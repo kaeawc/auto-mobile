@@ -530,18 +530,44 @@ describe("DeviceSessionManager legacy iOS auto-start readiness", () => {
 
   test("uses the configured readiness budget when no test override is supplied", async () => {
     const originalTimeoutMs = serverConfig.getRunnerReadinessTimeoutMs();
-    serverConfig.setRunnerReadinessTimeoutMs(120_000);
     try {
       const iosManager = new FakeIOSCtrlProxyManager();
       const iosClient = new FakeIOSCtrlProxy();
       iosClient.setConnected(false);
       const manager = createManager(iosManager, iosClient, true);
+      serverConfig.setRunnerReadinessTimeoutMs(120_000);
 
       await expect(manager.ensureDeviceReady("ios")).rejects.toThrow(/phase=runner-connect/);
       expect(iosManager.getLastSetupMinimumHealthPollDurationMs()).toBe(120_000);
     } finally {
       serverConfig.setRunnerReadinessTimeoutMs(originalTimeoutMs);
     }
+  });
+
+  test("resets stale setup state after the connected health probe fails", async () => {
+    const iosManager = new FakeIOSCtrlProxyManager();
+    const iosClient = new FakeIOSCtrlProxy();
+    iosClient.setConnected(true);
+    spyOn(iosClient, "verifyServiceReady")
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    const manager = createManager(iosManager, iosClient);
+
+    await expect(manager.ensureDeviceReady("ios")).resolves.toEqual(iosDevice);
+    expect(iosManager.wasMethodCalled("resetSetupState")).toBe(true);
+    expect(iosManager.wasMethodCalled("setup")).toBe(true);
+  });
+
+  test("does not retry the current simulator after runner readiness fails", async () => {
+    const iosManager = new FakeIOSCtrlProxyManager();
+    iosManager.setSetupShouldFail(true);
+    const iosClient = new FakeIOSCtrlProxy();
+    iosClient.setConnected(false);
+    const manager = createManager(iosManager, iosClient);
+    manager.setCurrentDevice(iosDevice, "ios");
+
+    await expect(manager.ensureDeviceReady("ios")).rejects.toThrow(/phase=runner-setup/);
+    expect(iosManager.getCallCount("setup")).toBe(1);
   });
 
   test("fails auto-start when a connected CtrlProxy never becomes healthy", async () => {

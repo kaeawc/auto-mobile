@@ -23,7 +23,7 @@ import { storeSetupTiming } from "../server/ToolExecutionContext";
 import { applyAppearanceOnConnect } from "./appearance/applyAppearanceOnConnect";
 import { disableStylusHandwriting } from "./disableStylusHandwriting";
 import { checkIosCtrlProxyOverride } from "./iosCtrlProxyOverride";
-import { RunnerReadinessService } from "./RunnerReadinessService";
+import { RunnerReadinessError, RunnerReadinessService } from "./RunnerReadinessService";
 import { defaultTimer, type Timer } from "./SystemTimer";
 import { serverConfig } from "./ServerConfig";
 
@@ -208,6 +208,7 @@ export interface DeviceSessionManager {
 
 export interface DeviceReadyOptions {
   skipCtrlProxyDownload?: boolean;
+  signal?: AbortSignal;
   /**
    * @deprecated Use skipCtrlProxyDownload instead.
    */
@@ -232,7 +233,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
   private readonly adbFactory: AdbClientFactory;
   private readonly runnerReadinessService: RunnerReadinessService;
   private readonly runnerReadinessTimer: Timer;
-  private readonly runnerReadinessTimeoutMs: number;
+  private readonly runnerReadinessTimeoutMs: number | undefined;
   private _adb: AdbExecutor | undefined;
   private simulatorAppOpened = false;
 
@@ -247,8 +248,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
     this.provider = provider;
     this.adbFactory = adbFactory;
     this.runnerReadinessTimer = options.runnerReadinessTimer ?? defaultTimer;
-    this.runnerReadinessTimeoutMs =
-      options.runnerReadinessTimeoutMs ?? serverConfig.getRunnerReadinessTimeoutMs();
+    this.runnerReadinessTimeoutMs = options.runnerReadinessTimeoutMs;
     this.runnerReadinessService = new RunnerReadinessService({
       timer: this.runnerReadinessTimer,
       getAndroidManager: (device) => this.provider.getAndroidCtrlProxyManager(device),
@@ -453,6 +453,9 @@ export class DeviceSessionManager implements DeviceSessionManager {
         deviceVerified = true;
         deviceSource = "current";
       } catch (error) {
+        if (error instanceof RunnerReadinessError) {
+          throw error;
+        }
         logger.warn(`Current device ${this.currentDevice} is no longer ready: ${error}`);
         this.currentDevice = undefined;
         this.currentPlatform = undefined;
@@ -745,21 +748,24 @@ export class DeviceSessionManager implements DeviceSessionManager {
     const perf = createPerformanceTracker(true);
     perf.serial("ensureCtrlProxy iOS");
     let didSetup = false;
+    const runnerReadinessTimeoutMs =
+      this.runnerReadinessTimeoutMs ?? serverConfig.getRunnerReadinessTimeoutMs();
 
     try {
       const totalDeadlineMs =
-        this.runnerReadinessTimer.now() + this.runnerReadinessTimeoutMs;
+        this.runnerReadinessTimer.now() + runnerReadinessTimeoutMs;
       await this.runnerReadinessService.ensureReady({
         device,
         requestedIdentity: `platform=ios deviceId=${deviceId}`,
         operationName: "legacy iOS session auto-start",
         totalDeadlineMs,
-        readinessTimeoutMs: this.runnerReadinessTimeoutMs,
+        readinessTimeoutMs: runnerReadinessTimeoutMs,
         skipCtrlProxyDownload:
           options?.skipCtrlProxyDownload ??
           options?.skipAccessibilityDownload ??
           options?.skipAccessibilitySetup,
         perf,
+        signal: options?.signal,
         onRunnerSetup: () => {
           didSetup = true;
         },

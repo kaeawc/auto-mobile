@@ -22,6 +22,8 @@ type RunnerReadinessPhase =
   | "runner-connect"
   | "runner-health";
 
+export class RunnerReadinessError extends ActionableError {}
+
 export interface AndroidCompatibilityResult {
   status:
     | "skipped"
@@ -59,6 +61,7 @@ export interface ReadinessAndroidManager {
 
 export interface ReadinessIosManager {
   isInstalled(): Promise<boolean>;
+  resetSetupState(): void;
   start(options?: {
     signal?: AbortSignal;
     minimumHealthPollDurationMs?: number;
@@ -391,6 +394,7 @@ export class RunnerReadinessService {
       if (ready) {
         return;
       }
+      manager.resetSetupState();
     }
 
     if (context.skipCtrlProxyDownload) {
@@ -546,7 +550,7 @@ export class RunnerReadinessService {
     const mapping =
       `platform=${device.platform} requested=[${context.requestedIdentity}] ` +
       `resolved=[${device.name} (${device.deviceId})]`;
-    throw new ActionableError(
+    throw new RunnerReadinessError(
       `${context.operationName ?? "startDevice"} automation runner readiness failed: ${mapping} phase=${phase} ` +
         `attempts=${attempts} remainingBudgetMs=${this.remaining(context)}: ${normalizeDiagnostic(detail)}`,
     );

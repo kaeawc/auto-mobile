@@ -71,11 +71,15 @@ describe("DeviceDataStreamSocketServer", () => {
   });
 
   it("records a device-authored frame context even without an IDE subscriber", () => {
-    server.pushHierarchyUpdate("device-1", {
-      updatedAt: 123,
-      packageName: "com.example.app",
-      hierarchy: { text: "Home" },
-    } as any, "frame-A");
+    server.pushHierarchyUpdate(
+      "device-1",
+      {
+        updatedAt: 123,
+        packageName: "com.example.app",
+        hierarchy: { text: "Home" },
+      } as any,
+      "frame-A",
+    );
 
     expect(server.getCurrentFrameContext("device-1")).toBe("frame-A");
   });
@@ -93,7 +97,10 @@ describe("DeviceDataStreamSocketServer", () => {
   });
 
   describe("request_observation", () => {
-    const requestedObservation = (deviceId: string, frameContext?: string): RequestedObservation => ({
+    const requestedObservation = (
+      deviceId: string,
+      frameContext?: string,
+    ): RequestedObservation => ({
       deviceId,
       observation: {
         updatedAt: "2026-06-24T00:00:00.000Z",
@@ -111,18 +118,21 @@ describe("DeviceDataStreamSocketServer", () => {
     it("triggers callback, pushes hierarchy update, and acknowledges success", async () => {
       let requestedDeviceId: string | null | undefined;
       let requestSignal: AbortSignal | undefined;
-      server.setOnObservationRequested(async request => {
+      server.setOnObservationRequested(async (request) => {
         requestedDeviceId = request.deviceId;
         requestSignal = request.signal;
         return [requestedObservation("emulator-5554")];
       });
       const { socket } = server.simulateSubscription({ deviceId: "emulator-5554" });
 
-      await server.processLineForTest(socket, JSON.stringify({
-        id: "obs-1",
-        command: "request_observation",
-        deviceId: "emulator-5554",
-      }));
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "obs-1",
+          command: "request_observation",
+          deviceId: "emulator-5554",
+        }),
+      );
 
       expect(requestedDeviceId).toBe("emulator-5554");
       expect(requestSignal?.aborted).toBe(false);
@@ -143,16 +153,19 @@ describe("DeviceDataStreamSocketServer", () => {
     });
 
     it("forwards proven frame context and clears it when an explicit observation lacks provenance", async () => {
-      server.setOnObservationRequested(async request => [
+      server.setOnObservationRequested(async (request) => [
         requestedObservation(request.deviceId ?? "emulator-5554", "frame-A"),
       ]);
       const { socket } = server.simulateSubscription({ deviceId: "emulator-5554" });
 
-      await server.processLineForTest(socket, JSON.stringify({
-        id: "obs-context",
-        command: "request_observation",
-        deviceId: "emulator-5554",
-      }));
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "obs-context",
+          command: "request_observation",
+          deviceId: "emulator-5554",
+        }),
+      );
 
       const firstMessages = socket.getWrittenMessages<{
         type: string;
@@ -161,54 +174,68 @@ describe("DeviceDataStreamSocketServer", () => {
       expect(firstMessages[0].frameContext).toBe("frame-A");
       expect(server.getCurrentFrameContext("emulator-5554")).toBe("frame-A");
 
-      server.setOnObservationRequested(async request => [
+      server.setOnObservationRequested(async (request) => [
         requestedObservation(request.deviceId ?? "emulator-5554"),
       ]);
-      await server.processLineForTest(socket, JSON.stringify({
-        id: "obs-contextless",
-        command: "request_observation",
-        deviceId: "emulator-5554",
-      }));
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "obs-contextless",
+          command: "request_observation",
+          deviceId: "emulator-5554",
+        }),
+      );
 
       expect(server.getCurrentFrameContext("emulator-5554")).toBeUndefined();
     });
 
     it("does not let a completed explicit observation replace a newer live frame context", async () => {
       let resolveObservation: ((observations: RequestedObservation[]) => void) | undefined;
-      server.setOnObservationRequested(() => new Promise(resolve => {
-        resolveObservation = resolve;
-      }));
+      server.setOnObservationRequested(
+        () =>
+          new Promise((resolve) => {
+            resolveObservation = resolve;
+          }),
+      );
       const { socket } = server.simulateSubscription({ deviceId: "emulator-5554" });
 
-      const request = server.processLineForTest(socket, JSON.stringify({
-        id: "obs-race",
-        command: "request_observation",
-        deviceId: "emulator-5554",
-      }));
+      const request = server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "obs-race",
+          command: "request_observation",
+          deviceId: "emulator-5554",
+        }),
+      );
       await Promise.resolve();
       expect(resolveObservation).toBeDefined();
 
       server.pushHierarchyUpdate(
         "emulator-5554",
         requestedObservation("emulator-5554", "frame-B").observation.viewHierarchy!,
-        "frame-B"
+        "frame-B",
       );
       resolveObservation!([requestedObservation("emulator-5554", "frame-A")]);
       await request;
 
       expect(server.getCurrentFrameContext("emulator-5554")).toBe("frame-B");
-      expect(socket.getWrittenMessages<{ type: string }>().filter(message =>
-        message.type === "hierarchy_update"
-      )).toHaveLength(1);
+      expect(
+        socket
+          .getWrittenMessages<{ type: string }>()
+          .filter((message) => message.type === "hierarchy_update"),
+      ).toHaveLength(1);
     });
 
     it("returns error when no observation callback is configured", async () => {
       const socket = new FakeSocket();
 
-      await server.processLineForTest(socket, JSON.stringify({
-        id: "obs-2",
-        command: "request_observation",
-      }));
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "obs-2",
+          command: "request_observation",
+        }),
+      );
 
       const msgs = socket.getWrittenMessages<{
         id?: string;
@@ -224,23 +251,28 @@ describe("DeviceDataStreamSocketServer", () => {
     });
 
     it("returns error when observation has no hierarchy", async () => {
-      server.setOnObservationRequested(async () => [{
-        deviceId: "emulator-5554",
-        observation: {
-          updatedAt: "2026-06-24T00:00:00.000Z",
-          screenSize: { width: 0, height: 0 },
-          systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-          errors: [{ phase: "viewHierarchy", message: "Accessibility service unavailable" }],
-          error: "Accessibility service unavailable",
+      server.setOnObservationRequested(async () => [
+        {
+          deviceId: "emulator-5554",
+          observation: {
+            updatedAt: "2026-06-24T00:00:00.000Z",
+            screenSize: { width: 0, height: 0 },
+            systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+            errors: [{ phase: "viewHierarchy", message: "Accessibility service unavailable" }],
+            error: "Accessibility service unavailable",
+          },
         },
-      }]);
+      ]);
       const { socket } = server.simulateSubscription({ deviceId: "emulator-5554" });
 
-      await server.processLineForTest(socket, JSON.stringify({
-        id: "obs-no-hierarchy",
-        command: "request_observation",
-        deviceId: "emulator-5554",
-      }));
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "obs-no-hierarchy",
+          command: "request_observation",
+          deviceId: "emulator-5554",
+        }),
+      );
 
       const msgs = socket.getWrittenMessages<{
         id?: string;
@@ -253,7 +285,7 @@ describe("DeviceDataStreamSocketServer", () => {
       expect(msgs[0].id).toBe("obs-no-hierarchy");
       expect(msgs[0].success).toBe(false);
       expect(msgs[0].error).toBe(
-        "Observation request failed for emulator-5554: Accessibility service unavailable"
+        "Observation request failed for emulator-5554: Accessibility service unavailable",
       );
     });
 
@@ -273,10 +305,13 @@ describe("DeviceDataStreamSocketServer", () => {
       ]);
       const { socket } = server.simulateSubscription({});
 
-      await server.processLineForTest(socket, JSON.stringify({
-        id: "obs-partial",
-        command: "request_observation",
-      }));
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "obs-partial",
+          command: "request_observation",
+        }),
+      );
 
       const msgs = socket.getWrittenMessages<{
         id?: string;
@@ -294,7 +329,7 @@ describe("DeviceDataStreamSocketServer", () => {
       expect(msgs[1].id).toBe("obs-partial");
       expect(msgs[1].success).toBe(false);
       expect(msgs[1].error).toBe(
-        "Observation request failed for emulator-5556: CtrlProxy unavailable"
+        "Observation request failed for emulator-5556: CtrlProxy unavailable",
       );
     });
 
@@ -302,10 +337,13 @@ describe("DeviceDataStreamSocketServer", () => {
       server.setOnObservationRequested(async () => []);
       const socket = new FakeSocket();
 
-      await server.processLineForTest(socket, JSON.stringify({
-        id: "obs-empty",
-        command: "request_observation",
-      }));
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "obs-empty",
+          command: "request_observation",
+        }),
+      );
 
       const msgs = socket.getWrittenMessages<{
         id?: string;
@@ -326,10 +364,13 @@ describe("DeviceDataStreamSocketServer", () => {
       });
       const socket = new FakeSocket();
 
-      await server.processLineForTest(socket, JSON.stringify({
-        id: "obs-3",
-        command: "request_observation",
-      }));
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "obs-3",
+          command: "request_observation",
+        }),
+      );
 
       const msgs = socket.getWrittenMessages<{
         id?: string;
@@ -346,16 +387,19 @@ describe("DeviceDataStreamSocketServer", () => {
 
     it("returns error and aborts request when observation times out", async () => {
       let requestSignal: AbortSignal | undefined;
-      server.setOnObservationRequested(request => {
+      server.setOnObservationRequested((request) => {
         requestSignal = request.signal;
         return new Promise<RequestedObservation[]>(() => {});
       }, 100);
       const socket = new FakeSocket();
 
-      const requestPromise = server.processLineForTest(socket, JSON.stringify({
-        id: "obs-4",
-        command: "request_observation",
-      }));
+      const requestPromise = server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "obs-4",
+          command: "request_observation",
+        }),
+      );
       await Promise.resolve();
       timer.advanceTime(100);
       await requestPromise;
@@ -382,9 +426,7 @@ describe("DeviceDataStreamSocketServer", () => {
         { id: 1, screenName: "Home", visitCount: 3 },
         { id: 2, screenName: "Settings", visitCount: 1 },
       ],
-      edges: [
-        { id: 1, from: "Home", to: "Settings", toolName: "tapOn", traversalCount: 2 },
-      ],
+      edges: [{ id: 1, from: "Home", to: "Settings", toolName: "tapOn", traversalCount: 2 }],
       currentScreen: "Home",
     };
 
@@ -522,6 +564,7 @@ describe("DeviceDataStreamSocketServer", () => {
       const requestLine = JSON.stringify({
         id: "unsub-1",
         command: "unsubscribe",
+        subscriptionId: "devicedatastream-1",
       });
 
       await server.processLineForTest(socket, requestLine);
@@ -536,30 +579,110 @@ describe("DeviceDataStreamSocketServer", () => {
       expect(msgs[0].success).toBe(true);
       expect(server.getSubscriberCount()).toBe(0);
     });
+
+    it("multiplexes device filters and cadence updates by subscriptionId", async () => {
+      const socket = new FakeSocket();
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "sub-device-1",
+          command: "subscribe",
+          deviceId: "device-1",
+          screenshotIntervalMs: 500,
+        }),
+      );
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "sub-device-2",
+          command: "subscribe",
+          deviceId: "device-2",
+          screenshotIntervalMs: 1000,
+        }),
+      );
+
+      const [firstResponse, secondResponse] = socket.getWrittenMessages<{
+        id: string;
+        subscriptionId: string;
+      }>();
+      expect(server.getSubscriberCount()).toBe(2);
+      expect(firstResponse.subscriptionId).toBe("devicedatastream-1");
+      expect(secondResponse.subscriptionId).toBe("devicedatastream-2");
+
+      server.pushScreenshotUpdate("device-1", "device-1-frame", 100, 200);
+      server.pushScreenshotUpdate("device-2", "device-2-frame", 100, 200);
+      expect(
+        socket
+          .getWrittenMessages<{
+            type: string;
+            subscriptionId: string;
+            screenshotBase64?: string;
+          }>()
+          .filter((message) => message.type === "screenshot_update"),
+      ).toMatchObject([
+        { subscriptionId: firstResponse.subscriptionId, screenshotBase64: "device-1-frame" },
+        { subscriptionId: secondResponse.subscriptionId, screenshotBase64: "device-2-frame" },
+      ]);
+
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "relax-device-2",
+          command: "update_cadence",
+          subscriptionId: secondResponse.subscriptionId,
+          screenshotIntervalMs: 1500,
+        }),
+      );
+
+      expect(server.getScreenshotIntervalMsForDevice("device-1")).toBe(500);
+      expect(server.getScreenshotIntervalMsForDevice("device-2")).toBe(1500);
+    });
+
+    it("removes every multiplexed device subscription on connection close", async () => {
+      const screenshotChanges: Array<string | null> = [];
+      server.setOnScreenshotCadenceChanged((deviceId) => screenshotChanges.push(deviceId));
+      const socket = new FakeSocket();
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "sub-device-1",
+          command: "subscribe",
+          deviceId: "device-1",
+        }),
+      );
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "sub-device-2",
+          command: "subscribe",
+          deviceId: "device-2",
+        }),
+      );
+      screenshotChanges.length = 0;
+
+      server.closeConnectionForTest(socket);
+
+      expect(server.getSubscriberCount()).toBe(0);
+      expect(screenshotChanges).toEqual(["device-1", "device-2"]);
+    });
   });
 
   describe("screenshot updates", () => {
     it("includes optional screenshot metadata when pushing updates", () => {
       const { socket } = server.simulateSubscription({ deviceId: "device-1" });
 
-      server.pushScreenshotUpdate(
-        "device-1",
-        "png-frame",
-        1080,
-        2340,
-        {
-          screenshotMimeType: "image/png",
-          screenshotFormat: "png",
-          screenshotCaptureSource: "android_adb_screencap",
-          screenshotFallback: true,
-          screenshotFallbackReason: "websocket_unavailable",
-          screenshotCaptureDurationMs: 42,
-          screenshotEncodeDurationMs: 7,
-          screenshotByteLength: 1200,
-          screenshotBase64Length: 1600,
-          checksum: "internal-checksum",
-        } as any
-      );
+      server.pushScreenshotUpdate("device-1", "png-frame", 1080, 2340, {
+        screenshotMimeType: "image/png",
+        screenshotFormat: "png",
+        screenshotCaptureSource: "android_adb_screencap",
+        screenshotFallback: true,
+        screenshotFallbackReason: "websocket_unavailable",
+        screenshotCaptureDurationMs: 42,
+        screenshotEncodeDurationMs: 7,
+        screenshotByteLength: 1200,
+        screenshotBase64Length: 1600,
+        checksum: "internal-checksum",
+      } as any);
 
       const msgs = socket.getWrittenMessages<{
         type: string;
@@ -600,18 +723,12 @@ describe("DeviceDataStreamSocketServer", () => {
     it("omits screenshot performance metadata when it is not provided", () => {
       const { socket } = server.simulateSubscription({ deviceId: "device-1" });
 
-      server.pushScreenshotUpdate(
-        "device-1",
-        "legacy-frame",
-        1080,
-        2340,
-        {
-          screenshotMimeType: "image/jpeg",
-          screenshotFormat: "jpeg",
-          screenshotCaptureSource: "android_ctrlproxy_a11y",
-          screenshotFallback: false,
-        }
-      );
+      server.pushScreenshotUpdate("device-1", "legacy-frame", 1080, 2340, {
+        screenshotMimeType: "image/jpeg",
+        screenshotFormat: "jpeg",
+        screenshotCaptureSource: "android_ctrlproxy_a11y",
+        screenshotFallback: false,
+      });
 
       const [message] = socket.getWrittenMessages<Record<string, unknown>>();
       expect(message).toMatchObject({
@@ -639,7 +756,10 @@ describe("DeviceDataStreamSocketServer", () => {
 
   describe("hierarchy diff annotation", () => {
     const frame = (text: string, rotation: number = 0) =>
-      ({ hierarchy: { node: { $: { class: "Root" }, node: [{ $: { class: "Child", text } }] } }, rotation }) as any;
+      ({
+        hierarchy: { node: { $: { class: "Root" }, node: [{ $: { class: "Child", text } }] } },
+        rotation,
+      }) as any;
 
     it("reports no baseline and annotates nothing on the first frame", () => {
       const { socket } = server.simulateSubscription({ deviceId: "device-1" });
@@ -648,7 +768,12 @@ describe("DeviceDataStreamSocketServer", () => {
 
       const [message] = socket.getWrittenMessages<any>();
       expect(message.type).toBe("hierarchy_update");
-      expect(message.hierarchyDiff).toEqual({ hasBaseline: false, added: 0, changed: 0, removed: 0 });
+      expect(message.hierarchyDiff).toEqual({
+        hasBaseline: false,
+        added: 0,
+        changed: 0,
+        removed: 0,
+      });
       expect(message.data.hierarchy.node.node[0].$.diffState).toBeUndefined();
     });
 
@@ -660,7 +785,12 @@ describe("DeviceDataStreamSocketServer", () => {
 
       const messages = socket.getWrittenMessages<any>();
       expect(messages).toHaveLength(2);
-      expect(messages[1].hierarchyDiff).toEqual({ hasBaseline: true, added: 0, changed: 1, removed: 0 });
+      expect(messages[1].hierarchyDiff).toEqual({
+        hasBaseline: true,
+        added: 0,
+        changed: 1,
+        removed: 0,
+      });
       expect(messages[1].data.hierarchy.node.node[0].$.diffState).toBe("changed");
     });
 
@@ -674,7 +804,7 @@ describe("DeviceDataStreamSocketServer", () => {
       // The post-reconnect frame is diffed against a fresh baseline, not the
       // pre-drop tree, so it reports no baseline rather than a spurious change.
       const messages = socket.getWrittenMessages<any>();
-      const hierarchyMessages = messages.filter(m => m.type === "hierarchy_update");
+      const hierarchyMessages = messages.filter((m) => m.type === "hierarchy_update");
       expect(hierarchyMessages[hierarchyMessages.length - 1].hierarchyDiff.hasBaseline).toBe(false);
     });
 
@@ -692,19 +822,33 @@ describe("DeviceDataStreamSocketServer", () => {
       const { socket } = server.simulateSubscription({ deviceId: "device-1" });
 
       const first = server.pushHierarchyUpdate("device-1", frame("a", 0));
-      server.pushScreenshotUpdate("device-1", pngFrame(1080, 2340), 1080, 2340, {}, {
-        captureSequence: first ?? undefined,
-        rotation: 0,
-      });
+      server.pushScreenshotUpdate(
+        "device-1",
+        pngFrame(1080, 2340),
+        1080,
+        2340,
+        {},
+        {
+          captureSequence: first ?? undefined,
+          rotation: 0,
+        },
+      );
       const second = server.pushHierarchyUpdate("device-1", frame("b", 1));
-      server.pushScreenshotUpdate("device-1", pngFrame(720, 1560), 720, 1560, {}, {
-        captureSequence: second ?? undefined,
-        rotation: 1,
-      });
+      server.pushScreenshotUpdate(
+        "device-1",
+        pngFrame(720, 1560),
+        720,
+        1560,
+        {},
+        {
+          captureSequence: second ?? undefined,
+          rotation: 1,
+        },
+      );
 
       const [h1, s1, h2, s2] = socket
         .getWrittenMessages<any>()
-        .filter(m => m.type === "hierarchy_update" || m.type === "screenshot_update");
+        .filter((m) => m.type === "hierarchy_update" || m.type === "screenshot_update");
 
       expect(h1.captureSequence).toBe(1);
       expect(s1.captureSequence).toBe(1);
@@ -726,11 +870,20 @@ describe("DeviceDataStreamSocketServer", () => {
       const { socket } = server.simulateSubscription({ deviceId: "device-1" });
 
       const captureSequence = server.pushHierarchyUpdate("device-1", frame("a"));
-      server.pushScreenshotUpdate("device-1", pngFrame(720, 1560), 1080, 2340, {}, {
-        captureSequence: captureSequence ?? undefined,
-      });
+      server.pushScreenshotUpdate(
+        "device-1",
+        pngFrame(720, 1560),
+        1080,
+        2340,
+        {},
+        {
+          captureSequence: captureSequence ?? undefined,
+        },
+      );
 
-      const screenshot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
+      const screenshot = socket
+        .getWrittenMessages<any>()
+        .find((m) => m.type === "screenshot_update");
       expect(screenshot.captureSequence).toBeUndefined();
       // The published geometry is the frame's real size, not the stale claim, so a client that
       // falls back to it maps through the pixels it is actually rendering.
@@ -746,7 +899,9 @@ describe("DeviceDataStreamSocketServer", () => {
       server.pushHierarchyUpdate("device-1", frame("a"));
       server.pushScreenshotUpdate("device-1", pngFrame(1080, 2340), 1080, 2340);
 
-      const screenshot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
+      const screenshot = socket
+        .getWrittenMessages<any>()
+        .find((m) => m.type === "screenshot_update");
       expect(screenshot.captureSequence).toBeUndefined();
     });
 
@@ -758,11 +913,20 @@ describe("DeviceDataStreamSocketServer", () => {
       const { socket } = server.simulateSubscription({ deviceId: "device-1" });
 
       const captureSequence = server.pushHierarchyUpdate("device-1", frame("a"));
-      server.pushScreenshotUpdate("device-1", pngFrame(1170, 2532), 2532, 1170, {}, {
-        captureSequence: captureSequence ?? undefined,
-      });
+      server.pushScreenshotUpdate(
+        "device-1",
+        pngFrame(1170, 2532),
+        2532,
+        1170,
+        {},
+        {
+          captureSequence: captureSequence ?? undefined,
+        },
+      );
 
-      const screenshot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
+      const screenshot = socket
+        .getWrittenMessages<any>()
+        .find((m) => m.type === "screenshot_update");
       expect(screenshot.captureSequence).toBe(captureSequence);
       // The MEASURED dimensions are still what gets published, so a client maps through the pixels
       // it actually renders rather than the claim.
@@ -775,11 +939,20 @@ describe("DeviceDataStreamSocketServer", () => {
       const { socket } = server.simulateSubscription({ deviceId: "device-1" });
 
       const captureSequence = server.pushHierarchyUpdate("device-1", frame("a"));
-      server.pushScreenshotUpdate("device-1", pngFrame(720, 1560), 1080, 2340, {}, {
-        captureSequence: captureSequence ?? undefined,
-      });
+      server.pushScreenshotUpdate(
+        "device-1",
+        pngFrame(720, 1560),
+        1080,
+        2340,
+        {},
+        {
+          captureSequence: captureSequence ?? undefined,
+        },
+      );
 
-      const screenshot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
+      const screenshot = socket
+        .getWrittenMessages<any>()
+        .find((m) => m.type === "screenshot_update");
       expect(screenshot.captureSequence).toBeUndefined();
     });
 
@@ -787,11 +960,20 @@ describe("DeviceDataStreamSocketServer", () => {
       const { socket } = server.simulateSubscription({ deviceId: "device-1" });
 
       const captureSequence = server.pushHierarchyUpdate("device-1", frame("a"));
-      server.pushScreenshotUpdate("device-1", pngFrame(800, 600), 1080, 2340, {}, {
-        captureSequence: captureSequence ?? undefined,
-      });
+      server.pushScreenshotUpdate(
+        "device-1",
+        pngFrame(800, 600),
+        1080,
+        2340,
+        {},
+        {
+          captureSequence: captureSequence ?? undefined,
+        },
+      );
 
-      const screenshot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
+      const screenshot = socket
+        .getWrittenMessages<any>()
+        .find((m) => m.type === "screenshot_update");
       expect(screenshot.captureSequence).toBeUndefined();
     });
 
@@ -804,11 +986,20 @@ describe("DeviceDataStreamSocketServer", () => {
       malformed.write("IDAT", 12, "ascii");
 
       const captureSequence = server.pushHierarchyUpdate("device-1", frame("a"));
-      server.pushScreenshotUpdate("device-1", malformed.toString("base64"), 1080, 2340, {}, {
-        captureSequence: captureSequence ?? undefined,
-      });
+      server.pushScreenshotUpdate(
+        "device-1",
+        malformed.toString("base64"),
+        1080,
+        2340,
+        {},
+        {
+          captureSequence: captureSequence ?? undefined,
+        },
+      );
 
-      const screenshot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
+      const screenshot = socket
+        .getWrittenMessages<any>()
+        .find((m) => m.type === "screenshot_update");
       expect(screenshot.captureSequence).toBeUndefined();
     });
 
@@ -816,11 +1007,20 @@ describe("DeviceDataStreamSocketServer", () => {
       const { socket } = server.simulateSubscription({ deviceId: "device-1" });
 
       const captureSequence = server.pushHierarchyUpdate("device-1", frame("a"));
-      server.pushScreenshotUpdate("device-1", Buffer.from("not-an-image").toString("base64"), 1080, 2340, {}, {
-        captureSequence: captureSequence ?? undefined,
-      });
+      server.pushScreenshotUpdate(
+        "device-1",
+        Buffer.from("not-an-image").toString("base64"),
+        1080,
+        2340,
+        {},
+        {
+          captureSequence: captureSequence ?? undefined,
+        },
+      );
 
-      const screenshot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
+      const screenshot = socket
+        .getWrittenMessages<any>()
+        .find((m) => m.type === "screenshot_update");
       expect(screenshot.captureSequence).toBeUndefined();
       // Unmeasurable: fall back to the caller's claim for display, but never pair on it.
       expect(screenshot.screenWidth).toBe(1080);
@@ -831,7 +1031,9 @@ describe("DeviceDataStreamSocketServer", () => {
 
       server.pushScreenshotUpdate("device-1", pngFrame(1080, 2340), 1080, 2340);
 
-      const screenshot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
+      const screenshot = socket
+        .getWrittenMessages<any>()
+        .find((m) => m.type === "screenshot_update");
       expect(screenshot.captureSequence).toBeUndefined();
     });
 
@@ -847,11 +1049,20 @@ describe("DeviceDataStreamSocketServer", () => {
       const screenB = server.pushHierarchyUpdate("device-1", frame("screen-b"));
       expect(screenB).toBeGreaterThan(screenA!);
       // ... and only now does the in-flight frame arrive and get pushed.
-      server.pushScreenshotUpdate("device-1", pngFrame(1080, 2340), 1080, 2340, {}, {
-        captureSequence: screenA ?? undefined,
-      });
+      server.pushScreenshotUpdate(
+        "device-1",
+        pngFrame(1080, 2340),
+        1080,
+        2340,
+        {},
+        {
+          captureSequence: screenA ?? undefined,
+        },
+      );
 
-      const screenshot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
+      const screenshot = socket
+        .getWrittenMessages<any>()
+        .find((m) => m.type === "screenshot_update");
       expect(screenshot.captureSequence).toBe(screenA);
       expect(screenshot.captureSequence).not.toBe(screenB);
     });
@@ -868,8 +1079,8 @@ describe("DeviceDataStreamSocketServer", () => {
 
       const ids = socket
         .getWrittenMessages<any>()
-        .filter(m => m.type === "hierarchy_update")
-        .map(m => m.captureSequence);
+        .filter((m) => m.type === "hierarchy_update")
+        .map((m) => m.captureSequence);
 
       expect(new Set(ids).size).toBe(ids.length);
       expect(ids[2]).toBeGreaterThan(ids[1]);
@@ -883,7 +1094,9 @@ describe("DeviceDataStreamSocketServer", () => {
       // The client drops its binding when the connection goes away, so nothing is supplied.
       server.pushScreenshotUpdate("device-1", pngFrame(1080, 2340), 1080, 2340);
 
-      const screenshot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
+      const screenshot = socket
+        .getWrittenMessages<any>()
+        .find((m) => m.type === "screenshot_update");
       expect(screenshot.captureSequence).toBeUndefined();
     });
 
@@ -939,12 +1152,15 @@ describe("DeviceDataStreamSocketServer", () => {
     it("parses requested screenshot cadence from subscribe commands", async () => {
       const socket = new FakeSocket();
 
-      await server.processLineForTest(socket, JSON.stringify({
-        id: "sub-fast",
-        command: "subscribe",
-        deviceId: "device-1",
-        screenshotIntervalMs: 500,
-      }));
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "sub-fast",
+          command: "subscribe",
+          deviceId: "device-1",
+          screenshotIntervalMs: 500,
+        }),
+      );
 
       expect(server.getScreenshotIntervalMsForDevice("device-1")).toBe(500);
     });
@@ -952,12 +1168,15 @@ describe("DeviceDataStreamSocketServer", () => {
     it("clamps requested screenshot cadence to the safe minimum", async () => {
       const socket = new FakeSocket();
 
-      await server.processLineForTest(socket, JSON.stringify({
-        id: "sub-clamped",
-        command: "subscribe",
-        deviceId: "device-1",
-        screenshotIntervalMs: 50,
-      }));
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "sub-clamped",
+          command: "subscribe",
+          deviceId: "device-1",
+          screenshotIntervalMs: 50,
+        }),
+      );
 
       expect(server.getScreenshotIntervalMsForDevice("device-1")).toBe(250);
     });
@@ -965,12 +1184,15 @@ describe("DeviceDataStreamSocketServer", () => {
     it("clamps requested screenshot cadence to the maximum timer delay", async () => {
       const socket = new FakeSocket();
 
-      await server.processLineForTest(socket, JSON.stringify({
-        id: "sub-max-clamped",
-        command: "subscribe",
-        deviceId: "device-1",
-        screenshotIntervalMs: 3_000_000_000,
-      }));
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "sub-max-clamped",
+          command: "subscribe",
+          deviceId: "device-1",
+          screenshotIntervalMs: 3_000_000_000,
+        }),
+      );
 
       expect(server.getScreenshotIntervalMsForDevice("device-1")).toBe(2_147_483_647);
     });
@@ -998,18 +1220,28 @@ describe("DeviceDataStreamSocketServer", () => {
     });
 
     it("removes requested cadence after unsubscribe", async () => {
-      const { socket } = server.simulateSubscription({ deviceId: "device-1", screenshotIntervalMs: 500 });
+      const { socket } = server.simulateSubscription({
+        deviceId: "device-1",
+        screenshotIntervalMs: 500,
+      });
 
-      await server.processLineForTest(socket, JSON.stringify({
-        id: "unsub-fast",
-        command: "unsubscribe",
-      }));
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "unsub-fast",
+          command: "unsubscribe",
+          subscriptionId: "devicedatastream-1",
+        }),
+      );
 
       expect(server.getScreenshotIntervalMsForDevice("device-1")).toBe(3000);
     });
 
     it("ignores destroyed subscriber sockets when aggregating cadence", () => {
-      const { socket } = server.simulateSubscription({ deviceId: "device-1", screenshotIntervalMs: 500 });
+      const { socket } = server.simulateSubscription({
+        deviceId: "device-1",
+        screenshotIntervalMs: 500,
+      });
       socket.destroy();
 
       expect(server.getScreenshotIntervalMsForDevice("device-1")).toBe(3000);
@@ -1017,57 +1249,74 @@ describe("DeviceDataStreamSocketServer", () => {
 
     it("notifies when subscribe changes screenshot cadence", async () => {
       const changedDevices: Array<string | null> = [];
-      server.setOnScreenshotCadenceChanged(deviceId => {
+      server.setOnScreenshotCadenceChanged((deviceId) => {
         changedDevices.push(deviceId);
       });
       const socket = new FakeSocket();
 
-      await server.processLineForTest(socket, JSON.stringify({
-        id: "sub-fast",
-        command: "subscribe",
-        deviceId: "device-1",
-        screenshotIntervalMs: 500,
-      }));
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "sub-fast",
+          command: "subscribe",
+          deviceId: "device-1",
+          screenshotIntervalMs: 500,
+        }),
+      );
 
       expect(changedDevices).toEqual(["device-1"]);
     });
 
     it("notifies when unsubscribe removes screenshot cadence", async () => {
       const changedDevices: Array<string | null> = [];
-      server.setOnScreenshotCadenceChanged(deviceId => {
+      server.setOnScreenshotCadenceChanged((deviceId) => {
         changedDevices.push(deviceId);
       });
-      const { socket } = server.simulateSubscription({ deviceId: "device-1", screenshotIntervalMs: 500 });
+      const { socket } = server.simulateSubscription({
+        deviceId: "device-1",
+        screenshotIntervalMs: 500,
+      });
 
-      await server.processLineForTest(socket, JSON.stringify({
-        id: "unsub-fast",
-        command: "unsubscribe",
-      }));
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "unsub-fast",
+          command: "unsubscribe",
+          subscriptionId: "devicedatastream-1",
+        }),
+      );
 
       expect(changedDevices).toEqual(["device-1"]);
     });
 
     it("does not notify when unsubscribe has no active subscription", async () => {
       const changedDevices: Array<string | null> = [];
-      server.setOnScreenshotCadenceChanged(deviceId => {
+      server.setOnScreenshotCadenceChanged((deviceId) => {
         changedDevices.push(deviceId);
       });
       const socket = new FakeSocket();
 
-      await server.processLineForTest(socket, JSON.stringify({
-        id: "unsub-missing",
-        command: "unsubscribe",
-      }));
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "unsub-missing",
+          command: "unsubscribe",
+          subscriptionId: "devicedatastream-missing",
+        }),
+      );
 
       expect(changedDevices).toEqual([]);
     });
 
     it("notifies when connection close removes screenshot cadence", () => {
       const changedDevices: Array<string | null> = [];
-      server.setOnScreenshotCadenceChanged(deviceId => {
+      server.setOnScreenshotCadenceChanged((deviceId) => {
         changedDevices.push(deviceId);
       });
-      const { socket } = server.simulateSubscription({ deviceId: "device-1", screenshotIntervalMs: 500 });
+      const { socket } = server.simulateSubscription({
+        deviceId: "device-1",
+        screenshotIntervalMs: 500,
+      });
 
       server.closeConnectionForTest(socket);
 
@@ -1091,12 +1340,15 @@ describe("DeviceDataStreamSocketServer", () => {
     it("parses requested hierarchy cadence from subscribe commands", async () => {
       const socket = new FakeSocket();
 
-      await server.processLineForTest(socket, JSON.stringify({
-        id: "sub-fast-hierarchy",
-        command: "subscribe",
-        deviceId: "device-1",
-        hierarchyIntervalMs: 500,
-      }));
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "sub-fast-hierarchy",
+          command: "subscribe",
+          deviceId: "device-1",
+          hierarchyIntervalMs: 500,
+        }),
+      );
 
       expect(server.getHierarchyIntervalMsForDevice("device-1")).toBe(500);
     });
@@ -1104,12 +1356,15 @@ describe("DeviceDataStreamSocketServer", () => {
     it("clamps requested hierarchy cadence to the safe minimum", async () => {
       const socket = new FakeSocket();
 
-      await server.processLineForTest(socket, JSON.stringify({
-        id: "sub-clamped-hierarchy",
-        command: "subscribe",
-        deviceId: "device-1",
-        hierarchyIntervalMs: 50,
-      }));
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "sub-clamped-hierarchy",
+          command: "subscribe",
+          deviceId: "device-1",
+          hierarchyIntervalMs: 50,
+        }),
+      );
 
       expect(server.getHierarchyIntervalMsForDevice("device-1")).toBe(250);
     });
@@ -1117,12 +1372,15 @@ describe("DeviceDataStreamSocketServer", () => {
     it("clamps requested hierarchy cadence to the maximum timer delay", async () => {
       const socket = new FakeSocket();
 
-      await server.processLineForTest(socket, JSON.stringify({
-        id: "sub-hierarchy-max-clamped",
-        command: "subscribe",
-        deviceId: "device-1",
-        hierarchyIntervalMs: 3_000_000_000,
-      }));
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "sub-hierarchy-max-clamped",
+          command: "subscribe",
+          deviceId: "device-1",
+          hierarchyIntervalMs: 3_000_000_000,
+        }),
+      );
 
       expect(server.getHierarchyIntervalMsForDevice("device-1")).toBe(2_147_483_647);
     });
@@ -1157,18 +1415,28 @@ describe("DeviceDataStreamSocketServer", () => {
     });
 
     it("removes requested hierarchy cadence after unsubscribe", async () => {
-      const { socket } = server.simulateSubscription({ deviceId: "device-1", hierarchyIntervalMs: 500 });
+      const { socket } = server.simulateSubscription({
+        deviceId: "device-1",
+        hierarchyIntervalMs: 500,
+      });
 
-      await server.processLineForTest(socket, JSON.stringify({
-        id: "unsub-fast-hierarchy",
-        command: "unsubscribe",
-      }));
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "unsub-fast-hierarchy",
+          command: "unsubscribe",
+          subscriptionId: "devicedatastream-1",
+        }),
+      );
 
       expect(server.getHierarchyIntervalMsForDevice("device-1")).toBe(1000);
     });
 
     it("ignores destroyed subscriber sockets when aggregating hierarchy cadence", () => {
-      const { socket } = server.simulateSubscription({ deviceId: "device-1", hierarchyIntervalMs: 500 });
+      const { socket } = server.simulateSubscription({
+        deviceId: "device-1",
+        hierarchyIntervalMs: 500,
+      });
       socket.destroy();
 
       expect(server.getHierarchyIntervalMsForDevice("device-1")).toBe(1000);
@@ -1181,12 +1449,15 @@ describe("DeviceDataStreamSocketServer", () => {
       });
       const socket = new FakeSocket();
 
-      await server.processLineForTest(socket, JSON.stringify({
-        id: "sub-fast-hierarchy",
-        command: "subscribe",
-        deviceId: "device-1",
-        hierarchyIntervalMs: 500,
-      }));
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "sub-fast-hierarchy",
+          command: "subscribe",
+          deviceId: "device-1",
+          hierarchyIntervalMs: 500,
+        }),
+      );
 
       expect(changedDevices).toEqual(["device-1"]);
     });
@@ -1196,12 +1467,19 @@ describe("DeviceDataStreamSocketServer", () => {
       server.setOnHierarchyCadenceChanged((deviceId: string | null) => {
         changedDevices.push(deviceId);
       });
-      const { socket } = server.simulateSubscription({ deviceId: "device-1", hierarchyIntervalMs: 500 });
+      const { socket } = server.simulateSubscription({
+        deviceId: "device-1",
+        hierarchyIntervalMs: 500,
+      });
 
-      await server.processLineForTest(socket, JSON.stringify({
-        id: "unsub-hierarchy-fast",
-        command: "unsubscribe",
-      }));
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "unsub-hierarchy-fast",
+          command: "unsubscribe",
+          subscriptionId: "devicedatastream-1",
+        }),
+      );
 
       expect(changedDevices).toEqual(["device-1"]);
     });
@@ -1211,7 +1489,10 @@ describe("DeviceDataStreamSocketServer", () => {
       server.setOnHierarchyCadenceChanged((deviceId: string | null) => {
         changedDevices.push(deviceId);
       });
-      const { socket } = server.simulateSubscription({ deviceId: "device-1", hierarchyIntervalMs: 500 });
+      const { socket } = server.simulateSubscription({
+        deviceId: "device-1",
+        hierarchyIntervalMs: 500,
+      });
 
       server.closeConnectionForTest(socket);
 
@@ -1222,56 +1503,77 @@ describe("DeviceDataStreamSocketServer", () => {
   describe("update_cadence", () => {
     it("raises the screenshot cadence for an existing subscription in place", async () => {
       const socket = new FakeSocket();
-      await server.processLineForTest(socket, JSON.stringify({
-        id: "sub",
-        command: "subscribe",
-        deviceId: "device-1",
-      }));
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "sub",
+          command: "subscribe",
+          deviceId: "device-1",
+        }),
+      );
       expect(server.getScreenshotIntervalMsForDevice("device-1")).toBe(3000);
 
-      await server.processLineForTest(socket, JSON.stringify({
-        id: "upd",
-        command: "update_cadence",
-        deviceId: "device-1",
-        screenshotIntervalMs: 500,
-      }));
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "upd",
+          command: "update_cadence",
+          subscriptionId: "devicedatastream-1",
+          deviceId: "device-1",
+          screenshotIntervalMs: 500,
+        }),
+      );
 
       expect(server.getScreenshotIntervalMsForDevice("device-1")).toBe(500);
     });
 
     it("does not add a second subscriber when updating cadence", async () => {
       const socket = new FakeSocket();
-      await server.processLineForTest(socket, JSON.stringify({
-        id: "sub",
-        command: "subscribe",
-        deviceId: "device-1",
-      }));
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "sub",
+          command: "subscribe",
+          deviceId: "device-1",
+        }),
+      );
 
-      await server.processLineForTest(socket, JSON.stringify({
-        id: "upd",
-        command: "update_cadence",
-        deviceId: "device-1",
-        screenshotIntervalMs: 500,
-      }));
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "upd",
+          command: "update_cadence",
+          subscriptionId: "devicedatastream-1",
+          deviceId: "device-1",
+          screenshotIntervalMs: 500,
+        }),
+      );
 
       expect((server as any).subscribers.size).toBe(1);
     });
 
     it("relaxes cadence back to the default when the field is omitted", async () => {
       const socket = new FakeSocket();
-      await server.processLineForTest(socket, JSON.stringify({
-        id: "sub",
-        command: "subscribe",
-        deviceId: "device-1",
-        screenshotIntervalMs: 500,
-      }));
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "sub",
+          command: "subscribe",
+          deviceId: "device-1",
+          screenshotIntervalMs: 500,
+        }),
+      );
       expect(server.getScreenshotIntervalMsForDevice("device-1")).toBe(500);
 
-      await server.processLineForTest(socket, JSON.stringify({
-        id: "upd",
-        command: "update_cadence",
-        deviceId: "device-1",
-      }));
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "upd",
+          command: "update_cadence",
+          subscriptionId: "devicedatastream-1",
+          deviceId: "device-1",
+        }),
+      );
 
       expect(server.getScreenshotIntervalMsForDevice("device-1")).toBe(3000);
     });
@@ -1279,23 +1581,30 @@ describe("DeviceDataStreamSocketServer", () => {
     it("clamps the updated hierarchy cadence and notifies both cadence listeners", async () => {
       const changedScreenshot: Array<string | null> = [];
       const changedHierarchy: Array<string | null> = [];
-      server.setOnScreenshotCadenceChanged(deviceId => changedScreenshot.push(deviceId));
-      server.setOnHierarchyCadenceChanged(deviceId => changedHierarchy.push(deviceId));
+      server.setOnScreenshotCadenceChanged((deviceId) => changedScreenshot.push(deviceId));
+      server.setOnHierarchyCadenceChanged((deviceId) => changedHierarchy.push(deviceId));
       const socket = new FakeSocket();
-      await server.processLineForTest(socket, JSON.stringify({
-        id: "sub",
-        command: "subscribe",
-        deviceId: "device-1",
-      }));
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "sub",
+          command: "subscribe",
+          deviceId: "device-1",
+        }),
+      );
       changedScreenshot.length = 0;
       changedHierarchy.length = 0;
 
-      await server.processLineForTest(socket, JSON.stringify({
-        id: "upd",
-        command: "update_cadence",
-        deviceId: "device-1",
-        hierarchyIntervalMs: 50,
-      }));
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "upd",
+          command: "update_cadence",
+          subscriptionId: "devicedatastream-1",
+          deviceId: "device-1",
+          hierarchyIntervalMs: 50,
+        }),
+      );
 
       expect(server.getHierarchyIntervalMsForDevice("device-1")).toBe(250);
       expect(changedScreenshot).toEqual(["device-1"]);
@@ -1304,22 +1613,29 @@ describe("DeviceDataStreamSocketServer", () => {
 
     it("acknowledges update_cadence with a subscription_response", async () => {
       const socket = new FakeSocket();
-      await server.processLineForTest(socket, JSON.stringify({
-        id: "sub",
-        command: "subscribe",
-        deviceId: "device-1",
-      }));
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "sub",
+          command: "subscribe",
+          deviceId: "device-1",
+        }),
+      );
 
-      await server.processLineForTest(socket, JSON.stringify({
-        id: "upd-ack",
-        command: "update_cadence",
-        deviceId: "device-1",
-        screenshotIntervalMs: 500,
-      }));
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "upd-ack",
+          command: "update_cadence",
+          subscriptionId: "devicedatastream-1",
+          deviceId: "device-1",
+          screenshotIntervalMs: 500,
+        }),
+      );
 
       const ack = socket
         .getWrittenMessages<{ id?: string; type: string; success?: boolean }>()
-        .find(message => message.id === "upd-ack");
+        .find((message) => message.id === "upd-ack");
       expect(ack?.type).toBe("subscription_response");
       expect(ack?.success).toBe(true);
     });
@@ -1327,16 +1643,20 @@ describe("DeviceDataStreamSocketServer", () => {
     it("acknowledges update_cadence even when the socket has no active subscription", async () => {
       const socket = new FakeSocket();
 
-      await server.processLineForTest(socket, JSON.stringify({
-        id: "upd-no-sub",
-        command: "update_cadence",
-        deviceId: "device-1",
-        screenshotIntervalMs: 500,
-      }));
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "upd-no-sub",
+          command: "update_cadence",
+          subscriptionId: "devicedatastream-missing",
+          deviceId: "device-1",
+          screenshotIntervalMs: 500,
+        }),
+      );
 
       const ack = socket
         .getWrittenMessages<{ id?: string; type: string; success?: boolean }>()
-        .find(message => message.id === "upd-no-sub");
+        .find((message) => message.id === "upd-no-sub");
       expect(ack?.type).toBe("subscription_response");
       expect(ack?.success).toBe(true);
       expect((server as any).subscribers.size).toBe(0);
@@ -1361,6 +1681,7 @@ describe("DeviceDataStreamSocketServer", () => {
         {
           type: "error",
           success: false,
+          subscriptionId: "devicedatastream-1",
           deviceId: "emulator-5554",
           timestamp: 1234,
           error: "device connection lost",
@@ -1400,7 +1721,15 @@ describe("DeviceDataStreamSocketServer", () => {
           bounds: { left: 0, top: 0, right: 390, bottom: 844 },
           node: {
             $: { class: "UIWindow", bounds: { left: 0, top: 0, right: 390, bottom: 844 } },
-            node: [{ $: { class: "UIButton", text: "Go", bounds: { left: 10, top: 20, right: 100, bottom: 60 } } }],
+            node: [
+              {
+                $: {
+                  class: "UIButton",
+                  text: "Go",
+                  bounds: { left: 10, top: 20, right: 100, bottom: 60 },
+                },
+              },
+            ],
           },
         },
         screenWidth: 390,
@@ -1421,8 +1750,18 @@ describe("DeviceDataStreamSocketServer", () => {
       expect(message.nativeScale).toBe(3);
       expect(message.data.screenWidth).toBe(1170);
       expect(message.data.screenHeight).toBe(2532);
-      expect(message.data.hierarchy.node.$.bounds).toEqual({ left: 0, top: 0, right: 1170, bottom: 2532 });
-      expect(message.data.hierarchy.node.node[0].$.bounds).toEqual({ left: 30, top: 60, right: 300, bottom: 180 });
+      expect(message.data.hierarchy.node.$.bounds).toEqual({
+        left: 0,
+        top: 0,
+        right: 1170,
+        bottom: 2532,
+      });
+      expect(message.data.hierarchy.node.node[0].$.bounds).toEqual({
+        left: 30,
+        top: 60,
+        right: 300,
+        bottom: 180,
+      });
       expect(message.data.hierarchy.bounds).toEqual({ left: 0, top: 0, right: 1170, bottom: 2532 });
     });
 
@@ -1431,7 +1770,12 @@ describe("DeviceDataStreamSocketServer", () => {
       const input = iosFrame();
       server.pushHierarchyUpdate("ios-1", input);
       // The push converts a clone; the object the caller (and MCP observe) holds is untouched.
-      expect(input.data ?? input.hierarchy.node.$.bounds).toEqual({ left: 0, top: 0, right: 390, bottom: 844 });
+      expect(input.data ?? input.hierarchy.node.$.bounds).toEqual({
+        left: 0,
+        top: 0,
+        right: 390,
+        bottom: 844,
+      });
       expect(input.screenWidth).toBe(390);
     });
 
@@ -1448,13 +1792,22 @@ describe("DeviceDataStreamSocketServer", () => {
       expect(message.nativeScale).toBeUndefined();
       // Point-space bounds and dims pass through unchanged.
       expect(message.data.screenWidth).toBe(390);
-      expect(message.data.hierarchy.node.node[0].$.bounds).toEqual({ left: 10, top: 20, right: 100, bottom: 60 });
+      expect(message.data.hierarchy.node.node[0].$.bounds).toEqual({
+        left: 10,
+        top: 20,
+        right: 100,
+        bottom: 60,
+      });
     });
 
     it("Android (nativeScale 1) leaves bounds numerically identical but still declares px", () => {
       const { socket } = server.simulateSubscription({ deviceId: "android-1" });
       const androidFrame = {
-        hierarchy: { node: { $: { class: "FrameLayout", bounds: { left: 0, top: 0, right: 1080, bottom: 2340 } } } },
+        hierarchy: {
+          node: {
+            $: { class: "FrameLayout", bounds: { left: 0, top: 0, right: 1080, bottom: 2340 } },
+          },
+        },
         screenWidth: 1080,
         screenHeight: 2340,
         nativeScale: 1,
@@ -1465,18 +1818,30 @@ describe("DeviceDataStreamSocketServer", () => {
 
       const [message] = socket.getWrittenMessages<any>();
       expect(message.coordinateSpace).toBe("px");
-      expect(message.data.hierarchy.node.$.bounds).toEqual({ left: 0, top: 0, right: 1080, bottom: 2340 });
+      expect(message.data.hierarchy.node.$.bounds).toEqual({
+        left: 0,
+        top: 0,
+        right: 1080,
+        bottom: 2340,
+      });
     });
 
     it("stamps coordinateSpace:px on a screenshot when the caller declares px", () => {
       const { socket } = server.simulateSubscription({ deviceId: "ios-1" });
       const seq = server.pushHierarchyUpdate("ios-1", iosFrame());
-      server.pushScreenshotUpdate("ios-1", pngFrame(1170, 2532), 1170, 2532, {}, {
-        captureSequence: seq ?? undefined,
-        coordinateSpace: "px",
-        nativeScale: 3,
-      });
-      const shot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
+      server.pushScreenshotUpdate(
+        "ios-1",
+        pngFrame(1170, 2532),
+        1170,
+        2532,
+        {},
+        {
+          captureSequence: seq ?? undefined,
+          coordinateSpace: "px",
+          nativeScale: 3,
+        },
+      );
+      const shot = socket.getWrittenMessages<any>().find((m) => m.type === "screenshot_update");
       expect(shot.coordinateSpace).toBe("px");
       expect(shot.nativeScale).toBe(3);
       expect(shot.captureSequence).toBe(seq);
@@ -1485,7 +1850,7 @@ describe("DeviceDataStreamSocketServer", () => {
     it("omits coordinateSpace on a screenshot from a legacy (non-px) caller", () => {
       const { socket } = server.simulateSubscription({ deviceId: "ios-legacy" });
       server.pushScreenshotUpdate("ios-legacy", pngFrame(1170, 2532), 1170, 2532, {}, {});
-      const shot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
+      const shot = socket.getWrittenMessages<any>().find((m) => m.type === "screenshot_update");
       expect(shot.coordinateSpace).toBeUndefined();
       expect(shot.nativeScale).toBeUndefined();
     });
@@ -1498,7 +1863,9 @@ describe("DeviceDataStreamSocketServer", () => {
     // frame's measured pixels are consistent with the claimed geometry (exact match or swapped
     // orientation — never a scale change, never an unmeasurable frame).
     const goldenFrame = (text: string) =>
-      ({ hierarchy: { node: { $: { class: "Root" }, node: [{ $: { class: "Child", text } }] } } }) as any;
+      ({
+        hierarchy: { node: { $: { class: "Root" }, node: [{ $: { class: "Child", text } }] } },
+      }) as any;
 
     const vectors = loadCoordinateMappingVectors().geometryPairing;
 
@@ -1518,10 +1885,12 @@ describe("DeviceDataStreamSocketServer", () => {
           vector.claimedWidth,
           vector.claimedHeight,
           {},
-          { captureSequence: captureSequence ?? undefined }
+          { captureSequence: captureSequence ?? undefined },
         );
 
-        const screenshot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
+        const screenshot = socket
+          .getWrittenMessages<any>()
+          .find((m) => m.type === "screenshot_update");
         if (vector.expectedMatch === 1) {
           expect(screenshot.captureSequence).toBe(captureSequence);
         } else {

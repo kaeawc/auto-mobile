@@ -22,9 +22,13 @@ interface TestPushMessage {
   type: "test_push";
   data: TestPushData;
   timestamp: number;
+  subscriptionId: string;
 }
 
-class TestablePushSubscriptionServer extends PushSubscriptionSocketServer<TestFilter, TestPushData> {
+class TestablePushSubscriptionServer extends PushSubscriptionSocketServer<
+  TestFilter,
+  TestPushData
+> {
   constructor(timer: FakeTimer) {
     super("/fake/path/test.sock", timer, "TestPush");
   }
@@ -48,10 +52,10 @@ class TestablePushSubscriptionServer extends PushSubscriptionSocketServer<TestFi
   /**
    * Simulate a client connection and subscription
    */
-  simulateSubscription(options: {
-    deviceId?: string;
-    packageName?: string;
-  }): { socket: FakeSocket; subscriptionId: string } {
+  simulateSubscription(options: { deviceId?: string; packageName?: string }): {
+    socket: FakeSocket;
+    subscriptionId: string;
+  } {
     const socket = new FakeSocket();
     const subscriptionId = `testpush-${++(this as any).subscriptionCounter}`;
     const timer = (this as any).timer as FakeTimer;
@@ -81,6 +85,10 @@ class TestablePushSubscriptionServer extends PushSubscriptionSocketServer<TestFi
     await (this as any).processLine(socket as unknown as Socket, line);
   }
 
+  closeConnectionForTest(socket: FakeSocket): void {
+    (this as any).onConnectionClose(socket as unknown as Socket);
+  }
+
   /**
    * Trigger keepalive check
    */
@@ -108,11 +116,12 @@ class TestablePushSubscriptionServer extends PushSubscriptionSocketServer<TestFi
     return matchesDevice && matchesPackage;
   }
 
-  protected createPushMessage(data: TestPushData): TestPushMessage {
+  protected createPushMessage(data: TestPushData, subscriptionId: string): TestPushMessage {
     return {
       type: "test_push",
       data,
       timestamp: (this as any).timer.now(),
+      subscriptionId,
     };
   }
 }
@@ -231,7 +240,7 @@ describe("PushSubscriptionSocketServer", () => {
       server.triggerKeepalive();
 
       const messages = socket.getWrittenMessages<{ type: string }>();
-      expect(messages.some(m => m.type === "ping")).toBe(true);
+      expect(messages.some((m) => m.type === "ping")).toBe(true);
     });
 
     it("removes subscribers with destroyed sockets", () => {
@@ -258,6 +267,7 @@ describe("PushSubscriptionSocketServer", () => {
       expect(messages[0].type).toBe("test_push");
       expect(messages[0].data).toEqual(data);
       expect(messages[0].timestamp).toBe(12345);
+      expect(messages[0].subscriptionId).toBe("testpush-1");
     });
   });
 
@@ -390,7 +400,7 @@ describe("PushSubscriptionSocketServer", () => {
 
       await server.simulateLine(
         socket,
-        JSON.stringify({ command: "subscribe", id: "req-1", deviceId: "device-1" })
+        JSON.stringify({ command: "subscribe", id: "req-1", deviceId: "device-1" }),
       );
 
       expect(server.getSubscriberCount()).toBe(1);
@@ -401,7 +411,115 @@ describe("PushSubscriptionSocketServer", () => {
         id: "req-1",
         type: "subscription_response",
         success: true,
+        subscriptionId: "testpush-1",
       });
+    });
+
+    it("multiplexes independently filtered subscriptions on one connection", async () => {
+      const socket = new FakeSocket();
+      await server.simulateLine(
+        socket,
+        JSON.stringify({
+          command: "subscribe",
+          id: "device-1",
+          deviceId: "device-1",
+        }),
+      );
+      await server.simulateLine(
+        socket,
+        JSON.stringify({
+          command: "subscribe",
+          id: "device-2",
+          deviceId: "device-2",
+        }),
+      );
+
+      expect(server.getSubscriberCount()).toBe(2);
+      expect(socket.getWrittenMessages<SubscriptionResponse>()).toMatchObject([
+        { id: "device-1", type: "subscription_response", subscriptionId: "testpush-1" },
+        { id: "device-2", type: "subscription_response", subscriptionId: "testpush-2" },
+      ]);
+
+      server.pushData({ deviceId: "device-1", packageName: "com.app", value: 1 });
+      server.pushData({ deviceId: "device-2", packageName: "com.app", value: 2 });
+
+      expect(socket.getWrittenMessages<TestPushMessage>().slice(2)).toMatchObject([
+        { type: "test_push", subscriptionId: "testpush-1", data: { value: 1 } },
+        { type: "test_push", subscriptionId: "testpush-2", data: { value: 2 } },
+      ]);
+    });
+
+    it("unsubscribes only the addressed subscription on a multiplexed connection", async () => {
+      const socket = new FakeSocket();
+      await server.simulateLine(
+        socket,
+        JSON.stringify({
+          command: "subscribe",
+          id: "device-1",
+          deviceId: "device-1",
+        }),
+      );
+      await server.simulateLine(
+        socket,
+        JSON.stringify({
+          command: "subscribe",
+          id: "device-2",
+          deviceId: "device-2",
+        }),
+      );
+
+      await server.simulateLine(
+        socket,
+        JSON.stringify({
+          command: "unsubscribe",
+          id: "remove-device-1",
+          subscriptionId: "testpush-1",
+        }),
+      );
+
+      expect(server.getSubscriberCount()).toBe(1);
+      server.pushData({ deviceId: "device-1", packageName: "com.app", value: 1 });
+      server.pushData({ deviceId: "device-2", packageName: "com.app", value: 2 });
+      expect(socket.getWrittenMessages<TestPushMessage>().slice(-1)).toMatchObject([
+        { type: "test_push", subscriptionId: "testpush-2", data: { value: 2 } },
+      ]);
+    });
+
+    it("removes every subscription when a multiplexed connection closes", async () => {
+      const socket = new FakeSocket();
+      await server.simulateLine(socket, JSON.stringify({ command: "subscribe", id: "first" }));
+      await server.simulateLine(socket, JSON.stringify({ command: "subscribe", id: "second" }));
+      expect(server.getSubscriberCount()).toBe(2);
+
+      server.closeConnectionForTest(socket);
+
+      expect(server.getSubscriberCount()).toBe(0);
+    });
+
+    it("sends one keepalive ping per multiplexed connection", async () => {
+      const socket = new FakeSocket();
+      await server.simulateLine(socket, JSON.stringify({ command: "subscribe", id: "first" }));
+      await server.simulateLine(socket, JSON.stringify({ command: "subscribe", id: "second" }));
+
+      server.triggerKeepalive();
+
+      expect(
+        socket
+          .getWrittenMessages<SubscriptionResponse>()
+          .filter((message) => message.type === "ping"),
+      ).toHaveLength(1);
+    });
+
+    it("reaps every subscription when a multiplexed connection stops responding", async () => {
+      const socket = new FakeSocket();
+      await server.simulateLine(socket, JSON.stringify({ command: "subscribe", id: "first" }));
+      await server.simulateLine(socket, JSON.stringify({ command: "subscribe", id: "second" }));
+
+      timer.advanceTimersByTime(31_000);
+      server.triggerKeepalive();
+
+      expect(server.getSubscriberCount()).toBe(0);
+      expect(socket.destroyed).toBe(true);
     });
 
     it("returns a typed error for an unknown command over the wire", async () => {

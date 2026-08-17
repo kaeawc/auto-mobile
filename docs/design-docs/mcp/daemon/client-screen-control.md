@@ -18,11 +18,11 @@ conforming `frameContext` reference implementation.
 
 ## What talks to the daemon (and what does not)
 
-| Consumer | Uses screen control? |
-| --- | --- |
-| Desktop app (`android/desktop-app`) | **Yes** — legacy frame-context integration; see [#4596](https://github.com/kaeawc/auto-mobile/issues/4596). |
-| Third-party daemon clients | **Yes** — the audience for this document. |
-| IntelliJ / Android Studio plugin (`android/ide-plugin`) | **No — inspector only.** |
+| Consumer                                                | Uses screen control?                                                                                        |
+| ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Desktop app (`android/desktop-app`)                     | **Yes** — legacy frame-context integration; see [#4596](https://github.com/kaeawc/auto-mobile/issues/4596). |
+| Third-party daemon clients                              | **Yes** — the audience for this document.                                                                   |
+| IntelliJ / Android Studio plugin (`android/ide-plugin`) | **No — inspector only.**                                                                                    |
 
 The IDE plugin shares the `desktop-core` rendering code but **never enables control mode**. It
 is an inspector: it selects elements and highlights them, and forwards no device input of any
@@ -35,13 +35,13 @@ as a deliberate scope decision, not a dropped feature.
 Screen control is five separate contracts. This page ties them together; each linked document is
 the normative spec for its piece.
 
-| # | Contract | Where it lives |
-| --- | --- | --- |
-| 1 | The `input/*` socket endpoints (tap, swipe, pressButton, typeText, key) | [Unix Socket API → Input API](unix-socket-api.md#input-api) |
-| 2 | Viewport→device **coordinate mapping** ([#3346](https://github.com/kaeawc/auto-mobile/issues/3346)) | [Screen Control Mapping](screen-control-mapping.md#viewport--device-mapping) |
-| 3 | **Drag-to-swipe** threshold and cancellation ([#3350](https://github.com/kaeawc/auto-mobile/issues/3350)) | [Screen Control Mapping → Drag-to-swipe policy](screen-control-mapping.md#drag-to-swipe-policy) |
-| 4 | **Key-forwarding** and host-shortcut policy ([#3351](https://github.com/kaeawc/auto-mobile/issues/3351)) | [Screen Control Mapping → Keyboard forwarding policy](screen-control-mapping.md#keyboard-forwarding-policy) |
-| 5 | **Frame snapshot** pairing + **post-input refresh** ([#3348](https://github.com/kaeawc/auto-mobile/issues/3348)) | [Client Frame Snapshot](client-frame-snapshot.md) |
+| #   | Contract                                                                                                         | Where it lives                                                                                              |
+| --- | ---------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| 1   | The `input/*` socket endpoints (tap, swipe, pressButton, typeText, key)                                          | [Unix Socket API → Input API](unix-socket-api.md#input-api)                                                 |
+| 2   | Viewport→device **coordinate mapping** ([#3346](https://github.com/kaeawc/auto-mobile/issues/3346))              | [Screen Control Mapping](screen-control-mapping.md#viewport--device-mapping)                                |
+| 3   | **Drag-to-swipe** threshold and cancellation ([#3350](https://github.com/kaeawc/auto-mobile/issues/3350))        | [Screen Control Mapping → Drag-to-swipe policy](screen-control-mapping.md#drag-to-swipe-policy)             |
+| 4   | **Key-forwarding** and host-shortcut policy ([#3351](https://github.com/kaeawc/auto-mobile/issues/3351))         | [Screen Control Mapping → Keyboard forwarding policy](screen-control-mapping.md#keyboard-forwarding-policy) |
+| 5   | **Frame snapshot** pairing + **post-input refresh** ([#3348](https://github.com/kaeawc/auto-mobile/issues/3348)) | [Client Frame Snapshot](client-frame-snapshot.md)                                                           |
 
 ## Observation stream protocol
 
@@ -57,14 +57,15 @@ it is authoritative to `src/daemon/deviceDataStreamSocketServer.ts`.
 
 ### Subscribe handshake
 
-Send a `subscribe` command; the daemon replies once, then pushes update messages until you
-`unsubscribe` or disconnect.
+Send a `subscribe` command for each device/facet. The daemon returns a server-minted
+`subscriptionId`; include that ID in every later `unsubscribe` or `update_cadence` command for the
+subscription. One connection can hold any number of independent subscriptions.
 
 ```json
 // client -> daemon
 { "id": "1", "command": "subscribe", "deviceId": "emulator-5554" }
 // daemon -> client
-{ "id": "1", "type": "subscription_response", "success": true }
+{ "id": "1", "type": "subscription_response", "success": true, "subscriptionId": "devicedatastream-1" }
 ```
 
 - `deviceId` is **optional**: omit it (or send `null`) to receive frames for **all** devices; pass a
@@ -72,15 +73,17 @@ Send a `subscribe` command; the daemon replies once, then pushes update messages
   device the user selected.
 - Optional `screenshotIntervalMs` / `hierarchyIntervalMs` on the `subscribe` request set the capture
   cadence (daemon defaults: screenshot 3000 ms, hierarchy 1000 ms; minimum 250 ms). To change
-  cadence in place later, send `{ "command": "update_cadence", "screenshotIntervalMs": …,
-  "hierarchyIntervalMs": … }`; to stop, send `{ "command": "unsubscribe" }`. An older daemon that
-  does not know a command replies with a benign error and keeps its default cadence.
+  cadence in place later, send `{ "command": "update_cadence", "subscriptionId":
+"devicedatastream-1", "screenshotIntervalMs": …, "hierarchyIntervalMs": … }`; to stop, send
+  `{ "command": "unsubscribe", "subscriptionId": "devicedatastream-1" }`.
+- Every pushed frame includes the `subscriptionId` that produced it, allowing a multiplexing client
+  to demultiplex independently of the frame's `deviceId`.
 
 ### Keepalive (ping/pong) — required to stay connected
 
-The daemon actively reaps subscribers it considers dead. Every **10 s** a keepalive sweep sends
-each subscriber a ping push and destroys any subscriber whose activity has not been refreshed for
-**more than 30 s**, removing its subscription. Because reaping happens only on those 10 s sweep
+The daemon actively reaps connections it considers dead. Every **10 s** a keepalive sweep sends one
+ping per connection and destroys any connection whose activity has not been refreshed for **more than 30 s**,
+removing all of its subscriptions. Because reaping happens only on those 10 s sweep
 boundaries, the effective disconnect lands **between just over 30 s and just under 40 s** of
 inactivity, depending on how the subscription aligns with the sweep. A client that subscribes but
 never answers pings is disconnected in that window — even while it is happily receiving frames.
@@ -173,7 +176,7 @@ platforms. That is the whole contract:
 - **Writing.** Send `input/tap` and `input/swipe` coordinates in those same pixels. The daemon does
   any runner-specific conversion itself (it divides by the runner-reported `nativeScale` for the iOS
   XCUITest runner, exactly and without rounding; Android runners already take pixels).
-- **Do not outlive the declaration.** That conversion uses the runner's *current* metadata, so a
+- **Do not outlive the declaration.** That conversion uses the runner's _current_ metadata, so a
   coordinate mapped against a frame whose space has since changed would be converted as the wrong
   unit. Bind the declared space to the snapshot and stop acting through a **retained** frame the
   moment an incoming message declares a different one — see
@@ -201,13 +204,13 @@ unavailable for control; that fails closed, which is always safe.
 **An unrecognized value is not the legacy fallback.** If a message declares a `coordinateSpace` this
 client does not implement — some future value — you **must** treat that frame as **unsupported** and
 fail closed, not fold it into the absent/point-space path. The two states carry different amounts of
-knowledge: *absent* means "a daemon whose geometry and `input/*` units I know exactly", while
-*declared something else* means "a daemon newer than me, whose bounds I cannot interpret and whose
+knowledge: _absent_ means "a daemon whose geometry and `input/*` units I know exactly", while
+_declared something else_ means "a daemon newer than me, whose bounds I cannot interpret and whose
 input endpoints may expect a unit I do not know". Degrading the second into the first would forward
 coordinates whose meaning is unknown, to real hardware. Surface it as a version mismatch — the
 reference client blocks with a distinct `UnsupportedCoordinateSpace` reason and tells the user to
 update — rather than as a transient condition that will resolve itself. Keeping the two distinct is
-also what lets the retained-frame rule below notice a transition *into* an unknown space.
+also what lets the retained-frame rule below notice a transition _into_ an unknown space.
 
 ### Pairing and the active device
 
@@ -280,8 +283,8 @@ rules:
 
 - A single width-based ratio scales both axes (the frame is aspect-fitted).
 - The mapping **never clamps**; it returns the raw coordinate plus an `inBounds` flag.
-- A control client **must not tap an out-of-bounds point** — drop it. (An out-of-bounds *drag
-  end* is the one exception; see below.)
+- A control client **must not tap an out-of-bounds point** — drop it. (An out-of-bounds _drag
+  end_ is the one exception; see below.)
 
 Map the point through **exactly the snapshot the user clicked**, and keep that snapshot bound to
 the input all the way to the request. A snapshot swap between click and send must not change the
@@ -298,9 +301,9 @@ executes whatever it is handed, so convergence on one policy is what keeps clien
   **≥ `24 * nativeScale` device coordinates** on a `coordinateSpace: "px"` frame, **≥ 24** on a
   legacy one (the threshold preserves the same physical distance in each frame's unit; see
   [Drag-to-swipe policy](screen-control-mapping.md#threshold)), measured after the end is
-  clamped. Below that, send **nothing** — not a swipe and *not* a tap. Map both
-  endpoints through the **one** snapshot pinned when the drag began. A drag that *started*
-  off-screen is dropped; a drag that *ended* off-screen is clamped to the last addressable pixel.
+  clamped. Below that, send **nothing** — not a swipe and _not_ a tap. Map both
+  endpoints through the **one** snapshot pinned when the drag began. A drag that _started_
+  off-screen is dropped; a drag that _ended_ off-screen is clamped to the last addressable pixel.
   Use a fixed **300 ms** duration, not the pointer velocity. Full rules:
   [Drag-to-swipe policy](screen-control-mapping.md#drag-to-swipe-policy).
 - **Keyboard** — forward only while the mirror view **holds keyboard focus** and is in control
@@ -366,15 +369,15 @@ consistent.
 
 ## Android vs iOS support matrix
 
-| Input | Android | iOS |
-| --- | --- | --- |
-| Tap (`input/tap`) | ✅ Supported | ✅ Supported |
-| Swipe / drag (`input/swipe`) | ✅ Supported | ✅ Supported |
-| Device buttons (`input/pressButton`) | ✅ Supported | ⚠️ Supported with platform gaps (unsupported buttons fail rather than being ignored) |
-| Discrete keys (`input/key`: Enter, Tab, arrows, …) | ✅ Supported | ❌ Unsupported — CtrlProxy exposes no discrete key events; the daemon returns an actionable error |
-| Printable text (`input/typeText`) | ✅ Supported via non-destructive `mode: "append"` | ✅ Supported via non-destructive `mode: "append"` |
+| Input                                              | Android                                           | iOS                                                                                               |
+| -------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Tap (`input/tap`)                                  | ✅ Supported                                      | ✅ Supported                                                                                      |
+| Swipe / drag (`input/swipe`)                       | ✅ Supported                                      | ✅ Supported                                                                                      |
+| Device buttons (`input/pressButton`)               | ✅ Supported                                      | ⚠️ Supported with platform gaps (unsupported buttons fail rather than being ignored)              |
+| Discrete keys (`input/key`: Enter, Tab, arrows, …) | ✅ Supported                                      | ❌ Unsupported — CtrlProxy exposes no discrete key events; the daemon returns an actionable error |
+| Printable text (`input/typeText`)                  | ✅ Supported via non-destructive `mode: "append"` | ✅ Supported via non-destructive `mode: "append"`                                                 |
 
-**Why iOS text is forwarded.** `input/typeText`'s default path *replaces* the focused field's
+**Why iOS text is forwarded.** `input/typeText`'s default path _replaces_ the focused field's
 contents, so a client that forwards each character must use `mode: "append"`. Android realizes
 append through real key events. iOS routes append through CtrlProxy's focused-field insertion
 primitive, which calls XCUITest `typeText` at the current caret without clearing or resolving a
@@ -399,7 +402,7 @@ desktop app (or your client) connected to the daemon and a device/simulator stre
 2. **Tap** a button; confirm the device actuates it and the touch pulse appears where you clicked.
 3. **Swipe** to scroll a list; confirm the list scrolls and a sub-24px nudge does nothing.
 4. **Button** — press `Esc`; confirm the device navigates back.
-5. **Text/keys** — focus a text field, type ASCII text (confirm it *appends*, not replaces),
+5. **Text/keys** — focus a text field, type ASCII text (confirm it _appends_, not replaces),
    press Enter/Tab/arrows/Backspace; confirm each maps to the device.
 6. Trigger a failure (e.g. overload the queue) and confirm the error banner shows and clears.
 
@@ -408,7 +411,7 @@ desktop app (or your client) connected to the daemon and a device/simulator stre
 1. Enter control mode as above.
 2. **Tap** and **swipe** — confirm both actuate.
 3. **Button** — `Esc` → back; confirm.
-4. **Text/keys** — focus a text field and type ASCII text; confirm each character *appends* at the
+4. **Text/keys** — focus a text field and type ASCII text; confirm each character _appends_ at the
    current caret without clearing the field. Confirm `input/key` presses surface an actionable
    error rather than being silently dropped.
 
@@ -421,10 +424,10 @@ desktop app (or your client) connected to the daemon and a device/simulator stre
 The Client Screen Control milestone is complete. The following are intentionally deferred and
 tracked back to [#1099](https://github.com/kaeawc/auto-mobile/issues/1099):
 
-| Issue | Deferred item |
-| --- | --- |
-| [#4502](https://github.com/kaeawc/auto-mobile/issues/4502) | Close the same-device rotation window in the client control-tap gate. |
-| [#4533](https://github.com/kaeawc/auto-mobile/issues/4533) | Bound `ensureAdbPath` discovery so a cold cache cannot wedge the per-device input queue. |
-| [#4534](https://github.com/kaeawc/auto-mobile/issues/4534) | Evict the append cache on rapid same-serial device reuse (needs a device-connect signal). |
+| Issue                                                      | Deferred item                                                                                 |
+| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| [#4502](https://github.com/kaeawc/auto-mobile/issues/4502) | Close the same-device rotation window in the client control-tap gate.                         |
+| [#4533](https://github.com/kaeawc/auto-mobile/issues/4533) | Bound `ensureAdbPath` discovery so a cold cache cannot wedge the per-device input queue.      |
+| [#4534](https://github.com/kaeawc/auto-mobile/issues/4534) | Evict the append cache on rapid same-serial device reuse (needs a device-connect signal).     |
 | [#4535](https://github.com/kaeawc/auto-mobile/issues/4535) | Optional daemon capability signal for newer input params (e.g. `input/typeText mode:append`). |
-| [#4536](https://github.com/kaeawc/auto-mobile/issues/4536) | Prefer a reliable native AltGraph signal over the `ctrl && alt` heuristic. |
+| [#4536](https://github.com/kaeawc/auto-mobile/issues/4536) | Prefer a reliable native AltGraph signal over the `ctrl && alt` heuristic.                    |

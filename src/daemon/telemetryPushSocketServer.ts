@@ -94,13 +94,17 @@ interface TelemetryPushMessage {
   type: "telemetry_push";
   timestamp: number;
   data: TelemetryEvent;
+  subscriptionId: string;
 }
 
 export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
   TelemetryFilter,
   TelemetryEvent
 > {
-  constructor(socketPath: string = getSocketPath(TELEMETRY_PUSH_SOCKET_CONFIG), timer: Timer = defaultTimer) {
+  constructor(
+    socketPath: string = getSocketPath(TELEMETRY_PUSH_SOCKET_CONFIG),
+    timer: Timer = defaultTimer,
+  ) {
     super(socketPath, timer, "TelemetryPush");
   }
 
@@ -109,7 +113,9 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
     if (sentCount > 0) {
       logger.info(`[TelemetryPush] Pushed ${event.category} event to ${sentCount} subscribers`);
     } else if (event.category === "navigation") {
-      logger.warn(`[TelemetryPush] No subscribers matched navigation event (${this.getSubscriberCount()} total subs, event deviceId: ${event.deviceId})`);
+      logger.warn(
+        `[TelemetryPush] No subscribers matched navigation event (${this.getSubscriberCount()} total subs, event deviceId: ${event.deviceId})`,
+      );
     }
   }
 
@@ -134,22 +140,30 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
     return true;
   }
 
-  protected override onSubscribed(subscriptionId: string, filter: TelemetryFilter, socket: Socket): void {
+  protected override onSubscribed(
+    subscriptionId: string,
+    filter: TelemetryFilter,
+    socket: Socket,
+  ): void {
     const subscriber = this.subscribers.get(subscriptionId);
     if (subscriber) {
       subscriber.backfilling = true;
     }
-    this.backfillRecentEvents(filter, socket).catch(err =>
-      logger.warn(`[TelemetryPush] Backfill failed: ${err}`)
-    ).finally(() => {
-      const sub = this.subscribers.get(subscriptionId);
-      if (sub) {
-        sub.backfilling = false;
-      }
-    });
+    this.backfillRecentEvents(subscriptionId, filter, socket)
+      .catch((err) => logger.warn(`[TelemetryPush] Backfill failed: ${err}`))
+      .finally(() => {
+        const sub = this.subscribers.get(subscriptionId);
+        if (sub) {
+          sub.backfilling = false;
+        }
+      });
   }
 
-  private async backfillRecentEvents(filter: TelemetryFilter, socket: Socket): Promise<void> {
+  private async backfillRecentEvents(
+    subscriptionId: string,
+    filter: TelemetryFilter,
+    socket: Socket,
+  ): Promise<void> {
     const limit = 100;
     const deviceId = filter.deviceId ?? undefined;
     const events: TelemetryEvent[] = [];
@@ -164,13 +178,31 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
       shouldInclude("os") ? getOsEvents({ deviceId, limit }) : [],
     ]);
     for (const r of networkRows) {
-      events.push({ category: "network", timestamp: r.timestamp, deviceId: r.deviceId, sessionId: r.sessionId ?? null, data: r });
+      events.push({
+        category: "network",
+        timestamp: r.timestamp,
+        deviceId: r.deviceId,
+        sessionId: r.sessionId ?? null,
+        data: r,
+      });
     }
     for (const r of logRows) {
-      events.push({ category: "log", timestamp: r.timestamp, deviceId: r.deviceId, sessionId: r.sessionId ?? null, data: r });
+      events.push({
+        category: "log",
+        timestamp: r.timestamp,
+        deviceId: r.deviceId,
+        sessionId: r.sessionId ?? null,
+        data: r,
+      });
     }
     for (const r of osRows) {
-      events.push({ category: "os", timestamp: r.timestamp, deviceId: r.deviceId, sessionId: r.sessionId ?? null, data: r });
+      events.push({
+        category: "os",
+        timestamp: r.timestamp,
+        deviceId: r.deviceId,
+        sessionId: r.sessionId ?? null,
+        data: r,
+      });
     }
 
     if (shouldInclude("navigation")) {
@@ -180,7 +212,7 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
       if (rows.length > 0) {
         try {
           const db = getDatabase() as unknown as Kysely<Database>;
-          const destinations = [...new Set(rows.map(r => r.destination))];
+          const destinations = [...new Set(rows.map((r) => r.destination))];
           const nodes = await db
             .selectFrom("navigation_nodes")
             .select(["id", "screen_name", "app_id"])
@@ -190,7 +222,9 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
             const key = `${node.app_id}:${node.screen_name}`;
             screenshotUris.set(key, `automobile:navigation/nodes/${node.id}/screenshot`);
           }
-        } catch { /* best-effort screenshot URI lookup */ }
+        } catch {
+          /* best-effort screenshot URI lookup */
+        }
       }
       for (const r of rows) {
         const screenshotUri = screenshotUris.get(`${r.applicationId}:${r.destination}`) ?? null;
@@ -206,8 +240,10 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
 
     // Backfill failures (crash/anr/nonfatal) in parallel
     const failureTypes = ["crash", "anr", "nonfatal"] as const;
-    const failureBackfillFn = async (failureType: typeof failureTypes[number]) => {
-      if (!shouldInclude(failureType)) {return;}
+    const failureBackfillFn = async (failureType: (typeof failureTypes)[number]) => {
+      if (!shouldInclude(failureType)) {
+        return;
+      }
       try {
         const db = getDatabase() as unknown as Kysely<Database>;
         let q = db
@@ -237,11 +273,15 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
           q = q.where("failure_occurrences.device_id", "=", deviceId);
         } else {
           // Even without a device filter, exclude failures with no device_id
-          q = q.where("failure_occurrences.device_id", "is not", null)
+          q = q
+            .where("failure_occurrences.device_id", "is not", null)
             .where("failure_occurrences.device_id", "!=", "");
         }
 
-        const rows = await q.orderBy("failure_occurrences.timestamp", "desc").limit(limit).execute();
+        const rows = await q
+          .orderBy("failure_occurrences.timestamp", "desc")
+          .limit(limit)
+          .execute();
 
         for (const r of rows) {
           let exceptionType: string | undefined;
@@ -255,7 +295,9 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
                   exceptionType = frames[0].className ?? frames[0].declaringClass;
                 }
               }
-            } catch { /* ignore parse errors */ }
+            } catch {
+              /* ignore parse errors */
+            }
           }
 
           // Bound the parsed stack trace by serialized size so a multi-hundred-KB
@@ -269,9 +311,15 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
             deviceId: r.deviceId,
             sessionId: r.sessionId ?? null,
             data: {
-              type: r.type, occurrenceId: r.occurrenceId, groupId: r.groupId,
-              severity: r.severity, title: r.title, exceptionType,
-              screen: r.screen, timestamp: r.timestamp, stackTrace: boundedStackTrace,
+              type: r.type,
+              occurrenceId: r.occurrenceId,
+              groupId: r.groupId,
+              severity: r.severity,
+              title: r.title,
+              exceptionType,
+              screen: r.screen,
+              timestamp: r.timestamp,
+              stackTrace: boundedStackTrace,
             },
           });
         }
@@ -286,30 +334,50 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
       shouldInclude("layout") ? getLayoutEvents({ deviceId, limit }) : [],
     ]);
     for (const r of storageRows) {
-      events.push({ category: "storage", timestamp: r.timestamp, deviceId: r.deviceId, sessionId: r.sessionId ?? null, data: r });
+      events.push({
+        category: "storage",
+        timestamp: r.timestamp,
+        deviceId: r.deviceId,
+        sessionId: r.sessionId ?? null,
+        data: r,
+      });
     }
     for (const r of layoutRows) {
-      events.push({ category: "layout", timestamp: r.timestamp, deviceId: r.deviceId, sessionId: r.sessionId ?? null, data: r });
+      events.push({
+        category: "layout",
+        timestamp: r.timestamp,
+        deviceId: r.deviceId,
+        sessionId: r.sessionId ?? null,
+        data: r,
+      });
     }
 
     // Sort oldest-first so dashboard shows them in correct order
     events.sort((a, b) => a.timestamp - b.timestamp);
 
     for (const event of events) {
+      const subscriber = this.subscribers.get(subscriptionId);
+      if (!subscriber || subscriber.socket !== socket) {
+        return;
+      }
+      if (filter.sessionId !== null && event.sessionId !== filter.sessionId) {
+        continue;
+      }
       // Single boundary cap for large plain-text fields (#2801): network bodies
       // are already capped in the repository mapRow; this bounds log/storage.
-      const msg = this.createPushMessage(boundBackfillEventText(event));
+      const msg = this.createPushMessage(boundBackfillEventText(event), subscriptionId);
       this.sendJson(socket, msg);
     }
 
     logger.info(`[TelemetryPush] Backfilled ${events.length} events to new subscriber`);
   }
 
-  protected createPushMessage(data: TelemetryEvent): TelemetryPushMessage {
+  protected createPushMessage(data: TelemetryEvent, subscriptionId: string): TelemetryPushMessage {
     return {
       type: "telemetry_push",
       timestamp: this.timer.now(),
       data,
+      subscriptionId,
     };
   }
 }

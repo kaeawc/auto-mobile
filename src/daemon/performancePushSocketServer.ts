@@ -82,6 +82,7 @@ interface PerformancePushMessage {
   type: "performance_push";
   timestamp: number;
   data: LivePerformanceData;
+  subscriptionId: string;
 }
 
 /**
@@ -89,8 +90,8 @@ interface PerformancePushMessage {
  *
  * Protocol:
  * - Client sends: {"id": "1", "command": "subscribe", "deviceId": "emulator-5554", "packageName": "com.example.app"}
- * - Server responds: {"id": "1", "type": "subscription_response", "success": true}
- * - Server pushes: {"type": "performance_push", "data": {...}}
+ * - Server responds: {"id": "1", "type": "subscription_response", "success": true, "subscriptionId": "performancepush-1"}
+ * - Server pushes: {"type": "performance_push", "subscriptionId": "performancepush-1", "data": {...}}
  * - Server sends ping every 10s: {"type": "ping", "timestamp": 123}
  * - Client responds: {"id": "x", "command": "pong"}
  */
@@ -98,7 +99,10 @@ export class PerformancePushSocketServer extends PushSubscriptionSocketServer<
   PerformanceFilter,
   LivePerformanceData
 > {
-  constructor(socketPath: string = getSocketPath(PERFORMANCE_PUSH_SOCKET_CONFIG), timer: Timer = defaultTimer) {
+  constructor(
+    socketPath: string = getSocketPath(PERFORMANCE_PUSH_SOCKET_CONFIG),
+    timer: Timer = defaultTimer,
+  ) {
     super(socketPath, timer, "PerformancePush");
   }
 
@@ -117,42 +121,66 @@ export class PerformancePushSocketServer extends PushSubscriptionSocketServer<
    */
   static calculateHealth(
     metrics: LivePerformanceData["metrics"],
-    thresholds: PerformanceThresholds
+    thresholds: PerformanceThresholds,
   ): HealthStatus {
     // Check FPS (lower is worse)
     if (metrics.fps !== null) {
-      if (metrics.fps < thresholds.fpsCritical) {return "critical";}
-      if (metrics.fps < thresholds.fpsWarning) {return "warning";}
+      if (metrics.fps < thresholds.fpsCritical) {
+        return "critical";
+      }
+      if (metrics.fps < thresholds.fpsWarning) {
+        return "warning";
+      }
     }
 
     // Check frame time (higher is worse)
     if (metrics.frameTimeMs !== null) {
-      if (metrics.frameTimeMs > thresholds.frameTimeCritical) {return "critical";}
-      if (metrics.frameTimeMs > thresholds.frameTimeWarning) {return "warning";}
+      if (metrics.frameTimeMs > thresholds.frameTimeCritical) {
+        return "critical";
+      }
+      if (metrics.frameTimeMs > thresholds.frameTimeWarning) {
+        return "warning";
+      }
     }
 
     // Check jank frames (higher is worse)
     if (metrics.jankFrames !== null) {
-      if (metrics.jankFrames > thresholds.jankCritical) {return "critical";}
-      if (metrics.jankFrames > thresholds.jankWarning) {return "warning";}
+      if (metrics.jankFrames > thresholds.jankCritical) {
+        return "critical";
+      }
+      if (metrics.jankFrames > thresholds.jankWarning) {
+        return "warning";
+      }
     }
 
     // Check touch latency (higher is worse)
     if (metrics.touchLatencyMs !== null) {
-      if (metrics.touchLatencyMs > thresholds.touchLatencyCritical) {return "critical";}
-      if (metrics.touchLatencyMs > thresholds.touchLatencyWarning) {return "warning";}
+      if (metrics.touchLatencyMs > thresholds.touchLatencyCritical) {
+        return "critical";
+      }
+      if (metrics.touchLatencyMs > thresholds.touchLatencyWarning) {
+        return "warning";
+      }
     }
 
     // Check TTFF (higher is worse)
     if (metrics.ttffMs !== null) {
-      if (metrics.ttffMs > thresholds.ttffCritical) {return "critical";}
-      if (metrics.ttffMs > thresholds.ttffWarning) {return "warning";}
+      if (metrics.ttffMs > thresholds.ttffCritical) {
+        return "critical";
+      }
+      if (metrics.ttffMs > thresholds.ttffWarning) {
+        return "warning";
+      }
     }
 
     // Check TTI (higher is worse)
     if (metrics.ttiMs !== null) {
-      if (metrics.ttiMs > thresholds.ttiCritical) {return "critical";}
-      if (metrics.ttiMs > thresholds.ttiWarning) {return "warning";}
+      if (metrics.ttiMs > thresholds.ttiCritical) {
+        return "critical";
+      }
+      if (metrics.ttiMs > thresholds.ttiWarning) {
+        return "warning";
+      }
     }
 
     return "healthy";
@@ -171,11 +199,15 @@ export class PerformancePushSocketServer extends PushSubscriptionSocketServer<
     return matchesDevice && matchesPackage;
   }
 
-  protected createPushMessage(data: LivePerformanceData): PerformancePushMessage {
+  protected createPushMessage(
+    data: LivePerformanceData,
+    subscriptionId: string,
+  ): PerformancePushMessage {
     return {
       type: "performance_push",
       timestamp: this.timer.now(),
       data,
+      subscriptionId,
     };
   }
 }

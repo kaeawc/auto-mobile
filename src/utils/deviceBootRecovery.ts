@@ -1,4 +1,4 @@
-import type { DeviceInfo } from "../models";
+import { ActionableError, type DeviceInfo } from "../models";
 import type { DeviceBootRequest } from "./deviceBootService";
 import { DefaultDeviceProvisioner, createDefaultAndroidAvdCreator } from "./deviceProvisioning";
 import type { DeviceProvisioner } from "./deviceProvisioning";
@@ -48,30 +48,62 @@ export class CiIosBootRecovery implements DeviceBootRecovery {
       }
       firstFailure = error;
     }
-    await this.recover(() => this.dependencies.shutdown(target));
-    if (signal?.aborted) {
-      throw firstFailure;
-    }
-    await this.recover(() => this.dependencies.erase(target.deviceId!));
-    if (signal?.aborted) {
-      throw firstFailure;
-    }
+    this.throwIfCancelled(signal);
+    await this.recover(signal, () => this.dependencies.shutdown(target));
+    this.throwIfCancelled(signal);
+    await this.recover(signal, () => this.dependencies.erase(target.deviceId!));
+    this.throwIfCancelled(signal);
     try {
       return await boot();
     } catch {
+      this.throwIfCancelled(signal);
       throw firstFailure;
     }
   }
 
   private isOwnedTarget(target: DeviceInfo): boolean {
-    return target.platform === "ios" && target.name === this.dependencies.ownedSimulatorName && Boolean(target.deviceId);
+    return (
+      target.platform === "ios" &&
+      target.name === this.dependencies.ownedSimulatorName &&
+      Boolean(target.deviceId)
+    );
   }
 
-  private async recover(action: () => Promise<void>): Promise<void> {
+  private throwIfCancelled(signal: AbortSignal | undefined): void {
+    if (signal?.aborted) {
+      throw new ActionableError("startDevice cancelled while recovering the CI iOS simulator");
+    }
+  }
+
+  private async recover(
+    signal: AbortSignal | undefined,
+    action: () => Promise<void>,
+  ): Promise<void> {
+    const actionPromise = Promise.resolve()
+      .then(action)
+      .catch((error) => {
+        // Recovery is best-effort; an unavailable simulator can still be retried.
+        logger.debug(`[CI iOS boot] recovery command failed: ${error}`);
+      });
+    if (!signal) {
+      await actionPromise;
+      return;
+    }
+    this.throwIfCancelled(signal);
+    let rejectCancellation!: (error: ActionableError) => void;
+    const cancellation = new Promise<never>((_resolve, reject) => {
+      rejectCancellation = reject;
+    });
+    const cancel = () => {
+      rejectCancellation(
+        new ActionableError("startDevice cancelled while recovering the CI iOS simulator"),
+      );
+    };
+    signal.addEventListener("abort", cancel, { once: true });
     try {
-      await action();
-    } catch (error) {
-      logger.debug(`[CI iOS boot] recovery command failed: ${error}`);
+      await Promise.race([actionPromise, cancellation]);
+    } finally {
+      signal.removeEventListener("abort", cancel);
     }
   }
 }
@@ -89,12 +121,23 @@ export function isGitHubActionsCi(environment: NodeJS.ProcessEnv): boolean {
 }
 
 /** CI recovery owns only the un-targeted product boot used by the workflow. */
-export function shouldUseCiIosBootRecovery(request: DeviceBootRequest, environment: NodeJS.ProcessEnv): boolean {
-  return request.platform === "ios" && !request.name && !request.deviceId && isGitHubActionsCi(environment);
+export function shouldUseCiIosBootRecovery(
+  request: DeviceBootRequest,
+  environment: NodeJS.ProcessEnv,
+): boolean {
+  return (
+    request.platform === "ios" &&
+    !request.name &&
+    !request.deviceId &&
+    isGitHubActionsCi(environment)
+  );
 }
 
 /** Match the runtime-qualified CI-owned name across fallback without changing provisioning bounds. */
-export function normalizeCiIosBootRequest(request: DeviceBootRequest, ownedSimulatorName: string): DeviceBootRequest {
+export function normalizeCiIosBootRequest(
+  request: DeviceBootRequest,
+  ownedSimulatorName: string,
+): DeviceBootRequest {
   return { ...request, name: ownedSimulatorName, matchNamedDeviceIgnoringOsVersion: true };
 }
 
@@ -123,14 +166,14 @@ export async function createCiIosBootConfiguration(
     }),
     recovery: new CiIosBootRecovery({
       ownedSimulatorName,
-      shutdown: async target => {
+      shutdown: async (target) => {
         await deviceManager.killDevice({
           name: target.name,
           platform: "ios",
           deviceId: target.deviceId!,
         });
       },
-      erase: udid => simctl.eraseSimulator(udid),
+      erase: (udid) => simctl.eraseSimulator(udid),
     }),
   };
 }

@@ -142,10 +142,10 @@ describe("DeviceBootService", () => {
     };
     let resolveDiscovery!: (devices: BootedDevice[]) => void;
     let markDiscoveryStarted!: () => void;
-    const discoveryStarted = new Promise<void>(resolve => {
+    const discoveryStarted = new Promise<void>((resolve) => {
       markDiscoveryStarted = resolve;
     });
-    const pendingDiscovery = new Promise<BootedDevice[]>(resolve => {
+    const pendingDiscovery = new Promise<BootedDevice[]>((resolve) => {
       resolveDiscovery = resolve;
     });
     devices.setDeviceImages("android", [image]);
@@ -173,10 +173,10 @@ describe("DeviceBootService", () => {
     const controller = new AbortController();
     let resolveStart!: (handle: ChildProcess | null) => void;
     let markStartStarted!: () => void;
-    const startStarted = new Promise<void>(resolve => {
+    const startStarted = new Promise<void>((resolve) => {
       markStartStarted = resolve;
     });
-    const pendingStart = new Promise<ChildProcess | null>(resolve => {
+    const pendingStart = new Promise<ChildProcess | null>((resolve) => {
       resolveStart = resolve;
     });
     let killCount = 0;
@@ -207,16 +207,54 @@ describe("DeviceBootService", () => {
     expect(devices.wasMethodCalled("waitForDeviceReady")).toBe(false);
   });
 
+  it("cancels a resolved start handle when cancellation wins the phase boundary", async () => {
+    const devices = new FakeDeviceUtils();
+    const matcher = new FakeDeviceMatcher();
+    const controller = new AbortController();
+    let resolveStart!: (handle: ChildProcess | null) => void;
+    let markStartStarted!: () => void;
+    const startStarted = new Promise<void>((resolve) => {
+      markStartStarted = resolve;
+    });
+    const pendingStart = new Promise<ChildProcess | null>((resolve) => {
+      resolveStart = resolve;
+    });
+    let killCount = 0;
+    const handle = {
+      pid: 12,
+      kill: () => {
+        killCount++;
+        return true;
+      },
+    } as ChildProcess;
+    devices.setDeviceImages("android", [image]);
+    matcher.setImageResult(image);
+    devices.startDevice = async () => {
+      markStartStarted();
+      return pendingStart;
+    };
+
+    const boot = service(devices, matcher).boot({ platform: "android", signal: controller.signal });
+    await startStarted;
+    resolveStart(handle);
+    queueMicrotask(() => controller.abort());
+
+    await expect(boot).rejects.toThrow("startDevice cancelled while starting the device");
+
+    expect(killCount).toBe(1);
+    expect(devices.wasMethodCalled("waitForDeviceReady")).toBe(false);
+  });
+
   it("cancels a started handle when external cancellation lands during progress reporting", async () => {
     const devices = new FakeDeviceUtils();
     const matcher = new FakeDeviceMatcher();
     const controller = new AbortController();
     let resolveProgress!: () => void;
     let markProgressStarted!: () => void;
-    const progressStarted = new Promise<void>(resolve => {
+    const progressStarted = new Promise<void>((resolve) => {
       markProgressStarted = resolve;
     });
-    const pendingProgress = new Promise<void>(resolve => {
+    const pendingProgress = new Promise<void>((resolve) => {
       resolveProgress = resolve;
     });
     let killCount = 0;
@@ -236,14 +274,66 @@ describe("DeviceBootService", () => {
       },
     } as ChildProcess);
 
-    const boot = service(devices, matcher).boot({ platform: "android", signal: controller.signal }, progress);
+    const boot = service(devices, matcher).boot(
+      { platform: "android", signal: controller.signal },
+      progress,
+    );
     await progressStarted;
     controller.abort();
     resolveProgress();
 
-    await expect(boot).rejects.toThrow("startDevice cancelled while waiting for device boot readiness");
+    await expect(boot).rejects.toThrow(
+      "startDevice cancelled while reporting device start progress",
+    );
     expect(killCount).toBe(1);
     expect(devices.wasMethodCalled("waitForDeviceReady")).toBe(false);
+  });
+
+  it("prevents a final progress callback from returning a cancelled cold boot", async () => {
+    const devices = new FakeDeviceUtils();
+    const matcher = new FakeDeviceMatcher();
+    const controller = new AbortController();
+    let markFinalProgressStarted!: () => void;
+    let resolveFinalProgress!: () => void;
+    const finalProgressStarted = new Promise<void>((resolve) => {
+      markFinalProgressStarted = resolve;
+    });
+    const pendingFinalProgress = new Promise<void>((resolve) => {
+      resolveFinalProgress = resolve;
+    });
+    let killCount = 0;
+    const progress: DeviceBootProgress = {
+      report: async (current) => {
+        if (current === 100) {
+          markFinalProgressStarted();
+          await pendingFinalProgress;
+        }
+      },
+    };
+    devices.setDeviceImages("android", [image]);
+    matcher.setImageResult(image);
+    devices.setMockChildProcess(image.name, {
+      pid: 12,
+      kill: () => {
+        killCount++;
+        return true;
+      },
+    } as ChildProcess);
+
+    const boot = service(devices, matcher).boot(
+      { platform: "android", signal: controller.signal },
+      progress,
+    );
+    await finalProgressStarted;
+    controller.abort();
+
+    await expect(boot).rejects.toThrow(
+      "startDevice cancelled while reporting device readiness progress",
+    );
+    resolveFinalProgress();
+    await Promise.resolve();
+
+    expect(killCount).toBe(1);
   });
 
   it("adopts and awaits a matching running device", async () => {

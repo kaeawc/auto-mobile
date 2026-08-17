@@ -285,6 +285,34 @@ export async function waitForStderrMessage(
   });
 }
 
+async function waitForStderrMessageOrAbort(
+  tracker: ProcessTracker,
+  messages: string | string[],
+  timeoutMs: number,
+  abortSignal: AbortSignal | undefined,
+): Promise<void> {
+  if (!abortSignal) {
+    await waitForStderrMessage(tracker, messages, timeoutMs);
+    return;
+  }
+  if (abortSignal.aborted) {
+    throw new Error("Recording start was cancelled during shutdown.");
+  }
+
+  let rejectAbort: (() => void) | undefined;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    rejectAbort = () => reject(new Error("Recording start was cancelled during shutdown."));
+    abortSignal.addEventListener("abort", rejectAbort, { once: true });
+  });
+  try {
+    await Promise.race([waitForStderrMessage(tracker, messages, timeoutMs), aborted]);
+  } finally {
+    if (rejectAbort) {
+      abortSignal.removeEventListener("abort", rejectAbort);
+    }
+  }
+}
+
 export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
   private hwAccelCache: Map<string, HardwareAccelInfo> = new Map();
   // Overridable in tests so the retry path can be exercised without real waits.
@@ -503,10 +531,11 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       const captureTracker = trackProcess(captureProcess);
 
       try {
-        await waitForStderrMessage(
+        await waitForStderrMessageOrAbort(
           captureTracker,
           IOS_RECORDING_START_MESSAGES,
-          this.iosRecordingStartTimeoutMs
+          this.iosRecordingStartTimeoutMs,
+          config.abortSignal,
         );
 
         const backendHandle: FfmpegBackendHandle = {
@@ -524,6 +553,14 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
           backendHandle,
         };
       } catch (error) {
+        if (config.abortSignal?.aborted) {
+          await waitForExit(
+            captureTracker.process,
+            captureTracker.exitPromise,
+            { timeoutMs: 1_500, signal: "SIGKILL" },
+          );
+          throw new ActionableError("iOS recording start was cancelled during shutdown.");
+        }
         // The handshake timed out. Tear down this attempt's process, snapshot the
         // simulator so a genuine wedge is diagnosable, then retry if budget remains.
         let stopError: unknown;

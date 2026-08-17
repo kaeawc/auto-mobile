@@ -135,6 +135,24 @@ describe("VideoRecorderService", () => {
     );
   });
 
+  test("rejects a graceful stop that resolves after force-stop removed its owner", async () => {
+    const recording = await service.startRecording();
+    let resolveStop: (() => void) | undefined;
+    backend.stop = async () => {
+      await new Promise<void>(resolve => {
+        resolveStop = resolve;
+      });
+      return backend.stopResult;
+    };
+
+    const stopping = service.stopRecording(recording.recordingId);
+    await Promise.resolve();
+    await service.forceStopRecording(recording.recordingId);
+    resolveStop?.();
+
+    await expect(stopping).rejects.toThrow("was force-stopped while it was stopping");
+  });
+
   afterEach(async () => {
     await fsPromises.rm(archiveRoot, { recursive: true, force: true });
   });

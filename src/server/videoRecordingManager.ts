@@ -199,6 +199,7 @@ let managerInitialized = false;
 let acceptingVideoRecordingStarts = true;
 let inFlightVideoRecordingStarts = 0;
 let resolveVideoRecordingStartDrain: (() => void) | null = null;
+const inFlightVideoRecordingStartControllers = new Set<AbortController>();
 
 const autoStopTimers = new Map<string, { timer: Timer; handle: NodeJS.Timeout }>();
 const highlightSessions = new Map<string, VideoRecordingHighlightSession>();
@@ -321,27 +322,40 @@ function resetVideoRecordingManagerState(): void {
   highlightSessionsByDeviceId.clear();
   acceptingVideoRecordingStarts = true;
   inFlightVideoRecordingStarts = 0;
+  for (const controller of inFlightVideoRecordingStartControllers) {
+    controller.abort();
+  }
+  inFlightVideoRecordingStartControllers.clear();
   resolveVideoRecordingStartDrain?.();
   resolveVideoRecordingStartDrain = null;
   managerInitialized = false;
 }
 
-function beginVideoRecordingStart(): () => void {
+function beginVideoRecordingStart(): { abortSignal: AbortSignal; complete(): void } {
   if (!acceptingVideoRecordingStarts) {
     throw new ActionableError("Video recording is unavailable while the daemon shuts down.");
   }
   inFlightVideoRecordingStarts++;
-  return () => {
+  const controller = new AbortController();
+  inFlightVideoRecordingStartControllers.add(controller);
+  return {
+    abortSignal: controller.signal,
+    complete: () => {
     inFlightVideoRecordingStarts--;
+    inFlightVideoRecordingStartControllers.delete(controller);
     if (inFlightVideoRecordingStarts === 0) {
       resolveVideoRecordingStartDrain?.();
       resolveVideoRecordingStartDrain = null;
     }
+    },
   };
 }
 
 export async function stopAcceptingVideoRecordingStarts(): Promise<void> {
   acceptingVideoRecordingStarts = false;
+  for (const controller of inFlightVideoRecordingStartControllers) {
+    controller.abort();
+  }
   if (inFlightVideoRecordingStarts === 0) {
     return;
   }
@@ -826,7 +840,7 @@ export async function updateVideoRecordingConfig(
 export async function startVideoRecording(
   request: StartVideoRecordingRequest
 ): Promise<ActiveVideoRecording> {
-  const completeStart = beginVideoRecordingStart();
+  const start = beginVideoRecordingStart();
   try {
   const deps = await getVideoRecordingDependencies();
   const { videoRecorderService, recordingRepository, timer } = deps;
@@ -856,6 +870,7 @@ export async function startVideoRecording(
     config: configInput,
     device: request.device,
     maxDurationSeconds,
+    abortSignal: start.abortSignal,
   });
 
   await recordingRepository.insertRecording({
@@ -898,7 +913,7 @@ export async function startVideoRecording(
 
   return active;
   } finally {
-    completeStart();
+    start.complete();
   }
 }
 

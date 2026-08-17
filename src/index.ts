@@ -133,12 +133,6 @@ async function main() {
     logger.info(`Received ${signal} signal, shutting down`);
     await runShutdownCleanupStages(
       [
-        { name: "video recording socket server", run: stopVideoRecordingSocketServer },
-        { name: "test recording socket server", run: stopTestRecordingSocketServer },
-        { name: "device snapshot socket server", run: stopDeviceSnapshotSocketServer },
-        { name: "appearance socket server", run: stopAppearanceSocketServer },
-        { name: "WebRTC stream socket server", run: stopWebRtcStreamSocketServer },
-        { name: "appearance sync scheduler", run: stopAppearanceSyncScheduler },
         {
           name: "direct-mode capture and iOS CtrlProxy children",
           run: async () => {
@@ -147,6 +141,12 @@ async function main() {
             }
           },
         },
+        { name: "video recording socket server", run: stopVideoRecordingSocketServer },
+        { name: "test recording socket server", run: stopTestRecordingSocketServer },
+        { name: "device snapshot socket server", run: stopDeviceSnapshotSocketServer },
+        { name: "appearance socket server", run: stopAppearanceSocketServer },
+        { name: "WebRTC stream socket server", run: stopWebRtcStreamSocketServer },
+        { name: "appearance sync scheduler", run: stopAppearanceSyncScheduler },
         {
           name: "prefetched Android CtrlProxy APK",
           run: AndroidCtrlProxyManager.cleanupPrefetchedApk,

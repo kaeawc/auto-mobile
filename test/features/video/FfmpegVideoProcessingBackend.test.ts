@@ -153,6 +153,8 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function() {
       stdout: null,
       stdin: null,
       killed: false,
+      exitCode: null,
+      signalCode: null,
       kill: () => {
         (child as unknown as { killed: boolean }).killed = true;
         queueMicrotask(() => child.emit("exit", 0, "SIGINT"));
@@ -205,6 +207,26 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function() {
     expect(handle.recordingId).toBe("test-recording");
     expect(started.length).toBe(2); // one retry after the first miss
     expect(diagnosticCalls).toBe(1); // diagnostics captured once, on the miss
+  });
+
+  test("kills an iOS recorder that is still waiting for its start handshake when shutdown aborts", async function() {
+    const child = makeCaptureChild(false);
+    const controller = new AbortController();
+    const simctl = {
+      isAvailable: async () => true,
+      startCommandArgs: async () => child,
+    } as unknown as SimCtl;
+    backend = new FfmpegVideoProcessingBackend(undefined, () => simctl);
+    (backend as any).ensureFfmpegAvailable = async () => {};
+    mockConfig.device = { ...mockDevice, platform: "ios", deviceId: "ios-abort-udid" };
+    mockConfig.abortSignal = controller.signal;
+
+    const starting = backend.start(mockConfig);
+    await Promise.resolve();
+    controller.abort();
+
+    await expect(starting).rejects.toThrow("cancelled during shutdown");
+    expect(child.killed).toBe(true);
   });
 
   test("fails after exhausting start attempts and reports simulator diagnostics (#4076)", async function() {

@@ -26,10 +26,10 @@ import type { ProxyManager, ProxySetupResult } from "./interfaces/ProxyManager";
 
 export const MAX_STARTUP_ORPHAN_RUNNER_CANDIDATES = 20;
 export const STARTUP_ORPHAN_RUNNER_REAP_DEADLINE_MS = 5_000;
-// ProcessLifecycle and DaemonManager force-exit after five seconds. This stage
+// ProcessLifecycle and DaemonManager force-exit after ten seconds. This stage
 // shares that budget with capture cleanup, so an unresponsive proxy must not
 // consume it all before the remaining owners receive their stop attempt.
-const SHUTDOWN_STOP_TIMEOUT_MS = 750;
+const SHUTDOWN_STOP_TIMEOUT_MS = 1_500;
 
 /**
  * iOS-specific setup result; carries the build result alongside the
@@ -431,7 +431,12 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     const settled = instance.stop().then(() => null, error => error);
     const timedOut = new Promise<Error>(resolve => {
       timeout = timer.setTimeout(
-        () => resolve(new Error(`timed out after ${SHUTDOWN_STOP_TIMEOUT_MS}ms`)),
+        () => {
+          // stop() may be blocked on a remote runner call. Dispatch direct
+          // best-effort termination before the shutdown registry is cleared.
+          instance.forceStopForShutdown();
+          resolve(new Error(`timed out after ${SHUTDOWN_STOP_TIMEOUT_MS}ms`));
+        },
         SHUTDOWN_STOP_TIMEOUT_MS
       );
     });
@@ -441,6 +446,53 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       if (timeout) {
         timer.clearTimeout(timeout);
       }
+    }
+  }
+
+  private forceStopForShutdown(): void {
+    this.isStopping = true;
+    this.processSupervisor.stop();
+    this.iproxySupervisor.stop();
+
+    const runnerPid = this.xcTestProcessId;
+    const iproxyPid = this.iproxyProcessId;
+    const iproxyProcess = this.iproxyProcess;
+    this.xcTestProcessId = null;
+    this.xcTestProcess = null;
+    this.iproxyProcessId = null;
+    this.iproxyProcess = null;
+    this.iproxyDevicePort = null;
+    this.clearCaches();
+    PortManager.release(this.device.deviceId);
+
+    if (this.useRemoteRunner()) {
+      if (runnerPid) {
+        void this.remoteRunner.stop({ deviceId: this.device.deviceId, pid: runnerPid }).catch(error => {
+          logger.warn(`[IOSCtrlProxy] Forced remote runner stop failed: ${error}`);
+        });
+      }
+      if (iproxyPid) {
+        void this.remoteRunner.stopIproxy({ pid: iproxyPid }).catch(error => {
+          logger.warn(`[IOSCtrlProxy] Forced remote iproxy stop failed: ${error}`);
+        });
+      }
+      return;
+    }
+
+    try {
+      if (iproxyProcess && typeof iproxyProcess.kill === "function") {
+        iproxyProcess.kill("SIGKILL");
+      } else if (iproxyPid) {
+        process.kill(iproxyPid, "SIGKILL");
+      }
+    } catch (error) {
+      // A child can exit between tracking and shutdown.
+      logger.debug(`[IOSCtrlProxy] Forced iproxy termination was already complete: ${error}`);
+    }
+    if (runnerPid) {
+      void this.processClient.terminateProcessTree(runnerPid).catch(error => {
+        logger.warn(`[IOSCtrlProxy] Forced CtrlProxy runner termination failed: ${error}`);
+      });
     }
   }
 

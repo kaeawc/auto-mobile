@@ -10,10 +10,10 @@ import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
 import { logger } from "../utils/logger";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 
-// DaemonManager and stdin lifecycle both force-exit after five seconds. Keep each
+// DaemonManager and stdin lifecycle both force-exit after ten seconds. Keep each
 // best-effort stage short enough for the fallback force-stop to run before that
 // outer deadline, even when listing, graceful stop, and interruption all stall.
-const CHILD_PROCESS_CLEANUP_TIMEOUT_MS = 750;
+const CHILD_PROCESS_CLEANUP_TIMEOUT_MS = 1_500;
 
 /**
  * Process owners which must be cleaned up before the daemon closes its database.

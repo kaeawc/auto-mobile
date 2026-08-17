@@ -311,14 +311,16 @@ describe("IOSCtrlProxyManager", function() {
       const firstStop = spyOn(first, "stop").mockImplementation(async () => {
         await new Promise<void>(() => {});
       });
+      const forceStop = spyOn(first as any, "forceStopForShutdown").mockImplementation(() => {});
       const secondStop = spyOn(second, "stop").mockResolvedValue();
       const shutdown = IOSCtrlProxyManager.shutdownAll(timer);
 
       await Promise.resolve();
-      timer.advanceTime(750);
+      timer.advanceTime(1_500);
       await shutdown;
 
       expect(firstStop).toHaveBeenCalledTimes(1);
+      expect(forceStop).toHaveBeenCalledTimes(1);
       expect(secondStop).toHaveBeenCalledTimes(1);
       expect(IOSCtrlProxyManager.getInstance(testDevice)).not.toBe(first);
     });

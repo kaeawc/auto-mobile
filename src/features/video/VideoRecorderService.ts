@@ -25,6 +25,8 @@ export interface VideoCaptureConfig extends VideoRecordingConfig {
   startedAt: string;
   device?: BootedDevice;
   maxDurationSeconds?: number;
+  /** Aborts a capture which has spawned but has not completed startup yet. */
+  abortSignal?: AbortSignal;
 }
 
 export interface RecordingHandle {
@@ -55,6 +57,7 @@ export interface StartVideoRecordingOptions {
   config?: VideoRecordingConfigInput | null;
   device?: BootedDevice;
   maxDurationSeconds?: number;
+  abortSignal?: AbortSignal;
 }
 
 export interface ActiveVideoRecording {
@@ -182,6 +185,7 @@ export class VideoRecorderService {
       startedAt,
       device: options.device,
       maxDurationSeconds: options.maxDurationSeconds,
+      abortSignal: options.abortSignal,
       ...config,
     });
 
@@ -217,6 +221,9 @@ export class VideoRecorderService {
     }
 
     const stopResult = await this.backend.stop(active.handle);
+    if (this.activeRecordings.get(recordingId) !== active) {
+      throw new Error(`Recording ${recordingId} was force-stopped while it was stopping.`);
+    }
     const endedAt = stopResult.endedAt ?? this.now().toISOString();
     const outputPath = stopResult.outputPath || active.outputPath;
     const fileName = path.basename(outputPath);

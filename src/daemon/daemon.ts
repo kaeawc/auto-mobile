@@ -1732,6 +1732,12 @@ export class Daemon {
     await runShutdownCleanupStages(
       [
         {
+          // Quiesce new recording work and stop owned children before any
+          // potentially blocking socket teardown consumes the shutdown budget.
+          name: "active capture and iOS CtrlProxy children",
+          run: cleanupDaemonChildProcesses,
+        },
+        {
           name: "health check timer",
           run: () => this.stopHealthCheckTimer(),
         },
@@ -1822,14 +1828,6 @@ export class Daemon {
         {
           name: "HTTP server",
           run: () => this.closeHttpListener(),
-        },
-        {
-          // The listener and every live transport are closed before this stage,
-          // so no request can start a new capture after the active-recording
-          // snapshot. Keep the database open until recording and CtrlProxy
-          // cleanup has persisted its terminal state (issue #5301).
-          name: "active capture and iOS CtrlProxy children",
-          run: cleanupDaemonChildProcesses,
         },
         { name: "active device sessions", run: () => this.releaseActiveSessionsForShutdown() },
         { name: "daemon files", run: () => cleanupDaemonFiles(this.getDaemonFileCleanupOptions()) },

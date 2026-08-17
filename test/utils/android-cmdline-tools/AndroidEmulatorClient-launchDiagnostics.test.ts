@@ -294,6 +294,271 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
     expect(accelChecks()).toBe(0);
   });
 
+  test("replays a post-validation exit to readiness with launch diagnostics", async () => {
+    const child = createChild();
+    const { client, timer } = createClient(child, () => {
+      child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+    });
+    const launchedChild = await client.startEmulator(avdName);
+    const baselineExitListeners = child.listenerCount("exit");
+    child.stderr!.emit(
+      "data",
+      Buffer.from("token=handoff-secret\nhandoff diagnostic\n"),
+    );
+    child.emit("exit", 1, null);
+
+    const readiness = expectRejection(
+      client.waitForEmulatorReady(avdName, 60_000, launchedChild),
+    );
+
+    child.stderr!.emit("data", Buffer.from("late handoff diagnostic\n"));
+    child.emit("close", 1, null);
+    const error = await readiness;
+
+    expect(error.message).toContain("exited with code: 1");
+    expect(error.message).toContain("handoff diagnostic");
+    expect(error.message).toContain("late handoff diagnostic");
+    expect(error.message).toContain("token=[REDACTED]");
+    expect(error.message).not.toContain("handoff-secret");
+    expect(timer.getSleepCallCount()).toBe(0);
+    expect(child.listenerCount("exit")).toBe(baselineExitListeners);
+  });
+
+  test("preserves richer diagnostics emitted after a post-validation exit", async () => {
+    const child = createChild();
+    const { client } = createClient(child, () => {
+      child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+    });
+    const launchedChild = await client.startEmulator(avdName);
+    child.emit("exit", 1, null);
+    const readiness = expectRejection(
+      client.waitForEmulatorReady(avdName, 60_000, launchedChild),
+    );
+    child.stderr!.emit(
+      "data",
+      Buffer.from("qemu_mprotect__osdep: mprotect failed: Permission denied\n"),
+    );
+    child.emit("close", 1, null);
+
+    const error = await readiness;
+    expect(error.message).toContain("hypervisor");
+    expect(error.message).toContain("sandbox");
+  });
+
+  test("keeps a post-validation duplicate-AVD exit nonfatal", async () => {
+    const child = createChild();
+    const { client, timer, accelChecks } = createClient(child, () => {
+      child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+    });
+    const launchedChild = await client.startEmulator(avdName);
+    child.stderr!.emit(
+      "data",
+      Buffer.from("Running multiple emulators with the same AVD is an experimental feature.\n"),
+    );
+    child.emit("exit", 1, null);
+    child.emit("close", 1, null);
+    const readiness = client.waitForEmulatorReady(avdName, 60_000, launchedChild);
+    let rejection: Error | undefined;
+    void readiness.catch((error) => {
+      rejection = error instanceof Error ? error : new Error(String(error));
+    });
+
+    try {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(rejection).toBeUndefined();
+      expect(accelChecks()).toBe(0);
+    } finally {
+      timer.setCurrentTime(60_000);
+      timer.resolveAll();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      timer.resolveAll();
+      await readiness.catch(() => undefined);
+    }
+  });
+
+  test("bounds post-validation exit diagnostic draining", async () => {
+    const child = createChild();
+    const { client, timer } = createClient(child, () => {
+      child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+    });
+    const launchedChild = await client.startEmulator(avdName);
+    child.emit("exit", 1, null);
+    const readiness = expectRejection(
+      client.waitForEmulatorReady(avdName, 60_000, launchedChild),
+    );
+    let settled = false;
+    void readiness.then(() => {
+      settled = true;
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(settled).toBe(false);
+    await timer.advanceTimeAsync(999);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
+    await timer.advanceTimeAsync(1);
+    const error = await readiness;
+    expect(error.message).toContain("exited with code: 1");
+  });
+
+  test("installs readiness exit monitoring without a check-to-listener yield", async () => {
+    const child = createChild();
+    const { client, timer } = createClient(child, () => {
+      child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+    });
+    const launchedChild = await client.startEmulator(avdName);
+    const baselineExitListeners = child.listenerCount("exit");
+    const readiness = client.waitForEmulatorReady(avdName, 60_000, launchedChild);
+    const readinessSettled = readiness.catch(() => undefined);
+
+    try {
+      expect(child.listenerCount("exit")).toBe(baselineExitListeners + 1);
+    } finally {
+      child.emit("exit", 1, null);
+      child.emit("close", 1, null);
+      await timer.advanceTimeAsync(500);
+      await readinessSettled;
+    }
+  });
+
+  test("keeps post-validation exit finalization bounded after a child error", async () => {
+    const child = createChild();
+    const { client, timer } = createClient(child, () => {
+      child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+    });
+    const launchedChild = await client.startEmulator(avdName);
+    child.emit("exit", 1, null);
+    const readiness = client.waitForEmulatorReady(avdName, 60_000, launchedChild);
+    let rejection: Error | undefined;
+    void readiness.catch((error) => {
+      rejection = error instanceof Error ? error : new Error(String(error));
+    });
+    child.emit("error", new Error("stdio failed after exit"));
+
+    try {
+      await timer.advanceTimeAsync(1_000);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(rejection?.message).toContain("exited with code: 1");
+    } finally {
+      child.emit("close", 1, null);
+      await readiness.catch(() => undefined);
+    }
+  });
+
+  test("preserves diagnostics emitted after a post-exit child error", async () => {
+    const child = createChild();
+    const { client } = createClient(child, () => {
+      child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+    });
+    const launchedChild = await client.startEmulator(avdName);
+    child.emit("exit", 1, null);
+    const readiness = expectRejection(
+      client.waitForEmulatorReady(avdName, 60_000, launchedChild),
+    );
+    child.emit("error", new Error("stdio failed after exit"));
+    child.stderr!.emit(
+      "data",
+      Buffer.from("qemu_mprotect__osdep: mprotect failed: Permission denied\n"),
+    );
+    child.emit("close", 1, null);
+
+    const error = await readiness;
+    expect(error.message).toContain("hypervisor");
+    expect(error.message).toContain("sandbox");
+  });
+
+  test("prefers finalized diagnostics for exits observed during readiness", async () => {
+    const child = createChild();
+    const { client, timer } = createClient(child, () => {
+      child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+    });
+    const launchedChild = await client.startEmulator(avdName);
+    const readiness = expectRejection(
+      client.waitForEmulatorReady(avdName, 60_000, launchedChild),
+    );
+
+    for (let turn = 0; turn < 10 && timer.getSleepCallCount() < 2; turn += 1) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    child.emit("exit", 1, null);
+    child.stderr!.emit(
+      "data",
+      Buffer.from("qemu_mprotect__osdep: mprotect failed: Permission denied\n"),
+    );
+    child.emit("close", 1, null);
+    await timer.advanceTimeAsync(500);
+
+    const error = await readiness;
+    expect(error.message).toContain("hypervisor");
+    expect(error.message).toContain("sandbox");
+  });
+
+  test("keeps duplicate-AVD adoption nonfatal during active readiness", async () => {
+    const child = createChild();
+    const { client, timer } = createClient(child, () => {
+      child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+    });
+    const launchedChild = await client.startEmulator(avdName);
+    const readiness = client.waitForEmulatorReady(avdName, 60_000, launchedChild);
+    let rejection: Error | undefined;
+    void readiness.catch((error) => {
+      rejection = error instanceof Error ? error : new Error(String(error));
+    });
+
+    try {
+      for (let turn = 0; turn < 10 && timer.getSleepCallCount() < 2; turn += 1) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+      child.stderr!.emit(
+        "data",
+        Buffer.from(
+          "Running multiple emulators with the same AVD is an experimental feature.\n",
+        ),
+      );
+      for (let index = 0; index < 51; index += 1) {
+        child.stderr!.emit("data", Buffer.from(`later readiness diagnostic ${index}\n`));
+      }
+      child.emit("exit", 1, null);
+      child.emit("close", 1, null);
+      await timer.advanceTimeAsync(500);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      expect(rejection).toBeUndefined();
+    } finally {
+      timer.setCurrentTime(60_000);
+      timer.resolveAll();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      timer.resolveAll();
+      await readiness.catch(() => undefined);
+    }
+  });
+
+  test("removes readiness listeners after observing a process exit", async () => {
+    const child = createChild();
+    const { client, timer } = createClient(child, () => {
+      child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+    });
+    const launchedChild = await client.startEmulator(avdName);
+    const baselineExitListeners = child.listenerCount("exit");
+    const baselineStdoutListeners = child.stdout!.listenerCount("data");
+    const baselineStderrListeners = child.stderr!.listenerCount("data");
+    const readiness = client.waitForEmulatorReady(avdName, 60_000, launchedChild);
+    const readinessError = expectRejection(readiness);
+
+    for (let turn = 0; turn < 10 && timer.getSleepCallCount() < 2; turn += 1) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    child.emit("exit", 1, null);
+    child.emit("close", 1, null);
+    await timer.advanceTimeAsync(500);
+
+    const error = await readinessError;
+    expect(error.message).toContain("exited with code: 1");
+    expect(child.listenerCount("exit")).toBe(baselineExitListeners);
+    expect(child.stdout!.listenerCount("data")).toBe(baselineStdoutListeners);
+    expect(child.stderr!.listenerCount("data")).toBe(baselineStderrListeners);
+  });
+
   test("times out an acceleration check without masking the original exit code", async () => {
     const child = createChild();
     let probeSignal: AbortSignal | undefined;

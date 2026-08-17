@@ -393,10 +393,8 @@ export class NavigationGraphManager implements NavigationGraphService {
     NavigationGraphManager.releasedSessions.delete(sessionId);
   }
 
-  /**
-   * Release a session-scoped instance and its transient state.
-   */
-  public static releaseSession(sessionId: string): void {
+  /** Clear a live session's device-scoped navigation state without tombstoning it. */
+  public static resetSession(sessionId: string): void {
     const instance = NavigationGraphManager.sessionInstances.get(sessionId);
     if (instance) {
       instance.activeTestSession = null;
@@ -404,8 +402,15 @@ export class NavigationGraphManager implements NavigationGraphService {
       instance.activeNavigation = null;
       instance.graphUpdateListeners = [];
       NavigationGraphManager.sessionInstances.delete(sessionId);
-      logger.debug(`[NAV_GRAPH] Released session instance: ${sessionId}`);
+      logger.debug(`[NAV_GRAPH] Reset session instance: ${sessionId}`);
     }
+  }
+
+  /**
+   * Release a session-scoped instance and its transient state.
+   */
+  public static releaseSession(sessionId: string): void {
+    NavigationGraphManager.resetSession(sessionId);
     // Mark released even if no instance existed yet, so a later stray event for this
     // session resolves to the unattributed global rather than minting a manager for
     // the ended session (#4984). Bounded FIFO to cap long-daemon growth.

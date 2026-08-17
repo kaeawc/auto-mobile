@@ -2297,13 +2297,14 @@ export class DevicePool {
       if (!session) {
         continue;
       }
-      const releasedDeviceId = await this.sessionManager.releaseSessionIfOwned(
+      await this.sessionManager.releaseSessionIfOwned(
         sessionId,
         session,
         deviceId,
         "batch-allocation-rollback",
       );
-      if (releasedDeviceId === deviceId && !this.sessionManager.getSession(sessionId)) {
+      const currentSession = this.sessionManager.getSession(sessionId);
+      if (!currentSession || currentSession.assignedDevice !== deviceId) {
         await this.releaseDevice(deviceId, sessionId);
       }
     }

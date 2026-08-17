@@ -2405,7 +2405,7 @@ describe("DevicePool", () => {
       expect(devicePool.getDevice("emulator-5554")?.status).toBe("idle");
     });
 
-    test("does not roll back a replacement session with the same UUID", async () => {
+    test("releases the old device without rolling back a replacement session with the same UUID", async () => {
       const secondWriteStarted = Promise.withResolvers<void>();
       const secondWriteFinished = Promise.withResolvers<void>();
       let writeCount = 0;
@@ -2434,25 +2434,19 @@ describe("DevicePool", () => {
       await initializeLiveDevices([
         createBootedDevice("emulator-5554"),
         createBootedDevice("emulator-5556"),
+        createBootedDevice("emulator-5558"),
       ]);
 
       const allocation = devicePool.assignMultipleDevices(["session-a", "session-b"], 1_000, "android");
-      const secondWriteStartedInTime = await Promise.race([
-        secondWriteStarted.promise.then(() => true),
-        new Promise<boolean>(resolve => setTimeout(() => resolve(false), 100)),
-      ]);
-      expect(secondWriteStartedInTime).toBe(true);
+      await secondWriteStarted.promise;
 
       await sessionManager.releaseSession("session-a");
-      await sessionManager.createSession("session-a", "emulator-5554", "android");
+      await sessionManager.createSession("session-a", "emulator-5558", "android");
       secondWriteFinished.resolve();
 
       await expect(allocation).rejects.toThrow("persist create failed");
-      expect(sessionManager.getSession("session-a")?.assignedDevice).toBe("emulator-5554");
-      expect(devicePool.getDevice("emulator-5554")).toMatchObject({
-        sessionId: "session-a",
-        status: "busy",
-      });
+      expect(sessionManager.getSession("session-a")?.assignedDevice).toBe("emulator-5558");
+      expect(devicePool.getDevice("emulator-5554")?.status).toBe("idle");
     });
   });
     test("evicts a started emulator when its process exits after readiness", async () => {

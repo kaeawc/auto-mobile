@@ -295,7 +295,7 @@ describe("DeviceBootService", () => {
     await discoveryStarted;
     controller.abort();
 
-    await expect(boot).rejects.toThrow("startDevice cancelled while discovering running devices");
+    await expect(boot).rejects.toBe(controller.signal.reason);
     resolveDiscovery([running]);
     await Promise.resolve();
 
@@ -335,7 +335,7 @@ describe("DeviceBootService", () => {
     controller.abort();
 
     resolveStart(handle);
-    await expect(boot).rejects.toThrow("startDevice cancelled while starting the device");
+    await expect(boot).rejects.toBe(controller.signal.reason);
     await Promise.resolve();
     await Promise.resolve();
 
@@ -347,6 +347,7 @@ describe("DeviceBootService", () => {
     const devices = new FakeDeviceUtils();
     const matcher = new FakeDeviceMatcher();
     const controller = new AbortController();
+    const abortReason = new Error("request cancelled");
     let resolveStart!: (handle: ChildProcess | null) => void;
     let markStartStarted!: () => void;
     const startStarted = new Promise<void>((resolve) => {
@@ -373,9 +374,9 @@ describe("DeviceBootService", () => {
     const boot = service(devices, matcher).boot({ platform: "android", signal: controller.signal });
     await startStarted;
     resolveStart(handle);
-    queueMicrotask(() => controller.abort());
+    queueMicrotask(() => controller.abort(abortReason));
 
-    await expect(boot).rejects.toThrow("startDevice cancelled while starting the device");
+    await expect(boot).rejects.toBe(abortReason);
 
     expect(killCount).toBe(1);
     expect(devices.wasMethodCalled("waitForDeviceReady")).toBe(false);
@@ -418,9 +419,7 @@ describe("DeviceBootService", () => {
     controller.abort();
     resolveProgress();
 
-    await expect(boot).rejects.toThrow(
-      "startDevice cancelled while reporting 60% device boot progress",
-    );
+    await expect(boot).rejects.toBe(controller.signal.reason);
     expect(killCount).toBe(1);
     expect(devices.wasMethodCalled("waitForDeviceReady")).toBe(false);
   });
@@ -463,9 +462,7 @@ describe("DeviceBootService", () => {
     await finalProgressStarted;
     controller.abort();
 
-    await expect(boot).rejects.toThrow(
-      "startDevice cancelled while reporting 100% device boot progress",
-    );
+    await expect(boot).rejects.toBe(controller.signal.reason);
     resolveFinalProgress();
     await Promise.resolve();
 
@@ -476,6 +473,7 @@ describe("DeviceBootService", () => {
     const devices = new FakeDeviceUtils();
     const timer = new FakeTimer();
     const controller = new AbortController();
+    const abortReason = new Error("request cancelled");
     let provisionSettled = false;
     let outcome: "pending" | "rejected" = "pending";
     const bootService = new DeviceBootService({
@@ -513,12 +511,12 @@ describe("DeviceBootService", () => {
     });
 
     await new Promise<void>((resolve) => setImmediate(resolve));
-    controller.abort(new Error("request cancelled"));
+    controller.abort(abortReason);
     await new Promise<void>((resolve) => setImmediate(resolve));
 
     expect(outcome).toBe("pending");
     timer.advanceTime(250);
-    await expect(boot).rejects.toThrow("startDevice cancelled while provisioning a device");
+    await expect(boot).rejects.toBe(abortReason);
     expect(provisionSettled).toBe(true);
   });
 

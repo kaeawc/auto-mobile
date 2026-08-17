@@ -454,6 +454,7 @@ export class DeviceBootService {
         operationPromise,
         awaitAbortSettlement && (controller.signal.aborted || externalSignal?.aborted === true),
       );
+      this.throwExternalAbortReason(externalSignal, phase);
       cancellation.throwIfCancelled();
       if (controller.signal.aborted) {
         throw new ActionableError(
@@ -467,6 +468,12 @@ export class DeviceBootService {
       }
       cancellation.dispose();
       removeExternalAbortListener?.();
+    }
+  }
+
+  private throwExternalAbortReason(signal: AbortSignal | undefined, phase: string): void {
+    if (signal?.aborted) {
+      throw signal.reason ?? new ActionableError(`startDevice cancelled while ${phase}`);
     }
   }
 

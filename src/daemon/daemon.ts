@@ -9,6 +9,7 @@ import { SessionHeartbeatMonitor } from "./SessionHeartbeatMonitor";
 import { SingleFlightInterval } from "./SingleFlightInterval";
 import { DevicePool, type PooledDevice } from "./devicePool";
 import { parseDeviceRecoveryPolicy } from "./poolConfig";
+import { deviceLossCancellationReason } from "./emulatorLossIncident";
 import { DaemonState } from "./daemonState";
 import { DeviceSessionRegistry } from "./deviceSessionRegistry";
 import {
@@ -75,6 +76,7 @@ import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import type { InstalledAppsStore } from "../db/installedAppsRepository";
 import { InstalledAppsRepository } from "../db/installedAppsRepository";
 import { DeviceSessionRepository } from "../db/deviceSessionRepository";
+import { EmulatorLossIncidentRepository } from "../db/emulatorLossIncidentRepository";
 import { DeviceSessionManager } from "../utils/DeviceSessionManager";
 import { startAppearanceSyncScheduler, stopAppearanceSyncScheduler } from "../utils/appearance/AppearanceSyncScheduler";
 import { startPerformanceMonitor, stopPerformanceMonitor, getPerformanceMonitor } from "../features/performance/PerformanceMonitor";
@@ -276,6 +278,7 @@ export class Daemon {
       undefined,
       recoveryConfiguration.policy,
       deviceId => this.deviceSessionRegistry.onDeviceDisconnected(deviceId),
+      new EmulatorLossIncidentRepository(this.timer, this.idGenerator),
     );
     // Initialize singleton for daemon state access
     DaemonState.getInstance().initialize(
@@ -1368,15 +1371,26 @@ export class Daemon {
 
           // Cancel active executions and release the session so the test fails
           // fast instead of waiting for the full MCP request timeout.
+          const incidentId = await this.devicePool.recordEmulatorLossIncident(
+            deviceId,
+            this.forceDisconnectedDeviceIds.has(deviceId)
+              ? "adb-transport-failure"
+              : "device-discovery-miss",
+            undefined,
+            "absent",
+          );
           const sessionId = this.sessionManager.getSessionForDevice(deviceId);
           if (sessionId) {
             logger.warn(
               `[DisconnectMonitor] Device ${deviceId} confirmed disconnected after ${DEVICE_DISCONNECT_MISS_THRESHOLD} consecutive misses — cancelling session ${sessionId}`
             );
-            await this.cancelAndReleaseSession(sessionId, `device-disconnected:${deviceId}`);
+            await this.cancelAndReleaseSession(
+              sessionId,
+              deviceLossCancellationReason(deviceId, incidentId),
+            );
           }
 
-          await this.devicePool.removeDisconnectedDevice(deviceId);
+          await this.devicePool.removeDisconnectedDevice(deviceId, true, incidentId);
           // Drop any per-device input caches so a device replaced under the same
           // serial does not inherit the previous one's cached API-level capability
           // (issue #3351): an API 31+/pre-31 mismatch mis-handles SHIFT/uppercase.

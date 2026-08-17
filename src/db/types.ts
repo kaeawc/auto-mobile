@@ -521,6 +521,16 @@ export interface DeviceLocksTable {
   updated_at: Generated<string>;
 }
 
+/** Bounded, durable diagnostics for unexpectedly lost Android emulators. */
+export interface EmulatorLossIncidentsTable {
+  incident_id: string;
+  device_id: string;
+  observed_at_ms: number;
+  updated_at_ms: number;
+  incident_json: string;
+  created_at: Generated<string>;
+}
+
 // Feature flags table
 export interface FeatureFlagsTable {
   key: string;
@@ -750,6 +760,7 @@ export interface Database {
   layout_events: LayoutEventsTable;
   device_sessions: DeviceSessionsTable;
   device_locks: DeviceLocksTable;
+  emulator_loss_incidents: EmulatorLossIncidentsTable;
 }
 
 // Convenience types for each table
@@ -762,6 +773,10 @@ export type DeviceSessionUpdate = Updateable<DeviceSessionsTable>;
 
 export type DeviceLock = Selectable<DeviceLocksTable>;
 export type NewDeviceLock = Insertable<DeviceLocksTable>;
+
+export type EmulatorLossIncidentRow = Selectable<EmulatorLossIncidentsTable>;
+export type NewEmulatorLossIncidentRow = Insertable<EmulatorLossIncidentsTable>;
+export type EmulatorLossIncidentRowUpdate = Updateable<EmulatorLossIncidentsTable>;
 
 export type PerformanceThresholds = Selectable<PerformanceThresholdsTable>;
 export type NewPerformanceThresholds = Insertable<PerformanceThresholdsTable>;

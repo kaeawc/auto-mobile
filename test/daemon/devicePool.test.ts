@@ -2793,13 +2793,14 @@ describe("DevicePool", () => {
       manager.childProcess.emit("exit", 0, null);
       await new Promise((resolve) => setImmediate(resolve));
 
-      expect(releaseCalls).toEqual([
-        {
-          sessionId: "session-1",
-          deviceId: "emulator-5554",
-          reason: "device-disconnected:emulator-5554",
-        },
-      ]);
+      expect(releaseCalls).toHaveLength(1);
+      expect(releaseCalls[0]).toEqual({
+        sessionId: "session-1",
+        deviceId: "emulator-5554",
+        reason: expect.stringMatching(
+          /^device-disconnected:emulator-5554;incident=emulator-loss-/,
+        ),
+      });
       expect(devicePool.getDevice("emulator-5554")).toBeNull();
       expect(sessionManager.getSession("session-1")).toBeNull();
     });

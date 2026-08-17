@@ -2449,6 +2449,8 @@ describe("DevicePool", () => {
       expect(devicePool.getDevice("emulator-5554")?.status).toBe("idle");
     });
   });
+
+  describe("assignMultipleDevices", () => {
     test("evicts a started emulator when its process exits after readiness", async () => {
       const images: DeviceInfo[] = [
         {

@@ -742,10 +742,11 @@ describe("SessionManager", () => {
         await firstPersistenceStartedPromise;
         const replacement = manager.createSession("s1", "device-2", "android");
 
-        expect(manager.getSession("s1")).toMatchObject({ assignedDevice: "device-2" });
+        expect(manager.getSession("s1")).toBeNull();
         finishFirstPersistence();
         await expect(first).resolves.toBe("device-1");
         await expect(replacement).resolves.toMatchObject({ assignedDevice: "device-2" });
+        expect(manager.getSession("s1")).toMatchObject({ assignedDevice: "device-2" });
         await expect(manager.releaseSession("s1", "second")).resolves.toBe("device-2");
         expect(releases).toEqual(["first", "second"]);
       } finally {

@@ -2259,6 +2259,12 @@ export class DevicePool {
         }
         return session;
       }
+      const currentSession = this.sessionManager.getSession(session.sessionId);
+      if (currentSession !== session && currentSession?.assignedDevice === device.id) {
+        // The attempted incarnation was replaced while its write completed.
+        // Return the attempted object so rollback can preserve the replacement.
+        return session;
+      }
       await this.sessionManager.waitForSessionRelease(session.sessionId);
       // A tracked process can exit while the durable session write is pending.
       // Do not publish success for a device that eviction already removed or
@@ -2286,28 +2292,6 @@ export class DevicePool {
       device.status === "busy" &&
       this.sessionManager.getSession(session.sessionId) === session
     );
-  }
-
-  private async rollbackAssignedSessions(
-    assignments: ReadonlyMap<string, string>,
-    assignedSessions: ReadonlyMap<string, Session>,
-  ): Promise<void> {
-    for (const [sessionId, deviceId] of assignments) {
-      const session = assignedSessions.get(sessionId);
-      if (!session) {
-        continue;
-      }
-      await this.sessionManager.releaseSessionIfOwned(
-        sessionId,
-        session,
-        deviceId,
-        "batch-allocation-rollback",
-      );
-      const currentSession = this.sessionManager.getSession(sessionId);
-      if (!currentSession || currentSession.assignedDevice !== deviceId) {
-        await this.releaseDevice(deviceId, sessionId);
-      }
-    }
   }
 
   /**

@@ -212,8 +212,10 @@ describe("startDevice handler", () => {
 
     const discoveredDevice = { ...androidDevice, transportId: "23" };
     const coldBootImage = { ...androidImage, deviceId: androidDevice.deviceId };
+    const childProcess = new FakeExitChildProcess();
     fakeDeviceUtils.setBootedDevices("android", [discoveredDevice]);
     fakeDeviceUtils.setDeviceImages("android", [coldBootImage]);
+    fakeDeviceUtils.setMockChildProcess(coldBootImage.name, childProcess as unknown as ChildProcess);
     fakeMatcher.setBootedResult(null);
     fakeMatcher.setImageResult(coldBootImage);
 
@@ -225,6 +227,7 @@ describe("startDevice handler", () => {
       transportId: "23",
       sessionId: result.sessionId,
     });
+    expect(childProcess.killed).toBe(false);
   });
 
   it("tracks the process handle for a public Android cold boot", async () => {

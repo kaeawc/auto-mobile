@@ -1699,6 +1699,14 @@ export class DevicePool {
     }
   }
 
+  hasStartedDeviceProcess(
+    deviceId: string,
+    childProcess: ChildProcess | null | undefined,
+  ): boolean {
+    return childProcess !== null && childProcess !== undefined &&
+      this.startedDeviceProcesses.get(deviceId) === childProcess;
+  }
+
   private getCompletedProcessExit(
     childProcess: ChildProcess,
   ): { code: number | null; signal: NodeJS.Signals | null } | undefined {
@@ -2870,6 +2878,7 @@ export class DevicePool {
     if (this.devices.get(deviceId) !== device) {
       throw new ActionableError(`Device '${deviceId}' exited before it could be autolocked.`);
     }
+    this.throwIfFreshStartAlreadyBound(device, sourceImage);
     await this.assertIdleDeviceAssignable(
       device,
       `Device '${deviceId}' is not available for autolock.\n` +
@@ -2922,6 +2931,26 @@ export class DevicePool {
       `Autolocked device ${deviceId} with session ${sessionId} (timeout: ${timeoutMs}ms)`,
     );
     return sessionId;
+  }
+
+  private throwIfFreshStartAlreadyBound(
+    device: PooledDevice,
+    sourceImage: DeviceInfo | undefined,
+  ): void {
+    if (!sourceImage || !device.sessionId) {
+      return;
+    }
+    const existingSession = this.sessionManager.getSession(device.sessionId);
+    if (
+      existingSession &&
+      existingSession.assignedDevice === device.id &&
+      existingSession.platform === device.platform
+    ) {
+      throw new ActionableError(
+        `Freshly started device '${device.id}' was assigned to session ` +
+          `${existingSession.sessionId} before its owning session could reserve it.`,
+      );
+    }
   }
 
   /**

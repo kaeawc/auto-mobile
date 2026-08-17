@@ -7,7 +7,11 @@ import type {
   MatchingStrategy,
 } from "../models/DeviceMatchCriteria";
 import type { DeviceCreationGate } from "./deviceCreationGate";
-import { DEFAULT_DEVICE_READY_TIMEOUT_MS, type PlatformDeviceManager } from "./deviceUtils";
+import {
+  DEFAULT_DEVICE_READY_TIMEOUT_MS,
+  type PlatformDeviceManager,
+  waitForDeviceReadyOrCancel,
+} from "./deviceUtils";
 import type { DeviceMatcher } from "./deviceMatcher";
 import type { DeviceProvisioner } from "./deviceProvisioning";
 import { NoopDeviceBootRecovery, type DeviceBootRecovery } from "./deviceBootRecovery";
@@ -195,8 +199,11 @@ export class DeviceBootService {
     if (request.preferRunning === false) {
       return undefined;
     }
-    const booted = await this.runPhase(context, "discovering running devices", () =>
-      this.dependencies.deviceManager.getBootedDevices(request.platform),
+    const booted = await this.runPhase(
+      context,
+      "discovering running devices",
+      () => this.dependencies.deviceManager.getBootedDevices(request.platform),
+      false,
     );
     const match = this.dependencies.deviceMatcher.matchBootedDevice(
       criteria,
@@ -443,11 +450,12 @@ export class DeviceBootService {
         cancellation.promise,
       ]);
     } catch (error) {
+      await this.awaitAbortSettlementIfNeeded(
+        operationPromise,
+        awaitAbortSettlement && (controller.signal.aborted || externalSignal?.aborted === true),
+      );
       cancellation.throwIfCancelled();
       if (controller.signal.aborted) {
-        if (awaitAbortSettlement) {
-          await this.awaitAbortSettlement(operationPromise);
-        }
         throw new ActionableError(
           `startDevice timeout exhausted while ${phase}; remainingBudgetMs=0`,
         );
@@ -459,6 +467,15 @@ export class DeviceBootService {
       }
       cancellation.dispose();
       removeExternalAbortListener?.();
+    }
+  }
+
+  private async awaitAbortSettlementIfNeeded(
+    operation: Promise<unknown>,
+    shouldAwait: boolean,
+  ): Promise<void> {
+    if (shouldAwait) {
+      await this.awaitAbortSettlement(operation);
     }
   }
 

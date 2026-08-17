@@ -334,8 +334,8 @@ describe("DeviceBootService", () => {
     await startStarted;
     controller.abort();
 
-    await expect(boot).rejects.toThrow("startDevice cancelled while starting the device");
     resolveStart(handle);
+    await expect(boot).rejects.toThrow("startDevice cancelled while starting the device");
     await Promise.resolve();
     await Promise.resolve();
 
@@ -419,7 +419,7 @@ describe("DeviceBootService", () => {
     resolveProgress();
 
     await expect(boot).rejects.toThrow(
-      "startDevice cancelled while reporting device start progress",
+      "startDevice cancelled while reporting 60% device boot progress",
     );
     expect(killCount).toBe(1);
     expect(devices.wasMethodCalled("waitForDeviceReady")).toBe(false);
@@ -464,12 +464,62 @@ describe("DeviceBootService", () => {
     controller.abort();
 
     await expect(boot).rejects.toThrow(
-      "startDevice cancelled while reporting device readiness progress",
+      "startDevice cancelled while reporting 100% device boot progress",
     );
     resolveFinalProgress();
     await Promise.resolve();
 
     expect(killCount).toBe(1);
+  });
+
+  it("awaits cancellation-aware provisioning before returning an external abort", async () => {
+    const devices = new FakeDeviceUtils();
+    const timer = new FakeTimer();
+    const controller = new AbortController();
+    let provisionSettled = false;
+    let outcome: "pending" | "rejected" = "pending";
+    const bootService = new DeviceBootService({
+      deviceManager: devices,
+      deviceMatcher: new FakeDeviceMatcher(),
+      deviceCreationGate: { isCreationAllowed: () => true, describeSource: () => "test" },
+      deviceProvisioner: {
+        provision: async (_criteria, signal) => {
+          await new Promise<void>((_resolve, reject) => {
+            signal?.addEventListener(
+              "abort",
+              () => {
+                timer.setTimeout(() => {
+                  provisionSettled = true;
+                  reject(signal.reason);
+                }, 250);
+              },
+              { once: true },
+            );
+          });
+          throw new Error("unexpected provision completion");
+        },
+      },
+      matchingStrategy: "LATEST",
+      timer,
+    });
+
+    const boot = bootService.boot({
+      platform: "android",
+      createIfMissing: true,
+      signal: controller.signal,
+    });
+    void boot.catch(() => {
+      outcome = "rejected";
+    });
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    controller.abort(new Error("request cancelled"));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(outcome).toBe("pending");
+    timer.advanceTime(250);
+    await expect(boot).rejects.toThrow("startDevice cancelled while provisioning a device");
+    expect(provisionSettled).toBe(true);
   });
 
   it("adopts and awaits a matching running device", async () => {

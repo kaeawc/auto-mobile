@@ -1240,7 +1240,9 @@ export class Daemon {
 
   private hasActiveSessionExecution(sessionId: string, query?: ActiveSessionExecutionQuery): boolean {
     const executionSessionId = resolveCapabilityBaseSessionUuid(sessionId, this.sessionManager) ?? sessionId;
-    return executionTracker.hasActiveSessionUuidExecutions(executionSessionId, query)
+    return executionTracker.hasActiveSessionUuidExecutions(sessionId, query)
+      || (executionSessionId !== sessionId
+        && executionTracker.hasActiveSessionUuidExecutions(executionSessionId, query))
       || this.devicePool.hasActiveAutolockMcpSessionExecution(
         sessionId,
         (mcpSessionId, executionQuery) => executionTracker.hasActiveSessionExecutions(mcpSessionId, executionQuery),

@@ -11,6 +11,7 @@ import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepositor
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
+import type { DeviceSessionStatus } from "../../src/db/types";
 import type { ViewHierarchyResult } from "../../src/models/ViewHierarchyResult";
 import type { KeepScreenAwakeState } from "../../src/utils/KeepScreenAwakeManager";
 
@@ -1036,6 +1037,36 @@ describe("SessionManager", () => {
       expect(released).toHaveLength(1);
       expect(released[0].sessionId).toBe("session-timer");
       expect(released[0].deviceId).toBe("emulator-5556");
+    });
+
+    test("persists expired status for lazy and periodic session expiry", async () => {
+      const releases: Array<{ sessionId: string; status: DeviceSessionStatus; reason: string }> = [];
+      const repository: DeviceSessionPersistence = {
+        async upsertActiveSession(): Promise<void> {},
+        async recordActivity(): Promise<void> {},
+        async markReleased(sessionId, status, _releasedAtMs, reason): Promise<void> {
+          releases.push({ sessionId, status, reason });
+        },
+        async markStaleActiveSessionsExpired(): Promise<void> {},
+      };
+      const manager = new SessionManager(fakeTimer, repository);
+      try {
+        await manager.createSession("lazy-expiry", "emulator-5554", "android");
+        fakeTimer.advanceTime(31 * 60 * 1000);
+        expect(manager.getSession("lazy-expiry")).toBeNull();
+        await manager.waitForSessionRelease("lazy-expiry");
+
+        await manager.createSession("periodic-expiry", "emulator-5556", "android");
+        fakeTimer.advanceTime(36 * 60 * 1000);
+        await manager.waitForSessionRelease("periodic-expiry");
+
+        expect(releases).toEqual([
+          { sessionId: "lazy-expiry", status: "expired", reason: "lazy-expiry" },
+          { sessionId: "periodic-expiry", status: "expired", reason: "cleanup-expired" },
+        ]);
+      } finally {
+        manager.stopCleanupTimer();
+      }
     });
   });
 

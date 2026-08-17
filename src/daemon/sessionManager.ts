@@ -728,7 +728,10 @@ export class SessionManager {
       if (pendingCleanup.length > 0) {this.trackPendingDeviceCleanup(deviceId, pendingCleanup);}
 
       try {
-        await this.deviceSessionRepository.markReleased(sessionId, "released", this.timer.now(), releaseReason);
+        const terminalStatus = releaseReason === "lazy-expiry" || releaseReason === "cleanup-expired"
+          ? "expired"
+          : "released";
+        await this.deviceSessionRepository.markReleased(sessionId, terminalStatus, this.timer.now(), releaseReason);
       } catch (error) {
         logger.warn(`[SessionManager] Failed to mark session released (${releaseReason}): ${error}`);
       }

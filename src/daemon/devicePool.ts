@@ -151,24 +151,39 @@ interface DeviceRemovedListener {
  */
 class EmulatorProcessOutputTail {
   private output = "";
-  private readonly redactor = new AndroidCommandOutputStreamRedactor();
+  private readonly stdoutRedactor = new AndroidCommandOutputStreamRedactor();
+  private readonly stderrRedactor = new AndroidCommandOutputStreamRedactor();
+  private readonly streamsClosed: Promise<void>;
 
-  constructor(childProcess: ChildProcess) {
-    childProcess.stdout?.on("data", value => this.append(value));
-    childProcess.stderr?.on("data", value => this.append(value));
+  constructor(
+    childProcess: ChildProcess,
+    private readonly timer: Timer,
+  ) {
+    const hasStreams = childProcess.stdout !== null && childProcess.stdout !== undefined
+      || childProcess.stderr !== null && childProcess.stderr !== undefined;
+    this.streamsClosed = hasStreams
+      ? new Promise(resolve => childProcess.once("close", resolve))
+      : Promise.resolve();
+    childProcess.stdout?.on("data", value => this.append(value, this.stdoutRedactor));
+    childProcess.stderr?.on("data", value => this.append(value, this.stderrRedactor));
   }
 
   snapshot(): string | undefined {
-    const output = boundedEmulatorOutputTail(this.output + this.redactor.snapshot());
+    const output = boundedEmulatorOutputTail(
+      this.output + this.stdoutRedactor.snapshot() + this.stderrRedactor.snapshot(),
+    );
     return output.length > 0 ? output : undefined;
   }
 
-  finalize(): string | undefined {
-    this.output = boundedEmulatorOutputTail(this.output + this.redactor.flush());
+  async finalize(): Promise<string | undefined> {
+    await this.waitForStreamClose();
+    this.output = boundedEmulatorOutputTail(
+      this.output + this.stdoutRedactor.flush() + this.stderrRedactor.flush(),
+    );
     return this.output.length > 0 ? this.output : undefined;
   }
 
-  private append(value: unknown): void {
+  private append(value: unknown, redactor: AndroidCommandOutputStreamRedactor): void {
     const text = typeof value === "string"
       ? value
       : Buffer.isBuffer(value)
@@ -177,7 +192,23 @@ class EmulatorProcessOutputTail {
     if (!text) {
       return;
     }
-    this.output = boundedEmulatorOutputTail(this.output + this.redactor.append(text));
+    this.output = boundedEmulatorOutputTail(this.output + redactor.append(text));
+  }
+
+  private async waitForStreamClose(): Promise<void> {
+    let timeout: NodeJS.Timeout | undefined;
+    try {
+      await Promise.race([
+        this.streamsClosed,
+        new Promise<void>(resolve => {
+          timeout = this.timer.setTimeout(resolve, 1_000);
+        }),
+      ]);
+    } finally {
+      if (timeout) {
+        this.timer.clearTimeout(timeout);
+      }
+    }
   }
 }
 
@@ -584,6 +615,9 @@ export class DevicePool {
     const startedProcess = preserveAutoMobileOwnership
       ? this.startedDeviceProcesses.get(pooledDevice.id)
       : undefined;
+    const startedProcessOutput = preserveAutoMobileOwnership
+      ? this.startedDeviceProcessOutput.get(pooledDevice.id)
+      : undefined;
     await this.evictMissingPooledDevice(
       pooledDevice,
       `runtime identity changed to ${bootedDevice.platform}:${bootedDevice.name}`,
@@ -594,6 +628,9 @@ export class DevicePool {
     await this.addDevice(bootedDevice, sourceImage);
     if (startedProcess) {
       this.startedDeviceProcesses.set(bootedDevice.deviceId, startedProcess);
+    }
+    if (startedProcessOutput) {
+      this.startedDeviceProcessOutput.set(bootedDevice.deviceId, startedProcessOutput);
     }
     return true;
   }
@@ -722,6 +759,7 @@ export class DevicePool {
       undefined,
       "absent",
     );
+    const recoveryWasAttempted = this.shouldRebootDisconnectedAndroidDevice(device);
     if (await this.rebootDisconnectedAndroidDevice(device, recordedIncidentId)) {
       return;
     }
@@ -730,7 +768,7 @@ export class DevicePool {
       return;
     }
     this.suppressAutoStartForDevice(device);
-    await this.completeEmulatorLossRecovery(recordedIncidentId, "not-attempted");
+    await this.completeRecoveryIfNotAttempted(recordedIncidentId, recoveryWasAttempted);
     await this.removeDevice(deviceId);
   }
 
@@ -753,7 +791,7 @@ export class DevicePool {
       return undefined;
     }
     const outputTail = detectionPath === "watched-process-exit"
-      ? this.startedDeviceProcessOutput.get(deviceId)?.finalize()
+      ? await this.startedDeviceProcessOutput.get(deviceId)?.finalize()
       : this.startedDeviceProcessOutput.get(deviceId)?.snapshot();
     try {
       const incident = await this.emulatorLossIncidentStore.open({
@@ -772,6 +810,15 @@ export class DevicePool {
         error,
       );
       return undefined;
+    }
+  }
+
+  private async completeRecoveryIfNotAttempted(
+    incidentId: string | undefined,
+    recoveryWasAttempted: boolean,
+  ): Promise<void> {
+    if (!recoveryWasAttempted) {
+      await this.completeEmulatorLossRecovery(incidentId, "not-attempted");
     }
   }
 
@@ -1743,6 +1790,7 @@ export class DevicePool {
       }
       const current = this.devices.get(device.id);
       if (current && current !== device) {
+        await this.completeEmulatorLossRecovery(incidentId, "recovered");
         return true;
       }
       await this.removeDevice(device.id);
@@ -1754,7 +1802,7 @@ export class DevicePool {
           return;
         }
         const attempt = ++recoveryAttempt;
-        const childProcess = await this.deviceManager.startDevice(target);
+        let childProcess: ChildProcess | null = null;
         let ready: BootedDevice | undefined;
         let readinessCompleted = false;
         const stopCancelledRecovery = async (deviceToRemove?: BootedDevice): Promise<void> => {
@@ -1773,6 +1821,7 @@ export class DevicePool {
           }
         };
         try {
+          childProcess = await this.deviceManager.startDevice(target);
           ready = this.criteriaMatcher.withDeviceImageMetadata(
             await waitForDeviceReadyOrCancel(this.deviceManager, target, childProcess),
             recoveryImage,
@@ -1909,7 +1958,10 @@ export class DevicePool {
     }
 
     this.startedDeviceProcesses.set(device.deviceId, childProcess);
-    this.startedDeviceProcessOutput.set(device.deviceId, new EmulatorProcessOutputTail(childProcess));
+    this.startedDeviceProcessOutput.set(
+      device.deviceId,
+      new EmulatorProcessOutputTail(childProcess, this.timer),
+    );
     let exitHandled = false;
     const handleExit = (code: number | null, signal: NodeJS.Signals | null): void => {
       if (exitHandled) {

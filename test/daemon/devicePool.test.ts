@@ -19,6 +19,8 @@ import type { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient"
 import type { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { getAbortSignal } from "../../src/utils/AbortContext";
+import { InMemoryEmulatorLossIncidentStore } from "../../src/daemon/emulatorLossIncident";
+import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 
 async function withProcessPlatform<T>(platform: NodeJS.Platform, fn: () => Promise<T>): Promise<T> {
   const original = process.platform;
@@ -382,6 +384,18 @@ describe("DevicePool", () => {
         childProcess.signalCode = null;
       }
       return childProcess;
+    }
+  }
+
+  class FakeDeviceManagerWithFailingRecoveryStart extends FakeDeviceManagerWithDistinctStartedProcesses {
+    override async startDevice(
+      device: DeviceInfo,
+      timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS,
+    ): Promise<FakeChildProcess> {
+      if (this.childProcesses.length > 0) {
+        throw new Error("recovery spawn failed");
+      }
+      return await super.startDevice(device, timeoutMs);
     }
   }
 
@@ -2971,6 +2985,64 @@ describe("DevicePool", () => {
           process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeath;
         }
       }
+    });
+
+    test("records failed recovery spawn attempts", async () => {
+      const images: DeviceInfo[] = [{
+        name: "Pixel 8",
+        platform: "android",
+        isRunning: false,
+        deviceId: "emulator-5554",
+        source: "local",
+      }];
+      const manager = new FakeDeviceManagerWithFailingRecoveryStart(images);
+      const incidents = new InMemoryEmulatorLossIncidentStore(
+        fakeTimer,
+        new CountingIdGenerator("incident"),
+      );
+      const twoFailedAttempts = {
+        async run(_target: DeviceInfo, reboot: () => Promise<void>): Promise<boolean> {
+          for (let attempt = 0; attempt < 2; attempt++) {
+            try {
+              await reboot();
+            } catch {
+              // The retry policy intentionally continues after each failed start.
+            }
+          }
+          return false;
+        },
+      };
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        manager,
+        new DefaultRetryExecutor(fakeTimer),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        twoFailedAttempts,
+        { onLoss: true, maxAttempts: 2 },
+        undefined,
+        incidents,
+      );
+
+      await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
+      manager.bootedDevices = [];
+      manager.childProcesses[0]!.emit("exit", 1, null);
+      await new Promise((resolve) => setImmediate(resolve));
+
+      const [incident] = await incidents.list();
+      expect(incident?.recovery).toEqual({
+        policy: { onLoss: true, maxAttempts: 2 },
+        attempts: [
+          { attempt: 1, outcome: "failed" },
+          { attempt: 2, outcome: "failed" },
+        ],
+        outcome: "exhausted",
+      });
     });
 
     test("does not recover an emulator intentionally shut down by the client", async () => {

@@ -9,7 +9,8 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await db.schema
     .createTable("emulator_loss_incidents")
     .ifNotExists()
-    .addColumn("incident_id", "text", (col) => col.primaryKey())
+    .addColumn("id", "integer", (col) => col.primaryKey().autoIncrement())
+    .addColumn("incident_id", "text", (col) => col.notNull().unique())
     .addColumn("device_id", "text", (col) => col.notNull())
     .addColumn("observed_at_ms", "integer", (col) => col.notNull())
     .addColumn("updated_at_ms", "integer", (col) => col.notNull())
@@ -21,7 +22,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .createIndex("idx_emulator_loss_incidents_observed")
     .ifNotExists()
     .on("emulator_loss_incidents")
-    .columns(["observed_at_ms", "incident_id"])
+    .columns(["observed_at_ms", "id"])
     .execute();
 
   await db.schema

@@ -523,6 +523,7 @@ export interface DeviceLocksTable {
 
 /** Bounded, durable diagnostics for unexpectedly lost Android emulators. */
 export interface EmulatorLossIncidentsTable {
+  id: Generated<number>;
   incident_id: string;
   device_id: string;
   observed_at_ms: number;

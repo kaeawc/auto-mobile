@@ -106,8 +106,11 @@ describe("DevicePool emulator-exit eviction rejection handling", () => {
     (diagnosticPool as unknown as {
       trackStartedDeviceProcess: (device: unknown, child: unknown) => Promise<void>;
     }).trackStartedDeviceProcess(androidDevice, child);
-    child.stderr.emit("data", Buffer.from("token=should-not-leak emulator died\n"));
+    child.stdout.emit("data", Buffer.from("token="));
     (child as unknown as EventEmitter).emit("exit", 1, null);
+    child.stderr.emit("data", Buffer.from("emulator died\n"));
+    child.stdout.emit("data", Buffer.from("should-not-leak\n"));
+    (child as unknown as EventEmitter).emit("close", 1, null);
 
     for (let i = 0; i < 10; i++) {
       await Promise.resolve();
@@ -119,7 +122,7 @@ describe("DevicePool emulator-exit eviction rejection handling", () => {
       avdName: "Pixel_7",
       detectionPath: "watched-process-exit",
       processExit: { code: 1, signal: null },
-      outputTail: "token=[REDACTED] emulator died\n",
+      outputTail: "token=[REDACTED]\nemulator died\n",
       recovery: {
         policy: { onLoss: false, maxAttempts: 2 },
         attempts: [],

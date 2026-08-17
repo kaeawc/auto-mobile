@@ -56,4 +56,27 @@ describe("EmulatorLossIncidentRepository", () => {
       outcome: "exhausted",
     });
   });
+
+  test("retains the most recently inserted incident when timestamps tie", async () => {
+    const ids = ["z-first", "a-second"];
+    const repository = new EmulatorLossIncidentRepository(
+      new FakeTimer(),
+      { next: () => ids.shift()! },
+      1,
+      db,
+    );
+    const first = await repository.open({
+      deviceId: "emulator-5554",
+      detectionPath: "device-discovery-miss",
+      recoveryPolicy: { onLoss: true, maxAttempts: 2 },
+    });
+    const second = await repository.open({
+      deviceId: "emulator-5556",
+      detectionPath: "device-discovery-miss",
+      recoveryPolicy: { onLoss: true, maxAttempts: 2 },
+    });
+
+    expect(await repository.get(first.id)).toBeUndefined();
+    expect((await repository.list()).map((incident) => incident.id)).toEqual([second.id]);
+  });
 });

@@ -73,17 +73,31 @@ export class EmulatorLossIncidentRepository implements EmulatorLossIncidentStore
         attempts: [],
       },
     };
-    await this.getDb()
-      .insertInto("emulator_loss_incidents")
-      .values({
-        incident_id: incident.id,
-        device_id: incident.deviceId,
-        observed_at_ms: incident.observedAtMs,
-        updated_at_ms: incident.updatedAtMs,
-        incident_json: JSON.stringify(incident),
-      })
-      .execute();
-    await this.prune();
+    await this.getDb().transaction().execute(async (trx) => {
+      await trx
+        .insertInto("emulator_loss_incidents")
+        .values({
+          incident_id: incident.id,
+          device_id: incident.deviceId,
+          observed_at_ms: incident.observedAtMs,
+          updated_at_ms: incident.updatedAtMs,
+          incident_json: JSON.stringify(incident),
+        })
+        .execute();
+      const rows = await trx
+        .selectFrom("emulator_loss_incidents")
+        .select("incident_id")
+        .orderBy("observed_at_ms", "desc")
+        .orderBy("id", "desc")
+        .execute();
+      const excessIds = rows.slice(this.maxRetained).map((row) => row.incident_id);
+      if (excessIds.length > 0) {
+        await trx
+          .deleteFrom("emulator_loss_incidents")
+          .where("incident_id", "in", excessIds)
+          .execute();
+      }
+    });
     return incident;
   }
 
@@ -116,7 +130,7 @@ export class EmulatorLossIncidentRepository implements EmulatorLossIncidentStore
       .selectFrom("emulator_loss_incidents")
       .select("incident_json")
       .orderBy("observed_at_ms", "desc")
-      .orderBy("incident_id", "desc")
+      .orderBy("id", "desc")
       .limit(limit)
       .execute();
     return rows.flatMap((row) => {
@@ -146,23 +160,6 @@ export class EmulatorLossIncidentRepository implements EmulatorLossIncidentStore
         incident_json: JSON.stringify(incident),
       })
       .where("incident_id", "=", incidentId)
-      .execute();
-  }
-
-  private async prune(): Promise<void> {
-    const rows = await this.getDb()
-      .selectFrom("emulator_loss_incidents")
-      .select("incident_id")
-      .orderBy("observed_at_ms", "desc")
-      .orderBy("incident_id", "desc")
-      .execute();
-    const excessIds = rows.slice(this.maxRetained).map((row) => row.incident_id);
-    if (excessIds.length === 0) {
-      return;
-    }
-    await this.getDb()
-      .deleteFrom("emulator_loss_incidents")
-      .where("incident_id", "in", excessIds)
       .execute();
   }
 }

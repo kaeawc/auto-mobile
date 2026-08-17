@@ -15,6 +15,7 @@ describe("cleanupDaemonChildProcesses", () => {
         { recordingId: "recording-a" },
         { recordingId: "recording-b" },
       ] as VideoRecordingRecord[],
+      listOwnedActiveVideoRecordingIds: () => [],
       stopVideoRecording: async recordingId => {
         calls.push(`stop:${recordingId}`);
         if (recordingId === "recording-a") {
@@ -34,11 +35,11 @@ describe("cleanupDaemonChildProcesses", () => {
 
     expect(calls).toEqual([
       "stop-recording-starts",
+      "shutdown-ios-ctrl-proxies",
       "stop:recording-a",
       "stop:recording-b",
       "force-stop:recording-a",
       "interrupt:recording-a",
-      "shutdown-ios-ctrl-proxies",
     ]);
   });
 
@@ -53,6 +54,7 @@ describe("cleanupDaemonChildProcesses", () => {
         { recordingId: "recording-a" },
         { recordingId: "recording-b" },
       ] as VideoRecordingRecord[],
+      listOwnedActiveVideoRecordingIds: () => [],
       stopVideoRecording: async recordingId => {
         calls.push(`stop:${recordingId}`);
         throw new Error("stop failed");
@@ -74,13 +76,13 @@ describe("cleanupDaemonChildProcesses", () => {
 
     expect(calls).toEqual([
       "stop-recording-starts",
+      "shutdown-ios-ctrl-proxies",
       "stop:recording-a",
       "stop:recording-b",
       "force-stop:recording-a",
       "force-stop:recording-b",
       "interrupt:recording-a",
       "interrupt:recording-b",
-      "shutdown-ios-ctrl-proxies",
     ]);
   });
 
@@ -97,6 +99,7 @@ describe("cleanupDaemonChildProcesses", () => {
         { recordingId: "hung-recording" },
         { recordingId: "later-recording" },
       ] as VideoRecordingRecord[],
+      listOwnedActiveVideoRecordingIds: () => [],
       stopVideoRecording: async recordingId => {
         calls.push(`stop:${recordingId}`);
         if (recordingId === "hung-recording") {
@@ -123,6 +126,7 @@ describe("cleanupDaemonChildProcesses", () => {
     await new Promise(resolve => setImmediate(resolve));
     expect(calls).toEqual([
       "stop-recording-starts",
+      "shutdown-ios-ctrl-proxies",
       "stop:hung-recording",
       "stop:later-recording",
       "force-stop:hung-recording",
@@ -133,11 +137,27 @@ describe("cleanupDaemonChildProcesses", () => {
 
     expect(calls).toEqual([
       "stop-recording-starts",
+      "shutdown-ios-ctrl-proxies",
       "stop:hung-recording",
       "stop:later-recording",
       "force-stop:hung-recording",
       "interrupt:hung-recording",
-      "shutdown-ios-ctrl-proxies",
     ]);
+  });
+
+  test("uses owned captures when the recording repository is unavailable", async () => {
+    const calls: string[] = [];
+
+    await cleanupDaemonChildProcesses({
+      stopAcceptingVideoRecordingStarts: async () => {},
+      listActiveVideoRecordings: async () => { throw new Error("database closed"); },
+      listOwnedActiveVideoRecordingIds: () => ["in-memory-recording"],
+      stopVideoRecording: async recordingId => { calls.push(`stop:${recordingId}`); },
+      forceStopVideoRecording: async recordingId => { calls.push(`force:${recordingId}`); },
+      interruptVideoRecording: async recordingId => { calls.push(`interrupt:${recordingId}`); },
+      shutdownIOSCtrlProxies: async () => {},
+    });
+
+    expect(calls).toEqual(["stop:in-memory-recording"]);
   });
 });

@@ -720,6 +720,33 @@ describe("IOSCtrlProxyManager", function() {
       ]);
     });
 
+    test("escalates a local iproxy that ignores graceful shutdown before clearing ownership", async function() {
+      const fakeProcess = new FakeChildProcess();
+      const signals: Array<NodeJS.Signals | number | undefined> = [];
+      spyOn(fakeProcess, "kill").mockImplementation(signal => {
+        signals.push(signal);
+        if (signal === "SIGKILL") {
+          fakeProcess.exitCode = null;
+          fakeProcess.emit("exit", null, "SIGKILL");
+        }
+        return true;
+      });
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        physicalDevice,
+        fakeTimer,
+        undefined,
+        fakeExecutor
+      );
+      (manager as unknown as { iproxyProcessId: number }).iproxyProcessId = fakeProcess.pid;
+      (manager as unknown as { iproxyProcess: ChildProcess }).iproxyProcess = fakeProcess as unknown as ChildProcess;
+
+      fakeTimer.enableAutoAdvance();
+      await (manager as unknown as { stopIproxyTunnel: () => Promise<void> }).stopIproxyTunnel();
+
+      expect(signals).toEqual([undefined, "SIGKILL"]);
+      expect((manager as unknown as { iproxyProcessId: number | null }).iproxyProcessId).toBeNull();
+    });
+
     test("restarts iproxy after unexpected exit", async function() {
       const fakeProcess = new FakeChildProcess();
       fakeExecutor.setNextSpawnProcess(fakeProcess);

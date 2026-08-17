@@ -17,6 +17,16 @@ export interface ViewHierarchyResult {
   updatedAt?: number;
   /** Opaque device-authored identity for the UI state captured in this hierarchy. */
   frameContext?: string;
+  /**
+   * Whether this tree was verified against the device on the call that produced
+   * it, as opposed to being served from a host-side cache unverified.
+   *
+   * The delegates have always computed this (`CtrlProxyHierarchyResponse.fresh`)
+   * and then discarded it at this boundary, which is how a cached tree could
+   * reach `ObserveScreen` indistinguishable from a freshly fetched one. Optional
+   * because not every source can report it.
+   */
+  fresh?: boolean;
   /** Package name of the foreground app (from accessibility service) */
   packageName?: string;
   /** Optional window metadata from the accessibility service */

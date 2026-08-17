@@ -41,6 +41,7 @@ import {
   RealHierarchyPlatformValidator
 } from "./HierarchyPlatformValidator";
 import { deriveIosScreenIdentity } from "./ios/IosScreenIdentity";
+import { computeFreshness } from "./observationFreshness";
 import { SafeAreaAuditor, capLayoutWarnings } from "./audits/SafeAreaAuditor";
 
 /**
@@ -285,7 +286,9 @@ export class RealObserveScreen implements ObserveScreen {
       // elements/predictions and before caching below — so that no downstream
       // consumer (tool response, observe cache, LATEST_OBSERVATION resource, or the
       // navigation-graph recorder) ever observes the other platform's data.
-      enforceHierarchyPlatform(result, this.device.platform, this.device.deviceId, this.platformValidator);
+      const hierarchyPlatformValid = enforceHierarchyPlatform(
+        result, this.device.platform, this.device.deviceId, this.platformValidator
+      );
 
       // Uncapped here; the output boundary (sanitizeObserveResult / the observe
       // served path in finalizeToolResponse) caps AFTER any scope narrowing so an
@@ -331,16 +334,25 @@ export class RealObserveScreen implements ObserveScreen {
 
       perf.end();
 
-      // Freshness diagnostics
-      const requestedAfter = minTimestamp > 0 ? minTimestamp : undefined;
-      const actualTimestamp = this.resolveObservationTimestampMs(result);
-      const isFresh = requestedAfter === undefined
-        ? true
-        : actualTimestamp !== undefined && actualTimestamp >= requestedAfter;
-      const staleDurationMs = requestedAfter !== undefined && actualTimestamp !== undefined && actualTimestamp < requestedAfter
-        ? requestedAfter - actualTimestamp
-        : undefined;
-      result.freshness = { requestedAfter, actualTimestamp, isFresh, staleDurationMs };
+      // Freshness diagnostics.
+      //
+      // This used to read `isFresh = requestedAfter === undefined ? true : …`,
+      // i.e. the literal `true` on every plain `observe` call — and
+      // `minTimestamp` is not reachable from the public tool schema, so that was
+      // the path virtually every consumer took. The field named for the exact
+      // property in question measured nothing. It is now always a measurement:
+      // capture age, plus whether the delegate verified the tree against the
+      // device on this call. See ./observationFreshness.ts.
+      result.freshness = computeFreshness({
+        requestedAfter: minTimestamp > 0 ? minTimestamp : undefined,
+        actualTimestamp: this.resolveObservationTimestampMs(result),
+        now: this.timer.now(),
+        verified: typeof result.viewHierarchy === "object" && result.viewHierarchy !== null
+          ? result.viewHierarchy.fresh
+          : undefined,
+        unavailable: !hierarchyPlatformValid || result.viewHierarchy?.hierarchy === undefined ||
+          result.viewHierarchy?.hierarchy?.error !== undefined,
+      });
 
       // Attach the windowed performance snapshot when opted in (independent of --debug-perf).
       await this.attachPerfSnapshot(result);

@@ -1765,6 +1765,43 @@ describe("IOSCtrlProxyClient", function() {
       }
     });
 
+    test("retains the first host receipt time when a push re-delivers the same capture", async function() {
+      const testTimer = fakeTimer;
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer
+      );
+      const hierarchy: CtrlProxyHierarchy = {
+        updatedAt: 1_750_934_583_218,
+        packageName: "com.test.app",
+        hierarchy: { text: "unchanged" },
+      };
+
+      try {
+        await testClient.ensureConnected();
+        const socket = await waitForSocket(getSocket);
+        await waitForSocketOpen(socket);
+
+        socket!.simulateMessage(JSON.stringify({ type: "hierarchy_update", data: hierarchy }));
+        await flushPromises();
+        const firstReceivedAt = (testClient as any).cachedHierarchy.receivedAt;
+        expect((testClient as any).cachedHierarchy.captureReceivedAt).toBe(firstReceivedAt);
+
+        testTimer.advanceTime(10_000);
+        const repeatedPushAt = testTimer.now();
+        socket!.simulateMessage(JSON.stringify({ type: "hierarchy_update", data: hierarchy }));
+        await flushPromises();
+
+        expect((testClient as any).cachedHierarchy.receivedAt).toBe(repeatedPushAt);
+        expect((testClient as any).cachedHierarchy.captureReceivedAt).toBe(firstReceivedAt);
+      } finally {
+        await testClient.close();
+      }
+    });
+
     test("invalidateCache should mark cache as not fresh", async function() {
       const testTimer = fakeTimer;
 

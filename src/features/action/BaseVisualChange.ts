@@ -312,10 +312,13 @@ export class BaseVisualChange {
       const warning = minTimestamp > 0
         ? "Observation may be stale after interaction"
         : "Observation may not reflect expected visual change";
-      latestObservation.freshness = {
-        ...latestObservation.freshness,
-        warning
-      };
+      // Spreading a possibly-undefined `freshness` used to drop the required
+      // `isFresh`. When no freshness was computed at all, the honest value is
+      // `false` (not confirmed fresh) — this branch only runs because the
+      // observation still looks stale/unchanged after every retry.
+      latestObservation.freshness = latestObservation.freshness
+        ? { ...latestObservation.freshness, warning }
+        : { isFresh: false, warning };
       logger.warn(`[BaseVisualChange] ${warning}`);
     }
 

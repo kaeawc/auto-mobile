@@ -1956,7 +1956,44 @@ describe("AndroidCtrlProxyClient", function() {
       expect(result).toBeNull();
     });
 
-    // WebSocket-based hierarchy retrieval is tested through integration tests
+    test("preserves a fresh delegate verdict instead of comparing the device timestamp to the host clock", async function() {
+      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        fakeTimer
+      );
+      const manager = AndroidCtrlProxyManager.getInstance(testDevice, fakeAdb);
+      const availability = spyOn(manager, "isAvailable").mockResolvedValue(true);
+
+      try {
+        const resultPromise = testClient.getAccessibilityHierarchy();
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "hierarchy_update",
+          timestamp: fakeTimer.now(),
+          data: {
+            // A real device may be behind the daemon host clock. The hierarchy
+            // was verified by this WebSocket update, so its clock must not turn
+            // the public result into a false stale observation.
+            updatedAt: fakeTimer.now() - 60_000,
+            packageName: "com.example.app",
+            hierarchy: { text: "fresh from device" },
+          },
+        }));
+
+        const result = await resultPromise;
+
+        expect(result?.fresh).toBe(true);
+      } finally {
+        availability.mockRestore();
+        await testClient.close();
+      }
+    });
 
     test("fresh-hierarchy wait fails fast — well under the timeout budget — when the screen is off", async function() {
       fakeAdb.setCommandResponse("forward", { stdout: `${serverPort}`, stderr: "" });

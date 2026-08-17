@@ -151,12 +151,16 @@ export class ViewHierarchy implements ViewHierarchyInterface {
         };
       }
 
-      // Convert XCTestHierarchy to ViewHierarchyResult format
+      // Convert XCTestHierarchy to ViewHierarchyResult format.
+      // `result.fresh` says whether the delegate verified this tree against the
+      // device on this call or served a host-side cache entry unverified; carry
+      // it so ObserveScreen can report freshness instead of assuming it.
       return this.convertXCTestHierarchy(
         result.hierarchy,
         result.updatedAt,
         result.reconnectStatus,
-        result.frameContext
+        result.frameContext,
+        result.fresh
       );
     });
 
@@ -174,7 +178,8 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     hierarchy: any,
     updatedAt?: number,
     ctrlProxyReconnect?: ViewHierarchyResult["ctrlProxyReconnect"],
-    frameContext?: string
+    frameContext?: string,
+    fresh?: boolean
   ): ViewHierarchyResult {
     const cleanedHierarchy = cleanupIosXCTestHierarchy(hierarchy);
     const result = {
@@ -186,6 +191,9 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     }
     if (frameContext !== undefined) {
       result.frameContext = frameContext;
+    }
+    if (fresh !== undefined) {
+      result.fresh = fresh;
     }
     return result;
   }

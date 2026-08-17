@@ -294,6 +294,10 @@ export const predictionsSchema = z.object({
 export const freshnessSchema = z.object({
   requestedAfter: z.number().int().optional(),
   actualTimestamp: z.number().int().optional(),
+  /** Wall-clock age of `actualTimestamp` at report time. */
+  ageMs: z.number().int().optional(),
+  /** Whether the hierarchy was verified against the device on this call, vs. served from cache. */
+  verified: z.boolean().optional(),
   isFresh: z.boolean(),
   staleDurationMs: z.number().int().optional(),
   warning: z.string().optional()

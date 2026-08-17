@@ -100,6 +100,7 @@ describe("iOS CtrlProxyHierarchy stale fallback", () => {
     expect(result.hierarchy).not.toBeNull();
     expect((result.hierarchy as XCTestHierarchy).hierarchy.text).toBe("pushed");
     expect(result.updatedAt).toBe(42);
+    expect(result.fresh).toBe(true);
   });
 
   test("with no push during the sync the invalidated entry is still the fallback", async () => {
@@ -119,5 +120,28 @@ describe("iOS CtrlProxyHierarchy stale fallback", () => {
 
     expect((result.hierarchy as XCTestHierarchy).hierarchy.text).toBe("invalidated");
     expect(result.fresh).toBe(false);
+  });
+
+  test("an SDK-enriched push with the same capture timestamp is still fresh", async () => {
+    let harness: Harness | null = null;
+    harness = createHarness((requestManager, requestId) => {
+      harness!.setCached({
+        hierarchy: makeHierarchy(1, "sdk-enriched"),
+        receivedAt: harness!.timer.now(),
+        fresh: true,
+      } as CtrlProxyCachedHierarchy);
+      requestManager.resolve(requestId, { hierarchy: undefined });
+    });
+
+    harness.setCached({
+      hierarchy: makeHierarchy(1, "before-sdk-enrichment"),
+      receivedAt: harness.timer.now(),
+      fresh: false,
+    } as CtrlProxyCachedHierarchy);
+
+    const result = await harness.hierarchy.getLatestHierarchy(false, 1000, undefined, true);
+
+    expect((result.hierarchy as XCTestHierarchy).hierarchy.text).toBe("sdk-enriched");
+    expect(result.fresh).toBe(true);
   });
 });

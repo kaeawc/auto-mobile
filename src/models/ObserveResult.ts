@@ -305,7 +305,22 @@ export interface ObserveResult {
     requestedAfter?: number;
     /** Actual timestamp of the observation (milliseconds since epoch) */
     actualTimestamp?: number;
-    /** Whether actualTimestamp satisfied requestedAfter (or true when no request was made) */
+    /** Wall-clock age of `actualTimestamp` at report time. Always present when a capture timestamp exists. */
+    ageMs?: number;
+    /**
+     * Whether the hierarchy delegate obtained a tree it verified against the
+     * device on THIS call, as opposed to serving a host-side cache entry
+     * unverified. Absent when the platform's delegate does not report it.
+     */
+    verified?: boolean;
+    /**
+     * Whether the observation is believed to match the screen.
+     *
+     * When no `requestedAfter` was supplied this is a MEASUREMENT (capture age +
+     * whether the delegate verified against the device), not the constant `true`
+     * it used to be. Freshness that cannot be established reads `false`, and
+     * `warning` names the cause.
+     */
     isFresh: boolean;
     /** How stale the observation was in milliseconds, if stale */
     staleDurationMs?: number;

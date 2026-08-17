@@ -35,6 +35,15 @@ deploy_docs_block() {
   echo "$block" | grep -Fq 'cancel-in-progress: false'
 }
 
+@test "workflow grants Actions read permission for cross-workflow artifacts" {
+  grep -Eq '^  actions: read$' "$WORKFLOW"
+}
+
+@test "deploy-docs only publishes the main branch" {
+  block="$(deploy_docs_block)"
+  echo "$block" | grep -Fq "github.ref == 'refs/heads/main'"
+}
+
 @test "top-level workflow concurrency is untouched (only deploy-docs job is scoped)" {
   # The fix must not add a workflow-level concurrency block, which would
   # serialize the entire On Merge workflow instead of just Pages deploys.

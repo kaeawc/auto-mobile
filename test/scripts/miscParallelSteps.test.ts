@@ -17,7 +17,6 @@ import { indexOfNamed, indexOfWaitOn, loadJobSteps, stepNamed } from "../helpers
 //     mkdocs regenerates/cleans site/, which would delete a badge landing early.
 
 const PR_WORKFLOW = ".github/workflows/pull_request.yml";
-const MERGE_WORKFLOW = ".github/workflows/merge.yml";
 const DOCS_WORKFLOW = ".github/workflows/docs.yml";
 
 for (const jobId of ["mcp-build-and-test", "ts-code-coverage"]) {

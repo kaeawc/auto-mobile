@@ -1071,6 +1071,16 @@ function cancelUnownedColdBoot(boot: DeviceBootResult | undefined): void {
   if (boot?.source !== "cold-boot" || !boot.processHandle) {
     return;
   }
+  const daemonState = DaemonState.getInstance();
+  if (
+    daemonState.isInitialized() &&
+    daemonState.getDevicePool().hasStartedDeviceProcess(boot.device.deviceId, boot.processHandle)
+  ) {
+    logger.info(
+      `[DeviceTools] Cold boot ${boot.device.deviceId} process ownership transferred before cleanup`,
+    );
+    return;
+  }
   try {
     boot.processHandle.kill();
   } catch (error) {

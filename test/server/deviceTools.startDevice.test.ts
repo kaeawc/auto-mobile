@@ -32,8 +32,10 @@ class FakeExitChildProcess extends EventEmitter {
   readonly pid = 4242;
   readonly exitCode: number | null | undefined = undefined;
   readonly signalCode: NodeJS.Signals | null | undefined = undefined;
+  killed = false;
 
   kill(): boolean {
+    this.killed = true;
     return true;
   }
 }
@@ -455,6 +457,125 @@ describe("startDevice handler", () => {
       "runner unavailable",
     );
     expect(killed).toBe(true);
+  });
+
+  it("does not kill a shared cold boot after its process ownership transfers", async () => {
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+
+    const coldBootImage = { ...androidImage, deviceId: androidDevice.deviceId };
+    const childProcess = new FakeExitChildProcess();
+    fakeDeviceUtils.setDeviceImages("android", [coldBootImage]);
+    fakeMatcher.setBootedResult(null);
+    fakeMatcher.setImageResult(coldBootImage);
+    fakeDeviceUtils.setMockChildProcess(
+      coldBootImage.name,
+      childProcess as unknown as ChildProcess,
+    );
+
+    const originalStartDevice = fakeDeviceUtils.startDevice.bind(fakeDeviceUtils);
+    let startCount = 0;
+    fakeDeviceUtils.startDevice = async (...args) => {
+      startCount++;
+      const handle = await originalStartDevice(...args);
+      return startCount === 1 ? handle : null;
+    };
+
+    const originalWaitForDeviceReady = fakeDeviceUtils.waitForDeviceReady.bind(fakeDeviceUtils);
+    let releaseOwnerReadiness!: () => void;
+    const ownerReadinessGate = new Promise<void>((resolve) => {
+      releaseOwnerReadiness = resolve;
+    });
+    let signalOwnerReadiness!: () => void;
+    const ownerReadinessStarted = new Promise<void>((resolve) => {
+      signalOwnerReadiness = resolve;
+    });
+    fakeDeviceUtils.waitForDeviceReady = async (device, timeoutMs, handle) => {
+      if (handle === childProcess) {
+        signalOwnerReadiness();
+        await ownerReadinessGate;
+      }
+      return await originalWaitForDeviceReady(device, timeoutMs, handle);
+    };
+
+    const ownerStart = callStartDevice({ platform: "android" });
+    await ownerReadinessStarted;
+    const adopterResult = await callStartDevice({ platform: "android" });
+
+    releaseOwnerReadiness();
+    await expect(ownerStart).rejects.toThrow(/Freshly started device .* assigned to session/);
+
+    expect(adopterResult.sessionId).toBeDefined();
+    expect(childProcess.killed).toBe(false);
+    expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBe(adopterResult.sessionId);
+  });
+
+  it("does not kill a transferred cold boot when autolock rejects the later owner", async () => {
+    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+
+    const coldBootImage = { ...androidImage, deviceId: androidDevice.deviceId };
+    const childProcess = new FakeExitChildProcess();
+    fakeDeviceUtils.setDeviceImages("android", [coldBootImage]);
+    fakeMatcher.setBootedResult(null);
+    fakeMatcher.setImageResult(coldBootImage);
+    fakeDeviceUtils.setMockChildProcess(
+      coldBootImage.name,
+      childProcess as unknown as ChildProcess,
+    );
+
+    const originalStartDevice = fakeDeviceUtils.startDevice.bind(fakeDeviceUtils);
+    let startCount = 0;
+    fakeDeviceUtils.startDevice = async (...args) => {
+      startCount++;
+      const handle = await originalStartDevice(...args);
+      return startCount === 1 ? handle : null;
+    };
+
+    const originalWaitForDeviceReady = fakeDeviceUtils.waitForDeviceReady.bind(fakeDeviceUtils);
+    let releaseOwnerReadiness!: () => void;
+    const ownerReadinessGate = new Promise<void>((resolve) => {
+      releaseOwnerReadiness = resolve;
+    });
+    let signalOwnerReadiness!: () => void;
+    const ownerReadinessStarted = new Promise<void>((resolve) => {
+      signalOwnerReadiness = resolve;
+    });
+    fakeDeviceUtils.waitForDeviceReady = async (device, timeoutMs, handle) => {
+      if (handle === childProcess) {
+        signalOwnerReadiness();
+        await ownerReadinessGate;
+      }
+      return await originalWaitForDeviceReady(device, timeoutMs, handle);
+    };
+
+    const ownerStart = callStartDevice({ platform: "android", __mcpSessionId: "owner" });
+    await ownerReadinessStarted;
+    const adopterResult = await callStartDevice({ platform: "android", __mcpSessionId: "adopter" });
+
+    releaseOwnerReadiness();
+    await expect(ownerStart).rejects.toThrow(/Freshly started device .* assigned to session/);
+
+    expect(adopterResult.sessionId).toBeDefined();
+    expect(childProcess.killed).toBe(false);
+    expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBe(adopterResult.sessionId);
   });
 
   it("passes timeout to the cold boot start operation", async () => {

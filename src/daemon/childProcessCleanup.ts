@@ -2,6 +2,7 @@ import type { VideoRecordingRecord } from "../db/videoRecordingRepository";
 import {
   interruptVideoRecording,
   listActiveVideoRecordings,
+  listOwnedActiveVideoRecordingIds,
   forceStopVideoRecording,
   stopAcceptingVideoRecordingStarts,
   stopVideoRecording,
@@ -23,6 +24,7 @@ const CHILD_PROCESS_CLEANUP_TIMEOUT_MS = 1_500;
 export interface DaemonChildProcessCleanupDependencies {
   stopAcceptingVideoRecordingStarts(): Promise<void>;
   listActiveVideoRecordings(): Promise<VideoRecordingRecord[]>;
+  listOwnedActiveVideoRecordingIds(): string[];
   stopVideoRecording(recordingId: string): Promise<unknown>;
   forceStopVideoRecording(recordingId: string): Promise<void>;
   interruptVideoRecording(recordingId: string): Promise<void>;
@@ -34,6 +36,7 @@ export interface DaemonChildProcessCleanupDependencies {
 const defaultDependencies: DaemonChildProcessCleanupDependencies = {
   stopAcceptingVideoRecordingStarts,
   listActiveVideoRecordings,
+  listOwnedActiveVideoRecordingIds,
   stopVideoRecording,
   forceStopVideoRecording,
   interruptVideoRecording,
@@ -50,7 +53,7 @@ export async function cleanupDaemonChildProcesses(
 ): Promise<void> {
   const timer = dependencies.timer ?? defaultTimer;
   const timeoutMs = dependencies.timeoutMs ?? CHILD_PROCESS_CLEANUP_TIMEOUT_MS;
-  let activeRecordings: VideoRecordingRecord[] = [];
+  const recordingIds = new Set<string>();
   try {
     const admission = await settleWithin(
       dependencies.stopAcceptingVideoRecordingStarts(),
@@ -66,7 +69,9 @@ export async function cleanupDaemonChildProcesses(
       timeoutMs
     );
     if (result.status === "fulfilled") {
-      activeRecordings = result.value;
+      for (const recording of result.value) {
+        recordingIds.add(recording.recordingId);
+      }
     } else {
       logger.warn(`[Daemon] Failed to list active recordings during shutdown: ${result.error}`);
     }
@@ -74,9 +79,24 @@ export async function cleanupDaemonChildProcesses(
     logger.warn(`[Daemon] Failed to list active recordings during shutdown: ${error}`);
   }
 
-  await Promise.all(activeRecordings.map(async recording => {
+  // The service is the process owner. Keep its in-memory snapshot independent
+  // of the repository query so a database failure cannot strand a capture.
+  try {
+    for (const recordingId of dependencies.listOwnedActiveVideoRecordingIds()) {
+      recordingIds.add(recordingId);
+    }
+  } catch (error) {
+    logger.warn(`[Daemon] Failed to list in-memory recordings during shutdown: ${error}`);
+  }
+
+  // Signal independent owners together so an unresponsive recording cannot
+  // postpone the CtrlProxy/iproxy termination attempt until the outer daemon
+  // deadline has already been consumed.
+  const proxyCleanup = settleWithin(dependencies.shutdownIOSCtrlProxies(), timer, timeoutMs);
+
+  await Promise.all(Array.from(recordingIds, async recordingId => {
     try {
-      const stop = dependencies.stopVideoRecording(recording.recordingId);
+      const stop = dependencies.stopVideoRecording(recordingId);
       const result = await settleWithin(
         stop,
         timer,
@@ -86,16 +106,16 @@ export async function cleanupDaemonChildProcesses(
         return;
       }
       logger.warn(
-        `[Daemon] Failed to stop recording ${recording.recordingId} during shutdown: ${result.error}`
+        `[Daemon] Failed to stop recording ${recordingId} during shutdown: ${result.error}`
       );
       const forceStopped = await settleWithin(
-        dependencies.forceStopVideoRecording(recording.recordingId),
+        dependencies.forceStopVideoRecording(recordingId),
         timer,
         timeoutMs
       );
       if (forceStopped.status !== "fulfilled") {
         logger.warn(
-          `[Daemon] Failed to force-stop recording ${recording.recordingId} during shutdown: ${forceStopped.error}`
+          `[Daemon] Failed to force-stop recording ${recordingId} during shutdown: ${forceStopped.error}`
         );
       }
       // A timed stop can have already finalized the backend and still be
@@ -107,17 +127,17 @@ export async function cleanupDaemonChildProcesses(
         return;
       } catch (error) {
         logger.warn(
-          `[Daemon] Recording ${recording.recordingId} did not finish after force-stop: ${error}`
+          `[Daemon] Recording ${recordingId} did not finish after force-stop: ${error}`
         );
       }
       const interrupted = await settleWithin(
-        dependencies.interruptVideoRecording(recording.recordingId),
+        dependencies.interruptVideoRecording(recordingId),
         timer,
         timeoutMs
       );
       if (interrupted.status !== "fulfilled") {
         logger.warn(
-          `[Daemon] Failed to interrupt recording ${recording.recordingId} during shutdown: ${interrupted.error}`
+          `[Daemon] Failed to interrupt recording ${recordingId} during shutdown: ${interrupted.error}`
         );
       }
     } catch (error) {
@@ -125,7 +145,7 @@ export async function cleanupDaemonChildProcesses(
     }
   }));
 
-  const proxies = await settleWithin(dependencies.shutdownIOSCtrlProxies(), timer, timeoutMs);
+  const proxies = await proxyCleanup;
   if (proxies.status !== "fulfilled") {
     logger.warn(`[Daemon] Failed to stop iOS CtrlProxy instances during shutdown: ${proxies.error}`);
   }

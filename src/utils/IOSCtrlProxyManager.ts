@@ -31,6 +31,7 @@ export const STARTUP_ORPHAN_RUNNER_REAP_DEADLINE_MS = 5_000;
 // consume it all before the remaining owners receive their stop attempt.
 const SHUTDOWN_STOP_TIMEOUT_MS = 1_200;
 const SHUTDOWN_FORCE_STOP_TIMEOUT_MS = 250;
+const IPROXY_GRACEFUL_STOP_TIMEOUT_MS = 1_000;
 
 /**
  * iOS-specific setup result; carries the build result alongside the
@@ -2699,11 +2700,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         }
       }
     } else if (this.iproxyProcess && typeof this.iproxyProcess.kill === "function") {
-      try {
-        this.iproxyProcess.kill();
-      } catch {
-        // Ignore errors if already exited
-      }
+      await this.stopLocalIproxyProcess(this.iproxyProcess);
     } else if (this.iproxyProcessId) {
       try {
         process.kill(this.iproxyProcessId);
@@ -2716,6 +2713,55 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     this.iproxyProcess = null;
     if (options.clearDevicePort) {
       this.iproxyDevicePort = null;
+    }
+  }
+
+  /**
+   * Do not discard a local iproxy handle until its child has exited. A SIGTERM
+   * request only means Node delivered the signal; it does not mean an iproxy
+   * child stopped. Escalate before the owning shutdown path accepts the stop.
+   */
+  private async stopLocalIproxyProcess(iproxyProcess: ChildProcess): Promise<void> {
+    if (iproxyProcess.exitCode !== null) {
+      return;
+    }
+    try {
+      iproxyProcess.kill();
+    } catch (error) {
+      logger.debug(`[IOSCtrlProxy] Local iproxy exited before graceful shutdown: ${error}`);
+      return;
+    }
+
+    if (await this.waitForLocalIproxyExit(iproxyProcess)) {
+      return;
+    }
+
+    try {
+      iproxyProcess.kill("SIGKILL");
+    } catch (error) {
+      // Ignore errors if the process exited while escalating.
+      logger.debug(`[IOSCtrlProxy] Local iproxy exited before forced shutdown: ${error}`);
+    }
+    await this.waitForLocalIproxyExit(iproxyProcess);
+  }
+
+  private async waitForLocalIproxyExit(iproxyProcess: ChildProcess): Promise<boolean> {
+    if (iproxyProcess.exitCode !== null) {
+      return true;
+    }
+    let timeout: NodeJS.Timeout | undefined;
+    const exited = new Promise<boolean>(resolve => {
+      const complete = () => resolve(true);
+      iproxyProcess.once("exit", complete);
+      iproxyProcess.once("error", complete);
+      timeout = this.timer.setTimeout(() => resolve(false), IPROXY_GRACEFUL_STOP_TIMEOUT_MS);
+    });
+    try {
+      return await exited;
+    } finally {
+      if (timeout) {
+        this.timer.clearTimeout(timeout);
+      }
     }
   }
 

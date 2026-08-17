@@ -210,6 +210,15 @@ export class VideoRecorderService {
     };
   }
 
+  /**
+   * Returns capture owners that are still live in this process. Shutdown uses
+   * this as a fallback when the database is unavailable, because a capture can
+   * outlive the repository query that normally discovers it.
+   */
+  listActiveRecordingIds(): string[] {
+    return Array.from(this.activeRecordings.keys());
+  }
+
   async stopRecording(recordingId: string): Promise<VideoRecordingMetadata> {
     const stopping = this.stoppingRecordings.get(recordingId);
     if (stopping) {

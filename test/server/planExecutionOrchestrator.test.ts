@@ -3,9 +3,17 @@ import os from "node:os";
 import path from "node:path";
 import { promises as fsPromises } from "node:fs";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import type { BootedDevice } from "../../src/models";
 import type { TestExecutionRecord, TestExecutionRepository } from "../../src/db/testExecutionRepository";
 import { ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS } from "../../src/features/video/androidScreenrecord";
+import { DaemonState } from "../../src/daemon/daemonState";
+import { DevicePool } from "../../src/daemon/devicePool";
+import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import { runWithToolCapabilityContext } from "../../src/features/toolCapabilities/toolCapabilityContext";
+import { resolveCapabilityBaseSessionUuid } from "../../src/features/toolCapabilities/capabilitySessionResolver";
+import { ExecutionTracker } from "../../src/server/executionTracker";
 
 // Mock planUtils so the orchestrator's runPlan() phase is observable without
 // spinning up a real PlanExecutor. The companion test
@@ -233,6 +241,150 @@ steps:
     const result = await orchestrator.execute();
     expect(result.success).toBe(false);
     expect(result.error).toContain("Device label requires a devices list");
+  });
+
+  test("keeps every labeled session assigned when expired setup follows allocation", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const secondAndroidDevice: BootedDevice = {
+      ...androidDevice,
+      deviceId: "emulator-5556",
+      name: "Android Emulator 2",
+    };
+    const devicePool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+    );
+    DaemonState.getInstance().initialize(sessionManager, devicePool);
+    await sessionManager.createSession("base", androidDevice.deviceId, "android", 1_000);
+    const executionTracker = new ExecutionTracker(timer);
+    const execution = executionTracker.startExecution("executePlan", undefined, "base");
+    const hasActiveExecution = (sessionId: string, query?: { excludeExecutionId?: string }) =>
+      executionTracker.hasActiveSessionUuidExecutions(
+        resolveCapabilityBaseSessionUuid(sessionId, sessionManager),
+        query,
+      );
+    sessionManager.setActiveSessionExecutionChecker(hasActiveExecution);
+    const heartbeatMonitor = new SessionHeartbeatMonitor(
+      sessionManager,
+      hasActiveExecution,
+      sessionId => sessionManager.releaseSession(sessionId),
+      timer,
+    );
+
+    devicePool.assignMultipleDevices = async sessionIds => {
+      const assignments = new Map<string, string>();
+      for (const [index, sessionId] of sessionIds.entries()) {
+        const device = index === 0 ? androidDevice : secondAndroidDevice;
+        if (!sessionManager.getSession(sessionId)) {
+          await sessionManager.createSession(sessionId, device.deviceId, "android", 1_000);
+        }
+        assignments.set(sessionId, device.deviceId);
+      }
+      timer.advanceTime(6_000);
+      await heartbeatMonitor.tick();
+      return assignments;
+    };
+    devicePool.assignDeviceToSession = async () => {
+      throw new Error("expired labeled sessions must not be recreated");
+    };
+    const trackSessionSetup = sessionManager.trackSessionSetup.bind(sessionManager);
+    sessionManager.trackSessionSetup = async (session, setup) => {
+      await trackSessionSetup(session, setup);
+      if (session.sessionId === "base") {
+        sessionManager.cleanupExpiredSessions();
+      }
+    };
+
+    const multiDevicePlan = `
+name: multi-device-test
+devices:
+  - A
+  - B
+steps:
+  - tool: observe
+    device: A
+    params: {}
+`;
+
+    try {
+      const result = await runWithToolCapabilityContext(
+        { execution: { executionId: "plan-execution", startTime: 0 } },
+        () => new PlanExecutionOrchestrator(
+          {
+            device: androidDevice,
+            request: {
+              ...baseRequest,
+              planContent: multiDevicePlan,
+              platform: "android",
+              sessionUuid: "base",
+              device: "A",
+              devices: ["A", "B"],
+            },
+          },
+          { ...baseDeps(), timer },
+        ).execute(),
+      );
+
+      expect(result).toMatchObject({ success: true });
+      expect(sessionManager.getSession("base")).not.toBeNull();
+      expect(sessionManager.getSession("base:B")).not.toBeNull();
+
+      executionTracker.endExecution(execution.id);
+      timer.advanceTime(30 * 60 * 1000 + 1);
+      sessionManager.cleanupExpiredSessions();
+      expect(sessionManager.getSession("base")).toBeNull();
+      expect(sessionManager.getSession("base:B")).toBeNull();
+    } finally {
+      DaemonState.getInstance().reset();
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
+  test("restores the previous device-label map when allocation fails", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const devicePool = new DevicePool(sessionManager, "daemon-session", timer);
+    DaemonState.getInstance().initialize(sessionManager, devicePool);
+    await sessionManager.createSession("base", androidDevice.deviceId, "android");
+    const previousDeviceLabels = { existing: "base" };
+    sessionManager.setDeviceLabels("base", previousDeviceLabels);
+    devicePool.assignMultipleDevices = async () => {
+      throw new Error("allocation failed");
+    };
+
+    try {
+      const result = await new PlanExecutionOrchestrator(
+        {
+          device: androidDevice,
+          request: {
+            ...baseRequest,
+            planContent: `
+name: multi-device-test
+devices:
+  - A
+  - B
+steps:
+  - tool: observe
+    device: A
+    params: {}
+`,
+            platform: "android",
+            sessionUuid: "base",
+            device: "A",
+            devices: ["A", "B"],
+          },
+        },
+        { ...baseDeps(), timer },
+      ).execute();
+
+      expect(result.success).toBe(false);
+      expect(sessionManager.getDeviceLabels("base")).toEqual(previousDeviceLabels);
+    } finally {
+      DaemonState.getInstance().reset();
+      sessionManager.stopCleanupTimer();
+    }
   });
 
   test("execute() records test execution to the repository when metadata is provided", async () => {

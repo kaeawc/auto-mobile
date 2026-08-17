@@ -122,6 +122,8 @@ export interface PlatformDeviceManager {
  * @param device - The device that was started
  * @param handle - The start handle from `startDevice` (null for adopted devices)
  * @param timeoutMs - Optional readiness timeout
+ * @param signal - Optional cancellation signal for a non-cooperative readiness wait
+ * @param cancelOwnedBoot - Optional idempotent cleanup for the owned launch handle
  * @returns The booted device once ready
  * @throws Re-throws the original readiness error after cancelling the boot
  */
@@ -132,6 +134,7 @@ export async function waitForDeviceReadyOrCancel(
   timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS,
   signal: AbortSignal | undefined = getAbortSignal(),
   timer: Pick<Timer, "setTimeout" | "clearTimeout"> = defaultTimer,
+  cancelOwnedBoot?: () => void,
 ): Promise<BootedDevice> {
   const timeoutError = new ActionableError(
     `Device readiness timed out after ${timeoutMs}ms for ${device.deviceId ?? device.name}`,
@@ -171,7 +174,7 @@ export async function waitForDeviceReadyOrCancel(
         `cancelling boot via handle.kill()`,
         error,
       );
-      handle.kill();
+      (cancelOwnedBoot ?? (() => handle.kill()))();
     }
     throw error;
   } finally {

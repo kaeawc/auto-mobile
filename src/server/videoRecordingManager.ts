@@ -1040,6 +1040,15 @@ export async function listActiveVideoRecordings(
   });
 }
 
+/**
+ * Lists capture owners without opening or querying the recording database.
+ * During shutdown the database may already be unavailable, while the process
+ * that owns an active capture remains available in memory.
+ */
+export function listOwnedActiveVideoRecordingIds(): string[] {
+  return moduleDependencies?.videoRecorderService.listActiveRecordingIds() ?? [];
+}
+
 export async function listVideoRecordings(
   scope: { ownerSessionUuid?: string } = {}
 ): Promise<VideoRecordingMetadata[]> {

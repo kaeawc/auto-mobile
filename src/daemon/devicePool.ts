@@ -3,7 +3,6 @@ import { randomUUID } from "node:crypto";
 import { logger } from "../utils/logger";
 import {
   SessionManager,
-  type ActiveSessionExecutionQuery,
   type Session,
   type SessionExecutionMetadata,
 } from "./sessionManager";
@@ -250,9 +249,15 @@ export class DevicePool {
         await this.sessionManager.releaseSession(sessionId, releaseReason);
       });
 
-    // Free autolocked devices when their session expires (idle timeout auto-release).
-    this.sessionManager.onSessionRelease((sessionId, deviceId) => {
-      this.releaseAutolockedDevice(sessionId, deviceId);
+    // Expiry has no caller available to return the device to the pool. Explicit
+    // release callers retain their ordered cleanup and release flow, while
+    // autolock metadata is still removed when their session ends.
+    this.sessionManager.onSessionRelease((sessionId, deviceId, releaseReason) => {
+      if (releaseReason === "lazy-expiry" || releaseReason === "cleanup-expired") {
+        this.releaseExpiredSessionDevice(sessionId, deviceId);
+      } else {
+        this.clearReleasedAutolockState(sessionId, deviceId);
+      }
     });
   }
 
@@ -1775,6 +1780,14 @@ export class DevicePool {
     }
   }
 
+  hasStartedDeviceProcess(
+    deviceId: string,
+    childProcess: ChildProcess | null | undefined,
+  ): boolean {
+    return childProcess !== null && childProcess !== undefined &&
+      this.startedDeviceProcesses.get(deviceId) === childProcess;
+  }
+
   private getCompletedProcessExit(
     childProcess: ChildProcess,
   ): { code: number | null; signal: NodeJS.Signals | null } | undefined {
@@ -2826,7 +2839,7 @@ export class DevicePool {
       pooled.id === expected.deviceId &&
       pooled.name === expected.name &&
       pooled.platform === expected.platform &&
-      pooled.transportId === expected.transportId
+      (expected.transportId === undefined || pooled.transportId === expected.transportId)
     );
   }
 
@@ -2946,6 +2959,7 @@ export class DevicePool {
     if (this.devices.get(deviceId) !== device) {
       throw new ActionableError(`Device '${deviceId}' exited before it could be autolocked.`);
     }
+    this.throwIfFreshStartAlreadyBound(device, sourceImage);
     await this.assertIdleDeviceAssignable(
       device,
       `Device '${deviceId}' is not available for autolock.\n` +
@@ -3000,6 +3014,26 @@ export class DevicePool {
     return sessionId;
   }
 
+  private throwIfFreshStartAlreadyBound(
+    device: PooledDevice,
+    sourceImage: DeviceInfo | undefined,
+  ): void {
+    if (!sourceImage || !device.sessionId) {
+      return;
+    }
+    const existingSession = this.sessionManager.getSession(device.sessionId);
+    if (
+      existingSession &&
+      existingSession.assignedDevice === device.id &&
+      existingSession.platform === device.platform
+    ) {
+      throw new ActionableError(
+        `Freshly started device '${device.id}' was assigned to session ` +
+          `${existingSession.sessionId} before its owning session could reserve it.`,
+      );
+    }
+  }
+
   /**
    * Resolve the autolock session associated with an MCP client session.
    *
@@ -3041,31 +3075,44 @@ export class DevicePool {
   }
 
   /**
-   * Whether a live MCP call owns this autolock session. The execution tracker
-   * keys socket-forwarded work by MCP session while SessionManager keys expiry
-   * by the generated device-session UUID, so this bridges those identities.
-   */
-  hasActiveAutolockMcpSessionExecution(
-    sessionId: string,
-    hasActiveMcpSessionExecution: (mcpSessionId: string, query?: ActiveSessionExecutionQuery) => boolean,
-    query?: ActiveSessionExecutionQuery,
-  ): boolean {
-    for (const [mcpSessionId, mappedSessionId] of this.mcpSessionAutolockMap) {
-      if (mappedSessionId === sessionId && hasActiveMcpSessionExecution(mcpSessionId, query)) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /**
    * Free a device whose autolock session has been released or has expired.
    *
-   * Invoked via the SessionManager release callback. Only acts on devices that
-   * were locked by the released session, so non-autolock sessions and devices
-   * that have since been re-locked by a different session are left untouched.
+   * Invoked via the SessionManager expiry callback. Only acts when the device
+   * is still owned by the released session, so a stale callback cannot free a
+   * replacement owner. Autolock-specific state is cleared when the device is
+   * actually returned to idle.
    */
-  private releaseAutolockedDevice(sessionId: string, deviceId: string): void {
+  private releaseExpiredSessionDevice(sessionId: string, deviceId: string): void {
+    const device = this.devices.get(deviceId);
+    if (!device || device.sessionId !== sessionId) {
+      return;
+    }
+
+    const cleanup = this.sessionManager.getPendingDeviceCleanup(deviceId);
+    const release = this.releaseDevice(deviceId, sessionId);
+    void release.then(() => {
+      if (!cleanup) {
+        this.clearExpiredAutolockStateWhenIdle(sessionId, deviceId);
+      }
+      logger.info(`Released device ${deviceId} from session ${sessionId}`);
+    });
+    if (cleanup) {
+      void cleanup.then(() => this.clearExpiredAutolockStateWhenIdle(sessionId, deviceId));
+    }
+  }
+
+  private clearExpiredAutolockStateWhenIdle(sessionId: string, deviceId: string): void {
+    const device = this.devices.get(deviceId);
+    if (!device || device.sessionId !== null || device.autolockSessionId !== sessionId) {
+      return;
+    }
+
+    device.autolockSessionId = undefined;
+    this.clearMcpAutolockMappings(sessionId);
+  }
+
+  /** Clear autolock-only state for an explicit release without freeing early. */
+  private clearReleasedAutolockState(sessionId: string, deviceId: string): void {
     const device = this.devices.get(deviceId);
     if (!device || device.autolockSessionId !== sessionId) {
       return;
@@ -3073,9 +3120,6 @@ export class DevicePool {
 
     device.autolockSessionId = undefined;
     this.clearMcpAutolockMappings(sessionId);
-    void this.releaseDevice(deviceId, sessionId).then(() => {
-      logger.info(`Autolock idle timeout: released device ${deviceId} from session ${sessionId}`);
-    });
   }
 
   private clearMcpAutolockMappings(sessionId: string): void {

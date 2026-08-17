@@ -240,10 +240,13 @@ describe("SessionHeartbeatMonitor", () => {
       process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
       process.env.AUTOMOBILE_DEVICE_POOL_TIMEOUT = "60"; // 60s idle timeout
       const fakeDeviceUtils = new FakeDeviceUtils();
-      const androidDevice = { name: "Pixel 7", platform: "android" as const, deviceId: "emulator-5554" };
-      fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+      const androidDevices = [
+        { name: "Pixel 7", platform: "android" as const, deviceId: "emulator-5554" },
+        { name: "Pixel 8", platform: "android" as const, deviceId: "emulator-5556" },
+      ];
+      fakeDeviceUtils.setBootedDevices("android", androidDevices);
       pool = new DevicePool(sessionManager, "daemon-test", timer, undefined, fakeDeviceUtils);
-      await pool.initializeWithDevices([androidDevice]);
+      await pool.initializeWithDevices(androidDevices);
     });
 
     // Mirrors daemon.ts cancelAndReleaseSession (minus execution cancellation).
@@ -289,15 +292,12 @@ describe("SessionHeartbeatMonitor", () => {
       }
     });
 
-    it("keeps an expired autolocked session assigned until active work completes", async () => {
-      const sessionId = await pool.autolockDevice("emulator-5554", "android", "mcp-session-1");
+    it("keeps the autolock resolved by an implicit execution after its MCP session remaps", async () => {
+      const firstSessionId = await pool.autolockDevice("emulator-5554", "android", "mcp-session-1");
       const executionTracker = new ExecutionTracker(timer);
       const hasActiveExecutions = (sessionUuid: string): boolean =>
         executionTracker.hasActiveSessionUuidExecutions(sessionUuid)
-        || pool.hasActiveAutolockMcpSessionExecution(
-          sessionUuid,
-          mcpSessionId => executionTracker.hasActiveSessionExecutions(mcpSessionId),
-        );
+        || executionTracker.hasActiveAutolockSessionExecutions(sessionUuid);
       sessionManager.setActiveSessionExecutionChecker(hasActiveExecutions);
       const monitor = new SessionHeartbeatMonitor(
         sessionManager,
@@ -306,23 +306,64 @@ describe("SessionHeartbeatMonitor", () => {
         timer,
       );
       const execution = executionTracker.startExecution("tapOn", "mcp-session-1");
+      executionTracker.setResolvedAutolockSessionUuid(execution.id, firstSessionId!);
+
+      // A later startDevice call from the same MCP session changes only the
+      // routing map. It must not transfer this running call's ownership.
+      const replacementSessionId = await pool.autolockDevice(
+        "emulator-5556",
+        "android",
+        "mcp-session-1",
+      );
 
       timer.advanceTime(60_001); // Past the autolock idle timeout.
       await monitor.tick();
 
-      const activeDevice = pool.getDevice("emulator-5554")!;
-      expect(activeDevice.status).toBe("busy");
-      expect(activeDevice.autolockSessionId).toBe(sessionId);
-      expect(sessionManager.getActiveSessionCount()).toBe(1);
-      expect(sessionManager.getSession(sessionId!)).not.toBeNull();
+      expect(pool.getDevice("emulator-5554")!.autolockSessionId).toBe(firstSessionId);
+      expect(pool.getDevice("emulator-5554")!.status).toBe("busy");
+      expect(sessionManager.getSession(firstSessionId!)).not.toBeNull();
+      expect(pool.getDevice("emulator-5556")!.status).toBe("idle");
+      expect(sessionManager.getSession(replacementSessionId!)).toBeNull();
 
       executionTracker.endExecution(execution.id);
       await monitor.tick();
 
-      const releasedDevice = pool.getDevice("emulator-5554")!;
-      expect(releasedDevice.status).toBe("idle");
-      expect(releasedDevice.autolockSessionId).toBeUndefined();
-      expect(sessionManager.getActiveSessionCount()).toBe(0);
+      expect(pool.getDevice("emulator-5554")!.status).toBe("idle");
+      expect(pool.getDevice("emulator-5554")!.autolockSessionId).toBeUndefined();
+    });
+
+    it("does not pin the mapped autolock for an explicit call to another session", async () => {
+      const mappedSessionId = await pool.autolockDevice("emulator-5554", "android", "mcp-session-1");
+      const explicitSessionId = await pool.autolockDevice("emulator-5556", "android", "other-mcp-session");
+      const executionTracker = new ExecutionTracker(timer);
+      const hasActiveExecutions = (sessionUuid: string): boolean =>
+        executionTracker.hasActiveSessionUuidExecutions(sessionUuid)
+        || executionTracker.hasActiveAutolockSessionExecutions(sessionUuid);
+      sessionManager.setActiveSessionExecutionChecker(hasActiveExecutions);
+      const monitor = new SessionHeartbeatMonitor(
+        sessionManager,
+        hasActiveExecutions,
+        reapVia(sessionManager, pool),
+        timer,
+      );
+      const execution = executionTracker.startExecution(
+        "tapOn",
+        "mcp-session-1",
+        explicitSessionId,
+      );
+
+      timer.advanceTime(60_001);
+      await monitor.tick();
+
+      expect(pool.getDevice("emulator-5554")!.status).toBe("idle");
+      expect(sessionManager.getSession(mappedSessionId!)).toBeNull();
+      expect(pool.getDevice("emulator-5556")!.autolockSessionId).toBe(explicitSessionId);
+      expect(sessionManager.getSession(explicitSessionId!)).not.toBeNull();
+
+      executionTracker.endExecution(execution.id);
+      await monitor.tick();
+
+      expect(pool.getDevice("emulator-5556")!.status).toBe("idle");
     });
   });
 });

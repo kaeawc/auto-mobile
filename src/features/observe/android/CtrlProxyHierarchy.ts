@@ -378,6 +378,10 @@ export class CtrlProxyHierarchy {
       if (frameContext !== undefined) {
         convertedHierarchy.frameContext = frameContext;
       }
+      // Preserve the Android delegate's cache/sync verdict. Without it,
+      // ObserveScreen compares the device-authored updatedAt against host time,
+      // so clock skew can turn a freshly verified hierarchy into a false stale.
+      convertedHierarchy.fresh = isFresh;
 
       // Merge Android-side performance timing
       if (androidPerfTiming && androidPerfTiming.length > 0) {

@@ -196,6 +196,8 @@ export class CtrlProxyHierarchy {
     // Note this only re-reads; it must never null the cache, because under
     // skipWaitForFresh a missing cache yields no hierarchy at all (#4193/#4230).
     const fallbackHierarchy = this.context.getCachedHierarchy() ?? cachedHierarchy;
+    const fallbackSupersededOriginal = fallbackHierarchy !== cachedHierarchy &&
+      fallbackHierarchy?.hierarchy.updatedAt !== cachedHierarchy?.hierarchy.updatedAt;
 
     // Return cached (stale) data if available.
     //
@@ -221,7 +223,10 @@ export class CtrlProxyHierarchy {
       }
       return {
         hierarchy: fallbackHierarchy.hierarchy,
-        fresh: false,
+        // A push with a new capture may have won the race with the synchronous
+        // re-verification. It is device-supplied fresh data, not the failed
+        // request's stale fallback. Same-capture re-deliveries remain false.
+        fresh: fallbackSupersededOriginal && fallbackHierarchy.fresh,
         updatedAt: fallbackHierarchy.hierarchy.updatedAt,
         perfTiming: fallbackHierarchy.perfTiming,
         frameContext: fallbackHierarchy.frameContext,

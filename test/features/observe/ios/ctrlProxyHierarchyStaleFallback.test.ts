@@ -100,6 +100,7 @@ describe("iOS CtrlProxyHierarchy stale fallback", () => {
     expect(result.hierarchy).not.toBeNull();
     expect((result.hierarchy as XCTestHierarchy).hierarchy.text).toBe("pushed");
     expect(result.updatedAt).toBe(42);
+    expect(result.fresh).toBe(true);
   });
 
   test("with no push during the sync the invalidated entry is still the fallback", async () => {

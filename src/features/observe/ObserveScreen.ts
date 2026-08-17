@@ -348,7 +348,9 @@ export class RealObserveScreen implements ObserveScreen {
         verified: typeof result.viewHierarchy === "object" && result.viewHierarchy !== null
           ? result.viewHierarchy.fresh
           : undefined,
-        unavailable: result.viewHierarchy?.hierarchy?.error !== undefined,
+        unavailable: result.viewHierarchy?.hierarchy === undefined ||
+          result.viewHierarchy.hierarchy.error !== undefined ||
+          result.error !== undefined,
       });
 
       // Attach the windowed performance snapshot when opted in (independent of --debug-perf).

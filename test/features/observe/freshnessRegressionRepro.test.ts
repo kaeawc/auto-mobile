@@ -49,6 +49,7 @@ import type { DeviceStateCollector } from "../../../src/features/observe/collect
 import type { PerformanceAuditor } from "../../../src/features/observe/audits/PerformanceAuditor";
 import type { AccessibilityAuditor } from "../../../src/features/observe/audits/AccessibilityAuditor";
 import type { AccessibilityStateDetector } from "../../../src/features/observe/audits/AccessibilityStateDetector";
+import type { HierarchyPlatformValidator } from "../../../src/features/observe/HierarchyPlatformValidator";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
 import type { PerformanceTracker } from "../../../src/utils/PerformanceTracker";
 import type {
@@ -101,7 +102,11 @@ class ScriptedHierarchyCollector implements Pick<HierarchyCollector, "collect" |
 
 const device: BootedDevice = { deviceId: "test-device", name: "Test Device", platform: "ios" };
 
-function createObserveScreen(fakeTimer: FakeTimer, viewHierarchy: { hierarchy: unknown; updatedAt?: number; fresh?: boolean }) {
+function createObserveScreen(
+  fakeTimer: FakeTimer,
+  viewHierarchy: { hierarchy: unknown; updatedAt?: number; fresh?: boolean },
+  platformValidator?: HierarchyPlatformValidator,
+) {
   const observeScreen = new RealObserveScreen(device, new FakeAdbClientFactory(new FakeAdbExecutor()), {
     cacheStore: new FakeObserveCacheStore(fakeTimer),
     screenshotStateStore: new FakeScreenshotStateStore(),
@@ -111,6 +116,7 @@ function createObserveScreen(fakeTimer: FakeTimer, viewHierarchy: { hierarchy: u
     performanceAuditor: new NoOpAuditor() as unknown as PerformanceAuditor,
     accessibilityAuditor: new NoOpAuditor() as unknown as AccessibilityAuditor,
     accessibilityStateDetector: new NoOpAuditor() as unknown as AccessibilityStateDetector,
+    platformValidator,
   }, fakeTimer);
   return { observeScreen };
 }
@@ -166,6 +172,21 @@ describe("freshness regression repro (glance path, ObserveScreen.execute)", () =
 
     const result = await observeScreen.execute();
 
+    expect(result.freshness?.isFresh).toBe(false);
+    expect(result.freshness?.warning).toContain("could not be retrieved");
+  });
+
+  test("A PLATFORM-REJECTED HIERARCHY: a scrubbed observation is never reported fresh", async () => {
+    const fakeTimer = new FakeTimer();
+    const { observeScreen } = createObserveScreen(fakeTimer, {
+      hierarchy: { node: { $: { class: "android.widget.TextView" } } },
+      updatedAt: fakeTimer.now(),
+    });
+
+    const result = await observeScreen.execute();
+
+    expect(result.viewHierarchy).toBeUndefined();
+    expect(result.error).toContain("Platform mismatch");
     expect(result.freshness?.isFresh).toBe(false);
     expect(result.freshness?.warning).toContain("could not be retrieved");
   });

@@ -383,7 +383,8 @@ export class SessionManager {
     }
 
     const inFlightRelease = this.releasePromises.get(sessionId);
-    if (inFlightRelease && inFlightRelease.session === this.sessions.get(sessionId)) {
+    const currentSession = this.sessions.get(sessionId);
+    if (inFlightRelease && (currentSession === undefined || inFlightRelease.session === currentSession)) {
       await inFlightRelease.promise;
       return await this.getOrCreateSession(sessionId, devicePool, platform);
     }

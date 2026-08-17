@@ -3022,7 +3022,8 @@ export class DevicePool {
    *
    * Invoked via the SessionManager expiry callback. Only acts when the device
    * is still owned by the released session, so a stale callback cannot free a
-   * replacement owner. Autolock-specific state is cleared when applicable.
+   * replacement owner. Autolock-specific state is cleared when the device is
+   * actually returned to idle.
    */
   private releaseExpiredSessionDevice(sessionId: string, deviceId: string): void {
     const device = this.devices.get(deviceId);
@@ -3030,13 +3031,27 @@ export class DevicePool {
       return;
     }
 
-    if (device.autolockSessionId === sessionId) {
-      device.autolockSessionId = undefined;
-      this.clearMcpAutolockMappings(sessionId);
-    }
-    void this.releaseDevice(deviceId, sessionId).then(() => {
+    const cleanup = this.sessionManager.getPendingDeviceCleanup(deviceId);
+    const release = this.releaseDevice(deviceId, sessionId);
+    void release.then(() => {
+      if (!cleanup) {
+        this.clearExpiredAutolockStateWhenIdle(sessionId, deviceId);
+      }
       logger.info(`Released device ${deviceId} from session ${sessionId}`);
     });
+    if (cleanup) {
+      void cleanup.then(() => this.clearExpiredAutolockStateWhenIdle(sessionId, deviceId));
+    }
+  }
+
+  private clearExpiredAutolockStateWhenIdle(sessionId: string, deviceId: string): void {
+    const device = this.devices.get(deviceId);
+    if (!device || device.sessionId !== null || device.autolockSessionId !== sessionId) {
+      return;
+    }
+
+    device.autolockSessionId = undefined;
+    this.clearMcpAutolockMappings(sessionId);
   }
 
   /** Clear autolock-only state for an explicit release without freeing early. */

@@ -472,6 +472,46 @@ describe("SessionManager", () => {
       }
     });
 
+    test("waits for expired session terminal work before recreating its UUID", async () => {
+      const persistenceStarted = Promise.withResolvers<void>();
+      const finishPersistence = Promise.withResolvers<void>();
+      const manager = new SessionManager(fakeTimer, {
+        async upsertActiveSession(): Promise<void> {},
+        async recordActivity(): Promise<void> {},
+        async markReleased(): Promise<void> {
+          persistenceStarted.resolve();
+          await finishPersistence.promise;
+        },
+        async markStaleActiveSessionsExpired(): Promise<void> {},
+      }, () => new FakeDbWriteBarrier());
+      const assignedSessionIds: string[] = [];
+      const devicePool: SessionDeviceAssigner = {
+        async assignDeviceToSession(sessionId: string): Promise<string> {
+          assignedSessionIds.push(sessionId);
+          const replacement = await manager.createSession(sessionId, "device-2", "android");
+          return replacement.assignedDevice;
+        },
+      };
+      try {
+        await manager.createSession("s1", "device-1", "android", 1);
+        fakeTimer.advanceTime(2);
+        expect(manager.getSession("s1")).toBeNull();
+        await persistenceStarted.promise;
+
+        const replacement = manager.getOrCreateSession("s1", devicePool);
+        await Promise.resolve();
+        expect(assignedSessionIds).toEqual([]);
+
+        finishPersistence.resolve();
+        await expect(replacement).resolves.toMatchObject({
+          sessionId: "s1",
+          assignedDevice: "device-2",
+        });
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
     test("keeps a session when work began before its expiry deadline", async () => {
       const session = await sessionManager.createSession("session-1", "emulator-5554", "android", 1000);
       fakeTimer.advanceTime(1001);

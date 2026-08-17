@@ -341,6 +341,61 @@ describe("DevicePool autolock", () => {
       expect(pool.getDevice("emulator-5554")!.status).toBe("idle");
     });
 
+    it("keeps autolock enforcement until deferred expiry release publishes the device idle", async () => {
+      process.env.AUTOMOBILE_DEVICE_POOL_TIMEOUT = "1";
+      let finishRestore!: () => void;
+      const restoration = new Promise<void>(resolve => { finishRestore = resolve; });
+      let restoreStarted!: () => void;
+      const restorationStarted = new Promise<void>(resolve => { restoreStarted = resolve; });
+      const restoringManager = new SessionManager(
+        timer,
+        new FakeDeviceSessionPersistence(),
+        () => new FakeDbWriteBarrier(),
+        () => ({ restore: async (): Promise<void> => {
+          restoreStarted();
+          await restoration;
+        } }),
+      );
+      const restoringPool = new DevicePool(
+        restoringManager,
+        "daemon-session-1",
+        timer,
+        undefined,
+        fakeDeviceUtils,
+      );
+      try {
+        fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+        await restoringPool.initializeWithDevices([androidDevice]);
+        const sessionId = await restoringPool.autolockDevice("emulator-5554", "android");
+        restoringManager.setKeepScreenAwake(sessionId!, { applied: true, method: "svc", svcWasEnabled: false });
+        timer.advanceTime(1_001);
+        expect(restoringManager.getSession(sessionId!)).toBeNull();
+        await restorationStarted;
+
+        timer.advanceTime(1_000);
+        await restoringManager.waitForSessionRelease(sessionId!);
+        expect(restoringPool.getDevice("emulator-5554")).toMatchObject({
+          sessionId,
+          status: "busy",
+          autolockSessionId: sessionId,
+        });
+        expect(() => restoringPool.assertAutolockAccess("emulator-5554", "other-session"))
+          .toThrow(ActionableError);
+
+        finishRestore();
+        for (let attempt = 0; attempt < 10 && restoringPool.getDevice("emulator-5554")?.status !== "idle"; attempt++) {
+          await new Promise<void>(resolve => setImmediate(resolve));
+        }
+        expect(restoringPool.getDevice("emulator-5554")).toMatchObject({
+          sessionId: null,
+          status: "idle",
+          autolockSessionId: undefined,
+        });
+      } finally {
+        restoringManager.stopCleanupTimer();
+      }
+    });
+
     it("rejects a late MCP request while earlier work still owns the expired autolock", async () => {
       await initializeLiveAndroidDevice();
       sessionManager.setActiveSessionExecutionChecker((_sessionId, query) => query?.excludeExecutionId === "late");

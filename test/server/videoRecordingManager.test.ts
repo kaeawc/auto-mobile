@@ -185,6 +185,27 @@ describe("videoRecordingManager", () => {
     );
   });
 
+  test("drains every concurrent shutdown waiter after an in-flight start aborts", async () => {
+    let signalStart: (() => void) | undefined;
+    const started = new Promise<void>(resolve => { signalStart = resolve; });
+    fakeBackend.start = async config => {
+      signalStart?.();
+      await new Promise<void>(resolve => {
+        config.abortSignal?.addEventListener("abort", resolve, { once: true });
+      });
+      throw new Error("start aborted");
+    };
+
+    const starting = startVideoRecording({ device: testDevice });
+    const startResult = starting.catch(error => error);
+    await started;
+    const firstDrain = stopAcceptingVideoRecordingStarts();
+    const secondDrain = stopAcceptingVideoRecordingStarts();
+
+    await expect(Promise.all([firstDrain, secondDrain])).resolves.toEqual([undefined, undefined]);
+    await expect(startResult).resolves.toThrow("start aborted");
+  });
+
   test("records highlight timelines for scheduled highlights", async () => {
     const highlightShapeOne = {
       type: "box",

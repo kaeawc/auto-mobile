@@ -198,7 +198,7 @@ let moduleDependencies: VideoRecordingManagerDependencies | null = null;
 let managerInitialized = false;
 let acceptingVideoRecordingStarts = true;
 let inFlightVideoRecordingStarts = 0;
-let resolveVideoRecordingStartDrain: (() => void) | null = null;
+let videoRecordingStartDrain: { promise: Promise<void>; resolve: () => void } | null = null;
 const inFlightVideoRecordingStartControllers = new Set<AbortController>();
 
 const autoStopTimers = new Map<string, { timer: Timer; handle: NodeJS.Timeout }>();
@@ -328,8 +328,8 @@ function resetVideoRecordingManagerState(): void {
     controller.abort();
   }
   inFlightVideoRecordingStartControllers.clear();
-  resolveVideoRecordingStartDrain?.();
-  resolveVideoRecordingStartDrain = null;
+  videoRecordingStartDrain?.resolve();
+  videoRecordingStartDrain = null;
   managerInitialized = false;
 }
 
@@ -346,8 +346,8 @@ function beginVideoRecordingStart(): { abortSignal: AbortSignal; complete(): voi
     inFlightVideoRecordingStarts--;
     inFlightVideoRecordingStartControllers.delete(controller);
     if (inFlightVideoRecordingStarts === 0) {
-      resolveVideoRecordingStartDrain?.();
-      resolveVideoRecordingStartDrain = null;
+      videoRecordingStartDrain?.resolve();
+      videoRecordingStartDrain = null;
     }
     },
   };
@@ -361,9 +361,12 @@ export async function stopAcceptingVideoRecordingStarts(): Promise<void> {
   if (inFlightVideoRecordingStarts === 0) {
     return;
   }
-  await new Promise<void>(resolve => {
-    resolveVideoRecordingStartDrain = resolve;
-  });
+  if (!videoRecordingStartDrain) {
+    let resolve: (() => void) | undefined;
+    const promise = new Promise<void>(settle => { resolve = settle; });
+    videoRecordingStartDrain = { promise, resolve: resolve! };
+  }
+  await videoRecordingStartDrain.promise;
 }
 
 export function resetVideoRecordingManagerDependencies(): void {

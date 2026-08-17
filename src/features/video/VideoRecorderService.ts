@@ -141,6 +141,7 @@ export class VideoRecorderService {
   private securePermissions: SecurePermissions;
   private activeRecordings = new Map<string, ActiveRecordingState>();
   private stoppingRecordings = new Map<string, Promise<VideoRecordingMetadata>>();
+  private forceStoppingRecordings = new Map<string, Promise<void>>();
 
   constructor(dependencies: VideoRecorderServiceDependencies) {
     this.backend = dependencies.backend;
@@ -269,19 +270,44 @@ export class VideoRecorderService {
   }
 
   async forceStopRecording(recordingId: string): Promise<void> {
+    const forceStopping = this.forceStoppingRecordings.get(recordingId);
+    if (forceStopping) {
+      return forceStopping;
+    }
     const active = this.activeRecordings.get(recordingId);
     if (!active) {
       throw new Error(`No active recording found for id ${recordingId}`);
     }
-    if (!this.backend.forceStop) {
+    const backendForceStop = this.backend.forceStop;
+    if (!backendForceStop) {
       throw new Error("Video capture backend does not support force stopping recordings.");
     }
 
     // Set this before awaiting the backend: the graceful stop may resolve while
     // a device-side force-stop command is still in flight.
     active.forceStopRequested = true;
-    await this.backend.forceStop(active.handle);
-    this.activeRecordings.delete(recordingId);
+    const forceStop = this.forceStopActiveRecording(active, backendForceStop);
+    this.forceStoppingRecordings.set(recordingId, forceStop);
+    try {
+      await forceStop;
+    } finally {
+      this.forceStoppingRecordings.delete(recordingId);
+    }
+  }
+
+  private async forceStopActiveRecording(
+    active: ActiveRecordingState,
+    backendForceStop: NonNullable<VideoCaptureBackend["forceStop"]>
+  ): Promise<void> {
+    try {
+      await backendForceStop.call(this.backend, active.handle);
+      this.activeRecordings.delete(active.recordingId);
+    } catch (error) {
+      if (this.activeRecordings.get(active.recordingId) === active) {
+        active.forceStopRequested = false;
+      }
+      throw error;
+    }
   }
 
   private getRecordingDir(name: string): string {

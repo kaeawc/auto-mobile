@@ -17,6 +17,7 @@ export class FakeIOSCtrlProxyManager implements CtrlProxyIosManager {
   private shouldSetupFail: boolean = false;
   private shouldForceRestartFail: boolean = false;
   private shouldIsRunningFail: boolean = false;
+  private lastSetupMinimumHealthPollDurationMs: number | undefined;
 
   // MARK: - Configuration Methods
 
@@ -117,6 +118,10 @@ export class FakeIOSCtrlProxyManager implements CtrlProxyIosManager {
     return this.executedOperations.filter(op => op.includes(operationName)).length;
   }
 
+  getLastSetupMinimumHealthPollDurationMs(): number | undefined {
+    return this.lastSetupMinimumHealthPollDurationMs;
+  }
+
   /**
    * Clear operation history
    */
@@ -174,8 +179,14 @@ export class FakeIOSCtrlProxyManager implements CtrlProxyIosManager {
     this.runningState = false;
   }
 
-  async setup(force: boolean = false, perf?: PerformanceTracker): Promise<CtrlProxyIosSetupResult> {
+  async setup(
+    force: boolean = false,
+    perf?: PerformanceTracker,
+    _signal?: AbortSignal,
+    minimumHealthPollDurationMs?: number,
+  ): Promise<CtrlProxyIosSetupResult> {
     this.executedOperations.push(`setup:force=${force}`);
+    this.lastSetupMinimumHealthPollDurationMs = minimumHealthPollDurationMs;
 
     if (this.shouldSetupFail) {
       return {

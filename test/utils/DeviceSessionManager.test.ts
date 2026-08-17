@@ -454,6 +454,7 @@ describe("DeviceSessionManager legacy iOS auto-start readiness", () => {
   function createManager(
     iosManager: FakeIOSCtrlProxyManager,
     iosClient: FakeIOSCtrlProxy,
+    useConfiguredReadinessTimeout: boolean = false,
   ): DeviceSessionManager {
     const fakeAdb = new FakeAdbExecutor();
     const fakeDeviceUtils = new FakeDeviceUtils();
@@ -481,10 +482,11 @@ describe("DeviceSessionManager legacy iOS auto-start readiness", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
 
-    return DeviceSessionManager.createInstance(provider, undefined, {
+    const options = {
       runnerReadinessTimer: timer,
-      runnerReadinessTimeoutMs: 1_000,
-    });
+      ...(useConfiguredReadinessTimeout ? {} : { runnerReadinessTimeoutMs: 1_000 }),
+    };
+    return DeviceSessionManager.createInstance(provider, undefined, options);
   }
 
   test("fails auto-start with the original CtrlProxy setup diagnostic", async () => {
@@ -494,9 +496,13 @@ describe("DeviceSessionManager legacy iOS auto-start readiness", () => {
     iosClient.setConnected(false);
     const manager = createManager(iosManager, iosClient);
 
-    await expect(manager.ensureDeviceReady("ios")).rejects.toThrow(
-      /phase=runner-setup.*Mock setup failure/,
+    const error = await manager.ensureDeviceReady("ios").then(
+      () => undefined,
+      (reason: unknown) => reason,
     );
+    const message = error instanceof Error ? error.message : String(error);
+    expect(message).toMatch(/legacy iOS session auto-start.*phase=runner-setup.*Mock setup failure/);
+    expect(message).not.toContain("startDevice");
   });
 
   test("fails auto-start when CtrlProxy setup throws", async () => {
@@ -520,6 +526,22 @@ describe("DeviceSessionManager legacy iOS auto-start readiness", () => {
     const manager = createManager(iosManager, iosClient);
 
     await expect(manager.ensureDeviceReady("ios")).rejects.toThrow(/phase=runner-connect/);
+  });
+
+  test("uses the configured readiness budget when no test override is supplied", async () => {
+    const originalTimeoutMs = serverConfig.getRunnerReadinessTimeoutMs();
+    serverConfig.setRunnerReadinessTimeoutMs(120_000);
+    try {
+      const iosManager = new FakeIOSCtrlProxyManager();
+      const iosClient = new FakeIOSCtrlProxy();
+      iosClient.setConnected(false);
+      const manager = createManager(iosManager, iosClient, true);
+
+      await expect(manager.ensureDeviceReady("ios")).rejects.toThrow(/phase=runner-connect/);
+      expect(iosManager.getLastSetupMinimumHealthPollDurationMs()).toBe(120_000);
+    } finally {
+      serverConfig.setRunnerReadinessTimeoutMs(originalTimeoutMs);
+    }
   });
 
   test("fails auto-start when a connected CtrlProxy never becomes healthy", async () => {

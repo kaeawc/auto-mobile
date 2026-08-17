@@ -91,6 +91,8 @@ export interface RunnerReadinessDependencies {
 export interface RunnerReadinessRequest {
   device: BootedDevice;
   requestedIdentity: string;
+  /** User-visible operation that requires the runner to become responsive. */
+  operationName?: string;
   /** Absolute deadline shared with device boot. */
   totalDeadlineMs: number;
   /** Maximum time allocated to runner readiness within the total deadline. */
@@ -545,7 +547,7 @@ export class RunnerReadinessService {
       `platform=${device.platform} requested=[${context.requestedIdentity}] ` +
       `resolved=[${device.name} (${device.deviceId})]`;
     throw new ActionableError(
-      `startDevice automation runner readiness failed: ${mapping} phase=${phase} ` +
+      `${context.operationName ?? "startDevice"} automation runner readiness failed: ${mapping} phase=${phase} ` +
         `attempts=${attempts} remainingBudgetMs=${this.remaining(context)}: ${normalizeDiagnostic(detail)}`,
     );
   }

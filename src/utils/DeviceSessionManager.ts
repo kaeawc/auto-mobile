@@ -24,8 +24,8 @@ import { applyAppearanceOnConnect } from "./appearance/applyAppearanceOnConnect"
 import { disableStylusHandwriting } from "./disableStylusHandwriting";
 import { checkIosCtrlProxyOverride } from "./iosCtrlProxyOverride";
 import { RunnerReadinessService } from "./RunnerReadinessService";
-import { DEFAULT_RUNNER_READINESS_TIMEOUT_MS } from "./runnerReadinessConfig";
 import { defaultTimer, type Timer } from "./SystemTimer";
+import { serverConfig } from "./ServerConfig";
 
 /**
  * Render a device list for a "not found" error.
@@ -248,7 +248,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
     this.adbFactory = adbFactory;
     this.runnerReadinessTimer = options.runnerReadinessTimer ?? defaultTimer;
     this.runnerReadinessTimeoutMs =
-      options.runnerReadinessTimeoutMs ?? DEFAULT_RUNNER_READINESS_TIMEOUT_MS;
+      options.runnerReadinessTimeoutMs ?? serverConfig.getRunnerReadinessTimeoutMs();
     this.runnerReadinessService = new RunnerReadinessService({
       timer: this.runnerReadinessTimer,
       getAndroidManager: (device) => this.provider.getAndroidCtrlProxyManager(device),
@@ -752,6 +752,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
       await this.runnerReadinessService.ensureReady({
         device,
         requestedIdentity: `platform=ios deviceId=${deviceId}`,
+        operationName: "legacy iOS session auto-start",
         totalDeadlineMs,
         readinessTimeoutMs: this.runnerReadinessTimeoutMs,
         skipCtrlProxyDownload:

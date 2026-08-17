@@ -521,8 +521,14 @@ export class DevicePool {
     pooledDevice: PooledDevice,
     bootedDevice: BootedDevice,
   ): Promise<boolean> {
-    const sourceImage = pooledDevice.androidImage;
-    const startedProcess = this.startedDeviceProcesses.get(pooledDevice.id);
+    const preserveAutoMobileOwnership = this.hasTransportOnlyIdentityChange(
+      pooledDevice,
+      bootedDevice,
+    );
+    const sourceImage = preserveAutoMobileOwnership ? pooledDevice.androidImage : undefined;
+    const startedProcess = preserveAutoMobileOwnership
+      ? this.startedDeviceProcesses.get(pooledDevice.id)
+      : undefined;
     await this.evictMissingPooledDevice(
       pooledDevice,
       `runtime identity changed to ${bootedDevice.platform}:${bootedDevice.name}`,
@@ -1363,6 +1369,7 @@ export class DevicePool {
   private async ensurePooledDevicePresentForUse(
     device: PooledDevice,
     deferRecovery: boolean = false,
+    assignmentLockHeld: boolean = false,
   ): Promise<boolean> {
     if (!this.shouldValidatePooledDevicePresence(device)) {
       return true;
@@ -1384,8 +1391,12 @@ export class DevicePool {
     }
 
     if (bootedDevice) {
-      await this.replacePooledDeviceForRuntimeIdentity(device, bootedDevice);
-      return false;
+      const replaced = await this.replaceIdlePooledDeviceForLivenessCheck(
+        device,
+        bootedDevice,
+        assignmentLockHeld,
+      );
+      return !replaced && this.devices.get(device.id) === device;
     }
 
     if (deferRecovery && this.shouldRebootDisconnectedAndroidDevice(device)) {
@@ -1400,6 +1411,26 @@ export class DevicePool {
     }
     await this.evictMissingPooledDevice(device, "not present in adb devices", true);
     return false;
+  }
+
+  private async replaceIdlePooledDeviceForLivenessCheck(
+    device: PooledDevice,
+    bootedDevice: BootedDevice,
+    assignmentLockHeld: boolean,
+  ): Promise<boolean> {
+    const replaceIfStillIdle = async () => {
+      if (
+        this.devices.get(device.id) !== device ||
+        device.status !== "idle" ||
+        device.sessionId !== null
+      ) {
+        return false;
+      }
+      return await this.replacePooledDeviceForRuntimeIdentity(device, bootedDevice);
+    };
+    return assignmentLockHeld
+      ? await replaceIfStillIdle()
+      : await this.assignmentMutex.runExclusive(replaceIfStillIdle);
   }
 
   private async evictMissingPooledDevice(
@@ -1990,7 +2021,7 @@ export class DevicePool {
     while (device) {
       const skippedDeviceId = device.id;
       if (this.shouldValidatePooledDevicePresence(device)) {
-        if (await this.ensurePooledDevicePresentForUse(device, true)) {
+        if (await this.ensurePooledDevicePresentForUse(device, true, true)) {
           return { device, livenessUnknown };
         }
         candidates = candidates.filter((candidate) => candidate.id !== skippedDeviceId);
@@ -2557,7 +2588,7 @@ export class DevicePool {
         }
       }
 
-      const device = this.devices.get(deviceId);
+      let device = this.devices.get(deviceId);
       if (!device) {
         throw new ActionableError(`Device '${deviceId}' is not available in the device pool.`);
       }
@@ -2586,12 +2617,12 @@ export class DevicePool {
         `Device '${deviceId}' is not available in the device pool.`,
       );
 
-      if (!(await this.ensurePooledDevicePresentForUse(device))) {
-        throw new ActionableError(
-          `Device '${deviceId}' is not available in the device pool. ` +
-            "It may have been shut down or disconnected.",
-        );
-      }
+      device = await this.validateOrReloadIdlePooledDevice(
+        device,
+        expectedIdentity,
+        `Device '${deviceId}' is not available in the device pool. ` +
+          "It may have been shut down or disconnected.",
+      );
 
       if (device.sessionId) {
         const existingSession = this.sessionManager.getSession(device.sessionId);
@@ -2635,6 +2666,23 @@ export class DevicePool {
       logger.info(`Bound device ${deviceId} to session ${sessionId}`);
       return sessionId;
     });
+  }
+
+  private async validateOrReloadIdlePooledDevice(
+    device: PooledDevice,
+    expectedIdentity: Pick<BootedDevice, "deviceId" | "name" | "platform"> | undefined,
+    unavailableMessage: string,
+  ): Promise<PooledDevice> {
+    if (await this.ensurePooledDevicePresentForUse(device, false, true)) {
+      return device;
+    }
+    const replacement = this.devices.get(device.id);
+    if (!replacement) {
+      throw new ActionableError(unavailableMessage);
+    }
+    this.assertRuntimeIdentity(replacement, expectedIdentity);
+    await this.assertIdleDeviceAssignable(replacement, unavailableMessage);
+    return replacement;
   }
 
   private createSessionForBinding(
@@ -2712,9 +2760,26 @@ export class DevicePool {
   ): boolean {
     return (
       pooled.id === expected.deviceId &&
-      pooled.name === expected.name &&
       pooled.platform === expected.platform &&
+      this.hasSameOrUnknownEmulatorName(pooled, expected) &&
       !this.matchesRuntimeIdentity(pooled, expected)
+    );
+  }
+
+  private hasSameOrUnknownEmulatorName(
+    pooled: PooledDevice,
+    expected: Pick<BootedDevice, "deviceId" | "name">,
+  ): boolean {
+    if (pooled.name === expected.name) {
+      return true;
+    }
+    if (!pooled.id.startsWith("emulator-")) {
+      return false;
+    }
+    const unknownName = `Unknown (${pooled.id})`;
+    return (
+      expected.name === unknownName ||
+      (pooled.name === unknownName && pooled.avdName === expected.name)
     );
   }
 
@@ -2774,7 +2839,7 @@ export class DevicePool {
     }
 
     // Assign the device to the generated session
-    const device = this.devices.get(deviceId);
+    let device = this.devices.get(deviceId);
     if (!device) {
       throw new ActionableError(
         `Device '${deviceId}' is not available for autolock.\n` +
@@ -2811,16 +2876,16 @@ export class DevicePool {
         `The device may have been shut down or disconnected.`,
     );
 
-    if (!(await this.ensurePooledDevicePresentForUse(device))) {
-      throw new ActionableError(
-        `Device '${deviceId}' is not available for autolock.\n` +
-          `The device may have been shut down or disconnected.\n\n` +
-          `Options:\n` +
-          `  - Use 'startDevice' with the same criteria to boot a new device\n` +
-          `  - Use 'startDevice' with deviceId to restart this specific device\n` +
-          `  - Use 'listDevices' to see currently available devices`,
-      );
-    }
+    device = await this.validateOrReloadIdlePooledDevice(
+      device,
+      expectedIdentity,
+      `Device '${deviceId}' is not available for autolock.\n` +
+        `The device may have been shut down or disconnected.\n\n` +
+        `Options:\n` +
+        `  - Use 'startDevice' with the same criteria to boot a new device\n` +
+        `  - Use 'startDevice' with deviceId to restart this specific device\n` +
+        `  - Use 'listDevices' to see currently available devices`,
+    );
 
     const assignmentSnapshot = this.snapshotSessionAssignment(device);
     device.sessionId = sessionId;

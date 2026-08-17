@@ -82,7 +82,7 @@ export interface Session {
  * This enables parallel tests to each have their own device
  * while sharing centralized state in the daemon.
  */
-export type SessionReleaseCallback = (sessionId: string, deviceId: string) => void;
+export type SessionReleaseCallback = (sessionId: string, deviceId: string, releaseReason: string) => void;
 export interface SessionExecutionMetadata {
   executionId: string;
   startTime: number;
@@ -341,7 +341,7 @@ export class SessionManager {
       // Notify release callbacks so session-scoped state is cleaned up
       for (const callback of this.releaseCallbacks) {
         try {
-          callback(sessionId, deviceId);
+          callback(sessionId, deviceId, "lazy-expiry");
         } catch (error) {
           logger.warn(`Session expiry callback failed for ${sessionId}: ${error}`);
         }
@@ -750,7 +750,7 @@ export class SessionManager {
       }
       for (const callback of this.releaseCallbacks) {
         try {
-          callback(sessionId, deviceId);
+          callback(sessionId, deviceId, releaseReason);
         } catch (error) {
           logger.warn(`Session release callback failed for ${sessionId}: ${error}`);
         }
@@ -1158,7 +1158,7 @@ export class SessionManager {
         .catch(error => logger.warn(`[SessionManager] Failed to mark session released (cleanup-expired): ${error}`));
       for (const callback of this.releaseCallbacks) {
         try {
-          callback(sessionId, deviceId);
+          callback(sessionId, deviceId, "cleanup-expired");
         } catch (error) {
           logger.warn(`Session cleanup callback failed for ${sessionId}: ${error}`);
         }

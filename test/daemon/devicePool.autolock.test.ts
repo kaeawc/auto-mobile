@@ -74,21 +74,57 @@ describe("DevicePool autolock", () => {
     expect(session!.assignedDevice).toBe("emulator-5554");
   });
 
-  it("session expires and frees device after timeout", async () => {
+  it("releases a matching pooled device when an ordinary session expires", async () => {
     await initializeLiveAndroidDevice();
-
-    // Create session with short timeout
     await pool.assignDeviceToSession("test-session", "android");
-
-    // Session exists
     expect(sessionManager.getSession("test-session")).not.toBeNull();
 
-    // Advance past the session timeout (30 min default)
+    // Trigger ordinary lazy expiry. Unlike an autolock session, this assignment
+    // has no autolockSessionId, but must still return its matching device to the pool.
     timer.advanceTime(31 * 60 * 1000);
+    expect(sessionManager.getSession("test-session")).toBeNull();
+    expect(pool.getDevice("emulator-5554")).toMatchObject({
+      sessionId: null,
+      status: "idle",
+    });
 
-    // Session should now be expired
-    const session = sessionManager.getSession("test-session");
-    expect(session).toBeNull();
+    await expect(pool.assignDeviceToSession("replacement-session", "android"))
+      .resolves.toBe("emulator-5554");
+    expect(pool.getDevice("emulator-5554")?.sessionId).toBe("replacement-session");
+  });
+
+  it("releases a matching pooled device during ordinary session cleanup", async () => {
+    await initializeLiveAndroidDevice();
+    await pool.assignDeviceToSession("test-session", "android");
+
+    // Advance past the 30-minute timeout and the five-minute cleanup interval
+    // without reading the session, so the periodic callback owns the expiry.
+    timer.advanceTime(36 * 60 * 1000);
+
+    expect(pool.getDevice("emulator-5554")).toMatchObject({
+      sessionId: null,
+      status: "idle",
+    });
+    await expect(pool.assignDeviceToSession("replacement-session", "android"))
+      .resolves.toBe("emulator-5554");
+  });
+
+  it("leaves explicit session release to its caller's ordered pool cleanup", async () => {
+    await initializeLiveAndroidDevice();
+    await pool.assignDeviceToSession("test-session", "android");
+
+    await sessionManager.releaseSession("test-session");
+
+    // Explicit callers perform other release cleanup before calling releaseDevice.
+    expect(pool.getDevice("emulator-5554")).toMatchObject({
+      sessionId: "test-session",
+      status: "busy",
+    });
+    await pool.releaseDevice("emulator-5554", "test-session");
+    expect(pool.getDevice("emulator-5554")).toMatchObject({
+      sessionId: null,
+      status: "idle",
+    });
   });
 
   it("does not auto-start a device image after that pool device disconnects", async () => {
@@ -460,6 +496,7 @@ describe("DevicePool autolock", () => {
       // The stale release for the first session must not free the re-locked device.
       const after = pool.getDevice("emulator-5554")!;
       expect(after.status).toBe("busy");
+      expect(after.sessionId).toBe("new-session");
       expect(after.autolockSessionId).toBe("new-session");
     });
 

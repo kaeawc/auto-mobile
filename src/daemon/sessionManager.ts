@@ -310,14 +310,15 @@ export class SessionManager {
     execution?: SessionExecutionMetadata,
   ): Session | null {
     const session = this.sessions.get(sessionId);
-    if (session && expireDespiteActiveExecution && this.isLateExecutionWhileEarlierWorkIsActive(session, execution)) {
+    if (!session) {
+      return null;
+    }
+    if (expireDespiteActiveExecution && this.isLateExecutionWhileEarlierWorkIsActive(session, execution)) {
       throw new Error(
         `Session ${sessionId} expired before this execution began while earlier work is still active.`,
       );
     }
-    if (session && (expireDespiteActiveExecution
-      ? this.isSessionExpiredForNewExecution(session, execution)
-      : this.isSessionExpired(session))) {
+    if (this.shouldExpireSession(session, expireDespiteActiveExecution, execution)) {
       // Release owns this exact session object until it has restored device state
       // and removed its assignment. Keep expiry cleanup from creating a second
       // incarnation with the same UUID before teardown completes.
@@ -347,7 +348,17 @@ export class SessionManager {
       }
       return null;
     }
-    return session || null;
+    return session;
+  }
+
+  private shouldExpireSession(
+    session: Session,
+    expireDespiteActiveExecution: boolean,
+    execution?: SessionExecutionMetadata,
+  ): boolean {
+    return expireDespiteActiveExecution
+      ? this.isSessionExpiredForNewExecution(session, execution)
+      : this.isSessionExpired(session);
   }
 
   /**

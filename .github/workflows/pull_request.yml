@@ -163,11 +163,10 @@ jobs:
               pull_number: prNumber,
             });
 
-            const labels = await github.paginate(github.rest.issues.listLabelsOnIssue, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: prNumber,
-            });
+            // The pull_request event already carries the complete label
+            // snapshot. Reusing it avoids an extra API request in the required
+            // change-detection job.
+            const labels = context.payload.pull_request.labels ?? [];
 
             const docPatterns = [
               /\.md$/,

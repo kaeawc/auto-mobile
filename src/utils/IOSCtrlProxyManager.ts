@@ -26,7 +26,10 @@ import type { ProxyManager, ProxySetupResult } from "./interfaces/ProxyManager";
 
 export const MAX_STARTUP_ORPHAN_RUNNER_CANDIDATES = 20;
 export const STARTUP_ORPHAN_RUNNER_REAP_DEADLINE_MS = 5_000;
-const SHUTDOWN_STOP_TIMEOUT_MS = 10_000;
+// ProcessLifecycle and DaemonManager force-exit after five seconds. This stage
+// shares that budget with capture cleanup, so an unresponsive proxy must not
+// consume it all before the remaining owners receive their stop attempt.
+const SHUTDOWN_STOP_TIMEOUT_MS = 750;
 
 /**
  * iOS-specific setup result; carries the build result alongside the

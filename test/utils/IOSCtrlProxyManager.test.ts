@@ -315,7 +315,7 @@ describe("IOSCtrlProxyManager", function() {
       const shutdown = IOSCtrlProxyManager.shutdownAll(timer);
 
       await Promise.resolve();
-      timer.advanceTime(10_000);
+      timer.advanceTime(750);
       await shutdown;
 
       expect(firstStop).toHaveBeenCalledTimes(1);

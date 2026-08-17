@@ -198,6 +198,35 @@ describe("startDevice handler", () => {
     expect(fakeDeviceUtils.wasMethodCalled("startDevice")).toBe(true);
   });
 
+  it("cold-boots when discovery supplies a transport ID after boot readiness", async () => {
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+
+    const discoveredDevice = { ...androidDevice, transportId: "23" };
+    const coldBootImage = { ...androidImage, deviceId: androidDevice.deviceId };
+    fakeDeviceUtils.setBootedDevices("android", [discoveredDevice]);
+    fakeDeviceUtils.setDeviceImages("android", [coldBootImage]);
+    fakeMatcher.setBootedResult(null);
+    fakeMatcher.setImageResult(coldBootImage);
+
+    const result = await callStartDevice({ platform: "android" });
+
+    expect(result.source).toBe("cold-boot");
+    expect(result.sessionId).toBeDefined();
+    expect(pool.getDevice(androidDevice.deviceId)).toMatchObject({
+      transportId: "23",
+      sessionId: result.sessionId,
+    });
+  });
+
   it("tracks the process handle for a public Android cold boot", async () => {
     const recoveryKeys = [
       "AUTOMOBILE_ANDROID_REBOOT_ON_DEATH",

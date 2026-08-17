@@ -2758,7 +2758,7 @@ export class DevicePool {
       pooled.id === expected.deviceId &&
       pooled.name === expected.name &&
       pooled.platform === expected.platform &&
-      pooled.transportId === expected.transportId
+      (expected.transportId === undefined || pooled.transportId === expected.transportId)
     );
   }
 

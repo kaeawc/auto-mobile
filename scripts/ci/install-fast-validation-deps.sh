@@ -16,9 +16,16 @@
 set -euo pipefail
 
 # Tunables (overridable for tuning and for the BATS tests).
-CMD_TIMEOUT_SECONDS="${FAST_VALIDATION_DEPS_CMD_TIMEOUT_SECONDS:-180}"
+#
+# Defaults are sized so the WORST CASE fits the workflow step's
+# `timeout-minutes: 10` backstop: 4 operations x (MAX_ATTEMPTS x
+# (CMD_TIMEOUT + KILL_GRACE) + retry delays) = 4 x (2 x (60 + 10) + 5) = 580s
+# < 600s. Healthy runs finish in seconds; a stalled mirror that cannot answer
+# in 60s will not answer in 180s either. Keep this arithmetic aligned when
+# changing any of these values or the step timeout.
+CMD_TIMEOUT_SECONDS="${FAST_VALIDATION_DEPS_CMD_TIMEOUT_SECONDS:-60}"
 KILL_GRACE_SECONDS="${FAST_VALIDATION_DEPS_KILL_GRACE_SECONDS:-10}"
-MAX_ATTEMPTS="${FAST_VALIDATION_DEPS_MAX_ATTEMPTS:-3}"
+MAX_ATTEMPTS="${FAST_VALIDATION_DEPS_MAX_ATTEMPTS:-2}"
 RETRY_BASE_DELAY_SECONDS="${FAST_VALIDATION_DEPS_RETRY_BASE_DELAY_SECONDS:-5}"
 BATS_CLONE_DIR="${FAST_VALIDATION_DEPS_BATS_CLONE_DIR:-/tmp/bats-core}"
 BATS_INSTALL_PREFIX="${FAST_VALIDATION_DEPS_BATS_INSTALL_PREFIX:-/usr/local}"
@@ -92,11 +99,15 @@ main() {
   if command -v bats > /dev/null 2>&1; then
     log "bats already on PATH; skipping source install"
   else
-    # Remove any partial clone from a previous killed attempt so `git clone`
-    # does not fail on a non-empty target directory.
-    rm -rf "$BATS_CLONE_DIR"
+    # The pre-clone cleanup must run inside the retried command: a clone that
+    # times out mid-transfer leaves a non-empty target directory, and without
+    # per-attempt cleanup every subsequent retry would fail instantly on it.
+    # `timeout` is an external binary and cannot run a shell function, so the
+    # cleanup+clone pair is composed with `bash -c`.
+    # shellcheck disable=SC2016 # $1 is deliberately expanded by the inner bash, not here.
     run_with_retry "clone bats-core" \
-      git clone --depth 1 https://github.com/bats-core/bats-core.git "$BATS_CLONE_DIR"
+      bash -c 'rm -rf "$1" && git clone --depth 1 https://github.com/bats-core/bats-core.git "$1"' \
+      _ "$BATS_CLONE_DIR"
     run_with_retry "install bats-core" \
       sudo "${BATS_CLONE_DIR}/install.sh" "$BATS_INSTALL_PREFIX"
   fi

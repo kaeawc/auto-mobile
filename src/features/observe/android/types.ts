@@ -189,6 +189,7 @@ export interface AccessibilityHierarchyResponse {
   hierarchy: AccessibilityHierarchy | null;
   fresh: boolean;
   updatedAt?: number; // Timestamp from device (only present when hierarchy data exists)
+  receivedAt?: number; // Host-clock-domain receipt time; basis for host-domain age (issue #5377)
   perfTiming?: AndroidPerfTiming[]; // Android-side performance timing data
   frameContext?: string;
 }

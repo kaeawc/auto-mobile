@@ -346,6 +346,7 @@ export class RealObserveScreen implements ObserveScreen {
       result.freshness = computeFreshness({
         requestedAfter: minTimestamp > 0 ? minTimestamp : undefined,
         actualTimestamp: this.resolveObservationTimestampMs(result),
+        hostAgeBasisMs: this.resolveHostReceivedAtMs(result),
         now: this.timer.now(),
         verified: typeof result.viewHierarchy === "object" && result.viewHierarchy !== null
           ? result.viewHierarchy.fresh
@@ -647,6 +648,20 @@ export class RealObserveScreen implements ObserveScreen {
       if (!Number.isNaN(parsed)) {
         return parsed;
       }
+    }
+    return undefined;
+  }
+
+  /**
+   * Host-clock-domain receipt time for the observed tree, when the delegate
+   * reports one (Android). Used as the age basis so clock skew between a device
+   * and the host is not misreported as observation age (issue #5377). Absent on
+   * iOS (shares the host clock), where age falls back to the device timestamp.
+   */
+  private resolveHostReceivedAtMs(result: ObserveResult): number | undefined {
+    const candidate = result.viewHierarchy?.receivedAt;
+    if (typeof candidate === "number" && !Number.isNaN(candidate)) {
+      return candidate;
     }
     return undefined;
   }

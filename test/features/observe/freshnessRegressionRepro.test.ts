@@ -82,7 +82,7 @@ class FakeDeviceStateCollector implements Pick<DeviceStateCollector, "collectBac
 
 /** Hands `execute()` a caller-controlled `result.viewHierarchy` directly. */
 class ScriptedHierarchyCollector implements Pick<HierarchyCollector, "collect" | "collectRaw" | "extractScreenSize" | "reconcileScreenDimensions"> {
-  constructor(private viewHierarchy: { hierarchy: unknown; updatedAt?: number; fresh?: boolean }) {}
+  constructor(private viewHierarchy: { hierarchy: unknown; updatedAt?: number; receivedAt?: number; fresh?: boolean }) {}
   async collect(result: ObserveResult): Promise<void> {
     result.viewHierarchy = {
       screenWidth: 1080,
@@ -104,7 +104,7 @@ const device: BootedDevice = { deviceId: "test-device", name: "Test Device", pla
 
 function createObserveScreen(
   fakeTimer: FakeTimer,
-  viewHierarchy: { hierarchy: unknown; updatedAt?: number; fresh?: boolean },
+  viewHierarchy: { hierarchy: unknown; updatedAt?: number; receivedAt?: number; fresh?: boolean },
   platformValidator?: HierarchyPlatformValidator,
 ) {
   const observeScreen = new RealObserveScreen(device, new FakeAdbClientFactory(new FakeAdbExecutor()), {
@@ -161,6 +161,30 @@ describe("freshness regression repro (glance path, ObserveScreen.execute)", () =
     const result = await observeScreen.execute();
 
     expect(result.freshness?.isFresh).toBe(false);
+  });
+
+  test("CLOCK SKEW (#5377): a device-skewed but host-fresh tree reports host-domain age with no false warning", async () => {
+    // Reproduces the reported emulator symptom: the device clock is ~25s behind
+    // the host, so the device-authored `updatedAt` is 25s in the past relative to
+    // host `now`, but the tree was verified and received on the host ~200ms ago.
+    // ageMs must reflect the ~200ms host-domain receipt age, not the 25s skew,
+    // and the "…the rest of the observation was slow" warning must NOT fire.
+    const SKEW_MS = 25_000;
+    const fakeTimer = new FakeTimer();
+    const { observeScreen } = createObserveScreen(fakeTimer, {
+      hierarchy: { text: "Wifi" },
+      updatedAt: fakeTimer.now() - SKEW_MS, // device domain, skewed behind host
+      receivedAt: fakeTimer.now() - 200, // host domain, freshly received
+      fresh: true, // delegate verified against the device on this call
+    });
+
+    const result = await observeScreen.execute();
+
+    expect(result.freshness?.isFresh).toBe(true);
+    expect(result.freshness?.ageMs).toBe(200);
+    expect(result.freshness?.warning).toBeUndefined();
+    // The raw device timestamp is still reported for correlation.
+    expect(result.freshness?.actualTimestamp).toBe(fakeTimer.now() - SKEW_MS);
   });
 
   test("A RETRIEVAL FAILURE: an error hierarchy is never reported fresh", async () => {

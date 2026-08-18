@@ -183,6 +183,7 @@ export class CtrlProxyHierarchy {
               hierarchy: cachedHierarchy.hierarchy,
               fresh: isFresh,
               updatedAt: updatedAt,
+              receivedAt: cachedHierarchy.receivedAt,
               perfTiming: cachedHierarchy.perfTiming,
               frameContext: cachedHierarchy.frameContext,
             };
@@ -197,6 +198,7 @@ export class CtrlProxyHierarchy {
             hierarchy: cachedHierarchy.hierarchy,
             fresh: isFresh,
             updatedAt: updatedAt,
+            receivedAt: cachedHierarchy.receivedAt,
             perfTiming: cachedHierarchy.perfTiming,
             frameContext: cachedHierarchy.frameContext,
           };
@@ -227,6 +229,7 @@ export class CtrlProxyHierarchy {
             hierarchy: freshData.hierarchy,
             fresh: true,
             updatedAt: freshData.hierarchy.updatedAt,
+            receivedAt: freshData.receivedAt,
             perfTiming: freshData.perfTiming,
             frameContext: freshData.frameContext,
           };
@@ -251,6 +254,7 @@ export class CtrlProxyHierarchy {
               hierarchy: currentCache.hierarchy,
               fresh: false,
               updatedAt: currentCache.hierarchy.updatedAt,
+              receivedAt: currentCache.receivedAt,
               perfTiming: currentCache.perfTiming,
               frameContext: currentCache.frameContext,
             };
@@ -328,6 +332,11 @@ export class CtrlProxyHierarchy {
       let isFresh = response.fresh;
       let androidPerfTiming = response.perfTiming;
       let frameContext = response.frameContext;
+      // Host-clock-domain receipt time, so observation age is not computed by
+      // subtracting the device-authored `updatedAt` from host `now` across a
+      // skewed emulator clock (issue #5377). Cache hits carry their original
+      // receipt time; a fresh sync below re-stamps it to the current host clock.
+      let receivedAt = response.receivedAt;
 
       // If no hierarchy from WebSocket or data is stale, sync to get fresh data
       const needsSync = !hierarchyData || !isFresh;
@@ -351,6 +360,7 @@ export class CtrlProxyHierarchy {
           }
           frameContext = syncResult.frameContext;
           isFresh = true;
+          receivedAt = this.context.timer.now();
           if (hierarchyData.packageName) {
             this.lastKnownPackageName = hierarchyData.packageName;
           }
@@ -375,6 +385,11 @@ export class CtrlProxyHierarchy {
       // Add the device timestamp to the result
       if (hierarchyData!.updatedAt) {
         convertedHierarchy.updatedAt = hierarchyData!.updatedAt;
+      }
+      // Carry the host-domain receipt time so ObserveScreen can measure age
+      // without crossing clock domains (issue #5377).
+      if (receivedAt !== undefined) {
+        convertedHierarchy.receivedAt = receivedAt;
       }
       if (frameContext !== undefined) {
         convertedHierarchy.frameContext = frameContext;

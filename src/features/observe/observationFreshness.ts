@@ -47,6 +47,16 @@ export interface FreshnessInputs {
   requestedAfter?: number;
   /** The capture timestamp carried by the observation itself. */
   actualTimestamp?: number;
+  /**
+   * A host-clock-domain timestamp to measure {@link FreshnessVerdict.ageMs}
+   * against, when the source can supply one (e.g. the Android delegate's
+   * host-side receipt time). `actualTimestamp` is device-authored, so on an
+   * emulator whose clock is skewed from the host, `now - actualTimestamp` reports
+   * the skew as age (issue #5377). When present, age is computed from this
+   * host-domain basis instead; when absent (iOS, which shares the host clock),
+   * age falls back to `actualTimestamp` and behavior is unchanged.
+   */
+  hostAgeBasisMs?: number;
   /** Wall clock at report time. */
   now: number;
   /**
@@ -116,6 +126,25 @@ function computeRequestedFreshness(
 }
 
 /**
+ * Wall-clock age of the observation, measured in a single clock domain.
+ *
+ * Age subtracts a capture time from host `now`, so both operands must share a
+ * clock. Prefer a host-authored basis when the source supplies one; only fall
+ * back to the device-authored capture timestamp (iOS, which shares the host
+ * clock). Subtracting a skewed device timestamp from host `now` reports the
+ * clock skew as age (issue #5377). Clamped at 0 so a device clock running ahead
+ * of the host cannot produce a negative age.
+ */
+function resolveAgeMs(
+  hostAgeBasisMs: number | undefined,
+  actualTimestamp: number | undefined,
+  now: number
+): number | undefined {
+  const ageBasis = hostAgeBasisMs ?? actualTimestamp;
+  return ageBasis !== undefined ? Math.max(0, now - ageBasis) : undefined;
+}
+
+/**
  * Compute the freshness verdict.
  *
  * The `requestedAfter` branch is unchanged from the original implementation, so
@@ -123,10 +152,10 @@ function computeRequestedFreshness(
  * used to return the constant `true` is new.
  */
 export function computeFreshness(inputs: FreshnessInputs): FreshnessVerdict {
-  const { requestedAfter, actualTimestamp, now, verified, unavailable } = inputs;
+  const { requestedAfter, actualTimestamp, hostAgeBasisMs, now, verified, unavailable } = inputs;
   const maxAgeMs = inputs.maxAgeMs ?? maxObservationAgeMs();
 
-  const ageMs = actualTimestamp !== undefined ? Math.max(0, now - actualTimestamp) : undefined;
+  const ageMs = resolveAgeMs(hostAgeBasisMs, actualTimestamp, now);
 
   if (unavailable) {
     return {

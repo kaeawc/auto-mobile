@@ -1842,21 +1842,18 @@ jobs:
             -only-testing:CtrlProxyTests/RotationChangeGenerationTests/testGestureOrientationKeepsLandscapeSceneWhenDeviceIsFaceUp \
             -only-testing:CtrlProxyUITests/CtrlProxyUITests/testHierarchyIncludesTypedTextInputsMissingFromSnapshotTree
 
-      # Re-sync the backgrounded ffmpeg install before its only consumer. With the
-      # install hoisted out, this step's 10-minute cap now covers the test alone.
-      - wait: install-ffmpeg
-
-      - name: "Run videoRecording MP4 integration test"
-        timeout-minutes: 10
-        env:
-          AUTOMOBILE_TOOLSET_SCREEN_ARTIFACTS: "1"
-        run: ./scripts/ios/video-recording-start-stop-integration.sh
-
-      # This is a freshly-booted sim, so bring the daemon to ready and warm
-      # CtrlProxy before the downstream simulator workflows. Pre-starting the daemon and waiting
-      # for readiness makes a startup failure surface loudly here instead of
-      # silently skipping the test (#2730); `auto-mobile` (installed to ~/.bun/bin
-      # by `bun add -g .`) is thereby on PATH for the swift-test step.
+      # Bring the daemon to ready and warm CtrlProxy on the freshly-booted sim
+      # BEFORE any simulator workflow that opens an in-process session — including
+      # the videoRecording test below. When videoRecording ran first (issue #5376),
+      # its in-process session auto-start had to cold-launch CtrlProxy
+      # (xcodebuild test-without-building, ~85s) inside the bounded runner-readiness
+      # budget (30s since #5362) and flaked; with CtrlProxy already warm here, that
+      # auto-start short-circuits to the readiness fast path. Keep these two warm-up
+      # steps ahead of the videoRecording test — do NOT move videoRecording above
+      # them. Pre-starting the daemon and waiting for readiness also makes a startup
+      # failure surface loudly here instead of silently skipping the test (#2730);
+      # `auto-mobile` (installed to ~/.bun/bin by `bun add -g .`) is thereby on PATH
+      # for the swift-test steps.
       - name: "Ensure AutoMobile daemon ready (Xcode 26.5)"
         if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}
         env:
@@ -1868,14 +1865,27 @@ jobs:
         run: ./scripts/ci/ensure-daemon-ready.sh
 
       # Launch CtrlProxy on the booted sim now (a slow, one-time xcodebuild launch)
-      # so the test's first `observe` doesn't pay that cost inside its short
-      # waitFor window and time out (#2730 follow-up). Worst case ≈ 3 × (observe
-      # floor 150s + delay); bound the step so a pathological hang points here
-      # instead of at the 45-min job cap.
+      # so the first `observe` from any downstream step (videoRecording, then the
+      # navigation-graph workflow) doesn't pay that cost inside its short waitFor
+      # window and time out (#2730 follow-up). Worst case ≈ 3 × (observe floor 150s
+      # + delay); bound the step so a pathological hang points here instead of at
+      # the 45-min job cap.
       - name: "Warm up iOS CtrlProxy (Xcode 26.5)"
         if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}
         timeout-minutes: 12
         run: ./scripts/ci/ensure-ctrl-proxy-ready.sh
+
+      # Re-sync the backgrounded ffmpeg install before its only consumer. With the
+      # install hoisted out, this step's 10-minute cap now covers the test alone.
+      # (The warm-up steps above don't need ffmpeg, so its background install gets
+      # extra time to finish before this wait.)
+      - wait: install-ffmpeg
+
+      - name: "Run videoRecording MP4 integration test"
+        timeout-minutes: 10
+        env:
+          AUTOMOBILE_TOOLSET_SCREEN_ARTIFACTS: "1"
+        run: ./scripts/ios/video-recording-start-stop-integration.sh
 
       - name: "Run iOS navigation graph Simulator workflow"
         if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}

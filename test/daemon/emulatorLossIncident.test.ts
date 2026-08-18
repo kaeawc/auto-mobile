@@ -69,4 +69,15 @@ describe("emulator loss incident store", () => {
     expect(await store.get(first.id)).toBeUndefined();
     expect((await store.list()).map((incident) => incident.id)).toEqual([third.id, second.id]);
   });
+
+  test("list(0) returns no incidents, matching the repository", async () => {
+    const store = createStore();
+    await store.open({
+      deviceId: "emulator-5554",
+      detectionPath: "device-discovery-miss",
+      recoveryPolicy: { onLoss: false, maxAttempts: 2 },
+    });
+
+    expect(await store.list(0)).toEqual([]);
+  });
 });

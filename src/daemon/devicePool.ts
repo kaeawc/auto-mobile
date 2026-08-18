@@ -790,10 +790,12 @@ export class DevicePool {
     ) {
       return undefined;
     }
-    const outputTail = detectionPath === "watched-process-exit"
-      ? await this.startedDeviceProcessOutput.get(deviceId)?.finalize()
-      : this.startedDeviceProcessOutput.get(deviceId)?.snapshot();
     try {
+      // Capture the tail inside the try so a finalize()/snapshot() rejection
+      // degrades to no tail rather than blocking device-loss cleanup.
+      const outputTail = detectionPath === "watched-process-exit"
+        ? await this.startedDeviceProcessOutput.get(deviceId)?.finalize()
+        : this.startedDeviceProcessOutput.get(deviceId)?.snapshot();
       const incident = await this.emulatorLossIncidentStore.open({
         deviceId,
         ...(device.avdName ? { avdName: device.avdName } : {}),

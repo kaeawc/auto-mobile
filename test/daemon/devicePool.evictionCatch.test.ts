@@ -103,7 +103,7 @@ describe("DevicePool emulator-exit eviction rejection handling", () => {
     };
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
-    (diagnosticPool as unknown as {
+    await (diagnosticPool as unknown as {
       trackStartedDeviceProcess: (device: unknown, child: unknown) => Promise<void>;
     }).trackStartedDeviceProcess(androidDevice, child);
     child.stdout.emit("data", Buffer.from("token="));

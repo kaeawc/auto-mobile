@@ -133,7 +133,11 @@ export class InMemoryEmulatorLossIncidentStore implements EmulatorLossIncidentSt
   }
 
   async list(limit: number = this.maxRetained): Promise<EmulatorLossIncident[]> {
-    return Array.from(this.incidents.values()).slice(-limit).reverse().map(copyIncident);
+    // Match EmulatorLossIncidentRepository.list, whose `.limit(0)` returns no
+    // rows. `slice(-0)` equals `slice(0)` and would otherwise return everything.
+    const incidents = Array.from(this.incidents.values());
+    const newest = limit <= 0 ? [] : incidents.slice(-limit);
+    return newest.reverse().map(copyIncident);
   }
 
   private prune(): void {

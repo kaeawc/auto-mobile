@@ -3289,8 +3289,13 @@ _install_system_package() {
 }
 
 install_runtime_deps() {
-    # ffmpeg — required for video recording features
-    if ! command_exists ffmpeg; then
+    # ffmpeg — required for video recording features.
+    # CI can opt out via AUTOMOBILE_INSTALL_SKIP_FFMPEG=true: ffmpeg is a large,
+    # slow dependency (its install has timed out the installer check) and video
+    # recording is not exercised by the installer validation jobs.
+    if [[ "${AUTOMOBILE_INSTALL_SKIP_FFMPEG:-false}" == "true" ]]; then
+        log_info "Skipping ffmpeg install (AUTOMOBILE_INSTALL_SKIP_FFMPEG=true) — video recording will be unavailable"
+    elif ! command_exists ffmpeg; then
         _install_system_package "ffmpeg" "required for video recording"
     fi
 }

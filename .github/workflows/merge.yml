@@ -466,6 +466,10 @@ jobs:
   installer-minimal:
     name: "Installer Minimal (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
+    env:
+      # ffmpeg is a large, slow install (it has timed out this job) and video
+      # recording is not exercised here — skip it.
+      AUTOMOBILE_INSTALL_SKIP_FFMPEG: "true"
     strategy:
       fail-fast: false
       matrix:
@@ -546,6 +550,7 @@ jobs:
         continue-on-error: true
         env:
           # Keep this disabled-job definition aligned with the PR installer lane.
+          AUTOMOBILE_INSTALL_SKIP_FFMPEG: "true"
           AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS: "30000"
           AUTOMOBILE_STARTUP_BENCHMARK: "1"
           AUTOMOBILE_STARTUP_BENCHMARK_OUTPUT: "${{ github.workspace }}/ci-logs/installer-daemon-startup.json"

@@ -382,4 +382,155 @@ final class WebSocketServerTests: XCTestCase {
         let request = Data("GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n".utf8)
         XCTAssertEqual(WebSocketConnection.completeHTTPRequestLength(in: request), request.count)
     }
+
+    // MARK: - /health stays responsive over a real socket while a command blocks (#5374)
+
+    /// A gesture performer whose `pressBack` parks the calling thread on a
+    /// semaphore until the test releases it.
+    ///
+    /// A gesture command runs its operation through `FrameContext.performIfCurrent`
+    /// → `runOnMainThread` (`DispatchQueue.main.sync`), so `pressBack` executes on
+    /// the **main thread** while the server's dispatch queue is blocked
+    /// synchronously waiting for it — reproducing the exact production wedge where
+    /// a hung XCUITest gesture pins the runner's main thread.
+    private final class BlockingGesturePerformer: FakeGesturePerformer, @unchecked Sendable {
+        let didStart = DispatchSemaphore(value: 0)
+        let release = DispatchSemaphore(value: 0)
+
+        override func pressBack() throws {
+            didStart.signal()
+            release.wait()
+            try super.pressBack()
+        }
+    }
+
+    /// Starts a real `WebSocketServer` on the first free port at/above `base`,
+    /// returning the running server and its bound port. Bind collisions
+    /// (`ServerError.failedToStart`) are retried on the next port so the test
+    /// does not depend on a specific port being free.
+    private func startServerOnFreePort(
+        commandHandler: CommandHandler,
+        perfProvider: PerfProvider,
+        base: UInt16 = 8850,
+        attempts: Int = 40,
+        file: StaticString = #file,
+        line: UInt = #line
+    )
+        -> (server: WebSocketServer, port: UInt16)
+    {
+        for offset in 0 ..< attempts {
+            let port = base + UInt16(offset)
+            let server = WebSocketServer(
+                port: port,
+                commandHandler: commandHandler,
+                perfProvider: perfProvider
+            )
+            do {
+                try server.start()
+                return (server, port)
+            } catch {
+                continue
+            }
+        }
+        XCTFail("could not bind a WebSocketServer on any port in [\(base), \(base + UInt16(attempts))]", file: file, line: line)
+        fatalError("unreachable")
+    }
+
+    /// End-to-end regression for the daemon health probe over a real socket:
+    /// while one WebSocket connection is stuck inside a blocked command, an
+    /// independent `GET /health` request over a *separate* connection must still
+    /// return promptly. This is the property the daemon relies on to tell "the
+    /// runner is wedged on this gesture" apart from "the runner is dead" — the
+    /// XCTestRunner flake in #5374 was exactly this: five 5s `/health` probes
+    /// timed out mid-command and a live runner was torn down.
+    ///
+    /// The command-offload fix (#5374) keeps the server queue free by running
+    /// commands on a dedicated `commandQueue`; `testDispatchCommandDoesNotBlock…`
+    /// pins that offload at the `dispatchCommand` seam. This test complements it
+    /// one layer out — it drives the real `WebSocketServer` (real `NWListener`,
+    /// real sockets on 127.0.0.1) and asserts an actual HTTP `GET /health`
+    /// returns 200 while a command blocks, covering the accept + HTTP-serving
+    /// path the seam-level test does not. The blocked gesture pins the main
+    /// thread via `runOnMainThread` (just as a hung XCUITest call does on
+    /// device), so the whole probe is orchestrated from a background thread and
+    /// the main thread is left free to run the gesture's `main.sync`. It fails —
+    /// `/health` never returns 200 — if command execution is ever moved back onto
+    /// the queue that accepts connections and serves `/health`.
+    func testHealthCheckStaysResponsiveWhileCommandBlocks() throws {
+        let fakeTimeProvider = FakeTimeProvider(initialTime: 1000)
+        perfProvider = PerfProvider.createForTesting(timeProvider: fakeTimeProvider)
+        let blockingPerformer = BlockingGesturePerformer()
+        let handler = CommandHandler.createForTesting(
+            elementLocator: FakeElementLocator(),
+            gesturePerformer: blockingPerformer,
+            perfProvider: perfProvider
+        )
+        let (server, port) = startServerOnFreePort(commandHandler: handler, perfProvider: perfProvider)
+        defer {
+            blockingPerformer.release.signal() // unblock the parked command so teardown can proceed
+            server.stop()
+        }
+
+        // 127.0.0.1 (not "localhost") avoids DNS / IPv6 happy-eyeballs latency.
+        let wsURL = try XCTUnwrap(URL(string: "ws://127.0.0.1:\(port)/"))
+        let healthURL = try XCTUnwrap(URL(string: "http://127.0.0.1:\(port)/health"))
+
+        let statusBox = Box<Int?>(nil)
+        let bodyBox = Box<String?>(nil)
+        let probeFinished = expectation(description: "health probe orchestration finished")
+
+        // Everything runs off the main thread: the blocked gesture will occupy
+        // the main thread (via runOnMainThread), so the main thread must stay in
+        // `wait(for:)` — pumping its run loop — for that `main.sync` to execute.
+        DispatchQueue.global().async {
+            let session = URLSession(configuration: .ephemeral)
+            let wsTask = session.webSocketTask(with: wsURL)
+            wsTask.resume()
+            wsTask.send(.data(Data(#"{"type":"request_press_back","requestId":"blocker"}"#.utf8))) { _ in }
+
+            // Proceed only once the command is actually executing and thus
+            // occupying the main thread + the server's dispatch queue.
+            let started = blockingPerformer.didStart.wait(timeout: .now() + 15)
+
+            // With the command parked, GET /health over a separate connection
+            // must still respond. Bound by its own timeout so a regression
+            // surfaces as a failed assertion, not a hung test.
+            let healthConfig = URLSessionConfiguration.ephemeral
+            healthConfig.timeoutIntervalForRequest = 4
+            let healthSession = URLSession(configuration: healthConfig)
+            let healthDone = DispatchSemaphore(value: 0)
+            let healthTask = healthSession
+                .dataTask(with: healthURL) { data, response, _ in
+                    statusBox.value = (response as? HTTPURLResponse)?.statusCode
+                    bodyBox.value = data.flatMap { String(data: $0, encoding: .utf8) }
+                    healthDone.signal()
+                }
+            if started == .success {
+                healthTask.resume()
+                _ = healthDone.wait(timeout: .now() + 6)
+            }
+
+            // Unblock the parked gesture so the main thread (and server queue)
+            // are released, then hand control back to the main test thread.
+            blockingPerformer.release.signal()
+            session.invalidateAndCancel()
+            healthSession.invalidateAndCancel()
+            probeFinished.fulfill()
+        }
+
+        wait(for: [probeFinished], timeout: 30)
+        XCTAssertEqual(statusBox.value, 200, "health check should return 200 while a command is blocked")
+        XCTAssertEqual(
+            bodyBox.value.flatMap { (try? JSONSerialization.jsonObject(with: Data($0.utf8))) as? [String: Any] }?["status"] as? String,
+            "ok",
+            "health body should report status:ok"
+        )
+    }
+}
+
+/// Reference wrapper so escaping completion handlers can publish a result back
+/// to the test without tripping Swift's captured-var concurrency diagnostics.
+private final class Box<T>: @unchecked Sendable {
+    var value: T
+    init(_ value: T) { self.value = value }
 }

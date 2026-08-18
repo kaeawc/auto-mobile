@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DefaultGitMetadataClient, type GitCommandRunner } from "../../src/utils/GitMetadataClient";
 
@@ -15,8 +15,10 @@ const fakeRunner = (responses: Record<string, string | null>): GitCommandRunner 
 
 describe("DefaultGitMetadataClient", () => {
   // Git for Windows is commonly a shell-resolved git.exe shim, while this
-  // production boundary deliberately uses shell:false argv execution.
-  test.skipIf(process.platform === "win32")("uses the default runner in this source checkout", () => {
+  // production boundary deliberately uses shell:false argv execution. A jj
+  // workspace has no Git worktree, so its optional Git metadata is expected
+  // to be unavailable and is covered by the injected-runner tests below.
+  test.skipIf(process.platform === "win32" || !existsSync(".git"))("uses the default runner in this Git source checkout", () => {
     const readPackageName = (directory: string): string | null =>
       (JSON.parse(readFileSync(join(directory, "package.json"), "utf8")) as { name?: string }).name ?? null;
 

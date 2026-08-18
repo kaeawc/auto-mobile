@@ -339,6 +339,7 @@ STUB
   # (issue #2823), so mirror scripts/lib next to the copied ktfmt dir.
   mkdir -p "$TEST_DIR/lib"
   cp "$REPO_ROOT/scripts/lib/file-selection.sh" "$TEST_DIR/lib/"
+  cp "$REPO_ROOT/scripts/lib/vcs-diff.sh" "$TEST_DIR/lib/"
   # Bump ONLY the pin line in the copy, preserving the shared helper functions.
   sed -i.bak 's/^KTFMT_VERSION=.*/KTFMT_VERSION="0.99"/' "$copy_dir/ktfmt_version.sh"
   rm -f "$copy_dir/ktfmt_version.sh.bak"

@@ -2,11 +2,14 @@ import { expect, describe, test, beforeEach, afterEach } from "bun:test";
 import fs from "fs/promises";
 import os from "os";
 import path from "path";
-import { Jimp, rgbaToInt } from "jimp";
 import { ScreenshotCache } from "../../src/utils/screenshot/ScreenshotCache";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const CACHE_TTL_MS = 10 * 60 * 1000;
+const RED_PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4AWP4z8DwHwAFAAH/e+m+7wAAAABJRU5ErkJggg==", "base64");
+const BLUE_PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4AWNgYPj/HwADAgH/FAeIXAAAAABJRU5ErkJggg==", "base64");
+const WHITE_PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4AWP4DwQACfsD/c8LaHIAAAAASUVORK5CYII=", "base64");
+const GREEN_PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4AWNg+M/wHwAEAQH/g5vEFwAAAABJRU5ErkJggg==", "base64");
 
 describe("ScreenshotCache", function() {
   let tempDir: string;
@@ -25,12 +28,12 @@ describe("ScreenshotCache", function() {
 
   test("returns cached buffer within TTL", async function() {
     const filePath = path.join(tempDir, "screenshot.png");
-    const buffer1 = await createTestImage({ r: 255, g: 0, b: 0 });
+    const buffer1 = RED_PNG;
     await fs.writeFile(filePath, buffer1);
 
     const first = await ScreenshotCache.getCachedScreenshot(filePath, fakeTimer);
 
-    const buffer2 = await createTestImage({ r: 0, g: 0, b: 255 });
+    const buffer2 = BLUE_PNG;
     await fs.writeFile(filePath, buffer2);
 
     const second = await ScreenshotCache.getCachedScreenshot(filePath, fakeTimer);
@@ -42,12 +45,12 @@ describe("ScreenshotCache", function() {
 
   test("reloads cache after TTL expires", async function() {
     const filePath = path.join(tempDir, "screenshot.png");
-    const buffer1 = await createTestImage({ r: 255, g: 255, b: 255 });
+    const buffer1 = WHITE_PNG;
     await fs.writeFile(filePath, buffer1);
 
     await ScreenshotCache.getCachedScreenshot(filePath, fakeTimer);
 
-    const buffer2 = await createTestImage({ r: 0, g: 255, b: 0 });
+    const buffer2 = GREEN_PNG;
     await fs.writeFile(filePath, buffer2);
 
     fakeTimer.advanceTime(CACHE_TTL_MS + 1);
@@ -57,8 +60,3 @@ describe("ScreenshotCache", function() {
     expect(refreshed.buffer.equals(buffer2)).toBe(true);
   });
 });
-
-async function createTestImage(color: { r: number; g: number; b: number }): Promise<Buffer> {
-  const image = new Jimp({ width: 10, height: 10, color: rgbaToInt(color.r, color.g, color.b, 255) });
-  return image.getBuffer("image/png");
-}

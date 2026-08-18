@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { executionBoundaryAst } from "../../scripts/lib/executionBoundaryAst";
 import type { ExecResult } from "../../src/models";
 import type { HostCommandExecutor } from "../../src/utils/HostCommandExecutor";
 import { createExecResult } from "../../src/utils/execResult";
@@ -13,6 +14,16 @@ const ANDROID_H264_INTEGRATION_TEST_PATH = new URL(
   "./androidH264SourceDevice.integration.test.ts",
   import.meta.url,
 );
+
+function directAdbExecutionCalls(source: string): string[] {
+  const ast = executionBoundaryAst(source);
+  return ast.calls
+    .filter(call =>
+      (ast.isLauncher(call) || ast.isExecutionSeam(call)) &&
+      ast.strings(call.arguments[0]).includes("adb"),
+    )
+    .map(call => call.getText());
+}
 
 describe("createAdbIntegrationCommandRunner", () => {
   test(
@@ -66,13 +77,29 @@ describe("createAdbIntegrationCommandRunner", () => {
   );
 
   test(
-    "routes every short-lived ADB query in the on-device suite through the bounded runner",
+    "rejects direct ADB execution in the on-device suite",
     () => {
       const source = readFileSync(ANDROID_H264_INTEGRATION_TEST_PATH, "utf8");
 
-      expect(source).not.toContain("execFileAsync(");
-      expect(source.match(/(?:adb|adbRunner)\.run\(/g)).toHaveLength(4);
+      expect(directAdbExecutionCalls(source)).toEqual([]);
       expect(source).toContain("}, ADB_SETUP_HOOK_TIMEOUT_MS)");
+    },
+    FAST_TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "detects child-process and host-executor ADB bypasses",
+    () => {
+      const source = `
+        import { execFile } from "node:child_process";
+        execFile("adb", ["devices"]);
+        executor.executeCommand("adb", ["wait-for-device"]);
+      `;
+
+      expect(directAdbExecutionCalls(source)).toEqual([
+        'execFile("adb", ["devices"])',
+        'executor.executeCommand("adb", ["wait-for-device"])',
+      ]);
     },
     FAST_TEST_TIMEOUT_MS,
   );

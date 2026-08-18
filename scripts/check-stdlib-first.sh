@@ -11,13 +11,19 @@ BASE_REF="${STDLIB_FIRST_BASE_REF:-origin/main}"
 
 cd "$ROOT_DIR"
 
-if ! git rev-parse --verify --quiet "${BASE_REF}^{commit}" >/dev/null; then
+# shellcheck disable=SC1091 # Resolved relative to this script's location.
+source "$ROOT_DIR/scripts/lib/vcs-diff.sh"
+
+set +e
+vcs_base_exists "$BASE_REF"
+base_exists=$?
+set -e
+if [[ "$base_exists" -ne 0 ]]; then
   echo "error: stdlib-first check cannot resolve base ref '${BASE_REF}'" >&2
   exit 2
 fi
 
-BASE_COMMIT="$(git merge-base "$BASE_REF" HEAD)"
-BASE_PACKAGE_JSON="$(git show "${BASE_COMMIT}:package.json")"
+BASE_PACKAGE_JSON="$(vcs_file_at_merge_base "$BASE_REF" package.json)"
 CURRENT_PACKAGE_JSON="$(<package.json)"
 
 base_dependencies="$(jq -r '(.dependencies // {} | keys[]) , (.devDependencies // {} | keys[]) , (.optionalDependencies // {} | keys[])' <<<"$BASE_PACKAGE_JSON" | sort -u)"

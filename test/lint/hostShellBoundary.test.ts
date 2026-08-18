@@ -22,7 +22,19 @@ describe("host shell execution boundary (issue #4068)", () => {
   });
 
   test("fails closed outside a Git worktree", () => {
-    expect(() => changedSourceFiles("origin/main", false)).toThrow("not a Git worktree");
+    expect(() => changedSourceFiles("origin/main", false, false)).toThrow("not a Git or Jujutsu worktree");
+  });
+
+  test("uses the tracked main bookmark in a jj workspace", () => {
+    const calls: string[][] = [];
+    const runner = (file: string, args: string[]): string => {
+      calls.push([file, ...args]);
+      return file === "jj" && args[0] === "diff" ? "src/index.ts\n" : "";
+    };
+
+    expect(changedSourceFiles("origin/main", false, true, runner)).toEqual(["src/index.ts"]);
+    expect(calls).toContainEqual(["jj", "log", "-r", "main@origin", "--no-graph", "-T", ""]);
+    expect(calls).toContainEqual(["jj", "diff", "--from", "main@origin", "--to", "@", "--name-only", "src"]);
   });
 
   test("fetches the pull request base in shallow GitHub checkouts", () => {

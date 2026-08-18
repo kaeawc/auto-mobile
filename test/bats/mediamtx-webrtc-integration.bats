@@ -5,6 +5,7 @@
 
 SCRIPT="scripts/webrtc/run-mediamtx-publisher-integration.sh"
 TEST_FILE="test/integration/mediamtxWebRtcPublisher.integration.test.ts"
+LOOPBACK_TEST_FILE="test/features/webrtc/WebRtcPublisher.loopback.test.ts"
 
 setup() {
   TEST_DIR="$(mktemp -d)"
@@ -54,7 +55,7 @@ SCRIPT
     bash "${ABS}"
 
   [ "${status}" -eq 0 ]
-  [ "$(cat "${INVOCATIONS_FILE}")" = "gate=1 binary=${resolved_binary} args=test ${TEST_FILE}" ]
+  [ "$(cat "${INVOCATIONS_FILE}")" = "gate=1 binary=${resolved_binary} args=test ${TEST_FILE} ${LOOPBACK_TEST_FILE}" ]
 }
 
 @test "runner resolves an injected relative MediaMTX binary before forwarding it" {
@@ -75,7 +76,7 @@ SCRIPT
     bash "${ABS}"
 
   [ "${status}" -eq 0 ]
-  [ "$(cat "${INVOCATIONS_FILE}")" = "gate=1 binary=${resolved_binary} args=test ${TEST_FILE}" ]
+  [ "$(cat "${INVOCATIONS_FILE}")" = "gate=1 binary=${resolved_binary} args=test ${TEST_FILE} ${LOOPBACK_TEST_FILE}" ]
 }
 
 @test "download path rejects a MediaMTX archive whose pinned checksum does not match" {

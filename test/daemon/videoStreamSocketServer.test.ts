@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import net from "node:net";
+import { connectBounded } from "./helpers/socketRequest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -147,11 +148,8 @@ async function subscribe(
   socketPath: string,
   request: Record<string, unknown> = { action: "subscribe", deviceId: DEVICE.deviceId }
 ): Promise<{ socket: net.Socket; ack: Record<string, unknown>; binary: () => Buffer }> {
-  const socket = net.createConnection(socketPath);
-  await new Promise<void>((resolve, reject) => {
-    socket.once("connect", () => resolve());
-    socket.once("error", reject);
-  });
+  const socket = new net.Socket();
+  await connectBounded(socket, socketPath);
 
   const chunks: Buffer[] = [];
   socket.on("data", data => chunks.push(data));
@@ -457,8 +455,8 @@ describe("VideoStreamSocketServer", () => {
 
     await waitFor(() => harnesses.some(h => h.socketPath === socketPath));
     const harness = harnesses.find(h => h.socketPath === socketPath)!;
-    const socket = net.createConnection(socketPath);
-    await new Promise<void>(resolve => socket.once("connect", resolve));
+    const socket = new net.Socket();
+    await connectBounded(socket, socketPath);
     socket.write(`${JSON.stringify({ action: "subscribe", deviceId: DEVICE.deviceId })}\n`);
     await sourceCreated;
     socket.destroy();
@@ -505,8 +503,8 @@ describe("VideoStreamSocketServer", () => {
       },
     });
 
-    const abandonedSocket = net.createConnection(socketPath);
-    await new Promise<void>(resolve => abandonedSocket.once("connect", resolve));
+    const abandonedSocket = new net.Socket();
+    await connectBounded(abandonedSocket, socketPath);
     abandonedSocket.write(`${JSON.stringify({ action: "subscribe", deviceId: DEVICE.deviceId })}\n`);
     await waitFor(() => resolveAbandonedSource !== undefined);
     abandonedSocket.destroy();
@@ -816,8 +814,8 @@ describe("VideoStreamSocketServer", () => {
 
   test("malformed JSON is rejected rather than crashing the server", async () => {
     const h = await startHarness();
-    const socket = net.createConnection(h.socketPath);
-    await new Promise<void>(resolve => socket.once("connect", () => resolve()));
+    const socket = new net.Socket();
+    await connectBounded(socket, h.socketPath);
 
     const chunks: Buffer[] = [];
     socket.on("data", data => chunks.push(data));

@@ -55,18 +55,20 @@ describe("startDevice handler", () => {
   let fakeDeviceUtils: FakeDeviceUtils;
   let fakeMatcher: FakeDeviceMatcher;
   let daemonSessionManager: SessionManager | undefined;
+  let bootTimer: FakeTimer;
 
   beforeEach(() => {
     fakeDeviceUtils = new FakeDeviceUtils();
     fakeMatcher = new FakeDeviceMatcher();
     daemonSessionManager = undefined;
+    bootTimer = new FakeTimer();
 
     setDeviceToolsDependencies({
       deviceManagerFactory: () => fakeDeviceUtils,
       deviceMatcherFactory: () => fakeMatcher,
       notifyResourcesChanged: async () => {},
       ensureCtrlProxyReady: async () => {},
-      timer: new FakeTimer(),
+      timer: bootTimer,
     });
 
     registerDeviceTools();
@@ -171,8 +173,18 @@ describe("startDevice handler", () => {
     const start = callStartDevice({ platform: "android" }, controller.signal);
     await imageListingStarted;
     controller.abort();
+    // #5368 holds an externally-aborted phase's rejection until the operation
+    // gets ABORT_SETTLEMENT_GRACE_MS (1s) to settle. That grace timer runs on
+    // the injected FakeTimer, and this fake image listing deliberately never
+    // settles, so advance the fake clock deterministically — without this the
+    // rejection never propagates and the whole `bun test` run wedges (the
+    // macos hang class behind the #5391 watchdog).
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    bootTimer.advanceTime(1_000);
 
-    await expect(start).rejects.toThrow("startDevice cancelled while listing device images");
+    // A bare abort() propagates the platform's default AbortError (#5368
+    // preserves the caller-provided abort reason as-is).
+    await expect(start).rejects.toThrow("The operation was aborted");
     resolveImages([androidImage]);
     await Promise.resolve();
 
@@ -224,9 +236,10 @@ describe("startDevice handler", () => {
     await finalProgressStarted;
     controller.abort();
 
-    await expect(start).rejects.toThrow(
-      "startDevice cancelled while reporting device readiness progress",
-    );
+    // Progress phases skip abort settlement, so the rejection propagates
+    // immediately; a bare abort() surfaces the platform's default AbortError
+    // (#5368 preserves the caller-provided abort reason as-is).
+    await expect(start).rejects.toThrow("The operation was aborted");
     resolveFinalProgress();
     await Promise.resolve();
 

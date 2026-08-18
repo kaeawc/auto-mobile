@@ -9,6 +9,10 @@ set -euo pipefail
 
 readonly MEDIAMTX_VERSION="1.19.2"
 readonly TEST_FILE="${AUTOMOBILE_MEDIAMTX_TEST_FILE:-test/integration/mediamtxWebRtcPublisher.integration.test.ts}"
+# The werift loopback suite shares the opt-in gate: its DTLS/ICE handshake runs
+# over real UDP sockets, so it lives in this integration lane rather than the
+# default `bun test` run (macos real-I/O hang class, #5391).
+readonly LOOPBACK_TEST_FILE="test/features/webrtc/WebRtcPublisher.loopback.test.ts"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cache_dir="${AUTOMOBILE_MEDIAMTX_CACHE_DIR:-${repo_root}/scratch/mediamtx}"
@@ -92,4 +96,4 @@ mediamtx_binary="$(cd "$(dirname "${mediamtx_binary}")" && pwd -P)/$(basename "$
 cd "${repo_root}"
 AUTOMOBILE_MEDIAMTX_WEBRTC_INTEGRATION=1 \
 AUTOMOBILE_MEDIAMTX_BINARY="${mediamtx_binary}" \
-  exec bun test "${TEST_FILE}"
+  exec bun test "${TEST_FILE}" "${LOOPBACK_TEST_FILE}"

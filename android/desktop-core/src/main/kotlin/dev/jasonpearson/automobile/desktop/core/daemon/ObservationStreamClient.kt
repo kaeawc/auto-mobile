@@ -89,6 +89,9 @@ private class SocketChannelTransport(private val channel: SocketChannel) :
 class ObservationStreamClient(
   private val transportFactory: ObservationStreamTransportFactory = SocketChannelTransportFactory,
   private val socketPathProvider: () -> String = { getSocketPath() },
+  // Test seam: invoked when a readMessages() invocation returns (superseded or not), so a test can
+  // await a specific read loop's completion deterministically. No-op in production.
+  private val onReadLoopExit: () -> Unit = {},
 ) : ObservationStream {
   companion object {
     internal fun getSocketPath(): String =
@@ -101,10 +104,21 @@ class ObservationStreamClient(
   private val json = DaemonJson
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-  // Single owning reference to the live transport. It is closed both at its death point in the read
-  // loop (EOF or read error) and in disconnect(), so no reconnect abandons a still-open socket
-  // (issue #5261).
+  // Serializes transport ownership: the (transport, connectionGeneration) pair is only ever read or
+  // mutated while holding this lock, so a read loop's generation check and connect()/disconnect()'s
+  // reassignment can never interleave.
+  private val ownershipLock = Any()
+
+  // Single owning reference to the live transport. Closed at its death point in the read loop (EOF
+  // or read error) and in disconnect(), so no reconnect abandons a still-open socket (issue #5261).
   private var transport: ObservationStreamTransport? = null
+
+  // Monotonic token identifying the current connection attempt. Advanced whenever the active
+  // transport is installed (connect) or released (disconnect/EOF). A read loop captures the
+  // generation it was started for and only clears the transport / publishes Disconnected while it
+  // still owns that generation, so a stale loop that outlives a reconnect is inert (issue #5261,
+  // CodeRabbit).
+  private var connectionGeneration: Long = 0L
 
   // Flow for hierarchy updates
   private val _hierarchyUpdates = MutableSharedFlow<HierarchyStreamUpdate>(replay = 1)
@@ -183,10 +197,18 @@ class ObservationStreamClient(
         return
       }
 
-      // Close any transport left over from a previous connection before opening a fresh one, so a
-      // dead socket from a prior EOF is never abandoned (issue #5261).
-      closeTransport(transport)
-      transport = transportFactory.open(socketPath)
+      // Open the fresh transport, then install it and advance the generation atomically. Any
+      // transport left over from a prior connection is closed rather than abandoned (issue #5261),
+      // and the generation bump supersedes any read loop still running from a previous attempt.
+      val newTransport = transportFactory.open(socketPath)
+      val previousTransport: ObservationStreamTransport?
+      val generation: Long
+      synchronized(ownershipLock) {
+        previousTransport = transport
+        transport = newTransport
+        generation = ++connectionGeneration
+      }
+      closeQuietly(previousTransport)
 
       _connectionState.update { ConnectionState.Connected() }
       log.info("Connected to observation stream")
@@ -197,9 +219,9 @@ class ObservationStreamClient(
       pendingCadenceUpdate = false
       subscribe(deviceId)
 
-      // Start reading messages
+      // Start reading messages for this generation
       scope.launch {
-        readMessages()
+        readMessages(generation)
       }
     } catch (e: Exception) {
       log.warn("Failed to connect to observation stream: ${e.message}")
@@ -228,26 +250,38 @@ class ObservationStreamClient(
       log.warn("Error disconnecting from observation stream: ${e.message}")
     }
 
-    closeTransport(transport)
+    releaseActiveTransport()
     subscriptionId = null
     pendingCadenceUpdate = false
     _connectionState.update { ConnectionState.Disconnected() }
   }
 
   /**
-   * Close [target] and, when it is still the active transport, drop the reference. Closing a
-   * [SocketChannel]-backed transport is idempotent, so a redundant call (the read loop racing
-   * [disconnect]) is safe. This is the single point that releases the socket fd (issue #5261).
+   * Clear the active transport and advance the generation under [ownershipLock], then close it. The
+   * generation bump supersedes any running read loop so it becomes inert on exit, and closing the
+   * transport releases its fd (issue #5261). Safe when there is no transport (no-op close).
    */
-  private fun closeTransport(target: ObservationStreamTransport?) {
+  private fun releaseActiveTransport() {
+    val target =
+      synchronized(ownershipLock) {
+        val current = transport
+        transport = null
+        connectionGeneration++
+        current
+      }
+    closeQuietly(target)
+  }
+
+  /**
+   * Close [target] best-effort. Closing a [SocketChannel]-backed transport is idempotent, so a
+   * redundant call (the read loop racing [disconnect]) is safe.
+   */
+  private fun closeQuietly(target: ObservationStreamTransport?) {
     if (target == null) return
     try {
       target.close()
     } catch (e: Exception) {
       log.warn("Error closing observation stream transport: ${e.message}")
-    }
-    if (transport === target) {
-      transport = null
     }
   }
 
@@ -345,14 +379,23 @@ class ObservationStreamClient(
     }
   }
 
-  private suspend fun readMessages() {
-    val activeTransport = transport ?: return
+  private suspend fun readMessages(generation: Long) {
+    // Bind to the transport for this generation. If a disconnect()/reconnect already superseded us
+    // before we started reading, there is nothing to own -- exit without touching state.
+    val activeTransport =
+      synchronized(ownershipLock) { if (connectionGeneration == generation) transport else null }
+    if (activeTransport == null) {
+      onReadLoopExit()
+      return
+    }
     val currentReader = activeTransport.reader
 
     try {
       log.info("Starting message read loop")
 
-      while (_connectionState.value.isConnected) {
+      // Stop as soon as a later connect()/disconnect() supersedes this generation, so a stale loop
+      // never emits frames onto the shared flows after ownership has moved on.
+      while (ownsGeneration(generation) && _connectionState.value.isConnected) {
         val line = currentReader.readLine() ?: break
         if (line.isBlank()) continue
 
@@ -369,14 +412,32 @@ class ObservationStreamClient(
       log.warn("Error reading from observation stream: ${e.message}", e)
     }
 
-    // Close the transport at its death point (EOF or read error) BEFORE publishing Disconnected.
-    // disconnect() early-returns once the state is no longer Connected, so without this every
-    // reconnect that reuses this instance would abandon the dead socket and leak its fd (issue
-    // #5261).
-    closeTransport(activeTransport)
-    _connectionState.update { ConnectionState.Disconnected("Stream ended") }
-    log.info("Observation stream disconnected")
+    // Death point (EOF or read error). Clear the transport and publish Disconnected ONLY while we
+    // still own the active generation: a loop superseded by disconnect()/reconnect must do nothing,
+    // or it would both close the NEW transport's slot and stomp the live Connected state -- after
+    // which disconnect()/dispose() would early-return and leak the new socket (issue #5261,
+    // CodeRabbit). disconnect() early-returns once not Connected, so for the still-owning EOF case
+    // this is the only place that releases the dead socket's fd.
+    val stillOwner =
+      synchronized(ownershipLock) {
+        if (connectionGeneration == generation) {
+          transport = null
+          connectionGeneration++
+          true
+        } else {
+          false
+        }
+      }
+    if (stillOwner) {
+      closeQuietly(activeTransport)
+      _connectionState.update { ConnectionState.Disconnected("Stream ended") }
+      log.info("Observation stream disconnected")
+    }
+    onReadLoopExit()
   }
+
+  private fun ownsGeneration(generation: Long): Boolean =
+    synchronized(ownershipLock) { connectionGeneration == generation }
 
   internal suspend fun handleMessage(message: String) {
     val response = json.decodeFromString(serializer<StreamResponse>(), message)

@@ -15,4 +15,10 @@ class FakeUpdateController(initial: UpdateStatus = UpdateStatus.Idle) : UpdateCo
   override suspend fun checkForUpdate() {
     // No-op: the fixed status stands in for a real check.
   }
+
+  override fun canApplyUpdate(): Boolean = false
+
+  override suspend fun applyUpdate() {
+    // No-op: the fake never applies an update.
+  }
 }

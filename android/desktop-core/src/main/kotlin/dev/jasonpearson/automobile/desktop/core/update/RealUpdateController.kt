@@ -35,6 +35,15 @@ class RealUpdateController(
     runCheck()
   }
 
+  // The GitHub-Releases checker never gained a download/install path — the status-bar pill links to
+  // the release, and applying in place is delivered by Conveyor (ConveyorUpdateController, #5227).
+  override fun canApplyUpdate(): Boolean = false
+
+  override suspend fun applyUpdate() {
+    // Nothing to apply: this controller only surfaces that a newer release exists. See
+    // canApplyUpdate() — the UI keeps its "Install & restart" action disabled for this path.
+  }
+
   private suspend fun runCheck() {
     val appVersion = appVersionProvider.current()
     // A development build (no packaged version) and an OS we don't ship an installer for both mean

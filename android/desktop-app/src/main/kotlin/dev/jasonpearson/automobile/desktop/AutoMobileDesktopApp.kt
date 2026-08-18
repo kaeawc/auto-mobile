@@ -540,6 +540,16 @@ fun AutoMobileDesktopApp(
                     onOpenReleaseNotes = {
                       availableUpdate.releaseNotesUrl?.let { openReleaseNotesInBrowser(it) }
                     },
+                    // Only a Conveyor package can apply in place; the GitHub path reports false and
+                    // the install action stays disabled. Conveyor tears the app down as it
+                    // restarts,
+                    // so this is the last thing the process does.
+                    onInstall =
+                      if (updateController.canApplyUpdate()) {
+                        { scope.launch { updateController.applyUpdate() } }
+                      } else {
+                        null
+                      },
                   )
                 }
               }

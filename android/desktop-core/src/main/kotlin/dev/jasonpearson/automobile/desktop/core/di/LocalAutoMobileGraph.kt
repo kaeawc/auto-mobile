@@ -6,6 +6,8 @@ import dev.jasonpearson.automobile.desktop.core.datasource.DefaultDataSourceFact
 import dev.jasonpearson.automobile.desktop.core.platform.PackagedVersionSource
 import dev.jasonpearson.automobile.desktop.core.platform.RuntimeAppVersionProvider
 import dev.jasonpearson.automobile.desktop.core.settings.FakeSettingsProvider
+import dev.jasonpearson.automobile.desktop.core.update.ConveyorSoftwareUpdateGateway
+import dev.jasonpearson.automobile.desktop.core.update.ConveyorUpdateController
 import dev.jasonpearson.automobile.desktop.core.update.GitHubReleaseSource
 import dev.jasonpearson.automobile.desktop.core.update.RealUpdateController
 
@@ -24,6 +26,8 @@ val LocalAutoMobileGraph =
       override val settingsProvider = FakeSettingsProvider()
       override val dataSourceFactory = DefaultDataSourceFactory(client)
       override val appVersionProvider = versionProvider
-      override val updateController = RealUpdateController(GitHubReleaseSource(), versionProvider)
+      override val updateController =
+        ConveyorSoftwareUpdateGateway.createOrNull()?.let { ConveyorUpdateController(it) }
+          ?: RealUpdateController(GitHubReleaseSource(), versionProvider)
     }
   }

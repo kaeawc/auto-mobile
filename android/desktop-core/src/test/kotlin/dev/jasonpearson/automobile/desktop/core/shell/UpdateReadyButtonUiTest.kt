@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.desktop.core.shell
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -74,17 +75,36 @@ class UpdateReadyButtonUiTest {
   }
 
   @Test
-  fun `install action is present but disabled in this item`() = runComposeUiTest {
+  fun `install action is disabled when no install callback is supplied`() = runComposeUiTest {
     setContent {
       MaterialTheme {
         UpdateDetailsContent(
           update = available,
           currentVersion = "0.0.52",
           onOpenReleaseNotes = {},
+          // onInstall defaults to null (the GitHub-Releases path, which can't apply in place).
         )
       }
     }
-    // The install affordance exists but is not yet actionable (delivered by a later item).
     onNodeWithText("Install", substring = true).assertIsNotEnabled()
   }
+
+  @Test
+  fun `install action is enabled and invokes the callback when one is supplied`() =
+    runComposeUiTest {
+      var installs = 0
+      setContent {
+        MaterialTheme {
+          UpdateDetailsContent(
+            update = available,
+            currentVersion = "0.0.52",
+            onOpenReleaseNotes = {},
+            onInstall = { installs++ },
+          )
+        }
+      }
+      onNodeWithText("Install", substring = true).assertIsEnabled()
+      onNodeWithText("Install", substring = true).performClick()
+      assertEquals(1, installs)
+    }
 }

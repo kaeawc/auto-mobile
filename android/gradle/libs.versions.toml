@@ -79,6 +79,9 @@ compose-multiplatform = "1.11.1"
 compose-hot-reload = "1.2.0"
 metro = "1.4.1"
 conveyor = "2.0"
+# Conveyor's in-app update control API (SoftwareUpdateController). Versioned independently of the
+# `conveyor` Gradle plugin above — this is the runtime library the desktop app links against.
+conveyor-control = "1.1"
 
 [plugins]
 compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "build-kotlin" }
@@ -111,6 +114,7 @@ kgp = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "bui
 kotlin-stdlib-consumer = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "build-kotlin-consumer" }
 agp = { module = "com.android.tools.build:gradle", version.ref = "build-android-agp" }
 
+conveyor-control = { module = "dev.hydraulic.conveyor:conveyor-control", version.ref = "conveyor-control" }
 koog-agents = { module = "ai.koog:koog-agents", version.ref = "koog-agents" }
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinx-coroutines-test" }

@@ -167,7 +167,7 @@ describe("#4308 device WebRTC integration workflow", () => {
 
     expect(boot).toBeDefined();
     expect(capture).toBeDefined();
-    expect(boot?.run).toContain("bun run src/index.ts --boot-device --platform ios --create-if-missing --timeout-ms 300000");
+    expect(boot?.run).toContain("bun run src/index.ts --boot-device --platform ios --create-if-missing --timeout-ms 600000");
     expect(boot?.run).toContain("jq -r '.deviceId'");
     expect(boot?.run).toContain("killall Simulator");
     expect(boot?.run).toContain("open -a Simulator --args -CurrentDeviceUDID");

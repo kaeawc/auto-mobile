@@ -217,7 +217,7 @@ an appropriate simulator and boots it:
 
 ```bash
 ios_version="$(xcrun --sdk iphonesimulator --show-sdk-version)"
-auto-mobile --boot-device --platform ios --create-if-missing --timeout-ms 300000 \
+auto-mobile --boot-device --platform ios --create-if-missing --timeout-ms 600000 \
   --min-os-version "${ios_version}" --max-os-version "${ios_version}"
 ```
 
@@ -377,7 +377,7 @@ xcrun xcresulttool get test-results tests \
 | `no such module 'XCTestRunner'` | `YourAppTests` compiles AutoMobile files without the package linked | Add `excludes: [AutoMobile/**]` to `YourAppTests` sources in `project.yml`; regenerate |
 | `AutoMobile daemon is not running and could not be started` | `auto-mobile` not on PATH or daemon failed to start | Install `@kaeawc/auto-mobile` globally; check PATH includes `~/.bun/bin` or `/usr/local/bin` |
 | `Plan not found at path: test-plans/launch-app.yaml` | YAML file not bundled | Verify the YAML is under `Tests/AutoMobile/` and appears in Build Phases → Copy Bundle Resources |
-| `No booted iPhone simulator found` | No simulator running | Run `ios_version="$(xcrun --sdk iphonesimulator --show-sdk-version)"; auto-mobile --boot-device --platform ios --create-if-missing --timeout-ms 300000 --min-os-version "${ios_version}" --max-os-version "${ios_version}"` or `xcrun simctl boot "iPhone 16"` |
+| `No booted iPhone simulator found` | No simulator running | Run `ios_version="$(xcrun --sdk iphonesimulator --show-sdk-version)"; auto-mobile --boot-device --platform ios --create-if-missing --timeout-ms 600000 --min-os-version "${ios_version}" --max-os-version "${ios_version}"` or `xcrun simctl boot "iPhone 16"` |
 | `Missing AutoMobile test plan path.` | `planPath` returns empty string | Override `var planPath: String` in your test class |
 | `Could not resolve package 'XCTestRunner'` | Local path wrong or source files missing | Verify `libs/spm/XCTestRunner/` exists and `Package.swift` references the correct `path` |
 

@@ -139,7 +139,10 @@ jobs:
           (cd ios/screen-capture && swift build)
       - name: "Boot and activate iOS Simulator"
         run: |
-          result="$(bun run src/index.ts --boot-device --platform ios --create-if-missing --timeout-ms 300000)"
+          # 600000ms matches the Android product-boot budget and the sibling
+          # CtrlProxy boot: the shared deadline must cover a cold `bootstatus -b`
+          # plus the in-process erase-and-reboot recovery on a loaded runner.
+          result="$(bun run src/index.ts --boot-device --platform ios --create-if-missing --timeout-ms 600000)"
           simulator_udid="$(printf '%s' "${result}" | jq -r '.deviceId')"
           if [[ -z "${simulator_udid}" || "${simulator_udid}" == "null" ]]; then
             echo "::error::AutoMobile product boot returned no deviceId." >&2

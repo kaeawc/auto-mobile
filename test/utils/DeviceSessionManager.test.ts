@@ -15,6 +15,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeWindow } from "../fakes/FakeWindow";
 import { BootedDevice, AppearanceConfigInput } from "../../src/models";
 import { serverConfig } from "../../src/utils/ServerConfig";
+import { DEFAULT_RUNNER_PROVISION_TIMEOUT_MS } from "../../src/utils/runnerReadinessConfig";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type { AndroidCtrlProxy } from "../../src/features/observe/android/AndroidCtrlProxyClient";
 import type { IOSCtrlProxy } from "../../src/features/observe/ios/IOSCtrlProxyClient";
@@ -528,17 +529,24 @@ describe("DeviceSessionManager legacy iOS auto-start readiness", () => {
     await expect(manager.ensureDeviceReady("ios")).rejects.toThrow(/phase=runner-connect/);
   });
 
-  test("uses the configured readiness budget when no test override is supplied", async () => {
+  test("sizes runner provisioning by the provision budget, decoupled from the health budget", async () => {
+    // Session auto-start's total deadline covers a cold CtrlProxy launch
+    // (the provision budget), so the setup health-poll duration reflects that
+    // budget — not the short steady-state readiness/health config (#5376).
     const originalTimeoutMs = serverConfig.getRunnerReadinessTimeoutMs();
     try {
       const iosManager = new FakeIOSCtrlProxyManager();
       const iosClient = new FakeIOSCtrlProxy();
       iosClient.setConnected(false);
       const manager = createManager(iosManager, iosClient, true);
-      serverConfig.setRunnerReadinessTimeoutMs(120_000);
+      serverConfig.setRunnerReadinessTimeoutMs(30_000);
 
       await expect(manager.ensureDeviceReady("ios")).rejects.toThrow(/phase=runner-connect/);
-      expect(iosManager.getLastSetupMinimumHealthPollDurationMs()).toBe(120_000);
+      // Provision (setup) budget dominates the health budget, so a cold launch
+      // gets the full provision window rather than the 30s health window.
+      expect(iosManager.getLastSetupMinimumHealthPollDurationMs()).toBe(
+        DEFAULT_RUNNER_PROVISION_TIMEOUT_MS,
+      );
     } finally {
       serverConfig.setRunnerReadinessTimeoutMs(originalTimeoutMs);
     }

@@ -974,16 +974,16 @@ export class LaunchApp extends BaseVisualChange {
       const intentResult = await perf.track("intentLaunch", async () => {
         logger.info(`[LaunchApp] Trying am start with intent for user ${userId}`);
         try {
-          // Use am start with MAIN/LAUNCHER intent - more reliable than monkey
-          const intentCmd = `shell am start --user ${userId} -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n ${packageName}/.MainActivity 2>/dev/null || am start --user ${userId} -a android.intent.action.MAIN -c android.intent.category.LAUNCHER ${packageName}`;
+          // Let PackageManager resolve the app's launcher activity instead of guessing MainActivity.
+          const intentCmd = `shell am start --user ${userId} -a android.intent.action.MAIN -c android.intent.category.LAUNCHER ${packageName}`;
           logger.info(`[LaunchApp] Intent command: ${intentCmd}`);
           const result = await this.adb.executeCommand(intentCmd);
-          // Check if launch was successful (no "Error" in output)
-          if (result.stdout && !result.stdout.includes("Error")) {
+          // am start may report launch errors on stderr while still returning exit code 0.
+          if (result.stdout && !result.stdout.includes("Error") && !result.stderr.includes("Error")) {
             logger.info(`[LaunchApp] Intent launch completed successfully`);
             return { success: true };
           }
-          logger.info(`[LaunchApp] Intent launch returned error: ${result.stdout}`);
+          logger.info(`[LaunchApp] Intent launch returned error: ${result.stdout}${result.stderr}`);
           return { success: false };
         } catch (error) {
           logger.info(`[LaunchApp] Intent launch failed: ${error}, falling back to monkey`);

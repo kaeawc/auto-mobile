@@ -17,12 +17,28 @@ SCRIPT="scripts/android/validate-no-desktop-core-unified.sh"
 }
 
 @test "fails when a core.unified package reference is present" {
-  local fixture_dir="android/desktop-core/src/test/kotlin/dev/jasonpearson/automobile/desktop"
-  local fixture="$fixture_dir/__UnifiedReferenceGuardFixture.kt"
+  # Build the offending reference in a TEMP root and point the script at it via
+  # its root-override argument. Writing the fixture into the real tree raced
+  # the sibling "passes when absent" tests under `bats --jobs`: they scanned
+  # the repository while the fixture existed and failed spuriously.
+  local tmp_root
+  tmp_root="$(mktemp -d)"
+  local fixture_dir="$tmp_root/android/desktop-core/src/test/kotlin/dev/jasonpearson/automobile/desktop"
   mkdir -p "$fixture_dir"
-  printf 'package dev.jasonpearson.automobile.desktop\nimport dev.jasonpearson.automobile.desktop.core.unified.UnifiedSocketClient\n' > "$fixture"
-  run bash "$SCRIPT"
-  rm -f "$fixture"
+  printf 'package dev.jasonpearson.automobile.desktop\nimport dev.jasonpearson.automobile.desktop.core.unified.UnifiedSocketClient\n' \
+    > "$fixture_dir/__UnifiedReferenceGuardFixture.kt"
+  run bash "$SCRIPT" "$tmp_root"
+  rm -rf "$tmp_root"
   [ "$status" -ne 0 ]
   [[ "$output" == *"desktop-core still references the deleted core.unified package"* ]]
+}
+
+@test "fails when the unified package directory itself is present" {
+  local tmp_root
+  tmp_root="$(mktemp -d)"
+  mkdir -p "$tmp_root/android/desktop-core/src/main/kotlin/dev/jasonpearson/automobile/desktop/core/unified"
+  run bash "$SCRIPT" "$tmp_root"
+  rm -rf "$tmp_root"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unified socket-client package still exists"* ]]
 }

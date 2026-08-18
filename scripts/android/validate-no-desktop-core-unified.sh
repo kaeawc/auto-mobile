@@ -2,7 +2,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# Optional first argument overrides the scanned root. Tests use this to point
+# the guard at a temp fixture tree instead of mutating the real repository,
+# which raced sibling tests under `bats --jobs` (fixture visible to the
+# "passes when absent" tests running concurrently).
+PROJECT_ROOT="${1:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 
 readonly UNIFIED_DIR="$PROJECT_ROOT/android/desktop-core/src/main/kotlin/dev/jasonpearson/automobile/desktop/core/unified"
 readonly UNIFIED_PACKAGE="dev.jasonpearson.automobile.desktop.core.unified"

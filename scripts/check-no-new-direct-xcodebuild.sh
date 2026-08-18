@@ -7,9 +7,11 @@ set -euo pipefail
 base_ref="${1:-origin/main}"
 owner="src/utils/ios-cmdline-tools/XcodebuildClient.ts"
 violations=()
+# shellcheck disable=SC1091 # Resolved relative to this script's location.
+source "$(dirname "${BASH_SOURCE[0]}")/lib/vcs-diff.sh"
 
-if ! git rev-parse --verify --quiet "${base_ref}^{commit}" >/dev/null; then
-  printf 'Cannot check new xcodebuild calls: base ref %s does not exist.\n' "$base_ref" >&2
+if ! vcs_base_exists "$base_ref"; then
+  printf 'Cannot check new xcodebuild calls: base ref %s does not exist.\n' "$(vcs_base_ref "$base_ref")" >&2
   exit 2
 fi
 
@@ -19,12 +21,12 @@ pattern="(${direct_process_call}\\([^;]*xcodebuild|(const|let|var)[^;=]*=[^;]*${
 
 while IFS= read -r file; do
   [[ "$file" == "$owner" || "$file" == test/* ]] && continue
-  added_lines="$(git diff --unified=0 "$base_ref" -- "$file" | awk '/^\+[^+]/ { print substr($0, 2) }' | perl -0pe 's{/\*.*?\*/}{}gs; s{//[^\n]*}{}g' | tr '\n' ' ')"
+  added_lines="$(vcs_diff "$base_ref" "$file" | awk '/^\+[^+]/ { print substr($0, 2) }' | perl -0pe 's{/\*.*?\*/}{}gs; s{//[^\n]*}{}g' | tr '\n' ' ')"
   [[ -z "$added_lines" ]] && continue
   if grep -Eq "$pattern" <<<"$added_lines"; then
     violations+=("$file")
   fi
-done < <(git diff --name-only "$base_ref" -- src)
+done < <(vcs_changed_files "$base_ref" src)
 
 if ((${#violations[@]})); then
   printf '%s\n' "New production xcodebuild execution must go through XcodebuildClient:" >&2

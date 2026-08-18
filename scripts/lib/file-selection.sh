@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
-# Shared git file-selection boilerplate for the per-tool formatter/linter
+# Shared VCS file-selection boilerplate for the per-tool formatter/linter
 # validate_<tool>.sh / apply_<tool>.sh scripts (issue #2823).
 #
 # Historically every formatter/linter re-declared the same three primitives:
-#   * get_touched_files()          - staged + working-tree files, regex-filtered
+#   * get_touched_files()          - working-tree files, regex-filtered
 #   * get_changed_files_since_sha() - files changed vs a base SHA, regex-filtered
 #   * the INSTALL_<TOOL>_WHEN_MISSING install-when-missing gate + re-verify
 # The copies drifted. This file is the single source of truth (issue #2823).
@@ -18,17 +18,18 @@
 #
 # Exports:
 #   collect_touched_files <project_root> <regex>
-#       Emit absolute paths of staged (--cached) and working-tree modified files
-#       whose repo-relative path matches <regex> and that still exist on disk.
-#       Deduplicated + sorted. Returns non-zero if either `git diff` fails, so a
-#       caller can distinguish "no matching files" from "git failed" (a producer
+#       Emit absolute paths of modified files whose repo-relative path matches
+#       <regex> and that still exist on disk. Git includes staged and working
+#       changes; jj compares its working-copy commit with its parent.
+#       Deduplicated + sorted. Returns non-zero when the VCS diff fails, so a
+#       caller can distinguish "no matching files" from "VCS failed" (a producer
 #       failure must never be mistaken for a clean tree).
 #
 #   collect_changed_since_sha <project_root> <sha> <regex>
-#       Emit absolute paths of files changed in <sha>...HEAD whose repo-relative
-#       path matches <regex> and that still exist on disk. Deduplicated + sorted.
-#       Verifies the SHA resolves; returns non-zero (with a message on stderr) if
-#       it does not, or if `git diff` fails.
+#       Emit absolute paths of files changed from <sha> to the working copy whose
+#       repo-relative path matches <regex> and that still exist on disk.
+#       Deduplicated + sorted. Verifies the revision resolves; returns non-zero
+#       (with a message on stderr) if it does not, or if the VCS diff fails.
 #
 #   ensure_tool <name> <installer_path> <install_when_missing>
 #       The install-when-missing gate: if <name> is absent from PATH, either run
@@ -42,6 +43,9 @@
 : "${GREEN:=\033[0;32m}"
 : "${YELLOW:=\033[1;33m}"
 : "${NC:=\033[0m}"
+
+# shellcheck disable=SC1091 # Resolved relative to the helper's location.
+source "$(dirname "${BASH_SOURCE[0]}")/vcs-diff.sh"
 
 # True if <cmd> is on PATH. Guarded so we don't redefine a caller's copy.
 if ! declare -F command_exists > /dev/null 2>&1; then
@@ -66,20 +70,10 @@ _filter_matching_files() {
 collect_touched_files() {
   local project_root="$1"
   local regex="$2"
-  local staged_files
-  local modified_files
 
-  if ! staged_files="$(git diff --cached --name-only --diff-filter=ACMR)"; then
-    return 1
-  fi
-  if ! modified_files="$(git diff --name-only --diff-filter=ACMR)"; then
-    return 1
-  fi
-
-  {
-    printf '%s\n' "$staged_files"
-    printf '%s\n' "$modified_files"
-  } | _filter_matching_files "$project_root" "$regex" | sort | uniq
+  # shellcheck disable=SC2119 # The current workspace determines touched files.
+  vcs_touched_files \
+    | _filter_matching_files "$project_root" "$regex" | sort | uniq
 }
 
 collect_changed_since_sha() {
@@ -88,13 +82,13 @@ collect_changed_since_sha() {
   local regex="$3"
   local changed_files
 
-  # Verify the SHA resolves before diffing so a bad base fails loudly here.
-  if ! git rev-parse --verify "$sha" > /dev/null 2>&1; then
-    echo -e "${RED}SHA '$sha' does not exist in the repository${NC}" >&2
+  # Verify the revision resolves before diffing so a bad base fails loudly here.
+  if ! vcs_base_exists "$sha"; then
+    echo -e "${RED}Revision '$sha' does not exist in the repository${NC}" >&2
     return 1
   fi
 
-  if ! changed_files="$(git diff --name-only "$sha"...HEAD)"; then
+  if ! changed_files="$(vcs_changed_files_since_merge_base "$sha")"; then
     return 1
   fi
 

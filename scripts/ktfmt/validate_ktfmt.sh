@@ -10,8 +10,8 @@ ONLY_CHANGED_SINCE_SHA=${ONLY_CHANGED_SINCE_SHA:-""}
 # shellcheck source=scripts/ktfmt/ktfmt_version.sh disable=SC1091
 source "$(dirname "${BASH_SOURCE[0]}")/ktfmt_version.sh"
 
-# Shared git file-selection + install-when-missing helpers (issue #2823).
-# shellcheck source=scripts/lib/file-selection.sh disable=SC1091
+# Shared VCS file-selection + install-when-missing helpers (issue #2823).
+# shellcheck disable=SC1091 # Resolved relative to this script's location.
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/file-selection.sh"
 
 # Colors for output
@@ -19,11 +19,6 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
-
-# Function to check if command exists
-command_exists() {
-    command -v "$1" >/dev/null 2>&1
-}
 
 PROJECT_ROOT="$(pwd)"
 
@@ -38,12 +33,21 @@ fi
 echo -e "${GREEN}ktfmt is available${NC}"
 
 # Check for other required commands
-for cmd in find xargs git; do
-    if ! command_exists "$cmd"; then
+for cmd in find xargs; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
         echo -e "${RED}Required command '$cmd' is not available${NC}"
         exit 1
     fi
 done
+if vcs_uses_jj; then
+    required_vcs_command="jj"
+else
+    required_vcs_command="git"
+fi
+if ! command -v "$required_vcs_command" >/dev/null 2>&1; then
+    echo -e "${RED}Required command '$required_vcs_command' is not available${NC}"
+    exit 1
+fi
 
 # Fingerprint gate (issue #2966): the scoped PR check only inspects a PR's
 # changed files, so a ktfmt whose version differs from the pin would reformat
@@ -140,7 +144,7 @@ load_files_to_process() {
 # shell, but this up-front branch preserves the intended CI behavior: scoped
 # mode degrades to a full-tree validation when a fetched base is unavailable.
 if [[ -n "$ONLY_CHANGED_SINCE_SHA" ]] \
-    && ! git rev-parse --verify -q "${ONLY_CHANGED_SINCE_SHA}^{commit}" >/dev/null 2>&1; then
+    && ! vcs_base_exists "$ONLY_CHANGED_SINCE_SHA"; then
     echo -e "${YELLOW}Base SHA '${ONLY_CHANGED_SINCE_SHA}' does not resolve; falling back to a full-tree ktfmt check.${NC}"
     ONLY_CHANGED_SINCE_SHA=""
     ONLY_TOUCHED_FILES=false
@@ -150,11 +154,12 @@ fi
 # the result for files outside a PR's Kotlin diff. Run the full tree for those
 # changes rather than relying on the post-merge backstop to discover drift.
 if [[ -n "$ONLY_CHANGED_SINCE_SHA" ]] \
-    && ! git diff --quiet "$ONLY_CHANGED_SINCE_SHA"...HEAD -- \
+    && [[ -n "$(vcs_diff_since_merge_base "$ONLY_CHANGED_SINCE_SHA" \
         scripts/ktfmt \
         scripts/lib/file-selection.sh \
+        scripts/lib/vcs-diff.sh \
         .github/workflows/pull_request.yml \
-        .github/workflows/merge.yml; then
+        .github/workflows/merge.yml)" ]]; then
     echo -e "${YELLOW}Ktfmt inputs changed since the base SHA; running a full-tree ktfmt check.${NC}"
     ONLY_CHANGED_SINCE_SHA=""
     ONLY_TOUCHED_FILES=false

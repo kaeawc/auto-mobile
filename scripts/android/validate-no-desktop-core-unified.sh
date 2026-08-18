@@ -17,7 +17,7 @@ if [[ ! -d "$PROJECT_ROOT/android" ]]; then
   exit 1
 fi
 
-if matches="$(git -C "$PROJECT_ROOT" grep --untracked --fixed-strings --line-number "$UNIFIED_PACKAGE" -- android)"; then
+if matches="$(rg --fixed-strings --line-number -- "$UNIFIED_PACKAGE" "$PROJECT_ROOT/android")"; then
   echo "desktop-core still references the deleted core.unified package:" >&2
   echo "$matches" >&2
   exit 1

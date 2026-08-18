@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 /**
@@ -20,32 +20,39 @@ import { join } from "node:path";
  */
 describe("bundled coordination server is retired (issue #4291)", () => {
   const REMOVED_DIR = "examples/webrtc-coordination-server";
+  const THIS_TEST_PATH = "test/integration/noBundledCoordinationServer.guard.test.ts";
 
   test("the reference coordination server directory is gone", () => {
     expect(existsSync(join(process.cwd(), REMOVED_DIR))).toBe(false);
   });
 
   test("no tracked file references the removed directory", () => {
-    // `git grep` is index-backed and searches only tracked files, so it will not
-    // trip on build output or an untracked scratch copy. Exit code 1 means "no
-    // matches", which is the success case here.
-    const result = spawnSync(
+    const offenders = versionedFiles()
+      .filter(file => file !== THIS_TEST_PATH)
+      .filter(file => readFileSync(file, "utf8").includes("webrtc-coordination-server"));
+    expect(offenders, `these tracked files still reference ${REMOVED_DIR}:\n${offenders.join("\n")}`).toEqual([]);
+  });
+});
+
+function versionedFiles(): string[] {
+  const usesJj = existsSync(".jj") && !existsSync(".git");
+  const result = usesJj
+    ? spawnSync("jj", ["file", "list", "-r", "@"], { cwd: process.cwd(), encoding: "utf8" })
+    : spawnSync(
       "git",
       ["grep", "-l", "--", "webrtc-coordination-server", ":!test/integration/noBundledCoordinationServer.guard.test.ts"],
       { cwd: process.cwd(), encoding: "utf8" }
     );
 
-    if (result.error) {
-      throw result.error;
-    }
-    // Fail closed: git grep exits 0 (matches) or 1 (no matches); anything else is
-    // an error (bad pathspec, not a repo) whose empty stdout would otherwise read
-    // as a false pass.
-    if (result.status !== 0 && result.status !== 1) {
-      throw new Error(`git grep failed (exit ${result.status}): ${result.stderr}`);
-    }
-
-    const offenders = result.stdout.split("\n").filter(line => line.length > 0);
-    expect(offenders, `these tracked files still reference ${REMOVED_DIR}:\n${offenders.join("\n")}`).toEqual([]);
-  });
-});
+  if (result.error) {
+    throw result.error;
+  }
+  if (usesJj && result.status !== 0) {
+    throw new Error(`jj file list failed (exit ${result.status}): ${result.stderr}`);
+  }
+  // `git grep` exits 1 when it finds no matches, which is the success case.
+  if (!usesJj && result.status !== 0 && result.status !== 1) {
+    throw new Error(`git grep failed (exit ${result.status}): ${result.stderr}`);
+  }
+  return result.stdout.split("\n").filter(line => line.length > 0);
+}

@@ -2,8 +2,9 @@
 
 setup() {
   repo_dir="$(mktemp -d)"
-  mkdir -p "$repo_dir/scripts" "$repo_dir/src"
+  mkdir -p "$repo_dir/scripts/lib" "$repo_dir/src"
   cp "$BATS_TEST_DIRNAME/../../scripts/check-no-new-direct-simctl.sh" "$repo_dir/scripts/"
+  cp "$BATS_TEST_DIRNAME/../../scripts/lib/vcs-diff.sh" "$repo_dir/scripts/lib/"
   git -C "$repo_dir" init -q
   git -C "$repo_dir" config user.email test@example.com
   git -C "$repo_dir" config user.name test

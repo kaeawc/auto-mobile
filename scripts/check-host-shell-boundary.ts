@@ -20,14 +20,14 @@ export function repositoryPath(file: string): string {
   return relative(".", file).replaceAll("\\", "/");
 }
 
-type GitRunner = (file: string, args: string[]) => string;
+type CommandRunner = (file: string, args: string[]) => string;
 
-const runGit: GitRunner = (file, args) => execFileSync(file, args, { encoding: "utf8" });
+const runCommand: CommandRunner = (file, args) => execFileSync(file, args, { encoding: "utf8" });
 
 export function resolveBaseRef(
   requestedBaseRef: string,
   environment: NodeJS.ProcessEnv = process.env,
-  runner: GitRunner = runGit
+  runner: CommandRunner = runCommand
 ): string {
   let baseRef = requestedBaseRef;
   try {
@@ -42,6 +42,19 @@ export function resolveBaseRef(
     } catch {
       throw new Error(`Cannot check new host shell execution: base ref ${baseRef} does not exist.`);
     }
+  }
+  return baseRef;
+}
+
+export function resolveJjBaseRef(
+  requestedBaseRef: string,
+  runner: CommandRunner = runCommand
+): string {
+  const baseRef = requestedBaseRef === "origin/main" ? "main@origin" : requestedBaseRef;
+  try {
+    runner("jj", ["log", "-r", baseRef, "--no-graph", "-T", ""]);
+  } catch {
+    throw new Error(`Cannot check new host shell execution: base ref ${baseRef} does not exist.`);
   }
   return baseRef;
 }
@@ -181,10 +194,21 @@ export function findViolationsInSource(file: string, source: string): Violation[
   return violations;
 }
 
-export function changedSourceFiles(baseRef: string, hasGitDirectory = existsSync(".git")): string[] {
-  if (!hasGitDirectory) {throw new Error("Cannot check new host shell execution: this directory is not a Git worktree.");}
-  const resolvedBaseRef = resolveBaseRef(baseRef);
-  return execFileSync("git", ["diff", "--name-only", resolvedBaseRef, "--", SOURCE_ROOT], { encoding: "utf8" })
+export function changedSourceFiles(
+  baseRef: string,
+  hasGitDirectory = existsSync(".git"),
+  hasJjDirectory = existsSync(".jj"),
+  runner: CommandRunner = runCommand
+): string[] {
+  if (!hasGitDirectory && !hasJjDirectory) {
+    throw new Error("Cannot check new host shell execution: this directory is not a Git or Jujutsu worktree.");
+  }
+  const useJj = hasJjDirectory && !hasGitDirectory;
+  const resolvedBaseRef = useJj ? resolveJjBaseRef(baseRef, runner) : resolveBaseRef(baseRef, process.env, runner);
+  const changedFiles = useJj
+    ? runner("jj", ["diff", "--from", resolvedBaseRef, "--to", "@", "--name-only", SOURCE_ROOT])
+    : runner("git", ["diff", "--name-only", resolvedBaseRef, "--", SOURCE_ROOT]);
+  return changedFiles
     .split("\n")
     .filter(file => file.endsWith(".ts") && existsSync(file));
 }

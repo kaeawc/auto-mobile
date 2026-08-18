@@ -1686,6 +1686,26 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     return this.gestures.requestPinch(centerX, centerY, distanceStart, distanceEnd, rotationDegrees, duration, timeoutMs, perf);
   }
 
+  // Streaming gesture input (Android-only): one live drag = start + moves + end sharing a gestureId,
+  // chained into a single continued AccessibilityService gesture by the runner.
+  async requestGestureStart(
+    gestureId: string, x: number, y: number, timeoutMs?: number, perf?: PerformanceTracker
+  ): Promise<A11ySwipeResult> {
+    return this.gestures.requestGestureStart(gestureId, x, y, timeoutMs, perf);
+  }
+
+  async requestGestureMove(
+    gestureId: string, x: number, y: number, timeoutMs?: number, perf?: PerformanceTracker
+  ): Promise<A11ySwipeResult> {
+    return this.gestures.requestGestureMove(gestureId, x, y, timeoutMs, perf);
+  }
+
+  async requestGestureEnd(
+    gestureId: string, x: number, y: number, cancel?: boolean, timeoutMs?: number, perf?: PerformanceTracker
+  ): Promise<A11ySwipeResult> {
+    return this.gestures.requestGestureEnd(gestureId, x, y, cancel, timeoutMs, perf);
+  }
+
   // ===========================================================================
   // Delegated Public Methods - Text
   // ===========================================================================

@@ -31,6 +31,7 @@ import kotlinx.serialization.serializer
 
 private const val DAEMON_CAPABILITIES_METHOD = "daemon/capabilities"
 private const val INPUT_TYPE_TEXT_APPEND_CAPABILITY = "input/typeText.mode:append"
+private const val INPUT_GESTURE_STREAM_CAPABILITY = "input/gestureStream"
 private const val OLD_DAEMON_CAPABILITIES_ERROR = "Unsupported daemon method: daemon/capabilities"
 private const val OLD_DAEMON_APPEND_MODE_ERROR = "input/typeText unsupported params: mode"
 private const val UNSUPPORTED_APPEND_MODE_ERROR =
@@ -438,6 +439,216 @@ class McpDaemonClient(
         putOptionalString("frameContext", frameContext)
       },
     )
+  }
+
+  override fun openGestureStream(platform: String, deviceId: String?): GestureInputStream? {
+    // Streaming has no XCUITest equivalent, and only this Unix-socket transport can hold a
+    // connection open. Everything else falls back to the atomic swipe (the interface default).
+    if (platform != "android") return null
+    if (!daemonSupportsGestureStream()) return null
+    return try {
+      McpGestureInputStream(platform, deviceId, connectPersistentChannel())
+    } catch (_: Exception) {
+      // Could not establish the persistent connection; the caller falls back to inputSwipe.
+      null
+    }
+  }
+
+  /**
+   * Whether the connected daemon advertises `input/gestureStream`. Mirrors the append-mode probe:
+   * an older daemon answers the capability query with its unsupported-method envelope (→ false),
+   * and a successful probe is cached only while the socket's file identity is unchanged.
+   */
+  private fun daemonSupportsGestureStream(): Boolean {
+    val identity = socketIdentity()
+    val capabilities =
+      if (identity == null) {
+        when (val probe = queryDaemonCapabilities(null)) {
+          is DaemonCapabilitiesProbe.Available -> probe.capabilities
+          DaemonCapabilitiesProbe.Legacy -> return false
+          is DaemonCapabilitiesProbe.Failure -> return false
+        }
+      } else {
+        daemonCapabilities?.takeIf { it.identity == identity }?.capabilities
+          ?: sharedDaemonCapabilities[identity]
+          ?: when (val probe = queryDaemonCapabilities(identity)) {
+            is DaemonCapabilitiesProbe.Available -> probe.capabilities
+            DaemonCapabilitiesProbe.Legacy -> return false
+            is DaemonCapabilitiesProbe.Failure -> return false
+          }
+      }
+    return INPUT_GESTURE_STREAM_CAPABILITY in capabilities
+  }
+
+  /**
+   * A connected Unix-socket channel plus its line reader/writer, kept open across gesture frames.
+   */
+  private class PersistentChannel(
+    val channel: SocketChannel,
+    val reader: BufferedReader,
+    val writer: BufferedWriter,
+  )
+
+  /**
+   * Open one Unix-socket channel and leave it connected. Reuses [sendRequest]'s connect discipline
+   * — open unconnected, arm a deadline watchdog before the blocking connect — so a wedged daemon
+   * that never accepts cannot hang the caller forever.
+   */
+  private fun connectPersistentChannel(): PersistentChannel {
+    ensureVersionMatchedDaemon()
+    ensureSocketExists()
+    val address = UnixDomainSocketAddress.of(socketPathValue)
+    val channel = SocketChannel.open(java.net.StandardProtocolFamily.UNIX)
+    val expired = java.util.concurrent.atomic.AtomicBoolean(false)
+    val watchdog =
+      requestWatchdog.schedule(
+        {
+          expired.set(true)
+          try {
+            channel.close()
+          } catch (_: Exception) {
+            // Best-effort; the caller owns the definitive close.
+          }
+        },
+        inputRequestTimeoutMs,
+        java.util.concurrent.TimeUnit.MILLISECONDS,
+      )
+    try {
+      channel.connect(address)
+      val reader =
+        BufferedReader(InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8))
+      val writer =
+        BufferedWriter(
+          OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8)
+        )
+      return PersistentChannel(channel, reader, writer)
+    } catch (e: Exception) {
+      try {
+        channel.close()
+      } catch (_: Exception) {
+        // Best-effort cleanup after a failed connect.
+      }
+      if (expired.get()) {
+        throw DaemonUnavailableException(
+          "Gesture stream connect timed out after ${inputRequestTimeoutMs}ms"
+        )
+      }
+      throw e
+    } finally {
+      watchdog.cancel(false)
+    }
+  }
+
+  /**
+   * One streamed gesture over a single held connection. Each frame writes one `input/gesture*` line
+   * and reads its ack, under the same per-input hang ceiling as one-shot input calls (a hung frame
+   * closes the channel, killing the stream so the caller falls back rather than freezing).
+   */
+  private inner class McpGestureInputStream(
+    private val platform: String,
+    private val deviceId: String?,
+    private val connection: PersistentChannel,
+  ) : GestureInputStream {
+    override fun start(gestureId: String, x: Double, y: Double): InputActionResult =
+      sendFrame("input/gestureStart") {
+        put("platform", JsonPrimitive(platform))
+        putOptionalString("deviceId", deviceId)
+        put("gestureId", JsonPrimitive(gestureId))
+        put("x", JsonPrimitive(x))
+        put("y", JsonPrimitive(y))
+      }
+
+    override fun move(gestureId: String, x: Double, y: Double): InputActionResult =
+      sendFrame("input/gestureMove") {
+        put("platform", JsonPrimitive(platform))
+        putOptionalString("deviceId", deviceId)
+        put("gestureId", JsonPrimitive(gestureId))
+        put("x", JsonPrimitive(x))
+        put("y", JsonPrimitive(y))
+      }
+
+    override fun end(
+      gestureId: String,
+      x: Double,
+      y: Double,
+      cancel: Boolean,
+    ): InputActionResult =
+      sendFrame("input/gestureEnd") {
+        put("platform", JsonPrimitive(platform))
+        putOptionalString("deviceId", deviceId)
+        put("gestureId", JsonPrimitive(gestureId))
+        put("x", JsonPrimitive(x))
+        put("y", JsonPrimitive(y))
+        put("cancel", JsonPrimitive(cancel))
+      }
+
+    override fun close() {
+      try {
+        connection.channel.close()
+      } catch (_: Exception) {
+        // Best-effort; the stream is being torn down regardless.
+      }
+    }
+
+    private fun sendFrame(method: String, params: JsonObjectBuilder.() -> Unit): InputActionResult {
+      val request =
+        DaemonRequest(
+          id = UUID.randomUUID().toString(),
+          type = "mcp_request",
+          method = method,
+          params = buildJsonObject(params),
+          clientVersion = clientVersion,
+        )
+      val expired = java.util.concurrent.atomic.AtomicBoolean(false)
+      val watchdog =
+        requestWatchdog.schedule(
+          {
+            expired.set(true)
+            try {
+              connection.channel.close()
+            } catch (_: Exception) {
+              // Best-effort; the frame call owns the definitive failure.
+            }
+          },
+          inputRequestTimeoutMs,
+          java.util.concurrent.TimeUnit.MILLISECONDS,
+        )
+      return try {
+        connection.writer.write(json.encodeToString(request))
+        connection.writer.newLine()
+        connection.writer.flush()
+        val line =
+          connection.reader.readLine()
+            ?: return InputActionResult(
+              action = method,
+              success = false,
+              error = "Gesture stream closed",
+            )
+        val response = json.decodeFromString<DaemonResponse>(line)
+        response.toInputActionResult(method)
+      } catch (e: Exception) {
+        val message =
+          if (expired.get()) "Gesture frame '$method' timed out after ${inputRequestTimeoutMs}ms"
+          else e.message ?: "Gesture frame '$method' failed"
+        InputActionResult(action = method, success = false, error = message)
+      } finally {
+        watchdog.cancel(false)
+      }
+    }
+  }
+
+  private fun DaemonResponse.toInputActionResult(method: String): InputActionResult {
+    if (!success) {
+      return InputActionResult(action = method, success = false, error = error)
+    }
+    val body =
+      result
+        ?: return InputActionResult(
+          action = method,
+          success = false,
+          error = "Daemon response missing result",
+        )
+    return json.decodeFromJsonElement(serializer<InputActionResult>(), body)
   }
 
   override fun setKeyValue(

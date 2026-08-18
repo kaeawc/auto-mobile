@@ -135,6 +135,43 @@ export interface RequestPinchMessage {
 }
 
 // =============================================================================
+// Streaming Gesture Requests (emitted via the shared sendCommand/createMessage path)
+// =============================================================================
+//
+// A real-time drag is a `request_gesture_start` (finger down), zero or more `request_gesture_move`
+// (incremental travel) sharing one [gestureId], and one `request_gesture_end` (lift or cancel). The
+// runner chains them into a single continued AccessibilityService gesture. Like taps, they carry no
+// `frameContext` so a snapshot advancing mid-drag cannot reject an in-flight gesture as stale.
+
+/** `@SerialName("request_gesture_start")` → `RequestGestureStart` (finger down) */
+export interface RequestGestureStartMessage {
+  type: "request_gesture_start";
+  requestId?: string;
+  gestureId: string;
+  x: number;
+  y: number;
+}
+
+/** `@SerialName("request_gesture_move")` → `RequestGestureMove` (incremental travel) */
+export interface RequestGestureMoveMessage {
+  type: "request_gesture_move";
+  requestId?: string;
+  gestureId: string;
+  x: number;
+  y: number;
+}
+
+/** `@SerialName("request_gesture_end")` → `RequestGestureEnd` (lift, or cancel-in-place) */
+export interface RequestGestureEndMessage {
+  type: "request_gesture_end";
+  requestId?: string;
+  gestureId: string;
+  x: number;
+  y: number;
+  cancel?: boolean;
+}
+
+// =============================================================================
 // Text Input Requests (emitted via the shared sendCommand/createMessage path)
 // =============================================================================
 
@@ -521,6 +558,9 @@ export type CtrlProxyRequest =
   | RequestTwoFingerSwipeMessage
   | RequestDragMessage
   | RequestPinchMessage
+  | RequestGestureStartMessage
+  | RequestGestureMoveMessage
+  | RequestGestureEndMessage
   | RequestSetTextMessage
   | RequestImeActionMessage
   | RequestSelectAllMessage
@@ -585,6 +625,9 @@ const REQUEST_TYPE_REGISTRY: Record<CtrlProxyRequestType, true> = {
   request_two_finger_swipe: true,
   request_drag: true,
   request_pinch: true,
+  request_gesture_start: true,
+  request_gesture_move: true,
+  request_gesture_end: true,
   request_set_text: true,
   request_ime_action: true,
   request_select_all: true,

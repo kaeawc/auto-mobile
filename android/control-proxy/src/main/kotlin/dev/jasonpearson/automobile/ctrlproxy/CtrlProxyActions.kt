@@ -105,6 +105,22 @@ interface CtrlProxyActions {
     duration: Long,
   )
 
+  // Streaming gesture input: one live drag arrives as a start, incremental moves sharing a
+  // `gestureId`, and an end. The runner chains them into a single continued AccessibilityService
+  // gesture so the device tracks the pointer in real time. Coordinates are `Double` for the same
+  // reason swipe/tap are — fractional wire values reach the float `Path` engine untruncated.
+  fun requestGestureStart(requestId: String?, gestureId: String, x: Double, y: Double)
+
+  fun requestGestureMove(requestId: String?, gestureId: String, x: Double, y: Double)
+
+  fun requestGestureEnd(
+    requestId: String?,
+    gestureId: String,
+    x: Double,
+    y: Double,
+    cancel: Boolean,
+  )
+
   fun requestSetText(
     requestId: String?,
     text: String,

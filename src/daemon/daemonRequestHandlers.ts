@@ -14,6 +14,13 @@ export const DAEMON_CAPABILITIES_METHOD = "daemon/capabilities";
 /** Non-destructive Android text input introduced with desktop keyboard forwarding. */
 export const INPUT_TYPE_TEXT_APPEND_CAPABILITY = "input/typeText.mode:append";
 
+/**
+ * Streaming (real-time) gesture input: `input/gestureStart` / `input/gestureMove` /
+ * `input/gestureEnd`, chained into one continued on-device gesture (Android only). A client probes
+ * for this before streaming a drag; when absent it falls back to the atomic `input/swipe`.
+ */
+export const INPUT_GESTURE_STREAM_CAPABILITY = "input/gestureStream";
+
 export interface DaemonStateAccess {
   isInitialized(): boolean;
   getSessionManager(): {
@@ -71,7 +78,7 @@ export async function handleDaemonRequest(
     return {
       success: true,
       result: {
-        capabilities: [INPUT_TYPE_TEXT_APPEND_CAPABILITY],
+        capabilities: [INPUT_TYPE_TEXT_APPEND_CAPABILITY, INPUT_GESTURE_STREAM_CAPABILITY],
       },
     };
   }

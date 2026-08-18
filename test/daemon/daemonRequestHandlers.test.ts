@@ -131,7 +131,7 @@ describe("handleDaemonRequest", () => {
     expect(response).toEqual({
       success: true,
       result: {
-        capabilities: ["input/typeText.mode:append"],
+        capabilities: ["input/typeText.mode:append", "input/gestureStream"],
       },
     });
   });

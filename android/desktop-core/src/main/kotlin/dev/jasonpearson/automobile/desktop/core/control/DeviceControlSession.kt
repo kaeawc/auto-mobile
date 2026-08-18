@@ -23,6 +23,7 @@ import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withContext
 
 /**
@@ -80,7 +81,17 @@ class DeviceControlSession(
   private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
   private val forwarder: DeviceControlInputForwarder = DeviceControlInputForwarder(),
   private val refreshTracker: PostInputRefreshTracker = PostInputRefreshTracker(),
+  /**
+   * Feature flag for streaming (real-time) drag input (issue: streaming gesture input). Off by
+   * default: [beginGestureStream] returns null, so the view keeps dispatching a drag as one atomic
+   * [swipe] on release. When on, a drag streams live and — if the daemon/runner cannot stream —
+   * falls back to the same atomic swipe inside the consumer, so the view's behavior is identical
+   * either way from its own perspective.
+   */
+  private val streamingEnabled: Boolean = false,
 ) {
+  /** Monotonic id for each streamed gesture, correlating its start/move/end frames on the wire. */
+  private val gestureStreamSeq = AtomicLong(0L)
   /**
    * Newest-attempt claim, folded in from the former `ControlTapErrorGate`. Actions are
    * asynchronous: a click claims a monotonically increasing token on the UI thread and, when it
@@ -586,6 +597,46 @@ class DeviceControlSession(
   }
 
   /**
+   * Begin a streamed (real-time) drag on [snapshot] from [start], on the SAME FIFO as [tap]/[swipe]
+   * so gesture order holds. Returns a handle the view feeds incremental moves and the release to,
+   * or null when streaming is unavailable — the flag is off, the start is off-screen, the frame is
+   * no longer dispatchable, or the queue is full — in which case the caller falls back to [swipe]
+   * on release (issue: streaming gesture input).
+   *
+   * [start] must be mapped through [snapshot], exactly like [swipe]'s endpoints; the view pins the
+   * frame at pointer-down and maps every point through it, so a snapshot swap mid-drag cannot
+   * rescale the gesture. Unlike [swipe] the drag-threshold policy is NOT applied here: a streamed
+   * gesture is live from the first move. If it turns out too short to matter, the atomic fallback
+   * in the consumer re-applies [DeviceDragGesturePolicy].
+   */
+  fun beginGestureStream(
+    snapshot: DeviceFrameSnapshot,
+    start: DevicePoint,
+  ): DeviceGestureStreamHandle? {
+    if (!streamingEnabled) return null
+    if (!start.inBounds) return null
+    if (!coordinatesAreStillDispatchable(snapshot)) return null
+    val events = Channel<GestureStreamEvent>(Channel.UNLIMITED)
+    val gestureId = "gesture-${gestureStreamSeq.incrementAndGet()}"
+    val accepted = enqueue { client, platformName, token ->
+      DeviceControlInputCommand.StreamGesture(
+        start = start,
+        gestureId = gestureId,
+        events = events,
+        client = client,
+        platform = platformName,
+        snapshot = snapshot,
+        token = token,
+      )
+    }
+    if (!accepted) {
+      events.close()
+      return null
+    }
+    return DeviceGestureStreamHandle(events)
+  }
+
+  /**
    * Enqueue whatever [stroke] should send, on the SAME queue as [tap] and [swipe] — so a
    * tap-then-type sequence executes in the order the user made it (issue #3351).
    *
@@ -728,6 +779,12 @@ class DeviceControlSession(
   }
 
   private suspend fun execute(command: DeviceControlInputCommand) {
+    // A streamed drag holds this slot for its whole lifetime and runs its own consumer loop, so it
+    // bypasses the one-shot machinery below (which assumes a single request per command).
+    if (command is DeviceControlInputCommand.StreamGesture) {
+      executeStreamGesture(command)
+      return
+    }
     // A command can wait behind another input while the sources rotate. Recheck at the FIFO
     // consumer boundary so a coordinate captured before disagreement cannot reach the daemon.
     if (
@@ -843,6 +900,144 @@ class DeviceControlSession(
           frameContext = command.snapshot.frameContext,
           onError = onError,
         )
+      is DeviceControlInputCommand.StreamGesture ->
+        // Streamed gestures are driven by executeStreamGesture, never the one-shot forwarder.
+        error("StreamGesture is executed directly, not forwarded")
+    }
+  }
+
+  /**
+   * Run one streamed drag to completion, holding the FIFO slot for its lifetime. Mirrors
+   * [execute]'s outer shape — dispatchability recheck, IO-hop, client close, single success/failure
+   * settle — but the actual work is the streaming consumer [streamGesture], which either streams
+   * live or, when the client cannot, drains the events into one atomic swipe. One `refreshTracker`
+   * settle fires at the end (the drag changed the device exactly once, on release), not per move.
+   */
+  private suspend fun executeStreamGesture(command: DeviceControlInputCommand.StreamGesture) {
+    if (!coordinatesAreStillDispatchable(command.snapshot)) {
+      drainAndClose(command.events)
+      command.client?.close()
+      return
+    }
+    var error: String? = null
+    val forwarded =
+      try {
+        withContext(ioDispatcher) {
+          if (!rotationIsStillDispatchable(command.snapshot)) {
+            drainAndClose(command.events)
+            false
+          } else {
+            streamGesture(command) { message -> error = message }
+            true
+          }
+        }
+      } finally {
+        command.client?.close()
+      }
+    if (!forwarded) return
+    val message = error
+    withContext(uiContext) {
+      if (message == null) {
+        refreshTracker.onInputSucceeded(command.snapshot, nowMs())
+      } else {
+        refreshTracker.onInputFailed()
+        if (command.token == errorToken.get()) publishError(message)
+      }
+    }
+  }
+
+  /**
+   * The streaming consumer. Opens a persistent gesture stream when the client supports it and
+   * relays start → moves → end live; otherwise drains the events and dispatches one atomic swipe,
+   * so the caller emits the same event sequence regardless of daemon/runner capability.
+   */
+  private suspend fun streamGesture(
+    command: DeviceControlInputCommand.StreamGesture,
+    onError: (String) -> Unit,
+  ) {
+    val stream = command.client?.openGestureStream(command.platform, command.snapshot.deviceId)
+    if (stream == null) {
+      fallbackAtomicSwipe(command, onError)
+      return
+    }
+    var failure: String? = null
+    try {
+      val started =
+        stream.start(command.gestureId, command.start.x.toDouble(), command.start.y.toDouble())
+      failure = if (started.success) null else started.error ?: "Gesture start failed"
+      if (failure == null) {
+        for (event in command.events) {
+          when (event) {
+            is GestureStreamEvent.Move -> {
+              val result =
+                stream.move(command.gestureId, event.point.x.toDouble(), event.point.y.toDouble())
+              if (!result.success) {
+                failure = result.error ?: "Gesture move failed"
+                break
+              }
+            }
+            is GestureStreamEvent.End -> {
+              val result =
+                stream.end(
+                  command.gestureId,
+                  event.point.x.toDouble(),
+                  event.point.y.toDouble(),
+                  event.cancel,
+                )
+              if (!result.success) failure = result.error ?: "Gesture end failed"
+              break
+            }
+          }
+        }
+      }
+    } finally {
+      stream.close()
+    }
+    if (failure != null) onError(failure)
+  }
+
+  /**
+   * Fallback for a client that cannot stream: collect the drag's release point and dispatch a
+   * single atomic swipe, applying the same [DeviceDragGesturePolicy] the one-shot [swipe] path uses
+   * (a below-threshold or cancelled drag sends nothing).
+   */
+  private suspend fun fallbackAtomicSwipe(
+    command: DeviceControlInputCommand.StreamGesture,
+    onError: (String) -> Unit,
+  ) {
+    for (event in command.events) {
+      if (event is GestureStreamEvent.End) {
+        if (event.cancel) return
+        val decision =
+          DeviceDragGesturePolicy.evaluate(
+            start = command.start,
+            end = event.point,
+            deviceWidth = command.snapshot.deviceWidth,
+            deviceHeight = command.snapshot.deviceHeight,
+            coordinateSpace = command.snapshot.coordinateSpace,
+            nativeScale = command.snapshot.nativeScale,
+          )
+        if (decision is DeviceDragDecision.Swipe) {
+          forwarder.forwardSwipe(
+            start = decision.start,
+            end = decision.end,
+            durationMs = decision.durationMs,
+            client = command.client,
+            platform = command.platform,
+            deviceId = command.snapshot.deviceId,
+            frameContext = command.snapshot.frameContext,
+            onError = onError,
+          )
+        }
+        return
+      }
+    }
+  }
+
+  /** Drain and close a gesture event channel without acting on it (a rejected/aborted stream). */
+  private suspend fun drainAndClose(events: Channel<GestureStreamEvent>) {
+    for (event in events) {
+      if (event is GestureStreamEvent.End) break
     }
   }
 

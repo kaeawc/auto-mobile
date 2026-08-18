@@ -4,6 +4,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.ClearKeyValueResult
 import dev.jasonpearson.automobile.desktop.core.daemon.ExecutePlanResult
 import dev.jasonpearson.automobile.desktop.core.daemon.FeatureFlagState
+import dev.jasonpearson.automobile.desktop.core.daemon.GestureInputStream
 import dev.jasonpearson.automobile.desktop.core.daemon.InputActionResult
 import dev.jasonpearson.automobile.desktop.core.daemon.KillDeviceResult
 import dev.jasonpearson.automobile.desktop.core.daemon.McpResource
@@ -185,6 +186,55 @@ class FakeAutoMobileClient : AutoMobileClient {
   val toolCalls = mutableListOf<ToolCall>()
 
   data class ToolCall(val name: String, val arguments: JsonObject)
+
+  // -- Streamed gesture support --
+
+  /** When false, [openGestureStream] returns null so callers exercise the atomic-swipe fallback. */
+  var gestureStreamSupported: Boolean = true
+
+  var gestureFrameResult: InputActionResult =
+    InputActionResult(action = "input/gestureStart", success = true)
+
+  /** Every stream opened via [openGestureStream], newest last, with its recorded frames. */
+  val openedGestureStreams = mutableListOf<RecordingGestureStream>()
+
+  sealed interface GestureFrame {
+    data class Start(val gestureId: String, val x: Double, val y: Double) : GestureFrame
+
+    data class Move(val gestureId: String, val x: Double, val y: Double) : GestureFrame
+
+    data class End(val gestureId: String, val x: Double, val y: Double, val cancel: Boolean) :
+      GestureFrame
+  }
+
+  inner class RecordingGestureStream : GestureInputStream {
+    val frames = mutableListOf<GestureFrame>()
+    var closed = false
+
+    override fun start(gestureId: String, x: Double, y: Double): InputActionResult {
+      frames.add(GestureFrame.Start(gestureId, x, y))
+      return gestureFrameResult
+    }
+
+    override fun move(gestureId: String, x: Double, y: Double): InputActionResult {
+      frames.add(GestureFrame.Move(gestureId, x, y))
+      return gestureFrameResult
+    }
+
+    override fun end(
+      gestureId: String,
+      x: Double,
+      y: Double,
+      cancel: Boolean,
+    ): InputActionResult {
+      frames.add(GestureFrame.End(gestureId, x, y, cancel))
+      return gestureFrameResult
+    }
+
+    override fun close() {
+      closed = true
+    }
+  }
 
   // -- AutoMobileClient implementation --
 
@@ -368,6 +418,12 @@ class FakeAutoMobileClient : AutoMobileClient {
     calls.add("inputKey")
     inputKeyCalls.add(InputKeyCall(key, platform, deviceId, frameContext))
     return inputKeyResult
+  }
+
+  override fun openGestureStream(platform: String, deviceId: String?): GestureInputStream? {
+    calls.add("openGestureStream")
+    if (!gestureStreamSupported) return null
+    return RecordingGestureStream().also { openedGestureStreams.add(it) }
   }
 
   override fun setKeyValue(

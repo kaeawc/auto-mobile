@@ -75,14 +75,17 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.MONOTONIC_NOW_MS
+import dev.jasonpearson.automobile.desktop.core.control.DeviceGestureStreamHandle
 import dev.jasonpearson.automobile.desktop.core.control.DeviceKeyboardEventTranslator
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 import dev.jasonpearson.automobile.desktop.domain.DeviceFrameSnapshot
+import dev.jasonpearson.automobile.desktop.domain.DeviceGestureStreamCoalescer
 import dev.jasonpearson.automobile.desktop.domain.DeviceKeyStroke
 import dev.jasonpearson.automobile.desktop.domain.DevicePoint
 import dev.jasonpearson.automobile.desktop.domain.DeviceScreenControlMode
 import dev.jasonpearson.automobile.desktop.domain.DeviceScreenCoordinateMapper
 import dev.jasonpearson.automobile.desktop.domain.DeviceScreenGeometry
+import dev.jasonpearson.automobile.desktop.domain.GestureStreamStep
 import dev.jasonpearson.automobile.desktop.domain.TouchFeedbackModel
 import dev.jasonpearson.automobile.desktop.domain.ViewportPoint
 import org.jetbrains.skia.Image
@@ -238,6 +241,15 @@ private suspend fun PointerInputScope.deviceScreenDragGestures(
   controlFrame: () -> Pair<DeviceFrameSnapshot, DeviceScreenGeometry>?,
   onPan: (Offset) -> Unit,
   onSwipe: (DeviceFrameSnapshot, DevicePoint, DevicePoint, Int) -> Unit,
+  /**
+   * Streaming (real-time) drag seam (issue: streaming gesture input). Called once, at touch-slop,
+   * in control mode with the pinned snapshot and the mapped down point; a non-null handle means the
+   * drag streams live (incremental [DeviceGestureStreamHandle.move]s throttled to frame cadence,
+   * then [DeviceGestureStreamHandle.end] on release/cancel) instead of firing the atomic [onSwipe].
+   * Null — the default, or a null return — keeps the atomic path, so the flag-off and inspector
+   * cases are exactly the previous behavior.
+   */
+  beginGestureStream: ((DeviceFrameSnapshot, DevicePoint) -> DeviceGestureStreamHandle?)? = null,
 ) {
   awaitEachGesture {
     val down = awaitFirstDown(requireUnconsumed = false)
@@ -264,31 +276,96 @@ private suspend fun PointerInputScope.deviceScreenDragGestures(
     // flicked (issue: fling strength). `uptimeMillis` is the toolkit's monotonic event clock, so
     // last-minus-down is the real gesture duration regardless of how many move events arrived.
     var lastUptimeMs = change.uptimeMillis
-    val completed =
-      drag(change.id) { dragged ->
-        // Read the delta BEFORE consuming: `positionChange()` reports Offset.Zero once the change
-        // is consumed, so consuming first silently zeroes every pan step.
-        val delta = dragged.positionChange()
-        dragged.consume()
-        if (panning) onPan(delta)
-        lastPosition = dragged.position
-        lastUptimeMs = dragged.uptimeMillis
+
+    // Decide stream vs atomic once, now that this is confirmed a control drag (past slop). The
+    // handle, if any, owns this drag until release; the coalescer throttles host samples to the
+    // wire cadence. Both stay null on a pan, in inspector mode, or when streaming is unavailable.
+    val streaming =
+      if (!panning && frame != null) {
+        val (snapshot, geometry) = frame
+        val downDevice =
+          DeviceScreenCoordinateMapper.viewportToDevice(
+            ViewportPoint(down.position.x, down.position.y),
+            geometry,
+          )
+        beginGestureStream?.invoke(snapshot, downDevice)
+      } else {
+        null
       }
-    if (!completed || frame == null) return@awaitEachGesture
-    val (snapshot, geometry) = frame
-    val gestureDurationMs = (lastUptimeMs - down.uptimeMillis).coerceAtLeast(0L).toInt()
-    onSwipe(
-      snapshot,
-      DeviceScreenCoordinateMapper.viewportToDevice(
-        ViewportPoint(down.position.x, down.position.y),
-        geometry,
-      ),
-      DeviceScreenCoordinateMapper.viewportToDevice(
-        ViewportPoint(lastPosition.x, lastPosition.y),
-        geometry,
-      ),
-      gestureDurationMs,
-    )
+    val coalescer = if (streaming != null) DeviceGestureStreamCoalescer() else null
+
+    // A streamed drag MUST send its terminal end even if this pointerInput coroutine is cancelled
+    // mid-drag (controlMode change, surface removed): the handle's end() is what closes the event
+    // channel, so skipping it leaves the stream consumer awaiting the channel forever while holding
+    // the single input FIFO slot, wedging all later input (issue: streaming gesture input). The
+    // finally lifts in place with a cancelling end when the normal release path did not run.
+    var streamReleased = false
+    try {
+      val completed =
+        drag(change.id) { dragged ->
+          // Read the delta BEFORE consuming: `positionChange()` reports Offset.Zero once the change
+          // is consumed, so consuming first silently zeroes every pan step.
+          val delta = dragged.positionChange()
+          dragged.consume()
+          if (panning) onPan(delta)
+          lastPosition = dragged.position
+          lastUptimeMs = dragged.uptimeMillis
+          if (streaming != null && coalescer != null && frame != null) {
+            val geometry = frame.second
+            val moved =
+              DeviceScreenCoordinateMapper.viewportToDevice(
+                ViewportPoint(dragged.position.x, dragged.position.y),
+                geometry,
+              )
+            // Throttle to the frame cadence; a coalesced sample is superseded by a later move or
+            // the
+            // exact release point sent below, so nothing visible is lost.
+            if (coalescer.offer(moved.x, moved.y, dragged.uptimeMillis) is GestureStreamStep.Emit) {
+              streaming.move(moved)
+            }
+          }
+        }
+
+      if (streaming != null && frame != null) {
+        // A streamed drag ends on release with the exact final point; a cancelled drag (pointer
+        // capture lost, window deactivated) lifts in place so a partial drag is abandoned cleanly.
+        val geometry = frame.second
+        val endDevice =
+          DeviceScreenCoordinateMapper.viewportToDevice(
+            ViewportPoint(lastPosition.x, lastPosition.y),
+            geometry,
+          )
+        streaming.end(endDevice, cancel = !completed)
+        streamReleased = true
+        return@awaitEachGesture
+      }
+
+      if (!completed || frame == null) return@awaitEachGesture
+      val (snapshot, geometry) = frame
+      val gestureDurationMs = (lastUptimeMs - down.uptimeMillis).coerceAtLeast(0L).toInt()
+      onSwipe(
+        snapshot,
+        DeviceScreenCoordinateMapper.viewportToDevice(
+          ViewportPoint(down.position.x, down.position.y),
+          geometry,
+        ),
+        DeviceScreenCoordinateMapper.viewportToDevice(
+          ViewportPoint(lastPosition.x, lastPosition.y),
+          geometry,
+        ),
+        gestureDurationMs,
+      )
+    } finally {
+      if (streaming != null && frame != null && !streamReleased) {
+        val geometry = frame.second
+        val endDevice =
+          DeviceScreenCoordinateMapper.viewportToDevice(
+            ViewportPoint(lastPosition.x, lastPosition.y),
+            geometry,
+          )
+        streaming.end(endDevice, cancel = true)
+      }
+    }
   }
 }
 
@@ -377,6 +454,17 @@ fun DeviceScreenView(
    */
   onControlSwipe: ((DeviceFrameSnapshot, DevicePoint, DevicePoint, Int) -> Unit)? = null,
   /**
+   * Streaming (real-time) drag seam (issue: streaming gesture input). In
+   * [DeviceScreenControlMode.Control], called once at touch-slop with the pinned snapshot and the
+   * mapped down point; a non-null [DeviceGestureStreamHandle] means this drag streams live — the
+   * view feeds it throttled incremental moves and the release — instead of firing the atomic
+   * [onControlSwipe]. A null return (or the null default) keeps the atomic path, so the streaming
+   * flag being off, an unsupported daemon/runner, and inspector mode are all exactly today's
+   * behavior. The caller (holding [DeviceControlSession]) applies the flag and capability gates.
+   */
+  onControlGestureStreamBegin: ((DeviceFrameSnapshot, DevicePoint) -> DeviceGestureStreamHandle?)? =
+    null,
+  /**
    * Called in [DeviceScreenControlMode.Control] for each key press this view receives **while it
    * holds keyboard focus**, with the snapshot the keystroke belongs to and the toolkit-free
    * [DeviceKeyStroke] it translated to (issue #3351). Returns whether the caller forwarded anything
@@ -411,6 +499,8 @@ fun DeviceScreenView(
   // Same reasoning for the drag callback: the gesture coroutine is keyed on controlMode alone, so
   // it must read the LATEST callback rather than the one captured when the gesture started.
   val currentOnControlSwipe by rememberUpdatedState(onControlSwipe)
+  // Same reasoning for the streaming-drag begin callback (issue: streaming gesture input).
+  val currentOnControlGestureStreamBegin by rememberUpdatedState(onControlGestureStreamBegin)
   // Same reasoning again for the key callback (issue #3351).
   val currentOnControlKey by rememberUpdatedState(onControlKey)
   val currentOnControlFocusChanged by rememberUpdatedState(onControlFocusChanged)
@@ -828,6 +918,9 @@ fun DeviceScreenView(
                 },
                 onSwipe = { snapshot, start, end, durationMs ->
                   currentOnControlSwipe?.invoke(snapshot, start, end, durationMs)
+                },
+                beginGestureStream = { snapshot, downPoint ->
+                  currentOnControlGestureStreamBegin?.invoke(snapshot, downPoint)
                 },
               )
             }

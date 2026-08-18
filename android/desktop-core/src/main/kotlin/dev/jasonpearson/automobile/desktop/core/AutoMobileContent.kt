@@ -68,6 +68,7 @@ import dev.jasonpearson.automobile.desktop.core.components.Tooltip
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.control.DeviceControlSession
 import dev.jasonpearson.automobile.desktop.core.control.DeviceKeyboardEventTranslator
+import dev.jasonpearson.automobile.desktop.core.control.GestureStreamingConfig
 import dev.jasonpearson.automobile.desktop.core.daemon.AppearanceClient
 import dev.jasonpearson.automobile.desktop.core.daemon.AppearanceSocketClient
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
@@ -949,6 +950,7 @@ fun AutoMobileContent(
         platform = { controlPlatform.value },
         nowMs = MONOTONIC_NOW_MS,
         publishError = { message -> deviceControlTapError = message },
+        streamingEnabled = GestureStreamingConfig.enabled,
       )
     }
 
@@ -1973,6 +1975,11 @@ fun AutoMobileContent(
               // here.
               onControlSwipe = { snapshot, start, end, durationMs ->
                 deviceControlSession.swipe(snapshot, start, end, durationMs)
+              },
+              // Streaming (real-time) drag on the SAME session: a non-null handle streams live,
+              // null keeps the atomic onControlSwipe above (flag off / unsupported).
+              onControlGestureStreamBegin = { snapshot, downPoint ->
+                deviceControlSession.beginGestureStream(snapshot, downPoint)
               },
               // Keyboard, text and device buttons (issue #3351) travel that SAME session too, so a
               // tap-then-type sequence reaches the device in order. The session answers whether it

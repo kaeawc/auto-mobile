@@ -192,6 +192,11 @@ fun DeviceStreamView(
       onControlSwipe = { snapshot, start, end, durationMs ->
         control.dispatcher.swipe(snapshot, start, end, durationMs)
       },
+      // Streaming (real-time) drag: a non-null handle means this drag streams live; null keeps the
+      // atomic onControlSwipe above (flag off / unsupported). See VideoInputDispatcher.
+      onControlGestureStreamBegin = { snapshot, downPoint ->
+        control.dispatcher.beginGestureStream(snapshot, downPoint)
+      },
       onControlKey = { snapshot, stroke -> control.dispatcher.key(stroke) },
     )
   } else {

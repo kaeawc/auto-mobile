@@ -136,6 +136,22 @@ interface AutoMobileClient {
     frameContext: String? = null,
   ): InputActionResult
 
+  /**
+   * Open a persistent connection for one streamed (real-time) gesture — a drag delivered as a down,
+   * incremental moves, and an up over a single held connection, so the device tracks the pointer
+   * live instead of receiving one atomic `input/swipe` on release.
+   *
+   * Returns null when streaming is unavailable — the transport can't hold a connection open (HTTP /
+   * stdio), the daemon does not advertise `input/gestureStream`, or the platform is not Android —
+   * in which case the caller falls back to [inputSwipe]. The default is null so only the
+   * Unix-socket client implements it; every other transport degrades cleanly (issue: streaming
+   * gesture input).
+   */
+  fun openGestureStream(
+    platform: String = "android",
+    deviceId: String? = null,
+  ): GestureInputStream? = null
+
   fun setKeyValue(
     deviceId: String,
     appId: String,
@@ -311,6 +327,26 @@ internal fun unsupportedInputAction(transportName: String, action: String): Inpu
     success = false,
     error = "$transportName does not support direct daemon input helpers",
   )
+
+/**
+ * A persistent connection for one streamed gesture, from [AutoMobileClient.openGestureStream]. The
+ * caller sends exactly one [start], then any number of [move]s, then one [end], all sharing a
+ * single `gestureId`, and finally [close]s the stream. Each call returns the frame's ack; a failed
+ * ack (or a thrown transport error) means the connection is dead and the caller should stop and
+ * fall back. Not thread-safe: drive it from one thread (the control dispatch consumer).
+ */
+interface GestureInputStream : AutoCloseable {
+  /** Finger down at ([x], [y]). Call once, first. */
+  fun start(gestureId: String, x: Double, y: Double): InputActionResult
+
+  /** One incremental move to ([x], [y]). */
+  fun move(gestureId: String, x: Double, y: Double): InputActionResult
+
+  /** Lift at ([x], [y]); [cancel] abandons the drag and lifts in place. Call once, last. */
+  fun end(gestureId: String, x: Double, y: Double, cancel: Boolean): InputActionResult
+
+  override fun close()
+}
 
 open class McpConnectionException(message: String, cause: Throwable? = null) :
   Exception(message, cause)

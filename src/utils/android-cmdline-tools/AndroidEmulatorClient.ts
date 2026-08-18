@@ -35,7 +35,7 @@ type LaunchFailureCategory =
   | "kvm_permission_denied"
   | "missing_shared_library";
 
-function boundedOutputTail(output: string): string {
+export function boundedEmulatorOutputTail(output: string): string {
   const lines = output.split(/\r?\n/);
   const recentLines = lines.slice(-MAX_LAUNCH_OUTPUT_LINES);
   const recentOutput = recentLines.join("\n");
@@ -915,7 +915,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       return "";
     }
     const output = error as { stdout?: unknown; stderr?: unknown };
-    return boundedOutputTail(
+    return boundedEmulatorOutputTail(
       redactAndroidCommandOutput(
         [outputFromUnknown(output.stdout), outputFromUnknown(output.stderr)]
           .filter(Boolean)
@@ -931,7 +931,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       .then(() => this.execAsync(this.emulatorPath, ["-accel-check"], controller.signal))
       .then(
         (result) =>
-          boundedOutputTail(
+          boundedEmulatorOutputTail(
             redactAndroidCommandOutput([result.stdout, result.stderr].filter(Boolean).join("\n")),
           ),
         (error) => this.diagnosticOutputFromError(error),
@@ -1417,11 +1417,11 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
       const appendRedactedLaunchOutput = (output: string) => {
         if (output.length > 0) {
-          launchOutput = boundedOutputTail(launchOutput + output);
+          launchOutput = boundedEmulatorOutputTail(launchOutput + output);
         }
       };
       const currentLaunchOutput = () =>
-        boundedOutputTail(launchOutput + stdoutRedactor.snapshot() + stderrRedactor.snapshot());
+        boundedEmulatorOutputTail(launchOutput + stdoutRedactor.snapshot() + stderrRedactor.snapshot());
       const flushLaunchOutput = () => {
         for (const redactor of [stdoutRedactor, stderrRedactor]) {
           const flushedOutput = redactor.flush();

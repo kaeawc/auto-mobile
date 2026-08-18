@@ -36,6 +36,14 @@ import { consolePortFromSerial } from "../utils/android-cmdline-tools/EmulatorCo
 import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
 import { runWithAbortSignal } from "../utils/AbortContext";
+import { AndroidCommandOutputStreamRedactor } from "../utils/android-cmdline-tools/redactAndroidCommandOutput";
+import { boundedEmulatorOutputTail } from "../utils/android-cmdline-tools/AndroidEmulatorClient";
+import {
+  deviceLossCancellationReason,
+  InMemoryEmulatorLossIncidentStore,
+  type EmulatorLossDetectionPath,
+  type EmulatorLossIncidentStore,
+} from "./emulatorLossIncident";
 
 export type { DeviceAllocationCriteria, DeviceAllocationRequest } from "./DeviceCriteriaMatcher";
 export type { DeviceRecoveryPolicy } from "./poolConfig";
@@ -137,6 +145,74 @@ interface DeviceRemovedListener {
 }
 
 /**
+ * A process can emit output after readiness. Capture its redacted bounded tail
+ * so a later unexpected exit has the same useful evidence as an early launch
+ * failure without retaining unbounded process output.
+ */
+class EmulatorProcessOutputTail {
+  private output = "";
+  private readonly stdoutRedactor = new AndroidCommandOutputStreamRedactor();
+  private readonly stderrRedactor = new AndroidCommandOutputStreamRedactor();
+  private readonly streamsClosed: Promise<void>;
+
+  constructor(
+    childProcess: ChildProcess,
+    private readonly timer: Timer,
+  ) {
+    const hasStreams = childProcess.stdout !== null && childProcess.stdout !== undefined
+      || childProcess.stderr !== null && childProcess.stderr !== undefined;
+    this.streamsClosed = hasStreams
+      ? new Promise(resolve => childProcess.once("close", resolve))
+      : Promise.resolve();
+    childProcess.stdout?.on("data", value => this.append(value, this.stdoutRedactor));
+    childProcess.stderr?.on("data", value => this.append(value, this.stderrRedactor));
+  }
+
+  snapshot(): string | undefined {
+    const output = boundedEmulatorOutputTail(
+      this.output + this.stdoutRedactor.snapshot() + this.stderrRedactor.snapshot(),
+    );
+    return output.length > 0 ? output : undefined;
+  }
+
+  async finalize(): Promise<string | undefined> {
+    await this.waitForStreamClose();
+    this.output = boundedEmulatorOutputTail(
+      this.output + this.stdoutRedactor.flush() + this.stderrRedactor.flush(),
+    );
+    return this.output.length > 0 ? this.output : undefined;
+  }
+
+  private append(value: unknown, redactor: AndroidCommandOutputStreamRedactor): void {
+    const text = typeof value === "string"
+      ? value
+      : Buffer.isBuffer(value)
+        ? value.toString()
+        : "";
+    if (!text) {
+      return;
+    }
+    this.output = boundedEmulatorOutputTail(this.output + redactor.append(text));
+  }
+
+  private async waitForStreamClose(): Promise<void> {
+    let timeout: NodeJS.Timeout | undefined;
+    try {
+      await Promise.race([
+        this.streamsClosed,
+        new Promise<void>(resolve => {
+          timeout = this.timer.setTimeout(resolve, 1_000);
+        }),
+      ]);
+    } finally {
+      if (timeout) {
+        this.timer.clearTimeout(timeout);
+      }
+    }
+  }
+}
+
+/**
  * Marker incarnation used when an intentional shutdown is recorded while no
  * pooled device is present (only an in-flight recovery). Such a marker applies
  * to whatever incarnation the recovery produces, matching the pre-existing
@@ -180,6 +256,8 @@ export class DevicePool {
   private readonly recoveringAndroidImages: Map<string, DeviceInfo> = new Map();
   private readonly recoveringAndroidDeviceIds: Set<string> = new Set();
   private readonly startedDeviceProcesses: Map<string, ChildProcess> = new Map();
+  private readonly startedDeviceProcessOutput: Map<string, EmulatorProcessOutputTail> = new Map();
+  private readonly emulatorLossIncidentStore: EmulatorLossIncidentStore;
   /** Latest refresh request; older discovery snapshots must not overwrite it. */
   private refreshGeneration = 0;
   private readonly readinessReservationCounts: Map<string, number> = new Map();
@@ -227,6 +305,7 @@ export class DevicePool {
     androidDeviceReboot?: AndroidDeviceReboot,
     recoveryPolicy?: DeviceRecoveryPolicy,
     onDeviceRemoved?: DeviceRemovedListener,
+    emulatorLossIncidentStore: EmulatorLossIncidentStore = new InMemoryEmulatorLossIncidentStore(timer),
   ) {
     this.sessionManager = sessionManager;
     this.daemonSessionId = daemonSessionId;
@@ -238,6 +317,7 @@ export class DevicePool {
     this.criteriaMatcher = criteriaMatcher;
     this.onDeviceReady = onDeviceReady;
     this.onDeviceRemoved = onDeviceRemoved;
+    this.emulatorLossIncidentStore = emulatorLossIncidentStore;
     // Resolve recovery policy once so retries and status agree even if the
     // process environment changes after construction.
     this.recoveryPolicy = { ...(recoveryPolicy ?? getDeviceRecoveryPolicy()) };
@@ -535,6 +615,9 @@ export class DevicePool {
     const startedProcess = preserveAutoMobileOwnership
       ? this.startedDeviceProcesses.get(pooledDevice.id)
       : undefined;
+    const startedProcessOutput = preserveAutoMobileOwnership
+      ? this.startedDeviceProcessOutput.get(pooledDevice.id)
+      : undefined;
     await this.evictMissingPooledDevice(
       pooledDevice,
       `runtime identity changed to ${bootedDevice.platform}:${bootedDevice.name}`,
@@ -545,6 +628,9 @@ export class DevicePool {
     await this.addDevice(bootedDevice, sourceImage);
     if (startedProcess) {
       this.startedDeviceProcesses.set(bootedDevice.deviceId, startedProcess);
+    }
+    if (startedProcessOutput) {
+      this.startedDeviceProcessOutput.set(bootedDevice.deviceId, startedProcessOutput);
     }
     return true;
   }
@@ -569,6 +655,7 @@ export class DevicePool {
     this.deviceSessionStarts.delete(deviceId);
     this.refreshMissingDeviceMisses.delete(deviceId);
     this.startedDeviceProcesses.delete(deviceId);
+    this.startedDeviceProcessOutput.delete(deviceId);
     if (this.lastReleasedDeviceId === deviceId) {
       this.lastReleasedDeviceId = null;
     }
@@ -650,6 +737,7 @@ export class DevicePool {
   async removeDisconnectedDevice(
     deviceId: string,
     mayBeStaleSignal: boolean = true,
+    incidentId?: string,
   ): Promise<void> {
     const device = this.devices.get(deviceId);
     if (await this.shouldDeferDisconnectCleanup(deviceId, device, mayBeStaleSignal)) {
@@ -665,7 +753,14 @@ export class DevicePool {
     if (this.devices.get(deviceId) !== device || rediscovery !== "not-rediscovered") {
       return;
     }
-    if (await this.rebootDisconnectedAndroidDevice(device)) {
+    const recordedIncidentId = incidentId ?? await this.recordEmulatorLossIncident(
+      deviceId,
+      "device-discovery-miss",
+      undefined,
+      "absent",
+    );
+    const recoveryWasAttempted = this.shouldRebootDisconnectedAndroidDevice(device);
+    if (await this.rebootDisconnectedAndroidDevice(device, recordedIncidentId)) {
       return;
     }
     const current = this.devices.get(deviceId);
@@ -673,7 +768,94 @@ export class DevicePool {
       return;
     }
     this.suppressAutoStartForDevice(device);
+    await this.completeRecoveryIfNotAttempted(recordedIncidentId, recoveryWasAttempted);
     await this.removeDevice(deviceId);
+  }
+
+  /**
+   * Opens a durable postmortem record without allowing diagnostics persistence
+   * failure to block the critical device-loss cleanup path.
+   */
+  async recordEmulatorLossIncident(
+    deviceId: string,
+    detectionPath: EmulatorLossDetectionPath,
+    processExit?: { code: number | null; signal: NodeJS.Signals | null },
+    lastAdbState?: string,
+  ): Promise<string | undefined> {
+    const device = this.devices.get(deviceId);
+    if (
+      !device ||
+      device.platform !== "android" ||
+      consolePortFromSerial(device.id) === null
+    ) {
+      return undefined;
+    }
+    try {
+      // Capture the tail inside the try so a finalize()/snapshot() rejection
+      // degrades to no tail rather than blocking device-loss cleanup.
+      const outputTail = detectionPath === "watched-process-exit"
+        ? await this.startedDeviceProcessOutput.get(deviceId)?.finalize()
+        : this.startedDeviceProcessOutput.get(deviceId)?.snapshot();
+      const incident = await this.emulatorLossIncidentStore.open({
+        deviceId,
+        ...(device.avdName ? { avdName: device.avdName } : {}),
+        detectionPath,
+        ...(processExit ? { processExit } : {}),
+        ...(outputTail ? { outputTail } : {}),
+        ...(lastAdbState ? { lastAdbState } : {}),
+        recoveryPolicy: this.getRecoveryPolicy(),
+      });
+      return incident.id;
+    } catch (error) {
+      logger.warn(
+        `[DevicePool] Failed to record emulator-loss incident for ${deviceId}: ${error}`,
+        error,
+      );
+      return undefined;
+    }
+  }
+
+  private async completeRecoveryIfNotAttempted(
+    incidentId: string | undefined,
+    recoveryWasAttempted: boolean,
+  ): Promise<void> {
+    if (!recoveryWasAttempted) {
+      await this.completeEmulatorLossRecovery(incidentId, "not-attempted");
+    }
+  }
+
+  private async recordEmulatorLossRecoveryAttempt(
+    incidentId: string | undefined,
+    attempt: { attempt: number; outcome: "failed" | "succeeded" },
+  ): Promise<void> {
+    if (!incidentId) {
+      return;
+    }
+    try {
+      await this.emulatorLossIncidentStore.recordRecoveryAttempt(incidentId, attempt);
+    } catch (error) {
+      logger.warn(
+        `[DevicePool] Failed to record emulator-loss recovery attempt for ${incidentId}: ${error}`,
+        error,
+      );
+    }
+  }
+
+  private async completeEmulatorLossRecovery(
+    incidentId: string | undefined,
+    outcome: "recovered" | "exhausted" | "not-attempted",
+  ): Promise<void> {
+    if (!incidentId) {
+      return;
+    }
+    try {
+      await this.emulatorLossIncidentStore.completeRecovery(incidentId, outcome);
+    } catch (error) {
+      logger.warn(
+        `[DevicePool] Failed to finalize emulator-loss incident ${incidentId}: ${error}`,
+        error,
+      );
+    }
   }
 
   private async wasRebootedAndroidDeviceRediscovered(
@@ -1518,6 +1700,7 @@ export class DevicePool {
     device: PooledDevice,
     reason: string,
     recoverAndroidEmulator: boolean = false,
+    incidentId?: string,
   ): Promise<void> {
     if (this.isReservedForShutdown(device)) {
       // killDevice alone owns a shutdown-reserved incarnation until it either
@@ -1527,11 +1710,21 @@ export class DevicePool {
       return;
     }
     logger.warn(`Evicting device ${device.id} from pool: ${reason}`);
+    const correlatedIncidentId = incidentId ?? (
+      recoverAndroidEmulator
+        ? await this.recordEmulatorLossIncident(
+          device.id,
+          "device-discovery-miss",
+          undefined,
+          "absent",
+        )
+        : undefined
+    );
     if (device.sessionId) {
       await this.releaseSessionForDisconnectedDevice(
         device.sessionId,
         device.id,
-        `device-disconnected:${device.id}`,
+        deviceLossCancellationReason(device.id, correlatedIncidentId),
       );
       if (this.devices.get(device.id) !== device) {
         return;
@@ -1543,9 +1736,10 @@ export class DevicePool {
     }
     device.status = "idle";
     if (recoverAndroidEmulator && this.shouldRebootDisconnectedAndroidDevice(device)) {
-      await this.removeDisconnectedDevice(device.id, false);
+      await this.removeDisconnectedDevice(device.id, false, correlatedIncidentId);
       return;
     }
+    await this.completeEmulatorLossRecovery(correlatedIncidentId, "not-attempted");
     await this.removeDevice(device.id);
   }
 
@@ -1559,7 +1753,10 @@ export class DevicePool {
     );
   }
 
-  private async rebootDisconnectedAndroidDevice(device: PooledDevice): Promise<boolean> {
+  private async rebootDisconnectedAndroidDevice(
+    device: PooledDevice,
+    incidentId?: string,
+  ): Promise<boolean> {
     if (!this.shouldRebootDisconnectedAndroidDevice(device)) {
       return false;
     }
@@ -1581,6 +1778,7 @@ export class DevicePool {
     };
     this.recoveringAndroidImages.set(avdName, recoveryImage);
     this.recoveringAndroidDeviceIds.add(device.id);
+    let recoveryAttempt = 0;
     try {
       try {
         await this.stopTrackedEmulatorProcess(device.id);
@@ -1589,10 +1787,12 @@ export class DevicePool {
           `[DevicePool] Could not terminate disconnected emulator ${device.id}: ${error}`,
           error,
         );
+        await this.completeEmulatorLossRecovery(incidentId, "exhausted");
         return false;
       }
       const current = this.devices.get(device.id);
       if (current && current !== device) {
+        await this.completeEmulatorLossRecovery(incidentId, "recovered");
         return true;
       }
       await this.removeDevice(device.id);
@@ -1603,7 +1803,8 @@ export class DevicePool {
           intentionallyStopped = true;
           return;
         }
-        const childProcess = await this.deviceManager.startDevice(target);
+        const attempt = ++recoveryAttempt;
+        let childProcess: ChildProcess | null = null;
         let ready: BootedDevice | undefined;
         let readinessCompleted = false;
         const stopCancelledRecovery = async (deviceToRemove?: BootedDevice): Promise<void> => {
@@ -1622,6 +1823,7 @@ export class DevicePool {
           }
         };
         try {
+          childProcess = await this.deviceManager.startDevice(target);
           ready = this.criteriaMatcher.withDeviceImageMetadata(
             await waitForDeviceReadyOrCancel(this.deviceManager, target, childProcess),
             recoveryImage,
@@ -1639,11 +1841,19 @@ export class DevicePool {
             return;
           }
           await this.trackStartedDeviceProcess(ready, childProcess);
+          await this.recordEmulatorLossRecoveryAttempt(incidentId, {
+            attempt,
+            outcome: "succeeded",
+          });
         } catch (error) {
           if (this.consumeIntentionalShutdown(recoveryDeviceIds)) {
             await stopCancelledRecovery(readinessCompleted ? ready : undefined);
             return;
           }
+          await this.recordEmulatorLossRecoveryAttempt(incidentId, {
+            attempt,
+            outcome: "failed",
+          });
           throw error;
         }
       });
@@ -1654,11 +1864,13 @@ export class DevicePool {
         logger.info(
           `[DevicePool] Cancelled Android emulator ${avdName} recovery after intentional shutdown`,
         );
+        await this.completeEmulatorLossRecovery(incidentId, "not-attempted");
         return true;
       }
       if (recovered) {
         logger.info(`[DevicePool] Restarted Android emulator ${avdName} after disconnect`);
       }
+      await this.completeEmulatorLossRecovery(incidentId, recovered ? "recovered" : "exhausted");
       return recovered;
     } finally {
       this.recoveringAndroidImages.delete(avdName);
@@ -1683,6 +1895,7 @@ export class DevicePool {
   private async stopTrackedEmulatorProcess(deviceId: string): Promise<void> {
     const childProcess = this.startedDeviceProcesses.get(deviceId);
     this.startedDeviceProcesses.delete(deviceId);
+    this.startedDeviceProcessOutput.delete(deviceId);
     await this.stopEmulatorProcess(childProcess);
   }
 
@@ -1747,6 +1960,10 @@ export class DevicePool {
     }
 
     this.startedDeviceProcesses.set(device.deviceId, childProcess);
+    this.startedDeviceProcessOutput.set(
+      device.deviceId,
+      new EmulatorProcessOutputTail(childProcess, this.timer),
+    );
     let exitHandled = false;
     const handleExit = (code: number | null, signal: NodeJS.Signals | null): void => {
       if (exitHandled) {
@@ -1825,10 +2042,16 @@ export class DevicePool {
       return;
     }
 
+    const incidentId = await this.recordEmulatorLossIncident(
+      deviceId,
+      "watched-process-exit",
+      { code, signal },
+    );
     await this.evictMissingPooledDevice(
       device,
       `emulator process exited after startup (code=${code ?? "null"}, signal=${signal ?? "null"})`,
       true,
+      incidentId,
     );
   }
 

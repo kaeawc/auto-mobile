@@ -69,6 +69,7 @@ import { registerStorageResources } from "./storageResources";
 import { registerAppFileResources } from "./appFileResources";
 import { registerFeatureFlagResources } from "./featureFlagResources";
 import { registerNetworkResources } from "./networkResources";
+import { registerEmulatorLossIncidentResources } from "./emulatorLossIncidentResources";
 import { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
 import { startupBenchmark } from "../utils/startupBenchmark";
 import {
@@ -252,6 +253,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   registerAppFileResources();
   registerFeatureFlagResources();
   registerNetworkResources();
+  registerEmulatorLossIncidentResources();
   startupBenchmark.endPhase("resourceRegistration");
 
   // Create a new MCP server

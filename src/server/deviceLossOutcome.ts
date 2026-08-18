@@ -5,6 +5,7 @@ export interface DeviceLossOutcome {
   code: typeof DEVICE_LOSS_OUTCOME_CODE;
   deviceId: string;
   sessionUuid?: string;
+  incidentId?: string;
   reason: "confirmed-unavailable";
 }
 
@@ -19,6 +20,7 @@ export class DeviceLostError extends Error {
   constructor(
     readonly deviceId: string,
     reason: string,
+    readonly incidentId?: string,
   ) {
     super(reason);
     this.name = "DeviceLostError";
@@ -30,10 +32,17 @@ export function isDeviceLostError(error: unknown): error is DeviceLostError {
 }
 
 export function deviceLostErrorFromCancellationReason(reason: string): DeviceLostError | undefined {
-  const deviceId = reason.startsWith("device-disconnected:")
-    ? reason.slice("device-disconnected:".length)
-    : "";
-  return deviceId ? new DeviceLostError(deviceId, reason) : undefined;
+  if (!reason.startsWith("device-disconnected:")) {
+    return undefined;
+  }
+  const details = reason.slice("device-disconnected:".length);
+  const incidentDelimiter = ";incident=";
+  const incidentIndex = details.indexOf(incidentDelimiter);
+  const deviceId = incidentIndex === -1 ? details : details.slice(0, incidentIndex);
+  const incidentId = incidentIndex === -1
+    ? undefined
+    : details.slice(incidentIndex + incidentDelimiter.length) || undefined;
+  return deviceId ? new DeviceLostError(deviceId, reason, incidentId) : undefined;
 }
 
 /**
@@ -62,6 +71,7 @@ export function deviceLossOutcomeFromError(
     code: DEVICE_LOSS_OUTCOME_CODE,
     deviceId: error.deviceId,
     ...(sessionUuid ? { sessionUuid } : {}),
+    ...(error.incidentId ? { incidentId: error.incidentId } : {}),
     reason: "confirmed-unavailable",
   };
 }

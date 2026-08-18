@@ -222,7 +222,9 @@ describe("DeviceSessionRepository", () => {
         .rejects.toThrow(/not available|shut down|disconnected/);
 
       const row = await repo.getSession("session-1");
-      expect(row!.release_reason).toBe("device-disconnected:emulator-5554");
+      expect(row!.release_reason).toMatch(
+        /^device-disconnected:emulator-5554;incident=emulator-loss-/,
+      );
     } finally {
       sessionManager.stopCleanupTimer();
     }

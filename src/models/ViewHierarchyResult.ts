@@ -15,6 +15,15 @@ export interface ViewHierarchyResult {
   hierarchy: Hierarchy;
   /** Timestamp from the device when the hierarchy was captured (milliseconds since epoch) */
   updatedAt?: number;
+  /**
+   * Host-clock-domain timestamp (ms since epoch) for when the host took delivery
+   * of this tree — a fresh sync's receipt time, or a cache entry's original
+   * receipt time. Used to measure observation age without crossing clock domains:
+   * `updatedAt` is device-authored, so on a skewed emulator `hostNow - updatedAt`
+   * misreports clock skew as age (issue #5377). Absent on iOS, which shares the
+   * host clock, and on any source that does not track receipt time.
+   */
+  receivedAt?: number;
   /** Opaque device-authored identity for the UI state captured in this hierarchy. */
   frameContext?: string;
   /**

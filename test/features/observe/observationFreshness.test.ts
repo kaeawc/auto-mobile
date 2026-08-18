@@ -91,6 +91,61 @@ describe("computeFreshness", () => {
       expect(v.ageMs).toBe(0);
       expect(v.isFresh).toBe(true);
     });
+
+    // --- issue #5377: age must be measured in a single (host) clock domain ---
+
+    test("CLOCK SKEW: a host-domain age basis is used for ageMs instead of the device timestamp", () => {
+      // The device clock is ~25s behind the host, so `actualTimestamp` (device
+      // domain) is 25s "in the past" relative to host `now` even though the tree
+      // was captured ~now on the device and received ~200ms ago on the host.
+      // ageMs must reflect the host-domain receipt age, not the skew.
+      const v = computeFreshness({
+        actualTimestamp: NOW - 25_000, // device-authored, skewed
+        hostAgeBasisMs: NOW - 200, // host-authored receipt time
+        now: NOW,
+        verified: true,
+      });
+      expect(v.ageMs).toBe(200);
+      expect(v.actualTimestamp).toBe(NOW - 25_000); // still reports the device timestamp
+      expect(v.isFresh).toBe(true);
+      expect(v.warning).toBeUndefined(); // no spurious "the rest of the observation was slow"
+    });
+
+    test("CLOCK SKEW: no spurious over-budget warning when only the device clock is skewed", () => {
+      // Recent host receipt but a wildly skewed device timestamp: without the
+      // host-domain basis this fired the false "already Nms old … slow" warning.
+      const v = computeFreshness({
+        actualTimestamp: NOW - 25_000,
+        hostAgeBasisMs: NOW - 100,
+        now: NOW,
+        verified: true,
+      });
+      expect(v.isFresh).toBe(true);
+      expect(v.warning).toBeUndefined();
+    });
+
+    test("a genuinely slow observation still warns, measured in the host domain", () => {
+      // Host-domain basis IS past the budget: this is real slowness (dense-screen
+      // extraction), so the verified-tree warning is legitimate here.
+      const v = computeFreshness({
+        actualTimestamp: NOW - 11_000,
+        hostAgeBasisMs: NOW - 11_000,
+        now: NOW,
+        verified: true,
+      });
+      expect(v.ageMs).toBe(11_000);
+      expect(v.isFresh).toBe(true);
+      expect(v.warning).toContain("verified against the device");
+    });
+
+    test("FALLBACK: with no host-domain basis, age falls back to the device timestamp (iOS)", () => {
+      // iOS shares the host clock, so it never supplies a host basis; the old
+      // device-timestamp age must remain byte-identical.
+      const v = computeFreshness({ actualTimestamp: NOW - 200, now: NOW, verified: true });
+      expect(v.ageMs).toBe(200);
+      expect(v.isFresh).toBe(true);
+      expect(v.warning).toBeUndefined();
+    });
   });
 
   describe("with a requested minimum (the `waitFor` polling path)", () => {

@@ -16,6 +16,10 @@ plugins {
   alias(libs.plugins.compose.multiplatform)
   alias(libs.plugins.compose.hot.reload)
   alias(libs.plugins.metro)
+  // Conveyor packaging + auto-update (POC, coexists with the jpackage `compose.desktop` block
+  // below). Adds the printConveyorConfig / writeConveyorConfig tasks and feeds the runtime
+  // classpath to `conveyor make`. See conveyor.conf and #5227.
+  alias(libs.plugins.conveyor)
 }
 
 repositories {

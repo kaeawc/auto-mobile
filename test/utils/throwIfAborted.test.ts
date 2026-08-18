@@ -1,10 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { throwIfAborted } from "../../src/utils/toolUtils";
 import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
-import { DeviceLostError } from "../../src/server/deviceLossOutcome";
-import { ExecutionTracker } from "../../src/server/executionTracker";
-import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
-import { FakeTimer } from "../fakes/FakeTimer";
+import { DeviceLostError, rememberDeviceLossAbort } from "../../src/server/deviceLossOutcome";
 
 describe("throwIfAborted", () => {
   test("throws the cancellation error when the signal is already aborted", () => {
@@ -21,21 +18,31 @@ describe("throwIfAborted", () => {
     expect(() => throwIfAborted(controller.signal)).toThrow(deviceLoss);
   });
 
-  test("preserves tracked device loss when AbortSignal.reason is unavailable", async () => {
-    const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator(["execution-1"]));
-    const execution = tracker.startExecution("observe", undefined, "session-a");
-    await tracker.cancelSessionUuidExecutions("session-a", "device-disconnected:emulator-5554");
-    Object.defineProperty(execution.abortController.signal, "reason", {
-      configurable: true,
-      value: undefined,
-    });
+  test("preserves tracked device loss when AbortSignal.reason is unavailable", () => {
+    // Regression for the device-loss fallback (issue #3909): Bun can report a
+    // signal as aborted while its `reason` does not surface the typed
+    // DeviceLostError. throwIfAborted must then recover the tracked device loss via
+    // the remembered-abort seam instead of throwing a generic cancellation.
+    //
+    // The signal is aborted plainly, so `signal.reason` is a DOMException rather
+    // than a DeviceLostError — the exact `isDeviceLostError(reason) === false`
+    // condition that drives the WeakMap fallback. This is fully deterministic and
+    // avoids redefining `reason` on a native AbortSignal, which was a non-portable,
+    // uncaught hazard: the property descriptor of `AbortSignal.prototype.reason`
+    // differs across Bun versions/platforms, so `Object.defineProperty` could throw
+    // on some runners (a cross-platform flake), and it sat outside the try/catch.
+    const controller = new AbortController();
+    controller.abort();
+    const deviceLoss = new DeviceLostError("emulator-5554", "device-disconnected:emulator-5554");
+    rememberDeviceLossAbort(controller.signal, deviceLoss);
 
     let thrown: unknown;
     try {
-      throwIfAborted(execution.abortController.signal);
+      throwIfAborted(controller.signal);
     } catch (error) {
       thrown = error;
     }
+    expect(thrown).toBe(deviceLoss);
     expect(thrown).toBeInstanceOf(DeviceLostError);
   });
 

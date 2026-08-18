@@ -108,7 +108,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.116.0",
+    "@anthropic-ai/sdk": "^0.117.1",
     "@jimp/core": "^1.6.1",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "adm-zip": "^0.6.0",

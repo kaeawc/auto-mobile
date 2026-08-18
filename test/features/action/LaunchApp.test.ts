@@ -81,6 +81,32 @@ describe("LaunchApp", () => {
     expect(fakeAwaitIdle.wasMethodCalled("initializeUiStabilityTracking")).toBe(true);
   });
 
+  test("launches an Android app whose launcher activity is not MainActivity with the package resolver", async () => {
+    fakeTimer.enableAutoAdvance();
+    const settingsPackageName = "com.android.settings";
+    const resolverCommand = `shell am start --user 0 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER ${settingsPackageName}`;
+
+    fakeAdb.setCommandResponse("shell pm list packages --user 0", {
+      stdout: `package:${settingsPackageName}\n`,
+      stderr: ""
+    });
+    fakeAdb.setCommandResponse(resolverCommand, {
+      stdout: "Starting: Intent { act=android.intent.action.MAIN }",
+      stderr: ""
+    });
+    fakeAdb.setCommandResponse(`shell ps | grep ${settingsPackageName}`, { stdout: "0\n", stderr: "" });
+    fakeAdb.setForegroundApp({ packageName: settingsPackageName, userId: 0 });
+    fakeObserveScreen.setObserveResult(createObserveResult(settingsPackageName));
+
+    const result = await launchApp.execute(settingsPackageName, false, false);
+
+    expect(result.success).toBe(true);
+    expect(result.observation?.activeWindow?.appId).toBe(settingsPackageName);
+    expect(fakeAdb.getExecutedCommands().filter(command => command.includes("shell am start") && command.includes("android.intent.category.LAUNCHER")))
+      .toEqual([resolverCommand]);
+    expect(fakeAdb.wasCommandExecuted(`shell monkey -p ${settingsPackageName}`)).toBe(false);
+  });
+
   test("clears Android app data through the injected action before relaunch", async () => {
     fakeTimer.enableAutoAdvance();
     fakeAdb.setForegroundApp({ packageName, userId: 0 });

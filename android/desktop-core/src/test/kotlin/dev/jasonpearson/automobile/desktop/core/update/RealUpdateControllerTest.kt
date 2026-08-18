@@ -54,7 +54,7 @@ class RealUpdateControllerTest {
     val status = controller.status.value
     assertIs<UpdateStatus.UpdateAvailable>(status)
     assertEquals("0.0.53", status.version)
-    assertEquals("AutoMobile-x-macos.dmg", status.asset.name)
+    assertEquals("AutoMobile-x-macos.dmg", status.asset?.name)
     assertEquals("https://notes", status.releaseNotesUrl)
   }
 

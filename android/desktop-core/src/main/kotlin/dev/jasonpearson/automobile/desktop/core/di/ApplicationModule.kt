@@ -7,6 +7,8 @@ import dev.jasonpearson.automobile.desktop.core.platform.PackagedVersionSource
 import dev.jasonpearson.automobile.desktop.core.platform.RuntimeAppVersionProvider
 import dev.jasonpearson.automobile.desktop.core.settings.FileSettingsProvider
 import dev.jasonpearson.automobile.desktop.core.settings.SettingsProvider
+import dev.jasonpearson.automobile.desktop.core.update.ConveyorSoftwareUpdateGateway
+import dev.jasonpearson.automobile.desktop.core.update.ConveyorUpdateController
 import dev.jasonpearson.automobile.desktop.core.update.GitHubReleaseSource
 import dev.jasonpearson.automobile.desktop.core.update.RealUpdateController
 import dev.jasonpearson.automobile.desktop.core.update.UpdateController
@@ -44,9 +46,18 @@ interface ApplicationModule {
     @Provides
     @SingleIn(AppScope::class)
     fun provideUpdateController(appVersionProvider: AppVersionProvider): UpdateController {
-      // Checks GitHub Releases against the running version (#5224). Purely reactive — nothing
-      // fetches until a caller invokes checkForUpdate().
-      return RealUpdateController(GitHubReleaseSource(), appVersionProvider)
+      // Inside a Conveyor package, drive updates through Conveyor's control API — it can both check
+      // and apply (download + install + restart). Everywhere else (dev, jpackage builds) the
+      // gateway
+      // is null, so fall back to the GitHub-Releases checker (#5224, #5227). Both are purely
+      // reactive
+      // — nothing fetches until a caller invokes checkForUpdate().
+      val conveyorGateway = ConveyorSoftwareUpdateGateway.createOrNull()
+      return if (conveyorGateway != null) {
+        ConveyorUpdateController(conveyorGateway)
+      } else {
+        RealUpdateController(GitHubReleaseSource(), appVersionProvider)
+      }
     }
   }
 }

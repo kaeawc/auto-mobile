@@ -112,6 +112,12 @@ dependencies {
   // Metro DI
   implementation(libs.metro.runtime)
 
+  // Conveyor in-app update control API (SoftwareUpdateController). Functional only inside a
+  // Conveyor
+  // package; getInstance() returns null otherwise (dev, jpackage, tests), so the desktop app
+  // degrades to the GitHub-Releases checker. See #5227 (PR-C2).
+  implementation(libs.conveyor.control)
+
   // Test dependencies
   testImplementation(libs.kotlin.test)
   testImplementation(libs.kotlinx.coroutines.test)

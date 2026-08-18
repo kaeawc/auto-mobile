@@ -81,8 +81,10 @@ fun UpdateReadyButton(
 
 /**
  * The compact details surface shown when the update pill is clicked: the available version, the
- * running version, a link to the release notes, and a (disabled here) install action delivered by a
- * later item. Pure content — the shell wraps it in a Popup.
+ * running version, a link to the release notes, and an "Install & restart" action. The action is
+ * enabled only when [onInstall] is non-null — the shell passes a callback only for packaging that
+ * can apply in place (a Conveyor package), and `null` for the GitHub-Releases path, which can only
+ * surface the release. Pure content — the shell wraps it in a Popup.
  */
 @Composable
 fun UpdateDetailsContent(
@@ -90,6 +92,7 @@ fun UpdateDetailsContent(
   currentVersion: String,
   onOpenReleaseNotes: () -> Unit,
   modifier: Modifier = Modifier,
+  onInstall: (() -> Unit)? = null,
 ) {
   Column(
     modifier = modifier.padding(12.dp),
@@ -107,9 +110,9 @@ fun UpdateDetailsContent(
     }
 
     Row(verticalAlignment = Alignment.CenterVertically) {
-      // Applying the update (download + install + restart) is delivered by a later item, so the
-      // action is present but not yet enabled.
-      TextButton(onClick = {}, enabled = false) {
+      // Enabled only when the shell supplies an install callback (a Conveyor package can apply in
+      // place); the GitHub-Releases path passes null and the action stays disabled.
+      TextButton(onClick = onInstall ?: {}, enabled = onInstall != null) {
         Icon(
           imageVector = Icons.Filled.Download,
           contentDescription = null,

@@ -114,6 +114,11 @@ public class WebSocketServer: WebSocketServing {
     private let frameContext: FrameContext
     private let broadcastSink: ((Data) -> Void)?
     private let queue = DispatchQueue(label: "com.ctrlproxy.server")
+    /// Command execution runs here, off the accept/`queue`, so a long XCUITest
+    /// walk or screenshot cannot starve `GET /health`, `POST /sdk-events`, or new
+    /// connection accepts — all of which are serviced on `queue`. A single
+    /// serial queue preserves per-connection command ordering (issue #5374).
+    private let commandQueue = DispatchQueue(label: "com.ctrlproxy.command")
     var onSdkHierarchyUpdated: (() -> Void)?
 
     public var isRunning: Bool {
@@ -221,7 +226,25 @@ public class WebSocketServer: WebSocketServing {
 
     private func handleMessage(_ data: Data, connectionId: Int) {
         guard let connection = connections.value(forId: connectionId) else { return }
-        handleMessage(data, responder: connection)
+        dispatchCommand(data, responder: connection)
+    }
+
+    /// Runs one command off the server `queue` on the serial `commandQueue`.
+    ///
+    /// The accept loop, `GET /health`, and `POST /sdk-events` are all serviced on
+    /// `queue`; before this hop, a slow command (an XCUITest element-tree walk, a
+    /// screenshot, or a semaphore-blocked SDK HTTP call) ran inline on `queue` and
+    /// starved them — a live-but-unresponsive runner whose `/health` probes time
+    /// out mid-run (issue #5374). Offloading keeps `queue` free while commands run
+    /// serially here, preserving per-connection ordering. `responder` is captured
+    /// strongly so it outlives the hop; `NWConnection.send` is thread-safe.
+    ///
+    /// Internal, not private, so `WebSocketServerTests` can drive the offload with a
+    /// fake responder and assert the caller is not blocked while a command runs.
+    func dispatchCommand(_ data: Data, responder: WebSocketResponding) {
+        commandQueue.async { [weak self] in
+            self?.handleMessage(data, responder: responder)
+        }
     }
 
     /// Decode → dispatch → encode → send, with the decode-failure `catch` #2854

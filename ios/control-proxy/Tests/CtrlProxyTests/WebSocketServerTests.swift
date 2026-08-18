@@ -21,6 +21,28 @@ final class WebSocketServerTests: XCTestCase {
         }
     }
 
+    /// Thread-safe responder for the command-offload test: `dispatchCommand`
+    /// delivers `send` from the `commandQueue`, so the test thread reads `count`
+    /// concurrently and must not race a bare array append.
+    private final class LockingResponder: WebSocketResponding {
+        private let lock = NSLock()
+        private var _sent: [Data] = []
+        /// Invoked on every `send`, on whatever queue produced the response.
+        var onSend: ((Data) -> Void)?
+        var count: Int {
+            lock.lock()
+            defer { lock.unlock() }
+            return _sent.count
+        }
+
+        func send(_ data: Data) {
+            lock.lock()
+            _sent.append(data)
+            lock.unlock()
+            onSend?(data)
+        }
+    }
+
     private final class TransitionInjectingExecutor: FrameContextMainExecuting {
         var afterNextPerform: (() -> Void)?
 
@@ -45,14 +67,15 @@ final class WebSocketServerTests: XCTestCase {
     /// singleton is untouched.
     private func makeServer(
         frameContext: FrameContext = FrameContext(),
-        broadcastSink: ((Data) -> Void)? = nil
+        broadcastSink: ((Data) -> Void)? = nil,
+        elementLocator: ElementLocating = FakeElementLocator()
     )
         -> WebSocketServer
     {
         let fakeTimeProvider = FakeTimeProvider(initialTime: 1000)
         perfProvider = PerfProvider.createForTesting(timeProvider: fakeTimeProvider)
         let handler = CommandHandler.createForTesting(
-            elementLocator: FakeElementLocator(),
+            elementLocator: elementLocator,
             gesturePerformer: FakeGesturePerformer(),
             perfProvider: perfProvider
         )
@@ -257,6 +280,66 @@ final class WebSocketServerTests: XCTestCase {
         // Every id added was also removed, so the registry must be empty and intact.
         XCTAssertEqual(registry.count, 0)
         XCTAssertTrue(registry.values().isEmpty)
+    }
+
+    // MARK: - Command offload keeps the server queue responsive (#5374)
+
+    /// A slow command (element-tree walk / screenshot / semaphore-blocked SDK
+    /// call) used to run inline on the server `DispatchQueue`, which also accepts
+    /// connections and answers `GET /health` and `POST /sdk-events`. While it ran,
+    /// those were starved — a live-but-unresponsive runner whose `/health` probes
+    /// time out mid-run (issue #5374: XCTestRunner Simulator Tests, five 5s health
+    /// probes returning 0 bytes).
+    ///
+    /// `dispatchCommand` now offloads execution onto a dedicated serial
+    /// `commandQueue`, so the caller (the server queue) returns immediately and
+    /// stays free to serve `/health`. This drives the real offload path with a
+    /// blocking `getViewHierarchy` and asserts the caller is not blocked while the
+    /// command runs. Pre-fix (inline execution) the caller blocks for the full
+    /// release delay and the elapsed-time assertion fails; the response still
+    /// arrives once the handler is released, proving the offload preserves it.
+    func testDispatchCommandDoesNotBlockCallerWhileHandlerRuns() {
+        let releaseAfter: TimeInterval = 0.5
+        let handlerReleased = DispatchSemaphore(value: 0)
+        let handlerEntered = DispatchSemaphore(value: 0)
+
+        let locator = FakeElementLocator()
+        locator.onHierarchyRead = {
+            // Signal that the command is executing, then block until released.
+            handlerEntered.signal()
+            _ = handlerReleased.wait(timeout: .now() + 10)
+        }
+
+        let server = makeServer(elementLocator: locator)
+        let responder = LockingResponder()
+        let responded = expectation(description: "command response delivered after handler release")
+        responder.onSend = { _ in responded.fulfill() }
+
+        // Independent releaser: unblock the handler shortly after it starts, from a
+        // thread that is never the caller — so pre-fix the only way the caller can
+        // return is by blocking here for `releaseAfter`.
+        DispatchQueue.global().async {
+            guard handlerEntered.wait(timeout: .now() + 5) == .success else { return }
+            Thread.sleep(forTimeInterval: releaseAfter)
+            handlerReleased.signal()
+        }
+
+        let command = Data(#"{"type":"request_hierarchy","requestId":"offload-1"}"#.utf8)
+        let start = Date()
+        server.dispatchCommand(command, responder: responder)
+        let elapsed = Date().timeIntervalSince(start)
+
+        // Offloaded, the caller returns in microseconds; inline, it blocks for
+        // ~releaseAfter until the handler completes. Generous margin for CI jitter.
+        XCTAssertLessThan(
+            elapsed,
+            releaseAfter - 0.1,
+            "command execution must be offloaded so the server queue is not blocked (issue #5374)"
+        )
+
+        // The response is still produced once the handler is released.
+        wait(for: [responded], timeout: 5)
+        XCTAssertEqual(responder.count, 1, "exactly one framed response should be delivered")
     }
 
     // MARK: - WebSocket frame length bounds (#3626)

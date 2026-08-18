@@ -528,9 +528,28 @@ final class WebSocketServerTests: XCTestCase {
     }
 }
 
-/// Reference wrapper so escaping completion handlers can publish a result back
-/// to the test without tripping Swift's captured-var concurrency diagnostics.
+/// Lock-protected reference cell so an escaping completion handler can publish a
+/// result back to the test thread. Access is synchronized because the timeout
+/// path has no happens-before: if `healthDone.wait` times out, the driver tears
+/// down the session, whose cancelled `dataTask` completion still fires and writes
+/// `value` concurrently with the main thread's post-`wait` read. The lock keeps
+/// that access defined (matching `LockingResponder`'s pattern above).
 private final class Box<T>: @unchecked Sendable {
-    var value: T
-    init(_ value: T) { self.value = value }
+    private let lock = NSLock()
+    private var _value: T
+
+    init(_ value: T) { _value = value }
+
+    var value: T {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _value
+        }
+        set {
+            lock.lock()
+            defer { lock.unlock() }
+            _value = newValue
+        }
+    }
 }

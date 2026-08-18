@@ -199,8 +199,11 @@ export class DeviceBootService {
     if (request.preferRunning === false) {
       return undefined;
     }
-    const booted = await this.runPhase(context, "discovering running devices", () =>
-      this.dependencies.deviceManager.getBootedDevices(request.platform),
+    const booted = await this.runPhase(
+      context,
+      "discovering running devices",
+      () => this.dependencies.deviceManager.getBootedDevices(request.platform),
+      false,
     );
     const match = this.dependencies.deviceMatcher.matchBootedDevice(
       criteria,
@@ -210,11 +213,7 @@ export class DeviceBootService {
     if (!match) {
       return undefined;
     }
-    if (progress) {
-      await this.runPhase(context, "reporting matching device progress", async () =>
-        progress.report(100, 100, "Found matching running device"),
-      );
-    }
+    await this.reportProgress(context, progress, 100, "Found matching running device");
     return this.waitForRunningDevice(match, context, progress);
   }
 
@@ -343,11 +342,7 @@ export class DeviceBootService {
     };
     context.signal?.addEventListener("abort", cancelHandle, { once: true });
     try {
-      if (progress) {
-        await this.runPhase(context, "reporting device start progress", async () =>
-          progress.report(60, 100, "Device started, waiting for readiness..."),
-        );
-      }
+      await this.reportProgress(context, progress, 60, "Device started, waiting for readiness...");
       const ready = await this.runPhase(context, "waiting for device boot readiness", (signal) =>
         waitForDeviceReadyOrCancel(
           this.dependencies.deviceManager,
@@ -359,11 +354,7 @@ export class DeviceBootService {
           cancelHandle,
         ),
       );
-      if (progress) {
-        await this.runPhase(context, "reporting device readiness progress", async () =>
-          progress.report(100, 100, "Device is ready for use"),
-        );
-      }
+      await this.reportProgress(context, progress, 100, "Device is ready for use");
       return {
         device: enrichBootedDevice(ready, image),
         source: "cold-boot",
@@ -380,6 +371,23 @@ export class DeviceBootService {
     }
   }
 
+  private async reportProgress(
+    context: BootDeadlineContext,
+    progress: DeviceBootProgress | undefined,
+    current: number,
+    message: string,
+  ): Promise<void> {
+    if (!progress) {
+      return;
+    }
+    await this.runPhase(
+      context,
+      `reporting ${current}% device boot progress`,
+      () => progress.report(current, 100, message),
+      false,
+    );
+  }
+
   private remaining(deadlineMs: number, phase: string): number {
     const remainingMs = Math.floor(deadlineMs - this.timer.now());
     if (remainingMs <= 0) {
@@ -394,20 +402,42 @@ export class DeviceBootService {
     context: BootDeadlineContext,
     phase: string,
     operation: (signal: AbortSignal) => Promise<T>,
+    awaitAbortSettlement = true,
   ): Promise<T> {
     const remainingMs = this.remaining(context.deadlineMs, phase);
     const cancellation = createPhaseCancellation(context.signal, phase);
     cancellation.throwIfCancelled();
     const controller = new AbortController();
-    const signal = context.signal
-      ? AbortSignal.any([context.signal, controller.signal])
+    const externalSignal = context.signal;
+    const signal = externalSignal
+      ? AbortSignal.any([externalSignal, controller.signal])
       : controller.signal;
     let timeoutHandle: NodeJS.Timeout | undefined;
+    let removeExternalAbortListener: (() => void) | undefined;
+    const externalAbortPromise = externalSignal
+      ? new Promise<never>((_resolve, reject) => {
+          const rejectForAbort = () => {
+            reject(
+              externalSignal.reason === undefined
+                ? new ActionableError(`startDevice request cancelled while ${phase}`)
+                : externalSignal.reason,
+            );
+          };
+          if (externalSignal.aborted) {
+            rejectForAbort();
+            return;
+          }
+          externalSignal.addEventListener("abort", rejectForAbort, { once: true });
+          removeExternalAbortListener = () =>
+            externalSignal.removeEventListener("abort", rejectForAbort);
+        })
+      : undefined;
     const operationPromise = runWithAbortSignal(signal, () => operation(signal));
     void operationPromise.catch(() => {});
     try {
       return await Promise.race([
         operationPromise,
+        ...(externalAbortPromise ? [externalAbortPromise] : []),
         new Promise<never>((_resolve, reject) => {
           timeoutHandle = this.timer.setTimeout(() => {
             controller.abort(new Error(`startDevice timeout exhausted while ${phase}`));
@@ -421,9 +451,13 @@ export class DeviceBootService {
         cancellation.promise,
       ]);
     } catch (error) {
+      await this.awaitAbortSettlementIfNeeded(
+        operationPromise,
+        awaitAbortSettlement && (controller.signal.aborted || externalSignal?.aborted === true),
+      );
+      this.throwExternalAbortReason(externalSignal, phase);
       cancellation.throwIfCancelled();
       if (controller.signal.aborted) {
-        await this.awaitAbortSettlement(operationPromise);
         throw new ActionableError(
           `startDevice timeout exhausted while ${phase}; remainingBudgetMs=0`,
         );
@@ -434,6 +468,25 @@ export class DeviceBootService {
         this.timer.clearTimeout(timeoutHandle);
       }
       cancellation.dispose();
+      removeExternalAbortListener?.();
+    }
+  }
+
+  private throwExternalAbortReason(signal: AbortSignal | undefined, phase: string): void {
+    if (signal?.aborted) {
+      if (signal.reason === undefined) {
+        throw new ActionableError(`startDevice cancelled while ${phase}`);
+      }
+      throw signal.reason;
+    }
+  }
+
+  private async awaitAbortSettlementIfNeeded(
+    operation: Promise<unknown>,
+    shouldAwait: boolean,
+  ): Promise<void> {
+    if (shouldAwait) {
+      await this.awaitAbortSettlement(operation);
     }
   }
 

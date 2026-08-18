@@ -81,6 +81,176 @@ describe("DeviceBootService", () => {
     expect(devices.getWaitForDeviceReadySignal()?.aborted).toBe(false);
   });
 
+  it("bounds a pending start progress callback by the shared deadline and cancels its owned process", async () => {
+    const devices = new FakeDeviceUtils();
+    const matcher = new FakeDeviceMatcher();
+    const timer = new FakeTimer();
+    let killCount = 0;
+    let progressStarted = false;
+    let outcome: "pending" | "rejected" = "pending";
+    devices.setDeviceImages("android", [image]);
+    matcher.setImageResult(image);
+    devices.setMockChildProcess(image.name, {
+      kill: () => {
+        killCount++;
+        return true;
+      },
+      pid: 12,
+    } as any);
+
+    const boot = service(devices, matcher, undefined, timer).boot(
+      { platform: "android", timeoutMs: 10_000 },
+      {
+        report: async (current) => {
+          if (current === 60) {
+            progressStarted = true;
+            await new Promise<void>(() => {});
+          }
+        },
+      },
+    );
+    void boot.catch(() => {
+      outcome = "rejected";
+    });
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(progressStarted).toBe(true);
+    timer.advanceTime(10_000);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(outcome).toBe("rejected");
+    expect(killCount).toBe(1);
+  });
+
+  it("cancels the owned process when a pending progress callback is externally aborted", async () => {
+    const devices = new FakeDeviceUtils();
+    const matcher = new FakeDeviceMatcher();
+    const controller = new AbortController();
+    let killCount = 0;
+    let progressStarted = false;
+    let outcome: "pending" | "rejected" = "pending";
+    devices.setDeviceImages("android", [image]);
+    matcher.setImageResult(image);
+    devices.setMockChildProcess(image.name, {
+      kill: () => {
+        killCount++;
+        return true;
+      },
+      pid: 12,
+    } as any);
+
+    const boot = service(devices, matcher).boot(
+      { platform: "android", signal: controller.signal },
+      {
+        report: async (current) => {
+          if (current === 60) {
+            progressStarted = true;
+            await new Promise<void>(() => {});
+          }
+        },
+      },
+    );
+    void boot.catch(() => {
+      outcome = "rejected";
+    });
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(progressStarted).toBe(true);
+    controller.abort(new Error("request cancelled"));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(outcome).toBe("rejected");
+    expect(killCount).toBe(1);
+  });
+
+  it("preserves an explicit null abort reason instead of substituting an error", async () => {
+    const devices = new FakeDeviceUtils();
+    const matcher = new FakeDeviceMatcher();
+    const controller = new AbortController();
+    let progressStarted = false;
+    let rejection: unknown = "unset";
+    devices.setDeviceImages("android", [image]);
+    matcher.setImageResult(image);
+    devices.setMockChildProcess(image.name, {
+      kill: () => true,
+      pid: 12,
+    } as any);
+
+    const boot = service(devices, matcher).boot(
+      { platform: "android", signal: controller.signal },
+      {
+        report: async (current) => {
+          if (current === 60) {
+            progressStarted = true;
+            await new Promise<void>(() => {});
+          }
+        },
+      },
+    );
+    void boot.catch((error: unknown) => {
+      rejection = error;
+    });
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(progressStarted).toBe(true);
+    controller.abort(null);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(rejection).toBeNull();
+  });
+
+  it("cancels the owned process when final progress reporting fails", async () => {
+    const devices = new FakeDeviceUtils();
+    const matcher = new FakeDeviceMatcher();
+    let killCount = 0;
+    devices.setDeviceImages("android", [image]);
+    matcher.setImageResult(image);
+    devices.setMockChildProcess(image.name, {
+      kill: () => {
+        killCount++;
+        return true;
+      },
+      pid: 12,
+    } as any);
+
+    await expect(
+      service(devices, matcher).boot(
+        { platform: "android" },
+        {
+          report: async (current) => {
+            if (current === 100) {
+              throw new Error("progress failed");
+            }
+          },
+        },
+      ),
+    ).rejects.toThrow("progress failed");
+
+    expect(killCount).toBe(1);
+  });
+
+  it("preserves successful cold-boot progress reporting", async () => {
+    const devices = new FakeDeviceUtils();
+    const matcher = new FakeDeviceMatcher();
+    const reports: Array<{ current: number; total: number; message: string }> = [];
+    devices.setDeviceImages("android", [image]);
+    matcher.setImageResult(image);
+
+    await service(devices, matcher).boot(
+      { platform: "android" },
+      {
+        report: async (current, total, message) => {
+          reports.push({ current, total, message });
+        },
+      },
+    );
+
+    expect(reports).toEqual([
+      { current: 60, total: 100, message: "Device started, waiting for readiness..." },
+      { current: 100, total: 100, message: "Device is ready for use" },
+    ]);
+  });
+
   it("aborts provisioning at the shared absolute deadline", async () => {
     const devices = new FakeDeviceUtils();
     const timer = new FakeTimer();
@@ -161,7 +331,7 @@ describe("DeviceBootService", () => {
     await discoveryStarted;
     controller.abort();
 
-    await expect(boot).rejects.toThrow("startDevice cancelled while discovering running devices");
+    await expect(boot).rejects.toBe(controller.signal.reason);
     resolveDiscovery([running]);
     await Promise.resolve();
 
@@ -200,8 +370,8 @@ describe("DeviceBootService", () => {
     await startStarted;
     controller.abort();
 
-    await expect(boot).rejects.toThrow("startDevice cancelled while starting the device");
     resolveStart(handle);
+    await expect(boot).rejects.toBe(controller.signal.reason);
     await Promise.resolve();
     await Promise.resolve();
 
@@ -213,6 +383,7 @@ describe("DeviceBootService", () => {
     const devices = new FakeDeviceUtils();
     const matcher = new FakeDeviceMatcher();
     const controller = new AbortController();
+    const abortReason = new Error("request cancelled");
     let resolveStart!: (handle: ChildProcess | null) => void;
     let markStartStarted!: () => void;
     const startStarted = new Promise<void>((resolve) => {
@@ -239,9 +410,9 @@ describe("DeviceBootService", () => {
     const boot = service(devices, matcher).boot({ platform: "android", signal: controller.signal });
     await startStarted;
     resolveStart(handle);
-    queueMicrotask(() => controller.abort());
+    queueMicrotask(() => controller.abort(abortReason));
 
-    await expect(boot).rejects.toThrow("startDevice cancelled while starting the device");
+    await expect(boot).rejects.toBe(abortReason);
 
     expect(killCount).toBe(1);
     expect(devices.wasMethodCalled("waitForDeviceReady")).toBe(false);
@@ -284,9 +455,7 @@ describe("DeviceBootService", () => {
     controller.abort();
     resolveProgress();
 
-    await expect(boot).rejects.toThrow(
-      "startDevice cancelled while reporting device start progress",
-    );
+    await expect(boot).rejects.toBe(controller.signal.reason);
     expect(killCount).toBe(1);
     expect(devices.wasMethodCalled("waitForDeviceReady")).toBe(false);
   });
@@ -329,13 +498,62 @@ describe("DeviceBootService", () => {
     await finalProgressStarted;
     controller.abort();
 
-    await expect(boot).rejects.toThrow(
-      "startDevice cancelled while reporting device readiness progress",
-    );
+    await expect(boot).rejects.toBe(controller.signal.reason);
     resolveFinalProgress();
     await Promise.resolve();
 
     expect(killCount).toBe(1);
+  });
+
+  it("awaits cancellation-aware provisioning before returning an external abort", async () => {
+    const devices = new FakeDeviceUtils();
+    const timer = new FakeTimer();
+    const controller = new AbortController();
+    const abortReason = new Error("request cancelled");
+    let provisionSettled = false;
+    let outcome: "pending" | "rejected" = "pending";
+    const bootService = new DeviceBootService({
+      deviceManager: devices,
+      deviceMatcher: new FakeDeviceMatcher(),
+      deviceCreationGate: { isCreationAllowed: () => true, describeSource: () => "test" },
+      deviceProvisioner: {
+        provision: async (_criteria, signal) => {
+          await new Promise<void>((_resolve, reject) => {
+            signal?.addEventListener(
+              "abort",
+              () => {
+                timer.setTimeout(() => {
+                  provisionSettled = true;
+                  reject(signal.reason);
+                }, 250);
+              },
+              { once: true },
+            );
+          });
+          throw new Error("unexpected provision completion");
+        },
+      },
+      matchingStrategy: "LATEST",
+      timer,
+    });
+
+    const boot = bootService.boot({
+      platform: "android",
+      createIfMissing: true,
+      signal: controller.signal,
+    });
+    void boot.catch(() => {
+      outcome = "rejected";
+    });
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    controller.abort(abortReason);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(outcome).toBe("pending");
+    timer.advanceTime(250);
+    await expect(boot).rejects.toBe(abortReason);
+    expect(provisionSettled).toBe(true);
   });
 
   it("adopts and awaits a matching running device", async () => {

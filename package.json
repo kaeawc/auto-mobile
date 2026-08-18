@@ -179,7 +179,7 @@
     "@typescript/native-preview": "7.0.0-dev.20260707.2",
     "fast-check": "^4.9.0",
     "knip": "^6.0.0",
-    "oxc-parser": "0.143.0",
+    "oxc-parser": "0.144.0",
     "oxfmt": "0.63.0",
     "oxlint": "1.78.0",
     "oxlint-tsgolint": "7.0.2001",

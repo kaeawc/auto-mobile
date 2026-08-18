@@ -1328,7 +1328,30 @@ jobs:
             # hook budgets (verified). Bypass turbo like the Windows branch so the
             # flag applies directly (macos then always runs, which also keeps the
             # native-source-scan guard tests from ever replaying a cached result).
-            bun test --isolate --timeout 20000 2>&1 | tee "ci-logs/bun-test-${{ matrix.os }}.log"
+            #
+            # bun's --timeout ONLY bounds individual test()/hook bodies. It cannot
+            # bound a hang OUTSIDE that scope: module-level/describe-body evaluation,
+            # a leaked real socket/child that keeps the process alive at teardown, or
+            # a real-timer/real-socket poll that never settles. Several files in this
+            # suite do real I/O (unix-socket daemon servers, a werift WebRTC loopback,
+            # real child spawns) rather than injected fakes, so one of them can wedge
+            # the whole run. Before this bound such a wedge rode the 25-minute JOB
+            # timeout to a silent CANCELLED (run 32156898919: bun hung mid-suite for
+            # ~24m, GitHub dropped the streamed log, no actionable signal). Wrap the
+            # invocation in a portable wall-clock watchdog (macos has no GNU
+            # `timeout`; this helper kills the whole process group and returns 124 on
+            # expiry) sized well above a healthy run (~6m observed) but far below the
+            # job timeout, so a hang fails FAST and RED with the tee'd log preserved
+            # for the "Upload Build/Test Logs" step to capture (issue: macos test hang).
+            # shellcheck source=scripts/ios/run_with_timeout.sh
+            source scripts/ios/run_with_timeout.sh
+            test_status=0
+            run_with_timeout 720 bun test --isolate --timeout 20000 2>&1 \
+              | tee "ci-logs/bun-test-${{ matrix.os }}.log" || test_status=$?
+            if [[ "$test_status" -eq 124 ]]; then
+              echo "::error::macOS bun test suite exceeded the 12-minute wall-clock ceiling and was aborted (a test is hanging on real I/O — a real socket/child/timer, not an injected fake). Inspect the last ::group:: in the uploaded ci-logs/bun-test-macos-latest.log to find the file that ran last."
+            fi
+            exit "$test_status"
           fi
 
       - name: "Run Bun image runtime smoke"

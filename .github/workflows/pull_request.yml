@@ -723,17 +723,18 @@ jobs:
       # xmlstarlet, and the BATS step needs bats. No dpkg-lock contention — this
       # is the only apt user in the job (setup-java unpacks a tarball and
       # setup-ripgrep installs a pre-built binary). Mechanism per #3779.
+      #
+      # Each network call inside the helper is bounded by a per-command timeout
+      # and retried with backoff so a stalled apt mirror or GitHub clone fails
+      # fast instead of hanging silently — a `background` failure surfaces at the
+      # `- wait:` below, and without this an indefinite hang ate the whole
+      # 50-minute job budget. `timeout-minutes` is the hard backstop.
       - name: "Install fast validation dependencies"
         shell: bash
         background: true
         id: install-fast-validation-deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y xmlstarlet
-          if ! command -v bats &>/dev/null; then
-            git clone --depth 1 https://github.com/bats-core/bats-core.git /tmp/bats-core
-            sudo /tmp/bats-core/install.sh /usr/local
-          fi
+        timeout-minutes: 10
+        run: scripts/ci/install-fast-validation-deps.sh
 
       # Pin the JDK so the ktfmt check formats deterministically (project targets
       # Java 21) instead of relying on the runner image's default JDK.

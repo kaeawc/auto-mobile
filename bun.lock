@@ -5,7 +5,7 @@
     "": {
       "name": "@kaeawc/auto-mobile",
       "dependencies": {
-        "@anthropic-ai/sdk": "^0.116.0",
+        "@anthropic-ai/sdk": "^0.117.1",
         "@jimp/core": "^1.6.1",
         "@modelcontextprotocol/sdk": "^1.26.0",
         "adm-zip": "^0.6.0",
@@ -79,7 +79,7 @@
     "tar": "^7.5.8",
   },
   "packages": {
-    "@anthropic-ai/sdk": ["@anthropic-ai/sdk@0.116.0", "", { "dependencies": { "json-schema-to-ts": "^3.1.1", "standardwebhooks": "^1.0.0" }, "peerDependencies": { "zod": "^3.25.0 || ^4.0.0" }, "optionalPeers": ["zod"], "bin": { "anthropic-ai-sdk": "bin/cli" } }, "sha512-4UEapYQ+epLEMsAuLZDvW8ExVSOtHD8a7zTyLzhw0H9RXJ1eilPgmqhjwgcdg22diwx13spw6fJ4rONZ+bS7Ww=="],
+    "@anthropic-ai/sdk": ["@anthropic-ai/sdk@0.117.1", "", { "dependencies": { "json-schema-to-ts": "^3.1.1", "standardwebhooks": "^1.0.0" }, "peerDependencies": { "zod": "^3.25.0 || ^4.0.0" }, "optionalPeers": ["zod"], "bin": { "anthropic-ai-sdk": "bin/cli" } }, "sha512-Yn2QlXfyCiKJ5YGCOOay7ZE78ISvII2XY621WMCiflmG8IYgwx59IBwPExxki3Xk9jKUtnD/Sj6UvplWr0rZxg=="],
 
     "@babel/code-frame": ["@babel/code-frame@7.27.1", "", { "dependencies": { "@babel/helper-validator-identifier": "^7.27.1", "js-tokens": "^4.0.0", "picocolors": "^1.1.1" } }, "sha512-cjQ7ZlQ0Mv3b47hABuTevyTuYN4i+loJKGeV9flcCgIK37cCXRh+L1bd3iBHlynerhQ7BhCkn2BPbQUL+rGqFg=="],
 

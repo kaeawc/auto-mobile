@@ -53,10 +53,11 @@ The `:desktop-app` module applies [JetBrains Compose Hot Reload](https://github.
 Launch the dashboard in hot-reload mode:
 
 ```bash
-./gradlew -p android :desktop-app:hotRun --autoReload
+./gradlew -p android :desktop-app:hotRun --autoReload --no-configuration-cache
 ```
 
-- The plugin auto-registers `hotRun` (blocking) and `hotDev` (async) tasks for this Kotlin/JVM module.
+- The plugin auto-registers `hotRun` (blocking) and `hotDev` (async) tasks for this Kotlin/JVM module -- but **only** because the Compose Multiplatform plugin (`org.jetbrains.compose`) is declared on the root build's classloader in `android/build.gradle.kts` (`alias(libs.plugins.compose.multiplatform) apply false`). The hot-reload plugin gates auto-registration on `Class.forName("org.jetbrains.compose.ComposePlugin")` resolving from its own (root) classloader; applying the Compose plugin only in leaf modules leaves that class invisible to it, it logs `Cannot access 'org.jetbrains.compose' plugin. Was this plugin loaded?`, and no `hotRun` task is created.
+- `--no-configuration-cache` is required: the hot-reload run tasks (e.g. `ComposeHotSnapshotTask`) are not configuration-cache serializable, and the repo enables the configuration cache by default. (The inner continuous-build daemon it spawns uses its own configuration cache and is unaffected.)
 - `ComposeHotRun.mainClass` is pinned to `dev.jasonpearson.automobile.desktop.MainKt` in `desktop-app/build.gradle.kts`.
 - Most composables live in `:desktop-core` (an `implementation` dependency of `:desktop-app`), so editing a dashboard panel there reloads into the running window.
 - Requires the JetBrains Runtime (JBR) for enhanced class redefinition; the foojay toolchain resolver in `settings.gradle.kts` provisions a compatible JDK. Java target stays at 21.

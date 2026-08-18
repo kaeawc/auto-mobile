@@ -16,6 +16,13 @@ plugins {
   alias(libs.plugins.android.application) apply false
   alias(libs.plugins.kotlin.serialization) apply false
   alias(libs.plugins.compose.compiler) apply false
+  // Declared here (not applied) so the Compose Multiplatform plugin shares the root
+  // classloader with the hot-reload plugin below. Compose Hot Reload's
+  // hasComposePluginAccess() does Class.forName("org.jetbrains.compose.ComposePlugin")
+  // from its own classloader; without this the class is only visible in leaf-module
+  // classloaders, the check fails ("Cannot access 'org.jetbrains.compose' plugin"),
+  // and the plugin never auto-registers the :desktop-app:hotRun task.
+  alias(libs.plugins.compose.multiplatform) apply false
   alias(libs.plugins.compose.hot.reload) apply false
   alias(libs.plugins.mavenPublish) apply false
   alias(libs.plugins.metro) apply false

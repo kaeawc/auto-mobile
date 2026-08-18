@@ -33,24 +33,44 @@ STUB
   # tool the script relies on in Ubuntu CI.
   cat > "${MOCK_BIN}/timeout" <<'STUB'
 #!/usr/bin/env bash
-if [ "$1" = "-k" ]; then shift 2; fi
+grace=""
+if [ "$1" = "-k" ]; then grace="$2"; shift 2; fi
 duration="$1"; shift
+# Sentinel recording that the killer actually fired. Checking the killer with
+# `kill -0` is racy: an exited-but-unreaped killer is a zombie, and `kill -0`
+# on a zombie still succeeds, which made this stub report the command's raw
+# exit (commonly 143) instead of 124.
+fired="$(mktemp -u)"
 "$@" &
 cmd_pid=$!
-( sleep "$duration"; kill -TERM "$cmd_pid" 2>/dev/null ) &
+(
+  sleep "$duration"
+  # Mark BEFORE signaling so the parent cannot observe the kill without the
+  # sentinel; un-mark if the command was already gone (natural exit won the
+  # race and must keep its own status).
+  : > "$fired"
+  if ! kill -TERM "$cmd_pid" 2>/dev/null; then
+    rm -f "$fired"
+  elif [ -n "$grace" ]; then
+    sleep "$grace"
+    kill -KILL "$cmd_pid" 2>/dev/null
+  fi
+) &
 killer_pid=$!
 if wait "$cmd_pid" 2>/dev/null; then status=0; else status=$?; fi
-if kill -0 "$killer_pid" 2>/dev/null; then
-  # Command finished first: cancel the killer and reap its `sleep` child so it
-  # is not orphaned (an orphaned long `sleep` would hold the output pipe open).
-  pkill -P "$killer_pid" 2>/dev/null
-  kill "$killer_pid" 2>/dev/null
-  wait "$killer_pid" 2>/dev/null
-  exit "$status"
+# Reap the killer and its `sleep` child either way so nothing orphaned holds
+# the output pipe open.
+pkill -P "$killer_pid" 2>/dev/null
+kill "$killer_pid" 2>/dev/null
+wait "$killer_pid" 2>/dev/null
+if [ -e "$fired" ] && [ "$status" -ne 0 ]; then
+  # Timed out: reap any grandchild of the killed command (e.g. a `sleep`).
+  pkill -P "$cmd_pid" 2>/dev/null
+  rm -f "$fired"
+  exit 124
 fi
-# Timed out: reap any grandchild of the killed command (e.g. a `sleep`).
-pkill -P "$cmd_pid" 2>/dev/null
-exit 124
+rm -f "$fired"
+exit "$status"
 STUB
   chmod +x "${MOCK_BIN}/timeout"
   export PATH="${MOCK_BIN}:${PATH}"
@@ -109,7 +129,68 @@ STUB
   make_apt_get 1
   run bash "$SCRIPT"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"attempt 2/3"* ]]
+  [[ "$output" == *"attempt 2/2"* ]]
+  [[ "$output" == *"Fast Validation dependencies ready"* ]]
+}
+
+@test "default retry budget fits the 10-minute step timeout" {
+  # Worst case = 4 ops x (MAX_ATTEMPTS x (CMD_TIMEOUT + KILL_GRACE) + delays).
+  # Guard the arithmetic so a future default bump cannot silently exceed the
+  # workflow step's timeout-minutes backstop.
+  local cmd_timeout kill_grace attempts base_delay
+  cmd_timeout=$(grep -oE 'CMD_TIMEOUT_SECONDS:-[0-9]+' "$SCRIPT" | grep -oE '[0-9]+$')
+  kill_grace=$(grep -oE 'KILL_GRACE_SECONDS:-[0-9]+' "$SCRIPT" | grep -oE '[0-9]+$')
+  attempts=$(grep -oE 'MAX_ATTEMPTS:-[0-9]+' "$SCRIPT" | grep -oE '[0-9]+$')
+  base_delay=$(grep -oE 'RETRY_BASE_DELAY_SECONDS:-[0-9]+' "$SCRIPT" | grep -oE '[0-9]+$')
+  local delays=0 delay="$base_delay" i
+  for ((i = 1; i < attempts; i++)); do
+    delays=$((delays + delay))
+    delay=$((delay * 2))
+  done
+  local worst_case=$((4 * (attempts * (cmd_timeout + kill_grace) + delays)))
+  echo "worst_case=${worst_case}s"
+  [ "$worst_case" -le 600 ]
+}
+
+@test "a partial clone left by a killed attempt is cleaned before the retry" {
+  # Force the source-install branch: drop the `bats` stub and restrict PATH so
+  # the host's real bats (typically /usr/local or homebrew) is not found, while
+  # our git/sudo/timeout stubs still win.
+  rm "${MOCK_BIN}/bats"
+  make_apt_get 0
+  local clone_dir="${MOCK_BIN}/bats-clone"
+  export CLONE_STATE="${MOCK_BIN}/git-calls"
+  # First clone "dies mid-transfer": leaves a non-empty target and fails.
+  # Second clone must see a CLEAN target (proving per-attempt cleanup) — it
+  # fails loudly like real git if the directory still exists.
+  cat > "${MOCK_BIN}/git" <<STUB
+#!/usr/bin/env bash
+target="\${!#}"
+calls=0
+[ -f "${CLONE_STATE}" ] && calls="\$(cat "${CLONE_STATE}")"
+calls=\$((calls + 1))
+echo "\$calls" > "${CLONE_STATE}"
+if [ "\$calls" -eq 1 ]; then
+  mkdir -p "\$target"
+  echo partial > "\$target/partial-object"
+  exit 1
+fi
+if [ -e "\$target" ]; then
+  echo "fatal: destination path '\$target' already exists and is not an empty directory." >&2
+  exit 128
+fi
+mkdir -p "\$target"
+printf '#!/usr/bin/env bash\nexit 0\n' > "\$target/install.sh"
+chmod +x "\$target/install.sh"
+exit 0
+STUB
+  chmod +x "${MOCK_BIN}/git"
+  run env PATH="${MOCK_BIN}:/usr/bin:/bin" \
+    FAST_VALIDATION_DEPS_BATS_CLONE_DIR="$clone_dir" \
+    bash "$SCRIPT"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"attempt 2/2"* ]]
   [[ "$output" == *"Fast Validation dependencies ready"* ]]
 }
 

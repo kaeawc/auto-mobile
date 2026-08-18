@@ -163,6 +163,42 @@ describe("DeviceBootService", () => {
     expect(killCount).toBe(1);
   });
 
+  it("preserves an explicit null abort reason instead of substituting an error", async () => {
+    const devices = new FakeDeviceUtils();
+    const matcher = new FakeDeviceMatcher();
+    const controller = new AbortController();
+    let progressStarted = false;
+    let rejection: unknown = "unset";
+    devices.setDeviceImages("android", [image]);
+    matcher.setImageResult(image);
+    devices.setMockChildProcess(image.name, {
+      kill: () => true,
+      pid: 12,
+    } as any);
+
+    const boot = service(devices, matcher).boot(
+      { platform: "android", signal: controller.signal },
+      {
+        report: async (current) => {
+          if (current === 60) {
+            progressStarted = true;
+            await new Promise<void>(() => {});
+          }
+        },
+      },
+    );
+    void boot.catch((error: unknown) => {
+      rejection = error;
+    });
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(progressStarted).toBe(true);
+    controller.abort(null);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(rejection).toBeNull();
+  });
+
   it("cancels the owned process when final progress reporting fails", async () => {
     const devices = new FakeDeviceUtils();
     const matcher = new FakeDeviceMatcher();

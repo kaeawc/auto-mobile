@@ -418,8 +418,9 @@ export class DeviceBootService {
       ? new Promise<never>((_resolve, reject) => {
           const rejectForAbort = () => {
             reject(
-              externalSignal.reason ??
-                new ActionableError(`startDevice request cancelled while ${phase}`),
+              externalSignal.reason === undefined
+                ? new ActionableError(`startDevice request cancelled while ${phase}`)
+                : externalSignal.reason,
             );
           };
           if (externalSignal.aborted) {
@@ -473,7 +474,10 @@ export class DeviceBootService {
 
   private throwExternalAbortReason(signal: AbortSignal | undefined, phase: string): void {
     if (signal?.aborted) {
-      throw signal.reason ?? new ActionableError(`startDevice cancelled while ${phase}`);
+      if (signal.reason === undefined) {
+        throw new ActionableError(`startDevice cancelled while ${phase}`);
+      }
+      throw signal.reason;
     }
   }
 

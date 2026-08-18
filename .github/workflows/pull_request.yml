@@ -1784,7 +1784,16 @@ jobs:
         id: ctrlproxy-simulator
         run: |
           ios_version="$(xcrun --sdk iphonesimulator --show-sdk-version)"
-          result="$(bun run src/index.ts --boot-device --platform ios --create-if-missing --timeout-ms 300000 --min-os-version "${ios_version}" --max-os-version "${ios_version}")"
+          # 600000ms matches the Android emulator product-boot budget
+          # (scripts/android/boot-emulator.sh). The whole boot draws from ONE
+          # shared deadline, including the in-process CiIosBootRecovery
+          # shutdown+erase+reboot. At 300000ms a slow first cold `bootstatus -b`
+          # on a loaded runner left the recovery's second boot with
+          # remainingBudgetMs=0 (`startDevice timeout exhausted while starting
+          # the device`), so the CLI returned no deviceId and this step, its
+          # `wait` barrier, and the nav-graph step (which reuses this UDID) all
+          # failed as a cascade. Healthy boots finish far inside either budget.
+          result="$(bun run src/index.ts --boot-device --platform ios --create-if-missing --timeout-ms 600000 --min-os-version "${ios_version}" --max-os-version "${ios_version}")"
           simulator_udid="$(printf '%s' "${result}" | jq -r '.deviceId')"
           if [[ -z "${simulator_udid}" || "${simulator_udid}" == "null" ]]; then
             echo "::error::AutoMobile product boot returned no deviceId." >&2

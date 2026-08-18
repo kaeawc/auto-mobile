@@ -102,7 +102,7 @@ SCRIPT
   run bash "$SCRIPT"
 
   [ "$status" -eq 0 ]
-  grep -q -- "run src/index.ts --boot-device --platform ios --create-if-missing --timeout-ms 300000 --min-os-version 26.5 --max-os-version 26.5" "$INVOCATIONS_FILE"
+  grep -q -- "run src/index.ts --boot-device --platform ios --create-if-missing --timeout-ms 600000 --min-os-version 26.5 --max-os-version 26.5" "$INVOCATIONS_FILE"
   grep -q -- "simctl io PRODUCT-UDID screenshot" "$INVOCATIONS_FILE"
 }
 

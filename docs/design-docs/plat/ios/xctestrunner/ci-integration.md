@@ -67,7 +67,7 @@ automobile-tests:
     - name: Boot iOS Simulator
       run: |
         ios_version="$(xcrun --sdk iphonesimulator --show-sdk-version)"
-        auto-mobile --boot-device --platform ios --create-if-missing --timeout-ms 300000 \\
+        auto-mobile --boot-device --platform ios --create-if-missing --timeout-ms 600000 \\
           --min-os-version "${ios_version}" --max-os-version "${ios_version}"
 
     - name: Start simulator log stream
@@ -146,7 +146,7 @@ The artifact contains both test bundles (`YourAppTests.xctest` and
 
 ```bash
 ios_version="$(xcrun --sdk iphonesimulator --show-sdk-version)"
-auto-mobile --boot-device --platform ios --create-if-missing --timeout-ms 300000 \
+auto-mobile --boot-device --platform ios --create-if-missing --timeout-ms 600000 \
   --min-os-version "${ios_version}" --max-os-version "${ios_version}"
 ```
 

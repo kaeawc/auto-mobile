@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { load } from "js-yaml";
 import { loadJobSteps, stepNamed, type WorkflowStep } from "../helpers/workflowSteps";
 
-const PRODUCT_BOOT = "bun run src/index.ts --boot-device --platform ios --create-if-missing --timeout-ms 300000";
+const PRODUCT_BOOT = "bun run src/index.ts --boot-device --platform ios --create-if-missing --timeout-ms 600000";
 
 function actionSteps(): WorkflowStep[] {
   const action = load(readFileSync(".github/actions/ios-simulator-bring-up/action.yml", "utf8")) as {

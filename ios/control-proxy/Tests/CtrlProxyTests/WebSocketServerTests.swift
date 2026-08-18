@@ -477,6 +477,12 @@ final class WebSocketServerTests: XCTestCase {
 
         let statusBox = Box<Int?>(nil)
         let bodyBox = Box<String?>(nil)
+        // The health outcome is captured strictly BEFORE the command is released.
+        // In a regression the probe stays blocked until release and only returns
+        // afterward; gating on this `.success` (which happens-before the status
+        // read) excludes that late response, so a post-release 200 cannot forge a
+        // pass. `.timedOut` unless health answers while the command is blocked.
+        let healthWaitResult = Box<DispatchTimeoutResult>(.timedOut)
         let probeFinished = expectation(description: "health probe orchestration finished")
 
         // Everything runs off the main thread: the blocked gesture will occupy
@@ -507,11 +513,14 @@ final class WebSocketServerTests: XCTestCase {
                 }
             if started == .success {
                 healthTask.resume()
-                _ = healthDone.wait(timeout: .now() + 6)
+                // The completion writes status/body before signaling, so a
+                // `.success` here happens-before those reads: the probe answered
+                // while the command was still blocked (release not yet signaled).
+                healthWaitResult.value = healthDone.wait(timeout: .now() + 6)
             }
 
-            // Unblock the parked gesture so the main thread (and server queue)
-            // are released, then hand control back to the main test thread.
+            // Only now unblock the parked gesture so the main thread (and server
+            // queue) are released, then hand control back to the main test thread.
             blockingPerformer.release.signal()
             session.invalidateAndCancel()
             healthSession.invalidateAndCancel()
@@ -519,6 +528,11 @@ final class WebSocketServerTests: XCTestCase {
         }
 
         wait(for: [probeFinished], timeout: 30)
+        XCTAssertEqual(
+            healthWaitResult.value,
+            .success,
+            "GET /health must respond while the command is still blocked (before it is released)"
+        )
         XCTAssertEqual(statusBox.value, 200, "health check should return 200 while a command is blocked")
         XCTAssertEqual(
             bodyBox.value.flatMap { (try? JSONSerialization.jsonObject(with: Data($0.utf8))) as? [String: Any] }?["status"] as? String,

@@ -36,12 +36,60 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.serializer
 
 /**
+ * A line-oriented bidirectional transport over the observation-stream socket. Abstracted from the
+ * concrete [SocketChannel] so [ObservationStreamClient] can be unit-tested for fd release across an
+ * EOF -> reconnect / EOF -> dispose cycle without a real daemon socket (issue #5261).
+ *
+ * [close] must be idempotent: the read loop and [ObservationStreamClient.disconnect] can both reach
+ * it for the same transport.
+ */
+interface ObservationStreamTransport {
+  val reader: BufferedReader
+  val writer: BufferedWriter
+
+  fun close()
+}
+
+/**
+ * Opens an [ObservationStreamTransport] for a socket path. Constructor-injected into
+ * [ObservationStreamClient]; production uses [SocketChannelTransportFactory] (a real AF_UNIX
+ * socket), tests supply a fake that records opens and closes.
+ */
+fun interface ObservationStreamTransportFactory {
+  fun open(socketPath: String): ObservationStreamTransport
+}
+
+/** Default factory backed by a real AF_UNIX [SocketChannel]. */
+internal object SocketChannelTransportFactory : ObservationStreamTransportFactory {
+  override fun open(socketPath: String): ObservationStreamTransport =
+    SocketChannelTransport(SocketChannel.open(UnixDomainSocketAddress.of(socketPath)))
+}
+
+private class SocketChannelTransport(private val channel: SocketChannel) :
+  ObservationStreamTransport {
+  override val reader: BufferedReader =
+    BufferedReader(InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8))
+  override val writer: BufferedWriter =
+    BufferedWriter(OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8))
+
+  // Closing the channel tears down the streams built from it; SocketChannel.close() on an
+  // already-closed channel is a no-op, so this stays idempotent for the death-point/disconnect
+  // race.
+  override fun close() {
+    channel.close()
+  }
+}
+
+/**
  * Client for the observation stream Unix socket server. Subscribes to receive real-time hierarchy
  * and screenshot updates from the MCP server.
  *
  * Socket path: ~/.auto-mobile/observation-stream.sock
  */
-class ObservationStreamClient : ObservationStream {
+class ObservationStreamClient(
+  private val transportFactory: ObservationStreamTransportFactory = SocketChannelTransportFactory,
+  private val socketPathProvider: () -> String = { getSocketPath() },
+) : ObservationStream {
   companion object {
     internal fun getSocketPath(): String =
       AutoMobileSocketPaths.socketPath("observation-stream.sock")
@@ -53,9 +101,10 @@ class ObservationStreamClient : ObservationStream {
   private val json = DaemonJson
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-  private var channel: SocketChannel? = null
-  private var reader: BufferedReader? = null
-  private var writer: BufferedWriter? = null
+  // Single owning reference to the live transport. It is closed both at its death point in the read
+  // loop (EOF or read error) and in disconnect(), so no reconnect abandons a still-open socket
+  // (issue #5261).
+  private var transport: ObservationStreamTransport? = null
 
   // Flow for hierarchy updates
   private val _hierarchyUpdates = MutableSharedFlow<HierarchyStreamUpdate>(replay = 1)
@@ -121,7 +170,7 @@ class ObservationStreamClient : ObservationStream {
       return
     }
 
-    val socketPath = getSocketPath()
+    val socketPath = socketPathProvider()
     log.info("Connecting to observation stream at $socketPath")
 
     _connectionState.update { ConnectionState.Connecting }
@@ -134,16 +183,10 @@ class ObservationStreamClient : ObservationStream {
         return
       }
 
-      val address = UnixDomainSocketAddress.of(socketPath)
-      channel = SocketChannel.open(address)
-      reader =
-        BufferedReader(
-          InputStreamReader(Channels.newInputStream(channel!!), StandardCharsets.UTF_8)
-        )
-      writer =
-        BufferedWriter(
-          OutputStreamWriter(Channels.newOutputStream(channel!!), StandardCharsets.UTF_8)
-        )
+      // Close any transport left over from a previous connection before opening a fresh one, so a
+      // dead socket from a prior EOF is never abandoned (issue #5261).
+      closeTransport(transport)
+      transport = transportFactory.open(socketPath)
 
       _connectionState.update { ConnectionState.Connected() }
       log.info("Connected to observation stream")
@@ -181,18 +224,31 @@ class ObservationStreamClient : ObservationStream {
           )
         sendRequest(request)
       }
-
-      channel?.close()
     } catch (e: Exception) {
       log.warn("Error disconnecting from observation stream: ${e.message}")
     }
 
-    channel = null
-    reader = null
-    writer = null
+    closeTransport(transport)
     subscriptionId = null
     pendingCadenceUpdate = false
     _connectionState.update { ConnectionState.Disconnected() }
+  }
+
+  /**
+   * Close [target] and, when it is still the active transport, drop the reference. Closing a
+   * [SocketChannel]-backed transport is idempotent, so a redundant call (the read loop racing
+   * [disconnect]) is safe. This is the single point that releases the socket fd (issue #5261).
+   */
+  private fun closeTransport(target: ObservationStreamTransport?) {
+    if (target == null) return
+    try {
+      target.close()
+    } catch (e: Exception) {
+      log.warn("Error closing observation stream transport: ${e.message}")
+    }
+    if (transport === target) {
+      transport = null
+    }
   }
 
   override fun isConnected(): Boolean = _connectionState.value.isConnected
@@ -275,7 +331,7 @@ class ObservationStreamClient : ObservationStream {
   }
 
   private fun sendRequest(request: StreamRequest): Boolean {
-    val currentWriter = writer ?: return false
+    val currentWriter = transport?.writer ?: return false
 
     return try {
       val message = json.encodeToString(serializer<StreamRequest>(), request)
@@ -290,7 +346,8 @@ class ObservationStreamClient : ObservationStream {
   }
 
   private suspend fun readMessages() {
-    val currentReader = reader ?: return
+    val activeTransport = transport ?: return
+    val currentReader = activeTransport.reader
 
     try {
       log.info("Starting message read loop")
@@ -312,6 +369,11 @@ class ObservationStreamClient : ObservationStream {
       log.warn("Error reading from observation stream: ${e.message}", e)
     }
 
+    // Close the transport at its death point (EOF or read error) BEFORE publishing Disconnected.
+    // disconnect() early-returns once the state is no longer Connected, so without this every
+    // reconnect that reuses this instance would abandon the dead socket and leak its fd (issue
+    // #5261).
+    closeTransport(activeTransport)
     _connectionState.update { ConnectionState.Disconnected("Stream ended") }
     log.info("Observation stream disconnected")
   }

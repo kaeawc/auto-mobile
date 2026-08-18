@@ -1,13 +1,22 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
 import app.cash.turbine.test
+import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.domain.CoordinateSpace
+import java.io.BufferedReader
+import java.io.BufferedWriter
+import java.io.StringReader
+import java.io.StringWriter
+import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
 
 class ObservationStreamClientTest {
   // Uses the same configuration as ObservationStreamClient so these assertions match the socket.
@@ -394,6 +403,97 @@ class ObservationStreamClientTest {
     // After reset, a new subscriber gets nothing until a genuinely fresh frame arrives.
     client.hierarchyUpdates.test { expectNoEvents() }
     client.screenshotUpdates.test { expectNoEvents() }
+  }
+
+  @Test
+  fun `closes the dead transport on EOF and opens a fresh one on reconnect without leaking`() {
+    // Regression for issue #5261 (supersedes #5045): before the fix, the read loop set
+    // Disconnected("Stream ended") on EOF without closing the SocketChannel, and disconnect()
+    // early-returns once not Connected -- so every reconnect abandoned a still-open fd. This drives
+    // the injectable transport seam through EOF -> reconnect and EOF -> dispose with no real
+    // socket.
+    runBlocking {
+      // connect() gates on Files.exists(socketPath); a real temp file passes it hermetically while
+      // the fake factory ignores the path entirely.
+      val tempSocket = Files.createTempFile("obs-stream-fdleak", ".sock")
+      try {
+        val factory = RecordingTransportFactory()
+        val client =
+          ObservationStreamClient(
+            transportFactory = factory,
+            socketPathProvider = { tempSocket.toString() },
+          )
+
+        // First connection: the empty reader yields immediate EOF, ending the read loop.
+        client.connect("emulator-5554")
+        client.awaitStreamEnded()
+
+        assertEquals(1, factory.opened.size, "connect should open exactly one transport")
+        val first = factory.opened[0]
+        assertTrue(first.isClosed, "the dead transport must be closed at EOF, not leaked")
+        assertFalse(client.isConnected())
+
+        // Reconnect on the SAME instance: opens a fresh transport; the previous one stays closed
+        // and
+        // is never re-owned (AC2).
+        client.connect("emulator-5554")
+        client.awaitStreamEnded()
+
+        assertEquals(2, factory.opened.size, "reconnect should open a second, fresh transport")
+        assertTrue(factory.opened[1].isClosed, "the second dead transport must also be closed")
+        assertEquals(1, first.closeCount, "the first transport must be closed exactly once")
+
+        // EOF -> dispose: disposing after a death finds nothing to leak and must not throw.
+        client.dispose()
+        assertTrue(
+          factory.opened.all { it.isClosed },
+          "no transport may be left open after dispose",
+        )
+      } finally {
+        Files.deleteIfExists(tempSocket)
+      }
+    }
+  }
+
+  /**
+   * Await the EOF-driven terminal state. The read loop runs on the client's own Dispatchers.IO
+   * scope, so the StateFlow flips from a real background coroutine; `first { ... }` replays the
+   * current value and returns as soon as the death point has published it (AC1: once observers can
+   * see Disconnected, the transport is already closed).
+   */
+  private suspend fun ObservationStreamClient.awaitStreamEnded() {
+    withTimeout(5_000) {
+      connectionState.first { it is ConnectionState.Disconnected && it.reason == "Stream ended" }
+    }
+  }
+
+  /**
+   * Records every transport it hands out so a test can assert each one was closed (issue #5261).
+   */
+  private class RecordingTransportFactory : ObservationStreamTransportFactory {
+    val opened = mutableListOf<FakeStreamTransport>()
+
+    override fun open(socketPath: String): ObservationStreamTransport =
+      FakeStreamTransport().also { opened += it }
+  }
+
+  /**
+   * In-memory [ObservationStreamTransport]: an empty reader (immediate EOF) over a discarding
+   * writer, counting [close] calls in place of releasing a real fd.
+   */
+  private class FakeStreamTransport : ObservationStreamTransport {
+    override val reader: BufferedReader = BufferedReader(StringReader(""))
+    override val writer: BufferedWriter = BufferedWriter(StringWriter())
+
+    var closeCount = 0
+      private set
+
+    val isClosed: Boolean
+      get() = closeCount > 0
+
+    override fun close() {
+      closeCount++
+    }
   }
 
   private fun deviceConnectionLostMessage(): String =

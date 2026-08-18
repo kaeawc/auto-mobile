@@ -41,8 +41,15 @@ command -v bun     >/dev/null 2>&1 || missing+=("bun")
 command -v bunx    >/dev/null 2>&1 || missing+=("bunx")
 
 # Runtime deps (ffmpeg installed by installer on macOS via brew,
-# pre-installed on ubuntu-latest)
-command -v ffmpeg  >/dev/null 2>&1 || missing+=("ffmpeg")
+# pre-installed on ubuntu-latest). When the workflow told the installer to
+# skip ffmpeg (AUTOMOBILE_INSTALL_SKIP_FFMPEG, #5385 — the ubuntu apt install
+# stalled for ~10 minutes per run), requiring it here would contradict that
+# skip and deterministically fail the job.
+if [[ "${AUTOMOBILE_INSTALL_SKIP_FFMPEG:-}" == "true" ]]; then
+  echo "Skipping ffmpeg check: AUTOMOBILE_INSTALL_SKIP_FFMPEG=true"
+else
+  command -v ffmpeg  >/dev/null 2>&1 || missing+=("ffmpeg")
+fi
 
 # Dev tools (installed by development preset via brew on macOS,
 # some pre-installed on ubuntu-latest)

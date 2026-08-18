@@ -33,6 +33,30 @@ SCRIPT="scripts/android/validate-no-desktop-core-unified.sh"
   [[ "$output" == *"desktop-core still references the deleted core.unified package"* ]]
 }
 
+@test "passes without ripgrep on PATH (git-grep fallback)" {
+  # Regression for #5386 reintroducing a hard rg dependency (6f2434a40 removed
+  # it): merge.yml's BATS runners have no ripgrep, so the guard 127'd on every
+  # merge. A PATH without rg must fall back to `git grep` inside the worktree.
+  run env PATH="/usr/bin:/bin" bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"No desktop-core unified socket-client package or references found."* ]]
+}
+
+@test "detects references without ripgrep in a non-git root (grep fallback)" {
+  # jj workspaces have no Git worktree AND a host may lack rg: the plain-grep
+  # last resort must still find the offending reference.
+  local tmp_root
+  tmp_root="$(mktemp -d)"
+  local fixture_dir="$tmp_root/android/desktop-core/src/test/kotlin/dev/jasonpearson/automobile/desktop"
+  mkdir -p "$fixture_dir"
+  printf 'import dev.jasonpearson.automobile.desktop.core.unified.UnifiedSocketClient\n' \
+    > "$fixture_dir/__UnifiedReferenceGuardFixture.kt"
+  run env PATH="/usr/bin:/bin" bash "$SCRIPT" "$tmp_root"
+  rm -rf "$tmp_root"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"desktop-core still references the deleted core.unified package"* ]]
+}
+
 @test "fails when the unified package directory itself is present" {
   local tmp_root
   tmp_root="$(mktemp -d)"

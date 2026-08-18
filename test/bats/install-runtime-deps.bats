@@ -26,6 +26,21 @@ setup() {
   [ "$status" -eq 1 ]
 }
 
+@test "skips ffmpeg install and succeeds when AUTOMOBILE_INSTALL_SKIP_FFMPEG=true" {
+  command_exists() {
+    [[ "$1" != "ffmpeg" ]]
+  }
+  _install_system_package() {
+    # Must never be called when the skip flag is set.
+    return 1
+  }
+  export AUTOMOBILE_INSTALL_SKIP_FFMPEG=true
+
+  run install_runtime_deps
+
+  [ "$status" -eq 0 ]
+}
+
 @test "succeeds when ffmpeg is already installed" {
   command_exists() {
     [[ "$1" == "ffmpeg" ]]

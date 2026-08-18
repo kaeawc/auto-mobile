@@ -951,6 +951,9 @@ jobs:
     needs: detect-changes
     env:
       RUN_INSTALLER: ${{ needs.detect-changes.outputs.docs_only != 'true' }}
+      # ffmpeg is a large, slow install (it has timed out this job) and video
+      # recording is not exercised here — skip it.
+      AUTOMOBILE_INSTALL_SKIP_FFMPEG: "true"
     strategy:
       fail-fast: false
       matrix:
@@ -1017,6 +1020,9 @@ jobs:
     needs: detect-changes
     env:
       RUN_INSTALLER: ${{ needs.detect-changes.outputs.docs_only != 'true' }}
+      # ffmpeg is a large, slow install (it has timed out this job) and video
+      # recording is not exercised here — skip it.
+      AUTOMOBILE_INSTALL_SKIP_FFMPEG: "true"
     strategy:
       fail-fast: false
       matrix:

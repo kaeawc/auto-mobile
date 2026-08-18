@@ -21,7 +21,23 @@ if [[ ! -d "$PROJECT_ROOT/android" ]]; then
   exit 1
 fi
 
-if matches="$(rg --fixed-strings --line-number -- "$UNIFIED_PACKAGE" "$PROJECT_ROOT/android")"; then
+# Layered scanner: rg when available (fastest, works in jj workspaces with no
+# Git worktree — the reason #5386 reached for it), then `git grep` inside a Git
+# worktree (the deliberate no-ripgrep CI path from 6f2434a40 — merge.yml's BATS
+# runners do not ship rg, so an unconditional rg dependency 127s there), then
+# plain `grep -rF` as the last resort (jj workspace on a host without rg).
+# All three exit 0=match, 1=no-match, >1=error, so the caller logic is shared.
+scan_for_unified_references() {
+  if command -v rg > /dev/null 2>&1; then
+    rg --fixed-strings --line-number -- "$UNIFIED_PACKAGE" "$PROJECT_ROOT/android"
+  elif git -C "$PROJECT_ROOT" rev-parse --is-inside-work-tree > /dev/null 2>&1; then
+    git -C "$PROJECT_ROOT" grep --untracked --fixed-strings --line-number "$UNIFIED_PACKAGE" -- android
+  else
+    grep -rFn -- "$UNIFIED_PACKAGE" "$PROJECT_ROOT/android"
+  fi
+}
+
+if matches="$(scan_for_unified_references)"; then
   echo "desktop-core still references the deleted core.unified package:" >&2
   echo "$matches" >&2
   exit 1

@@ -232,9 +232,15 @@ compose.desktop {
   }
 }
 
-// Compose Hot Reload: `./gradlew :desktop-app:hotRun --autoReload` launches the desktop
-// dashboard with live UI reloading. Composables live in :desktop-core (an implementation
-// dependency), so edits there reload into the running window without a restart.
+// Compose Hot Reload: `./gradlew :desktop-app:hotRun --autoReload --no-configuration-cache`
+// launches the desktop dashboard with live UI reloading. Composables live in :desktop-core
+// (an implementation dependency), so edits there recompile and reload into the running window
+// without a restart. `--no-configuration-cache` is required because the hot-reload run tasks
+// (e.g. ComposeHotSnapshotTask) are not configuration-cache serializable and the repo enables
+// the configuration cache by default. The `hotRun` task itself is auto-registered by the
+// hot-reload plugin -- which only happens because the Compose Multiplatform plugin is declared
+// on the root classloader in android/build.gradle.kts (see the comment there); this block just
+// points the auto-registered task at the app's main class.
 tasks.withType<ComposeHotRun>().configureEach {
   mainClass.set("dev.jasonpearson.automobile.desktop.MainKt")
 }

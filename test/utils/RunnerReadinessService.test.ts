@@ -98,9 +98,16 @@ class FakeIosManager implements ReadinessIosManager {
     return this.installed;
   }
 
+  /** Optional hook to simulate elapsed provisioning time (e.g. a cold launch). */
+  onStart?: () => Promise<void>;
+  onSetup?: () => Promise<void>;
+
   async start(options?: { signal?: AbortSignal; minimumHealthPollDurationMs?: number }): Promise<void> {
     this.startCalls++;
     this.startOptions = options;
+    if (this.onStart) {
+      await this.onStart();
+    }
   }
 
   async setup(
@@ -112,6 +119,9 @@ class FakeIosManager implements ReadinessIosManager {
     this.setupCalls++;
     this.setupSignal = signal;
     this.setupMinimumHealthPollDurationMs = minimumHealthPollDurationMs;
+    if (this.onSetup) {
+      await this.onSetup();
+    }
     return this.setupResult;
   }
 
@@ -337,6 +347,81 @@ describe("RunnerReadinessService", () => {
     expect(iosManager.startOptions?.signal).toBeDefined();
     expect(iosManager.setupCalls).toBe(0);
     expect(iosClient.healthCalls).toBe(1);
+  });
+
+  test("sizes the cold-launch health poll by the provision budget, not the health budget", async () => {
+    // With a provision-class total deadline larger than the health budget, the
+    // one-time cold launch runs against the total, not the 30s health window
+    // (#5376). Pre-fix this was min(total, readiness) = 30_000, killing a cold
+    // launch mid-flight.
+    const iosManager = new FakeIosManager();
+    const iosClient = new FakeReadinessClient();
+    iosClient.connected = false;
+    const { service } = createService({ iosManager, iosClient });
+
+    await service.ensureReady({
+      device: iosDevice,
+      requestedIdentity: "platform=ios deviceId=IOS-UDID",
+      totalDeadlineMs: 180_000,
+      readinessTimeoutMs: 30_000,
+      skipCtrlProxyDownload: true,
+    });
+
+    expect(iosManager.startOptions?.minimumHealthPollDurationMs).toBe(180_000);
+  });
+
+  test("provisions a cold iOS runner whose launch outlasts the health budget", async () => {
+    const iosManager = new FakeIosManager();
+    const iosClient = new FakeReadinessClient();
+    iosClient.connected = false;
+    const { service, timer } = createService({ iosManager, iosClient });
+    // Cold launch takes 90s — longer than the 30s health budget but well within
+    // the 180s provision budget. Pre-#5376 the setup phase was capped at the
+    // health budget and aborted at 30s; now it runs against the total deadline.
+    iosManager.onStart = async () => {
+      await timer.sleep(90_000);
+    };
+
+    await service.ensureReady({
+      device: iosDevice,
+      requestedIdentity: "platform=ios deviceId=IOS-UDID",
+      totalDeadlineMs: 180_000,
+      readinessTimeoutMs: 30_000,
+      skipCtrlProxyDownload: true,
+    });
+
+    expect(iosManager.startCalls).toBe(1);
+    expect(iosClient.healthCalls).toBe(1);
+    // The health window opened only after the launch, so we spent the launch
+    // time but did not exhaust the total budget.
+    expect(timer.now()).toBeGreaterThanOrEqual(90_000);
+    expect(timer.now()).toBeLessThan(180_000);
+  });
+
+  test("keeps the health probe fast-fail after a long cold provision", async () => {
+    const iosManager = new FakeIosManager();
+    const iosClient = new FakeReadinessClient();
+    iosClient.connected = false;
+    iosClient.connectionResults = []; // runner launches but never answers
+    const { service, timer } = createService({ iosManager, iosClient });
+    iosManager.onStart = async () => {
+      await timer.sleep(90_000);
+    };
+
+    await expect(
+      service.ensureReady({
+        device: iosDevice,
+        requestedIdentity: "platform=ios deviceId=IOS-UDID",
+        totalDeadlineMs: 180_000,
+        readinessTimeoutMs: 1_000,
+        skipCtrlProxyDownload: true,
+      }),
+    ).rejects.toThrow(/phase=runner-connect/);
+
+    // The 90s launch was allowed to finish (provision budget), but the health
+    // window then failed within ~1s — it did not stretch to the 180s total.
+    expect(timer.now()).toBeGreaterThanOrEqual(90_000);
+    expect(timer.now()).toBeLessThan(95_000);
   });
 
   test("fails without iOS setup when downloads are disabled and no runner is installed", async () => {

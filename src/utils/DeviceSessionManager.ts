@@ -26,6 +26,7 @@ import { checkIosCtrlProxyOverride } from "./iosCtrlProxyOverride";
 import { RunnerReadinessError, RunnerReadinessService } from "./RunnerReadinessService";
 import { defaultTimer, type Timer } from "./SystemTimer";
 import { serverConfig } from "./ServerConfig";
+import { DEFAULT_RUNNER_PROVISION_TIMEOUT_MS } from "./runnerReadinessConfig";
 
 /**
  * Render a device list for a "not found" error.
@@ -222,6 +223,12 @@ export interface DeviceReadyOptions {
 export interface DeviceSessionManagerOptions {
   runnerReadinessTimer?: Timer;
   runnerReadinessTimeoutMs?: number;
+  /**
+   * Boot-class budget for one-time runner provisioning (cold CtrlProxy launch)
+   * on the session auto-start path, which owns no separate device-boot deadline.
+   * Defaults to {@link DEFAULT_RUNNER_PROVISION_TIMEOUT_MS} (#5376).
+   */
+  runnerProvisionTimeoutMs?: number;
 }
 
 export class DeviceSessionManager implements DeviceSessionManager {
@@ -234,6 +241,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
   private readonly runnerReadinessService: RunnerReadinessService;
   private readonly runnerReadinessTimer: Timer;
   private readonly runnerReadinessTimeoutMs: number | undefined;
+  private readonly runnerProvisionTimeoutMs: number | undefined;
   private _adb: AdbExecutor | undefined;
   private simulatorAppOpened = false;
 
@@ -249,6 +257,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
     this.adbFactory = adbFactory;
     this.runnerReadinessTimer = options.runnerReadinessTimer ?? defaultTimer;
     this.runnerReadinessTimeoutMs = options.runnerReadinessTimeoutMs;
+    this.runnerProvisionTimeoutMs = options.runnerProvisionTimeoutMs;
     this.runnerReadinessService = new RunnerReadinessService({
       timer: this.runnerReadinessTimer,
       getAndroidManager: (device) => this.provider.getAndroidCtrlProxyManager(device),
@@ -750,10 +759,19 @@ export class DeviceSessionManager implements DeviceSessionManager {
     let didSetup = false;
     const runnerReadinessTimeoutMs =
       this.runnerReadinessTimeoutMs ?? serverConfig.getRunnerReadinessTimeoutMs();
+    // Session auto-start owns no separate device-boot deadline, so a genuine cold
+    // first call must fit the one-time CtrlProxy provisioning (~90-115s launch)
+    // in the total deadline. Size it to the provision budget while keeping
+    // `readinessTimeoutMs` as the fast-fail steady-state health window; the
+    // service bounds setup by the total and opens the health window only after
+    // provisioning completes (#5376).
+    const runnerProvisionTimeoutMs =
+      this.runnerProvisionTimeoutMs ?? DEFAULT_RUNNER_PROVISION_TIMEOUT_MS;
 
     try {
       const totalDeadlineMs =
-        this.runnerReadinessTimer.now() + runnerReadinessTimeoutMs;
+        this.runnerReadinessTimer.now() +
+        Math.max(runnerProvisionTimeoutMs, runnerReadinessTimeoutMs);
       await this.runnerReadinessService.ensureReady({
         device,
         requestedIdentity: `platform=ios deviceId=${deviceId}`,

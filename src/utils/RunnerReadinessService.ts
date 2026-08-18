@@ -107,7 +107,13 @@ export interface RunnerReadinessRequest {
 }
 
 interface ReadinessAttemptContext extends RunnerReadinessRequest {
-  readinessDeadlineMs: number;
+  /**
+   * Absolute deadline for the steady-state connect/health phases, opened when
+   * `waitForResponsiveClient` begins (null until then) so a long cold
+   * provisioning does not consume the short health budget. Setup/provision
+   * phases are bounded by `totalDeadlineMs` directly (#5376).
+   */
+  healthDeadlineMs: number | null;
 }
 
 type ReadinessRelease = () => void;
@@ -133,11 +139,10 @@ export class RunnerReadinessService {
   constructor(private readonly dependencies: RunnerReadinessDependencies) {}
 
   async ensureReady(request: RunnerReadinessRequest): Promise<void> {
-    const readinessDeadlineMs = Math.min(
-      request.totalDeadlineMs,
-      this.dependencies.timer.now() + request.readinessTimeoutMs,
-    );
-    const context: ReadinessAttemptContext = { ...request, readinessDeadlineMs };
+    // Setup/provision phases run against `totalDeadlineMs`; the connect/health
+    // window is opened later (see `startHealthWindow`) so a cold launch cannot
+    // starve it (#5376).
+    const context: ReadinessAttemptContext = { ...request, healthDeadlineMs: null };
     const key = `${request.device.platform}:${request.device.deviceId}`;
     const release = await this.acquireReadinessTurn(context, key);
     try {
@@ -159,7 +164,7 @@ export class RunnerReadinessService {
     context: ReadinessAttemptContext,
     key: string,
   ): Promise<ReadinessRelease> {
-    if (this.remaining(context) <= 0) {
+    if (this.remainingForPhase(context, "runner-setup") <= 0) {
       this.fail(context, "runner-setup", 1, "readiness budget exhausted before setup lock");
     }
     const lock = readinessLocksByDevice.get(key) ?? { locked: false, waiters: [] };
@@ -188,7 +193,7 @@ export class RunnerReadinessService {
         };
         waiter.timeoutHandle = this.dependencies.timer.setTimeout(
           () => abandon(new Error("readiness setup lock exceeded this request's deadline")),
-          this.remaining(context),
+          this.remainingForPhase(context, "runner-setup"),
         );
         waiter.abortListener = () => abandon(context.signal?.reason);
         context.signal?.addEventListener("abort", waiter.abortListener, { once: true });
@@ -403,7 +408,7 @@ export class RunnerReadinessService {
     }
 
     const setup = await this.runPhase(context, "runner-setup", 1, (signal) =>
-      manager.setup(false, context.perf, signal, this.remaining(context)),
+      manager.setup(false, context.perf, signal, this.remainingForPhase(context, "runner-setup")),
     );
     context.onRunnerSetup?.();
     if (!setup.success) {
@@ -429,7 +434,7 @@ export class RunnerReadinessService {
     await this.runPhase(context, "runner-setup", 1, (signal) =>
       manager.start({
         signal,
-        minimumHealthPollDurationMs: this.remaining(context),
+        minimumHealthPollDurationMs: this.remainingForPhase(context, "runner-setup"),
       }),
     );
     await this.waitForResponsiveClient(context, client);
@@ -439,10 +444,13 @@ export class RunnerReadinessService {
     context: ReadinessAttemptContext,
     client: ReadinessClient,
   ): Promise<void> {
+    // Provisioning is done; open the steady-state health window now so a long
+    // cold launch above did not consume it (#5376).
+    this.startHealthWindow(context);
     let attempts = 0;
     let connected = client.isConnected();
     let phase: RunnerReadinessPhase = connected ? "runner-health" : "runner-connect";
-    while (this.remaining(context) > 0) {
+    while (this.remainingForPhase(context, "runner-health") > 0) {
       attempts++;
       connected = client.isConnected();
       if (!connected) {
@@ -461,7 +469,7 @@ export class RunnerReadinessService {
         }
       }
 
-      const remaining = this.remaining(context);
+      const remaining = this.remainingForPhase(context, "runner-health");
       if (remaining > 0) {
         await this.dependencies.timer.sleep(Math.min(READINESS_RETRY_DELAY_MS, remaining));
       }
@@ -480,10 +488,10 @@ export class RunnerReadinessService {
     attempts: number,
     operation: (signal: AbortSignal) => Promise<T>,
   ): Promise<T> {
-    if (this.remaining(context) <= 0) {
+    if (this.remainingForPhase(context, phase) <= 0) {
       this.fail(context, phase, attempts, "readiness budget exhausted before phase started");
     }
-    const remainingMs = this.remaining(context);
+    const remainingMs = this.remainingForPhase(context, phase);
     const controller = new AbortController();
     const signal = context.signal
       ? AbortSignal.any([context.signal, controller.signal])
@@ -533,11 +541,48 @@ export class RunnerReadinessService {
   }
 
   private probeTimeout(context: ReadinessAttemptContext): number {
-    return Math.max(1, Math.min(READINESS_PROBE_TIMEOUT_MS, this.remaining(context)));
+    return Math.max(
+      1,
+      Math.min(READINESS_PROBE_TIMEOUT_MS, this.remainingForPhase(context, "runner-health")),
+    );
   }
 
-  private remaining(context: ReadinessAttemptContext): number {
-    return Math.max(0, context.readinessDeadlineMs - this.dependencies.timer.now());
+  /**
+   * Setup/provision phases (a cold CtrlProxy download + `xcodebuild`/install
+   * launch) are the ones that legitimately take boot-class time, so they run
+   * against `totalDeadlineMs`. Connect/health probes are steady-state and stay
+   * fast-fail against the health window (#5376).
+   */
+  private static isSetupPhase(phase: RunnerReadinessPhase): boolean {
+    return phase === "runner-setup" || phase === "package-compatibility";
+  }
+
+  private phaseDeadlineMs(context: ReadinessAttemptContext, phase: RunnerReadinessPhase): number {
+    if (RunnerReadinessService.isSetupPhase(phase)) {
+      return context.totalDeadlineMs;
+    }
+    // Before the health window opens (fast-path probes run before setup), fall
+    // back to the total deadline; those probes self-bound via `probeTimeout`.
+    return context.healthDeadlineMs ?? context.totalDeadlineMs;
+  }
+
+  private remainingForPhase(
+    context: ReadinessAttemptContext,
+    phase: RunnerReadinessPhase,
+  ): number {
+    return Math.max(0, this.phaseDeadlineMs(context, phase) - this.dependencies.timer.now());
+  }
+
+  /**
+   * Open the steady-state connect/health window once provisioning is done, so a
+   * long cold launch does not eat the health budget. Still bounded by the
+   * caller's total deadline (#5376).
+   */
+  private startHealthWindow(context: ReadinessAttemptContext): void {
+    context.healthDeadlineMs = Math.min(
+      context.totalDeadlineMs,
+      this.dependencies.timer.now() + context.readinessTimeoutMs,
+    );
   }
 
   private fail(
@@ -552,7 +597,7 @@ export class RunnerReadinessService {
       `resolved=[${device.name} (${device.deviceId})]`;
     throw new RunnerReadinessError(
       `${context.operationName ?? "startDevice"} automation runner readiness failed: ${mapping} phase=${phase} ` +
-        `attempts=${attempts} remainingBudgetMs=${this.remaining(context)}: ${normalizeDiagnostic(detail)}`,
+        `attempts=${attempts} remainingBudgetMs=${this.remainingForPhase(context, phase)}: ${normalizeDiagnostic(detail)}`,
     );
   }
 }

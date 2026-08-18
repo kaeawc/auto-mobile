@@ -1,6 +1,4 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { AndroidH264Source } from "../../src/features/webrtc/AndroidH264Source";
 import {
   H264AnnexBParser,
@@ -10,7 +8,13 @@ import {
   nalUnitType,
 } from "../../src/features/webrtc/h264";
 import type { BootedDevice } from "../../src/models";
+import { DefaultHostCommandExecutor } from "../../src/utils/HostCommandExecutor";
 import { defaultTimer } from "../../src/utils/SystemTimer";
+import {
+  ADB_INTEGRATION_COMMAND_TIMEOUT_MS,
+  createAdbIntegrationCommandRunner,
+  type AdbIntegrationCommandRunner,
+} from "./adbIntegrationCommandRunner";
 
 /**
  * On-device verification of the ONE seam the unit tests structurally cannot
@@ -24,25 +28,27 @@ import { defaultTimer } from "../../src/utils/SystemTimer";
  * `AUTOMOBILE_ANDROID_H264_INTEGRATION=1` (and optionally
  * `AUTOMOBILE_ANDROID_H264_DEVICE_ID=<serial>`) to run them.
  */
-const execFileAsync = promisify(execFile);
 const RUN_INTEGRATION = process.env.AUTOMOBILE_ANDROID_H264_INTEGRATION === "1";
 const describeIntegration = RUN_INTEGRATION ? describe : describe.skip;
-
 const CAPTURE_MS = 3000;
+// The two sequential setup queries must each be killed by their own child-process
+// deadline. This hook budget is only a final backstop if a future setup step stalls.
+const ADB_SETUP_HOOK_TIMEOUT_MS = ADB_INTEGRATION_COMMAND_TIMEOUT_MS * 2 + 1000;
+const adb = createAdbIntegrationCommandRunner(new DefaultHostCommandExecutor());
 
 /** Resolve the target device serial from env or the first booted device. */
-async function resolveDeviceId(): Promise<string> {
+async function resolveDeviceId(adbRunner: AdbIntegrationCommandRunner): Promise<string> {
   const explicit = process.env.AUTOMOBILE_ANDROID_H264_DEVICE_ID;
   if (explicit) {
     return explicit;
   }
-  const { stdout } = await execFileAsync("adb", ["devices"]);
+  const { stdout } = await adbRunner.run(["devices"], "discovering an Android device");
   const serial = stdout
     .split("\n")
     .slice(1)
-    .map(line => line.trim())
-    .filter(line => line.endsWith("\tdevice"))
-    .map(line => line.split("\t")[0])[0];
+    .map((line) => line.trim())
+    .filter((line) => line.endsWith("\tdevice"))
+    .map((line) => line.split("\t")[0])[0];
   if (!serial) {
     throw new Error(`No booted Android device found in \`adb devices\`:\n${stdout}`);
   }
@@ -50,9 +56,15 @@ async function resolveDeviceId(): Promise<string> {
 }
 
 /** Count device-side `screenrecord` processes (to detect orphans after stop). */
-async function countScreenrecordProcesses(deviceId: string): Promise<number> {
-  const { stdout } = await execFileAsync("adb", ["-s", deviceId, "shell", "ps", "-A"]);
-  return stdout.split("\n").filter(line => line.includes("screenrecord")).length;
+async function countScreenrecordProcesses(
+  adbRunner: AdbIntegrationCommandRunner,
+  deviceId: string,
+): Promise<number> {
+  const { stdout } = await adbRunner.run(
+    ["-s", deviceId, "shell", "ps", "-A"],
+    "checking for screenrecord processes",
+  );
+  return stdout.split("\n").filter((line) => line.includes("screenrecord")).length;
 }
 
 /** Split an accumulated Annex-B buffer into NAL-type counts. */
@@ -76,13 +88,9 @@ describeIntegration("AndroidH264Source on-device capture (#3775)", () => {
   let deviceId: string;
 
   beforeAll(async () => {
-    try {
-      await execFileAsync("adb", ["version"]);
-    } catch (error) {
-      throw new Error(`adb is required for this integration test: ${String(error)}`);
-    }
-    deviceId = await resolveDeviceId();
-  });
+    await adb.run(["version"], "checking ADB availability");
+    deviceId = await resolveDeviceId(adb);
+  }, ADB_SETUP_HOOK_TIMEOUT_MS);
 
   function makeDevice(): BootedDevice {
     return { deviceId, platform: "android", name: deviceId } as BootedDevice;
@@ -90,14 +98,14 @@ describeIntegration("AndroidH264Source on-device capture (#3775)", () => {
 
   async function capture(
     overrides: Partial<ConstructorParameters<typeof AndroidH264Source>[0]> = {},
-    captureMs: number = CAPTURE_MS
+    captureMs: number = CAPTURE_MS,
   ): Promise<{ chunks: Buffer[]; errors: Error[]; source: AndroidH264Source }> {
     const chunks: Buffer[] = [];
     const errors: Error[] = [];
     const source = new AndroidH264Source({
       device: makeDevice(),
-      onData: chunk => chunks.push(chunk),
-      onError: error => errors.push(error),
+      onData: (chunk) => chunks.push(chunk),
+      onError: (error) => errors.push(error),
       ...overrides,
     });
     await source.start();
@@ -133,7 +141,10 @@ describeIntegration("AndroidH264Source on-device capture (#3775)", () => {
   test("accepts device --bit-rate and --size overrides and still produces frames", async () => {
     // Use the device's native resolution so `--size` is always a supported value
     // while still exercising the `--size WxH` argument path end-to-end.
-    const { stdout } = await execFileAsync("adb", ["-s", deviceId, "shell", "wm", "size"]);
+    const { stdout } = await adb.run(
+      ["-s", deviceId, "shell", "wm", "size"],
+      "reading display size",
+    );
     const match = stdout.match(/(\d+)x(\d+)/);
     if (!match) {
       throw new Error(`Could not parse \`wm size\`: ${stdout}`);
@@ -156,7 +167,7 @@ describeIntegration("AndroidH264Source on-device capture (#3775)", () => {
     // Force fast rotation: cap each segment at 2s and rotate at 1.5s.
     const { chunks, errors, source } = await capture(
       { segmentTimeLimitSeconds: 2, segmentRotateMs: 1500 },
-      5000
+      5000,
     );
 
     expect(errors).toEqual([]);
@@ -171,7 +182,7 @@ describeIntegration("AndroidH264Source on-device capture (#3775)", () => {
   }, 30000);
 
   test("stop leaves no orphaned screenrecord process on the device", async () => {
-    const baseline = await countScreenrecordProcesses(deviceId);
+    const baseline = await countScreenrecordProcesses(adb, deviceId);
 
     const { errors } = await capture();
     expect(errors).toEqual([]);
@@ -179,7 +190,7 @@ describeIntegration("AndroidH264Source on-device capture (#3775)", () => {
     // After stop + wind-down, the device-side screenrecord count must return to
     // (or below) the baseline — our session leaves nothing running. A leak would
     // show up as a count above baseline.
-    const after = await countScreenrecordProcesses(deviceId);
+    const after = await countScreenrecordProcesses(adb, deviceId);
     expect(after).toBeLessThanOrEqual(baseline);
   }, 30000);
 });

@@ -181,7 +181,7 @@
     "knip": "^6.0.0",
     "oxc-parser": "0.143.0",
     "oxfmt": "0.63.0",
-    "oxlint": "1.77.0",
+    "oxlint": "1.78.0",
     "oxlint-tsgolint": "7.0.2001",
     "ts-prune": "^0.10.3",
     "tsx": "^4.21.0",

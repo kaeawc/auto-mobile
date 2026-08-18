@@ -8,6 +8,7 @@ import {
 } from "werift";
 import { WebRtcPublisher } from "../../../src/features/webrtc/WebRtcPublisher";
 import { WhipClient, type FetchLike } from "../../../src/features/webrtc/WhipClient";
+import { defaultTimer } from "../../../src/utils/SystemTimer";
 
 /**
  * End-to-end loopback: a real werift publisher POSTs a WHIP offer to an
@@ -15,7 +16,36 @@ import { WhipClient, type FetchLike } from "../../../src/features/webrtc/WhipCli
  * endpoint). This exercises RTP packetization + DTLS/ICE + media transport
  * without a device or a real HTTP server — the true proof that the publish path
  * works.
+ *
+ * Deliberately opt-in, like the MediaMTX integration suite: the DTLS/ICE
+ * handshake runs over REAL loopback UDP sockets, which under CI runner
+ * contention can stall — exactly the real-I/O hang class the macos "Run Tests"
+ * watchdog (#5391) guards against, and one a fakes-based unit test cannot
+ * cover. It runs in the dedicated `webrtc-integration-test` CI job (and
+ * locally) via `bun run test:integration:webrtc-mediamtx`; the fakes-based
+ * WebRtcPublisher.test.ts / WebRtcPublisher.trickle.test.ts suites keep the
+ * publisher logic covered in the default `bun test` run.
  */
+const RUN_INTEGRATION = process.env.AUTOMOBILE_MEDIAMTX_WEBRTC_INTEGRATION === "1";
+const describeLoopback = RUN_INTEGRATION ? describe : describe.skip;
+
+/** Bound a real-I/O step so a stalled DTLS/ICE exchange fails with a diagnostic. */
+async function withDeadline<T>(step: string, timeoutMs: number, run: () => Promise<T>): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = defaultTimer.setTimeout(
+      () => reject(new Error(`${step} did not complete within ${timeoutMs}ms — bounded real-I/O deadline hit`)),
+      timeoutMs
+    );
+  });
+  try {
+    return await Promise.race([run(), deadline]);
+  } finally {
+    if (timer !== undefined) {
+      defaultTimer.clearTimeout(timer);
+    }
+  }
+}
 
 const START = Buffer.from([0x00, 0x00, 0x00, 0x01]);
 
@@ -51,7 +81,7 @@ async function waitForIceComplete(pc: RTCPeerConnection): Promise<void> {
   await pc.iceGatheringStateChange.watch(state => state === "complete", 5000);
 }
 
-describe("WebRtcPublisher loopback", () => {
+describeLoopback("WebRtcPublisher loopback", () => {
   test(
     "publishes an H.264 stream over WHIP and the receiver gets RTP frames",
     async () => {
@@ -96,7 +126,7 @@ describe("WebRtcPublisher loopback", () => {
       );
 
       try {
-        await publisher.start();
+        await withDeadline("publisher.start (WHIP offer/answer + ICE)", 10_000, () => publisher.start());
         expect(publisher.getState()).toBe("connected");
 
         // Wait for the DTLS/ICE transport to connect before pumping media.
@@ -118,8 +148,10 @@ describe("WebRtcPublisher loopback", () => {
         expect(descriptor.resourceUrl).toBe("https://ingest.local/whip/loopback");
         expect(descriptor.framesSent).toBeGreaterThan(0);
       } finally {
-        await publisher.stop();
-        await receiver.close();
+        // Teardown must be bounded too: a hung stop/close would leak the real
+        // UDP sockets and keep the worker process alive after the test fails.
+        await withDeadline("publisher.stop", 5_000, () => publisher.stop());
+        await withDeadline("receiver.close", 5_000, async () => { await receiver.close(); });
       }
     },
     20000

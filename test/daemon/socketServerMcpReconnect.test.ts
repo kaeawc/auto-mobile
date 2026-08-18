@@ -6,6 +6,8 @@ import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
+import { SOCKET_REQUEST_DEADLINE_MS, sendSocketRequest } from "./helpers/socketRequest";
+import { defaultTimer } from "../../src/utils/SystemTimer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { DaemonResponse } from "../../src/daemon/types";
 
@@ -47,44 +49,7 @@ function createFakeDaemonState() {
 }
 
 function sendRequest(socketPath: string, method: string, params: Record<string, unknown> = {}): Promise<DaemonResponse> {
-  return new Promise((resolve, reject) => {
-    const client = new Socket();
-    let buffer = "";
-
-    client.connect(socketPath, () => {
-      const request = JSON.stringify({
-        id: randomUUID(),
-        type: "mcp_request",
-        method,
-        params,
-      });
-      client.write(request + "\n");
-    });
-
-    client.on("data", data => {
-      buffer += data.toString();
-      const lines = buffer.split("\n");
-      for (const line of lines) {
-        if (line.trim()) {
-          try {
-            const response = JSON.parse(line) as DaemonResponse;
-            client.destroy();
-            resolve(response);
-            return;
-          } catch {
-            // Incomplete JSON, keep buffering
-          }
-        }
-      }
-    });
-
-    client.on("error", reject);
-    client.on("close", () => {
-      if (!buffer.trim()) {
-        reject(new Error("Connection closed without response"));
-      }
-    });
-  });
+  return sendSocketRequest(socketPath, method, params);
 }
 
 class PersistentSocketClient {
@@ -126,8 +91,18 @@ class PersistentSocketClient {
       this.responses.delete(id);
       return Promise.resolve(buffered);
     }
-    return new Promise(resolve => {
-      this.waiters.set(id, resolve);
+    return new Promise((resolve, reject) => {
+      // Bounded: an unanswered request must fail fast with a diagnostic, not
+      // pend until the suite's wall-clock watchdog (macos hang class, #5391).
+      const deadline = defaultTimer.setTimeout(() => {
+        this.waiters.delete(id);
+        this.socket.destroy();
+        reject(new Error(`No response to ${method} within ${SOCKET_REQUEST_DEADLINE_MS}ms — bounded socket-test deadline hit`));
+      }, SOCKET_REQUEST_DEADLINE_MS);
+      this.waiters.set(id, response => {
+        defaultTimer.clearTimeout(deadline);
+        resolve(response);
+      });
     });
   }
 

@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { Socket } from "node:net";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
+import { sendRawSocketRequest } from "./helpers/socketRequest";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { DaemonResponse } from "../../src/daemon/types";
 import type { DaemonSelfIdentity } from "../../src/daemon/daemonHandshake";
@@ -22,42 +22,12 @@ function createFakeDaemonState() {
   };
 }
 
-function sendRequest(
+async function sendRequest(
   socketPath: string,
   payload: Record<string, unknown>
 ): Promise<DaemonResponse> {
-  return new Promise((resolve, reject) => {
-    const client = new Socket();
-    let buffer = "";
-
-    client.connect(socketPath, () => {
-      client.write(JSON.stringify({ id: randomUUID(), ...payload }) + "\n");
-    });
-
-    client.on("data", data => {
-      buffer += data.toString();
-      const lines = buffer.split("\n");
-      for (const line of lines) {
-        if (line.trim()) {
-          try {
-            const response = JSON.parse(line) as DaemonResponse;
-            client.destroy();
-            resolve(response);
-            return;
-          } catch {
-            // keep buffering
-          }
-        }
-      }
-    });
-
-    client.on("error", reject);
-    client.on("close", () => {
-      if (!buffer.trim()) {
-        reject(new Error("Connection closed without response"));
-      }
-    });
-  });
+  const { response } = await sendRawSocketRequest(socketPath, payload);
+  return response;
 }
 
 // `ide/ping` is handled locally without the MCP client, so these tests exercise the

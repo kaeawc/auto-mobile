@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { Socket } from "node:net";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
+import { sendSocketRequest } from "./helpers/socketRequest";
 import { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
 import { FakeFeatureFlagRepository } from "../fakes/FakeFeatureFlagRepository";
 import { FakeFeatureFlagApplier } from "../fakes/FakeFeatureFlagApplier";
@@ -37,44 +37,7 @@ function createFakeDaemonState() {
 }
 
 function sendRequest(socketPath: string, method: string, params: Record<string, unknown> = {}): Promise<DaemonResponse> {
-  return new Promise((resolve, reject) => {
-    const client = new Socket();
-    let buffer = "";
-
-    client.connect(socketPath, () => {
-      const request = JSON.stringify({
-        id: randomUUID(),
-        type: "mcp_request",
-        method,
-        params,
-      });
-      client.write(request + "\n");
-    });
-
-    client.on("data", data => {
-      buffer += data.toString();
-      const lines = buffer.split("\n");
-      for (const line of lines) {
-        if (line.trim()) {
-          try {
-            const response = JSON.parse(line) as DaemonResponse;
-            client.destroy();
-            resolve(response);
-            return;
-          } catch {
-            // Incomplete JSON, keep buffering
-          }
-        }
-      }
-    });
-
-    client.on("error", reject);
-    client.on("close", () => {
-      if (!buffer.trim()) {
-        reject(new Error("Connection closed without response"));
-      }
-    });
-  });
+  return sendSocketRequest(socketPath, method, params);
 }
 
 describe("UnixSocketServer feature flag handlers", () => {

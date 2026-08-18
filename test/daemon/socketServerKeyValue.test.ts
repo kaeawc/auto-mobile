@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { Socket } from "node:net";
 import { existsSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
+import { sendSocketRequest } from "./helpers/socketRequest";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
@@ -52,27 +52,7 @@ function createDaemonState() {
 }
 
 function sendRequest(socketPath: string, method: string, params: Record<string, unknown>): Promise<DaemonResponse> {
-  return new Promise((resolve, reject) => {
-    const socket = new Socket();
-    let buffer = "";
-    socket.connect(socketPath, () => {
-      socket.write(JSON.stringify({
-        id: randomUUID(),
-        type: "mcp_request",
-        method,
-        params,
-      }) + "\n");
-    });
-    socket.on("data", data => {
-      buffer += data.toString();
-      const line = buffer.split("\n").find(value => value.trim());
-      if (line) {
-        socket.destroy();
-        resolve(JSON.parse(line) as DaemonResponse);
-      }
-    });
-    socket.on("error", reject);
-  });
+  return sendSocketRequest(socketPath, method, params);
 }
 
 describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {

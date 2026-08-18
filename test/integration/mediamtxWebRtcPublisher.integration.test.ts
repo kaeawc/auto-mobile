@@ -9,6 +9,7 @@ import { join, resolve } from "node:path";
 import WebSocket from "ws";
 import { WebRtcPublisher } from "../../src/features/webrtc/WebRtcPublisher";
 import { WhipClient } from "../../src/features/webrtc/WhipClient";
+import { defaultTimer } from "../../src/utils/SystemTimer";
 
 /**
  * Real SFU + decoder coverage for #4290. This is deliberately opt-in: it
@@ -301,32 +302,74 @@ async function readDecodedVideo(cdp: CdpClient): Promise<DecodedVideo> {
   return value;
 }
 
+/**
+ * Bound a wait on a real child-process event: these three helper tests run in
+ * the DEFAULT `bun test` suite on macOS/Linux (only win32 is skipped), so an
+ * unbounded `once()` on a child that never emits would ride the whole CI
+ * wall-clock watchdog (#5391) instead of failing with a diagnostic.
+ */
+async function boundedOnce(
+  emitter: Parameters<typeof once>[0],
+  event: string,
+  description: string,
+  timeoutMs: number = 10_000,
+): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = defaultTimer.setTimeout(
+      () => reject(new Error(`${description} did not emit '${event}' within ${timeoutMs}ms — bounded real-I/O deadline hit`)),
+      timeoutMs
+    );
+  });
+  try {
+    await Promise.race([once(emitter, event), deadline]);
+  } finally {
+    if (timer !== undefined) {
+      defaultTimer.clearTimeout(timer);
+    }
+  }
+}
+
 test.skipIf(process.platform === "win32")("force-kills a child that ignores SIGTERM", async () => {
   const child = spawn("/bin/sh", ["-c", 'trap "" TERM; printf ready; while :; do sleep 1; done'], {
     stdio: ["ignore", "pipe", "pipe"],
   });
-  await once(child.stdout, "data");
+  try {
+    await boundedOnce(child.stdout, "data", "SIGTERM-ignoring child stdout");
 
-  await stopProcess(child, 10);
+    await stopProcess(child, 10);
 
-  expect(child.exitCode).toBeNull();
-  expect(child.signalCode).toBe("SIGKILL");
+    expect(child.exitCode).toBeNull();
+    expect(child.signalCode).toBe("SIGKILL");
+  } finally {
+    // Guaranteed teardown even when an assertion or the deadline throws: a
+    // surviving `while :; do sleep 1; done` child would leak past the suite.
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill("SIGKILL");
+    }
+  }
 });
 
 test.skipIf(process.platform === "win32")("rejects a stale listener when the server child has already exited", async () => {
   const child = spawn("/bin/sh", ["-c", "exit 7"], {
     stdio: ["ignore", "pipe", "pipe"],
   });
-  await once(child, "exit");
+  try {
+    await boundedOnce(child, "exit", "immediately-exiting child");
 
-  await expect(waitForHttpServer(child, () => "address already in use", "http://127.0.0.1:8889/", "MediaMTX"))
-    .rejects.toThrow("MediaMTX exited before readiness (exit code 7):\naddress already in use");
+    await expect(waitForHttpServer(child, () => "address already in use", "http://127.0.0.1:8889/", "MediaMTX"))
+      .rejects.toThrow("MediaMTX exited before readiness (exit code 7):\naddress already in use");
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill("SIGKILL");
+    }
+  }
 });
 
 test.skipIf(process.platform === "win32")("captures a child spawn error for the test body", async () => {
   const started = startProcess(join(tmpdir(), "missing-mediamtx-test-binary"), [], tmpdir());
 
-  await once(started.process, "error");
+  await boundedOnce(started.process, "error", "missing-binary spawn");
 
   expect(started.error()).toBeInstanceOf(Error);
   await stopProcess(started.process, 1);

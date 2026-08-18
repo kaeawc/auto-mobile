@@ -6,6 +6,8 @@ import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
+import { SOCKET_REQUEST_DEADLINE_MS, sendRawSocketRequest } from "./helpers/socketRequest";
+import { defaultTimer } from "../../src/utils/SystemTimer";
 import {
   DAEMON_BOUND_SESSION_PARAM,
   DAEMON_CAPABILITY_PROFILE_PARAM,
@@ -70,39 +72,9 @@ function createFakeDaemonState(
   };
 }
 
-function sendRequest(socketPath: string, request: DaemonRequest): Promise<DaemonResponse> {
-  return new Promise((resolve, reject) => {
-    const client = new Socket();
-    let buffer = "";
-
-    client.connect(socketPath, () => {
-      client.write(JSON.stringify(request) + "\n");
-    });
-
-    client.on("data", data => {
-      buffer += data.toString();
-      const lines = buffer.split("\n");
-      for (const line of lines) {
-        if (line.trim()) {
-          try {
-            const response = JSON.parse(line) as DaemonResponse;
-            client.destroy();
-            resolve(response);
-            return;
-          } catch {
-            // keep buffering
-          }
-        }
-      }
-    });
-
-    client.on("error", reject);
-    client.on("close", () => {
-      if (!buffer.trim()) {
-        reject(new Error("Connection closed without response"));
-      }
-    });
-  });
+async function sendRequest(socketPath: string, request: DaemonRequest): Promise<DaemonResponse> {
+  const { response } = await sendRawSocketRequest(socketPath, request);
+  return response;
 }
 
 function sendToolsCallWithArgs(
@@ -144,6 +116,16 @@ function sendTwoToolsCallsOnOneSocket(socketPath: string, toolName: string): Pro
       }
     });
 
+    // Bounded: two unanswered pipelined requests must fail fast with a
+    // diagnostic, not pend until the suite's wall-clock watchdog (#5391).
+    const deadline = defaultTimer.setTimeout(() => {
+      client.destroy();
+      reject(new Error(
+        `Received ${responses.length}/2 responses to pipelined tools/call within ${SOCKET_REQUEST_DEADLINE_MS}ms — `
+        + "bounded socket-test deadline hit"
+      ));
+    }, SOCKET_REQUEST_DEADLINE_MS);
+
     client.on("data", data => {
       buffer += data.toString();
       const lines = buffer.split("\n");
@@ -154,6 +136,7 @@ function sendTwoToolsCallsOnOneSocket(socketPath: string, toolName: string): Pro
         }
         responses.push(JSON.parse(line) as DaemonResponse);
         if (responses.length === 2) {
+          defaultTimer.clearTimeout(deadline);
           client.destroy();
           resolve(responses);
           return;
@@ -161,8 +144,12 @@ function sendTwoToolsCallsOnOneSocket(socketPath: string, toolName: string): Pro
       }
     });
 
-    client.on("error", reject);
+    client.on("error", error => {
+      defaultTimer.clearTimeout(deadline);
+      reject(error);
+    });
     client.on("close", () => {
+      defaultTimer.clearTimeout(deadline);
       if (responses.length < 2) {
         reject(new Error(`Connection closed after ${responses.length} responses`));
       }
@@ -209,8 +196,18 @@ class PersistentSocketClient {
       this.responses.delete(id);
       return Promise.resolve(buffered);
     }
-    return new Promise(resolve => {
-      this.waiters.set(id, resolve);
+    return new Promise((resolve, reject) => {
+      // Bounded: an unanswered request must fail fast with a diagnostic, not
+      // pend until the suite's wall-clock watchdog (macos hang class, #5391).
+      const deadline = defaultTimer.setTimeout(() => {
+        this.waiters.delete(id);
+        this.socket.destroy();
+        reject(new Error(`No response to ${method} within ${SOCKET_REQUEST_DEADLINE_MS}ms — bounded socket-test deadline hit`));
+      }, SOCKET_REQUEST_DEADLINE_MS);
+      this.waiters.set(id, response => {
+        defaultTimer.clearTimeout(deadline);
+        resolve(response);
+      });
     });
   }
 

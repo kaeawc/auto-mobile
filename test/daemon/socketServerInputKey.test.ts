@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { Socket } from "node:net";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
+import { sendRawSocketRequest } from "./helpers/socketRequest";
 import { InputKey, type InputKeyName } from "../../src/features/action/InputKey";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -61,46 +61,16 @@ function sendRequest(
   params: Record<string, unknown> = {},
   timeoutMs?: number
 ): Promise<{ response: DaemonResponse; frameCount: number }> {
-  return new Promise((resolve, reject) => {
-    const client = new Socket();
-    let buffer = "";
-    let frameCount = 0;
-    let response: DaemonResponse | undefined;
-    const request: DaemonRequest = {
-      id: randomUUID(),
-      type: "mcp_request",
-      method,
-      params,
-      ...(timeoutMs === undefined ? {} : { timeoutMs }),
-    };
-
-    client.connect(socketPath, () => {
-      client.write(JSON.stringify(request) + "\n");
-    });
-
-    client.on("data", data => {
-      buffer += data.toString();
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
-      for (const line of lines) {
-        if (!line.trim()) {
-          continue;
-        }
-        frameCount++;
-        response = JSON.parse(line) as DaemonResponse;
-        client.end();
-      }
-    });
-
-    client.on("error", reject);
-    client.on("close", () => {
-      if (!response) {
-        reject(new Error("Connection closed without response"));
-        return;
-      }
-      resolve({ response, frameCount });
-    });
-  });
+  const request: DaemonRequest = {
+    id: randomUUID(),
+    type: "mcp_request",
+    method,
+    params,
+    ...(timeoutMs === undefined ? {} : { timeoutMs }),
+  };
+  // "drain" resolves on close with the LAST frame and the total frame count,
+  // so the tests below can assert the server wrote exactly one response frame.
+  return sendRawSocketRequest(socketPath, request, { resolveOn: "drain" });
 }
 
 describe("UnixSocketServer input/key", () => {

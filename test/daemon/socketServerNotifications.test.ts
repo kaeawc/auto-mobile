@@ -63,11 +63,21 @@ class FrameCollectingClient {
     this.socket.write(JSON.stringify({ id: randomUUID(), type: "daemon_request", method, params }) + "\n");
   }
 
-  /** Resolves once at least `count` frames have arrived (bounded by the bun test timeout). */
-  async waitForFrames(count: number): Promise<void> {
+  /**
+   * Resolves once at least `count` frames have arrived, or rejects with a
+   * diagnostic after `deadlineMs`. An unbounded wait here would pend until the
+   * CI wall-clock watchdog on a dropped broadcast (macos hang class, #5391).
+   */
+  async waitForFrames(count: number, deadlineMs: number = 10_000): Promise<void> {
+    const deadline = Date.now() + deadlineMs;
     while (this.frames.length < count) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        throw new Error(`Received ${this.frames.length}/${count} notification frames within ${deadlineMs}ms — bounded socket-test deadline hit`);
+      }
       await new Promise<void>(resolve => {
         this.frameWaiters.push(resolve);
+        defaultTimer.setTimeout(resolve, remaining).unref();
       });
     }
   }

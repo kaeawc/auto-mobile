@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { Socket } from "node:net";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
+import { sendRawSocketRequest, sendSocketRequest } from "./helpers/socketRequest";
 import { PressButton } from "../../src/features/action/PressButton";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -87,87 +87,16 @@ function sendRequest(
   params: Record<string, unknown> = {},
   timeoutMs?: number
 ): Promise<DaemonResponse> {
-  return new Promise((resolve, reject) => {
-    const client = new Socket();
-    let buffer = "";
-    const request: DaemonRequest = {
-      id: randomUUID(),
-      type: "mcp_request",
-      method,
-      params,
-      ...(timeoutMs === undefined ? {} : { timeoutMs }),
-    };
-
-    client.connect(socketPath, () => {
-      client.write(JSON.stringify(request) + "\n");
-    });
-
-    client.on("data", data => {
-      buffer += data.toString();
-      const lines = buffer.split("\n");
-      for (const line of lines) {
-        if (!line.trim()) {
-          continue;
-        }
-        try {
-          const response = JSON.parse(line) as DaemonResponse;
-          client.destroy();
-          resolve(response);
-          return;
-        } catch {
-          // Incomplete JSON, keep buffering.
-        }
-      }
-    });
-
-    client.on("error", reject);
-    client.on("close", () => {
-      if (!buffer.trim()) {
-        reject(new Error("Connection closed without response"));
-      }
-    });
-  });
+  return sendSocketRequest(socketPath, method, params, timeoutMs);
 }
 
-function sendRequestAfterConnect(
+async function sendRequestAfterConnect(
   socketPath: string,
   request: DaemonRequest,
   onConnect: () => void
 ): Promise<DaemonResponse> {
-  return new Promise((resolve, reject) => {
-    const client = new Socket();
-    let buffer = "";
-
-    client.connect(socketPath, () => {
-      onConnect();
-      client.write(JSON.stringify(request) + "\n");
-    });
-
-    client.on("data", data => {
-      buffer += data.toString();
-      const lines = buffer.split("\n");
-      for (const line of lines) {
-        if (!line.trim()) {
-          continue;
-        }
-        try {
-          const response = JSON.parse(line) as DaemonResponse;
-          client.destroy();
-          resolve(response);
-          return;
-        } catch {
-          // Incomplete JSON, keep buffering.
-        }
-      }
-    });
-
-    client.on("error", reject);
-    client.on("close", () => {
-      if (!buffer.trim()) {
-        reject(new Error("Connection closed without response"));
-      }
-    });
-  });
+  const { response } = await sendRawSocketRequest(socketPath, request, { onConnect });
+  return response;
 }
 
 describe("UnixSocketServer input/pressButton", () => {

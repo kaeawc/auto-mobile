@@ -1,6 +1,13 @@
 import { Socket } from "node:net";
 import { randomUUID } from "node:crypto";
 import { mock } from "bun:test";
+import {
+  SOCKET_REQUEST_DEADLINE_MS,
+  connectBounded,
+  sendRawSocketRequest,
+  sendSocketRequest,
+} from "./socketRequest";
+import { defaultTimer } from "../../../src/utils/SystemTimer";
 import { PlatformDeviceManagerFactory } from "../../../src/utils/factories/PlatformDeviceManagerFactory";
 import type { DaemonRequest, DaemonResponse } from "../../../src/daemon/types";
 import type { DeviceLabelMap, Session } from "../../../src/daemon/sessionManager";
@@ -86,87 +93,16 @@ export function sendRequest(
   params: Record<string, unknown> = {},
   timeoutMs?: number
 ): Promise<DaemonResponse> {
-  return new Promise((resolve, reject) => {
-    const client = new Socket();
-    let buffer = "";
-    const request: DaemonRequest = {
-      id: randomUUID(),
-      type: "mcp_request",
-      method,
-      params,
-      ...(timeoutMs === undefined ? {} : { timeoutMs }),
-    };
-
-    client.connect(socketPath, () => {
-      client.write(JSON.stringify(request) + "\n");
-    });
-
-    client.on("data", data => {
-      buffer += data.toString();
-      const lines = buffer.split("\n");
-      for (const line of lines) {
-        if (!line.trim()) {
-          continue;
-        }
-        try {
-          const response = JSON.parse(line) as DaemonResponse;
-          client.destroy();
-          resolve(response);
-          return;
-        } catch {
-          // Incomplete JSON, keep buffering.
-        }
-      }
-    });
-
-    client.on("error", reject);
-    client.on("close", () => {
-      if (!buffer.trim()) {
-        reject(new Error("Connection closed without response"));
-      }
-    });
-  });
+  return sendSocketRequest(socketPath, method, params, timeoutMs);
 }
 
-export function sendRequestAfterConnect(
+export async function sendRequestAfterConnect(
   socketPath: string,
   request: DaemonRequest,
   onConnect: () => void
 ): Promise<DaemonResponse> {
-  return new Promise((resolve, reject) => {
-    const client = new Socket();
-    let buffer = "";
-
-    client.connect(socketPath, () => {
-      onConnect();
-      client.write(JSON.stringify(request) + "\n");
-    });
-
-    client.on("data", data => {
-      buffer += data.toString();
-      const lines = buffer.split("\n");
-      for (const line of lines) {
-        if (!line.trim()) {
-          continue;
-        }
-        try {
-          const response = JSON.parse(line) as DaemonResponse;
-          client.destroy();
-          resolve(response);
-          return;
-        } catch {
-          // Incomplete JSON, keep buffering.
-        }
-      }
-    });
-
-    client.on("error", reject);
-    client.on("close", () => {
-      if (!buffer.trim()) {
-        reject(new Error("Connection closed without response"));
-      }
-    });
-  });
+  const { response } = await sendRawSocketRequest(socketPath, request, { onConnect });
+  return response;
 }
 
 /** One persistent socket connection that can send several requests before closing. */
@@ -184,49 +120,64 @@ export interface PersistentConnection {
  * one session and then {@link PersistentConnection.close} it to model a mid-drag disconnect.
  * Responses are correlated by request id, so concurrent sends are supported.
  */
-export function openPersistentConnection(socketPath: string): Promise<PersistentConnection> {
-  return new Promise((resolveConn, rejectConn) => {
-    const client = new Socket();
-    let buffer = "";
-    const pending = new Map<string, (response: DaemonResponse) => void>();
+export async function openPersistentConnection(socketPath: string): Promise<PersistentConnection> {
+  const client = new Socket();
+  let buffer = "";
+  const pending = new Map<string, { resolve: (response: DaemonResponse) => void; deadline: NodeJS.Timeout }>();
 
-    client.on("data", data => {
-      buffer += data.toString();
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-      for (const line of lines) {
-        if (!line.trim()) {
-          continue;
-        }
-        const response = JSON.parse(line) as DaemonResponse;
-        const resolve = pending.get(response.id);
-        if (resolve) {
-          pending.delete(response.id);
-          resolve(response);
-        }
+  client.on("data", data => {
+    buffer += data.toString();
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+    for (const line of lines) {
+      if (!line.trim()) {
+        continue;
       }
-    });
-    client.on("error", rejectConn);
-    client.connect(socketPath, () => {
-      resolveConn({
-        send(method, params = {}, timeoutMs) {
-          const id = randomUUID();
-          return new Promise<DaemonResponse>(resolve => {
-            pending.set(id, resolve);
-            const request: DaemonRequest = {
-              id,
-              type: "mcp_request",
-              method,
-              params,
-              ...(timeoutMs === undefined ? {} : { timeoutMs }),
-            };
-            client.write(JSON.stringify(request) + "\n");
-          });
-        },
-        close() {
-          client.destroy();
-        },
-      });
-    });
+      const response = JSON.parse(line) as DaemonResponse;
+      const entry = pending.get(response.id);
+      if (entry) {
+        pending.delete(response.id);
+        defaultTimer.clearTimeout(entry.deadline);
+        entry.resolve(response);
+      }
+    }
   });
+  await connectBounded(client, socketPath);
+  // Post-connect transport errors (e.g. ECONNRESET when a test closes the
+  // server mid-stream) must not become uncaught 'error' events; pending sends
+  // are already bounded by their own deadlines.
+  client.on("error", () => {});
+  return {
+    send(method, params = {}, timeoutMs) {
+      const id = randomUUID();
+      return new Promise<DaemonResponse>((resolve, reject) => {
+        // Bounded like sendSocketRequest: an unanswered request must fail fast
+        // with a diagnostic, not pend until the suite's wall-clock watchdog.
+        const deadline = defaultTimer.setTimeout(() => {
+          pending.delete(id);
+          client.destroy();
+          reject(new Error(
+            `No response to ${method} on ${socketPath} within ${SOCKET_REQUEST_DEADLINE_MS}ms — `
+            + "bounded socket-test deadline hit (the server hung or dropped the request)"
+          ));
+        }, SOCKET_REQUEST_DEADLINE_MS);
+        pending.set(id, { resolve, deadline });
+        const request: DaemonRequest = {
+          id,
+          type: "mcp_request",
+          method,
+          params,
+          ...(timeoutMs === undefined ? {} : { timeoutMs }),
+        };
+        client.write(JSON.stringify(request) + "\n");
+      });
+    },
+    close() {
+      for (const entry of pending.values()) {
+        defaultTimer.clearTimeout(entry.deadline);
+      }
+      pending.clear();
+      client.destroy();
+    },
+  };
 }

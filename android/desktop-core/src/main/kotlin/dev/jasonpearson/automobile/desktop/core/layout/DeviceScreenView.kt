@@ -294,58 +294,78 @@ private suspend fun PointerInputScope.deviceScreenDragGestures(
       }
     val coalescer = if (streaming != null) DeviceGestureStreamCoalescer() else null
 
-    val completed =
-      drag(change.id) { dragged ->
-        // Read the delta BEFORE consuming: `positionChange()` reports Offset.Zero once the change
-        // is consumed, so consuming first silently zeroes every pan step.
-        val delta = dragged.positionChange()
-        dragged.consume()
-        if (panning) onPan(delta)
-        lastPosition = dragged.position
-        lastUptimeMs = dragged.uptimeMillis
-        if (streaming != null && coalescer != null && frame != null) {
-          val geometry = frame.second
-          val moved =
-            DeviceScreenCoordinateMapper.viewportToDevice(
-              ViewportPoint(dragged.position.x, dragged.position.y),
-              geometry,
-            )
-          // Throttle to the frame cadence; a coalesced sample is superseded by a later move or the
-          // exact release point sent below, so nothing visible is lost.
-          if (coalescer.offer(moved.x, moved.y, dragged.uptimeMillis) is GestureStreamStep.Emit) {
-            streaming.move(moved)
+    // A streamed drag MUST send its terminal end even if this pointerInput coroutine is cancelled
+    // mid-drag (controlMode change, surface removed): the handle's end() is what closes the event
+    // channel, so skipping it leaves the stream consumer awaiting the channel forever while holding
+    // the single input FIFO slot, wedging all later input (issue: streaming gesture input). The
+    // finally lifts in place with a cancelling end when the normal release path did not run.
+    var streamReleased = false
+    try {
+      val completed =
+        drag(change.id) { dragged ->
+          // Read the delta BEFORE consuming: `positionChange()` reports Offset.Zero once the change
+          // is consumed, so consuming first silently zeroes every pan step.
+          val delta = dragged.positionChange()
+          dragged.consume()
+          if (panning) onPan(delta)
+          lastPosition = dragged.position
+          lastUptimeMs = dragged.uptimeMillis
+          if (streaming != null && coalescer != null && frame != null) {
+            val geometry = frame.second
+            val moved =
+              DeviceScreenCoordinateMapper.viewportToDevice(
+                ViewportPoint(dragged.position.x, dragged.position.y),
+                geometry,
+              )
+            // Throttle to the frame cadence; a coalesced sample is superseded by a later move or
+            // the
+            // exact release point sent below, so nothing visible is lost.
+            if (coalescer.offer(moved.x, moved.y, dragged.uptimeMillis) is GestureStreamStep.Emit) {
+              streaming.move(moved)
+            }
           }
         }
+
+      if (streaming != null && frame != null) {
+        // A streamed drag ends on release with the exact final point; a cancelled drag (pointer
+        // capture lost, window deactivated) lifts in place so a partial drag is abandoned cleanly.
+        val geometry = frame.second
+        val endDevice =
+          DeviceScreenCoordinateMapper.viewportToDevice(
+            ViewportPoint(lastPosition.x, lastPosition.y),
+            geometry,
+          )
+        streaming.end(endDevice, cancel = !completed)
+        streamReleased = true
+        return@awaitEachGesture
       }
 
-    if (streaming != null && frame != null) {
-      // A streamed drag ends on release with the exact final point; a cancelled drag (pointer
-      // capture lost, window deactivated) lifts in place so a partial drag is abandoned cleanly.
-      val geometry = frame.second
-      val endDevice =
+      if (!completed || frame == null) return@awaitEachGesture
+      val (snapshot, geometry) = frame
+      val gestureDurationMs = (lastUptimeMs - down.uptimeMillis).coerceAtLeast(0L).toInt()
+      onSwipe(
+        snapshot,
+        DeviceScreenCoordinateMapper.viewportToDevice(
+          ViewportPoint(down.position.x, down.position.y),
+          geometry,
+        ),
         DeviceScreenCoordinateMapper.viewportToDevice(
           ViewportPoint(lastPosition.x, lastPosition.y),
           geometry,
-        )
-      streaming.end(endDevice, cancel = !completed)
-      return@awaitEachGesture
+        ),
+        gestureDurationMs,
+      )
+    } finally {
+      if (streaming != null && frame != null && !streamReleased) {
+        val geometry = frame.second
+        val endDevice =
+          DeviceScreenCoordinateMapper.viewportToDevice(
+            ViewportPoint(lastPosition.x, lastPosition.y),
+            geometry,
+          )
+        streaming.end(endDevice, cancel = true)
+      }
     }
-
-    if (!completed || frame == null) return@awaitEachGesture
-    val (snapshot, geometry) = frame
-    val gestureDurationMs = (lastUptimeMs - down.uptimeMillis).coerceAtLeast(0L).toInt()
-    onSwipe(
-      snapshot,
-      DeviceScreenCoordinateMapper.viewportToDevice(
-        ViewportPoint(down.position.x, down.position.y),
-        geometry,
-      ),
-      DeviceScreenCoordinateMapper.viewportToDevice(
-        ViewportPoint(lastPosition.x, lastPosition.y),
-        geometry,
-      ),
-      gestureDurationMs,
-    )
   }
 }
 

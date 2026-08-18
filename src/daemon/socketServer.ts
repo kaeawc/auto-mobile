@@ -183,6 +183,20 @@ const GESTURE_FRAME_METHODS = {
 } as const;
 
 /**
+ * A streamed gesture the runner has accepted (a `gestureStart` that acked) but not yet ended,
+ * retained so its owning socket can issue a cancelling `gestureEnd` if it tears down mid-drag.
+ * [targetDevice] is captured at start so the cancel can be forwarded without re-resolving the
+ * device on a socket whose session state is already gone.
+ */
+interface OwnedGesture {
+  targetDevice: BootedDevice;
+  gestureId: string;
+}
+
+/** Timeout for the best-effort cancelling `gestureEnd` issued when a socket owning a gesture closes. */
+const OWNED_GESTURE_CANCEL_TIMEOUT_MS = 5000;
+
+/**
  * The narrow key-value mutation surface the `ide/*` handlers need from a
  * platform CtrlProxy client. Both AndroidCtrlProxyClient and IOSCtrlProxyClient
  * satisfy it structurally (#4708).
@@ -285,6 +299,17 @@ export class UnixSocketServer {
    * appears, so a runner upgrade is not pinned to the stale legacy verdict.
    */
   private confirmedLegacyScaleDevices: Set<string> = new Set();
+
+  /**
+   * Streamed gestures currently open on a device, keyed by the SOCKET session that started them,
+   * then by `${deviceId}::${gestureId}`. A `gestureStart` the runner accepts records its owning
+   * socket here and the matching `gestureEnd` clears it. The runner deliberately parks a continued
+   * stroke while it waits, with no duration ceiling, so a socket that closes/errors before sending
+   * its end (desktop crash, timeout, disconnect) would leave the on-device touch and the runner's
+   * registry entry live indefinitely; {@link cancelOwnedGestures} issues a cancelling end for each
+   * on socket teardown (issue: streaming gesture input).
+   */
+  private ownedGesturesBySocket: Map<string, Map<string, OwnedGesture>> = new Map();
 
   constructor(
     socketPath: string = SOCKET_PATH,
@@ -435,6 +460,9 @@ export class UnixSocketServer {
       this.clientSockets.delete(sessionId);
       this.notificationSubscribers.delete(sessionId);
       this.clearBoundMcpClientKey(sessionId);
+      // Lift any streamed gesture this socket left open on the device (issue: streaming gesture
+      // input). Tracked so daemon shutdown drains it rather than a fire-and-forget floating promise.
+      this.trackRequestHandler(this.cancelOwnedGestures(sessionId));
     });
 
     socket.on("error", error => {
@@ -443,6 +471,7 @@ export class UnixSocketServer {
       this.clientSockets.delete(sessionId);
       this.notificationSubscribers.delete(sessionId);
       this.clearBoundMcpClientKey(sessionId);
+      this.trackRequestHandler(this.cancelOwnedGestures(sessionId));
       if (!socket.destroyed) {
         socket.destroy();
       }
@@ -1777,6 +1806,17 @@ export class UnixSocketServer {
       throw new Error(gestureResult.error ?? `${method} failed on ${args.platform}`);
     }
 
+    // Track ownership so a socket that tears down mid-drag can lift its still-open on-device stroke.
+    // Only an acked start opens the gesture; an end (release OR cancel) closes it. A socket-less
+    // forward (no client session) can't be cancelled on close, so it isn't tracked.
+    if (socketSessionId) {
+      if (kind === "start") {
+        this.rememberOwnedGesture(socketSessionId, targetDevice, args.gestureId);
+      } else if (kind === "end") {
+        this.forgetOwnedGesture(socketSessionId, targetDevice.deviceId, args.gestureId);
+      }
+    }
+
     return {
       action: method,
       platform: args.platform,
@@ -1786,6 +1826,59 @@ export class UnixSocketServer {
       point: { x: args.x, y: args.y },
       ...(kind === "end" ? { cancel: args.cancel } : {}),
     };
+  }
+
+  private static ownedGestureKey(deviceId: string, gestureId: string): string {
+    return `${deviceId}::${gestureId}`;
+  }
+
+  private rememberOwnedGesture(
+    socketSessionId: string,
+    targetDevice: BootedDevice,
+    gestureId: string
+  ): void {
+    const key = UnixSocketServer.ownedGestureKey(targetDevice.deviceId, gestureId);
+    const forSocket = this.ownedGesturesBySocket.get(socketSessionId) ?? new Map<string, OwnedGesture>();
+    forSocket.set(key, { targetDevice, gestureId });
+    this.ownedGesturesBySocket.set(socketSessionId, forSocket);
+  }
+
+  private forgetOwnedGesture(socketSessionId: string, deviceId: string, gestureId: string): void {
+    const forSocket = this.ownedGesturesBySocket.get(socketSessionId);
+    if (!forSocket) {
+      return;
+    }
+    forSocket.delete(UnixSocketServer.ownedGestureKey(deviceId, gestureId));
+    if (forSocket.size === 0) {
+      this.ownedGesturesBySocket.delete(socketSessionId);
+    }
+  }
+
+  /**
+   * Cancel every gesture a closing/erroring socket still owns. Best-effort: each cancelling
+   * `gestureEnd` is forwarded through the same per-device keyed queue as live frames (so it can't
+   * race an in-flight frame) and a failure is logged, never thrown — the socket is already gone.
+   */
+  private async cancelOwnedGestures(socketSessionId: string): Promise<void> {
+    const forSocket = this.ownedGesturesBySocket.get(socketSessionId);
+    if (!forSocket || forSocket.size === 0) {
+      this.ownedGesturesBySocket.delete(socketSessionId);
+      return;
+    }
+    this.ownedGesturesBySocket.delete(socketSessionId);
+    for (const { targetDevice, gestureId } of forSocket.values()) {
+      try {
+        await this.runKeyedMcpForward(`device:${targetDevice.deviceId}`, async () => {
+          const client = AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
+          // Coordinates are ignored for a cancel (the runner lifts in place), so 0,0 is fine.
+          return client.requestGestureEnd(gestureId, 0, 0, true, OWNED_GESTURE_CANCEL_TIMEOUT_MS);
+        }, `device:${targetDevice.deviceId}`);
+      } catch (error) {
+        logger.warn(
+          `Failed to cancel orphaned gesture ${gestureId} on ${targetDevice.deviceId} for closed socket ${socketSessionId}: ${error}`
+        );
+      }
+    }
   }
 
   /** Relay one gesture frame to the Android runner's continued-gesture path. */

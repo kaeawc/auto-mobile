@@ -168,3 +168,65 @@ export function sendRequestAfterConnect(
     });
   });
 }
+
+/** One persistent socket connection that can send several requests before closing. */
+export interface PersistentConnection {
+  /** Send one request over the held connection and resolve with its response (correlated by id). */
+  send(method: string, params?: Record<string, unknown>, timeoutMs?: number): Promise<DaemonResponse>;
+  /** Disconnect, modelling the client going away (a crash/timeout mid-stream). */
+  close(): void;
+}
+
+/**
+ * Open ONE persistent socket and keep it connected across many requests, the way the real streaming
+ * gesture client holds a single connection open for a drag's start -> moves -> end. Unlike
+ * {@link sendRequest} (a throwaway socket per call), this lets a test drive a multi-frame gesture on
+ * one session and then {@link PersistentConnection.close} it to model a mid-drag disconnect.
+ * Responses are correlated by request id, so concurrent sends are supported.
+ */
+export function openPersistentConnection(socketPath: string): Promise<PersistentConnection> {
+  return new Promise((resolveConn, rejectConn) => {
+    const client = new Socket();
+    let buffer = "";
+    const pending = new Map<string, (response: DaemonResponse) => void>();
+
+    client.on("data", data => {
+      buffer += data.toString();
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+      for (const line of lines) {
+        if (!line.trim()) {
+          continue;
+        }
+        const response = JSON.parse(line) as DaemonResponse;
+        const resolve = pending.get(response.id);
+        if (resolve) {
+          pending.delete(response.id);
+          resolve(response);
+        }
+      }
+    });
+    client.on("error", rejectConn);
+    client.connect(socketPath, () => {
+      resolveConn({
+        send(method, params = {}, timeoutMs) {
+          const id = randomUUID();
+          return new Promise<DaemonResponse>(resolve => {
+            pending.set(id, resolve);
+            const request: DaemonRequest = {
+              id,
+              type: "mcp_request",
+              method,
+              params,
+              ...(timeoutMs === undefined ? {} : { timeoutMs }),
+            };
+            client.write(JSON.stringify(request) + "\n");
+          });
+        },
+        close() {
+          client.destroy();
+        },
+      });
+    });
+  });
+}

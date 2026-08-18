@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.workspace
 
 import dev.jasonpearson.automobile.desktop.core.control.testSnapshot
+import dev.jasonpearson.automobile.desktop.core.daemon.InputActionResult
 import dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient
 import dev.jasonpearson.automobile.desktop.domain.DeviceKeyModifiers
 import dev.jasonpearson.automobile.desktop.domain.DeviceKeyStroke
@@ -8,6 +9,7 @@ import dev.jasonpearson.automobile.desktop.domain.DevicePoint
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -321,16 +323,87 @@ class VideoInputDispatcherTest {
     advanceUntilIdle()
 
     val stream = client.openedGestureStreams.single()
+    // The gesture id is namespaced with a per-dispatcher-instance prefix (so two dispatchers can't
+    // collide on the device-global registry); assert the whole gesture shares the start's id.
+    val gestureId = (stream.frames.first() as FakeAutoMobileClient.GestureFrame.Start).gestureId
+    assertTrue(gestureId.startsWith("gesture-") && gestureId.endsWith("-1"), gestureId)
     assertEquals(
       listOf(
-        FakeAutoMobileClient.GestureFrame.Start("gesture-1", 360.0, 780.0),
-        FakeAutoMobileClient.GestureFrame.Move("gesture-1", 360.0, 1000.0),
-        FakeAutoMobileClient.GestureFrame.End("gesture-1", 360.0, 1400.0, false),
+        FakeAutoMobileClient.GestureFrame.Start(gestureId, 360.0, 780.0),
+        FakeAutoMobileClient.GestureFrame.Move(gestureId, 360.0, 1000.0),
+        FakeAutoMobileClient.GestureFrame.End(gestureId, 360.0, 1400.0, false),
       ),
       stream.frames,
     )
     assertTrue(stream.closed)
     assertTrue(client.inputSwipeCalls.isEmpty())
+    scope.cancel()
+  }
+
+  @Test
+  fun `a rejected stream start falls back to one atomic swipe on release`() = runTest {
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    // The runner opens the stream but rejects the start (an old artifact that can't decode
+    // request_gesture_start, or API 24-25): the drag must still land as one atomic swipe.
+    val client =
+      FakeAutoMobileClient().apply {
+        gestureFrameResult = InputActionResult(action = "input/gestureStart", success = false)
+      }
+    val handle =
+      assertNotNull(
+        scope
+          .streamingDispatcher(client, testScheduler)
+          .beginGestureStream(testSnapshot(), inBounds)
+      )
+    handle.move(DevicePoint(x = 360, y = 1000, inBounds = true))
+    handle.end(DevicePoint(x = 360, y = 1400, inBounds = true))
+    advanceUntilIdle()
+
+    // Only the rejected start reached the stream; no further frames were pushed after the failed
+    // ack.
+    val stream = client.openedGestureStreams.single()
+    assertEquals(1, stream.frames.size)
+    assertTrue(stream.frames.single() is FakeAutoMobileClient.GestureFrame.Start)
+    assertTrue(stream.closed)
+    // The remaining moves/release collapsed into one atomic swipe.
+    val swipe = client.inputSwipeCalls.single()
+    assertEquals(360.0, swipe.startX)
+    assertEquals(780.0, swipe.startY)
+    assertEquals(360.0, swipe.endX)
+    assertEquals(1400.0, swipe.endY)
+    assertNull(swipe.frameContext)
+    scope.cancel()
+  }
+
+  @Test
+  fun `two dispatchers on one device produce distinct gesture ids`() = runTest {
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val clientA = FakeAutoMobileClient()
+    val clientB = FakeAutoMobileClient()
+    assertNotNull(
+        scope
+          .streamingDispatcher(clientA, testScheduler)
+          .beginGestureStream(testSnapshot(), inBounds)
+      )
+      .end(DevicePoint(x = 360, y = 1400, inBounds = true))
+    assertNotNull(
+        scope
+          .streamingDispatcher(clientB, testScheduler)
+          .beginGestureStream(testSnapshot(), inBounds)
+      )
+      .end(DevicePoint(x = 360, y = 1400, inBounds = true))
+    advanceUntilIdle()
+
+    val idA =
+      (clientA.openedGestureStreams.single().frames.first()
+          as FakeAutoMobileClient.GestureFrame.Start)
+        .gestureId
+    val idB =
+      (clientB.openedGestureStreams.single().frames.first()
+          as FakeAutoMobileClient.GestureFrame.Start)
+        .gestureId
+    // Both started their first gesture, but the per-dispatcher prefix keeps the ids from colliding.
+    assertNotEquals(idA, idB)
     scope.cancel()
   }
 

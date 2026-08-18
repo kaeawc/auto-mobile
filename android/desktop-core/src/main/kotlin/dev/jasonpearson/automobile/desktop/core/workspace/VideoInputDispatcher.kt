@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.desktop.core.workspace
 import dev.jasonpearson.automobile.desktop.core.control.DeviceGestureStreamHandle
 import dev.jasonpearson.automobile.desktop.core.control.GestureStreamEvent
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
+import dev.jasonpearson.automobile.desktop.core.daemon.GestureInputStream
 import dev.jasonpearson.automobile.desktop.core.daemon.InputActionResult
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.domain.DeviceDragDecision
@@ -12,6 +13,7 @@ import dev.jasonpearson.automobile.desktop.domain.DeviceKeyStroke
 import dev.jasonpearson.automobile.desktop.domain.DeviceKeyboardDecision
 import dev.jasonpearson.automobile.desktop.domain.DeviceKeyboardInputPolicy
 import dev.jasonpearson.automobile.desktop.domain.DevicePoint
+import java.util.UUID
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
@@ -86,6 +88,14 @@ class VideoInputDispatcher(
   private val streamingEnabled: Boolean = false,
 ) {
   private val injectedDispatcher: CoroutineDispatcher? = ioDispatcher
+
+  // Per-dispatcher-instance namespace for streamed gesture ids. The runner's gesture registry is
+  // device-global and keyed only by the id string, so a bare per-dispatcher counter would have two
+  // dispatchers (two desktop processes, or two control surfaces on the same device) both start at
+  // "gesture-1"; the runner rejects the second start as already active. A random per-instance
+  // prefix
+  // makes independently created dispatchers collision-free (issue: streaming gesture input).
+  private val gestureIdPrefix: String = UUID.randomUUID().toString().take(8)
 
   /** Monotonic id per streamed gesture, correlating its start/move/end frames on the wire. */
   private val gestureSeq = AtomicLong(0L)
@@ -226,7 +236,7 @@ class VideoInputDispatcher(
     if (!start.inBounds) return null
     flushPendingText()
     val events = Channel<GestureStreamEvent>(Channel.UNLIMITED)
-    val gestureId = "gesture-${gestureSeq.incrementAndGet()}"
+    val gestureId = "gesture-$gestureIdPrefix-${gestureSeq.incrementAndGet()}"
     val platformName = platform()
     val generation = activeGeneration.get()
     if (pendingDispatches.incrementAndGet() > MAX_PENDING_DISPATCHES) {
@@ -270,22 +280,70 @@ class VideoInputDispatcher(
       return
     }
     tracer.dispatching(deviceId)
+    // A rejected start means the runner can't stream this gesture — an older control-proxy artifact
+    // that doesn't decode request_gesture_start, or API 24-25. Treat it as unsupported and fall
+    // back to one atomic swipe on release so the drag still lands, exactly as when the client
+    // cannot stream at all (issue: streaming gesture input). The GestureInputStream contract makes
+    // a failed ack terminal: stop, do not keep sending frames, and do not report the gesture acked.
+    var startRejected = false
+    var acked = false
     try {
-      stream.start(gestureId, start.x.toDouble(), start.y.toDouble())
-      for (event in events) {
-        when (event) {
-          is GestureStreamEvent.Move ->
-            stream.move(gestureId, event.point.x.toDouble(), event.point.y.toDouble())
-          is GestureStreamEvent.End -> {
-            stream.end(gestureId, event.point.x.toDouble(), event.point.y.toDouble(), event.cancel)
-            break
-          }
-        }
+      val started = stream.start(gestureId, start.x.toDouble(), start.y.toDouble())
+      if (!started.success) {
+        LOG.warn(
+          "gesture stream start rejected for $deviceId: ${started.error ?: started.action}; " +
+            "falling back to atomic swipe"
+        )
+        startRejected = true
+      } else {
+        acked = consumeStreamedGesture(stream, gestureId, events)
       }
-      tracer.acked(deviceId)
     } finally {
       stream.close()
     }
+    if (startRejected) {
+      // The stream is closed; drain the remaining moves/release from the same events channel into
+      // one atomic swipe, so the pane emits the same start/move/end regardless of runner support.
+      fallbackAtomicSwipe(client, platformName, snapshot, start, events)
+      return
+    }
+    if (acked) tracer.acked(deviceId)
+  }
+
+  /**
+   * Relay the drag's moves and release over an already-started [stream], honoring each frame's ack.
+   * Returns true only when the whole gesture (through its terminal End) was acknowledged. A failed
+   * ack is terminal per the [dev.jasonpearson.automobile.desktop.core.daemon.GestureInputStream]
+   * contract: stop sending, and let the caller close the stream (which cancels the partial
+   * on-device gesture) rather than continue as if the drag succeeded.
+   */
+  private suspend fun consumeStreamedGesture(
+    stream: GestureInputStream,
+    gestureId: String,
+    events: Channel<GestureStreamEvent>,
+  ): Boolean {
+    for (event in events) {
+      when (event) {
+        is GestureStreamEvent.Move -> {
+          val result = stream.move(gestureId, event.point.x.toDouble(), event.point.y.toDouble())
+          if (!result.success) {
+            LOG.warn("gesture stream move rejected for $deviceId: ${result.error ?: result.action}")
+            return false
+          }
+        }
+        is GestureStreamEvent.End -> {
+          val result =
+            stream.end(gestureId, event.point.x.toDouble(), event.point.y.toDouble(), event.cancel)
+          if (!result.success) {
+            LOG.warn("gesture stream end rejected for $deviceId: ${result.error ?: result.action}")
+            return false
+          }
+          return true
+        }
+      }
+    }
+    // The channel closed without an End (deactivated mid-drag): not a clean acknowledgement.
+    return false
   }
 
   private suspend fun fallbackAtomicSwipe(

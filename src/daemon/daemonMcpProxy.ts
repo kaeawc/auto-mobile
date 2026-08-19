@@ -51,11 +51,17 @@ const DAEMON_MCP_HEARTBEAT_INTERVAL_MS = 2_000;
 function heartbeatIntervalMs(config: DaemonMcpProxyConfig): number {
   const configuredTimeout = config.heartbeatTimeoutMs;
   const configuredInterval = config.heartbeatIntervalMs;
+  if (
+    configuredTimeout !== undefined &&
+    (!Number.isFinite(configuredTimeout) || configuredTimeout <= 0)
+  ) {
+    throw new Error("heartbeat timeout must be a positive finite number");
+  }
   const interval =
     configuredInterval ??
     (configuredTimeout === undefined
       ? DAEMON_MCP_HEARTBEAT_INTERVAL_MS
-      : Math.floor(configuredTimeout / 2));
+      : Math.max(1, Math.floor(configuredTimeout / 2)));
   if (!Number.isFinite(interval) || interval <= 0) {
     throw new Error("heartbeat interval must be a positive finite number");
   }

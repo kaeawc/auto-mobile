@@ -420,6 +420,7 @@ export class DaemonMcpProxy {
   private readonly clientVersion: string;
   private readonly clientAssetVersion: string | null;
   private connecting: Promise<void> | null = null;
+  private connectionCloseReject: ((reason?: unknown) => void) | null = null;
   private connected: boolean = false;
   private closing: boolean = false;
   // The daemon clears socket-local state when its RPC connection drops. Keep this
@@ -457,6 +458,7 @@ export class DaemonMcpProxy {
   private releaseEpoch: number = 0;
   private readonly releasedSessionEpochs = new Map<string, number>();
   private readonly releasedSessionReasons = new Map<string, string>();
+  private readonly activeReleaseEpochReferences = new Map<string, number>();
   // Monotonic counter bumped whenever a daemon push invalidates a discovery cache
   // or the session binding mid-flight (list_changed nulls a cache; a bound-session
   // release changes the session scope). A `tools/list` / `resources/list` captures
@@ -530,11 +532,19 @@ export class DaemonMcpProxy {
       return this.connecting;
     }
 
-    this.connecting = this.doConnect();
+    const attempt = this.doConnect();
+    const connecting = new Promise<void>((resolve, reject) => {
+      this.connectionCloseReject = reject;
+      void attempt.then(resolve, reject);
+    });
+    this.connecting = connecting;
     try {
-      await this.connecting;
+      await connecting;
     } finally {
-      this.connecting = null;
+      if (this.connecting === connecting) {
+        this.connecting = null;
+        this.connectionCloseReject = null;
+      }
     }
   }
 
@@ -1103,6 +1113,7 @@ export class DaemonMcpProxy {
       name === SET_TOOL_CAPABILITY_TOOL_NAME ? args : this.withBoundSessionUuid(args);
     const forwardedArgs = this.withCapabilityProfile(routingArgs);
     const forwardedSessionUuid = this.sessionUuidFromArgs(forwardedArgs);
+    this.retainReleaseEpochReference(forwardedSessionUuid);
     // Snapshot the release epoch at forward time. If a session-released signal for
     // the SPECIFIC forwarded UUID lands WHILE this call is in flight, that UUID's
     // recorded epoch advances past this snapshot and the completion path below
@@ -1151,6 +1162,8 @@ export class DaemonMcpProxy {
         throw await this.toolUnavailableError(name);
       }
       throw error;
+    } finally {
+      this.releaseReleaseEpochReference(forwardedSessionUuid);
     }
   }
 
@@ -1332,8 +1345,35 @@ export class DaemonMcpProxy {
       return;
     }
     this.releaseEpoch += 1;
+    if (!this.activeReleaseEpochReferences.has(normalizedSessionUuid)) {
+      return;
+    }
     this.releasedSessionEpochs.set(normalizedSessionUuid, this.releaseEpoch);
     this.releasedSessionReasons.set(normalizedSessionUuid, reason ?? "released");
+  }
+
+  private retainReleaseEpochReference(sessionUuid: string | undefined): void {
+    if (!sessionUuid) {
+      return;
+    }
+    this.activeReleaseEpochReferences.set(
+      sessionUuid,
+      (this.activeReleaseEpochReferences.get(sessionUuid) ?? 0) + 1,
+    );
+  }
+
+  private releaseReleaseEpochReference(sessionUuid: string | undefined): void {
+    if (!sessionUuid) {
+      return;
+    }
+    const references = (this.activeReleaseEpochReferences.get(sessionUuid) ?? 0) - 1;
+    if (references > 0) {
+      this.activeReleaseEpochReferences.set(sessionUuid, references);
+      return;
+    }
+    this.activeReleaseEpochReferences.delete(sessionUuid);
+    this.releasedSessionEpochs.delete(sessionUuid);
+    this.releasedSessionReasons.delete(sessionUuid);
   }
 
   private forwardedSessionReleaseReasonSince(
@@ -1568,6 +1608,7 @@ export class DaemonMcpProxy {
    */
   async close(): Promise<void> {
     this.closing = true;
+    this.connectionCloseReject?.(new DaemonUnavailableError("MCP proxy is closing"));
     await this.stopBoundSessionHeartbeat();
     if (this.client) {
       await this.client.close();

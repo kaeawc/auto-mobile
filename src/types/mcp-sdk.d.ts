@@ -54,6 +54,10 @@ declare module "@modelcontextprotocol/sdk/types.js" {
     isError?: boolean;
   }
 
+  export class McpError extends Error {
+    constructor(code: number, message: string, data?: any);
+  }
+
   export const CallToolRequestSchema: any;
   export const ListToolsRequestSchema: any;
   export const GetResourceRequestSchema: any;

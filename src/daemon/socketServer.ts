@@ -229,6 +229,8 @@ class InputTypeTextAppendError extends Error {
 
 export class UnixSocketServer {
   private server: NetServer | null = null;
+  private closing = false;
+  private lifecycleGeneration = 0;
   private socketFileIdentity: SocketFileIdentity | null = null;
   private sessions: Map<string, SessionContext> = new Map();
   /** Live client sockets by session ID, for server-pushed notification frames (issue #3223). */
@@ -344,6 +346,8 @@ export class UnixSocketServer {
    * Start the Unix socket server
    */
   async start(): Promise<void> {
+    this.closing = false;
+    this.lifecycleGeneration += 1;
     // Owner-only (0o700) socket directory so the control socket is not
     // world-traversable. On macOS socket-file permission bits are not reliably
     // enforced on connect(), so the containing directory's mode is the primary
@@ -373,6 +377,7 @@ export class UnixSocketServer {
     // recovery-rewire reason as list-changed; close() unsubscribes symmetrically.
     this.sessionReleaseUnsubscribe?.();
     this.sessionReleaseUnsubscribe = SessionReleaseBroadcaster.subscribe((sessionId, reason) => {
+      this.clearBoundMcpClientsForReleasedSession(sessionId);
       this.broadcastSessionReleased(sessionId, reason);
     });
 
@@ -1136,6 +1141,14 @@ export class UnixSocketServer {
     }
     this.boundMcpClientKeysBySocketSession.delete(socketSessionId);
     this.scheduleMcpClientIdleClose(boundClient.clientKey);
+  }
+
+  private clearBoundMcpClientsForReleasedSession(sessionUuid: string): void {
+    for (const [socketSessionId, boundClient] of this.boundMcpClientKeysBySocketSession) {
+      if (boundClient.sessionUuid === sessionUuid) {
+        this.clearBoundMcpClientKey(socketSessionId);
+      }
+    }
   }
 
   private isMcpClientKeyBound(key: string): boolean {
@@ -2811,14 +2824,23 @@ export class UnixSocketServer {
       return existingPromise;
     }
 
+    const generation = this.lifecycleGeneration;
     const clientPromise = this.mcpClientFactory(boundSessionUuid, capabilityProfileUuid)
-      .then(client => {
+      .then(async client => {
+        if (this.closing || generation !== this.lifecycleGeneration) {
+          await client.close();
+          throw new Error("Unix socket server is closing");
+        }
         this.mcpClients.set(key, client);
-        this.mcpClientPromises.delete(key);
+        if (this.mcpClientPromises.get(key) === clientPromise) {
+          this.mcpClientPromises.delete(key);
+        }
         return client;
       })
       .catch(error => {
-        this.mcpClientPromises.delete(key);
+        if (this.mcpClientPromises.get(key) === clientPromise) {
+          this.mcpClientPromises.delete(key);
+        }
         throw error;
       });
 
@@ -2974,6 +2996,8 @@ export class UnixSocketServer {
    */
   async close(): Promise<void> {
     logger.info("Closing Unix socket server...");
+    this.closing = true;
+    this.lifecycleGeneration += 1;
 
     // Stop receiving list-changed events (mirrors the subscribe in start()).
     this.listChangedUnsubscribe?.();

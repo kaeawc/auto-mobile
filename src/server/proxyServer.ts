@@ -6,6 +6,7 @@ import {
   ReadResourceRequestSchema,
   ListResourceTemplatesRequestSchema,
   type CallToolResult,
+  McpError,
 } from "@modelcontextprotocol/sdk/types.js";
 import { logger } from "../utils/logger";
 import {
@@ -48,8 +49,12 @@ function sessionOwnershipLostResult(
   };
 }
 
-function sessionOwnershipLostError(error: DaemonBoundSessionExpiredError): ActionableError {
-  return new ActionableError(sessionOwnershipLostMessage(error));
+function sessionOwnershipLostError(error: DaemonBoundSessionExpiredError): McpError {
+  return new McpError(-32603, sessionOwnershipLostMessage(error), {
+    code: "session_ownership_lost",
+    sessionUuid: error.sessionUuid,
+    reason: error.reason,
+  });
 }
 
 /**

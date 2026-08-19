@@ -83,7 +83,9 @@ print_status "Using $LYCHEE_VERSION"
 # rate limit. CI injects the token via env; for local runs, fall back to the
 # developer's gh CLI credentials so behavior matches CI.
 if [[ -z "${GITHUB_TOKEN:-}" ]] && command -v gh >/dev/null 2>&1; then
-    if GH_TOKEN=$(gh auth token 2>/dev/null) && [[ -n "$GH_TOKEN" ]]; then
+    # Pin to github.com so a set GH_HOST (e.g. GitHub Enterprise) can't leak an
+    # Enterprise token into GITHUB_TOKEN for github.com link checks.
+    if GH_TOKEN=$(gh auth token --hostname github.com 2>/dev/null) && [[ -n "$GH_TOKEN" ]]; then
         export GITHUB_TOKEN="$GH_TOKEN"
         print_status "Using GitHub token from gh CLI for github.com link checks"
     fi

@@ -63,21 +63,29 @@ subscription. One connection can hold any number of independent subscriptions.
 
 ```json
 // client -> daemon
-{ "id": "1", "command": "subscribe", "deviceId": "emulator-5554" }
+{ "id": "1", "command": "subscribe", "deviceSessionUuid": "d1f0c2a4-…" }
 // daemon -> client
 { "id": "1", "type": "subscription_response", "success": true, "subscriptionId": "devicedatastream-1" }
 ```
 
-- `deviceId` is **optional**: omit it (or send `null`) to receive frames for **all** devices; pass a
-  specific id to receive only that device's frames. A control client should subscribe to the one
-  device the user selected.
+- `deviceSessionUuid` is the **routing key** (epic [#5256](https://github.com/kaeawc/auto-mobile/issues/5256)) and is **optional**:
+  omit it (or send `null`) to receive frames for **all** devices; pass a specific value to receive
+  only that device's frames. A control client should subscribe to the `deviceSessionUuid` of the one
+  device the user selected. The uuid is daemon-minted per **device connection epoch** — it is
+  retired on disconnect and a fresh one is minted on reconnect even when the serial/UDID is
+  identical, so it is stable where the raw `deviceId` (serial/UDID) is not. Discover the current
+  uuid for each connected device via the `listDeviceSessions` daemon command, then keep it current
+  from the `device_session_started` / `device_session_ended` lifecycle frames (below). Subscribing
+  with a **retired** uuid matches nothing (it never re-attaches to a reused serial) rather than
+  silently attaching to the reincarnated device. The raw `deviceId` is **no longer** a subscribe
+  filter — it remains only as a human-facing label on each frame.
 - Optional `screenshotIntervalMs` / `hierarchyIntervalMs` on the `subscribe` request set the capture
   cadence (daemon defaults: screenshot 3000 ms, hierarchy 1000 ms; minimum 250 ms). To change
   cadence in place later, send `{ "command": "update_cadence", "subscriptionId":
 "devicedatastream-1", "screenshotIntervalMs": …, "hierarchyIntervalMs": … }`; to stop, send
   `{ "command": "unsubscribe", "subscriptionId": "devicedatastream-1" }`.
 - Every pushed frame includes the `subscriptionId` that produced it, allowing a multiplexing client
-  to demultiplex independently of the frame's `deviceId`.
+  to demultiplex independently of the frame's `deviceSessionUuid`.
 
 ### Keepalive (ping/pong) — required to stay connected
 
@@ -116,8 +124,10 @@ never answers pings is disconnected in that window — even while it is happily 
 
 ### Pushed messages
 
-Every push carries a `type`, the `deviceId` it belongs to, and a display-only `timestamp`. Pair
-frames **only** across messages with the same `deviceId`.
+Every push carries a `type`, the `deviceSessionUuid` it belongs to (the epoch-stable routing key,
+`null` only on an unattributable frame), the raw `deviceId` label, and a display-only `timestamp`.
+Pair frames **only** across messages with the same `deviceSessionUuid` — it survives a same-serial
+reconnect that `deviceId` does not.
 
 **`hierarchy_update`** — the element tree. Carries a `captureSequence` and, on current
 CtrlProxy runners, a device-authored `frameContext`.
@@ -125,6 +135,7 @@ CtrlProxy runners, a device-authored `frameContext`.
 ```json
 {
   "type": "hierarchy_update",
+  "deviceSessionUuid": "d1f0c2a4-…",
   "deviceId": "emulator-5554",
   "timestamp": 1737942000123,
   "data": { "hierarchy": { "…": "ViewHierarchyResult with element bounds" } },
@@ -143,6 +154,7 @@ field is **absent** and a control client must fail closed for that frame.
 ```json
 {
   "type": "screenshot_update",
+  "deviceSessionUuid": "d1f0c2a4-…",
   "deviceId": "emulator-5554",
   "timestamp": 1737942000456,
   "screenshotBase64": "<PNG bytes, base64>",
@@ -156,9 +168,23 @@ field is **absent** and a control client must fail closed for that frame.
 ```
 
 **`error`** — a device-side problem (e.g. connection lost):
-`{ "type": "error", "deviceId": "…", "timestamp": …, "error": "device connection lost" }`.
+`{ "type": "error", "deviceSessionUuid": "…", "deviceId": "…", "timestamp": …, "error": "device connection lost" }`.
 
-(The stream also pushes `navigation_update`, `performance_update`, and `storage_update`; a control
+**`device_session_started` / `device_session_ended`** — device-session lifecycle (epic
+[#5256](https://github.com/kaeawc/auto-mobile/issues/5256)). Emitted when the daemon mints or retires a
+`deviceSessionUuid`, so a consumer flushes per-device state on a real epoch boundary instead of
+guessing from serial reuse. A same-serial reconnect surfaces as an `ended` for the old uuid
+immediately followed by a `started` for the new one.
+`{ "type": "device_session_started", "deviceSessionUuid": "…", "deviceId": "emulator-5554", "platform": "android", "timestamp": … }`.
+Because a `device_session_started` frame announces a **brand-new** uuid, only an **all-devices**
+(`null`-filter) subscription observes it — a uuid-scoped subscription cannot yet be filtered on a
+uuid it has not learned. A client that must track the full device set therefore runs at least one
+all-devices subscription, and **enumerates existing devices via `listDeviceSessions` on connect**:
+devices already booted when the daemon started mint their epoch before the observation-stream
+server exists, so they emit no `started` frame and are discoverable only by enumeration.
+
+(The stream also pushes `navigation_update` — now targeted at the owning device's
+`deviceSessionUuid` rather than broadcast — `performance_update`, and `storage_update`; a control
 client ignores them.)
 
 ### Coordinates: one unit, no platform knowledge required
@@ -230,10 +256,12 @@ also what lets the retained-frame rule below notice a transition _into_ an unkno
 - **Release availability:** the default `0.0.59` CtrlProxy artifacts predate `frameContext`
   support. Use runners built from a revision that publishes the field before enabling this control
   flow; otherwise treat the runner as legacy and keep the mirror in inspector mode.
-- **Active device:** every message's `deviceId` identifies its device. Subscribe with the selected
-  device's id (rather than the all-devices `null`) so you only receive its frames, and still confirm
-  each message's `deviceId` matches the selection before pairing — a lingering frame from a
-  previously-selected device must not pair with the new one.
+- **Active device:** every message's `deviceSessionUuid` identifies its device epoch. Subscribe with
+  the selected device's `deviceSessionUuid` (rather than the all-devices `null`) so you only receive
+  its frames, and still confirm each message's `deviceSessionUuid` matches the selection before
+  pairing — a lingering frame from a previously-selected device (or a pre-reconnect epoch) must not
+  pair with the new one. On `device_session_ended` for the selected uuid, stop pairing and re-select
+  from the device's new epoch.
 
 ## Implementing a client, end to end
 

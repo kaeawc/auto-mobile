@@ -6,8 +6,10 @@ import {
   getSocketPath,
   SubscriptionResponse,
 } from "./socketServer/index";
-import type { ObserveResult, ViewHierarchyResult } from "../models";
+import type { ObserveResult, Platform, ViewHierarchyResult } from "../models";
 import type { StorageChangedEvent } from "../features/storage/storageTypes";
+import { type DeviceSessionResolver, nullDeviceSessionResolver } from "./deviceSessionResolver";
+import type { DeviceSessionRecord } from "./deviceSessionRegistry";
 import { DEVICE_DATA_STREAM_SOCKET_CONFIG } from "./daemonFiles";
 import type { ScreenshotMetadata } from "../features/observe/ScreenshotMetadata";
 import { annotateHierarchyDiff, type HierarchyDiffSummary } from "./hierarchyStreamDiff";
@@ -84,12 +86,23 @@ interface DeviceDataStreamMessage extends ScreenshotMetadata {
     | "navigation_update"
     | "performance_update"
     | "storage_update"
+    | "device_session_started"
+    | "device_session_ended"
     | "ping"
     | "pong"
     | "error";
   success?: boolean;
   error?: string;
   deviceId?: string;
+  /**
+   * Stable device-session routing key for this frame's device epoch (epic #5256,
+   * item 3). Present on every device-attributed frame — resolved from `deviceId`
+   * by the server at push time — and on the lifecycle frames. `null` when no live
+   * epoch maps to the serial (e.g. a navigation broadcast with unknown provenance).
+   */
+  deviceSessionUuid?: string | null;
+  /** Device platform. Carried on `device_session_started`/`device_session_ended` frames. */
+  platform?: Platform;
   timestamp?: number;
   data?: ViewHierarchyResult;
   screenshotBase64?: string;
@@ -206,19 +219,29 @@ interface PushScreenshotOptions {
 
 /**
  * Filter for device data stream subscriptions.
+ *
+ * `deviceSessionUuid` is the primary routing key (epic #5256, item 3): frame
+ * delivery matches on it (`null` = every device). `deviceId` is the serial
+ * resolved from that uuid at subscribe time and is used ONLY by the serial-scoped
+ * cadence/polling machinery (which device to poll, at what interval) — it is never
+ * the delivery key. The two are separated on purpose: routing is epoch-stable,
+ * polling is inherently serial-addressed.
  */
 interface DeviceDataFilter {
-  deviceId: string | null; // null means subscribe to all devices
+  deviceSessionUuid: string | null; // null means subscribe to all devices
+  deviceId: string | null; // serial resolved from deviceSessionUuid, for cadence only
   screenshotIntervalMs: number | null;
   hierarchyIntervalMs: number | null;
 }
 
 /**
- * Push data wrapper - used internally for type safety with base class.
+ * Push data wrapper - used internally for type safety with base class. Routing is
+ * on `targetDeviceSessionUuid`; `null` reaches only all-device (`null`-filter)
+ * subscribers (there is no cross-device broadcast — see `matchesFilter`).
  */
 interface DeviceDataPush {
   message: DeviceDataStreamMessage;
-  targetDeviceId: string | null; // null for broadcast to all
+  targetDeviceSessionUuid: string | null;
 }
 
 /**
@@ -301,6 +324,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   getCurrentFrameContext(deviceId: string): string | undefined {
     return this.currentFrameContexts.get(deviceId);
   }
+  private deviceSessionResolver: DeviceSessionResolver = nullDeviceSessionResolver;
   private onSubscriberConnected: OnSubscriberConnectedCallback | null = null;
   private onScreenshotCadenceChanged: OnScreenshotCadenceChangedCallback | null = null;
   private onHierarchyCadenceChanged: OnHierarchyCadenceChangedCallback | null = null;
@@ -324,6 +348,24 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     timer: Timer = defaultTimer,
   ) {
     super(socketPath, timer, "DeviceDataStream");
+  }
+
+  /** Wire the serial↔`deviceSessionUuid` resolver used to stamp frames and route on the epoch key. */
+  setDeviceSessionResolver(resolver: DeviceSessionResolver): void {
+    this.deviceSessionResolver = resolver;
+  }
+
+  /**
+   * Stamp a device-attributed frame with the live `deviceSessionUuid` for its
+   * serial and push it, routing on that uuid. A serial with no live epoch resolves
+   * to `null`, reaching only all-device subscribers.
+   */
+  private pushForDevice(deviceId: string, message: DeviceDataStreamMessage): number {
+    const deviceSessionUuid = this.deviceSessionResolver.resolveUuid(deviceId);
+    return this.pushToSubscribers({
+      message: { ...message, deviceSessionUuid },
+      targetDeviceSessionUuid: deviceSessionUuid,
+    });
   }
 
   /**
@@ -434,7 +476,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       rotation: hierarchy.rotation,
     };
 
-    const sentCount = this.pushToSubscribers({ message, targetDeviceId: deviceId });
+    const sentCount = this.pushForDevice(deviceId, message);
     if (sentCount > 0) {
       logger.debug(
         `[DeviceDataStream] Pushed hierarchy_update to ${sentCount} subscribers (device: ${deviceId})`,
@@ -506,7 +548,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       screenshotByteLength,
       screenshotBase64Length,
     };
-    const sentCount = this.pushToSubscribers({ message, targetDeviceId: deviceId });
+    const sentCount = this.pushForDevice(deviceId, message);
     if (sentCount > 0) {
       logger.debug(
         `[DeviceDataStream] Pushed screenshot_update to ${sentCount} subscribers (device: ${deviceId})`,
@@ -515,19 +557,68 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   }
 
   /**
-   * Push a navigation graph update to all subscribers.
-   * Navigation graph updates are broadcast to all subscribers (not device-specific).
+   * Push a navigation graph update, targeting the device whose graph changed
+   * (epic #5256, item 3 — closes #4837, which cross-contaminated panes because
+   * this broadcast to every subscriber). The daemon resolves the graph's owning
+   * serial from the app's build context; `deviceId` is `null` only when that
+   * provenance is unknown, in which case the frame reaches all-device subscribers
+   * (`null` filter) but never a specific device's pane.
    */
-  pushNavigationGraphUpdate(navigationGraph: NavigationGraphStreamData): void {
+  pushNavigationGraphUpdate(
+    navigationGraph: NavigationGraphStreamData,
+    deviceId: string | null,
+  ): void {
+    const deviceSessionUuid = deviceId ? this.deviceSessionResolver.resolveUuid(deviceId) : null;
     const message: DeviceDataStreamMessage = {
       type: "navigation_update",
+      deviceId: deviceId ?? undefined,
+      deviceSessionUuid,
       timestamp: this.timer.now(),
       navigationGraph,
     };
 
-    const sentCount = this.pushToSubscribers({ message, targetDeviceId: null });
+    const sentCount = this.pushToSubscribers({
+      message,
+      targetDeviceSessionUuid: deviceSessionUuid,
+    });
     if (sentCount > 0) {
       logger.debug(`[DeviceDataStream] Pushed navigation_update to ${sentCount} subscribers`);
+    }
+  }
+
+  /**
+   * Push a device-session lifecycle frame so consumers flush per-device state on a
+   * real epoch boundary (epic #5256, item 3). Emitted from the registry's
+   * connect/disconnect transitions; targets the session's own uuid so both a
+   * device-scoped pane and an all-device hub observe the transition.
+   */
+  pushDeviceSessionStarted(record: DeviceSessionRecord): void {
+    this.pushDeviceSessionLifecycle("device_session_started", record);
+  }
+
+  pushDeviceSessionEnded(record: DeviceSessionRecord): void {
+    this.pushDeviceSessionLifecycle("device_session_ended", record);
+  }
+
+  private pushDeviceSessionLifecycle(
+    type: "device_session_started" | "device_session_ended",
+    record: DeviceSessionRecord,
+  ): void {
+    const message: DeviceDataStreamMessage = {
+      type,
+      deviceId: record.deviceId,
+      deviceSessionUuid: record.deviceSessionUuid,
+      platform: record.platform,
+      timestamp: this.timer.now(),
+    };
+    const sentCount = this.pushToSubscribers({
+      message,
+      targetDeviceSessionUuid: record.deviceSessionUuid,
+    });
+    if (sentCount > 0) {
+      logger.debug(
+        `[DeviceDataStream] Pushed ${type} to ${sentCount} subscribers (device: ${record.deviceId}, session: ${record.deviceSessionUuid})`,
+      );
     }
   }
 
@@ -542,7 +633,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       performanceData,
     };
 
-    const sentCount = this.pushToSubscribers({ message, targetDeviceId: deviceId });
+    const sentCount = this.pushForDevice(deviceId, message);
     if (sentCount > 0) {
       logger.debug(
         `[DeviceDataStream] Pushed performance_update to ${sentCount} subscribers (device: ${deviceId})`,
@@ -561,7 +652,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       storageEvent: event,
     };
 
-    const sentCount = this.pushToSubscribers({ message, targetDeviceId: deviceId });
+    const sentCount = this.pushForDevice(deviceId, message);
     if (sentCount > 0) {
       logger.debug(
         `[DeviceDataStream] Pushed storage_update to ${sentCount} subscribers (device: ${deviceId})`,
@@ -573,25 +664,28 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
    * Return true when at least one active subscriber would receive updates for this device.
    */
   hasSubscriberForDevice(deviceId: string): boolean {
-    const probe: DeviceDataPush = {
-      message: {
-        type: "screenshot_update",
-        deviceId,
-      },
-      targetDeviceId: deviceId,
-    };
-
     for (const subscriber of this.subscribers.values()) {
       if (subscriber.backfilling || subscriber.socket.destroyed) {
         continue;
       }
 
-      if (this.matchesFilter(subscriber.filter, probe)) {
+      if (this.subscriberWantsDevice(subscriber.filter, deviceId)) {
         return true;
       }
     }
 
     return false;
+  }
+
+  /**
+   * Whether a subscription's serial-scoped cadence applies to this device. This is
+   * the POLLING question (which serial to poll, how fast), kept separate from frame
+   * routing (`matchesFilter`, on `deviceSessionUuid`): the cadence machinery is
+   * inherently serial-addressed, and `filter.deviceId` is the serial resolved for
+   * exactly this purpose. `null` = an all-devices subscription.
+   */
+  private subscriberWantsDevice(filter: DeviceDataFilter, deviceId: string): boolean {
+    return filter.deviceId === null || filter.deviceId === deviceId;
   }
 
   /**
@@ -601,7 +695,6 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   getScreenshotIntervalMsForDevice(deviceId: string): number {
     return this.getFastestIntervalMsForDevice(
       deviceId,
-      "screenshot_update",
       DEFAULT_SCREENSHOT_INTERVAL_MS,
       (filter) => filter.screenshotIntervalMs,
       true,
@@ -618,7 +711,6 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   ): number {
     return this.getFastestIntervalMsForDevice(
       deviceId,
-      "hierarchy_update",
       defaultIntervalMs,
       (filter) => filter.hierarchyIntervalMs,
       false,
@@ -627,18 +719,10 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
 
   private getFastestIntervalMsForDevice(
     deviceId: string,
-    messageType: "screenshot_update" | "hierarchy_update",
     defaultIntervalMs: number,
     getRequestedIntervalMs: (filter: DeviceDataFilter) => number | null,
     useDefaultWhenRequestMissing: boolean,
   ): number {
-    const probe: DeviceDataPush = {
-      message: {
-        type: messageType,
-        deviceId,
-      },
-      targetDeviceId: deviceId,
-    };
     let fastestIntervalMs: number | null = null;
 
     for (const subscriber of this.subscribers.values()) {
@@ -646,7 +730,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
         continue;
       }
 
-      if (!this.matchesFilter(subscriber.filter, probe)) {
+      if (!this.subscriberWantsDevice(subscriber.filter, deviceId)) {
         continue;
       }
 
@@ -682,7 +766,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       error: "device connection lost",
     };
 
-    const sentCount = this.pushToSubscribers({ message, targetDeviceId: deviceId });
+    const sentCount = this.pushForDevice(deviceId, message);
     if (sentCount > 0) {
       logger.debug(
         `[DeviceDataStream] Pushed device connection lost error to ${sentCount} subscribers (device: ${deviceId})`,
@@ -698,6 +782,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       id?: string;
       command: string;
       deviceId?: string;
+      deviceSessionUuid?: string;
       appId?: string;
       screenshotIntervalMs?: unknown;
       hierarchyIntervalMs?: unknown;
@@ -735,9 +820,16 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       try {
         const graphData = await this.onNavigationGraphRequested(request.appId ?? null);
         if (graphData) {
+          // Echo the requester's device-session key so the pane can attribute this
+          // on-demand response to its own device (epic #5256, item 3; #4837 AC2).
+          const deviceSessionUuid = request.deviceSessionUuid ?? null;
           const message: DeviceDataStreamMessage = {
             id: request.id,
             type: "navigation_update",
+            deviceSessionUuid,
+            deviceId: deviceSessionUuid
+              ? this.deviceSessionResolver.resolveDeviceId(deviceSessionUuid) ?? undefined
+              : undefined,
             timestamp: this.timer.now(),
             navigationGraph: graphData,
           };
@@ -768,13 +860,19 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       // Let base class handle the subscription
       await super.processLine(socket, line);
 
-      this.notifyScreenshotCadenceChanged(request.deviceId ?? null);
-      this.notifyHierarchyCadenceChanged(request.deviceId ?? null);
+      // The wire now targets a deviceSessionUuid; the cadence/connect machinery is
+      // serial-scoped, so resolve to the current serial (null = all devices).
+      const subscribedDeviceId = request.deviceSessionUuid
+        ? this.deviceSessionResolver.resolveDeviceId(request.deviceSessionUuid)
+        : null;
+
+      this.notifyScreenshotCadenceChanged(subscribedDeviceId);
+      this.notifyHierarchyCadenceChanged(subscribedDeviceId);
 
       // Trigger the callback if set
       if (this.onSubscriberConnected) {
         try {
-          this.onSubscriberConnected(request.deviceId ?? null);
+          this.onSubscriberConnected(subscribedDeviceId);
         } catch (error) {
           logger.warn(`[DeviceDataStream] Error in onSubscriberConnected callback: ${error}`);
         }
@@ -851,20 +949,28 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   }
 
   protected parseSubscriptionFilter(request: Record<string, unknown>): DeviceDataFilter {
+    const deviceSessionUuid = (request.deviceSessionUuid as string) ?? null;
     return {
-      deviceId: (request.deviceId as string) ?? null,
+      deviceSessionUuid,
+      // Resolve the serial once, at subscribe time, for the serial-scoped cadence
+      // machinery. Within an epoch the serial is stable, so a snapshot is safe.
+      deviceId: deviceSessionUuid
+        ? this.deviceSessionResolver.resolveDeviceId(deviceSessionUuid)
+        : null,
       screenshotIntervalMs: this.parseScreenshotIntervalMs(request.screenshotIntervalMs),
       hierarchyIntervalMs: this.parseHierarchyIntervalMs(request.hierarchyIntervalMs),
     };
   }
 
   protected matchesFilter(filter: DeviceDataFilter, data: DeviceDataPush): boolean {
-    // If targetDeviceId is null, broadcast to all subscribers
-    if (data.targetDeviceId === null) {
-      return true;
-    }
-    // Send to subscribers that want all devices or specifically this device
-    return filter.deviceId === null || filter.deviceId === data.targetDeviceId;
+    // Route on the stable epoch key. A `null` target reaches only all-device
+    // (`null`-filter) subscribers — there is no cross-device broadcast, so a frame
+    // for one device (or a retired epoch, which resolves to `null`) can never leak
+    // into another device's subscription (epic #5256, AC2/AC4; closes #4837).
+    return (
+      filter.deviceSessionUuid === null ||
+      filter.deviceSessionUuid === data.targetDeviceSessionUuid
+    );
   }
 
   protected createPushMessage(

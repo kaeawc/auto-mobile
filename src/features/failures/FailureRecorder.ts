@@ -228,7 +228,8 @@ export class FailureRecorder implements FailureRecorderService {
         "tool_failure",
         severity,
         failureInput.title,
-        input.errorMessage
+        input.errorMessage,
+        input.deviceId ?? null
       );
 
       return occurrenceId;
@@ -278,7 +279,8 @@ export class FailureRecorder implements FailureRecorderService {
         "crash",
         severity,
         title,
-        `${input.exceptionType}: ${input.exceptionMessage}`
+        `${input.exceptionType}: ${input.exceptionMessage}`,
+        input.deviceId ?? null
       );
 
       // Push to telemetry timeline
@@ -342,7 +344,8 @@ export class FailureRecorder implements FailureRecorderService {
         "anr",
         "high", // ANRs are always high severity
         title,
-        input.reason
+        input.reason,
+        input.deviceId ?? null
       );
 
       // Push to telemetry timeline
@@ -406,7 +409,8 @@ export class FailureRecorder implements FailureRecorderService {
         "nonfatal",
         severity,
         title,
-        failureInput.message
+        failureInput.message,
+        input.deviceId ?? null
       );
 
       // Push to telemetry timeline
@@ -441,7 +445,8 @@ export class FailureRecorder implements FailureRecorderService {
     type: FailureType,
     severity: FailureSeverity,
     title: string,
-    message: string
+    message: string,
+    deviceId: string | null
   ): void {
     const server = getFailuresPushServer();
     if (server) {
@@ -453,6 +458,10 @@ export class FailureRecorder implements FailureRecorderService {
         title,
         message,
         timestamp: this.timer.now(),
+        // Attribution added in epic #5256, item 3. The push server resolves the
+        // stable deviceSessionUuid from this serial at push time.
+        deviceId,
+        deviceSessionUuid: null,
       };
       logger.debug(`[FailureRecorder] Pushing failure notification: ${type} - ${title}`);
       server.pushFailure(notification);

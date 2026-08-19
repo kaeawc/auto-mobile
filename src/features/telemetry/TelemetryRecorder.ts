@@ -19,6 +19,13 @@ export interface TelemetryEvent {
   category: TelemetryCategory;
   timestamp: number;
   deviceId: string | null;
+  /**
+   * Stable device-session routing key for the epoch this event belongs to (epic
+   * #5256, item 3). Stamped by the telemetry push server from `deviceId` at push
+   * and backfill time; recorders leave it absent. `null` when no live epoch maps
+   * to the serial (e.g. a backfilled event for a now-disconnected device).
+   */
+  deviceSessionUuid?: string | null;
   sessionId: string | null;
   data: unknown;
 }

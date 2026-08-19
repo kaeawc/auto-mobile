@@ -351,6 +351,25 @@ export class NavigationGraphManager implements NavigationGraphService {
   }
 
   /**
+   * Resolve the serial/UDID that owns an app's navigation graph, from the app's
+   * build context (epic #5256, item 3). The daemon uses this to attribute a
+   * graph-update push to a device so panes watching other devices are not
+   * cross-contaminated (closes #4837). Returns `null` when the app has no build
+   * context or only the legacy sentinel — in which case the daemon broadcasts to
+   * all-device subscribers rather than mis-attributing.
+   */
+  public getDeviceIdForApp(appId: string | null): string | null {
+    if (!appId) {
+      return null;
+    }
+    const deviceId = this.buildContexts.get(appId)?.deviceId;
+    if (!deviceId || deviceId === LEGACY_PROVENANCE_SENTINEL) {
+      return null;
+    }
+    return deviceId;
+  }
+
+  /**
    * Get the singleton instance of NavigationGraphManager.
    * Used for non-daemon single-agent mode.
    */

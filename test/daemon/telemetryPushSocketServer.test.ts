@@ -8,6 +8,7 @@ import { boundStructuredField } from "../../src/utils/truncateBodyText";
 import type { TelemetryEvent } from "../../src/features/telemetry/TelemetryRecorder";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeSocket } from "../fakes/FakeNetServer";
+import { FakeDeviceSessionResolver } from "../fakes/FakeDeviceSessionResolver";
 import { withInMemorySingletonDatabase } from "../db/inMemorySingletonDatabase";
 import { getDatabase } from "../../src/db/database";
 import { runMigrations } from "../../src/db/migrator";
@@ -33,7 +34,12 @@ class TestableTelemetryPushSocketServer extends TelemetryPushSocketServer {
     (this as any).server = null;
   }
 
-  simulateSubscription(options: { category?: string | null; deviceId?: string | null }): {
+  simulateSubscription(options: {
+    category?: string | null;
+    deviceSessionUuid?: string | null;
+    deviceId?: string | null;
+    sessionId?: string | null;
+  }): {
     socket: FakeSocket;
     subscriptionId: string;
   } {
@@ -46,8 +52,11 @@ class TestableTelemetryPushSocketServer extends TelemetryPushSocketServer {
       lastActivity: timer.now(),
       filter: {
         category: options.category ?? null,
+        deviceSessionUuid: options.deviceSessionUuid ?? null,
+        // The server resolves this from deviceSessionUuid at real subscribe time; a
+        // test may seed it directly for backfill-query coverage.
         deviceId: options.deviceId ?? null,
-        sessionId: null,
+        sessionId: options.sessionId ?? null,
       },
       backfilling: false,
       drainPending: false,
@@ -230,10 +239,15 @@ describe("boundStructuredField", () => {
 describe("TelemetryPushSocketServer", () => {
   let server: TestableTelemetryPushSocketServer;
   let timer: FakeTimer;
+  let resolver: FakeDeviceSessionResolver;
 
   beforeEach(async () => {
     timer = new FakeTimer();
     server = new TestableTelemetryPushSocketServer(timer);
+    resolver = new FakeDeviceSessionResolver()
+      .bind("device-1", "uuid-1")
+      .bind("device-2", "uuid-2");
+    server.setDeviceSessionResolver(resolver);
     await server.startFake();
   });
 
@@ -412,27 +426,46 @@ describe("TelemetryPushSocketServer", () => {
     expect(msgs[0].data?.timestamp).toBe(50000);
   });
 
-  it("filters pushes by deviceId", () => {
-    const { socket: d1Socket } = server.simulateSubscription({ deviceId: "device-1" });
-    const { socket: d2Socket } = server.simulateSubscription({ deviceId: "device-2" });
+  it("filters pushes by deviceSessionUuid (AC2)", () => {
+    const { socket: d1Socket } = server.simulateSubscription({ deviceSessionUuid: "uuid-1" });
+    const { socket: d2Socket } = server.simulateSubscription({ deviceSessionUuid: "uuid-2" });
     const { socket: allSocket } = server.simulateSubscription({});
 
     const event: TelemetryEvent = {
       category: "network",
       timestamp: 1000,
       deviceId: "device-1",
+      sessionId: null,
       data: { method: "GET", url: "/test", statusCode: 200, durationMs: 10 },
     };
 
     server.pushTelemetryEvent(event);
 
-    expect(d1Socket.getWrittenMessages()).toHaveLength(1);
+    const d1 = d1Socket.getWrittenMessages<{ data?: TelemetryEvent }>();
+    expect(d1).toHaveLength(1);
+    // Live events carry the resolved epoch key (AC1).
+    expect(d1[0].data?.deviceSessionUuid).toBe("uuid-1");
     expect(d2Socket.getWrittenMessages()).toHaveLength(0);
     expect(allSocket.getWrittenMessages()).toHaveLength(1);
   });
 
-  it("filters by both category and deviceId", () => {
-    const { socket } = server.simulateSubscription({ category: "log", deviceId: "device-1" });
+  it("yields zero events to a stale/retired deviceSessionUuid filter (AC4)", () => {
+    const { socket } = server.simulateSubscription({ deviceSessionUuid: "uuid-1" });
+    resolver.retire("device-1").bind("device-1", "uuid-1b");
+
+    server.pushTelemetryEvent({
+      category: "network",
+      timestamp: 1000,
+      deviceId: "device-1",
+      sessionId: null,
+      data: { method: "GET", url: "/test", statusCode: 200, durationMs: 10 },
+    });
+
+    expect(socket.getWrittenMessages()).toHaveLength(0);
+  });
+
+  it("filters by both category and deviceSessionUuid", () => {
+    const { socket } = server.simulateSubscription({ category: "log", deviceSessionUuid: "uuid-1" });
 
     const matchEvent: TelemetryEvent = {
       category: "log",
@@ -609,4 +642,56 @@ describe("TelemetryPushSocketServer failure backfill (#4209)", () => {
       expect(socket.getWrittenMessages()).toHaveLength(0);
     });
   });
-});
+
+  // AC4 for the BACKFILL path (epic #5256): a subscription that named a specific
+    // deviceSessionUuid which no longer resolves to a live serial (deviceId === null)
+    // must backfill NOTHING — never fall through to an all-devices DB query that would
+    // dump every device's history to a stale-uuid subscriber. Discriminating: delete
+    // the guard in backfillRecentEvents and the stale case below leaks the crash.
+    it("backfills zero events for a specific deviceSessionUuid that no longer resolves (AC4)", async () => {
+      await withInMemorySingletonDatabase(async () => {
+        const db = getDatabase() as unknown as Kysely<Database>;
+        await runMigrations(db as unknown as Kysely<unknown>);
+
+        await db
+          .insertInto("failure_groups")
+          .values({
+            id: "group-x", type: "crash", signature: "sig-x", title: "Boom", message: "boom",
+            severity: "critical", first_occurrence: 1000, last_occurrence: 1000,
+            total_count: 1, unique_sessions: 1, stack_trace_json: null, tool_call_info_json: null,
+          })
+          .execute();
+        await db
+          .insertInto("failure_occurrences")
+          .values({
+            id: "occ-x", group_id: "group-x", timestamp: 1000, device_id: "emulator-5554",
+            device_model: "Pixel", os: "34", app_version: "1.0.0", session_id: "session-x",
+            screen_at_failure: "MainActivity", test_name: null, test_execution_id: null,
+            error_code: null, duration_ms: null, tool_args_json: null,
+          })
+          .execute();
+
+        const server = new TestableTelemetryPushSocketServer(new FakeTimer());
+
+        // Stale/retired uuid: resolves to deviceId === null → the guard suppresses the query.
+        const staleSocket = new FakeSocket();
+        const staleFilter = { category: null, deviceSessionUuid: "uuid-retired", deviceId: null, sessionId: null };
+        (server as any).subscribers.set("stale", {
+          socket: staleSocket as unknown as Socket, subscriptionId: "stale",
+          lastActivity: 0, filter: staleFilter, backfilling: true, drainPending: false,
+        });
+        await (server as any).backfillRecentEvents("stale", staleFilter, staleSocket as unknown as Socket);
+        expect(staleSocket.getWrittenMessages()).toHaveLength(0);
+
+        // Contrast: an all-devices subscription (deviceSessionUuid === null) still backfills.
+        const allSocket = new FakeSocket();
+        const allFilter = { category: null, deviceSessionUuid: null, deviceId: null, sessionId: null };
+        (server as any).subscribers.set("all", {
+          socket: allSocket as unknown as Socket, subscriptionId: "all",
+          lastActivity: 0, filter: allFilter, backfilling: true, drainPending: false,
+        });
+        await (server as any).backfillRecentEvents("all", allFilter, allSocket as unknown as Socket);
+        expect(allSocket.getWrittenMessages().length).toBeGreaterThan(0);
+      });
+    });
+  });

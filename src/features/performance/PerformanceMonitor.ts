@@ -728,6 +728,8 @@ export class PerformanceMonitor {
   ): void {
     const data: LivePerformanceData = {
       deviceId: device.deviceId,
+      // Resolved by the push server from deviceId at push time (epic #5256, item 3).
+      deviceSessionUuid: null,
       packageName: device.packageName,
       timestamp: now,
       nodeId: null,

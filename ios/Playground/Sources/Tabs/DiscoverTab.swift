@@ -73,12 +73,12 @@ struct VideoRowView: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(video.title)
-                    .font(.headline)
+                    .font(theme.typography.titleMedium)
                     .foregroundStyle(theme.textPrimary)
                     .lineLimit(2)
 
                 Text(video.duration)
-                    .font(.caption)
+                    .font(theme.typography.labelMedium)
                     .foregroundStyle(theme.textSecondary)
             }
         }
@@ -107,18 +107,18 @@ struct VideoDetailView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 Text(video.title)
-                    .font(.title2)
+                    .font(theme.typography.headlineMedium)
                     .fontWeight(.bold)
                     .foregroundStyle(theme.textPrimary)
 
                 Text("Duration: \(video.duration)")
-                    .font(.subheadline)
+                    .font(theme.typography.titleSmall)
                     .foregroundStyle(theme.textSecondary)
 
                 Text(
                     "This is a sample video for testing the AutoMobile iOS Playground app. The video demonstrates various features and capabilities."
                 )
-                .font(.body)
+                .font(theme.typography.bodyLarge)
                 .foregroundStyle(theme.textSecondary)
                 .padding(.top, 8)
             }

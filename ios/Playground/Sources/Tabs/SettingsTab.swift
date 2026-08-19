@@ -19,10 +19,10 @@ struct SettingsTab: View {
 
                         VStack(alignment: .leading) {
                             Text(userName.isEmpty ? "Guest User" : userName)
-                                .font(.headline)
+                                .font(theme.typography.titleMedium)
                                 .foregroundStyle(theme.textPrimary)
                             Text("Tap to edit profile")
-                                .font(.caption)
+                                .font(theme.typography.labelMedium)
                                 .foregroundStyle(theme.textSecondary)
                         }
                     }
@@ -58,14 +58,14 @@ struct SettingsTab: View {
                         Text("Version")
                         Spacer()
                         Text("1.0.0")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(theme.textSecondary)
                     }
 
                     HStack {
                         Text("Build")
                         Spacer()
                         Text("1")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(theme.textSecondary)
                     }
 
                     Link(destination: URL(string: "https://github.com") ?? URL(fileURLWithPath: "/")) {
@@ -73,7 +73,7 @@ struct SettingsTab: View {
                             Text("View Source Code")
                             Spacer()
                             Image(systemName: "arrow.up.right.square")
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(theme.textSecondary)
                         }
                     }
                 }
@@ -82,7 +82,7 @@ struct SettingsTab: View {
                     Button("Sign Out", role: .destructive) {
                         userName = ""
                     }
-                    .foregroundStyle(Color.autoMobileRed)
+                    .foregroundStyle(theme.primary)
                 }
             }
             .scrollContentBackground(.hidden)
@@ -116,7 +116,7 @@ struct StorageSettingsView: View {
                         .foregroundStyle(theme.textPrimary)
 
                     Text("Total Storage Used")
-                        .font(.subheadline)
+                        .font(theme.typography.titleSmall)
                         .foregroundStyle(theme.textSecondary)
                 }
                 .frame(maxWidth: .infinity)
@@ -125,7 +125,7 @@ struct StorageSettingsView: View {
 
             Section("Breakdown") {
                 StorageRow(title: "Documents", size: documents, color: .autoMobileLalala)
-                StorageRow(title: "Cache", size: cache, color: .autoMobileRed)
+                StorageRow(title: "Cache", size: cache, color: theme.primary)
                 StorageRow(title: "Other", size: other, color: .autoMobileDarkGrey)
             }
         }
@@ -140,6 +140,7 @@ struct StorageRow: View {
     let title: String
     let size: Double
     let color: Color
+    @Environment(\.autoMobileTheme) private var theme
 
     var body: some View {
         HStack {
@@ -152,7 +153,7 @@ struct StorageRow: View {
             Spacer()
 
             Text(String(format: "%.1f MB", size))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(theme.textSecondary)
         }
     }
 }
@@ -168,15 +169,15 @@ struct CacheSettingsView: View {
                 VStack(spacing: 12) {
                     Image(systemName: "trash.circle.fill")
                         .font(.system(size: 60))
-                        .foregroundStyle(Color.autoMobileRed)
+                        .foregroundStyle(theme.primary)
 
                     Text("45.2 MB")
-                        .font(.title)
+                        .font(theme.typography.headlineLarge)
                         .fontWeight(.bold)
                         .foregroundStyle(theme.textPrimary)
 
                     Text("Cached data can be safely cleared")
-                        .font(.subheadline)
+                        .font(theme.typography.titleSmall)
                         .foregroundStyle(theme.textSecondary)
                         .multilineTextAlignment(.center)
                 }
@@ -198,7 +199,7 @@ struct CacheSettingsView: View {
                         Spacer()
                     }
                 }
-                .foregroundStyle(Color.autoMobileRed)
+                .foregroundStyle(theme.primary)
                 .disabled(isClearing)
             }
         }

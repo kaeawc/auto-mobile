@@ -789,7 +789,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
     }
   });
 
-  test("does not recreate a released session from an implicit proxy binding", async () => {
+  test("rejects a released implicit proxy binding instead of forwarding unbound", async () => {
     const clientBindings: Array<string | undefined> = [];
     const forwardedArguments: Array<Record<string, unknown>> = [];
     server.mcpClientFactory = async boundSessionUuid => {
@@ -813,12 +813,10 @@ describe("UnixSocketServer MCP forward serialization", () => {
       [DAEMON_BOUND_SESSION_PARAM]: "released-session",
     });
 
-    expect(response.success).toBe(true);
-    expect(clientBindings).toEqual([undefined]);
-    expect(forwardedArguments).toEqual([expect.not.objectContaining({
-      sessionUuid: expect.anything(),
-      [DAEMON_BOUND_SESSION_PARAM]: expect.anything(),
-    })]);
+    expect(response.success).toBe(false);
+    expect(response.error).toContain("Session not found: released-session");
+    expect(clientBindings).toEqual([]);
+    expect(forwardedArguments).toEqual([]);
   });
 
   test("routes a bound resources/read call through its session-scoped MCP client", async () => {

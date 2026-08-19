@@ -164,20 +164,21 @@ describe("UnixSocketServer notification broadcast", () => {
     });
   });
 
-  test("pushes a session-released frame carrying the released session id to subscribers (issue #4610)", async () => {
+  test("pushes a session-released frame carrying the id and diagnostic reason", async () => {
     const subscriber = await connectedClient();
     subscriber.send(DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD);
     await subscriber.waitForFrames(1);
 
     // Emitted by the daemon's onSessionRelease callback in production; the socket
     // server subscribes to the broadcaster in start().
-    SessionReleaseBroadcaster.emit("session-a");
+    SessionReleaseBroadcaster.emit("session-a", "missing-first-heartbeat");
     await subscriber.waitForFrames(2);
 
     expect(subscriber.frames[1]).toEqual({
       type: "daemon_notification",
       method: SESSION_RELEASED_NOTIFICATION_METHOD,
       sessionId: "session-a",
+      reason: "missing-first-heartbeat",
     });
   });
 

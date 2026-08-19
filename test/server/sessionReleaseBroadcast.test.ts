@@ -11,23 +11,26 @@ describe("SESSION_RELEASED_NOTIFICATION_METHOD", () => {
 });
 
 describe("SessionReleaseBroadcaster", () => {
-  test("emit reaches all subscribers with the released session id; unsubscribe stops delivery", () => {
-    const first: string[] = [];
-    const second: string[] = [];
-    const unsubscribeFirst = SessionReleaseBroadcaster.subscribe(sessionId => {
-      first.push(sessionId);
+  test("emit reaches subscribers with the session id and reason; unsubscribe stops delivery", () => {
+    const first: Array<{ sessionId: string; reason?: string }> = [];
+    const second: Array<{ sessionId: string; reason?: string }> = [];
+    const unsubscribeFirst = SessionReleaseBroadcaster.subscribe((sessionId, reason) => {
+      first.push({ sessionId, reason });
     });
-    const unsubscribeSecond = SessionReleaseBroadcaster.subscribe(sessionId => {
-      second.push(sessionId);
+    const unsubscribeSecond = SessionReleaseBroadcaster.subscribe((sessionId, reason) => {
+      second.push({ sessionId, reason });
     });
 
     try {
-      SessionReleaseBroadcaster.emit("session-a");
+      SessionReleaseBroadcaster.emit("session-a", "heartbeat-timeout");
       unsubscribeFirst();
-      SessionReleaseBroadcaster.emit("session-a:device-a");
+      SessionReleaseBroadcaster.emit("session-a:device-a", "explicit-release");
 
-      expect(first).toEqual(["session-a"]);
-      expect(second).toEqual(["session-a", "session-a:device-a"]);
+      expect(first).toEqual([{ sessionId: "session-a", reason: "heartbeat-timeout" }]);
+      expect(second).toEqual([
+        { sessionId: "session-a", reason: "heartbeat-timeout" },
+        { sessionId: "session-a:device-a", reason: "explicit-release" },
+      ]);
     } finally {
       unsubscribeFirst();
       unsubscribeSecond();

@@ -203,6 +203,40 @@ describe("DeviceSessionRepository", () => {
     }
   });
 
+  test("SessionManager persists heartbeat expiry reasons as expired sessions", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, repo);
+
+    try {
+      await sessionManager.createSession(
+        "missing-heartbeat",
+        "emulator-5554",
+        "android",
+        60_000,
+        60_000,
+      );
+      await sessionManager.createSession(
+        "stale-heartbeat",
+        "emulator-5556",
+        "android",
+        60_000,
+        60_000,
+      );
+
+      await sessionManager.releaseSession("missing-heartbeat", "missing-first-heartbeat");
+      await sessionManager.releaseSession("stale-heartbeat", "heartbeat-timeout");
+
+      const missingHeartbeat = await repo.getSession("missing-heartbeat");
+      const staleHeartbeat = await repo.getSession("stale-heartbeat");
+      expect(missingHeartbeat!.status).toBe("expired");
+      expect(missingHeartbeat!.release_reason).toBe("missing-first-heartbeat");
+      expect(staleHeartbeat!.status).toBe("expired");
+      expect(staleHeartbeat!.release_reason).toBe("heartbeat-timeout");
+    } finally {
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
   test("DevicePool stale emulator eviction persists device-disconnected release reason", async () => {
     const timer = new FakeTimer();
     const fakeDeviceUtils = new FakeDeviceUtils();

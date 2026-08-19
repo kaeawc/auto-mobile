@@ -7,11 +7,17 @@ import { TestCoverageRepository } from "../../src/db/testCoverageRepository";
 import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { createTestDatabase } from "../db/testDbHelper";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 // Issue #4610: the daemon registers a release callback (next to the nav-graph /
 // observe-cache cleanup) that fans the released session key out to the
 // SessionReleaseBroadcaster, so a connected proxy learns of a real release
 // instead of guessing with the replay TTL.
+
+interface DaemonHeartbeatMonitorInternals {
+  heartbeatMonitor: { stop(): void } | null;
+  startHeartbeatMonitor(): void;
+}
 
 describe("Daemon session-release signal wiring", () => {
   afterEach(() => {
@@ -33,18 +39,60 @@ describe("Daemon session-release signal wiring", () => {
     const daemon = new Daemon({}, undefined, undefined, new DeviceSessionRepository(db));
     const sessionManager = daemon.getSessionManager();
 
-    const emitted: string[] = [];
-    const unsubscribe = SessionReleaseBroadcaster.subscribe(sessionId => {
-      emitted.push(sessionId);
+    const emitted: Array<{ sessionId: string; reason?: string }> = [];
+    const unsubscribe = SessionReleaseBroadcaster.subscribe((sessionId, reason) => {
+      emitted.push({ sessionId, reason });
     });
 
     try {
       await sessionManager.createSession("session-release-signal", "emulator-5554", "android");
       await sessionManager.releaseSession("session-release-signal");
 
-      expect(emitted).toEqual(["session-release-signal"]);
+      expect(emitted).toEqual([
+        { sessionId: "session-release-signal", reason: "explicit-release" },
+      ]);
     } finally {
       unsubscribe();
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
+  test("heartbeat monitor persists and broadcasts the diagnostic expiry reason", async () => {
+    const db = await createTestDatabase();
+    const timer = new FakeTimer();
+    const repository = new DeviceSessionRepository(db);
+    const daemon = new Daemon({}, undefined, timer, repository);
+    const sessionManager = daemon.getSessionManager();
+    const internals = daemon as unknown as DaemonHeartbeatMonitorInternals;
+    const emitted: Array<{ sessionId: string; reason?: string }> = [];
+    const unsubscribe = SessionReleaseBroadcaster.subscribe((sessionId, reason) => {
+      emitted.push({ sessionId, reason });
+    });
+
+    try {
+      await sessionManager.createSession(
+        "heartbeat-expired",
+        "emulator-5554",
+        "android",
+        60_000,
+        1_000,
+      );
+      sessionManager.recordHeartbeat("heartbeat-expired");
+      internals.startHeartbeatMonitor();
+
+      await timer.advanceTimeAsync(10_000);
+
+      const persisted = await repository.getSession("heartbeat-expired");
+      expect(persisted).toMatchObject({
+        status: "expired",
+        release_reason: "heartbeat-timeout",
+      });
+      expect(emitted).toEqual([
+        { sessionId: "heartbeat-expired", reason: "heartbeat-timeout" },
+      ]);
+    } finally {
+      unsubscribe();
+      internals.heartbeatMonitor?.stop();
       sessionManager.stopCleanupTimer();
     }
   });

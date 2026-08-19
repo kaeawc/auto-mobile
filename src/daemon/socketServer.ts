@@ -372,8 +372,8 @@ export class UnixSocketServer {
     // replay-TTL guess. Subscribed here (not in the daemon) for the same
     // recovery-rewire reason as list-changed; close() unsubscribes symmetrically.
     this.sessionReleaseUnsubscribe?.();
-    this.sessionReleaseUnsubscribe = SessionReleaseBroadcaster.subscribe(sessionId => {
-      this.broadcastSessionReleased(sessionId);
+    this.sessionReleaseUnsubscribe = SessionReleaseBroadcaster.subscribe((sessionId, reason) => {
+      this.broadcastSessionReleased(sessionId, reason);
     });
 
     return new Promise((resolve, reject) => {
@@ -513,11 +513,12 @@ export class UnixSocketServer {
    * {@link broadcastListChanged}. Note `sessionId` here is the socket-client id,
    * distinct from the released daemon session carried in the frame.
    */
-  private broadcastSessionReleased(releasedSessionId: string): void {
+  private broadcastSessionReleased(releasedSessionId: string, reason?: string): void {
     const notification: DaemonNotification = {
       type: "daemon_notification",
       method: SESSION_RELEASED_NOTIFICATION_METHOD,
       sessionId: releasedSessionId,
+      ...(reason !== undefined ? { reason } : {}),
     };
     for (const sessionId of this.notificationSubscribers) {
       const socket = this.clientSockets.get(sessionId);
@@ -891,8 +892,9 @@ export class UnixSocketServer {
     request: DaemonRequest,
     socketSessionId: string,
   ): McpForwardRoute {
+    this.throwIfReleasedBoundSession(request.params);
     const sessionUuid = this.getSessionUuid(request.params);
-    if (sessionUuid && !this.isReleasedBoundSession(request.params)) {
+    if (sessionUuid) {
       return this.sessionScopedForwardRoute(socketSessionId, sessionUuid, undefined);
     }
     const uri = request.params?.uri;
@@ -900,11 +902,12 @@ export class UnixSocketServer {
   }
 
   private getToolsCallForwardRoute(args: unknown, socketSessionId: string): McpForwardRoute {
+    this.throwIfReleasedBoundSession(args);
     const scopedKey = this.getRequestArgumentScopeKey(args);
     const boundRoute = this.getBoundMcpClientRoute(socketSessionId);
     const sessionUuid = this.getSessionUuid(args);
     const capabilityProfileUuid = this.getCapabilityProfileUuid(args) ?? boundRoute?.capabilityProfileUuid;
-    if (sessionUuid && !this.isReleasedBoundSession(args)) {
+    if (sessionUuid) {
       return this.sessionScopedForwardRoute(socketSessionId, sessionUuid, scopedKey, capabilityProfileUuid);
     }
     if (capabilityProfileUuid) {
@@ -1156,6 +1159,13 @@ export class UnixSocketServer {
       record[DAEMON_BOUND_SESSION_PARAM] === sessionUuid &&
       !this.hasActiveDaemonSession(sessionUuid)
     );
+  }
+
+  private throwIfReleasedBoundSession(args: unknown): void {
+    if (!this.isReleasedBoundSession(args)) {
+      return;
+    }
+    throw new Error(`Session not found: ${this.getSessionUuid(args)}`);
   }
 
   private getRequestArgumentScopeKey(args: unknown): string | undefined {
@@ -2697,6 +2707,7 @@ export class UnixSocketServer {
 
     const forwardedArgs = { ...args } as Record<string, unknown>;
     delete forwardedArgs[DAEMON_CAPABILITY_PROFILE_PARAM];
+    this.throwIfReleasedBoundSession(forwardedArgs);
     const boundSessionUuid = this.getSessionUuid(forwardedArgs);
     const usesBoundSession = forwardedArgs[DAEMON_BOUND_SESSION_PARAM] === boundSessionUuid;
     delete forwardedArgs[DAEMON_BOUND_SESSION_PARAM];

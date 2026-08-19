@@ -12,6 +12,10 @@ export interface HeartbeatSessionSource {
   cleanupExpiredSessions(): void;
 }
 
+type SessionHeartbeatReleaseReason =
+  | "missing-first-heartbeat"
+  | "heartbeat-timeout";
+
 export interface SessionHeartbeatMonitorConfig {
   /** How often to scan for stale sessions. Default: 10s. */
   checkIntervalMs?: number;
@@ -59,7 +63,10 @@ export class SessionHeartbeatMonitor {
   constructor(
     private readonly sessions: HeartbeatSessionSource,
     private readonly hasActiveExecutions: (sessionId: string) => boolean,
-    private readonly reap: (sessionId: string) => Promise<void>,
+    private readonly reap: (
+      sessionId: string,
+      reason: SessionHeartbeatReleaseReason,
+    ) => Promise<void>,
     private readonly timer: Timer = defaultTimer,
     config: SessionHeartbeatMonitorConfig = {},
   ) {
@@ -116,8 +123,11 @@ export class SessionHeartbeatMonitor {
         const lastHeartbeat = session.lastHeartbeat ?? session.lastUsedAt;
         if (session.heartbeatTimeoutSource === "default") {
           if (now - lastHeartbeat > this.preFirstHeartbeatGraceMs) {
-            logger.warn(`Session ${session.sessionId} never received first heartbeat, cancelling`);
-            await this.reap(session.sessionId);
+            const reason = "missing-first-heartbeat";
+            logger.warn(
+              `Session ${session.sessionId} never received first heartbeat, cancelling (reason=${reason})`,
+            );
+            await this.reap(session.sessionId, reason);
           }
           continue;
         }
@@ -128,8 +138,11 @@ export class SessionHeartbeatMonitor {
       }
       const lastHeartbeat = session.lastHeartbeat ?? session.lastUsedAt;
       if (now - lastHeartbeat > timeoutMs) {
-        logger.warn(`Session ${session.sessionId} heartbeat timeout, cancelling`);
-        await this.reap(session.sessionId);
+        const reason = "heartbeat-timeout";
+        logger.warn(
+          `Session ${session.sessionId} heartbeat timeout, cancelling (reason=${reason})`,
+        );
+        await this.reap(session.sessionId, reason);
       }
     }
   }

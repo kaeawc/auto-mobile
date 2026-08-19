@@ -7,7 +7,11 @@ import {
   ListResourceTemplatesRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { logger } from "../utils/logger";
-import { DaemonMcpProxy, type DaemonMcpProxyConfig } from "../daemon/daemonMcpProxy";
+import {
+  DaemonBoundSessionExpiredError,
+  DaemonMcpProxy,
+  type DaemonMcpProxyConfig,
+} from "../daemon/daemonMcpProxy";
 import { ActionableError } from "../models";
 import { getMcpServerVersion } from "../utils/mcpVersion";
 
@@ -19,6 +23,29 @@ export interface ProxyMcpServerOptions {
   proxyConfig?: DaemonMcpProxyConfig;
   /** Session context for tracking */
   sessionContext?: { sessionId?: string };
+}
+
+interface SessionOwnershipLostCallToolResult {
+  content: Array<{ type: "text"; text: string }>;
+  isError: true;
+}
+
+function sessionOwnershipLostResult(
+  error: DaemonBoundSessionExpiredError,
+): SessionOwnershipLostCallToolResult {
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          code: "session_ownership_lost",
+          sessionUuid: error.sessionUuid,
+          reason: error.reason,
+        }),
+      },
+    ],
+    isError: true,
+  };
 }
 
 /**
@@ -114,6 +141,12 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
       const result = await proxy.callTool(name, args);
       return result;
     } catch (error) {
+      if (error instanceof DaemonBoundSessionExpiredError) {
+        logger.warn(
+          `[ProxyServer] Session ownership lost for ${error.sessionUuid}: ${error.reason}`,
+        );
+        return sessionOwnershipLostResult(error);
+      }
       logger.error(`[ProxyServer] Tool call failed: ${name} - ${error}`);
       // Return error as tool result (not throwing) to match expected MCP behavior
       return {

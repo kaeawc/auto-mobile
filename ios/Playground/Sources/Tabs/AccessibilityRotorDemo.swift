@@ -62,7 +62,7 @@ struct AccessibilityRotorDemo: View {
         List {
             Section {
                 Text(Self.instructions)
-                    .font(.callout)
+                    .font(theme.typography.bodyMedium)
                     .foregroundStyle(theme.textSecondary)
             }
 
@@ -95,12 +95,12 @@ struct AccessibilityRotorDemo: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.title)
-                    .font(.headline)
+                    .font(theme.typography.titleMedium)
                     .foregroundStyle(theme.textPrimary)
 
                 if item.isLandmark {
                     Text("Landmark")
-                        .font(.caption)
+                        .font(theme.typography.labelMedium)
                         .foregroundStyle(theme.textSecondary)
                 }
             }

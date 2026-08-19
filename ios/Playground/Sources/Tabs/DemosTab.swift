@@ -152,16 +152,16 @@ struct DemoRow: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: icon)
-                .font(.title2)
+                .font(theme.typography.headlineMedium)
                 .foregroundStyle(theme.primary)
                 .frame(width: 40)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.headline)
+                    .font(theme.typography.titleMedium)
                     .foregroundStyle(theme.textPrimary)
                 Text(description)
-                    .font(.caption)
+                    .font(theme.typography.labelMedium)
                     .foregroundStyle(theme.textSecondary)
             }
         }
@@ -184,10 +184,10 @@ struct ScrollPerformanceDemo: View {
 
                 VStack(alignment: .leading) {
                     Text(item)
-                        .font(.headline)
+                        .font(theme.typography.titleMedium)
                         .foregroundStyle(theme.textPrimary)
                     Text("Scroll quickly to test performance")
-                        .font(.caption)
+                        .font(theme.typography.labelMedium)
                         .foregroundStyle(theme.textSecondary)
                 }
             }
@@ -215,7 +215,7 @@ struct AnimationDemo: View {
                 // Continuous rotation
                 VStack(spacing: 8) {
                     Text("Continuous Rotation")
-                        .font(.headline)
+                        .font(theme.typography.titleMedium)
                         .foregroundStyle(theme.textPrimary)
 
                     Image(systemName: "gear")
@@ -232,11 +232,11 @@ struct AnimationDemo: View {
                 // Scale animation
                 VStack(spacing: 8) {
                     Text("Tap to Scale")
-                        .font(.headline)
+                        .font(theme.typography.titleMedium)
                         .foregroundStyle(theme.textPrimary)
 
                     Circle()
-                        .fill(Color.autoMobileRed)
+                        .fill(theme.primary)
                         .frame(width: 80, height: 80)
                         .scaleEffect(scale)
                         .onTapGesture {
@@ -249,7 +249,7 @@ struct AnimationDemo: View {
                 // Toggle animation
                 VStack(spacing: 8) {
                     Text("Toggle Animation")
-                        .font(.headline)
+                        .font(theme.typography.titleMedium)
                         .foregroundStyle(theme.textPrimary)
 
                     RoundedRectangle(cornerRadius: 12)
@@ -292,14 +292,14 @@ struct HeavyComputationDemo: View {
                 // Main Thread Blocking Section
                 VStack(spacing: 12) {
                     Text("Block Main Thread")
-                        .font(.title2)
+                        .font(theme.typography.headlineMedium)
                         .fontWeight(.bold)
                         .foregroundStyle(theme.textPrimary)
 
                     Text(
                         "This will freeze the UI completely by sleeping on the main thread. Use this to test jank detection."
                     )
-                    .font(.body)
+                    .font(theme.typography.bodyLarge)
                     .foregroundStyle(theme.textSecondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal)
@@ -307,7 +307,7 @@ struct HeavyComputationDemo: View {
                     // Duration picker
                     VStack(spacing: 8) {
                         Text("Duration: \(String(format: "%.1f", selectedDuration))s")
-                            .font(.subheadline)
+                            .font(theme.typography.titleSmall)
                             .foregroundStyle(theme.textSecondary)
 
                         Picker("Duration", selection: $selectedDuration) {
@@ -325,10 +325,10 @@ struct HeavyComputationDemo: View {
                         Label("Block Main Thread", systemImage: "exclamationmark.triangle.fill")
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(.autoMobileRed)
+                    .tint(theme.primary)
                 }
                 .padding()
-                .background(Color.autoMobileRed.opacity(0.1))
+                .background(theme.primary.opacity(0.1))
                 .cornerRadius(12)
 
                 Divider()
@@ -337,12 +337,12 @@ struct HeavyComputationDemo: View {
                 // Background Computation Section
                 VStack(spacing: 12) {
                     Text("Background Computation")
-                        .font(.title2)
+                        .font(theme.typography.headlineMedium)
                         .fontWeight(.bold)
                         .foregroundStyle(theme.textPrimary)
 
                     Text("This runs intensive calculations in the background without blocking the UI.")
-                        .font(.body)
+                        .font(theme.typography.bodyLarge)
                         .foregroundStyle(theme.textSecondary)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal)
@@ -431,6 +431,7 @@ struct HeavyComputationDemo: View {
 // MARK: - Form Demo
 
 struct FormDemo: View {
+    @Environment(\.autoMobileTheme) private var theme
     @State private var name = ""
     @State private var email = ""
     @State private var enableNotifications = true
@@ -479,6 +480,7 @@ struct FormDemo: View {
 // MARK: - Alerts Demo
 
 struct AlertsDemo: View {
+    @Environment(\.autoMobileTheme) private var theme
     @State private var showAlert = false
     @State private var showSheet = false
     @State private var showConfirmation = false
@@ -522,15 +524,16 @@ struct AlertsDemo: View {
 
 struct SheetContent: View {
     @Environment(\.dismiss) var dismiss
+    @Environment(\.autoMobileTheme) private var theme
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 20) {
                 Text("This is a sheet")
-                    .font(.title)
+                    .font(theme.typography.headlineLarge)
 
                 Text("Swipe down or tap Done to dismiss")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(theme.textSecondary)
             }
             .navigationTitle("Sheet")
             .navigationBarTitleDisplayMode(.inline)
@@ -555,7 +558,7 @@ struct AccessibilityDemo: View {
         List {
             Section {
                 Text("Dynamic Type Preview")
-                    .font(.headline)
+                    .font(theme.typography.titleMedium)
                     .foregroundStyle(theme.textPrimary)
 
                 Text(
@@ -577,7 +580,7 @@ struct AccessibilityDemo: View {
                     Spacer()
 
                     Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(Color.autoMobileSuccess)
+                        .foregroundStyle(theme.success)
                         .accessibilityLabel("Completed")
                 }
                 .accessibilityElement(children: .combine)
@@ -607,7 +610,7 @@ struct AccessibilityDemo: View {
 
                 HStack {
                     Rectangle()
-                        .fill(Color.autoMobileRed)
+                        .fill(theme.primary)
                         .frame(width: 40, height: 40)
                         .cornerRadius(4)
                     Text("Secondary (Red)")
@@ -651,14 +654,14 @@ struct SDKStatusDemo: View {
                     Text("Initialized")
                     Spacer()
                     Text(AutoMobileSDK.shared.isInitialized ? "Yes" : "No")
-                        .foregroundStyle(AutoMobileSDK.shared.isInitialized ? Color.autoMobileSuccess : .secondary)
+                        .foregroundStyle(AutoMobileSDK.shared.isInitialized ? theme.success : theme.textSecondary)
                 }
 
                 HStack {
                     Text("Bundle ID")
                     Spacer()
                     Text(AutoMobileSDK.shared.bundleId ?? "N/A")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.textSecondary)
                         .lineLimit(1)
                 }
 
@@ -671,7 +674,7 @@ struct SDKStatusDemo: View {
                     Text("Navigation Listeners")
                     Spacer()
                     Text("\(AutoMobileSDK.shared.listenerCount)")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.textSecondary)
                 }
             }
 
@@ -691,8 +694,8 @@ struct SDKStatusDemo: View {
 
                 if !statusMessage.isEmpty {
                     Text(statusMessage)
-                        .foregroundStyle(Color.autoMobileSuccess)
-                        .font(.caption)
+                        .foregroundStyle(theme.success)
+                        .font(theme.typography.labelMedium)
                 }
             }
 
@@ -701,14 +704,14 @@ struct SDKStatusDemo: View {
                     Text("UserDefaults Inspector")
                     Spacer()
                     Text(UserDefaultsInspector.shared.isEnabled ? "Enabled" : "Disabled")
-                        .foregroundStyle(UserDefaultsInspector.shared.isEnabled ? Color.autoMobileSuccess : .secondary)
+                        .foregroundStyle(UserDefaultsInspector.shared.isEnabled ? theme.success : theme.textSecondary)
                 }
 
                 HStack {
                     Text("Database Inspector")
                     Spacer()
                     Text(DatabaseInspector.shared.isEnabled ? "Enabled" : "Disabled")
-                        .foregroundStyle(DatabaseInspector.shared.isEnabled ? Color.autoMobileSuccess : .secondary)
+                        .foregroundStyle(DatabaseInspector.shared.isEnabled ? theme.success : theme.textSecondary)
                 }
             }
         }
@@ -734,7 +737,7 @@ struct ErrorTrackingDemo: View {
                     Text("Recorded Errors")
                     Spacer()
                     Text("\(AutoMobileFailures.shared.eventCount)")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.textSecondary)
                 }
 
                 Button("Record Test Error") {
@@ -769,7 +772,7 @@ struct ErrorTrackingDemo: View {
 
                 if !lastError.isEmpty {
                     Text("Last: \(lastError)")
-                        .font(.caption)
+                        .font(theme.typography.labelMedium)
                         .foregroundStyle(Color.autoMobileError)
                 }
             }
@@ -778,16 +781,16 @@ struct ErrorTrackingDemo: View {
                 let events = AutoMobileFailures.shared.getRecentEvents()
                 if events.isEmpty {
                     Text("No errors recorded")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.textSecondary)
                 } else {
                     ForEach(events.suffix(5).reversed(), id: \.timestamp) { event in
                         VStack(alignment: .leading, spacing: 2) {
                             Text(event.errorDomain)
-                                .font(.headline)
+                                .font(theme.typography.titleMedium)
                                 .foregroundStyle(theme.textPrimary)
                             if let msg = event.customMessage {
                                 Text(msg)
-                                    .font(.caption)
+                                    .font(theme.typography.labelMedium)
                                     .foregroundStyle(theme.textSecondary)
                             }
                         }
@@ -801,7 +804,7 @@ struct ErrorTrackingDemo: View {
                     errorCount = 0
                     lastError = ""
                 }
-                .foregroundStyle(Color.autoMobileRed)
+                .foregroundStyle(theme.primary)
             }
         }
         .scrollContentBackground(.hidden)
@@ -862,12 +865,12 @@ struct BiometricsDemo: View {
                     Text("Has Override")
                     Spacer()
                     Text(AutoMobileBiometrics.shared.hasOverride ? "Yes" : "No")
-                        .foregroundStyle(AutoMobileBiometrics.shared.hasOverride ? Color.autoMobileSuccess : .secondary)
+                        .foregroundStyle(AutoMobileBiometrics.shared.hasOverride ? theme.success : theme.textSecondary)
                 }
 
                 if !statusMessage.isEmpty {
                     Text(statusMessage)
-                        .font(.caption)
+                        .font(theme.typography.labelMedium)
                         .foregroundStyle(Color.autoMobileInfo)
                 }
             }
@@ -945,12 +948,12 @@ struct NetworkTrackingDemo: View {
                     Text("Events Recorded")
                     Spacer()
                     Text("\(requestCount)")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.textSecondary)
                 }
 
                 if !lastRequest.isEmpty {
                     Text(lastRequest)
-                        .font(.caption)
+                        .font(theme.typography.labelMedium)
                         .foregroundStyle(Color.autoMobileInfo)
                 }
             }
@@ -1010,36 +1013,36 @@ struct ViewHierarchyDebugDemo: View {
     private var combinedElementSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Combined Element")
-                .font(.headline)
+                .font(theme.typography.titleMedium)
                 .foregroundStyle(theme.textPrimary)
             Text("Accessibility sees one element; SDK walker sees the children.")
-                .font(.caption)
+                .font(theme.typography.labelMedium)
                 .foregroundStyle(theme.textSecondary)
 
             HStack(spacing: 12) {
                 Image(systemName: "photo.fill")
-                    .font(.largeTitle)
+                    .font(theme.typography.displaySmall)
                     .foregroundStyle(theme.primary)
                     .accessibilityIdentifier("combined-image")
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Photo Title")
-                        .font(.body)
+                        .font(theme.typography.bodyLarge)
                         .foregroundStyle(theme.textPrimary)
                         .accessibilityIdentifier("combined-title")
                     Text("Subtitle with details")
-                        .font(.caption)
+                        .font(theme.typography.labelMedium)
                         .foregroundStyle(theme.textSecondary)
                         .accessibilityIdentifier("combined-subtitle")
                     HStack(spacing: 4) {
                         Image(systemName: "star.fill")
-                            .font(.caption2)
+                            .font(theme.typography.labelSmall)
                             .foregroundStyle(Color.autoMobileWarning)
                         Text("4.8")
-                            .font(.caption2)
+                            .font(theme.typography.labelSmall)
                             .foregroundStyle(theme.textSecondary)
                         Text("(128 reviews)")
-                            .font(.caption2)
+                            .font(theme.typography.labelSmall)
                             .foregroundStyle(theme.textSecondary)
                     }
                     .accessibilityIdentifier("combined-rating")
@@ -1062,21 +1065,21 @@ struct ViewHierarchyDebugDemo: View {
     private var customActionsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Custom Actions")
-                .font(.headline)
+                .font(theme.typography.titleMedium)
                 .foregroundStyle(theme.textPrimary)
             Text("Accessibility custom actions are only visible through the SDK walker.")
-                .font(.caption)
+                .font(theme.typography.labelMedium)
                 .foregroundStyle(theme.textSecondary)
 
             VStack(spacing: 12) {
                 Text("Message from Alice")
-                    .font(.body)
+                    .font(theme.typography.bodyLarge)
                     .foregroundStyle(theme.textPrimary)
                 Text("Hey, want to grab lunch tomorrow?")
-                    .font(.subheadline)
+                    .font(theme.typography.titleSmall)
                     .foregroundStyle(theme.textSecondary)
                 Text("Tap count: \(tapCount)")
-                    .font(.caption)
+                    .font(theme.typography.labelMedium)
                     .foregroundStyle(theme.textSecondary)
             }
             .padding()
@@ -1101,18 +1104,18 @@ struct ViewHierarchyDebugDemo: View {
     private var gestureRecognizerSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Gesture Recognizers")
-                .font(.headline)
+                .font(theme.typography.titleMedium)
                 .foregroundStyle(theme.textPrimary)
             Text("SDK walker shows gesture types; accessibility only reports 'button' trait.")
-                .font(.caption)
+                .font(theme.typography.labelMedium)
                 .foregroundStyle(theme.textSecondary)
 
             VStack(spacing: 4) {
                 Text("Tap, Long Press, or Swipe")
-                    .font(.body)
+                    .font(theme.typography.bodyLarge)
                     .foregroundStyle(theme.textPrimary)
                 Text("Taps: \(tapCount)  Long Presses: \(longPressCount)  Swipe: \(swipeDirection)")
-                    .font(.caption)
+                    .font(theme.typography.labelMedium)
                     .foregroundStyle(theme.textSecondary)
             }
             .padding(40)
@@ -1145,15 +1148,15 @@ struct ViewHierarchyDebugDemo: View {
     private var layeredViewsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Layered Views")
-                .font(.headline)
+                .font(theme.typography.titleMedium)
                 .foregroundStyle(theme.textPrimary)
             Text("SDK walker reveals z-order, alpha, background colors, and corner radii.")
-                .font(.caption)
+                .font(theme.typography.labelMedium)
                 .foregroundStyle(theme.textSecondary)
 
             ZStack {
                 RoundedRectangle(cornerRadius: 20)
-                    .fill(Color.autoMobileRed.opacity(0.3))
+                    .fill(theme.primary.opacity(0.3))
                     .frame(width: 200, height: 200)
                     .accessibilityIdentifier("layer-back")
 
@@ -1168,7 +1171,7 @@ struct ViewHierarchyDebugDemo: View {
                     .accessibilityIdentifier("layer-front")
 
                 Text("Top")
-                    .font(.headline)
+                    .font(theme.typography.titleMedium)
                     .foregroundStyle(.white)
                     .accessibilityIdentifier("layer-label")
             }
@@ -1185,10 +1188,10 @@ struct ViewHierarchyDebugDemo: View {
     private var hiddenViewsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Hidden & Decorative Views")
-                .font(.headline)
+                .font(theme.typography.titleMedium)
                 .foregroundStyle(theme.textPrimary)
             Text("Views with accessibilityHidden or zero alpha exist in the UIView tree but not the accessibility tree.")
-                .font(.caption)
+                .font(theme.typography.labelMedium)
                 .foregroundStyle(theme.textSecondary)
 
             VStack(spacing: 12) {
@@ -1197,7 +1200,7 @@ struct ViewHierarchyDebugDemo: View {
                     .accessibilityIdentifier("visible-text")
 
                 Text("A11y-hidden content")
-                    .foregroundStyle(Color.autoMobileRed)
+                    .foregroundStyle(theme.primary)
                     .accessibilityIdentifier("a11y-hidden-text")
                     .accessibilityHidden(true)
 
@@ -1237,10 +1240,10 @@ struct ViewHierarchyDebugDemo: View {
     private var uiKitControlSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("UIKit Controls in SwiftUI")
-                .font(.headline)
+                .font(theme.typography.titleMedium)
                 .foregroundStyle(theme.textPrimary)
             Text("UIViewRepresentable wraps real UIKit controls — SDK walker sees UIControl targets and actions.")
-                .font(.caption)
+                .font(theme.typography.labelMedium)
                 .foregroundStyle(theme.textSecondary)
 
             StepperControlView(value: $sliderValue)
@@ -1248,7 +1251,7 @@ struct ViewHierarchyDebugDemo: View {
                 .accessibilityIdentifier("uikit-stepper")
 
             Text("Value: \(String(format: "%.1f", sliderValue))")
-                .font(.caption)
+                .font(theme.typography.labelMedium)
                 .foregroundStyle(theme.textSecondary)
 
             SegmentedControlView()

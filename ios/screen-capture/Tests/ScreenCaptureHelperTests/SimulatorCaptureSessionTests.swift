@@ -40,6 +40,14 @@ final class SimulatorCaptureSessionTests: XCTestCase {
         private(set) var updatedConfigurations: [SCStreamConfiguration] = []
 
         var startCaptureError: Error?
+        /// When `true`, `startCapture()` parks far longer than any test-injected
+        /// deadline, standing in for a `SCStream.startCapture()` hung inside
+        /// ScreenCaptureKit start (issue #4350). The session's deadline race is
+        /// expected to cancel this task, so the sleep unwinds via `CancellationError`
+        /// rather than leaking. If the deadline ever regresses, the sleep instead
+        /// completes (a bounded 5s) so the test fails fast with a clear assertion
+        /// instead of hanging.
+        var startCaptureHangs = false
         /// When set, every `updateConfiguration` call throws it.
         var updateConfigurationError: Error?
         /// Throws on the first N `updateConfiguration` calls, then succeeds —
@@ -61,6 +69,13 @@ final class SimulatorCaptureSessionTests: XCTestCase {
 
         func startCapture() async throws {
             startCaptureCallCount += 1
+            if startCaptureHangs {
+                // Far exceeds any sane test deadline; the session's timeout arm
+                // cancels this task, so the sleep throws `CancellationError` and
+                // unwinds cleanly. The 5s bound only elapses if the deadline
+                // regresses, turning a hang into a fast assertion failure.
+                try await Task.sleep(nanoseconds: 5_000_000_000)
+            }
             if let error = startCaptureError { throw error }
         }
 
@@ -275,8 +290,33 @@ final class SimulatorCaptureSessionTests: XCTestCase {
         XCTAssertTrue(diagnostics.lines.isEmpty)
     }
 
-    // NOTE: A bounded `startCapture()` timeout is not present on this branch
-    // (tracked separately as the #4350 hardening work). When it lands, add a
-    // case here that injects a `startCapture()` which never returns and asserts
-    // the session times out — the `CaptureStream` seam already supports it.
+    // MARK: - Bounded startCapture() deadline (issue #4350 / #4764)
+
+    /// A `startCapture()` that hangs inside ScreenCaptureKit start must be
+    /// surfaced as a specific `StartCaptureTimeoutError` — the greppable
+    /// `error:` diagnostic the parent supervisor fails fast on — rather than
+    /// stalling until the parent's 15s SIGTERM with silent frame starvation.
+    /// This pins the deadline race added for the #4350 no-frames flake.
+    func testBeginCaptureTimesOutWhenStartCaptureHangs() async {
+        let diagnostics = DiagnosticRecorder()
+        let session = makeSession(diagnostics: diagnostics)
+        // Shrink the 14s production deadline so the hang resolves in tens of ms.
+        session.startCaptureDeadlineSeconds = 0.05
+        let fake = FakeCaptureStream()
+        fake.startCaptureHangs = true
+
+        do {
+            try await session.beginCapture(with: fake, audio: false)
+            XCTFail("beginCapture should time out when startCapture never returns")
+        } catch let error as StartCaptureTimeoutError {
+            XCTAssertEqual(error.deadlineSeconds, 0.05)
+        } catch {
+            XCTFail("unexpected error type: \(error)")
+        }
+
+        // The start was attempted, but a stream that never started must not be
+        // retained as the live stream.
+        XCTAssertEqual(fake.startCaptureCallCount, 1)
+        XCTAssertNil(session.stream)
+    }
 }

@@ -14,6 +14,7 @@ import type { Database } from "../db/types";
 import type { Kysely } from "kysely";
 import { TELEMETRY_PUSH_SOCKET_CONFIG } from "./daemonFiles";
 import { truncateBodyText, boundStructuredField } from "../utils/truncateBodyText";
+import { type DeviceSessionResolver, nullDeviceSessionResolver } from "./deviceSessionResolver";
 
 /**
  * Opaque plain-text fields that the backfill fans out (limit=100) and that can
@@ -86,6 +87,17 @@ export function boundBackfillEventText(event: TelemetryEvent): TelemetryEvent {
 
 interface TelemetryFilter {
   category: string | null; // "network", "log", "os", "navigation", "crash", "anr", "nonfatal", "storage", "layout", or null for all
+  /**
+   * Primary device routing key (epic #5256). `null` matches every device.
+   * Live-event delivery filters on this.
+   */
+  deviceSessionUuid: string | null;
+  /**
+   * Serial/UDID resolved from `deviceSessionUuid` at subscribe time. Retained
+   * only for the serial-scoped backfill DB queries (which key on the persisted
+   * `device_id`); it is NOT the live routing key. `null` for an all-devices
+   * subscription or a `deviceSessionUuid` with no live epoch.
+   */
   deviceId: string | null;
   sessionId: string | null;
 }
@@ -101,6 +113,8 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
   TelemetryFilter,
   TelemetryEvent
 > {
+  private deviceSessionResolver: DeviceSessionResolver = nullDeviceSessionResolver;
+
   constructor(
     socketPath: string = getSocketPath(TELEMETRY_PUSH_SOCKET_CONFIG),
     timer: Timer = defaultTimer,
@@ -108,21 +122,41 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
     super(socketPath, timer, "TelemetryPush");
   }
 
+  /** Wire the serial↔`deviceSessionUuid` resolver used to stamp and route events. */
+  setDeviceSessionResolver(resolver: DeviceSessionResolver): void {
+    this.deviceSessionResolver = resolver;
+  }
+
+  /** Stamp the live `deviceSessionUuid` for an event's serial (epic #5256). */
+  private stampDeviceSession(event: TelemetryEvent): TelemetryEvent {
+    const deviceSessionUuid = event.deviceId
+      ? this.deviceSessionResolver.resolveUuid(event.deviceId)
+      : null;
+    return { ...event, deviceSessionUuid };
+  }
+
   pushTelemetryEvent(event: TelemetryEvent): void {
-    const sentCount = this.pushToSubscribers(event);
+    const stamped = this.stampDeviceSession(event);
+    const sentCount = this.pushToSubscribers(stamped);
     if (sentCount > 0) {
-      logger.info(`[TelemetryPush] Pushed ${event.category} event to ${sentCount} subscribers`);
-    } else if (event.category === "navigation") {
+      logger.info(`[TelemetryPush] Pushed ${stamped.category} event to ${sentCount} subscribers`);
+    } else if (stamped.category === "navigation") {
       logger.warn(
-        `[TelemetryPush] No subscribers matched navigation event (${this.getSubscriberCount()} total subs, event deviceId: ${event.deviceId})`,
+        `[TelemetryPush] No subscribers matched navigation event (${this.getSubscriberCount()} total subs, event deviceId: ${stamped.deviceId})`,
       );
     }
   }
 
   protected parseSubscriptionFilter(request: Record<string, unknown>): TelemetryFilter {
+    const deviceSessionUuid = (request.deviceSessionUuid as string) ?? null;
     return {
       category: (request.category as string) ?? null,
-      deviceId: (request.deviceId as string) ?? null,
+      deviceSessionUuid,
+      // Resolve the serial once, at subscribe time, for the serial-scoped backfill
+      // queries. Within an epoch the serial is stable, so a snapshot is safe.
+      deviceId: deviceSessionUuid
+        ? this.deviceSessionResolver.resolveDeviceId(deviceSessionUuid)
+        : null,
       sessionId: (request.sessionId as string) ?? null,
     };
   }
@@ -134,7 +168,10 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
     if (filter.sessionId !== null && filter.sessionId !== data.sessionId) {
       return false;
     }
-    if (filter.deviceId !== null && filter.deviceId !== data.deviceId) {
+    if (
+      filter.deviceSessionUuid !== null &&
+      filter.deviceSessionUuid !== (data.deviceSessionUuid ?? null)
+    ) {
       return false;
     }
     return true;
@@ -165,6 +202,14 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
     socket: Socket,
   ): Promise<void> {
     const limit = 100;
+    // A subscription that named a specific deviceSessionUuid which no longer
+    // resolves to a live serial (retired epoch) must backfill NOTHING — never fall
+    // through to an all-devices query, which would leak other devices' history to a
+    // stale-uuid subscriber (epic #5256, AC4). An all-devices subscription
+    // (deviceSessionUuid === null) still backfills every device.
+    if (filter.deviceSessionUuid !== null && filter.deviceId === null) {
+      return;
+    }
     const deviceId = filter.deviceId ?? undefined;
     const sessionId = filter.sessionId ?? undefined;
     const events: TelemetryEvent[] = [];
@@ -369,7 +414,12 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
       }
       // Single boundary cap for large plain-text fields (#2801): network bodies
       // are already capped in the repository mapRow; this bounds log/storage.
-      const msg = this.createPushMessage(boundBackfillEventText(event), subscriptionId);
+      // Stamp the device-session key so every backfilled frame carries the same
+      // attribution as live frames (epic #5256, AC1).
+      const msg = this.createPushMessage(
+        this.stampDeviceSession(boundBackfillEventText(event)),
+        subscriptionId,
+      );
       this.sendJson(socket, msg);
     }
 

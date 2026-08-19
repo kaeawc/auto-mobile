@@ -7,6 +7,7 @@ import {
 } from "../../src/daemon/performancePushSocketServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeSocket } from "../fakes/FakeNetServer";
+import { FakeDeviceSessionResolver } from "../fakes/FakeDeviceSessionResolver";
 
 /**
  * Test helper that wraps PerformancePushSocketServer to allow injecting fake sockets
@@ -40,7 +41,7 @@ class TestablePerformancePushSocketServer extends PerformancePushSocketServer {
    * Simulate a client connection and subscription
    */
   simulateSubscription(options: {
-    deviceId?: string;
+    deviceSessionUuid?: string | null;
     packageName?: string;
   }): { socket: FakeSocket; subscriptionId: string } {
     const socket = new FakeSocket();
@@ -53,7 +54,7 @@ class TestablePerformancePushSocketServer extends PerformancePushSocketServer {
       subscriptionId,
       lastActivity: timer.now(),
       filter: {
-        deviceId: options.deviceId ?? null,
+        deviceSessionUuid: options.deviceSessionUuid ?? null,
         packageName: options.packageName ?? null,
       },
       backfilling: false,
@@ -78,14 +79,14 @@ class TestablePerformancePushSocketServer extends PerformancePushSocketServer {
    * Get subscriber info for testing
    */
   getSubscriber(subscriptionId: string): {
-    deviceId: string | null;
+    deviceSessionUuid: string | null;
     packageName: string | null;
     lastActivity: number;
   } | null {
     const subscriber = this.subscribers.get(subscriptionId);
     if (!subscriber) {return null;}
     return {
-      deviceId: subscriber.filter.deviceId,
+      deviceSessionUuid: subscriber.filter.deviceSessionUuid,
       packageName: subscriber.filter.packageName,
       lastActivity: subscriber.lastActivity,
     };
@@ -102,10 +103,16 @@ class TestablePerformancePushSocketServer extends PerformancePushSocketServer {
 describe("PerformancePushSocketServer", () => {
   let server: TestablePerformancePushSocketServer;
   let timer: FakeTimer;
+  let resolver: FakeDeviceSessionResolver;
 
   beforeEach(async () => {
     timer = new FakeTimer();
     server = new TestablePerformancePushSocketServer(timer);
+    resolver = new FakeDeviceSessionResolver()
+      .bind("emulator-5554", "uuid-a")
+      .bind("device-1", "uuid-1")
+      .bind("device-2", "uuid-2");
+    server.setDeviceSessionResolver(resolver);
     await server.startFake();
   });
 
@@ -115,19 +122,19 @@ describe("PerformancePushSocketServer", () => {
     server.simulateSubscription({});
     expect(server.getSubscriberCount()).toBe(1);
 
-    server.simulateSubscription({ deviceId: "device-1" });
+    server.simulateSubscription({ deviceSessionUuid: "uuid-1" });
     expect(server.getSubscriberCount()).toBe(2);
   });
 
   it("stores subscription filters correctly", () => {
     const { subscriptionId } = server.simulateSubscription({
-      deviceId: "emulator-5554",
+      deviceSessionUuid: "uuid-a",
       packageName: "com.example.app",
     });
 
     const subscriber = server.getSubscriber(subscriptionId);
     expect(subscriber).not.toBeNull();
-    expect(subscriber?.deviceId).toBe("emulator-5554");
+    expect(subscriber?.deviceSessionUuid).toBe("uuid-a");
     expect(subscriber?.packageName).toBe("com.example.app");
   });
 
@@ -137,6 +144,7 @@ describe("PerformancePushSocketServer", () => {
 
     const testData: LivePerformanceData = {
       deviceId: "emulator-5554",
+      deviceSessionUuid: null,
       packageName: "com.example.app",
       timestamp: Date.now(),
       nodeId: 42,
@@ -163,17 +171,20 @@ describe("PerformancePushSocketServer", () => {
     expect(msgs1).toHaveLength(1);
     expect(msgs1[0].type).toBe("performance_push");
     expect(msgs1[0].data?.deviceId).toBe("emulator-5554");
+    // Server resolves the stable epoch key from the serial (AC1).
+    expect(msgs1[0].data?.deviceSessionUuid).toBe("uuid-a");
 
     expect(msgs2).toHaveLength(1);
     expect(msgs2[0].type).toBe("performance_push");
   });
 
-  it("filters pushes by deviceId", async () => {
-    const { socket: socket1 } = server.simulateSubscription({ deviceId: "device-1" });
-    const { socket: socket2 } = server.simulateSubscription({ deviceId: "device-2" });
+  it("filters pushes by deviceSessionUuid (AC2)", async () => {
+    const { socket: socket1 } = server.simulateSubscription({ deviceSessionUuid: "uuid-1" });
+    const { socket: socket2 } = server.simulateSubscription({ deviceSessionUuid: "uuid-2" });
 
     const testData: LivePerformanceData = {
       deviceId: "device-1",
+      deviceSessionUuid: null,
       packageName: "com.example.app",
       timestamp: Date.now(),
       nodeId: null,
@@ -195,12 +206,36 @@ describe("PerformancePushSocketServer", () => {
     expect(msgs2).toHaveLength(0);
   });
 
+  it("yields zero events to a stale/retired deviceSessionUuid filter (AC4)", async () => {
+    const { socket } = server.simulateSubscription({ deviceSessionUuid: "uuid-1" });
+    // device-1 reconnects under a new epoch: uuid-1 is retired, serial now maps to uuid-1b.
+    resolver.retire("device-1").bind("device-1", "uuid-1b");
+
+    server.pushPerformanceData({
+      deviceId: "device-1",
+      deviceSessionUuid: null,
+      packageName: "com.app",
+      timestamp: Date.now(),
+      nodeId: null,
+      screenName: null,
+      metrics: {
+        fps: 60, frameTimeMs: 16, jankFrames: 0, touchLatencyMs: null,
+        ttffMs: null, ttiMs: null, cpuUsagePercent: null, memoryUsageMb: null,
+      },
+      thresholds: DEFAULT_THRESHOLDS,
+      health: "healthy",
+    });
+
+    expect(socket.getWrittenMessages()).toHaveLength(0);
+  });
+
   it("filters pushes by packageName", async () => {
     const { socket: socket1 } = server.simulateSubscription({ packageName: "com.app.one" });
     const { socket: socket2 } = server.simulateSubscription({ packageName: "com.app.two" });
 
     const testData: LivePerformanceData = {
       deviceId: "device-1",
+      deviceSessionUuid: null,
       packageName: "com.app.one",
       timestamp: Date.now(),
       nodeId: null,
@@ -231,6 +266,7 @@ describe("PerformancePushSocketServer", () => {
     // Push data - should clean up destroyed socket
     const testData: LivePerformanceData = {
       deviceId: "device-1",
+      deviceSessionUuid: null,
       packageName: "com.app",
       timestamp: Date.now(),
       nodeId: null,

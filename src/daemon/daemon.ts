@@ -52,11 +52,12 @@ import { startTestRecordingSocketServer, stopTestRecordingSocketServer } from ".
 import { startDeviceSnapshotSocketServer, stopDeviceSnapshotSocketServer } from "./deviceSnapshotSocketServer";
 import { startAppearanceSocketServer, stopAppearanceSocketServer } from "./appearanceSocketServer";
 import { startPerformanceStreamSocketServer, stopPerformanceStreamSocketServer } from "./performanceStreamSocketServer";
-import { startPerformancePushSocketServer, stopPerformancePushSocketServer } from "./performancePushSocketServer";
+import { startPerformancePushSocketServer, stopPerformancePushSocketServer, getPerformancePushServer } from "./performancePushSocketServer";
 import { startDeviceDataStreamSocketServer, stopDeviceDataStreamSocketServer, getDeviceDataStreamServer } from "./deviceDataStreamSocketServer";
 import { startFailuresStreamSocketServer, stopFailuresStreamSocketServer } from "./failuresStreamSocketServer";
-import { startFailuresPushSocketServer, stopFailuresPushSocketServer } from "./failuresPushSocketServer";
-import { startTelemetryPushSocketServer, stopTelemetryPushSocketServer } from "./telemetryPushSocketServer";
+import { startFailuresPushSocketServer, stopFailuresPushSocketServer, getFailuresPushServer } from "./failuresPushSocketServer";
+import { startTelemetryPushSocketServer, stopTelemetryPushSocketServer, getTelemetryPushServer } from "./telemetryPushSocketServer";
+import { createRegistryDeviceSessionResolver } from "./deviceSessionResolver";
 import { startWebRtcStreamSocketServer, stopWebRtcStreamSocketServer } from "./webrtcStreamSocketServer";
 import { startVideoStreamSocketServer, stopVideoStreamSocketServer } from "./videoStreamSocketServer";
 import { getDaemonSocketPathsByName } from "./socketPaths";
@@ -436,6 +437,10 @@ export class Daemon {
 
     // Wire up callback to establish WebSocket connections when IDE plugins subscribe
     this.setupDeviceDataStreamCallback();
+
+    // Wire the device-session routing key (epic #5256, item 3): give every push
+    // server the serial↔deviceSessionUuid resolver, and stream session lifecycle.
+    this.setupDeviceSessionRouting();
 
     startAppearanceSyncScheduler();
     startPerformanceMonitor();
@@ -958,6 +963,28 @@ export class Daemon {
    * the WebSocket connections to Android devices are established so that
    * hierarchy updates can flow continuously.
    */
+  /**
+   * Give every push socket server the serial↔`deviceSessionUuid` resolver so it can
+   * stamp the epoch key on outgoing frames and route subscriptions on it, and wire
+   * the registry's connect/disconnect transitions to `device_session_started` /
+   * `device_session_ended` frames on the observation stream (epic #5256, item 3).
+   */
+  private setupDeviceSessionRouting(): void {
+    const resolver = createRegistryDeviceSessionResolver(this.deviceSessionRegistry);
+    const deviceDataStream = getDeviceDataStreamServer();
+    deviceDataStream?.setDeviceSessionResolver(resolver);
+    getPerformancePushServer()?.setDeviceSessionResolver(resolver);
+    getFailuresPushServer()?.setDeviceSessionResolver(resolver);
+    getTelemetryPushServer()?.setDeviceSessionResolver(resolver);
+
+    if (deviceDataStream) {
+      this.deviceSessionRegistry.setLifecycleListener({
+        onSessionStarted: record => deviceDataStream.pushDeviceSessionStarted(record),
+        onSessionEnded: record => deviceDataStream.pushDeviceSessionEnded(record),
+      });
+    }
+  }
+
   private setupDeviceDataStreamCallback(): void {
     const server = getDeviceDataStreamServer();
     if (!server) {
@@ -1117,7 +1144,10 @@ export class Daemon {
         logger.info(`[Daemon] Got summary: appId=${summary.appId}, nodes=${summary.nodes.length}, edges=${summary.edges.length}`);
 
         const streamData = convertSummaryToStreamData(summary);
-        server.pushNavigationGraphUpdate(streamData);
+        // Attribute the update to the device that owns this app's graph so panes
+        // watching other devices are not cross-contaminated (epic #5256; #4837).
+        const deviceId = navGraphManager.getDeviceIdForApp(summary.appId);
+        server.pushNavigationGraphUpdate(streamData, deviceId);
 
         logger.info(`[Daemon] Pushed navigation graph update: ${summary.nodes.length} nodes, ${summary.edges.length} edges`);
       } catch (error) {

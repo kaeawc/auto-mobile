@@ -8,6 +8,7 @@ import { boundStructuredField } from "../../src/utils/truncateBodyText";
 import type { TelemetryEvent } from "../../src/features/telemetry/TelemetryRecorder";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeSocket } from "../fakes/FakeNetServer";
+import { FakeDeviceSessionResolver } from "../fakes/FakeDeviceSessionResolver";
 import { withInMemorySingletonDatabase } from "../db/inMemorySingletonDatabase";
 import { getDatabase } from "../../src/db/database";
 import { runMigrations } from "../../src/db/migrator";
@@ -33,7 +34,12 @@ class TestableTelemetryPushSocketServer extends TelemetryPushSocketServer {
     (this as any).server = null;
   }
 
-  simulateSubscription(options: { category?: string | null; deviceId?: string | null }): {
+  simulateSubscription(options: {
+    category?: string | null;
+    deviceSessionUuid?: string | null;
+    deviceId?: string | null;
+    sessionId?: string | null;
+  }): {
     socket: FakeSocket;
     subscriptionId: string;
   } {
@@ -46,8 +52,11 @@ class TestableTelemetryPushSocketServer extends TelemetryPushSocketServer {
       lastActivity: timer.now(),
       filter: {
         category: options.category ?? null,
+        deviceSessionUuid: options.deviceSessionUuid ?? null,
+        // The server resolves this from deviceSessionUuid at real subscribe time; a
+        // test may seed it directly for backfill-query coverage.
         deviceId: options.deviceId ?? null,
-        sessionId: null,
+        sessionId: options.sessionId ?? null,
       },
       backfilling: false,
       drainPending: false,
@@ -230,10 +239,15 @@ describe("boundStructuredField", () => {
 describe("TelemetryPushSocketServer", () => {
   let server: TestableTelemetryPushSocketServer;
   let timer: FakeTimer;
+  let resolver: FakeDeviceSessionResolver;
 
   beforeEach(async () => {
     timer = new FakeTimer();
     server = new TestableTelemetryPushSocketServer(timer);
+    resolver = new FakeDeviceSessionResolver()
+      .bind("device-1", "uuid-1")
+      .bind("device-2", "uuid-2");
+    server.setDeviceSessionResolver(resolver);
     await server.startFake();
   });
 
@@ -412,27 +426,46 @@ describe("TelemetryPushSocketServer", () => {
     expect(msgs[0].data?.timestamp).toBe(50000);
   });
 
-  it("filters pushes by deviceId", () => {
-    const { socket: d1Socket } = server.simulateSubscription({ deviceId: "device-1" });
-    const { socket: d2Socket } = server.simulateSubscription({ deviceId: "device-2" });
+  it("filters pushes by deviceSessionUuid (AC2)", () => {
+    const { socket: d1Socket } = server.simulateSubscription({ deviceSessionUuid: "uuid-1" });
+    const { socket: d2Socket } = server.simulateSubscription({ deviceSessionUuid: "uuid-2" });
     const { socket: allSocket } = server.simulateSubscription({});
 
     const event: TelemetryEvent = {
       category: "network",
       timestamp: 1000,
       deviceId: "device-1",
+      sessionId: null,
       data: { method: "GET", url: "/test", statusCode: 200, durationMs: 10 },
     };
 
     server.pushTelemetryEvent(event);
 
-    expect(d1Socket.getWrittenMessages()).toHaveLength(1);
+    const d1 = d1Socket.getWrittenMessages<{ data?: TelemetryEvent }>();
+    expect(d1).toHaveLength(1);
+    // Live events carry the resolved epoch key (AC1).
+    expect(d1[0].data?.deviceSessionUuid).toBe("uuid-1");
     expect(d2Socket.getWrittenMessages()).toHaveLength(0);
     expect(allSocket.getWrittenMessages()).toHaveLength(1);
   });
 
-  it("filters by both category and deviceId", () => {
-    const { socket } = server.simulateSubscription({ category: "log", deviceId: "device-1" });
+  it("yields zero events to a stale/retired deviceSessionUuid filter (AC4)", () => {
+    const { socket } = server.simulateSubscription({ deviceSessionUuid: "uuid-1" });
+    resolver.retire("device-1").bind("device-1", "uuid-1b");
+
+    server.pushTelemetryEvent({
+      category: "network",
+      timestamp: 1000,
+      deviceId: "device-1",
+      sessionId: null,
+      data: { method: "GET", url: "/test", statusCode: 200, durationMs: 10 },
+    });
+
+    expect(socket.getWrittenMessages()).toHaveLength(0);
+  });
+
+  it("filters by both category and deviceSessionUuid", () => {
+    const { socket } = server.simulateSubscription({ category: "log", deviceSessionUuid: "uuid-1" });
 
     const matchEvent: TelemetryEvent = {
       category: "log",

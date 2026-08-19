@@ -1,5 +1,6 @@
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
+import { logger } from "../utils/logger";
 import type { Platform } from "../models";
 
 /**
@@ -43,6 +44,20 @@ interface LiveEntry {
 }
 
 /**
+ * Observer of device-session epoch transitions.
+ *
+ * The daemon wires this to push `device_session_started` / `device_session_ended`
+ * lifecycle frames onto the observation stream (epic #5256, item 3) so a consumer
+ * flushes per-device state on a real epoch boundary instead of guessing from serial
+ * reuse. A same-serial reincarnation surfaces as `onSessionEnded(old)` immediately
+ * followed by `onSessionStarted(new)`.
+ */
+export interface DeviceSessionLifecycleListener {
+  onSessionStarted(record: DeviceSessionRecord): void;
+  onSessionEnded(record: DeviceSessionRecord): void;
+}
+
+/**
  * Process-lifetime map of `deviceId (serial/UDID) ↔ deviceSessionUuid`, the
  * single source of truth for device-session identity across the daemon's
  * stream API. Purely in-memory: an epoch is meaningless across daemon restarts,
@@ -53,10 +68,38 @@ export class DeviceSessionRegistry {
   private readonly idGenerator: IdGenerator;
   private readonly byDeviceId = new Map<string, LiveEntry>();
   private readonly uuidToDeviceId = new Map<string, string>();
+  private lifecycleListener: DeviceSessionLifecycleListener | null = null;
 
   constructor(timer: Timer = defaultTimer, idGenerator: IdGenerator = defaultIdGenerator) {
     this.timer = timer;
     this.idGenerator = idGenerator;
+  }
+
+  /**
+   * Register (or clear, with `null`) the observer notified on epoch transitions.
+   * Wired by the daemon after the observation-stream server is up.
+   */
+  setLifecycleListener(listener: DeviceSessionLifecycleListener | null): void {
+    this.lifecycleListener = listener;
+  }
+
+  private emitStarted(record: DeviceSessionRecord): void {
+    try {
+      this.lifecycleListener?.onSessionStarted(record);
+    } catch (error) {
+      // A lifecycle observer must never break identity bookkeeping — swallow and
+      // keep the registry authoritative; trace at debug for diagnosis.
+      logger.debug(`[DeviceSessionRegistry] onSessionStarted listener threw: ${error}`);
+    }
+  }
+
+  private emitEnded(record: DeviceSessionRecord): void {
+    try {
+      this.lifecycleListener?.onSessionEnded(record);
+    } catch (error) {
+      // See emitStarted: swallow observer faults, keep the registry authoritative.
+      logger.debug(`[DeviceSessionRegistry] onSessionEnded listener threw: ${error}`);
+    }
   }
 
   /**
@@ -74,8 +117,10 @@ export class DeviceSessionRegistry {
     }
     if (existing) {
       // Superseded epoch (new incarnation for the same serial) — drop its uuid
-      // so a stale reference cannot resolve to the reincarnated device.
+      // so a stale reference cannot resolve to the reincarnated device, and
+      // surface the boundary as an end of the old epoch before the new one starts.
       this.uuidToDeviceId.delete(existing.record.deviceSessionUuid);
+      this.emitEnded(existing.record);
     }
 
     const record: DeviceSessionRecord = {
@@ -86,6 +131,7 @@ export class DeviceSessionRegistry {
     };
     this.byDeviceId.set(input.deviceId, { record, incarnation: input.incarnation });
     this.uuidToDeviceId.set(record.deviceSessionUuid, input.deviceId);
+    this.emitStarted(record);
     return record;
   }
 
@@ -97,6 +143,7 @@ export class DeviceSessionRegistry {
     }
     this.byDeviceId.delete(deviceId);
     this.uuidToDeviceId.delete(existing.record.deviceSessionUuid);
+    this.emitEnded(existing.record);
   }
 
   getByDeviceId(deviceId: string): DeviceSessionRecord | undefined {

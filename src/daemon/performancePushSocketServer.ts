@@ -2,6 +2,7 @@ import { logger } from "../utils/logger";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { PushSubscriptionSocketServer, getSocketPath } from "./socketServer/index";
 import { PERFORMANCE_PUSH_SOCKET_CONFIG } from "./daemonFiles";
+import { type DeviceSessionResolver, nullDeviceSessionResolver } from "./deviceSessionResolver";
 
 /**
  * Performance thresholds for health status calculation
@@ -49,6 +50,12 @@ export type HealthStatus = "healthy" | "warning" | "critical";
  */
 export interface LivePerformanceData {
   deviceId: string;
+  /**
+   * Stable device-session routing key for this device's current epoch (epic #5256,
+   * item 3). Resolved by the push server from `deviceId`; `null` when no live epoch
+   * maps to the serial. Callers may leave it `null` — the server (re)resolves it.
+   */
+  deviceSessionUuid: string | null;
   packageName: string;
   timestamp: number;
   nodeId: number | null;
@@ -71,7 +78,7 @@ export interface LivePerformanceData {
  * Filter for performance push subscriptions.
  */
 interface PerformanceFilter {
-  deviceId: string | null;
+  deviceSessionUuid: string | null;
   packageName: string | null;
 }
 
@@ -99,6 +106,8 @@ export class PerformancePushSocketServer extends PushSubscriptionSocketServer<
   PerformanceFilter,
   LivePerformanceData
 > {
+  private deviceSessionResolver: DeviceSessionResolver = nullDeviceSessionResolver;
+
   constructor(
     socketPath: string = getSocketPath(PERFORMANCE_PUSH_SOCKET_CONFIG),
     timer: Timer = defaultTimer,
@@ -106,11 +115,21 @@ export class PerformancePushSocketServer extends PushSubscriptionSocketServer<
     super(socketPath, timer, "PerformancePush");
   }
 
+  /** Wire the serial↔`deviceSessionUuid` resolver used to stamp pushed frames. */
+  setDeviceSessionResolver(resolver: DeviceSessionResolver): void {
+    this.deviceSessionResolver = resolver;
+  }
+
   /**
-   * Push live performance data to all interested subscribers.
+   * Push live performance data to all interested subscribers. `deviceSessionUuid`
+   * is (re)resolved here from `deviceId` so the routing key reflects the device's
+   * current epoch regardless of what the caller supplied.
    */
   pushPerformanceData(data: LivePerformanceData): void {
-    const sentCount = this.pushToSubscribers(data);
+    const deviceSessionUuid = data.deviceId
+      ? this.deviceSessionResolver.resolveUuid(data.deviceId)
+      : null;
+    const sentCount = this.pushToSubscribers({ ...data, deviceSessionUuid });
     if (sentCount > 0) {
       logger.debug(`[PerformancePush] Pushed data to ${sentCount} subscribers`);
     }
@@ -188,13 +207,14 @@ export class PerformancePushSocketServer extends PushSubscriptionSocketServer<
 
   protected parseSubscriptionFilter(request: Record<string, unknown>): PerformanceFilter {
     return {
-      deviceId: (request.deviceId as string) ?? null,
+      deviceSessionUuid: (request.deviceSessionUuid as string) ?? null,
       packageName: (request.packageName as string) ?? null,
     };
   }
 
   protected matchesFilter(filter: PerformanceFilter, data: LivePerformanceData): boolean {
-    const matchesDevice = filter.deviceId === null || filter.deviceId === data.deviceId;
+    const matchesDevice =
+      filter.deviceSessionUuid === null || filter.deviceSessionUuid === data.deviceSessionUuid;
     const matchesPackage = filter.packageName === null || filter.packageName === data.packageName;
     return matchesDevice && matchesPackage;
   }

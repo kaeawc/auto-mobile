@@ -1648,6 +1648,10 @@
             "ios"
           ]
         },
+        "appId": {
+          "description": "Scope the graph to this app id instead of the device's current foreground app",
+          "type": "string"
+        },
         "sessionUuid": {
           "description": "Session",
           "type": "string"

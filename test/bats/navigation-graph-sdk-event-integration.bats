@@ -111,6 +111,9 @@ fi
   [ "$(cat "$HEALTH_ATTEMPTS_FILE")" = "3" ]
   [ -f "$TARGET_APP_LAUNCHED_FILE" ]
   [[ "$output" == *"getNavigationGraph attempt 1 failed"* ]]
+  # Regression for issue #4579: the graph read must be scoped to the fixture
+  # bundle so a concurrent SpringBoard hierarchy push cannot redirect the query.
+  grep -q -- "getNavigationGraph --platform ios --deviceId simulator-udid --appId com.apple.reminders" "$INVOCATION_FILE"
   launch_line="$(grep -n -- "launchApp --platform ios --appId com.apple.reminders --deviceId simulator-udid" "$INVOCATION_FILE" | head -n 1 | cut -d: -f1)"
   observe_line="$(grep -n -- "observe --platform ios --deviceId simulator-udid" "$INVOCATION_FILE" | head -n 1 | cut -d: -f1)"
   [ "$launch_line" -lt "$observe_line" ]

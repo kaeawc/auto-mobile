@@ -846,7 +846,8 @@ export class UnixSocketServer {
       // the proxy-side reconnect seeding (issue #4610).
       const listSessionUuid = this.getSessionUuid(request.params);
       const capabilityProfileUuid = this.getCapabilityProfileUuid(request.params);
-      if (listSessionUuid && !this.isReleasedBoundSession(request.params)) {
+      this.throwIfReleasedBoundSession(request.params);
+      if (listSessionUuid) {
         return this.sessionScopedForwardRoute(socketSessionId, listSessionUuid, undefined, capabilityProfileUuid);
       }
       if (capabilityProfileUuid) {

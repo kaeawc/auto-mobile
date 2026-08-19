@@ -819,6 +819,35 @@ describe("UnixSocketServer MCP forward serialization", () => {
     expect(forwardedArguments).toEqual([]);
   });
 
+  test("rejects tools/list for a released implicit proxy binding", async () => {
+    const clientBindings: Array<string | undefined> = [];
+    server.mcpClientFactory = async boundSessionUuid => {
+      clientBindings.push(boundSessionUuid);
+      return {
+        listTools: async () => ({ tools: [] }),
+        callTool: async () => ({ content: [] }),
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({ contents: [] }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
+        close: async () => {},
+      };
+    };
+
+    const response = await sendRequest(socketPath, {
+      id: randomUUID(),
+      type: "mcp_request",
+      method: "tools/list",
+      params: {
+        sessionUuid: "released-session",
+        [DAEMON_BOUND_SESSION_PARAM]: "released-session",
+      },
+    });
+
+    expect(response.success).toBe(false);
+    expect(response.error).toContain("Session not found: released-session");
+    expect(clientBindings).toEqual([]);
+  });
+
   test("routes a bound resources/read call through its session-scoped MCP client", async () => {
     sessionDevices.set("session-a", "device-a");
     const clientBindings: Array<string | undefined> = [];

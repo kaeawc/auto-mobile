@@ -46,6 +46,14 @@ declare module "@modelcontextprotocol/sdk/types.js" {
     mimeType?: string;
   }
 
+  export interface CallToolResult {
+    content: Array<{
+      type: string;
+      text: string;
+    }>;
+    isError?: boolean;
+  }
+
   export const CallToolRequestSchema: any;
   export const ListToolsRequestSchema: any;
   export const GetResourceRequestSchema: any;
@@ -66,5 +74,6 @@ declare module "@modelcontextprotocol/sdk/types" {
       type: string;
       text: string;
     }>;
+    isError?: boolean;
   }
 }

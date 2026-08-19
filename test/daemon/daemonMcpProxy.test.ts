@@ -351,6 +351,49 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
+    test("normalizes an explicit session UUID before remembering and fencing it", async () => {
+      let callCount = 0;
+      const firstClient = new FakeDaemonClient({
+        onCallTool: () => {
+          callCount += 1;
+          if (callCount === 2) {
+            throw new Error("Session not found: session-a");
+          }
+        },
+      });
+      const retryClient = new ScriptedDaemonClient({
+        toolError: new Error("Session not found: session-a"),
+      });
+      const clients: DaemonClientLike[] = [firstClient, retryClient];
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => clients.shift()!,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("observe", {
+          sessionUuid: "  session-a  ",
+          deviceId: "device-a",
+        });
+        expect(firstClient.callToolCalls[0]).toEqual({
+          toolName: "observe",
+          params: { sessionUuid: "session-a", deviceId: "device-a" },
+        });
+
+        await expect(
+          proxy.callTool("observe", { deviceId: "device-a" }),
+        ).rejects.toMatchObject({
+          sessionUuid: "session-a",
+          reason: "session-not-found",
+        });
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
     test("a release received during connection setup prevents the first explicit call", async () => {
       const fakeClient = new FakeDaemonClient();
       fakeClient.subscribeToNotifications = async () => {

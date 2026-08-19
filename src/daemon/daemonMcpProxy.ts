@@ -619,8 +619,8 @@ export class DaemonMcpProxy {
     // derived sessions untouched; the replay TTL remains a dropped-frame
     // backstop (issues #4610, #4655).
     const releasedSessionUuid =
-      typeof notification.sessionId === "string" && notification.sessionId.length > 0
-        ? notification.sessionId
+      typeof notification.sessionId === "string" && notification.sessionId.trim().length > 0
+        ? notification.sessionId.trim()
         : undefined;
     if (!releasedSessionUuid) {
       return;
@@ -1118,12 +1118,13 @@ export class DaemonMcpProxy {
     // caller asking for it (issue #4610). Once the replay window has elapsed with
     // no forwarded call (explicit or implicit) refreshing the binding, treat it
     // as retired.
-    const explicitSessionUuid =
-      typeof args.sessionUuid === "string" && args.sessionUuid.trim().length > 0
-        ? args.sessionUuid
-        : undefined;
+    const explicitSessionUuid = this.sessionUuidFromArgs(args);
+    const normalizedArgs =
+      explicitSessionUuid && explicitSessionUuid !== args.sessionUuid
+        ? { ...args, sessionUuid: explicitSessionUuid }
+        : args;
     if (!this.boundSessionUuid || explicitSessionUuid === this.boundSessionUuid) {
-      return args;
+      return normalizedArgs;
     }
     if (explicitSessionUuid && this.initialSessionBindingConfigured) {
       throw new Error(
@@ -1132,7 +1133,7 @@ export class DaemonMcpProxy {
       );
     }
     if (explicitSessionUuid) {
-      return args;
+      return normalizedArgs;
     }
     return {
       ...args,
@@ -1275,9 +1276,13 @@ export class DaemonMcpProxy {
   // global counter — is what lets an unrelated session's release NOT block
   // remembering the session another in-flight call forwarded.
   private recordSessionReleased(sessionUuid: string, reason?: string): void {
+    const normalizedSessionUuid = sessionUuid.trim();
+    if (normalizedSessionUuid.length === 0) {
+      return;
+    }
     this.releaseEpoch += 1;
-    this.releasedSessionEpochs.set(sessionUuid, this.releaseEpoch);
-    this.releasedSessionReasons.set(sessionUuid, reason ?? "released");
+    this.releasedSessionEpochs.set(normalizedSessionUuid, this.releaseEpoch);
+    this.releasedSessionReasons.set(normalizedSessionUuid, reason ?? "released");
   }
 
   private forwardedSessionReleaseReasonSince(
@@ -1353,11 +1358,9 @@ export class DaemonMcpProxy {
       this.fenceReleasedForwardedSession(forwardedArgs, releaseReason);
       return;
     }
-    if (
-      typeof forwardedArgs.sessionUuid === "string" &&
-      forwardedArgs.sessionUuid.trim().length > 0
-    ) {
-      this.boundSessionUuid = forwardedArgs.sessionUuid;
+    const rememberedSessionUuid = this.sessionUuidFromArgs(forwardedArgs);
+    if (rememberedSessionUuid) {
+      this.boundSessionUuid = rememberedSessionUuid;
       this.boundSessionUuidAt = this.timer.now();
       this.startBoundSessionHeartbeat();
     }
@@ -1397,11 +1400,9 @@ export class DaemonMcpProxy {
       this.fenceReleasedForwardedSession(forwardedArgs, releaseReason);
       return;
     }
-    if (
-      typeof forwardedArgs.sessionUuid === "string" &&
-      forwardedArgs.sessionUuid.trim().length > 0
-    ) {
-      this.boundSessionUuid = forwardedArgs.sessionUuid;
+    const admittedSessionUuid = this.sessionUuidFromArgs(forwardedArgs);
+    if (admittedSessionUuid) {
+      this.boundSessionUuid = admittedSessionUuid;
       this.boundSessionUuidAt = this.timer.now();
       this.startBoundSessionHeartbeat();
     }

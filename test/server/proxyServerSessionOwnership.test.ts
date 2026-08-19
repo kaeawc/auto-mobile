@@ -68,6 +68,52 @@ describe("proxy server session ownership errors", () => {
       expect(fakeClient.callToolCalls).toEqual([]);
     } finally {
       await client.close();
+      await server.close();
+      await proxy.close();
+    }
+  });
+
+  test("preserves machine-readable ownership loss across discovery errors", async () => {
+    isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const fakeClient = new FakeDaemonClient({
+      daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+    });
+    const daemonManager = new FakeDaemonManager();
+    daemonManager.statusResult = {
+      ...daemonManager.statusResult,
+      version: DAEMON_VERSION,
+    };
+    const { server, proxy } = createProxyMcpServer({
+      proxyConfig: {
+        initialSessionUuid: "session-123",
+        clientFactory: () => fakeClient,
+        daemonManager,
+        autoStartDaemon: false,
+      },
+    });
+    const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "ownership-test-client", version: "0.0.1" });
+    const ownershipLoss = /session_ownership_lost.*session-123.*heartbeat-timeout/;
+
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+      await proxy.listTools();
+      fakeClient.emitNotification(
+        SESSION_RELEASED_NOTIFICATION_METHOD,
+        "session-123",
+        "heartbeat-timeout",
+      );
+
+      await expect(client.listTools()).rejects.toThrow(ownershipLoss);
+      await expect(client.listResources()).rejects.toThrow(ownershipLoss);
+      await expect(client.listResourceTemplates()).rejects.toThrow(ownershipLoss);
+      await expect(
+        client.readResource({ uri: "automobile:devices/booted" }),
+      ).rejects.toThrow(ownershipLoss);
+    } finally {
+      await client.close();
+      await server.close();
       await proxy.close();
     }
   });

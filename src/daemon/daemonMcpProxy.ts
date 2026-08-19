@@ -48,6 +48,20 @@ export type BuildMismatchReason = "autoStartDisabled" | "cooldown" | "restartMis
 
 const DAEMON_MCP_HEARTBEAT_INTERVAL_MS = 2_000;
 
+function heartbeatIntervalMs(config: DaemonMcpProxyConfig): number {
+  const configuredTimeout = config.heartbeatTimeoutMs;
+  const configuredInterval = config.heartbeatIntervalMs;
+  const interval =
+    configuredInterval ??
+    (configuredTimeout === undefined
+      ? DAEMON_MCP_HEARTBEAT_INTERVAL_MS
+      : Math.floor(configuredTimeout / 2));
+  if (!Number.isFinite(interval) || interval <= 0) {
+    throw new Error("heartbeat interval must be a positive finite number");
+  }
+  return Math.max(1, interval);
+}
+
 /**
  * Raised before connecting when the running daemon and MCP client package
  * versions differ but the proxy cannot safely reconcile them immediately.
@@ -206,6 +220,10 @@ export interface DaemonMcpProxyConfig {
   daemonOptions?: DaemonOptions;
   /** Timer for restart cooldown checks and bound-session heartbeats. */
   timer?: Timer;
+  /** Daemon session heartbeat timeout used to derive a safe cadence when unset. */
+  heartbeatTimeoutMs?: number;
+  /** Explicit bound-session heartbeat cadence; defaults to half the timeout or 2s. */
+  heartbeatIntervalMs?: number;
   /** This client's build identity (for testing; defaults to the current process build) */
   buildIdentity?: BuildIdentity;
   /** This client's version for the daemon version gate (defaults to DAEMON_VERSION; injectable for testing) */
@@ -397,6 +415,7 @@ export class DaemonMcpProxy {
   private readonly clientAssetVersion: string | null;
   private connecting: Promise<void> | null = null;
   private connected: boolean = false;
+  private closing: boolean = false;
   // The daemon clears socket-local state when its RPC connection drops. Keep this
   // proxy's successful explicit binding so subsequent sessionless calls can seed
   // a replacement socket without sharing the binding with other proxies.
@@ -467,7 +486,7 @@ export class DaemonMcpProxy {
     this.timer = config.timer ?? defaultTimer;
     this.heartbeatKeeper = new SingleFlightInterval(
       this.timer,
-      DAEMON_MCP_HEARTBEAT_INTERVAL_MS,
+      heartbeatIntervalMs(config),
       () => this.sendBoundSessionHeartbeat(),
       {
         onError: error => {
@@ -493,6 +512,9 @@ export class DaemonMcpProxy {
    * Will auto-start daemon if configured and daemon is not running
    */
   async ensureConnected(): Promise<void> {
+    if (this.closing) {
+      throw new DaemonUnavailableError("MCP proxy is closing");
+    }
     if (this.connected && this.client) {
       return;
     }
@@ -511,6 +533,9 @@ export class DaemonMcpProxy {
   }
 
   private async doConnect(): Promise<void> {
+    if (this.closing) {
+      throw new DaemonUnavailableError("MCP proxy is closing");
+    }
     // Check if daemon is available
     const socketPath = this.config.socketPath ?? SOCKET_PATH;
     const isAvailable = await DaemonClient.isAvailable(socketPath);
@@ -533,6 +558,9 @@ export class DaemonMcpProxy {
     }
 
     // Create and connect client
+    if (this.closing) {
+      throw new DaemonUnavailableError("MCP proxy is closing");
+    }
     this.client = this.clientFactory();
     const client = this.client;
     // Wire daemon-pushed list-changed forwarding (issue #3223) when the client
@@ -548,6 +576,10 @@ export class DaemonMcpProxy {
       );
     }
     await client.connect();
+    if (this.closing) {
+      await client.close();
+      throw new DaemonUnavailableError("MCP proxy is closing");
+    }
     this.connected = true;
     logger.info("[DaemonMcpProxy] Connected to daemon");
 
@@ -930,6 +962,9 @@ export class DaemonMcpProxy {
     operation: () => Promise<T>,
     attemptedSessionUuid?: string,
   ): Promise<T> {
+    if (this.closing) {
+      throw new DaemonUnavailableError("MCP proxy is closing");
+    }
     this.throwIfBoundSessionFenced();
     await this.ensureConnected();
     this.throwIfBoundSessionFenced();
@@ -937,6 +972,9 @@ export class DaemonMcpProxy {
     try {
       return await operation();
     } catch (error) {
+      if (this.closing) {
+        throw error;
+      }
       this.throwIfBoundSessionFenced();
       if (!this.isRecoverableDaemonSessionError(error)) {
         throw error;
@@ -1124,6 +1162,12 @@ export class DaemonMcpProxy {
         ? { ...args, sessionUuid: explicitSessionUuid }
         : args;
     if (!this.boundSessionUuid || explicitSessionUuid === this.boundSessionUuid) {
+      if (explicitSessionUuid === this.boundSessionUuid && this.boundSessionUuid) {
+        return {
+          ...normalizedArgs,
+          [DAEMON_BOUND_SESSION_PARAM]: this.boundSessionUuid,
+        };
+      }
       return normalizedArgs;
     }
     if (explicitSessionUuid && this.initialSessionBindingConfigured) {
@@ -1234,7 +1278,8 @@ export class DaemonMcpProxy {
   }
 
   private startBoundSessionHeartbeat(): void {
-    if (this.boundSessionUuid && !this.terminalBoundSession && this.connected) {
+    if (this.boundSessionUuid && !this.terminalBoundSession && this.connected && !this.closing) {
+      void this.heartbeatKeeper.run();
       this.heartbeatKeeper.start();
     }
   }
@@ -1248,7 +1293,7 @@ export class DaemonMcpProxy {
 
   private async sendBoundSessionHeartbeat(): Promise<void> {
     const sessionUuid = this.boundSessionUuid;
-    if (!sessionUuid || this.terminalBoundSession) {
+    if (!sessionUuid || this.terminalBoundSession || this.closing) {
       return;
     }
     try {
@@ -1516,6 +1561,7 @@ export class DaemonMcpProxy {
    * Close the connection to daemon
    */
   async close(): Promise<void> {
+    this.closing = true;
     await this.stopBoundSessionHeartbeat();
     if (this.client) {
       await this.client.close();

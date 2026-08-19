@@ -61,6 +61,7 @@ class ScriptedDaemonClient implements DaemonClientLike {
       resourceError?: Error;
       daemonMethodResults?: Map<string, any>;
       daemonMethodError?: Error;
+      daemonMethodErrors?: Map<string, Error>;
     },
   ) {}
 
@@ -101,6 +102,10 @@ class ScriptedDaemonClient implements DaemonClientLike {
     const recordedParams = { ...params };
     delete recordedParams.__autoMobileBoundSessionUuid;
     this.callDaemonMethodCalls.push({ method, params: recordedParams });
+    const methodError = this.behavior.daemonMethodErrors?.get(method);
+    if (methodError) {
+      throw methodError;
+    }
     if (this.behavior.daemonMethodError) {
       throw this.behavior.daemonMethodError;
     }
@@ -181,10 +186,14 @@ describe("DaemonMcpProxy", () => {
         ]);
 
         expect(firstClient.callDaemonMethodCalls).toEqual([
+          { method: "daemon/heartbeat", params: { sessionId: "device-session-a" } },
           { method: "tools/list", params: { sessionUuid: "device-session-a" } },
+          { method: "daemon/heartbeat", params: { sessionId: "device-session-a" } },
         ]);
         expect(secondClient.callDaemonMethodCalls).toEqual([
+          { method: "daemon/heartbeat", params: { sessionId: "device-session-b" } },
           { method: "tools/list", params: { sessionUuid: "device-session-b" } },
+          { method: "daemon/heartbeat", params: { sessionId: "device-session-b" } },
         ]);
         expect(firstClient.callToolCalls).toEqual([
           {
@@ -239,10 +248,12 @@ describe("DaemonMcpProxy", () => {
           { method: "daemon/heartbeat", params: { sessionId: "device-session-a" } },
           { method: "daemon/heartbeat", params: { sessionId: "device-session-a" } },
           { method: "daemon/heartbeat", params: { sessionId: "device-session-a" } },
+          { method: "daemon/heartbeat", params: { sessionId: "device-session-a" } },
         ]);
         expect(
           secondClient.callDaemonMethodCalls.filter(call => call.method === "daemon/heartbeat"),
         ).toEqual([
+          { method: "daemon/heartbeat", params: { sessionId: "device-session-b" } },
           { method: "daemon/heartbeat", params: { sessionId: "device-session-b" } },
           { method: "daemon/heartbeat", params: { sessionId: "device-session-b" } },
           { method: "daemon/heartbeat", params: { sessionId: "device-session-b" } },
@@ -1667,7 +1678,7 @@ describe("DaemonMcpProxy", () => {
       // tools/list so it returns the session-scoped list (issue #4610).
       const staleClient = new ScriptedDaemonClient({
         toolResult: { content: [{ type: "text", text: "bound" }] },
-        daemonMethodError: new Error("Session not found"),
+        daemonMethodErrors: new Map([["tools/list", new Error("Session not found")]]),
       });
       const freshClient = new ScriptedDaemonClient({
         daemonMethodResults: new Map([
@@ -1689,9 +1700,11 @@ describe("DaemonMcpProxy", () => {
         expect(tools).toEqual([{ name: "scopedTool", inputSchema: {} }]);
         // The stale attempt and the reconnect retry both carry the bound session.
         expect(staleClient.callDaemonMethodCalls).toEqual([
+          { method: "daemon/heartbeat", params: { sessionId: "session-a" } },
           { method: "tools/list", params: { sessionUuid: "session-a" } },
         ]);
         expect(freshClient.callDaemonMethodCalls).toEqual([
+          { method: "daemon/heartbeat", params: { sessionId: "session-a" } },
           { method: "tools/list", params: { sessionUuid: "session-a" } },
         ]);
       } finally {
@@ -2481,12 +2494,10 @@ describe("DaemonMcpProxy", () => {
         await expect(proxy.callTool("observe", { deviceId: "device-a" })).rejects.toThrow(
           /session-a.*(?:expired|released)/i,
         );
-        await proxy.close();
-        await proxy.callTool("observe", { sessionUuid: "session-b", deviceId: "device-b" });
-
-        expect(replacementClient.callToolCalls).toEqual([
-          { toolName: "observe", params: { sessionUuid: "session-b", deviceId: "device-b" } },
-        ]);
+        await expect(
+          proxy.callTool("observe", { sessionUuid: "session-b", deviceId: "device-b" }),
+        ).rejects.toThrow(/session-a.*(?:expired|released)/i);
+        expect(replacementClient.callToolCalls).toEqual([]);
       } finally {
         isAvailableSpy.mockRestore();
         await proxy.close();

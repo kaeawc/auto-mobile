@@ -837,6 +837,30 @@ export class UnixSocketServer {
     }
 
     const boundRoute = this.getBoundMcpClientRoute(socketSessionId);
+    if (
+      request.method === "tools/list" ||
+      request.method === "resources/list" ||
+      request.method === "resources/list-templates"
+    ) {
+      return this.getDiscoveryForwardRoute(request, socketSessionId, boundRoute);
+    }
+
+    if (request.method === "ide/getNavigationGraph") {
+      return this.getNavigationGraphForwardRoute(request, socketSessionId, boundRoute);
+    }
+
+    if (request.method === "resources/read") {
+      return this.getResourceReadForwardRoute(request, socketSessionId);
+    }
+
+    return this.sharedMcpForwardRoute(`method:${request.method}`);
+  }
+
+  private getDiscoveryForwardRoute(
+    request: DaemonRequest,
+    socketSessionId: string,
+    boundRoute: McpForwardRoute | undefined,
+  ): McpForwardRoute {
     if (request.method === "tools/list") {
       // A reconnected restricted discovery re-sends `{sessionUuid}` (see
       // daemonMcpProxy.listTools). A fresh socket has no boundRoute, so without
@@ -856,15 +880,16 @@ export class UnixSocketServer {
       return boundRoute ?? this.sharedMcpForwardRoute(`method:${request.method}`);
     }
 
-    if (request.method === "ide/getNavigationGraph") {
-      return this.getNavigationGraphForwardRoute(request, socketSessionId, boundRoute);
+    const sessionUuid = this.getSessionUuid(request.params);
+    const capabilityProfileUuid = this.getCapabilityProfileUuid(request.params);
+    this.throwIfReleasedBoundSession(request.params);
+    if (sessionUuid) {
+      return this.sessionScopedForwardRoute(socketSessionId, sessionUuid, undefined, capabilityProfileUuid);
     }
-
-    if (request.method === "resources/read") {
-      return this.getResourceReadForwardRoute(request, socketSessionId);
+    if (capabilityProfileUuid) {
+      return this.capabilityProfileScopedForwardRoute(socketSessionId, capabilityProfileUuid, undefined);
     }
-
-    return this.sharedMcpForwardRoute(`method:${request.method}`);
+    return boundRoute ?? this.sharedMcpForwardRoute(`method:${request.method}`);
   }
 
   private getNavigationGraphForwardRoute(

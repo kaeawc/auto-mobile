@@ -1,5 +1,17 @@
 # Changelog
 
+## [v0.0.60] - 2026-08-19
+### Added
+- feat(daemon): stamp deviceSessionUuid on every stream envelope + filter key + session lifecycle events ([#5259](https://github.com/kaeawc/auto-mobile/issues/5259))
+- feat(playground/android): hand-drawn treatment for filled/nav DS components + demo wiring ([#5115](https://github.com/kaeawc/auto-mobile/issues/5115)) (android)
+- Desktop: Navigation stream updates need deviceId before wiring (broadcast cross-contaminates panes) ([#4837](https://github.com/kaeawc/auto-mobile/issues/4837)) (desktop)
+### Changed
+- chore(playground/ios): route views through the theme (colours + Shantell Sans typography) ([#5098](https://github.com/kaeawc/auto-mobile/issues/5098)) (ios)
+### Fixed
+- Bound MCP sessions can expire and silently rebind to another device ([#5411](https://github.com/kaeawc/auto-mobile/issues/5411))
+### Other
+- ci(playground): run the Playground design-system tests in CI (Android + iOS) ([#5102](https://github.com/kaeawc/auto-mobile/issues/5102)) (ci, testing)
+
 ## [v0.0.59] - 2026-08-19
 ### Added
 - observe perfSnapshot: add gfxinfo frame-time percentiles, memory breakdown, and startup timing (zero extra device overhead) ([#5403](https://github.com/kaeawc/auto-mobile/issues/5403)) (android, performance)

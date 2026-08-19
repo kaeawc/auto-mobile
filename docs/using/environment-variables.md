@@ -18,6 +18,10 @@ unset.
 | `AUTOMOBILE_DATA_DIR` | `AUTO_MOBILE_DATA_DIR` | Stable base directory for AutoMobile's non-log state, including caches, screenshots, `tool_logs`, and the default log location. | `~/.auto-mobile` |
 | `AUTOMOBILE_LOG_DIR` | `AUTO_MOBILE_LOG_DIR` | Directory for structured daemon/client logs, rotated logs, and daemon-launch captures. Takes precedence over the `logs` child of `AUTOMOBILE_DATA_DIR` without relocating any non-log state. Relative paths resolve from the daemon's launch working directory. | `${AUTOMOBILE_DATA_DIR:-~/.auto-mobile}/logs` |
 
+When no home directory is available and `AUTOMOBILE_DATA_DIR` is unset, the data
+directory falls back to `os.tmpdir()/auto-mobile`; the default log directory is
+then `os.tmpdir()/auto-mobile/logs`.
+
 For example, keep durable state under one path while routing only logs to a
 location collected by your deployment:
 

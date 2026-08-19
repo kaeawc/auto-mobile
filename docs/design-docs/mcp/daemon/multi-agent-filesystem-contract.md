@@ -14,7 +14,8 @@
 > fds — the cause of the 0-byte logs and `ENOENT` cache writes in #2724.
 > `AUTOMOBILE_LOG_DIR` / `AUTO_MOBILE_LOG_DIR`, when set, overrides only the
 > core log directory; otherwise logs use
-> `${AUTOMOBILE_DATA_DIR:-~/.auto-mobile}/logs`. Paths written
+> `${AUTOMOBILE_DATA_DIR:-~/.auto-mobile}/logs` (or
+> `os.tmpdir()/auto-mobile/logs` when no home directory is resolvable). Paths written
 > `${TMPDIR}/auto-mobile/...` below are historical; read non-log paths as
 > `${AUTOMOBILE_DATA_DIR:-~/.auto-mobile}/...`.
 

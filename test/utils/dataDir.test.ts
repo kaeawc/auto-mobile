@@ -78,32 +78,44 @@ describe("resolveAutoMobileLogsDir", () => {
         home,
         "/launch",
       )
-    ).toBe("/srv/logs");
+    ).toBe(path.resolve("/srv/logs"));
   });
 
   test("honors the legacy log-dir alias", () => {
     expect(
       resolveAutoMobileLogsDir({ AUTO_MOBILE_LOG_DIR: "/srv/legacy-logs" }, home, "/launch")
-    ).toBe("/srv/legacy-logs");
+    ).toBe(path.resolve("/srv/legacy-logs"));
   });
 
   test("resolves relative log overrides from the daemon launch directory", () => {
     expect(
       resolveAutoMobileLogsDir({ AUTOMOBILE_LOG_DIR: "logs" }, home, "/launch")
-    ).toBe("/launch/logs");
+    ).toBe(path.resolve("/launch", "logs"));
+  });
+
+  test("uses the injected launch directory for a relative log override", () => {
+    expect(
+      resolveAutoMobileLogsDir(
+        {
+          AUTOMOBILE_LOG_DIR: "logs",
+          AUTOMOBILE_DAEMON_LAUNCH_CWD: "/injected-launch",
+        },
+        home,
+      )
+    ).toBe(path.resolve("/injected-launch", "logs"));
   });
 
   test("falls back to the data-dir logs child for an unset or blank override", () => {
     expect(
       resolveAutoMobileLogsDir({ AUTOMOBILE_DATA_DIR: "/srv/data" }, home, "/launch")
-    ).toBe("/srv/data/logs");
+    ).toBe(path.join(path.resolve("/srv/data"), "logs"));
     expect(
       resolveAutoMobileLogsDir(
         { AUTOMOBILE_LOG_DIR: "   ", AUTOMOBILE_DATA_DIR: "/srv/data" },
         home,
         "/launch",
       )
-    ).toBe("/srv/data/logs");
+    ).toBe(path.join(path.resolve("/srv/data"), "logs"));
   });
 });
 
@@ -120,8 +132,12 @@ describe("getTempDir", () => {
     process.env.AUTOMOBILE_DATA_DIR = "/srv/data";
     process.env.AUTOMOBILE_LOG_DIR = "/srv/logs";
     try {
-      expect(getTempDir(TEMP_SUBDIRS.SCREENSHOTS)).toBe("/srv/data/screenshots");
-      expect(getTempDir(TEMP_SUBDIRS.TOOL_LOGS)).toBe("/srv/data/tool_logs");
+      expect(getTempDir(TEMP_SUBDIRS.SCREENSHOTS)).toBe(
+        path.join(path.resolve("/srv/data"), "screenshots")
+      );
+      expect(getTempDir(TEMP_SUBDIRS.TOOL_LOGS)).toBe(
+        path.join(path.resolve("/srv/data"), "tool_logs")
+      );
     } finally {
       if (previousDataDir === undefined) {
         delete process.env.AUTOMOBILE_DATA_DIR;
@@ -172,6 +188,46 @@ describe("ensureSecureTempDirSync", () => {
       const mode = fs.statSync(dir).mode & 0o777;
       expect(dir).toBe(logDir);
       expect(mode).toBe(0o700);
+    } finally {
+      if (previousLogDir === undefined) {
+        delete process.env.AUTOMOBILE_LOG_DIR;
+      } else {
+        process.env.AUTOMOBILE_LOG_DIR = previousLogDir;
+      }
+      fs.rmSync(tmpBase, { recursive: true, force: true });
+    }
+  });
+
+  test.skipIf(process.platform === "win32")("repairs an existing overridden logs directory to 0o700", () => {
+    const tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), "am-log-mode-repair-"));
+    const logDir = path.join(tmpBase, "logs");
+    const previousLogDir = process.env.AUTOMOBILE_LOG_DIR;
+    fs.mkdirSync(logDir, { mode: 0o755 });
+    fs.chmodSync(logDir, 0o755);
+    process.env.AUTOMOBILE_LOG_DIR = logDir;
+    try {
+      ensureSecureLogsDirSync();
+      expect(fs.statSync(logDir).mode & 0o777).toBe(0o700);
+    } finally {
+      if (previousLogDir === undefined) {
+        delete process.env.AUTOMOBILE_LOG_DIR;
+      } else {
+        process.env.AUTOMOBILE_LOG_DIR = previousLogDir;
+      }
+      fs.rmSync(tmpBase, { recursive: true, force: true });
+    }
+  });
+
+  test.skipIf(process.platform === "win32")("rejects a symbolic-link log directory", () => {
+    const tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), "am-log-link-"));
+    const targetDir = path.join(tmpBase, "target");
+    const linkDir = path.join(tmpBase, "logs");
+    const previousLogDir = process.env.AUTOMOBILE_LOG_DIR;
+    fs.mkdirSync(targetDir);
+    fs.symlinkSync(targetDir, linkDir, "dir");
+    process.env.AUTOMOBILE_LOG_DIR = linkDir;
+    try {
+      expect(() => ensureSecureLogsDirSync()).toThrow("symbolic-link directory");
     } finally {
       if (previousLogDir === undefined) {
         delete process.env.AUTOMOBILE_LOG_DIR;

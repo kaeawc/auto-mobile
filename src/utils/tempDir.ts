@@ -69,7 +69,7 @@ export function resolveAutoMobileBaseDir(
 export function resolveAutoMobileLogsDir(
   env: NodeJS.ProcessEnv = process.env,
   homeDir: string = os.homedir(),
-  daemonLaunchWorkingDirectory: string = resolveDaemonLaunchWorkingDirectory()
+  daemonLaunchWorkingDirectory: string = resolveDaemonLaunchWorkingDirectory(undefined, env)
 ): string {
   const override = (env.AUTOMOBILE_LOG_DIR ?? env.AUTO_MOBILE_LOG_DIR)?.trim();
   if (override && override.length > 0) {
@@ -95,6 +95,12 @@ export function getTempDir(subdirectory: string): string {
 
 function ensureSecureDirectorySync(dir: string): string {
   fs.mkdirSync(dir, { recursive: true, mode: SECURE_DIR_MODE });
+  if (fs.lstatSync(dir).isSymbolicLink()) {
+    throw new Error(`Refusing to use symbolic-link directory: ${dir}`);
+  }
+  if (process.platform !== "win32") {
+    fs.chmodSync(dir, SECURE_DIR_MODE);
+  }
   return dir;
 }
 

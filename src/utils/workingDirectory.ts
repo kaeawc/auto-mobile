@@ -23,9 +23,10 @@ export function resolveStableDaemonWorkingDirectory(
 }
 
 export function resolveDaemonLaunchWorkingDirectory(
-  currentWorkingDirectory: string = safeProcessCwd()
+  currentWorkingDirectory: string = safeProcessCwd(),
+  env: NodeJS.ProcessEnv = process.env
 ): string {
-  const launchCwd = process.env[DAEMON_LAUNCH_CWD_ENV]?.trim();
+  const launchCwd = env[DAEMON_LAUNCH_CWD_ENV]?.trim();
   return launchCwd && path.isAbsolute(launchCwd)
     ? launchCwd
     : currentWorkingDirectory;

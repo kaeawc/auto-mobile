@@ -460,6 +460,11 @@ jobs:
 
       - name: "Validate Links"
         shell: "bash"
+        # Lychee routes github.com links through the GitHub API (not throttled
+        # HTTP scraping) when GITHUB_TOKEN is set, which prevents the mass
+        # request timeouts we hit against the repo's own issue/actions links.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           scripts/lychee/validate_lychee.sh
 

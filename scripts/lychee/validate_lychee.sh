@@ -77,6 +77,24 @@ fi
 LYCHEE_VERSION=$(lychee --version | head -1)
 print_status "Using $LYCHEE_VERSION"
 
+# Lychee routes github.com links through the GitHub API (not throttled HTTP
+# scraping) when GITHUB_TOKEN is set. Without it, the many self-referencing
+# issue/actions links in our docs mass-timeout under GitHub's unauthenticated
+# rate limit. CI injects the token via env; for local runs, fall back to the
+# developer's gh CLI credentials so behavior matches CI.
+if [[ -z "${GITHUB_TOKEN:-}" ]] && command -v gh >/dev/null 2>&1; then
+    if GH_TOKEN=$(gh auth token 2>/dev/null) && [[ -n "$GH_TOKEN" ]]; then
+        export GITHUB_TOKEN="$GH_TOKEN"
+        print_status "Using GitHub token from gh CLI for github.com link checks"
+    fi
+fi
+
+if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    print_status "GITHUB_TOKEN present: github.com links checked via GitHub API"
+else
+    print_warning "No GITHUB_TOKEN: github.com links may time out under rate limits"
+fi
+
 # Check if config file exists
 if [[ ! -f "$LYCHEE_CONFIG" ]]; then
     print_warning "Lychee config not found at: $LYCHEE_CONFIG"

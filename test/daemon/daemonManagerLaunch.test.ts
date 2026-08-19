@@ -23,6 +23,7 @@ describe("DaemonManager launch", () => {
     process.chdir(originalCwd);
     delete process.env[DAEMON_LAUNCH_CWD_ENV];
     delete process.env.AUTOMOBILE_DATA_DIR;
+    delete process.env.AUTOMOBILE_LOG_DIR;
     delete process.env[EVENT_ALL_MARKERS_ENV];
     for (const dir of tempDirs) {
       rmSync(dir, { recursive: true, force: true });
@@ -76,6 +77,58 @@ describe("DaemonManager launch", () => {
     expect(existsSync(logsDir)).toBe(true);
     const launchLogs = readdirSync(logsDir).filter(name => name.startsWith("daemon-launch"));
     expect(launchLogs.length).toBeGreaterThan(0);
+  });
+
+  test("writes the daemon launch log to AUTOMOBILE_LOG_DIR without moving data paths", async () => {
+    const stateDir = createTempDir("daemon-launch-state-");
+    const dataDir = createTempDir("daemon-data-dir-");
+    const logDir = join(createTempDir("daemon-log-dir-"), "logs");
+    process.env.AUTOMOBILE_DATA_DIR = dataDir;
+    process.env.AUTOMOBILE_LOG_DIR = logDir;
+
+    let capturedOptions: SpawnOptions | undefined;
+    const processSpawner: DaemonProcessSpawner = {
+      spawn: (_command: string, _args: string[], options: SpawnOptions) => {
+        capturedOptions = options;
+        return {
+          unref() {},
+          once() { return this; },
+          off() { return this; },
+        } as ChildProcess;
+      }
+    };
+
+    let statusCallCount = 0;
+    class TestDaemonManager extends DaemonManager {
+      override findAllDaemonProcesses(): number[] { return []; }
+      override async status(): Promise<any> {
+        statusCallCount++;
+        return statusCallCount === 1
+          ? { running: false }
+          : { running: true, pid: 1234, port: 31847, socketPath: join(stateDir, "daemon.sock") };
+      }
+      override async waitForReady(_timeout: number): Promise<boolean> {
+        return true;
+      }
+    }
+
+    const manager = new TestDaemonManager(
+      undefined,
+      undefined,
+      new FakeTimer(),
+      join(stateDir, "daemon.lock"),
+      join(stateDir, "daemon.pid"),
+      join(stateDir, "daemon.sock"),
+      undefined,
+      processSpawner
+    );
+
+    await manager.start();
+
+    expect(existsSync(logDir)).toBe(true);
+    expect(readdirSync(logDir).some(name => name.startsWith("daemon-launch"))).toBe(true);
+    expect(existsSync(join(dataDir, "logs"))).toBe(false);
+    expect(capturedOptions?.env?.AUTOMOBILE_LOG_DIR).toBe(logDir);
   });
 
   test("spawns detached daemon from a stable cwd instead of inheriting the spawner cwd", async () => {

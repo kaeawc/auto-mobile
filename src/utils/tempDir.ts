@@ -14,6 +14,7 @@
 import fs from "node:fs";
 import os from "os";
 import path from "path";
+import { resolveDaemonLaunchWorkingDirectory } from "./workingDirectory";
 
 /**
  * Restrictive directory permissions (owner read/write/execute only).
@@ -22,7 +23,7 @@ import path from "path";
 const SECURE_DIR_MODE = 0o700;
 
 /**
- * Resolve the stable base directory for all auto-mobile on-disk state.
+ * Resolve the stable base directory for AutoMobile's non-log on-disk state.
  *
  * Resolution order:
  * 1. `AUTOMOBILE_DATA_DIR` / `AUTO_MOBILE_DATA_DIR` — explicit, configurable
@@ -58,6 +59,27 @@ export function resolveAutoMobileBaseDir(
 }
 
 /**
+ * Resolve the directory for structured and daemon-launch logs.
+ *
+ * A log-dir override intentionally takes precedence over the data-dir-derived
+ * logs child without changing the base directory for any other AutoMobile
+ * state. Relative overrides are anchored to the daemon launch directory so a
+ * manager and its spawned daemon agree even after the daemon changes cwd.
+ */
+export function resolveAutoMobileLogsDir(
+  env: NodeJS.ProcessEnv = process.env,
+  homeDir: string = os.homedir(),
+  daemonLaunchWorkingDirectory: string = resolveDaemonLaunchWorkingDirectory()
+): string {
+  const override = (env.AUTOMOBILE_LOG_DIR ?? env.AUTO_MOBILE_LOG_DIR)?.trim();
+  if (override && override.length > 0) {
+    return path.resolve(daemonLaunchWorkingDirectory, override);
+  }
+
+  return path.join(resolveAutoMobileBaseDir(env, homeDir), TEMP_SUBDIRS.LOGS);
+}
+
+/**
  * Get a secure auto-mobile directory path for a given subdirectory.
  * Does NOT create the directory - use ensureSecureTempDirSync for that.
  *
@@ -71,6 +93,11 @@ export function getTempDir(subdirectory: string): string {
   return path.join(resolveAutoMobileBaseDir(), subdirectory);
 }
 
+function ensureSecureDirectorySync(dir: string): string {
+  fs.mkdirSync(dir, { recursive: true, mode: SECURE_DIR_MODE });
+  return dir;
+}
+
 /**
  * Synchronously ensure a secure temp directory exists with restrictive permissions.
  *
@@ -78,9 +105,14 @@ export function getTempDir(subdirectory: string): string {
  * @returns Full path to the created/existing temp directory
  */
 export function ensureSecureTempDirSync(subdirectory: string): string {
-  const dir = getTempDir(subdirectory);
-  fs.mkdirSync(dir, { recursive: true, mode: SECURE_DIR_MODE });
-  return dir;
+  return ensureSecureDirectorySync(getTempDir(subdirectory));
+}
+
+/**
+ * Synchronously ensure the shared log directory exists with restrictive permissions.
+ */
+export function ensureSecureLogsDirSync(): string {
+  return ensureSecureDirectorySync(resolveAutoMobileLogsDir());
 }
 
 // Common subdirectory constants for consistency

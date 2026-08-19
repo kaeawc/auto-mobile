@@ -58,7 +58,17 @@ export const runTimerContract = (
 
       await timer.sleep(capabilities.realTime ? 15 : 101);
 
-      expect(calls).toEqual(["early", "late"]);
+      if (capabilities.realTime) {
+        // Real OS timers coalesce sub-resolution delays into a single event-loop
+        // wake (Windows timer granularity is ~15.6ms), so two near-simultaneous
+        // callbacks dispatch in registration order, not delay order. Assert only
+        // that both fired; strict shorter-before-longer ordering is pinned
+        // deterministically by the fake-timer contracts (the auto-advance branch
+        // below and the manual-advance contract). See issue #5333.
+        expect([...calls].sort()).toEqual(["early", "late"]);
+      } else {
+        expect(calls).toEqual(["early", "late"]);
+      }
     });
 
     test("setTimeout callback can be cancelled", async function() {

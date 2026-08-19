@@ -82,22 +82,26 @@ class DesktopDaemonLifecycleTest {
   }
 
   @Test
-  fun `rejects a newer daemon without restarting it`() {
+  fun `restarts a newer daemon at the compatible desktop version`() {
     val commands = FakeDaemonCommandExecutor()
     val lifecycle =
       DesktopDaemonLifecycle(
         expectedVersionProvider = { "0.0.40" },
-        socketChecker = FakeDaemonSocketChecker(listOf(true)),
-        pidFileReader = FakeDaemonPidFileReader(listOf("0.0.41")),
+        socketChecker = FakeDaemonSocketChecker(listOf(true, true)),
+        pidFileReader = FakeDaemonPidFileReader(listOf("0.0.41", "0.0.40")),
         commandExecutor = commands,
         timer = FakeDaemonRetryTimer(),
+        packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
       )
 
     val result = lifecycle.ensureVersionMatchedDaemon()
 
-    assertIs<DaemonLifecycleResult.Failure>(result)
-    assertTrue(result.message.contains("newer"))
-    assertTrue(commands.commands.isEmpty())
+    assertIs<DaemonLifecycleResult.Ready>(result)
+    assertTrue(result.restarted)
+    assertEquals(
+      listOf(listOf("bunx", "@kaeawc/auto-mobile@0.0.40", "--daemon", "restart")),
+      commands.commands,
+    )
   }
 
   @Test

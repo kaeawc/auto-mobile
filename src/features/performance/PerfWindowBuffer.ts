@@ -1,7 +1,9 @@
 import { computePercentile } from "../../utils/percentile";
 import type {
   AverageLatestSummary,
+  FrameTimePercentiles,
   JankSummary,
+  MemoryBreakdownMb,
   PercentileSummary,
   PerfSnapshot,
   TouchLatencySummary,
@@ -21,6 +23,17 @@ export interface PerfSample {
   touchLatencyMs: number | null;
   cpuUsagePercent: number | null;
   memoryUsageMb: number | null;
+  /**
+   * gfxinfo's native frame-time percentiles for this interval, or null when no
+   * frames rendered (or the reading came from a non-gfxinfo source). Carried
+   * as-is and surfaced latest-wins, since percentiles do not average.
+   */
+  frameTimePercentilesMs: FrameTimePercentiles | null;
+  /**
+   * meminfo App Summary breakdown (MB) for this interval, or null when memory
+   * was not collected this tick. Surfaced latest-wins.
+   */
+  memoryBreakdownMb: MemoryBreakdownMb | null;
 }
 
 /**
@@ -88,7 +101,7 @@ export class PerfWindowBuffer {
     const cutoff = now - windowMs;
 
     // Prune anything older than the window, then keep the trimmed array.
-    const inWindow = samples.filter(s => s.t >= cutoff && s.t <= now);
+    const inWindow = samples.filter((s) => s.t >= cutoff && s.t <= now);
     if (inWindow.length !== samples.length) {
       this.samplesByDevice.set(deviceId, inWindow);
     }
@@ -99,15 +112,67 @@ export class PerfWindowBuffer {
       windowMs,
       sampleCount: inWindow.length,
       oldestSampleAgeMs: oldest !== null ? now - oldest.t : null,
-      fps: percentileSummary(collect(inWindow, s => s.fps)),
+      fps: percentileSummary(collect(inWindow, (s) => s.fps)),
+      // Native gfxinfo percentiles do not average across intervals, so surface
+      // the most recent frame-bearing interval rather than compositing.
+      frameTimeMs: roundFrameTimePercentiles(
+        latestNonNull(inWindow, (s) => s.frameTimePercentilesMs),
+      ),
       // A jank sample describes the interval ending at its timestamp. A
       // sample exactly on the cutoff therefore began before this window.
-      jank: jankSummary(inWindow.filter(sample => sample.t > cutoff)),
+      jank: jankSummary(inWindow.filter((sample) => sample.t > cutoff)),
       touchLatencyMs: touchLatencySummary(inWindow),
-      cpu: averageLatestSummary(collect(inWindow, s => s.cpuUsagePercent)),
-      memoryMb: averageLatestSummary(collect(inWindow, s => s.memoryUsageMb)),
+      cpu: averageLatestSummary(collect(inWindow, (s) => s.cpuUsagePercent)),
+      memoryMb: averageLatestSummary(collect(inWindow, (s) => s.memoryUsageMb)),
+      // Memory composition changes slowly and is sampled sparsely; the latest
+      // in-window reading is more useful than a windowed average.
+      memoryBreakdownMb: roundMemoryBreakdown(latestNonNull(inWindow, (s) => s.memoryBreakdownMb)),
+      // Startup timing is package-keyed and event-based, not part of the sample
+      // ring; the caller (observe) fills it in from the launch cache.
+      startup: null,
     };
   }
+}
+
+/** Return the last non-null value of a metric in the window (latest-wins). */
+function latestNonNull<T>(samples: PerfSample[], pick: (s: PerfSample) => T | null): T | null {
+  for (let i = samples.length - 1; i >= 0; i--) {
+    const v = pick(samples[i]);
+    if (v !== null) {
+      return v;
+    }
+  }
+  return null;
+}
+
+/** Round each native frame-time percentile for a compact wire payload. */
+function roundFrameTimePercentiles(p: FrameTimePercentiles | null): FrameTimePercentiles | null {
+  if (p === null) {
+    return null;
+  }
+  return {
+    p50: round2(p.p50),
+    p90: round2(p.p90),
+    p95: round2(p.p95),
+    p99: round2(p.p99),
+  };
+}
+
+/** Round each memory-breakdown component (nulls preserved). */
+function roundMemoryBreakdown(b: MemoryBreakdownMb | null): MemoryBreakdownMb | null {
+  if (b === null) {
+    return null;
+  }
+  const r = (v: number | null): number | null => (v === null ? null : round2(v));
+  return {
+    javaHeap: r(b.javaHeap),
+    nativeHeap: r(b.nativeHeap),
+    code: r(b.code),
+    stack: r(b.stack),
+    graphics: r(b.graphics),
+    privateOther: r(b.privateOther),
+    system: r(b.system),
+  };
 }
 
 /** Collect the non-null values of one metric, preserving sample order. */
@@ -138,7 +203,7 @@ function percentileSummary(values: number[]): PercentileSummary | null {
 
 /** Sum of janky frames plus a per-second rate over the covered span. */
 function jankSummary(samples: PerfSample[]): JankSummary | null {
-  const withJank = samples.filter(s => s.jankFrames !== null && Number.isFinite(s.jankFrames));
+  const withJank = samples.filter((s) => s.jankFrames !== null && Number.isFinite(s.jankFrames));
   if (withJank.length === 0) {
     return null;
   }
@@ -161,7 +226,7 @@ function jankSummary(samples: PerfSample[]): JankSummary | null {
 }
 
 function touchLatencySummary(samples: PerfSample[]): TouchLatencySummary | null {
-  const values = collect(samples, s => s.touchLatencyMs);
+  const values = collect(samples, (s) => s.touchLatencyMs);
   if (values.length === 0) {
     return null;
   }

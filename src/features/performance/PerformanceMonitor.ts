@@ -13,6 +13,11 @@ import {
 import { RecompositionTracker } from "./RecompositionTracker";
 import { getPerfWindowBuffer, PerfWindowBuffer } from "./PerfWindowBuffer";
 import { getSdkFrameMetricsStore, SdkFrameMetricsStore } from "./SdkFrameMetricsStore";
+import type {
+  FrameTimePercentiles,
+  MemoryBreakdownMb,
+  StartupTimingSummary,
+} from "../../models/PerfSnapshot";
 import { TelemetryRecorder } from "../telemetry/TelemetryRecorder";
 import {
   defaultAdbClientFactory,
@@ -69,6 +74,12 @@ interface GfxMetrics {
   highInputLatencyFrames: number | null;
   /** Total frames rendered in this interval (for calculating latency ratio) */
   totalFrames: number | null;
+  /**
+   * gfxinfo's native frame-time percentile histogram for this interval, or null
+   * when no frames rendered. Parsed from the same dumpsys output as `frameTimeMs`
+   * (its 50th percentile), so it adds no device work.
+   */
+  frameTimePercentilesMs: FrameTimePercentiles | null;
 }
 
 /**
@@ -112,6 +123,8 @@ interface MonitoredDevice {
   lastSlowTick: number;
   cachedCpu: number | null;
   cachedMemory: number | null;
+  /** Cached meminfo App Summary breakdown, carried between slow ticks. */
+  cachedMemoryBreakdown: MemoryBreakdownMb | null;
   /** Cached FPS from last interval with actual frames */
   cachedFps: number | null;
   /** Cached frame time from last interval with actual frames */
@@ -282,6 +295,7 @@ export class PerformanceMonitor {
       lastSlowTick: 0,
       cachedCpu: null,
       cachedMemory: null,
+      cachedMemoryBreakdown: null,
       cachedFps: null,
       cachedFrameTime: null,
       cachedTouchLatency: null,
@@ -442,10 +456,15 @@ export class PerformanceMonitor {
       device.lastSlowTick === 0 || now - device.lastSlowTick >= PerformanceMonitor.SLOW_INTERVAL_MS;
     const memoryPromise = shouldCollectMemory
       ? this.collectMemoryMetrics(device)
-      : Promise.resolve(device.cachedMemory);
+      : Promise.resolve({
+          totalPssMb: device.cachedMemory,
+          breakdown: device.cachedMemoryBreakdown,
+        });
 
-    const [gfx, cpuResult, memory] = await Promise.all([gfxPromise, cpuPromise, memoryPromise]);
+    const [gfx, cpuResult, memResult] = await Promise.all([gfxPromise, cpuPromise, memoryPromise]);
     const cpu = cpuResult.cpuUsagePercent;
+    const memory = memResult.totalPssMb;
+    const memoryBreakdown = memResult.breakdown;
 
     // Drop the whole sample if monitoring changed apps or stopped mid-collection.
     if (!this.isSampleCurrent(device, samplingPackage, samplingGeneration)) {
@@ -465,6 +484,7 @@ export class PerformanceMonitor {
     if (shouldCollectMemory) {
       device.lastSlowTick = now;
       device.cachedMemory = memory;
+      device.cachedMemoryBreakdown = memoryBreakdown;
     }
 
     // Resolve fps / frame time / jank / touch latency from whichever source is
@@ -557,10 +577,14 @@ export class PerformanceMonitor {
       frameTimeMs: recordGfxWindowSample ? rawFrameTimeMs : null,
       jankFrames: recordGfxWindowSample ? jankFrames : null,
       touchLatencyMs: recordGfxWindowSample ? rawTouchLatencyMs : null,
+      // Native gfxinfo percentiles follow the same priming gate as the raw frame
+      // readings; the SDK path (gfx === null) contributes none.
+      frameTimePercentilesMs: recordGfxWindowSample ? (gfx?.frameTimePercentilesMs ?? null) : null,
       // CPU/memory only when actually collected this tick (null otherwise), so
       // the window never averages a reading acquired outside it.
       cpuUsagePercent: shouldCollectCpu ? cpu : null,
       memoryUsageMb: shouldCollectMemory ? memory : null,
+      memoryBreakdownMb: shouldCollectMemory ? memoryBreakdown : null,
     });
   }
 
@@ -656,6 +680,7 @@ export class PerformanceMonitor {
     };
 
     // iOS has no on-device frame/touch source here, so raw readings are null.
+    // Host `ps` yields only RSS, not a meminfo-style component breakdown.
     this.pushMetrics(device, now, metrics, jankFrames, server, {
       fps,
       frameTimeMs,
@@ -663,6 +688,8 @@ export class PerformanceMonitor {
       touchLatencyMs: null,
       cpuUsagePercent: shouldCollectCpu ? cpu : null,
       memoryUsageMb: shouldCollectMemory ? memory : null,
+      frameTimePercentilesMs: null,
+      memoryBreakdownMb: null,
     });
   }
 
@@ -695,6 +722,8 @@ export class PerformanceMonitor {
       touchLatencyMs: number | null;
       cpuUsagePercent: number | null;
       memoryUsageMb: number | null;
+      frameTimePercentilesMs: FrameTimePercentiles | null;
+      memoryBreakdownMb: MemoryBreakdownMb | null;
     },
   ): void {
     const data: LivePerformanceData = {
@@ -722,6 +751,8 @@ export class PerformanceMonitor {
       touchLatencyMs: raw.touchLatencyMs,
       cpuUsagePercent: raw.cpuUsagePercent,
       memoryUsageMb: raw.memoryUsageMb,
+      frameTimePercentilesMs: raw.frameTimePercentilesMs,
+      memoryBreakdownMb: raw.memoryBreakdownMb,
     });
 
     // Emit telemetry events when metric health status changes
@@ -901,11 +932,15 @@ export class PerformanceMonitor {
       const totalFramesMatch = stdout.match(/Total frames rendered:\s+(\d+)/);
       const totalFrames = totalFramesMatch ? parseInt(totalFramesMatch[1], 10) : 0;
 
-      // Only parse P50 frame time if frames were rendered (otherwise it's a garbage default value)
+      // Only parse frame-time percentiles if frames were rendered (otherwise
+      // gfxinfo prints garbage default values). gfxinfo already computes this
+      // native histogram for the same interval we reset each tick, so surfacing
+      // it costs no extra device work.
       let frameTimeMs: number | null = null;
+      let frameTimePercentilesMs: FrameTimePercentiles | null = null;
       if (totalFrames > 0) {
-        const p50Match = stdout.match(/50th percentile:\s+(\d+(?:\.\d+)?)ms/);
-        frameTimeMs = p50Match ? parseFloat(p50Match[1]) : null;
+        frameTimeMs = parsePercentileMs(stdout, 50);
+        frameTimePercentilesMs = parseFrameTimePercentiles(stdout);
       }
 
       // Parse jank counters (now reflects only jank since last reset)
@@ -934,6 +969,7 @@ export class PerformanceMonitor {
         jankFrames: null, // Computed as delta in sampleDevice
         highInputLatencyFrames,
         totalFrames,
+        frameTimePercentilesMs,
         rawJankCounters: { missedVsync, slowUi, deadlineMissed, jankyFrames },
         resetSucceeded: true,
       };
@@ -945,6 +981,7 @@ export class PerformanceMonitor {
         jankFrames: null,
         highInputLatencyFrames: null,
         totalFrames: null,
+        frameTimePercentilesMs: null,
         rawJankCounters: null,
         resetSucceeded: false,
       };
@@ -1008,10 +1045,18 @@ export class PerformanceMonitor {
   }
 
   /**
-   * Collect memory usage from dumpsys meminfo.
-   * Returns total PSS in megabytes.
+   * Collect memory usage from `dumpsys meminfo`. Returns total PSS in MB plus
+   * the App Summary per-component breakdown.
+   *
+   * We read the full `dumpsys meminfo` output rather than piping through
+   * `grep "TOTAL PSS"`: the App Summary breakdown (Java heap, native heap, etc.)
+   * is already computed by the same dumpsys pass — dropping the on-device grep
+   * transfers a few more KB but adds no work on the target. We deliberately do
+   * NOT pass `--unreachable`, which would force a GC on the target process.
    */
-  private async collectMemoryMetrics(device: MonitoredDevice): Promise<number | null> {
+  private async collectMemoryMetrics(
+    device: MonitoredDevice,
+  ): Promise<{ totalPssMb: number | null; breakdown: MemoryBreakdownMb | null }> {
     try {
       const adb = this.adbClientFactory.create({
         deviceId: device.deviceId,
@@ -1019,21 +1064,16 @@ export class PerformanceMonitor {
         platform: "android",
       });
 
-      const { stdout } = await adb.executeCommand(
-        `shell dumpsys meminfo ${device.packageName} | grep "TOTAL PSS"`,
-      );
+      const { stdout } = await adb.executeCommand(`shell dumpsys meminfo ${device.packageName}`);
 
-      // Format: "TOTAL PSS:    12345"
-      const match = stdout.match(/TOTAL PSS:\s+(\d+)/);
-      if (!match) {
-        return null;
-      }
+      // App Summary "TOTAL PSS:" line (present since API 21).
+      const totalMatch = stdout.match(/TOTAL PSS:\s+(\d+)/);
+      const totalPssMb = totalMatch ? parseInt(totalMatch[1], 10) / 1024 : null;
 
-      const pssKb = parseInt(match[1], 10);
-      return pssKb / 1024; // Convert to MB
+      return { totalPssMb, breakdown: parseMemoryBreakdown(stdout) };
     } catch (error) {
       logger.debug(`[PerformanceMonitor] Memory metrics failed for ${device.deviceId}: ${error}`);
-      return null;
+      return { totalPssMb: null, breakdown: null };
     }
   }
 
@@ -1113,9 +1153,63 @@ export class PerformanceMonitor {
   }
 }
 
+/**
+ * Parse one `dumpsys gfxinfo` frame-time percentile line (e.g. `90th
+ * percentile: 12ms`), returning the millisecond value or null when absent.
+ */
+function parsePercentileMs(stdout: string, percentile: number): number | null {
+  const match = stdout.match(new RegExp(`${percentile}th percentile:\\s+(\\d+(?:\\.\\d+)?)ms`));
+  return match ? parseFloat(match[1]) : null;
+}
+
+/**
+ * Assemble gfxinfo's native frame-time percentile histogram (p50/p90/p95/p99)
+ * from one dumpsys output. Returns null unless the full set is present, so the
+ * snapshot never reports a partial percentile summary.
+ */
+function parseFrameTimePercentiles(stdout: string): FrameTimePercentiles | null {
+  const p50 = parsePercentileMs(stdout, 50);
+  const p90 = parsePercentileMs(stdout, 90);
+  const p95 = parsePercentileMs(stdout, 95);
+  const p99 = parsePercentileMs(stdout, 99);
+  if (p50 === null || p90 === null || p95 === null || p99 === null) {
+    return null;
+  }
+  return { p50, p90, p95, p99 };
+}
+
+/**
+ * Parse the `dumpsys meminfo` App Summary block into a per-component MB
+ * breakdown. Each row prints its Pss column as the first number after the
+ * label; a missing row yields null for that component. Returns null when the
+ * output has no App Summary at all (very old Android).
+ */
+function parseMemoryBreakdown(stdout: string): MemoryBreakdownMb | null {
+  const kbToMb = (label: string): number | null => {
+    const match = stdout.match(new RegExp(`${label}:\\s+(\\d+)`));
+    return match ? parseInt(match[1], 10) / 1024 : null;
+  };
+  const breakdown: MemoryBreakdownMb = {
+    javaHeap: kbToMb("Java Heap"),
+    nativeHeap: kbToMb("Native Heap"),
+    code: kbToMb("Code"),
+    stack: kbToMb("Stack"),
+    graphics: kbToMb("Graphics"),
+    privateOther: kbToMb("Private Other"),
+    system: kbToMb("System"),
+  };
+  // No App Summary section → every row missing; report null rather than an
+  // all-null object so consumers can distinguish "unsupported" from "0".
+  const hasAny = Object.values(breakdown).some((v) => v !== null);
+  return hasAny ? breakdown : null;
+}
+
 // TTI (Time to Interactive) store - tracks last known TTI per package
 // TTI is an event-based metric captured at app launch, not continuous
 const ttiStore = new Map<string, { ttiMs: number; timestamp: number }>();
+
+/** Startup timing is only relevant for recent launches (within 5 minutes). */
+const STARTUP_MAX_AGE_MS = 5 * 60 * 1000;
 
 /**
  * Store the last known TTI for a package.
@@ -1135,13 +1229,31 @@ function getLastTtiMs(packageName: string): number | null {
   if (!entry) {
     return null;
   }
-  // TTI is only relevant for recent launches (within 5 minutes)
-  const MAX_AGE_MS = 5 * 60 * 1000;
-  if (defaultTimer.now() - entry.timestamp > MAX_AGE_MS) {
+  if (defaultTimer.now() - entry.timestamp > STARTUP_MAX_AGE_MS) {
     ttiStore.delete(packageName);
     return null;
   }
   return entry.ttiMs;
+}
+
+/**
+ * Startup timing for a package's most recent launch, for the observe
+ * `perfSnapshot`. Reads the same in-memory launch cache as {@link getLastTtiMs}
+ * (populated by `launchApp` from the ActivityManager "Displayed" time), so it
+ * adds no device work. Returns null when no launch is recorded or the last one
+ * is stale (>5 minutes).
+ */
+export function getLastStartupTimingMs(packageName: string): StartupTimingSummary | null {
+  const entry = ttiStore.get(packageName);
+  if (!entry) {
+    return null;
+  }
+  const ageMs = defaultTimer.now() - entry.timestamp;
+  if (ageMs > STARTUP_MAX_AGE_MS) {
+    ttiStore.delete(packageName);
+    return null;
+  }
+  return { displayedMs: entry.ttiMs, ageMs };
 }
 
 // Singleton instance

@@ -10,6 +10,8 @@ function sample(overrides: Partial<PerfSample> & { t: number }): PerfSample {
     touchLatencyMs: null,
     cpuUsagePercent: null,
     memoryUsageMb: null,
+    frameTimePercentilesMs: null,
+    memoryBreakdownMb: null,
     ...overrides,
   };
 }
@@ -24,10 +26,14 @@ describe("PerfWindowBuffer", () => {
       expect(snap.sampleCount).toBe(0);
       expect(snap.oldestSampleAgeMs).toBeNull();
       expect(snap.fps).toBeNull();
+      expect(snap.frameTimeMs).toBeNull();
       expect(snap.jank).toBeNull();
       expect(snap.touchLatencyMs).toBeNull();
       expect(snap.cpu).toBeNull();
       expect(snap.memoryMb).toBeNull();
+      expect(snap.memoryBreakdownMb).toBeNull();
+      // Startup is filled by the caller (observe), never by the buffer.
+      expect(snap.startup).toBeNull();
     });
 
     it("reports oldestSampleAgeMs relative to the snapshot time", () => {
@@ -184,6 +190,71 @@ describe("PerfWindowBuffer", () => {
       expect(snap.cpu!.latest).toBe(30);
       expect(snap.memoryMb!.avg).toBe(150);
       expect(snap.memoryMb!.latest).toBe(200);
+    });
+  });
+
+  describe("native frame-time percentiles (latest-wins)", () => {
+    it("surfaces the most recent frame-bearing interval, ignoring null ticks", () => {
+      const buffer = new PerfWindowBuffer();
+      buffer.record("device-1", sample({
+        t: 1,
+        frameTimePercentilesMs: { p50: 8, p90: 12, p95: 15, p99: 30 },
+      }));
+      // Later idle tick carries no native percentiles; must not clobber the last real one.
+      buffer.record("device-1", sample({ t: 2, frameTimePercentilesMs: null }));
+      buffer.record("device-1", sample({
+        t: 3,
+        frameTimePercentilesMs: { p50: 9, p90: 14, p95: 18, p99: 42 },
+      }));
+
+      const snap = buffer.snapshot("device-1", 3, 100);
+      expect(snap.frameTimeMs).toEqual({ p50: 9, p90: 14, p95: 18, p99: 42 });
+    });
+
+    it("is null when no in-window sample carried native percentiles", () => {
+      const buffer = new PerfWindowBuffer();
+      buffer.record("device-1", sample({ t: 1, fps: 60 }));
+      expect(buffer.snapshot("device-1", 1, 100).frameTimeMs).toBeNull();
+    });
+  });
+
+  describe("memory breakdown (latest-wins)", () => {
+    it("surfaces the latest in-window meminfo breakdown", () => {
+      const buffer = new PerfWindowBuffer();
+      buffer.record("device-1", sample({
+        t: 1,
+        memoryBreakdownMb: {
+          javaHeap: 10, nativeHeap: 20, code: 5, stack: 1,
+          graphics: 8, privateOther: 3, system: 2,
+        },
+      }));
+      buffer.record("device-1", sample({
+        t: 2,
+        memoryBreakdownMb: {
+          javaHeap: 12, nativeHeap: 22, code: 5, stack: 1,
+          graphics: 9, privateOther: 3, system: 2,
+        },
+      }));
+
+      const snap = buffer.snapshot("device-1", 2, 100);
+      expect(snap.memoryBreakdownMb!.javaHeap).toBe(12);
+      expect(snap.memoryBreakdownMb!.nativeHeap).toBe(22);
+      expect(snap.memoryBreakdownMb!.graphics).toBe(9);
+    });
+
+    it("preserves null components without dropping the whole breakdown", () => {
+      const buffer = new PerfWindowBuffer();
+      buffer.record("device-1", sample({
+        t: 1,
+        memoryBreakdownMb: {
+          javaHeap: 12, nativeHeap: null, code: null, stack: null,
+          graphics: null, privateOther: null, system: null,
+        },
+      }));
+
+      const snap = buffer.snapshot("device-1", 1, 100);
+      expect(snap.memoryBreakdownMb!.javaHeap).toBe(12);
+      expect(snap.memoryBreakdownMb!.nativeHeap).toBeNull();
     });
   });
 

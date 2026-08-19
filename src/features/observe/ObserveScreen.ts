@@ -5,13 +5,23 @@ import { ViewHierarchy } from "./ViewHierarchy";
 import { Window } from "./Window";
 import { TakeScreenshot } from "./TakeScreenshot";
 import { GetBackStack } from "./GetBackStack";
-import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  AdbClientFactory,
+  defaultAdbClientFactory,
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { NoOpPerformanceTracker, PerformanceTracker, processTimingData } from "../../utils/PerformanceTracker";
+import {
+  NoOpPerformanceTracker,
+  PerformanceTracker,
+  processTimingData,
+} from "../../utils/PerformanceTracker";
 import { serverConfig } from "../../utils/ServerConfig";
 import { RecompositionTracker } from "../performance/RecompositionTracker";
 import { getPerfWindowBuffer } from "../performance/PerfWindowBuffer";
-import { getObservePerfWindowMs, isObservePerfSnapshotEnabled } from "../performance/observePerfSnapshotConfig";
+import {
+  getObservePerfWindowMs,
+  isObservePerfSnapshotEnabled,
+} from "../performance/observePerfSnapshotConfig";
 import { PredictiveUIState } from "./PredictiveUIState";
 import { ScreenshotJobTracker } from "../../utils/ScreenshotJobTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
@@ -22,11 +32,14 @@ import type { ViewHierarchy as ViewHierarchyInterface } from "./interfaces/ViewH
 import type { PredictiveUIState as PredictiveUIStateInterface } from "./interfaces/PredictiveUIState";
 
 import { getObserveCacheStore, setObserveCacheStore } from "./cache/ObserveCacheRegistry";
-import { getScreenshotStateStore, setScreenshotStateStore } from "./screenshot/ScreenshotStateRegistry";
+import {
+  getScreenshotStateStore,
+  setScreenshotStateStore,
+} from "./screenshot/ScreenshotStateRegistry";
 import {
   DefaultObserveScreenshotRecorder,
   ObserveScreenshotRecorder,
-  TrackedScreenshotService
+  TrackedScreenshotService,
 } from "./screenshot/ObserveScreenshotRecorder";
 import { HierarchyCollector } from "./collectors/HierarchyCollector";
 import { DeviceStateCollector } from "./collectors/DeviceStateCollector";
@@ -38,7 +51,7 @@ import { ObserveElementsBuilder } from "./ObserveElementsBuilder";
 import {
   enforceHierarchyPlatform,
   HierarchyPlatformValidator,
-  RealHierarchyPlatformValidator
+  RealHierarchyPlatformValidator,
 } from "./HierarchyPlatformValidator";
 import { deriveIosScreenIdentity } from "./ios/IosScreenIdentity";
 import { computeFreshness } from "./observationFreshness";
@@ -130,11 +143,12 @@ export class RealObserveScreen implements ObserveScreen {
    * Adapter that exposes the static `clearCache` as an `ObserveScreenCache`
    * for dependency injection.
    */
-  static readonly defaultObserveScreenCache: import("./interfaces/ObserveScreenCache").ObserveScreenCache = {
-    clearForDevice(deviceId: string): void {
-      RealObserveScreen.clearCache(deviceId);
-    },
-  };
+  static readonly defaultObserveScreenCache: import("./interfaces/ObserveScreenCache").ObserveScreenCache =
+    {
+      clearForDevice(deviceId: string): void {
+        RealObserveScreen.clearCache(deviceId);
+      },
+    };
 
   // ---------- Constructor ----------
 
@@ -142,7 +156,7 @@ export class RealObserveScreen implements ObserveScreen {
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     dependencies?: ObserveScreenDependencies,
-    timer: Timer = defaultTimer
+    timer: Timer = defaultTimer,
   ) {
     this.device = device;
     this.adbFactory = adbFactory;
@@ -169,42 +183,56 @@ export class RealObserveScreen implements ObserveScreen {
     }
 
     // Composed services
-    this.screenshotRecorder = dependencies?.screenshotRecorder ?? new DefaultObserveScreenshotRecorder(
-      device,
-      screenshotUtil as TrackedScreenshotService,
-      getScreenshotStateStore()
-    );
-    this.hierarchyCollector = dependencies?.hierarchyCollector ?? new HierarchyCollector({
-      device,
-      viewHierarchy: this.viewHierarchy,
-      adb: this.adb,
-      adbFactory: this.adbFactory,
-      timer: this.timer,
-    });
-    this.deviceStateCollector = dependencies?.deviceStateCollector ?? new DeviceStateCollector({
-      device,
-      window,
-      backStack,
-      adb: this.adb,
-      timer: this.timer,
-    });
-    this.performanceAuditor = dependencies?.performanceAuditor ?? new PerformanceAuditor({
-      device,
-      adbFactory: this.adbFactory,
-    });
-    this.accessibilityAuditor = dependencies?.accessibilityAuditor ?? new AccessibilityAuditor({
-      device,
-      // Prefer the recorder-backed cached path before falling back to disk scan.
-      screenshotPathResolver: () => resolveLatestScreenshotPath(
-        () => getScreenshotStateStore().getPath(this.device.deviceId)
-      ),
-    });
-    this.accessibilityStateDetector = dependencies?.accessibilityStateDetector ?? new AccessibilityStateDetector({
-      device,
-      adb: this.adb,
-    });
+    this.screenshotRecorder =
+      dependencies?.screenshotRecorder ??
+      new DefaultObserveScreenshotRecorder(
+        device,
+        screenshotUtil as TrackedScreenshotService,
+        getScreenshotStateStore(),
+      );
+    this.hierarchyCollector =
+      dependencies?.hierarchyCollector ??
+      new HierarchyCollector({
+        device,
+        viewHierarchy: this.viewHierarchy,
+        adb: this.adb,
+        adbFactory: this.adbFactory,
+        timer: this.timer,
+      });
+    this.deviceStateCollector =
+      dependencies?.deviceStateCollector ??
+      new DeviceStateCollector({
+        device,
+        window,
+        backStack,
+        adb: this.adb,
+        timer: this.timer,
+      });
+    this.performanceAuditor =
+      dependencies?.performanceAuditor ??
+      new PerformanceAuditor({
+        device,
+        adbFactory: this.adbFactory,
+      });
+    this.accessibilityAuditor =
+      dependencies?.accessibilityAuditor ??
+      new AccessibilityAuditor({
+        device,
+        // Prefer the recorder-backed cached path before falling back to disk scan.
+        screenshotPathResolver: () =>
+          resolveLatestScreenshotPath(() =>
+            getScreenshotStateStore().getPath(this.device.deviceId),
+          ),
+      });
+    this.accessibilityStateDetector =
+      dependencies?.accessibilityStateDetector ??
+      new AccessibilityStateDetector({
+        device,
+        adb: this.adb,
+      });
     this.elementsBuilder = new ObserveElementsBuilder();
-    this.platformValidator = dependencies?.platformValidator ?? new RealHierarchyPlatformValidator();
+    this.platformValidator =
+      dependencies?.platformValidator ?? new RealHierarchyPlatformValidator();
     this.safeAreaAuditor = new SafeAreaAuditor();
   }
 
@@ -243,16 +271,18 @@ export class RealObserveScreen implements ObserveScreen {
         updatedAt: new Date().toISOString(),
         screenSize: { width: 0, height: 0 },
         systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-        error: "No cached observe result available"
+        error: "No cached observe result available",
       };
     } catch (error) {
       const duration = this.timer.now() - startTime;
-      logger.warn(`[OBSERVE_CACHE] Error getting cached observe result after ${duration}ms: ${error}`);
+      logger.warn(
+        `[OBSERVE_CACHE] Error getting cached observe result after ${duration}ms: ${error}`,
+      );
       return {
         updatedAt: new Date().toISOString(),
         screenSize: { width: 0, height: 0 },
         systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-        error: "Failed to retrieve cached observe result"
+        error: "Failed to retrieve cached observe result",
       };
     }
   }
@@ -270,7 +300,9 @@ export class RealObserveScreen implements ObserveScreen {
     const skipScreenshot = options?.skipScreenshot ?? false;
 
     try {
-      logger.debug(`Executing observe command (skipWaitForFresh=${skipWaitForFresh}, minTimestamp=${minTimestamp})`);
+      logger.debug(
+        `Executing observe command (skipWaitForFresh=${skipWaitForFresh}, minTimestamp=${minTimestamp})`,
+      );
       const startTime = this.timer.now();
       throwIfAborted(signal);
 
@@ -279,7 +311,15 @@ export class RealObserveScreen implements ObserveScreen {
       perf.serial("observe");
 
       // Phase 1+2: hierarchy + derived device state (platform-specific orchestration).
-      await this.collectAllData(result, queryOptions, perf, skipWaitForFresh, minTimestamp, signal, skipBackStack);
+      await this.collectAllData(
+        result,
+        queryOptions,
+        perf,
+        skipWaitForFresh,
+        minTimestamp,
+        signal,
+        skipBackStack,
+      );
 
       // Reject a stale cross-platform hierarchy (e.g. an iOS hierarchy returned on
       // an Android device via a stale connection) at the source — before deriving
@@ -287,7 +327,10 @@ export class RealObserveScreen implements ObserveScreen {
       // consumer (tool response, observe cache, LATEST_OBSERVATION resource, or the
       // navigation-graph recorder) ever observes the other platform's data.
       const hierarchyPlatformValid = enforceHierarchyPlatform(
-        result, this.device.platform, this.device.deviceId, this.platformValidator
+        result,
+        this.device.platform,
+        this.device.deviceId,
+        this.platformValidator,
       );
 
       // Uncapped here; the output boundary (sanitizeObserveResult / the observe
@@ -330,7 +373,9 @@ export class RealObserveScreen implements ObserveScreen {
       }
 
       // Cache the result for future use
-      await perf.track("cacheResult", () => getObserveCacheStore().put(this.device.deviceId, result));
+      await perf.track("cacheResult", () =>
+        getObserveCacheStore().put(this.device.deviceId, result),
+      );
 
       perf.end();
 
@@ -348,10 +393,13 @@ export class RealObserveScreen implements ObserveScreen {
         actualTimestamp: this.resolveObservationTimestampMs(result),
         hostAgeBasisMs: this.resolveHostReceivedAtMs(result),
         now: this.timer.now(),
-        verified: typeof result.viewHierarchy === "object" && result.viewHierarchy !== null
-          ? result.viewHierarchy.fresh
-          : undefined,
-        unavailable: !hierarchyPlatformValid || result.viewHierarchy?.hierarchy === undefined ||
+        verified:
+          typeof result.viewHierarchy === "object" && result.viewHierarchy !== null
+            ? result.viewHierarchy.fresh
+            : undefined,
+        unavailable:
+          !hierarchyPlatformValid ||
+          result.viewHierarchy?.hierarchy === undefined ||
           result.viewHierarchy?.hierarchy?.error !== undefined,
       });
 
@@ -372,10 +420,14 @@ export class RealObserveScreen implements ObserveScreen {
       logger.debug(`Total observe command execution took ${this.timer.now() - startTime}ms`);
       return result;
     } catch (err) {
-      const errorMessage = err instanceof Error ? (err.stack || err.message) : String(err);
+      const errorMessage = err instanceof Error ? err.stack || err.message : String(err);
       logger.error(`Critical error in observe command: ${errorMessage}`);
       ScreenshotJobTracker.cancelJob(this.device.deviceId);
-      getScreenshotStateStore().update(this.device.deviceId, undefined, `Observation failed: ${errorMessage}`);
+      getScreenshotStateStore().update(
+        this.device.deviceId,
+        undefined,
+        `Observation failed: ${errorMessage}`,
+      );
       const fallback: ObserveResult = {
         updatedAt: new Date().toISOString(),
         screenSize: { width: 0, height: 0 },
@@ -384,7 +436,7 @@ export class RealObserveScreen implements ObserveScreen {
       appendObserveError(fallback, {
         phase: "critical",
         message: "Observation failed due to device access error",
-        cause: errorMessage
+        cause: errorMessage,
       });
       return fallback;
     }
@@ -415,16 +467,21 @@ export class RealObserveScreen implements ObserveScreen {
       // start() schedules the sampling interval (idempotent); startMonitoring()
       // alone only registers the device and would never accumulate samples if
       // the daemon had not already started the monitor.
-      const { getPerformanceMonitor } = await import("../performance/PerformanceMonitor");
+      const { getPerformanceMonitor, getLastStartupTimingMs } =
+        await import("../performance/PerformanceMonitor");
       const monitor = getPerformanceMonitor();
       monitor.start();
       monitor.startMonitoring(this.device.deviceId, appId, this.device.platform);
 
-      result.perfSnapshot = getPerfWindowBuffer().snapshot(
+      const snapshot = getPerfWindowBuffer().snapshot(
         this.device.deviceId,
         this.timer.now(),
-        getObservePerfWindowMs()
+        getObservePerfWindowMs(),
       );
+      // Startup timing is package-keyed and event-based, so it is not in the
+      // sample ring; fill it from the launch cache (an in-memory read).
+      snapshot.startup = getLastStartupTimingMs(appId);
+      result.perfSnapshot = snapshot;
     } catch (error) {
       // Best-effort: an audit/snapshot failure should not pollute observation.
       logger.warn(`[PerfSnapshot] Failed to attach performance snapshot: ${error}`);
@@ -445,7 +502,9 @@ export class RealObserveScreen implements ObserveScreen {
   /**
    * Back-compat shim around {@link HierarchyCollector.extractScreenSize}.
    */
-  extractScreenSizeFromHierarchy(viewHierarchy: ObserveResult["viewHierarchy"]): { width: number; height: number } | null {
+  extractScreenSizeFromHierarchy(
+    viewHierarchy: ObserveResult["viewHierarchy"],
+  ): { width: number; height: number } | null {
     return this.hierarchyCollector.extractScreenSize(viewHierarchy);
   }
 
@@ -456,7 +515,7 @@ export class RealObserveScreen implements ObserveScreen {
       updatedAt: new Date(this.timer.now()).toISOString(),
       screenSize: { width: 0, height: 0 },
       systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-      insets: { available: false, source: "unavailable", units: "unknown" }
+      insets: { available: false, source: "unavailable", units: "unknown" },
     };
   }
 
@@ -482,12 +541,19 @@ export class RealObserveScreen implements ObserveScreen {
     skipWaitForFresh: boolean = false,
     minTimestamp: number = 0,
     signal?: AbortSignal,
-    skipBackStack: boolean = false
+    skipBackStack: boolean = false,
   ): Promise<void> {
     switch (this.device.platform) {
       case "android":
         perf.serial("phase1_hierarchy");
-        await this.hierarchyCollector.collect(result, queryOptions, perf, skipWaitForFresh, minTimestamp, signal);
+        await this.hierarchyCollector.collect(
+          result,
+          queryOptions,
+          perf,
+          skipWaitForFresh,
+          minTimestamp,
+          signal,
+        );
         perf.end();
 
         // Prefer accessibility-service-supplied metadata for screen/insets/rotation/wakefulness/foreground.
@@ -512,31 +578,53 @@ export class RealObserveScreen implements ObserveScreen {
             result.activeWindow = {
               appId: packageName,
               activityName,
-              layoutSeqSum: 0
+              layoutSeqSum: 0,
             };
           }
           const parallelTasks: Promise<void>[] = [];
           if (hierarchy.wakefulness) {
             result.wakefulness = hierarchy.wakefulness;
           } else {
-            parallelTasks.push(perf.track("wakefulness", () => this.deviceStateCollector.collectWakefulness(result, signal)));
+            parallelTasks.push(
+              perf.track("wakefulness", () =>
+                this.deviceStateCollector.collectWakefulness(result, signal),
+              ),
+            );
           }
-          parallelTasks.push(perf.track("deviceLock", () => this.deviceStateCollector.collectDeviceLock(result, signal)));
+          parallelTasks.push(
+            perf.track("deviceLock", () =>
+              this.deviceStateCollector.collectDeviceLock(result, signal),
+            ),
+          );
           if (!skipBackStack) {
-            parallelTasks.push(perf.track("backStack", () => this.deviceStateCollector.collectBackStack(result, perf, signal)));
+            parallelTasks.push(
+              perf.track("backStack", () =>
+                this.deviceStateCollector.collectBackStack(result, perf, signal),
+              ),
+            );
           }
           if (parallelTasks.length > 0) {
             await Promise.all(parallelTasks);
           }
           logger.debug("[OBSERVE] Using device metadata from accessibility service");
         } else {
-          logger.warn("[OBSERVE] No screen info from accessibility service - check if APK is updated");
+          logger.warn(
+            "[OBSERVE] No screen info from accessibility service - check if APK is updated",
+          );
           const tasks: Promise<void>[] = [
-            perf.track("wakefulness", () => this.deviceStateCollector.collectWakefulness(result, signal)),
-            perf.track("deviceLock", () => this.deviceStateCollector.collectDeviceLock(result, signal)),
+            perf.track("wakefulness", () =>
+              this.deviceStateCollector.collectWakefulness(result, signal),
+            ),
+            perf.track("deviceLock", () =>
+              this.deviceStateCollector.collectDeviceLock(result, signal),
+            ),
           ];
           if (!skipBackStack) {
-            tasks.push(perf.track("backStack", () => this.deviceStateCollector.collectBackStack(result, perf, signal)));
+            tasks.push(
+              perf.track("backStack", () =>
+                this.deviceStateCollector.collectBackStack(result, perf, signal),
+              ),
+            );
           }
           await Promise.all(tasks);
         }
@@ -546,7 +634,7 @@ export class RealObserveScreen implements ObserveScreen {
           result.activeWindow = {
             appId: result.viewHierarchy.packageName,
             activityName: "",
-            layoutSeqSum: 0
+            layoutSeqSum: 0,
           };
         }
 
@@ -565,19 +653,30 @@ export class RealObserveScreen implements ObserveScreen {
 
       case "ios": {
         perf.serial("ios_collect");
-        await this.hierarchyCollector.collect(result, queryOptions, perf, skipWaitForFresh, minTimestamp, signal);
+        await this.hierarchyCollector.collect(
+          result,
+          queryOptions,
+          perf,
+          skipWaitForFresh,
+          minTimestamp,
+          signal,
+        );
 
         // Resolve screen size: hierarchy-derived bounds, then CtrlProxy-reported logical points.
         const extractedSize = this.hierarchyCollector.extractScreenSize(result.viewHierarchy);
         if (extractedSize) {
           result.screenSize = extractedSize;
-          logger.debug(`[iOS] Extracted screen size from hierarchy: ${extractedSize.width}x${extractedSize.height}`);
+          logger.debug(
+            `[iOS] Extracted screen size from hierarchy: ${extractedSize.width}x${extractedSize.height}`,
+          );
         } else if (result.viewHierarchy?.screenWidth && result.viewHierarchy?.screenHeight) {
           result.screenSize = {
             width: result.viewHierarchy.screenWidth,
-            height: result.viewHierarchy.screenHeight
+            height: result.viewHierarchy.screenHeight,
           };
-          logger.debug(`[iOS] Using screen size from CtrlProxy iOS: ${result.screenSize.width}x${result.screenSize.height}`);
+          logger.debug(
+            `[iOS] Using screen size from CtrlProxy iOS: ${result.screenSize.width}x${result.screenSize.height}`,
+          );
         } else {
           logger.warn("[iOS] Failed to extract screen size from hierarchy");
         }
@@ -596,13 +695,16 @@ export class RealObserveScreen implements ObserveScreen {
           // them). The iOS runner can report a stale 320x480 (legacy compatibility
           // mode) value; keep the hierarchy fields consistent for consumers that
           // read them directly (issue #2683).
-          this.hierarchyCollector.reconcileScreenDimensions(result.viewHierarchy, result.screenSize);
+          this.hierarchyCollector.reconcileScreenDimensions(
+            result.viewHierarchy,
+            result.screenSize,
+          );
 
           const rawHierarchy = result.viewHierarchy;
           result.viewHierarchy = this.viewHierarchy.filterOffscreenNodes(
             rawHierarchy,
             result.screenSize.width,
-            result.screenSize.height
+            result.screenSize.height,
           );
           if (serverConfig.isRawElementSearchEnabled()) {
             attachRawViewHierarchy(result.viewHierarchy, rawHierarchy);
@@ -614,21 +716,25 @@ export class RealObserveScreen implements ObserveScreen {
           result.activeWindow = {
             appId: result.viewHierarchy.packageName,
             activityName: "",
-            layoutSeqSum: 0
+            layoutSeqSum: 0,
           };
         }
 
         let sdkScreenIdentity: ScreenIdentity | undefined;
         try {
-          sdkScreenIdentity = await this.viewHierarchy.getScreenIdentity?.(result.viewHierarchy?.packageName);
+          sdkScreenIdentity = await this.viewHierarchy.getScreenIdentity?.(
+            result.viewHierarchy?.packageName,
+          );
         } catch (error) {
           // The hierarchy remains valid when the optional SDK refresh fails.
-          logger.debug(`[iOS] SDK screen identity refresh failed; using hierarchy identity: ${error}`);
+          logger.debug(
+            `[iOS] SDK screen identity refresh failed; using hierarchy identity: ${error}`,
+          );
         }
         const hierarchyScreenIdentity = deriveIosScreenIdentity(result.viewHierarchy);
         result.screenIdentity = hierarchyScreenIdentity?.components.modalClass
           ? hierarchyScreenIdentity
-          : sdkScreenIdentity ?? hierarchyScreenIdentity;
+          : (sdkScreenIdentity ?? hierarchyScreenIdentity);
 
         perf.end();
         break;

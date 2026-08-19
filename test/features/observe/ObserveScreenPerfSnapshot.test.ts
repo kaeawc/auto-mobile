@@ -109,6 +109,11 @@ describe("ObserveScreen perf snapshot", () => {
     // covers it regardless of any timer advance during execute().
     getPerfWindowBuffer().record(DEVICE_ID, {
       t: 0, fps: 60, frameTimeMs: 16, jankFrames: 2, touchLatencyMs: 16, cpuUsagePercent: 25, memoryUsageMb: 150,
+      frameTimePercentilesMs: { p50: 16, p90: 20, p95: 24, p99: 40 },
+      memoryBreakdownMb: {
+        javaHeap: 40, nativeHeap: 30, code: 20, stack: 2,
+        graphics: 10, privateOther: 5, system: 3,
+      },
     });
 
     const result = await createObserveScreen().execute();
@@ -119,12 +124,17 @@ describe("ObserveScreen perf snapshot", () => {
     expect(result.perfSnapshot!.fps!.p50).toBe(60);
     expect(result.perfSnapshot!.cpu!.latest).toBe(25);
     expect(result.perfSnapshot!.memoryMb!.latest).toBe(150);
+    expect(result.perfSnapshot!.frameTimeMs).toEqual({ p50: 16, p90: 20, p95: 24, p99: 40 });
+    expect(result.perfSnapshot!.memoryBreakdownMb!.javaHeap).toBe(40);
+    // No launch was recorded in this test, so startup timing is absent.
+    expect(result.perfSnapshot!.startup).toBeNull();
   });
 
   test("omits the snapshot when the opt-in is disabled", async () => {
     // env var intentionally left unset
     getPerfWindowBuffer().record(DEVICE_ID, {
       t: 0, fps: 60, frameTimeMs: 16, jankFrames: 0, touchLatencyMs: 16, cpuUsagePercent: 25, memoryUsageMb: 150,
+      frameTimePercentilesMs: null, memoryBreakdownMb: null,
     });
 
     const result = await createObserveScreen().execute();

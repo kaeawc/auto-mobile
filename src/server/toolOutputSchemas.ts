@@ -20,7 +20,7 @@ const boundsObjectSchema = z.object({
   right: z.number(),
   bottom: z.number(),
   centerX: z.number().optional(),
-  centerY: z.number().optional()
+  centerY: z.number().optional(),
 });
 
 // Compact bounds shape, now emitted unconditionally: every `bounds` object is
@@ -31,7 +31,7 @@ const compactBoundsTupleSchema = z
   .tuple([z.number(), z.number(), z.number(), z.number()])
   .describe(
     "Compact bounds tuple [left, top, right, bottom], emitted in place of the " +
-      "{left, top, right, bottom} object."
+      "{left, top, right, bottom} object.",
   );
 
 /**
@@ -53,161 +53,189 @@ export const elementBoundsSchema = z
   .describe(
     "Element bounds. Default: positional tuple [left, top, right, bottom]; the " +
       "object {left, top, right, bottom} (+ optional centerX/centerY) is also " +
-      "schema-valid."
+      "schema-valid.",
   );
 
-export const elementSchema = z.object({
-  "bounds": elementBoundsSchema,
-  "text": z.string().optional(),
-  "resource-id": z.string().optional(),
-  "view-id": z.string().optional(),
-  "content-desc": z.string().optional(),
-  "occlusionState": z.string().optional(),
-  "occludedBy": z.string().optional(),
-  "occludedByViewId": z.string().optional(),
-  "class": z.string().optional(),
-  "package": z.string().optional(),
-  "checkable": booleanOrString,
-  "checked": booleanOrString,
-  "clickable": booleanOrString,
-  "enabled": booleanOrString,
-  "focusable": booleanOrString,
-  "focused": booleanOrString,
-  "accessibility-focused": booleanOrString,
-  "scrollable": booleanOrString,
-  "selected": booleanOrString
-}).passthrough();
+export const elementSchema = z
+  .object({
+    bounds: elementBoundsSchema,
+    text: z.string().optional(),
+    "resource-id": z.string().optional(),
+    "view-id": z.string().optional(),
+    "content-desc": z.string().optional(),
+    occlusionState: z.string().optional(),
+    occludedBy: z.string().optional(),
+    occludedByViewId: z.string().optional(),
+    class: z.string().optional(),
+    package: z.string().optional(),
+    checkable: booleanOrString,
+    checked: booleanOrString,
+    clickable: booleanOrString,
+    enabled: booleanOrString,
+    focusable: booleanOrString,
+    focused: booleanOrString,
+    "accessibility-focused": booleanOrString,
+    scrollable: booleanOrString,
+    selected: booleanOrString,
+  })
+  .passthrough();
 
 const selectedElementStateSchema = z.object({
   method: z.enum(["accessibility", "visual"]),
   confidence: z.number(),
-  reason: z.string().optional()
+  reason: z.string().optional(),
 });
 
-export const selectedElementSchema = z.object({
-  text: z.string().optional(),
-  resourceId: z.string().optional(),
-  contentDesc: z.string().optional(),
-  bounds: elementBoundsSchema.optional(),
-  indexInMatches: z.number().int().optional(),
-  totalMatches: z.number().int().optional(),
-  selectionStrategy: z.string().optional(),
-  selectedState: selectedElementStateSchema.optional()
-}).passthrough();
+export const selectedElementSchema = z
+  .object({
+    text: z.string().optional(),
+    resourceId: z.string().optional(),
+    contentDesc: z.string().optional(),
+    bounds: elementBoundsSchema.optional(),
+    indexInMatches: z.number().int().optional(),
+    totalMatches: z.number().int().optional(),
+    selectionStrategy: z.string().optional(),
+    selectedState: selectedElementStateSchema.optional(),
+  })
+  .passthrough();
 
-export const activeWindowSchema = z.object({
-  appId: z.string().optional(),
-  activityName: z.string().optional(),
-  layoutSeqSum: z.number().int().optional(),
-  type: z.string().optional()
-}).passthrough();
+export const activeWindowSchema = z
+  .object({
+    appId: z.string().optional(),
+    activityName: z.string().optional(),
+    layoutSeqSum: z.number().int().optional(),
+    type: z.string().optional(),
+  })
+  .passthrough();
 
-const screenIdentitySchema = z.object({
-  platform: z.enum(["ios", "android"]),
-  source: z.enum(["heuristic", "sdk"]),
-  confidence: z.enum(["high", "medium", "low"]),
-  key: z.string(),
-  components: z.object({
-    bundleId: z.string().optional(),
-    navigationRoute: z.string().optional(),
-    navigationTitle: z.string().optional(),
-    selectedTab: z.string().optional(),
-    presentation: z.string().optional(),
-    modalClass: z.string().optional(),
-    modalTitle: z.string().optional(),
-    focusedElementId: z.string().optional(),
-    keyboardVisible: z.boolean().optional()
-  }).passthrough()
-}).passthrough();
+const screenIdentitySchema = z
+  .object({
+    platform: z.enum(["ios", "android"]),
+    source: z.enum(["heuristic", "sdk"]),
+    confidence: z.enum(["high", "medium", "low"]),
+    key: z.string(),
+    components: z
+      .object({
+        bundleId: z.string().optional(),
+        navigationRoute: z.string().optional(),
+        navigationTitle: z.string().optional(),
+        selectedTab: z.string().optional(),
+        presentation: z.string().optional(),
+        modalClass: z.string().optional(),
+        modalTitle: z.string().optional(),
+        focusedElementId: z.string().optional(),
+        keyboardVisible: z.boolean().optional(),
+      })
+      .passthrough(),
+  })
+  .passthrough();
 
-export const observationSummarySchema = z.object({
-  selectedElements: z.array(selectedElementSchema).optional(),
-  focusedElement: elementSchema.optional(),
-  accessibilityFocusedElement: elementSchema.optional(),
-  activeWindow: activeWindowSchema.optional(),
-  screenIdentity: screenIdentitySchema.optional()
-}).passthrough();
+export const observationSummarySchema = z
+  .object({
+    selectedElements: z.array(selectedElementSchema).optional(),
+    focusedElement: elementSchema.optional(),
+    accessibilityFocusedElement: elementSchema.optional(),
+    activeWindow: activeWindowSchema.optional(),
+    screenIdentity: screenIdentitySchema.optional(),
+  })
+  .passthrough();
 
-const observationDiffScreenIdentitySchema = z.object({
-  activeWindow: activeWindowSchema.optional(),
-  hierarchyPackageName: z.string().optional(),
-  screenIdentity: screenIdentitySchema.optional()
-}).passthrough();
+const observationDiffScreenIdentitySchema = z
+  .object({
+    activeWindow: activeWindowSchema.optional(),
+    hierarchyPackageName: z.string().optional(),
+    screenIdentity: screenIdentitySchema.optional(),
+  })
+  .passthrough();
 
-const observationDiffMetadataSchema = z.object({
-  mode: z.enum(["diff", "full"]),
-  reason: z.enum([
-    "diff_emitted",
-    "missing_baseline",
-    "screen_changed",
-    "missing_session",
-    "unrenderable_hierarchy",
-    "disabled",
-    "stripped_by_actions_no_observe"
-  ]),
-  fromScreen: observationDiffScreenIdentitySchema.optional(),
-  toScreen: observationDiffScreenIdentitySchema.optional()
-}).passthrough();
+const observationDiffMetadataSchema = z
+  .object({
+    mode: z.enum(["diff", "full"]),
+    reason: z.enum([
+      "diff_emitted",
+      "missing_baseline",
+      "screen_changed",
+      "missing_session",
+      "unrenderable_hierarchy",
+      "disabled",
+      "stripped_by_actions_no_observe",
+    ]),
+    fromScreen: observationDiffScreenIdentitySchema.optional(),
+    toScreen: observationDiffScreenIdentitySchema.optional(),
+  })
+  .passthrough();
 
-const toolOutputArtifactDetailsSchema = z.object({
-  path: z.string(),
-  format: z.literal("json"),
-  payload: z.string(),
-  bytes: z.number().int().nonnegative(),
-  tool: z.string()
-}).passthrough();
+const toolOutputArtifactDetailsSchema = z
+  .object({
+    path: z.string(),
+    format: z.literal("json"),
+    payload: z.string(),
+    bytes: z.number().int().nonnegative(),
+    tool: z.string(),
+  })
+  .passthrough();
 
-export const toolOutputArtifactMetadataSchema = z.object({
-  artifact: toolOutputArtifactDetailsSchema
-}).passthrough();
+export const toolOutputArtifactMetadataSchema = z
+  .object({
+    artifact: toolOutputArtifactDetailsSchema,
+  })
+  .passthrough();
 
-const tapOnSearchUntilSchema = z.object({
-  durationMs: z.number().int(),
-  requestCount: z.number().int(),
-  changeCount: z.number().int()
-}).passthrough();
+const tapOnSearchUntilSchema = z
+  .object({
+    durationMs: z.number().int(),
+    requestCount: z.number().int(),
+    changeCount: z.number().int(),
+  })
+  .passthrough();
 
-const screenReaderNavigationSchema = z.object({
-  reachable: z.boolean().describe("Whether swipe cursor navigation reached the target"),
-  traversalOrder: z.array(elementSchema).describe("Focused nodes in cursor traversal order"),
-  focusTrapDetected: z.boolean().describe("Whether cursor navigation got stuck or failed to converge")
-}).passthrough();
+const screenReaderNavigationSchema = z
+  .object({
+    reachable: z.boolean().describe("Whether swipe cursor navigation reached the target"),
+    traversalOrder: z.array(elementSchema).describe("Focused nodes in cursor traversal order"),
+    focusTrapDetected: z
+      .boolean()
+      .describe("Whether cursor navigation got stuck or failed to converge"),
+  })
+  .passthrough();
 
-export const tapOnResultSchema = z.object({
-  success: z.boolean(),
-  action: z.string().optional(),
-  message: z.string().optional(),
-  element: elementSchema.optional(),
-  observation: z.union([observationSummarySchema, toolOutputArtifactMetadataSchema]).optional(),
-  observationDiff: observationDiffMetadataSchema.optional(),
-  selectedElement: selectedElementSchema.optional(),
-  selectedElements: z.array(selectedElementSchema).optional(),
-  error: z.string().optional(),
-  pressRecognized: z.boolean().optional(),
-  contextMenuOpened: z.boolean().optional(),
-  selectionStarted: z.boolean().optional(),
-  searchUntil: tapOnSearchUntilSchema.optional(),
-  screenReaderNavigation: screenReaderNavigationSchema.optional(),
-  debug: z.any().optional()
-}).passthrough();
+export const tapOnResultSchema = z
+  .object({
+    success: z.boolean(),
+    action: z.string().optional(),
+    message: z.string().optional(),
+    element: elementSchema.optional(),
+    observation: z.union([observationSummarySchema, toolOutputArtifactMetadataSchema]).optional(),
+    observationDiff: observationDiffMetadataSchema.optional(),
+    selectedElement: selectedElementSchema.optional(),
+    selectedElements: z.array(selectedElementSchema).optional(),
+    error: z.string().optional(),
+    pressRecognized: z.boolean().optional(),
+    contextMenuOpened: z.boolean().optional(),
+    selectionStarted: z.boolean().optional(),
+    searchUntil: tapOnSearchUntilSchema.optional(),
+    screenReaderNavigation: screenReaderNavigationSchema.optional(),
+    debug: z.any().optional(),
+  })
+  .passthrough();
 
 export const screenSizeSchema = z.object({
   width: z.number().int(),
-  height: z.number().int()
+  height: z.number().int(),
 });
 
 export const systemInsetsSchema = z.object({
   top: z.number(),
   right: z.number(),
   bottom: z.number(),
-  left: z.number()
+  left: z.number(),
 });
 
 const edgeInsetsSchema = z.object({
   top: z.number(),
   right: z.number(),
   bottom: z.number(),
-  left: z.number()
+  left: z.number(),
 });
 
 const systemChromeSchema = z.object({
@@ -220,7 +248,12 @@ const systemChromeSchema = z.object({
 
 const observationInsetsSchema = z.object({
   available: z.boolean(),
-  source: z.enum(["android-window-metrics", "android-resource-fallback", "ios-sdk-safe-area", "unavailable"]),
+  source: z.enum([
+    "android-window-metrics",
+    "android-resource-fallback",
+    "ios-sdk-safe-area",
+    "unavailable",
+  ]),
   units: z.enum(["physical-pixels", "points", "unknown"]),
   // Android's Kotlin payload serializes unavailable typed inset categories as
   // null (rather than omitting them), particularly on older API levels.
@@ -244,7 +277,15 @@ const layoutWarningSchema = z.object({
     bounds: elementBoundsSchema,
   }),
   categories: z.array(z.enum(["text", "interaction"])),
-  insetTypes: z.array(z.enum(["systemBars", "displayCutout", "safeArea", "systemGestures", "mandatorySystemGestures"])),
+  insetTypes: z.array(
+    z.enum([
+      "systemBars",
+      "displayCutout",
+      "safeArea",
+      "systemGestures",
+      "mandatorySystemGestures",
+    ]),
+  ),
   sides: z.array(z.enum(["top", "right", "bottom", "left"])),
   overflowPx: edgeInsetsSchema.partial(),
   insetPx: edgeInsetsSchema.partial(),
@@ -252,69 +293,89 @@ const layoutWarningSchema = z.object({
   confidence: z.enum(["high", "medium"]),
 });
 
-const predictionTargetSchema = z.object({
-  text: z.string().optional(),
-  elementId: z.string().optional(),
-  contentDesc: z.string().optional(),
-  container: z.object({
+const predictionTargetSchema = z
+  .object({
     text: z.string().optional(),
     elementId: z.string().optional(),
-    contentDesc: z.string().optional()
-  }).optional(),
-  lookFor: z.object({
-    text: z.string().optional(),
+    contentDesc: z.string().optional(),
+    container: z
+      .object({
+        text: z.string().optional(),
+        elementId: z.string().optional(),
+        contentDesc: z.string().optional(),
+      })
+      .optional(),
+    lookFor: z
+      .object({
+        text: z.string().optional(),
+        elementId: z.string().optional(),
+        contentDesc: z.string().optional(),
+      })
+      .optional(),
+  })
+  .passthrough();
+
+const predictedActionSchema = z
+  .object({
+    action: z.string(),
+    target: predictionTargetSchema,
+    predictedScreen: z.string(),
+    predictedElements: z.array(z.string()).optional(),
+    confidence: z.number(),
+  })
+  .passthrough();
+
+const interactablePredictionSchema = z
+  .object({
     elementId: z.string().optional(),
-    contentDesc: z.string().optional()
-  }).optional()
-}).passthrough();
+    elementText: z.string().optional(),
+    elementContentDesc: z.string().optional(),
+    predictedOutcome: z
+      .object({
+        screenName: z.string(),
+        basedOn: z.enum(["navigation_graph"]),
+      })
+      .optional(),
+  })
+  .passthrough();
 
-const predictedActionSchema = z.object({
-  action: z.string(),
-  target: predictionTargetSchema,
-  predictedScreen: z.string(),
-  predictedElements: z.array(z.string()).optional(),
-  confidence: z.number()
-}).passthrough();
+export const predictionsSchema = z
+  .object({
+    likelyActions: z.array(predictedActionSchema),
+    interactableElements: z.array(interactablePredictionSchema),
+  })
+  .passthrough();
 
-const interactablePredictionSchema = z.object({
-  elementId: z.string().optional(),
-  elementText: z.string().optional(),
-  elementContentDesc: z.string().optional(),
-  predictedOutcome: z.object({
-    screenName: z.string(),
-    basedOn: z.enum(["navigation_graph"])
-  }).optional()
-}).passthrough();
+export const freshnessSchema = z
+  .object({
+    requestedAfter: z.number().int().optional(),
+    actualTimestamp: z.number().int().optional(),
+    /** Wall-clock age of `actualTimestamp` at report time. */
+    ageMs: z.number().int().optional(),
+    /** Whether the hierarchy was verified against the device on this call, vs. served from cache. */
+    verified: z.boolean().optional(),
+    isFresh: z.boolean(),
+    staleDurationMs: z.number().int().optional(),
+    warning: z.string().optional(),
+  })
+  .passthrough();
 
-export const predictionsSchema = z.object({
-  likelyActions: z.array(predictedActionSchema),
-  interactableElements: z.array(interactablePredictionSchema)
-}).passthrough();
+export const accessibilityStateSchema = z
+  .object({
+    enabled: z.boolean(),
+    service: z.enum(["talkback", "voiceover", "unknown"]),
+  })
+  .passthrough();
 
-export const freshnessSchema = z.object({
-  requestedAfter: z.number().int().optional(),
-  actualTimestamp: z.number().int().optional(),
-  /** Wall-clock age of `actualTimestamp` at report time. */
-  ageMs: z.number().int().optional(),
-  /** Whether the hierarchy was verified against the device on this call, vs. served from cache. */
-  verified: z.boolean().optional(),
-  isFresh: z.boolean(),
-  staleDurationMs: z.number().int().optional(),
-  warning: z.string().optional()
-}).passthrough();
-
-export const accessibilityStateSchema = z.object({
-  enabled: z.boolean(),
-  service: z.enum(["talkback", "voiceover", "unknown"])
-}).passthrough();
-
-export const accessibilityFocusResultSchema = z.object({
-  success: z.boolean(),
-  error: z.string().optional(),
-  warning: z.string().optional(),
-  focusedElement: elementSchema.optional(),
-  confirmed: z.boolean().optional()
-}).passthrough();
+export const accessibilityFocusResultSchema = z
+  .object({
+    success: z.boolean(),
+    error: z.string().optional(),
+    warning: z.string().optional(),
+    focusedElement: elementSchema.optional(),
+    confirmed: z.boolean().optional(),
+  })
+  .passthrough();
 
 /**
  * A recursive view-hierarchy / element node (issue #3025). Its `bounds` routes
@@ -327,29 +388,35 @@ export const accessibilityFocusResultSchema = z.object({
  * the large, dynamic node payload.
  */
 export const viewHierarchyNodeSchema: z.ZodType = z.lazy(() =>
-  z.object({
-    bounds: elementBoundsSchema.optional(),
-    occlusionState: z.string().optional(),
-    occludedBy: z.string().optional(),
-    occludedByViewId: z.string().optional(),
-    node: z.union([viewHierarchyNodeSchema, z.array(viewHierarchyNodeSchema)]).optional()
-  }).passthrough()
+  z
+    .object({
+      bounds: elementBoundsSchema.optional(),
+      occlusionState: z.string().optional(),
+      occludedBy: z.string().optional(),
+      occludedByViewId: z.string().optional(),
+      node: z.union([viewHierarchyNodeSchema, z.array(viewHierarchyNodeSchema)]).optional(),
+    })
+    .passthrough(),
 );
 
 const hierarchyNodeField = z
   .union([viewHierarchyNodeSchema, z.array(viewHierarchyNodeSchema)])
   .optional();
 
-const contentHiddenRegionSchema = z.object({
-  bounds: elementBoundsSchema,
-  reason: z.string(),
-  areaPercent: z.number()
-}).passthrough();
+const contentHiddenRegionSchema = z
+  .object({
+    bounds: elementBoundsSchema,
+    reason: z.string(),
+    areaPercent: z.number(),
+  })
+  .passthrough();
 
-const viewHierarchyWindowSchema = z.object({
-  bounds: elementBoundsSchema.optional(),
-  hierarchy: viewHierarchyNodeSchema.optional()
-}).passthrough();
+const viewHierarchyWindowSchema = z
+  .object({
+    bounds: elementBoundsSchema.optional(),
+    hierarchy: viewHierarchyNodeSchema.optional(),
+  })
+  .passthrough();
 
 /**
  * The `viewHierarchy` sub-tree of an observe result (issue #3025). The
@@ -366,19 +433,24 @@ const viewHierarchyWindowSchema = z.object({
  * than advertising a shape the server never emits for that site. Everything else
  * (`packageName`, `sources`, screen/density metadata, …) also passes through.
  */
-export const viewHierarchyResultSchema = z.object({
-  "hierarchy": z.object({
-    error: z.string().optional(),
-    node: hierarchyNodeField
-  }).passthrough().optional(),
-  // Real captures emit `null` (not an absent key) for the empty case, so these
-  // are nullish rather than merely optional.
-  "windows": z.array(viewHierarchyWindowSchema).nullish(),
-  "contentHiddenRegions": z.array(contentHiddenRegionSchema).nullish(),
-  "accessibility-focused-element": viewHierarchyNodeSchema.optional(),
-  "systemInsets": systemInsetsSchema.optional(),
-  "insets": observationInsetsSchema.optional()
-}).passthrough();
+export const viewHierarchyResultSchema = z
+  .object({
+    hierarchy: z
+      .object({
+        error: z.string().optional(),
+        node: hierarchyNodeField,
+      })
+      .passthrough()
+      .optional(),
+    // Real captures emit `null` (not an absent key) for the empty case, so these
+    // are nullish rather than merely optional.
+    windows: z.array(viewHierarchyWindowSchema).nullish(),
+    contentHiddenRegions: z.array(contentHiddenRegionSchema).nullish(),
+    "accessibility-focused-element": viewHierarchyNodeSchema.optional(),
+    systemInsets: systemInsetsSchema.optional(),
+    insets: observationInsetsSchema.optional(),
+  })
+  .passthrough();
 
 /**
  * A `MediaView` entry from the `elements.media` array. Real captures carry an
@@ -386,9 +458,11 @@ export const viewHierarchyResultSchema = z.object({
  * other bounds, so it routes through {@link elementBoundsSchema} too (its other
  * fields — `mediaType`, `className`, `resourceId`, … — ride `.passthrough()`).
  */
-const observeMediaSchema = z.object({
-  bounds: elementBoundsSchema.optional()
-}).passthrough();
+const observeMediaSchema = z
+  .object({
+    bounds: elementBoundsSchema.optional(),
+  })
+  .passthrough();
 
 /**
  * The flattened `elements` block of an observe result. Each category is an array
@@ -397,12 +471,14 @@ const observeMediaSchema = z.object({
  * every entry's `bounds` routes through the union and advertises the compact
  * tuple at every depth.
  */
-const observeElementsSchema = z.object({
-  clickable: z.array(viewHierarchyNodeSchema),
-  scrollable: z.array(viewHierarchyNodeSchema),
-  text: z.array(viewHierarchyNodeSchema),
-  media: z.array(observeMediaSchema)
-}).passthrough();
+const observeElementsSchema = z
+  .object({
+    clickable: z.array(viewHierarchyNodeSchema),
+    scrollable: z.array(viewHierarchyNodeSchema),
+    text: z.array(viewHierarchyNodeSchema),
+    media: z.array(observeMediaSchema),
+  })
+  .passthrough();
 
 /**
  * Machine-readable `outputSchema` for the headline `observe` tool (issue #3025).
@@ -433,16 +509,18 @@ export const deviceLockSchema = z.object({
  * are always the compact `[left, top, right, bottom]` tuple, so this uses the
  * tuple schema directly rather than the `elementBoundsSchema` union.
  */
-export const skeletonElementSchema = z.object({
-  id: z.string().optional(),
-  label: z.string().optional(),
-  bounds: compactBoundsTupleSchema.describe(
-    "Bounds as the compact [left, top, right, bottom] tuple — always this shape " +
-      "for skeleton entries."
-  ),
-  affordances: z.array(z.enum(["tap", "long-press", "input", "scroll", "toggle"])),
-  checked: z.boolean().optional()
-}).passthrough();
+export const skeletonElementSchema = z
+  .object({
+    id: z.string().optional(),
+    label: z.string().optional(),
+    bounds: compactBoundsTupleSchema.describe(
+      "Bounds as the compact [left, top, right, bottom] tuple — always this shape " +
+        "for skeleton entries.",
+    ),
+    affordances: z.array(z.enum(["tap", "long-press", "input", "scroll", "toggle"])),
+    checked: z.boolean().optional(),
+  })
+  .passthrough();
 
 /**
  * Progressive-disclosure scoping metadata (issue #4344), present only when a
@@ -450,65 +528,99 @@ export const skeletonElementSchema = z.object({
  * payload. `regionPx` routes through {@link elementBoundsSchema} so its bounds
  * advertise the compact tuple like every other bounds.
  */
-export const observeScopeMetadataSchema = z.object({
-  applied: z.array(z.enum(["focus", "region", "overview"])),
-  gatedOff: z.array(z.enum(["focus", "region", "overview"])).optional(),
-  nodesBefore: z.number().int().nonnegative(),
-  nodesAfter: z.number().int().nonnegative(),
-  regionPx: elementBoundsSchema.optional(),
-  focus: z.object({
-    by: z.enum(["anchor", "foreground-app"]),
-    matched: z.boolean(),
-    packageName: z.string().optional()
-  }).passthrough().optional()
-}).passthrough();
+export const observeScopeMetadataSchema = z
+  .object({
+    applied: z.array(z.enum(["focus", "region", "overview"])),
+    gatedOff: z.array(z.enum(["focus", "region", "overview"])).optional(),
+    nodesBefore: z.number().int().nonnegative(),
+    nodesAfter: z.number().int().nonnegative(),
+    regionPx: elementBoundsSchema.optional(),
+    focus: z
+      .object({
+        by: z.enum(["anchor", "foreground-app"]),
+        matched: z.boolean(),
+        packageName: z.string().optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
 
 /** Windowed perf snapshot (opt-in via AUTOMOBILE_OBSERVE_PERF_SNAPSHOT). */
 const perfSnapshotSchema = z.object({
   windowMs: z.number(),
   sampleCount: z.number().int().nonnegative(),
   oldestSampleAgeMs: z.number().nullable(),
-  fps: z.object({
-    p50: z.number(), p90: z.number(), p95: z.number(), p99: z.number()
-  }).nullable(),
+  fps: z
+    .object({
+      p50: z.number(),
+      p90: z.number(),
+      p95: z.number(),
+      p99: z.number(),
+    })
+    .nullable(),
+  frameTimeMs: z
+    .object({
+      p50: z.number(),
+      p90: z.number(),
+      p95: z.number(),
+      p99: z.number(),
+    })
+    .nullable(),
   jank: z.object({ total: z.number(), perSecond: z.number().nullable() }).nullable(),
   touchLatencyMs: z.object({ p50: z.number(), p95: z.number(), latest: z.number() }).nullable(),
   cpu: z.object({ avg: z.number(), latest: z.number() }).nullable(),
-  memoryMb: z.object({ avg: z.number(), latest: z.number() }).nullable()
+  memoryMb: z.object({ avg: z.number(), latest: z.number() }).nullable(),
+  memoryBreakdownMb: z
+    .object({
+      javaHeap: z.number().nullable(),
+      nativeHeap: z.number().nullable(),
+      code: z.number().nullable(),
+      stack: z.number().nullable(),
+      graphics: z.number().nullable(),
+      privateOther: z.number().nullable(),
+      system: z.number().nullable(),
+    })
+    .nullable(),
+  startup: z.object({ displayedMs: z.number(), ageMs: z.number() }).nullable(),
 });
 
-export const observeResultSchema = z.object({
-  screenSize: screenSizeSchema.optional(),
-  systemInsets: systemInsetsSchema.optional(),
-  insets: observationInsetsSchema.optional(),
-  layoutWarnings: z.object({
-    scope: z.enum(["full", "truncated", "scoped"]),
-    total: z.number().optional(),
-    warnings: z.array(layoutWarningSchema),
-  }).optional(),
-  viewHierarchy: viewHierarchyResultSchema.optional(),
-  skeleton: z.array(skeletonElementSchema).optional(),
-  activeWindow: activeWindowSchema.optional(),
-  screenIdentity: screenIdentitySchema.optional(),
-  elements: observeElementsSchema.optional(),
-  selectedElements: z.array(selectedElementSchema).optional(),
-  focusedElement: elementSchema.optional(),
-  accessibilityFocusedElement: elementSchema.optional(),
-  awaitedElement: elementSchema.optional(),
-  matched: z.boolean().optional(),
-  settled: z.boolean().optional(),
-  timedOut: z.boolean().optional(),
-  polls: z.number().int().nonnegative().optional(),
-  waitMs: z.number().nonnegative().optional(),
-  matchedElement: elementSchema.optional(),
-  candidates: z.array(elementSchema).optional(),
-  freshness: freshnessSchema.optional(),
-  predictions: predictionsSchema.optional(),
-  accessibilityState: accessibilityStateSchema.optional(),
-  deviceLock: deviceLockSchema.optional(),
-  perfSnapshot: perfSnapshotSchema.optional(),
-  observeScope: observeScopeMetadataSchema.optional()
-}).passthrough();
+export const observeResultSchema = z
+  .object({
+    screenSize: screenSizeSchema.optional(),
+    systemInsets: systemInsetsSchema.optional(),
+    insets: observationInsetsSchema.optional(),
+    layoutWarnings: z
+      .object({
+        scope: z.enum(["full", "truncated", "scoped"]),
+        total: z.number().optional(),
+        warnings: z.array(layoutWarningSchema),
+      })
+      .optional(),
+    viewHierarchy: viewHierarchyResultSchema.optional(),
+    skeleton: z.array(skeletonElementSchema).optional(),
+    activeWindow: activeWindowSchema.optional(),
+    screenIdentity: screenIdentitySchema.optional(),
+    elements: observeElementsSchema.optional(),
+    selectedElements: z.array(selectedElementSchema).optional(),
+    focusedElement: elementSchema.optional(),
+    accessibilityFocusedElement: elementSchema.optional(),
+    awaitedElement: elementSchema.optional(),
+    matched: z.boolean().optional(),
+    settled: z.boolean().optional(),
+    timedOut: z.boolean().optional(),
+    polls: z.number().int().nonnegative().optional(),
+    waitMs: z.number().nonnegative().optional(),
+    matchedElement: elementSchema.optional(),
+    candidates: z.array(elementSchema).optional(),
+    freshness: freshnessSchema.optional(),
+    predictions: predictionsSchema.optional(),
+    accessibilityState: accessibilityStateSchema.optional(),
+    deviceLock: deviceLockSchema.optional(),
+    perfSnapshot: perfSnapshotSchema.optional(),
+    observeScope: observeScopeMetadataSchema.optional(),
+  })
+  .passthrough();
 
 export const observeToolResultSchema = z.union([
   observeResultSchema,

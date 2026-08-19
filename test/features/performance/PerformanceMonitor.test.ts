@@ -7,6 +7,8 @@ import {
   ServerGetter,
   SimCtlClientFactory,
   ExecFileAsyncFn,
+  setLastTtiMs,
+  getLastStartupTimingMs,
 } from "../../../src/features/performance/PerformanceMonitor";
 import { LivePerformanceData } from "../../../src/daemon/performancePushSocketServer";
 import { PerfWindowBuffer } from "../../../src/features/performance/PerfWindowBuffer";
@@ -121,10 +123,25 @@ describe("PerformanceMonitor", () => {
     // uptime response
     adb.setCommandResult("shell cat /proc/uptime", "1000.00 800.00\n");
 
-    // meminfo response
+    // meminfo response — full output (no on-device grep) so the App Summary
+    // breakdown can be parsed host-side. Pss column is the first number per row.
     adb.setCommandResult(
-      "shell dumpsys meminfo com.example.app | grep \"TOTAL PSS\"",
-      "        TOTAL PSS:   102400\n"
+      "shell dumpsys meminfo com.example.app",
+      `
+       App Summary
+                           Pss(KB)                        Rss(KB)
+                            ------                         ------
+               Java Heap:    20480                          30000
+             Native Heap:    10240                          15000
+                    Code:     8192                          10000
+                   Stack:      512                            600
+                Graphics:     4096                           5000
+           Private Other:     2048
+                  System:     1024
+                 Unknown:                                    4000
+
+               TOTAL PSS:   102400            TOTAL RSS:   150000       TOTAL SWAP (KB):    2048
+      `
     );
   }
 
@@ -627,6 +644,14 @@ describe("PerformanceMonitor", () => {
       const snap = buffer.snapshot("device-1", fakeTimer.now(), 60000);
       expect(snap.sampleCount).toBeGreaterThanOrEqual(1);
       expect(snap.fps).not.toBeNull();
+      // gfxinfo's native frame-time percentiles are parsed from the same dumpsys
+      // output (no extra device call) and surfaced latest-wins.
+      expect(snap.frameTimeMs).toEqual({ p50: 8.5, p90: 12.3, p95: 15.7, p99: 22.1 });
+      // The App Summary breakdown comes from the same meminfo pass as TOTAL PSS.
+      expect(snap.memoryBreakdownMb).toEqual({
+        javaHeap: 20, nativeHeap: 10, code: 8, stack: 0.5,
+        graphics: 4, privateOther: 2, system: 1,
+      });
     });
 
     it("primes gfxinfo while preserving non-gfx metrics from the first tick", async () => {
@@ -1231,6 +1256,24 @@ root       1  0.0  0.0   407056   1632   ??  Ss   Mon09AM   0:01.23 /sbin/launch
       await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
 
       expect(fakeTelemetry.lastContext).toBe("emulator-5554");
+    });
+  });
+
+  describe("getLastStartupTimingMs", () => {
+    it("returns the last recorded launch displayed time with a fresh age", () => {
+      // Unique package so the module-global store does not leak across tests.
+      const pkg = "com.example.startup.fresh";
+      setLastTtiMs(pkg, 742);
+
+      const startup = getLastStartupTimingMs(pkg);
+      expect(startup).not.toBeNull();
+      expect(startup!.displayedMs).toBe(742);
+      expect(startup!.ageMs).toBeGreaterThanOrEqual(0);
+      expect(startup!.ageMs).toBeLessThan(60000);
+    });
+
+    it("returns null for a package with no recorded launch", () => {
+      expect(getLastStartupTimingMs("com.example.startup.never")).toBeNull();
     });
   });
 });

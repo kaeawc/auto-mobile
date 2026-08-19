@@ -6489,6 +6489,37 @@
                 }
               ]
             },
+            "frameTimeMs": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "p50": {
+                      "type": "number"
+                    },
+                    "p90": {
+                      "type": "number"
+                    },
+                    "p95": {
+                      "type": "number"
+                    },
+                    "p99": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "p50",
+                    "p90",
+                    "p95",
+                    "p99"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "jank": {
               "anyOf": [
                 {
@@ -6591,6 +6622,121 @@
                   "type": "null"
                 }
               ]
+            },
+            "memoryBreakdownMb": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "javaHeap": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "nativeHeap": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "code": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "stack": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "graphics": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "privateOther": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "system": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "javaHeap",
+                    "nativeHeap",
+                    "code",
+                    "stack",
+                    "graphics",
+                    "privateOther",
+                    "system"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "startup": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "displayedMs": {
+                      "type": "number"
+                    },
+                    "ageMs": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "displayedMs",
+                    "ageMs"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -6598,10 +6744,13 @@
             "sampleCount",
             "oldestSampleAgeMs",
             "fps",
+            "frameTimeMs",
             "jank",
             "touchLatencyMs",
             "cpu",
-            "memoryMb"
+            "memoryMb",
+            "memoryBreakdownMb",
+            "startup"
           ],
           "additionalProperties": false
         },

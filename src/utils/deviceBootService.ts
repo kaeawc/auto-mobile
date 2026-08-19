@@ -20,6 +20,26 @@ import { runWithAbortSignal } from "./AbortContext";
 
 const ABORT_SETTLEMENT_GRACE_MS = 1_000;
 
+/**
+ * True for an `AbortSignal.reason` that carries no caller-supplied context: a
+ * literal `undefined` (used by synthetic/fake signals in tests), or the
+ * platform's own default `DOMException` that `AbortController.abort()`
+ * synthesizes when called with no argument (`name: "AbortError"`).
+ *
+ * A bare `abort()` never leaves `reason` as `undefined` on a real
+ * `AbortSignal` — the runtime fills in that default `DOMException` — so this
+ * is the actual signal a generic/unlabeled external cancellation needs to be
+ * detected by. An explicit `abort(null)` deliberately stays "not default":
+ * `null !== undefined` and `null` is not a `DOMException`, so a caller who
+ * explicitly cancels with a `null` reason still gets that reason back as-is.
+ * Any other explicit reason (`Error`, `DeviceLostError`, string, etc.) is
+ * likewise left untouched — only this platform sentinel is relabeled with
+ * boot-phase context (issue #5394).
+ */
+function isDefaultAbortReason(reason: unknown): boolean {
+  return reason === undefined || (reason instanceof DOMException && reason.name === "AbortError");
+}
+
 /** Inputs which affect device discovery, creation, and readiness, but not MCP sessions or automation setup. */
 export interface DeviceBootRequest {
   platform: "android" | "ios";
@@ -418,7 +438,7 @@ export class DeviceBootService {
       ? new Promise<never>((_resolve, reject) => {
           const rejectForAbort = () => {
             reject(
-              externalSignal.reason === undefined
+              isDefaultAbortReason(externalSignal.reason)
                 ? new ActionableError(`startDevice request cancelled while ${phase}`)
                 : externalSignal.reason,
             );
@@ -474,7 +494,7 @@ export class DeviceBootService {
 
   private throwExternalAbortReason(signal: AbortSignal | undefined, phase: string): void {
     if (signal?.aborted) {
-      if (signal.reason === undefined) {
+      if (isDefaultAbortReason(signal.reason)) {
         throw new ActionableError(`startDevice cancelled while ${phase}`);
       }
       throw signal.reason;

@@ -3,11 +3,12 @@ import { describe, expect, it } from "bun:test";
 import { DeviceBootService, type DeviceBootProgress } from "../../src/utils/deviceBootService";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
-import type { BootedDevice, DeviceInfo } from "../../src/models";
+import { ActionableError, type BootedDevice, type DeviceInfo } from "../../src/models";
 import type { DeviceMatchCriteria } from "../../src/models/DeviceMatchCriteria";
 import type { DeviceBootRecovery } from "../../src/utils/deviceBootRecovery";
 import type { Timer } from "../../src/utils/SystemTimer";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { DeviceLostError } from "../../src/server/deviceLossOutcome";
 
 const image: DeviceInfo = {
   name: "Pixel_9_API_35",
@@ -331,7 +332,11 @@ describe("DeviceBootService", () => {
     await discoveryStarted;
     controller.abort();
 
-    await expect(boot).rejects.toBe(controller.signal.reason);
+    // A bare abort() carries the platform's default AbortError DOMException as
+    // `reason`, not `undefined` — it must still be relabeled with the boot
+    // phase in flight (#5394), not surfaced raw.
+    await expect(boot).rejects.toBeInstanceOf(ActionableError);
+    await expect(boot).rejects.toThrow("startDevice cancelled while discovering running devices");
     resolveDiscovery([running]);
     await Promise.resolve();
 
@@ -371,7 +376,9 @@ describe("DeviceBootService", () => {
     controller.abort();
 
     resolveStart(handle);
-    await expect(boot).rejects.toBe(controller.signal.reason);
+    // Bare abort(): default AbortError DOMException relabeled with phase context.
+    await expect(boot).rejects.toBeInstanceOf(ActionableError);
+    await expect(boot).rejects.toThrow("startDevice cancelled while starting the device");
     await Promise.resolve();
     await Promise.resolve();
 
@@ -455,7 +462,11 @@ describe("DeviceBootService", () => {
     controller.abort();
     resolveProgress();
 
-    await expect(boot).rejects.toBe(controller.signal.reason);
+    // Bare abort(): default AbortError DOMException relabeled with phase context.
+    await expect(boot).rejects.toBeInstanceOf(ActionableError);
+    await expect(boot).rejects.toThrow(
+      "startDevice cancelled while reporting 60% device boot progress",
+    );
     expect(killCount).toBe(1);
     expect(devices.wasMethodCalled("waitForDeviceReady")).toBe(false);
   });
@@ -498,7 +509,11 @@ describe("DeviceBootService", () => {
     await finalProgressStarted;
     controller.abort();
 
-    await expect(boot).rejects.toBe(controller.signal.reason);
+    // Bare abort(): default AbortError DOMException relabeled with phase context.
+    await expect(boot).rejects.toBeInstanceOf(ActionableError);
+    await expect(boot).rejects.toThrow(
+      "startDevice cancelled while reporting 100% device boot progress",
+    );
     resolveFinalProgress();
     await Promise.resolve();
 
@@ -700,5 +715,139 @@ describe("DeviceBootService", () => {
     });
 
     expect(provisionCriteria).toMatchObject({ minOsVersion: "26.3", maxOsVersion: "26.3" });
+  });
+
+  describe("bare external abort phase labeling (#5394)", () => {
+    // "listing device images" and "waiting for device boot readiness" both
+    // default `awaitAbortSettlement` to true, so the fake operation below
+    // (which never cooperatively observes the abort signal) is only unstuck
+    // by advancing the FakeTimer past ABORT_SETTLEMENT_GRACE_MS -- mirroring
+    // the deterministic pattern the #5393 deadlock fix established. Skipping
+    // this advance hangs `bun test` outright rather than merely failing.
+    const ABORT_SETTLEMENT_GRACE_MS = 1_000;
+
+    it("labels a bare abort during image listing with its boot phase", async () => {
+      const devices = new FakeDeviceUtils();
+      const matcher = new FakeDeviceMatcher();
+      const timer = new FakeTimer();
+      const controller = new AbortController();
+      let markListingStarted!: () => void;
+      const listingStarted = new Promise<void>((resolve) => {
+        markListingStarted = resolve;
+      });
+      const pendingImages = new Promise<DeviceInfo[]>(() => {});
+      devices.listDeviceImages = async () => {
+        markListingStarted();
+        return pendingImages;
+      };
+
+      const boot = service(devices, matcher, undefined, timer).boot({
+        platform: "android",
+        signal: controller.signal,
+      });
+      void boot.catch(() => {});
+      await listingStarted;
+      controller.abort();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      timer.advanceTime(ABORT_SETTLEMENT_GRACE_MS);
+
+      await expect(boot).rejects.toBeInstanceOf(ActionableError);
+      await expect(boot).rejects.toThrow("startDevice cancelled while listing device images");
+    });
+
+    it("labels a bare abort during device boot readiness with its boot phase", async () => {
+      const devices = new FakeDeviceUtils();
+      const matcher = new FakeDeviceMatcher();
+      const timer = new FakeTimer();
+      const controller = new AbortController();
+      let markReadinessStarted!: () => void;
+      const readinessStarted = new Promise<void>((resolve) => {
+        markReadinessStarted = resolve;
+      });
+      const pendingReadiness = new Promise<BootedDevice>(() => {});
+      devices.setDeviceImages("android", [image]);
+      matcher.setImageResult(image);
+      devices.setMockChildProcess(image.name, { kill: () => true, pid: 12 } as any);
+      devices.waitForDeviceReady = async () => {
+        markReadinessStarted();
+        return pendingReadiness;
+      };
+
+      const boot = service(devices, matcher, undefined, timer).boot({
+        platform: "android",
+        signal: controller.signal,
+      });
+      void boot.catch(() => {});
+      await readinessStarted;
+      controller.abort();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      timer.advanceTime(ABORT_SETTLEMENT_GRACE_MS);
+
+      await expect(boot).rejects.toBeInstanceOf(ActionableError);
+      await expect(boot).rejects.toThrow(
+        "startDevice cancelled while waiting for device boot readiness",
+      );
+    });
+
+    it("preserves a tracked device-loss reason over the generic abort label", async () => {
+      const devices = new FakeDeviceUtils();
+      const matcher = new FakeDeviceMatcher();
+      const timer = new FakeTimer();
+      const controller = new AbortController();
+      const deviceLoss = new DeviceLostError("emulator-5554", "device-disconnected:emulator-5554");
+      let markListingStarted!: () => void;
+      const listingStarted = new Promise<void>((resolve) => {
+        markListingStarted = resolve;
+      });
+      const pendingImages = new Promise<DeviceInfo[]>(() => {});
+      devices.listDeviceImages = async () => {
+        markListingStarted();
+        return pendingImages;
+      };
+
+      const boot = service(devices, matcher, undefined, timer).boot({
+        platform: "android",
+        signal: controller.signal,
+      });
+      void boot.catch(() => {});
+      await listingStarted;
+      controller.abort(deviceLoss);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      timer.advanceTime(ABORT_SETTLEMENT_GRACE_MS);
+
+      // A tracked device-loss reason takes precedence over the generic
+      // phase-labeled ActionableError: the caller-supplied `DeviceLostError`
+      // surfaces unchanged, not wrapped or relabeled (#5394).
+      await expect(boot).rejects.toBe(deviceLoss);
+    });
+
+    it("preserves an explicit AbortError-shaped reason distinct from the platform default", async () => {
+      const devices = new FakeDeviceUtils();
+      const matcher = new FakeDeviceMatcher();
+      const timer = new FakeTimer();
+      const controller = new AbortController();
+      let markListingStarted!: () => void;
+      const listingStarted = new Promise<void>((resolve) => {
+        markListingStarted = resolve;
+      });
+      const pendingImages = new Promise<DeviceInfo[]>(() => {});
+      devices.listDeviceImages = async () => {
+        markListingStarted();
+        return pendingImages;
+      };
+
+      const boot = service(devices, matcher, undefined, timer).boot({
+        platform: "android",
+        signal: controller.signal,
+      });
+      void boot.catch(() => {});
+      await listingStarted;
+      const explicitReason = new Error("caller-cancelled");
+      controller.abort(explicitReason);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      timer.advanceTime(ABORT_SETTLEMENT_GRACE_MS);
+
+      await expect(boot).rejects.toBe(explicitReason);
+    });
   });
 });

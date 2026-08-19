@@ -19,7 +19,51 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/ios/local-sim-build-args.sh disable=SC1091
 source "${SCRIPT_DIR}/local-sim-build-args.sh"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-IOS_DIR="${PROJECT_ROOT}/ios"
+# IOS_DIR is overridable (tests point it at a fixture dir); defaults to ios/.
+IOS_DIR="${IOS_DIR:-${PROJECT_ROOT}/ios}"
+
+# Optional positional args restrict which Xcode projects get tested, by name
+# (without the .xcodeproj suffix). With no args, every project under ios/ is
+# tested (legacy behavior). CI's Playground job passes "Playground" so the
+# heavier CtrlProxy tests (covered by the XCTestRunner simulator job) are not
+# double-run here.
+REQUESTED_PROJECTS=("$@")
+
+# Discover and filter projects up front so a dry run needs no Xcode. The dry run
+# (XCODE_TEST_DRY_RUN=1) prints the selected project names and exits, which is
+# how test/bats/xcode-test-project-filter.bats pins the filter on any host. The
+# match is inlined (rather than a helper invoked in an `if`) so `set -e` stays
+# active for the rest of the loop body (shellcheck SC2310).
+SELECTED_XCODEPROJ_DIRS=()
+while IFS= read -r _xcodeproj; do
+    [ -z "${_xcodeproj}" ] && continue
+    _name="$(basename "${_xcodeproj}" .xcodeproj)"
+    _match=0
+    if [ ${#REQUESTED_PROJECTS[@]} -eq 0 ]; then
+        # No filter given: every project is selected (legacy behavior).
+        _match=1
+    else
+        for _want in "${REQUESTED_PROJECTS[@]}"; do
+            [ "${_want}" = "${_name}" ] && _match=1
+        done
+    fi
+    [ "${_match}" -eq 1 ] && SELECTED_XCODEPROJ_DIRS+=("${_xcodeproj}")
+done < <(find "${IOS_DIR}" -name "*.xcodeproj" -type d 2>/dev/null || true)
+
+# Fail closed: an explicit filter that matches nothing is a misconfiguration
+# (e.g. a renamed project), not a reason to pass a gating job with zero tests.
+# With no filter, an empty result is handled later as a benign no-op.
+if [ ${#REQUESTED_PROJECTS[@]} -ne 0 ] && [ ${#SELECTED_XCODEPROJ_DIRS[@]} -eq 0 ]; then
+    echo "Error: no Xcode project under ${IOS_DIR} matched: ${REQUESTED_PROJECTS[*]}" >&2
+    exit 1
+fi
+
+if [ "${XCODE_TEST_DRY_RUN:-0}" = "1" ]; then
+    for _xcodeproj in "${SELECTED_XCODEPROJ_DIRS[@]}"; do
+        basename "${_xcodeproj}" .xcodeproj
+    done
+    exit 0
+fi
 
 # On a local arm64 host, build only the arch the simulator runs and skip the
 # index store; empty in CI / on Intel so those keep building universal (#5024).
@@ -108,17 +152,16 @@ echo ""
 # Build destination string
 DESTINATION="platform=iOS Simulator,id=${SIMULATOR_ID}"
 
-# Find all xcodeproj directories
-echo -e "${BLUE}Searching for Xcode projects...${NC}"
-XCODEPROJ_DIRS=$(find "${IOS_DIR}" -name "*.xcodeproj" -type d 2>/dev/null || true)
+# Projects were discovered and filtered up front (see SELECTED_XCODEPROJ_DIRS).
+echo -e "${BLUE}Testing Xcode projects: ${SELECTED_XCODEPROJ_DIRS[*]:-none}${NC}"
 
-if [ -z "${XCODEPROJ_DIRS}" ]; then
-    echo -e "${YELLOW}No Xcode projects found in ${IOS_DIR}${NC}"
+if [ ${#SELECTED_XCODEPROJ_DIRS[@]} -eq 0 ]; then
+    echo -e "${YELLOW}No matching Xcode projects found in ${IOS_DIR}${NC}"
     exit 0
 fi
 
 # Test each project
-for xcodeproj in ${XCODEPROJ_DIRS}; do
+for xcodeproj in "${SELECTED_XCODEPROJ_DIRS[@]}"; do
     PROJECT_NAME=$(basename "${xcodeproj}" .xcodeproj)
 
     echo -e "  Testing ${PROJECT_NAME}..."
@@ -132,10 +175,16 @@ for xcodeproj in ${XCODEPROJ_DIRS}; do
         continue
     fi
 
-    # Run tests for the first scheme (usually the main app scheme)
+    # Prefer the scheme whose name matches the project (e.g. Playground.xcodeproj
+    # → the "Playground" scheme, which wires the PlaygroundTests test action).
+    # xcodebuild -list also surfaces auto-generated schemes for dependency
+    # targets (e.g. "AutoMobileSDK") that have no test action and can sort first,
+    # so a blind `head -1` would try to test the wrong scheme. Fall back to the
+    # first scheme when no name matches (preserves legacy single-scheme behavior).
     TEST_SUCCESS=true
     TESTS_RAN=false
-    FIRST_SCHEME=$(echo "${SCHEMES}" | head -1)
+    FIRST_SCHEME=$(echo "${SCHEMES}" | grep -Fx "${PROJECT_NAME}" | head -1 || true)
+    [ -z "${FIRST_SCHEME}" ] && FIRST_SCHEME=$(echo "${SCHEMES}" | head -1)
 
     if [ -n "${FIRST_SCHEME}" ]; then
         echo -e "    Testing scheme: ${FIRST_SCHEME}..."

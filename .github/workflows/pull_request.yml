@@ -862,7 +862,18 @@ jobs:
           gradle-tasks: "detektMain detektTest"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
-          reuse-configuration-cache: true
+          # Configuration-cache reuse is deliberately OFF here (#5332). A restored
+          # config-cache entry intermittently evaluated the Metro Gradle plugin
+          # classpath under a stale JVM context, failing ~2min with a generic
+          # exit 1 and NO `.kt` annotations ("Dependency requires at least JVM
+          # runtime version 21. This build uses a Java 17 JVM.") even though the
+          # action pins JDK 21 and local `--rerun-tasks` runs are green. Disabling
+          # reuse removes that flake deterministically; the Gradle BUILD cache
+          # (the real speed win) stays on, so the cost is only the configuration
+          # phase, not a full recompile. Do not flip this back to true without
+          # first fixing the underlying config-cache/JVM interaction -- the guard
+          # in test/bats/detekt-config-cache-disabled.bats pins it.
+          reuse-configuration-cache: false
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
       - name: "Upload Detekt Reports"

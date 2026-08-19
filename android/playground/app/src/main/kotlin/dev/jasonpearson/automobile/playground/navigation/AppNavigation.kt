@@ -30,6 +30,7 @@ import dev.jasonpearson.automobile.demos.TapTargetsDemoScreen
 import dev.jasonpearson.automobile.demos.UxFlowDetailsScreen
 import dev.jasonpearson.automobile.demos.UxFlowStartScreen
 import dev.jasonpearson.automobile.demos.UxFlowSummaryScreen
+import dev.jasonpearson.automobile.design.system.demo.DesignSystemDemoScreen
 import dev.jasonpearson.automobile.home.HomeScreen
 import dev.jasonpearson.automobile.login.ui.LoginScreen
 import dev.jasonpearson.automobile.mediaplayer.VideoPlayerScreen
@@ -150,7 +151,8 @@ fun determineStartDestinationWithDeepLink(
           is DemoTapTargetsDestination,
           is DemoBugReproDestination,
           is DemoHandledExceptionDestination,
-          is DemoNetworkTestDestination -> {
+          is DemoNetworkTestDestination,
+          is DesignSystemDemoDestination -> {
             // For protected destinations, ensure user is authenticated
             when {
               !hasCompletedOnboarding -> {
@@ -285,7 +287,8 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
             is DemoTapTargetsDestination,
             is DemoBugReproDestination,
             is DemoHandledExceptionDestination,
-            is DemoNetworkTestDestination -> {
+            is DemoNetworkTestDestination,
+            is DesignSystemDemoDestination -> {
               // For protected destinations, ensure user is authenticated
               when {
                 !userPreferences.hasCompletedOnboarding -> {
@@ -581,8 +584,20 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
                 backStack.add(DemoHandledExceptionDestination)
               },
               onNavigateToNetworkTest = { backStack.add(DemoNetworkTestDestination) },
+              onNavigateToDesignSystem = { backStack.add(DesignSystemDemoDestination) },
               onNavigateBack = { backStack.removeLastOrNull() },
             )
+          }
+        }
+
+        entry<DesignSystemDemoDestination> { destination ->
+          Navigation3Adapter.TrackNavigation(destination)
+          LaunchedEffect(Unit) {
+            Log.d(TAG, "Navigated to DesignSystemDemoScreen")
+            analyticsTracker.trackScreenView("DesignSystemDemoScreen")
+          }
+          Box(modifier = Modifier.destinationSemanticModifier<DesignSystemDemoDestination>()) {
+            DesignSystemDemoScreen(onBackClick = { backStack.removeLastOrNull() })
           }
         }
 

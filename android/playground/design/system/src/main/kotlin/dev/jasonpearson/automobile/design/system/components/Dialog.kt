@@ -17,6 +17,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import dev.jasonpearson.automobile.design.system.theme.AutoMobileDimensions
 import dev.jasonpearson.automobile.design.system.theme.AutoMobileTheme
@@ -42,7 +43,10 @@ fun AutoMobileAlertDialog(
       if (dismissButtonText != null && onDismissClick != null) {
         { AutoMobileTextButton(text = dismissButtonText, onClick = onDismissClick) }
       } else null,
-    modifier = modifier,
+    // Crayon border on the dialog surface — the same treatment as the bordered
+    // Card, matched to the dialog's rounded shape (#5115).
+    modifier =
+      modifier.crayonBorder(color = MaterialTheme.colorScheme.outline, cornerRadius = 28.dp),
     containerColor = MaterialTheme.colorScheme.surface,
     titleContentColor = MaterialTheme.colorScheme.onSurface,
     textContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -64,6 +68,8 @@ fun AutoMobileCustomDialog(
     properties = properties,
   ) {
     Card(
+      // Crayon border on the custom dialog surface (#5115).
+      modifier = Modifier.crayonBorder(color = MaterialTheme.colorScheme.outline),
       colors =
         CardDefaults.cardColors(
           containerColor = MaterialTheme.colorScheme.surface,

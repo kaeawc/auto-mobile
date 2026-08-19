@@ -33,7 +33,14 @@ fun AutoMobileTopAppBar(
 ) {
   TopAppBar(
     title = title,
-    modifier = modifier,
+    // A crayon divider line along the bottom edge — a single sketchy stroke reads
+    // better on a bar than a full wobbly box would (#5115).
+    modifier =
+      modifier.crayonHorizontalEdge(
+        color = MaterialTheme.colorScheme.primary,
+        atBottom = true,
+        seed = 31L,
+      ),
     navigationIcon = navigationIcon,
     actions = actions,
     colors = colors,
@@ -57,7 +64,12 @@ fun AutoMobileCenterAlignedTopAppBar(
 ) {
   CenterAlignedTopAppBar(
     title = title,
-    modifier = modifier,
+    modifier =
+      modifier.crayonHorizontalEdge(
+        color = MaterialTheme.colorScheme.primary,
+        atBottom = true,
+        seed = 32L,
+      ),
     navigationIcon = navigationIcon,
     actions = actions,
     colors = colors,

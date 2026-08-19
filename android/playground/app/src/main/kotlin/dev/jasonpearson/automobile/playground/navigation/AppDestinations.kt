@@ -45,3 +45,5 @@ data class HomeDestination(
 @Serializable data object DemoHandledExceptionDestination : AppDestination
 
 @Serializable data object DemoNetworkTestDestination : AppDestination
+
+@Serializable data object DesignSystemDemoDestination : AppDestination

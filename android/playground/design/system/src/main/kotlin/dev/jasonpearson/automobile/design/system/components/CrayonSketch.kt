@@ -102,6 +102,30 @@ fun crayonOutlineOffsets(
   return jittered.dropLast(1) + jittered.first()
 }
 
+/**
+ * A hand-drawn 1-D crayon line: a deterministic, seeded perpendicular jitter of a straight baseline
+ * from `(0, 0)` to `(length, 0)`. Same [seed] -> identical points. The endpoints stay anchored on
+ * the baseline (`y == 0`) so a divider meets both edges cleanly, while interior points wobble in
+ * `y` within `[-roughness, roughness]`. `x` is monotonic across `segments + 1` samples. Pure
+ * `Offset` maths (host-testable). Used for the top-app-bar / bottom-nav divider strokes — a full
+ * [crayonBorder] would read as a box, so nav surfaces get a single sketchy line instead.
+ */
+fun crayonLinePoints(
+  length: Float,
+  seed: Long,
+  roughness: Float,
+  segments: Int = 12,
+): List<Offset> {
+  // Zero/negative segments would drop every sample or crash the range; clamp to a single span.
+  val segs = segments.coerceAtLeast(1)
+  return (0..segs).map { i ->
+    val x = length * i / segs
+    // Anchor the endpoints on the baseline so the divider meets both component edges.
+    val jitterY = if (i == 0 || i == segs) 0f else sketchNoise(seed, i) * roughness
+    Offset(x, jitterY)
+  }
+}
+
 private fun List<Offset>.toPath(): Path =
   Path().apply {
     forEachIndexed { i, o -> if (i == 0) moveTo(o.x, o.y) else lineTo(o.x, o.y) }
@@ -140,3 +164,36 @@ fun Modifier.crayonBorder(
     drawPath(main, color = color, style = solid)
   }
 }
+
+/**
+ * Draws a single hand-drawn crayon line along the top or bottom edge of the content — the nav
+ * surfaces' answer to [crayonBorder]. A full wobbly box would fight a top app bar / bottom nav, so
+ * they get one sketchy divider stroke instead (built from [crayonLinePoints]). Deterministic per
+ * [seed]; minSdk-24 safe.
+ */
+fun Modifier.crayonHorizontalEdge(
+  color: Color,
+  atBottom: Boolean,
+  thickness: Dp = 2.5.dp,
+  seed: Long = 0L,
+  roughness: Dp = 2.dp,
+): Modifier = drawWithCache {
+  val rough = roughness.toPx()
+  val strokePx = thickness.toPx()
+  // Sample ~1 point per 24dp so the wobble density is consistent across bar widths.
+  val spacing = 24.dp.toPx()
+  val seg = (size.width / spacing).toInt().coerceIn(8, 64)
+  // Inset by the stroke so the whole rounded line stays inside the component bounds.
+  val baseY = if (atBottom) size.height - strokePx else strokePx
+  val line =
+    crayonLinePoints(size.width, seed, rough, seg).map { Offset(it.x, baseY + it.y) }.toPolyline()
+  val stroke = Stroke(width = strokePx, cap = StrokeCap.Round, join = StrokeJoin.Round)
+  onDrawWithContent {
+    drawContent()
+    drawPath(line, color = color, style = stroke)
+  }
+}
+
+/** An open polyline (unlike [toPath], which closes the loop for a border). */
+private fun List<Offset>.toPolyline(): Path =
+  Path().apply { forEachIndexed { i, o -> if (i == 0) moveTo(o.x, o.y) else lineTo(o.x, o.y) } }

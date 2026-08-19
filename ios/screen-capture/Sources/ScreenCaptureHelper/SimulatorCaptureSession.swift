@@ -73,6 +73,12 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
     /// frame starvation. See issues #4350 / #4764.
     static let startCaptureDeadlineSeconds: TimeInterval = 14.0
 
+    /// Effective deadline the `startCapture()` race uses, defaulting to the
+    /// production `startCaptureDeadlineSeconds`. `internal` (not a constant) only
+    /// so `@testable` tests can shrink it to exercise the hung-start path without
+    /// a real 14s wait; production never mutates it. See issue #4350.
+    var startCaptureDeadlineSeconds: TimeInterval = SimulatorCaptureSession.startCaptureDeadlineSeconds
+
     init(
         writer: FrameWriter,
         makeStream: @escaping StreamFactory = { filter, config, delegate in
@@ -133,7 +139,7 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
         if audio {
             try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue)
         }
-        try await SimulatorCaptureSession.startCapture(stream)
+        try await startCapture(stream)
         self.stream = stream
     }
 
@@ -145,8 +151,11 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
     /// unstructured tasks and the first to finish wins; on timeout the stalled
     /// capture task is left to be reaped by process exit, which the parent
     /// triggers immediately after seeing the `error:` diagnostic.
-    private static func startCapture(_ stream: CaptureStream) async throws {
+    private func startCapture(_ stream: CaptureStream) async throws {
         let race = StartRaceState()
+        // Snapshot the deadline into a Sendable local so the unstructured tasks
+        // below capture a value rather than the non-Sendable session.
+        let deadlineSeconds = startCaptureDeadlineSeconds
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             let capture = Task {
                 do {
@@ -157,12 +166,12 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
                 }
             }
             Task {
-                let deadlineNanos = UInt64(startCaptureDeadlineSeconds * 1_000_000_000)
+                let deadlineNanos = UInt64(deadlineSeconds * 1_000_000_000)
                 try? await Task.sleep(nanoseconds: deadlineNanos)
                 if race.finish() {
                     capture.cancel()
                     continuation.resume(
-                        throwing: StartCaptureTimeoutError(deadlineSeconds: startCaptureDeadlineSeconds)
+                        throwing: StartCaptureTimeoutError(deadlineSeconds: deadlineSeconds)
                     )
                 }
             }

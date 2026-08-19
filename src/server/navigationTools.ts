@@ -17,7 +17,8 @@ export const navigateToSchema = addDeviceTargetingToSchema(z.object({
 }));
 
 export const getNavigationGraphSchema = addDeviceTargetingToSchema(z.object({
-  platform: platformSchema.default("android")
+  platform: platformSchema.default("android"),
+  appId: z.string().optional().describe("Scope the graph to this app id instead of the device's current foreground app")
 }));
 
 export const exploreSchema = addDeviceTargetingToSchema(z.object({
@@ -42,6 +43,7 @@ export interface NavigateToArgs {
 
 export interface GetNavigationGraphArgs {
   platform: Platform;
+  appId?: string;
   sessionUuid?: string;
 }
 
@@ -107,12 +109,20 @@ export function registerNavigationTools() {
     try {
       const manager = getNavigationManager(args.sessionUuid);
       const observation = RealObserveScreen.getRecentCachedResultForDevice(device.deviceId);
-      const appId = observation?.viewHierarchy?.packageName ?? observation?.activeWindow?.appId;
-      const stats = await manager.getStatsForApp(appId ?? null);
-      const graph = await manager.exportGraphForApp(appId ?? null);
+      const observedAppId = observation?.viewHierarchy?.packageName ?? observation?.activeWindow?.appId ?? null;
+      // An explicit appId scopes the read to the requested app so a concurrent
+      // hierarchy update that marks a different app current (e.g. SpringBoard)
+      // cannot redirect the query away from the app the caller cares about
+      // (issue #4579). Fall back to the device's observed foreground app.
+      const requestedAppId = args.appId ?? null;
+      const appId = requestedAppId ?? observedAppId;
+      const stats = await manager.getStatsForApp(appId);
+      const graph = await manager.exportGraphForApp(appId);
 
       return createJSONToolResponse({
         message: `Navigation graph for app: ${appId || "none"}`,
+        requestedAppId,
+        observedAppId,
         currentScreen: stats.currentScreen,
         nodeCount: stats.nodeCount,
         edgeCount: stats.edgeCount,

@@ -182,6 +182,81 @@ describe("navigation tool session graph selection", () => {
     }
   });
 
+  test("scopes the graph to an explicit appId even when the current app changed to SpringBoard", async () => {
+    // Regression for issue #4579: after SDK events reach the fixture app's
+    // graph, a concurrent hierarchy push can mark com.apple.springboard current.
+    // An explicit appId must read the fixture graph, not the current app's.
+    const graph = new FakeNavigationGraphManager();
+    Object.assign(graph, {
+      getStatsForApp: async (appId: string | null) => {
+        expect(appId).toBe("com.apple.reminders");
+        return {
+          nodeCount: 2,
+          edgeCount: 1,
+          currentScreen: null,
+          knownEdgeCount: 1,
+          unknownEdgeCount: 0,
+          toolCallHistorySize: 0,
+        };
+      },
+      exportGraphForApp: async (appId: string | null) => {
+        expect(appId).toBe("com.apple.reminders");
+        return {
+          appId,
+          currentScreen: null,
+          nodes: [
+            { screenName: "Issue4460Home", firstSeenAt: 1, lastSeenAt: 2, visitCount: 1 },
+            { screenName: "Issue4460Detail", firstSeenAt: 2, lastSeenAt: 3, visitCount: 1 },
+          ],
+          edges: [{
+            from: "Issue4460Home",
+            to: "Issue4460Detail",
+            timestamp: 3,
+            edgeType: "unknown" as const,
+          }],
+        };
+      },
+    });
+    const managerSpy = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
+      graph as unknown as NavigationGraphManager
+    );
+    // A concurrent hierarchy update marked SpringBoard current.
+    const observationSpy = spyOn(RealObserveScreen, "getRecentCachedResultForDevice").mockReturnValue({
+      viewHierarchy: { packageName: "com.apple.springboard" }
+    } as never);
+
+    try {
+      const handler = (ToolRegistry as unknown as {
+        tools: Map<string, { deviceAwareHandler?: (device: BootedDevice, args: any) => Promise<any> }>;
+      }).tools.get("getNavigationGraph")?.deviceAwareHandler;
+
+      const response = await handler!(device, {
+        platform: "ios",
+        appId: "com.apple.reminders",
+      });
+
+      const result = JSON.parse(response.content[0].text);
+      // Failures identify the queried app and the current app (diagnostics).
+      expect(result.message).toBe("Navigation graph for app: com.apple.reminders");
+      expect(result.requestedAppId).toBe("com.apple.reminders");
+      expect(result.observedAppId).toBe("com.apple.springboard");
+      expect(result).toMatchObject({
+        nodeCount: 2,
+        edgeCount: 1,
+        knownEdges: 1,
+        unknownEdges: 0,
+        screens: [
+          { name: "Issue4460Home", visitCount: 1 },
+          { name: "Issue4460Detail", visitCount: 1 },
+        ],
+        transitions: [{ from: "Issue4460Home", to: "Issue4460Detail", type: "unknown" }],
+      });
+    } finally {
+      observationSpy.mockRestore();
+      managerSpy.mockRestore();
+    }
+  });
+
   test("reports none when the target device has no cached observation", async () => {
     const staleGraph = new FakeNavigationGraphManager();
     staleGraph.setCurrentAppId("com.google.android.settings.intelligence");
@@ -222,6 +297,8 @@ describe("navigation tool session graph selection", () => {
 
       expect(JSON.parse(response.content[0].text)).toEqual({
         message: "Navigation graph for app: none",
+        requestedAppId: null,
+        observedAppId: null,
         currentScreen: null,
         nodeCount: 0,
         edgeCount: 0,

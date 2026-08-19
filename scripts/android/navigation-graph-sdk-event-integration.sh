@@ -87,8 +87,12 @@ for attempt in 1 2 3 4 5; do
     sleep 2
     continue
   fi
+  # Scope the read to the fixture package. Without --appId the daemon selects the
+  # device's latest observed foreground app, so a concurrent hierarchy push can
+  # redirect this assertion to another app's graph even though the event reached
+  # the fixture app (issue #4579).
   if ! graph="$(auto-mobile --debug --embedded-sdk --cli --session-uuid "$session_uuid" \
-    getNavigationGraph --platform android --deviceId "$device_id")"; then
+    getNavigationGraph --platform android --deviceId "$device_id" --appId "$package_id")"; then
     echo "getNavigationGraph attempt ${attempt} failed; retrying in 2s..." >&2
     sleep 2
     continue
@@ -103,6 +107,6 @@ for attempt in 1 2 3 4 5; do
   sleep 2
 done
 
-echo "error: Android SDK navigation event did not reach getNavigationGraph" >&2
+echo "error: Android SDK navigation event did not reach getNavigationGraph for app ${package_id}" >&2
 echo "last graph response: ${graph}" >&2
 exit 1

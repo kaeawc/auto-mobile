@@ -134,6 +134,9 @@ exit 1
   first_observe_line="$(grep -n -- "observe --platform android --deviceId emulator-5554" "$AUTO_MOBILE_LOG" | head -n 1 | cut -d: -f1)"
   [ "$root_line" -lt "$wait_for_device_line" ]
   [ "$launch_line" -lt "$first_observe_line" ]
+  # Regression for issue #4579: scope the graph read to the fixture package so a
+  # concurrent hierarchy push cannot redirect the query to another app's graph.
+  grep -q -- "getNavigationGraph --platform android --deviceId emulator-5554 --appId dev.jasonpearson.automobile.playground" "$AUTO_MOBILE_LOG"
 }
 
 @test "uses the workspace CLI entrypoint when the global auto-mobile install is unavailable" {

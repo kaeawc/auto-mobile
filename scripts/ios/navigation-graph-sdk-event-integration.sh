@@ -128,7 +128,11 @@ for attempt in 1 2 3 4 5; do
     sleep 2
     continue
   fi
-  if ! graph="$(auto-mobile --debug --embedded-sdk --cli --session-uuid "${session_uuid}" getNavigationGraph --platform ios --deviceId "${device_id}")"; then
+  # Scope the read to the fixture bundle. Without --appId the daemon selects the
+  # device's latest observed foreground app, so a concurrent hierarchy push that
+  # marks com.apple.springboard current makes this assertion read the wrong
+  # (empty) graph even though the events reached the fixture app (issue #4579).
+  if ! graph="$(auto-mobile --debug --embedded-sdk --cli --session-uuid "${session_uuid}" getNavigationGraph --platform ios --deviceId "${device_id}" --appId "${bundle_id}")"; then
     echo "getNavigationGraph attempt ${attempt} failed; retrying in 2s..." >&2
     sleep 2
     continue
@@ -144,6 +148,6 @@ for attempt in 1 2 3 4 5; do
   sleep 2
 done
 
-echo "error: iOS SDK navigation events did not reach getNavigationGraph" >&2
+echo "error: iOS SDK navigation events did not reach getNavigationGraph for app ${bundle_id}" >&2
 echo "last graph response: ${graph}" >&2
 exit 1

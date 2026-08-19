@@ -10,7 +10,7 @@ import {
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import type { BootedDevice, DeviceInfo } from "../../src/models";
+import { ActionableError, type BootedDevice, type DeviceInfo } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -182,9 +182,11 @@ describe("startDevice handler", () => {
     await new Promise<void>((resolve) => setImmediate(resolve));
     bootTimer.advanceTime(1_000);
 
-    // A bare abort() propagates the platform's default AbortError (#5368
-    // preserves the caller-provided abort reason as-is).
-    await expect(start).rejects.toThrow("The operation was aborted");
+    // A bare abort() carries the platform's default AbortError DOMException as
+    // its reason, not `undefined`. #5394 relabels that generic/unlabeled case
+    // with the boot phase in flight instead of letting it surface raw.
+    await expect(start).rejects.toBeInstanceOf(ActionableError);
+    await expect(start).rejects.toThrow("startDevice cancelled while listing device images");
     resolveImages([androidImage]);
     await Promise.resolve();
 
@@ -237,9 +239,13 @@ describe("startDevice handler", () => {
     controller.abort();
 
     // Progress phases skip abort settlement, so the rejection propagates
-    // immediately; a bare abort() surfaces the platform's default AbortError
-    // (#5368 preserves the caller-provided abort reason as-is).
-    await expect(start).rejects.toThrow("The operation was aborted");
+    // immediately. A bare abort() carries the platform's default AbortError
+    // DOMException as its reason; #5394 relabels it with the boot phase in
+    // flight instead of letting it surface raw.
+    await expect(start).rejects.toBeInstanceOf(ActionableError);
+    await expect(start).rejects.toThrow(
+      "startDevice cancelled while reporting 100% device boot progress",
+    );
     resolveFinalProgress();
     await Promise.resolve();
 
@@ -339,7 +345,10 @@ describe("startDevice handler", () => {
     const childProcess = new FakeExitChildProcess();
     fakeDeviceUtils.setBootedDevices("android", [discoveredDevice]);
     fakeDeviceUtils.setDeviceImages("android", [coldBootImage]);
-    fakeDeviceUtils.setMockChildProcess(coldBootImage.name, childProcess as unknown as ChildProcess);
+    fakeDeviceUtils.setMockChildProcess(
+      coldBootImage.name,
+      childProcess as unknown as ChildProcess,
+    );
     fakeMatcher.setBootedResult(null);
     fakeMatcher.setImageResult(coldBootImage);
 

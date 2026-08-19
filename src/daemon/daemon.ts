@@ -252,8 +252,8 @@ export class Daemon {
     // (heartbeat / idle / plan), rather than guessing with the replay TTL. Fires
     // for every released key — base and derived `${base}:${label}` alike; the
     // proxy matches its bound (base) UUID by exact equality (issue #4610).
-    this.sessionManager.onSessionRelease(sessionId => {
-      SessionReleaseBroadcaster.emit(sessionId);
+    this.sessionManager.onSessionRelease((sessionId, _deviceId, releaseReason) => {
+      SessionReleaseBroadcaster.emit(sessionId, releaseReason);
     });
     this.installedAppsRepository = installedAppsRepository ?? new InstalledAppsRepository();
     const recoveryConfiguration = parseDeviceRecoveryPolicy(recoveryPolicyEnvironment);
@@ -1249,7 +1249,7 @@ export class Daemon {
     this.heartbeatMonitor = new SessionHeartbeatMonitor(
       this.sessionManager,
       sessionId => this.hasActiveSessionExecution(sessionId),
-      sessionId => this.cancelAndReleaseSession(sessionId),
+      (sessionId, reason) => this.cancelAndReleaseSession(sessionId, reason),
       this.timer,
     );
     this.heartbeatMonitor.start();

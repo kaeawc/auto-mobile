@@ -5,9 +5,15 @@ import {
   ListResourcesRequestSchema,
   ReadResourceRequestSchema,
   ListResourceTemplatesRequestSchema,
+  type CallToolResult,
+  McpError,
 } from "@modelcontextprotocol/sdk/types.js";
 import { logger } from "../utils/logger";
-import { DaemonMcpProxy, type DaemonMcpProxyConfig } from "../daemon/daemonMcpProxy";
+import {
+  DaemonBoundSessionExpiredError,
+  DaemonMcpProxy,
+  type DaemonMcpProxyConfig,
+} from "../daemon/daemonMcpProxy";
 import { ActionableError } from "../models";
 import { getMcpServerVersion } from "../utils/mcpVersion";
 
@@ -19,6 +25,40 @@ export interface ProxyMcpServerOptions {
   proxyConfig?: DaemonMcpProxyConfig;
   /** Session context for tracking */
   sessionContext?: { sessionId?: string };
+}
+
+function sessionOwnershipLostPayload(error: DaemonBoundSessionExpiredError) {
+  return {
+    error: {
+      code: "session_ownership_lost",
+      message: `Session ownership lost for ${error.sessionUuid}: ${error.reason}`,
+      sessionUuid: error.sessionUuid,
+      reason: error.reason,
+    },
+  };
+}
+
+function sessionOwnershipLostMessage(error: DaemonBoundSessionExpiredError): string {
+  return JSON.stringify(sessionOwnershipLostPayload(error));
+}
+
+function sessionOwnershipLostResult(
+  error: DaemonBoundSessionExpiredError,
+): CallToolResult {
+  return {
+    content: [
+      {
+        type: "text",
+        text: sessionOwnershipLostMessage(error),
+      },
+    ],
+    isError: true,
+  };
+}
+
+function sessionOwnershipLostError(error: DaemonBoundSessionExpiredError): McpError {
+  const payload = sessionOwnershipLostPayload(error);
+  return new McpError(-32603, sessionOwnershipLostMessage(error), payload);
 }
 
 /**
@@ -92,6 +132,9 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
       const tools = await proxy.listTools();
       return { tools };
     } catch (error) {
+      if (error instanceof DaemonBoundSessionExpiredError) {
+        throw sessionOwnershipLostError(error);
+      }
       logger.error(`[ProxyServer] Failed to list tools: ${error}`);
       throw new ActionableError(
         `Failed to list tools from daemon: ${error instanceof Error ? error.message : String(error)}`
@@ -114,6 +157,12 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
       const result = await proxy.callTool(name, args);
       return result;
     } catch (error) {
+      if (error instanceof DaemonBoundSessionExpiredError) {
+        logger.warn(
+          `[ProxyServer] Session ownership lost for ${error.sessionUuid}: ${error.reason}`,
+        );
+        return sessionOwnershipLostResult(error);
+      }
       logger.error(`[ProxyServer] Tool call failed: ${name} - ${error}`);
       // Return error as tool result (not throwing) to match expected MCP behavior
       return {
@@ -134,6 +183,9 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
       const resources = await proxy.listResources();
       return { resources };
     } catch (error) {
+      if (error instanceof DaemonBoundSessionExpiredError) {
+        throw sessionOwnershipLostError(error);
+      }
       logger.error(`[ProxyServer] Failed to list resources: ${error}`);
       throw new ActionableError(
         `Failed to list resources from daemon: ${error instanceof Error ? error.message : String(error)}`
@@ -147,6 +199,9 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
       const resourceTemplates = await proxy.listResourceTemplates();
       return { resourceTemplates };
     } catch (error) {
+      if (error instanceof DaemonBoundSessionExpiredError) {
+        throw sessionOwnershipLostError(error);
+      }
       logger.error(`[ProxyServer] Failed to list resource templates: ${error}`);
       throw new ActionableError(
         `Failed to list resource templates from daemon: ${error instanceof Error ? error.message : String(error)}`
@@ -168,6 +223,9 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
       const result = await proxy.readResource(uri);
       return result;
     } catch (error) {
+      if (error instanceof DaemonBoundSessionExpiredError) {
+        throw sessionOwnershipLostError(error);
+      }
       logger.error(`[ProxyServer] Resource read failed: ${uri} - ${error}`);
       throw new ActionableError(
         `Failed to read resource from daemon: ${error instanceof Error ? error.message : String(error)}`

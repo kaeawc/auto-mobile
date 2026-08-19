@@ -61,6 +61,7 @@ class ScriptedDaemonClient implements DaemonClientLike {
       resourceError?: Error;
       daemonMethodResults?: Map<string, any>;
       daemonMethodError?: Error;
+      daemonMethodErrors?: Map<string, Error>;
     },
   ) {}
 
@@ -101,6 +102,10 @@ class ScriptedDaemonClient implements DaemonClientLike {
     const recordedParams = { ...params };
     delete recordedParams.__autoMobileBoundSessionUuid;
     this.callDaemonMethodCalls.push({ method, params: recordedParams });
+    const methodError = this.behavior.daemonMethodErrors?.get(method);
+    if (methodError) {
+      throw methodError;
+    }
     if (this.behavior.daemonMethodError) {
       throw this.behavior.daemonMethodError;
     }
@@ -181,10 +186,14 @@ describe("DaemonMcpProxy", () => {
         ]);
 
         expect(firstClient.callDaemonMethodCalls).toEqual([
+          { method: "daemon/heartbeat", params: { sessionId: "device-session-a" } },
           { method: "tools/list", params: { sessionUuid: "device-session-a" } },
+          { method: "daemon/heartbeat", params: { sessionId: "device-session-a" } },
         ]);
         expect(secondClient.callDaemonMethodCalls).toEqual([
+          { method: "daemon/heartbeat", params: { sessionId: "device-session-b" } },
           { method: "tools/list", params: { sessionUuid: "device-session-b" } },
+          { method: "daemon/heartbeat", params: { sessionId: "device-session-b" } },
         ]);
         expect(firstClient.callToolCalls).toEqual([
           {
@@ -202,6 +211,230 @@ describe("DaemonMcpProxy", () => {
         isAvailableSpy.mockRestore();
         await firstProxy.close();
         await secondProxy.close();
+      }
+    });
+
+    test("keeps two configured session bindings alive independently while idle", async () => {
+      const timer = new FakeTimer();
+      const firstClient = new FakeDaemonClient({
+        daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+      });
+      const secondClient = new FakeDaemonClient({
+        daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const firstProxy = new DaemonMcpProxy({
+        initialSessionUuid: "device-session-a",
+        clientFactory: () => firstClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+        timer,
+      });
+      const secondProxy = new DaemonMcpProxy({
+        initialSessionUuid: "device-session-b",
+        clientFactory: () => secondClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+        timer,
+      });
+
+      try {
+        await Promise.all([firstProxy.listTools(), secondProxy.listTools()]);
+        await timer.advanceTimeAsync(6_000);
+
+        expect(
+          firstClient.callDaemonMethodCalls.filter(call => call.method === "daemon/heartbeat"),
+        ).toEqual([
+          { method: "daemon/heartbeat", params: { sessionId: "device-session-a" } },
+          { method: "daemon/heartbeat", params: { sessionId: "device-session-a" } },
+          { method: "daemon/heartbeat", params: { sessionId: "device-session-a" } },
+          { method: "daemon/heartbeat", params: { sessionId: "device-session-a" } },
+        ]);
+        expect(
+          secondClient.callDaemonMethodCalls.filter(call => call.method === "daemon/heartbeat"),
+        ).toEqual([
+          { method: "daemon/heartbeat", params: { sessionId: "device-session-b" } },
+          { method: "daemon/heartbeat", params: { sessionId: "device-session-b" } },
+          { method: "daemon/heartbeat", params: { sessionId: "device-session-b" } },
+          { method: "daemon/heartbeat", params: { sessionId: "device-session-b" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await firstProxy.close();
+        await secondProxy.close();
+      }
+      expect(timer.getPendingIntervalCount()).toBe(0);
+    });
+
+    test("replays a learned session heartbeat through a recoverable daemon reconnect", async () => {
+      const timer = new FakeTimer();
+      const staleClient = new ScriptedDaemonClient({
+        daemonMethodError: new DaemonUnavailableError("Daemon socket connection lost"),
+      });
+      const freshClient = new FakeDaemonClient();
+      const clients: DaemonClientLike[] = [staleClient, freshClient];
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => clients.shift()!,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+        timer,
+      });
+
+      try {
+        await proxy.callTool("observe", {
+          sessionUuid: "device-session-a",
+          deviceId: "device-a",
+        });
+        await timer.advanceTimeAsync(2_000);
+
+        expect(staleClient.callDaemonMethodCalls).toEqual([
+          { method: "daemon/heartbeat", params: { sessionId: "device-session-a" } },
+        ]);
+        expect(staleClient.closeCallCount).toBe(1);
+        expect(freshClient.callDaemonMethodCalls).toEqual([
+          { method: "daemon/heartbeat", params: { sessionId: "device-session-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("a stale heartbeat retry cannot fence a newer explicit binding", async () => {
+      const timer = new FakeTimer();
+      const heartbeatStarted = Promise.withResolvers<void>();
+      const releaseFirstHeartbeat = Promise.withResolvers<void>();
+      const retryHeartbeatCalled = Promise.withResolvers<void>();
+      const staleClient = new FakeDaemonClient({
+        onCallDaemonMethod: async method => {
+          if (method === "daemon/heartbeat") {
+            heartbeatStarted.resolve();
+            await releaseFirstHeartbeat.promise;
+            throw new Error("Session not found: session-a");
+          }
+        },
+      });
+      const freshClient = new FakeDaemonClient({
+        onCallDaemonMethod: method => {
+          if (method === "daemon/heartbeat") {
+            retryHeartbeatCalled.resolve();
+            throw new Error("Session not found: session-a");
+          }
+        },
+      });
+      const clients: DaemonClientLike[] = [staleClient, freshClient];
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => clients.shift()!,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+        timer,
+      });
+
+      try {
+        await proxy.callTool("observe", {
+          sessionUuid: "session-a",
+          deviceId: "device-a",
+        });
+        timer.advanceTime(2_000);
+        await heartbeatStarted.promise;
+
+        await proxy.callTool("observe", {
+          sessionUuid: "session-b",
+          deviceId: "device-b",
+        });
+        releaseFirstHeartbeat.resolve();
+        await retryHeartbeatCalled.promise;
+        await Promise.resolve();
+        await Promise.resolve();
+
+        await expect(
+          proxy.callTool("observe", { deviceId: "device-b" }),
+        ).resolves.toBeDefined();
+        expect(freshClient.callToolCalls.at(-1)).toEqual({
+          toolName: "observe",
+          params: { deviceId: "device-b", sessionUuid: "session-b" },
+        });
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("normalizes an explicit session UUID before remembering and fencing it", async () => {
+      let callCount = 0;
+      const firstClient = new FakeDaemonClient({
+        onCallTool: () => {
+          callCount += 1;
+          if (callCount === 2) {
+            throw new Error("Session not found: session-a");
+          }
+        },
+      });
+      const retryClient = new ScriptedDaemonClient({
+        toolError: new Error("Session not found: session-a"),
+      });
+      const clients: DaemonClientLike[] = [firstClient, retryClient];
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => clients.shift()!,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("observe", {
+          sessionUuid: "  session-a  ",
+          deviceId: "device-a",
+        });
+        expect(firstClient.callToolCalls[0]).toEqual({
+          toolName: "observe",
+          params: { sessionUuid: "session-a", deviceId: "device-a" },
+        });
+
+        await expect(
+          proxy.callTool("observe", { deviceId: "device-a" }),
+        ).rejects.toMatchObject({
+          sessionUuid: "session-a",
+          reason: "session-not-found",
+        });
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("a release received during connection setup prevents the first explicit call", async () => {
+      const fakeClient = new FakeDaemonClient();
+      fakeClient.subscribeToNotifications = async () => {
+        fakeClient.emitNotification(
+          SESSION_RELEASED_NOTIFICATION_METHOD,
+          "session-a",
+          "heartbeat-timeout",
+        );
+      };
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await expect(
+          proxy.callTool("observe", {
+            sessionUuid: "session-a",
+            deviceId: "device-a",
+          }),
+        ).rejects.toMatchObject({
+          sessionUuid: "session-a",
+          reason: "heartbeat-timeout",
+        });
+        expect(fakeClient.callToolCalls).toEqual([]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
       }
     });
 
@@ -1445,7 +1678,7 @@ describe("DaemonMcpProxy", () => {
       // tools/list so it returns the session-scoped list (issue #4610).
       const staleClient = new ScriptedDaemonClient({
         toolResult: { content: [{ type: "text", text: "bound" }] },
-        daemonMethodError: new Error("Session not found"),
+        daemonMethodErrors: new Map([["tools/list", new Error("Session not found")]]),
       });
       const freshClient = new ScriptedDaemonClient({
         daemonMethodResults: new Map([
@@ -1467,9 +1700,11 @@ describe("DaemonMcpProxy", () => {
         expect(tools).toEqual([{ name: "scopedTool", inputSchema: {} }]);
         // The stale attempt and the reconnect retry both carry the bound session.
         expect(staleClient.callDaemonMethodCalls).toEqual([
+          { method: "daemon/heartbeat", params: { sessionId: "session-a" } },
           { method: "tools/list", params: { sessionUuid: "session-a" } },
         ]);
         expect(freshClient.callDaemonMethodCalls).toEqual([
+          { method: "daemon/heartbeat", params: { sessionId: "session-a" } },
           { method: "tools/list", params: { sessionUuid: "session-a" } },
         ]);
       } finally {
@@ -1543,12 +1778,11 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
-    test("stops replaying a bound session after the daemon session idle window elapses", async () => {
+    test("terminally fences a bound session after the replay backstop elapses", async () => {
       // The daemon's heartbeat/idle cleanup can release an ordinary session while
       // this proxy stays connected. Once the replay window elapses with no
-      // explicit-sessionUuid call refreshing the binding, a later device-aware
-      // call that omits sessionUuid must NOT be rewritten to the retired UUID —
-      // otherwise createToolExecutionContext silently recreates the session
+      // activity refreshing the binding, a later device-aware call must fail
+      // instead of silently recreating the session
       // (issue [#4610](https://github.com/kaeawc/auto-mobile/issues/4610)).
       const timer = new FakeTimer();
       const client = new ScriptedDaemonClient({
@@ -1564,12 +1798,15 @@ describe("DaemonMcpProxy", () => {
 
       try {
         await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
-        timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS);
-        await proxy.callTool("observe", { deviceId: "device-a" });
+        // Move the clock without running the keeper to model a dropped heartbeat
+        // path where the replay lease is the final safety backstop.
+        timer.setCurrentTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS);
+        await expect(proxy.callTool("observe", { deviceId: "device-a" })).rejects.toThrow(
+          /session-a.*expired/i,
+        );
 
         expect(client.callToolCalls).toEqual([
           { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
-          { toolName: "observe", params: { deviceId: "device-a" } },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -1713,11 +1950,10 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
-    test("does NOT refresh the replay lease when the failing call never reached the daemon", async () => {
-      // A transport/connect failure (DaemonUnavailableError) never reached the
-      // handler, so the live session was not refreshed. The lease must be allowed
-      // to expire — refreshing it would replay a UUID whose session may be gone
-      // (issue [#4610](https://github.com/kaeawc/auto-mobile/issues/4610)).
+    test("successful heartbeats keep the replay lease alive across a failed tool transport", async () => {
+      // The failed tool request did not refresh the daemon session, but the
+      // independent heartbeat keeper did. The binding therefore remains live
+      // across the old replay-TTL boundary (issue #5411).
       const timer = new FakeTimer();
       const client = new ScriptedDaemonClient({
         toolResult: { content: [{ type: "text", text: "ok" }] },
@@ -1742,10 +1978,13 @@ describe("DaemonMcpProxy", () => {
         timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
         await proxy.callTool("observe", { deviceId: "device-a" });
 
-        // The final implicit observe must NOT carry an injected sessionUuid: the
-        // lease expired because the transport failure did not refresh it.
+        // The final implicit observe remains bound because heartbeat activity,
+        // not the failed tool attempt, refreshed the live session.
         const lastCall = client.callToolCalls[client.callToolCalls.length - 1];
-        expect(lastCall).toEqual({ toolName: "observe", params: { deviceId: "device-a" } });
+        expect(lastCall).toEqual({
+          toolName: "observe",
+          params: { deviceId: "device-a", sessionUuid: "session-a" },
+        });
       } finally {
         isAvailableSpy.mockRestore();
         await proxy.close();
@@ -1881,9 +2120,10 @@ describe("DaemonMcpProxy", () => {
     // instead of waiting out the replay-TTL guess. The TTL stays as a
     // dropped-frame backstop.
 
-    test("a released signal clears an initial binding before a later sessionless call", async () => {
+    test("a released signal terminally fences an initial binding", async () => {
       const fakeClient = new FakeDaemonClient({
         toolResult: { content: [{ type: "text", text: "ok" }] },
+        daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
       });
       const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
       const proxy = new DaemonMcpProxy({
@@ -1895,14 +2135,19 @@ describe("DaemonMcpProxy", () => {
 
       try {
         // The initial routing binding scopes calls before any mutable device selection.
+        await proxy.listTools();
         await proxy.callTool("observe", { deviceId: "device-a" });
         fakeClient.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, "session-a");
-        // The next sessionless call must NOT be rewritten to the retired UUID.
-        await proxy.callTool("observe", { deviceId: "device-a" });
+        await expect(proxy.listTools()).rejects.toThrow(/session-a.*(?:expired|released)/i);
+        await expect(proxy.callTool("observe", { deviceId: "device-a" })).rejects.toThrow(
+          /session-a.*(?:expired|released)/i,
+        );
+        await expect(
+          proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" }),
+        ).rejects.toThrow(/session-a.*(?:expired|released)/i);
 
         expect(fakeClient.callToolCalls).toEqual([
           { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
-          { toolName: "observe", params: { deviceId: "device-a" } },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -1967,14 +2212,43 @@ describe("DaemonMcpProxy", () => {
         await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
         // Call 2 injects session-a, then the release lands mid-flight.
         await proxy.callTool("observe", { deviceId: "device-a" });
-        // Call 3 must NOT be rewritten to the released UUID.
-        await proxy.callTool("observe", { deviceId: "device-a" });
+        // Call 3 must fail terminally without reaching the daemon.
+        await expect(proxy.callTool("observe", { deviceId: "device-a" })).rejects.toThrow(
+          /session-a.*(?:expired|released)/i,
+        );
 
         expect(fakeClient.callToolCalls).toEqual([
           { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
           { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "session-a" } },
-          { toolName: "observe", params: { deviceId: "device-a" } },
         ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("a release during the first explicit call fences the transport before reuse", async () => {
+      const fakeClient: FakeDaemonClient = new FakeDaemonClient({
+        onCallTool: () => {
+          fakeClient.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, "session-a");
+        },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("observe", {
+          sessionUuid: "session-a",
+          deviceId: "device-a",
+        });
+        await expect(
+          proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" }),
+        ).rejects.toThrow(/session-a.*(?:expired|released)/i);
+        expect(fakeClient.callToolCalls).toHaveLength(1);
       } finally {
         isAvailableSpy.mockRestore();
         await proxy.close();
@@ -2038,15 +2312,16 @@ describe("DaemonMcpProxy", () => {
       try {
         await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
         await expect(proxy.callTool("tapOn", { deviceId: "device-a" })).rejects.toThrow(
-          "handler rejected the admitted call",
+          /session-a.*(?:expired|released)/i,
         );
         // The admitted-failure refresh must not resurrect the released UUID's lease.
-        await proxy.callTool("observe", { deviceId: "device-a" });
+        await expect(proxy.callTool("observe", { deviceId: "device-a" })).rejects.toThrow(
+          /session-a.*(?:expired|released)/i,
+        );
 
         expect(fakeClient.callToolCalls).toEqual([
           { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
           { toolName: "tapOn", params: { deviceId: "device-a", sessionUuid: "session-a" } },
-          { toolName: "observe", params: { deviceId: "device-a" } },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -2087,9 +2362,9 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
-    test("the TTL backstop still expires the binding when no signal arrives", async () => {
+    test("the TTL backstop terminally fences the binding when no signal arrives", async () => {
       // Dropped-frame path: no released signal is delivered, so the replay TTL
-      // must still retire the binding on its own.
+      // must still fence the binding on its own.
       const timer = new FakeTimer();
       const fakeClient = new FakeDaemonClient({
         toolResult: { content: [{ type: "text", text: "ok" }] },
@@ -2104,16 +2379,72 @@ describe("DaemonMcpProxy", () => {
 
       try {
         await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
-        timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS);
-        await proxy.callTool("observe", { deviceId: "device-a" });
+        timer.setCurrentTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS);
+        await expect(proxy.callTool("observe", { deviceId: "device-a" })).rejects.toThrow(
+          /session-a.*expired/i,
+        );
 
         expect(fakeClient.callToolCalls).toEqual([
           { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
-          { toolName: "observe", params: { deviceId: "device-a" } },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
         await proxy.close();
+      }
+    });
+
+    test("cached discovery surfaces still enforce the bound-session replay backstop", async () => {
+      const discoveryCases = [
+        {
+          name: "tools/list",
+          read: (proxy: DaemonMcpProxy) => proxy.listTools(),
+        },
+        {
+          name: "resources/list",
+          read: (proxy: DaemonMcpProxy) => proxy.listResources(),
+        },
+        {
+          name: "resources/list-templates",
+          read: (proxy: DaemonMcpProxy) => proxy.listResourceTemplates(),
+        },
+      ];
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+
+      try {
+        for (const discoveryCase of discoveryCases) {
+          const timer = new FakeTimer();
+          const fakeClient = new FakeDaemonClient({
+            daemonMethodResults: new Map([
+              ["tools/list", { tools: [{ name: "observe", inputSchema: {} }] }],
+              ["resources/list", { resources: [{ uri: "automobile:test", name: "test" }] }],
+              ["resources/list-templates", { resourceTemplates: [{ uriTemplate: "test://{id}", name: "test" }] }],
+            ]),
+          });
+          const proxy = new DaemonMcpProxy({
+            clientFactory: () => fakeClient,
+            daemonManager: matchingDaemonManager(),
+            autoStartDaemon: false,
+            timer,
+          });
+
+          try {
+            await proxy.callTool("observe", {
+              sessionUuid: "session-a",
+              deviceId: "device-a",
+            });
+            await discoveryCase.read(proxy);
+            timer.setCurrentTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS);
+
+            await expect(discoveryCase.read(proxy)).rejects.toMatchObject({
+              sessionUuid: "session-a",
+              reason: "replay-lease-expired",
+            });
+          } finally {
+            await proxy.close();
+          }
+        }
+      } finally {
+        isAvailableSpy.mockRestore();
       }
     });
 
@@ -2142,7 +2473,7 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
-    test("clears a configured binding after a confirmed missing-session fallback", async () => {
+    test("terminally fences a configured binding after a confirmed missing-session fallback", async () => {
       const firstClient = new ScriptedDaemonClient({
         toolError: new Error("Session not found"),
       });
@@ -2161,14 +2492,12 @@ describe("DaemonMcpProxy", () => {
 
       try {
         await expect(proxy.callTool("observe", { deviceId: "device-a" })).rejects.toThrow(
-          "Session not found",
+          /session-a.*(?:expired|released)/i,
         );
-        await proxy.close();
-        await proxy.callTool("observe", { sessionUuid: "session-b", deviceId: "device-b" });
-
-        expect(replacementClient.callToolCalls).toEqual([
-          { toolName: "observe", params: { sessionUuid: "session-b", deviceId: "device-b" } },
-        ]);
+        await expect(
+          proxy.callTool("observe", { sessionUuid: "session-b", deviceId: "device-b" }),
+        ).rejects.toThrow(/session-a.*(?:expired|released)/i);
+        expect(replacementClient.callToolCalls).toEqual([]);
       } finally {
         isAvailableSpy.mockRestore();
         await proxy.close();

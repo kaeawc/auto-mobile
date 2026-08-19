@@ -229,6 +229,8 @@ class InputTypeTextAppendError extends Error {
 
 export class UnixSocketServer {
   private server: NetServer | null = null;
+  private closing = false;
+  private lifecycleGeneration = 0;
   private socketFileIdentity: SocketFileIdentity | null = null;
   private sessions: Map<string, SessionContext> = new Map();
   /** Live client sockets by session ID, for server-pushed notification frames (issue #3223). */
@@ -344,6 +346,8 @@ export class UnixSocketServer {
    * Start the Unix socket server
    */
   async start(): Promise<void> {
+    this.closing = false;
+    this.lifecycleGeneration += 1;
     // Owner-only (0o700) socket directory so the control socket is not
     // world-traversable. On macOS socket-file permission bits are not reliably
     // enforced on connect(), so the containing directory's mode is the primary
@@ -372,8 +376,9 @@ export class UnixSocketServer {
     // replay-TTL guess. Subscribed here (not in the daemon) for the same
     // recovery-rewire reason as list-changed; close() unsubscribes symmetrically.
     this.sessionReleaseUnsubscribe?.();
-    this.sessionReleaseUnsubscribe = SessionReleaseBroadcaster.subscribe(sessionId => {
-      this.broadcastSessionReleased(sessionId);
+    this.sessionReleaseUnsubscribe = SessionReleaseBroadcaster.subscribe((sessionId, reason) => {
+      this.clearBoundMcpClientsForReleasedSession(sessionId);
+      this.broadcastSessionReleased(sessionId, reason);
     });
 
     return new Promise((resolve, reject) => {
@@ -513,11 +518,12 @@ export class UnixSocketServer {
    * {@link broadcastListChanged}. Note `sessionId` here is the socket-client id,
    * distinct from the released daemon session carried in the frame.
    */
-  private broadcastSessionReleased(releasedSessionId: string): void {
+  private broadcastSessionReleased(releasedSessionId: string, reason?: string): void {
     const notification: DaemonNotification = {
       type: "daemon_notification",
       method: SESSION_RELEASED_NOTIFICATION_METHOD,
       sessionId: releasedSessionId,
+      ...(reason !== undefined ? { reason } : {}),
     };
     for (const sessionId of this.notificationSubscribers) {
       const socket = this.clientSockets.get(sessionId);
@@ -836,22 +842,12 @@ export class UnixSocketServer {
     }
 
     const boundRoute = this.getBoundMcpClientRoute(socketSessionId);
-    if (request.method === "tools/list") {
-      // A reconnected restricted discovery re-sends `{sessionUuid}` (see
-      // daemonMcpProxy.listTools). A fresh socket has no boundRoute, so without
-      // honoring the request's session the shared UNSEEDED client would return the
-      // full, unfiltered tool list. Route to the session-scoped client so the
-      // seeded loopback transport advertises the session-scoped list, completing
-      // the proxy-side reconnect seeding (issue #4610).
-      const listSessionUuid = this.getSessionUuid(request.params);
-      const capabilityProfileUuid = this.getCapabilityProfileUuid(request.params);
-      if (listSessionUuid && !this.isReleasedBoundSession(request.params)) {
-        return this.sessionScopedForwardRoute(socketSessionId, listSessionUuid, undefined, capabilityProfileUuid);
-      }
-      if (capabilityProfileUuid) {
-        return this.capabilityProfileScopedForwardRoute(socketSessionId, capabilityProfileUuid, undefined);
-      }
-      return boundRoute ?? this.sharedMcpForwardRoute(`method:${request.method}`);
+    if (
+      request.method === "tools/list" ||
+      request.method === "resources/list" ||
+      request.method === "resources/list-templates"
+    ) {
+      return this.getDiscoveryForwardRoute(request, socketSessionId, boundRoute);
     }
 
     if (request.method === "ide/getNavigationGraph") {
@@ -863,6 +859,42 @@ export class UnixSocketServer {
     }
 
     return this.sharedMcpForwardRoute(`method:${request.method}`);
+  }
+
+  private getDiscoveryForwardRoute(
+    request: DaemonRequest,
+    socketSessionId: string,
+    boundRoute: McpForwardRoute | undefined,
+  ): McpForwardRoute {
+    if (request.method === "tools/list") {
+      // A reconnected restricted discovery re-sends `{sessionUuid}` (see
+      // daemonMcpProxy.listTools). A fresh socket has no boundRoute, so without
+      // honoring the request's session the shared UNSEEDED client would return the
+      // full, unfiltered tool list. Route to the session-scoped client so the
+      // seeded loopback transport advertises the session-scoped list, completing
+      // the proxy-side reconnect seeding (issue #4610).
+      const listSessionUuid = this.getSessionUuid(request.params);
+      const capabilityProfileUuid = this.getCapabilityProfileUuid(request.params);
+      this.throwIfReleasedBoundSession(request.params);
+      if (listSessionUuid) {
+        return this.sessionScopedForwardRoute(socketSessionId, listSessionUuid, undefined, capabilityProfileUuid);
+      }
+      if (capabilityProfileUuid) {
+        return this.capabilityProfileScopedForwardRoute(socketSessionId, capabilityProfileUuid, undefined);
+      }
+      return boundRoute ?? this.sharedMcpForwardRoute(`method:${request.method}`);
+    }
+
+    const sessionUuid = this.getSessionUuid(request.params);
+    const capabilityProfileUuid = this.getCapabilityProfileUuid(request.params);
+    this.throwIfReleasedBoundSession(request.params);
+    if (sessionUuid) {
+      return this.sessionScopedForwardRoute(socketSessionId, sessionUuid, undefined, capabilityProfileUuid);
+    }
+    if (capabilityProfileUuid) {
+      return this.capabilityProfileScopedForwardRoute(socketSessionId, capabilityProfileUuid, undefined);
+    }
+    return boundRoute ?? this.sharedMcpForwardRoute(`method:${request.method}`);
   }
 
   private getNavigationGraphForwardRoute(
@@ -891,8 +923,9 @@ export class UnixSocketServer {
     request: DaemonRequest,
     socketSessionId: string,
   ): McpForwardRoute {
+    this.throwIfReleasedBoundSession(request.params);
     const sessionUuid = this.getSessionUuid(request.params);
-    if (sessionUuid && !this.isReleasedBoundSession(request.params)) {
+    if (sessionUuid) {
       return this.sessionScopedForwardRoute(socketSessionId, sessionUuid, undefined);
     }
     const uri = request.params?.uri;
@@ -900,11 +933,12 @@ export class UnixSocketServer {
   }
 
   private getToolsCallForwardRoute(args: unknown, socketSessionId: string): McpForwardRoute {
+    this.throwIfReleasedBoundSession(args);
     const scopedKey = this.getRequestArgumentScopeKey(args);
     const boundRoute = this.getBoundMcpClientRoute(socketSessionId);
     const sessionUuid = this.getSessionUuid(args);
     const capabilityProfileUuid = this.getCapabilityProfileUuid(args) ?? boundRoute?.capabilityProfileUuid;
-    if (sessionUuid && !this.isReleasedBoundSession(args)) {
+    if (sessionUuid) {
       return this.sessionScopedForwardRoute(socketSessionId, sessionUuid, scopedKey, capabilityProfileUuid);
     }
     if (capabilityProfileUuid) {
@@ -1109,6 +1143,14 @@ export class UnixSocketServer {
     this.scheduleMcpClientIdleClose(boundClient.clientKey);
   }
 
+  private clearBoundMcpClientsForReleasedSession(sessionUuid: string): void {
+    for (const [socketSessionId, boundClient] of this.boundMcpClientKeysBySocketSession) {
+      if (boundClient.sessionUuid === sessionUuid) {
+        this.clearBoundMcpClientKey(socketSessionId);
+      }
+    }
+  }
+
   private isMcpClientKeyBound(key: string): boolean {
     for (const boundClient of this.boundMcpClientKeysBySocketSession.values()) {
       if (boundClient.clientKey === key) {
@@ -1156,6 +1198,13 @@ export class UnixSocketServer {
       record[DAEMON_BOUND_SESSION_PARAM] === sessionUuid &&
       !this.hasActiveDaemonSession(sessionUuid)
     );
+  }
+
+  private throwIfReleasedBoundSession(args: unknown): void {
+    if (!this.isReleasedBoundSession(args)) {
+      return;
+    }
+    throw new Error(`Session not found: ${this.getSessionUuid(args)}`);
   }
 
   private getRequestArgumentScopeKey(args: unknown): string | undefined {
@@ -2697,6 +2746,7 @@ export class UnixSocketServer {
 
     const forwardedArgs = { ...args } as Record<string, unknown>;
     delete forwardedArgs[DAEMON_CAPABILITY_PROFILE_PARAM];
+    this.throwIfReleasedBoundSession(forwardedArgs);
     const boundSessionUuid = this.getSessionUuid(forwardedArgs);
     const usesBoundSession = forwardedArgs[DAEMON_BOUND_SESSION_PARAM] === boundSessionUuid;
     delete forwardedArgs[DAEMON_BOUND_SESSION_PARAM];
@@ -2774,14 +2824,23 @@ export class UnixSocketServer {
       return existingPromise;
     }
 
+    const generation = this.lifecycleGeneration;
     const clientPromise = this.mcpClientFactory(boundSessionUuid, capabilityProfileUuid)
-      .then(client => {
+      .then(async client => {
+        if (this.closing || generation !== this.lifecycleGeneration) {
+          await client.close();
+          throw new Error("Unix socket server is closing");
+        }
         this.mcpClients.set(key, client);
-        this.mcpClientPromises.delete(key);
+        if (this.mcpClientPromises.get(key) === clientPromise) {
+          this.mcpClientPromises.delete(key);
+        }
         return client;
       })
       .catch(error => {
-        this.mcpClientPromises.delete(key);
+        if (this.mcpClientPromises.get(key) === clientPromise) {
+          this.mcpClientPromises.delete(key);
+        }
         throw error;
       });
 
@@ -2937,6 +2996,8 @@ export class UnixSocketServer {
    */
   async close(): Promise<void> {
     logger.info("Closing Unix socket server...");
+    this.closing = true;
+    this.lifecycleGeneration += 1;
 
     // Stop receiving list-changed events (mirrors the subscribe in start()).
     this.listChangedUnsubscribe?.();

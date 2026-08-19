@@ -789,7 +789,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
     }
   });
 
-  test("does not recreate a released session from an implicit proxy binding", async () => {
+  test("rejects a released implicit proxy binding instead of forwarding unbound", async () => {
     const clientBindings: Array<string | undefined> = [];
     const forwardedArguments: Array<Record<string, unknown>> = [];
     server.mcpClientFactory = async boundSessionUuid => {
@@ -813,12 +813,70 @@ describe("UnixSocketServer MCP forward serialization", () => {
       [DAEMON_BOUND_SESSION_PARAM]: "released-session",
     });
 
-    expect(response.success).toBe(true);
-    expect(clientBindings).toEqual([undefined]);
-    expect(forwardedArguments).toEqual([expect.not.objectContaining({
-      sessionUuid: expect.anything(),
-      [DAEMON_BOUND_SESSION_PARAM]: expect.anything(),
-    })]);
+    expect(response.success).toBe(false);
+    expect(response.error).toContain("Session not found: released-session");
+    expect(clientBindings).toEqual([]);
+    expect(forwardedArguments).toEqual([]);
+  });
+
+  test("rejects tools/list for a released implicit proxy binding", async () => {
+    const clientBindings: Array<string | undefined> = [];
+    server.mcpClientFactory = async boundSessionUuid => {
+      clientBindings.push(boundSessionUuid);
+      return {
+        listTools: async () => ({ tools: [] }),
+        callTool: async () => ({ content: [] }),
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({ contents: [] }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
+        close: async () => {},
+      };
+    };
+
+    const response = await sendRequest(socketPath, {
+      id: randomUUID(),
+      type: "mcp_request",
+      method: "tools/list",
+      params: {
+        sessionUuid: "released-session",
+        [DAEMON_BOUND_SESSION_PARAM]: "released-session",
+      },
+    });
+
+    expect(response.success).toBe(false);
+    expect(response.error).toContain("Session not found: released-session");
+    expect(clientBindings).toEqual([]);
+  });
+
+  test("rejects released bound resource discovery before shared routing", async () => {
+    const clientBindings: Array<string | undefined> = [];
+    server.mcpClientFactory = async boundSessionUuid => {
+      clientBindings.push(boundSessionUuid);
+      return {
+        listTools: async () => ({ tools: [] }),
+        callTool: async () => ({ content: [] }),
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({ contents: [] }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
+        close: async () => {},
+      };
+    };
+
+    for (const method of ["resources/list", "resources/list-templates"]) {
+      const response = await sendRequest(socketPath, {
+        id: randomUUID(),
+        type: "mcp_request",
+        method,
+        params: {
+          sessionUuid: "released-session",
+          [DAEMON_BOUND_SESSION_PARAM]: "released-session",
+        },
+      });
+
+      expect(response.success).toBe(false);
+      expect(response.error).toContain("Session not found: released-session");
+    }
+    expect(clientBindings).toEqual([]);
   });
 
   test("routes a bound resources/read call through its session-scoped MCP client", async () => {

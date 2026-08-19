@@ -93,13 +93,39 @@ describe("SessionHeartbeatMonitor", () => {
 
     it("reaps a default-heartbeat session shortly after it misses the first heartbeat", async () => {
       await sessionManager.createSession("s1", "emulator-5554", "android", 60_000);
-      const reaped: string[] = [];
-      const monitor = new SessionHeartbeatMonitor(sessionManager, () => false, async sid => { reaped.push(sid); }, timer);
+      const reaped: Array<{ sessionId: string; reason: string }> = [];
+      const monitor = new SessionHeartbeatMonitor(
+        sessionManager,
+        () => false,
+        async (sessionId, reason) => {
+          reaped.push({ sessionId, reason });
+        },
+        timer,
+      );
 
       timer.advanceTime(5_001);
       await monitor.tick();
 
-      expect(reaped).toEqual(["s1"]);
+      expect(reaped).toEqual([{ sessionId: "s1", reason: "missing-first-heartbeat" }]);
+    });
+
+    it("reports heartbeat-timeout after a session received its first heartbeat", async () => {
+      await sessionManager.createSession("s1", "emulator-5554", "android", 60_000, 1_000);
+      sessionManager.recordHeartbeat("s1");
+      const reaped: Array<{ sessionId: string; reason: string }> = [];
+      const monitor = new SessionHeartbeatMonitor(
+        sessionManager,
+        () => false,
+        async (sessionId, reason) => {
+          reaped.push({ sessionId, reason });
+        },
+        timer,
+      );
+
+      timer.advanceTime(1_001);
+      await monitor.tick();
+
+      expect(reaped).toEqual([{ sessionId: "s1", reason: "heartbeat-timeout" }]);
     });
 
     it("does not reap a default-heartbeat session with recent activity before its first heartbeat", async () => {

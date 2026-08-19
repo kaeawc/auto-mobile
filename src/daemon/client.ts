@@ -527,8 +527,10 @@ export class DaemonClient {
     this.connected = false;
 
     // Reject all pending requests
-    for (const [, { timeout }] of this.pendingRequests) {
+    const closeError = new DaemonUnavailableError("Socket connection closed");
+    for (const [, { timeout, reject }] of this.pendingRequests) {
       this.timer.clearTimeout(timeout);
+      reject(closeError);
     }
     this.pendingRequests.clear();
     this.notificationHandlers.clear();

@@ -10,7 +10,7 @@ import { logger } from "../utils/logger";
 export const SESSION_RELEASED_NOTIFICATION_METHOD = "notifications/session/released";
 
 export interface SessionReleaseListener {
-  (sessionId: string): void;
+  (sessionId: string, reason?: string): void;
 }
 
 /**
@@ -37,10 +37,10 @@ class SessionReleaseBroadcasterClass {
     };
   }
 
-  emit(sessionId: string): void {
+  emit(sessionId: string, reason?: string): void {
     for (const listener of this.listeners) {
       try {
-        listener(sessionId);
+        listener(sessionId, reason);
       } catch (error) {
         // Best-effort fan-out: one broken sink must not block the others or the
         // session release that triggered the emit.

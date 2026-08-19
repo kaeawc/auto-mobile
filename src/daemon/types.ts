@@ -62,10 +62,12 @@ export interface DaemonNotification {
   method: string;
   /**
    * Released session key for `notifications/session/released` frames (issue
-   * #4610). Absent for list-changed frames. The proxy clears its remembered
+   * #4610). Absent for list-changed frames. The proxy fences its remembered
    * binding only when this exactly equals its bound (base) session UUID.
    */
   sessionId?: string;
+  /** Diagnostic release reason for `notifications/session/released`. */
+  reason?: string;
 }
 
 /** Discriminates a daemon socket frame as a server-pushed notification. */

@@ -568,11 +568,13 @@ async function main() {
       let server;
       try {
         if (useProxyMode) {
+          const { getDefaultSessionHeartbeatTimeoutMs } = await import("./daemon/sessionManager");
           const result = createProxyMcpServer({
             proxyConfig: {
               autoStartDaemon: !noDaemon,
               daemonOptions: daemonStartupOptions,
               initialSessionUuid,
+              heartbeatTimeoutMs: getDefaultSessionHeartbeatTimeoutMs(),
             },
           });
           server = result.server;

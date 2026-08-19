@@ -116,6 +116,12 @@ export interface SessionDeviceAssigner {
 
 const KEEP_SCREEN_AWAKE_RESTORE_TIMEOUT_MS = 1_000;
 const SESSION_SETUP_DRAIN_TIMEOUT_MS = 1_000;
+const EXPIRY_RELEASE_REASONS = new Set([
+  "lazy-expiry",
+  "cleanup-expired",
+  "missing-first-heartbeat",
+  "heartbeat-timeout",
+]);
 
 export function getDefaultSessionHeartbeatTimeoutMs(): number {
   const rawValue = process.env.AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS
@@ -735,20 +741,23 @@ export class SessionManager {
       }
       if (pendingCleanup.length > 0) {this.trackPendingDeviceCleanup(deviceId, pendingCleanup);}
 
-      try {
-        const terminalStatus = releaseReason === "lazy-expiry" || releaseReason === "cleanup-expired"
-          ? "expired"
-          : "released";
-        await this.deviceSessionRepository.markReleased(sessionId, terminalStatus, this.timer.now(), releaseReason);
-      } catch (error) {
-        logger.warn(`[SessionManager] Failed to mark session released (${releaseReason}): ${error}`);
-      }
+      // In-memory ownership is already terminal, so notify bound transports
+      // before awaiting best-effort persistence. This closes the window where a
+      // released UUID could be forwarded again while the DB write is pending.
       for (const callback of this.releaseCallbacks) {
         try {
           callback(sessionId, deviceId, releaseReason);
         } catch (error) {
           logger.warn(`Session release callback failed for ${sessionId}: ${error}`);
         }
+      }
+      try {
+        const terminalStatus = EXPIRY_RELEASE_REASONS.has(releaseReason)
+          ? "expired"
+          : "released";
+        await this.deviceSessionRepository.markReleased(sessionId, terminalStatus, this.timer.now(), releaseReason);
+      } catch (error) {
+        logger.warn(`[SessionManager] Failed to mark session released (${releaseReason}): ${error}`);
       }
       logger.info(
         pendingCleanup.length > 0

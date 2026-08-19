@@ -28,6 +28,7 @@ import { compareStrictNumericVersions } from "../server/deviceMatcher";
 import { releaseVersion } from "../utils/mcpVersion";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { isExplicitPin, resolveAssetVersion, resolvePinnedVersion } from "../constants/release";
+import { SingleFlightInterval } from "./SingleFlightInterval";
 import {
   type BuildIdentity,
   buildIdentitiesMatch,
@@ -44,6 +45,28 @@ export type VersionMismatchReason =
   | "restartMismatch";
 
 export type BuildMismatchReason = "autoStartDisabled" | "cooldown" | "restartMismatch";
+
+const DAEMON_MCP_HEARTBEAT_INTERVAL_MS = 2_000;
+
+function heartbeatIntervalMs(config: DaemonMcpProxyConfig): number {
+  const configuredTimeout = config.heartbeatTimeoutMs;
+  const configuredInterval = config.heartbeatIntervalMs;
+  if (
+    configuredTimeout !== undefined &&
+    (!Number.isFinite(configuredTimeout) || configuredTimeout <= 0)
+  ) {
+    throw new Error("heartbeat timeout must be a positive finite number");
+  }
+  const interval =
+    configuredInterval ??
+    (configuredTimeout === undefined
+      ? DAEMON_MCP_HEARTBEAT_INTERVAL_MS
+      : Math.max(1, Math.floor(configuredTimeout / 2)));
+  if (!Number.isFinite(interval) || interval <= 0) {
+    throw new Error("heartbeat interval must be a positive finite number");
+  }
+  return Math.max(1, interval);
+}
 
 /**
  * Raised before connecting when the running daemon and MCP client package
@@ -140,6 +163,26 @@ export class DaemonAssetVersionMismatchError extends DaemonUnavailableError {
 }
 
 /**
+ * Raised after a daemon release proves that this transport's device-session
+ * identity is terminal. A fresh transport may create a new session; this bound
+ * transport must never silently resurrect its UUID against another device.
+ */
+export class DaemonBoundSessionExpiredError extends Error {
+  readonly sessionUuid: string;
+  readonly reason: string;
+
+  constructor(sessionUuid: string, reason: string) {
+    super(
+      `Device session ${sessionUuid} expired or was released (${reason}). ` +
+        "This MCP transport cannot create a replacement session; start a new transport.",
+    );
+    this.name = "DaemonBoundSessionExpiredError";
+    this.sessionUuid = sessionUuid;
+    this.reason = reason;
+  }
+}
+
+/**
  * Raised when a tool the frontend advertises is rejected by the daemon as
  * "Unknown tool" even after the proxy reconciled build identity and retried.
  * Replaces the opaque `-32603` with an actionable message naming both builds.
@@ -181,8 +224,12 @@ export interface DaemonMcpProxyConfig {
   daemonManager?: DaemonManagerLike;
   /** Options to pass when auto-starting the daemon */
   daemonOptions?: DaemonOptions;
-  /** Timer for version restart cooldown checks */
-  timer?: Pick<Timer, "now">;
+  /** Timer for restart cooldown checks and bound-session heartbeats. */
+  timer?: Timer;
+  /** Daemon session heartbeat timeout used to derive a safe cadence when unset. */
+  heartbeatTimeoutMs?: number;
+  /** Explicit bound-session heartbeat cadence; defaults to half the timeout or 2s. */
+  heartbeatIntervalMs?: number;
   /** This client's build identity (for testing; defaults to the current process build) */
   buildIdentity?: BuildIdentity;
   /** This client's version for the daemon version gate (defaults to DAEMON_VERSION; injectable for testing) */
@@ -367,12 +414,15 @@ export class DaemonMcpProxy {
   private config: DaemonMcpProxyConfig;
   private daemonManager: DaemonManagerLike;
   private clientFactory: DaemonClientFactory;
-  private readonly timer: Pick<Timer, "now">;
+  private readonly timer: Timer;
+  private readonly heartbeatKeeper: SingleFlightInterval;
   private readonly buildIdentity: BuildIdentity;
   private readonly clientVersion: string;
   private readonly clientAssetVersion: string | null;
   private connecting: Promise<void> | null = null;
+  private connectionCloseReject: ((reason?: unknown) => void) | null = null;
   private connected: boolean = false;
+  private closing: boolean = false;
   // The daemon clears socket-local state when its RPC connection drops. Keep this
   // proxy's successful explicit binding so subsequent sessionless calls can seed
   // a replacement socket without sharing the binding with other proxies.
@@ -382,6 +432,12 @@ export class DaemonMcpProxy {
   // refreshing it, the remembered UUID is treated as retired so a sessionless
   // call is not rewritten to a released session (issue #4610).
   private boundSessionUuidAt: number | undefined;
+  // Once the daemon confirms this transport's bound session is gone, preserve
+  // that terminal identity instead of clearing it and allowing the same UUID to
+  // acquire another device.
+  private terminalBoundSession:
+    | { sessionUuid: string; reason: string }
+    | undefined;
   // Startup bindings remain authoritative until the daemon signals release.
   // Replay expiration only protects bindings inferred from ordinary calls.
   private initialSessionBindingConfigured = false;
@@ -401,6 +457,8 @@ export class DaemonMcpProxy {
   // actually forwarded, while a release of the forwarded UUID still preserves.
   private releaseEpoch: number = 0;
   private readonly releasedSessionEpochs = new Map<string, number>();
+  private readonly releasedSessionReasons = new Map<string, string>();
+  private readonly activeReleaseEpochReferences = new Map<string, number>();
   // Monotonic counter bumped whenever a daemon push invalidates a discovery cache
   // or the session binding mid-flight (list_changed nulls a cache; a bound-session
   // release changes the session scope). A `tools/list` / `resources/list` captures
@@ -434,6 +492,16 @@ export class DaemonMcpProxy {
       config.clientFactory ??
       (() => new DaemonClient(this.config.socketPath, this.config.connectionTimeoutMs));
     this.timer = config.timer ?? defaultTimer;
+    this.heartbeatKeeper = new SingleFlightInterval(
+      this.timer,
+      heartbeatIntervalMs(config),
+      () => this.sendBoundSessionHeartbeat(),
+      {
+        onError: error => {
+          logger.warn(`[DaemonMcpProxy] Bound-session heartbeat failed: ${error}`);
+        },
+      },
+    );
     if (
       typeof config.initialSessionUuid === "string" &&
       config.initialSessionUuid.trim().length > 0
@@ -452,6 +520,9 @@ export class DaemonMcpProxy {
    * Will auto-start daemon if configured and daemon is not running
    */
   async ensureConnected(): Promise<void> {
+    if (this.closing) {
+      throw new DaemonUnavailableError("MCP proxy is closing");
+    }
     if (this.connected && this.client) {
       return;
     }
@@ -461,15 +532,26 @@ export class DaemonMcpProxy {
       return this.connecting;
     }
 
-    this.connecting = this.doConnect();
+    const attempt = this.doConnect();
+    const connecting = new Promise<void>((resolve, reject) => {
+      this.connectionCloseReject = reject;
+      void attempt.then(resolve, reject);
+    });
+    this.connecting = connecting;
     try {
-      await this.connecting;
+      await connecting;
     } finally {
-      this.connecting = null;
+      if (this.connecting === connecting) {
+        this.connecting = null;
+        this.connectionCloseReject = null;
+      }
     }
   }
 
   private async doConnect(): Promise<void> {
+    if (this.closing) {
+      throw new DaemonUnavailableError("MCP proxy is closing");
+    }
     // Check if daemon is available
     const socketPath = this.config.socketPath ?? SOCKET_PATH;
     const isAvailable = await DaemonClient.isAvailable(socketPath);
@@ -492,6 +574,9 @@ export class DaemonMcpProxy {
     }
 
     // Create and connect client
+    if (this.closing) {
+      throw new DaemonUnavailableError("MCP proxy is closing");
+    }
     this.client = this.clientFactory();
     const client = this.client;
     // Wire daemon-pushed list-changed forwarding (issue #3223) when the client
@@ -507,6 +592,10 @@ export class DaemonMcpProxy {
       );
     }
     await client.connect();
+    if (this.closing) {
+      await client.close();
+      throw new DaemonUnavailableError("MCP proxy is closing");
+    }
     this.connected = true;
     logger.info("[DaemonMcpProxy] Connected to daemon");
 
@@ -520,6 +609,7 @@ export class DaemonMcpProxy {
         logger.warn(`[DaemonMcpProxy] Failed to subscribe to daemon notifications: ${error}`);
       }
     }
+    this.startBoundSessionHeartbeat();
   }
 
   /**
@@ -537,24 +627,7 @@ export class DaemonMcpProxy {
 
   private handleDaemonNotification(notification: DaemonNotification): void {
     if (notification.method === SESSION_RELEASED_NOTIFICATION_METHOD) {
-      // The daemon actually released a session. Record the release against the
-      // SPECIFIC UUID (issue #4655) so an in-flight call that forwarded exactly
-      // this session declines to re-remember it on completion — regardless of
-      // whether it is the currently-bound session. If it IS the one this proxy
-      // remembers, also drop the binding NOW so a later sessionless call is not
-      // rewritten to the retired UUID (issue #4610). A non-matching key —
-      // including a derived `${base}:${label}` release when we hold the base —
-      // leaves the binding intact. The replay TTL stays as a dropped-frame
-      // backstop for when this signal never arrives.
-      if (typeof notification.sessionId === "string" && notification.sessionId.length > 0) {
-        this.recordSessionReleased(notification.sessionId);
-      }
-      if (this.boundSessionUuid !== undefined && notification.sessionId === this.boundSessionUuid) {
-        // A bound-session release changes the scope of any in-flight discovery
-        // forwarded with that UUID, so invalidate pending discovery too (#4655).
-        this.discoveryEpoch += 1;
-        this.clearBoundSessionUuid();
-      }
+      this.handleSessionReleasedNotification(notification);
       return;
     }
 
@@ -585,6 +658,30 @@ export class DaemonMcpProxy {
         // break cache invalidation or sibling listeners.
         logger.warn(`[DaemonMcpProxy] list_changed listener failed for ${kind}: ${error}`);
       }
+    }
+  }
+
+  private handleSessionReleasedNotification(notification: DaemonNotification): void {
+    // Record the release against the specific UUID so an in-flight call that
+    // forwarded it cannot re-remember it. Exact matching leaves unrelated and
+    // derived sessions untouched; the replay TTL remains a dropped-frame
+    // backstop (issues #4610, #4655).
+    const releasedSessionUuid =
+      typeof notification.sessionId === "string" && notification.sessionId.trim().length > 0
+        ? notification.sessionId.trim()
+        : undefined;
+    if (!releasedSessionUuid) {
+      return;
+    }
+    this.recordSessionReleased(releasedSessionUuid, notification.reason);
+    if (
+      releasedSessionUuid === this.boundSessionUuid ||
+      releasedSessionUuid === this.terminalBoundSession?.sessionUuid
+    ) {
+      this.fenceBoundSessionUuid(
+        releasedSessionUuid,
+        notification.reason ?? "released",
+      );
     }
   }
 
@@ -877,12 +974,24 @@ export class DaemonMcpProxy {
     }
   }
 
-  private async withRecoverableReconnect<T>(operation: () => Promise<T>): Promise<T> {
+  private async withRecoverableReconnect<T>(
+    operation: () => Promise<T>,
+    attemptedSessionUuid?: string,
+  ): Promise<T> {
+    if (this.closing) {
+      throw new DaemonUnavailableError("MCP proxy is closing");
+    }
+    this.throwIfBoundSessionFenced();
     await this.ensureConnected();
+    this.throwIfBoundSessionFenced();
 
     try {
       return await operation();
     } catch (error) {
+      if (this.closing) {
+        throw error;
+      }
+      this.throwIfBoundSessionFenced();
       if (!this.isRecoverableDaemonSessionError(error)) {
         throw error;
       }
@@ -891,17 +1000,23 @@ export class DaemonMcpProxy {
         `[DaemonMcpProxy] Daemon session is stale, reconnecting and retrying once: ${error instanceof Error ? error.message : String(error)}`,
       );
       await this.resetConnection();
+      this.throwIfBoundSessionFenced();
       await this.ensureConnected();
+      this.throwIfBoundSessionFenced();
       try {
         return await operation();
       } catch (retryError) {
-        // A configured binding normally survives beyond the replay TTL, because
-        // only an actual daemon release may retire it. If the release push was
-        // missed, two authoritative "Session not found" responses prove the
-        // configured session is gone, so unblock an explicit replacement.
-        if (this.initialSessionBindingConfigured && this.isDaemonSessionNotFoundError(retryError)) {
-          this.discoveryEpoch += 1;
-          this.clearBoundSessionUuid();
+        this.throwIfBoundSessionFenced();
+        if (
+          attemptedSessionUuid &&
+          this.boundSessionUuid === attemptedSessionUuid &&
+          this.isDaemonSessionNotFoundError(retryError)
+        ) {
+          this.fenceBoundSessionUuid(
+            attemptedSessionUuid,
+            "session-not-found",
+          );
+          throw this.boundSessionExpiredError();
         }
         throw retryError;
       }
@@ -953,6 +1068,7 @@ export class DaemonMcpProxy {
    * Get list of available tools from daemon
    */
   async listTools(): Promise<ProxiedToolDefinition[]> {
+    this.throwIfBoundSessionUnavailable();
     // Return cached tools if available
     if (this.cachedTools) {
       return this.cachedTools;
@@ -962,15 +1078,13 @@ export class DaemonMcpProxy {
       // Bind discovery to the session like callTool does. Without this, a
       // recoverable reconnect INSIDE withRecoverableReconnect retries tools/list
       // with empty params against the fresh UNSEEDED transport, which returns the
-      // full unfiltered tool list instead of the session-scoped one. Computing the
-      // forwarded params inside the operation closure re-seeds the retry after a
-      // reconnect (issue #4610).
+      // full unfiltered tool list instead of the session-scoped one. Reusing the
+      // session-scoped params re-seeds the retry after a reconnect (issue #4610).
       const discoveryEpoch = this.discoveryEpoch;
-      const result = await this.withRecoverableReconnect(() =>
-        this.client!.callDaemonMethod(
-          "tools/list",
-          this.withCapabilityProfile(this.withBoundSessionUuid({})),
-        ),
+      const forwardedParams = this.withCapabilityProfile(this.withBoundSessionUuid({}));
+      const result = await this.withRecoverableReconnect(
+        () => this.client!.callDaemonMethod("tools/list", forwardedParams),
+        this.sessionUuidFromArgs(forwardedParams),
       );
       const tools = result?.tools ?? [];
       // If a list_changed or bound-session release invalidated this cache WHILE the
@@ -998,6 +1112,8 @@ export class DaemonMcpProxy {
     const routingArgs =
       name === SET_TOOL_CAPABILITY_TOOL_NAME ? args : this.withBoundSessionUuid(args);
     const forwardedArgs = this.withCapabilityProfile(routingArgs);
+    const forwardedSessionUuid = this.sessionUuidFromArgs(forwardedArgs);
+    this.retainReleaseEpochReference(forwardedSessionUuid);
     // Snapshot the release epoch at forward time. If a session-released signal for
     // the SPECIFIC forwarded UUID lands WHILE this call is in flight, that UUID's
     // recorded epoch advances past this snapshot and the completion path below
@@ -1006,8 +1122,12 @@ export class DaemonMcpProxy {
     // so it does not block remembering the session this call forwarded.
     const callReleaseEpoch = this.releaseEpoch;
     try {
-      const result = await this.withRecoverableReconnect(() =>
-        this.client!.callTool(name, forwardedArgs),
+      const result = await this.withRecoverableReconnect(
+        () => {
+          this.throwIfForwardedSessionReleasedSince(forwardedArgs, callReleaseEpoch);
+          return this.client!.callTool(name, forwardedArgs);
+        },
+        forwardedSessionUuid,
       );
       this.rememberCapabilityProfile(name, args, result);
       // Remember what was actually forwarded, not the caller's raw args. An
@@ -1042,25 +1162,32 @@ export class DaemonMcpProxy {
         throw await this.toolUnavailableError(name);
       }
       throw error;
+    } finally {
+      this.releaseReleaseEpochReference(forwardedSessionUuid);
     }
   }
 
   private withBoundSessionUuid(args: Record<string, unknown>): Record<string, unknown> {
+    this.throwIfBoundSessionUnavailable();
     // A daemon session released by ordinary heartbeat/idle expiry leaves this
     // remembered binding dangling; replaying its UUID on a later sessionless call
     // would silently recreate the session and reacquire a device without the
     // caller asking for it (issue #4610). Once the replay window has elapsed with
     // no forwarded call (explicit or implicit) refreshing the binding, treat it
     // as retired.
-    if (this.isBoundSessionReplayExpired()) {
-      this.clearBoundSessionUuid();
-    }
-    const explicitSessionUuid =
-      typeof args.sessionUuid === "string" && args.sessionUuid.trim().length > 0
-        ? args.sessionUuid
-        : undefined;
+    const explicitSessionUuid = this.sessionUuidFromArgs(args);
+    const normalizedArgs =
+      explicitSessionUuid && explicitSessionUuid !== args.sessionUuid
+        ? { ...args, sessionUuid: explicitSessionUuid }
+        : args;
     if (!this.boundSessionUuid || explicitSessionUuid === this.boundSessionUuid) {
-      return args;
+      if (explicitSessionUuid === this.boundSessionUuid && this.boundSessionUuid) {
+        return {
+          ...normalizedArgs,
+          [DAEMON_BOUND_SESSION_PARAM]: this.boundSessionUuid,
+        };
+      }
+      return normalizedArgs;
     }
     if (explicitSessionUuid && this.initialSessionBindingConfigured) {
       throw new Error(
@@ -1069,13 +1196,28 @@ export class DaemonMcpProxy {
       );
     }
     if (explicitSessionUuid) {
-      return args;
+      return normalizedArgs;
     }
     return {
       ...args,
       sessionUuid: this.boundSessionUuid,
       [DAEMON_BOUND_SESSION_PARAM]: this.boundSessionUuid,
     };
+  }
+
+  private throwIfBoundSessionUnavailable(): void {
+    this.throwIfBoundSessionFenced();
+    if (!this.isBoundSessionReplayExpired()) {
+      return;
+    }
+    this.fenceBoundSessionUuid(this.boundSessionUuid!, "replay-lease-expired");
+    throw this.boundSessionExpiredError();
+  }
+
+  private sessionUuidFromArgs(args: Record<string, unknown>): string | undefined {
+    return typeof args.sessionUuid === "string" && args.sessionUuid.trim().length > 0
+      ? args.sessionUuid.trim()
+      : undefined;
   }
 
   private withCapabilityProfile(args: Record<string, unknown>): Record<string, unknown> {
@@ -1121,32 +1263,160 @@ export class DaemonMcpProxy {
     this.initialSessionBindingConfigured = false;
   }
 
+  private fenceBoundSessionUuid(sessionUuid: string, reason: string): void {
+    if (this.terminalBoundSession) {
+      if (
+        this.terminalBoundSession.sessionUuid === sessionUuid &&
+        reason !== "released"
+      ) {
+        this.terminalBoundSession.reason = reason;
+      }
+      return;
+    }
+    this.terminalBoundSession = { sessionUuid, reason };
+    // A terminal release changes the scope of in-flight discovery and prevents
+    // its stale response from repopulating a cleared cache.
+    this.discoveryEpoch += 1;
+    this.invalidateCache();
+    this.clearBoundSessionUuid();
+    void this.stopBoundSessionHeartbeat();
+  }
+
+  private throwIfBoundSessionFenced(): void {
+    if (this.terminalBoundSession) {
+      throw this.boundSessionExpiredError();
+    }
+  }
+
+  private boundSessionExpiredError(): DaemonBoundSessionExpiredError {
+    const terminal = this.terminalBoundSession;
+    if (!terminal) {
+      throw new Error("Bound session is not terminal");
+    }
+    return new DaemonBoundSessionExpiredError(terminal.sessionUuid, terminal.reason);
+  }
+
+  private startBoundSessionHeartbeat(): void {
+    if (this.boundSessionUuid && !this.terminalBoundSession && this.connected && !this.closing) {
+      void this.heartbeatKeeper.run();
+      this.heartbeatKeeper.start();
+    }
+  }
+
+  private async stopBoundSessionHeartbeat(): Promise<void> {
+    const settled = await this.heartbeatKeeper.stop();
+    if (!settled) {
+      logger.warn("[DaemonMcpProxy] Bound-session heartbeat did not settle before shutdown");
+    }
+  }
+
+  private async sendBoundSessionHeartbeat(): Promise<void> {
+    const sessionUuid = this.boundSessionUuid;
+    if (!sessionUuid || this.terminalBoundSession || this.closing) {
+      return;
+    }
+    try {
+      await this.withRecoverableReconnect(() =>
+        this.client!.callDaemonMethod("daemon/heartbeat", { sessionId: sessionUuid }),
+        sessionUuid,
+      );
+    } catch (error) {
+      if (error instanceof DaemonBoundSessionExpiredError) {
+        // Terminal fencing already stopped the keeper; this tick has no further work.
+        logger.debug(`[DaemonMcpProxy] Bound-session heartbeat stopped: ${error.message}`);
+        return;
+      }
+      throw error;
+    }
+    if (this.boundSessionUuid === sessionUuid && !this.terminalBoundSession) {
+      this.boundSessionUuidAt = this.timer.now();
+    }
+  }
+
   // Record that the daemon released a specific session UUID, advancing the global
   // release epoch. An in-flight call that forwarded this exact UUID compares its
   // captured epoch against this entry and declines to resurrect the released
   // session on completion (issue #4655). Scoping the record to the UUID — not a
   // global counter — is what lets an unrelated session's release NOT block
   // remembering the session another in-flight call forwarded.
-  private recordSessionReleased(sessionUuid: string): void {
+  private recordSessionReleased(sessionUuid: string, reason?: string): void {
+    const normalizedSessionUuid = sessionUuid.trim();
+    if (normalizedSessionUuid.length === 0) {
+      return;
+    }
     this.releaseEpoch += 1;
-    this.releasedSessionEpochs.set(sessionUuid, this.releaseEpoch);
+    if (!this.activeReleaseEpochReferences.has(normalizedSessionUuid)) {
+      return;
+    }
+    this.releasedSessionEpochs.set(normalizedSessionUuid, this.releaseEpoch);
+    this.releasedSessionReasons.set(normalizedSessionUuid, reason ?? "released");
   }
 
-  // True when the session THIS call forwarded was released at a later epoch than
-  // the one captured at forward time — i.e. a release for the forwarded UUID
-  // landed WHILE the call was in flight. A release of any OTHER session advances
-  // the global epoch but leaves the forwarded UUID's entry untouched, so this
-  // stays false for it (issue #4655).
-  private wasForwardedSessionReleasedSince(
+  private retainReleaseEpochReference(sessionUuid: string | undefined): void {
+    if (!sessionUuid) {
+      return;
+    }
+    this.activeReleaseEpochReferences.set(
+      sessionUuid,
+      (this.activeReleaseEpochReferences.get(sessionUuid) ?? 0) + 1,
+    );
+  }
+
+  private releaseReleaseEpochReference(sessionUuid: string | undefined): void {
+    if (!sessionUuid) {
+      return;
+    }
+    const references = (this.activeReleaseEpochReferences.get(sessionUuid) ?? 0) - 1;
+    if (references > 0) {
+      this.activeReleaseEpochReferences.set(sessionUuid, references);
+      return;
+    }
+    this.activeReleaseEpochReferences.delete(sessionUuid);
+    this.releasedSessionEpochs.delete(sessionUuid);
+    this.releasedSessionReasons.delete(sessionUuid);
+  }
+
+  private forwardedSessionReleaseReasonSince(
     forwardedArgs: Record<string, unknown>,
     forwardEpoch: number,
-  ): boolean {
-    const forwardedUuid =
-      typeof forwardedArgs.sessionUuid === "string" ? forwardedArgs.sessionUuid : undefined;
-    if (forwardedUuid === undefined || forwardedUuid.trim().length === 0) {
-      return false;
+  ): string | undefined {
+    const forwardedUuid = this.sessionUuidFromArgs(forwardedArgs);
+    if (
+      !forwardedUuid ||
+      (this.releasedSessionEpochs.get(forwardedUuid) ?? 0) <= forwardEpoch
+    ) {
+      return undefined;
     }
-    return (this.releasedSessionEpochs.get(forwardedUuid) ?? 0) > forwardEpoch;
+    return this.releasedSessionReasons.get(forwardedUuid) ?? "released";
+  }
+
+  private fenceReleasedForwardedSession(
+    forwardedArgs: Record<string, unknown>,
+    reason: string,
+  ): void {
+    const forwardedUuid = this.sessionUuidFromArgs(forwardedArgs) ?? "";
+    if (
+      forwardedUuid.length > 0
+      && (!this.boundSessionUuid || this.boundSessionUuid === forwardedUuid)
+    ) {
+      this.fenceBoundSessionUuid(forwardedUuid, reason);
+    }
+  }
+
+  private throwIfForwardedSessionReleasedSince(
+    forwardedArgs: Record<string, unknown>,
+    forwardEpoch: number,
+  ): void {
+    const reason = this.forwardedSessionReleaseReasonSince(forwardedArgs, forwardEpoch);
+    if (!reason) {
+      return;
+    }
+    const forwardedUuid = this.sessionUuidFromArgs(forwardedArgs)!;
+    this.fenceReleasedForwardedSession(forwardedArgs, reason);
+    if (this.terminalBoundSession?.sessionUuid === forwardedUuid) {
+      throw this.boundSessionExpiredError();
+    }
+    throw new DaemonBoundSessionExpiredError(forwardedUuid, reason);
   }
 
   // Called with the FORWARDED args (post-withBoundSessionUuid), so an implicit
@@ -1159,7 +1429,9 @@ export class DaemonMcpProxy {
     callReleaseEpoch: number,
   ): void {
     if (name === "executePlan") {
-      this.clearBoundSessionUuid();
+      // The daemon owns plan-session release. Preserve the binding until its
+      // release notification (or heartbeat not-found fallback) terminally fences
+      // this transport.
       return;
     }
     if (name === SET_TOOL_CAPABILITY_TOOL_NAME) {
@@ -1171,15 +1443,17 @@ export class DaemonMcpProxy {
     // sessionless call recreate it (issue #4611). Scoped to the forwarded UUID so
     // an unrelated session's mid-call release does NOT block this remember (issue
     // #4655); a later explicit call re-binds normally.
-    if (this.wasForwardedSessionReleasedSince(forwardedArgs, callReleaseEpoch)) {
+    const releaseReason =
+      this.forwardedSessionReleaseReasonSince(forwardedArgs, callReleaseEpoch);
+    if (releaseReason) {
+      this.fenceReleasedForwardedSession(forwardedArgs, releaseReason);
       return;
     }
-    if (
-      typeof forwardedArgs.sessionUuid === "string" &&
-      forwardedArgs.sessionUuid.trim().length > 0
-    ) {
-      this.boundSessionUuid = forwardedArgs.sessionUuid;
+    const rememberedSessionUuid = this.sessionUuidFromArgs(forwardedArgs);
+    if (rememberedSessionUuid) {
+      this.boundSessionUuid = rememberedSessionUuid;
       this.boundSessionUuidAt = this.timer.now();
+      this.startBoundSessionHeartbeat();
     }
   }
 
@@ -1211,15 +1485,17 @@ export class DaemonMcpProxy {
     // mid-flight already recorded it, so an admitted-then-rejected call must not
     // re-refresh the released UUID's lease (issue #4611/#4655). The session is
     // gone; resurrecting the lease would replay it on the next sessionless call.
-    if (this.wasForwardedSessionReleasedSince(forwardedArgs, callReleaseEpoch)) {
+    const releaseReason =
+      this.forwardedSessionReleaseReasonSince(forwardedArgs, callReleaseEpoch);
+    if (releaseReason) {
+      this.fenceReleasedForwardedSession(forwardedArgs, releaseReason);
       return;
     }
-    if (
-      typeof forwardedArgs.sessionUuid === "string" &&
-      forwardedArgs.sessionUuid.trim().length > 0
-    ) {
-      this.boundSessionUuid = forwardedArgs.sessionUuid;
+    const admittedSessionUuid = this.sessionUuidFromArgs(forwardedArgs);
+    if (admittedSessionUuid) {
+      this.boundSessionUuid = admittedSessionUuid;
       this.boundSessionUuidAt = this.timer.now();
+      this.startBoundSessionHeartbeat();
     }
   }
 
@@ -1244,6 +1520,7 @@ export class DaemonMcpProxy {
    * Get list of available resources from daemon
    */
   async listResources(): Promise<ProxiedResourceDefinition[]> {
+    this.throwIfBoundSessionUnavailable();
     // Return cached resources if available
     if (this.cachedResources) {
       return this.cachedResources;
@@ -1251,8 +1528,10 @@ export class DaemonMcpProxy {
 
     try {
       const discoveryEpoch = this.discoveryEpoch;
+      const forwardedParams = this.withBoundSessionUuid({});
       const result = await this.withRecoverableReconnect(() =>
-        this.client!.callDaemonMethod("resources/list", this.withBoundSessionUuid({})),
+        this.client!.callDaemonMethod("resources/list", forwardedParams),
+        this.sessionUuidFromArgs(forwardedParams),
       );
       const resources = result?.resources ?? [];
       // Discard a response invalidated mid-flight rather than caching the stale
@@ -1271,6 +1550,7 @@ export class DaemonMcpProxy {
    * Get list of resource templates from daemon
    */
   async listResourceTemplates(): Promise<ProxiedResourceTemplate[]> {
+    this.throwIfBoundSessionUnavailable();
     // Return cached templates if available
     if (this.cachedResourceTemplates) {
       return this.cachedResourceTemplates;
@@ -1278,8 +1558,10 @@ export class DaemonMcpProxy {
 
     try {
       const discoveryEpoch = this.discoveryEpoch;
+      const forwardedParams = this.withBoundSessionUuid({});
       const result = await this.withRecoverableReconnect(() =>
-        this.client!.callDaemonMethod("resources/list-templates", this.withBoundSessionUuid({})),
+        this.client!.callDaemonMethod("resources/list-templates", forwardedParams),
+        this.sessionUuidFromArgs(forwardedParams),
       );
       const templates = result?.resourceTemplates ?? [];
       // Discard a response invalidated mid-flight rather than caching the stale
@@ -1298,8 +1580,10 @@ export class DaemonMcpProxy {
    * Read a resource from the daemon
    */
   async readResource(uri: string): Promise<any> {
+    const forwardedParams = this.withBoundSessionUuid({});
     return await this.withRecoverableReconnect(() =>
-      this.client!.readResource(uri, this.withBoundSessionUuid({})),
+      this.client!.readResource(uri, forwardedParams),
+      this.sessionUuidFromArgs(forwardedParams),
     );
   }
 
@@ -1323,6 +1607,9 @@ export class DaemonMcpProxy {
    * Close the connection to daemon
    */
   async close(): Promise<void> {
+    this.closing = true;
+    this.connectionCloseReject?.(new DaemonUnavailableError("MCP proxy is closing"));
+    await this.stopBoundSessionHeartbeat();
     if (this.client) {
       await this.client.close();
       this.client = null;
@@ -1331,6 +1618,7 @@ export class DaemonMcpProxy {
     this.notificationUnsubscribe = null;
     this.connected = false;
     this.clearBoundSessionUuid();
+    this.terminalBoundSession = undefined;
     this.invalidateCache();
     logger.debug("[DaemonMcpProxy] Disconnected from daemon");
   }

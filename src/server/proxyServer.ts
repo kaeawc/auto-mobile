@@ -27,12 +27,19 @@ export interface ProxyMcpServerOptions {
   sessionContext?: { sessionId?: string };
 }
 
+function sessionOwnershipLostPayload(error: DaemonBoundSessionExpiredError) {
+  return {
+    error: {
+      code: "session_ownership_lost",
+      message: `Session ownership lost for ${error.sessionUuid}: ${error.reason}`,
+      sessionUuid: error.sessionUuid,
+      reason: error.reason,
+    },
+  };
+}
+
 function sessionOwnershipLostMessage(error: DaemonBoundSessionExpiredError): string {
-  return JSON.stringify({
-    code: "session_ownership_lost",
-    sessionUuid: error.sessionUuid,
-    reason: error.reason,
-  });
+  return JSON.stringify(sessionOwnershipLostPayload(error));
 }
 
 function sessionOwnershipLostResult(
@@ -50,11 +57,8 @@ function sessionOwnershipLostResult(
 }
 
 function sessionOwnershipLostError(error: DaemonBoundSessionExpiredError): McpError {
-  return new McpError(-32603, sessionOwnershipLostMessage(error), {
-    code: "session_ownership_lost",
-    sessionUuid: error.sessionUuid,
-    reason: error.reason,
-  });
+  const payload = sessionOwnershipLostPayload(error);
+  return new McpError(-32603, sessionOwnershipLostMessage(error), payload);
 }
 
 /**

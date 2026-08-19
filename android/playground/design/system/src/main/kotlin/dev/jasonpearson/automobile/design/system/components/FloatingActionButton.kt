@@ -27,7 +27,13 @@ fun AutoMobileFloatingActionButton(
 ) {
   FloatingActionButton(
     onClick = onClick,
-    modifier = modifier,
+    // Hand-inked outline on the filled surface (#5115), in the contrasting content colour.
+    modifier =
+      modifier.crayonBorder(
+        color = MaterialTheme.colorScheme.onSecondary,
+        cornerRadius = AutoMobileDimensions.cornerRadiusLarge,
+        seed = 22L,
+      ),
     containerColor = MaterialTheme.colorScheme.secondary,
     contentColor = MaterialTheme.colorScheme.onSecondary,
     elevation = FloatingActionButtonDefaults.elevation(),
@@ -45,7 +51,12 @@ fun AutoMobileSmallFloatingActionButton(
 ) {
   SmallFloatingActionButton(
     onClick = onClick,
-    modifier = modifier,
+    modifier =
+      modifier.crayonBorder(
+        color = MaterialTheme.colorScheme.onSecondary,
+        cornerRadius = AutoMobileDimensions.cornerRadiusMedium,
+        seed = 23L,
+      ),
     containerColor = MaterialTheme.colorScheme.secondary,
     contentColor = MaterialTheme.colorScheme.onSecondary,
     elevation = FloatingActionButtonDefaults.elevation(),
@@ -64,7 +75,12 @@ fun AutoMobileExtendedFloatingActionButton(
 ) {
   ExtendedFloatingActionButton(
     onClick = onClick,
-    modifier = modifier,
+    modifier =
+      modifier.crayonBorder(
+        color = MaterialTheme.colorScheme.onSecondary,
+        cornerRadius = AutoMobileDimensions.cornerRadiusLarge,
+        seed = 24L,
+      ),
     containerColor = MaterialTheme.colorScheme.secondary,
     contentColor = MaterialTheme.colorScheme.onSecondary,
     elevation = FloatingActionButtonDefaults.elevation(),

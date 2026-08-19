@@ -27,7 +27,21 @@ fun AutoMobileButton(
 ) {
   Button(
     onClick = onClick,
-    modifier = modifier.height(AutoMobileDimensions.buttonHeight),
+    // A wobbly border reads as a box on a bordered surface; on a filled surface the
+    // same primitive reads as a hand-inked outline, drawn in the contrasting content
+    // colour and clamped to the button's stadium shape (#5115).
+    modifier =
+      modifier
+        .height(AutoMobileDimensions.buttonHeight)
+        .crayonBorder(
+          // Fade the outline with the button so a disabled (greyed) button does not
+          // keep a vivid ink line.
+          color =
+            if (enabled) MaterialTheme.colorScheme.onPrimary
+            else MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.38f),
+          cornerRadius = AutoMobileDimensions.buttonHeight / 2f,
+          seed = 11L,
+        ),
     enabled = enabled,
     colors =
       ButtonDefaults.buttonColors(

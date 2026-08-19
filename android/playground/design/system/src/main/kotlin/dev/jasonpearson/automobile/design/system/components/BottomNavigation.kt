@@ -36,7 +36,16 @@ fun AutoMobileBottomNavigation(
   modifier: Modifier = Modifier,
 ) {
   NavigationBar(
-    modifier = modifier.height(AutoMobileDimensions.bottomNavHeight),
+    // A crayon divider line along the top edge (#5115) — the nav counterpart of the
+    // bordered components' crayonBorder.
+    modifier =
+      modifier
+        .height(AutoMobileDimensions.bottomNavHeight)
+        .crayonHorizontalEdge(
+          color = MaterialTheme.colorScheme.primary,
+          atBottom = false,
+          seed = 33L,
+        ),
     containerColor = MaterialTheme.colorScheme.surface,
     contentColor = MaterialTheme.colorScheme.onSurface,
     tonalElevation = AutoMobileDimensions.elevationSmall,

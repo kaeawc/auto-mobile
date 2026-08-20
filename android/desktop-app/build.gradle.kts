@@ -196,6 +196,10 @@ compose.desktop {
     mainClass = "dev.jasonpearson.automobile.desktop.MainKt"
     nativeDistributions {
       targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
+      // GitHubReleaseSource (constructed during application startup) uses the JDK HttpClient.
+      // Compose's minimized jlink runtime does not infer this module from the classpath, so it
+      // must be declared explicitly or packaged apps fail with NoClassDefFoundError.
+      modules("java.net.http")
       packageName = "AutoMobile"
       packageVersion = desktopPackageVersion
       description = "AutoMobile Desktop - Device automation and testing dashboard"

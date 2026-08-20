@@ -34,6 +34,22 @@ wiring_requires_yq() {
   [[ "$output" == ":desktop-app:createDistributable" ]]
 }
 
+@test "the macOS app image verifies java.net.http before notarization" {
+  wiring_requires_yq
+
+  local module_check_idx notarize_idx run_block
+  run_block="$(yq -r '.jobs.build.steps[] | select(.name == "Verify Java HTTP module in app image") | .run' "$WORKFLOW")"
+  [ -n "$run_block" ]
+  [[ "$run_block" == *'verify-desktop-app-http-module.sh'* ]]
+  [[ "$run_block" == *'"$APP"'* ]]
+
+  module_check_idx="$(yq -r '.jobs.build.steps | to_entries[] | select(.value.name == "Verify Java HTTP module in app image") | .key' "$WORKFLOW")"
+  notarize_idx="$(yq -r '.jobs.build.steps | to_entries[] | select(.value.name == "Notarize and staple app image") | .key' "$WORKFLOW")"
+  [ -n "$module_check_idx" ]
+  [ -n "$notarize_idx" ]
+  [ "$module_check_idx" -lt "$notarize_idx" ]
+}
+
 @test "the app image is notarized and stapled before the DMG is assembled" {
   wiring_requires_yq
 

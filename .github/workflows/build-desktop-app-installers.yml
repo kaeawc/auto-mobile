@@ -145,6 +145,21 @@ jobs:
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
           malloc-replacement: ${{ runner.os == 'Linux' && 'jemalloc' || 'none' }}
 
+      # `GitHubReleaseSource` is created during desktop-app startup and requires this module.
+      # Compose's jlink image is minimized, so assert the actual app image includes it before
+      # notarization instead of discovering a missing class after release.
+      - name: "Verify Java HTTP module in app image"
+        if: matrix.platform == 'macos'
+        working-directory: android
+        run: |
+          set -euo pipefail
+          APP=$(find desktop-app/build/compose/binaries/main/app -maxdepth 1 -type d -name '*.app' | head -n 1)
+          if [ -z "$APP" ]; then
+            echo "No .app was produced under desktop-app/build/compose/binaries/main/app" >&2
+            exit 1
+          fi
+          "${GITHUB_WORKSPACE}/scripts/ci/verify-desktop-app-http-module.sh" "$APP"
+
       - name: "Write App Store Connect API key"
         if: matrix.platform == 'macos'
         env:

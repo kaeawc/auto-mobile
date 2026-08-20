@@ -3,8 +3,8 @@
  */
 import fs from "fs";
 import path from "path";
-import { ensureDirExists, statAsync, renameAsync } from "./io";
-import { getTempDir, TEMP_SUBDIRS } from "./tempDir";
+import { statAsync, renameAsync } from "./io";
+import { ensureSecureLogsDirSync } from "./tempDir";
 import { pruneLogFiles } from "./logPruner";
 
 /**
@@ -138,16 +138,9 @@ const trackWrite = (write: Promise<void>): void => {
   lastWrite = lastWrite.then(() => write);
 };
 
-// Create logs directory if it doesn't exist. Use getTempDir so the location
-// honors TMPDIR and matches the rest of the auto-mobile temp tree (rather than a
-// hardcoded /tmp path that can diverge from where other processes look).
-const logsDir = getTempDir(TEMP_SUBDIRS.LOGS);
-if (!fs.existsSync(logsDir)) {
-  fs.mkdirSync(logsDir, { recursive: true });
-}
-ensureDirExists(logsDir).catch(err => {
-  console.error("Failed to create logs directory:", err);
-});
+// Create the configured log directory with owner-only permissions. This may be
+// independent of AUTOMOBILE_DATA_DIR, which continues to scope non-log state.
+const logsDir = ensureSecureLogsDirSync();
 
 // The daemon is single-owner, so keep its stable log name easy to document and
 // tail. Stdio/client processes remain PID-scoped because several can run in

@@ -9,7 +9,7 @@ import {
   INCOMPLETE_EXTRACTION_CODE,
   INCOMPLETE_EXTRACTION_EXIT_CODE,
 } from "../db/migrationDependencyIntegrity";
-import { ensureSecureTempDirSync, TEMP_SUBDIRS } from "../utils/tempDir";
+import { ensureSecureLogsDirSync } from "../utils/tempDir";
 import { outputReductionFlagsToArgs } from "../utils/outputReductionFlags";
 import {
   EVENT_ALL_MARKERS_FLAG,
@@ -546,14 +546,14 @@ export class DaemonManager implements DaemonManagerLike {
     // Falls back to bunx to avoid requiring a global install.
     let { command: autoMobileCmd, args } = this.withDaemonOptions(this.resolveLaunchCommand(), options);
 
-    // Redirect the detached daemon's stdout/stderr into the STABLE logs dir
+    // Redirect the detached daemon's stdout/stderr into the configured logs dir
     // (`~/.auto-mobile/logs` by default) rather than an ephemeral
     // `mkdtemp(tmpdir())` directory. Under bunx the temp tree is reaped while the
     // daemon keeps this fd open, which previously left the on-disk log unlinked
     // and post-hoc debugging impossible (issue #2724). The logs dir is created
-    // owner-only (0o700) by ensureSecureTempDirSync, so a fixed, predictable
+    // owner-only (0o700) by ensureSecureLogsDirSync, so a fixed, predictable
     // filename inside it is not exposed to other users.
-    const logsDir = ensureSecureTempDirSync(TEMP_SUBDIRS.LOGS);
+    const logsDir = ensureSecureLogsDirSync();
     const logPath = join(logsDir, `daemon-launch-${process.pid}.log`);
     // Open with restricted permissions (0o600 = owner read/write only).
     // Truncate per launch so a single manager's bootstrap captures don't grow

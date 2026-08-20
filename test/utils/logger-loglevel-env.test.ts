@@ -1,6 +1,8 @@
 import { describe, expect, test, spyOn } from "bun:test";
 import fs from "fs";
 import { EventEmitter } from "node:events";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { LogLevel, parseAutomobileLogLevel, resolveProcessLogPrefix } from "../../src/utils/logger";
 
 class FakeLogStream extends EventEmitter {
@@ -48,6 +50,30 @@ async function loggerWithEnvLevel(
       delete process.env.AUTOMOBILE_LOG_LEVEL;
     } else {
       process.env.AUTOMOBILE_LOG_LEVEL = previous;
+    }
+  }
+}
+
+async function loggerWithLogDirectory(
+  logDir: string,
+  dataDir: string
+): Promise<typeof import("../../src/utils/logger")> {
+  const previousLogDir = process.env.AUTOMOBILE_LOG_DIR;
+  const previousDataDir = process.env.AUTOMOBILE_DATA_DIR;
+  process.env.AUTOMOBILE_LOG_DIR = logDir;
+  process.env.AUTOMOBILE_DATA_DIR = dataDir;
+  try {
+    return await import(`../../src/utils/logger.ts?log-directory-${freshImportCounter++}`);
+  } finally {
+    if (previousLogDir === undefined) {
+      delete process.env.AUTOMOBILE_LOG_DIR;
+    } else {
+      process.env.AUTOMOBILE_LOG_DIR = previousLogDir;
+    }
+    if (previousDataDir === undefined) {
+      delete process.env.AUTOMOBILE_DATA_DIR;
+    } else {
+      process.env.AUTOMOBILE_DATA_DIR = previousDataDir;
     }
   }
 }
@@ -155,6 +181,29 @@ describe("AUTOMOBILE_LOG_LEVEL is applied at process start (issue #3845)", () =>
     } finally {
       createWriteStream.mockRestore();
       logFileExists.mockRestore();
+    }
+  });
+});
+
+describe("AUTOMOBILE_LOG_DIR", () => {
+  test("routes structured logs outside the data directory", async () => {
+    const root = fs.mkdtempSync(join(tmpdir(), "am-logger-dir-"));
+    const logDir = join(root, "logs");
+    const dataDir = join(root, "data");
+    const stream = new FakeLogStream();
+    const createWriteStream = spyOn(fs, "createWriteStream").mockReturnValue(
+      stream as unknown as fs.WriteStream,
+    );
+
+    try {
+      const mod = await loggerWithLogDirectory(logDir, dataDir);
+      const prefix = mod.resolveProcessLogPrefix(process.argv, process.pid);
+      expect(createWriteStream).toHaveBeenCalledWith(join(logDir, `${prefix}.log`), { flags: "a" });
+      expect(fs.existsSync(join(dataDir, "logs"))).toBeFalse();
+      await mod.logger.closeAfterFlush();
+    } finally {
+      createWriteStream.mockRestore();
+      fs.rmSync(root, { recursive: true, force: true });
     }
   });
 });

@@ -4,7 +4,9 @@ import os from "node:os";
 import path from "node:path";
 import {
   resolveAutoMobileBaseDir,
+  resolveAutoMobileLogsDir,
   getTempDir,
+  ensureSecureLogsDirSync,
   ensureSecureTempDirSync,
   TEMP_SUBDIRS,
 } from "../../src/utils/tempDir";
@@ -62,11 +64,92 @@ describe("resolveAutoMobileBaseDir", () => {
   });
 });
 
+describe("resolveAutoMobileLogsDir", () => {
+  const home = "/home/tester";
+
+  test("prefers the log override over data-dir and legacy log overrides", () => {
+    expect(
+      resolveAutoMobileLogsDir(
+        {
+          AUTOMOBILE_LOG_DIR: "/srv/logs",
+          AUTO_MOBILE_LOG_DIR: "/srv/legacy-logs",
+          AUTOMOBILE_DATA_DIR: "/srv/data",
+        },
+        home,
+        "/launch",
+      )
+    ).toBe(path.resolve("/srv/logs"));
+  });
+
+  test("honors the legacy log-dir alias", () => {
+    expect(
+      resolveAutoMobileLogsDir({ AUTO_MOBILE_LOG_DIR: "/srv/legacy-logs" }, home, "/launch")
+    ).toBe(path.resolve("/srv/legacy-logs"));
+  });
+
+  test("resolves relative log overrides from the daemon launch directory", () => {
+    expect(
+      resolveAutoMobileLogsDir({ AUTOMOBILE_LOG_DIR: "logs" }, home, "/launch")
+    ).toBe(path.resolve("/launch", "logs"));
+  });
+
+  test("uses the injected launch directory for a relative log override", () => {
+    expect(
+      resolveAutoMobileLogsDir(
+        {
+          AUTOMOBILE_LOG_DIR: "logs",
+          AUTOMOBILE_DAEMON_LAUNCH_CWD: "/injected-launch",
+        },
+        home,
+      )
+    ).toBe(path.resolve("/injected-launch", "logs"));
+  });
+
+  test("falls back to the data-dir logs child for an unset or blank override", () => {
+    expect(
+      resolveAutoMobileLogsDir({ AUTOMOBILE_DATA_DIR: "/srv/data" }, home, "/launch")
+    ).toBe(path.join(path.resolve("/srv/data"), "logs"));
+    expect(
+      resolveAutoMobileLogsDir(
+        { AUTOMOBILE_LOG_DIR: "   ", AUTOMOBILE_DATA_DIR: "/srv/data" },
+        home,
+        "/launch",
+      )
+    ).toBe(path.join(path.resolve("/srv/data"), "logs"));
+  });
+});
+
 describe("getTempDir", () => {
   test("derives every subdirectory from the resolved stable base", () => {
     const logs = getTempDir(TEMP_SUBDIRS.LOGS);
     const base = resolveAutoMobileBaseDir();
     expect(logs).toBe(path.join(base, TEMP_SUBDIRS.LOGS));
+  });
+
+  test("keeps non-log paths under AUTOMOBILE_DATA_DIR when logs are overridden", () => {
+    const previousDataDir = process.env.AUTOMOBILE_DATA_DIR;
+    const previousLogDir = process.env.AUTOMOBILE_LOG_DIR;
+    process.env.AUTOMOBILE_DATA_DIR = "/srv/data";
+    process.env.AUTOMOBILE_LOG_DIR = "/srv/logs";
+    try {
+      expect(getTempDir(TEMP_SUBDIRS.SCREENSHOTS)).toBe(
+        path.join(path.resolve("/srv/data"), "screenshots")
+      );
+      expect(getTempDir(TEMP_SUBDIRS.TOOL_LOGS)).toBe(
+        path.join(path.resolve("/srv/data"), "tool_logs")
+      );
+    } finally {
+      if (previousDataDir === undefined) {
+        delete process.env.AUTOMOBILE_DATA_DIR;
+      } else {
+        process.env.AUTOMOBILE_DATA_DIR = previousDataDir;
+      }
+      if (previousLogDir === undefined) {
+        delete process.env.AUTOMOBILE_LOG_DIR;
+      } else {
+        process.env.AUTOMOBILE_LOG_DIR = previousLogDir;
+      }
+    }
   });
 });
 
@@ -90,6 +173,66 @@ describe("ensureSecureTempDirSync", () => {
         delete process.env.AUTOMOBILE_DATA_DIR;
       } else {
         process.env.AUTOMOBILE_DATA_DIR = prev;
+      }
+      fs.rmSync(tmpBase, { recursive: true, force: true });
+    }
+  });
+
+  test.skipIf(process.platform === "win32")("creates an overridden logs directory with restrictive 0o700 permissions", () => {
+    const tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), "am-log-mode-test-"));
+    const logDir = path.join(tmpBase, "logs");
+    const previousLogDir = process.env.AUTOMOBILE_LOG_DIR;
+    process.env.AUTOMOBILE_LOG_DIR = logDir;
+    try {
+      const dir = ensureSecureLogsDirSync();
+      const mode = fs.statSync(dir).mode & 0o777;
+      expect(dir).toBe(logDir);
+      expect(mode).toBe(0o700);
+    } finally {
+      if (previousLogDir === undefined) {
+        delete process.env.AUTOMOBILE_LOG_DIR;
+      } else {
+        process.env.AUTOMOBILE_LOG_DIR = previousLogDir;
+      }
+      fs.rmSync(tmpBase, { recursive: true, force: true });
+    }
+  });
+
+  test.skipIf(process.platform === "win32")("repairs an existing overridden logs directory to 0o700", () => {
+    const tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), "am-log-mode-repair-"));
+    const logDir = path.join(tmpBase, "logs");
+    const previousLogDir = process.env.AUTOMOBILE_LOG_DIR;
+    fs.mkdirSync(logDir, { mode: 0o755 });
+    fs.chmodSync(logDir, 0o755);
+    process.env.AUTOMOBILE_LOG_DIR = logDir;
+    try {
+      ensureSecureLogsDirSync();
+      expect(fs.statSync(logDir).mode & 0o777).toBe(0o700);
+    } finally {
+      if (previousLogDir === undefined) {
+        delete process.env.AUTOMOBILE_LOG_DIR;
+      } else {
+        process.env.AUTOMOBILE_LOG_DIR = previousLogDir;
+      }
+      fs.rmSync(tmpBase, { recursive: true, force: true });
+    }
+  });
+
+  test.skipIf(process.platform === "win32")("rejects a symbolic-link log directory", () => {
+    const tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), "am-log-link-"));
+    const targetDir = path.join(tmpBase, "target");
+    const linkDir = path.join(tmpBase, "logs");
+    const previousLogDir = process.env.AUTOMOBILE_LOG_DIR;
+    fs.mkdirSync(targetDir);
+    fs.symlinkSync(targetDir, linkDir, "dir");
+    process.env.AUTOMOBILE_LOG_DIR = linkDir;
+    try {
+      expect(() => ensureSecureLogsDirSync()).toThrow("symbolic-link directory");
+    } finally {
+      if (previousLogDir === undefined) {
+        delete process.env.AUTOMOBILE_LOG_DIR;
+      } else {
+        process.env.AUTOMOBILE_LOG_DIR = previousLogDir;
       }
       fs.rmSync(tmpBase, { recursive: true, force: true });
     }

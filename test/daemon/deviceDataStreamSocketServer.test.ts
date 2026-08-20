@@ -584,6 +584,115 @@ describe("DeviceDataStreamSocketServer", () => {
       expect(server.getSubscriberCount()).toBe(1);
     });
 
+    it("rejects a malformed deviceSessionUuid at the socket boundary", async () => {
+      const screenshotChanges: Array<string | null> = [];
+      server.setOnScreenshotCadenceChanged((deviceId) => screenshotChanges.push(deviceId));
+      const socket = new FakeSocket();
+
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "sub-invalid-session",
+          command: "subscribe",
+          deviceSessionUuid: 42,
+          screenshotIntervalMs: 500,
+        }),
+      );
+
+      expect(socket.getWrittenMessages()).toEqual([
+        {
+          id: "sub-invalid-session",
+          type: "error",
+          success: false,
+          error: "deviceSessionUuid must be a string or null",
+        },
+      ]);
+      expect(server.getSubscriberCount()).toBe(0);
+      expect(screenshotChanges).toEqual([]);
+    });
+
+    it("treats an omitted deviceSessionUuid as an intentional all-devices subscription", async () => {
+      const screenshotChanges: Array<string | null> = [];
+      const hierarchyChanges: Array<string | null> = [];
+      server.setOnScreenshotCadenceChanged((deviceId) => screenshotChanges.push(deviceId));
+      server.setOnHierarchyCadenceChanged((deviceId) => hierarchyChanges.push(deviceId));
+      const socket = new FakeSocket();
+
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "sub-all-devices",
+          command: "subscribe",
+          screenshotIntervalMs: 750,
+          hierarchyIntervalMs: 500,
+        }),
+      );
+
+      expect(screenshotChanges).toEqual([null]);
+      expect(hierarchyChanges).toEqual([null]);
+      expect(server.getScreenshotIntervalMsForDevice("device-1")).toBe(750);
+      expect(server.getScreenshotIntervalMsForDevice("device-2")).toBe(750);
+      expect(server.getHierarchyIntervalMsForDevice("device-1")).toBe(500);
+      expect(server.getHierarchyIntervalMsForDevice("device-2")).toBe(500);
+    });
+
+    it("rejects an unresolved deviceSessionUuid before creating a subscription", async () => {
+      const screenshotChanges: Array<string | null> = [];
+      const hierarchyChanges: Array<string | null> = [];
+      server.setOnScreenshotCadenceChanged((deviceId) => screenshotChanges.push(deviceId));
+      server.setOnHierarchyCadenceChanged((deviceId) => hierarchyChanges.push(deviceId));
+      const socket = new FakeSocket();
+
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "sub-unknown-session",
+          command: "subscribe",
+          deviceSessionUuid: "session-unknown",
+          screenshotIntervalMs: 250,
+          hierarchyIntervalMs: 250,
+        }),
+      );
+
+      expect(socket.getWrittenMessages<{ type: string; success?: boolean; error?: string }>()).toEqual([
+        {
+          id: "sub-unknown-session",
+          type: "error",
+          success: false,
+          error: "deviceSessionUuid 'session-unknown' does not identify a live device session",
+        },
+      ]);
+      expect(screenshotChanges).toEqual([]);
+      expect(hierarchyChanges).toEqual([]);
+      expect(server.getSubscriberCount()).toBe(0);
+      expect(server.hasSubscriberForDevice("device-1")).toBe(false);
+      expect(server.getScreenshotIntervalMsForDevice("device-1")).toBe(3000);
+      expect(server.getHierarchyIntervalMsForDevice("device-1")).toBe(1000);
+    });
+
+    it("rejects a blank deviceSessionUuid", async () => {
+      const socket = new FakeSocket();
+
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "sub-blank-session",
+          command: "subscribe",
+          deviceSessionUuid: "  ",
+        }),
+      );
+
+      expect(socket.getWrittenMessages()).toEqual([
+        {
+          id: "sub-blank-session",
+          type: "error",
+          success: false,
+          error: "deviceSessionUuid must not be blank",
+        },
+      ]);
+      expect(server.getSubscriberCount()).toBe(0);
+    });
+
     it("handles unsubscribe command", async () => {
       const { socket } = server.simulateSubscription({});
       expect(server.getSubscriberCount()).toBe(1);
@@ -1982,14 +2091,34 @@ describe("DeviceDataStreamSocketServer", () => {
         .toEqual(["session-device-b"]);
     });
 
-    it("yields zero events to a stale/retired deviceSessionUuid subscriber (AC4)", () => {
-      const { socket } = server.simulateSubscription({ deviceId: "device-a" });
+    it("yields zero events and stops capture for a stale/retired deviceSessionUuid subscriber (AC4)", () => {
+      const { socket } = server.simulateSubscription({
+        deviceId: "device-a",
+        screenshotIntervalMs: 250,
+        hierarchyIntervalMs: 250,
+      });
+      expect(server.hasSubscriberForDevice("device-a")).toBe(true);
+      expect(server.getScreenshotIntervalMsForDevice("device-a")).toBe(250);
+      expect(server.getHierarchyIntervalMsForDevice("device-a")).toBe(250);
+
       // device-a reconnects under a new epoch: the serial now resolves to a new uuid.
       server.sessionResolver.retire("device-a").bind("device-a", "session-device-a-2");
 
       server.pushHierarchyUpdate("device-a", hierarchy);
 
       expect(frames(socket).filter(f => f.type === "hierarchy_update")).toHaveLength(0);
+      expect(server.hasSubscriberForDevice("device-a")).toBe(false);
+      expect(server.getScreenshotIntervalMsForDevice("device-a")).toBe(3000);
+      expect(server.getHierarchyIntervalMsForDevice("device-a")).toBe(1000);
+    });
+
+    it("retires the previous uuid when a fake resolver rebinds a device", () => {
+      server.sessionResolver.bind("device-a", "session-device-a");
+      server.sessionResolver.bind("device-a", "session-device-a-2");
+
+      expect(server.sessionResolver.resolveUuid("device-a")).toBe("session-device-a-2");
+      expect(server.sessionResolver.resolveDeviceId("session-device-a")).toBeNull();
+      expect(server.sessionResolver.resolveDeviceId("session-device-a-2")).toBe("device-a");
     });
 
     describe("navigation targeting (AC3, closes #4837)", () => {
@@ -2045,7 +2174,11 @@ describe("DeviceDataStreamSocketServer", () => {
       });
 
       it("pushes device_session_started to a matching-uuid and an all-device subscriber", () => {
-        const scoped = server.simulateSubscription({ deviceSessionUuid: "session-device-a" });
+        server.sessionResolver.bind("device-a", "session-device-a");
+        const scoped = server.simulateSubscription({
+          deviceId: "device-a",
+          deviceSessionUuid: "session-device-a",
+        });
         const all = server.simulateSubscription({});
         const other = server.simulateSubscription({ deviceSessionUuid: "session-other" });
 
@@ -2060,7 +2193,12 @@ describe("DeviceDataStreamSocketServer", () => {
       });
 
       it("pushes device_session_ended with the retired identity", () => {
-        const { socket } = server.simulateSubscription({ deviceSessionUuid: "session-device-a" });
+        server.sessionResolver.bind("device-a", "session-device-a");
+        const { socket } = server.simulateSubscription({
+          deviceId: "device-a",
+          deviceSessionUuid: "session-device-a",
+        });
+        server.sessionResolver.retire("device-a");
         server.pushDeviceSessionEnded(record());
 
         const f = frames(socket).filter(x => x.type === "device_session_ended");

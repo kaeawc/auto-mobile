@@ -104,10 +104,30 @@ function normalizeProcessCommand(command: string): string {
   return command.replace(/\\/g, "/").replace(/\/+/g, "/");
 }
 
+function invokedCommand(command: string): string {
+  const shellInvocation = command.trim().match(
+    /(?:^|\s)(?:-c|\/c|-(?:command|encodedcommand|c|ec))\s+["']?(.+)$/i,
+  );
+  return shellInvocation?.[1].trim() ?? command.trim();
+}
+
 function isAutoMobileDaemonCommand(command: string): boolean {
   const normalizedCommand = normalizeProcessCommand(command);
-  return normalizedCommand.includes("--daemon-mode") &&
-    (normalizedCommand.includes("auto-mobile") || normalizedCommand.includes("dist/src/index.js"));
+  const invocation = invokedCommand(normalizedCommand);
+  if (!/(?:^|\s)--daemon-mode(?:\s|["']|$)/.test(invocation)) {
+    return false;
+  }
+
+  const runsBundledEntrypoint =
+    /(?:^|["'\s\\/])(?:bun|node)(?:\.exe)?(?:\s|["'])/.test(invocation) &&
+    /(?:^|["'\s])[^"'\s]*\/(?:@kaeawc\/)?auto-mobile\/dist\/src\/index\.js(?:\s|["']|$)/.test(invocation);
+  const runsPublishedPackage =
+    /^(?:"?[^"'\s]*\/)?(?:bunx|npx)(?:\.exe)?\s+(?:(?:-y|--yes|--bun|--no-cache)\s+)*@kaeawc\/auto-mobile(?:@[^\s"']+)?(?:\s|["']|$)/.test(invocation) ||
+    /^(?:"?[^"'\s]*\/)?bun(?:\.exe)?\s+x\s+(?:(?:-y|--yes|--bun|--no-cache)\s+)*@kaeawc\/auto-mobile(?:@[^\s"']+)?(?:\s|["']|$)/.test(invocation);
+  const runsStandaloneBinary =
+    /^(?:"?[^"'\s]*\/)?auto-mobile(?:\.exe)?(?:\s|$)/i.test(invocation);
+
+  return runsBundledEntrypoint || runsPublishedPackage || runsStandaloneBinary;
 }
 
 function isShellCommandWrapper(command: string): boolean {
@@ -206,6 +226,16 @@ export function parseWindowsDaemonProcessTable(processTableJson: string): Daemon
 export interface DaemonProcessLivenessChecker {
   isProcessRunning(pid: number): boolean;
 }
+
+export interface DaemonProcessSignaler {
+  signal(pid: number, signal: NodeJS.Signals): void;
+}
+
+const defaultDaemonProcessSignaler: DaemonProcessSignaler = {
+  signal(pid, signal): void {
+    process.kill(pid, signal);
+  },
+};
 
 export class PsDaemonProcessFinder implements DaemonProcessFinder, DaemonProcessLivenessChecker {
   constructor(private readonly runCommand: ProcessTableCommandRunner = execSync) {}
@@ -324,6 +354,7 @@ export class DaemonManager implements DaemonManagerLike {
   private readonly socketPath: string;
   private readonly processFinder: DaemonProcessFinder;
   private readonly processLivenessChecker: DaemonProcessLivenessChecker;
+  private readonly processSignaler: DaemonProcessSignaler;
   private readonly extractionCleaner: ExtractionCleaner;
   private readonly launcher: DaemonLauncher;
   private readonly fallbackLauncher: DaemonLauncher;
@@ -340,6 +371,7 @@ export class DaemonManager implements DaemonManagerLike {
     processSpawner: DaemonProcessSpawner | undefined = undefined,
     extractionCleaner: ExtractionCleaner = fileSystemExtractionCleaner,
     launcher: DaemonLauncher | (() => DaemonLaunchCommand) | undefined = undefined,
+    processSignaler: DaemonProcessSignaler = defaultDaemonProcessSignaler,
   ) {
     this.stateProvider = stateProvider;
     this.timer = timer;
@@ -357,6 +389,7 @@ export class DaemonManager implements DaemonManagerLike {
       this.processLivenessChecker = processFinder;
       processSpawner = processFinderOrSpawner;
     }
+    this.processSignaler = processSignaler;
     this.extractionCleaner = extractionCleaner;
     this.launchCommandResolver = typeof launcher === "function" ? launcher : undefined;
     this.launcher = (typeof launcher === "object" ? launcher : undefined) ?? new DaemonLauncher({
@@ -932,15 +965,87 @@ export class DaemonManager implements DaemonManagerLike {
     // replace a stale checkout. Preserve the daemon's PID-recorded options so
     // that replacement cannot silently discard configuration such as debug,
     // output, or accessibility flags.
-    const runningOptions = (await this.status()).options ?? {};
+    const status = await this.status();
+    const runningOptions = status.options ?? {};
     const requestedOptions = Object.fromEntries(
       Object.entries(options).filter(([, value]) => value !== undefined)
     ) as DaemonOptions;
     const restartOptions: DaemonOptions = { ...runningOptions, ...requestedOptions };
-    await this.stop();
+    if (status.running) {
+      await this.stop();
+    }
+    await this.stopUnrecordedDaemonsForExplicitRestart(status.pid);
     // Wait a bit before starting
     await this.timer.sleep(1000);
     await this.start(restartOptions);
+  }
+
+  /**
+   * An explicit restart force-cleans live daemon-mode processes discovered from
+   * other PID-file namespaces. This intentionally does not require this
+   * manager's socket to be reachable: an orphaned daemon is precisely the
+   * failure mode that `--daemon restart` must recover from. Ordinary `start`
+   * remains non-destructive.
+   */
+  private async stopUnrecordedDaemonsForExplicitRestart(recordedPid?: number): Promise<void> {
+    const candidates = this.findLiveDaemonProcesses().filter(pid => pid !== recordedPid);
+    if (candidates.length === 0) {
+      return;
+    }
+
+    stderrLog(
+      `Explicit restart force-stopping ${candidates.length} live AutoMobile daemon candidate(s) without this namespace's PID record...`
+    );
+    for (const pid of candidates) {
+      await this.stopUnrecordedDaemonProcess(pid);
+    }
+  }
+
+  private async stopUnrecordedDaemonProcess(pid: number): Promise<void> {
+    if (!this.findLiveDaemonProcesses().includes(pid)) {
+      stderrLog(`Daemon candidate ${pid} exited before explicit restart could stop it.`);
+      return;
+    }
+
+    stderrLog(`Stopping daemon without this namespace's PID record (PID ${pid})...`);
+    try {
+      this.processSignaler.signal(pid, "SIGTERM");
+    } catch (error) {
+      if (this.isMissingProcessError(error)) {
+        return;
+      }
+      throw new ActionableError(
+        `Failed to stop verified daemon process ${pid}: ${this.describeError(error)}`
+      );
+    }
+
+    if (await this.waitForStop(pid, DAEMON_SHUTDOWN_TIMEOUT_MS)) {
+      return;
+    }
+
+    stderrLog(`Verified daemon ${pid} did not stop gracefully, sending SIGKILL...`);
+    if (!this.findLiveDaemonProcesses().includes(pid)) {
+      stderrLog(`Daemon candidate ${pid} exited before explicit restart could force-stop it.`);
+      return;
+    }
+    try {
+      this.processSignaler.signal(pid, "SIGKILL");
+    } catch (error) {
+      if (this.isMissingProcessError(error)) {
+        return;
+      }
+      throw new ActionableError(
+        `Failed to force-stop verified daemon process ${pid}: ${this.describeError(error)}`
+      );
+    }
+
+    if (!(await this.waitForStop(pid, 1000))) {
+      throw new ActionableError(`Verified daemon process ${pid} did not exit after SIGKILL`);
+    }
+  }
+
+  private isMissingProcessError(error: unknown): boolean {
+    return error instanceof Error && error.message.includes("ESRCH");
   }
 
   /**
@@ -959,18 +1064,21 @@ export class DaemonManager implements DaemonManagerLike {
       pollCount++;
       if (existsSync(this.socketPath)) {
         socketObserved = true;
+        // A daemon started from another checkout can own this namespace's socket
+        // without writing this namespace's PID record. The socket connection is
+        // authoritative readiness in that case; status() cannot prove ownership.
+        if (await this.verifyDaemonConnection()) {
+          stderrLog(
+            `Daemon readiness probe succeeded after ${this.timer.now() - startTime}ms ` +
+            `(${pollCount} polls; socket observed)`
+          );
+          return true;
+        }
+        if (signal?.aborted) {
+          return false;
+        }
         const status = await this.status();
         if (status.running) {
-          if (await this.verifyDaemonConnection()) {
-            stderrLog(
-              `Daemon readiness probe succeeded after ${this.timer.now() - startTime}ms ` +
-              `(${pollCount} polls; socket observed)`
-            );
-            return true;
-          }
-          if (signal?.aborted) {
-            return false;
-          }
           await this.removeInvalidSocketPath();
         }
       }

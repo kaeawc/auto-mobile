@@ -20,6 +20,7 @@ import type { DaemonOptions, DaemonStatus } from "../../src/daemon/types";
 import type {
   DaemonProcessFinder,
   DaemonProcessLivenessChecker,
+  DaemonProcessSignaler,
   DaemonProcessSpawner,
   DaemonProcessRecord,
   ExtractionCleaner,
@@ -83,7 +84,18 @@ describe("DaemonManager restart", () => {
   test("preserves PID-recorded options when no replacement options are requested", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const manager = new DaemonManager(undefined, undefined, timer);
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      timer,
+      undefined,
+      undefined,
+      undefined,
+      {
+        findDaemonProcesses: () => [],
+        isProcessRunning: () => false,
+      },
+    );
     const recordedOptions: DaemonOptions = {
       debug: true,
       toolOutputsDir: "/tmp/automobile-artifacts",
@@ -91,6 +103,7 @@ describe("DaemonManager restart", () => {
     };
     const statusSpy = spyOn(manager, "status").mockResolvedValue({
       running: true,
+      pid: 999,
       options: recordedOptions,
     });
     const stopSpy = spyOn(manager, "stop").mockResolvedValue(undefined);
@@ -290,6 +303,17 @@ class FakeDaemonProcessFinder implements DaemonProcessFinder, DaemonProcessLiven
   }
 }
 
+class FakeDaemonProcessSignaler implements DaemonProcessSignaler {
+  readonly signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+
+  constructor(private readonly onSignal?: (pid: number, signal: NodeJS.Signals) => void) {}
+
+  signal(pid: number, signal: NodeJS.Signals): void {
+    this.signals.push({ pid, signal });
+    this.onSignal?.(pid, signal);
+  }
+}
+
 class FakeDaemonChildProcess extends EventEmitter {
   unref(): void {}
 
@@ -381,27 +405,36 @@ describe("Daemon manager process detection", () => {
   test("parses daemon processes from ps pid ppid command output", () => {
     const records = parseDaemonProcessTable(`
       10     1 /usr/bin/unrelated --daemon-mode
-      20     1 /bin/sh -c "bun /worktree/dist/src/index.js --daemon-mode"
-      21    20 bun /worktree/dist/src/index.js --daemon-mode
-      22     1 bun /worktree/dist/src/index.js
+      11     1 python worker.py --note auto-mobile --daemon-mode
+      12     1 bunx -y other-package @kaeawc/auto-mobile --daemon-mode
+      13     1 bun /worktree/unrelated/dist/src/index.js --daemon-mode
+      20     1 /bin/sh -c "bun /worktree/auto-mobile/dist/src/index.js --daemon-mode"
+      21    20 bun /worktree/auto-mobile/dist/src/index.js --daemon-mode
+      22     1 bun /worktree/auto-mobile/dist/src/index.js
       30     1 bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode
+      31     1 bun x -y @kaeawc/auto-mobile@0.0.38 --daemon-mode
     `);
 
     expect(records).toEqual([
       {
         pid: 20,
         ppid: 1,
-        command: `/bin/sh -c "bun /worktree/dist/src/index.js --daemon-mode"`,
+        command: `/bin/sh -c "bun /worktree/auto-mobile/dist/src/index.js --daemon-mode"`,
       },
       {
         pid: 21,
         ppid: 20,
-        command: "bun /worktree/dist/src/index.js --daemon-mode",
+        command: "bun /worktree/auto-mobile/dist/src/index.js --daemon-mode",
       },
       {
         pid: 30,
         ppid: 1,
         command: "bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode",
+      },
+      {
+        pid: 31,
+        ppid: 1,
+        command: "bun x -y @kaeawc/auto-mobile@0.0.38 --daemon-mode",
       },
     ]);
   });
@@ -450,7 +483,7 @@ describe("Daemon manager process detection", () => {
       {
         ProcessId: 21,
         ParentProcessId: 20,
-        CommandLine: "C:\\\\Program Files\\\\nodejs\\\\node.exe C:\\\\repo\\\\dist\\\\src\\\\index.js --daemon-mode",
+        CommandLine: "C:\\\\Program Files\\\\nodejs\\\\node.exe C:\\\\repo\\\\auto-mobile\\\\dist\\\\src\\\\index.js --daemon-mode",
       },
       {
         ProcessId: 22,
@@ -468,7 +501,7 @@ describe("Daemon manager process detection", () => {
       {
         pid: 21,
         ppid: 20,
-        command: "C:\\\\Program Files\\\\nodejs\\\\node.exe C:\\\\repo\\\\dist\\\\src\\\\index.js --daemon-mode",
+        command: "C:\\\\Program Files\\\\nodejs\\\\node.exe C:\\\\repo\\\\auto-mobile\\\\dist\\\\src\\\\index.js --daemon-mode",
       },
     ]);
   });
@@ -836,6 +869,206 @@ describe("Daemon manager process detection", () => {
     } finally {
       killSpy.mockRestore();
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("explicit restart force-stops an unreachable daemon without the default namespace PID record", async () => {
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const candidatePid = 451;
+    const livePids = new Set([candidatePid]);
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses: () => [{
+        pid: candidatePid,
+        ppid: 1,
+        command: "bun /other-checkout/dist/src/index.js --daemon-mode",
+      }],
+      isProcessRunning: pid => livePids.has(pid),
+    };
+    const signaler = new FakeDaemonProcessSignaler((pid, signal) => {
+      if (pid === candidatePid && signal === "SIGTERM") {
+        livePids.delete(pid);
+      }
+    });
+    const manager = new DaemonManager(
+      () => {
+        throw new Error("unreachable daemon socket must not block explicit restart");
+      },
+      undefined,
+      fakeTimer,
+      undefined,
+      undefined,
+      undefined,
+      processFinder,
+      undefined,
+      undefined,
+      undefined,
+      signaler,
+    );
+    const statusSpy = spyOn(manager, "status").mockResolvedValue({ running: false });
+    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+
+    try {
+      await manager.restart();
+
+      expect(signaler.signals).toEqual([{ pid: candidatePid, signal: "SIGTERM" }]);
+      expect(startSpy).toHaveBeenCalledWith({});
+    } finally {
+      startSpy.mockRestore();
+      statusSpy.mockRestore();
+    }
+  });
+
+  test("explicit restart force-stops every daemon from other PID-file namespaces", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "daemon-manager-custom-restart-test-"));
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const candidatePids = [452, 453];
+    const livePids = new Set(candidatePids);
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses: () => candidatePids.map(pid => ({
+        pid,
+        ppid: 1,
+        command: "bun /other-checkout/dist/src/index.js --daemon-mode",
+      })),
+      isProcessRunning: pid => livePids.has(pid),
+    };
+    const signaler = new FakeDaemonProcessSignaler((pid, signal) => {
+      if (signal === "SIGTERM") {
+        livePids.delete(pid);
+      }
+    });
+    const manager = new DaemonManager(
+      () => {
+        throw new Error("unreachable daemon socket must not block explicit restart");
+      },
+      undefined,
+      fakeTimer,
+      join(dir, "daemon.lock"),
+      join(dir, "daemon.pid"),
+      join(dir, "daemon.sock"),
+      processFinder,
+      undefined,
+      undefined,
+      undefined,
+      signaler,
+    );
+    const statusSpy = spyOn(manager, "status").mockResolvedValue({ running: false });
+    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+
+    try {
+      await manager.restart();
+
+      expect(signaler.signals).toEqual([
+        { pid: 452, signal: "SIGTERM" },
+        { pid: 453, signal: "SIGTERM" },
+      ]);
+      expect(startSpy).toHaveBeenCalledWith({});
+    } finally {
+      startSpy.mockRestore();
+      statusSpy.mockRestore();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("explicit restart stops the recorded daemon and every cross-namespace daemon", async () => {
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const recordedPid = 451;
+    const crossNamespacePid = 452;
+    const livePids = new Set([recordedPid, crossNamespacePid]);
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses: () => [recordedPid, crossNamespacePid].map(pid => ({
+        pid,
+        ppid: 1,
+        command: "bun /other-checkout/dist/src/index.js --daemon-mode",
+      })),
+      isProcessRunning: pid => livePids.has(pid),
+    };
+    const signaler = new FakeDaemonProcessSignaler((pid, signal) => {
+      if (signal === "SIGTERM") {
+        livePids.delete(pid);
+      }
+    });
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      fakeTimer,
+      undefined,
+      undefined,
+      undefined,
+      processFinder,
+      undefined,
+      undefined,
+      undefined,
+      signaler,
+    );
+    const statusSpy = spyOn(manager, "status").mockResolvedValue({
+      running: true,
+      pid: recordedPid,
+    });
+    const stopSpy = spyOn(manager, "stop").mockImplementation(async () => {
+      livePids.delete(recordedPid);
+    });
+    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+
+    try {
+      await manager.restart();
+
+      expect(stopSpy).toHaveBeenCalledTimes(1);
+      expect(signaler.signals).toEqual([{ pid: crossNamespacePid, signal: "SIGTERM" }]);
+      expect(startSpy).toHaveBeenCalledWith({});
+    } finally {
+      startSpy.mockRestore();
+      stopSpy.mockRestore();
+      statusSpy.mockRestore();
+    }
+  });
+
+  test("explicit restart does not signal a candidate that exits before the forced stop", async () => {
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const candidatePid = 453;
+    let livenessChecks = 0;
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses: () => [{
+        pid: candidatePid,
+        ppid: 1,
+        command: "bun /other-checkout/dist/src/index.js --daemon-mode",
+      }],
+      isProcessRunning: pid => {
+        if (pid !== candidatePid) {
+          return false;
+        }
+        livenessChecks++;
+        return livenessChecks === 1;
+      },
+    };
+    const signaler = new FakeDaemonProcessSignaler();
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      fakeTimer,
+      undefined,
+      undefined,
+      undefined,
+      processFinder,
+      undefined,
+      undefined,
+      undefined,
+      signaler,
+    );
+    const statusSpy = spyOn(manager, "status").mockResolvedValue({ running: false });
+    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+
+    try {
+      await manager.restart();
+
+      expect(signaler.signals).toEqual([]);
+      expect(startSpy).toHaveBeenCalledWith({});
+    } finally {
+      startSpy.mockRestore();
+      statusSpy.mockRestore();
     }
   });
 

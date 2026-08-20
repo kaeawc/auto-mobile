@@ -152,6 +152,35 @@ describe("DaemonManager readiness", () => {
     expect(existsSync(socketPath)).toBe(true);
   });
 
+  test("reports direct socket readiness when this namespace has no PID record", async () => {
+    const { lockPath, pidPath, socketPath } = createPaths();
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const clients: ProbeClient[] = [];
+    // A daemon from another checkout can own this namespace's socket without
+    // writing its PID metadata here. The successful direct connection is enough
+    // to reuse it; no PID file is written for this namespace.
+    writeFileSync(socketPath, "socket placeholder");
+
+    const manager = new DaemonManager(
+      () => {
+        const client = new ProbeClient(true);
+        clients.push(client);
+        return client;
+      },
+      undefined,
+      fakeTimer,
+      lockPath,
+      pidPath,
+      socketPath
+    );
+
+    await expect(manager.waitForReady(100)).resolves.toBe(true);
+    expect(clients).toHaveLength(1);
+    expect(existsSync(pidPath)).toBe(false);
+    expect(existsSync(socketPath)).toBe(true);
+  });
+
   test("removes an invalid non-socket path and keeps waiting when the PID is alive", async () => {
     const { lockPath, pidPath, socketPath } = createPaths();
     const fakeTimer = new FakeTimer();

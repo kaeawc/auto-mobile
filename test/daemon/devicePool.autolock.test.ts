@@ -396,6 +396,63 @@ describe("DevicePool autolock", () => {
       }
     });
 
+    it("does not release a same-UUID replacement after deferred teardown", async () => {
+      let finishRestore!: () => void;
+      const restoration = new Promise<void>(resolve => { finishRestore = resolve; });
+      let restoreStarted!: () => void;
+      const restorationStarted = new Promise<void>(resolve => { restoreStarted = resolve; });
+      const restoringManager = new SessionManager(
+        timer,
+        new FakeDeviceSessionPersistence(),
+        () => new FakeDbWriteBarrier(),
+        () => ({ restore: async (): Promise<void> => {
+          restoreStarted();
+          await restoration;
+        } }),
+      );
+      const restoringPool = new DevicePool(
+        restoringManager,
+        "daemon-session-1",
+        timer,
+        undefined,
+        fakeDeviceUtils,
+      );
+      try {
+        fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+        await restoringPool.initializeWithDevices([androidDevice]);
+        await restoringPool.assignDeviceToSession("reused-session", "android");
+        restoringManager.setKeepScreenAwake(
+          "reused-session",
+          { applied: true, method: "svc", svcWasEnabled: false },
+        );
+
+        const release = restoringManager.releaseSession("reused-session");
+        await restorationStarted;
+        timer.advanceTime(1_000);
+        await restoringManager.waitForSessionRelease("reused-session");
+        await release;
+        await restoringPool.releaseDevice("emulator-5554", "reused-session");
+        await restoringPool.bindOrReuseDeviceSession(
+          "reused-session",
+          "emulator-5554",
+          "android",
+        );
+
+        finishRestore();
+        for (let attempt = 0; attempt < 10; attempt++) {
+          await new Promise<void>(resolve => setImmediate(resolve));
+        }
+
+        expect(restoringPool.getDevice("emulator-5554")).toMatchObject({
+          sessionId: "reused-session",
+          status: "busy",
+        });
+        expect(restoringManager.getSession("reused-session")?.assignedDevice).toBe("emulator-5554");
+      } finally {
+        restoringManager.stopCleanupTimer();
+      }
+    });
+
     it("rejects a late MCP request while earlier work still owns the expired autolock", async () => {
       await initializeLiveAndroidDevice();
       sessionManager.setActiveSessionExecutionChecker((_sessionId, query) => query?.excludeExecutionId === "late");

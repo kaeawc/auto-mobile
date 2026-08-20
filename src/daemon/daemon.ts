@@ -4,7 +4,7 @@ import { createMcpServer } from "../server";
 import { logger } from "../utils/logger";
 import { MultiPlatformDeviceManager } from "../utils/deviceUtils";
 import { UnixSocketServer } from "./socketServer";
-import { SessionManager, type ActiveSessionExecutionQuery } from "./sessionManager";
+import { SessionManager, type ActiveSessionExecutionQuery, type Session } from "./sessionManager";
 import { SessionHeartbeatMonitor } from "./SessionHeartbeatMonitor";
 import { SingleFlightInterval } from "./SingleFlightInterval";
 import { DevicePool, type PooledDevice } from "./devicePool";
@@ -132,6 +132,12 @@ const MIGRATION_SETTLE_TIMEOUT_MS = 5_000;
 
 type HealthFailureKind = "http" | "socket" | "database" | "unknown";
 type DatabaseHealthFailureRecovery = (code: number) => void | Promise<void>;
+type DeviceSessionRoutingTargets = {
+  deviceDataStream: ReturnType<typeof getDeviceDataStreamServer>;
+  performancePush: ReturnType<typeof getPerformancePushServer>;
+  failuresPush: ReturnType<typeof getFailuresPushServer>;
+  telemetryPush: ReturnType<typeof getTelemetryPushServer>;
+};
 
 /**
  * Main daemon process
@@ -175,6 +181,8 @@ export class Daemon {
   private startupFailureTracker: StartupFailureTracker;
   private recoverFromDatabaseHealthFailure: DatabaseHealthFailureRecovery;
   private observationStreamHealth: ObservationStreamHealth;
+  private deviceDataStreamServer: ReturnType<typeof getDeviceDataStreamServer> = null;
+  private readonly navigationGraphListenerManagers = new WeakSet<NavigationGraphManager>();
   private unsubscribeAdbMissingDevice: (() => void) | null = null;
   private options: DaemonOptions;
   private shutdownHandlersRegistered: boolean = false;
@@ -219,15 +227,24 @@ export class Daemon {
       startServer: async () => {
         await startDeviceDataStreamSocketServer(this.timer);
       },
-      configureCallbacks: () => this.setupDeviceDataStreamCallback(),
+      configureCallbacks: () => this.configureDeviceDataStreamServer(),
     });
     this.deviceSessionRepository = deviceSessionRepository;
     this.sessionManager = new SessionManager(this.timer, this.deviceSessionRepository);
     this.sessionManager.setActiveSessionExecutionChecker(
       (sessionId, query) => this.hasActiveSessionExecution(sessionId, query),
     );
+    this.sessionManager.onSessionCreated((session) => {
+      NavigationGraphManager.clearReleasedSession(session.sessionId);
+      this.setupNavigationGraphUpdateListener(
+        NavigationGraphManager.getInstanceForSession(session.sessionId),
+      );
+    });
     // Register centralized cleanup for session-scoped state
     this.sessionManager.onSessionRelease((sessionId, deviceId) => {
+      this.navigationGraphListenerManagers.delete(
+        NavigationGraphManager.getInstanceForSession(sessionId),
+      );
       NavigationGraphManager.releaseSession(sessionId);
       RealObserveScreen.clearCache(deviceId);
       // Clear the per-device CtrlProxy client's binding to the released session
@@ -242,7 +259,12 @@ export class Daemon {
     // A rebind keeps the session live, but its navigation state was collected on
     // the old device and must not follow it to the new one.
     this.sessionManager.onSessionDeviceUnbound((sessionId, deviceId) => {
+      const previousNavigationManager = NavigationGraphManager.getInstanceForSession(sessionId);
       NavigationGraphManager.resetSession(sessionId);
+      this.navigationGraphListenerManagers.delete(previousNavigationManager);
+      this.setupNavigationGraphUpdateListener(
+        NavigationGraphManager.getInstanceForSession(sessionId),
+      );
       RealObserveScreen.clearCache(deviceId);
       AndroidCtrlProxyClient.getExistingInstance(deviceId)?.releaseSessionBinding(sessionId);
       IOSCtrlProxyClient.getExistingInstance(deviceId)?.releaseSessionBinding(sessionId);
@@ -426,21 +448,18 @@ export class Daemon {
     await startDeviceSnapshotSocketServer();
     await startAppearanceSocketServer();
     await startPerformanceStreamSocketServer();
+    await startDeviceDataStreamSocketServer(this.timer);
+    this.configureDeviceDataStreamServer();
     await startPerformancePushSocketServer();
-    await startDeviceDataStreamSocketServer();
+    this.setupDeviceSessionRouting();
     await startFailuresStreamSocketServer();
     await startFailuresPushSocketServer();
+    this.setupDeviceSessionRouting();
     await startTelemetryPushSocketServer();
+    this.setupDeviceSessionRouting();
     await startWebRtcStreamSocketServer();
     await startVideoStreamSocketServer();
     startupBenchmark.endPhase("auxiliarySocketServerStart");
-
-    // Wire up callback to establish WebSocket connections when IDE plugins subscribe
-    this.setupDeviceDataStreamCallback();
-
-    // Wire the device-session routing key (epic #5256, item 3): give every push
-    // server the serial↔deviceSessionUuid resolver, and stream session lifecycle.
-    this.setupDeviceSessionRouting();
 
     startAppearanceSyncScheduler();
     startPerformanceMonitor();
@@ -969,13 +988,35 @@ export class Daemon {
    * the registry's connect/disconnect transitions to `device_session_started` /
    * `device_session_ended` frames on the observation stream (epic #5256, item 3).
    */
+  private getDeviceSessionRoutingTargets(): DeviceSessionRoutingTargets {
+    return {
+      deviceDataStream: getDeviceDataStreamServer(),
+      performancePush: getPerformancePushServer(),
+      failuresPush: getFailuresPushServer(),
+      telemetryPush: getTelemetryPushServer(),
+    };
+  }
+
+  private configureDeviceDataStreamServer(): void {
+    // The stream singleton can be replaced by health recovery. Route it before
+    // registering request callbacks so every handler observes the current epoch.
+    this.setupDeviceSessionRouting();
+    this.setupDeviceDataStreamCallback();
+  }
+
   private setupDeviceSessionRouting(): void {
     const resolver = createRegistryDeviceSessionResolver(this.deviceSessionRegistry);
-    const deviceDataStream = getDeviceDataStreamServer();
+    const {
+      deviceDataStream,
+      performancePush,
+      failuresPush,
+      telemetryPush,
+    } = this.getDeviceSessionRoutingTargets();
+    this.deviceDataStreamServer = deviceDataStream;
     deviceDataStream?.setDeviceSessionResolver(resolver);
-    getPerformancePushServer()?.setDeviceSessionResolver(resolver);
-    getFailuresPushServer()?.setDeviceSessionResolver(resolver);
-    getTelemetryPushServer()?.setDeviceSessionResolver(resolver);
+    performancePush?.setDeviceSessionResolver(resolver);
+    failuresPush?.setDeviceSessionResolver(resolver);
+    telemetryPush?.setDeviceSessionResolver(resolver);
 
     if (deviceDataStream) {
       this.deviceSessionRegistry.setLifecycleListener({
@@ -986,7 +1027,7 @@ export class Daemon {
   }
 
   private setupDeviceDataStreamCallback(): void {
-    const server = getDeviceDataStreamServer();
+    const server = this.deviceDataStreamServer ?? getDeviceDataStreamServer();
     if (!server) {
       logger.warn("[Daemon] Observation stream server not available for callback setup");
       return;
@@ -1135,33 +1176,49 @@ export class Daemon {
       return;
     }
 
-    const navGraphManager = NavigationGraphManager.getInstance();
+    this.setupNavigationGraphUpdateListener(NavigationGraphManager.getInstance());
+    for (const session of this.sessionManager.getAllSessions()) {
+      this.setupNavigationGraphUpdateListener(
+        NavigationGraphManager.getInstanceForSession(session.sessionId)
+      );
+    }
 
+    // Requests retain the legacy unattributed graph behavior. Live graph changes
+    // above are also wired to each active session manager, which is where tool
+    // execution records navigation state.
+    server.setOnNavigationGraphRequested(
+      createNavigationGraphRequestHandler(NavigationGraphManager.getInstance())
+    );
+
+    logger.info("[Daemon] Navigation graph stream listener configured");
+  }
+
+  private setupNavigationGraphUpdateListener(navGraphManager: NavigationGraphManager): void {
+    if (this.navigationGraphListenerManagers.has(navGraphManager)) {
+      return;
+    }
+    this.navigationGraphListenerManagers.add(navGraphManager);
     navGraphManager.setGraphUpdateListener(async () => {
       logger.info("[Daemon] Navigation graph listener triggered, exporting summary...");
       try {
         const summary = await navGraphManager.exportGraphSummary();
+        if (!this.navigationGraphListenerManagers.has(navGraphManager)) {
+          logger.debug("[Daemon] Ignoring navigation update from a released or rebound session");
+          return;
+        }
         logger.info(`[Daemon] Got summary: appId=${summary.appId}, nodes=${summary.nodes.length}, edges=${summary.edges.length}`);
 
         const streamData = convertSummaryToStreamData(summary);
         // Attribute the update to the device that owns this app's graph so panes
         // watching other devices are not cross-contaminated (epic #5256; #4837).
         const deviceId = navGraphManager.getDeviceIdForApp(summary.appId);
-        server.pushNavigationGraphUpdate(streamData, deviceId);
+        this.deviceDataStreamServer?.pushNavigationGraphUpdate(streamData, deviceId);
 
         logger.info(`[Daemon] Pushed navigation graph update: ${summary.nodes.length} nodes, ${summary.edges.length} edges`);
       } catch (error) {
         logger.warn(`[Daemon] Failed to push navigation graph update: ${error}`);
       }
     });
-
-    // Wire up on-demand navigation graph requests from IDE plugins. A failed export must NOT be
-    // swallowed to null (issue #4918): the handler rethrows so the stream server's existing error
-    // path surfaces a typed `error` frame, letting a stream-driven client distinguish "export
-    // failed" from "no app / empty graph".
-    server.setOnNavigationGraphRequested(createNavigationGraphRequestHandler(navGraphManager));
-
-    logger.info("[Daemon] Navigation graph stream listener configured");
   }
 
   /**
@@ -1356,7 +1413,18 @@ export class Daemon {
 
         for (const [deviceId, recordingIds] of missingByDevice.entries()) {
           const pooledDeviceAtDisconnect = this.devicePool.getDevice(deviceId);
-          if (await this.shouldSkipStaleDisconnectCleanup(pooledDeviceAtDisconnect, deviceId)) {
+          const assignmentCountAtDisconnect = pooledDeviceAtDisconnect?.assignmentCount;
+          const sessionIdAtDisconnect =
+            pooledDeviceAtDisconnect?.sessionId ?? this.sessionManager.getSessionForDevice(deviceId);
+          const sessionAtDisconnect = sessionIdAtDisconnect
+            ? this.sessionManager.getSession(sessionIdAtDisconnect)
+            : null;
+          const forceGenerationAtDisconnect = this.forceDisconnectedDeviceGenerations.get(deviceId);
+          if (await this.shouldSkipStaleDisconnectCleanup(
+            pooledDeviceAtDisconnect,
+            deviceId,
+            forceGenerationAtDisconnect,
+          )) {
             continue;
           }
           let deviceCleanupSucceeded = true;
@@ -1365,37 +1433,16 @@ export class Daemon {
           getPerformanceMonitor().stopMonitoring(deviceId);
 
           for (const recordingId of recordingIds) {
-            if (this.stoppingRecordings.has(recordingId)) {
+            if (!(await this.stopRecordingAfterDeviceDisconnect(recordingId, deviceId))) {
               deviceCleanupSucceeded = false;
-              continue;
-            }
-            this.stoppingRecordings.add(recordingId);
-            try {
-              await stopVideoRecording(recordingId);
-              logger.warn(
-                `[Daemon] Stopped recording ${recordingId} after device ${deviceId} disconnected`
-              );
-            } catch (error) {
-              logger.warn(
-                `[Daemon] Failed to stop recording ${recordingId} after device ${deviceId} disconnected: ${error}`
-              );
-              try {
-                await interruptVideoRecording(recordingId);
-                logger.warn(
-                  `[Daemon] Marked recording ${recordingId} interrupted after device ${deviceId} disconnected`
-                );
-              } catch (interruptError) {
-                deviceCleanupSucceeded = false;
-                logger.warn(
-                  `[Daemon] Failed to mark recording ${recordingId} interrupted after device ${deviceId} disconnected: ${interruptError}`
-                );
-              }
-            } finally {
-              this.stoppingRecordings.delete(recordingId);
             }
           }
 
-          if (await this.shouldSkipStaleDisconnectCleanup(pooledDeviceAtDisconnect, deviceId)) {
+          if (await this.shouldSkipStaleDisconnectCleanup(
+            pooledDeviceAtDisconnect,
+            deviceId,
+            forceGenerationAtDisconnect,
+          )) {
             continue;
           }
 
@@ -1409,41 +1456,67 @@ export class Daemon {
             undefined,
             "absent",
           );
-          if (await this.shouldSkipStaleDisconnectCleanup(pooledDeviceAtDisconnect, deviceId)) {
+          if (await this.shouldSkipStaleDisconnectCleanup(
+            pooledDeviceAtDisconnect,
+            deviceId,
+            forceGenerationAtDisconnect,
+          ) || !this.isCapturedDisconnectTargetCurrent(
+            deviceId,
+            pooledDeviceAtDisconnect,
+            assignmentCountAtDisconnect,
+            sessionIdAtDisconnect,
+            sessionAtDisconnect,
+          )) {
             continue;
           }
-          const sessionId = this.sessionManager.getSessionForDevice(deviceId);
-          if (sessionId) {
+          if (sessionIdAtDisconnect && sessionAtDisconnect) {
             logger.warn(
-              `[DisconnectMonitor] Device ${deviceId} confirmed disconnected after ${DEVICE_DISCONNECT_MISS_THRESHOLD} consecutive misses — cancelling session ${sessionId}`
+              `[DisconnectMonitor] Device ${deviceId} confirmed disconnected after ${DEVICE_DISCONNECT_MISS_THRESHOLD} consecutive misses — cancelling session ${sessionIdAtDisconnect}`
             );
             await this.cancelAndReleaseSession(
-              sessionId,
+              sessionIdAtDisconnect,
               deviceLossCancellationReason(deviceId, incidentId),
+              false,
+              sessionAtDisconnect,
             );
           }
 
-          await this.devicePool.removeDisconnectedDevice(deviceId, true, incidentId);
+          if (!this.isCapturedDisconnectTargetCurrent(
+            deviceId,
+            pooledDeviceAtDisconnect,
+            assignmentCountAtDisconnect,
+          )) {
+            continue;
+          }
+          await this.devicePool.removeDisconnectedDevice(
+            deviceId,
+            true,
+            incidentId,
+            pooledDeviceAtDisconnect ?? undefined,
+          );
           // Drop any per-device input caches so a device replaced under the same
           // serial does not inherit the previous one's cached API-level capability
           // (issue #3351): an API 31+/pre-31 mismatch mis-handles SHIFT/uppercase.
           // This fires only on a CONFIRMED disappearance; a fast same-serial restart
           // that never confirms is handled by the device-ready callback; the 5-min
           // idle close remains a fallback.
-          this.socketServer?.evictDeviceInputCache(deviceId);
           if (this.devicePool.getDevice(deviceId)) {
             // removeDisconnectedDevice can synchronously recover a same-serial
             // Android emulator (reboot → re-add), which mints a fresh epoch. The
             // device is live again, so retiring here would delete that just-minted
             // epoch; skip the retire and let cleanup fail so the monitor retries.
             deviceCleanupSucceeded = false;
+          } else {
+            this.socketServer?.evictDeviceInputCache(deviceId);
           }
           if (deviceCleanupSucceeded) {
             this.confirmedDisconnectedDeviceIds.add(deviceId);
             this.deviceDisconnectMisses.delete(deviceId);
             this.deviceDisconnectMissIncarnations.delete(deviceId);
-            this.forceDisconnectedDeviceIds.delete(deviceId);
-            this.forceDisconnectedDeviceGenerations.delete(deviceId);
+            if (this.forceDisconnectedDeviceGenerations.get(deviceId) === forceGenerationAtDisconnect) {
+              this.forceDisconnectedDeviceIds.delete(deviceId);
+              this.forceDisconnectedDeviceGenerations.delete(deviceId);
+            }
           }
         }
       } catch (error) {
@@ -1453,9 +1526,45 @@ export class Daemon {
     this.deviceDisconnectMonitor.start();
   }
 
+  private async stopRecordingAfterDeviceDisconnect(recordingId: string, deviceId: string): Promise<boolean> {
+    if (this.stoppingRecordings.has(recordingId)) {
+      return false;
+    }
+    this.stoppingRecordings.add(recordingId);
+    try {
+      await stopVideoRecording(recordingId);
+      logger.warn(`[Daemon] Stopped recording ${recordingId} after device ${deviceId} disconnected`);
+      return true;
+    } catch (error) {
+      logger.warn(
+        `[Daemon] Failed to stop recording ${recordingId} after device ${deviceId} disconnected: ${error}`,
+      );
+      return await this.interruptRecordingAfterDeviceDisconnect(recordingId, deviceId);
+    } finally {
+      this.stoppingRecordings.delete(recordingId);
+    }
+  }
+
+  private async interruptRecordingAfterDeviceDisconnect(
+    recordingId: string,
+    deviceId: string,
+  ): Promise<boolean> {
+    try {
+      await interruptVideoRecording(recordingId);
+      logger.warn(`[Daemon] Marked recording ${recordingId} interrupted after device ${deviceId} disconnected`);
+      return true;
+    } catch (error) {
+      logger.warn(
+        `[Daemon] Failed to mark recording ${recordingId} interrupted after device ${deviceId} disconnected: ${error}`,
+      );
+      return false;
+    }
+  }
+
   private async shouldSkipStaleDisconnectCleanup(
     pooledDeviceAtDisconnect: PooledDevice | null,
-    deviceId: string
+    deviceId: string,
+    forceGenerationAtDisconnect: number | undefined = this.forceDisconnectedDeviceGenerations.get(deviceId),
   ): Promise<boolean> {
     if (!pooledDeviceAtDisconnect) {
       if (!this.devicePool.getDevice(deviceId)) {
@@ -1464,14 +1573,15 @@ export class Daemon {
       this.deviceDisconnectMisses.delete(deviceId);
       this.deviceDisconnectMissIncarnations.delete(deviceId);
       this.confirmedDisconnectedDeviceIds.delete(deviceId);
-      this.forceDisconnectedDeviceIds.delete(deviceId);
-      this.forceDisconnectedDeviceGenerations.delete(deviceId);
+      if (this.forceDisconnectedDeviceGenerations.get(deviceId) === forceGenerationAtDisconnect) {
+        this.forceDisconnectedDeviceIds.delete(deviceId);
+        this.forceDisconnectedDeviceGenerations.delete(deviceId);
+      }
       logger.info(
         `[DisconnectMonitor] Skipping stale disconnect cleanup for recovered device ${deviceId}`
       );
       return true;
     }
-    const forceGenerationAtVerificationStart = this.forceDisconnectedDeviceGenerations.get(deviceId);
     const disconnectStatus = await this.devicePool.isCurrentDisconnectedDevice(pooledDeviceAtDisconnect);
     if (disconnectStatus === "current") {
       return false;
@@ -1485,7 +1595,7 @@ export class Daemon {
     this.deviceDisconnectMisses.delete(deviceId);
     this.deviceDisconnectMissIncarnations.delete(deviceId);
     this.confirmedDisconnectedDeviceIds.delete(deviceId);
-    if (this.forceDisconnectedDeviceGenerations.get(deviceId) === forceGenerationAtVerificationStart) {
+    if (this.forceDisconnectedDeviceGenerations.get(deviceId) === forceGenerationAtDisconnect) {
       this.forceDisconnectedDeviceIds.delete(deviceId);
       this.forceDisconnectedDeviceGenerations.delete(deviceId);
     }
@@ -1493,6 +1603,33 @@ export class Daemon {
       `[DisconnectMonitor] Skipping stale disconnect cleanup for recovered device ${deviceId}`
     );
     return true;
+  }
+
+  private isCapturedDisconnectTargetCurrent(
+    deviceId: string,
+    pooledDeviceAtDisconnect: PooledDevice | null,
+    assignmentCountAtDisconnect: number | undefined,
+    sessionIdAtDisconnect?: string | null,
+    sessionAtDisconnect?: Session | null,
+  ): boolean {
+    if (pooledDeviceAtDisconnect) {
+      if (
+        this.devicePool.getDevice(deviceId) !== pooledDeviceAtDisconnect ||
+        pooledDeviceAtDisconnect.assignmentCount !== assignmentCountAtDisconnect
+      ) {
+        return false;
+      }
+    } else if (this.devicePool.getDevice(deviceId)) {
+      return false;
+    }
+
+    if (!sessionIdAtDisconnect) {
+      return this.sessionManager.getSessionForDevice(deviceId) === null;
+    }
+    return (
+      this.sessionManager.getSessionForDevice(deviceId) === sessionIdAtDisconnect &&
+      this.sessionManager.getSession(sessionIdAtDisconnect) === sessionAtDisconnect
+    );
   }
 
   private startAdbMissingDeviceListener(): void {
@@ -1518,9 +1655,17 @@ export class Daemon {
     sessionId: string,
     releaseReason: string = "explicit-release",
     allowExpired: boolean = false,
+    expectedSession?: Session,
   ): Promise<void> {
     const cancelled = await executionTracker.cancelSessionUuidExecutions(sessionId, releaseReason);
-    const deviceId = await this.sessionManager.releaseSession(sessionId, releaseReason, allowExpired);
+    const deviceId = expectedSession
+      ? await this.sessionManager.releaseSessionIfOwned(
+        sessionId,
+        expectedSession,
+        expectedSession.assignedDevice,
+        releaseReason,
+      )
+      : await this.sessionManager.releaseSession(sessionId, releaseReason, allowExpired);
     if (deviceId) {
       await this.devicePool.releaseDevice(deviceId, sessionId);
     }
@@ -1573,6 +1718,10 @@ export class Daemon {
         logger.info("Restarting observation stream socket server...");
         try {
           await this.observationStreamHealth.recover();
+          // DefaultObservationStreamHealth recreates the device-data singleton.
+          // Reinstall routing, lifecycle delivery, cadence, observation, and
+          // navigation callbacks on that replacement.
+          this.configureDeviceDataStreamServer();
           logger.info("Observation stream socket server restarted successfully");
         } catch (error) {
           logger.error(`Failed to restart observation stream socket server: ${error}`);
@@ -1934,7 +2083,7 @@ export class Daemon {
   }
 
   private async releaseActiveSessionsForShutdown(): Promise<void> {
-    const sessionIds = this.sessionManager.getAllSessionIds();
+    const sessionIds = this.sessionManager.getAllKnownSessionIds();
     const releases = sessionIds.map(sessionId =>
       this.cancelAndReleaseSession(sessionId, "daemon-shutdown", true),
     );

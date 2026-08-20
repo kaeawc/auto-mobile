@@ -204,6 +204,9 @@ describe("CtrlProxyPackages (Android)", function() {
         backfilling: false,
         filter: {
           deviceId: testDevice.deviceId,
+          // Device-scoped subscriptions created at the socket boundary always
+          // carry an explicit session filter; null is the all-session sentinel.
+          deviceSessionUuid: null,
           screenshotIntervalMs: null,
           hierarchyIntervalMs: 500,
         },

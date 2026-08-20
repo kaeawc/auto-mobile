@@ -229,7 +229,12 @@ interface PushScreenshotOptions {
  */
 interface DeviceDataFilter {
   deviceSessionUuid: string | null; // null means subscribe to all devices
-  deviceId: string | null; // serial resolved from deviceSessionUuid, for cadence only
+  /**
+   * Serial resolved from deviceSessionUuid, for cadence only. A non-null UUID
+   * that cannot be resolved remains null: it is a no-device subscription, not
+   * an all-devices subscription.
+   */
+  deviceId: string | null;
   screenshotIntervalMs: number | null;
   hierarchyIntervalMs: number | null;
 }
@@ -682,10 +687,13 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
    * the POLLING question (which serial to poll, how fast), kept separate from frame
    * routing (`matchesFilter`, on `deviceSessionUuid`): the cadence machinery is
    * inherently serial-addressed, and `filter.deviceId` is the serial resolved for
-   * exactly this purpose. `null` = an all-devices subscription.
+   * exactly this purpose. Only a `null` `deviceSessionUuid` means all devices;
+   * a non-null UUID with a null `deviceId` schedules none.
    */
   private subscriberWantsDevice(filter: DeviceDataFilter, deviceId: string): boolean {
-    return filter.deviceId === null || filter.deviceId === deviceId;
+    return filter.deviceSessionUuid === null ||
+      (filter.deviceId === deviceId &&
+        this.deviceSessionResolver.resolveUuid(deviceId) === filter.deviceSessionUuid);
   }
 
   /**
@@ -828,7 +836,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
             type: "navigation_update",
             deviceSessionUuid,
             deviceId: deviceSessionUuid
-              ? this.deviceSessionResolver.resolveDeviceId(deviceSessionUuid) ?? undefined
+              ? (this.deviceSessionResolver.resolveDeviceId(deviceSessionUuid) ?? undefined)
               : undefined,
             timestamp: this.timer.now(),
             navigationGraph: graphData,
@@ -857,20 +865,55 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
 
     // Handle subscribe with onSubscriberConnected callback
     if (request.command === "subscribe") {
+      let deviceSessionUuid: string | null;
+      try {
+        // JSON parsing does not validate fields at runtime. Do it before the
+        // base server creates a subscription so malformed keys cannot quietly
+        // become all-device subscriptions.
+        deviceSessionUuid = this.parseDeviceSessionUuid(request.deviceSessionUuid);
+      } catch (error) {
+        const errorResponse: SubscriptionResponse = {
+          id: request.id,
+          type: "error",
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        };
+        this.sendJson(socket, errorResponse);
+        return;
+      }
+
+      const subscribedDeviceId =
+        deviceSessionUuid === null
+          ? null
+          : this.deviceSessionResolver.resolveDeviceId(deviceSessionUuid);
+      if (deviceSessionUuid !== null && subscribedDeviceId === null) {
+        const errorResponse: SubscriptionResponse = {
+          id: request.id,
+          type: "error",
+          success: false,
+          error: `deviceSessionUuid '${deviceSessionUuid}' does not identify a live device session`,
+        };
+        this.sendJson(socket, errorResponse);
+        return;
+      }
+
       // Let base class handle the subscription
       await super.processLine(socket, line);
 
       // The wire now targets a deviceSessionUuid; the cadence/connect machinery is
-      // serial-scoped, so resolve to the current serial (null = all devices).
-      const subscribedDeviceId = request.deviceSessionUuid
-        ? this.deviceSessionResolver.resolveDeviceId(request.deviceSessionUuid)
-        : null;
-
-      this.notifyScreenshotCadenceChanged(subscribedDeviceId);
-      this.notifyHierarchyCadenceChanged(subscribedDeviceId);
+      // serial-scoped, so resolve to the current serial. A missing UUID is an
+      // intentional all-device subscription; an unresolvable UUID schedules no
+      // device and must not be treated as that all-device case.
+      if (deviceSessionUuid === null || subscribedDeviceId !== null) {
+        this.notifyScreenshotCadenceChanged(subscribedDeviceId);
+        this.notifyHierarchyCadenceChanged(subscribedDeviceId);
+      }
 
       // Trigger the callback if set
-      if (this.onSubscriberConnected) {
+      if (
+        this.onSubscriberConnected &&
+        (deviceSessionUuid === null || subscribedDeviceId !== null)
+      ) {
         try {
           this.onSubscriberConnected(subscribedDeviceId);
         } catch (error) {
@@ -886,8 +929,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
         : undefined;
       await super.processLine(socket, line);
       if (filter) {
-        this.notifyScreenshotCadenceChanged(filter.deviceId);
-        this.notifyHierarchyCadenceChanged(filter.deviceId);
+        this.notifyCadenceChangedForFilter(filter);
       }
       return;
     }
@@ -911,8 +953,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       };
       this.sendJson(socket, response);
       if (filter) {
-        this.notifyScreenshotCadenceChanged(filter.deviceId);
-        this.notifyHierarchyCadenceChanged(filter.deviceId);
+        this.notifyCadenceChangedForFilter(filter);
       }
       return;
     }
@@ -924,32 +965,36 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   protected onConnectionClose(socket: Socket): void {
     const filters = this.getSubscribersForSocket(socket).map((subscriber) => subscriber.filter);
     super.onConnectionClose(socket);
-    for (const deviceId of new Set(filters.map((filter) => filter.deviceId))) {
-      this.notifyScreenshotCadenceChanged(deviceId);
-      this.notifyHierarchyCadenceChanged(deviceId);
+    for (const filter of filters) {
+      this.notifyCadenceChangedForFilter(filter);
     }
   }
 
   protected onConnectionError(socket: Socket, error: Error): void {
     const filters = this.getSubscribersForSocket(socket).map((subscriber) => subscriber.filter);
     super.onConnectionError(socket, error);
-    for (const deviceId of new Set(filters.map((filter) => filter.deviceId))) {
-      this.notifyScreenshotCadenceChanged(deviceId);
-      this.notifyHierarchyCadenceChanged(deviceId);
+    for (const filter of filters) {
+      this.notifyCadenceChangedForFilter(filter);
     }
   }
 
   protected checkKeepalive(): void {
-    const subscriberCountBefore = this.subscribers.size;
+    const filtersBySubscriptionId = new Map(
+      [...this.subscribers].map(([subscriptionId, subscriber]) => [
+        subscriptionId,
+        subscriber.filter,
+      ]),
+    );
     super.checkKeepalive();
-    if (this.subscribers.size !== subscriberCountBefore) {
-      this.notifyScreenshotCadenceChanged(null);
-      this.notifyHierarchyCadenceChanged(null);
+    for (const [subscriptionId, filter] of filtersBySubscriptionId) {
+      if (!this.subscribers.has(subscriptionId)) {
+        this.notifyCadenceChangedForFilter(filter);
+      }
     }
   }
 
   protected parseSubscriptionFilter(request: Record<string, unknown>): DeviceDataFilter {
-    const deviceSessionUuid = (request.deviceSessionUuid as string) ?? null;
+    const deviceSessionUuid = this.parseDeviceSessionUuid(request.deviceSessionUuid);
     return {
       deviceSessionUuid,
       // Resolve the serial once, at subscribe time, for the serial-scoped cadence
@@ -969,7 +1014,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     // into another device's subscription (epic #5256, AC2/AC4; closes #4837).
     return (
       filter.deviceSessionUuid === null ||
-      filter.deviceSessionUuid === data.targetDeviceSessionUuid
+      (filter.deviceId !== null && filter.deviceSessionUuid === data.targetDeviceSessionUuid)
     );
   }
 
@@ -990,6 +1035,19 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
 
   private parseHierarchyIntervalMs(value: unknown): number | null {
     return this.parseClampedIntervalMs(value, MIN_HIERARCHY_INTERVAL_MS, MAX_HIERARCHY_INTERVAL_MS);
+  }
+
+  private parseDeviceSessionUuid(value: unknown): string | null {
+    if (value === undefined || value === null) {
+      return null;
+    }
+    if (typeof value !== "string") {
+      throw new Error("deviceSessionUuid must be a string or null");
+    }
+    if (value.trim().length === 0) {
+      throw new Error("deviceSessionUuid must not be blank");
+    }
+    return value;
   }
 
   private parseClampedIntervalMs(
@@ -1022,6 +1080,14 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       "onHierarchyCadenceChanged",
       deviceId,
     );
+  }
+
+  private notifyCadenceChangedForFilter(filter: DeviceDataFilter): void {
+    if (filter.deviceSessionUuid !== null && filter.deviceId === null) {
+      return;
+    }
+    this.notifyScreenshotCadenceChanged(filter.deviceId);
+    this.notifyHierarchyCadenceChanged(filter.deviceId);
   }
 
   private notifyCadenceChanged(

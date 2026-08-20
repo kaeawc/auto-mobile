@@ -438,7 +438,7 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
-    test("auto-starts daemon when not running", async () => {
+    test("observes the socket without cleanup before auto-starting", async () => {
       const fakeClient = new FakeDaemonClient({
         daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
       });
@@ -462,6 +462,10 @@ describe("DaemonMcpProxy", () => {
         await proxy.listTools();
 
         expect(fakeManager.startCalled).toBe(true);
+        expect(isAvailableSpy).toHaveBeenCalledWith(
+          expect.any(String),
+          { skipStaleCleanup: true },
+        );
       } finally {
         isAvailableSpy.mockRestore();
         await proxy.close();

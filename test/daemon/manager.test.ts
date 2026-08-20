@@ -20,6 +20,7 @@ import type { DaemonOptions, DaemonStatus } from "../../src/daemon/types";
 import type {
   DaemonProcessFinder,
   DaemonProcessLivenessChecker,
+  DaemonProcessSignaler,
   DaemonProcessSpawner,
   DaemonProcessRecord,
   ExtractionCleaner,
@@ -287,6 +288,17 @@ class FakeDaemonProcessFinder implements DaemonProcessFinder, DaemonProcessLiven
 
   isProcessRunning(pid: number): boolean {
     return this.livePids.has(pid);
+  }
+}
+
+class FakeDaemonProcessSignaler implements DaemonProcessSignaler {
+  readonly signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+
+  constructor(private readonly onSignal?: (pid: number, signal: NodeJS.Signals) => void) {}
+
+  signal(pid: number, signal: NodeJS.Signals): void {
+    this.signals.push({ pid, signal });
+    this.onSignal?.(pid, signal);
   }
 }
 
@@ -839,7 +851,7 @@ describe("Daemon manager process detection", () => {
     }
   });
 
-  test("restart takes over a verified daemon without the default namespace PID record", async () => {
+  test("explicit restart force-stops an unreachable daemon without the default namespace PID record", async () => {
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     const candidatePid = 451;
@@ -852,128 +864,134 @@ describe("Daemon manager process detection", () => {
       }],
       isProcessRunning: pid => livePids.has(pid),
     };
+    const signaler = new FakeDaemonProcessSignaler((pid, signal) => {
+      if (pid === candidatePid && signal === "SIGTERM") {
+        livePids.delete(pid);
+      }
+    });
     const manager = new DaemonManager(
-      () => new FakeDaemonClient({}),
+      () => {
+        throw new Error("unreachable daemon socket must not block explicit restart");
+      },
       undefined,
       fakeTimer,
       undefined,
       undefined,
       undefined,
       processFinder,
+      undefined,
+      undefined,
+      undefined,
+      signaler,
     );
     const statusSpy = spyOn(manager, "status").mockResolvedValue({ running: false });
     const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
-    const killSpy = spyOn(process, "kill").mockImplementation(((pid: number, signal?: NodeJS.Signals | number) => {
-      if (pid === candidatePid && signal === "SIGTERM") {
-        livePids.delete(pid);
-      }
-      return true;
-    }) as typeof process.kill);
 
     try {
       await manager.restart();
 
-      expect(killSpy).toHaveBeenCalledWith(candidatePid, "SIGTERM");
+      expect(signaler.signals).toEqual([{ pid: candidatePid, signal: "SIGTERM" }]);
       expect(startSpy).toHaveBeenCalledWith({});
     } finally {
-      killSpy.mockRestore();
       startSpy.mockRestore();
       statusSpy.mockRestore();
     }
   });
 
-  test("restart takes over a verified daemon without a custom namespace PID record", async () => {
+  test("explicit restart force-stops every daemon from other PID-file namespaces", async () => {
     const dir = mkdtempSync(join(tmpdir(), "daemon-manager-custom-restart-test-"));
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
-    const candidatePid = 452;
-    const livePids = new Set([candidatePid]);
+    const candidatePids = [452, 453];
+    const livePids = new Set(candidatePids);
     const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
-      findDaemonProcesses: () => [{
-        pid: candidatePid,
+      findDaemonProcesses: () => candidatePids.map(pid => ({
+        pid,
         ppid: 1,
         command: "bun /other-checkout/dist/src/index.js --daemon-mode",
-      }],
+      })),
       isProcessRunning: pid => livePids.has(pid),
     };
+    const signaler = new FakeDaemonProcessSignaler((pid, signal) => {
+      if (signal === "SIGTERM") {
+        livePids.delete(pid);
+      }
+    });
     const manager = new DaemonManager(
-      () => new FakeDaemonClient({}),
+      () => {
+        throw new Error("unreachable daemon socket must not block explicit restart");
+      },
       undefined,
       fakeTimer,
       join(dir, "daemon.lock"),
       join(dir, "daemon.pid"),
       join(dir, "daemon.sock"),
       processFinder,
+      undefined,
+      undefined,
+      undefined,
+      signaler,
     );
     const statusSpy = spyOn(manager, "status").mockResolvedValue({ running: false });
     const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
-    const killSpy = spyOn(process, "kill").mockImplementation(((pid: number, signal?: NodeJS.Signals | number) => {
-      if (pid === candidatePid && signal === "SIGTERM") {
-        livePids.delete(pid);
-      }
-      return true;
-    }) as typeof process.kill);
 
     try {
       await manager.restart();
 
-      expect(killSpy).toHaveBeenCalledWith(candidatePid, "SIGTERM");
+      expect(signaler.signals).toEqual([
+        { pid: 452, signal: "SIGTERM" },
+        { pid: 453, signal: "SIGTERM" },
+      ]);
       expect(startSpy).toHaveBeenCalledWith({});
     } finally {
-      killSpy.mockRestore();
       startSpy.mockRestore();
       statusSpy.mockRestore();
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  test("restart does not signal a candidate that exits while its socket is probed", async () => {
+  test("explicit restart does not signal a candidate that exits before the forced stop", async () => {
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     const candidatePid = 453;
-    const livePids = new Set([candidatePid]);
+    let livenessChecks = 0;
     const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
       findDaemonProcesses: () => [{
         pid: candidatePid,
         ppid: 1,
         command: "bun /other-checkout/dist/src/index.js --daemon-mode",
       }],
-      isProcessRunning: pid => livePids.has(pid),
+      isProcessRunning: pid => {
+        if (pid !== candidatePid) {
+          return false;
+        }
+        livenessChecks++;
+        return livenessChecks === 1;
+      },
     };
+    const signaler = new FakeDaemonProcessSignaler();
     const manager = new DaemonManager(
-      () => ({
-        async connect() {
-          livePids.delete(candidatePid);
-        },
-        async close() {},
-        async callTool() {
-          return {};
-        },
-        async readResource() {
-          return {};
-        },
-        async callDaemonMethod() {
-          return {};
-        },
-      }),
+      undefined,
       undefined,
       fakeTimer,
       undefined,
       undefined,
       undefined,
       processFinder,
+      undefined,
+      undefined,
+      undefined,
+      signaler,
     );
     const statusSpy = spyOn(manager, "status").mockResolvedValue({ running: false });
     const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
-    const killSpy = spyOn(process, "kill").mockImplementation(() => true);
 
     try {
       await manager.restart();
 
-      expect(killSpy).not.toHaveBeenCalled();
+      expect(signaler.signals).toEqual([]);
       expect(startSpy).toHaveBeenCalledWith({});
     } finally {
-      killSpy.mockRestore();
       startSpy.mockRestore();
       statusSpy.mockRestore();
     }

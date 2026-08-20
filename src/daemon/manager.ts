@@ -207,6 +207,16 @@ export interface DaemonProcessLivenessChecker {
   isProcessRunning(pid: number): boolean;
 }
 
+export interface DaemonProcessSignaler {
+  signal(pid: number, signal: NodeJS.Signals): void;
+}
+
+const defaultDaemonProcessSignaler: DaemonProcessSignaler = {
+  signal(pid, signal): void {
+    process.kill(pid, signal);
+  },
+};
+
 export class PsDaemonProcessFinder implements DaemonProcessFinder, DaemonProcessLivenessChecker {
   constructor(private readonly runCommand: ProcessTableCommandRunner = execSync) {}
 
@@ -324,6 +334,7 @@ export class DaemonManager implements DaemonManagerLike {
   private readonly socketPath: string;
   private readonly processFinder: DaemonProcessFinder;
   private readonly processLivenessChecker: DaemonProcessLivenessChecker;
+  private readonly processSignaler: DaemonProcessSignaler;
   private readonly extractionCleaner: ExtractionCleaner;
   private readonly launcher: DaemonLauncher;
   private readonly fallbackLauncher: DaemonLauncher;
@@ -340,6 +351,7 @@ export class DaemonManager implements DaemonManagerLike {
     processSpawner: DaemonProcessSpawner | undefined = undefined,
     extractionCleaner: ExtractionCleaner = fileSystemExtractionCleaner,
     launcher: DaemonLauncher | (() => DaemonLaunchCommand) | undefined = undefined,
+    processSignaler: DaemonProcessSignaler = defaultDaemonProcessSignaler,
   ) {
     this.stateProvider = stateProvider;
     this.timer = timer;
@@ -357,6 +369,7 @@ export class DaemonManager implements DaemonManagerLike {
       this.processLivenessChecker = processFinder;
       processSpawner = processFinderOrSpawner;
     }
+    this.processSignaler = processSignaler;
     this.extractionCleaner = extractionCleaner;
     this.launchCommandResolver = typeof launcher === "function" ? launcher : undefined;
     this.launcher = (typeof launcher === "object" ? launcher : undefined) ?? new DaemonLauncher({
@@ -941,7 +954,7 @@ export class DaemonManager implements DaemonManagerLike {
     if (status.running) {
       await this.stop();
     } else {
-      await this.stopVerifiedUnrecordedDaemon();
+      await this.stopUnrecordedDaemonsForExplicitRestart();
     }
     // Wait a bit before starting
     await this.timer.sleep(1000);
@@ -949,54 +962,35 @@ export class DaemonManager implements DaemonManagerLike {
   }
 
   /**
-   * An explicit restart may be the only way to replace a daemon started from
-   * another checkout, whose PID file is outside this manager's namespace.
-   * Never infer that a process owns this socket from process-table output
-   * alone: first prove this namespace's socket is reachable, then re-check the
-   * candidate PID before signalling it. Ordinary `start` intentionally remains
-   * non-destructive.
+   * An explicit restart force-cleans live daemon-mode processes discovered from
+   * other PID-file namespaces. This intentionally does not require this
+   * manager's socket to be reachable: an orphaned daemon is precisely the
+   * failure mode that `--daemon restart` must recover from. Ordinary `start`
+   * remains non-destructive.
    */
-  private async stopVerifiedUnrecordedDaemon(): Promise<void> {
+  private async stopUnrecordedDaemonsForExplicitRestart(): Promise<void> {
     const candidates = this.findLiveDaemonProcesses();
     if (candidates.length === 0) {
       return;
     }
 
     stderrLog(
-      `Found ${candidates.length} live AutoMobile daemon candidate(s) without this namespace's PID record; verifying socket ownership before restart...`
+      `Explicit restart force-stopping ${candidates.length} live AutoMobile daemon candidate(s) without this namespace's PID record...`
     );
-    if (!(await this.waitForExistingDaemon(DAEMON_STARTUP_TIMEOUT_MS))) {
-      const stillLiveCandidates = candidates.filter(pid => this.isProcessRunning(pid));
-      if (stillLiveCandidates.length > 0) {
-        throw new ActionableError(
-          `Found live AutoMobile daemon candidate(s) (${stillLiveCandidates.join(", ")}) but this namespace's socket did not become reachable within ` +
-          `${DAEMON_STARTUP_TIMEOUT_MS}ms. Refusing to terminate an unverified daemon during restart.`
-        );
-      }
-      return;
+    for (const pid of candidates) {
+      await this.stopUnrecordedDaemonProcess(pid);
     }
-
-    // A candidate can exit while the connection probe is waiting or retrying.
-    // Do not signal a PID that has already gone away (and may have been reused).
-    const verifiedCandidates = candidates.filter(pid => this.isProcessRunning(pid));
-    if (verifiedCandidates.length === 0) {
-      stderrLog("Daemon candidate exited while its socket was being verified; starting a replacement.");
-      return;
-    }
-    if (verifiedCandidates.length > 1) {
-      throw new ActionableError(
-        `Found multiple live AutoMobile daemon candidates (${verifiedCandidates.join(", ")}); ` +
-        "cannot safely identify which one owns this namespace's socket. Stop the intended daemon explicitly before restarting."
-      );
-    }
-
-    await this.stopUnrecordedDaemonProcess(verifiedCandidates[0]);
   }
 
   private async stopUnrecordedDaemonProcess(pid: number): Promise<void> {
-    stderrLog(`Stopping verified daemon without this namespace's PID record (PID ${pid})...`);
+    if (!this.findLiveDaemonProcesses().includes(pid)) {
+      stderrLog(`Daemon candidate ${pid} exited before explicit restart could stop it.`);
+      return;
+    }
+
+    stderrLog(`Stopping daemon without this namespace's PID record (PID ${pid})...`);
     try {
-      process.kill(pid, "SIGTERM");
+      this.processSignaler.signal(pid, "SIGTERM");
     } catch (error) {
       if (this.isMissingProcessError(error)) {
         return;
@@ -1011,8 +1005,12 @@ export class DaemonManager implements DaemonManagerLike {
     }
 
     stderrLog(`Verified daemon ${pid} did not stop gracefully, sending SIGKILL...`);
+    if (!this.findLiveDaemonProcesses().includes(pid)) {
+      stderrLog(`Daemon candidate ${pid} exited before explicit restart could force-stop it.`);
+      return;
+    }
     try {
-      process.kill(pid, "SIGKILL");
+      this.processSignaler.signal(pid, "SIGKILL");
     } catch (error) {
       if (this.isMissingProcessError(error)) {
         return;

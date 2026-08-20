@@ -70,7 +70,7 @@ lifecycleViewmodelNavigation3Android = "2.11.0"
 
 # Network and server libraries
 ktor = "3.5.2"
-okhttp = "5.4.0"
+okhttp = "5.5.0"
 
 # Publishing
 mavenpublish = "0.37.0"

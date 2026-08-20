@@ -406,27 +406,35 @@ describe("Daemon manager process detection", () => {
     const records = parseDaemonProcessTable(`
       10     1 /usr/bin/unrelated --daemon-mode
       11     1 python worker.py --note auto-mobile --daemon-mode
-      20     1 /bin/sh -c "bun /worktree/dist/src/index.js --daemon-mode"
-      21    20 bun /worktree/dist/src/index.js --daemon-mode
-      22     1 bun /worktree/dist/src/index.js
+      12     1 bunx -y other-package @kaeawc/auto-mobile --daemon-mode
+      13     1 bun /worktree/unrelated/dist/src/index.js --daemon-mode
+      20     1 /bin/sh -c "bun /worktree/auto-mobile/dist/src/index.js --daemon-mode"
+      21    20 bun /worktree/auto-mobile/dist/src/index.js --daemon-mode
+      22     1 bun /worktree/auto-mobile/dist/src/index.js
       30     1 bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode
+      31     1 bun x -y @kaeawc/auto-mobile@0.0.38 --daemon-mode
     `);
 
     expect(records).toEqual([
       {
         pid: 20,
         ppid: 1,
-        command: `/bin/sh -c "bun /worktree/dist/src/index.js --daemon-mode"`,
+        command: `/bin/sh -c "bun /worktree/auto-mobile/dist/src/index.js --daemon-mode"`,
       },
       {
         pid: 21,
         ppid: 20,
-        command: "bun /worktree/dist/src/index.js --daemon-mode",
+        command: "bun /worktree/auto-mobile/dist/src/index.js --daemon-mode",
       },
       {
         pid: 30,
         ppid: 1,
         command: "bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode",
+      },
+      {
+        pid: 31,
+        ppid: 1,
+        command: "bun x -y @kaeawc/auto-mobile@0.0.38 --daemon-mode",
       },
     ]);
   });
@@ -475,7 +483,7 @@ describe("Daemon manager process detection", () => {
       {
         ProcessId: 21,
         ParentProcessId: 20,
-        CommandLine: "C:\\\\Program Files\\\\nodejs\\\\node.exe C:\\\\repo\\\\dist\\\\src\\\\index.js --daemon-mode",
+        CommandLine: "C:\\\\Program Files\\\\nodejs\\\\node.exe C:\\\\repo\\\\auto-mobile\\\\dist\\\\src\\\\index.js --daemon-mode",
       },
       {
         ProcessId: 22,
@@ -493,7 +501,7 @@ describe("Daemon manager process detection", () => {
       {
         pid: 21,
         ppid: 20,
-        command: "C:\\\\Program Files\\\\nodejs\\\\node.exe C:\\\\repo\\\\dist\\\\src\\\\index.js --daemon-mode",
+        command: "C:\\\\Program Files\\\\nodejs\\\\node.exe C:\\\\repo\\\\auto-mobile\\\\dist\\\\src\\\\index.js --daemon-mode",
       },
     ]);
   });

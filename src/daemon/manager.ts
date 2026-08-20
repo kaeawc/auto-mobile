@@ -104,19 +104,28 @@ function normalizeProcessCommand(command: string): string {
   return command.replace(/\\/g, "/").replace(/\/+/g, "/");
 }
 
+function invokedCommand(command: string): string {
+  const shellInvocation = command.trim().match(
+    /(?:^|\s)(?:-c|\/c|-(?:command|encodedcommand|c|ec))\s+["']?(.+)$/i,
+  );
+  return shellInvocation?.[1].trim() ?? command.trim();
+}
+
 function isAutoMobileDaemonCommand(command: string): boolean {
   const normalizedCommand = normalizeProcessCommand(command);
-  if (!/(?:^|\s)--daemon-mode(?:\s|["']|$)/.test(normalizedCommand)) {
+  const invocation = invokedCommand(normalizedCommand);
+  if (!/(?:^|\s)--daemon-mode(?:\s|["']|$)/.test(invocation)) {
     return false;
   }
 
   const runsBundledEntrypoint =
-    /(?:^|["'\s\\/])(?:bun|node)(?:\.exe)?(?:\s|["'])/.test(normalizedCommand) &&
-    /(?:^|["'\s])[^"'\s]*dist\/src\/index\.js(?:\s|["']|$)/.test(normalizedCommand);
+    /(?:^|["'\s\\/])(?:bun|node)(?:\.exe)?(?:\s|["'])/.test(invocation) &&
+    /(?:^|["'\s])[^"'\s]*\/(?:@kaeawc\/)?auto-mobile\/dist\/src\/index\.js(?:\s|["']|$)/.test(invocation);
   const runsPublishedPackage =
-    /(?:^|["'\s])(bunx?|npx)(?:\.exe)?(?:\s+(?!--daemon-mode)[^"'\s]+)*\s+@kaeawc\/auto-mobile(?:@[^\s"']+)?(?:\s|["']|$)/.test(normalizedCommand);
+    /^(?:"?[^"'\s]*\/)?(?:bunx|npx)(?:\.exe)?\s+(?:(?:-y|--yes|--bun|--no-cache)\s+)*@kaeawc\/auto-mobile(?:@[^\s"']+)?(?:\s|["']|$)/.test(invocation) ||
+    /^(?:"?[^"'\s]*\/)?bun(?:\.exe)?\s+x\s+(?:(?:-y|--yes|--bun|--no-cache)\s+)*@kaeawc\/auto-mobile(?:@[^\s"']+)?(?:\s|["']|$)/.test(invocation);
   const runsStandaloneBinary =
-    /^(?:"?[^"'\s]*\/)?auto-mobile(?:\.exe)?(?:\s|$)/i.test(normalizedCommand);
+    /^(?:"?[^"'\s]*\/)?auto-mobile(?:\.exe)?(?:\s|$)/i.test(invocation);
 
   return runsBundledEntrypoint || runsPublishedPackage || runsStandaloneBinary;
 }

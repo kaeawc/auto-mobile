@@ -2395,6 +2395,18 @@ jobs:
 
       - uses: ./.github/actions/setup-auto-mobile-npm-package
 
+      - name: "Verify pinned runtime dependency graph (#5421)"
+        shell: bash
+        run: bash scripts/ci/verify-pinned-runtime-graph.sh
+
+      - name: "Upload Pinned Runtime Graph Report"
+        uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: pinned-runtime-graph-report
+          path: ci-logs/pinned-runtime-graph.log
+          retention-days: 90
+
       - name: "Run MCP Benchmarks"
         shell: bash
         run: |

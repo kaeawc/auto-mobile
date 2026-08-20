@@ -1,0 +1,282 @@
+#!/usr/bin/env bun
+/**
+ * Generate / verify the pinned runtime dependency graph (issue #5421).
+ *
+ *   bun scripts/release/pin-runtime-deps.ts --write   # apply pins + manifest
+ *   bun scripts/release/pin-runtime-deps.ts --check    # CI drift-guard (no writes)
+ *
+ * `--write` rewrites `package.json` so the published `dependencies` are the
+ * exact, right-sized runtime graph (runtime roots + pure-transitive closure),
+ * moves build-only/inlined dependencies to `devDependencies`, and refreshes the
+ * committed manifest `scripts/release/runtime-graph.json`.
+ *
+ * `--check` recomputes the intended graph from `bun.lock` + the manifest roots
+ * and fails if `package.json` or the manifest have drifted from it — the refresh
+ * point the release/update procedure gates on. It is hermetic (no build, no
+ * network) so CI can run it cheaply; the clean-room install that resolves the
+ * packed artifact lives in `scripts/ci/verify-pinned-runtime-graph.sh`.
+ */
+
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { builtinModules } from "node:module";
+import {
+  computePins,
+  isExactVersion,
+  parseBunLock,
+  repartitionDependencies,
+} from "./lib/runtime-pins";
+
+const REPO_ROOT = path.resolve(import.meta.dir, "../..");
+const PACKAGE_JSON = path.join(REPO_ROOT, "package.json");
+const BUN_LOCK = path.join(REPO_ROOT, "bun.lock");
+const DIST_DIR = path.join(REPO_ROOT, "dist");
+const DIST_ENTRY = path.join(DIST_DIR, "src/index.js");
+const MANIFEST = path.join(REPO_ROOT, "scripts/release/runtime-graph.json");
+
+interface Manifest {
+  description: string;
+  issue: number;
+  roots: string[];
+  dependencies: Record<string, string>;
+  residualUnpinned: string[];
+  multiVersion: Record<string, string[]>;
+}
+
+const BUILTINS = new Set<string>(builtinModules);
+
+function addRootFromSpec(roots: Set<string>, spec: string): void {
+  if (
+    spec.startsWith(".") ||
+    spec.startsWith("/") ||
+    spec.startsWith("node:") ||
+    spec.startsWith("bun:")
+  ) {
+    return;
+  }
+  const pkgName = spec.startsWith("@") ? spec.split("/").slice(0, 2).join("/") : spec.split("/")[0];
+  const topLevel = pkgName.split("/")[0];
+  if (BUILTINS.has(pkgName) || BUILTINS.has(topLevel) || pkgName.startsWith("@img/")) {
+    return;
+  }
+  roots.add(pkgName);
+}
+
+function collectSourceFiles(dir: string, out: string[]): void {
+  for (const entry of readdirSync(dir)) {
+    const full = path.join(dir, entry);
+    if (statSync(full).isDirectory()) {
+      collectSourceFiles(full, out);
+    } else if ((entry.endsWith(".ts") || entry.endsWith(".js")) && !entry.endsWith(".map")) {
+      out.push(full);
+    }
+  }
+}
+
+/**
+ * Derive the runtime roots from the built artifact — the bare packages a consumer
+ * must resolve from node_modules. Two sources, because the published `dist/` is
+ * not a single bundle:
+ *  - the bundled `dist/src/index.js` externalizes only the jimp/sharp families;
+ *    it is minified, so only its unambiguous dynamic `import("x")` forms are
+ *    trusted (string literals elsewhere would be false positives);
+ *  - the raw source files `build.ts` copies into `dist/` (the DB migrations and
+ *    `eventTables.ts`, loaded from disk at runtime via AUTOMOBILE_MIGRATIONS_DIR)
+ *    are clean source, so all static/dynamic import forms are trusted — this is
+ *    where `kysely` (used by every migration's `sql` tag) is required at runtime.
+ * Platform-variant `@img/*` binaries stay in optionalDependencies, so they are
+ * never roots.
+ */
+function deriveRootsFromDist(distDir: string): string[] {
+  const roots = new Set<string>();
+  const entryPath = path.join(distDir, "src/index.js");
+
+  if (existsSync(entryPath)) {
+    const bundle = readFileSync(entryPath, "utf8");
+    const dynamicImport = /\bimport\(\s*["']([^"']+)["']\s*\)/g;
+    let match: RegExpExecArray | null;
+    while ((match = dynamicImport.exec(bundle))) {
+      addRootFromSpec(roots, match[1]);
+    }
+  }
+
+  const sourceFiles: string[] = [];
+  collectSourceFiles(distDir, sourceFiles);
+  const importForm =
+    /(?:^|[^\w.])(?:import|export)\s[^;]*?from\s*["']([^"']+)["']|(?:^|[^\w.])(?:import|require)\s*\(?\s*["']([^"']+)["']/gm;
+  for (const file of sourceFiles) {
+    if (file === entryPath) {
+      continue; // handled above; the minified bundle is scanned only for dynamic imports
+    }
+    const text = readFileSync(file, "utf8");
+    let match: RegExpExecArray | null;
+    while ((match = importForm.exec(text))) {
+      addRootFromSpec(roots, match[1] ?? match[2] ?? "");
+    }
+  }
+
+  return [...roots].sort();
+}
+
+function loadPackageJson(): Record<string, unknown> {
+  return JSON.parse(readFileSync(PACKAGE_JSON, "utf8")) as Record<string, unknown>;
+}
+
+/** The `@types/`/`@img/` prefixes stay out of the pinned runtime deps. */
+const EXCLUDE_PREFIXES = ["@types/", "@img/"];
+
+interface Intended {
+  roots: string[];
+  dependencies: Record<string, string>;
+  devDependencies: Record<string, string>;
+  residualUnpinned: string[];
+  multiVersion: Record<string, string[]>;
+}
+
+function computeIntended(roots: string[]): Intended {
+  const pkg = loadPackageJson();
+  const lock = parseBunLock(readFileSync(BUN_LOCK, "utf8"));
+  const pins = computePins(lock, roots, { excludePrefixes: EXCLUDE_PREFIXES });
+  const repartition = repartitionDependencies({
+    currentDependencies: (pkg.dependencies as Record<string, string>) ?? {},
+    currentDevDependencies: (pkg.devDependencies as Record<string, string>) ?? {},
+    roots,
+    closurePins: pins.dependencies,
+  });
+  return {
+    roots,
+    dependencies: repartition.dependencies,
+    devDependencies: repartition.devDependencies,
+    residualUnpinned: repartition.residualUnpinned,
+    multiVersion: pins.multiVersion,
+  };
+}
+
+function assertAllExact(dependencies: Record<string, string>): void {
+  const ranged = Object.entries(dependencies).filter(([, spec]) => !isExactVersion(spec));
+  if (ranged.length > 0) {
+    throw new Error(
+      `Runtime dependencies must be exact-pinned, found ranges: ${ranged
+        .map(([n, s]) => `${n}@${s}`)
+        .join(", ")}`,
+    );
+  }
+}
+
+function readRootsForCheck(): string[] {
+  // Prefer the committed manifest so --check is hermetic and stable across
+  // machines; fall back to deriving from a freshly-built dist/ when no manifest
+  // exists yet. (A drift between the manifest roots and what dist imports is
+  // caught by --write regenerating them.)
+  if (existsSync(MANIFEST)) {
+    return (JSON.parse(readFileSync(MANIFEST, "utf8")) as Manifest).roots;
+  }
+  if (existsSync(DIST_ENTRY)) {
+    return deriveRootsFromDist(DIST_DIR);
+  }
+  throw new Error(
+    "Cannot determine runtime roots: generate the manifest (--write) or build dist/ first.",
+  );
+}
+
+function stableJson(value: unknown): string {
+  return `${JSON.stringify(value, null, 2)}\n`;
+}
+
+function writeMode(): void {
+  if (!existsSync(DIST_ENTRY)) {
+    throw new Error("dist/src/index.js not found — run `bun run build` before --write.");
+  }
+  const roots = deriveRootsFromDist(DIST_DIR);
+  if (roots.length === 0) {
+    throw new Error("No runtime roots derived from dist — refusing to empty the dependency graph.");
+  }
+  const intended = computeIntended(roots);
+  assertAllExact(intended.dependencies);
+
+  const pkg = loadPackageJson();
+  pkg.dependencies = intended.dependencies;
+  pkg.devDependencies = intended.devDependencies;
+  writeFileSync(PACKAGE_JSON, stableJson(pkg));
+
+  const manifest: Manifest = {
+    description:
+      "Pinned runtime dependency graph for @kaeawc/auto-mobile. Regenerate with `bun scripts/release/pin-runtime-deps.ts --write` after a dependency or security update; see docs/design-docs/release/runtime-dependency-pinning.md.",
+    issue: 5421,
+    roots: intended.roots,
+    dependencies: intended.dependencies,
+    residualUnpinned: intended.residualUnpinned,
+    multiVersion: intended.multiVersion,
+  };
+  writeFileSync(MANIFEST, stableJson(manifest));
+
+  console.log(
+    `Pinned ${Object.keys(intended.dependencies).length} runtime dependencies; ` +
+      `moved ${Object.keys(intended.devDependencies).length} to devDependencies; ` +
+      `${intended.residualUnpinned.length} residual (transitive, gate-verified).`,
+  );
+  console.log(
+    "Run `bun install` to refresh bun.lock, then commit package.json, bun.lock, and the manifest.",
+  );
+}
+
+function checkMode(): void {
+  const errors: string[] = [];
+  const roots = readRootsForCheck();
+  const intended = computeIntended(roots);
+  assertAllExact(intended.dependencies);
+
+  const pkg = loadPackageJson();
+  const currentDeps = (pkg.dependencies as Record<string, string>) ?? {};
+  const currentDevDeps = (pkg.devDependencies as Record<string, string>) ?? {};
+
+  if (JSON.stringify(currentDeps) !== JSON.stringify(intended.dependencies)) {
+    errors.push("package.json `dependencies` differ from the intended pinned runtime graph.");
+  }
+  // devDependencies must be a superset (the intended dev set); order-insensitive.
+  for (const [name, spec] of Object.entries(intended.devDependencies)) {
+    if (currentDevDeps[name] !== spec) {
+      errors.push(
+        `devDependencies drift: ${name} expected ${spec}, found ${currentDevDeps[name] ?? "(absent)"}.`,
+      );
+    }
+  }
+
+  if (!existsSync(MANIFEST)) {
+    errors.push(`Missing manifest ${path.relative(REPO_ROOT, MANIFEST)}.`);
+  } else {
+    const manifest = JSON.parse(readFileSync(MANIFEST, "utf8")) as Manifest;
+    if (JSON.stringify(manifest.dependencies) !== JSON.stringify(intended.dependencies)) {
+      errors.push("Manifest `dependencies` are out of sync with the intended pinned graph.");
+    }
+    if (JSON.stringify([...manifest.roots].sort()) !== JSON.stringify([...roots].sort())) {
+      errors.push("Manifest `roots` differ from the roots the built artifact imports.");
+    }
+  }
+
+  if (errors.length > 0) {
+    console.error("Runtime dependency-graph pinning is out of date (#5421):");
+    for (const error of errors) {
+      console.error(`  - ${error}`);
+    }
+    console.error("Refresh with: bun scripts/release/pin-runtime-deps.ts --write && bun install");
+    process.exit(1);
+  }
+  console.log(
+    `Pinned runtime graph is in sync (${Object.keys(intended.dependencies).length} exact deps).`,
+  );
+}
+
+function main(): void {
+  const mode = process.argv[2];
+  if (mode === "--write") {
+    writeMode();
+  } else if (mode === "--check") {
+    checkMode();
+  } else {
+    console.error("Usage: pin-runtime-deps.ts --write | --check");
+    process.exit(2);
+  }
+}
+
+main();

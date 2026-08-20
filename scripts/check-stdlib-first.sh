@@ -35,9 +35,23 @@ if [[ -z "$added_dependencies" ]]; then
   exit 0
 fi
 
+# Runtime-graph pins (issue #5421) promote already-resolved transitive packages
+# to exact direct dependencies for reproducibility. They are not new package
+# *choices* — they are already in the dependency tree — so they are exempt from
+# the decision-record requirement. `pin-runtime-deps.ts` is the record for the
+# whole set. A genuinely new package still needs a record.
+RUNTIME_PIN_MANIFEST="$ROOT_DIR/scripts/release/runtime-graph.json"
+pinned_dependencies=""
+if [[ -f "$RUNTIME_PIN_MANIFEST" ]]; then
+  pinned_dependencies="$(jq -r '.dependencies // {} | keys[]' "$RUNTIME_PIN_MANIFEST" | sort -u)"
+fi
+
 missing=0
 while IFS= read -r dependency; do
   [[ -z "$dependency" ]] && continue
+  if [[ -n "$pinned_dependencies" ]] && grep -Fxq "$dependency" <<<"$pinned_dependencies"; then
+    continue
+  fi
   if ! rg --glob '*.md' --fixed-strings "Dependency: \`${dependency}\`" docs/decisions >/dev/null 2>&1; then
     echo "error: new direct dependency '${dependency}' needs a docs/decisions record containing: Dependency: \`${dependency}\`" >&2
     missing=1

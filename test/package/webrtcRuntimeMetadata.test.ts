@@ -3,10 +3,21 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 describe("packaged WebRTC runtime metadata", () => {
-  test("reflect-metadata is a direct runtime dependency", async () => {
+  // `reflect-metadata` is a side-effect polyfill that `build.ts` inlines into
+  // `dist/src/index.js` (it is not in the build's externals, unlike the jimp/
+  // sharp families). The published bundle therefore self-contains the polyfill,
+  // so consumers never resolve it from node_modules — which is why it lives in
+  // devDependencies after the runtime-graph right-sizing (issue #5421). The
+  // runtime guarantee is enforced by the first-import ordering below and by the
+  // bundled WHIP-publish run at the end of this file, not by shipping the package
+  // to consumers. What still matters here is that it is a direct dependency the
+  // build can resolve and inline.
+  test("reflect-metadata is a direct dependency available to the build", async () => {
     const pkg = await Bun.file("package.json").json();
 
-    expect(pkg.dependencies["reflect-metadata"]).toBeString();
+    const declaredVersion =
+      pkg.dependencies?.["reflect-metadata"] ?? pkg.devDependencies?.["reflect-metadata"];
+    expect(declaredVersion).toBeString();
   });
 
   test("the packaged entrypoint initializes runtime metadata first", async () => {
@@ -14,7 +25,7 @@ describe("packaged WebRTC runtime metadata", () => {
     const executableBody = entrypoint.replace(/^#!.*\r?\n/, "");
     const firstImportLine = executableBody
       .split(/\r?\n/)
-      .find(line => line.startsWith("import "));
+      .find((line) => line.startsWith("import "));
 
     expect(firstImportLine).toBe('import "./runtime/reflectMetadata";');
   });
@@ -85,7 +96,7 @@ if (!posts.some(post => post.method === "POST" && post.url.includes("streamId=de
   throw new Error("WHIP POST was not reached");
 }
 console.log("ok");
-`
+`,
       );
 
       const build = await Bun.build({

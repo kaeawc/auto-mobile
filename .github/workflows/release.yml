@@ -320,6 +320,14 @@ jobs:
       - name: Build TypeScript package
         run: bun run build
 
+      # Refuse to publish a release whose runtime dependency graph is not pinned
+      # in lock-step with bun.lock, then prove a clean install of the packed
+      # artifact reproduces the intended exact graph (issue #5421). This is what
+      # keeps a fixed release reproducible when transitive dependencies later
+      # publish new compatible versions.
+      - name: Verify pinned runtime dependency graph (#5421)
+        run: bash scripts/ci/verify-pinned-runtime-graph.sh
+
       # Publish the prepared CtrlProxy assets before any SDK distribution. Maven
       # Central automatically releases its deployment, so a later npm/Homebrew
       # failure must never make a new SDK selectable without its matching APK.

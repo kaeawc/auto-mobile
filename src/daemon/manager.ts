@@ -106,8 +106,19 @@ function normalizeProcessCommand(command: string): string {
 
 function isAutoMobileDaemonCommand(command: string): boolean {
   const normalizedCommand = normalizeProcessCommand(command);
-  return normalizedCommand.includes("--daemon-mode") &&
-    (normalizedCommand.includes("auto-mobile") || normalizedCommand.includes("dist/src/index.js"));
+  if (!/(?:^|\s)--daemon-mode(?:\s|["']|$)/.test(normalizedCommand)) {
+    return false;
+  }
+
+  const runsBundledEntrypoint =
+    /(?:^|["'\s\\/])(?:bun|node)(?:\.exe)?(?:\s|["'])/.test(normalizedCommand) &&
+    /(?:^|["'\s])[^"'\s]*dist\/src\/index\.js(?:\s|["']|$)/.test(normalizedCommand);
+  const runsPublishedPackage =
+    /(?:^|["'\s])(bunx?|npx)(?:\.exe)?(?:\s+(?!--daemon-mode)[^"'\s]+)*\s+@kaeawc\/auto-mobile(?:@[^\s"']+)?(?:\s|["']|$)/.test(normalizedCommand);
+  const runsStandaloneBinary =
+    /^(?:"?[^"'\s]*\/)?auto-mobile(?:\.exe)?(?:\s|$)/i.test(normalizedCommand);
+
+  return runsBundledEntrypoint || runsPublishedPackage || runsStandaloneBinary;
 }
 
 function isShellCommandWrapper(command: string): boolean {

@@ -173,6 +173,25 @@ describe("SessionManager", () => {
       }
     });
 
+    test("includes a pending creation in the shutdown session snapshot", async () => {
+      const repository = new DeferredDeviceSessionPersistence();
+      const manager = new SessionManager(fakeTimer, repository);
+
+      try {
+        repository.deferNextUpsert();
+        const creating = manager.createSession("pending-shutdown", "emulator-5554", "android");
+        await repository.waitForUpsert();
+
+        expect(manager.getAllSessionIds()).toEqual([]);
+        expect(manager.getAllKnownSessionIds()).toEqual(["pending-shutdown"]);
+
+        repository.finishUpsert();
+        await creating;
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
     test("keeps ownership unpublished while a creation write is pending", async () => {
       let rejectFirstWrite!: (error: Error) => void;
       const firstWrite = new Promise<void>((_resolve, reject) => {

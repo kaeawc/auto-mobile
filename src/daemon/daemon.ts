@@ -242,6 +242,9 @@ export class Daemon {
     });
     // Register centralized cleanup for session-scoped state
     this.sessionManager.onSessionRelease((sessionId, deviceId) => {
+      this.navigationGraphListenerManagers.delete(
+        NavigationGraphManager.getInstanceForSession(sessionId),
+      );
       NavigationGraphManager.releaseSession(sessionId);
       RealObserveScreen.clearCache(deviceId);
       // Clear the per-device CtrlProxy client's binding to the released session
@@ -256,7 +259,12 @@ export class Daemon {
     // A rebind keeps the session live, but its navigation state was collected on
     // the old device and must not follow it to the new one.
     this.sessionManager.onSessionDeviceUnbound((sessionId, deviceId) => {
+      const previousNavigationManager = NavigationGraphManager.getInstanceForSession(sessionId);
       NavigationGraphManager.resetSession(sessionId);
+      this.navigationGraphListenerManagers.delete(previousNavigationManager);
+      this.setupNavigationGraphUpdateListener(
+        NavigationGraphManager.getInstanceForSession(sessionId),
+      );
       RealObserveScreen.clearCache(deviceId);
       AndroidCtrlProxyClient.getExistingInstance(deviceId)?.releaseSessionBinding(sessionId);
       IOSCtrlProxyClient.getExistingInstance(deviceId)?.releaseSessionBinding(sessionId);
@@ -1194,6 +1202,10 @@ export class Daemon {
       logger.info("[Daemon] Navigation graph listener triggered, exporting summary...");
       try {
         const summary = await navGraphManager.exportGraphSummary();
+        if (!this.navigationGraphListenerManagers.has(navGraphManager)) {
+          logger.debug("[Daemon] Ignoring navigation update from a released or rebound session");
+          return;
+        }
         logger.info(`[Daemon] Got summary: appId=${summary.appId}, nodes=${summary.nodes.length}, edges=${summary.edges.length}`);
 
         const streamData = convertSummaryToStreamData(summary);
@@ -2071,7 +2083,7 @@ export class Daemon {
   }
 
   private async releaseActiveSessionsForShutdown(): Promise<void> {
-    const sessionIds = this.sessionManager.getAllSessionIds();
+    const sessionIds = this.sessionManager.getAllKnownSessionIds();
     const releases = sessionIds.map(sessionId =>
       this.cancelAndReleaseSession(sessionId, "daemon-shutdown", true),
     );

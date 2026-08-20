@@ -255,6 +255,106 @@ describe("Daemon stream wiring", () => {
     }
   });
 
+  test("replaces the navigation listener when a session rebinds", async () => {
+    const timer = new FakeTimer();
+    const db = await createTestDatabase();
+    const sessionId = "rebound-navigation-session";
+    const initialNavigation = NavigationGraphManager.createForTesting(
+      new NavigationRepository(db),
+      new TestCoverageRepository(undefined, db),
+      undefined,
+      sessionId,
+    );
+    NavigationGraphManager.setInstanceForTesting(
+      NavigationGraphManager.createForTesting(
+        new NavigationRepository(db),
+        new TestCoverageRepository(undefined, db),
+      ),
+    );
+    NavigationGraphManager.setInstanceForSessionForTesting(sessionId, initialNavigation);
+    const daemon = new Daemon(
+      {},
+      undefined,
+      timer,
+      new DeviceSessionRepository(db),
+      new CountingIdGenerator("daemon"),
+    );
+    const internals = daemon as unknown as DaemonStreamInternals;
+    const stream = new FakeDeviceDataStreamServer();
+    internals.getDeviceSessionRoutingTargets = () => targets(stream);
+    const attachedManagers: NavigationGraphManager[] = [];
+    internals.setupNavigationGraphUpdateListener = manager => {
+      attachedManagers.push(manager);
+    };
+
+    try {
+      internals.setupDeviceSessionRouting();
+      internals.setupNavigationGraphStreamListener(stream);
+      await daemon.getSessionManager().createSession(sessionId, "emulator-old", "android");
+
+      await daemon.getSessionManager().rebindSession(sessionId, "emulator-new", "android");
+
+      expect(attachedManagers).toHaveLength(3);
+      expect(attachedManagers[1]).toBe(initialNavigation);
+      expect(attachedManagers[2]).not.toBe(initialNavigation);
+    } finally {
+      daemon.getSessionManager().stopCleanupTimer();
+    }
+  });
+
+  test("does not deliver an in-flight navigation update after session release", async () => {
+    const timer = new FakeTimer();
+    const db = await createTestDatabase();
+    const sessionId = "released-navigation-session";
+    NavigationGraphManager.setInstanceForTesting(
+      NavigationGraphManager.createForTesting(
+        new NavigationRepository(db),
+        new TestCoverageRepository(undefined, db),
+      ),
+    );
+    const sessionNavigation = NavigationGraphManager.createForTesting(
+      new NavigationRepository(db),
+      new TestCoverageRepository(undefined, db),
+      undefined,
+      sessionId,
+    );
+    NavigationGraphManager.setInstanceForSessionForTesting(sessionId, sessionNavigation);
+    const daemon = new Daemon(
+      {},
+      undefined,
+      timer,
+      new DeviceSessionRepository(db),
+      new CountingIdGenerator("daemon"),
+    );
+    const internals = daemon as unknown as DaemonStreamInternals;
+    const stream = new FakeDeviceDataStreamServer();
+    internals.getDeviceSessionRoutingTargets = () => targets(stream);
+
+    try {
+      internals.setupDeviceSessionRouting();
+      internals.setupNavigationGraphStreamListener(stream);
+      await daemon.getSessionManager().createSession(sessionId, "emulator-5554", "android");
+      const originalExport = sessionNavigation.exportGraphSummary.bind(sessionNavigation);
+      const exportStarted = Promise.withResolvers<void>();
+      const resumeExport = Promise.withResolvers<void>();
+      sessionNavigation.exportGraphSummary = async () => {
+        exportStarted.resolve();
+        await resumeExport.promise;
+        return await originalExport();
+      };
+
+      await sessionNavigation.setCurrentApp("com.example.released");
+      await exportStarted.promise;
+      await daemon.getSessionManager().releaseSession(sessionId);
+      resumeExport.resolve();
+      await flushNavigationUpdate();
+
+      expect(stream.navigationUpdates).toEqual([]);
+    } finally {
+      daemon.getSessionManager().stopCleanupTimer();
+    }
+  });
+
   test("clears a released UUID tombstone before attaching its recreated session", async () => {
     const timer = new FakeTimer();
     const db = await createTestDatabase();

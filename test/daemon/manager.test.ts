@@ -405,6 +405,7 @@ describe("Daemon manager process detection", () => {
   test("parses daemon processes from ps pid ppid command output", () => {
     const records = parseDaemonProcessTable(`
       10     1 /usr/bin/unrelated --daemon-mode
+      11     1 python worker.py --note auto-mobile --daemon-mode
       20     1 /bin/sh -c "bun /worktree/dist/src/index.js --daemon-mode"
       21    20 bun /worktree/dist/src/index.js --daemon-mode
       22     1 bun /worktree/dist/src/index.js

@@ -1087,6 +1087,21 @@ export class SessionManager {
   }
 
   /**
+   * Snapshot every session identity that is published or still completing
+   * creation, assignment, rebind, or early-release work.
+   */
+  getAllKnownSessionIds(): string[] {
+    return Array.from(new Set([
+      ...this.sessions.keys(),
+      ...this.pendingSessionCreations.keys(),
+      ...this.pendingSessionAssignments.keys(),
+      ...this.pendingSessionRebinds.keys(),
+      ...this.pendingSessionReleases.keys(),
+      ...this.releasePromises.keys(),
+    ]));
+  }
+
+  /**
    * Get all devices currently assigned to sessions
    */
   getAssignedDevices(): Set<string> {

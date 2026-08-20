@@ -636,7 +636,7 @@ describe("DeviceDataStreamSocketServer", () => {
       expect(server.getHierarchyIntervalMsForDevice("device-2")).toBe(500);
     });
 
-    it("keeps an unresolved deviceSessionUuid from matching or scheduling devices", async () => {
+    it("rejects an unresolved deviceSessionUuid before creating a subscription", async () => {
       const screenshotChanges: Array<string | null> = [];
       const hierarchyChanges: Array<string | null> = [];
       server.setOnScreenshotCadenceChanged((deviceId) => screenshotChanges.push(deviceId));
@@ -654,24 +654,43 @@ describe("DeviceDataStreamSocketServer", () => {
         }),
       );
 
-      expect(socket.getWrittenMessages<{ type: string; success?: boolean }>()).toMatchObject([
-        { type: "subscription_response", success: true },
+      expect(socket.getWrittenMessages<{ type: string; success?: boolean; error?: string }>()).toEqual([
+        {
+          id: "sub-unknown-session",
+          type: "error",
+          success: false,
+          error: "deviceSessionUuid 'session-unknown' does not identify a live device session",
+        },
       ]);
       expect(screenshotChanges).toEqual([]);
       expect(hierarchyChanges).toEqual([]);
+      expect(server.getSubscriberCount()).toBe(0);
       expect(server.hasSubscriberForDevice("device-1")).toBe(false);
       expect(server.getScreenshotIntervalMsForDevice("device-1")).toBe(3000);
       expect(server.getHierarchyIntervalMsForDevice("device-1")).toBe(1000);
+    });
 
-      // The subscription resolved to no device at creation time, so a later
-      // rebind cannot attach it to the new epoch.
-      server.sessionResolver.bind("device-1", "session-unknown");
-      server.pushScreenshotUpdate("device-1", "frame", 100, 200);
+    it("rejects a blank deviceSessionUuid", async () => {
+      const socket = new FakeSocket();
 
-      expect(socket.getWrittenMessages()).toHaveLength(1);
-      expect(server.hasSubscriberForDevice("device-1")).toBe(false);
-      expect(server.getScreenshotIntervalMsForDevice("device-1")).toBe(3000);
-      expect(server.getHierarchyIntervalMsForDevice("device-1")).toBe(1000);
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "sub-blank-session",
+          command: "subscribe",
+          deviceSessionUuid: "  ",
+        }),
+      );
+
+      expect(socket.getWrittenMessages()).toEqual([
+        {
+          id: "sub-blank-session",
+          type: "error",
+          success: false,
+          error: "deviceSessionUuid must not be blank",
+        },
+      ]);
+      expect(server.getSubscriberCount()).toBe(0);
     });
 
     it("handles unsubscribe command", async () => {
@@ -2072,14 +2091,25 @@ describe("DeviceDataStreamSocketServer", () => {
         .toEqual(["session-device-b"]);
     });
 
-    it("yields zero events to a stale/retired deviceSessionUuid subscriber (AC4)", () => {
-      const { socket } = server.simulateSubscription({ deviceId: "device-a" });
+    it("yields zero events and stops capture for a stale/retired deviceSessionUuid subscriber (AC4)", () => {
+      const { socket } = server.simulateSubscription({
+        deviceId: "device-a",
+        screenshotIntervalMs: 250,
+        hierarchyIntervalMs: 250,
+      });
+      expect(server.hasSubscriberForDevice("device-a")).toBe(true);
+      expect(server.getScreenshotIntervalMsForDevice("device-a")).toBe(250);
+      expect(server.getHierarchyIntervalMsForDevice("device-a")).toBe(250);
+
       // device-a reconnects under a new epoch: the serial now resolves to a new uuid.
       server.sessionResolver.retire("device-a").bind("device-a", "session-device-a-2");
 
       server.pushHierarchyUpdate("device-a", hierarchy);
 
       expect(frames(socket).filter(f => f.type === "hierarchy_update")).toHaveLength(0);
+      expect(server.hasSubscriberForDevice("device-a")).toBe(false);
+      expect(server.getScreenshotIntervalMsForDevice("device-a")).toBe(3000);
+      expect(server.getHierarchyIntervalMsForDevice("device-a")).toBe(1000);
     });
 
     it("retires the previous uuid when a fake resolver rebinds a device", () => {

@@ -722,6 +722,38 @@ describe("DevicePool", () => {
       }
     });
 
+    test("does not remove a same-serial device added after an absent disconnect capture", async () => {
+      const device = createBootedDevice("emulator-5554");
+
+      const disconnect = devicePool.removeDisconnectedDevice(device.deviceId);
+      await devicePool.initializeWithDevices([device]);
+      const replacement = devicePool.getDevice(device.deviceId);
+      await disconnect;
+
+      expect(devicePool.getDevice(device.deviceId)).toBe(replacement);
+    });
+
+    test("does not release a same-UUID replacement assignment after session persistence", async () => {
+      const device = createBootedDevice("emulator-5554");
+      fakeDeviceManager.bootedDevices = [device];
+      await devicePool.initializeWithDevices([device]);
+      await devicePool.bindOrReuseDeviceSession("session-1", device.deviceId, device.platform);
+      const originalAssignmentCount = devicePool.getDevice(device.deviceId)?.assignmentCount;
+
+      await sessionManager.releaseSession("session-1");
+      await devicePool.bindOrReuseDeviceSession("session-1", device.deviceId, device.platform);
+      const replacement = devicePool.getDevice(device.deviceId);
+      expect(replacement?.assignmentCount).toBe((originalAssignmentCount ?? 0) + 1);
+
+      await devicePool.releaseDevice(device.deviceId, "session-1");
+
+      expect(devicePool.getDevice(device.deviceId)).toBe(replacement);
+      expect(replacement).toMatchObject({
+        sessionId: "session-1",
+        status: "busy",
+      });
+    });
+
     // Boundary row (PARAM-7): the pool is keyed by device id, so two devices
     // with the same id collapse to a single tracked entry rather than being
     // double-counted. Pins the de-dup invariant a duplicate-id feed depends on.

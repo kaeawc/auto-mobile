@@ -601,7 +601,12 @@ describe("SessionManager", () => {
 
     test("publishes live heartbeat and label routing updates after deferred persistence", async () => {
       const repository = new DeferredDeviceSessionPersistence();
-      const manager = new SessionManager(fakeTimer, repository);
+      const manager = new SessionManager(
+        fakeTimer,
+        repository,
+        undefined,
+        () => ({ restore: async () => {} }),
+      );
       const labels = {
         primary: "session-1",
         secondary: "session-2",
@@ -632,6 +637,33 @@ describe("SessionManager", () => {
         });
         expect(manager.getDeviceLabels("session-1")).toEqual(labels);
         expect(manager.getSession("session-1")?.cacheData).toEqual({ deviceLabels: labels });
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("waits for a pending rebind before admitting a new execution", async () => {
+      const repository = new DeferredDeviceSessionPersistence();
+      const manager = new SessionManager(fakeTimer, repository);
+
+      try {
+        await manager.createSession("session-1", "emulator-old", "android");
+        repository.deferNextUpsert();
+
+        const rebinding = manager.rebindSession("session-1", "emulator-new", "android");
+        await repository.waitForUpsert();
+        let resolvedDevice: string | null = null;
+        const resolving = manager.getOrCreateSession("session-1").then((session) => {
+          resolvedDevice = session.assignedDevice;
+          return session;
+        });
+        await Promise.resolve();
+
+        expect(resolvedDevice).toBeNull();
+        repository.finishUpsert();
+
+        await expect(rebinding).resolves.toMatchObject({ assignedDevice: "emulator-new" });
+        await expect(resolving).resolves.toMatchObject({ assignedDevice: "emulator-new" });
       } finally {
         manager.stopCleanupTimer();
       }

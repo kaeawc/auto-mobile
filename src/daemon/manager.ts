@@ -953,9 +953,8 @@ export class DaemonManager implements DaemonManagerLike {
     const restartOptions: DaemonOptions = { ...runningOptions, ...requestedOptions };
     if (status.running) {
       await this.stop();
-    } else {
-      await this.stopUnrecordedDaemonsForExplicitRestart();
     }
+    await this.stopUnrecordedDaemonsForExplicitRestart(status.pid);
     // Wait a bit before starting
     await this.timer.sleep(1000);
     await this.start(restartOptions);
@@ -968,8 +967,8 @@ export class DaemonManager implements DaemonManagerLike {
    * failure mode that `--daemon restart` must recover from. Ordinary `start`
    * remains non-destructive.
    */
-  private async stopUnrecordedDaemonsForExplicitRestart(): Promise<void> {
-    const candidates = this.findLiveDaemonProcesses();
+  private async stopUnrecordedDaemonsForExplicitRestart(recordedPid?: number): Promise<void> {
+    const candidates = this.findLiveDaemonProcesses().filter(pid => pid !== recordedPid);
     if (candidates.length === 0) {
       return;
     }

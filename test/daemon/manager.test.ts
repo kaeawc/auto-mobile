@@ -84,7 +84,18 @@ describe("DaemonManager restart", () => {
   test("preserves PID-recorded options when no replacement options are requested", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const manager = new DaemonManager(undefined, undefined, timer);
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      timer,
+      undefined,
+      undefined,
+      undefined,
+      {
+        findDaemonProcesses: () => [],
+        isProcessRunning: () => false,
+      },
+    );
     const recordedOptions: DaemonOptions = {
       debug: true,
       toolOutputsDir: "/tmp/automobile-artifacts",
@@ -92,6 +103,7 @@ describe("DaemonManager restart", () => {
     };
     const statusSpy = spyOn(manager, "status").mockResolvedValue({
       running: true,
+      pid: 999,
       options: recordedOptions,
     });
     const stopSpy = spyOn(manager, "stop").mockResolvedValue(undefined);
@@ -947,6 +959,60 @@ describe("Daemon manager process detection", () => {
       startSpy.mockRestore();
       statusSpy.mockRestore();
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("explicit restart stops the recorded daemon and every cross-namespace daemon", async () => {
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const recordedPid = 451;
+    const crossNamespacePid = 452;
+    const livePids = new Set([recordedPid, crossNamespacePid]);
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses: () => [recordedPid, crossNamespacePid].map(pid => ({
+        pid,
+        ppid: 1,
+        command: "bun /other-checkout/dist/src/index.js --daemon-mode",
+      })),
+      isProcessRunning: pid => livePids.has(pid),
+    };
+    const signaler = new FakeDaemonProcessSignaler((pid, signal) => {
+      if (signal === "SIGTERM") {
+        livePids.delete(pid);
+      }
+    });
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      fakeTimer,
+      undefined,
+      undefined,
+      undefined,
+      processFinder,
+      undefined,
+      undefined,
+      undefined,
+      signaler,
+    );
+    const statusSpy = spyOn(manager, "status").mockResolvedValue({
+      running: true,
+      pid: recordedPid,
+    });
+    const stopSpy = spyOn(manager, "stop").mockImplementation(async () => {
+      livePids.delete(recordedPid);
+    });
+    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+
+    try {
+      await manager.restart();
+
+      expect(stopSpy).toHaveBeenCalledTimes(1);
+      expect(signaler.signals).toEqual([{ pid: crossNamespacePid, signal: "SIGTERM" }]);
+      expect(startSpy).toHaveBeenCalledWith({});
+    } finally {
+      startSpy.mockRestore();
+      stopSpy.mockRestore();
+      statusSpy.mockRestore();
     }
   });
 

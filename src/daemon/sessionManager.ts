@@ -377,6 +377,12 @@ export class SessionManager {
     platform?: Platform,
     execution?: SessionExecutionMetadata,
   ): Promise<Session> {
+    const pendingRebind = this.pendingSessionRebinds.get(sessionId);
+    if (pendingRebind) {
+      await pendingRebind.promise;
+      return await this.getOrCreateSession(sessionId, devicePool, platform, execution);
+    }
+
     const existing = this.getSessionForNewExecution(sessionId, execution);
     if (existing) {
       const inFlightRelease = this.releasePromises.get(sessionId);

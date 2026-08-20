@@ -34,6 +34,7 @@ interface DaemonStreamInternals {
   getDeviceSessionRoutingTargets(): RoutingTargets;
   setupDeviceSessionRouting(): void;
   setupNavigationGraphStreamListener(server: unknown): void;
+  setupNavigationGraphUpdateListener(manager: NavigationGraphManager): void;
   attemptRecovery(failureKind?: string): Promise<void>;
 }
 
@@ -48,6 +49,11 @@ class FakePushServer implements RoutingTarget {
 class FakeDeviceDataStreamServer extends FakePushServer {
   started: DeviceSessionRecord[] = [];
   navigationUpdates: Array<{ appId: string | null; deviceId: string | null | undefined }> = [];
+  subscriberCallbackInstalled = false;
+  screenshotCadenceCallbackInstalled = false;
+  hierarchyCadenceCallbackInstalled = false;
+  observationCallbackInstalled = false;
+  navigationRequestCallbackInstalled = false;
 
   pushDeviceSessionStarted(record: DeviceSessionRecord): void {
     this.started.push(record);
@@ -62,7 +68,25 @@ class FakeDeviceDataStreamServer extends FakePushServer {
     this.navigationUpdates.push({ appId: streamData.appId, deviceId });
   }
 
-  setOnNavigationGraphRequested(_handler: unknown): void {}
+  setOnSubscriberConnected(_handler: unknown): void {
+    this.subscriberCallbackInstalled = true;
+  }
+
+  setOnScreenshotCadenceChanged(_handler: unknown): void {
+    this.screenshotCadenceCallbackInstalled = true;
+  }
+
+  setOnHierarchyCadenceChanged(_handler: unknown): void {
+    this.hierarchyCadenceCallbackInstalled = true;
+  }
+
+  setOnObservationRequested(_handler: unknown): void {
+    this.observationCallbackInstalled = true;
+  }
+
+  setOnNavigationGraphRequested(_handler: unknown): void {
+    this.navigationRequestCallbackInstalled = true;
+  }
 }
 
 function targets(deviceDataStream: FakeDeviceDataStreamServer): RoutingTargets {
@@ -135,6 +159,11 @@ describe("Daemon stream wiring", () => {
         recoveredRecord.deviceSessionUuid,
       );
       expect(replacementStream.started).toEqual([recoveredRecord]);
+      expect(replacementStream.subscriberCallbackInstalled).toBe(true);
+      expect(replacementStream.screenshotCadenceCallbackInstalled).toBe(true);
+      expect(replacementStream.hierarchyCadenceCallbackInstalled).toBe(true);
+      expect(replacementStream.observationCallbackInstalled).toBe(true);
+      expect(replacementStream.navigationRequestCallbackInstalled).toBe(true);
     } finally {
       daemon.getSessionManager().stopCleanupTimer();
     }
@@ -221,6 +250,40 @@ describe("Daemon stream wiring", () => {
       expect(stream.navigationUpdates).toEqual([
         { appId: "com.example.created-after-setup", deviceId: null },
       ]);
+    } finally {
+      daemon.getSessionManager().stopCleanupTimer();
+    }
+  });
+
+  test("clears a released UUID tombstone before attaching its recreated session", async () => {
+    const timer = new FakeTimer();
+    const db = await createTestDatabase();
+    const sessionId = "recreated-session";
+    const globalNavigation = NavigationGraphManager.createForTesting(
+      new NavigationRepository(db),
+      new TestCoverageRepository(undefined, db),
+    );
+    NavigationGraphManager.setInstanceForTesting(globalNavigation);
+    NavigationGraphManager.releaseSession(sessionId);
+    const daemon = new Daemon(
+      {},
+      undefined,
+      timer,
+      new DeviceSessionRepository(db),
+      new CountingIdGenerator("daemon"),
+    );
+    const internals = daemon as unknown as DaemonStreamInternals;
+    const attachedManagers: NavigationGraphManager[] = [];
+    internals.setupNavigationGraphUpdateListener = manager => {
+      attachedManagers.push(manager);
+    };
+
+    try {
+      await daemon.getSessionManager().createSession(sessionId, "emulator-5554", "android");
+
+      const recreatedNavigation = NavigationGraphManager.getInstanceForSession(sessionId);
+      expect(recreatedNavigation).not.toBe(globalNavigation);
+      expect(attachedManagers).toEqual([recreatedNavigation]);
     } finally {
       daemon.getSessionManager().stopCleanupTimer();
     }

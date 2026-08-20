@@ -235,6 +235,7 @@ export class Daemon {
       (sessionId, query) => this.hasActiveSessionExecution(sessionId, query),
     );
     this.sessionManager.onSessionCreated((session) => {
+      NavigationGraphManager.clearReleasedSession(session.sessionId);
       this.setupNavigationGraphUpdateListener(
         NavigationGraphManager.getInstanceForSession(session.sessionId),
       );
@@ -1706,8 +1707,9 @@ export class Daemon {
         try {
           await this.observationStreamHealth.recover();
           // DefaultObservationStreamHealth recreates the device-data singleton.
-          // Reinstall the resolver and lifecycle bridge on that replacement.
-          this.setupDeviceSessionRouting();
+          // Reinstall routing, lifecycle delivery, cadence, observation, and
+          // navigation callbacks on that replacement.
+          this.configureDeviceDataStreamServer();
           logger.info("Observation stream socket server restarted successfully");
         } catch (error) {
           logger.error(`Failed to restart observation stream socket server: ${error}`);

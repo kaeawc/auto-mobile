@@ -691,7 +691,9 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
    * a non-null UUID with a null `deviceId` schedules none.
    */
   private subscriberWantsDevice(filter: DeviceDataFilter, deviceId: string): boolean {
-    return filter.deviceSessionUuid === null || filter.deviceId === deviceId;
+    return filter.deviceSessionUuid === null ||
+      (filter.deviceId === deviceId &&
+        this.deviceSessionResolver.resolveUuid(deviceId) === filter.deviceSessionUuid);
   }
 
   /**
@@ -880,6 +882,21 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
         return;
       }
 
+      const subscribedDeviceId =
+        deviceSessionUuid === null
+          ? null
+          : this.deviceSessionResolver.resolveDeviceId(deviceSessionUuid);
+      if (deviceSessionUuid !== null && subscribedDeviceId === null) {
+        const errorResponse: SubscriptionResponse = {
+          id: request.id,
+          type: "error",
+          success: false,
+          error: `deviceSessionUuid '${deviceSessionUuid}' does not identify a live device session`,
+        };
+        this.sendJson(socket, errorResponse);
+        return;
+      }
+
       // Let base class handle the subscription
       await super.processLine(socket, line);
 
@@ -887,11 +904,6 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       // serial-scoped, so resolve to the current serial. A missing UUID is an
       // intentional all-device subscription; an unresolvable UUID schedules no
       // device and must not be treated as that all-device case.
-      const subscribedDeviceId =
-        deviceSessionUuid === null
-          ? null
-          : this.deviceSessionResolver.resolveDeviceId(deviceSessionUuid);
-
       if (deviceSessionUuid === null || subscribedDeviceId !== null) {
         this.notifyScreenshotCadenceChanged(subscribedDeviceId);
         this.notifyHierarchyCadenceChanged(subscribedDeviceId);
@@ -1031,6 +1043,9 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     }
     if (typeof value !== "string") {
       throw new Error("deviceSessionUuid must be a string or null");
+    }
+    if (value.trim().length === 0) {
+      throw new Error("deviceSessionUuid must not be blank");
     }
     return value;
   }

@@ -281,6 +281,15 @@ export class DevicePool {
     string,
     { device: PooledDevice; sessionId: string; assignmentCount: number; cleanup: Promise<void> }
   > = new Map();
+  /**
+   * Explicit session-release callbacks run before terminal persistence awaits.
+   * Capture ownership there so the later caller-ordered pool release cannot
+   * snapshot and free a same-UUID replacement assignment.
+   */
+  private readonly releasedDeviceCaptures: Map<
+    string,
+    { device: PooledDevice; deviceId: string; assignmentCount: number }
+  > = new Map();
   private deviceIncarnationCounter = 0;
 
   // Max consecutive errors before marking device as failed
@@ -336,6 +345,7 @@ export class DevicePool {
       if (releaseReason === "lazy-expiry" || releaseReason === "cleanup-expired") {
         this.releaseExpiredSessionDevice(sessionId, deviceId);
       } else {
+        this.captureReleasedDevice(sessionId, deviceId);
         this.clearReleasedAutolockState(sessionId, deviceId);
       }
     });
@@ -759,7 +769,6 @@ export class DevicePool {
       return;
     }
     if (!device) {
-      await this.removeDevice(deviceId, true, device);
       return;
     }
     if (device.sessionId) {
@@ -2681,12 +2690,35 @@ export class DevicePool {
    * Frees the device so it can be assigned to other sessions.
    */
   async releaseDevice(deviceId: string, expectedSessionId: string): Promise<void> {
+    const releasedCapture = this.releasedDeviceCaptures.get(expectedSessionId);
+    if (releasedCapture?.deviceId === deviceId) {
+      this.releasedDeviceCaptures.delete(expectedSessionId);
+      await this.releaseCapturedDevice(
+        releasedCapture.device,
+        expectedSessionId,
+        releasedCapture.assignmentCount,
+      );
+      return;
+    }
+
     const device = this.devices.get(deviceId);
     if (!device) {
       logger.warn(`Cannot release device ${deviceId}: not in pool`);
       return;
     }
     await this.releaseCapturedDevice(device, expectedSessionId, device.assignmentCount);
+  }
+
+  private captureReleasedDevice(sessionId: string, deviceId: string): void {
+    const device = this.devices.get(deviceId);
+    if (!device || device.sessionId !== sessionId) {
+      return;
+    }
+    this.releasedDeviceCaptures.set(sessionId, {
+      device,
+      deviceId,
+      assignmentCount: device.assignmentCount,
+    });
   }
 
   private async releaseCapturedDevice(
@@ -3392,16 +3424,24 @@ export class DevicePool {
     const assignmentCount = device.assignmentCount;
     const cleanup = this.sessionManager.getPendingDeviceCleanup(deviceId);
     const release = this.releaseCapturedDevice(device, sessionId, assignmentCount);
-    void release.then(() => {
-      if (!cleanup) {
-        this.clearExpiredAutolockStateWhenIdle(sessionId, device, assignmentCount);
-      }
-      logger.info(`Released device ${deviceId} from session ${sessionId}`);
-    });
+    void release
+      .then(() => {
+        if (!cleanup) {
+          this.clearExpiredAutolockStateWhenIdle(sessionId, device, assignmentCount);
+        }
+        logger.info(`Released device ${deviceId} from session ${sessionId}`);
+      })
+      .catch(error => {
+        logger.warn(`Failed to release expired-session device ${deviceId}: ${error}`, error);
+      });
     if (cleanup) {
-      void cleanup.then(() =>
-        this.clearExpiredAutolockStateWhenIdle(sessionId, device, assignmentCount),
-      );
+      void cleanup
+        .then(() =>
+          this.clearExpiredAutolockStateWhenIdle(sessionId, device, assignmentCount),
+        )
+        .catch(error => {
+          logger.warn(`Failed to finish expired-session cleanup for ${deviceId}: ${error}`, error);
+        });
     }
   }
 

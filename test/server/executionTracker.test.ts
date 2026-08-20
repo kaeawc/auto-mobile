@@ -84,7 +84,7 @@ describe("ExecutionTracker", function() {
     const cancelled = await tracker.cancelSessionUuidExecutions(
       "session-uuid",
       "device-disconnected:emulator-5554",
-      { excludeSignal: kill.abortController.signal },
+      { excludeExecutionId: kill.id },
     );
 
     expect(cancelled).toBe(1);

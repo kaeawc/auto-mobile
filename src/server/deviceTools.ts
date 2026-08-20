@@ -32,6 +32,7 @@ import { getDbWriteBarrier } from "../db/dbWriteBarrier";
 import { isAdbMissingDeviceError } from "../utils/android-cmdline-tools/AdbDeviceHealth";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
+import { getToolCapabilityContext } from "../features/toolCapabilities/toolCapabilityContext";
 import { executionTracker } from "./executionTracker";
 import {
   createDefaultRunnerReadinessService,
@@ -125,6 +126,10 @@ export const DEVICE_ALREADY_STOPPED_ERROR_CODE = "device_already_stopped";
 const DEVICE_SHUTDOWN_TIMEOUT_MS = 30_000;
 const DEVICE_SHUTDOWN_POLL_INTERVAL_MS = 1_000;
 const DEVICE_SHUTDOWN_POST_RELEASE_RECHECK_TIMEOUT_MS = 1_000;
+
+function getShutdownInitiatingExecutionId(): string | undefined {
+  return getToolCapabilityContext()?.execution?.executionId;
+}
 
 function isAlreadyStoppedDeviceError(
   platform: SomePlatform,
@@ -807,7 +812,7 @@ async function retireShutdownOwnership(
     await executionTracker.cancelSessionUuidExecutions(
       sessionId,
       `device-disconnected:${device.deviceId}`,
-      { excludeSignal: abortSignal },
+      { excludeExecutionId: getShutdownInitiatingExecutionId() },
     );
     const release = sessionManager.releaseSession(sessionId, `device-stopped:${device.deviceId}`);
     try {

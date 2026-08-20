@@ -932,15 +932,103 @@ export class DaemonManager implements DaemonManagerLike {
     // replace a stale checkout. Preserve the daemon's PID-recorded options so
     // that replacement cannot silently discard configuration such as debug,
     // output, or accessibility flags.
-    const runningOptions = (await this.status()).options ?? {};
+    const status = await this.status();
+    const runningOptions = status.options ?? {};
     const requestedOptions = Object.fromEntries(
       Object.entries(options).filter(([, value]) => value !== undefined)
     ) as DaemonOptions;
     const restartOptions: DaemonOptions = { ...runningOptions, ...requestedOptions };
-    await this.stop();
+    if (status.running) {
+      await this.stop();
+    } else {
+      await this.stopVerifiedUnrecordedDaemon();
+    }
     // Wait a bit before starting
     await this.timer.sleep(1000);
     await this.start(restartOptions);
+  }
+
+  /**
+   * An explicit restart may be the only way to replace a daemon started from
+   * another checkout, whose PID file is outside this manager's namespace.
+   * Never infer that a process owns this socket from process-table output
+   * alone: first prove this namespace's socket is reachable, then re-check the
+   * candidate PID before signalling it. Ordinary `start` intentionally remains
+   * non-destructive.
+   */
+  private async stopVerifiedUnrecordedDaemon(): Promise<void> {
+    const candidates = this.findLiveDaemonProcesses();
+    if (candidates.length === 0) {
+      return;
+    }
+
+    stderrLog(
+      `Found ${candidates.length} live AutoMobile daemon candidate(s) without this namespace's PID record; verifying socket ownership before restart...`
+    );
+    if (!(await this.waitForExistingDaemon(DAEMON_STARTUP_TIMEOUT_MS))) {
+      const stillLiveCandidates = candidates.filter(pid => this.isProcessRunning(pid));
+      if (stillLiveCandidates.length > 0) {
+        throw new ActionableError(
+          `Found live AutoMobile daemon candidate(s) (${stillLiveCandidates.join(", ")}) but this namespace's socket did not become reachable within ` +
+          `${DAEMON_STARTUP_TIMEOUT_MS}ms. Refusing to terminate an unverified daemon during restart.`
+        );
+      }
+      return;
+    }
+
+    // A candidate can exit while the connection probe is waiting or retrying.
+    // Do not signal a PID that has already gone away (and may have been reused).
+    const verifiedCandidates = candidates.filter(pid => this.isProcessRunning(pid));
+    if (verifiedCandidates.length === 0) {
+      stderrLog("Daemon candidate exited while its socket was being verified; starting a replacement.");
+      return;
+    }
+    if (verifiedCandidates.length > 1) {
+      throw new ActionableError(
+        `Found multiple live AutoMobile daemon candidates (${verifiedCandidates.join(", ")}); ` +
+        "cannot safely identify which one owns this namespace's socket. Stop the intended daemon explicitly before restarting."
+      );
+    }
+
+    await this.stopUnrecordedDaemonProcess(verifiedCandidates[0]);
+  }
+
+  private async stopUnrecordedDaemonProcess(pid: number): Promise<void> {
+    stderrLog(`Stopping verified daemon without this namespace's PID record (PID ${pid})...`);
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch (error) {
+      if (this.isMissingProcessError(error)) {
+        return;
+      }
+      throw new ActionableError(
+        `Failed to stop verified daemon process ${pid}: ${this.describeError(error)}`
+      );
+    }
+
+    if (await this.waitForStop(pid, DAEMON_SHUTDOWN_TIMEOUT_MS)) {
+      return;
+    }
+
+    stderrLog(`Verified daemon ${pid} did not stop gracefully, sending SIGKILL...`);
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch (error) {
+      if (this.isMissingProcessError(error)) {
+        return;
+      }
+      throw new ActionableError(
+        `Failed to force-stop verified daemon process ${pid}: ${this.describeError(error)}`
+      );
+    }
+
+    if (!(await this.waitForStop(pid, 1000))) {
+      throw new ActionableError(`Verified daemon process ${pid} did not exit after SIGKILL`);
+    }
+  }
+
+  private isMissingProcessError(error: unknown): boolean {
+    return error instanceof Error && error.message.includes("ESRCH");
   }
 
   /**
@@ -959,18 +1047,21 @@ export class DaemonManager implements DaemonManagerLike {
       pollCount++;
       if (existsSync(this.socketPath)) {
         socketObserved = true;
+        // A daemon started from another checkout can own this namespace's socket
+        // without writing this namespace's PID record. The socket connection is
+        // authoritative readiness in that case; status() cannot prove ownership.
+        if (await this.verifyDaemonConnection()) {
+          stderrLog(
+            `Daemon readiness probe succeeded after ${this.timer.now() - startTime}ms ` +
+            `(${pollCount} polls; socket observed)`
+          );
+          return true;
+        }
+        if (signal?.aborted) {
+          return false;
+        }
         const status = await this.status();
         if (status.running) {
-          if (await this.verifyDaemonConnection()) {
-            stderrLog(
-              `Daemon readiness probe succeeded after ${this.timer.now() - startTime}ms ` +
-              `(${pollCount} polls; socket observed)`
-            );
-            return true;
-          }
-          if (signal?.aborted) {
-            return false;
-          }
           await this.removeInvalidSocketPath();
         }
       }

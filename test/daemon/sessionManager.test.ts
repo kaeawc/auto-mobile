@@ -599,6 +599,44 @@ describe("SessionManager", () => {
       }
     });
 
+    test("publishes live heartbeat and label routing updates after deferred persistence", async () => {
+      const repository = new DeferredDeviceSessionPersistence();
+      const manager = new SessionManager(fakeTimer, repository);
+      const labels = {
+        primary: "session-1",
+        secondary: "session-2",
+      };
+
+      try {
+        await manager.createSession("session-1", "emulator-old", "android", 1_000);
+        manager.setLastHierarchy("session-1", makeHierarchy("old"));
+        manager.setKeepScreenAwake("session-1", { applied: true });
+        repository.deferNextUpsert();
+
+        const rebinding = manager.rebindSession("session-1", "emulator-new", "android");
+        await repository.waitForUpsert();
+
+        fakeTimer.advanceTime(100);
+        manager.setDeviceLabels("session-1", labels);
+        fakeTimer.advanceTime(50);
+        manager.recordHeartbeat("session-1");
+        repository.finishUpsert();
+
+        await expect(rebinding).resolves.toMatchObject({
+          assignedDevice: "emulator-new",
+          lastUsedAt: 150,
+          lastHeartbeat: 150,
+          expiresAt: 1_150,
+          hasReceivedHeartbeat: true,
+          cacheData: { deviceLabels: labels },
+        });
+        expect(manager.getDeviceLabels("session-1")).toEqual(labels);
+        expect(manager.getSession("session-1")?.cacheData).toEqual({ deviceLabels: labels });
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
     test("serializes expiry cleanup with a pending rebind", async () => {
       const repository = new DeferredDeviceSessionPersistence();
       const manager = new SessionManager(fakeTimer, repository, () => new FakeDbWriteBarrier());

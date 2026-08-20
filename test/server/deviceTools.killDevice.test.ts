@@ -17,9 +17,11 @@ import {
 } from "../../src/server/videoRecordingManager";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
-import { getAbortSignal } from "../../src/utils/AbortContext";
+import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
+import { runWithToolCapabilityContext } from "../../src/features/toolCapabilities/toolCapabilityContext";
 import { IOSCtrlProxyManager } from "../../src/utils/IOSCtrlProxyManager";
 import { DeviceSessionRepository } from "../../src/db/DeviceSessionRepository";
+import { executionTracker } from "../../src/server/executionTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
@@ -462,6 +464,77 @@ describe("killDevice handler", () => {
 
     expect(successfulManager.getCallCount("startDevice")).toBe(1);
     expect(pool.getDevice("emulator-5554")).toBeNull();
+  });
+
+  test("keeps the initiating parallel plan alive while cancelling other execution tracks", async () => {
+    const timer = new FakeTimer();
+    const successfulManager = new SuccessfulKillDeviceManager();
+    manager = successfulManager;
+    const deviceSessionRepository = new FakeDeviceSessionRepository();
+    const image: DeviceInfo = {
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+      isRunning: false,
+      source: "local",
+    };
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => successfulManager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      timer,
+    });
+    sessionManager = new SessionManager(timer, deviceSessionRepository);
+    successfulManager.setDeviceImages("android", [image]);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      successfulManager,
+      new DefaultRetryExecutor(timer),
+      deviceSessionRepository,
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.assignMultipleDevices(["session-1"], 1_000, "android");
+    const initiatingPlan = executionTracker.startExecution("executePlan", undefined, "session-1");
+    const competingExecution = executionTracker.startExecution("tapOn", undefined, "session-1");
+    const trackAbortController = new AbortController();
+    const parallelTrackSignal = AbortSignal.any([
+      initiatingPlan.abortController.signal,
+      trackAbortController.signal,
+    ]);
+    const tool = ToolRegistry.getTool("killDevice");
+    if (!tool) {
+      throw new Error("killDevice not registered");
+    }
+
+    try {
+      expect(parallelTrackSignal).not.toBe(initiatingPlan.abortController.signal);
+      await runWithToolCapabilityContext(
+        {
+          execution: {
+            executionId: initiatingPlan.id,
+            startTime: initiatingPlan.startTime,
+          },
+        },
+        async () => await runWithAbortSignal(
+          parallelTrackSignal,
+          async () => await tool.handler(
+            { device: { name: image.name, platform: "android", deviceId: image.deviceId! } },
+            undefined,
+            parallelTrackSignal,
+          ),
+        ),
+      );
+
+      expect(initiatingPlan.abortController.signal.aborted).toBe(false);
+      expect(competingExecution.abortController.signal.aborted).toBe(true);
+    } finally {
+      executionTracker.endExecution(initiatingPlan.id);
+      executionTracker.endExecution(competingExecution.id);
+    }
   });
 
   test("bypasses the Android device-list cache while confirming shutdown", async () => {

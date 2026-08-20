@@ -83,6 +83,7 @@ export interface Session {
  * while sharing centralized state in the daemon.
  */
 export type SessionReleaseCallback = (sessionId: string, deviceId: string, releaseReason: string) => void;
+export type SessionCreatedCallback = (session: Session) => void;
 export interface SessionExecutionMetadata {
   executionId: string;
   startTime: number;
@@ -139,6 +140,7 @@ export class SessionManager {
   private cleanupTimer: NodeJS.Timeout | null = null;
   private timer: Timer;
   private releaseCallbacks: SessionReleaseCallback[] = [];
+  private createdCallbacks: SessionCreatedCallback[] = [];
   private deviceUnboundCallbacks: SessionDeviceUnboundCallback[] = [];
   private readonly releasePromises: Map<
     string,
@@ -208,6 +210,13 @@ export class SessionManager {
    */
   onSessionRelease(callback: SessionReleaseCallback): void {
     this.releaseCallbacks.push(callback);
+  }
+
+  /**
+   * Register a callback invoked after a newly-created session is published.
+   */
+  onSessionCreated(callback: SessionCreatedCallback): void {
+    this.createdCallbacks.push(callback);
   }
 
   /** Return outstanding post-release device work, if the device must stay quarantined. */
@@ -290,6 +299,7 @@ export class SessionManager {
     this.sessions.set(session.sessionId, session);
     this.sessionDeviceMap.set(session.sessionId, session.assignedDevice);
     this.deviceSessionMap.set(session.assignedDevice, session.sessionId);
+    this.notifySessionCreated(session);
     logger.info(`Created session ${session.sessionId} with device ${session.assignedDevice}`);
     return session;
   }
@@ -485,12 +495,7 @@ export class SessionManager {
     assignedDevice: string,
     platform: Platform,
   ): Promise<Session> {
-    const replacement: Session = {
-      ...existing,
-      assignedDevice,
-      platform,
-      cacheData: {},
-    };
+    const replacement = this.createReboundSession(existing, assignedDevice, platform);
     await this.persistSession(replacement);
 
     try {
@@ -502,7 +507,10 @@ export class SessionManager {
     const previousDevice = existing.assignedDevice;
     // Preserve object identity so an already-started release observes the
     // rebinding and frees its live replacement rather than a stale snapshot.
-    Object.assign(existing, replacement);
+    // Recreate the replacement after awaited work: activity and label-routing
+    // updates remain live while persistence is in flight, and publishing the
+    // pre-persistence snapshot would overwrite them.
+    Object.assign(existing, this.createReboundSession(existing, assignedDevice, platform));
     this.sessionDeviceMap.set(existing.sessionId, assignedDevice);
     if (this.deviceSessionMap.get(previousDevice) === existing.sessionId) {
       this.deviceSessionMap.delete(previousDevice);
@@ -510,6 +518,25 @@ export class SessionManager {
     this.deviceSessionMap.set(assignedDevice, existing.sessionId);
     this.notifySessionDeviceUnbound(existing.sessionId, previousDevice);
     return existing;
+  }
+
+  /**
+   * Rebinding keeps only session-level routing cache. Hierarchy, rendered
+   * observation, and keep-awake state belong to the old physical device.
+   */
+  private createReboundSession(
+    session: Session,
+    assignedDevice: string,
+    platform: Platform,
+  ): Session {
+    return {
+      ...session,
+      assignedDevice,
+      platform,
+      cacheData: session.cacheData.deviceLabels === undefined
+        ? {}
+        : { deviceLabels: session.cacheData.deviceLabels },
+    };
   }
 
   /**
@@ -844,6 +871,16 @@ export class SessionManager {
         callback(sessionId, deviceId);
       } catch (error) {
         logger.warn(`Session device-unbound callback failed for ${sessionId}: ${error}`);
+      }
+    }
+  }
+
+  private notifySessionCreated(session: Session): void {
+    for (const callback of this.createdCallbacks) {
+      try {
+        callback(session);
+      } catch (error) {
+        logger.warn(`Session creation callback failed for ${session.sessionId}: ${error}`);
       }
     }
   }

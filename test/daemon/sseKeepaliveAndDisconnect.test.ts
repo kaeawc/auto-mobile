@@ -520,6 +520,36 @@ describe("disconnect monitor miss counting", () => {
     expect(forced.has("sim-1")).toBe(false);
   });
 
+  test("retains a replacement force marker when null-captured cleanup finds a pooled device", async () => {
+    const forced = new Set(["sim-1"]);
+    const forceGenerations = new Map([["sim-1", 2]]);
+    const daemon = {
+      devicePool: {
+        getDevice: () => ({}),
+      },
+      deviceDisconnectMisses: new Map([["sim-1", DEVICE_DISCONNECT_MISS_THRESHOLD]]),
+      deviceDisconnectMissIncarnations: new Map([["sim-1", 1]]),
+      confirmedDisconnectedDeviceIds: new Set(["sim-1"]),
+      forceDisconnectedDeviceIds: forced,
+      forceDisconnectedDeviceGenerations: forceGenerations,
+    };
+    const shouldSkipStaleDisconnectCleanup = (
+      Daemon.prototype as unknown as {
+        shouldSkipStaleDisconnectCleanup: (
+          pooledDeviceAtDisconnect: null,
+          deviceId: string,
+          forceGenerationAtDisconnect: number | undefined,
+        ) => Promise<boolean>;
+      }
+    ).shouldSkipStaleDisconnectCleanup;
+
+    await expect(
+      shouldSkipStaleDisconnectCleanup.call(daemon, null, "sim-1", 1),
+    ).resolves.toBe(true);
+    expect(forced.has("sim-1")).toBe(true);
+    expect(forceGenerations.get("sim-1")).toBe(2);
+  });
+
   test("clears disconnect state when cleanup rediscovers the pooled incarnation", async () => {
     const misses = new Map([["emulator-5554", DEVICE_DISCONNECT_MISS_THRESHOLD]]);
     const missIncarnations = new Map([["emulator-5554", 4]]);
@@ -588,6 +618,32 @@ describe("disconnect monitor miss counting", () => {
     await expect(pending).resolves.toBe(true);
     expect(forced.has("emulator-5554")).toBe(true);
     expect(forceGenerations.get("emulator-5554")).toBe(1);
+  });
+
+  test("rejects an old disconnect target after cancellation races a same-ID replacement", () => {
+    const capturedDevice = { assignmentCount: 4 };
+    const replacementDevice = { assignmentCount: 1 };
+    const daemon = {
+      devicePool: {
+        getDevice: () => replacementDevice,
+      },
+      sessionManager: {
+        getSessionForDevice: () => null,
+      },
+    };
+    const isCapturedDisconnectTargetCurrent = (
+      Daemon.prototype as unknown as {
+        isCapturedDisconnectTargetCurrent: (
+          deviceId: string,
+          pooledDeviceAtDisconnect: object,
+          assignmentCountAtDisconnect: number,
+        ) => boolean;
+      }
+    ).isCapturedDisconnectTargetCurrent;
+
+    expect(
+      isCapturedDisconnectTargetCurrent.call(daemon, "emulator-5554", capturedDevice, 4),
+    ).toBe(false);
   });
 
   test("retains disconnect state when cleanup verification is inconclusive", async () => {

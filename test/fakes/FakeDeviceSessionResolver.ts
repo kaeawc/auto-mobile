@@ -10,6 +10,10 @@ export class FakeDeviceSessionResolver implements DeviceSessionResolver {
   private readonly uuidToDeviceId = new Map<string, string>();
 
   bind(deviceId: string, deviceSessionUuid: string): this {
+    const previousUuid = this.deviceIdToUuid.get(deviceId);
+    if (previousUuid !== undefined && previousUuid !== deviceSessionUuid) {
+      this.uuidToDeviceId.delete(previousUuid);
+    }
     this.deviceIdToUuid.set(deviceId, deviceSessionUuid);
     this.uuidToDeviceId.set(deviceSessionUuid, deviceId);
     return this;

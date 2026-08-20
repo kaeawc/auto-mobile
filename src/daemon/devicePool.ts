@@ -279,7 +279,7 @@ export class DevicePool {
   /** Releases waiting for late session teardown, bound to one pooled incarnation. */
   private readonly deferredDeviceReleases: Map<
     string,
-    { device: PooledDevice; sessionId: string; cleanup: Promise<void> }
+    { device: PooledDevice; sessionId: string; assignmentCount: number; cleanup: Promise<void> }
   > = new Map();
   private deviceIncarnationCounter = 0;
 
@@ -638,9 +638,17 @@ export class DevicePool {
   /**
    * Remove device from pool
    */
-  async removeDevice(deviceId: string, awaitCacheCleanup: boolean = true): Promise<void> {
+  async removeDevice(
+    deviceId: string,
+    awaitCacheCleanup: boolean = true,
+    expectedDevice?: PooledDevice,
+  ): Promise<void> {
     const device = this.devices.get(deviceId);
     if (!device) {
+      return;
+    }
+    if (expectedDevice && device !== expectedDevice) {
+      logger.debug(`Ignoring stale removal for replacement device ${deviceId}`);
       return;
     }
 
@@ -716,7 +724,7 @@ export class DevicePool {
       return true;
     }
     this.intentionalShutdowns.delete(deviceId);
-    await this.removeDevice(deviceId);
+    await this.removeDevice(deviceId, true, device);
     return true;
   }
 
@@ -738,19 +746,30 @@ export class DevicePool {
     deviceId: string,
     mayBeStaleSignal: boolean = true,
     incidentId?: string,
+    expectedDevice?: PooledDevice,
   ): Promise<void> {
     const device = this.devices.get(deviceId);
+    if (!this.matchesExpectedDisconnectedDevice(device, expectedDevice)) {
+      return;
+    }
     if (await this.shouldDeferDisconnectCleanup(deviceId, device, mayBeStaleSignal)) {
       return;
     }
-    if (!device || device.sessionId) {
-      await this.removeDevice(deviceId);
+    if (!this.matchesExpectedDisconnectedDevice(this.devices.get(deviceId), expectedDevice)) {
+      return;
+    }
+    if (!device) {
+      await this.removeDevice(deviceId, true, device);
+      return;
+    }
+    if (device.sessionId) {
+      await this.removeDevice(deviceId, true, device);
       return;
     }
     const rediscovery = mayBeStaleSignal
       ? await this.wasRebootedAndroidDeviceRediscovered(device)
       : "not-rediscovered";
-    if (this.devices.get(deviceId) !== device || rediscovery !== "not-rediscovered") {
+    if (!this.canContinueDisconnectCleanup(device, rediscovery)) {
       return;
     }
     const recordedIncidentId = incidentId ?? await this.recordEmulatorLossIncident(
@@ -763,13 +782,31 @@ export class DevicePool {
     if (await this.rebootDisconnectedAndroidDevice(device, recordedIncidentId)) {
       return;
     }
-    const current = this.devices.get(deviceId);
-    if (current && current !== device) {
+    if (this.hasReplacementDisconnectedDevice(device)) {
       return;
     }
     this.suppressAutoStartForDevice(device);
     await this.completeRecoveryIfNotAttempted(recordedIncidentId, recoveryWasAttempted);
-    await this.removeDevice(deviceId);
+    await this.removeDevice(deviceId, true, device);
+  }
+
+  private matchesExpectedDisconnectedDevice(
+    device: PooledDevice | undefined,
+    expectedDevice: PooledDevice | undefined,
+  ): boolean {
+    return expectedDevice === undefined || device === expectedDevice;
+  }
+
+  private canContinueDisconnectCleanup(
+    device: PooledDevice,
+    rediscovery: "rediscovered" | "not-rediscovered" | "unknown",
+  ): boolean {
+    return this.devices.get(device.id) === device && rediscovery === "not-rediscovered";
+  }
+
+  private hasReplacementDisconnectedDevice(device: PooledDevice): boolean {
+    const current = this.devices.get(device.id);
+    return current !== undefined && current !== device;
   }
 
   /**
@@ -1740,7 +1777,7 @@ export class DevicePool {
       return;
     }
     await this.completeEmulatorLossRecovery(correlatedIncidentId, "not-attempted");
-    await this.removeDevice(device.id);
+    await this.removeDevice(device.id, true, device);
   }
 
   private shouldRebootDisconnectedAndroidDevice(
@@ -2649,44 +2686,49 @@ export class DevicePool {
       logger.warn(`Cannot release device ${deviceId}: not in pool`);
       return;
     }
+    await this.releaseCapturedDevice(device, expectedSessionId, device.assignmentCount);
+  }
 
-    if (expectedSessionId !== undefined && device.sessionId !== expectedSessionId) {
-      logger.warn(
-        `Cannot release device ${deviceId}: expected session ${expectedSessionId}, ` +
-          `but it is owned by ${device.sessionId ?? "no session"}`,
-      );
-      return;
-    }
-
-    if (!device.sessionId) {
-      logger.debug(`Device ${deviceId} is already idle`);
-      return;
-    }
-
-    if (device.sessionId !== expectedSessionId) {
-      logger.debug(
-        `Ignoring stale release for device ${deviceId}: expected ${expectedSessionId}, owned by ${device.sessionId}`,
-      );
+  private async releaseCapturedDevice(
+    device: PooledDevice,
+    expectedSessionId: string,
+    expectedAssignmentCount: number,
+  ): Promise<void> {
+    const deviceId = device.id;
+    if (!this.isCapturedReleaseCurrent(device, expectedSessionId, expectedAssignmentCount)) {
       return;
     }
 
     const existingDeferredRelease = this.deferredDeviceReleases.get(deviceId);
     if (existingDeferredRelease) {
-      return;
+      if (
+        existingDeferredRelease.device === device &&
+        existingDeferredRelease.sessionId === expectedSessionId &&
+        existingDeferredRelease.assignmentCount === expectedAssignmentCount
+      ) {
+        return;
+      }
+      this.deferredDeviceReleases.delete(deviceId);
     }
     const cleanup = this.sessionManager.getPendingDeviceCleanup(deviceId);
     if (cleanup) {
-      const deferredRelease = { device, sessionId: expectedSessionId, cleanup };
+      const deferredRelease = {
+        device,
+        sessionId: expectedSessionId,
+        assignmentCount: expectedAssignmentCount,
+        cleanup,
+      };
       this.deferredDeviceReleases.set(deviceId, deferredRelease);
       void cleanup.then(() => {
         if (
           this.deferredDeviceReleases.get(deviceId) !== deferredRelease ||
-          this.devices.get(deviceId) !== device
+          this.devices.get(deviceId) !== device ||
+          device.assignmentCount !== expectedAssignmentCount
         ) {
           return;
         }
         this.deferredDeviceReleases.delete(deviceId);
-        return this.releaseDevice(deviceId, expectedSessionId);
+        return this.releaseCapturedDevice(device, expectedSessionId, expectedAssignmentCount);
       }).catch(error => logger.warn(`Failed to release device ${deviceId} after late session teardown: ${error}`));
       logger.info(`Keeping device ${deviceId} assigned until late session teardown completes`);
       return;
@@ -2699,6 +2741,42 @@ export class DevicePool {
     this.lastReleasedDeviceId = deviceId;
 
     logger.info(`Released device ${deviceId} from session ${sessionId}`);
+  }
+
+  private isCapturedReleaseCurrent(
+    device: PooledDevice,
+    expectedSessionId: string,
+    expectedAssignmentCount: number,
+  ): boolean {
+    const deviceId = device.id;
+    if (this.devices.get(deviceId) !== device) {
+      logger.debug(`Ignoring stale release for replacement device ${deviceId}`);
+      return false;
+    }
+    if (device.assignmentCount !== expectedAssignmentCount) {
+      logger.debug(`Ignoring stale release for reassigned device ${deviceId}`);
+      return false;
+    }
+    if (expectedSessionId !== undefined && device.sessionId !== expectedSessionId) {
+      logger.warn(
+        `Cannot release device ${deviceId}: expected session ${expectedSessionId}, ` +
+          `but it is owned by ${device.sessionId ?? "no session"}`,
+      );
+      return false;
+    }
+
+    if (!device.sessionId) {
+      logger.debug(`Device ${deviceId} is already idle`);
+      return false;
+    }
+
+    if (device.sessionId !== expectedSessionId) {
+      logger.debug(
+        `Ignoring stale release for device ${deviceId}: expected ${expectedSessionId}, owned by ${device.sessionId}`,
+      );
+      return false;
+    }
+    return true;
   }
 
   /**
@@ -3311,26 +3389,37 @@ export class DevicePool {
       return;
     }
 
+    const assignmentCount = device.assignmentCount;
     const cleanup = this.sessionManager.getPendingDeviceCleanup(deviceId);
-    const release = this.releaseDevice(deviceId, sessionId);
+    const release = this.releaseCapturedDevice(device, sessionId, assignmentCount);
     void release.then(() => {
       if (!cleanup) {
-        this.clearExpiredAutolockStateWhenIdle(sessionId, deviceId);
+        this.clearExpiredAutolockStateWhenIdle(sessionId, device, assignmentCount);
       }
       logger.info(`Released device ${deviceId} from session ${sessionId}`);
     });
     if (cleanup) {
-      void cleanup.then(() => this.clearExpiredAutolockStateWhenIdle(sessionId, deviceId));
+      void cleanup.then(() =>
+        this.clearExpiredAutolockStateWhenIdle(sessionId, device, assignmentCount),
+      );
     }
   }
 
-  private clearExpiredAutolockStateWhenIdle(sessionId: string, deviceId: string): void {
-    const device = this.devices.get(deviceId);
-    if (!device || device.sessionId !== null || device.autolockSessionId !== sessionId) {
+  private clearExpiredAutolockStateWhenIdle(
+    sessionId: string,
+    expectedDevice: PooledDevice,
+    expectedAssignmentCount: number,
+  ): void {
+    if (
+      this.devices.get(expectedDevice.id) !== expectedDevice ||
+      expectedDevice.assignmentCount !== expectedAssignmentCount ||
+      expectedDevice.sessionId !== null ||
+      expectedDevice.autolockSessionId !== sessionId
+    ) {
       return;
     }
 
-    device.autolockSessionId = undefined;
+    expectedDevice.autolockSessionId = undefined;
     this.clearMcpAutolockMappings(sessionId);
   }
 

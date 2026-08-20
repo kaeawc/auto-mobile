@@ -839,6 +839,146 @@ describe("Daemon manager process detection", () => {
     }
   });
 
+  test("restart takes over a verified daemon without the default namespace PID record", async () => {
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const candidatePid = 451;
+    const livePids = new Set([candidatePid]);
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses: () => [{
+        pid: candidatePid,
+        ppid: 1,
+        command: "bun /other-checkout/dist/src/index.js --daemon-mode",
+      }],
+      isProcessRunning: pid => livePids.has(pid),
+    };
+    const manager = new DaemonManager(
+      () => new FakeDaemonClient({}),
+      undefined,
+      fakeTimer,
+      undefined,
+      undefined,
+      undefined,
+      processFinder,
+    );
+    const statusSpy = spyOn(manager, "status").mockResolvedValue({ running: false });
+    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+    const killSpy = spyOn(process, "kill").mockImplementation(((pid: number, signal?: NodeJS.Signals | number) => {
+      if (pid === candidatePid && signal === "SIGTERM") {
+        livePids.delete(pid);
+      }
+      return true;
+    }) as typeof process.kill);
+
+    try {
+      await manager.restart();
+
+      expect(killSpy).toHaveBeenCalledWith(candidatePid, "SIGTERM");
+      expect(startSpy).toHaveBeenCalledWith({});
+    } finally {
+      killSpy.mockRestore();
+      startSpy.mockRestore();
+      statusSpy.mockRestore();
+    }
+  });
+
+  test("restart takes over a verified daemon without a custom namespace PID record", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "daemon-manager-custom-restart-test-"));
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const candidatePid = 452;
+    const livePids = new Set([candidatePid]);
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses: () => [{
+        pid: candidatePid,
+        ppid: 1,
+        command: "bun /other-checkout/dist/src/index.js --daemon-mode",
+      }],
+      isProcessRunning: pid => livePids.has(pid),
+    };
+    const manager = new DaemonManager(
+      () => new FakeDaemonClient({}),
+      undefined,
+      fakeTimer,
+      join(dir, "daemon.lock"),
+      join(dir, "daemon.pid"),
+      join(dir, "daemon.sock"),
+      processFinder,
+    );
+    const statusSpy = spyOn(manager, "status").mockResolvedValue({ running: false });
+    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+    const killSpy = spyOn(process, "kill").mockImplementation(((pid: number, signal?: NodeJS.Signals | number) => {
+      if (pid === candidatePid && signal === "SIGTERM") {
+        livePids.delete(pid);
+      }
+      return true;
+    }) as typeof process.kill);
+
+    try {
+      await manager.restart();
+
+      expect(killSpy).toHaveBeenCalledWith(candidatePid, "SIGTERM");
+      expect(startSpy).toHaveBeenCalledWith({});
+    } finally {
+      killSpy.mockRestore();
+      startSpy.mockRestore();
+      statusSpy.mockRestore();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("restart does not signal a candidate that exits while its socket is probed", async () => {
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const candidatePid = 453;
+    const livePids = new Set([candidatePid]);
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses: () => [{
+        pid: candidatePid,
+        ppid: 1,
+        command: "bun /other-checkout/dist/src/index.js --daemon-mode",
+      }],
+      isProcessRunning: pid => livePids.has(pid),
+    };
+    const manager = new DaemonManager(
+      () => ({
+        async connect() {
+          livePids.delete(candidatePid);
+        },
+        async close() {},
+        async callTool() {
+          return {};
+        },
+        async readResource() {
+          return {};
+        },
+        async callDaemonMethod() {
+          return {};
+        },
+      }),
+      undefined,
+      fakeTimer,
+      undefined,
+      undefined,
+      undefined,
+      processFinder,
+    );
+    const statusSpy = spyOn(manager, "status").mockResolvedValue({ running: false });
+    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+    const killSpy = spyOn(process, "kill").mockImplementation(() => true);
+
+    try {
+      await manager.restart();
+
+      expect(killSpy).not.toHaveBeenCalled();
+      expect(startSpy).toHaveBeenCalledWith({});
+    } finally {
+      killSpy.mockRestore();
+      startSpy.mockRestore();
+      statusSpy.mockRestore();
+    }
+  });
+
   test("start takeover does not signal transient daemon-mode candidates that are gone by liveness re-check", async () => {
     const dir = mkdtempSync(join(tmpdir(), "daemon-manager-transient-takeover-test-"));
     process.env.AUTOMOBILE_DATA_DIR = dir;

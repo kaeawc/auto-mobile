@@ -45,7 +45,7 @@ fi
 # up in bun.lock as an id spec `"name@version"`, so the leading quote anchors an
 # exact-name match. A genuinely new package — absent from the base lock — still
 # needs a record.
-BASE_BUN_LOCK="$(vcs_file_at_merge_base "$BASE_REF" bun.lock || true)"
+BASE_BUN_LOCK="$(vcs_file_at_merge_base "$BASE_REF" bun.lock)"
 
 missing=0
 while IFS= read -r dependency; do

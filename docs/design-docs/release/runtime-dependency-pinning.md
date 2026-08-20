@@ -19,10 +19,15 @@ resolvable. A fixed release must resolve a fixed graph.
 `build.ts` bundles the server into a single `dist/src/index.js`, externalizing
 **only** the image backends it loads from `node_modules` at runtime — the `jimp`
 family (`jimp`, `@jimp/core`) and the `sharp` family (`sharp` + the platform
-`@img/sharp-*` binaries). Every other dependency (`werift`, the MCP SDK, `zod`,
-…) is inlined into the bundle and is **not** needed at install time. Those
-inlined packages therefore live in `devDependencies`; consumers never install
-them, which is what removed the `@peculiar/asn1-*` install path entirely.
+`@img/sharp-*` binaries). One more package is a runtime dependency without being
+in that bundle: **`kysely`**. The DB migration `.ts` files are copied verbatim
+into `dist/` and loaded from disk at runtime (via `AUTOMOBILE_MIGRATIONS_DIR`),
+and each imports `kysely`'s `sql` tag — so `kysely` is the fourth runtime root
+even though it is not `import()`-ed from the bundle. Every other dependency
+(`werift`, the MCP SDK, `zod`, …) is inlined into the bundle and is **not** needed
+at install time. Those inlined packages therefore live in `devDependencies`;
+consumers never install them, which is what removed the `@peculiar/asn1-*`
+install path entirely.
 
 ## How the graph is pinned
 
@@ -33,8 +38,8 @@ here — the `@img/sharp-*` binaries are platform-variant and the jimp graph
 exceeds the unpacked-size cap. So the runtime closure is flattened into exact
 `dependencies`:
 
-- **runtime roots** — `jimp`, `@jimp/core`, `sharp` — and every **pure-transitive**
-  node of their closure are pinned to exact versions;
+- **runtime roots** — `jimp`, `@jimp/core`, `sharp`, `kysely` — and every
+  **pure-transitive** node of their closure are pinned to exact versions;
 - **platform-native `@img/sharp-*`** binaries stay in `optionalDependencies`
   (already exact-pinned, resolved per platform);
 - a small set of **residual** names (`pixelmatch`, `pngjs`, `xml2js`, `zod`) are

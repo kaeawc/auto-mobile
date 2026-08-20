@@ -3,8 +3,10 @@ import {
   computePins,
   findGraphMismatches,
   isExactVersion,
+  lastKeyComponent,
   parseBunLock,
   repartitionDependencies,
+  resolveKey,
   resolveRuntimeClosure,
   splitIdSpec,
 } from "../../scripts/release/lib/runtime-pins";
@@ -53,6 +55,37 @@ describe("isExactVersion", () => {
     ]) {
       expect(isExactVersion(bad)).toBe(false);
     }
+  });
+});
+
+describe("lastKeyComponent", () => {
+  test("returns the trailing package name, handling scopes and nesting", () => {
+    expect(lastKeyComponent("codec")).toBe("codec");
+    expect(lastKeyComponent("@jimp/core")).toBe("@jimp/core");
+    expect(lastKeyComponent("a/b/core")).toBe("core");
+    expect(lastKeyComponent("a/@scope/pkg")).toBe("@scope/pkg");
+  });
+});
+
+describe("resolveKey", () => {
+  test("does not match an unscoped name against a scoped key", () => {
+    const graph = parseBunLock(`{
+      "packages": {
+        "@jimp/core": ["@jimp/core@1.6.1", "", {}, "h"]
+      }
+    }`);
+    // Unscoped `core` must NOT resolve to the scoped `@jimp/core`.
+    expect(resolveKey(graph, "core", null)).toBeNull();
+    expect(resolveKey(graph, "@jimp/core", null)).toBe("@jimp/core");
+  });
+
+  test("falls back to a nested entry by trailing component", () => {
+    const graph = parseBunLock(`{
+      "packages": {
+        "parent/only-nested": ["only-nested@2.0.0", "", {}, "h"]
+      }
+    }`);
+    expect(resolveKey(graph, "only-nested", null)).toBe("parent/only-nested");
   });
 });
 

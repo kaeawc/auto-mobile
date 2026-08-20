@@ -137,6 +137,16 @@ function computeIntended(roots: string[]): Intended {
   const pkg = loadPackageJson();
   const lock = parseBunLock(readFileSync(BUN_LOCK, "utf8"));
   const pins = computePins(lock, roots, { excludePrefixes: EXCLUDE_PREFIXES });
+  // Fail closed: non-empty roots that resolve to an empty closure means the lock
+  // could not be walked (e.g. a future bun.lock format change parseBunLock does
+  // not understand). Without this, --write would move every dependency to
+  // devDependencies and every gate would pass vacuously against an empty graph.
+  if (roots.length > 0 && Object.keys(pins.dependencies).length === 0) {
+    throw new Error(
+      `Runtime roots [${roots.join(", ")}] resolved to an empty closure from bun.lock — ` +
+        "refusing to compute an empty runtime graph (is bun.lock parseable / current?).",
+    );
+  }
   const repartition = repartitionDependencies({
     currentDependencies: (pkg.dependencies as Record<string, string>) ?? {},
     currentDevDependencies: (pkg.devDependencies as Record<string, string>) ?? {},
@@ -249,8 +259,21 @@ function checkMode(): void {
     if (JSON.stringify(manifest.dependencies) !== JSON.stringify(intended.dependencies)) {
       errors.push("Manifest `dependencies` are out of sync with the intended pinned graph.");
     }
-    if (JSON.stringify([...manifest.roots].sort()) !== JSON.stringify([...roots].sort())) {
-      errors.push("Manifest `roots` differ from the roots the built artifact imports.");
+    // Detect roots drift against what the built artifact actually imports. --check
+    // computes pins from `manifest.roots` (hermetic), so this is the only place a
+    // *new* runtime import — a new migration `import`, or a build.ts externals
+    // change — is caught: if it is not, a genuinely-new runtime dependency would
+    // ship unpinned with the gate still green. Only possible when dist/ is built
+    // (the clean-room gate builds it first); skipped in the hermetic Fast
+    // Validation run where dist/ is absent.
+    if (existsSync(DIST_ENTRY)) {
+      const distRoots = deriveRootsFromDist(DIST_DIR);
+      if (JSON.stringify([...distRoots].sort()) !== JSON.stringify([...manifest.roots].sort())) {
+        errors.push(
+          `Manifest \`roots\` [${[...manifest.roots].sort().join(", ")}] differ from the roots ` +
+            `the built artifact imports [${distRoots.join(", ")}] — run --write to refresh.`,
+        );
+      }
     }
   }
 

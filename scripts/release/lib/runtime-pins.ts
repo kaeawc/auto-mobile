@@ -77,6 +77,21 @@ export function parseBunLock(text: string): LockGraph {
 }
 
 /**
+ * The trailing package name of a lock key. Keys are `/`-joined package names, and
+ * a scoped package (`@scope/name`) carries its own internal `/`, so the last
+ * component is two segments when the penultimate segment is a scope. `@jimp/core`
+ * → `@jimp/core`; `a/b/core` → `core`; `a/@scope/pkg` → `@scope/pkg`.
+ */
+export function lastKeyComponent(key: string): string {
+  const segments = key.split("/");
+  const penultimate = segments[segments.length - 2];
+  if (penultimate?.startsWith("@")) {
+    return `${penultimate}/${segments[segments.length - 1]}`;
+  }
+  return segments[segments.length - 1] ?? key;
+}
+
+/**
  * Resolve a dependency `name` referenced from `parentKey` to a lock key. Bun
  * records a nested `parent/name` entry when a package needs a version different
  * from the hoisted one; otherwise the bare hoisted `name` is used.
@@ -95,9 +110,11 @@ export function resolveKey(
   if (graph.has(name)) {
     return name;
   }
-  // Fall back to any nested entry that resolves this exact name.
+  // Fall back to any nested entry whose trailing package name is exactly `name`.
+  // Compare on the full trailing component so an unscoped `core` never matches a
+  // scoped `@jimp/core` (a plain `endsWith("/core")` would).
   for (const key of graph.keys()) {
-    if (key === name || key.endsWith(`/${name}`)) {
+    if (lastKeyComponent(key) === name) {
       return key;
     }
   }
@@ -222,7 +239,15 @@ export function computePins(
   };
 }
 
-/** Descending semver-ish compare (numeric segments), good enough for hoist choice. */
+/**
+ * Descending compare on numeric version segments — a hoist-choice heuristic, NOT
+ * a full semver comparator. It orders release lines correctly (1.10.0 > 1.9.0)
+ * but coerces prerelease/build identifiers to 0, so it does not rank a release
+ * above its prerelease. This only picks which of a multi-version closure name is
+ * pinned; today the sole multi-version name (`pngjs`) is residual-unpinned, so
+ * the choice never reaches `dependencies`. Replace with a real semver compare if
+ * a pure-transitive ever resolves to a release + prerelease pair.
+ */
 function compareVersionDesc(a: string, b: string): number {
   const pa = a.split(/[.+-]/).map((n) => Number.parseInt(n, 10));
   const pb = b.split(/[.+-]/).map((n) => Number.parseInt(n, 10));

@@ -2395,18 +2395,6 @@ jobs:
 
       - uses: ./.github/actions/setup-auto-mobile-npm-package
 
-      - name: "Verify pinned runtime dependency graph (#5421)"
-        shell: bash
-        run: bash scripts/ci/verify-pinned-runtime-graph.sh
-
-      - name: "Upload Pinned Runtime Graph Report"
-        uses: actions/upload-artifact@v6
-        if: always()
-        with:
-          name: pinned-runtime-graph-report
-          path: ci-logs/pinned-runtime-graph.log
-          retention-days: 90
-
       - name: "Run MCP Benchmarks"
         shell: bash
         run: |
@@ -2845,6 +2833,41 @@ jobs:
             exit 1
           fi
 
+  # Clean-room pack+install proof that a consumer's
+  # `bun install -g @kaeawc/auto-mobile` reproduces the pinned runtime
+  # dependency graph (issue #5421, acceptance criterion 3). Extracted from the
+  # "MCP Benchmarks" job into its own job so it can be rolled up by
+  # runtime-graph-gate below and promoted to a required status check — the
+  # heavy pack+install still runs exactly once per PR. Same gating as
+  # benchmarks (ts_changed, minus the automated sha256-only PRs) so the
+  # verification exercises every source/dependency change without wedging the
+  # SHA256 bump chores.
+  runtime-graph-verification:
+    timeout-minutes: 20
+    name: "Pinned Runtime Graph"
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.ts_changed == 'true' && needs.detect-changes.outputs.sha256_only != 'true'
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - uses: ./.github/actions/setup-auto-mobile-npm-package
+
+      - name: "Verify pinned runtime dependency graph (#5421)"
+        shell: bash
+        run: bash scripts/ci/verify-pinned-runtime-graph.sh
+
+      - name: "Upload Pinned Runtime Graph Report"
+        uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: pinned-runtime-graph-report
+          path: ci-logs/pinned-runtime-graph.log
+          retention-days: 90
+
 
   # =============================================================================
   # Gate Jobs for Branch Protection
@@ -3140,6 +3163,45 @@ jobs:
             r="${results[$name]}"
             if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
               echo "::error::WebRTC gate dependency ${name} = ${r}"
+              fail=1
+            fi
+          done
+          if [[ -n "${fail}" ]]; then
+            echo "One or more jobs failed or were cancelled"
+            exit 1
+          fi
+
+  # Stable roll-up of the clean-room pinned-runtime-graph verification so it can
+  # be promoted to a required check (issue #5421, acceptance criterion 3). The
+  # verification is conditional (runtime-graph-verification runs only on
+  # ts_changed, non-sha256-only PRs); when it is gated out its result is
+  # "skipped" (not failure), so this gate passes and does not wedge PRs that do
+  # not touch the runtime graph. A real verification failure is "failure", which
+  # this gate turns into a merge block. NOTE: advisory until "Pinned Runtime
+  # Graph Gate" is added to the green-main ruleset's required checks — a manual
+  # repo-settings step.
+  runtime-graph-gate:
+    timeout-minutes: 10
+    name: "Pinned Runtime Graph Gate"
+    if: always() && needs.detect-changes.outputs.auto_chore != 'true'
+    needs:
+      - detect-changes
+      - runtime-graph-verification
+    # Roll-up only reads needs.*.result — it needs no token scopes.
+    permissions: {}
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Check results"
+        run: |
+          declare -A results=(
+            [detect-changes]="${{ needs.detect-changes.result }}"
+            [runtime-graph-verification]="${{ needs.runtime-graph-verification.result }}"
+          )
+          fail=
+          for name in "${!results[@]}"; do
+            r="${results[$name]}"
+            if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
+              echo "::error::Pinned Runtime Graph gate dependency ${name} = ${r}"
               fail=1
             fi
           done

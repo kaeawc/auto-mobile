@@ -32,12 +32,13 @@ job_block() {
   grep -q '^    name: "iOS Build"$' "$WF"
   grep -q '^    name: "CodeQL"$' "$WF"
   grep -q '^    name: "Shell Tests"$' "$WF"
+  grep -q '^    name: "Pinned Runtime Graph Gate"$' "$WF"
 }
 
 @test "required gates run with always() so they always post a conclusion" {
   # A required check that never posts hangs as "Expected"; always() guarantees a
   # success/failure/skipped conclusion in every path.
-  for job in ios-build-gate codeql-gate shell-tests-gate; do
+  for job in ios-build-gate codeql-gate shell-tests-gate runtime-graph-gate; do
     block="$(job_block "$job")"
     [[ "$block" == *"if: always() &&"* ]]
   done
@@ -64,7 +65,7 @@ job_block() {
   # The whole point of the gate is to go red when a dependency fails; a gate that
   # never `exit 1`s is a permanent false-green. Pin the failure semantics so
   # weakening the loop (e.g. exit 1 -> exit 0) fails this guard.
-  for job in ios-build-gate codeql-gate shell-tests-gate; do
+  for job in ios-build-gate codeql-gate shell-tests-gate runtime-graph-gate; do
     block="$(job_block "$job")"
     [[ -n "$block" ]]
     [[ "$block" == *'"$r" == "failure" || "$r" == "cancelled"'* ]]
@@ -82,6 +83,28 @@ job_block() {
   block="$(job_block shell-tests-gate)"
   [[ "$block" == *"- bats-tests"* ]]
   [[ "$block" == *"needs.bats-tests.result"* ]]
+}
+
+@test "runtime-graph-gate rolls up runtime-graph-verification (#5421)" {
+  block="$(job_block runtime-graph-gate)"
+  [[ "$block" == *"- runtime-graph-verification"* ]]
+  [[ "$block" == *"needs.runtime-graph-verification.result"* ]]
+}
+
+@test "runtime-graph-verification runs the clean-room pinned-graph check exactly once (#5421)" {
+  # The heavy pack+install verification must live in its own required-able job
+  # and NOT be duplicated back into the benchmarks job (it was extracted from
+  # there). Assert exactly one invocation across the whole workflow.
+  count="$(grep -c 'scripts/ci/verify-pinned-runtime-graph.sh' "$WF")"
+  [[ "$count" -eq 1 ]]
+  block="$(job_block runtime-graph-verification)"
+  [[ -n "$block" ]]
+  [[ "$block" == *"scripts/ci/verify-pinned-runtime-graph.sh"* ]]
+  # Gated to the same source/dependency surface as benchmarks, minus the
+  # automated sha256-only chores.
+  [[ "$block" == *"needs.detect-changes.outputs.ts_changed == 'true'"* ]]
+  # Preserves the ci-logs artifact upload.
+  [[ "$block" == *"pinned-runtime-graph-report"* ]]
 }
 
 @test "ios-gate reuses ios-build-gate so build-leg membership is declared once" {

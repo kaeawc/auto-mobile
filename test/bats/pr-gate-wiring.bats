@@ -28,6 +28,14 @@ job_block() {
   ' "$WF"
 }
 
+ts_filter_block() {
+  awk '
+    /^        id: filter-ts$/ { cap = 1; next }
+    cap && /^      - name: / { exit }
+    cap { print }
+  ' "$WF"
+}
+
 @test "required gate jobs exist with stable context names" {
   grep -q '^    name: "iOS Build"$' "$WF"
   grep -q '^    name: "CodeQL"$' "$WF"
@@ -105,6 +113,13 @@ job_block() {
   [[ "$block" == *"needs.detect-changes.outputs.ts_changed == 'true'"* ]]
   # Preserves the ci-logs artifact upload.
   [[ "$block" == *"pinned-runtime-graph-report"* ]]
+}
+
+@test "runtime-graph verification runs when its workflow wiring changes (#5421)" {
+  block="$(ts_filter_block)"
+  [[ -n "$block" ]]
+  [[ "$block" == *"- '.github/workflows/pull_request.yml'"* ]]
+  [[ "$block" == *"- '.github/actions/setup-auto-mobile-npm-package/**'"* ]]
 }
 
 @test "ios-gate reuses ios-build-gate so build-leg membership is declared once" {

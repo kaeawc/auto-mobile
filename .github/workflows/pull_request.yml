@@ -376,6 +376,11 @@ jobs:
               - '.oxlintrc.json'
               - '.oxfmtrc.json'
               - 'oxlint-plugins/**'
+              # These files define and prepare the runtime-graph verification.
+              # Keep the clean-room check from being skipped when its own
+              # workflow wiring changes.
+              - '.github/workflows/pull_request.yml'
+              - '.github/actions/setup-auto-mobile-npm-package/**'
 
       - name: "Decide if Android jobs should run"
         id: android_should_run

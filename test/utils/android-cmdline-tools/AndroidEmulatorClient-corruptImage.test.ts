@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { AndroidEmulatorClient } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { ExecResult, BootedDevice } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -117,6 +117,10 @@ const mockExecAsync = async (_file: string, _args: string[]): Promise<ExecResult
 function skipEmulatorPathDetection(client: AndroidEmulatorClient): void {
   (client as any).ensureEmulatorPath = async () => "emulator";
 }
+
+afterEach(() => {
+  AndroidEmulatorClient.resetUnlabelledLaunchTrackingForTesting();
+});
 
 describe("AndroidEmulatorClient detectCorruptImage", () => {
   let client: AndroidEmulatorClient;
@@ -788,6 +792,50 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     expect(result.deviceId).toBe("emulator-5558");
     expect(scopedFactory.commandLog.some(command => command.startsWith("emulator-5558:get-state"))).toBe(true);
     expect(scopedFactory.commandLog.some(command => command.startsWith("emulator-5554:get-state"))).toBe(false);
+  });
+
+  test("does not correlate an unknown emulator while another unlabelled launch is pending", async () => {
+    fakeTimer.enableAutoAdvance();
+    const firstChild = createFakeChildProcess();
+    const secondChild = createFakeChildProcess();
+    const candidate: BootedDevice = {
+      name: "Unknown (emulator-5558)",
+      platform: "android",
+      deviceId: "emulator-5558",
+      source: "local",
+    };
+    const scopedFactory = new DeviceScopedAdbClientFactory([
+      [],
+      [],
+      [],
+      [],
+      [candidate],
+    ]);
+    const children = [firstChild, secondChild];
+    const spawnFn = ((_cmd: string, _args: string[]) => {
+      const child = children.shift()!;
+      process.nextTick(() => {
+        child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+      });
+      return child;
+    }) as any;
+    const execAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
+      if (args.includes("-list-avds")) {
+        return createExecResult("am-api33-ga-arm64\n");
+      }
+      return createExecResult("");
+    };
+    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, scopedFactory);
+    skipEmulatorPathDetection(client);
+
+    const firstLaunch = await client.startEmulator("am-api33-ga-arm64");
+    const secondLaunch = await client.startEmulator("am-api33-ga-arm64");
+    await expect(
+      client.waitForEmulatorReady("am-api33-ga-arm64", 100, firstLaunch),
+    ).rejects.toThrow("cannot safely correlate the launched emulator while 2 unlabelled");
+
+    expect(scopedFactory.commandLog.some(command => command.startsWith("emulator-5558:get-state"))).toBe(false);
+    secondLaunch!.emit("exit", 0);
   });
 
   test("reports ambiguous unknown emulator correlation without probing either candidate", async () => {

@@ -329,6 +329,9 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   private platform: NodeJS.Platform;
   private hostArchitecture: string;
   private readonly launchTargetDeviceIds = new WeakMap<ChildProcess, string>();
+  // startDevice creates a fresh client per request, so this safety boundary must
+  // cover every client in the daemon rather than one client instance.
+  private static readonly pendingUnlabelledLaunches = new Set<ChildProcess>();
   private readonly launchPreexistingEmulatorDeviceIds = new WeakMap<
     ChildProcess,
     ReadonlySet<string>
@@ -369,6 +372,10 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     this.hostArchitecture = hostArchitecture;
     // Only set a fallback emulator path here; proper detection happens lazily
     this.emulatorPath = this.getFallbackEmulatorPath();
+  }
+
+  static resetUnlabelledLaunchTrackingForTesting(): void {
+    AndroidEmulatorClient.pendingUnlabelledLaunches.clear();
   }
 
   /**
@@ -1820,6 +1827,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
       child.on("exit", (code, signal) => {
         this.timer.clearTimeout(startupTimeout);
+        this.releaseUnlabelledLaunch(child);
         childTerminationObserved = true;
         exitCode = code;
         exitSignal = signal;
@@ -1842,6 +1850,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
       child.on("close", (code, signal) => {
         this.timer.clearTimeout(startupTimeout);
+        this.releaseUnlabelledLaunch(child);
         clearExitDrainTimeout();
         childTerminationObserved = true;
         exitCode ??= code;
@@ -1926,6 +1935,13 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   ): void {
     if (preexistingDeviceIds) {
       this.launchPreexistingEmulatorDeviceIds.set(childProcess, preexistingDeviceIds);
+      AndroidEmulatorClient.pendingUnlabelledLaunches.add(childProcess);
+    }
+  }
+
+  private releaseUnlabelledLaunch(childProcess?: ChildProcess | null): void {
+    if (childProcess) {
+      AndroidEmulatorClient.pendingUnlabelledLaunches.delete(childProcess);
     }
   }
 
@@ -1945,6 +1961,15 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       return {};
     }
 
+    const pendingUnlabelledLaunches = AndroidEmulatorClient.pendingUnlabelledLaunches.size;
+    if (pendingUnlabelledLaunches > 1) {
+      return {
+        failure:
+          `Emulator '${avdName}' cannot safely correlate the launched emulator while ` +
+          `${pendingUnlabelledLaunches} unlabelled emulator launches are pending`,
+      };
+    }
+
     const newUnknownEmulators = runningEmulators.filter(
       (candidate) =>
         candidate.deviceId.startsWith("emulator-") &&
@@ -1953,6 +1978,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     );
     if (newUnknownEmulators.length === 1) {
       const emulator = newUnknownEmulators[0];
+      this.recordLaunchTargetDeviceId(childProcess, emulator.deviceId, "pre-launch device set");
       logger.debug(`Correlated launched emulator from pre-launch device set: ${emulator.deviceId}`);
       return { emulator };
     }
@@ -1977,6 +2003,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       `Exact name match for '${avdName}': ${namedEmulator ? `Found ${namedEmulator.deviceId}` : "Not found"}`,
     );
     if (namedEmulator) {
+      this.recordLaunchTargetDeviceId(childProcess, namedEmulator.deviceId, "AVD name");
       return { emulator: namedEmulator };
     }
 
@@ -2096,11 +2123,21 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
     const targetDeviceId = this.detectDeviceIdFromEmulatorOutput(output);
     if (targetDeviceId) {
-      this.launchTargetDeviceIds.set(childProcess, targetDeviceId);
-      logger.debug(
-        `Captured emulator launch target deviceId from process output: ${targetDeviceId}`,
-      );
+      this.recordLaunchTargetDeviceId(childProcess, targetDeviceId, "process output");
     }
+  }
+
+  private recordLaunchTargetDeviceId(
+    childProcess: ChildProcess | null | undefined,
+    targetDeviceId: string,
+    source: string,
+  ): void {
+    if (!childProcess || this.launchTargetDeviceIds.has(childProcess)) {
+      return;
+    }
+    this.launchTargetDeviceIds.set(childProcess, targetDeviceId);
+    this.releaseUnlabelledLaunch(childProcess);
+    logger.debug(`Captured emulator launch target deviceId from ${source}: ${targetDeviceId}`);
   }
 
   /**

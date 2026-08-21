@@ -6,16 +6,24 @@ Use this when debugging **JUnit / YAML plan** runs that talk to the AutoMobile *
 
 ## Where the log file is
 
-When the daemon is started through the normal **`--daemon start` / `restart`** flow, AutoMobile creates a **unique directory under `/tmp`** on the **CI runner** (the machine running Gradle), for example:
+When the daemon is started through the normal **`--daemon start` / `restart`**
+flow, AutoMobile writes logs to **`os.tmpdir()/auto-mobile`** on the CI runner
+(normally `/tmp/auto-mobile` on Linux). Set `AUTOMOBILE_LOG_DIR` to use another
+directory.
 
-`/tmp/auto-mobile-daemon-<random>/daemon.log`
+The structured daemon log is:
 
-Daemon **stdout and stderr** are written to that file.
+`/tmp/auto-mobile/daemon.log`
 
-This is **not** the same path as the Unix socket:
+The daemon manager also captures the daemon process's stdout and stderr per
+launch:
 
-- **Socket (stable):** `/tmp/auto-mobile-daemon-<uid>.sock` (UID = user running the tests, e.g. `id -u` on Linux)
-- **Log file (random subfolder):** use **`find`** or the **`Logs:`** line below
+`/tmp/auto-mobile/daemon-launch-<manager-pid>.log`
+
+This is separate from the Unix socket:
+
+- **Socket:** `/tmp/auto-mobile-daemon-<uid>.sock` (UID = user running the tests, e.g. `id -u` on Linux)
+- **Log directory:** `${AUTOMOBILE_LOG_DIR:-${TMPDIR:-/tmp}/auto-mobile}`
 
 ---
 
@@ -24,12 +32,13 @@ This is **not** the same path as the Unix socket:
 On a successful daemon start, the parent process often prints to **stderr** a line like:
 
 ```text
-Logs: /tmp/auto-mobile-daemon-xxxxx/daemon.log
+Logs: /tmp/auto-mobile/daemon-launch-12345.log
 ```
 
 Search your **CI job log** for **`Logs:`** if Gradle or the wrapper surfaces stderr.
 
-If that line is missing, locate the file with **`find`** (see below).
+If that line is missing, inspect `daemon.log` and `daemon-launch-*.log` in the
+log directory (see below).
 
 ---
 
@@ -40,8 +49,9 @@ Add an **`after_script`** (runs even when tests fail) so the log is visible in t
 ```yaml
 after_script:
   - |
-    echo "=== AutoMobile daemon.log (if any) ==="
-    find /tmp -maxdepth 4 -name daemon.log -path '*auto-mobile-daemon*' 2>/dev/null | while read -r f; do
+    log_dir="${AUTOMOBILE_LOG_DIR:-${TMPDIR:-/tmp}/auto-mobile}"
+    echo "=== AutoMobile daemon logs in $log_dir (if any) ==="
+    find "$log_dir" -maxdepth 1 -type f -name 'daemon*.log' 2>/dev/null | while read -r f; do
       echo "--- $f ---"
       tail -n 500 "$f" || true
     done
@@ -65,8 +75,9 @@ artifacts:
 after_script:
   - mkdir -p daemon-logs
   - |
-    find /tmp -maxdepth 4 -name daemon.log -path '*auto-mobile-daemon*' -print 2>/dev/null | while read -r f; do
-      cp "$f" "daemon-logs/$(basename "$(dirname "$f")").log" || true
+    log_dir="${AUTOMOBILE_LOG_DIR:-${TMPDIR:-/tmp}/auto-mobile}"
+    find "$log_dir" -maxdepth 1 -type f -name 'daemon*.log' -print 2>/dev/null | while read -r f; do
+      cp "$f" daemon-logs/ || true
     done
 ```
 
@@ -80,7 +91,8 @@ Download the job artifact and open the `daemon-logs/*.log` files.
 - name: AutoMobile daemon log
   if: always()
   run: |
-    find /tmp -maxdepth 4 -name daemon.log -path '*auto-mobile-daemon*' 2>/dev/null | while read -r f; do
+    log_dir="${AUTOMOBILE_LOG_DIR:-${TMPDIR:-/tmp}/auto-mobile}"
+    find "$log_dir" -maxdepth 1 -type f -name 'daemon*.log' 2>/dev/null | while read -r f; do
       echo "--- $f ---"
       tail -n 500 "$f" || true
     done
@@ -93,16 +105,17 @@ Download the job artifact and open the `daemon-logs/*.log` files.
 If you have SSH or a debug shell on the same host that ran the daemon:
 
 ```bash
-find /tmp -maxdepth 4 -name daemon.log -path '*auto-mobile-daemon*' 2>/dev/null
-tail -n 200 /tmp/auto-mobile-daemon-XXXXXX/daemon.log
+log_dir="${AUTOMOBILE_LOG_DIR:-${TMPDIR:-/tmp}/auto-mobile}"
+find "$log_dir" -maxdepth 1 -type f -name 'daemon*.log' 2>/dev/null
+tail -n 200 "$log_dir/daemon.log"
 ```
 
 ---
 
 ## Gotchas
 
-- **Same job only:** The log exists on the runner that started the daemon. A **later** CI job does not see that `/tmp` unless you pass an **artifact** or a shared cache (unusual for logs).
-- **Ephemeral runners:** `/tmp` may be wiped between jobs—use **`when: always`** and **`after_script`** on the job that runs tests.
+- **Same job only:** The logs exist on the runner that started the daemon. A **later** CI job does not see `os.tmpdir()` unless you pass an **artifact** or a shared cache (unusual for logs).
+- **Ephemeral runners:** The default temporary directory may be wiped between jobs—use **`when: always`** and **`after_script`** on the job that runs tests.
 - **Enable more noise:** JVM **`automobile.debug=true`** can help surface daemon-related paths and diagnostics in test output; see the JUnit runner README for system properties.
 
 ---

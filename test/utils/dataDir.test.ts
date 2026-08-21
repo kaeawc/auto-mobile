@@ -105,17 +105,17 @@ describe("resolveAutoMobileLogsDir", () => {
     ).toBe(path.resolve("/injected-launch", "logs"));
   });
 
-  test("falls back to the data-dir logs child for an unset or blank override", () => {
+  test("defaults to os.tmpdir()/auto-mobile independently of AUTOMOBILE_DATA_DIR", () => {
     expect(
       resolveAutoMobileLogsDir({ AUTOMOBILE_DATA_DIR: "/srv/data" }, home, "/launch")
-    ).toBe(path.join(path.resolve("/srv/data"), "logs"));
+    ).toBe(path.join(os.tmpdir(), "auto-mobile"));
     expect(
       resolveAutoMobileLogsDir(
         { AUTOMOBILE_LOG_DIR: "   ", AUTOMOBILE_DATA_DIR: "/srv/data" },
         home,
         "/launch",
       )
-    ).toBe(path.join(path.resolve("/srv/data"), "logs"));
+    ).toBe(path.join(os.tmpdir(), "auto-mobile"));
   });
 });
 

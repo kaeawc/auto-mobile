@@ -116,10 +116,11 @@ global_timeout_handler() {
   fi
   echo "" >&2
 
-  # Show any stderr logs collected
-  for log_file in /tmp/auto-mobile-*/stderr.log; do
+  # Show daemon logs in the same location used by the runtime.
+  local automobile_log_dir="${AUTOMOBILE_LOG_DIR:-${TMPDIR:-/tmp}/auto-mobile}"
+  for log_file in "$automobile_log_dir"/daemon*.log; do
     if [[ -f "$log_file" && -s "$log_file" ]]; then
-      echo "Stderr log ($log_file):" >&2
+      echo "Daemon log ($log_file):" >&2
       tail -n 30 "$log_file" 2>/dev/null | sed 's/^/  /' >&2 || true
       echo "" >&2
     fi

@@ -1081,8 +1081,9 @@ jobs:
           install_status=${PIPESTATUS[0]}
           set -e
           mkdir -p ci-logs/daemon-logs
-          if [[ -d "${HOME}/.auto-mobile/logs" ]]; then
-            cp -R "${HOME}/.auto-mobile/logs/." ci-logs/daemon-logs/ || true
+          daemon_log_dir="${AUTOMOBILE_LOG_DIR:-${TMPDIR:-/tmp}/auto-mobile}"
+          if [[ -d "${daemon_log_dir}" ]]; then
+            cp -R "${daemon_log_dir}/." ci-logs/daemon-logs/ || true
           else
             echo "No daemon logs directory was created" > ci-logs/daemon-logs/README.txt
           fi
@@ -1986,16 +1987,24 @@ jobs:
       # Daemon-internal logs (CtrlProxy startup/health/observe timing) are the only
       # way to diagnose iOS observe failures — the swift-test stdout doesn't include
       # them. Upload on failure only (they aren't needed on green runs, and this
-      # avoids publishing env/path details from passing runs). `include-hidden-files`
-      # is required because the logs live under the dot-dir ~/.auto-mobile.
+      # avoids publishing env/path details from passing runs).
+      - name: "Collect AutoMobile daemon logs"
+        if: failure()
+        continue-on-error: true
+        run: |
+          mkdir -p ci-logs/daemon-logs
+          daemon_log_dir="${AUTOMOBILE_LOG_DIR:-${TMPDIR:-/tmp}/auto-mobile}"
+          if [[ -d "${daemon_log_dir}" ]]; then
+            cp -R "${daemon_log_dir}/." ci-logs/daemon-logs/
+          fi
+
       - name: "Upload AutoMobile daemon logs"
         if: failure()
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: automobile-daemon-logs-xctestrunner
-          path: ~/.auto-mobile/logs/
-          include-hidden-files: true
+          path: ci-logs/daemon-logs/
           if-no-files-found: ignore
           retention-days: 7
 

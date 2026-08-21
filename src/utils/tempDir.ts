@@ -3,12 +3,11 @@
  *
  * Provides consistent, secure working directory creation with restrictive
  * permissions. The base resolves to a STABLE, non-ephemeral location so that
- * long-lived state (daemon logs, persistent caches) survives package-runner
- * temp-dir cleanup. When AutoMobile is launched via `bunx`, `os.tmpdir()` can
- * point into an extraction tree that bunx later reaps while the daemon still
- * holds open file descriptors — leaving on-disk logs at 0 bytes and cache
- * writes failing with ENOENT (issue #2724). Anchoring on the user's home dir
- * (`~/.auto-mobile`) avoids that lifecycle entirely.
+ * long-lived non-log state (persistent caches) survives package-runner temp-dir
+ * cleanup. When AutoMobile is launched via `bunx`, `os.tmpdir()` can point into
+ * an extraction tree that bunx later reaps while the daemon still holds open
+ * file descriptors, so persistent state is anchored on the user's home dir
+ * (`~/.auto-mobile`).
  */
 
 import fs from "node:fs";
@@ -61,10 +60,11 @@ export function resolveAutoMobileBaseDir(
 /**
  * Resolve the directory for structured and daemon-launch logs.
  *
- * A log-dir override intentionally takes precedence over the data-dir-derived
- * logs child without changing the base directory for any other AutoMobile
- * state. Relative overrides are anchored to the daemon launch directory so a
- * manager and its spawned daemon agree even after the daemon changes cwd.
+ * A log-dir override intentionally takes precedence over the default without
+ * changing the base directory for any other AutoMobile state. Without an
+ * override, logs use `os.tmpdir()/auto-mobile`. Relative overrides are anchored
+ * to the daemon launch directory so a manager and its spawned daemon agree even
+ * after the daemon changes cwd.
  */
 export function resolveAutoMobileLogsDir(
   env: NodeJS.ProcessEnv = process.env,
@@ -76,7 +76,7 @@ export function resolveAutoMobileLogsDir(
     return path.resolve(daemonLaunchWorkingDirectory, override);
   }
 
-  return path.join(resolveAutoMobileBaseDir(env, homeDir), TEMP_SUBDIRS.LOGS);
+  return path.join(os.tmpdir(), "auto-mobile");
 }
 
 /**

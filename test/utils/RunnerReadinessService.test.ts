@@ -26,6 +26,9 @@ class FakeReadinessClient implements ReadinessClient {
   connectionResults: boolean[] = [true];
   healthCalls = 0;
   connectionCalls = 0;
+  accessibilityHierarchies: Array<ViewHierarchyResult | null> = [];
+  tapResult = { success: true };
+  tapCoordinates: Array<{ x: number; y: number }> = [];
 
   isConnected(): boolean {
     return this.connected;
@@ -41,6 +44,15 @@ class FakeReadinessClient implements ReadinessClient {
   async verifyServiceReady(): Promise<boolean> {
     this.healthCalls++;
     return this.healthResults.shift() ?? false;
+  }
+
+  async getAccessibilityHierarchy(): Promise<ViewHierarchyResult | null> {
+    return this.accessibilityHierarchies.shift() ?? null;
+  }
+
+  async requestTapCoordinates(x: number, y: number): Promise<{ success: boolean; error?: string }> {
+    this.tapCoordinates.push({ x, y });
+    return this.tapResult;
   }
 }
 
@@ -167,6 +179,26 @@ function createService(
   };
 }
 
+function systemUiAnrHierarchy(): ViewHierarchyResult {
+  return {
+    hierarchy: {},
+    windows: [
+      {
+        windowLayer: 100,
+        packageName: "com.android.systemui",
+        hierarchy: {
+          $: {},
+          node: [
+            { $: { text: "System UI isn't responding" } },
+            { $: { text: "Close app" } },
+            { $: { text: "Wait", bounds: "[100,200][300,260]" } },
+          ],
+        },
+      },
+    ],
+  };
+}
+
 describe("RunnerReadinessService", () => {
   test("keeps an already-ready Android device on the fast path", async () => {
     const { service, androidManager, androidClient } = createService();
@@ -180,6 +212,24 @@ describe("RunnerReadinessService", () => {
 
     expect(androidManager.setupCalls).toBe(0);
     expect(androidClient.healthCalls).toBe(1);
+  });
+
+  test("checks for a System UI ANR while runner health is failing", async () => {
+    const androidClient = new FakeReadinessClient();
+    androidClient.healthResults = [false, false, true];
+    androidClient.accessibilityHierarchies = [systemUiAnrHierarchy(), null, null];
+    const { service, androidManager } = createService({ androidClient });
+
+    await service.ensureReady({
+      device: androidDevice(),
+      requestedIdentity: "platform=android name=Pixel_9_Pro",
+      totalDeadlineMs: 30_000,
+      readinessTimeoutMs: 30_000,
+    });
+
+    expect(androidManager.setupCalls).toBe(1);
+    expect(androidClient.tapCoordinates).toEqual([{ x: 200, y: 230 }]);
+    expect(androidClient.healthCalls).toBe(3);
   });
 
   test("repairs a missing Android package before checking observation health", async () => {

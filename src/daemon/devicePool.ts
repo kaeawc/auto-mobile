@@ -261,6 +261,8 @@ export class DevicePool {
   /** Latest refresh request; older discovery snapshots must not overwrite it. */
   private refreshGeneration = 0;
   private readonly readinessReservationCounts: Map<string, number> = new Map();
+  /** Stable runtime names reserved while a booted serial is being replaced. */
+  private readonly readinessReservationNames: Map<string, number> = new Map();
   /**
    * Captured incarnations that an explicit shutdown is retiring. Unlike a
    * readiness reservation, this excludes direct startDevice/autolock binding
@@ -2828,6 +2830,24 @@ export class DevicePool {
   }
 
   /**
+   * A System UI recovery that has confirmed shutdown but cannot restore the
+   * AVD has no usable successor for the session. Release it before retiring
+   * the captured connection epoch.
+   */
+  async retireDeviceAfterSystemUiAnrRecoveryFailure(
+    expectedDevice: PooledDevice,
+  ): Promise<boolean> {
+    if (expectedDevice.sessionId) {
+      await this.releaseSessionForDisconnectedDevice(
+        expectedDevice.sessionId,
+        expectedDevice.id,
+        deviceLossCancellationReason(expectedDevice.id),
+      );
+    }
+    return await this.retireDeviceForShutdown(expectedDevice);
+  }
+
+  /**
    * Atomically replace a captured stopped-device incarnation with the device
    * discovered under the same ID. This keeps allocators from claiming the old
    * device during the handoff.
@@ -2854,6 +2874,118 @@ export class DevicePool {
       );
       return this.devices.get(replacement.deviceId);
     });
+  }
+
+  /**
+   * Replace a stopped Android runtime while retaining the active AutoMobile
+   * session. The caller keeps both a shutdown reservation and a stable AVD
+   * readiness reservation until this handoff has completed.
+   */
+  async replaceDeviceForSystemUiAnrRecovery(
+    expectedDevice: PooledDevice,
+    replacement: BootedDevice,
+    sourceImage: DeviceInfo,
+    childProcess?: ChildProcess | null,
+  ): Promise<string | undefined> {
+    return await this.assignmentMutex.runExclusive(async () => {
+      if (this.devices.get(expectedDevice.id) !== expectedDevice) {
+        throw new ActionableError(
+          `Device '${expectedDevice.id}' changed while System UI recovery was in progress.`,
+        );
+      }
+      this.assertSystemUiAnrReplacement(expectedDevice, replacement, sourceImage);
+
+      const preservedSessionId = this.systemUiAnrRecoverySessionId(expectedDevice);
+      const replacementDevice = await this.replaceStoppedDeviceForSystemUiAnr(
+        expectedDevice,
+        replacement,
+        sourceImage,
+        childProcess,
+      );
+      await this.restoreSystemUiAnrRecoverySession(preservedSessionId, replacementDevice);
+      this.intentionalShutdowns.delete(expectedDevice.id);
+      return preservedSessionId;
+    });
+  }
+
+  private assertSystemUiAnrReplacement(
+    expectedDevice: PooledDevice,
+    replacement: BootedDevice,
+    sourceImage: DeviceInfo,
+  ): void {
+    if (
+      expectedDevice.platform !== "android" ||
+      replacement.platform !== "android" ||
+      sourceImage.platform !== "android" ||
+      replacement.name !== sourceImage.name
+    ) {
+      throw new ActionableError(
+        `System UI recovery must replace Android AVD '${sourceImage.name}' with the same runtime.`,
+      );
+    }
+  }
+
+  private systemUiAnrRecoverySessionId(expectedDevice: PooledDevice): string | undefined {
+    const sessionId = expectedDevice.sessionId;
+    const session = sessionId ? this.sessionManager.getSession(sessionId) : null;
+    if (
+      session === null ||
+      session.assignedDevice !== expectedDevice.id ||
+      session.platform !== "android"
+    ) {
+      return undefined;
+    }
+    return sessionId ?? undefined;
+  }
+
+  private async replaceStoppedDeviceForSystemUiAnr(
+    expectedDevice: PooledDevice,
+    replacement: BootedDevice,
+    sourceImage: DeviceInfo,
+    childProcess: ChildProcess | null | undefined,
+  ): Promise<PooledDevice> {
+    const priorAssignmentCount = expectedDevice.assignmentCount;
+    const priorLastUsedAt = expectedDevice.lastUsedAt;
+
+    // removeDevice rejects busy entries, so detach pool ownership only after
+    // capturing any session that must be rebound below. The replacement remains
+    // unavailable through the caller's readiness reservation while this runs.
+    this.releaseCapturedDeviceForShutdown(expectedDevice);
+    await this.removeDevice(expectedDevice.id, false, expectedDevice);
+    if (this.devices.has(replacement.deviceId)) {
+      throw new ActionableError(
+        `Replacement device '${replacement.deviceId}' was already added to the device pool.`,
+      );
+    }
+
+    await this.addDevice(replacement, sourceImage, false);
+    await this.trackStartedDeviceProcess(replacement, childProcess);
+    const replacementDevice = this.devices.get(replacement.deviceId);
+    if (!replacementDevice) {
+      throw new ActionableError(
+        `Replacement device '${replacement.deviceId}' was not retained by the device pool.`,
+      );
+    }
+    replacementDevice.assignmentCount = priorAssignmentCount;
+    replacementDevice.lastUsedAt = priorLastUsedAt;
+    return replacementDevice;
+  }
+
+  private async restoreSystemUiAnrRecoverySession(
+    sessionId: string | undefined,
+    replacementDevice: PooledDevice,
+  ): Promise<void> {
+    if (!sessionId) {
+      return;
+    }
+    await this.sessionManager.rebindSession(
+      sessionId,
+      replacementDevice.id,
+      replacementDevice.platform,
+    );
+    replacementDevice.sessionId = sessionId;
+    replacementDevice.status = "busy";
+    replacementDevice.lastUsedAt = this.nextLastUsedAt();
   }
 
   private sourceImageForSameAndroidReplacement(
@@ -2892,7 +3024,12 @@ export class DevicePool {
   async reserveDeviceForReadiness(
     deviceId: string,
     expectedIdentity: Pick<BootedDevice, "deviceId" | "name" | "platform" | "transportId">,
+    stableRuntimeName = expectedIdentity.name,
   ): Promise<() => Promise<void>> {
+    const stableRuntimeKey = this.readinessReservationNameKey({
+      name: stableRuntimeName,
+      platform: expectedIdentity.platform,
+    });
     await this.assignmentMutex.runExclusive(async () => {
       const pooled = this.devices.get(deviceId);
       if (pooled) {
@@ -2906,6 +3043,10 @@ export class DevicePool {
         deviceId,
         (this.readinessReservationCounts.get(deviceId) ?? 0) + 1,
       );
+      this.readinessReservationNames.set(
+        stableRuntimeKey,
+        (this.readinessReservationNames.get(stableRuntimeKey) ?? 0) + 1,
+      );
     });
 
     let released = false;
@@ -2918,15 +3059,37 @@ export class DevicePool {
         const count = this.readinessReservationCounts.get(deviceId);
         if (count === undefined || count <= 1) {
           this.readinessReservationCounts.delete(deviceId);
-          return;
+        } else {
+          this.readinessReservationCounts.set(deviceId, count - 1);
         }
-        this.readinessReservationCounts.set(deviceId, count - 1);
+        const nameCount = this.readinessReservationNames.get(stableRuntimeKey);
+        if (nameCount === undefined || nameCount <= 1) {
+          this.readinessReservationNames.delete(stableRuntimeKey);
+        } else {
+          this.readinessReservationNames.set(stableRuntimeKey, nameCount - 1);
+        }
       });
     };
   }
 
   private isReservedForReadiness(deviceId: string): boolean {
     return (this.readinessReservationCounts.get(deviceId) ?? 0) > 0;
+  }
+
+  private readinessReservationNameKey(
+    device: Pick<BootedDevice, "name" | "platform">,
+  ): string {
+    return `${device.platform}:${device.name}`;
+  }
+
+  private hasReadinessNameReservation(device: PooledDevice): boolean {
+    return (
+      this.readinessReservationNames.has(this.readinessReservationNameKey(device)) ||
+      (device.avdName !== undefined &&
+        this.readinessReservationNames.has(
+          this.readinessReservationNameKey({ name: device.avdName, platform: device.platform }),
+        ))
+    );
   }
 
   /**
@@ -2977,7 +3140,11 @@ export class DevicePool {
   }
 
   private isReservedForAssignment(device: PooledDevice): boolean {
-    return this.isReservedForReadiness(device.id) || this.isReservedForShutdown(device);
+    return (
+      this.isReservedForReadiness(device.id) ||
+      this.hasReadinessNameReservation(device) ||
+      this.isReservedForShutdown(device)
+    );
   }
 
   private assertNotReservedForShutdown(device: PooledDevice, unavailableMessage: string): void {

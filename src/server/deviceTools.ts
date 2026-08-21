@@ -37,6 +37,7 @@ import { executionTracker } from "./executionTracker";
 import {
   createDefaultRunnerReadinessService,
   type RunnerReadinessRequest,
+  SystemUiAnrRecoveryRequiredError,
 } from "../utils/RunnerReadinessService";
 import {
   MAX_RUNNER_READINESS_TIMEOUT_MS,
@@ -1110,6 +1111,376 @@ function publishWarmDeviceReady(source: "booted" | "cold-boot", deviceId: string
   }
 }
 
+function isUnknownAndroidRuntimeName(device: BootedDevice): boolean {
+  return device.name === `Unknown (${device.deviceId})`;
+}
+
+async function resolveSystemUiRecoveryImage(
+  boot: DeviceBootResult,
+  deviceManager: PlatformDeviceManager,
+  devicePool: DevicePool | undefined,
+  timer: Timer,
+  totalDeadlineMs: number,
+  signal: AbortSignal | undefined,
+): Promise<DeviceInfo> {
+  const pooled = devicePool?.getDevice(boot.device.deviceId);
+  const avdName =
+    pooled?.avdName ??
+    (boot.sourceImage?.platform === "android" ? boot.sourceImage.name : undefined) ??
+    (isUnknownAndroidRuntimeName(boot.device) ? undefined : boot.device.name);
+  if (!avdName) {
+    throw new ActionableError(
+      `Cannot restart Android device '${boot.device.deviceId}' after a System UI ANR because its AVD name is unknown.`,
+    );
+  }
+  const images = await runWithinShutdownDeadline(
+    boot.device,
+    timer,
+    totalDeadlineMs,
+    "System UI recovery image lookup did not complete",
+    signal,
+    async () => await deviceManager.listDeviceImages("android"),
+  );
+  const image = images.find(
+    (candidate) => candidate.platform === "android" && candidate.name === avdName,
+  );
+  if (!image) {
+    throw new ActionableError(
+      `Cannot restart Android device '${boot.device.deviceId}' after a System UI ANR because AVD '${avdName}' is unavailable.`,
+    );
+  }
+  return { ...image, isRunning: false };
+}
+
+async function rebootAndroidAfterSystemUiAnr(
+  boot: DeviceBootResult,
+  args: StartDeviceArgs,
+  bootService: DeviceBootService,
+  deviceManager: PlatformDeviceManager,
+  devicePool: DevicePool | undefined,
+  totalDeadlineMs: number,
+  timer: Timer,
+  signal: AbortSignal | undefined,
+  progress: { report: ProgressCallback } | undefined,
+): Promise<{
+  boot: DeviceBootResult;
+  preservedSessionId?: string;
+  releaseReadinessReservation?: () => Promise<void>;
+}> {
+  const sourceImage = await resolveSystemUiRecoveryImage(
+    boot,
+    deviceManager,
+    devicePool,
+    timer,
+    totalDeadlineMs,
+    signal,
+  );
+  const releaseReadinessReservation = devicePool
+    ? await devicePool.reserveDeviceForReadiness(
+      boot.device.deviceId,
+      boot.device,
+      sourceImage.name,
+    )
+    : undefined;
+  let shutdownReservation: Awaited<ReturnType<DevicePool["reserveDeviceForShutdown"]>>;
+  let shutdownWasConfirmed = false;
+  let keepReadinessReservation = false;
+  try {
+    shutdownReservation = await reserveSystemUiAnrShutdown(devicePool, boot.device.deviceId, signal);
+    await shutdownAndroidForSystemUiAnr(
+      boot.device,
+      deviceManager,
+      timer,
+      totalDeadlineMs,
+      signal,
+    );
+    shutdownWasConfirmed = true;
+
+    const replacementBoot = await bootSystemUiAnrReplacement(
+      bootService,
+      args,
+      sourceImage,
+      totalDeadlineMs,
+      signal,
+      progress,
+    );
+    const preservedSessionId = await handoffSystemUiAnrReplacement(
+      devicePool,
+      shutdownReservation,
+      replacementBoot,
+      sourceImage,
+    );
+    keepReadinessReservation = true;
+    return { boot: replacementBoot, preservedSessionId, releaseReadinessReservation };
+  } catch (error) {
+    await cleanUpFailedSystemUiAnrRecovery(
+      devicePool,
+      shutdownReservation,
+      shutdownWasConfirmed,
+      boot.device.deviceId,
+    );
+    throw error;
+  } finally {
+    await shutdownReservation?.release();
+    if (!keepReadinessReservation) {
+      await releaseReadinessReservation?.();
+    }
+  }
+}
+
+async function reserveSystemUiAnrShutdown(
+  devicePool: DevicePool | undefined,
+  deviceId: string,
+  signal: AbortSignal | undefined,
+): Promise<Awaited<ReturnType<DevicePool["reserveDeviceForShutdown"]>>> {
+  if (!devicePool) {
+    return undefined;
+  }
+  const reservation = await devicePool.reserveDeviceForShutdown(deviceId, signal);
+  if (reservation) {
+    devicePool.markIntentionalShutdown(deviceId);
+  }
+  return reservation;
+}
+
+async function shutdownAndroidForSystemUiAnr(
+  device: BootedDevice,
+  deviceManager: PlatformDeviceManager,
+  timer: Timer,
+  totalDeadlineMs: number,
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  const shutdownDevice = await runWithinShutdownDeadline(
+    device,
+    timer,
+    totalDeadlineMs,
+    "System UI recovery shutdown command did not complete",
+    signal,
+    async (shutdownSignal, timeoutMs) =>
+      await deviceManager.killDevice(device, { signal: shutdownSignal, timeoutMs }),
+  );
+  await waitForDeviceShutdown(
+    deviceManager,
+    shutdownDevice ?? device,
+    timer,
+    totalDeadlineMs,
+    signal,
+  );
+}
+
+async function bootSystemUiAnrReplacement(
+  bootService: DeviceBootService,
+  args: StartDeviceArgs,
+  sourceImage: DeviceInfo,
+  totalDeadlineMs: number,
+  signal: AbortSignal | undefined,
+  progress: { report: ProgressCallback } | undefined,
+): Promise<DeviceBootResult> {
+  const replacement = await bootService.boot(
+    {
+      ...args,
+      deviceId: undefined,
+      name: sourceImage.name,
+      preferRunning: false,
+      totalDeadlineMs,
+      signal,
+    },
+    progress,
+  );
+  return { ...replacement, sourceImage };
+}
+
+async function handoffSystemUiAnrReplacement(
+  devicePool: DevicePool | undefined,
+  shutdownReservation: Awaited<ReturnType<DevicePool["reserveDeviceForShutdown"]>>,
+  replacementBoot: DeviceBootResult,
+  sourceImage: DeviceInfo,
+): Promise<string | undefined> {
+  if (!devicePool || !shutdownReservation) {
+    return undefined;
+  }
+  return await devicePool.replaceDeviceForSystemUiAnrRecovery(
+    shutdownReservation.device,
+    replacementBoot.device,
+    sourceImage,
+    replacementBoot.processHandle,
+  );
+}
+
+async function cleanUpFailedSystemUiAnrRecovery(
+  devicePool: DevicePool | undefined,
+  shutdownReservation: Awaited<ReturnType<DevicePool["reserveDeviceForShutdown"]>>,
+  shutdownWasConfirmed: boolean,
+  deviceId: string,
+): Promise<void> {
+  if (!shutdownReservation) {
+    return;
+  }
+  if (shutdownWasConfirmed) {
+    await devicePool?.retireDeviceAfterSystemUiAnrRecoveryFailure(shutdownReservation.device);
+    return;
+  }
+  devicePool?.clearIntentionalShutdown(deviceId);
+}
+
+type SystemUiAnrRecoveryResult = Awaited<ReturnType<typeof rebootAndroidAfterSystemUiAnr>>;
+
+async function ensureRunnerReadyWithSystemUiAnrRecovery(
+  boot: DeviceBootResult,
+  ensureRunnerReady: (candidate: DeviceBootResult) => Promise<void>,
+  rebootAfterSystemUiAnr: (candidate: DeviceBootResult) => Promise<SystemUiAnrRecoveryResult>,
+): Promise<SystemUiAnrRecoveryResult & { recovered: boolean }> {
+  try {
+    await ensureRunnerReady(boot);
+    return { boot, recovered: false };
+  } catch (error) {
+    if (!(error instanceof SystemUiAnrRecoveryRequiredError) || boot.device.platform !== "android") {
+      throw error;
+    }
+    const recovery = await rebootAfterSystemUiAnr(boot);
+    await ensureRunnerReady(recovery.boot);
+    return { ...recovery, recovered: true };
+  }
+}
+
+async function reserveRecoveredDeviceForReadiness(
+  devicePool: DevicePool | undefined,
+  boot: DeviceBootResult,
+  args: StartDeviceArgs,
+  requestedIdentity: string,
+  releaseReadinessReservations: Array<() => Promise<void>>,
+): Promise<void> {
+  validateBootIdentity(args, boot.device, boot.source, boot.sourceImage);
+  validatePooledDeviceMapping(boot.device, requestedIdentity);
+  if (devicePool) {
+    releaseReadinessReservations.push(
+      await devicePool.reserveDeviceForReadiness(
+        boot.device.deviceId,
+        boot.device,
+        boot.sourceImage?.name ?? boot.device.name,
+      ),
+    );
+  }
+  clearColdBootShutdownMarker(boot.source, boot.device.deviceId);
+}
+
+async function reserveInitialDeviceForReadiness(
+  daemonState: DaemonState,
+  boot: DeviceBootResult,
+  releaseReadinessReservations: Array<() => Promise<void>>,
+): Promise<void> {
+  const devicePool = getStartDevicePool(daemonState);
+  if (!devicePool) {
+    return;
+  }
+  releaseReadinessReservations.push(
+    await devicePool.reserveDeviceForReadiness(
+      boot.device.deviceId,
+      boot.device,
+      boot.sourceImage?.name ?? boot.device.name,
+    ),
+  );
+}
+
+async function notifyResourcesAfterDeviceBoot(
+  boot: DeviceBootResult,
+  perf: ReturnType<typeof createPerformanceTracker>,
+  notifyResourcesChanged: () => Promise<void>,
+): Promise<void> {
+  if (boot.source !== "cold-boot" && !boot.provisioned) {
+    return;
+  }
+  perf.startOperation("notifyResources");
+  await notifyResourcesChanged();
+  perf.endOperation("notifyResources");
+}
+
+interface StartDeviceRunnerReadinessInput {
+  boot: DeviceBootResult;
+  args: StartDeviceArgs;
+  bootService: DeviceBootService;
+  deviceUtils: PlatformDeviceManager;
+  daemonState: DaemonState;
+  totalDeadlineMs: number;
+  readinessTimeoutMs: number;
+  timer: Timer;
+  signal: AbortSignal | undefined;
+  progress: ProgressCallback | undefined;
+  perf: ReturnType<typeof createPerformanceTracker>;
+  requestedIdentity: string;
+  ensureCtrlProxyReady: (request: RunnerReadinessRequest) => Promise<void>;
+  releaseReadinessReservations: Array<() => Promise<void>>;
+}
+
+async function prepareStartDeviceRunnerReadiness(
+  input: StartDeviceRunnerReadinessInput,
+): Promise<{ boot: DeviceBootResult; preservedSessionId?: string }> {
+  const devicePool = getStartDevicePool(input.daemonState);
+  const readinessResult = await ensureRunnerReadyWithSystemUiAnrRecovery(
+    input.boot,
+    createRunnerReadinessAttempt(input),
+    createSystemUiAnrRebooter(input, devicePool),
+  );
+  if (readinessResult.recovered) {
+    await prepareRecoveredDeviceForRunnerReadiness(input, devicePool, readinessResult);
+  }
+  return readinessResult;
+}
+
+function getStartDevicePool(daemonState: DaemonState): DevicePool | undefined {
+  return daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
+}
+
+function createRunnerReadinessAttempt(
+  input: StartDeviceRunnerReadinessInput,
+): (candidate: DeviceBootResult) => Promise<void> {
+  return async (candidate) =>
+    await input.ensureCtrlProxyReady({
+      device: candidate.device,
+      requestedIdentity: input.requestedIdentity,
+      totalDeadlineMs: input.totalDeadlineMs,
+      readinessTimeoutMs: input.readinessTimeoutMs,
+      skipCtrlProxyDownload: serverConfig.isSkipCtrlProxyDownloadEnabled(),
+      perf: input.perf,
+      signal: input.signal,
+    });
+}
+
+function createSystemUiAnrRebooter(
+  input: StartDeviceRunnerReadinessInput,
+  devicePool: DevicePool | undefined,
+): (candidate: DeviceBootResult) => Promise<SystemUiAnrRecoveryResult> {
+  return async (candidate) =>
+    await rebootAndroidAfterSystemUiAnr(
+      candidate,
+      input.args,
+      input.bootService,
+      input.deviceUtils,
+      devicePool,
+      input.totalDeadlineMs,
+      input.timer,
+      input.signal,
+      input.progress ? { report: input.progress } : undefined,
+    );
+}
+
+async function prepareRecoveredDeviceForRunnerReadiness(
+  input: StartDeviceRunnerReadinessInput,
+  devicePool: DevicePool | undefined,
+  recovery: SystemUiAnrRecoveryResult,
+): Promise<void> {
+  if (recovery.releaseReadinessReservation) {
+    input.releaseReadinessReservations.push(recovery.releaseReadinessReservation);
+  }
+  await reserveRecoveredDeviceForReadiness(
+    devicePool,
+    recovery.boot,
+    input.args,
+    input.requestedIdentity,
+    input.releaseReadinessReservations,
+  );
+}
+
 export function registerDeviceTools() {
   // List AVDs handler
   const listDeviceImagesHandler = async (args: ListDeviceImagesArgs) => {
@@ -1183,7 +1554,8 @@ export function registerDeviceTools() {
     const requestedIdentity = describeStartDeviceRequest(args);
     let boot: DeviceBootResult | undefined;
     let ownershipTransferred = false;
-    let releaseReadinessReservation: (() => Promise<void>) | undefined;
+    const releaseReadinessReservations: Array<() => Promise<void>> = [];
+    let preservedSessionId: string | undefined;
 
     try {
       const bootService = new DeviceBootService({
@@ -1203,26 +1575,37 @@ export function registerDeviceTools() {
       validateBootIdentity(args, boot.device, boot.source, boot.sourceImage);
       validatePooledDeviceMapping(boot.device, requestedIdentity);
       const daemonState = DaemonState.getInstance();
-      if (daemonState.isInitialized()) {
-        releaseReadinessReservation = await daemonState
-          .getDevicePool()
-          .reserveDeviceForReadiness(boot.device.deviceId, boot.device);
-      }
+      await reserveInitialDeviceForReadiness(
+        daemonState,
+        boot,
+        releaseReadinessReservations,
+      );
 
       // A new incarnation must not inherit a prior intentional-shutdown marker
       // while its per-device runner setup is in flight.
       clearColdBootShutdownMarker(boot.source, boot.device.deviceId);
 
       const ctrlProxySetup = deps.ensureCtrlProxyReady ?? ensureCtrlProxyReady;
-      await ctrlProxySetup({
-        device: boot.device,
-        requestedIdentity,
-        totalDeadlineMs,
-        readinessTimeoutMs,
-        skipCtrlProxyDownload: serverConfig.isSkipCtrlProxyDownloadEnabled(),
-        perf,
-        signal,
-      });
+      const readinessResult = await prepareStartDeviceRunnerReadiness(
+        {
+          boot,
+          args,
+          bootService,
+          deviceUtils,
+          daemonState,
+          totalDeadlineMs,
+          readinessTimeoutMs,
+          timer: deps.timer,
+          signal,
+          progress,
+          perf,
+          requestedIdentity,
+          ensureCtrlProxyReady: ctrlProxySetup,
+          releaseReadinessReservations,
+        },
+      );
+      boot = readinessResult.boot;
+      preservedSessionId = readinessResult.preservedSessionId;
       // Re-check under the later binding lock because pool identity can change
       // while runner setup is in flight.
       validatePooledDeviceMapping(boot.device, requestedIdentity);
@@ -1230,19 +1613,15 @@ export function registerDeviceTools() {
       // Publish only after runner health passes. Readiness remains per-device,
       // so 20-40 concurrent emulators do not serialize on a host-wide gate.
       publishWarmDeviceReady(boot.source, boot.device.deviceId);
-      const sessionId = await bindBootedDeviceSession(
+      const sessionId = preservedSessionId ?? await bindBootedDeviceSession(
         boot.device,
         args,
         boot.sourceImage,
-        boot.processHandle
+        boot.processHandle,
       );
       ownershipTransferred = true;
 
-      if (boot.source === "cold-boot" || boot.provisioned) {
-        perf.startOperation("notifyResources");
-        await deps.notifyResourcesChanged();
-        perf.endOperation("notifyResources");
-      }
+      await notifyResourcesAfterDeviceBoot(boot, perf, deps.notifyResourcesChanged);
       return await buildBootedResponse(
         boot.device,
         boot.source,
@@ -1260,7 +1639,9 @@ export function registerDeviceTools() {
       }
       throw new ActionableError(`Failed to start ${args.platform} device: ${error}`);
     } finally {
-      await releaseReadinessReservation?.();
+      for (const releaseReservation of releaseReadinessReservations.reverse()) {
+        await releaseReservation();
+      }
     }
   };
 

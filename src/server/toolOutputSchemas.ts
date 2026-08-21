@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v4";
 
 // Android accessibility returns boolean attributes as strings ("true"/"false")
 // This schema accepts both for compatibility

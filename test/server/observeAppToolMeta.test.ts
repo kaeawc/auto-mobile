@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach } from "bun:test";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerObserveTools } from "../../src/server/observeTools";
 import { OBSERVE_APP_RESOURCE_URI } from "../../src/server/observeAppResource";
-import { z } from "zod";
+import { z } from "zod/v4";
 
 describe("tool → MCP App UI association via _meta.ui.resourceUri", () => {
   beforeEach(() => {

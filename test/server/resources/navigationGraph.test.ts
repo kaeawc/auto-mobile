@@ -8,7 +8,7 @@ import {
   setNavigationGraphProvider
 } from "../../../src/server/navigationResources";
 import { FakeNavigationGraphManager } from "../../fakes/FakeNavigationGraphManager";
-import { z } from "zod";
+import { z } from "zod/v4";
 
 describe("MCP Navigation Graph Resource", () => {
   let fixture: McpTestFixture;

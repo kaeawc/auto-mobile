@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { z } from "zod";
+import { z } from "zod/v4";
 import { registerAppTools } from "../../src/server/appTools";
 import { registerObserveTools } from "../../src/server/observeTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";

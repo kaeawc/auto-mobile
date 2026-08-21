@@ -802,7 +802,7 @@ jobs:
           KTFMT_ONLY_TOUCHED_FILES: "false"
         run: |
           scripts/all_fast_validate_checks.sh \
-            --only yaml,xml,bun-version-coherence,shellcheck,shell-portability,shell-sete,stdlib-first,dependency-decisions,sharp-matrix,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,mkdocs-nav,ktfmt,claude-plugin,codex-skills,github-python-lock \
+            --only yaml,xml,bun-version-coherence,shellcheck,shell-portability,shell-sete,stdlib-first,dependency-decisions,sharp-matrix,runtime-pins,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,mkdocs-nav,ktfmt,claude-plugin,codex-skills,github-python-lock \
             --max-parallel 4
 
       - name: "Run BATS Tests (Ubuntu)"
@@ -2394,6 +2394,18 @@ jobs:
           lfs: false
 
       - uses: ./.github/actions/setup-auto-mobile-npm-package
+
+      - name: "Verify pinned runtime dependency graph (#5421)"
+        shell: bash
+        run: bash scripts/ci/verify-pinned-runtime-graph.sh
+
+      - name: "Upload Pinned Runtime Graph Report"
+        uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: pinned-runtime-graph-report
+          path: ci-logs/pinned-runtime-graph.log
+          retention-days: 90
 
       - name: "Run MCP Benchmarks"
         shell: bash

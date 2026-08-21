@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { z } from "zod";
+import { z } from "zod/v4";
 import type { BootedDevice } from "../../src/models";
 import { Explore } from "../../src/features/navigation/Explore";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";

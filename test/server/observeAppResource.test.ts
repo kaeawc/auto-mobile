@@ -10,7 +10,7 @@ import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { loadAndroidHomeObserve, loadIosFractionalObserve } from "../fixtures/observe/observeFixture";
 import type { ObserveResult } from "../../src/models/ObserveResult";
-import { z } from "zod";
+import { z } from "zod/v4";
 
 const androidObserve = (): ObserveResult => loadAndroidHomeObserve().observe;
 const iosObserve = (): ObserveResult => loadIosFractionalObserve();

@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v4";
 
 /** Shared platform schema — single source of truth for all tool schemas. */
 export const platformSchema = z.enum(["android", "ios"]);

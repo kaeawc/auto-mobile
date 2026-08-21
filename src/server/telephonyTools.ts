@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v4";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { Telephony, PhoneCallOptions, SendSmsOptions } from "../features/action/Telephony";
 import { ActionableError, BootedDevice } from "../models";

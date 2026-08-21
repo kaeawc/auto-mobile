@@ -9,7 +9,7 @@ import { BootedDevice, Platform } from "../../../src/models";
 import { DaemonState } from "../../../src/daemon/daemonState";
 import { DevicePool } from "../../../src/daemon/devicePool";
 import { SessionManager } from "../../../src/daemon/sessionManager";
-import { z } from "zod";
+import { z } from "zod/v4";
 
 describe("MCP Booted Device Resources", () => {
   let fixture: McpTestFixture;

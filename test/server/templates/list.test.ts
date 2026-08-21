@@ -3,7 +3,7 @@ import {
   ListResourceTemplatesRequestSchema
 } from "@modelcontextprotocol/sdk/types.js";
 import { McpTestFixture } from "../../fixtures/mcpTestFixture";
-import { z } from "zod";
+import { z } from "zod/v4";
 
 describe("MCP Templates List", () => {
   let fixture: McpTestFixture;

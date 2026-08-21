@@ -1,7 +1,7 @@
 import { describe, expect, test, beforeEach } from "bun:test";
 import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { z } from "zod";
+import { z } from "zod/v4";
 import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
 import { withTemporaryTool } from "../helpers/withTemporaryTool";
 

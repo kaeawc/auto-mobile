@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { z } from "zod";
+import { z } from "zod/v4";
 import { formatToolParamError } from "../../src/server/index";
 
 // Issue #4181, rank 7 (A6): the "container must be an object …" hint is

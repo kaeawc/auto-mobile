@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { BootedDevice } from "../../src/models";
-import { z } from "zod";
+import { z } from "zod/v4";
 
 describe("ToolRegistry iOS session context", () => {
   const iosDeviceA: BootedDevice = {

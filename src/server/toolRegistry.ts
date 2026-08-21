@@ -1,5 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { toJSONSchema } from "zod";
+import { toJSONSchema } from "zod/v4";
 import { DeviceSessionManager } from "../utils/DeviceSessionManager";
 import { ActionableError, BootedDevice, SomePlatform } from "../models";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";

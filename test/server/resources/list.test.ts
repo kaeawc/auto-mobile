@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { McpTestFixture } from "../../fixtures/mcpTestFixture";
 import { ResourceRegistry } from "../../../src/server/resourceRegistry";
-import { z } from "zod";
+import { z } from "zod/v4";
 
 describe("MCP Resources List", () => {
   let fixture: McpTestFixture;

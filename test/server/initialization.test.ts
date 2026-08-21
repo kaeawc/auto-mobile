@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { getMcpServerVersion } from "../../src/utils/mcpVersion";
-import { z } from "zod";
+import { z } from "zod/v4";
 
 describe("MCP Server Initialization", () => {
   let fixture: McpTestFixture;

@@ -28,12 +28,13 @@ job_block() {
   ' "$WF"
 }
 
-ts_filter_block() {
-  awk '
-    /^        id: filter-ts$/ { cap = 1; next }
-    cap && /^      - name: / { exit }
-    cap { print }
-  ' "$WF"
+wiring_requires_yq() {
+  command -v yq >/dev/null 2>&1 && return 0
+  if [[ -n "${CI:-}" ]]; then
+    echo "yq is required in CI to verify pull-request workflow wiring" >&2
+    return 1
+  fi
+  skip "yq not installed"
 }
 
 @test "required gate jobs exist with stable context names" {
@@ -116,10 +117,15 @@ ts_filter_block() {
 }
 
 @test "runtime-graph verification runs when its workflow wiring changes (#5421)" {
-  block="$(ts_filter_block)"
-  [[ -n "$block" ]]
-  [[ "$block" == *"- '.github/workflows/pull_request.yml'"* ]]
-  [[ "$block" == *"- '.github/actions/setup-auto-mobile-npm-package/**'"* ]]
+  wiring_requires_yq
+  run yq -r '
+    .jobs."detect-changes".steps[]
+    | select(.id == "filter-ts")
+    | (.with.filters | from_yaml | .ts[])
+  ' "$WF"
+  [ "$status" -eq 0 ]
+  [[ $'\n'"$output"$'\n' == *$'\n.github/workflows/pull_request.yml\n'* ]]
+  [[ $'\n'"$output"$'\n' == *$'\n.github/actions/setup-auto-mobile-npm-package/**\n'* ]]
 }
 
 @test "ios-gate reuses ios-build-gate so build-leg membership is declared once" {

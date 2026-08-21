@@ -151,7 +151,7 @@ wiring_requires_yq() {
   # automated sha256-only chores.
   run yq -r '.jobs."runtime-graph-verification".if' "$WF"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"needs.detect-changes.outputs.ts_changed == 'true'"* ]]
+  [ "$output" = "needs.detect-changes.outputs.ts_changed == 'true' && needs.detect-changes.outputs.sha256_only != 'true'" ]
 
   # Preserves the ci-logs artifact upload.
   run yq -r '

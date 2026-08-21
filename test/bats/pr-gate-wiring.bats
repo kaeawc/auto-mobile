@@ -103,17 +103,38 @@ wiring_requires_yq() {
 @test "runtime-graph-verification runs the clean-room pinned-graph check exactly once (#5421)" {
   # The heavy pack+install verification must live in its own required-able job
   # and NOT be duplicated back into the benchmarks job (it was extracted from
-  # there). Assert exactly one invocation across the whole workflow.
-  count="$(grep -c 'scripts/ci/verify-pinned-runtime-graph.sh' "$WF")"
-  [[ "$count" -eq 1 ]]
-  block="$(job_block runtime-graph-verification)"
-  [[ -n "$block" ]]
-  [[ "$block" == *"scripts/ci/verify-pinned-runtime-graph.sh"* ]]
+  # there). Read parsed `run` fields so a commented-out command cannot satisfy
+  # the guard.
+  wiring_requires_yq
+  run yq -r '
+    [.jobs[] | .steps[]? | .run? | select(. == "bash scripts/ci/verify-pinned-runtime-graph.sh")]
+    | length
+  ' "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" -eq 1 ]
+
+  run yq -r '
+    .jobs."runtime-graph-verification".steps[]
+    | select(.name == "Verify pinned runtime dependency graph (#5421)")
+    | .run
+  ' "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" = "bash scripts/ci/verify-pinned-runtime-graph.sh" ]
+
   # Gated to the same source/dependency surface as benchmarks, minus the
   # automated sha256-only chores.
-  [[ "$block" == *"needs.detect-changes.outputs.ts_changed == 'true'"* ]]
+  run yq -r '.jobs."runtime-graph-verification".if' "$WF"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"needs.detect-changes.outputs.ts_changed == 'true'"* ]]
+
   # Preserves the ci-logs artifact upload.
-  [[ "$block" == *"pinned-runtime-graph-report"* ]]
+  run yq -r '
+    .jobs."runtime-graph-verification".steps[]
+    | select(.name == "Upload Pinned Runtime Graph Report")
+    | .with.name
+  ' "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" = "pinned-runtime-graph-report" ]
 }
 
 @test "runtime-graph verification runs when its workflow wiring changes (#5421)" {

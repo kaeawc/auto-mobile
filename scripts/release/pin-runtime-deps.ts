@@ -17,15 +17,15 @@
  * packed artifact lives in `scripts/ci/verify-pinned-runtime-graph.sh`.
  */
 
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { builtinModules } from "node:module";
 import {
   computePins,
   isExactVersion,
   parseBunLock,
   repartitionDependencies,
 } from "./lib/runtime-pins";
+import { deriveRootsFromDist } from "./lib/runtime-roots";
 
 const REPO_ROOT = path.resolve(import.meta.dir, "../..");
 const PACKAGE_JSON = path.join(REPO_ROOT, "package.json");
@@ -43,87 +43,15 @@ interface Manifest {
   multiVersion: Record<string, string[]>;
 }
 
-const BUILTINS = new Set<string>(builtinModules);
-
-function addRootFromSpec(roots: Set<string>, spec: string): void {
-  if (
-    spec.startsWith(".") ||
-    spec.startsWith("/") ||
-    spec.startsWith("node:") ||
-    spec.startsWith("bun:")
-  ) {
-    return;
-  }
-  const pkgName = spec.startsWith("@") ? spec.split("/").slice(0, 2).join("/") : spec.split("/")[0];
-  const topLevel = pkgName.split("/")[0];
-  if (BUILTINS.has(pkgName) || BUILTINS.has(topLevel) || pkgName.startsWith("@img/")) {
-    return;
-  }
-  roots.add(pkgName);
-}
-
-function collectSourceFiles(dir: string, out: string[]): void {
-  for (const entry of readdirSync(dir)) {
-    const full = path.join(dir, entry);
-    if (statSync(full).isDirectory()) {
-      collectSourceFiles(full, out);
-    } else if ((entry.endsWith(".ts") || entry.endsWith(".js")) && !entry.endsWith(".map")) {
-      out.push(full);
-    }
-  }
-}
-
-/**
- * Derive the runtime roots from the built artifact — the bare packages a consumer
- * must resolve from node_modules. Two sources, because the published `dist/` is
- * not a single bundle:
- *  - the bundled `dist/src/index.js` externalizes only the jimp/sharp families;
- *    it is minified, so only its unambiguous dynamic `import("x")` forms are
- *    trusted (string literals elsewhere would be false positives);
- *  - the raw source files `build.ts` copies into `dist/` (the DB migrations and
- *    `eventTables.ts`, loaded from disk at runtime via AUTOMOBILE_MIGRATIONS_DIR)
- *    are clean source, so all static/dynamic import forms are trusted — this is
- *    where `kysely` (used by every migration's `sql` tag) is required at runtime.
- * Platform-variant `@img/*` binaries stay in optionalDependencies, so they are
- * never roots.
- */
-function deriveRootsFromDist(distDir: string): string[] {
-  const roots = new Set<string>();
-  const entryPath = path.join(distDir, "src/index.js");
-
-  if (existsSync(entryPath)) {
-    const bundle = readFileSync(entryPath, "utf8");
-    const dynamicImport = /\bimport\(\s*["']([^"']+)["']\s*\)/g;
-    let match: RegExpExecArray | null;
-    while ((match = dynamicImport.exec(bundle))) {
-      addRootFromSpec(roots, match[1]);
-    }
-  }
-
-  const sourceFiles: string[] = [];
-  collectSourceFiles(distDir, sourceFiles);
-  const importForm =
-    /(?:^|[^\w.])(?:import|export)\s[^;]*?from\s*["']([^"']+)["']|(?:^|[^\w.])(?:import|require)\s*\(?\s*["']([^"']+)["']/gm;
-  for (const file of sourceFiles) {
-    if (file === entryPath) {
-      continue; // handled above; the minified bundle is scanned only for dynamic imports
-    }
-    const text = readFileSync(file, "utf8");
-    let match: RegExpExecArray | null;
-    while ((match = importForm.exec(text))) {
-      addRootFromSpec(roots, match[1] ?? match[2] ?? "");
-    }
-  }
-
-  return [...roots].sort();
-}
-
 function loadPackageJson(): Record<string, unknown> {
-  return JSON.parse(readFileSync(PACKAGE_JSON, "utf8")) as Record<string, unknown>;
+  return JSON.parse(readFileSync(PACKAGE_JSON, "utf8")) as Record<
+    string,
+    unknown
+  >;
 }
 
-/** The `@types/`/`@img/` prefixes stay out of the pinned runtime deps. */
-const EXCLUDE_PREFIXES = ["@types/", "@img/"];
+/** Type declarations and platform-native sharp packages stay out of runtime deps. */
+const EXCLUDE_PREFIXES = ["@types/", "@img/sharp-"];
 
 interface Intended {
   roots: string[];
@@ -149,9 +77,11 @@ function computeIntended(roots: string[]): Intended {
   }
   const repartition = repartitionDependencies({
     currentDependencies: (pkg.dependencies as Record<string, string>) ?? {},
-    currentDevDependencies: (pkg.devDependencies as Record<string, string>) ?? {},
+    currentDevDependencies:
+      (pkg.devDependencies as Record<string, string>) ?? {},
     roots,
     closurePins: pins.dependencies,
+    previousRuntimeDependencies: loadManifest()?.dependencies,
   });
   return {
     roots,
@@ -162,8 +92,17 @@ function computeIntended(roots: string[]): Intended {
   };
 }
 
+function loadManifest(): Manifest | undefined {
+  if (!existsSync(MANIFEST)) {
+    return undefined;
+  }
+  return JSON.parse(readFileSync(MANIFEST, "utf8")) as Manifest;
+}
+
 function assertAllExact(dependencies: Record<string, string>): void {
-  const ranged = Object.entries(dependencies).filter(([, spec]) => !isExactVersion(spec));
+  const ranged = Object.entries(dependencies).filter(
+    ([, spec]) => !isExactVersion(spec),
+  );
   if (ranged.length > 0) {
     throw new Error(
       `Runtime dependencies must be exact-pinned, found ranges: ${ranged
@@ -174,12 +113,11 @@ function assertAllExact(dependencies: Record<string, string>): void {
 }
 
 function readRootsForCheck(): string[] {
-  // Prefer the committed manifest so --check is hermetic and stable across
-  // machines; fall back to deriving from a freshly-built dist/ when no manifest
-  // exists yet. (A drift between the manifest roots and what dist imports is
-  // caught by --write regenerating them.)
-  if (existsSync(MANIFEST)) {
-    return (JSON.parse(readFileSync(MANIFEST, "utf8")) as Manifest).roots;
+  // Prefer the committed manifest so --check is hermetic and stable when dist/
+  // is absent; when it is built, checkMode also compares its roots below.
+  const manifest = loadManifest();
+  if (manifest) {
+    return manifest.roots;
   }
   if (existsSync(DIST_ENTRY)) {
     return deriveRootsFromDist(DIST_DIR);
@@ -195,11 +133,15 @@ function stableJson(value: unknown): string {
 
 function writeMode(): void {
   if (!existsSync(DIST_ENTRY)) {
-    throw new Error("dist/src/index.js not found — run `bun run build` before --write.");
+    throw new Error(
+      "dist/src/index.js not found — run `bun run build` before --write.",
+    );
   }
   const roots = deriveRootsFromDist(DIST_DIR);
   if (roots.length === 0) {
-    throw new Error("No runtime roots derived from dist — refusing to empty the dependency graph.");
+    throw new Error(
+      "No runtime roots derived from dist — refusing to empty the dependency graph.",
+    );
   }
   const intended = computeIntended(roots);
   assertAllExact(intended.dependencies);
@@ -241,7 +183,9 @@ function checkMode(): void {
   const currentDevDeps = (pkg.devDependencies as Record<string, string>) ?? {};
 
   if (JSON.stringify(currentDeps) !== JSON.stringify(intended.dependencies)) {
-    errors.push("package.json `dependencies` differ from the intended pinned runtime graph.");
+    errors.push(
+      "package.json `dependencies` differ from the intended pinned runtime graph.",
+    );
   }
   // devDependencies must be a superset (the intended dev set); order-insensitive.
   for (const [name, spec] of Object.entries(intended.devDependencies)) {
@@ -255,9 +199,17 @@ function checkMode(): void {
   if (!existsSync(MANIFEST)) {
     errors.push(`Missing manifest ${path.relative(REPO_ROOT, MANIFEST)}.`);
   } else {
-    const manifest = JSON.parse(readFileSync(MANIFEST, "utf8")) as Manifest;
-    if (JSON.stringify(manifest.dependencies) !== JSON.stringify(intended.dependencies)) {
-      errors.push("Manifest `dependencies` are out of sync with the intended pinned graph.");
+    const manifest = loadManifest();
+    if (!manifest) {
+      throw new Error(`Could not load manifest ${MANIFEST}.`);
+    }
+    if (
+      JSON.stringify(manifest.dependencies) !==
+      JSON.stringify(intended.dependencies)
+    ) {
+      errors.push(
+        "Manifest `dependencies` are out of sync with the intended pinned graph.",
+      );
     }
     // Detect roots drift against what the built artifact actually imports. --check
     // computes pins from `manifest.roots` (hermetic), so this is the only place a
@@ -268,7 +220,10 @@ function checkMode(): void {
     // Validation run where dist/ is absent.
     if (existsSync(DIST_ENTRY)) {
       const distRoots = deriveRootsFromDist(DIST_DIR);
-      if (JSON.stringify([...distRoots].sort()) !== JSON.stringify([...manifest.roots].sort())) {
+      if (
+        JSON.stringify([...distRoots].sort()) !==
+        JSON.stringify([...manifest.roots].sort())
+      ) {
         errors.push(
           `Manifest \`roots\` [${[...manifest.roots].sort().join(", ")}] differ from the roots ` +
             `the built artifact imports [${distRoots.join(", ")}] — run --write to refresh.`,
@@ -282,7 +237,9 @@ function checkMode(): void {
     for (const error of errors) {
       console.error(`  - ${error}`);
     }
-    console.error("Refresh with: bun scripts/release/pin-runtime-deps.ts --write && bun install");
+    console.error(
+      "Refresh with: bun scripts/release/pin-runtime-deps.ts --write && bun install",
+    );
     process.exit(1);
   }
   console.log(

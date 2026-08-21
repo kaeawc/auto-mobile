@@ -3,7 +3,7 @@
  * Assert that a clean install of the packed artifact resolved the intended
  * pinned runtime graph (issue #5421, acceptance criterion 3).
  *
- *   bun scripts/ci/assert-installed-runtime-graph.ts <consumer-node-modules-dir>
+ *   bun scripts/ci/assert-installed-runtime-graph.ts <node-modules-dir> [...]
  *
  * The consumer dir is a throwaway project that installed the packed
  * `@kaeawc/auto-mobile` tarball with an empty cache. Every exact pin in the
@@ -21,27 +21,35 @@ const REPO_ROOT = path.resolve(import.meta.dir, "../..");
 const MANIFEST = path.join(REPO_ROOT, "scripts/release/runtime-graph.json");
 
 interface Manifest {
-  roots: string[];
   dependencies: Record<string, string>;
   residualUnpinned: string[];
 }
 
-function resolveInstalledVersion(nodeModulesDir: string, name: string): string | undefined {
-  const pkgJson = path.join(nodeModulesDir, name, "package.json");
-  if (!existsSync(pkgJson)) {
-    return undefined;
+function resolveInstalledVersion(
+  nodeModulesDirs: string[],
+  name: string,
+): string | undefined {
+  for (const nodeModulesDir of nodeModulesDirs) {
+    const pkgJson = path.join(nodeModulesDir, name, "package.json");
+    if (!existsSync(pkgJson)) {
+      continue;
+    }
+    try {
+      return (JSON.parse(readFileSync(pkgJson, "utf8")) as { version?: string })
+        .version;
+    } catch {
+      continue;
+    }
   }
-  try {
-    return (JSON.parse(readFileSync(pkgJson, "utf8")) as { version?: string }).version;
-  } catch {
-    return undefined;
-  }
+  return undefined;
 }
 
 function main(): void {
-  const consumerNodeModules = process.argv[2];
-  if (!consumerNodeModules) {
-    console.error("Usage: assert-installed-runtime-graph.ts <consumer-node-modules-dir>");
+  const nodeModulesDirs = process.argv.slice(2);
+  if (nodeModulesDirs.length === 0) {
+    console.error(
+      "Usage: assert-installed-runtime-graph.ts <node-modules-dir> [...]",
+    );
     process.exit(2);
   }
   if (!existsSync(MANIFEST)) {
@@ -54,14 +62,18 @@ function main(): void {
 
   const resolved: Record<string, string | undefined> = {};
   for (const name of Object.keys(manifest.dependencies)) {
-    resolved[name] = resolveInstalledVersion(consumerNodeModules, name);
+    resolved[name] = resolveInstalledVersion(nodeModulesDirs, name);
   }
 
   const mismatches = findGraphMismatches(manifest.dependencies, resolved);
   if (mismatches.length > 0) {
-    console.error("Clean-room install did NOT reproduce the pinned runtime graph (#5421):");
+    console.error(
+      "Clean-room install did NOT reproduce the pinned runtime graph (#5421):",
+    );
     for (const m of mismatches) {
-      console.error(`  - ${m.name}: expected ${m.expected}, resolved ${m.resolved ?? "(absent)"}`);
+      console.error(
+        `  - ${m.name}: expected ${m.expected}, resolved ${m.resolved ?? "(absent)"}`,
+      );
     }
     process.exit(1);
   }
@@ -71,9 +83,14 @@ function main(): void {
   );
   if (manifest.residualUnpinned.length > 0) {
     const residualVersions = manifest.residualUnpinned
-      .map((name) => `${name}@${resolveInstalledVersion(consumerNodeModules, name) ?? "(absent)"}`)
+      .map(
+        (name) =>
+          `${name}@${resolveInstalledVersion(nodeModulesDirs, name) ?? "(absent)"}`,
+      )
       .join(", ");
-    console.log(`Residual (transitively-resolved, not pinnable) packages: ${residualVersions}`);
+    console.log(
+      `Residual (transitively-resolved, not pinnable) packages: ${residualVersions}`,
+    );
   }
 }
 

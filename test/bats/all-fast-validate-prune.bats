@@ -47,6 +47,13 @@ teardown() {
   [[ "$output" == *"bun-version-coherence"* ]]
 }
 
+@test "fast validation registers the runtime pin drift check" {
+  run "$ABS_SCRIPT" --list
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"runtime-pins"* ]]
+}
+
 @test "Bun coherence scans every composite action" {
   mkdir -p "$(dirname "$COHERENCE_FIXTURE")"
   printf '%s\n' \

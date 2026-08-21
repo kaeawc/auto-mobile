@@ -57,11 +57,17 @@ export function splitIdSpec(idspec: string): { name: string; version: string } {
  */
 export function parseBunLock(text: string): LockGraph {
   const stripped = text.replace(/,(\s*[}\]])/g, "$1");
-  const parsed = JSON.parse(stripped) as { packages?: Record<string, unknown[]> };
+  const parsed = JSON.parse(stripped) as {
+    packages?: Record<string, unknown[]>;
+  };
   const packages = parsed.packages ?? {};
   const graph: LockGraph = new Map();
   for (const [key, entry] of Object.entries(packages)) {
-    if (!Array.isArray(entry) || entry.length === 0 || typeof entry[0] !== "string") {
+    if (
+      !Array.isArray(entry) ||
+      entry.length === 0 ||
+      typeof entry[0] !== "string"
+    ) {
       continue;
     }
     const { name, version } = splitIdSpec(entry[0]);
@@ -69,8 +75,10 @@ export function parseBunLock(text: string): LockGraph {
       (part): part is Record<string, unknown> =>
         Boolean(part) && typeof part === "object" && !Array.isArray(part),
     );
-    const deps = (meta?.dependencies as Record<string, string> | undefined) ?? {};
-    const optionalDeps = (meta?.optionalDependencies as Record<string, string> | undefined) ?? {};
+    const deps =
+      (meta?.dependencies as Record<string, string> | undefined) ?? {};
+    const optionalDeps =
+      (meta?.optionalDependencies as Record<string, string> | undefined) ?? {};
     graph.set(key, { name, version, deps, optionalDeps });
   }
   return graph;
@@ -106,6 +114,16 @@ export function resolveKey(
     if (graph.has(nested)) {
       return nested;
     }
+    // A nested package can resolve a sibling that its own parent has already
+    // installed. Walk each ancestor before using a hoisted/global candidate.
+    let ancestor = parentLockKey(parentKey);
+    while (ancestor) {
+      const candidate = `${ancestor}/${name}`;
+      if (graph.has(candidate)) {
+        return candidate;
+      }
+      ancestor = parentLockKey(ancestor);
+    }
   }
   if (graph.has(name)) {
     return name;
@@ -121,13 +139,26 @@ export function resolveKey(
   return null;
 }
 
+/** Return the containing package's lock key, accounting for scoped package names. */
+function parentLockKey(key: string): string | null {
+  const segments = key.split("/");
+  const packageSegmentCount = segments[segments.length - 2]?.startsWith("@")
+    ? 2
+    : 1;
+  const parent = segments.slice(0, -packageSegmentCount).join("/");
+  return parent || null;
+}
+
 /**
  * Walk the runtime closure from `roots`, following regular `dependencies`
  * (transitively) and each node's `optionalDependencies` (which a consumer's
  * `bun install` will attempt to install when the platform matches). Returns a
  * map of package name -> the set of resolved versions reachable in the closure.
  */
-export function resolveRuntimeClosure(graph: LockGraph, roots: string[]): Map<string, Set<string>> {
+export function resolveRuntimeClosure(
+  graph: LockGraph,
+  roots: string[],
+): Map<string, Set<string>> {
   const versionsByName = new Map<string, Set<string>>();
   const visited = new Set<string>();
 
@@ -155,23 +186,28 @@ export function resolveRuntimeClosure(graph: LockGraph, roots: string[]): Map<st
     const edges = { ...node.deps, ...node.optionalDeps };
     for (const depName of Object.keys(edges)) {
       const depKey = resolveKey(graph, depName, key);
-      if (depKey) {
-        walk(depKey);
+      if (!depKey) {
+        throw new Error(
+          `Runtime dependency ${depName} declared by ${node.name}@${node.version} has no matching bun.lock entry.`,
+        );
       }
+      walk(depKey);
     }
   };
 
   for (const root of roots) {
     const key = resolveKey(graph, root, null);
-    if (key) {
-      walk(key);
+    if (!key) {
+      throw new Error(`Runtime root ${root} has no matching bun.lock entry.`);
     }
+    walk(key);
   }
   return versionsByName;
 }
 
 /** A semver version string with no range operators (`^`, `~`, `x`, ranges, tags). */
-const EXACT_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+const EXACT_VERSION =
+  /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 /** True when `spec` pins one exact version (what a pinned graph requires). */
 export function isExactVersion(spec: string): boolean {
@@ -183,7 +219,8 @@ export interface ComputePinsOptions {
    * Package-name prefixes excluded from the pinned `dependencies` even when they
    * are in the runtime closure. `@types/` is inert at runtime and pinning it
    * would collide with a dev `@types/node`; `@img/` binaries are platform-variant
-   * and stay in `optionalDependencies` (already exact-pinned).
+   * and stay in `optionalDependencies` (already exact-pinned). Other `@img/`
+   * packages, such as sharp's regular `@img/colour` dependency, stay pinned.
    */
   excludePrefixes?: string[];
 }
@@ -197,7 +234,7 @@ export interface ComputedPins {
   excluded: string[];
 }
 
-const DEFAULT_EXCLUDE_PREFIXES = ["@types/", "@img/"];
+const DEFAULT_EXCLUDE_PREFIXES = ["@types/", "@img/sharp-"];
 
 /**
  * Compute the exact-pinned runtime `dependencies` from a lock graph and the
@@ -240,26 +277,12 @@ export function computePins(
 }
 
 /**
- * Descending compare on numeric version segments — a hoist-choice heuristic, NOT
- * a full semver comparator. It orders release lines correctly (1.10.0 > 1.9.0)
- * but coerces prerelease/build identifiers to 0, so it does not rank a release
- * above its prerelease. This only picks which of a multi-version closure name is
- * pinned; today the sole multi-version name (`pngjs`) is residual-unpinned, so
- * the choice never reaches `dependencies`. Replace with a real semver compare if
- * a pure-transitive ever resolves to a release + prerelease pair.
+ * Descending SemVer-precedence comparison for the package manager's hoist
+ * choice. Bun's comparator correctly ranks stable releases above prereleases
+ * and ignores build metadata for precedence.
  */
 function compareVersionDesc(a: string, b: string): number {
-  const pa = a.split(/[.+-]/).map((n) => Number.parseInt(n, 10));
-  const pb = b.split(/[.+-]/).map((n) => Number.parseInt(n, 10));
-  const len = Math.max(pa.length, pb.length);
-  for (let i = 0; i < len; i++) {
-    const na = Number.isNaN(pa[i]) ? 0 : (pa[i] ?? 0);
-    const nb = Number.isNaN(pb[i]) ? 0 : (pb[i] ?? 0);
-    if (na !== nb) {
-      return nb - na;
-    }
-  }
-  return b.localeCompare(a);
+  return Bun.semver.order(b, a);
 }
 
 function sortRecord<T>(record: Record<string, T>): Record<string, T> {
@@ -305,6 +328,8 @@ export interface RepartitionInput {
   roots: string[];
   /** Exact runtime-closure pins (from `computePins`). */
   closurePins: Record<string, string>;
+  /** Dependencies emitted by the prior runtime-graph manifest, if present. */
+  previousRuntimeDependencies?: Record<string, string>;
 }
 
 export interface RepartitionResult {
@@ -331,8 +356,16 @@ export interface RepartitionResult {
  * jimp's transitive `zod@3` over the `zod@4` our build inlines. Those names are
  * reported as `residualUnpinned` and covered by the clean-room CI graph gate.
  */
-export function repartitionDependencies(input: RepartitionInput): RepartitionResult {
-  const { currentDependencies, currentDevDependencies, roots, closurePins } = input;
+export function repartitionDependencies(
+  input: RepartitionInput,
+): RepartitionResult {
+  const {
+    currentDependencies,
+    currentDevDependencies,
+    roots,
+    closurePins,
+    previousRuntimeDependencies = {},
+  } = input;
   const rootSet = new Set(roots);
   const currentSpecOf = (name: string): string | undefined =>
     currentDependencies[name] ?? currentDevDependencies[name];
@@ -342,14 +375,20 @@ export function repartitionDependencies(input: RepartitionInput): RepartitionRes
 
   for (const [name, version] of Object.entries(closurePins)) {
     const current = currentSpecOf(name);
+    const wasGeneratedPin =
+      current !== undefined && previousRuntimeDependencies[name] === current;
     if (rootSet.has(name)) {
       dependencies[name] = version;
-    } else if (current !== undefined && current !== version) {
+    } else if (
+      current !== undefined &&
+      current !== version &&
+      !wasGeneratedPin
+    ) {
       // We already use this name directly at a DIFFERENT version (our build
       // inlines that version). Pinning the transitive version here would collide
       // with the build dependency, so leave it to transitive resolution and let
-      // the CI graph gate assert it. When our own version already equals the
-      // pin, we pin it normally — which also makes this function idempotent.
+      // the CI graph gate assert it. A version recorded in the prior manifest is
+      // a generated pin rather than a build dependency, so refresh it normally.
       residualUnpinned.push(name);
     } else {
       dependencies[name] = version;

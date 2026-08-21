@@ -42,17 +42,19 @@ exceeds the unpacked-size cap. So the runtime closure is flattened into exact
   **pure-transitive** node of their closure are pinned to exact versions;
 - **platform-native `@img/sharp-*`** binaries stay in `optionalDependencies`
   (already exact-pinned, resolved per platform);
+- non-native `@img` transitives, including sharp's `@img/colour`, remain in
+  `dependencies` and are exact-pinned like every other pure-transitive node;
 - a small set of **residual** names (`pixelmatch`, `pngjs`, `xml2js`, `zod`) are
-  *not* pinned in `dependencies` because the repo also uses them directly at a
+  _not_ pinned in `dependencies` because the repo also uses them directly at a
   different version for the build; their runtime versions resolve transitively
   and are reported by the clean-room gate.
 
 The pinned graph is mirrored in `scripts/release/runtime-graph.json` (the
 manifest) and enforced by:
 
-| Guard | Where | What it proves |
-| --- | --- | --- |
-| `pin-runtime-deps.ts --check` | Fast Validation (`runtime-pins`) | `package.json` + manifest are in lock-step with `bun.lock` (hermetic) |
+| Guard                            | Where                                 | What it proves                                                                   |
+| -------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------- |
+| `pin-runtime-deps.ts --check`    | Fast Validation (`runtime-pins`)      | `package.json` + manifest are in lock-step with `bun.lock` (hermetic)            |
 | `verify-pinned-runtime-graph.sh` | PR benchmarks job + release preflight | a clean-cache install of the **packed** artifact reproduces every pinned version |
 
 ## Refreshing the graph (dependency / security updates)

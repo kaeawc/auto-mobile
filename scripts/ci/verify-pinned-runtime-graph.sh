@@ -61,15 +61,9 @@ echo "Installing packed artifact into clean room ($consumer_dir)…"
 
 # 5. Assert the resolved graph reproduces the pinned manifest.
 installed_nm="$consumer_dir/node_modules/@kaeawc/auto-mobile/node_modules"
-# Bun hoists the tarball's dependencies to the consumer's top-level node_modules;
-# fall back to the nested location if a package was kept nested.
 consumer_nm="$consumer_dir/node_modules"
-if [ -d "$installed_nm" ]; then
-  # Assert against the top-level tree (hoisted) — the manifest names resolve there.
-  echo "(nested node_modules present under the package; asserting hoisted tree)"
-fi
 
-bun "$REPO_ROOT/scripts/ci/assert-installed-runtime-graph.ts" "$consumer_nm" \
+bun "$REPO_ROOT/scripts/ci/assert-installed-runtime-graph.ts" "$installed_nm" "$consumer_nm" \
   | tee ci-logs/pinned-runtime-graph.log
 
 echo "Pinned runtime graph clean-room verification passed."

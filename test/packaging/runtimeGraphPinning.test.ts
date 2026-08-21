@@ -22,12 +22,17 @@ import { isExactVersion } from "../../scripts/release/lib/runtime-pins";
  */
 describe("runtime dependency graph is pinned (#5421)", () => {
   const repoRoot = path.resolve(import.meta.dir, "../..");
-  const pkg = JSON.parse(readFileSync(path.join(repoRoot, "package.json"), "utf8")) as {
+  const pkg = JSON.parse(
+    readFileSync(path.join(repoRoot, "package.json"), "utf8"),
+  ) as {
     dependencies: Record<string, string>;
     devDependencies: Record<string, string>;
     optionalDependencies: Record<string, string>;
   };
-  const manifestPath = path.join(repoRoot, "scripts/release/runtime-graph.json");
+  const manifestPath = path.join(
+    repoRoot,
+    "scripts/release/runtime-graph.json",
+  );
 
   // Packages the build inlines into dist/src/index.js (build.ts externalizes only
   // the jimp/sharp families). Consumers must not install these, so they must not
@@ -47,7 +52,9 @@ describe("runtime dependency graph is pinned (#5421)", () => {
   const RUNTIME_ROOTS = ["jimp", "@jimp/core", "sharp", "kysely"];
 
   test("every runtime dependency is pinned to an exact version", () => {
-    const ranged = Object.entries(pkg.dependencies).filter(([, spec]) => !isExactVersion(spec));
+    const ranged = Object.entries(pkg.dependencies).filter(
+      ([, spec]) => !isExactVersion(spec),
+    );
     expect(ranged).toEqual([]);
   });
 
@@ -58,7 +65,9 @@ describe("runtime dependency graph is pinned (#5421)", () => {
   });
 
   test("build-inlined packages are not shipped to consumers as runtime deps", () => {
-    const leaked = INLINED_NOT_RUNTIME.filter((name) => name in pkg.dependencies);
+    const leaked = INLINED_NOT_RUNTIME.filter(
+      (name) => name in pkg.dependencies,
+    );
     expect(leaked).toEqual([]);
   });
 
@@ -84,7 +93,9 @@ describe("runtime dependency graph is pinned (#5421)", () => {
       dependencies: Record<string, string>;
       residualUnpinned: string[];
     };
-    expect([...manifest.roots].sort()).toEqual([...RUNTIME_ROOTS].sort());
+    for (const root of RUNTIME_ROOTS) {
+      expect(manifest.roots).toContain(root);
+    }
     // The manifest's pinned graph is exactly package.json's dependencies.
     expect(manifest.dependencies).toEqual(pkg.dependencies);
     expect(Array.isArray(manifest.residualUnpinned)).toBe(true);

@@ -33,8 +33,14 @@ const FIXTURE_LOCK = `{
 
 describe("splitIdSpec", () => {
   test("splits scoped and unscoped id specs", () => {
-    expect(splitIdSpec("codec@1.4.7")).toEqual({ name: "codec", version: "1.4.7" });
-    expect(splitIdSpec("@jimp/core@1.6.1")).toEqual({ name: "@jimp/core", version: "1.6.1" });
+    expect(splitIdSpec("codec@1.4.7")).toEqual({
+      name: "codec",
+      version: "1.4.7",
+    });
+    expect(splitIdSpec("@jimp/core@1.6.1")).toEqual({
+      name: "@jimp/core",
+      version: "1.6.1",
+    });
   });
 });
 
@@ -87,14 +93,32 @@ describe("resolveKey", () => {
     }`);
     expect(resolveKey(graph, "only-nested", null)).toBe("parent/only-nested");
   });
+
+  test("prefers the nearest ancestor over an arbitrary nested lock entry", () => {
+    const graph = parseBunLock(`{
+      "packages": {
+        "root": ["root@1.0.0", "", { "dependencies": { "parent": "1.0.0" } }, "h"],
+        "parent": ["parent@1.0.0", "", { "dependencies": { "child": "1.0.0", "dep": "1.0.0" } }, "h"],
+        "parent/child": ["child@1.0.0", "", { "dependencies": { "dep": "1.0.0" } }, "h"],
+        "parent/dep": ["dep@2.0.0", "", {}, "h"],
+        "other/dep": ["dep@1.0.0", "", {}, "h"]
+      }
+    }`);
+    expect(resolveKey(graph, "dep", "parent/child")).toBe("parent/dep");
+  });
 });
 
 describe("parseBunLock", () => {
   test("parses JSONC with trailing commas into resolved nodes", () => {
     const graph = parseBunLock(FIXTURE_LOCK);
     expect(graph.get("codec")?.version).toBe("1.4.7");
-    expect(graph.get("img-lib")?.deps).toEqual({ codec: "^1.4.0", shared: "^1.0.0" });
-    expect(graph.get("img-lib")?.optionalDeps).toEqual({ "img-native-darwin": "2.0.0" });
+    expect(graph.get("img-lib")?.deps).toEqual({
+      codec: "^1.4.0",
+      shared: "^1.0.0",
+    });
+    expect(graph.get("img-lib")?.optionalDeps).toEqual({
+      "img-native-darwin": "2.0.0",
+    });
   });
 });
 
@@ -115,12 +139,26 @@ describe("resolveRuntimeClosure", () => {
     ]);
     expect(closure.get("asn1")).toEqual(new Set(["3.1.9"]));
   });
+
+  test("fails closed when a root or dependency edge is missing from the lock", () => {
+    const graph = parseBunLock(`{
+      "packages": {
+        "root": ["root@1.0.0", "", { "dependencies": { "missing": "^1.0.0" } }, "h"]
+      }
+    }`);
+    expect(() => resolveRuntimeClosure(graph, ["root"])).toThrow("missing");
+    expect(() => resolveRuntimeClosure(graph, ["also-missing"])).toThrow(
+      "also-missing",
+    );
+  });
 });
 
 describe("computePins", () => {
   test("exact-pins the closure, excludes @types/ and native @img-style prefixes", () => {
     const graph = parseBunLock(FIXTURE_LOCK);
-    const pins = computePins(graph, ["img-lib"], { excludePrefixes: ["@types/", "img-native-"] });
+    const pins = computePins(graph, ["img-lib"], {
+      excludePrefixes: ["@types/", "img-native-"],
+    });
     expect(pins.dependencies).toEqual({
       asn1: "3.1.9",
       codec: "1.4.7",
@@ -145,21 +183,44 @@ describe("computePins", () => {
     expect(pins.multiVersion.dup).toEqual(["2.5.0", "1.5.0"]);
     expect(pins.dependencies.dup).toBe("2.5.0");
   });
+
+  test("uses SemVer precedence so a stable release wins over a prerelease", () => {
+    const graph = parseBunLock(`{
+      "packages": {
+        "root": ["root@1.0.0", "", { "dependencies": { "a": "1.0.0", "b": "1.0.0" } }, "h"],
+        "a": ["a@1.0.0", "", { "dependencies": { "dup": "1.6.1-beta.2" } }, "h"],
+        "b": ["b@1.0.0", "", { "dependencies": { "dup": "1.6.1" } }, "h"],
+        "a/dup": ["dup@1.6.1-beta.2", "", {}, "h"],
+        "dup": ["dup@1.6.1", "", {}, "h"]
+      }
+    }`);
+    expect(computePins(graph, ["root"]).dependencies.dup).toBe("1.6.1");
+  });
 });
 
 describe("repartitionDependencies", () => {
   test("pins roots + pure transitives, leaves directly-used names unpinned, moves inlined deps to dev", () => {
     const graph = parseBunLock(FIXTURE_LOCK);
-    const pins = computePins(graph, ["img-lib"], { excludePrefixes: ["@types/", "img-native-"] });
+    const pins = computePins(graph, ["img-lib"], {
+      excludePrefixes: ["@types/", "img-native-"],
+    });
     const result = repartitionDependencies({
-      currentDependencies: { "img-lib": "^2.0.0", shared: "^2.0.0", werift: "^0.24.0" },
+      currentDependencies: {
+        "img-lib": "^2.0.0",
+        shared: "^2.0.0",
+        werift: "^0.24.0",
+      },
       currentDevDependencies: { typescript: "^7.0.0" },
       roots: ["img-lib"],
       closurePins: pins.dependencies,
     });
 
     // Root + pure-transitive closure nodes are pinned exact.
-    expect(result.dependencies).toEqual({ asn1: "3.1.9", codec: "1.4.7", "img-lib": "2.0.0" });
+    expect(result.dependencies).toEqual({
+      asn1: "3.1.9",
+      codec: "1.4.7",
+      "img-lib": "2.0.0",
+    });
     // `shared` is used directly at a different major -> stays dev at our version,
     // never pinned to the transitive 1.9.0 (that would collide with our build).
     expect(result.residualUnpinned).toEqual(["shared"]);
@@ -168,7 +229,9 @@ describe("repartitionDependencies", () => {
     expect(result.devDependencies.werift).toBe("^0.24.0");
     expect(result.devDependencies.typescript).toBe("^7.0.0");
     // No name may appear in both maps.
-    const both = Object.keys(result.dependencies).filter((n) => n in result.devDependencies);
+    const both = Object.keys(result.dependencies).filter(
+      (n) => n in result.devDependencies,
+    );
     expect(both).toEqual([]);
   });
 
@@ -191,9 +254,15 @@ describe("repartitionDependencies", () => {
 
   test("is idempotent: re-running on already-pinned package.json is a no-op", () => {
     const graph = parseBunLock(FIXTURE_LOCK);
-    const pins = computePins(graph, ["img-lib"], { excludePrefixes: ["@types/", "img-native-"] });
+    const pins = computePins(graph, ["img-lib"], {
+      excludePrefixes: ["@types/", "img-native-"],
+    });
     const first = repartitionDependencies({
-      currentDependencies: { "img-lib": "^2.0.0", shared: "^2.0.0", werift: "^0.24.0" },
+      currentDependencies: {
+        "img-lib": "^2.0.0",
+        shared: "^2.0.0",
+        werift: "^0.24.0",
+      },
       currentDevDependencies: { typescript: "^7.0.0" },
       roots: ["img-lib"],
       closurePins: pins.dependencies,
@@ -208,6 +277,19 @@ describe("repartitionDependencies", () => {
     expect(second.devDependencies).toEqual(first.devDependencies);
     expect(second.residualUnpinned).toEqual(first.residualUnpinned);
   });
+
+  test("refreshes a generated transitive pin instead of treating it as a build conflict", () => {
+    const result = repartitionDependencies({
+      currentDependencies: { root: "1.0.0", transitive: "1.0.0" },
+      currentDevDependencies: {},
+      roots: ["root"],
+      closurePins: { root: "1.0.0", transitive: "2.0.0" },
+      previousRuntimeDependencies: { root: "1.0.0", transitive: "1.0.0" },
+    });
+
+    expect(result.dependencies.transitive).toBe("2.0.0");
+    expect(result.residualUnpinned).toEqual([]);
+  });
 });
 
 describe("findGraphMismatches", () => {
@@ -215,7 +297,11 @@ describe("findGraphMismatches", () => {
 
   test("returns nothing when the resolved graph reproduces the pins", () => {
     expect(
-      findGraphMismatches(expected, { asn1: "3.1.9", codec: "1.4.7", extra: "1.0.0" }),
+      findGraphMismatches(expected, {
+        asn1: "3.1.9",
+        codec: "1.4.7",
+        extra: "1.0.0",
+      }),
     ).toEqual([]);
   });
 

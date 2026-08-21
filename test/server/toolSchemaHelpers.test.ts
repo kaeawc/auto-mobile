@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "fs";
-import { z } from "zod";
+import { z } from "zod/v4";
 import {
   addDeviceTargetingToSchema,
   appIdFieldAliases,

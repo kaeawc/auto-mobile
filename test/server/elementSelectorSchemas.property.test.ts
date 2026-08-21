@@ -1,6 +1,6 @@
 import { describe, test } from "bun:test";
 import fc from "fast-check";
-import { z } from "zod";
+import { z } from "zod/v4";
 import { validateElementIdTextSelector } from "../../src/server/elementSelectorSchemas";
 
 // Property-based tests. See test/utils/Backoff.property.test.ts for the pinned-seed rationale.

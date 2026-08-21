@@ -12,7 +12,7 @@
  * they cannot re-resolve after publication.
  */
 
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { findGraphMismatches } from "../release/lib/runtime-pins";
 
@@ -22,6 +22,7 @@ const MANIFEST = path.join(REPO_ROOT, "scripts/release/runtime-graph.json");
 interface Manifest {
   dependencies: Record<string, string>;
   bundledRuntimeDependencies: Record<string, string[]>;
+  bundledRuntimeDependencyOwners: Record<string, Record<string, string[]>>;
 }
 
 function resolveInstalledVersion(
@@ -43,55 +44,77 @@ function resolveInstalledVersion(
   return undefined;
 }
 
-export interface BundledGraphMismatch {
-  name: string;
+export interface BundledOwnerMismatch {
+  owner: string;
+  dependency: string;
   expected: string[];
-  resolved: string[];
+  resolved: string | undefined;
 }
 
-export function findBundledGraphMismatches(
-  expected: Record<string, string[]>,
-  resolved: Record<string, Set<string>>,
-): BundledGraphMismatch[] {
+export function findBundledOwnerMismatches(
+  expected: Record<string, Record<string, string[]>>,
+  resolved: Record<string, Record<string, string | undefined>>,
+): BundledOwnerMismatch[] {
   return Object.entries(expected)
-    .flatMap(([name, expectedVersions]) => {
-      const actual = [...(resolved[name] ?? new Set<string>())].sort();
-      const wanted = [...expectedVersions].sort();
-      return JSON.stringify(actual) === JSON.stringify(wanted)
-        ? []
-        : [{ name, expected: wanted, resolved: actual }];
-    })
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .flatMap(([owner, dependencies]) =>
+      Object.entries(dependencies).flatMap(([dependency, expectedVersions]) => {
+        const actual = resolved[owner]?.[dependency];
+        const wanted = [...expectedVersions].sort();
+        return actual && wanted.includes(actual)
+          ? []
+          : [{ owner, dependency, expected: wanted, resolved: actual }];
+      }),
+    )
+    .sort(
+      (a, b) =>
+        a.owner.localeCompare(b.owner) ||
+        a.dependency.localeCompare(b.dependency),
+    );
 }
 
-export function collectInstalledVersions(
-  packageRoot: string,
-): Record<string, Set<string>> {
-  const versions: Record<string, Set<string>> = {};
-  const visit = (directory: string): void => {
-    for (const entry of readdirSync(directory, { withFileTypes: true })) {
-      const fullPath = path.join(directory, entry.name);
-      if (entry.isDirectory()) {
-        visit(fullPath);
-      } else if (entry.isFile() && entry.name === "package.json") {
-        try {
-          const pkg = JSON.parse(readFileSync(fullPath, "utf8")) as {
-            name?: string;
-            version?: string;
-          };
-          if (pkg.name && pkg.version) {
-            (versions[pkg.name] ??= new Set()).add(pkg.version);
-          }
-        } catch {
-          // A malformed unrelated package cannot establish a version match.
-        }
-      }
-    }
-  };
-  if (existsSync(packageRoot)) {
-    visit(packageRoot);
+function collectBundledOwnerVersions(
+  packageNodeModules: string,
+  expected: Record<string, Record<string, string[]>>,
+): Record<string, Record<string, string | undefined>> {
+  return Object.fromEntries(
+    Object.entries(expected).map(([owner, dependencies]) => [
+      owner,
+      Object.fromEntries(
+        Object.keys(dependencies).map((dependency) => [
+          dependency,
+          resolveBundledOwnerVersion(
+            packageNodeModules,
+            path.join(packageNodeModules, owner),
+            dependency,
+          ),
+        ]),
+      ),
+    ]),
+  );
+}
+
+/**
+ * Resolve a dependency as Node would from a bundled owner, but search only
+ * locations within the packed AutoMobile package. npm can hoist a bundled
+ * owner's dependency to the package's own node_modules; searching the consumer
+ * node_modules here would recreate the registry-resolution false positive.
+ */
+function resolveBundledOwnerVersion(
+  packageNodeModules: string,
+  ownerDirectory: string,
+  dependency: string,
+): string | undefined {
+  const nodeModulesDirs: string[] = [];
+  let current = ownerDirectory;
+  while (
+    current === packageNodeModules ||
+    current.startsWith(`${packageNodeModules}${path.sep}`)
+  ) {
+    nodeModulesDirs.push(path.join(current, "node_modules"));
+    current = path.dirname(current);
   }
-  return versions;
+  nodeModulesDirs.push(packageNodeModules);
+  return resolveInstalledVersion([...new Set(nodeModulesDirs)], dependency);
 }
 
 export function assertInstalledRuntimeGraph(
@@ -134,9 +157,12 @@ export function assertInstalledRuntimeGraph(
     process.exit(1);
   }
 
-  const bundledMismatches = findBundledGraphMismatches(
-    manifest.bundledRuntimeDependencies,
-    collectInstalledVersions(packageNodeModules),
+  const bundledMismatches = findBundledOwnerMismatches(
+    manifest.bundledRuntimeDependencyOwners,
+    collectBundledOwnerVersions(
+      packageNodeModules,
+      manifest.bundledRuntimeDependencyOwners,
+    ),
   );
   if (bundledMismatches.length > 0) {
     console.error(
@@ -144,7 +170,7 @@ export function assertInstalledRuntimeGraph(
     );
     for (const mismatch of bundledMismatches) {
       console.error(
-        `  - ${mismatch.name}: expected [${mismatch.expected.join(", ")}], resolved [${mismatch.resolved.join(", ") || "(absent)"}]`,
+        `  - ${mismatch.owner} -> ${mismatch.dependency}: expected [${mismatch.expected.join(", ")}], resolved ${mismatch.resolved ?? "(absent)"}`,
       );
     }
     process.exit(1);
@@ -155,7 +181,7 @@ export function assertInstalledRuntimeGraph(
   );
   if (Object.keys(manifest.bundledRuntimeDependencies).length > 0) {
     console.log(
-      `Clean-room install reproduced ${Object.keys(manifest.bundledRuntimeDependencies).length} bundled runtime package names.`,
+      `Clean-room install reproduced ${Object.keys(manifest.bundledRuntimeDependencyOwners).length} bundled runtime dependency owners.`,
     );
   }
 }

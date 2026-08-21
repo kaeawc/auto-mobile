@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import { z } from "zod";
+import { z } from "zod/v4";
 
 /**
  * Tests for ToolRegistry.registerWithServer to verify that progress callbacks

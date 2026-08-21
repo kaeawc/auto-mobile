@@ -3,7 +3,7 @@ import {
   ListToolsRequestSchema,
   CallToolRequestSchema
 } from "@modelcontextprotocol/sdk/types.js";
-import { ZodError, type ZodIssue } from "zod";
+import { ZodError, type ZodIssue } from "zod/v4";
 import { ActionableError } from "../models";
 import { logger } from "../utils/logger";
 import { defaultTimer } from "../utils/SystemTimer";

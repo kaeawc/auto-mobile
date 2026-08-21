@@ -3,7 +3,7 @@ import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
 import { Plan } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { z } from "zod";
+import { z } from "zod/v4";
 
 describe("PlanExecutor - Session-based Device Routing", () => {
   let planExecutor: DefaultPlanExecutor;

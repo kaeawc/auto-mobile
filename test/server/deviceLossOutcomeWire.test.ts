@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { z } from "zod";
+import { z } from "zod/v4";
 import type { BootedDevice } from "../../src/models";
 import { ActionableError } from "../../src/models";
 import { DeviceLostError, rememberDeviceLossAbort } from "../../src/server/deviceLossOutcome";

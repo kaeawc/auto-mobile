@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { z } from "zod";
+import { z } from "zod/v4";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { executionTracker } from "../../src/server/executionTracker";

@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v4";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { SetUIState } from "../features/action/SetUIState";
 import { BootedDevice } from "../models";

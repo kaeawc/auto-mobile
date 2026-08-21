@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { z } from "zod";
+import { z } from "zod/v4";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { logger } from "../../src/utils/logger";
 

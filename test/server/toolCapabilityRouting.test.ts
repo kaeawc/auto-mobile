@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { z } from "zod";
+import { z } from "zod/v4";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { BootedDevice } from "../../src/models";
 import type { SessionToolProfileService } from "../../src/features/toolCapabilities/SessionToolProfileService";

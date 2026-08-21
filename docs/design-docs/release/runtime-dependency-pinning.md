@@ -23,11 +23,14 @@ family (`jimp`, `@jimp/core`) and the `sharp` family (`sharp` + the platform
 in that bundle: **`kysely`**. The DB migration `.ts` files are copied verbatim
 into `dist/` and loaded from disk at runtime (via `AUTOMOBILE_MIGRATIONS_DIR`),
 and each imports `kysely`'s `sql` tag — so `kysely` is the fourth runtime root
-even though it is not `import()`-ed from the bundle. Every other dependency
-(`werift`, the MCP SDK, `zod`, …) is inlined into the bundle and is **not** needed
-at install time. Those inlined packages therefore live in `devDependencies`;
-consumers never install them, which is what removed the `@peculiar/asn1-*`
-install path entirely.
+even though it is not `import()`-ed from the bundle.
+
+The server uses the `zod/v4` subpath exported by **`zod@3.25.76`**. It remains
+bundled into `dist/`, while the exact root package is also published so every
+Jimp `zod: ^3.23.8` edge resolves to the same pinned version. Every other
+inlined package (`werift`, the MCP SDK, …) is not needed at install time and
+lives in `devDependencies`; consumers never install them, which is what removed
+the `@peculiar/asn1-*` install path entirely.
 
 ## How the graph is pinned
 
@@ -39,15 +42,20 @@ small `bundledDependencies` set for the conflicting Jimp paths:
 
 - **runtime roots** — `jimp`, `@jimp/core`, `sharp`, `kysely` — and every
   **pure-transitive** node of their closure are pinned to exact versions;
+- **shared Jimp validator** — `zod@3.25.76` is a direct exact pin. AutoMobile
+  imports its `zod/v4` subpath, so the bundled server retains the v4 API while
+  Jimp's v3-compatible ranges cannot re-resolve;
 - **platform-native `@img/sharp-*`** binaries stay in `optionalDependencies`
   (already exact-pinned, resolved per platform);
 - non-native `@img` transitives, including sharp's `@img/colour`, remain in
   `dependencies` and are exact-pinned like every other pure-transitive node;
-- `@jimp/diff`, `@jimp/js-png`, `@jimp/plugin-blit`, and
-  `parse-bmfont-xml` are bundled so their nested `pixelmatch`, `pngjs`,
-  `xml2js`, and `zod` versions remain part of the published artifact instead of
-  being resolved from later registry releases. The native `@img/sharp-*`
-  binaries remain unbundled and platform-selected.
+- `@jimp/diff`, `@jimp/js-png`, and `parse-bmfont-xml` are bundled so their
+  nested `pixelmatch`, `pngjs`, and `xml2js` versions remain part of the
+  published artifact instead of being resolved from later registry releases.
+  The clean-room gate verifies each bundled owner path, including nested
+  dependency paths, not merely that one matching residual exists somewhere in
+  the package. The native `@img/sharp-*` binaries remain unbundled and
+  platform-selected.
 
 The selected bundle adds about 17 MiB to the package. The unpacked-size guard is
 therefore 36 MiB: enough for the reproducible Jimp closure, but still a bounded

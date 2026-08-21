@@ -6,7 +6,7 @@ import type { UIStateSetup } from "../../../src/features/navigation/interfaces/U
 import type { NavigationEdge } from "../../../src/utils/interfaces/NavigationGraph";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { BootedDevice } from "../../../src/models";
-import { z } from "zod";
+import { z } from "zod/v4";
 import { FakeNavigationGraphManager } from "../../fakes/FakeNavigationGraphManager";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeTimer } from "../../fakes/FakeTimer";

@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { TOOL_CAPABILITY_BY_NAME } from "../../../src/features/toolCapabilities/toolCapabilityMap";
 import { McpTestFixture } from "../../fixtures/mcpTestFixture";
-import { z } from "zod";
+import { z } from "zod/v4";
 import { compileJsonSchema } from "../../helpers/jsonSchemaCompile";
 
 const listToolsResponseSchema = z.object({

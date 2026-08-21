@@ -21,7 +21,9 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
   computePins,
+  findRuntimeDependencyOwners,
   isExactVersion,
+  lockKeyToNodeModulesPath,
   parseBunLock,
   repartitionDependencies,
 } from "./lib/runtime-pins";
@@ -40,6 +42,7 @@ interface Manifest {
   roots: string[];
   dependencies: Record<string, string>;
   bundledRuntimeDependencies: Record<string, string[]>;
+  bundledRuntimeDependencyOwners: Record<string, Record<string, string[]>>;
   multiVersion: Record<string, string[]>;
 }
 
@@ -52,13 +55,13 @@ function loadPackageJson(): Record<string, unknown> {
 
 /** Type declarations and platform-native sharp packages stay out of runtime deps. */
 const EXCLUDE_PREFIXES = ["@types/", "@img/sharp-"];
-// These exact runtime packages own the Jimp transitives that collide with the
-// repo's build-time versions. Bundle only these parents so npm preserves their
-// nested resolution without shipping Jimp's full source/test tree.
+// These runtime packages own the remaining transitives that conflict with the
+// repo's build-time versions. `zod` is a direct exact pin, so every Jimp owner
+// resolves it from the same published package root instead of requiring a
+// duplicate bundle per plugin.
 const BUNDLED_RUNTIME_PACKAGES = [
   "@jimp/diff",
   "@jimp/js-png",
-  "@jimp/plugin-blit",
   "parse-bmfont-xml",
 ];
 
@@ -68,6 +71,7 @@ interface Intended {
   devDependencies: Record<string, string>;
   bundledDependencies: string[];
   bundledRuntimeDependencies: Record<string, string[]>;
+  bundledRuntimeDependencyOwners: Record<string, Record<string, string[]>>;
   multiVersion: Record<string, string[]>;
 }
 
@@ -103,12 +107,39 @@ function computeIntended(roots: string[]): Intended {
     }
     bundledRuntimeDependencies[name] = versions;
   }
+  const bundledRuntimeDependencyOwnerKeys = findRuntimeDependencyOwners(
+    lock,
+    roots,
+    repartition.residualUnpinned,
+  );
+  const missingBundledOwners = Object.keys(
+    bundledRuntimeDependencyOwnerKeys,
+  ).filter(
+    (ownerKey) =>
+      !BUNDLED_RUNTIME_PACKAGES.some(
+        (bundle) => ownerKey === bundle || ownerKey.startsWith(`${bundle}/`),
+      ),
+  );
+  if (missingBundledOwners.length > 0) {
+    throw new Error(
+      `Residual runtime dependency owners are not bundled: ${missingBundledOwners.join(", ")}.`,
+    );
+  }
+  const bundledRuntimeDependencyOwners = Object.fromEntries(
+    Object.entries(bundledRuntimeDependencyOwnerKeys).map(
+      ([ownerKey, dependencies]) => [
+        lockKeyToNodeModulesPath(ownerKey),
+        dependencies,
+      ],
+    ),
+  );
   return {
     roots,
     dependencies: repartition.dependencies,
     devDependencies: repartition.devDependencies,
     bundledDependencies: BUNDLED_RUNTIME_PACKAGES,
     bundledRuntimeDependencies,
+    bundledRuntimeDependencyOwners,
     multiVersion: pins.multiVersion,
   };
 }
@@ -180,6 +211,7 @@ function writeMode(): void {
     roots: intended.roots,
     dependencies: intended.dependencies,
     bundledRuntimeDependencies: intended.bundledRuntimeDependencies,
+    bundledRuntimeDependencyOwners: intended.bundledRuntimeDependencyOwners,
     multiVersion: intended.multiVersion,
   };
   writeFileSync(MANIFEST, stableJson(manifest));
@@ -187,7 +219,7 @@ function writeMode(): void {
   console.log(
       `Pinned ${Object.keys(intended.dependencies).length} runtime dependencies; ` +
       `moved ${Object.keys(intended.devDependencies).length} to devDependencies; ` +
-      `bundled ${Object.keys(intended.bundledRuntimeDependencies).length} conflicting runtime packages.`,
+      `bundled ${Object.keys(intended.bundledRuntimeDependencyOwners).length} conflicting runtime owners.`,
   );
   console.log(
     "Run `bun install` to refresh bun.lock, then commit package.json, bun.lock, and the manifest.",
@@ -250,6 +282,14 @@ function checkMode(): void {
     ) {
       errors.push(
         "Manifest `bundledRuntimeDependencies` are out of sync with the runtime closure.",
+      );
+    }
+    if (
+      JSON.stringify(manifest.bundledRuntimeDependencyOwners) !==
+      JSON.stringify(intended.bundledRuntimeDependencyOwners)
+    ) {
+      errors.push(
+        "Manifest `bundledRuntimeDependencyOwners` are out of sync with the runtime closure.",
       );
     }
     // Detect roots drift against what the built artifact actually imports. --check

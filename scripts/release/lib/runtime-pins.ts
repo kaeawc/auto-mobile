@@ -155,6 +155,21 @@ function parentLockKey(key: string): string | null {
 }
 
 /**
+ * Convert a Bun lock key to its path below a package's node_modules directory.
+ * For example, `@jimp/diff/pixelmatch` becomes
+ * `@jimp/diff/node_modules/pixelmatch`.
+ */
+export function lockKeyToNodeModulesPath(key: string): string {
+  const packages: string[] = [];
+  let current: string | null = key;
+  while (current) {
+    packages.unshift(lastKeyComponent(current));
+    current = parentLockKey(current);
+  }
+  return packages.join("/node_modules/");
+}
+
+/**
  * Walk the runtime closure from `roots`, following regular `dependencies`
  * (transitively) and each node's `optionalDependencies` (which a consumer's
  * `bun install` will attempt to install when the platform matches). Returns a
@@ -208,6 +223,91 @@ export function resolveRuntimeClosure(
     walk(key);
   }
   return versionsByName;
+}
+
+/**
+ * Return the runtime lockfile paths that directly own one of `dependencyNames`,
+ * along with the resolved versions each owner requires. These ownership paths
+ * matter for bundled residuals: finding one matching version elsewhere in the
+ * packed tree does not prove every package manager range is isolated from the
+ * registry.
+ */
+export function findRuntimeDependencyOwners(
+  graph: LockGraph,
+  roots: string[],
+  dependencyNames: string[],
+): Record<string, Record<string, string[]>> {
+  const watched = new Set(dependencyNames);
+  const owners = new Map<string, Map<string, Set<string>>>();
+  const visited = new Set<string>();
+
+  const record = (
+    ownerKey: string,
+    dependency: string,
+    version: string,
+  ): void => {
+    let dependencies = owners.get(ownerKey);
+    if (!dependencies) {
+      dependencies = new Map();
+      owners.set(ownerKey, dependencies);
+    }
+    let versions = dependencies.get(dependency);
+    if (!versions) {
+      versions = new Set();
+      dependencies.set(dependency, versions);
+    }
+    if (version) {
+      versions.add(version);
+    }
+  };
+
+  const walk = (key: string): void => {
+    if (visited.has(key)) {
+      return;
+    }
+    visited.add(key);
+    const node = graph.get(key);
+    if (!node) {
+      return;
+    }
+    const edges = { ...node.deps, ...node.optionalDeps };
+    for (const dependency of Object.keys(edges)) {
+      const dependencyKey = resolveKey(graph, dependency, key);
+      if (!dependencyKey) {
+        throw new Error(
+          `Runtime dependency ${dependency} declared by ${node.name}@${node.version} has no matching bun.lock entry.`,
+        );
+      }
+      if (watched.has(dependency)) {
+        record(key, dependency, graph.get(dependencyKey)?.version ?? "");
+      }
+      walk(dependencyKey);
+    }
+  };
+
+  for (const root of roots) {
+    const key = resolveKey(graph, root, null);
+    if (!key) {
+      throw new Error(`Runtime root ${root} has no matching bun.lock entry.`);
+    }
+    walk(key);
+  }
+
+  return Object.fromEntries(
+    [...owners.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([owner, dependencies]) => [
+        owner,
+        Object.fromEntries(
+          [...dependencies.entries()]
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([dependency, versions]) => [
+              dependency,
+              [...versions].sort(compareVersionDesc),
+            ]),
+        ),
+      ]),
+  );
 }
 
 /** A semver version string with no range operators (`^`, `~`, `x`, ranges, tags). */

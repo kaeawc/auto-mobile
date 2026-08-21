@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import {
   computePins,
+  findRuntimeDependencyOwners,
   findGraphMismatches,
   isExactVersion,
   lastKeyComponent,
+  lockKeyToNodeModulesPath,
   parseBunLock,
   repartitionDependencies,
   resolveKey,
@@ -70,6 +72,17 @@ describe("lastKeyComponent", () => {
     expect(lastKeyComponent("@jimp/core")).toBe("@jimp/core");
     expect(lastKeyComponent("a/b/core")).toBe("core");
     expect(lastKeyComponent("a/@scope/pkg")).toBe("@scope/pkg");
+  });
+});
+
+describe("lockKeyToNodeModulesPath", () => {
+  test("preserves nested and scoped package boundaries", () => {
+    expect(lockKeyToNodeModulesPath("@jimp/diff/pixelmatch")).toBe(
+      "@jimp/diff/node_modules/pixelmatch",
+    );
+    expect(lockKeyToNodeModulesPath("parent/@scope/package")).toBe(
+      "parent/node_modules/@scope/package",
+    );
   });
 });
 
@@ -170,6 +183,19 @@ describe("resolveRuntimeClosure", () => {
     expect(() => resolveRuntimeClosure(graph, ["also-missing"])).toThrow(
       "also-missing",
     );
+  });
+});
+
+describe("findRuntimeDependencyOwners", () => {
+  test("records each runtime parent that owns a residual dependency", () => {
+    const graph = parseBunLock(FIXTURE_LOCK);
+
+    expect(
+      findRuntimeDependencyOwners(graph, ["img-lib"], ["shared", "asn1"]),
+    ).toEqual({
+      codec: { asn1: ["3.1.9"] },
+      "img-lib": { shared: ["1.9.0"] },
+    });
   });
 });
 

@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v4";
 import { addDeviceTargetingToSchema, withAppIdAliases } from "./toolSchemaHelpers";
 import type { Platform } from "../models";
 
@@ -107,14 +107,17 @@ export function normalizeAppFileRelativePath(path: string): string {
   return normalized;
 }
 
-export const putAppFileSchema = withAppIdAliases(addDeviceTargetingToSchema(z.object({
+const putAppFileBaseSchema = z.object({
   appId: z.string().min(1),
   container: appFileContainerSchema.describe("App container"),
   sourcePath: z.string().min(1).optional().describe("Host file path"),
   contentText: z.string().optional().describe("UTF-8 content"),
   contentBase64: z.string().optional().describe("Base64 content"),
   destinationPath: z.string().describe("Container-relative destination path"),
-}).superRefine((args, ctx) => {
+});
+
+export const putAppFileSchema = withAppIdAliases(
+  addDeviceTargetingToSchema(putAppFileBaseSchema).superRefine((args, ctx) => {
   if (countDefined([args.sourcePath, args.contentText, args.contentBase64]) !== 1) {
     ctx.addIssue({
       code: "custom",
@@ -155,7 +158,8 @@ export const putAppFileSchema = withAppIdAliases(addDeviceTargetingToSchema(z.ob
       });
     }
   }
-})));
+  })
+);
 
 function encodePathSegments(path: string): string {
   return normalizeAppFileRelativePath(path)

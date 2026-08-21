@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { findBundledGraphMismatches } from "../../scripts/ci/assert-installed-runtime-graph";
+import { findBundledOwnerMismatches } from "../../scripts/ci/assert-installed-runtime-graph";
 import { isExactVersion } from "../../scripts/release/lib/runtime-pins";
 
 /**
@@ -60,6 +60,11 @@ describe("runtime dependency graph is pinned (#5421)", () => {
     expect(ranged).toEqual([]);
   });
 
+  test("Jimp and the server share the exact zod package with the v4 subpath", () => {
+    expect(pkg.dependencies.zod).toBe("3.25.76");
+    expect(pkg.devDependencies.zod).toBeUndefined();
+  });
+
   test("the runtime roots the artifact imports are present in dependencies", () => {
     for (const root of RUNTIME_ROOTS) {
       expect(pkg.dependencies[root]).toBeDefined();
@@ -94,6 +99,10 @@ describe("runtime dependency graph is pinned (#5421)", () => {
       roots: string[];
       dependencies: Record<string, string>;
       bundledRuntimeDependencies: Record<string, string[]>;
+      bundledRuntimeDependencyOwners: Record<
+        string,
+        Record<string, string[]>
+      >;
     };
     for (const root of RUNTIME_ROOTS) {
       expect(manifest.roots).toContain(root);
@@ -104,7 +113,9 @@ describe("runtime dependency graph is pinned (#5421)", () => {
       pixelmatch: expect.any(Array),
       pngjs: expect.any(Array),
       xml2js: expect.any(Array),
-      zod: expect.any(Array),
+    });
+    expect(manifest.bundledRuntimeDependencyOwners["@jimp/diff"]).toEqual({
+      pixelmatch: ["5.3.0"],
     });
   });
 
@@ -113,28 +124,29 @@ describe("runtime dependency graph is pinned (#5421)", () => {
       expect.arrayContaining([
         "@jimp/diff",
         "@jimp/js-png",
-        "@jimp/plugin-blit",
         "parse-bmfont-xml",
       ]),
     );
   });
 
-  test("the clean-room verifier rejects an absent or drifted bundled package", () => {
+  test("the clean-room verifier rejects an absent or drifted bundled owner", () => {
     expect(
-      findBundledGraphMismatches(
-        { pngjs: ["6.0.0", "7.0.0"], zod: ["3.25.76"] },
-        { pngjs: new Set(["7.0.0"]) },
+      findBundledOwnerMismatches(
+        {
+          "@jimp/diff": { pixelmatch: ["5.3.0"] },
+          "@jimp/diff/node_modules/pixelmatch": { pngjs: ["6.0.0"] },
+        },
+        {
+          "@jimp/diff": { pixelmatch: "5.3.0" },
+          "@jimp/diff/node_modules/pixelmatch": { pngjs: undefined },
+        },
       ),
     ).toEqual([
       {
-        name: "pngjs",
-        expected: ["6.0.0", "7.0.0"],
-        resolved: ["7.0.0"],
-      },
-      {
-        name: "zod",
-        expected: ["3.25.76"],
-        resolved: [],
+        owner: "@jimp/diff/node_modules/pixelmatch",
+        dependency: "pngjs",
+        expected: ["6.0.0"],
+        resolved: undefined,
       },
     ]);
   });

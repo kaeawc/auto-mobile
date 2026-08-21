@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { toJSONSchema } from "zod";
+import { toJSONSchema } from "zod/v4";
 import {
   elementSchema,
   observeResultSchema,

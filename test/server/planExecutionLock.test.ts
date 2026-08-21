@@ -9,7 +9,7 @@ import { ExecutionTracker } from "../../src/server/executionTracker";
 import type { PlanExecutionLockScope } from "../../src/utils/ServerConfig";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { resetDeviceToolsDependencies, setDeviceToolsDependencies } from "../../src/server/deviceTools";
-import { z } from "zod";
+import { z } from "zod/v4";
 
 class FakePlanExecutionLockScopeProvider implements PlanExecutionLockScopeProvider {
   constructor(private scope: PlanExecutionLockScope) {}

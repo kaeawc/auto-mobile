@@ -16,7 +16,7 @@ import {
   type PlanExecutionOptions,
 } from "../../models/ExecutePlanResult";
 import { throwIfAborted, getStructuredPayload } from "../toolUtils";
-import { ZodError } from "zod";
+import { ZodError } from "zod/v4";
 import { PlanPartitioner, TrackedStep } from "./PlanPartitioner";
 import { DaemonState } from "../../daemon/daemonState";
 import { Timer, defaultTimer } from "../SystemTimer";

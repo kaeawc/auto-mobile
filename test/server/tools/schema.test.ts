@@ -6,7 +6,7 @@ import { DeviceInfo } from "../../../src/models";
 import { McpTestFixture } from "../../fixtures/mcpTestFixture";
 import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
 import { compileJsonSchema } from "../../helpers/jsonSchemaCompile";
-import { z } from "zod";
+import { z } from "zod/v4";
 
 // Issue #4181, rank 5 (R1): populate the registry at MODULE scope so a
 // collection-time test.each iterates over real advertised tools. Building the

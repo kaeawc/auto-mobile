@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { z } from "zod";
+import { z } from "zod/v4";
 import { Plan } from "../../src/models/Plan";
 import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
 import { ToolRegistry } from "../../src/server/toolRegistry";

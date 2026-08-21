@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { findBundledGraphMismatches } from "../../scripts/ci/assert-installed-runtime-graph";
 import { isExactVersion } from "../../scripts/release/lib/runtime-pins";
 
 /**
@@ -28,6 +29,7 @@ describe("runtime dependency graph is pinned (#5421)", () => {
     dependencies: Record<string, string>;
     devDependencies: Record<string, string>;
     optionalDependencies: Record<string, string>;
+    bundledDependencies?: string[];
   };
   const manifestPath = path.join(
     repoRoot,
@@ -91,13 +93,49 @@ describe("runtime dependency graph is pinned (#5421)", () => {
     const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
       roots: string[];
       dependencies: Record<string, string>;
-      residualUnpinned: string[];
+      bundledRuntimeDependencies: Record<string, string[]>;
     };
     for (const root of RUNTIME_ROOTS) {
       expect(manifest.roots).toContain(root);
     }
     // The manifest's pinned graph is exactly package.json's dependencies.
     expect(manifest.dependencies).toEqual(pkg.dependencies);
-    expect(Array.isArray(manifest.residualUnpinned)).toBe(true);
+    expect(manifest.bundledRuntimeDependencies).toEqual({
+      pixelmatch: expect.any(Array),
+      pngjs: expect.any(Array),
+      xml2js: expect.any(Array),
+      zod: expect.any(Array),
+    });
+  });
+
+  test("runtime packages with conflicting build versions are bundled, not left to re-resolve", () => {
+    expect(pkg.bundledDependencies).toEqual(
+      expect.arrayContaining([
+        "@jimp/diff",
+        "@jimp/js-png",
+        "@jimp/plugin-blit",
+        "parse-bmfont-xml",
+      ]),
+    );
+  });
+
+  test("the clean-room verifier rejects an absent or drifted bundled package", () => {
+    expect(
+      findBundledGraphMismatches(
+        { pngjs: ["6.0.0", "7.0.0"], zod: ["3.25.76"] },
+        { pngjs: new Set(["7.0.0"]) },
+      ),
+    ).toEqual([
+      {
+        name: "pngjs",
+        expected: ["6.0.0", "7.0.0"],
+        resolved: ["7.0.0"],
+      },
+      {
+        name: "zod",
+        expected: ["3.25.76"],
+        resolved: [],
+      },
+    ]);
   });
 });

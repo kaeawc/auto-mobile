@@ -1,10 +1,10 @@
 {
   "version": "1.0.0",
   "thresholds": {
-    "unpackedBytes": 31457280
+    "unpackedBytes": 37748736
   },
   "metadata": {
-    "generatedAt": "2025-01-01",
-    "description": "NPM unpacked size cap for the root package"
+    "generatedAt": "2026-08-21",
+    "description": "36 MiB NPM unpacked-size cap for the root package, including the reproducible Jimp runtime closure (#5421)"
   }
 }

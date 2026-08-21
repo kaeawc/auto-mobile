@@ -10,16 +10,16 @@
  *
  * The mechanism is exact top-level `dependencies`, which Bun honors on
  * `bun install -g` (verified empirically). A published `npm-shrinkwrap.json` is
- * ignored by Bun, and `bundleDependencies` is impractical here (the native
- * `@img/sharp-*` binaries are platform-variant and the jimp graph exceeds the
- * unpacked-size cap), so flattening the runtime closure into exact direct
- * dependencies is the one package-manager-compatible pin that survives into a
- * consumer's `bun install -g`.
+ * ignored by Bun. The graph uses exact direct dependencies where possible and
+ * selectively bundles the few conflicting Jimp transitives, avoiding native
+ * `@img/sharp-*` binaries while preserving their resolved versions.
  *
  * This file is pure (no fs/network) so the unit tests stay fast and hermetic;
  * the CLI (`scripts/release/pin-runtime-deps.ts`) wires it to `bun.lock`,
  * `package.json`, and the built `dist/`.
  */
+
+import ts from "typescript";
 
 /** A single resolved node in a Bun lockfile. */
 export interface LockNode {
@@ -51,13 +51,18 @@ export function splitIdSpec(idspec: string): { name: string; version: string } {
 
 /**
  * Parse a Bun text lockfile (`bun.lock`). Bun's lockfile is JSONC (trailing
- * commas), so we strip trailing commas before `JSON.parse` rather than pulling
- * in a JSONC dependency. Each `packages` entry is
+ * commas and comments), so TypeScript's structured JSONC parser handles its
+ * syntax without rewriting string contents. Each `packages` entry is
  * `["name@version", registryHint?, { dependencies, optionalDependencies }?, hash?]`.
  */
 export function parseBunLock(text: string): LockGraph {
-  const stripped = text.replace(/,(\s*[}\]])/g, "$1");
-  const parsed = JSON.parse(stripped) as {
+  const result = ts.parseConfigFileTextToJson("bun.lock", text);
+  if (result.error) {
+    throw new Error(
+      `Could not parse bun.lock: ${ts.flattenDiagnosticMessageText(result.error.messageText, "\n")}`,
+    );
+  }
+  const parsed = result.config as {
     packages?: Record<string, unknown[]>;
   };
   const packages = parsed.packages ?? {};
@@ -228,6 +233,8 @@ export interface ComputePinsOptions {
 export interface ComputedPins {
   /** Exact-pinned runtime dependencies (sorted). */
   dependencies: Record<string, string>;
+  /** Every resolved version reachable in the runtime closure (sorted descending). */
+  versions: Record<string, string[]>;
   /** Names that carry more than one version in the closure (only the hoisted one is pinnable via package.json). */
   multiVersion: Record<string, string[]>;
   /** Closure names skipped by an exclude prefix. */
@@ -251,15 +258,17 @@ export function computePins(
   const excludePrefixes = options.excludePrefixes ?? DEFAULT_EXCLUDE_PREFIXES;
   const closure = resolveRuntimeClosure(graph, roots);
   const dependencies: Record<string, string> = {};
+  const versions: Record<string, string[]> = {};
   const multiVersion: Record<string, string[]> = {};
   const excluded: string[] = [];
 
-  for (const [name, versions] of closure) {
+  for (const [name, resolvedVersions] of closure) {
     if (excludePrefixes.some((prefix) => name.startsWith(prefix))) {
       excluded.push(name);
       continue;
     }
-    const sorted = [...versions].sort(compareVersionDesc);
+    const sorted = [...resolvedVersions].sort(compareVersionDesc);
+    versions[name] = sorted;
     if (sorted.length > 1) {
       multiVersion[name] = sorted;
     }
@@ -271,6 +280,7 @@ export function computePins(
 
   return {
     dependencies: sortRecord(dependencies),
+    versions: sortRecord(versions),
     multiVersion: sortRecord(multiVersion),
     excluded: excluded.sort(),
   };
@@ -338,10 +348,9 @@ export interface RepartitionResult {
   /** New `devDependencies`: everything else we build/test with, at our own versions. */
   devDependencies: Record<string, string>;
   /**
-   * Runtime-closure names left unpinned because we already use them directly at
-   * a version of our own (they would collide with a build dependency if pinned).
-   * Their runtime versions resolve transitively and are asserted by the CI graph
-   * gate rather than pinned in package.json.
+   * Runtime-closure names carried by a selected bundled parent because the repo
+   * builds against another version. Their exact nested versions are recorded in
+   * the manifest and asserted from the packed artifact by CI.
    */
   residualUnpinned: string[];
 }
@@ -353,8 +362,9 @@ export interface RepartitionResult {
  * `devDependency` at our own version — it is inlined into `dist/` at build time
  * and only needed to build/test the repo. Crucially, a closure node whose name
  * we already use directly is NOT flattened into `dependencies`: that would pin
- * jimp's transitive `zod@3` over the `zod@4` our build inlines. Those names are
- * reported as `residualUnpinned` and covered by the clean-room CI graph gate.
+ * jimp's transitive `zod@3` over the `zod@4` our build inlines. The release
+ * generator records those names so selected parent packages can bundle their
+ * exact nested closure into the published artifact.
  */
 export function repartitionDependencies(
   input: RepartitionInput,
@@ -387,8 +397,9 @@ export function repartitionDependencies(
       // We already use this name directly at a DIFFERENT version (our build
       // inlines that version). Pinning the transitive version here would collide
       // with the build dependency, so leave it to transitive resolution and let
-      // the CI graph gate assert it. A version recorded in the prior manifest is
-      // a generated pin rather than a build dependency, so refresh it normally.
+      // the published artifact bundles it beneath its exact runtime parent. A
+      // version recorded in the prior manifest is a generated pin rather than a
+      // build dependency, so refresh it normally.
       residualUnpinned.push(name);
     } else {
       dependencies[name] = version;
@@ -400,6 +411,9 @@ export function repartitionDependencies(
   const devDependencies: Record<string, string> = { ...currentDevDependencies };
   for (const [name, range] of Object.entries(currentDependencies)) {
     if (!(name in dependencies)) {
+      if (previousRuntimeDependencies[name] === range) {
+        continue;
+      }
       devDependencies[name] = range;
     }
   }

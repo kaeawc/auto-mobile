@@ -39,7 +39,7 @@ interface Manifest {
   issue: number;
   roots: string[];
   dependencies: Record<string, string>;
-  residualUnpinned: string[];
+  bundledRuntimeDependencies: Record<string, string[]>;
   multiVersion: Record<string, string[]>;
 }
 
@@ -52,12 +52,22 @@ function loadPackageJson(): Record<string, unknown> {
 
 /** Type declarations and platform-native sharp packages stay out of runtime deps. */
 const EXCLUDE_PREFIXES = ["@types/", "@img/sharp-"];
+// These exact runtime packages own the Jimp transitives that collide with the
+// repo's build-time versions. Bundle only these parents so npm preserves their
+// nested resolution without shipping Jimp's full source/test tree.
+const BUNDLED_RUNTIME_PACKAGES = [
+  "@jimp/diff",
+  "@jimp/js-png",
+  "@jimp/plugin-blit",
+  "parse-bmfont-xml",
+];
 
 interface Intended {
   roots: string[];
   dependencies: Record<string, string>;
   devDependencies: Record<string, string>;
-  residualUnpinned: string[];
+  bundledDependencies: string[];
+  bundledRuntimeDependencies: Record<string, string[]>;
   multiVersion: Record<string, string[]>;
 }
 
@@ -83,11 +93,22 @@ function computeIntended(roots: string[]): Intended {
     closurePins: pins.dependencies,
     previousRuntimeDependencies: loadManifest()?.dependencies,
   });
+  const bundledRuntimeDependencies: Record<string, string[]> = {};
+  for (const name of repartition.residualUnpinned) {
+    const versions = pins.versions[name];
+    if (!versions || versions.length === 0) {
+      throw new Error(
+        `Residual runtime dependency ${name} has no resolved version in bun.lock.`,
+      );
+    }
+    bundledRuntimeDependencies[name] = versions;
+  }
   return {
     roots,
     dependencies: repartition.dependencies,
     devDependencies: repartition.devDependencies,
-    residualUnpinned: repartition.residualUnpinned,
+    bundledDependencies: BUNDLED_RUNTIME_PACKAGES,
+    bundledRuntimeDependencies,
     multiVersion: pins.multiVersion,
   };
 }
@@ -149,6 +170,7 @@ function writeMode(): void {
   const pkg = loadPackageJson();
   pkg.dependencies = intended.dependencies;
   pkg.devDependencies = intended.devDependencies;
+  pkg.bundledDependencies = intended.bundledDependencies;
   writeFileSync(PACKAGE_JSON, stableJson(pkg));
 
   const manifest: Manifest = {
@@ -157,15 +179,15 @@ function writeMode(): void {
     issue: 5421,
     roots: intended.roots,
     dependencies: intended.dependencies,
-    residualUnpinned: intended.residualUnpinned,
+    bundledRuntimeDependencies: intended.bundledRuntimeDependencies,
     multiVersion: intended.multiVersion,
   };
   writeFileSync(MANIFEST, stableJson(manifest));
 
   console.log(
-    `Pinned ${Object.keys(intended.dependencies).length} runtime dependencies; ` +
+      `Pinned ${Object.keys(intended.dependencies).length} runtime dependencies; ` +
       `moved ${Object.keys(intended.devDependencies).length} to devDependencies; ` +
-      `${intended.residualUnpinned.length} residual (transitive, gate-verified).`,
+      `bundled ${Object.keys(intended.bundledRuntimeDependencies).length} conflicting runtime packages.`,
   );
   console.log(
     "Run `bun install` to refresh bun.lock, then commit package.json, bun.lock, and the manifest.",
@@ -181,6 +203,9 @@ function checkMode(): void {
   const pkg = loadPackageJson();
   const currentDeps = (pkg.dependencies as Record<string, string>) ?? {};
   const currentDevDeps = (pkg.devDependencies as Record<string, string>) ?? {};
+  const currentBundled = Array.isArray(pkg.bundledDependencies)
+    ? [...(pkg.bundledDependencies as string[])].sort()
+    : [];
 
   if (JSON.stringify(currentDeps) !== JSON.stringify(intended.dependencies)) {
     errors.push(
@@ -194,6 +219,14 @@ function checkMode(): void {
         `devDependencies drift: ${name} expected ${spec}, found ${currentDevDeps[name] ?? "(absent)"}.`,
       );
     }
+  }
+  if (
+    JSON.stringify(currentBundled) !==
+    JSON.stringify([...intended.bundledDependencies].sort())
+  ) {
+    errors.push(
+      "package.json `bundledDependencies` differ from the required bundled runtime roots.",
+    );
   }
 
   if (!existsSync(MANIFEST)) {
@@ -209,6 +242,14 @@ function checkMode(): void {
     ) {
       errors.push(
         "Manifest `dependencies` are out of sync with the intended pinned graph.",
+      );
+    }
+    if (
+      JSON.stringify(manifest.bundledRuntimeDependencies) !==
+      JSON.stringify(intended.bundledRuntimeDependencies)
+    ) {
+      errors.push(
+        "Manifest `bundledRuntimeDependencies` are out of sync with the runtime closure.",
       );
     }
     // Detect roots drift against what the built artifact actually imports. --check

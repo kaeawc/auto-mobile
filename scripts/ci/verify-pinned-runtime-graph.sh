@@ -60,10 +60,10 @@ echo "Installing packed artifact into clean room ($consumer_dir)…"
 )
 
 # 5. Assert the resolved graph reproduces the pinned manifest.
-installed_nm="$consumer_dir/node_modules/@kaeawc/auto-mobile/node_modules"
+package_root="$consumer_dir/node_modules/@kaeawc/auto-mobile"
 consumer_nm="$consumer_dir/node_modules"
 
-bun "$REPO_ROOT/scripts/ci/assert-installed-runtime-graph.ts" "$installed_nm" "$consumer_nm" \
+bun "$REPO_ROOT/scripts/ci/assert-installed-runtime-graph.ts" "$package_root" "$consumer_nm" \
   | tee ci-logs/pinned-runtime-graph.log
 
 echo "Pinned runtime graph clean-room verification passed."

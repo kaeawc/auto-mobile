@@ -120,6 +120,26 @@ describe("parseBunLock", () => {
       "img-native-darwin": "2.0.0",
     });
   });
+
+  test("parses JSONC comments without altering comment-like strings", () => {
+    const graph = parseBunLock(`{
+      // Bun may emit JSONC comments in future lockfile formats.
+      "packages": {
+        "root": ["root@1.0.0", "", {
+          "dependencies": {
+            "child": "^1.0.0"
+          }
+        }, "https://example.test/with,//comment-like-text"],
+        "child": ["child@1.0.0", "", {}, "h"],
+      },
+    }`);
+
+    expect(graph.get("root")).toMatchObject({
+      name: "root",
+      version: "1.0.0",
+      deps: { child: "^1.0.0" },
+    });
+  });
 });
 
 describe("resolveRuntimeClosure", () => {
@@ -289,6 +309,20 @@ describe("repartitionDependencies", () => {
 
     expect(result.dependencies.transitive).toBe("2.0.0");
     expect(result.residualUnpinned).toEqual([]);
+  });
+
+  test("drops a generated pin that no longer belongs to the runtime closure", () => {
+    const result = repartitionDependencies({
+      currentDependencies: { root: "1.0.0", removed: "1.0.0" },
+      currentDevDependencies: { typescript: "^7.0.0" },
+      roots: ["root"],
+      closurePins: { root: "1.0.0" },
+      previousRuntimeDependencies: { root: "1.0.0", removed: "1.0.0" },
+    });
+
+    expect(result.dependencies).toEqual({ root: "1.0.0" });
+    expect(result.devDependencies.removed).toBeUndefined();
+    expect(result.devDependencies.typescript).toBe("^7.0.0");
   });
 });
 

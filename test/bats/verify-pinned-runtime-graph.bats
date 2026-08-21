@@ -54,7 +54,7 @@ setup() {
     bash "$SCRIPT"
 
   [ "$status" -eq 1 ]
-  [ "$(sed -n '2p' "$ASSERT_ARGS")" = "$CONSUMER_DIR/node_modules/@kaeawc/auto-mobile/node_modules" ]
+  [ "$(sed -n '2p' "$ASSERT_ARGS")" = "$CONSUMER_DIR/node_modules/@kaeawc/auto-mobile" ]
   [ "$(sed -n '3p' "$ASSERT_ARGS")" = "$CONSUMER_DIR/node_modules" ]
   [ ! -e "$REPO_ROOT/automobile-cleanroom-fixture.tgz" ]
   [ ! -e "$CONSUMER_DIR" ]

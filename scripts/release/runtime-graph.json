@@ -74,12 +74,21 @@
     "xml-parse-from-string": "1.0.1",
     "xmlbuilder": "11.0.1"
   },
-  "residualUnpinned": [
-    "pixelmatch",
-    "pngjs",
-    "xml2js",
-    "zod"
-  ],
+  "bundledRuntimeDependencies": {
+    "pixelmatch": [
+      "5.3.0"
+    ],
+    "pngjs": [
+      "7.0.0",
+      "6.0.0"
+    ],
+    "xml2js": [
+      "0.5.0"
+    ],
+    "zod": [
+      "3.25.76"
+    ]
+  },
   "multiVersion": {
     "pngjs": [
       "7.0.0",

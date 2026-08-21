@@ -38,18 +38,29 @@ wiring_requires_yq() {
 }
 
 @test "required gate jobs exist with stable context names" {
-  grep -q '^    name: "iOS Build"$' "$WF"
-  grep -q '^    name: "CodeQL"$' "$WF"
-  grep -q '^    name: "Shell Tests"$' "$WF"
-  grep -q '^    name: "Pinned Runtime Graph Gate"$' "$WF"
+  wiring_requires_yq
+  local job expected
+  for job in ios-build-gate codeql-gate shell-tests-gate runtime-graph-gate; do
+    case "$job" in
+      ios-build-gate) expected="iOS Build" ;;
+      codeql-gate) expected="CodeQL" ;;
+      shell-tests-gate) expected="Shell Tests" ;;
+      runtime-graph-gate) expected="Pinned Runtime Graph Gate" ;;
+    esac
+    run yq -r ".jobs.\"${job}\".name" "$WF"
+    [ "$status" -eq 0 ]
+    [ "$output" = "$expected" ]
+  done
 }
 
 @test "required gates run with always() so they always post a conclusion" {
   # A required check that never posts hangs as "Expected"; always() guarantees a
   # success/failure/skipped conclusion in every path.
+  wiring_requires_yq
   for job in ios-build-gate codeql-gate shell-tests-gate runtime-graph-gate; do
-    block="$(job_block "$job")"
-    [[ "$block" == *"if: always() &&"* ]]
+    run yq -r ".jobs.\"${job}\".if" "$WF"
+    [ "$status" -eq 0 ]
+    [[ "$output" == "always() &&"* ]]
   done
 }
 
@@ -74,11 +85,16 @@ wiring_requires_yq() {
   # The whole point of the gate is to go red when a dependency fails; a gate that
   # never `exit 1`s is a permanent false-green. Pin the failure semantics so
   # weakening the loop (e.g. exit 1 -> exit 0) fails this guard.
+  wiring_requires_yq
   for job in ios-build-gate codeql-gate shell-tests-gate runtime-graph-gate; do
-    block="$(job_block "$job")"
-    [[ -n "$block" ]]
-    [[ "$block" == *'"$r" == "failure" || "$r" == "cancelled"'* ]]
-    [[ "$block" == *"exit 1"* ]]
+    run yq -r "
+      .jobs.\"${job}\".steps[]
+      | select(.name == \"Check results\")
+      | .run
+    " "$WF"
+    [ "$status" -eq 0 ]
+    printf '%s\n' "$output" | grep -Fqx '  if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then'
+    printf '%s\n' "$output" | grep -Fqx '  exit 1'
   done
 }
 
@@ -95,9 +111,19 @@ wiring_requires_yq() {
 }
 
 @test "runtime-graph-gate rolls up runtime-graph-verification (#5421)" {
-  block="$(job_block runtime-graph-gate)"
-  [[ "$block" == *"- runtime-graph-verification"* ]]
-  [[ "$block" == *"needs.runtime-graph-verification.result"* ]]
+  wiring_requires_yq
+  run yq -r '.jobs."runtime-graph-gate".needs[]' "$WF"
+  [ "$status" -eq 0 ]
+  [[ $'\n'"$output"$'\n' == *$'\nruntime-graph-verification\n'* ]]
+
+  run yq -r '
+    .jobs."runtime-graph-gate".steps[]
+    | select(.name == "Check results")
+    | .run
+  ' "$WF"
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" \
+    | grep -Fqx '  [runtime-graph-verification]="${{ needs.runtime-graph-verification.result }}"'
 }
 
 @test "runtime-graph-verification runs the clean-room pinned-graph check exactly once (#5421)" {

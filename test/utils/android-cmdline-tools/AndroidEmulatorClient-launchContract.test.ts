@@ -8,6 +8,9 @@ import {
 } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import type { DeviceInfo, ExecResult } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
+import type { AdbExecutor } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 
 const execResult = (stdout = ""): ExecResult => ({
   stdout,
@@ -30,10 +33,15 @@ function createChild(): ChildProcess & EventEmitter {
 }
 
 function createClient(spawnFn: (command: string, args: string[]) => ChildProcess): AndroidEmulatorClient {
+  const adb = new FakeAdbExecutor();
+  const adbFactory: AdbClientFactory = {
+    create: (): AdbExecutor => adb,
+  };
   const client = new AndroidEmulatorClient(
     async () => execResult(),
     spawnFn as never,
     new FakeTimer(),
+    adbFactory,
   );
   (client as unknown as { ensureEmulatorPath: () => Promise<string> }).ensureEmulatorPath = async () => "emulator";
   (client as unknown as { listAvds: () => Promise<DeviceInfo[]> }).listAvds = async () => [

@@ -329,6 +329,10 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   private platform: NodeJS.Platform;
   private hostArchitecture: string;
   private readonly launchTargetDeviceIds = new WeakMap<ChildProcess, string>();
+  private readonly launchPreexistingEmulatorDeviceIds = new WeakMap<
+    ChildProcess,
+    ReadonlySet<string>
+  >();
   private readonly launchErrors = new WeakMap<ChildProcess, ActionableError>();
   private readonly launchErrorFinalizations = new WeakMap<
     ChildProcess,
@@ -1277,6 +1281,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           }
         },
         () => disposed,
+        request.deviceId === undefined,
       );
       if (disposed) {
         if (process && !process.killed) {
@@ -1327,6 +1332,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     requestedExtraArgs?: readonly string[],
     onSpawn?: (process: ChildProcess) => void,
     isCancelled?: () => boolean,
+    capturePreLaunchDeviceIds: boolean = false,
   ): Promise<ChildProcess | null> {
     logger.info(`Using local emulator for AVD: ${avdName}`);
     const perf = createGlobalPerformanceTracker();
@@ -1392,11 +1398,16 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     logger.info(`Starting emulator with AVD: ${avdName}`);
     logger.debug(`Emulator command: ${this.emulatorPath} ${args.join(" ")}`);
     this.throwIfLaunchCancelled(avdName, isCancelled);
+    const preLaunchEmulatorDeviceIds = await this.capturePreLaunchEmulatorDeviceIds(
+      capturePreLaunchDeviceIds,
+    );
+    this.throwIfLaunchCancelled(avdName, isCancelled);
 
     return new Promise((resolve, reject) => {
       perf.startOperation("spawnEmulator");
       const child = this.spawnFn(this.emulatorPath, args);
       perf.endOperation("spawnEmulator");
+      this.recordPreLaunchEmulatorDeviceIds(child, preLaunchEmulatorDeviceIds);
       onSpawn?.(child);
 
       // Keep only a redacted tail for launch diagnostics and failure classification.
@@ -1887,6 +1898,99 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     return childProcess ? this.launchTargetDeviceIds.get(childProcess) : undefined;
   }
 
+  private async capturePreLaunchEmulatorDeviceIds(
+    capture: boolean,
+  ): Promise<ReadonlySet<string> | undefined> {
+    if (!capture) {
+      return undefined;
+    }
+    try {
+      const devices = await this.adbFactory.create(null).getBootedAndroidDevices({
+        bypassCache: true,
+        throwOnMissingAdb: true,
+      });
+      return new Set(
+        devices
+          .map((device) => device.deviceId)
+          .filter((deviceId): deviceId is string => deviceId.startsWith("emulator-")),
+      );
+    } catch (error) {
+      logger.debug(`Could not capture pre-launch emulator device IDs: ${error}`);
+      return undefined;
+    }
+  }
+
+  private recordPreLaunchEmulatorDeviceIds(
+    childProcess: ChildProcess,
+    preexistingDeviceIds: ReadonlySet<string> | undefined,
+  ): void {
+    if (preexistingDeviceIds) {
+      this.launchPreexistingEmulatorDeviceIds.set(childProcess, preexistingDeviceIds);
+    }
+  }
+
+  private getLaunchPreexistingEmulatorDeviceIds(
+    childProcess?: ChildProcess | null,
+  ): ReadonlySet<string> | undefined {
+    return childProcess ? this.launchPreexistingEmulatorDeviceIds.get(childProcess) : undefined;
+  }
+
+  private correlateNewUnknownEmulator(
+    avdName: string,
+    childProcess: ChildProcess | null | undefined,
+    runningEmulators: BootedDevice[],
+  ): { emulator?: BootedDevice; failure?: string } {
+    const preexistingDeviceIds = this.getLaunchPreexistingEmulatorDeviceIds(childProcess);
+    if (!preexistingDeviceIds) {
+      return {};
+    }
+
+    const newUnknownEmulators = runningEmulators.filter(
+      (candidate) =>
+        candidate.deviceId.startsWith("emulator-") &&
+        !preexistingDeviceIds.has(candidate.deviceId) &&
+        this.isUnknownEmulatorName(candidate.name, candidate.deviceId),
+    );
+    if (newUnknownEmulators.length === 1) {
+      const emulator = newUnknownEmulators[0];
+      logger.debug(`Correlated launched emulator from pre-launch device set: ${emulator.deviceId}`);
+      return { emulator };
+    }
+    if (newUnknownEmulators.length > 1) {
+      const candidateIds = newUnknownEmulators.map((candidate) => candidate.deviceId);
+      return {
+        failure:
+          `Emulator '${avdName}' could not correlate the launched emulator ` +
+          `from ${candidateIds.length} newly discovered unknown devices: ${candidateIds.join(", ")}`,
+      };
+    }
+    return {};
+  }
+
+  private findNamedOrNewUnknownEmulator(
+    avdName: string,
+    childProcess: ChildProcess | null | undefined,
+    runningEmulators: BootedDevice[],
+  ): { emulator?: BootedDevice; failure?: string } {
+    const namedEmulator = runningEmulators.find((emulator) => emulator.name === avdName);
+    logger.debug(
+      `Exact name match for '${avdName}': ${namedEmulator ? `Found ${namedEmulator.deviceId}` : "Not found"}`,
+    );
+    if (namedEmulator) {
+      return { emulator: namedEmulator };
+    }
+
+    const correlation = this.correlateNewUnknownEmulator(
+      avdName,
+      childProcess,
+      runningEmulators,
+    );
+    if (correlation.failure) {
+      logger.debug(correlation.failure);
+    }
+    return correlation;
+  }
+
   private getLaunchError(childProcess?: ChildProcess | null): ActionableError | undefined {
     return childProcess ? this.launchErrors.get(childProcess) : undefined;
   }
@@ -1931,10 +2035,14 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     avdName: string,
     timeoutMs: number,
     processExitError: ActionableError | null,
+    correlationFailure?: string,
   ): ActionableError {
     return (
       processExitError ??
-      new ActionableError(`Emulator '${avdName}' failed to become ready within ${timeoutMs}ms`)
+      new ActionableError(
+        correlationFailure ??
+          `Emulator '${avdName}' failed to become ready within ${timeoutMs}ms`,
+      )
     );
   }
 
@@ -2100,6 +2208,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
     // Start background polling immediately with configurable intervals
     let foundDeviceId: string | null = null;
+    let correlationFailure: string | undefined;
     const offlineTracker = { deviceId: null as string | null, since: null as number | null };
 
     perf.startOperation("devicePolling");
@@ -2136,6 +2245,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           logger.debug(`Device scan complete - found ${runningEmulators.length} running emulators`);
           const readinessTimeoutMs = Math.max(0, timeoutMs - (this.timer.now() - startTime));
 
+          correlationFailure = undefined;
           if (runningEmulators.length > 0) {
             logger.debug(
               `Found ${runningEmulators.length} running emulators: ${runningEmulators.map((e) => `${e.name}(${e.deviceId})`).join(", ")}`,
@@ -2162,13 +2272,17 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
             // Look for emulator by name next.
             if (!emulator && !correlatedTargetDeviceId) {
-              emulator = runningEmulators.find((emu) => emu.name === avdName);
-              logger.debug(
-                `Exact name match for '${avdName}': ${emulator ? `Found ${emulator.deviceId}` : "Not found"}`,
+              const correlation = this.findNamedOrNewUnknownEmulator(
+                avdName,
+                childProcess,
+                runningEmulators,
               );
+              emulator = correlation.emulator;
+              correlationFailure = correlation.failure;
             }
 
             if (emulator && emulator.deviceId) {
+              correlationFailure = undefined;
               logger.debug(
                 `Target emulator found: ${emulator.name} (${emulator.deviceId}) - starting readiness checks`,
               );
@@ -2375,7 +2489,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       return bootedDevice;
     }
 
-    throw this.readinessTimeoutError(avdName, timeoutMs, processExitError);
+    throw this.readinessTimeoutError(avdName, timeoutMs, processExitError, correlationFailure);
   }
 
   /**

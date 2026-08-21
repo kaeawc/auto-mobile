@@ -747,6 +747,99 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     expect(scopedFactory.commandLog.some(command => command.startsWith("emulator-5554:get-state"))).toBe(false);
   });
 
+  test("uses one newly discovered unknown emulator when launch output and AVD-name lookup are unavailable", async () => {
+    fakeTimer.enableAutoAdvance();
+    const fakeChild = createFakeChildProcess();
+    const existingDevice: BootedDevice = {
+      name: "Unknown (emulator-5554)",
+      platform: "android",
+      deviceId: "emulator-5554",
+      source: "local",
+    };
+    const launchedDevice: BootedDevice = {
+      name: "Unknown (emulator-5558)",
+      platform: "android",
+      deviceId: "emulator-5558",
+      source: "local",
+    };
+    const scopedFactory = new DeviceScopedAdbClientFactory([
+      [existingDevice],
+      [existingDevice],
+      [existingDevice, launchedDevice],
+    ]);
+    const spawnFn = ((_cmd: string, _args: string[]) => {
+      process.nextTick(() => {
+        fakeChild.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+      });
+      return fakeChild;
+    }) as any;
+    const execAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
+      if (args.includes("-list-avds")) {
+        return createExecResult("am-api33-ga-arm64\n");
+      }
+      return createExecResult("");
+    };
+    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, scopedFactory);
+    skipEmulatorPathDetection(client);
+
+    const child = await client.startEmulator("am-api33-ga-arm64");
+    const result = await client.waitForEmulatorReady("am-api33-ga-arm64", 5_000, child);
+
+    expect(result.deviceId).toBe("emulator-5558");
+    expect(scopedFactory.commandLog.some(command => command.startsWith("emulator-5558:get-state"))).toBe(true);
+    expect(scopedFactory.commandLog.some(command => command.startsWith("emulator-5554:get-state"))).toBe(false);
+  });
+
+  test("reports ambiguous unknown emulator correlation without probing either candidate", async () => {
+    fakeTimer.enableAutoAdvance();
+    const fakeChild = createFakeChildProcess();
+    const existingDevice: BootedDevice = {
+      name: "Unknown (emulator-5554)",
+      platform: "android",
+      deviceId: "emulator-5554",
+      source: "local",
+    };
+    const firstCandidate: BootedDevice = {
+      name: "Unknown (emulator-5558)",
+      platform: "android",
+      deviceId: "emulator-5558",
+      source: "local",
+    };
+    const secondCandidate: BootedDevice = {
+      name: "Unknown (emulator-5560)",
+      platform: "android",
+      deviceId: "emulator-5560",
+      source: "local",
+    };
+    const scopedFactory = new DeviceScopedAdbClientFactory([
+      [existingDevice],
+      [existingDevice],
+      [existingDevice, firstCandidate, secondCandidate],
+    ]);
+    const spawnFn = ((_cmd: string, _args: string[]) => {
+      process.nextTick(() => {
+        fakeChild.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+      });
+      return fakeChild;
+    }) as any;
+    const execAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
+      if (args.includes("-list-avds")) {
+        return createExecResult("am-api33-ga-arm64\n");
+      }
+      return createExecResult("");
+    };
+    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, scopedFactory);
+    skipEmulatorPathDetection(client);
+
+    const child = await client.startEmulator("am-api33-ga-arm64");
+    await expect(
+      client.waitForEmulatorReady("am-api33-ga-arm64", 100, child),
+    ).rejects.toThrow("could not correlate the launched emulator");
+
+    expect(scopedFactory.commandLog.some(command => command.startsWith("emulator-5558:get-state"))).toBe(false);
+    expect(scopedFactory.commandLog.some(command => command.startsWith("emulator-5560:get-state"))).toBe(false);
+  });
+
   test("does not readiness-check multiple new unknown emulators", async () => {
     fakeTimer.enableAutoAdvance();
     const fakeChild = createFakeChildProcess();

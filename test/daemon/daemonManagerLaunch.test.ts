@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
@@ -131,6 +131,62 @@ describe("DaemonManager launch", () => {
     expect(readdirSync(logDir).some(name => name.startsWith("daemon-launch"))).toBe(true);
     expect(existsSync(join(dataDir, "logs"))).toBe(false);
     expect(capturedOptions?.env?.AUTOMOBILE_LOG_DIR).toBe(logDir);
+  });
+
+  test("uses the ensured data-dir fallback for daemon launch capture", async () => {
+    const stateDir = createTempDir("daemon-launch-state-");
+    const dataDir = createTempDir("daemon-data-dir-");
+    const logDir = join(dataDir, "logs");
+    let ensureCalls = 0;
+
+    const processSpawner: DaemonProcessSpawner = {
+      spawn: (_command: string, _args: string[], _options: SpawnOptions) => {
+        return {
+          unref() {},
+          once() { return this; },
+          off() { return this; },
+        } as ChildProcess;
+      }
+    };
+
+    let statusCallCount = 0;
+    class TestDaemonManager extends DaemonManager {
+      override findAllDaemonProcesses(): number[] { return []; }
+      override async status(): Promise<any> {
+        statusCallCount++;
+        return statusCallCount === 1
+          ? { running: false }
+          : { running: true, pid: 1234, port: 31847, socketPath: join(stateDir, "daemon.sock") };
+      }
+      override async waitForReady(_timeout: number): Promise<boolean> {
+        return true;
+      }
+    }
+
+    const manager = new TestDaemonManager(
+      undefined,
+      undefined,
+      new FakeTimer(),
+      join(stateDir, "daemon.lock"),
+      join(stateDir, "daemon.pid"),
+      join(stateDir, "daemon.sock"),
+      undefined,
+      processSpawner,
+      undefined,
+      undefined,
+      undefined,
+      () => {
+        ensureCalls++;
+        mkdirSync(logDir, { recursive: true });
+        return logDir;
+      }
+    );
+
+    await manager.start();
+
+    expect(ensureCalls).toBeGreaterThan(0);
+    expect(existsSync(logDir)).toBe(true);
+    expect(readdirSync(logDir).some(name => name.startsWith("daemon-launch"))).toBe(true);
   });
 
   test("spawns detached daemon from a stable cwd instead of inheriting the spawner cwd", async () => {

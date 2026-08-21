@@ -24,7 +24,7 @@ When the daemon log includes **`Full error: {"code":"ConnectionRefused",…}`**,
 
 When **`automobile.debug=true`** (or your CI already prints it), stderr often includes:
 
-- **`Logs: /tmp/auto-mobile/daemon-launch-<pid>.log`**
+- **`Logs: ~/.auto-mobile/logs/daemon-launch-<pid>.log`**
 
 Open that file on the failed job artifact or add a step to **`cat`** it after tests. Look for:
 
@@ -32,8 +32,9 @@ Open that file on the failed job artifact or add a step to **`cat`** it after te
 - The **stack trace** immediately after that line.
 
 If you do not have the path in logs, search
-**`${AUTOMOBILE_LOG_DIR:-${TMPDIR:-/tmp}/auto-mobile}`** for `daemon*.log` in
-the job’s post-failure script.
+the resolved directory from
+[CI daemon logs](ci-daemon-logs.md#resolve-the-log-directory-in-shell) for
+`daemon*.log` in the job’s post-failure script.
 
 ### 2. Check proxy environment variables
 

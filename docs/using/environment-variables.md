@@ -16,18 +16,22 @@ unset.
 | Variable | Legacy alias | Purpose | Default |
 |----------|--------------|---------|---------|
 | `AUTOMOBILE_DATA_DIR` | `AUTO_MOBILE_DATA_DIR` | Stable base directory for AutoMobile's non-log state, including caches, screenshots, and `tool_logs`. | `~/.auto-mobile` |
-| `AUTOMOBILE_LOG_DIR` | `AUTO_MOBILE_LOG_DIR` | Directory for structured daemon/client logs, rotated logs, and daemon-launch captures. Takes precedence over the default without relocating any non-log state. Relative paths resolve from the daemon's launch working directory. | `os.tmpdir()/auto-mobile` |
+| `AUTOMOBILE_LOG_DIR` | `AUTO_MOBILE_LOG_DIR` | Directory for structured daemon/client logs, rotated logs, and daemon-launch captures. Takes precedence over the default without relocating any non-log state. Relative paths resolve from the daemon's launch working directory. | `~/.auto-mobile/logs` |
 
 When no home directory is available and `AUTOMOBILE_DATA_DIR` is unset, the data
-directory falls back to `os.tmpdir()/auto-mobile`. Logs always default to
-`os.tmpdir()/auto-mobile` unless `AUTOMOBILE_LOG_DIR` is set.
+directory falls back to `os.tmpdir()/auto-mobile`. Logs default to
+`~/.auto-mobile/logs`, inside the owner-controlled AutoMobile directory rather
+than a shared temporary root. If no home directory is available, the log
+directory falls back to `/tmp/auto-mobile-<uid>` on Unix or the system temporary
+directory on Windows. If the default log directory cannot be initialized and
+`AUTOMOBILE_DATA_DIR` is set, logs fall back to `<AUTOMOBILE_DATA_DIR>/logs`.
 
 For example, keep durable state under one path while routing only logs to a
 location collected by your deployment:
 
 ```bash
 export AUTOMOBILE_DATA_DIR=/var/lib/automobile
-export AUTOMOBILE_LOG_DIR=/var/logs/auto-mobile
+export AUTOMOBILE_LOG_DIR=/var/log/auto-mobile
 ```
 
 ## Database location & behavior (`AUTOMOBILE_DB_*`)

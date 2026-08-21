@@ -40,7 +40,7 @@ No. Almost all functionality works without adding the Android AutoMobile SDK to 
 
 | Location | Contents |
 |----------|----------|
-| `os.tmpdir()/auto-mobile/` | Structured daemon/client logs and daemon-launch captures (overridable with `AUTOMOBILE_LOG_DIR`) |
+| `~/.auto-mobile/logs/` | Structured daemon/client logs and daemon-launch captures (overridable with `AUTOMOBILE_LOG_DIR`) |
 | `~/.auto-mobile/` | Caches, screenshots, tool outputs, and other non-log state (overridable with `AUTOMOBILE_DATA_DIR`) |
 | `~/.auto-mobile/auto-mobile.db` | Navigation graph, tool history, test records, performance records |
 

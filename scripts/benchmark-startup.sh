@@ -20,6 +20,10 @@
 #   0 - All benchmarks passed or no comparisons were requested
 #   1 - One or more regressions detected or error occurred
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib/auto-mobile-log-dir.sh disable=SC1091
+source "$SCRIPT_DIR/lib/auto-mobile-log-dir.sh"
+
 DEFAULT_TIMEOUT_MS=15000
 GLOBAL_TIMEOUT_MS=30000
 MCP_PROTOCOL_VERSION="2024-11-05"
@@ -117,7 +121,8 @@ global_timeout_handler() {
   echo "" >&2
 
   # Show daemon logs in the same location used by the runtime.
-  local automobile_log_dir="${AUTOMOBILE_LOG_DIR:-${TMPDIR:-/tmp}/auto-mobile}"
+  local automobile_log_dir
+  automobile_log_dir="$(resolve_automobile_log_dir)"
   for log_file in "$automobile_log_dir"/daemon*.log; do
     if [[ -f "$log_file" && -s "$log_file" ]]; then
       echo "Daemon log ($log_file):" >&2

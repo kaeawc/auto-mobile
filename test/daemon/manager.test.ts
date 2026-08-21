@@ -400,6 +400,7 @@ describe("Daemon manager process detection", () => {
   afterEach(() => {
     delete process.env.AUTOMOBILE_DATA_DIR;
     delete process.env.AUTOMOBILE_LOG_DIR;
+    delete process.env.AUTO_MOBILE_LOG_DIR;
   });
 
   test("parses daemon processes from ps pid ppid command output", () => {

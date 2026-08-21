@@ -403,7 +403,7 @@ export class Daemon {
   async start(): Promise<void> {
     // Mirror structured daemon logs to stdout/stderr capture as well. The
     // primary log is `<configured log dir>/daemon.log` (defaulting to
-    // `os.tmpdir()/auto-mobile/daemon.log`); the daemon manager also redirects
+    // `~/.auto-mobile/logs/daemon.log`); the daemon manager also redirects
     // stdout/stderr to a per-start capture file in that same dir.
     logger.enableStdoutLogging();
     const stableWorkingDirectory = resolveStableDaemonWorkingDirectory();

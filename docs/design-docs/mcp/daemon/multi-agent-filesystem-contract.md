@@ -13,7 +13,7 @@
 > those at an extraction tree it later reaps while the daemon still holds open
 > fds — the cause of the `ENOENT` cache writes in #2724.
 > `AUTOMOBILE_LOG_DIR` / `AUTO_MOBILE_LOG_DIR`, when set, overrides only the
-> core log directory; otherwise logs use `os.tmpdir()/auto-mobile`. Paths written
+> core log directory; otherwise logs use `~/.auto-mobile/logs`. Paths written
 > `${TMPDIR}/auto-mobile/...` below are historical; read non-log paths as
 > `${AUTOMOBILE_DATA_DIR:-~/.auto-mobile}/...`.
 
@@ -61,7 +61,7 @@ to a single writer in its own tree. Paths are written `${TMPDIR}/auto-mobile/...
 for historical continuity; resolve them as
 `${AUTOMOBILE_DATA_DIR:-~/.auto-mobile}/...` (see the stable-base-dir note above).
 Core log paths below use `$LOG_DIR`, which resolves to
-`${AUTOMOBILE_LOG_DIR:-os.tmpdir()/auto-mobile}`.
+`${AUTOMOBILE_LOG_DIR:-~/.auto-mobile/logs}`.
 
 | Path / resource | Writers (shared base dir) | Collision risk & mitigation |
 |---|---|---|
@@ -99,7 +99,7 @@ single biggest source of "client can't find the daemon" failures.
 #   export AUTOMOBILE_DATA_DIR=/run/auto-mobile/agent-$AGENT_ID
 
 # Optional: redirect only core logs, without relocating device caches or other state.
-#   export AUTOMOBILE_LOG_DIR=/var/logs/auto-mobile
+#   export AUTOMOBILE_LOG_DIR=/var/log/auto-mobile
 
 # Daemon discovery — MUST match between clients and the daemon, or clients
 # resolve a different socket/PID/lock than the daemon created.
@@ -123,8 +123,8 @@ export AUTOMOBILE_LOG_LEVEL=warn           # quieter shared log in prod
   deleting each other's files.
 - **`AUTOMOBILE_LOG_DIR`** — when set, routes only core daemon/client logs,
   rotated logs, and daemon-launch captures to that directory. It takes
-  precedence over the `os.tmpdir()/auto-mobile` default; all non-log state
-  remains data-dir scoped.
+  precedence over the `~/.auto-mobile/logs` default; all non-log state remains
+  data-dir scoped.
 - **`AUTOMOBILE_DAEMON_*` paths** — `daemon/constants.ts` resolves these at
   module load. Default is `/tmp/auto-mobile-daemon-<uid>.{sock,pid,lock}`. If
   you override them, override them for **both** sides. The daemon already
@@ -168,12 +168,14 @@ run **one daemon per user** (each gets its own `<uid>` paths automatically).
 ## 4. Per-agent isolation (the primary production recommendation)
 
 Because every agent executes tools in its own process, the robust setup is to
-give **each agent its own `AUTOMOBILE_DATA_DIR`** and point them all at the
-**same daemon**:
+give **each agent its own `AUTOMOBILE_DATA_DIR` and `AUTOMOBILE_LOG_DIR`** and
+point them all at the **same daemon**:
 
 ```bash
 # Per agent: isolated, STABLE base dir for device caches.
 export AUTOMOBILE_DATA_DIR=/run/auto-mobile/agent-$AGENT_ID
+# Per agent: isolate structured and daemon-launch logs too.
+export AUTOMOBILE_LOG_DIR=/run/auto-mobile/agent-$AGENT_ID/logs
 
 # Same on every agent: the shared daemon is discovered via explicit paths that
 # are INDEPENDENT of the data dir, so isolating it does not fragment the daemon.
@@ -205,8 +207,9 @@ cross-agent data loss as defense-in-depth:
 ## 5. Quick checklist
 
 - [ ] All clients + daemon run as the **same OS user**.
-- [ ] **Per-agent `AUTOMOBILE_DATA_DIR`** (preferred), with explicit
-      `AUTOMOBILE_DAEMON_*` paths pointing every agent at the one shared daemon.
+- [ ] **Per-agent `AUTOMOBILE_DATA_DIR` and `AUTOMOBILE_LOG_DIR`** (preferred),
+      with explicit `AUTOMOBILE_DAEMON_*` paths pointing every agent at the one
+      shared daemon.
 - [ ] If overriding `AUTOMOBILE_DAEMON_{SOCKET,PID,LOCK}_FILE_PATH`, set them
       everywhere.
 - [ ] One pinned package version across the fleet.

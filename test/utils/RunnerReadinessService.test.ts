@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import {
   RunnerReadinessService,
+  SystemUiAnrRecoveryRequiredError,
   type ReadinessAndroidManager,
   type ReadinessClient,
   type ReadinessIosManager,
@@ -179,6 +180,10 @@ function createService(
   };
 }
 
+function clearedAnrHierarchy(): ViewHierarchyResult {
+  return { hierarchy: {}, windows: [] };
+}
+
 function systemUiAnrHierarchy(): ViewHierarchyResult {
   return {
     hierarchy: {},
@@ -217,7 +222,11 @@ describe("RunnerReadinessService", () => {
   test("checks for a System UI ANR while runner health is failing", async () => {
     const androidClient = new FakeReadinessClient();
     androidClient.healthResults = [false, false, true];
-    androidClient.accessibilityHierarchies = [systemUiAnrHierarchy(), null, null];
+    androidClient.accessibilityHierarchies = [
+      systemUiAnrHierarchy(),
+      clearedAnrHierarchy(),
+      clearedAnrHierarchy(),
+    ];
     const { service, androidManager } = createService({ androidClient });
 
     await service.ensureReady({
@@ -230,6 +239,25 @@ describe("RunnerReadinessService", () => {
     expect(androidManager.setupCalls).toBe(1);
     expect(androidClient.tapCoordinates).toEqual([{ x: 200, y: 230 }]);
     expect(androidClient.healthCalls).toBe(3);
+  });
+
+  test("treats unreadable confirmation hierarchies as an unrecovered ANR", async () => {
+    const androidClient = new FakeReadinessClient();
+    androidClient.healthResults = [false, false, true];
+    // The dialog is present, then both post-tap confirmation reads fail. A failed
+    // read must not be mistaken for a cleared dialog (#5430 review), so recovery
+    // is still required rather than reported as healthy.
+    androidClient.accessibilityHierarchies = [systemUiAnrHierarchy(), null, null];
+    const { service } = createService({ androidClient });
+
+    await expect(
+      service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android name=Pixel_9_Pro",
+        totalDeadlineMs: 30_000,
+        readinessTimeoutMs: 30_000,
+      }),
+    ).rejects.toThrow(SystemUiAnrRecoveryRequiredError);
   });
 
   test("repairs a missing Android package before checking observation health", async () => {

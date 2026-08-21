@@ -2896,16 +2896,50 @@ export class DevicePool {
       this.assertSystemUiAnrReplacement(expectedDevice, replacement, sourceImage);
 
       const preservedSessionId = this.systemUiAnrRecoverySessionId(expectedDevice);
+      const preservedAutolockSessionId = expectedDevice.autolockSessionId;
       const replacementDevice = await this.replaceStoppedDeviceForSystemUiAnr(
         expectedDevice,
         replacement,
         sourceImage,
         childProcess,
       );
-      await this.restoreSystemUiAnrRecoverySession(preservedSessionId, replacementDevice);
+      try {
+        await this.restoreSystemUiAnrRecoverySession(
+          preservedSessionId,
+          replacementDevice,
+          preservedAutolockSessionId,
+        );
+      } catch (error) {
+        // The destructive pool handoff already published the replacement and
+        // removed the old incarnation. If the session rebind fails, roll the
+        // replacement back and release the preserved session so the caller's
+        // cleanup (which targets the removed original) cannot leave an idle,
+        // assignable device still mapped to the stopped serial.
+        await this.rollbackSystemUiAnrRecoveryReplacement(
+          replacementDevice,
+          preservedSessionId,
+          expectedDevice.id,
+        );
+        throw error;
+      }
       this.intentionalShutdowns.delete(expectedDevice.id);
       return preservedSessionId;
     });
+  }
+
+  private async rollbackSystemUiAnrRecoveryReplacement(
+    replacementDevice: PooledDevice,
+    preservedSessionId: string | undefined,
+    originalDeviceId: string,
+  ): Promise<void> {
+    await this.removeDevice(replacementDevice.id, false, replacementDevice);
+    if (preservedSessionId) {
+      await this.releaseSessionForDisconnectedDevice(
+        preservedSessionId,
+        originalDeviceId,
+        deviceLossCancellationReason(originalDeviceId),
+      );
+    }
   }
 
   private assertSystemUiAnrReplacement(
@@ -2974,6 +3008,7 @@ export class DevicePool {
   private async restoreSystemUiAnrRecoverySession(
     sessionId: string | undefined,
     replacementDevice: PooledDevice,
+    autolockSessionId: string | undefined,
   ): Promise<void> {
     if (!sessionId) {
       return;
@@ -2985,6 +3020,11 @@ export class DevicePool {
     );
     replacementDevice.sessionId = sessionId;
     replacementDevice.status = "busy";
+    // addDevice leaves autolockSessionId undefined, which assertAutolockAccess
+    // reads as "unlocked" and would let any session drive the recovered device
+    // while the mcpSessionAutolockMap still points at the original. Carry the
+    // lock forward so the original session keeps exclusive access.
+    replacementDevice.autolockSessionId = autolockSessionId;
     replacementDevice.lastUsedAt = this.nextLastUsedAt();
   }
 
@@ -3026,6 +3066,10 @@ export class DevicePool {
     expectedIdentity: Pick<BootedDevice, "deviceId" | "name" | "platform" | "transportId">,
     stableRuntimeName = expectedIdentity.name,
   ): Promise<() => Promise<void>> {
+    // The stable-name reservation exists to bridge an Android emulator changing
+    // serials across a reboot. iOS UDIDs are stable, so a name reservation there
+    // only hides other idle simulators that share a (non-unique) display name.
+    const trackStableName = expectedIdentity.platform === "android";
     const stableRuntimeKey = this.readinessReservationNameKey({
       name: stableRuntimeName,
       platform: expectedIdentity.platform,
@@ -3043,10 +3087,12 @@ export class DevicePool {
         deviceId,
         (this.readinessReservationCounts.get(deviceId) ?? 0) + 1,
       );
-      this.readinessReservationNames.set(
-        stableRuntimeKey,
-        (this.readinessReservationNames.get(stableRuntimeKey) ?? 0) + 1,
-      );
+      if (trackStableName) {
+        this.readinessReservationNames.set(
+          stableRuntimeKey,
+          (this.readinessReservationNames.get(stableRuntimeKey) ?? 0) + 1,
+        );
+      }
     });
 
     let released = false;
@@ -3061,6 +3107,9 @@ export class DevicePool {
           this.readinessReservationCounts.delete(deviceId);
         } else {
           this.readinessReservationCounts.set(deviceId, count - 1);
+        }
+        if (!trackStableName) {
+          return;
         }
         const nameCount = this.readinessReservationNames.get(stableRuntimeKey);
         if (nameCount === undefined || nameCount <= 1) {

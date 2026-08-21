@@ -1185,6 +1185,8 @@ async function rebootAndroidAfterSystemUiAnr(
   let shutdownReservation: Awaited<ReturnType<DevicePool["reserveDeviceForShutdown"]>>;
   let shutdownWasConfirmed = false;
   let keepReadinessReservation = false;
+  let replacementBoot: DeviceBootResult | undefined;
+  let replacementAdopted = false;
   try {
     shutdownReservation = await reserveSystemUiAnrShutdown(devicePool, boot.device.deviceId, signal);
     await shutdownAndroidForSystemUiAnr(
@@ -1196,7 +1198,7 @@ async function rebootAndroidAfterSystemUiAnr(
     );
     shutdownWasConfirmed = true;
 
-    const replacementBoot = await bootSystemUiAnrReplacement(
+    replacementBoot = await bootSystemUiAnrReplacement(
       bootService,
       args,
       sourceImage,
@@ -1210,14 +1212,22 @@ async function rebootAndroidAfterSystemUiAnr(
       replacementBoot,
       sourceImage,
     );
+    replacementAdopted = true;
     keepReadinessReservation = true;
     return { boot: replacementBoot, preservedSessionId, releaseReadinessReservation };
   } catch (error) {
+    // A replacement that booted but was never adopted by the pool (handoff
+    // rejected, or rolled back) leaks its emulator process: the outer handler
+    // only tracks the original boot. Cancel it here where its handle is in scope.
+    if (!replacementAdopted) {
+      cancelUnownedColdBoot(replacementBoot);
+    }
     await cleanUpFailedSystemUiAnrRecovery(
       devicePool,
       shutdownReservation,
       shutdownWasConfirmed,
       boot.device.deviceId,
+      signal,
     );
     throw error;
   } finally {
@@ -1312,6 +1322,7 @@ async function cleanUpFailedSystemUiAnrRecovery(
   shutdownReservation: Awaited<ReturnType<DevicePool["reserveDeviceForShutdown"]>>,
   shutdownWasConfirmed: boolean,
   deviceId: string,
+  signal: AbortSignal | undefined,
 ): Promise<void> {
   if (!shutdownReservation) {
     return;
@@ -1320,7 +1331,13 @@ async function cleanUpFailedSystemUiAnrRecovery(
     await devicePool?.retireDeviceAfterSystemUiAnrRecoveryFailure(shutdownReservation.device);
     return;
   }
-  devicePool?.clearIntentionalShutdown(deviceId);
+  // Caller cancellation may have already stopped the emulator while shutdown
+  // confirmation was still in flight. Retain the intentional-shutdown marker so
+  // the deferred process-exit is not treated as unexpected loss, mirroring the
+  // regular kill path's guard.
+  if (shouldClearIntentionalShutdownAfterFailure("android", signal)) {
+    devicePool?.clearIntentionalShutdown(deviceId);
+  }
 }
 
 type SystemUiAnrRecoveryResult = Awaited<ReturnType<typeof rebootAndroidAfterSystemUiAnr>>;
@@ -1338,7 +1355,16 @@ async function ensureRunnerReadyWithSystemUiAnrRecovery(
       throw error;
     }
     const recovery = await rebootAfterSystemUiAnr(boot);
-    await ensureRunnerReady(recovery.boot);
+    try {
+      await ensureRunnerReady(recovery.boot);
+    } catch (readinessError) {
+      // rebootAfterSystemUiAnr retained the readiness reservation for the
+      // replacement, but it only reaches the caller's ordered cleanup once this
+      // returns. Release it here so a failed second readiness check does not
+      // strand the recovered AVD out of general allocation forever.
+      await recovery.releaseReadinessReservation?.();
+      throw readinessError;
+    }
     return { ...recovery, recovered: true };
   }
 }

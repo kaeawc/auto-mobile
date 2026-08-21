@@ -414,10 +414,13 @@ export class RunnerReadinessService {
       if (!required) {
         return null;
       }
-      throw this.systemUiAnrRecoveryRequired(context, "dialog persisted after selecting Wait");
+      throw this.systemUiAnrRecoveryRequired(
+        context,
+        "recovery budget expired before the dialog state could be confirmed",
+      );
     }
     try {
-      return await this.runPhase(context, "runner-health", 1, async (signal) =>
+      const hierarchy = await this.runPhase(context, "runner-health", 1, async (signal) =>
         await client.getAccessibilityHierarchy(
           undefined,
           undefined,
@@ -428,7 +431,26 @@ export class RunnerReadinessService {
           timeoutMs,
         ),
       );
+      // The production client resolves timeouts and transport failures to
+      // `null`. A required read must treat that as an unconfirmed dialog so the
+      // caller reboots, rather than as an ANR that has cleared.
+      if (hierarchy === null && required) {
+        throw this.systemUiAnrRecoveryRequired(
+          context,
+          "could not confirm dialog recovery: hierarchy unavailable",
+        );
+      }
+      return hierarchy;
     } catch (error) {
+      if (error instanceof SystemUiAnrRecoveryRequiredError) {
+        throw error;
+      }
+      // Genuine cancellation or device loss aborts the request signal. Treating
+      // that as "no dialog" would let startDevice bind a session after the
+      // caller has already given up, so propagate it on every probe.
+      if (context.signal?.aborted) {
+        throw error;
+      }
       if (!required) {
         return null;
       }

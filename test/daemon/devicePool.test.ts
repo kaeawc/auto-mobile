@@ -1879,16 +1879,72 @@ describe("DevicePool", () => {
       }
     });
 
-    test("defers monitor loss recovery while System UI recovery owns the emulator", async () => {
-      const originalRecoveryOnLoss = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
-      process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
-      const manager = new FakeDeviceManager();
-      const pool = new DevicePool(
+    test("carries the autolock owner onto the System UI recovery replacement", async () => {
+      const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
+      const sourceImage: DeviceInfo = {
+        name: "Pixel 8",
+        platform: "android",
+        isRunning: false,
+        source: "local",
+      };
+      fakeDeviceManager.bootedDevices = [device];
+      await devicePool.initializeWithDevices([device]);
+      await devicePool.bindOrReuseDeviceSession(
+        "owner-session",
+        device.deviceId,
+        "android",
+        sourceImage,
+      );
+      const captured = devicePool.getDevice(device.deviceId);
+      if (!captured) {
+        throw new Error("expected recovery device to be pooled");
+      }
+      // Simulate an autolocked device so recovery must preserve exclusivity; an
+      // unset autolockSessionId on the replacement would let any session drive it.
+      captured.autolockSessionId = "owner-session";
+      const readinessRelease = await devicePool.reserveDeviceForReadiness(
+        device.deviceId,
+        device,
+        sourceImage.name,
+      );
+      const shutdownReservation = await devicePool.reserveDeviceForShutdown(device.deviceId);
+      if (!shutdownReservation) {
+        throw new Error("expected shutdown reservation");
+      }
+
+      try {
+        fakeDeviceManager.bootedDevices = [];
+        await devicePool.removeDisconnectedDevice(device.deviceId, false);
+        const replacement = { ...device, deviceId: "emulator-5556" };
+        await devicePool.replaceDeviceForSystemUiAnrRecovery(
+          shutdownReservation.device,
+          replacement,
+          sourceImage,
+        );
+
+        expect(devicePool.getDevice(replacement.deviceId)).toMatchObject({
+          sessionId: "owner-session",
+          autolockSessionId: "owner-session",
+        });
+      } finally {
+        await shutdownReservation.release();
+        await readinessRelease();
+      }
+    });
+
+    test("rolls back the replacement when the recovery session rebind fails", async () => {
+      sessionManager.stopCleanupTimer();
+      const sessionPersistence = new FakeDeviceSessionPersistence();
+      // The first upsert binds the owner session; the rebind onto the
+      // replacement is the second, and it rejects here.
+      sessionPersistence.createFailureOnAttempt = 2;
+      sessionManager = new SessionManager(fakeTimer, sessionPersistence);
+      devicePool = new DevicePool(
         sessionManager,
-        "daemon-session",
+        "test-daemon-session-id",
         fakeTimer,
         fakeAppsRepo,
-        manager,
+        fakeDeviceManager,
         new DefaultRetryExecutor(fakeTimer),
       );
       const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
@@ -1898,37 +1954,99 @@ describe("DevicePool", () => {
         isRunning: false,
         source: "local",
       };
-      manager.bootedDevices = [device];
-      await pool.initializeWithDevices([device]);
-      await pool.bindOrReuseDeviceSession(
+      fakeDeviceManager.bootedDevices = [device];
+      await devicePool.initializeWithDevices([device]);
+      await devicePool.bindOrReuseDeviceSession(
         "owner-session",
         device.deviceId,
         "android",
         sourceImage,
       );
-      const captured = pool.getDevice(device.deviceId);
-      if (!captured) {
-        throw new Error("expected recovery device to be pooled");
-      }
-      const reservation = await pool.reserveDeviceForShutdown(captured.id);
-      if (!reservation) {
+      const shutdownReservation = await devicePool.reserveDeviceForShutdown(device.deviceId);
+      if (!shutdownReservation) {
         throw new Error("expected shutdown reservation");
       }
 
       try {
-        manager.bootedDevices = [];
-        await pool.removeDisconnectedDevice(device.deviceId, false);
+        fakeDeviceManager.bootedDevices = [];
+        await devicePool.removeDisconnectedDevice(device.deviceId, false);
+        const replacement = { ...device, deviceId: "emulator-5556" };
 
-        expect(pool.getDevice(device.deviceId)).toBe(captured);
-        expect(sessionManager.getSession("owner-session")?.assignedDevice).toBe(device.deviceId);
-        expect(manager.startedDevices).toEqual([]);
+        await expect(
+          devicePool.replaceDeviceForSystemUiAnrRecovery(
+            shutdownReservation.device,
+            replacement,
+            sourceImage,
+          ),
+        ).rejects.toThrow("persist create failed");
+
+        // The failed rebind must not strand an idle, assignable replacement that
+        // still maps to the stopped serial.
+        expect(devicePool.getDevice(replacement.deviceId)).toBeNull();
+        expect(devicePool.getIdleDevices()).toEqual([]);
+        expect(sessionManager.getSession("owner-session")).toBeNull();
       } finally {
-        await reservation.release();
+        await shutdownReservation.release();
+      }
+    });
+
+    test("defers monitor loss recovery while System UI recovery owns the emulator", async () => {
+      const originalRecoveryOnLoss = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+      const restoreRecoveryOnLoss = () => {
         if (originalRecoveryOnLoss === undefined) {
           delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
         } else {
           process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRecoveryOnLoss;
         }
+      };
+
+      try {
+        process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+        const manager = new FakeDeviceManager();
+        const pool = new DevicePool(
+          sessionManager,
+          "daemon-session",
+          fakeTimer,
+          fakeAppsRepo,
+          manager,
+          new DefaultRetryExecutor(fakeTimer),
+        );
+        const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
+        const sourceImage: DeviceInfo = {
+          name: "Pixel 8",
+          platform: "android",
+          isRunning: false,
+          source: "local",
+        };
+        manager.bootedDevices = [device];
+        await pool.initializeWithDevices([device]);
+        await pool.bindOrReuseDeviceSession(
+          "owner-session",
+          device.deviceId,
+          "android",
+          sourceImage,
+        );
+        const captured = pool.getDevice(device.deviceId);
+        if (!captured) {
+          throw new Error("expected recovery device to be pooled");
+        }
+        const reservation = await pool.reserveDeviceForShutdown(captured.id);
+        if (!reservation) {
+          throw new Error("expected shutdown reservation");
+        }
+
+        try {
+          manager.bootedDevices = [];
+          await pool.removeDisconnectedDevice(device.deviceId, false);
+
+          expect(pool.getDevice(device.deviceId)).toBe(captured);
+          expect(sessionManager.getSession("owner-session")?.assignedDevice).toBe(device.deviceId);
+          expect(manager.startedDevices).toEqual([]);
+        } finally {
+          await reservation.release();
+        }
+      } finally {
+        restoreRecoveryOnLoss();
       }
     });
 

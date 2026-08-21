@@ -331,7 +331,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   private readonly launchTargetDeviceIds = new WeakMap<ChildProcess, string>();
   // startDevice creates a fresh client per request, so this safety boundary must
   // cover every client in the daemon rather than one client instance.
-  private static readonly pendingUnlabelledLaunches = new Set<ChildProcess>();
+  private static readonly unlabelledLaunchDeviceIds = new Map<ChildProcess, string | undefined>();
   private readonly launchPreexistingEmulatorDeviceIds = new WeakMap<
     ChildProcess,
     ReadonlySet<string>
@@ -375,7 +375,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   }
 
   static resetUnlabelledLaunchTrackingForTesting(): void {
-    AndroidEmulatorClient.pendingUnlabelledLaunches.clear();
+    AndroidEmulatorClient.unlabelledLaunchDeviceIds.clear();
   }
 
   /**
@@ -1414,7 +1414,11 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       perf.startOperation("spawnEmulator");
       const child = this.spawnFn(this.emulatorPath, args);
       perf.endOperation("spawnEmulator");
-      this.recordPreLaunchEmulatorDeviceIds(child, preLaunchEmulatorDeviceIds);
+      this.recordPreLaunchEmulatorDeviceIds(
+        child,
+        preLaunchEmulatorDeviceIds,
+        capturePreLaunchDeviceIds,
+      );
       onSpawn?.(child);
 
       // Keep only a redacted tail for launch diagnostics and failure classification.
@@ -1924,6 +1928,8 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           .filter((deviceId): deviceId is string => deviceId.startsWith("emulator-")),
       );
     } catch (error) {
+      // Without a baseline, unknown-device fallback stays disabled. Readiness can
+      // still use a captured serial or an exact AVD-name match.
       logger.debug(`Could not capture pre-launch emulator device IDs: ${error}`);
       return undefined;
     }
@@ -1932,16 +1938,20 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   private recordPreLaunchEmulatorDeviceIds(
     childProcess: ChildProcess,
     preexistingDeviceIds: ReadonlySet<string> | undefined,
+    trackUnlabelledLaunch: boolean,
   ): void {
+    if (!trackUnlabelledLaunch) {
+      return;
+    }
     if (preexistingDeviceIds) {
       this.launchPreexistingEmulatorDeviceIds.set(childProcess, preexistingDeviceIds);
-      AndroidEmulatorClient.pendingUnlabelledLaunches.add(childProcess);
     }
+    AndroidEmulatorClient.unlabelledLaunchDeviceIds.set(childProcess, undefined);
   }
 
   private releaseUnlabelledLaunch(childProcess?: ChildProcess | null): void {
     if (childProcess) {
-      AndroidEmulatorClient.pendingUnlabelledLaunches.delete(childProcess);
+      AndroidEmulatorClient.unlabelledLaunchDeviceIds.delete(childProcess);
     }
   }
 
@@ -1961,7 +1971,9 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       return {};
     }
 
-    const pendingUnlabelledLaunches = AndroidEmulatorClient.pendingUnlabelledLaunches.size;
+    const pendingUnlabelledLaunches = Array.from(
+      AndroidEmulatorClient.unlabelledLaunchDeviceIds.values(),
+    ).filter((deviceId) => deviceId === undefined).length;
     if (pendingUnlabelledLaunches > 1) {
       return {
         failure:
@@ -1974,6 +1986,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       (candidate) =>
         candidate.deviceId.startsWith("emulator-") &&
         !preexistingDeviceIds.has(candidate.deviceId) &&
+        !this.isTrackedUnlabelledLaunchDeviceId(childProcess, candidate.deviceId) &&
         this.isUnknownEmulatorName(candidate.name, candidate.deviceId),
     );
     if (newUnknownEmulators.length === 1) {
@@ -2136,8 +2149,20 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       return;
     }
     this.launchTargetDeviceIds.set(childProcess, targetDeviceId);
-    this.releaseUnlabelledLaunch(childProcess);
+    if (AndroidEmulatorClient.unlabelledLaunchDeviceIds.has(childProcess)) {
+      AndroidEmulatorClient.unlabelledLaunchDeviceIds.set(childProcess, targetDeviceId);
+    }
     logger.debug(`Captured emulator launch target deviceId from ${source}: ${targetDeviceId}`);
+  }
+
+  private isTrackedUnlabelledLaunchDeviceId(
+    childProcess: ChildProcess | null | undefined,
+    deviceId: string,
+  ): boolean {
+    return Array.from(AndroidEmulatorClient.unlabelledLaunchDeviceIds.entries()).some(
+      ([trackedProcess, trackedDeviceId]) =>
+        trackedProcess !== childProcess && trackedDeviceId === deviceId,
+    );
   }
 
   /**

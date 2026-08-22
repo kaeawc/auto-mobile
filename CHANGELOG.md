@@ -1,5 +1,19 @@
 # Changelog
 
+## [v0.0.61] - 2026-08-22
+### Added
+- feat(device-control): capture a fresh raw device screenshot with cached-resource fallback ([#5437](https://github.com/kaeawc/auto-mobile/issues/5437)) (android, ios, research)
+- feat(resources): add completeness and provisioning-catalog data to device resources ([#5436](https://github.com/kaeawc/auto-mobile/issues/5436)) (android, ios, research)
+- feat(device-control): provision an exact virtual device from a caller-supplied specification ([#5434](https://github.com/kaeawc/auto-mobile/issues/5434)) (android, ios, research)
+### Fixed
+- Android: provide a bounded shutdown policy for an ADB server started by AutoMobile ([#5433](https://github.com/kaeawc/auto-mobile/issues/5433)) (android)
+- Android startDevice can time out when AVD-name lookup is unavailable despite a usable emulator ([#5424](https://github.com/kaeawc/auto-mobile/issues/5424)) (android)
+### Other
+- Fall back to Android AVD system property during emulator discovery ([#5450](https://github.com/kaeawc/auto-mobile/issues/5450))
+- iOS multi-simulator daemon startup exceeds the default readiness deadline ([#5431](https://github.com/kaeawc/auto-mobile/issues/5431))
+- release: pin the published runtime dependency graph ([#5421](https://github.com/kaeawc/auto-mobile/issues/5421)) (release engineering)
+- Allow log directory override independent of data directory ([#5413](https://github.com/kaeawc/auto-mobile/issues/5413))
+
 ## [v0.0.60] - 2026-08-19
 ### Added
 - feat(daemon): stamp deviceSessionUuid on every stream envelope + filter key + session lifecycle events ([#5259](https://github.com/kaeawc/auto-mobile/issues/5259))

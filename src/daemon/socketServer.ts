@@ -667,8 +667,7 @@ export class UnixSocketServer {
                 );
                 return response;
               } catch (ideError) {
-                const ideErrorMessage =
-                  errorMessage(ideError);
+                const ideErrorMessage = errorMessage(ideError);
                 if (ideErrorMessage.includes("Session not found")) {
                   logger.warn("MCP client session expired, reconnecting and retrying...");
                   await this.resetMcpClient(route.clientKey);

@@ -20,20 +20,12 @@ const barrierSchema = z.object({
     .int()
     .positive()
     .describe("Number of devices that must arrive before the barrier lifts"),
-  timeout: z
-    .number()
-    .int()
-    .positive()
-    .optional()
-    .describe("Barrier timeout ms (default 30000)"),
+  timeout: z.number().int().positive().optional().describe("Barrier timeout ms (default 30000)"),
   // Internal: the plan's base session UUID, injected by PlanExecutor
   // (buildEnhancedStepParams). Scopes the shared coordinator so two independent
   // plans that reuse the same lock name get isolated barriers instead of
   // colliding. Not authored by users; stripped from recordings via INTERNAL_PARAMS.
-  __lockNamespace: z
-    .string()
-    .optional()
-    .describe("Internal plan-scoped lock namespace (injected)"),
+  __lockNamespace: z.string().optional().describe("Internal plan-scoped lock namespace (injected)"),
 });
 
 type BarrierParams = z.infer<typeof barrierSchema>;
@@ -47,13 +39,13 @@ const barrierHandler = async (
   device: BootedDevice,
   params: BarrierParams,
   _progress?: unknown,
-  signal?: AbortSignal
+  signal?: AbortSignal,
 ): Promise<any> => {
   const { lock, deviceCount, timeout, __lockNamespace: namespace } = params;
   const coordinator = CriticalSectionCoordinator.getInstance();
 
   logger.info(
-    `Device ${device.deviceId} arriving at barrier "${lock}" (expecting ${deviceCount} devices)`
+    `Device ${device.deviceId} arriving at barrier "${lock}" (expecting ${deviceCount} devices)`,
   );
 
   throwIfAborted(signal);
@@ -66,11 +58,9 @@ const barrierHandler = async (
     coordinator.forceCleanup(lock, namespace);
 
     const errorMsg = errorMessage(error);
-    logger.error(
-      `Device ${device.deviceId} error at barrier "${lock}": ${errorMsg}`
-    );
+    logger.error(`Device ${device.deviceId} error at barrier "${lock}": ${errorMsg}`);
     throw new ActionableError(
-      `Barrier "${lock}" failed for device ${device.deviceId}: ${errorMsg}`
+      `Barrier "${lock}" failed for device ${device.deviceId}: ${errorMsg}`,
     );
   }
 
@@ -96,7 +86,7 @@ export function registerBarrierTools(): void {
     // Plan-only: a multi-device coordination primitive that only makes sense as
     // a plan step (a single direct call would just block). Hidden from tools/list
     // discovery, still runnable in plans via getToolForPlan.
-    { planOnly: true, planExecutable: true, acceptsPlanLockNamespace: true }
+    { defaultEnabled: false, planOnly: true, planExecutable: true, acceptsPlanLockNamespace: true },
   );
 
   logger.info("Barrier tools registered");

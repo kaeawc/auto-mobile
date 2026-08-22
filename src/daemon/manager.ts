@@ -45,10 +45,7 @@ import {
 } from "./buildIdentity";
 import { DaemonState, type DaemonStateLike } from "./daemonState";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
-import {
-  cleanupDaemonFiles,
-  isProcessRunning as isDaemonProcessRunning,
-} from "./daemonFiles";
+import { cleanupDaemonFiles, isProcessRunning as isDaemonProcessRunning } from "./daemonFiles";
 import { parseLockContent, releaseExclusiveLock, tryAcquireExclusiveLock } from "../utils/fileLock";
 import {
   DAEMON_LAUNCH_CWD_ENV,
@@ -98,7 +95,7 @@ export const DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES = 16 * 1024 * 1024;
 
 type ProcessTableCommandRunner = (
   command: string,
-  options: { encoding: "utf-8"; maxBuffer: number }
+  options: { encoding: "utf-8"; maxBuffer: number },
 ) => string;
 
 function normalizeProcessCommand(command: string): string {
@@ -106,9 +103,9 @@ function normalizeProcessCommand(command: string): string {
 }
 
 function invokedCommand(command: string): string {
-  const shellInvocation = command.trim().match(
-    /(?:^|\s)(?:-c|\/c|-(?:command|encodedcommand|c|ec))\s+["']?(.+)$/i,
-  );
+  const shellInvocation = command
+    .trim()
+    .match(/(?:^|\s)(?:-c|\/c|-(?:command|encodedcommand|c|ec))\s+["']?(.+)$/i);
   return shellInvocation?.[1].trim() ?? command.trim();
 }
 
@@ -121,12 +118,17 @@ function isAutoMobileDaemonCommand(command: string): boolean {
 
   const runsBundledEntrypoint =
     /(?:^|["'\s\\/])(?:bun|node)(?:\.exe)?(?:\s|["'])/.test(invocation) &&
-    /(?:^|["'\s])[^"'\s]*\/(?:@kaeawc\/)?auto-mobile\/dist\/src\/index\.js(?:\s|["']|$)/.test(invocation);
+    /(?:^|["'\s])[^"'\s]*\/(?:@kaeawc\/)?auto-mobile\/dist\/src\/index\.js(?:\s|["']|$)/.test(
+      invocation,
+    );
   const runsPublishedPackage =
-    /^(?:"?[^"'\s]*\/)?(?:bunx|npx)(?:\.exe)?\s+(?:(?:-y|--yes|--bun|--no-cache)\s+)*@kaeawc\/auto-mobile(?:@[^\s"']+)?(?:\s|["']|$)/.test(invocation) ||
-    /^(?:"?[^"'\s]*\/)?bun(?:\.exe)?\s+x\s+(?:(?:-y|--yes|--bun|--no-cache)\s+)*@kaeawc\/auto-mobile(?:@[^\s"']+)?(?:\s|["']|$)/.test(invocation);
-  const runsStandaloneBinary =
-    /^(?:"?[^"'\s]*\/)?auto-mobile(?:\.exe)?(?:\s|$)/i.test(invocation);
+    /^(?:"?[^"'\s]*\/)?(?:bunx|npx)(?:\.exe)?\s+(?:(?:-y|--yes|--bun|--no-cache)\s+)*@kaeawc\/auto-mobile(?:@[^\s"']+)?(?:\s|["']|$)/.test(
+      invocation,
+    ) ||
+    /^(?:"?[^"'\s]*\/)?bun(?:\.exe)?\s+x\s+(?:(?:-y|--yes|--bun|--no-cache)\s+)*@kaeawc\/auto-mobile(?:@[^\s"']+)?(?:\s|["']|$)/.test(
+      invocation,
+    );
+  const runsStandaloneBinary = /^(?:"?[^"'\s]*\/)?auto-mobile(?:\.exe)?(?:\s|$)/i.test(invocation);
 
   return runsBundledEntrypoint || runsPublishedPackage || runsStandaloneBinary;
 }
@@ -134,9 +136,9 @@ function isAutoMobileDaemonCommand(command: string): boolean {
 function isShellCommandWrapper(command: string): boolean {
   const normalizedCommand = normalizeProcessCommand(command);
   const trimmedCommand = normalizedCommand.trim();
-  const executable = trimmedCommand.startsWith("\"")
-    ? trimmedCommand.slice(1, trimmedCommand.indexOf("\"", 1))
-    : trimmedCommand.split(/\s+/, 1)[0] ?? "";
+  const executable = trimmedCommand.startsWith('"')
+    ? trimmedCommand.slice(1, trimmedCommand.indexOf('"', 1))
+    : (trimmedCommand.split(/\s+/, 1)[0] ?? "");
 
   if (/(^|\/)(?:ba|da|z)?sh$/.test(executable) && normalizedCommand.includes(" -c ")) {
     return true;
@@ -146,8 +148,10 @@ function isShellCommandWrapper(command: string): boolean {
     return true;
   }
 
-  return /(^|\/)(?:powershell|pwsh)(?:\.exe)?$/i.test(executable) &&
-    /(?:^|\s)-(?:command|encodedcommand|c|ec)(?:\s|$)/i.test(normalizedCommand);
+  return (
+    /(^|\/)(?:powershell|pwsh)(?:\.exe)?$/i.test(executable) &&
+    /(?:^|\s)-(?:command|encodedcommand|c|ec)(?:\s|$)/i.test(normalizedCommand)
+  );
 }
 
 export function parseDaemonProcessTable(psOutput: string): DaemonProcessRecord[] {
@@ -188,7 +192,9 @@ function parseWindowsProcessId(value: unknown): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-function parseWindowsProcessTableEntry(entry: WindowsProcessTableEntry): DaemonProcessRecord | undefined {
+function parseWindowsProcessTableEntry(
+  entry: WindowsProcessTableEntry,
+): DaemonProcessRecord | undefined {
   const pid = parseWindowsProcessId(entry.ProcessId);
   const ppid = parseWindowsProcessId(entry.ParentProcessId);
   const command = entry.CommandLine;
@@ -254,16 +260,18 @@ export class PsDaemonProcessFinder implements DaemonProcessFinder, DaemonProcess
   }
 }
 
-export class WindowsDaemonProcessFinder implements DaemonProcessFinder, DaemonProcessLivenessChecker {
+export class WindowsDaemonProcessFinder
+  implements DaemonProcessFinder, DaemonProcessLivenessChecker
+{
   constructor(private readonly runCommand: ProcessTableCommandRunner = execSync) {}
 
   findDaemonProcesses(): DaemonProcessRecord[] {
     const processTableJson = this.runCommand(
-      "powershell.exe -NoProfile -NonInteractive -Command \"Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CommandLine | ConvertTo-Json -Compress\"",
+      'powershell.exe -NoProfile -NonInteractive -Command "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CommandLine | ConvertTo-Json -Compress"',
       {
         encoding: "utf-8",
         maxBuffer: DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
-      }
+      },
     );
     return parseWindowsDaemonProcessTable(processTableJson);
   }
@@ -274,7 +282,7 @@ export class WindowsDaemonProcessFinder implements DaemonProcessFinder, DaemonPr
 }
 
 export function createDefaultDaemonProcessFinder(
-  platform: NodeJS.Platform = process.platform
+  platform: NodeJS.Platform = process.platform,
 ): DaemonProcessFinder & DaemonProcessLivenessChecker {
   return platform === "win32" ? new WindowsDaemonProcessFinder() : new PsDaemonProcessFinder();
 }
@@ -321,7 +329,10 @@ const fileSystemExtractionCleaner: ExtractionCleaner = {
 };
 
 function hasProcessLivenessChecker(value: unknown): value is DaemonProcessLivenessChecker {
-  return typeof (value as Partial<DaemonProcessLivenessChecker> | undefined)?.isProcessRunning === "function";
+  return (
+    typeof (value as Partial<DaemonProcessLivenessChecker> | undefined)?.isProcessRunning ===
+    "function"
+  );
 }
 
 const MAX_DAEMON_STARTUP_LOG_BYTES = 4000;
@@ -369,7 +380,9 @@ export class DaemonManager implements DaemonManagerLike {
     lockFilePath: string = LOCK_FILE_PATH,
     pidFilePath: string = PID_FILE_PATH,
     socketPath: string = SOCKET_PATH,
-    processFinderOrSpawner: DaemonProcessFinder | DaemonProcessSpawner = createDefaultDaemonProcessFinder(),
+    processFinderOrSpawner:
+      | DaemonProcessFinder
+      | DaemonProcessSpawner = createDefaultDaemonProcessFinder(),
     processSpawner: DaemonProcessSpawner | undefined = undefined,
     extractionCleaner: ExtractionCleaner = fileSystemExtractionCleaner,
     launcher: DaemonLauncher | (() => DaemonLaunchCommand) | undefined = undefined,
@@ -394,16 +407,19 @@ export class DaemonManager implements DaemonManagerLike {
     this.processSignaler = processSignaler;
     this.extractionCleaner = extractionCleaner;
     this.launchCommandResolver = typeof launcher === "function" ? launcher : undefined;
-    this.launcher = (typeof launcher === "object" ? launcher : undefined) ?? new DaemonLauncher({
-      spawn: processSpawner?.spawn.bind(processSpawner),
-      timer,
-    });
+    this.launcher =
+      (typeof launcher === "object" ? launcher : undefined) ??
+      new DaemonLauncher({
+        spawn: processSpawner?.spawn.bind(processSpawner),
+        timer,
+      });
     this.fallbackLauncher = new DaemonLauncher({
       entryScript: null,
       spawn: processSpawner?.spawn.bind(processSpawner),
       timer,
     });
-    this.clientFactory = clientFactory ?? (() => new DaemonClient(this.socketPath, undefined, timer));
+    this.clientFactory =
+      clientFactory ?? (() => new DaemonClient(this.socketPath, undefined, timer));
   }
 
   /**
@@ -419,7 +435,7 @@ export class DaemonManager implements DaemonManagerLike {
   acquireLock(): boolean {
     const logPath = this.daemonLaunchLogPath();
     const acquired = tryAcquireExclusiveLock(this.lockFilePath, {
-      isProcessRunning: pid => this.isProcessRunning(pid),
+      isProcessRunning: (pid) => this.isProcessRunning(pid),
       metadata: Buffer.from(logPath, "utf8").toString("base64url"),
     });
     this.heldLockLogPath = acquired ? logPath : undefined;
@@ -457,23 +473,21 @@ export class DaemonManager implements DaemonManagerLike {
     try {
       return this.normalizeDaemonProcessRecords(this.processFinder.findDaemonProcesses());
     } catch (error) {
-      throw new ActionableError(
-        `Failed to inspect daemon process table: ${errorMessage(error)}`
-      );
+      throw new ActionableError(`Failed to inspect daemon process table: ${errorMessage(error)}`);
     }
   }
 
   findOtherDaemonProcesses(activeDaemonPid: number | undefined): number[] {
-    return this.findLiveDaemonProcesses().filter(pid => pid !== activeDaemonPid);
+    return this.findLiveDaemonProcesses().filter((pid) => pid !== activeDaemonPid);
   }
 
   findLiveDaemonProcesses(): number[] {
-    return this.findAllDaemonProcesses().filter(pid => this.isProcessRunning(pid));
+    return this.findAllDaemonProcesses().filter((pid) => this.isProcessRunning(pid));
   }
 
   private normalizeDaemonProcessRecords(records: DaemonProcessRecord[]): number[] {
     const wrapperPids = new Set<number>();
-    const childPpids = new Set(records.map(record => record.ppid));
+    const childPpids = new Set(records.map((record) => record.ppid));
 
     for (const record of records) {
       if (isShellCommandWrapper(record.command) && childPpids.has(record.pid)) {
@@ -558,7 +572,7 @@ export class DaemonManager implements DaemonManagerLike {
     const liveDaemons = this.findLiveDaemonProcesses();
     if (liveDaemons.length > 0) {
       stderrLog(
-        `Found ${liveDaemons.length} live auto-mobile daemon process(es) without a usable PID record; waiting for one to become ready...`
+        `Found ${liveDaemons.length} live auto-mobile daemon process(es) without a usable PID record; waiting for one to become ready...`,
       );
       for (const pid of liveDaemons) {
         stderrLog(`  - PID ${pid}`);
@@ -570,8 +584,8 @@ export class DaemonManager implements DaemonManagerLike {
 
       throw new ActionableError(
         `Found live AutoMobile daemon process(es) (${liveDaemons.join(", ")}) but none became reachable within ` +
-        `${DAEMON_STARTUP_TIMEOUT_MS}ms. Refusing to terminate a live daemon during start; ` +
-        `inspect it or run \`bunx ${resolveDaemonInstallSpecifier()} --daemon restart\` explicitly.`
+          `${DAEMON_STARTUP_TIMEOUT_MS}ms. Refusing to terminate a live daemon during start; ` +
+          `inspect it or run \`bunx ${resolveDaemonInstallSpecifier()} --daemon restart\` explicitly.`,
       );
     }
 
@@ -583,7 +597,10 @@ export class DaemonManager implements DaemonManagerLike {
     // Resolve the current binary so the daemon uses the same version.
     // process.argv[1] is the entry script (e.g. dist/src/index.js).
     // Falls back to bunx to avoid requiring a global install.
-    let { command: autoMobileCmd, args } = this.withDaemonOptions(this.resolveLaunchCommand(), options);
+    let { command: autoMobileCmd, args } = this.withDaemonOptions(
+      this.resolveLaunchCommand(),
+      options,
+    );
 
     // Redirect the detached daemon's stdout/stderr into the configured logs dir
     // (`~/.auto-mobile/logs` by default) rather than an ephemeral
@@ -633,8 +650,9 @@ export class DaemonManager implements DaemonManagerLike {
             waitForReady: (timeoutMs, signal) => this.waitForReady(timeoutMs, signal),
             isReadyForLaunchedProcess: (pid, timeoutMs, signal) =>
               this.isLaunchedProcessReady(pid, timeoutMs, signal),
-            formatFailure: summary => this.createDaemonStartupFailure(summary, logPath),
-            formatExitFailure: (code, signal) => this.createDaemonExitFailure(code, signal, logPath),
+            formatFailure: (summary) => this.createDaemonStartupFailure(summary, logPath),
+            formatExitFailure: (code, signal) =>
+              this.createDaemonExitFailure(code, signal, logPath),
           });
           break;
         } catch (error) {
@@ -646,17 +664,24 @@ export class DaemonManager implements DaemonManagerLike {
           const entryScript = args[0];
           let removed = false;
           try {
-            removed = entryScript ? await this.extractionCleaner.removeExtractionForEntryScript(entryScript) : false;
+            removed = entryScript
+              ? await this.extractionCleaner.removeExtractionForEntryScript(entryScript)
+              : false;
           } catch (cleanupError) {
             throw new ActionableError(
-              `${this.describeError(error)}\nFailed to remove incomplete extraction before retry: ${this.describeError(cleanupError)}`
+              `${this.describeError(error)}\nFailed to remove incomplete extraction before retry: ${this.describeError(cleanupError)}`,
             );
           }
           if (!removed) {
             throw error;
           }
-          ({ command: autoMobileCmd, args } = this.withDaemonOptions(this.fallbackLauncher.resolveCommand(), options));
-          stderrLog(`Detected incomplete daemon package extraction (${INCOMPLETE_EXTRACTION_CODE}); removed it and retrying once...`);
+          ({ command: autoMobileCmd, args } = this.withDaemonOptions(
+            this.fallbackLauncher.resolveCommand(),
+            options,
+          ));
+          stderrLog(
+            `Detected incomplete daemon package extraction (${INCOMPLETE_EXTRACTION_CODE}); removed it and retrying once...`,
+          );
         }
       }
     } finally {
@@ -665,14 +690,15 @@ export class DaemonManager implements DaemonManagerLike {
     }
 
     const newStatus = await this.status();
-    stderrLog(
-      `Daemon started successfully (PID ${newStatus.pid}, port ${newStatus.port})`
-    );
+    stderrLog(`Daemon started successfully (PID ${newStatus.pid}, port ${newStatus.port})`);
     stderrLog(`Socket: ${newStatus.socketPath}`);
     stderrLog(`Logs: ${logPath}`);
   }
 
-  private withDaemonOptions(launch: DaemonLaunchCommand, options: DaemonOptions): DaemonLaunchCommand {
+  private withDaemonOptions(
+    launch: DaemonLaunchCommand,
+    options: DaemonOptions,
+  ): DaemonLaunchCommand {
     const args = [...launch.args];
     if (options.port) {
       args.push("--port", options.port.toString());
@@ -715,6 +741,12 @@ export class DaemonManager implements DaemonManagerLike {
     }
     if (options.embeddedSdk) {
       args.push("--embedded-sdk");
+    }
+    for (const toolName of options.enabledTools ?? []) {
+      args.push("--enable-tool", toolName);
+    }
+    for (const toolName of options.disabledTools ?? []) {
+      args.push("--disable-tool", toolName);
     }
     if (options.dismissKeyboardAfterInput) {
       args.push("--dismiss-keyboard-after-input");
@@ -798,10 +830,10 @@ export class DaemonManager implements DaemonManagerLike {
 
   private async createLockHolderStartupFailure(retainedLogPath?: string | null): Promise<Error> {
     const summary = "Another process is starting the daemon but it failed to become ready";
-    const logPath = retainedLogPath ?? await this.getLockHolderStartupLogPath();
+    const logPath = retainedLogPath ?? (await this.getLockHolderStartupLogPath());
     if (!logPath) {
       return new ActionableError(
-        `${summary}; the startup lock did not contain a usable holder PID for diagnostics.`
+        `${summary}; the startup lock did not contain a usable holder PID for diagnostics.`,
       );
     }
     return new ActionableError(await this.formatDaemonStartupFailure(summary, logPath));
@@ -824,7 +856,7 @@ export class DaemonManager implements DaemonManagerLike {
       return logPath;
     } catch (error) {
       logger.debug(
-        `[DaemonManager] Unable to read startup lock holder diagnostics: ${this.describeError(error)}`
+        `[DaemonManager] Unable to read startup lock holder diagnostics: ${this.describeError(error)}`,
       );
       return null;
     }
@@ -841,9 +873,10 @@ export class DaemonManager implements DaemonManagerLike {
   ): Promise<Error> {
     const exitCode = code === null ? "unknown" : code.toString();
     const signalDetail = signal ? `, signal ${signal}` : "";
-    const summary = code === INCOMPLETE_EXTRACTION_EXIT_CODE
-      ? this.formatIncompleteExtractionStartupSummary(exitCode, signalDetail)
-      : `Daemon subprocess exited before becoming ready (exit code ${exitCode}${signalDetail})`;
+    const summary =
+      code === INCOMPLETE_EXTRACTION_EXIT_CODE
+        ? this.formatIncompleteExtractionStartupSummary(exitCode, signalDetail)
+        : `Daemon subprocess exited before becoming ready (exit code ${exitCode}${signalDetail})`;
     return this.createDaemonStartupFailure(summary, logPath);
   }
 
@@ -856,8 +889,10 @@ export class DaemonManager implements DaemonManagerLike {
   }
 
   private isIncompleteExtractionStartupSummary(summary: string): boolean {
-    return summary.includes(`exit code ${INCOMPLETE_EXTRACTION_EXIT_CODE}`) &&
-      summary.includes("incomplete package extraction");
+    return (
+      summary.includes(`exit code ${INCOMPLETE_EXTRACTION_EXIT_CODE}`) &&
+      summary.includes("incomplete package extraction")
+    );
   }
 
   private isIncompleteExtractionStartupError(error: unknown): boolean {
@@ -1013,14 +1048,14 @@ export class DaemonManager implements DaemonManagerLike {
     const status = await this.status();
     const runningOptions = status.options ?? {};
     const requestedOptions = Object.fromEntries(
-      Object.entries(options).filter(([, value]) => value !== undefined)
+      Object.entries(options).filter(([, value]) => value !== undefined),
     ) as DaemonOptions;
     const restartOptions: DaemonOptions = { ...runningOptions, ...requestedOptions };
     // All restart cleanup follows the same 10s graceful + 1s forced-stop
     // budget. Run the PID-recorded daemon and every cross-namespace candidate
     // concurrently so the launcher timeout remains bounded by one cleanup window.
     await this.awaitRestartCleanup([
-      () => status.running ? this.stop() : undefined,
+      () => (status.running ? this.stop() : undefined),
       () => this.stopUnrecordedDaemonsForExplicitRestart(status.pid),
     ]);
     // Wait a bit before starting
@@ -1036,16 +1071,16 @@ export class DaemonManager implements DaemonManagerLike {
    * remains non-destructive.
    */
   private async stopUnrecordedDaemonsForExplicitRestart(recordedPid?: number): Promise<void> {
-    const candidates = this.findLiveDaemonProcesses().filter(pid => pid !== recordedPid);
+    const candidates = this.findLiveDaemonProcesses().filter((pid) => pid !== recordedPid);
     if (candidates.length === 0) {
       return;
     }
 
     stderrLog(
-      `Explicit restart force-stopping ${candidates.length} live AutoMobile daemon candidate(s) without this namespace's PID record...`
+      `Explicit restart force-stopping ${candidates.length} live AutoMobile daemon candidate(s) without this namespace's PID record...`,
     );
     await this.awaitRestartCleanup(
-      candidates.map(pid => () => this.stopUnrecordedDaemonProcess(pid))
+      candidates.map((pid) => () => this.stopUnrecordedDaemonProcess(pid)),
     );
   }
 
@@ -1053,10 +1088,10 @@ export class DaemonManager implements DaemonManagerLike {
     operations: ReadonlyArray<() => void | Promise<void>>,
   ): Promise<void> {
     const results = await Promise.allSettled(
-      operations.map(operation => Promise.resolve().then(operation))
+      operations.map((operation) => Promise.resolve().then(operation)),
     );
     const failure = results.find(
-      (result): result is PromiseRejectedResult => result.status === "rejected"
+      (result): result is PromiseRejectedResult => result.status === "rejected",
     );
     if (failure) {
       throw failure.reason;
@@ -1077,7 +1112,7 @@ export class DaemonManager implements DaemonManagerLike {
         return;
       }
       throw new ActionableError(
-        `Failed to stop verified daemon process ${pid}: ${this.describeError(error)}`
+        `Failed to stop verified daemon process ${pid}: ${this.describeError(error)}`,
       );
     }
 
@@ -1097,7 +1132,7 @@ export class DaemonManager implements DaemonManagerLike {
         return;
       }
       throw new ActionableError(
-        `Failed to force-stop verified daemon process ${pid}: ${this.describeError(error)}`
+        `Failed to force-stop verified daemon process ${pid}: ${this.describeError(error)}`,
       );
     }
 
@@ -1133,7 +1168,7 @@ export class DaemonManager implements DaemonManagerLike {
         if (await this.verifyDaemonConnection(this.remainingTime(deadline), signal)) {
           stderrLog(
             `Daemon readiness probe succeeded after ${this.timer.now() - startTime}ms ` +
-            `(${pollCount} polls; socket observed)`
+              `(${pollCount} polls; socket observed)`,
           );
           return true;
         }
@@ -1155,7 +1190,7 @@ export class DaemonManager implements DaemonManagerLike {
 
     stderrLog(
       `Daemon readiness probe timed out after ${this.timer.now() - startTime}ms ` +
-      `(${pollCount} polls; socket ${socketObserved ? "observed" : "not observed"})`
+        `(${pollCount} polls; socket ${socketObserved ? "observed" : "not observed"})`,
     );
     return false;
   }
@@ -1187,7 +1222,7 @@ export class DaemonManager implements DaemonManagerLike {
       return Promise.resolve();
     }
 
-    return new Promise(resolve => {
+    return new Promise((resolve) => {
       function done() {
         signal.removeEventListener("abort", onAbort);
         resolve();
@@ -1226,7 +1261,7 @@ export class DaemonManager implements DaemonManagerLike {
         return true;
       } catch (error) {
         logger.debug(
-          `Daemon socket readiness probe failed (attempt ${attempt}/${READINESS_PROBE_MAX_ATTEMPTS}): ${errorMessage(error)}`
+          `Daemon socket readiness probe failed (attempt ${attempt}/${READINESS_PROBE_MAX_ATTEMPTS}): ${errorMessage(error)}`,
         );
       } finally {
         try {
@@ -1290,7 +1325,7 @@ export class DaemonManager implements DaemonManagerLike {
     return (
       status.running === true &&
       status.pid === pid &&
-      await this.verifyDaemonConnection(timeoutMs, signal)
+      (await this.verifyDaemonConnection(timeoutMs, signal))
     );
   }
 
@@ -1350,10 +1385,7 @@ export class DaemonManager implements DaemonManagerLike {
     }
 
     try {
-      const pidFileContent = require("fs").readFileSync(
-        this.pidFilePath,
-        "utf-8"
-      );
+      const pidFileContent = require("fs").readFileSync(this.pidFilePath, "utf-8");
       const pidData: PidFileData = JSON.parse(pidFileContent);
       return pidData.pid;
     } catch (error) {
@@ -1365,14 +1397,17 @@ export class DaemonManager implements DaemonManagerLike {
   }
 }
 
-export function parseDaemonArgs(args: string[], env: NodeJS.ProcessEnv = process.env): DaemonOptions {
+export function parseDaemonArgs(
+  args: string[],
+  env: NodeJS.ProcessEnv = process.env,
+): DaemonOptions {
   const options: DaemonOptions = shouldSkipCtrlProxyDownload(args, env)
     ? { skipCtrlProxyDownload: true }
     : {};
   options.toolOutputsDir = parseToolOutputsDirConfig(
     [],
     env,
-    resolveDaemonLaunchWorkingDirectory()
+    resolveDaemonLaunchWorkingDirectory(),
   );
   const eventAllMarkers = parseEventAllMarkersConfig(args, env);
   const eventAllMarkersCliOverride = hasEventAllMarkersCliOverride(args);
@@ -1440,6 +1475,18 @@ export function parseDaemonArgs(args: string[], env: NodeJS.ProcessEnv = process
       options.networkMockable = true;
     } else if (args[i] === "--embedded-sdk") {
       options.embeddedSdk = true;
+    } else if (args[i] === "--enable-tool") {
+      const toolName = args[i + 1];
+      if (toolName && !toolName.startsWith("--")) {
+        options.enabledTools = [...(options.enabledTools ?? []), toolName];
+        i++;
+      }
+    } else if (args[i] === "--disable-tool") {
+      const toolName = args[i + 1];
+      if (toolName && !toolName.startsWith("--")) {
+        options.disabledTools = [...(options.disabledTools ?? []), toolName];
+        i++;
+      }
     } else if (args[i] === "--dismiss-keyboard-after-input") {
       options.dismissKeyboardAfterInput = true;
     } else if (args[i] === "--no-ui-perf-mode") {
@@ -1475,7 +1522,10 @@ export function parseDaemonArgs(args: string[], env: NodeJS.ProcessEnv = process
       options.predictiveUi = true;
     } else if (args[i] === "--raw-element-search") {
       options.rawElementSearch = true;
-    } else if (args[i] === "--skip-ctrl-proxy-download" || args[i] === "--skip-accessibility-download") {
+    } else if (
+      args[i] === "--skip-ctrl-proxy-download" ||
+      args[i] === "--skip-accessibility-download"
+    ) {
       options.skipCtrlProxyDownload = true;
     } else if (args[i] === "--mcp-recording") {
       options.mcpRecording = true;
@@ -1510,7 +1560,7 @@ export interface RunDaemonCommandOptions {
  */
 export function daemonBuildIdentityStatusLines(
   status: DaemonStatus,
-  client: BuildIdentity
+  client: BuildIdentity,
 ): string[] {
   const daemon = buildIdentityFromStatus(status);
   const lines = [
@@ -1523,7 +1573,7 @@ export function daemonBuildIdentityStatusLines(
       "\n⚠️  WARNING: the running daemon is a different build than this checkout:",
       `  daemon build=${describeBuildIdentity(daemon)}`,
       `  client build=${describeBuildIdentity(client)}`,
-      "\nRestart the daemon from this checkout (run `--daemon restart` with this same CLI) to align them."
+      "\nRestart the daemon from this checkout (run `--daemon restart` with this same CLI) to align them.",
     );
   }
 
@@ -1533,7 +1583,7 @@ export function daemonBuildIdentityStatusLines(
 export async function runDaemonCommand(
   command: string,
   args: string[],
-  options: RunDaemonCommandOptions = {}
+  options: RunDaemonCommandOptions = {},
 ): Promise<void> {
   const manager = new DaemonManager(options.clientFactory, options.stateProvider);
 
@@ -1558,7 +1608,7 @@ export async function runDaemonCommand(
           console.log(`  Database: ${status.dbPath || "unknown"}`);
           console.log(`  Version: ${status.version || "unknown"}`);
           console.log(
-            `  Started: ${status.startedAt ? new Date(status.startedAt).toISOString() : "unknown"}`
+            `  Started: ${status.startedAt ? new Date(status.startedAt).toISOString() : "unknown"}`,
           );
           for (const line of daemonBuildIdentityStatusLines(status, getCurrentBuildIdentity())) {
             console.log(line);
@@ -1568,13 +1618,13 @@ export async function runDaemonCommand(
           const otherDaemons = manager.findOtherDaemonProcesses(status.pid);
           if (otherDaemons.length > 0) {
             console.log(
-              `\n⚠️  WARNING: Found ${otherDaemons.length} other daemon process(es) from other worktrees:`
+              `\n⚠️  WARNING: Found ${otherDaemons.length} other daemon process(es) from other worktrees:`,
             );
             for (const pid of otherDaemons) {
               console.log(`  - PID ${pid}`);
             }
             console.log(
-              `\nThese can cause device pool conflicts. Run 'bunx ${resolveDaemonInstallSpecifier()} --daemon restart' to stop them.`
+              `\nThese can cause device pool conflicts. Run 'bunx ${resolveDaemonInstallSpecifier()} --daemon restart' to stop them.`,
             );
           }
         } else {
@@ -1622,29 +1672,32 @@ export async function runDaemonCommand(
           stats?: { idle: number; assigned: number; error: number; total: number },
           recoveryPolicy?: { onLoss: boolean; maxAttempts: number },
           devices?: Array<{ deviceId: string; platform: string; recoveryEligibility?: unknown }>,
-        ) => JSON.stringify({
-          availableDevices: stats?.idle ?? 0,
-          totalDevices: stats?.total ?? 0,
-          assignedDevices: stats?.assigned ?? 0,
-          errorDevices: stats?.error ?? 0,
-          ...(recoveryPolicy ? { recoveryPolicy } : {}),
-          ...(devices ? { devices } : {}),
-        });
+        ) =>
+          JSON.stringify({
+            availableDevices: stats?.idle ?? 0,
+            totalDevices: stats?.total ?? 0,
+            assignedDevices: stats?.assigned ?? 0,
+            errorDevices: stats?.error ?? 0,
+            ...(recoveryPolicy ? { recoveryPolicy } : {}),
+            ...(devices ? { devices } : {}),
+          });
 
         // Check if running in daemon process
         const daemonState = manager.getDaemonState();
         if (daemonState.isInitialized()) {
           // Running inside daemon process
           const pool = daemonState.getDevicePool();
-          console.log(formatPoolStats(
-            pool.getStats(),
-            pool.getRecoveryPolicy(),
-            pool.getAllDevices().map(device => ({
-              deviceId: device.id,
-              platform: device.platform,
-              recoveryEligibility: pool.getRecoveryEligibility(device.id),
-            })),
-          ));
+          console.log(
+            formatPoolStats(
+              pool.getStats(),
+              pool.getRecoveryPolicy(),
+              pool.getAllDevices().map((device) => ({
+                deviceId: device.id,
+                platform: device.platform,
+                recoveryEligibility: pool.getRecoveryEligibility(device.id),
+              })),
+            ),
+          );
         } else {
           // Running from CLI - query daemon via socket
           const client = manager.createClient();
@@ -1656,25 +1709,27 @@ export async function runDaemonCommand(
               console.log(formatPoolStats());
             } else {
               const data = JSON.parse(content);
-              console.log(formatPoolStats(
-                data?.poolStatus,
-                data?.poolStatus?.recoveryPolicy,
-                data?.devices?.map((device: {
-                  deviceId: string;
-                  platform: string;
-                  recoveryEligibility?: unknown;
-                }) => ({
-                  deviceId: device.deviceId,
-                  platform: device.platform,
-                  recoveryEligibility: device.recoveryEligibility,
-                })),
-              ));
+              console.log(
+                formatPoolStats(
+                  data?.poolStatus,
+                  data?.poolStatus?.recoveryPolicy,
+                  data?.devices?.map(
+                    (device: {
+                      deviceId: string;
+                      platform: string;
+                      recoveryEligibility?: unknown;
+                    }) => ({
+                      deviceId: device.deviceId,
+                      platform: device.platform,
+                      recoveryEligibility: device.recoveryEligibility,
+                    }),
+                  ),
+                ),
+              );
             }
             await client.close();
           } catch (error) {
-            throw new ActionableError(
-              `Failed to query available devices: ${errorMessage(error)}`
-            );
+            throw new ActionableError(`Failed to query available devices: ${errorMessage(error)}`);
           }
         }
         break;
@@ -1694,14 +1749,16 @@ export async function runDaemonCommand(
           if (!session) {
             throw new ActionableError(`Session not found: ${sessionId}`);
           }
-          console.log(JSON.stringify({
-            sessionId: session.sessionId,
-            assignedDevice: session.assignedDevice,
-            createdAt: session.createdAt,
-            lastUsedAt: session.lastUsedAt,
-            expiresAt: session.expiresAt,
-            cacheSize: JSON.stringify(session.cacheData).length,
-          }));
+          console.log(
+            JSON.stringify({
+              sessionId: session.sessionId,
+              assignedDevice: session.assignedDevice,
+              createdAt: session.createdAt,
+              lastUsedAt: session.lastUsedAt,
+              expiresAt: session.expiresAt,
+              cacheSize: JSON.stringify(session.cacheData).length,
+            }),
+          );
         } else {
           // Running from CLI - query daemon via socket
           const client = manager.createClient();
@@ -1711,9 +1768,7 @@ export async function runDaemonCommand(
             console.log(JSON.stringify(result));
             await client.close();
           } catch (error) {
-            throw new ActionableError(
-              `Failed to get session info: ${errorMessage(error)}`
-            );
+            throw new ActionableError(`Failed to get session info: ${errorMessage(error)}`);
           }
         }
         break;
@@ -1749,9 +1804,7 @@ export async function runDaemonCommand(
             console.log(`Session ${sessionId} released`);
             await client.close();
           } catch (error) {
-            throw new ActionableError(
-              `Failed to release session: ${errorMessage(error)}`
-            );
+            throw new ActionableError(`Failed to release session: ${errorMessage(error)}`);
           }
         }
         break;

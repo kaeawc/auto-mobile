@@ -94,7 +94,7 @@ const segmentedSessions = (() => {
      */
     async stopAndRemove(
       handle: string,
-      session: AndroidSegmentedPlanVideoSession
+      session: AndroidSegmentedPlanVideoSession,
     ): Promise<StoppedSegmentedSession> {
       byHandle.delete(handle);
       const { filePaths, recordingIds } = await session.stop();
@@ -130,7 +130,7 @@ export function setSegmentedSessionTimer(timer: Timer | undefined): void {
 
 /** Test seam: inject start/stop recording functions used by segmented sessions. */
 export function setSegmentedSessionRecordingDependencies(
-  deps: SegmentedSessionRecordingDependencies
+  deps: SegmentedSessionRecordingDependencies,
 ): void {
   segmentedSessions.setRecordingDependencies(deps);
 }
@@ -156,7 +156,7 @@ let deviceDetectorForTesting: ConnectedDeviceDetector | undefined;
 
 /** Test seam: inject the detector used to resolve all-device targets. Pass undefined to reset. */
 export function setVideoRecordingDeviceDetectorForTesting(
-  detector: ConnectedDeviceDetector | undefined
+  detector: ConnectedDeviceDetector | undefined,
 ): void {
   deviceDetectorForTesting = detector;
 }
@@ -197,29 +197,31 @@ const highlightSchema = z.object({
   timing: highlightTimingSchema.optional().describe("Highlight timing"),
 });
 
-const videoRecordingSchema = addDeviceTargetingToSchema(z.object({
-  action: z.enum(["start", "stop"]),
-  platform: platformSchema,
-  deviceId: z.string().optional(),
-  recordingId: z.string().optional().describe("Recording ID"),
-  qualityPreset: z.enum(["low", "medium", "high"]).optional(),
-  targetBitrateKbps: z.number().int().positive().optional().describe("Bitrate Kbps"),
-  maxThroughputMbps: z.number().positive().optional().describe("Max throughput Mbps"),
-  fps: z.number().int().positive().optional().describe("FPS"),
-  resolution: resolutionSchema.optional().describe("Resolution"),
-  format: z.enum(["mp4"]).optional(),
-  // Outer ceiling only; the manager enforces the real per-platform cap (iOS up to
-  // IOS_MAX_DURATION_SECONDS, non-iOS 300s — see resolveMaxDurationSeconds).
-  maxDuration: z
-    .number()
-    .int()
-    .positive()
-    .max(IOS_MAX_DURATION_SECONDS)
-    .optional()
-    .describe("Max duration seconds"),
-  outputName: z.string().optional().describe("Recording label"),
-  highlights: z.array(highlightSchema).optional().describe("Recording highlights"),
-}));
+const videoRecordingSchema = addDeviceTargetingToSchema(
+  z.object({
+    action: z.enum(["start", "stop"]),
+    platform: platformSchema,
+    deviceId: z.string().optional(),
+    recordingId: z.string().optional().describe("Recording ID"),
+    qualityPreset: z.enum(["low", "medium", "high"]).optional(),
+    targetBitrateKbps: z.number().int().positive().optional().describe("Bitrate Kbps"),
+    maxThroughputMbps: z.number().positive().optional().describe("Max throughput Mbps"),
+    fps: z.number().int().positive().optional().describe("FPS"),
+    resolution: resolutionSchema.optional().describe("Resolution"),
+    format: z.enum(["mp4"]).optional(),
+    // Outer ceiling only; the manager enforces the real per-platform cap (iOS up to
+    // IOS_MAX_DURATION_SECONDS, non-iOS 300s — see resolveMaxDurationSeconds).
+    maxDuration: z
+      .number()
+      .int()
+      .positive()
+      .max(IOS_MAX_DURATION_SECONDS)
+      .optional()
+      .describe("Max duration seconds"),
+    outputName: z.string().optional().describe("Recording label"),
+    highlights: z.array(highlightSchema).optional().describe("Recording highlights"),
+  }),
+);
 
 function buildConfigOverrides(args: VideoRecordingArgs): VideoRecordingConfigInput {
   const overrides: VideoRecordingConfigInput = {};
@@ -250,7 +252,7 @@ function shouldTargetAllDevices(args: VideoRecordingArgs): boolean {
 
 async function resolveTargetDevices(
   device: BootedDevice,
-  args: VideoRecordingArgs
+  args: VideoRecordingArgs,
 ): Promise<BootedDevice[]> {
   if (!shouldTargetAllDevices(args)) {
     return [device];
@@ -258,7 +260,7 @@ async function resolveTargetDevices(
 
   const detector = deviceDetectorForTesting ?? DeviceSessionManager.getInstance();
   const devices = await detector.detectConnectedPlatforms();
-  const matching = devices.filter(candidate => candidate.platform === device.platform);
+  const matching = devices.filter((candidate) => candidate.platform === device.platform);
 
   if (matching.length === 0) {
     return [device];
@@ -272,13 +274,11 @@ async function resolveTargetDevices(
 }
 
 function selectLatestRecording(records: VideoRecordingRecord[]): VideoRecordingRecord {
-  return records
-    .slice()
-    .sort((left, right) => {
-      const leftTime = Date.parse(left.startedAt);
-      const rightTime = Date.parse(right.startedAt);
-      return (Number.isNaN(rightTime) ? 0 : rightTime) - (Number.isNaN(leftTime) ? 0 : leftTime);
-    })[0];
+  return records.slice().sort((left, right) => {
+    const leftTime = Date.parse(left.startedAt);
+    const rightTime = Date.parse(right.startedAt);
+    return (Number.isNaN(rightTime) ? 0 : rightTime) - (Number.isNaN(leftTime) ? 0 : leftTime);
+  })[0];
 }
 
 /**
@@ -296,7 +296,7 @@ async function tryStopSegmentedSession(recordingId: string) {
   try {
     const { sessionId, segments, manifestPath } = await segmentedSessions.stopAndRemove(
       recordingId,
-      session
+      session,
     );
     return createJSONToolResponse({
       action: "stop",
@@ -304,7 +304,7 @@ async function tryStopSegmentedSession(recordingId: string) {
       manifestPath,
       // Each segment carries sessionId + segmentIndex, so `recordings[]` has the same shape
       // whether it came from a by-handle or a bare (multi-session) stop.
-      recordings: segments.map(segment => ({ ...segment, sessionId })),
+      recordings: segments.map((segment) => ({ ...segment, sessionId })),
       segmented: true,
     });
   } catch (error) {
@@ -321,7 +321,7 @@ async function stopRecordingById(recordingId: string) {
   const results: Array<Record<string, unknown>> = [];
   const evictedRecordingIds: string[] = [];
   const activeRecords = await listActiveVideoRecordings();
-  const matching = activeRecords.find(record => record.recordingId === recordingId);
+  const matching = activeRecords.find((record) => record.recordingId === recordingId);
 
   try {
     const { metadata, evictedRecordingIds: evicted } = await stopVideoRecording(recordingId);
@@ -356,10 +356,7 @@ async function stopRecordingById(recordingId: string) {
 }
 
 export function registerVideoRecordingTools(): void {
-  const videoRecordingHandler = async (
-    device: BootedDevice,
-    args: VideoRecordingArgs
-  ) => {
+  const videoRecordingHandler = async (device: BootedDevice, args: VideoRecordingArgs) => {
     if (args.action === "start") {
       const targetDevices = await resolveTargetDevices(device, args);
       const maxDurationSeconds = args.maxDuration ?? DEFAULT_MAX_DURATION_SECONDS;
@@ -439,9 +436,10 @@ export function registerVideoRecordingTools(): void {
       }
 
       if (recordings.length === 0) {
-        const message = failures.length > 0
-          ? `Failed to start video recordings: ${failures.map(failure => failure.error).join("; ")}`
-          : "Failed to start video recordings.";
+        const message =
+          failures.length > 0
+            ? `Failed to start video recordings: ${failures.map((failure) => failure.error).join("; ")}`
+            : "Failed to start video recordings.";
         throw new ActionableError(message);
       }
 
@@ -478,7 +476,7 @@ export function registerVideoRecordingTools(): void {
             try {
               const { sessionId, segments, manifestPath } = await segmentedSessions.stopAndRemove(
                 handle,
-                session
+                session,
               );
               if (manifestPath) {
                 manifestPaths.push(manifestPath);
@@ -497,8 +495,8 @@ export function registerVideoRecordingTools(): void {
             } catch (error) {
               logger.warn(
                 `[VideoRecording] Failed to finalize segmented session ${handle} on ` +
-                `device ${target.deviceId}: ${errorMessage(error)}`,
-                error
+                  `device ${target.deviceId}: ${errorMessage(error)}`,
+                error,
               );
               failures.push({
                 deviceId: target.deviceId,
@@ -511,7 +509,7 @@ export function registerVideoRecordingTools(): void {
         }
 
         activeRecords ??= await listActiveVideoRecordings({ platform: device.platform });
-        const matches = activeRecords.filter(record => record.deviceId === target.deviceId);
+        const matches = activeRecords.filter((record) => record.deviceId === target.deviceId);
         if (matches.length === 0) {
           failures.push({
             deviceId: target.deviceId,
@@ -524,7 +522,7 @@ export function registerVideoRecordingTools(): void {
         const latest = selectLatestRecording(matches);
         try {
           const { metadata, evictedRecordingIds: evicted } = await stopVideoRecording(
-            latest.recordingId
+            latest.recordingId,
           );
           const codec = metadata.codec ?? "unknown";
           const durationMs = metadata.durationMs ?? 0;
@@ -554,9 +552,10 @@ export function registerVideoRecordingTools(): void {
       }
 
       if (results.length === 0) {
-        const message = failures.length > 0
-          ? `Failed to stop video recordings: ${failures.map(failure => failure.error).join("; ")}`
-          : "Failed to stop video recordings.";
+        const message =
+          failures.length > 0
+            ? `Failed to stop video recordings: ${failures.map((failure) => failure.error).join("; ")}`
+            : "Failed to stop video recordings.";
         throw new ActionableError(message);
       }
 
@@ -580,10 +579,19 @@ export function registerVideoRecordingTools(): void {
     }
 
     throw new ActionableError(
-      "Video recording start/stop requires a connected device unless recordingId is provided."
+      "Video recording start/stop requires a connected device unless recordingId is provided.",
     );
   };
 
-  ToolRegistry.registerDeviceAware("videoRecording", "Start or stop device video recording.", videoRecordingSchema, videoRecordingHandler, { shouldEnsureDevice: args => !(args.action === "stop" && args.recordingId),
-    nonDeviceHandler: videoRecordingNonDeviceHandler, });
+  ToolRegistry.registerDeviceAware(
+    "videoRecording",
+    "Start or stop device video recording.",
+    videoRecordingSchema,
+    videoRecordingHandler,
+    {
+      defaultEnabled: false,
+      shouldEnsureDevice: (args) => !(args.action === "stop" && args.recordingId),
+      nonDeviceHandler: videoRecordingNonDeviceHandler,
+    },
+  );
 }

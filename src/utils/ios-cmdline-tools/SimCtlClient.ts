@@ -1,11 +1,12 @@
 import { errorMessage } from "../describeUnknownError";
-import { ChildProcess, execFile, spawn, type SpawnOptions } from "child_process";
+import { ChildProcess, execFile, type SpawnOptions } from "child_process";
 import { promisify } from "util";
 import { promises as fsPromises } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { logger } from "../logger";
 import { createExecResult } from "../execResult";
+import { DefaultHostCommandExecutor, type HostProcessExecutor } from "../HostCommandExecutor";
 import { ExecResult, ActionableError, DeviceInfo, BootedDevice, ScreenSize } from "../../models";
 import { defaultTimer, Timer } from "../SystemTimer";
 import { createGlobalPerformanceTracker } from "../PerformanceTracker";
@@ -308,12 +309,19 @@ const execAsync = async (
   return createExecResult(stdout, stderr);
 };
 
+// Route the default long-lived spawn through the shared host-process seam so the
+// client no longer reaches for `child_process.spawn` directly (issue #5459). The
+// executor's `spawn` is a plain passthrough that already defaults `options` to
+// `{}`, so this is behavior-identical; SimCtlClient keeps its own timeout/abort
+// orchestration and the injected `spawnProcess` test seam.
+const hostProcessExecutor: HostProcessExecutor = new DefaultHostCommandExecutor();
+
 function defaultSpawnProcess(
   command: string,
   args: string[],
   options?: SpawnOptions,
 ): ChildProcess {
-  return spawn(command, args, options ?? {});
+  return hostProcessExecutor.spawn(command, args, options);
 }
 
 function splitCommandArgs(command: string): string[] {

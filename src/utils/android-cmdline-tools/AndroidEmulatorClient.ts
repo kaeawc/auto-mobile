@@ -426,7 +426,8 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   // startDevice creates a fresh client per request, so reservations must cover
   // every client in the daemon rather than one client instance.
   private static readonly reservedLaunchDeviceIds = new Map<ChildProcess, string>();
-  private static readonly terminalReservedDeviceIds = new Set<string>();
+  private static readonly terminalReservedDeviceIds = new Map<string, number>();
+  private static terminalReservationGeneration = 0;
   private readonly launchErrors = new WeakMap<ChildProcess, ActionableError>();
   private readonly launchErrorFinalizations = new WeakMap<
     ChildProcess,
@@ -468,6 +469,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   static resetLaunchReservationsForTesting(): void {
     AndroidEmulatorClient.reservedLaunchDeviceIds.clear();
     AndroidEmulatorClient.terminalReservedDeviceIds.clear();
+    AndroidEmulatorClient.terminalReservationGeneration = 0;
   }
 
   /**
@@ -2019,6 +2021,9 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     if (!capture) {
       return undefined;
     }
+    const terminalReservationsAtSnapshot = new Map(
+      AndroidEmulatorClient.terminalReservedDeviceIds,
+    );
     try {
       const adb = this.adbFactory.create(null);
       const devices = await adb.getBootedAndroidDevices({
@@ -2040,7 +2045,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           deviceIds.add(deviceId);
         }
       }
-      this.releaseAbsentTerminalReservations(deviceIds);
+      this.releaseAbsentTerminalReservations(deviceIds, terminalReservationsAtSnapshot);
       return deviceIds;
     } catch (error) {
       if (signal?.aborted) {
@@ -2080,7 +2085,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     return new Set([
       ...(preexistingDeviceIds ?? []),
       ...AndroidEmulatorClient.reservedLaunchDeviceIds.values(),
-      ...AndroidEmulatorClient.terminalReservedDeviceIds,
+      ...AndroidEmulatorClient.terminalReservedDeviceIds.keys(),
     ]);
   }
 
@@ -2156,13 +2161,22 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       AndroidEmulatorClient.reservedLaunchDeviceIds.delete(childProcess);
       // ADB can retain an exited emulator briefly. Keep its port unavailable
       // until a later successful snapshot confirms the serial has disappeared.
-      AndroidEmulatorClient.terminalReservedDeviceIds.add(deviceId);
+      AndroidEmulatorClient.terminalReservedDeviceIds.set(
+        deviceId,
+        ++AndroidEmulatorClient.terminalReservationGeneration,
+      );
     }
   }
 
-  private releaseAbsentTerminalReservations(deviceIds: ReadonlySet<string>): void {
-    for (const deviceId of AndroidEmulatorClient.terminalReservedDeviceIds) {
-      if (!deviceIds.has(deviceId)) {
+  private releaseAbsentTerminalReservations(
+    deviceIds: ReadonlySet<string>,
+    terminalReservationsAtSnapshot: ReadonlyMap<string, number>,
+  ): void {
+    for (const [deviceId, generation] of terminalReservationsAtSnapshot) {
+      if (
+        !deviceIds.has(deviceId) &&
+        AndroidEmulatorClient.terminalReservedDeviceIds.get(deviceId) === generation
+      ) {
         AndroidEmulatorClient.terminalReservedDeviceIds.delete(deviceId);
       }
     }

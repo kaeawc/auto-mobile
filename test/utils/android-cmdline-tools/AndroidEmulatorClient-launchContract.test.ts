@@ -173,6 +173,51 @@ describe("AndroidEmulatorClient launch contract", () => {
     secondChild.emit("exit", 0, null);
   });
 
+  test("does not clear a terminal reservation created during an older snapshot", async () => {
+    const adb = new FakeAdbExecutor();
+    const firstChild = createChild();
+    const secondChild = createChild();
+    const spawnedArgs: string[][] = [];
+    const children = [firstChild, secondChild];
+    let releaseSecondStateScan: (states: []) => void = () => {};
+    const secondStateScan = new Promise<[]>(resolve => {
+      releaseSecondStateScan = resolve;
+    });
+    let stateScans = 0;
+    let secondStateScanStarted = false;
+    adb.getDeviceStates = async () => {
+      stateScans += 1;
+      if (stateScans === 2) {
+        secondStateScanStarted = true;
+        return secondStateScan;
+      }
+      return [];
+    };
+    const createSharedClient = () => createClient((_command, args) => {
+      spawnedArgs.push(args);
+      const child = children.shift()!;
+      queueMicrotask(() => child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")));
+      return child;
+    }, adb);
+    const firstClient = createSharedClient();
+    const secondClient = createSharedClient();
+
+    await firstClient.startEmulator("Pixel 9");
+    const secondLaunch = secondClient.startEmulator("Pixel 9");
+    while (!secondStateScanStarted) {
+      await Promise.resolve();
+    }
+    firstChild.emit("exit", 0, null);
+    releaseSecondStateScan([]);
+    await secondLaunch;
+
+    expect(spawnedArgs).toEqual([
+      expect.arrayContaining(["-port", "5554"]),
+      expect.arrayContaining(["-port", "5556"]),
+    ]);
+    secondChild.emit("exit", 0, null);
+  });
+
   test("does not spawn when launch has already been cancelled", async () => {
     const controller = new AbortController();
     controller.abort();

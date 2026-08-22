@@ -529,7 +529,7 @@ final class AutoMobileVersionTests: XCTestCase {
             subcommand: "restart",
             readinessTimeoutSeconds: 15,
             environment: [:]
-        ), 36)
+        ), 96)
         XCTAssertEqual(DaemonManager.daemonLauncherTimeoutSeconds(
             subcommand: "restart",
             readinessTimeoutSeconds: 15,
@@ -544,7 +544,7 @@ final class AutoMobileVersionTests: XCTestCase {
             subcommand: "start",
             readinessTimeoutSeconds: 15,
             environment: [:]
-        ), 30)
+        ), 90)
     }
 
     func testEnsureDaemonRunningAcceptsDaemonMatchingPinnedClientVersion() {

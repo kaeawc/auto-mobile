@@ -17,6 +17,7 @@ class DaemonSocketPathsFlagWiringTest {
       "automobile.daemon.no.navigation.screenshots",
       "automobile.daemon.no.waitfor.polling.overhead",
       "automobile.daemon.package.version",
+      "automobile.daemon.startup.timeout.ms",
     )
 
   @Before
@@ -51,6 +52,17 @@ class DaemonSocketPathsFlagWiringTest {
       "should not contain --no-waitfor-polling-overhead",
       command.contains("--no-waitfor-polling-overhead"),
     )
+  }
+
+  @Test
+  fun `daemon startup timeout defaults to 30 seconds`() {
+    // CI provides a valid environment override for emulator startup; an invalid
+    // system property takes precedence and exercises this method's fallback.
+    System.setProperty("automobile.daemon.startup.timeout.ms", "not-a-number")
+    SystemPropertyCache.clear()
+
+    assertEquals(30_000L, DaemonSocketPaths.daemonStartTimeoutMs())
+    assertEquals(90_000L, DaemonSocketPaths.daemonLauncherTimeoutMs())
   }
 
   @Test

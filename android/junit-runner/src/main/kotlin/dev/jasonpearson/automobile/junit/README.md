@@ -76,7 +76,7 @@ When using prompt-based testing:
 - `automobile.daemon.no.ui.perf.mode`: When `true`, appends `--no-ui-perf-mode` to the daemon `start` / `restart` command (same as CLI pre-start). Use in CI so a runner-triggered `--daemon restart` does not re-enable UI perf auditing. Can also be set via `AUTOMOBILE_DAEMON_NO_UI_PERF` (`1`, `true`, or `yes`).
 - `automobile.daemon.no.navigation.screenshots`: When `true`, appends `--no-navigation-screenshots` to the daemon command. Disables screenshot capture on navigation events, reducing emulator resource usage in CI. Can also be set via `AUTOMOBILE_DAEMON_NO_NAVIGATION_SCREENSHOTS` (`1`, `true`, or `yes`).
 - `automobile.daemon.no.waitfor.polling.overhead`: When `true`, appends `--no-waitfor-polling-overhead` to the daemon command. Skips screenshots and back stack collection during `observe` `waitFor` polling loops, reducing ADB contention that can cause ctrl-proxy WebSocket instability on resource-constrained CI emulators. Can also be set via `AUTOMOBILE_DAEMON_NO_WAITFOR_POLLING_OVERHEAD` (`1`, `true`, or `yes`).
-- `automobile.daemon.startup.timeout.ms`: Daemon startup timeout in milliseconds (default: 10000). Can also be set via `AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS` environment variable.
+- `automobile.daemon.startup.timeout.ms`: Daemon startup timeout in milliseconds (default: 30000). Can also be set via `AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS` environment variable.
 - `automobile.junit.shuffle.enabled`: Randomize test execution order (default: true)
 - `automobile.junit.shuffle.seed`: Seed for randomized order (default: current time)
 - `automobile.junit.timing.enabled`: Fetch historical timing data from the daemon (default: true)

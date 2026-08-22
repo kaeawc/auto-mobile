@@ -1067,8 +1067,7 @@ jobs:
         shell: bash
         continue-on-error: true
         env:
-          # The default 10s daemon budget is lower than cold hosted macOS
-          # startup variance. Keep this aligned with ensure-daemon-ready.sh.
+          # Pin the installer benchmark to the standard 30s daemon startup budget.
           AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS: "30000"
           AUTOMOBILE_STARTUP_BENCHMARK: "1"
           AUTOMOBILE_STARTUP_BENCHMARK_OUTPUT: "${{ github.workspace }}/ci-logs/installer-daemon-startup.json"
@@ -1775,13 +1774,12 @@ jobs:
     # then kill+respawn) a runner still coming up, and let an `observe` request wait
     # (150s > 120s) for that cold start instead of aborting at the 30s default (#2834).
     #
-    # The daemon's own readiness budget (DAEMON_STARTUP_TIMEOUT_MS, default 10s) must
+    # The daemon's own readiness budget (DAEMON_STARTUP_TIMEOUT_MS, default 30s) must
     # cover the entire serial bring-up: Bun cold start + from-scratch migrations +
-    # `initializeDevicePoolWithTimeout(5s)` + `initializeIosServices(5s)`. On a cold
-    # macOS runner the two 5s device probes alone can exhaust 10s before Bun start and
-    # migrations are even counted, hard-failing the Swift tests' daemon start. Raise it
-    # to 60s here, consistent with the sibling budgets above (#3110). The env var name
-    # must match src/daemon/constants.ts exactly — a typo silently falls back to 10000.
+    # `initializeDevicePoolWithTimeout(5s)` + `initializeIosServices(5s)`. The default
+    # covers normal cold startup; this Xcode lane can add two serial iOS readiness probes,
+    # so keep its explicit 60s budget. The env var name must match
+    # src/daemon/constants.ts exactly — a typo silently falls back to 30000.
     env:
       AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS: "240"
       AUTOMOBILE_OBSERVE_MCP_TIMEOUT_MS: "150000"

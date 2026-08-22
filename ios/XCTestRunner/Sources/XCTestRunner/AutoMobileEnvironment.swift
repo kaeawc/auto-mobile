@@ -494,10 +494,10 @@ public enum DaemonManager {
     ) -> TimeInterval {
         let configuredStartupMilliseconds = Int(environment["AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS"] ?? "")
             ?? Int(environment["AUTO_MOBILE_DAEMON_STARTUP_TIMEOUT_MS"] ?? "")
-            ?? 10_000
+            ?? 30_000
         let startupSeconds = configuredStartupMilliseconds > 0
             ? TimeInterval(configuredStartupMilliseconds) / 1000
-            : 10
+            : 30
         // DaemonManager can wait for a lock holder, then make two startup attempts while
         // recovering an incomplete package extraction, each with the configured startup budget.
         let startupLifecycleSeconds = 3 * startupSeconds

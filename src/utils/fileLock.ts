@@ -66,6 +66,13 @@ export interface ExclusiveLockOptions {
    * from `IdGenerator`; a future caller must uphold the same shape.
    */
   ownerToken?: string;
+
+  /**
+   * Optional single-line metadata written on line 3 of the lock file. It is
+   * opaque to this primitive; callers that need to preserve arbitrary data must
+   * encode it before passing it here.
+   */
+  metadata?: string;
 }
 
 /**
@@ -84,25 +91,39 @@ export interface LockContent {
   pid: number;
   /** Per-process-instance token (line 2), or `undefined` when absent. */
   token: string | undefined;
+  /** Optional caller-defined metadata (line 3). */
+  metadata?: string;
 }
 
 /**
  * Serialize a lock file body. PID on line 1 (bare integer, always), token on an
- * optional line 2. Inverse of {@link parseLockContent}. Centralizes the positional
- * format so a future field can't silently move the PID off line 1 (#3006).
+ * optional line 2, and opaque metadata on an optional line 3. Inverse of
+ * {@link parseLockContent}. Centralizes the positional format so a future field
+ * can't silently move the PID off line 1 (#3006).
  */
-export function formatLockContent(pid: number, ownerToken?: string): string {
-  return ownerToken === undefined ? String(pid) : `${pid}\n${ownerToken}`;
+export function formatLockContent(pid: number, ownerToken?: string, metadata?: string): string {
+  if (metadata === undefined) {
+    return ownerToken === undefined ? String(pid) : `${pid}\n${ownerToken}`;
+  }
+  return `${pid}\n${ownerToken ?? ""}\n${metadata}`;
 }
 
 /**
  * Parse a lock file body (already `trim()`-ed by the caller) into its PID and
- * optional token. Line 1 is parsed as an integer PID (`NaN` when unreadable); line
- * 2, if present, is the token. Inverse of {@link formatLockContent} (#3006).
+ * optional token and metadata. Line 1 is parsed as an integer PID (`NaN` when
+ * unreadable); line 2, if present, is the token; line 3 is caller-defined
+ * metadata. Inverse of {@link formatLockContent} (#3006).
  */
 export function parseLockContent(content: string): LockContent {
-  const [pidLine, tokenLine] = content.split("\n", 2);
-  return { pid: Number.parseInt(pidLine, 10), token: tokenLine };
+  const [pidLine, tokenLine, metadataLine] = content.split("\n", 3);
+  const parsed: LockContent = {
+    pid: Number.parseInt(pidLine, 10),
+    token: tokenLine || undefined,
+  };
+  if (metadataLine) {
+    parsed.metadata = metadataLine;
+  }
+  return parsed;
 }
 
 /**
@@ -117,8 +138,9 @@ export function tryAcquireExclusiveLock(
   const isProcessRunning = options.isProcessRunning ?? defaultIsProcessRunning;
   const reclaimOwnPid = options.reclaimOwnPid ?? false;
   const ownerToken = options.ownerToken;
+  const metadata = options.metadata;
 
-  if (writeExclusiveLockFile(lockFilePath, pid, ownerToken)) {
+  if (writeExclusiveLockFile(lockFilePath, pid, ownerToken, metadata)) {
     return true;
   }
 
@@ -191,7 +213,7 @@ export function tryAcquireExclusiveLock(
   } catch {
     // Best-effort: the consumed stale marker is ours to remove.
   }
-  return writeExclusiveLockFile(lockFilePath, pid, ownerToken);
+  return writeExclusiveLockFile(lockFilePath, pid, ownerToken, metadata);
 }
 
 /**
@@ -249,11 +271,16 @@ export function releaseExclusiveLock(
  * this process instance's live lock from a recycled-PID leak (#2947); the PID
  * stays on the first line so `parseInt`-based readers are unaffected.
  */
-function writeExclusiveLockFile(lockFilePath: string, pid: number, ownerToken?: string): boolean {
+function writeExclusiveLockFile(
+  lockFilePath: string,
+  pid: number,
+  ownerToken?: string,
+  metadata?: string
+): boolean {
   try {
     mkdirSync(dirname(lockFilePath), { recursive: true });
     const fd = openSync(lockFilePath, "wx", 0o600);
-    writeFileSync(fd, formatLockContent(pid, ownerToken));
+    writeFileSync(fd, formatLockContent(pid, ownerToken, metadata));
     closeSync(fd);
     return true;
   } catch (error) {

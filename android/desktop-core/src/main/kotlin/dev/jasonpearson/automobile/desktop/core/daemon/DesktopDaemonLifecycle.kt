@@ -199,14 +199,14 @@ internal object SystemDaemonCommandExecutor : DaemonCommandExecutor {
     startupTimeoutOverride: String? =
       System.getenv("AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS")
         ?: System.getenv("AUTO_MOBILE_DAEMON_STARTUP_TIMEOUT_MS")
-  ): Long =
-    maxOf(
-      DEFAULT_COMMAND_TIMEOUT_MILLIS,
-      startupTimeoutOverride
-        ?.toLongOrNull()
-        ?.takeIf { it > 0 }
-        ?.plus(TERMINATION_TIMEOUT_SECONDS * 1_000) ?: DEFAULT_COMMAND_TIMEOUT_MILLIS,
-    )
+  ): Long {
+    val startupTimeoutMillis =
+      startupTimeoutOverride?.toLongOrNull()?.takeIf { it > 0 }
+        ?: DEFAULT_DAEMON_STARTUP_TIMEOUT_MILLIS
+    return (startupTimeoutMillis.coerceAtMost(
+      (Long.MAX_VALUE - TERMINATION_TIMEOUT_MILLIS) / DAEMON_STARTUP_LIFECYCLE_BUDGETS
+    ) * DAEMON_STARTUP_LIFECYCLE_BUDGETS) + TERMINATION_TIMEOUT_MILLIS
+  }
 
   private fun drainOutput(
     process: Process,
@@ -221,8 +221,10 @@ internal object SystemDaemonCommandExecutor : DaemonCommandExecutor {
     return output.toString()
   }
 
-  private const val DEFAULT_COMMAND_TIMEOUT_MILLIS = 60_000L
+  private const val DEFAULT_DAEMON_STARTUP_TIMEOUT_MILLIS = 30_000L
+  private const val DAEMON_STARTUP_LIFECYCLE_BUDGETS = 3L
   private const val TERMINATION_TIMEOUT_SECONDS = 5L
+  private const val TERMINATION_TIMEOUT_MILLIS = TERMINATION_TIMEOUT_SECONDS * 1_000
   private const val TIMEOUT_EXIT_CODE = -1
   private const val CANCELLED_EXIT_CODE = -2
 }

@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { defaultAdbClientFactory, type AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { BootedDevice } from "../../models";
@@ -152,7 +153,7 @@ export class NotificationPolicy {
         ...(policyAccess.error ? { error: policyAccess.error } : {}),
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorMessage(error);
       return {
         success: false,
         appId,

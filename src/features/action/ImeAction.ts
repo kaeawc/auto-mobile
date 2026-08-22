@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import { BootedDevice, ImeAction as ImeActionType, ImeActionResult, ObserveResult } from "../../models";
@@ -59,11 +60,11 @@ export class ImeAction extends BaseVisualChange {
           }
         } catch (error) {
           perf.end();
-          const errorMessage = error instanceof Error ? error.message : String(error);
+          const errorMsg = errorMessage(error);
           return {
             success: false,
             action,
-            error: `Failed to execute IME action: ${errorMessage}`
+            error: `Failed to execute IME action: ${errorMsg}`
           };
         }
       },
@@ -149,11 +150,11 @@ export class ImeAction extends BaseVisualChange {
 
       return { success: true, action };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMsg = errorMessage(error);
       return {
         success: false,
         action,
-        error: `ADB key event failed: ${errorMessage}`
+        error: `ADB key event failed: ${errorMsg}`
       };
     }
   }

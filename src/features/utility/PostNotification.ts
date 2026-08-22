@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BootedDevice, PostNotificationResult } from "../../models";
@@ -87,7 +88,7 @@ export class PostNotification {
       return {
         success: false,
         supported: false,
-        error: `Failed to post notification: ${error instanceof Error ? error.message : String(error)}`
+        error: `Failed to post notification: ${errorMessage(error)}`
       };
     } finally {
       perf.end();
@@ -205,7 +206,7 @@ export class PostNotification {
       return {
         success: false,
         supported: false,
-        error: `Failed to post notification: ${error instanceof Error ? error.message : String(error)}`
+        error: `Failed to post notification: ${errorMessage(error)}`
       };
     }
   }
@@ -284,7 +285,7 @@ export class PostNotification {
         imageType,
         appId,
         channelId: options.channelId,
-        error: `SDK notification broadcast failed: ${error instanceof Error ? error.message : String(error)}`
+        error: `SDK notification broadcast failed: ${errorMessage(error)}`
       };
     }
   }
@@ -384,7 +385,7 @@ export class PostNotification {
     } catch (error) {
       return {
         success: false,
-        error: `Failed to push image to device: ${error instanceof Error ? error.message : String(error)}`
+        error: `Failed to push image to device: ${errorMessage(error)}`
       };
     }
   }

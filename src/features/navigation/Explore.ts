@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { ActionableError, BootedDevice, Element, isTruthy, ObserveResult } from "../../models";
 import { BaseVisualChange, ProgressCallback } from "../action/BaseVisualChange";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
@@ -801,7 +802,7 @@ export class Explore extends BaseVisualChange {
       await this.timer.sleep(1000);
     } catch (error) {
       logger.warn(`[Explore] Failed to navigate back: ${error}`);
-      this.stopReason = `Back-navigation recovery failed: ${error instanceof Error ? error.message : String(error)}`;
+      this.stopReason = `Back-navigation recovery failed: ${errorMessage(error)}`;
     }
   }
 
@@ -842,7 +843,7 @@ export class Explore extends BaseVisualChange {
       this.consecutiveBackCount = 0;
     } catch (error) {
       logger.warn(`[Explore] Failed to reset to home: ${error}`);
-      this.stopReason = `Home-screen recovery failed: ${error instanceof Error ? error.message : String(error)}`;
+      this.stopReason = `Home-screen recovery failed: ${errorMessage(error)}`;
     }
   }
 

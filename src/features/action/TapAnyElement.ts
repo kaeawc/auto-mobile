@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import {
   ActionableError,
@@ -363,11 +364,11 @@ export class TapAnyElement extends BaseVisualChange {
       return result;
     } catch (error) {
       perf.end();
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMsg = errorMessage(error);
       return {
         success: false,
         action: options.action,
-        error: `Failed to tap clickable element: ${errorMessage}`,
+        error: `Failed to tap clickable element: ${errorMsg}`,
         element: {
           bounds: { left: 0, top: 0, right: 0, bottom: 0 }
         } as Element

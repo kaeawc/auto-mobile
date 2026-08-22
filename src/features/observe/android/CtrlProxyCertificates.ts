@@ -5,6 +5,7 @@
  * device owner status queries, and permission requests.
  */
 
+import { errorMessage } from "../../../utils/describeUnknownError";
 import WebSocket from "ws";
 import fs from "fs/promises";
 import path from "node:path";
@@ -229,7 +230,7 @@ export class CtrlProxyCertificates {
         success: false,
         action: "install",
         totalTimeMs: this.context.timer.now() - startTime,
-        error: error instanceof Error ? error.message : String(error)
+        error: errorMessage(error)
       };
     }
   }

@@ -1,3 +1,4 @@
+import { errorMessage } from "../describeUnknownError";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { ActionableError, type ExecResult } from "../../models";
@@ -48,7 +49,7 @@ const defaultExecutor: CodesignExecutor = {
 const isUnsignedBundle = (error: unknown): boolean => {
   const childError = error as { stderr?: unknown };
   const message = [
-    error instanceof Error ? error.message : String(error),
+    errorMessage(error),
     typeof childError.stderr === "string" ? childError.stderr : "",
   ].join("\n");
   const normalized = message.toLowerCase();

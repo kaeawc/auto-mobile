@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import type { BootedDevice } from "../../models";
 import type { TalkBackResult } from "../../models/AccessibilityResult";
@@ -70,7 +71,7 @@ export class TalkBackToggle {
         await this.disableTalkBack();
       }
     } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
+      const reason = errorMessage(error);
       logger.warn(`[TalkBackToggle] Failed to ${enabled ? "enable" : "disable"} TalkBack: ${reason}`);
       return {
         supported: true,

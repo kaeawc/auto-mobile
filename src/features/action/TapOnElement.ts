@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import {
   ActionableError,
@@ -1294,11 +1295,11 @@ export class TapOnElement extends BaseVisualChange {
       );
 
       // Return error result with debug info instead of throwing
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMsg = errorMessage(error);
       return {
         success: false,
         action: options.action,
-        error: `Failed to perform tap on element: ${errorMessage}`,
+        error: `Failed to perform tap on element: ${errorMsg}`,
         element: {
           bounds: { left: 0, top: 0, right: 0, bottom: 0 }
         } as Element,

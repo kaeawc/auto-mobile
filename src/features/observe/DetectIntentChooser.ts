@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { DeepLinkManager } from "../../utils/DeepLinkManager";
 import { BootedDevice, IntentChooserResult, ObserveResult } from "../../models";
@@ -43,7 +44,7 @@ export class DetectIntentChooser extends BaseVisualChange {
           return {
             success: false,
             detected: false,
-            error: error instanceof Error ? error.message : String(error)
+            error: errorMessage(error)
           };
         }
       },

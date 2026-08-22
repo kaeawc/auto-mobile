@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/describeUnknownError";
 /**
  If thrown, the MCP server will catch it and send the message to the client.
  */
@@ -18,6 +19,6 @@ export function toActionableError(error: unknown, context: string): ActionableEr
   if (error instanceof ActionableError) {
     return error;
   }
-  const message = error instanceof Error ? error.message : String(error);
+  const message = errorMessage(error);
   return new ActionableError(`${context}: ${message}`, { cause: error });
 }

@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/describeUnknownError";
 import {
   DaemonClient,
   DaemonUnavailableError,
@@ -1098,7 +1099,7 @@ export class DaemonMcpProxy {
       }
 
       logger.warn(
-        `[DaemonMcpProxy] Daemon session is stale, reconnecting and retrying once: ${error instanceof Error ? error.message : String(error)}`,
+        `[DaemonMcpProxy] Daemon session is stale, reconnecting and retrying once: ${errorMessage(error)}`,
       );
       await this.resetConnection();
       this.throwIfBoundSessionFenced();
@@ -1134,12 +1135,12 @@ export class DaemonMcpProxy {
   }
 
   private isDaemonSessionNotFoundError(error: unknown): boolean {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorMessage(error);
     return message.includes("Session not found");
   }
 
   private isUnknownToolError(error: unknown): boolean {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorMessage(error);
     return message.includes("Unknown tool:");
   }
 

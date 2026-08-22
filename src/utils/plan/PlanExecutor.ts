@@ -1,3 +1,4 @@
+import { errorMessage } from "../describeUnknownError";
 import {
   Plan,
   PlanStep,
@@ -41,6 +42,7 @@ interface StepExecutionContext {
   sessionUuid?: string;
   signal?: AbortSignal;
   captureObserveSteps?: NonNullable<PlanExecutionOptions["captureObserveSteps"]>;
+  sessionToolProfileService?: PlanExecutionOptions["sessionToolProfileService"];
   logPrefix: string;
   debugLog?: boolean;
 }
@@ -174,7 +176,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
       return null;
     }
     return {
-      awaitDuration: typeof payload.awaitDuration === "number" ? payload.awaitDuration : undefined,
+      awaitDuration: typeof payload.awaitDuration === "number" ? payload.awaitDuration : undefined
     };
   }
 
@@ -185,7 +187,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
   private mergeToolDiagnosticsIntoStepDetails(
     toolName: string,
     toolResult: unknown,
-    details: Record<string, unknown>,
+    details: Record<string, unknown>
   ): void {
     if (toolName !== "tapOn" || toolResult === null || typeof toolResult !== "object") {
       return;
@@ -209,7 +211,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
     error: string,
   ): void {
     logger.warn(
-      `[PLAN_STEP_${stepNumber}] optional step ${step.tool} failed; skipping and continuing: ${error}`,
+      `[PLAN_STEP_${stepNumber}] optional step ${step.tool} failed; skipping and continuing: ${error}`
     );
     debugSteps.push({
       step: `Execute step ${stepNumber}: ${step.tool}`,
@@ -259,9 +261,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
           }, DefaultPlanExecutor.FAILURE_OBSERVATION_TIMEOUT_MS);
         }),
       ]);
-      if (timeoutHandle) {
-        clearTimeout(timeoutHandle);
-      }
+      if (timeoutHandle) {clearTimeout(timeoutHandle);}
 
       const raw = this.parseStructuredToolPayload(response);
       if (!raw) {
@@ -271,14 +271,14 @@ export class DefaultPlanExecutor implements PlanExecutor {
     } catch (error) {
       return {
         capturedAtMs: Date.now(),
-        observeError: error instanceof Error ? error.message : String(error),
+        observeError: errorMessage(error)
       };
     }
   }
 
   private buildObserveStepCaptureFromResponse(
     toolResponse: unknown,
-    mode: NonNullable<PlanExecutionOptions["captureObserveSteps"]>,
+    mode: NonNullable<PlanExecutionOptions["captureObserveSteps"]>
   ): FailureObservationSummary | undefined {
     const raw = this.parseStructuredToolPayload(toolResponse);
     if (!raw) {
@@ -306,7 +306,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
         }
         return {
           capturedAtMs: Date.now(),
-          observeError: "Could not parse observe tool response",
+          observeError: "Could not parse observe tool response"
         };
       }
       if (!platform) {
@@ -316,7 +316,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
     } catch (error) {
       return {
         capturedAtMs: Date.now(),
-        observeError: error instanceof Error ? error.message : String(error),
+        observeError: errorMessage(error)
       };
     }
   }
@@ -408,21 +408,16 @@ export class DefaultPlanExecutor implements PlanExecutor {
         logger.info(`${context.logPrefix} Calling ${step.tool} with params: ${paramsPreview}`);
       }
 
-      const response = await ToolRegistry.callInternal(
-        tool,
-        parsedParams,
-        undefined,
-        context.signal,
-        {
-          forPlan: true,
-          sessionUuid: context.sessionUuid,
-        },
-      );
+      const response = await ToolRegistry.callInternal(tool, parsedParams, undefined, context.signal, {
+        forPlan: true,
+        sessionUuid: context.sessionUuid,
+        sessionToolProfileService: context.sessionToolProfileService,
+      });
       throwIfAborted(context.signal);
 
       const toolResult = this.extractToolResult(response);
       logger.info(
-        `${context.logPrefix} ${step.tool} completed. Response success: ${toolResult?.success !== false ? "true" : "FALSE"}`,
+        `${context.logPrefix} ${step.tool} completed. Response success: ${toolResult?.success !== false ? "true" : "FALSE"}`
       );
 
       const checkResult = toolResult ?? response;
@@ -432,8 +427,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
         "success" in checkResult &&
         checkResult.success === false
       ) {
-        const error =
-          "error" in checkResult ? formatToolError(checkResult.error) : "Tool execution failed";
+        const error = "error" in checkResult ? formatToolError(checkResult.error) : "Tool execution failed";
         if (step.optional) {
           return {
             status: "skipped",
@@ -459,7 +453,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
           ...(toolResult && typeof toolResult === "object" && "debug" in toolResult
             ? { toolDebug: toolResult.debug }
             : {}),
-          ...(failureObservation ? { failureObservation } : {}),
+          ...(failureObservation ? { failureObservation } : {})
         };
         this.mergeToolDiagnosticsIntoStepDetails(step.tool, toolResult, details);
         return {
@@ -470,8 +464,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
         };
       }
 
-      const observeTimedOut =
-        step.tool === "observe" ? this.observeWaitForTimedOut(response) : null;
+      const observeTimedOut = step.tool === "observe" ? this.observeWaitForTimedOut(response) : null;
       if (observeTimedOut) {
         const error = `observe waitFor timed out after ${observeTimedOut.awaitDuration ?? "unknown"}ms`;
         if (step.optional) {
@@ -501,7 +494,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
       if (step.tool === "observe" && context.captureObserveSteps) {
         const stepObservation = this.buildObserveStepCaptureFromResponse(
           response,
-          context.captureObserveSteps,
+          context.captureObserveSteps
         );
         if (stepObservation) {
           details.stepObservation = stepObservation;
@@ -517,18 +510,15 @@ export class DefaultPlanExecutor implements PlanExecutor {
       if (isDeviceLostError(error)) {
         throw error;
       }
-      const errorMessage = `${error}`;
+      const errorMsg = `${error}`;
       if (step.optional && !context.signal?.aborted && !(error instanceof ZodError)) {
-        this.logger.warn(
-          `${context.logPrefix} optional step ${step.tool} threw; returning skipped status`,
-          error,
-        );
+        this.logger.warn(`${context.logPrefix} optional step ${step.tool} threw; returning skipped status`, error);
         return {
           status: "skipped",
-          error: errorMessage,
+          error: errorMsg,
           details: {
             params: step.params,
-            error: errorMessage,
+            error: errorMsg,
             optional: true,
           },
         };
@@ -537,23 +527,20 @@ export class DefaultPlanExecutor implements PlanExecutor {
       const failureObservation = context.signal?.aborted
         ? undefined
         : await this.buildFailureObservationContext(
-            step.tool,
-            undefined,
-            context.platform,
-            context.deviceId,
-            context.sessionUuid,
-          );
-      this.logger.warn(
-        `${context.logPrefix} step ${step.tool} threw; returning failed status`,
-        error,
-      );
+          step.tool,
+          undefined,
+          context.platform,
+          context.deviceId,
+          context.sessionUuid,
+        );
+      this.logger.warn(`${context.logPrefix} step ${step.tool} threw; returning failed status`, error);
       return {
         status: "failed",
-        error: errorMessage,
+        error: errorMsg,
         details: {
           params: step.params,
-          error: errorMessage,
-          ...(failureObservation ? { failureObservation } : {}),
+          error: errorMsg,
+          ...(failureObservation ? { failureObservation } : {})
         },
         failureObservation,
       };
@@ -579,7 +566,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
     sessionUuid?: string,
     signal?: AbortSignal,
     abortStrategy: AbortStrategy = DEFAULT_ABORT_STRATEGY,
-    executionOptions?: PlanExecutionOptions,
+    executionOptions?: PlanExecutionOptions
   ): Promise<PlanExecutionResult> {
     // Check if this is a multi-device plan
     const partitionedPlan = PlanPartitioner.partition(plan);
@@ -587,7 +574,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
     if (partitionedPlan) {
       if (executionOptions?.captureObserveSteps) {
         logger.warn(
-          "[PlanExecutor] captureObserveSteps is ignored for multi-device plans (parallel tracks do not emit unified debug steps)",
+          "[PlanExecutor] captureObserveSteps is ignored for multi-device plans (parallel tracks do not emit unified debug steps)"
         );
       }
       // Multi-device parallel execution
@@ -600,7 +587,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
         sessionUuid,
         signal,
         abortStrategy,
-        executionOptions,
+        executionOptions
       );
     } else {
       // Single-device sequential execution
@@ -611,7 +598,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
         deviceId,
         sessionUuid,
         signal,
-        executionOptions,
+        executionOptions
       );
     }
   }
@@ -626,7 +613,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
     deviceId?: string,
     sessionUuid?: string,
     signal?: AbortSignal,
-    executionOptions?: PlanExecutionOptions,
+    executionOptions?: PlanExecutionOptions
   ): Promise<PlanExecutionResult> {
     let executedSteps = 0;
     const debugMode = isDebugModeEnabled();
@@ -639,9 +626,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
       if (startStep < 0) {
         startStep = 0;
       } else if (plan.steps.length > 0 && startStep >= plan.steps.length) {
-        throw new ActionableError(
-          `Start step index ${startStep} is out of bounds. Plan has ${plan.steps.length} steps (valid range: 0-${plan.steps.length - 1})`,
-        );
+        throw new ActionableError(`Start step index ${startStep} is out of bounds. Plan has ${plan.steps.length} steps (valid range: 0-${plan.steps.length - 1})`);
       }
 
       // Handle empty plans
@@ -650,7 +635,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
         return {
           success: true,
           executedSteps: 0,
-          totalSteps: 0,
+          totalSteps: 0
         };
       }
 
@@ -666,11 +651,8 @@ export class DefaultPlanExecutor implements PlanExecutor {
         }
         const step = plan.steps[i];
         const stepStartTime = debugMode ? this.timer.now() : 0;
-        const stepLabel =
-          step.label || step.params?.label || JSON.stringify(step.params).substring(0, 50);
-        logger.info(
-          `[PLAN_STEP_${i + 1}/${plan.steps.length}] Tool: ${step.tool}, Label: ${stepLabel}`,
-        );
+        const stepLabel = step.label || step.params?.label || JSON.stringify(step.params).substring(0, 50);
+        logger.info(`[PLAN_STEP_${i + 1}/${plan.steps.length}] Tool: ${step.tool}, Label: ${stepLabel}`);
 
         const stepResult = await this.executeStep(step, {
           platform,
@@ -678,6 +660,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
           sessionUuid,
           signal,
           captureObserveSteps: executionOptions?.captureObserveSteps,
+          sessionToolProfileService: executionOptions?.sessionToolProfileService,
           logPrefix: `[PLAN_STEP_${i + 1}]`,
         });
 
@@ -709,14 +692,12 @@ export class DefaultPlanExecutor implements PlanExecutor {
               stepIndex: i,
               tool: step.tool,
               error: stepResult.error ?? "Unknown error",
-              ...(stepResult.failureObservation
-                ? { failureObservation: stepResult.failureObservation }
-                : {}),
+              ...(stepResult.failureObservation ? { failureObservation: stepResult.failureObservation } : {})
             },
             debug: {
               executionTimeMs: this.timer.now() - startTime,
-              steps: debugSteps,
-            },
+              steps: debugSteps
+            }
           };
         }
 
@@ -728,23 +709,20 @@ export class DefaultPlanExecutor implements PlanExecutor {
         });
 
         executedSteps++;
-        logger.info(
-          `[PLAN_STEP_${i + 1}] Successfully completed. Total executed: ${executedSteps}/${plan.steps.length}`,
-        );
+        logger.info(`[PLAN_STEP_${i + 1}] Successfully completed. Total executed: ${executedSteps}/${plan.steps.length}`);
       }
 
-      logger.info(
-        `Plan execution completed successfully: ${executedSteps}/${plan.steps.length} steps`,
-      );
+      logger.info(`Plan execution completed successfully: ${executedSteps}/${plan.steps.length} steps`);
       return {
         success: true,
         executedSteps,
         totalSteps: plan.steps.length,
         debug: {
           executionTimeMs: this.timer.now() - startTime,
-          steps: debugSteps,
-        },
+          steps: debugSteps
+        }
       };
+
     } catch (error) {
       if (isDeviceLostError(error)) {
         throw error;
@@ -756,8 +734,8 @@ export class DefaultPlanExecutor implements PlanExecutor {
         status: "failed",
         durationMs: this.timer.now() - startTime,
         details: {
-          error: `${error}`,
-        },
+          error: `${error}`
+        }
       });
 
       return {
@@ -767,12 +745,12 @@ export class DefaultPlanExecutor implements PlanExecutor {
         failedStep: {
           stepIndex: -1,
           tool: "unknown",
-          error: `${error}`,
+          error: `${error}`
         },
         debug: {
           executionTimeMs: this.timer.now() - startTime,
-          steps: debugSteps,
-        },
+          steps: debugSteps
+        }
       };
     }
   }
@@ -794,7 +772,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
     const debugMode = isDebugModeEnabled();
 
     logger.info(
-      `[PARALLEL_EXEC] Starting parallel execution for ${partitionedPlan.devices.length} devices`,
+      `[PARALLEL_EXEC] Starting parallel execution for ${partitionedPlan.devices.length} devices`
     );
 
     // Create an abort controller for internal cancellation
@@ -816,11 +794,13 @@ export class DefaultPlanExecutor implements PlanExecutor {
       | undefined;
 
     // Execute each device track in parallel
-    const devicePromises = partitionedPlan.devices.map(async (device) => {
+    const devicePromises = partitionedPlan.devices.map(async device => {
       const deviceStartTime = debugMode ? this.timer.now() : 0;
       const track = partitionedPlan.deviceTracks.get(device)!;
 
-      logger.info(`[PARALLEL_EXEC][${device}] Starting device track with ${track.length} steps`);
+      logger.info(
+        `[PARALLEL_EXEC][${device}] Starting device track with ${track.length} steps`
+      );
 
       try {
         const result = await this.executeDeviceTrack(
@@ -843,12 +823,12 @@ export class DefaultPlanExecutor implements PlanExecutor {
           executionTimeMs: debugMode ? this.timer.now() - deviceStartTime : undefined,
           failedStep: result.failedStep
             ? {
-                stepIndex: result.failedStep.stepIndex,
-                trackIndex: result.failedStep.trackIndex,
-                tool: result.failedStep.tool,
-                error: result.failedStep.error,
-                failureObservation: result.failedStep.failureObservation,
-              }
+              stepIndex: result.failedStep.stepIndex,
+              trackIndex: result.failedStep.trackIndex,
+              tool: result.failedStep.tool,
+              error: result.failedStep.error,
+              failureObservation: result.failedStep.failureObservation,
+            }
             : undefined,
         };
 
@@ -856,7 +836,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
 
         if (!result.success) {
           logger.error(
-            `[PARALLEL_EXEC][${device}] Device track failed at step ${result.failedStep?.stepIndex}`,
+            `[PARALLEL_EXEC][${device}] Device track failed at step ${result.failedStep?.stepIndex}`
           );
 
           // Record first failure
@@ -873,7 +853,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
           // Trigger abort based on strategy
           if (abortStrategy === "immediate") {
             logger.info(
-              `[PARALLEL_EXEC] Aborting all devices immediately due to failure on ${device}`,
+              `[PARALLEL_EXEC] Aborting all devices immediately due to failure on ${device}`
             );
             internalAbortController.abort();
           }
@@ -885,8 +865,8 @@ export class DefaultPlanExecutor implements PlanExecutor {
         if (isDeviceLostError(error)) {
           throw error;
         }
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        logger.error(`[PARALLEL_EXEC][${device}] Unexpected error: ${errorMessage}`);
+        const errorMsg = errorMessage(error);
+        logger.error(`[PARALLEL_EXEC][${device}] Unexpected error: ${errorMsg}`);
 
         const deviceResult: DeviceExecutionResult = {
           device,
@@ -898,7 +878,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
             stepIndex: -1,
             trackIndex: -1,
             tool: "unknown",
-            error: errorMessage,
+            error: errorMsg,
           },
         };
 
@@ -909,7 +889,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
             device,
             stepIndex: -1,
             tool: "unknown",
-            error: errorMessage,
+            error: errorMsg,
           };
         }
 
@@ -925,7 +905,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
             stepIndex: -1,
             trackIndex: -1,
             tool: "unknown",
-            error: errorMessage,
+            error: errorMsg,
           },
           skippedSteps: [],
         };
@@ -938,10 +918,10 @@ export class DefaultPlanExecutor implements PlanExecutor {
     // Calculate total executed steps across all devices
     const totalExecutedSteps = results.reduce((sum, r) => sum + r.executedSteps, 0);
     const totalSteps = results.reduce((sum, r) => sum + r.totalSteps, 0);
-    const allSucceeded = results.every((r) => r.success);
+    const allSucceeded = results.every(r => r.success);
 
     logger.info(
-      `[PARALLEL_EXEC] Parallel execution completed. Success: ${allSucceeded}, Total steps: ${totalExecutedSteps}/${totalSteps}`,
+      `[PARALLEL_EXEC] Parallel execution completed. Success: ${allSucceeded}, Total steps: ${totalExecutedSteps}/${totalSteps}`
     );
 
     // Log per-device timing in debug mode or on failure
@@ -951,11 +931,11 @@ export class DefaultPlanExecutor implements PlanExecutor {
         const timing = result.executionTimeMs ? ` (${result.executionTimeMs}ms)` : "";
         const status = result.success ? "SUCCESS" : "FAILED";
         logger.info(
-          `[PARALLEL_EXEC]   ${device}: ${status} - ${result.executedSteps}/${result.totalSteps} steps${timing}`,
+          `[PARALLEL_EXEC]   ${device}: ${status} - ${result.executedSteps}/${result.totalSteps} steps${timing}`
         );
         if (result.failedStep) {
           logger.error(
-            `[PARALLEL_EXEC]   ${device}: Failed at plan step ${result.failedStep.stepIndex} (track step ${result.failedStep.trackIndex}): ${result.failedStep.error}`,
+            `[PARALLEL_EXEC]   ${device}: Failed at plan step ${result.failedStep.stepIndex} (track step ${result.failedStep.trackIndex}): ${result.failedStep.error}`
           );
         }
       }
@@ -967,12 +947,12 @@ export class DefaultPlanExecutor implements PlanExecutor {
       totalSteps,
       failedStep: firstFailure
         ? {
-            stepIndex: firstFailure.stepIndex,
-            tool: firstFailure.tool,
-            error: firstFailure.error,
-            device: firstFailure.device,
-            failureObservation: firstFailure.failureObservation,
-          }
+          stepIndex: firstFailure.stepIndex,
+          tool: firstFailure.tool,
+          error: firstFailure.error,
+          device: firstFailure.device,
+          failureObservation: firstFailure.failureObservation,
+        }
         : undefined,
       perDeviceResults,
     };
@@ -1023,7 +1003,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
         const stepLabel =
           step.label || step.params?.label || JSON.stringify(step.params).substring(0, 50);
         logger.info(
-          `[PARALLEL_EXEC][${device}] Step ${trackIndex + 1}/${track.length} (plan step ${planIndex}): ${step.tool}, Label: ${stepLabel}`,
+          `[PARALLEL_EXEC][${device}] Step ${trackIndex + 1}/${track.length} (plan step ${planIndex}): ${step.tool}, Label: ${stepLabel}`
         );
 
         const stepStartTime = this.timer.now();
@@ -1032,13 +1012,14 @@ export class DefaultPlanExecutor implements PlanExecutor {
           deviceId,
           sessionUuid,
           signal,
+          sessionToolProfileService: executionOptions?.sessionToolProfileService,
           logPrefix: `[PARALLEL_EXEC][${device}]`,
           debugLog: true,
         });
 
         if (stepResult.status === "skipped") {
           logger.warn(
-            `[PARALLEL_EXEC][${device}] optional step ${step.tool} failed; skipping and continuing: ${stepResult.error}`,
+            `[PARALLEL_EXEC][${device}] optional step ${step.tool} failed; skipping and continuing: ${stepResult.error}`
           );
           skippedSteps.push({
             stepIndex: planIndex,
@@ -1062,9 +1043,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
               trackIndex,
               tool: step.tool,
               error: stepResult.error ?? "Unknown error",
-              ...(stepResult.failureObservation
-                ? { failureObservation: stepResult.failureObservation }
-                : {}),
+              ...(stepResult.failureObservation ? { failureObservation: stepResult.failureObservation } : {}),
             },
             skippedSteps,
           };
@@ -1072,12 +1051,12 @@ export class DefaultPlanExecutor implements PlanExecutor {
 
         executedSteps++;
         logger.debug(
-          `[PARALLEL_EXEC][${device}] Step completed successfully. Executed: ${executedSteps}/${track.length}`,
+          `[PARALLEL_EXEC][${device}] Step completed successfully. Executed: ${executedSteps}/${track.length}`
         );
       }
 
       logger.info(
-        `[PARALLEL_EXEC][${device}] Device track completed successfully: ${executedSteps}/${track.length} steps`,
+        `[PARALLEL_EXEC][${device}] Device track completed successfully: ${executedSteps}/${track.length} steps`
       );
 
       return {
@@ -1090,8 +1069,8 @@ export class DefaultPlanExecutor implements PlanExecutor {
       if (isDeviceLostError(error)) {
         throw error;
       }
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      logger.error(`[PARALLEL_EXEC][${device}] Track execution error: ${errorMessage}`);
+      const errorMsg = errorMessage(error);
+      logger.error(`[PARALLEL_EXEC][${device}] Track execution error: ${errorMsg}`);
 
       return {
         success: false,
@@ -1101,10 +1080,11 @@ export class DefaultPlanExecutor implements PlanExecutor {
           stepIndex: -1,
           trackIndex: -1,
           tool: "unknown",
-          error: errorMessage,
+          error: errorMsg,
         },
         skippedSteps,
       };
     }
   }
+
 }

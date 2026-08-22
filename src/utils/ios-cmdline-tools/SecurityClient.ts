@@ -1,3 +1,4 @@
+import { errorMessage } from "../describeUnknownError";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { ActionableError, type ExecResult } from "../../models";
@@ -60,7 +61,7 @@ const parseIdentities = (output: string): SecurityIdentity[] => output
   });
 
 const isKeychainError = (error: unknown): boolean => {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = errorMessage(error);
   return /user interaction is not allowed|keychain|errsec/i.test(message);
 };
 

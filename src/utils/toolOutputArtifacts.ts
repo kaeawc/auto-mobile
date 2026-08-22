@@ -1,3 +1,4 @@
+import { errorMessage } from "./describeUnknownError";
 import { promises as fsPromises, constants as fsConstants } from "node:fs";
 import path from "node:path";
 import { ActionableError } from "../models";
@@ -52,10 +53,6 @@ export function parseToolOutputsDirConfig(
 
 export function getDefaultToolOutputsDir(): string {
   return getTempDir(TEMP_SUBDIRS.TOOL_OUTPUTS);
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 export async function validateToolOutputsDirForWrite(

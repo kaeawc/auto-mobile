@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import {
@@ -393,7 +394,7 @@ export class SetUIState extends BaseVisualChange {
           fieldType
         };
       } catch (error) {
-        lastError = error instanceof Error ? error.message : String(error);
+        lastError = errorMessage(error);
         logger.warn(`[SetUIState] Attempt ${attempts} failed: ${lastError}`);
       }
     }
@@ -588,7 +589,7 @@ export class SetUIState extends BaseVisualChange {
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : String(error)
+        error: errorMessage(error)
       };
     }
   }

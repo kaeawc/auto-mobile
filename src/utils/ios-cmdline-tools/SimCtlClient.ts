@@ -1,3 +1,4 @@
+import { errorMessage } from "../describeUnknownError";
 import { ChildProcess, execFile, spawn, type SpawnOptions } from "child_process";
 import { promisify } from "util";
 import { promises as fsPromises } from "fs";
@@ -609,7 +610,7 @@ export class SimCtlClient implements SimCtl {
     try {
       await this.ensureLocalSimctlAvailable();
     } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
+      const detail = errorMessage(error);
       const message =
         this.platform === "darwin"
           ? `simctl is not available. Please install Xcode command line tools to continue. ${detail}`
@@ -721,7 +722,7 @@ export class SimCtlClient implements SimCtl {
         .catch((err) => {
           SimCtlClient.localSimctlAvailability = null;
           logger.debug(
-            `[iOS] simctl unavailable: ${err instanceof Error ? err.message : String(err)}`,
+            `[iOS] simctl unavailable: ${errorMessage(err)}`,
           );
           throw err;
         });
@@ -762,7 +763,7 @@ export class SimCtlClient implements SimCtl {
       logger.error(`Failed to parse simctl device list: ${error}`);
       throw new ActionableError(
         "Failed to parse iOS device list from 'xcrun simctl list devices --json'. " +
-          `${error instanceof Error ? error.message : String(error)}. ` +
+          `${errorMessage(error)}. ` +
           `stdout (first 300 chars): ${stdoutSnippet || "<empty>"}. ` +
           `stderr (first 300 chars): ${stderrSnippet || "<empty>"}.`,
       );
@@ -1140,7 +1141,7 @@ export class SimCtlClient implements SimCtl {
         return this.resolveReadySimulator(udid, this.remainingBootTimeoutMs(deadlineMs));
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorMessage(error);
       // "Invalid device" means the UDID doesn't exist at all
       if (message.includes("Invalid device")) {
         throw new ActionableError(`Simulator with UDID ${udid} not found`);
@@ -1296,7 +1297,7 @@ export class SimCtlClient implements SimCtl {
     } catch (error) {
       throw new ActionableError(
         "Could not detect the iOS SDK version from Xcode " +
-          `('xcrun --sdk iphonesimulator --show-sdk-version' failed: ${error instanceof Error ? error.message : String(error)}). ` +
+          `('xcrun --sdk iphonesimulator --show-sdk-version' failed: ${errorMessage(error)}). ` +
           "Ensure Xcode and its command line tools are installed and selected via xcode-select.",
       );
     }
@@ -1315,7 +1316,7 @@ export class SimCtlClient implements SimCtl {
     } catch (error) {
       throw new ActionableError(
         "Failed to parse iOS simulator runtimes from 'xcrun simctl list runtimes iOS --json': " +
-          `${error instanceof Error ? error.message : String(error)}. ` +
+          `${errorMessage(error)}. ` +
           `stdout (first 300 chars): ${result.stdout.trim().slice(0, 300) || "<empty>"}.`,
       );
     }
@@ -1339,7 +1340,7 @@ export class SimCtlClient implements SimCtl {
       return undefined;
     } catch (error) {
       logger.warn(
-        `[iOS] Could not read simulator state for ${udid}: ${error instanceof Error ? error.message : String(error)}`,
+        `[iOS] Could not read simulator state for ${udid}: ${errorMessage(error)}`,
         error,
       );
       return undefined;
@@ -1428,7 +1429,7 @@ export class SimCtlClient implements SimCtl {
       return devices;
     } catch (error) {
       SimCtlClient.deviceListCache = null;
-      const detail = error instanceof Error ? error.message : String(error);
+      const detail = errorMessage(error);
       logger.warn(`Failed to get iOS devices: ${detail}`);
       throw new ActionableError(`Failed to list iOS simulator devices: ${detail}`);
     }
@@ -1879,7 +1880,7 @@ export class SimCtlClient implements SimCtl {
       }
       return { success: true };
     } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) };
+      return { success: false, error: errorMessage(error) };
     } finally {
       await fsPromises.rm(dir, { recursive: true, force: true }).catch(() => {});
     }

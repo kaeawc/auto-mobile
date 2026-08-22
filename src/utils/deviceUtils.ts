@@ -1,3 +1,4 @@
+import { errorMessage } from "./describeUnknownError";
 import { ChildProcess } from "child_process";
 import { DeviceInfo, ActionableError, SomePlatform, BootedDevice, Platform } from "../models";
 import { defaultAdbClientFactory } from "./android-cmdline-tools/AdbClientFactory";
@@ -36,10 +37,6 @@ export interface BootedDeviceDiscovery {
 export interface BootedDeviceDiscoveryOptions {
   /** Bypass Android's short device-list cache to verify ADB transport identity. */
   bypassAndroidDeviceListCache?: boolean;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 /** Bounds and cancels a platform shutdown command. */

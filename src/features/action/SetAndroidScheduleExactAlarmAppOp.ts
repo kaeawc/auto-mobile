@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AndroidDeviceShellToolResult, BootedDevice } from "../../models";
@@ -95,7 +96,7 @@ export class SetAndroidScheduleExactAlarmAppOp {
       return { success: true, appId: packageName };
     } catch (cause) {
       perf.end();
-      const message = cause instanceof Error ? cause.message : String(cause);
+      const message = errorMessage(cause);
       if (input.mode === "allow") {
         logger.warn(`[SetAndroidScheduleExactAlarmAppOp] allow failed for ${packageName}: ${message}`);
         return { success: false, appId: packageName, error: message };

@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import {
   AdbClientFactory,
   defaultAdbClientFactory,
@@ -165,7 +166,7 @@ export class UninstallApp {
         packageName: bundleId,
         wasInstalled: true,
         keepData: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage(error),
       };
     }
   }
@@ -268,7 +269,7 @@ export class UninstallApp {
         packageName,
         wasInstalled: true,
         keepData,
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage(error),
       };
     }
   }
@@ -296,7 +297,7 @@ export class UninstallApp {
         packageName,
         keepData,
         userId,
-        `Package-state check failed: ${error instanceof Error ? error.message : String(error)}`,
+        `Package-state check failed: ${errorMessage(error)}`,
       );
     }
 
@@ -323,7 +324,7 @@ export class UninstallApp {
           packageName,
           keepData,
           userId,
-          `One bounded retry failed: ${error instanceof Error ? error.message : String(error)}`,
+          `One bounded retry failed: ${errorMessage(error)}`,
         );
       }
       retryTimedOut = true;
@@ -343,7 +344,7 @@ export class UninstallApp {
         packageName,
         keepData,
         userId,
-        `Post-retry package-state check failed: ${error instanceof Error ? error.message : String(error)}`,
+        `Post-retry package-state check failed: ${errorMessage(error)}`,
       );
     }
 

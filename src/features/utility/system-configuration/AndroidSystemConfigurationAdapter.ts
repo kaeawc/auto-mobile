@@ -1,3 +1,4 @@
+import { errorMessage } from "../../../utils/describeUnknownError";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { readAndroidDeviceApiLevel } from "../../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
 import { logger } from "../../../utils/logger";
@@ -65,12 +66,12 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
       await this.runShellCommand(`shell setprop persist.sys.locale ${shellQuote(languageTag)}`);
       await this.runShellCommand("shell stop; start");
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMsg = errorMessage(error);
       return {
         success: false,
         languageTag,
         previousLanguageTag,
-        error: `Failed to set locale: ${errorMessage}`
+        error: `Failed to set locale: ${errorMsg}`
       };
     }
 
@@ -123,12 +124,12 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
         `shell cmd locale set-app-locales ${shellQuote(appId)} --user ${targetUserId} --locales ${shellQuote(languageTag)}`
       );
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMsg = errorMessage(error);
       return {
         success: false,
         languageTag,
         previousLanguageTag,
-        error: `Failed to set app locale for ${appId}: ${errorMessage}`
+        error: `Failed to set app locale for ${appId}: ${errorMsg}`
       };
     }
 
@@ -179,10 +180,10 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
       await this.adb.executeCommand("root", undefined, undefined, true);
       await this.adb.executeCommand("wait-for-device", undefined, undefined, true);
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMsg = errorMessage(error);
       return {
         success: false,
-        error: `Android API ${apiLevel} does not support app-scoped locale changes, so AutoMobile must use the root-backed system locale path. Failed to run adb root; the target emulator is not root-capable or does not allow root ADB. adb root error: ${errorMessage}`
+        error: `Android API ${apiLevel} does not support app-scoped locale changes, so AutoMobile must use the root-backed system locale path. Failed to run adb root; the target emulator is not root-capable or does not allow root ADB. adb root error: ${errorMsg}`
       };
     }
 
@@ -195,10 +196,10 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
         };
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMsg = errorMessage(error);
       return {
         success: false,
-        error: `Android API ${apiLevel} does not support app-scoped locale changes, so AutoMobile must verify root before changing the system locale. Failed to verify root shell after adb root: ${errorMessage}`
+        error: `Android API ${apiLevel} does not support app-scoped locale changes, so AutoMobile must verify root before changing the system locale. Failed to verify root shell after adb root: ${errorMsg}`
       };
     }
 
@@ -226,12 +227,12 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
         method: "setprop persist.sys.timezone"
       };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMsg = errorMessage(error);
       return {
         success: false,
         zoneId,
         previousZoneId,
-        error: `Failed to set time zone: ${errorMessage}`
+        error: `Failed to set time zone: ${errorMsg}`
       };
     }
   }
@@ -301,12 +302,12 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
         previousFormat: normalizeTimeFormat(previousFormat)
       };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMsg = errorMessage(error);
       return {
         success: false,
         enabled,
         previousFormat: normalizeTimeFormat(previousFormat),
-        error: `Failed to set 24-hour format: ${errorMessage}`
+        error: `Failed to set 24-hour format: ${errorMsg}`
       };
     }
   }
@@ -332,12 +333,12 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
         previousCalendarSystem
       };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMsg = errorMessage(error);
       return {
         success: false,
         calendarSystem,
         previousCalendarSystem,
-        error: `Failed to set calendar system: ${errorMessage}`
+        error: `Failed to set calendar system: ${errorMsg}`
       };
     }
   }

@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { BaseVisualChange } from "./BaseVisualChange";
 import {
   BootedDevice,
@@ -121,13 +122,13 @@ export class InputText extends BaseVisualChange {
           }
         } catch (error) {
           perf.end();
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          logger.warn(`[InputText] text input failed (mode=${resolvedMode}): ${errorMessage}`, error);
+          const errorMsg = errorMessage(error);
+          logger.warn(`[InputText] text input failed (mode=${resolvedMode}): ${errorMsg}`, error);
 
           return {
             success: false,
             text,
-            error: `Failed to send text input: ${errorMessage}`,
+            error: `Failed to send text input: ${errorMsg}`,
             method: this.device.platform === "android" ? resolvedMode : "a11y"
           };
         }
@@ -495,7 +496,7 @@ export class InputText extends BaseVisualChange {
                 "Frame context is stale or unavailable; observe a fresh frame before retrying";
             }
           } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
+            const message = errorMessage(error);
             validationError = `append frame context validation failed: ${message}`;
           }
           const budgetAfterValidation = remaining();
@@ -524,7 +525,7 @@ export class InputText extends BaseVisualChange {
         if (validationError) {
           return { charsSent, error: validationError };
         }
-        const message = error instanceof Error ? error.message : String(error);
+        const message = errorMessage(error);
         logger.warn(`[InputText] append key event failed after ${charsSent} char(s): ${message}`, error);
         // An adb timeout kills the host child but cannot establish whether Android
         // accepted the current key event. Reporting the earlier prefix as an exact

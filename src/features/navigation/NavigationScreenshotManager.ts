@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import path from "path";
 import crypto from "crypto";
 import { logger, type Logger } from "../../utils/logger";
@@ -136,7 +137,7 @@ export class NavigationScreenshotManager {
       return path.join(this.screenshotDir, matching[0]);
     } catch (error) {
       // Screenshot lookup is best-effort; callers can capture a fresh image when lookup fails.
-      this.logger.debug(`[NAV_SCREENSHOT] Failed to find existing screenshot: ${error instanceof Error ? error.message : String(error)}`, error);
+      this.logger.debug(`[NAV_SCREENSHOT] Failed to find existing screenshot: ${errorMessage(error)}`, error);
       return null;
     }
   }
@@ -279,7 +280,7 @@ export class NavigationScreenshotManager {
 
       return finalPath;
     } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : String(err);
+      const errorMsg = errorMessage(err);
       logger.warn(`[NAV_SCREENSHOT] Failed to capture/store screenshot: ${errorMsg}`);
       return null;
     }
@@ -379,7 +380,7 @@ export class NavigationScreenshotManager {
       return await this.fs.readFileBuffer(screenshotPath);
     } catch (error) {
       // Screenshot reads are best-effort; callers treat null as an unavailable image.
-      this.logger.debug(`[NAV_SCREENSHOT] Failed to read screenshot: ${error instanceof Error ? error.message : String(error)}`, error);
+      this.logger.debug(`[NAV_SCREENSHOT] Failed to read screenshot: ${errorMessage(error)}`, error);
       return null;
     }
   }

@@ -5,6 +5,7 @@
  * CtrlProxyClient (iOS) to reduce code duplication.
  */
 
+import { errorMessage } from "../../utils/describeUnknownError";
 import type { Timer } from "../../utils/SystemTimer";
 import type { PerformanceTracker } from "../../utils/PerformanceTracker";
 import { logger, type Logger } from "../../utils/logger";
@@ -177,7 +178,7 @@ export function parseMessage<T>(data: string | Buffer, log: Logger = logger): T 
     return JSON.parse(text) as T;
   } catch (error) {
     // Malformed delegate messages are non-fatal; callers treat null as an unparseable message.
-    log.debug(`Failed to parse device service message: ${error instanceof Error ? error.message : String(error)}`, error);
+    log.debug(`Failed to parse device service message: ${errorMessage(error)}`, error);
     return null;
   }
 }

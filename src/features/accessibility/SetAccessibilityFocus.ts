@@ -9,6 +9,7 @@
  * rather than silently no-op'ing.
  */
 
+import { errorMessage } from "../../utils/describeUnknownError";
 import {
   ActionableError,
   BootedDevice,
@@ -83,7 +84,7 @@ export class SetAccessibilityFocus {
         await service.setAccessibilityFocus(resourceId);
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorMessage(error);
       return { success: false, error: message };
     }
 

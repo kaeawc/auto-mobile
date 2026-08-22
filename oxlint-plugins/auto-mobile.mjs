@@ -494,12 +494,67 @@ const namingConventionRule = {
 	},
 };
 
+// Bans the inline message-only idiom `X instanceof Error ? X.message :
+// String(X)` (issue #5457). There is one canonical helper, errorMessage(X) from
+// utils/describeUnknownError, so the ternary should never be written by hand.
+// Matches only the EXACT message-only shape where all three occurrences are the
+// same identifier; richer variants (`.stack`, `: new Error(String(x))`, `.name`)
+// are deliberately left alone.
+function identifierName(node) {
+	return node?.type === "Identifier" ? node.name : null;
+}
+
+const noInlineErrorNormalizeRule = {
+	meta: {
+		type: "suggestion",
+		messages: {
+			inlineNormalize: "Do not inline `X instanceof Error ? X.message : String(X)`. Use the canonical errorMessage(X) helper (import { errorMessage } from 'utils/describeUnknownError'), issue #5457.",
+		},
+	},
+	create(context) {
+		return {
+			ConditionalExpression(node) {
+				const test = node.test;
+				if (test?.type !== "BinaryExpression" || test.operator !== "instanceof") {
+					return;
+				}
+				const subject = identifierName(test.left);
+				if (subject === null || identifierName(test.right) !== "Error") {
+					return;
+				}
+				// consequent must be `X.message` (non-computed member access).
+				const consequent = node.consequent;
+				if (
+					consequent?.type !== "MemberExpression" ||
+					consequent.computed ||
+					identifierName(consequent.object) !== subject ||
+					propertyName(consequent.property) !== "message"
+				) {
+					return;
+				}
+				// alternate must be `String(X)`.
+				const alternate = node.alternate;
+				if (
+					alternate?.type !== "CallExpression" ||
+					identifierName(alternate.callee) !== "String" ||
+					alternate.arguments.length !== 1 ||
+					identifierName(alternate.arguments[0]) !== subject
+				) {
+					return;
+				}
+				context.report({ node, messageId: "inlineNormalize" });
+			},
+		};
+	},
+};
+
 const plugin = {
 	meta: {
 		name: "auto-mobile",
 	},
 	rules: {
 		"catch-convention": catchConventionRule,
+		"no-inline-error-normalize": noInlineErrorNormalizeRule,
 		"no-unknown-cast": noUnknownCastRule,
 		"no-accumulator-foreach": noAccumulatorForEachRule,
 		"no-bare-expect": noBareExpectRule,

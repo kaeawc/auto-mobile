@@ -1,3 +1,4 @@
+import { errorMessage } from "./describeUnknownError";
 import { logger } from "./logger";
 import { AdbClientFactory, defaultAdbClientFactory } from "./android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "./android-cmdline-tools/interfaces/AdbExecutor";
@@ -218,7 +219,7 @@ export class DeepLinkManager implements DeepLinkManager {
           intentFilters: [],
           supportedMimeTypes: []
         },
-        error: error instanceof Error ? error.message : String(error)
+        error: errorMessage(error)
       };
     }
   }
@@ -284,7 +285,7 @@ export class DeepLinkManager implements DeepLinkManager {
       };
     } catch (error) {
       logger.error(`[DeepLinkManager] Failed to get iOS deep links for ${bundleId}: ${error}`);
-      return this.emptyIosResult(bundleId, error instanceof Error ? error.message : String(error));
+      return this.emptyIosResult(bundleId, errorMessage(error));
     }
   }
 
@@ -658,7 +659,7 @@ export class DeepLinkManager implements DeepLinkManager {
       return {
         success: false,
         detected: true,
-        error: error instanceof Error ? error.message : String(error)
+        error: errorMessage(error)
       };
     }
   }

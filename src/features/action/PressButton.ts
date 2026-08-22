@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import { BootedDevice, PressButtonResult } from "../../models";
@@ -70,7 +71,7 @@ export class PressButton extends BaseVisualChange {
         success: false,
         button,
         keyCode: -1,
-        error: `Failed to press button: ${error instanceof Error ? error.message : String(error)}`
+        error: `Failed to press button: ${errorMessage(error)}`
       };
     }
   }

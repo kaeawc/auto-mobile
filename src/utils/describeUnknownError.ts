@@ -28,3 +28,11 @@ export function describeUnknownError(value: unknown): string {
   }
   return String(value);
 }
+
+/** Extracts a single-line message from an unknown thrown value (message-only; no stack/cause). */
+export function errorMessage(value: unknown): string {
+  // This IS the canonical implementation the no-inline-error-normalize rule
+  // steers every other call site toward, so the idiom is expected here.
+  // oxlint-disable-next-line auto-mobile/no-inline-error-normalize
+  return value instanceof Error ? value.message : String(value);
+}

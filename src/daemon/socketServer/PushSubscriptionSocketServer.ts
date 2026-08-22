@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { Socket } from "node:net";
 import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
@@ -187,7 +188,7 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
         id: request.id,
         type: "error",
         success: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage(error),
       };
       this.sendJson(socket, errorResponse);
     }

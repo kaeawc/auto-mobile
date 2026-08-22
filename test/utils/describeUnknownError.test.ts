@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { describeUnknownError } from "../../src/utils/describeUnknownError";
+import { describeUnknownError, errorMessage } from "../../src/utils/describeUnknownError";
 
 describe("describeUnknownError", () => {
   test("formats Error with message and truncated stack", () => {
@@ -70,5 +70,35 @@ describe("describeUnknownError", () => {
 
   test("stringifies a boolean primitive", () => {
     expect(describeUnknownError(false)).toBe("false");
+  });
+});
+
+describe("errorMessage", () => {
+  test("returns an Error's message", () => {
+    expect(errorMessage(new Error("boom"))).toBe("boom");
+  });
+
+  test("returns a subclass Error's message (message-only, no name)", () => {
+    expect(errorMessage(new TypeError("bad type"))).toBe("bad type");
+  });
+
+  test("returns a string primitive unchanged", () => {
+    expect(errorMessage("plain")).toBe("plain");
+  });
+
+  test("stringifies a number", () => {
+    expect(errorMessage(42)).toBe("42");
+  });
+
+  test("stringifies null", () => {
+    expect(errorMessage(null)).toBe("null");
+  });
+
+  test("stringifies undefined", () => {
+    expect(errorMessage(undefined)).toBe("undefined");
+  });
+
+  test("stringifies a plain object as [object Object]", () => {
+    expect(errorMessage({ a: 1 })).toBe("[object Object]");
   });
 });

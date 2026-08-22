@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
@@ -219,7 +220,7 @@ export class TouchLatencyTracker {
         latencyMs: 0,
         touchCoordinates: touchLocation,
         success: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage(error),
         sampleCount: measurements.length
       };
     }

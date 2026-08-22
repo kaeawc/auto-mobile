@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/describeUnknownError";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
 import { ActionableError, BootedDevice } from "../models/index";
@@ -15,7 +16,9 @@ import { formatStructuredToolError } from "../utils/formatStructuredToolError";
 const criticalSectionStepSchema = z
   .object({
     tool: z.string().describe("Tool name"),
-    params: z.record(z.string(), z.any()).describe("Tool params; must include device"),
+    params: z
+      .record(z.string(), z.any())
+      .describe("Tool params; must include device"),
     label: z.string().optional().describe("Step label"),
   })
   .passthrough()
@@ -25,7 +28,8 @@ const criticalSectionStepSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["params", "device"],
-        message: "Every step inside a criticalSection must declare a non-empty 'device' parameter",
+        message:
+          "Every step inside a criticalSection must declare a non-empty 'device' parameter",
       });
     }
   });
@@ -33,25 +37,42 @@ const criticalSectionStepSchema = z
 type CriticalSectionStepInput = z.infer<typeof criticalSectionStepSchema>;
 
 // Critical section tool schema
-const criticalSectionSchema = addDeviceTargetingToSchema(
-  z.object({
-    lock: z.string().describe("Shared barrier lock name"),
-    steps: z
-      .array(criticalSectionStepSchema)
-      .min(1)
-      .describe("Serial steps; each needs params.device"),
-    deviceCount: z.number().int().positive().describe("Devices required at barrier"),
-    timeout: z.number().int().positive().optional().describe("Barrier timeout ms (default 30000)"),
-    // Internal: the plan's base session UUID, injected by PlanExecutor
-    // (buildEnhancedStepParams). Scopes the shared coordinator so two independent
-    // plans that reuse the same lock name get isolated barriers instead of
-    // colliding. Not authored by users; stripped from recordings via INTERNAL_PARAMS.
-    __lockNamespace: z
-      .string()
-      .optional()
-      .describe("Internal plan-scoped lock namespace (injected)"),
-  }),
-);
+const criticalSectionSchema = addDeviceTargetingToSchema(z.object({
+  lock: z
+    .string()
+    .describe(
+      "Shared barrier lock name"
+    ),
+  steps: z
+    .array(criticalSectionStepSchema)
+    .min(1)
+    .describe(
+      "Serial steps; each needs params.device"
+    ),
+  deviceCount: z
+    .number()
+    .int()
+    .positive()
+    .describe(
+      "Devices required at barrier"
+    ),
+  timeout: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe(
+      "Barrier timeout ms (default 30000)"
+    ),
+  // Internal: the plan's base session UUID, injected by PlanExecutor
+  // (buildEnhancedStepParams). Scopes the shared coordinator so two independent
+  // plans that reuse the same lock name get isolated barriers instead of
+  // colliding. Not authored by users; stripped from recordings via INTERNAL_PARAMS.
+  __lockNamespace: z
+    .string()
+    .optional()
+    .describe("Internal plan-scoped lock namespace (injected)"),
+}));
 
 type CriticalSectionParams = z.infer<typeof criticalSectionSchema>;
 
@@ -74,7 +95,7 @@ function unwrapCriticalSectionResult(result: unknown): Record<string, unknown> |
   }
   try {
     const parsed = JSON.parse(text);
-    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : undefined;
+    return parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : undefined;
   } catch (error) {
     logger.debug(`Failed to parse nested critical-section tool response: ${error}`);
     return undefined;
@@ -82,10 +103,10 @@ function unwrapCriticalSectionResult(result: unknown): Record<string, unknown> |
 }
 
 function formatCriticalSectionError(result: Record<string, unknown>, tool: string): string {
-  return (
-    formatStructuredToolError(result.error) ??
-    (typeof result.message === "string" ? result.message : `Tool "${tool}" returned failure status`)
-  );
+  return formatStructuredToolError(result.error)
+    ?? (typeof result.message === "string"
+      ? result.message
+      : `Tool "${tool}" returned failure status`);
 }
 
 /**
@@ -96,14 +117,16 @@ const criticalSectionHandler = async (
   device: BootedDevice,
   params: CriticalSectionParams,
   _progress?: unknown,
-  signal?: AbortSignal,
+  signal?: AbortSignal
 ): Promise<any> => {
   const { lock, steps, deviceCount, timeout, __lockNamespace: namespace } = params;
-  const normalizedSteps = PlanNormalizer.normalizeSteps(steps as CriticalSectionStepInput[]);
+  const normalizedSteps = PlanNormalizer.normalizeSteps(
+    steps as CriticalSectionStepInput[]
+  );
   const coordinator = CriticalSectionCoordinator.getInstance();
 
   logger.info(
-    `Device ${device.deviceId} entering critical section "${lock}" (expecting ${deviceCount} devices)`,
+    `Device ${device.deviceId} entering critical section "${lock}" (expecting ${deviceCount} devices)`
   );
 
   // Check for abort before entering
@@ -115,7 +138,7 @@ const criticalSectionHandler = async (
   for (const step of normalizedSteps) {
     if (step.tool === "criticalSection" || step.tool === "barrier") {
       throw new ActionableError(
-        `Nested critical sections are not supported. Found ${step.tool} step inside critical section "${lock}".`,
+        `Nested critical sections are not supported. Found ${step.tool} step inside critical section "${lock}".`
       );
     }
   }
@@ -125,7 +148,7 @@ const criticalSectionHandler = async (
     coordinator.registerExpectedDevices(lock, deviceCount, namespace);
   } catch (error) {
     throw new ActionableError(
-      `Failed to register devices for critical section "${lock}": ${error}`,
+      `Failed to register devices for critical section "${lock}": ${error}`
     );
   }
 
@@ -133,10 +156,15 @@ const criticalSectionHandler = async (
 
   try {
     // Wait at barrier and acquire lock
-    release = await coordinator.enterCriticalSection(lock, device.deviceId, timeout, namespace);
+    release = await coordinator.enterCriticalSection(
+      lock,
+      device.deviceId,
+      timeout,
+      namespace
+    );
 
     logger.info(
-      `Device ${device.deviceId} executing ${normalizedSteps.length} steps in critical section "${lock}"`,
+      `Device ${device.deviceId} executing ${normalizedSteps.length} steps in critical section "${lock}"`
     );
 
     // Execute steps serially
@@ -147,7 +175,7 @@ const criticalSectionHandler = async (
       throwIfAborted(signal);
 
       logger.debug(
-        `Device ${device.deviceId} executing step ${i + 1}/${normalizedSteps.length}: ${step.tool}`,
+        `Device ${device.deviceId} executing step ${i + 1}/${normalizedSteps.length}: ${step.tool}`
       );
 
       try {
@@ -158,10 +186,13 @@ const criticalSectionHandler = async (
           throw new ActionableError(`Tool "${step.tool}" not found in registry`);
         }
 
-        const result = await ToolRegistry.callInternal(tool, step.params, undefined, signal, {
-          forPlan: true,
-          targetDevice: device,
-        });
+        const result = await ToolRegistry.callInternal(
+          tool,
+          step.params,
+          undefined,
+          signal,
+          { forPlan: true, targetDevice: device },
+        );
 
         // Internal tool calls can return an MCP envelope whose JSON payload
         // contains the actual success/error fields.
@@ -175,18 +206,21 @@ const criticalSectionHandler = async (
       } catch (error) {
         executedSteps.push({ tool: step.tool, success: false });
 
-        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorMsg =
+					errorMessage(error);
         logger.error(
-          `Device ${device.deviceId} failed at step ${i + 1}/${steps.length} in critical section "${lock}": ${errorMessage}`,
+          `Device ${device.deviceId} failed at step ${i + 1}/${steps.length} in critical section "${lock}": ${errorMsg}`
         );
 
         throw new ActionableError(
-          `Failed at step ${i + 1}/${steps.length} (${step.tool}): ${errorMessage}`,
+          `Failed at step ${i + 1}/${steps.length} (${step.tool}): ${errorMsg}`
         );
       }
     }
 
-    logger.info(`Device ${device.deviceId} completed all steps in critical section "${lock}"`);
+    logger.info(
+      `Device ${device.deviceId} completed all steps in critical section "${lock}"`
+    );
 
     return createJSONToolResponse({
       success: true,
@@ -199,11 +233,13 @@ const criticalSectionHandler = async (
     // Force cleanup on error to prevent other devices from waiting forever
     coordinator.forceCleanup(lock, namespace);
 
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    logger.error(`Device ${device.deviceId} error in critical section "${lock}": ${errorMessage}`);
+    const errorMsg = errorMessage(error);
+    logger.error(
+      `Device ${device.deviceId} error in critical section "${lock}": ${errorMsg}`
+    );
 
     throw new ActionableError(
-      `Critical section "${lock}" failed for device ${device.deviceId}: ${errorMessage}`,
+      `Critical section "${lock}" failed for device ${device.deviceId}: ${errorMsg}`
     );
   } finally {
     // Release the lock if we acquired it
@@ -225,7 +261,7 @@ export function registerCriticalSectionTools(): void {
     // Plan-only: a multi-device coordination primitive that only makes sense as
     // a plan step (a single direct call would just block). Hidden from tools/list
     // discovery, still runnable in plans via getToolForPlan.
-    { defaultEnabled: false, planOnly: true, planExecutable: true, acceptsPlanLockNamespace: true },
+    { planOnly: true, planExecutable: true, acceptsPlanLockNamespace: true }
   );
 
   logger.info("Critical section tools registered");

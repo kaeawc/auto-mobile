@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
@@ -127,7 +128,7 @@ export class GrantAndroidPermissions {
             logger.info(`[GrantAndroidPermissions] ${action} ${trimmed} for ${packageName} (user ${targetUserId})`);
           });
         } catch (cause) {
-          const message = cause instanceof Error ? cause.message : String(cause);
+          const message = errorMessage(cause);
           results.push({
             operationId: `pm_${action}:${trimmed}`,
             permission: trimmed,
@@ -226,7 +227,7 @@ export class GrantAndroidPermissions {
         }],
       };
     } catch (cause) {
-      const message = cause instanceof Error ? cause.message : String(cause);
+      const message = errorMessage(cause);
       logger.warn(`[GrantAndroidPermissions] reset threw: ${message}`);
       return {
         success: false,

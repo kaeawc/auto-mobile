@@ -39,8 +39,6 @@
 1	src/features/action/HomeScreen.ts	auto-mobile(catch-convention)
 1	src/features/action/InputText.ts	eslint(complexity)
 1	src/features/action/RecentApps.ts	auto-mobile(catch-convention)
-1	src/features/action/RestoreSnapshotIos.ts	eslint(complexity)
-1	src/features/action/RestoreSnapshotIos.ts	eslint(max-depth)
 1	src/features/action/TapOnElement.ts	eslint(max-depth)
 1	src/features/action/TerminateApp.ts	auto-mobile(catch-convention)
 1	src/features/action/swipeon/ScrollUntilVisible.ts	eslint(max-depth)

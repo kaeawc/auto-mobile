@@ -14,7 +14,6 @@ import { ResourceRegistry } from "./resourceRegistry";
 import { DEVICE_SNAPSHOT_RESOURCE_URIS } from "./deviceSnapshotResourceUris";
 import { CaptureSnapshot, type CaptureSnapshotResult } from "../features/action/CaptureSnapshot";
 import { RestoreSnapshot, type RestoreSnapshotResult } from "../features/action/RestoreSnapshot";
-import { RestoreSnapshotIos } from "../features/action/RestoreSnapshotIos";
 import type {
   SnapshotCaptureProvider,
   SnapshotRestoreProvider,
@@ -93,9 +92,6 @@ async function getDeviceSnapshotDependencies(): Promise<DeviceSnapshotManagerDep
         return new CaptureSnapshot(device, undefined, undefined, timer, store);
       },
       createRestoreProvider: (device, timer, store) => {
-        if (device.platform === "ios") {
-          return new RestoreSnapshotIos(device, undefined, store);
-        }
         return new RestoreSnapshot(device, undefined, undefined, timer, store);
       },
     };

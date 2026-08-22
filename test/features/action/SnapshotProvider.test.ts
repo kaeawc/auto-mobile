@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { FakeSnapshotProvider } from "../../fakes/FakeSnapshotProvider";
 import { CaptureSnapshot } from "../../../src/features/action/CaptureSnapshot";
 import { RestoreSnapshot } from "../../../src/features/action/RestoreSnapshot";
-import { RestoreSnapshotIos } from "../../../src/features/action/RestoreSnapshotIos";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -99,7 +98,7 @@ describe("SnapshotProvider interfaces", () => {
 
   const restoreCases: ReadonlyArray<[string, () => SnapshotRestoreProvider]> = [
     ["Android RestoreSnapshot", () => new RestoreSnapshot(androidDevice, fakeAdbFactory, undefined, new FakeTimer(), store())],
-    ["iOS RestoreSnapshotIos", () => new RestoreSnapshotIos(iosDevice, new FakeSimCtlClient(), store())],
+    ["iOS RestoreSnapshot", () => new RestoreSnapshot(iosDevice, undefined, undefined, new FakeTimer(), store(), new FakeSimCtlClient())],
   ];
   for (const [name, build] of restoreCases) {
     it(`${name} satisfies SnapshotRestoreProvider`, () => {

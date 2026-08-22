@@ -1,3 +1,5 @@
+import type { DeviceControlTransportFailure } from "./deviceControlTransportFailure";
+
 /**
  * Request sent from CLI client to daemon
  */
@@ -41,6 +43,12 @@ export interface DaemonResponse {
   result?: any;
   /** Error message if unsuccessful */
   error?: string;
+  /**
+   * Safe, machine-readable details for a loopback device-control transport
+   * failure. Optional so older Kotlin, Swift, and TypeScript clients keep using
+   * the legacy string error without a wire-version break.
+   */
+  transportFailure?: DeviceControlTransportFailure;
   /**
    * Number of leading characters delivered by a failed Android
    * `input/typeText` append request. Present only when the append operation

@@ -87,6 +87,16 @@ import { getDeviceDataStreamServer } from "./deviceDataStreamSocketServer";
 import type { KeyValueType } from "../features/storage/storageTypes";
 import type { BootedDevice, ImeAction, ScreenScaleMetadata } from "../models";
 import type { DeviceService } from "../features/observe/DeviceService";
+import {
+  DEVICE_CONTROL_TRANSPORT_FAILURE_CODE,
+  DeviceControlTransportError,
+  deviceControlToolName,
+  isDeviceControlTransportRequest,
+  isReplaySafeAfterResponseClosure,
+  isUnexpectedSocketClosure,
+  type DeviceControlTransportFailure,
+  type DeviceControlTransportPhase,
+} from "./deviceControlTransportFailure";
 const MCP_CLIENT_IDLE_CLOSE_MS = 5 * 60 * 1000;
 /** Keep shutdown bounded if a request handler ignores its disconnected peer. */
 const DAEMON_REQUEST_HANDLER_DRAIN_TIMEOUT_MS = 1_000;
@@ -171,6 +181,20 @@ interface McpForwardRoute {
   /** Replayed when this transport needs to establish a fresh MCP session. */
   sessionUuid?: string;
   toolSelectionProfileUuid?: string;
+}
+
+interface DeviceControlTransportIdentity {
+  sessionUuid?: string;
+  deviceId?: string;
+  deviceSessionUuid?: string;
+}
+
+interface McpForwardRecoveryContext {
+  request: DaemonRequest;
+  route: McpForwardRoute;
+  socketSessionId: string;
+  remainingTimeoutMs: number;
+  forwardStartMs: number;
 }
 
 const isNonBlankSessionUuid = (value: unknown): value is string =>
@@ -644,68 +668,22 @@ export class UnixSocketServer {
 
             const forwardStartMs = this.timer.now();
             try {
-              const mcpClient = await this.getMcpClient(
-                route.clientKey,
-                route.sessionUuid,
-                route.toolSelectionProfileUuid,
-              );
               const sessionWasActiveBeforeForward = this.wasRequestSessionActive(request);
-
-              try {
-                const response = await this.handleIdeRequest(
-                  mcpClient,
-                  request,
-                  remainingTimeoutMs,
-                  sessionId,
-                );
-                this.recordBoundMcpClientKey(
-                  request,
-                  sessionId,
-                  route,
-                  sessionWasActiveBeforeForward,
-                  response,
-                );
-                return response;
-              } catch (ideError) {
-                const ideErrorMessage = errorMessage(ideError);
-                if (ideErrorMessage.includes("Session not found")) {
-                  logger.warn("MCP client session expired, reconnecting and retrying...");
-                  await this.resetMcpClient(route.clientKey);
-                  const freshClient = await this.getMcpClient(
-                    route.clientKey,
-                    route.sessionUuid,
-                    route.toolSelectionProfileUuid,
-                  );
-                  const retryRemainingMs = remainingTimeoutMs - (this.timer.now() - forwardStartMs);
-                  if (retryRemainingMs <= 0) {
-                    const toolName =
-                      request.method === "tools/call"
-                        ? (request.params?.name ?? request.method)
-                        : request.method;
-                    throw new McpTimeoutError({
-                      toolName,
-                      timeoutMs: remainingTimeoutMs,
-                      origin: "UnixSocketServer.handleRequest",
-                      detail: `no budget remaining after session reconnect (elapsed ${this.timer.now() - forwardStartMs}ms)`,
-                    });
-                  }
-                  const response = await this.handleIdeRequest(
-                    freshClient,
-                    request,
-                    retryRemainingMs,
-                    sessionId,
-                  );
-                  this.recordBoundMcpClientKey(
-                    request,
-                    sessionId,
-                    route,
-                    sessionWasActiveBeforeForward,
-                    response,
-                  );
-                  return response;
-                }
-                throw ideError;
-              }
+              const response = await this.forwardMcpRequestWithRecovery({
+                request,
+                route,
+                socketSessionId: sessionId,
+                remainingTimeoutMs,
+                forwardStartMs,
+              });
+              this.recordBoundMcpClientKey(
+                request,
+                sessionId,
+                route,
+                sessionWasActiveBeforeForward,
+                response,
+              );
+              return response;
             } finally {
               logger.debug(
                 `[McpForward] end executionKey=${route.executionKey} clientKey=${route.clientKey} socketSession=${sessionId} requestId=${request.id} ${forwardLabel} forwardMs=${this.timer.now() - forwardStartMs}`,
@@ -734,6 +712,9 @@ export class UnixSocketServer {
           type: "mcp_response",
           success: false,
           error: errorMsg,
+          ...(error instanceof DeviceControlTransportError
+            ? { transportFailure: error.failure }
+            : {}),
           ...(error instanceof InputTypeTextAppendError ? { charsSent: error.charsSent } : {}),
         };
       }
@@ -1239,6 +1220,313 @@ export class UnixSocketServer {
       }
     }
     return false;
+  }
+
+  private isDeviceControlSocketClosure(
+    request: DaemonRequest,
+    error: unknown,
+  ): boolean {
+    return isDeviceControlTransportRequest(request) && isUnexpectedSocketClosure(error);
+  }
+
+  private async forwardMcpRequestWithRecovery(
+    context: McpForwardRecoveryContext,
+  ): Promise<unknown> {
+    const identity = this.getDeviceControlTransportIdentity(context.request, context.route);
+    let mcpClient: Client;
+    try {
+      mcpClient = await this.getMcpClient(
+        context.route.clientKey,
+        context.route.sessionUuid,
+        context.route.toolSelectionProfileUuid,
+      );
+    } catch (error) {
+      if (!this.isDeviceControlSocketClosure(context.request, error)) {
+        throw error;
+      }
+      return this.recoverDeviceControlTransport({
+        ...context,
+        phase: "connect",
+        identity,
+      });
+    }
+    return this.forwardConnectedMcpRequest(context, identity, mcpClient);
+  }
+
+  private async forwardConnectedMcpRequest(
+    context: McpForwardRecoveryContext,
+    identity: DeviceControlTransportIdentity,
+    mcpClient: Client,
+  ): Promise<unknown> {
+    try {
+      return await this.handleIdeRequest(
+        mcpClient,
+        context.request,
+        context.remainingTimeoutMs,
+        context.socketSessionId,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes("Session not found")) {
+        return this.retryExpiredMcpSession(context);
+      }
+      if (this.isDeviceControlSocketClosure(context.request, error)) {
+        return this.recoverDeviceControlTransport({
+          ...context,
+          phase: "response",
+          identity,
+        });
+      }
+      throw error;
+    }
+  }
+
+  private async retryExpiredMcpSession(
+    context: McpForwardRecoveryContext,
+  ): Promise<unknown> {
+    logger.warn("MCP client session expired, reconnecting and retrying...");
+    await this.resetMcpClient(context.route.clientKey);
+    const freshClient = await this.getMcpClient(
+      context.route.clientKey,
+      context.route.sessionUuid,
+      context.route.toolSelectionProfileUuid,
+    );
+    const retryRemainingMs =
+      context.remainingTimeoutMs - (this.timer.now() - context.forwardStartMs);
+    if (retryRemainingMs <= 0) {
+      const toolName = context.request.method === "tools/call"
+        ? context.request.params?.name ?? context.request.method
+        : context.request.method;
+      throw new McpTimeoutError({
+        toolName,
+        timeoutMs: context.remainingTimeoutMs,
+        origin: "UnixSocketServer.handleRequest",
+        detail: `no budget remaining after session reconnect (elapsed ${this.timer.now() - context.forwardStartMs}ms)`,
+      });
+    }
+    return this.handleIdeRequest(
+      freshClient,
+      context.request,
+      retryRemainingMs,
+      context.socketSessionId,
+    );
+  }
+
+  private getDeviceControlTransportIdentity(
+    request: DaemonRequest,
+    route: McpForwardRoute,
+  ): DeviceControlTransportIdentity {
+    const args = request.method === "tools/call" ? request.params?.arguments : undefined;
+    const sessionUuid = route.sessionUuid ?? this.getSessionUuid(args);
+    const deviceId = this.resolveDeviceControlDeviceId(args, sessionUuid);
+    const deviceSessionUuid = this.resolveDeviceControlSessionUuid(deviceId);
+    return { sessionUuid, deviceId, deviceSessionUuid };
+  }
+
+  private resolveDeviceControlDeviceId(
+    args: unknown,
+    sessionUuid?: string,
+  ): string | undefined {
+    if (args && typeof args === "object" && !Array.isArray(args)) {
+      const explicitDeviceId = (args as Record<string, unknown>).deviceId;
+      if (typeof explicitDeviceId === "string") {
+        return explicitDeviceId;
+      }
+    }
+    if (!sessionUuid || !this.daemonState.isInitialized()) {
+      return undefined;
+    }
+    try {
+      return this.daemonState.getSessionManager().getSession(sessionUuid)?.assignedDevice;
+    } catch (error) {
+      logger.debug(`Unable to resolve transport session ${sessionUuid}: ${error}`);
+      return undefined;
+    }
+  }
+
+  private resolveDeviceControlSessionUuid(deviceId?: string): string | undefined {
+    if (!deviceId || !this.daemonState.isInitialized()) {
+      return undefined;
+    }
+    try {
+      return this.daemonState
+        .getDeviceSessionRegistry()
+        .list()
+        .find(record => record.deviceId === deviceId)
+        ?.deviceSessionUuid;
+    } catch (error) {
+      logger.debug(`Unable to resolve transport device epoch for ${deviceId}: ${error}`);
+      return undefined;
+    }
+  }
+
+  private isDeviceControlTransportIdentityValid(
+    identity: DeviceControlTransportIdentity,
+  ): boolean {
+    if (
+      !this.daemonState.isInitialized()
+      || !identity.deviceId
+      || !identity.deviceSessionUuid
+    ) {
+      return false;
+    }
+    try {
+      if (identity.sessionUuid) {
+        const session = this.daemonState.getSessionManager().getSession(identity.sessionUuid);
+        if (!session || session.assignedDevice !== identity.deviceId) {
+          return false;
+        }
+      }
+      const liveDeviceSession = this.daemonState
+        .getDeviceSessionRegistry()
+        .list()
+        .find(record => record.deviceId === identity.deviceId);
+      return liveDeviceSession?.deviceSessionUuid === identity.deviceSessionUuid;
+    } catch (error) {
+      logger.debug(`Unable to validate device-control transport identity: ${error}`);
+      return false;
+    }
+  }
+
+  private deviceControlTransportError(input: {
+    request: DaemonRequest;
+    identity: DeviceControlTransportIdentity;
+    phase: DeviceControlTransportPhase;
+    reconnectAttempted: boolean;
+    replayAttempted: boolean;
+    recoveryExhausted: boolean;
+  }): DeviceControlTransportError {
+    const toolName = deviceControlToolName(input.request);
+    const sessionValid = this.isDeviceControlTransportIdentityValid(input.identity);
+    const retryable =
+      sessionValid
+      && (
+        input.phase === "connect"
+        || isReplaySafeAfterResponseClosure(input.request)
+      );
+    const failure: DeviceControlTransportFailure = {
+      code: DEVICE_CONTROL_TRANSPORT_FAILURE_CODE,
+      transport: "daemon_loopback_http",
+      toolName,
+      ...(input.identity.deviceId ? { deviceId: input.identity.deviceId } : {}),
+      ...(input.identity.deviceSessionUuid
+        ? { deviceSessionUuid: input.identity.deviceSessionUuid }
+        : {}),
+      ...(input.identity.sessionUuid ? { sessionUuid: input.identity.sessionUuid } : {}),
+      sessionValid,
+      phase: input.phase,
+      retryable,
+      reconnectAttempted: input.reconnectAttempted,
+      replayAttempted: input.replayAttempted,
+    };
+    const message = input.recoveryExhausted
+      ? `Device-control transport recovery exhausted while handling ${toolName}`
+      : `Device-control transport closed while handling ${toolName}`;
+    return new DeviceControlTransportError(message, failure);
+  }
+
+  private async recoverDeviceControlTransport(input: {
+    request: DaemonRequest;
+    route: McpForwardRoute;
+    socketSessionId: string;
+    remainingTimeoutMs: number;
+    forwardStartMs: number;
+    phase: DeviceControlTransportPhase;
+    identity: DeviceControlTransportIdentity;
+  }): Promise<unknown> {
+    if (!this.isDeviceControlTransportIdentityValid(input.identity)) {
+      throw this.deviceControlTransportError({
+        request: input.request,
+        identity: input.identity,
+        phase: input.phase,
+        reconnectAttempted: false,
+        replayAttempted: false,
+        recoveryExhausted: false,
+      });
+    }
+
+    const replayAfterResponse =
+      input.phase === "response"
+      && isReplaySafeAfterResponseClosure(input.request);
+    logger.warn(
+      `[McpForward] device-control transport closed for ${deviceControlToolName(input.request)} during ${input.phase}; reconnecting once`,
+    );
+    await this.resetMcpClient(input.route.clientKey);
+    const retryRemainingMs =
+      input.remainingTimeoutMs - (this.timer.now() - input.forwardStartMs);
+    if (retryRemainingMs <= 0) {
+      throw this.deviceControlTransportError({
+        request: input.request,
+        identity: input.identity,
+        phase: input.phase,
+        reconnectAttempted: true,
+        replayAttempted: false,
+        recoveryExhausted: true,
+      });
+    }
+
+    let freshClient: Client;
+    try {
+      freshClient = await this.getMcpClient(
+        input.route.clientKey,
+        input.route.sessionUuid,
+        input.route.toolSelectionProfileUuid,
+      );
+    } catch {
+      logger.warn(
+        `[McpForward] device-control transport reconnect failed for ${deviceControlToolName(input.request)}`,
+      );
+      throw this.deviceControlTransportError({
+        request: input.request,
+        identity: input.identity,
+        phase: input.phase,
+        reconnectAttempted: true,
+        replayAttempted: false,
+        recoveryExhausted: true,
+      });
+    }
+
+    if (!this.isDeviceControlTransportIdentityValid(input.identity)) {
+      throw this.deviceControlTransportError({
+        request: input.request,
+        identity: input.identity,
+        phase: input.phase,
+        reconnectAttempted: true,
+        replayAttempted: false,
+        recoveryExhausted: false,
+      });
+    }
+    if (input.phase === "response" && !replayAfterResponse) {
+      throw this.deviceControlTransportError({
+        request: input.request,
+        identity: input.identity,
+        phase: input.phase,
+        reconnectAttempted: true,
+        replayAttempted: false,
+        recoveryExhausted: false,
+      });
+    }
+
+    try {
+      return await this.handleIdeRequest(
+        freshClient,
+        input.request,
+        retryRemainingMs,
+        input.socketSessionId,
+      );
+    } catch (error) {
+      if (!isUnexpectedSocketClosure(error)) {
+        throw error;
+      }
+      throw this.deviceControlTransportError({
+        request: input.request,
+        identity: input.identity,
+        phase: "response",
+        reconnectAttempted: true,
+        replayAttempted: replayAfterResponse,
+        recoveryExhausted: true,
+      });
+    }
   }
 
   private wasRequestSessionActive(request: DaemonRequest): boolean {

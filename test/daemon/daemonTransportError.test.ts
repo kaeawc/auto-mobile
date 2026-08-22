@@ -8,6 +8,7 @@ import {
   DaemonUnavailableError,
   toDaemonTransportError,
 } from "../../src/daemon/client";
+import { DeviceControlTransportError } from "../../src/daemon/deviceControlTransportFailure";
 
 const isWindows = platform() === "win32";
 
@@ -83,5 +84,73 @@ describe("DaemonClient in-flight request on connection reset (#2737)", () => {
 
       await client.close();
     }
+  );
+});
+
+describe("DaemonClient device-control transport response", () => {
+  const tempDirs: string[] = [];
+  let server: Server | null = null;
+
+  afterEach(async () => {
+    if (server) {
+      await new Promise<void>(resolve => server!.close(() => resolve()));
+      server = null;
+    }
+    for (const dir of tempDirs) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+    tempDirs.length = 0;
+  });
+
+  (isWindows ? test.skip : test)(
+    "rehydrates safe transport metadata as a typed error",
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "daemon-transport-payload-test-"));
+      tempDirs.push(dir);
+      const socketPath = join(dir, "daemon.sock");
+      const failure = {
+        code: "device_control_transport_failure" as const,
+        transport: "daemon_loopback_http" as const,
+        toolName: "launchApp",
+        deviceId: "emulator-5554",
+        deviceSessionUuid: "device-epoch-a",
+        sessionUuid: "session-a",
+        sessionValid: true,
+        phase: "response" as const,
+        retryable: false,
+        reconnectAttempted: true,
+        replayAttempted: false,
+      };
+
+      server = createServer((connection: Socket) => {
+        connection.once("data", data => {
+          const request = JSON.parse(data.toString().trim()) as { id: string };
+          connection.write(`${JSON.stringify({
+            id: request.id,
+            type: "mcp_response",
+            success: false,
+            error: "Device-control transport closed while handling launchApp",
+            transportFailure: failure,
+          })}\n`);
+        });
+      });
+      await new Promise<void>(resolve => server!.listen(socketPath, resolve));
+
+      const client = new DaemonClient(socketPath, 2000);
+      await client.connect();
+
+      try {
+        await client.callTool("launchApp", {
+          sessionUuid: "session-a",
+          appId: "dev.example",
+        });
+        throw new Error("Expected launchApp to reject");
+      } catch (error) {
+        expect(error).toBeInstanceOf(DeviceControlTransportError);
+        expect((error as DeviceControlTransportError).failure).toEqual(failure);
+      } finally {
+        await client.close();
+      }
+    },
   );
 });

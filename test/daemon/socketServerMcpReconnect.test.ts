@@ -36,14 +36,48 @@ function createFakeMcpClient(overrides: Partial<FakeMcpClient> = {}): FakeMcpCli
   };
 }
 
-function createFakeDaemonState() {
+function socketClosedError(sensitiveDetail = ""): Error {
+  return new Error(
+    `The socket connection was closed unexpectedly. For more information, pass verbose: true.${sensitiveDetail}`,
+  );
+}
+
+function createFakeDaemonState(sessionIsValid: () => boolean) {
+  const session = {
+    sessionId: "session-a",
+    assignedDevice: "emulator-5554",
+    platform: "android" as const,
+    createdAt: 0,
+    lastUsedAt: 0,
+    expiresAt: Number.MAX_SAFE_INTEGER,
+    cacheData: {},
+    lastHeartbeat: 0,
+    sessionTimeoutMs: 60_000,
+    heartbeatTimeoutMs: 60_000,
+    heartbeatTimeoutSource: "default" as const,
+    hasReceivedHeartbeat: true,
+  };
+  const deviceSession = {
+    deviceSessionUuid: "device-epoch-a",
+    deviceId: "emulator-5554",
+    platform: "android" as const,
+    epochStartedAt: 0,
+  };
   return {
     isInitialized: () => true,
-    getSessionManager: () => ({ getSession: () => null, releaseSession: async () => null }),
+    getSessionManager: () => ({
+      getSession: (sessionId: string) =>
+        sessionId === session.sessionId && sessionIsValid() ? session : null,
+      getDeviceLabels: () => undefined,
+      releaseSession: async () => null,
+    }),
     getDevicePool: () => ({
       refreshDevices: async () => 0,
       getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
       releaseDevice: async () => {},
+    }),
+    getDeviceSessionRegistry: () => ({
+      list: () => sessionIsValid() ? [deviceSession] : [],
     }),
   };
 }
@@ -115,14 +149,16 @@ describe("UnixSocketServer MCP session reconnect", () => {
   let socketPath: string;
   let server: UnixSocketServer;
   let fakeTimer: FakeTimer;
+  let sessionIsValid: boolean;
 
   beforeEach(async () => {
     socketPath = join(tmpdir(), `mcp-rc-${randomUUID()}.sock`);
     fakeTimer = new FakeTimer();
+    sessionIsValid = true;
     server = new UnixSocketServer(
       socketPath,
       "http://localhost:0/mcp",
-      createFakeDaemonState(),
+      createFakeDaemonState(() => sessionIsValid),
       fakeTimer,
     );
     await server.start();
@@ -199,6 +235,173 @@ describe("UnixSocketServer MCP session reconnect", () => {
     expect(response.error).toContain("Connection refused");
     // Only one client created — no retry
     expect(clientsCreated).toBe(1);
+  });
+
+  test("reconnects launchApp after a socket closure before request dispatch", async () => {
+    let clientsCreated = 0;
+    let callsDispatched = 0;
+
+    server.mcpClientFactory = async () => {
+      clientsCreated++;
+      if (clientsCreated === 1) {
+        throw socketClosedError();
+      }
+      return createFakeMcpClient({
+        callTool: async () => {
+          callsDispatched++;
+          return { content: [{ type: "text", text: "launched" }] };
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "launchApp",
+      arguments: { sessionUuid: "session-a", appId: "dev.example" },
+    });
+
+    expect(response.success).toBe(true);
+    expect(clientsCreated).toBe(2);
+    expect(callsDispatched).toBe(1);
+  });
+
+  test("reconnects and replays observe after a socket closure while handling the response", async () => {
+    let clientsCreated = 0;
+    let callsDispatched = 0;
+
+    server.mcpClientFactory = async () => {
+      const clientIndex = ++clientsCreated;
+      return createFakeMcpClient({
+        callTool: async () => {
+          callsDispatched++;
+          if (clientIndex === 1) {
+            throw socketClosedError();
+          }
+          return { content: [{ type: "text", text: "observed" }] };
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: { sessionUuid: "session-a" },
+    });
+
+    expect(response.success).toBe(true);
+    expect(clientsCreated).toBe(2);
+    expect(callsDispatched).toBe(2);
+  });
+
+  test("does not replay launchApp after an ambiguous response closure", async () => {
+    let clientsCreated = 0;
+    let callsDispatched = 0;
+
+    server.mcpClientFactory = async () => {
+      clientsCreated++;
+      return createFakeMcpClient({
+        callTool: async () => {
+          callsDispatched++;
+          throw socketClosedError(" endpoint=https://secret.invalid?token=hidden");
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "launchApp",
+      arguments: { sessionUuid: "session-a", appId: "dev.example" },
+    });
+
+    expect(response.success).toBe(false);
+    expect(clientsCreated).toBe(2);
+    expect(callsDispatched).toBe(1);
+    expect(response.error).toBe("Device-control transport closed while handling launchApp");
+    expect(response.error).not.toContain("secret.invalid");
+    expect(response.transportFailure).toEqual({
+      code: "device_control_transport_failure",
+      transport: "daemon_loopback_http",
+      toolName: "launchApp",
+      deviceId: "emulator-5554",
+      deviceSessionUuid: "device-epoch-a",
+      sessionUuid: "session-a",
+      sessionValid: true,
+      phase: "response",
+      retryable: false,
+      reconnectAttempted: true,
+      replayAttempted: false,
+    });
+  });
+
+  test("returns a retryable structured error after observe reconnection exhaustion", async () => {
+    let clientsCreated = 0;
+    let callsDispatched = 0;
+
+    server.mcpClientFactory = async () => {
+      clientsCreated++;
+      return createFakeMcpClient({
+        callTool: async () => {
+          callsDispatched++;
+          throw socketClosedError(" endpoint=https://secret.invalid?token=hidden");
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: { sessionUuid: "session-a" },
+    });
+
+    expect(response.success).toBe(false);
+    expect(clientsCreated).toBe(2);
+    expect(callsDispatched).toBe(2);
+    expect(response.error).toBe("Device-control transport recovery exhausted while handling observe");
+    expect(JSON.stringify(response)).not.toContain("secret.invalid");
+    expect(response.transportFailure).toMatchObject({
+      code: "device_control_transport_failure",
+      toolName: "observe",
+      deviceId: "emulator-5554",
+      deviceSessionUuid: "device-epoch-a",
+      sessionUuid: "session-a",
+      sessionValid: true,
+      phase: "response",
+      retryable: true,
+      reconnectAttempted: true,
+      replayAttempted: true,
+    });
+  });
+
+  test("does not reconnect or replay after the bound device session becomes invalid", async () => {
+    let clientsCreated = 0;
+    let callsDispatched = 0;
+
+    server.mcpClientFactory = async () => {
+      clientsCreated++;
+      return createFakeMcpClient({
+        callTool: async () => {
+          callsDispatched++;
+          sessionIsValid = false;
+          throw socketClosedError();
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: { sessionUuid: "session-a" },
+    });
+
+    expect(response.success).toBe(false);
+    expect(clientsCreated).toBe(1);
+    expect(callsDispatched).toBe(1);
+    expect(response.transportFailure).toMatchObject({
+      code: "device_control_transport_failure",
+      deviceId: "emulator-5554",
+      deviceSessionUuid: "device-epoch-a",
+      sessionUuid: "session-a",
+      sessionValid: false,
+      phase: "response",
+      retryable: false,
+      reconnectAttempted: false,
+      replayAttempted: false,
+    });
   });
 
   test("subsequent requests reuse the reconnected client without creating another", async () => {

@@ -17,6 +17,7 @@ import {
 } from "../daemon/daemonMcpProxy";
 import { ActionableError } from "../models";
 import { getMcpServerVersion } from "../utils/mcpVersion";
+import { DeviceControlTransportError } from "../daemon/deviceControlTransportFailure";
 
 /**
  * Options for creating a proxy MCP server
@@ -60,6 +61,25 @@ function sessionOwnershipLostResult(
 function sessionOwnershipLostError(error: DaemonBoundSessionExpiredError): McpError {
   const payload = sessionOwnershipLostPayload(error);
   return new McpError(-32603, sessionOwnershipLostMessage(error), payload);
+}
+
+function deviceControlTransportFailureResult(
+  error: DeviceControlTransportError,
+): CallToolResult {
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          error: {
+            message: error.message,
+            ...error.failure,
+          },
+        }),
+      },
+    ],
+    isError: true,
+  };
 }
 
 /**
@@ -163,6 +183,12 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
           `[ProxyServer] Session ownership lost for ${error.sessionUuid}: ${error.reason}`,
         );
         return sessionOwnershipLostResult(error);
+      }
+      if (error instanceof DeviceControlTransportError) {
+        logger.warn(
+          `[ProxyServer] Device-control transport failure for ${error.failure.toolName} during ${error.failure.phase}`,
+        );
+        return deviceControlTransportFailureResult(error);
       }
       logger.error(`[ProxyServer] Tool call failed: ${name} - ${error}`);
       // Return error as tool result (not throwing) to match expected MCP behavior

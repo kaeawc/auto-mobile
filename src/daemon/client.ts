@@ -15,6 +15,7 @@ import { type BuildIdentity, getCurrentBuildIdentity } from "./buildIdentity";
 import { resolveMcpRequestTimeoutMs } from "./mcpRequestTimeout";
 import { McpTimeoutError } from "./McpTimeoutError";
 import { type Timer, defaultTimer } from "../utils/SystemTimer";
+import { DeviceControlTransportError } from "./deviceControlTransportFailure";
 import {
   cleanupStaleDaemonFilesForDeadPidSync,
   getDaemonSocketPathList,
@@ -414,7 +415,12 @@ export class DaemonClient {
       pending.resolve(response);
     } else {
       pending.reject(
-        new ActionableError(response.error || "Unknown error from daemon")
+        response.transportFailure
+          ? new DeviceControlTransportError(
+            response.error || "Device-control transport failure",
+            response.transportFailure,
+          )
+          : new ActionableError(response.error || "Unknown error from daemon")
       );
     }
   }

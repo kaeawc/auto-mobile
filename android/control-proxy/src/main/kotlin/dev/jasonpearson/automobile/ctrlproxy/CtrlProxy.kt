@@ -476,10 +476,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   private val recompositionStore = RecompositionStore()
   private val frameMetricsStore = FrameMetricsStore()
   private val viewHierarchyExtractor = ViewHierarchyExtractor(recompositionStore)
-  private val json = Json {
-    prettyPrint = true
-    encodeDefaults = true
-  }
   private val jsonCompact = Json {
     prettyPrint = false
     encodeDefaults = true
@@ -1252,9 +1248,19 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                   TAG,
                   "Hierarchy changed (hash=${result.hash}, extraction=${result.extractionTimeMs}ms)",
                 )
-                writeHierarchyToFile(result.hierarchy)
+                // Only serialize and persist a Changed frame that will actually broadcast. A
+                // throttled frame skips both the wire push and the flushed disk write (issue
+                // #5469) — the debug file is refreshed by the next non-throttled broadcast and
+                // force-written by every explicit hierarchy request, so no real consumer is staled.
                 if (broadcastThrottler.shouldBroadcast()) {
-                  broadcastHierarchyUpdate(result.hierarchy)
+                  // Serialize the tree exactly once and reuse the compact wire form for the debug
+                  // file, so a single Changed result never serializes twice (issue #5469).
+                  val serialized =
+                    perfProvider.track("serializeHierarchy") {
+                      jsonCompact.encodeToString(result.hierarchy)
+                    }
+                  writeHierarchyToFile(result.hierarchy, serialized = serialized)
+                  broadcastHierarchyUpdate(result.hierarchy, serialized = serialized)
                 } else {
                   extractedHierarchyFrameContexts.remove(result.hierarchy)
                   Log.d(
@@ -2741,18 +2747,28 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         snapshotOptions = snapshotOptions,
       )
     if (hierarchy != null) {
-      writeHierarchyToFile(hierarchy)
-      kotlinx.coroutines.runBlocking { broadcastHierarchyUpdate(hierarchy, sync = true) }
+      // Explicit request: force-write the file and broadcast, serializing the tree once (#5469).
+      val serialized =
+        perfProvider.track("serializeHierarchy") { jsonCompact.encodeToString(hierarchy) }
+      writeHierarchyToFile(hierarchy, serialized = serialized)
+      kotlinx.coroutines.runBlocking {
+        broadcastHierarchyUpdate(hierarchy, sync = true, serialized = serialized)
+      }
     }
   }
 
-  /** Writes the hierarchy to a file for synchronous access */
+  /**
+   * Writes the hierarchy to a file for synchronous access. Callers that already serialized the tree
+   * for the wire frame pass that exact compact string via [serialized] so a single change is never
+   * serialized twice (issue #5469); the file therefore holds the same canonical form as the wire.
+   */
   private fun writeHierarchyToFile(
     hierarchy: ViewHierarchy,
     filename: String = HIERARCHY_FILE_NAME,
+    serialized: String? = null,
   ) {
     try {
-      val jsonString = json.encodeToString(hierarchy)
+      val jsonString = serialized ?: jsonCompact.encodeToString(hierarchy)
       val jsonBytes = jsonString.toByteArray()
       openFileOutput(filename, Context.MODE_PRIVATE).use { output ->
         Log.d(TAG, "Writing ${jsonBytes.size} bytes to $filename")
@@ -2787,10 +2803,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           val hierarchy = extractHierarchy(textFilter, disableAllFiltering)
           if (hierarchy != null) {
             val filename = "hierarchy_$uuid.json"
-            writeHierarchyToFile(hierarchy, filename)
+            // Explicit request: serialize once and reuse for the file and the wire frame (#5469).
+            val serialized =
+              perfProvider.track("serializeHierarchy") { jsonCompact.encodeToString(hierarchy) }
+            writeHierarchyToFile(hierarchy, filename, serialized = serialized)
 
             // Broadcast to WebSocket clients
-            broadcastHierarchyUpdate(hierarchy)
+            broadcastHierarchyUpdate(hierarchy, serialized = serialized)
 
             val message =
               if (textFilter != null) {
@@ -2919,7 +2938,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    * @param sync If true, waits for delivery to all clients before returning. Use for critical
    *   ordering.
    */
-  private suspend fun broadcastHierarchyUpdate(hierarchy: ViewHierarchy, sync: Boolean = false) {
+  private suspend fun broadcastHierarchyUpdate(
+    hierarchy: ViewHierarchy,
+    sync: Boolean = false,
+    serialized: String? = null,
+  ) {
     val contextAtExtraction = extractedHierarchyFrameContexts.remove(hierarchy)
     if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
       Log.d(TAG, "WebSocket server not running, skipping broadcast")
@@ -2927,8 +2950,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
 
     try {
+      // Reuse the string the caller already serialized for the disk file when present, so a single
+      // change is serialized at most once (issue #5469); otherwise serialize the wire form here.
       val jsonString =
-        perfProvider.track("serializeHierarchy") { jsonCompact.encodeToString(hierarchy) }
+        serialized
+          ?: perfProvider.track("serializeHierarchy") { jsonCompact.encodeToString(hierarchy) }
 
       val messageBuilder: (kotlinx.serialization.json.JsonElement?) -> String = { perfTiming ->
         buildString {

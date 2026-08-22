@@ -24,11 +24,10 @@ on:
         required: false
         type: boolean
         default: false
-      publish:
-        description: "Publish the update site to GitHub Releases (make copied-site) instead of artifacts-only"
-        required: false
-        type: boolean
-        default: false
+      # No `publish` input here on purpose: publishing to GitHub Releases is only reachable via
+      # workflow_call from release.yml, which binds the version to the validated release tag. A manual
+      # dispatch is always artifacts-only, so it can never push wrong-commit or wrong-version packages
+      # to a public release (#5227, PR-C4).
   workflow_call:
     inputs:
       version:
@@ -101,6 +100,13 @@ jobs:
             echo "::error::publish=true requires signed=true — refusing to publish unsigned macOS packages" >&2
             exit 1
           fi
+          # Conveyor has no prerelease/build-metadata field, so publishing a qualified version would
+          # push copied-site to the wrong (base) version. release.yml rejects such tags up front; guard
+          # the workflow_call publish path here too (defense in depth).
+          if [[ "$PUBLISH" == "true" && ( "$VERSION" == *-* || "$VERSION" == *+* ) ]]; then
+            echo "::error::publish=true does not support prerelease/build-metadata versions: $VERSION" >&2
+            exit 1
+          fi
 
       - name: "Set up JDK 21"
         uses: actions/setup-java@v4
@@ -142,7 +148,9 @@ jobs:
           echo "CONVEYOR_MAC_CERTIFICATE_PASSWORD=${MACOS_DEVELOPER_ID_CERT_PASSWORD}" >> "$GITHUB_ENV"
 
       - name: "Run Conveyor"
-        uses: hydraulic-software/conveyor/actions/build@v22.0
+        # Pinned to the v22.0 commit: this third-party action receives contents: write on the publish
+        # path, so pin to an immutable SHA rather than the mutable tag (supply-chain hardening).
+        uses: hydraulic-software/conveyor/actions/build@9e90ce7c2a4356c99d68c63f41e4bc497da279c8 # v22.0
         with:
           # publish -> `make copied-site` pushes the site to app.site.copy-to (GitHub Releases);
           # otherwise `make site` writes to ./output only (artifacts-only).

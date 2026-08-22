@@ -4,7 +4,6 @@ import { DefaultElementParser } from "../features/utility/ElementParser";
 const SYSTEM_UI_PACKAGE = "com.android.systemui";
 const SYSTEM_UI_ANR_TITLE = "System UI isn't responding";
 const WAIT_ACTION = "Wait";
-const CLOSE_APP_ACTION = "Close app";
 
 // The ANR dialog title and action labels are localized, so exact English text
 // never matches on non-English devices. The framework AlertDialog resource IDs
@@ -14,6 +13,7 @@ const CLOSE_APP_ACTION = "Close app";
 const ALERT_TITLE_RESOURCE_ID = "android:id/alertTitle";
 const WAIT_BUTTON_RESOURCE_ID = "android:id/button2";
 const CLOSE_APP_BUTTON_RESOURCE_ID = "android:id/button1";
+const SYSTEM_WINDOW_TYPE = 3;
 
 export interface SystemUiAnrDialog {
   waitBounds: ElementBounds;
@@ -30,8 +30,8 @@ type AnrDialogParser = Pick<
 
 interface SystemUiAnrSignals {
   systemUi: boolean;
+  systemWindow: boolean;
   titleFound: boolean;
-  closeAppFound: boolean;
   alertTitleFound: boolean;
   closeAppResourceFound: boolean;
   waitBounds?: ElementBounds;
@@ -41,7 +41,7 @@ interface SystemUiAnrSignals {
 /**
  * Detects the Android framework System UI ANR dialog in the topmost window.
  * A matching title alone is insufficient because an app can render the same
- * text; require System UI ownership or both framework action labels.
+ * text; require System UI ownership.
  */
 export function findSystemUiAnrDialog(
   viewHierarchy: ViewHierarchyResult,
@@ -55,9 +55,9 @@ export function findSystemUiAnrDialog(
   }
 
   const signals: SystemUiAnrSignals = {
-    systemUi: topmostWindowPackageIsSystemUi(viewHierarchy),
+    systemUi: hierarchyPackageIsSystemUi(viewHierarchy) || topmostWindowPackageIsSystemUi(viewHierarchy),
+    systemWindow: topmostWindowIsSystemWindow(viewHierarchy),
     titleFound: false,
-    closeAppFound: false,
     alertTitleFound: false,
     closeAppResourceFound: false,
   };
@@ -67,14 +67,14 @@ export function findSystemUiAnrDialog(
     );
   }
 
-  // English match: exact localized-in-English strings, ownership-or-Close-app.
+  // English match: exact localized-in-English strings plus System UI ownership.
   const englishWaitBounds = matchesEnglishSystemUiAnr(signals) ? signals.waitBounds : undefined;
   if (englishWaitBounds) {
     return { waitBounds: englishWaitBounds };
   }
-  // Localized fallback: a System UI-owned framework AlertDialog with the ANR
-  // button layout (alert title plus both Wait/Close-app buttons). Gating on
-  // System UI ownership keeps this from matching unrelated app dialogs.
+  // Localized fallback: CtrlProxy exposes AccessibilityWindowInfo types, where
+  // Android framework dialogs are TYPE_SYSTEM (3). Requiring a system window
+  // prevents an app-owned AlertDialog from being mistaken for a localized ANR.
   const localizedWaitBounds = matchesLocalizedSystemUiAnr(signals)
     ? signals.waitBoundsByResourceId
     : undefined;
@@ -88,13 +88,14 @@ function matchesEnglishSystemUiAnr(signals: SystemUiAnrSignals): boolean {
   return (
     signals.titleFound &&
     signals.waitBounds !== undefined &&
-    (signals.systemUi || signals.closeAppFound)
+    signals.systemUi
   );
 }
 
 function matchesLocalizedSystemUiAnr(signals: SystemUiAnrSignals): boolean {
   return (
     signals.systemUi &&
+    signals.systemWindow &&
     signals.alertTitleFound &&
     signals.closeAppResourceFound &&
     signals.waitBoundsByResourceId !== undefined
@@ -108,11 +109,13 @@ function inspectSystemUiAnrNode(
 ): void {
   const properties = parser.extractNodeProperties(node);
   const text = coalesceString(properties.text, properties["content-desc"]);
-  const packageName = coalesceString(properties.package, properties["package-name"]);
+  const packageName = coalesceString(
+    properties.packageName,
+    coalesceString(properties.package, properties["package-name"]),
+  );
   const resourceId = coalesceString(properties["resource-id"], properties.resourceId);
   signals.systemUi ||= packageName === SYSTEM_UI_PACKAGE;
   signals.titleFound ||= text === SYSTEM_UI_ANR_TITLE;
-  signals.closeAppFound ||= text === CLOSE_APP_ACTION;
   signals.alertTitleFound ||= resourceId === ALERT_TITLE_RESOURCE_ID;
   signals.closeAppResourceFound ||= resourceId === CLOSE_APP_BUTTON_RESOURCE_ID;
   if (text === WAIT_ACTION) {
@@ -136,14 +139,27 @@ function boundsOfNode(
 }
 
 function topmostWindowPackageIsSystemUi(viewHierarchy: ViewHierarchyResult): boolean {
+  return topmostWindow(viewHierarchy)?.packageName === SYSTEM_UI_PACKAGE;
+}
+
+function hierarchyPackageIsSystemUi(viewHierarchy: ViewHierarchyResult): boolean {
+  return viewHierarchy.packageName === SYSTEM_UI_PACKAGE;
+}
+
+function topmostWindowIsSystemWindow(viewHierarchy: ViewHierarchyResult): boolean {
+  return topmostWindow(viewHierarchy)?.type === SYSTEM_WINDOW_TYPE;
+}
+
+function topmostWindow(
+  viewHierarchy: ViewHierarchyResult,
+): NonNullable<ViewHierarchyResult["windows"]>[number] | undefined {
   const windows = viewHierarchy.windows;
   if (!windows || windows.length === 0) {
-    return false;
+    return undefined;
   }
-  const topmost = windows.reduce((current, candidate) =>
+  return windows.reduce((current, candidate) =>
     (candidate.windowLayer ?? 0) > (current.windowLayer ?? 0) ? candidate : current,
   );
-  return topmost.packageName === SYSTEM_UI_PACKAGE;
 }
 
 export function centerOfBounds(bounds: ElementBounds): { x: number; y: number } {

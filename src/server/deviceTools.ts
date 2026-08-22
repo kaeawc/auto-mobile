@@ -24,7 +24,11 @@ import { DEVICE_POOL_MATCHING, isDevicePoolAutolockEnabled } from "../daemon/poo
 import { DEVICE_CREATE_ENV_VAR, getDeviceCreationGate, type DeviceCreationGate } from "../utils/deviceCreationGate";
 import { createDefaultDeviceProvisioner, type DeviceProvisioner } from "../utils/deviceProvisioning";
 import { DaemonState } from "../daemon/daemonState";
-import type { DevicePool, PooledDevice } from "../daemon/devicePool";
+import type {
+  DevicePool,
+  DeviceReadinessReservation,
+  PooledDevice,
+} from "../daemon/devicePool";
 import type { SessionManager } from "../daemon/sessionManager";
 import { DeviceBootService, type DeviceBootResult } from "../utils/deviceBootService";
 import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
@@ -1165,7 +1169,9 @@ async function rebootAndroidAfterSystemUiAnr(
 ): Promise<{
   boot: DeviceBootResult;
   preservedSessionId?: string;
-  releaseReadinessReservation?: () => Promise<void>;
+  releaseReadinessReservation?: DeviceReadinessReservation;
+  retireReplacement?: () => Promise<void>;
+  validatePreservedSession?: () => Promise<void>;
 }> {
   const sourceImage = await resolveSystemUiRecoveryImage(
     boot,
@@ -1180,13 +1186,13 @@ async function rebootAndroidAfterSystemUiAnr(
       boot.device.deviceId,
       boot.device,
       sourceImage.name,
+      sourceImage.name,
     )
     : undefined;
   let shutdownReservation: Awaited<ReturnType<DevicePool["reserveDeviceForShutdown"]>>;
   let shutdownWasConfirmed = false;
   let keepReadinessReservation = false;
   let replacementBoot: DeviceBootResult | undefined;
-  let replacementAdopted = false;
   try {
     shutdownReservation = await reserveSystemUiAnrShutdown(devicePool, boot.device.deviceId, signal);
     await shutdownAndroidForSystemUiAnr(
@@ -1206,29 +1212,45 @@ async function rebootAndroidAfterSystemUiAnr(
       signal,
       progress,
     );
-    const preservedSessionId = await handoffSystemUiAnrReplacement(
+    const adoptedReplacementBoot = replacementBoot;
+    const handoff = await handoffSystemUiAnrReplacement(
       devicePool,
       shutdownReservation,
-      replacementBoot,
+      adoptedReplacementBoot,
       sourceImage,
     );
-    replacementAdopted = true;
     keepReadinessReservation = true;
-    return { boot: replacementBoot, preservedSessionId, releaseReadinessReservation };
+    return {
+      boot: adoptedReplacementBoot,
+      preservedSessionId: handoff?.preservedSessionId,
+      releaseReadinessReservation,
+      retireReplacement: async () =>
+        await retireSystemUiAnrReplacement(
+          devicePool,
+          handoff?.replacementDevice,
+          adoptedReplacementBoot,
+        ),
+      validatePreservedSession: handoff?.validatePreservedSession,
+    };
   } catch (error) {
-    // A replacement that booted but was never adopted by the pool (handoff
-    // rejected, or rolled back) leaks its emulator process: the outer handler
-    // only tracks the original boot. Cancel it here where its handle is in scope.
-    if (!replacementAdopted) {
-      cancelUnownedColdBoot(replacementBoot);
+    // The pool rolls an adopted replacement back before rejecting its handoff,
+    // so any replacement still in scope here is safe to cancel as an unowned
+    // cold boot.
+    cancelUnownedColdBoot(replacementBoot);
+    try {
+      await cleanUpFailedSystemUiAnrRecovery(
+        devicePool,
+        shutdownReservation,
+        shutdownWasConfirmed,
+        boot.device.deviceId,
+        signal,
+      );
+    } catch (cleanupError) {
+      logger.warn(
+        `[DeviceTools] Failed to clean up after System UI ANR recovery failure: ${cleanupError}`,
+        cleanupError,
+      );
     }
-    await cleanUpFailedSystemUiAnrRecovery(
-      devicePool,
-      shutdownReservation,
-      shutdownWasConfirmed,
-      boot.device.deviceId,
-      signal,
-    );
     throw error;
   } finally {
     await shutdownReservation?.release();
@@ -1305,7 +1327,7 @@ async function handoffSystemUiAnrReplacement(
   shutdownReservation: Awaited<ReturnType<DevicePool["reserveDeviceForShutdown"]>>,
   replacementBoot: DeviceBootResult,
   sourceImage: DeviceInfo,
-): Promise<string | undefined> {
+): Promise<Awaited<ReturnType<DevicePool["replaceDeviceForSystemUiAnrRecovery"]>> | undefined> {
   if (!devicePool || !shutdownReservation) {
     return undefined;
   }
@@ -1340,7 +1362,46 @@ async function cleanUpFailedSystemUiAnrRecovery(
   }
 }
 
+async function retireSystemUiAnrReplacement(
+  devicePool: DevicePool | undefined,
+  expectedReplacement: PooledDevice | undefined,
+  replacementBoot: DeviceBootResult,
+): Promise<void> {
+  try {
+    if (expectedReplacement) {
+      await devicePool?.retireDeviceAfterSystemUiAnrRecoveryFailure(expectedReplacement);
+    }
+  } finally {
+    // Retiring the pool entry drops its process tracking, allowing the existing
+    // cold-boot cleanup to terminate this recovered emulator deterministically.
+    cancelUnownedColdBoot(replacementBoot);
+  }
+}
+
 type SystemUiAnrRecoveryResult = Awaited<ReturnType<typeof rebootAndroidAfterSystemUiAnr>>;
+
+async function validatePreservedSystemUiAnrRecoverySession(
+  preservedSessionId: string | undefined,
+  validatePreservedSession: (() => Promise<void>) | undefined,
+  retireReplacement: (() => Promise<void>) | undefined,
+): Promise<void> {
+  if (!preservedSessionId) {
+    return;
+  }
+  try {
+    await validatePreservedSession?.();
+  } catch (error) {
+    try {
+      await retireReplacement?.();
+    } catch (retireError) {
+      logger.warn(
+        `[DeviceTools] Failed to retire stale System UI recovery replacement: ${retireError}`,
+        retireError,
+      );
+    }
+    throw error;
+  }
+}
 
 async function ensureRunnerReadyWithSystemUiAnrRecovery(
   boot: DeviceBootResult,
@@ -1358,11 +1419,26 @@ async function ensureRunnerReadyWithSystemUiAnrRecovery(
     try {
       await ensureRunnerReady(recovery.boot);
     } catch (readinessError) {
-      // rebootAfterSystemUiAnr retained the readiness reservation for the
-      // replacement, but it only reaches the caller's ordered cleanup once this
-      // returns. Release it here so a failed second readiness check does not
-      // strand the recovered AVD out of general allocation forever.
-      await recovery.releaseReadinessReservation?.();
+      try {
+        await recovery.retireReplacement?.();
+      } catch (retireError) {
+        logger.warn(
+          `[DeviceTools] Failed to retire System UI recovery replacement: ${retireError}`,
+          retireError,
+        );
+      }
+      try {
+        // rebootAfterSystemUiAnr retained the readiness reservation for the
+        // replacement, but it only reaches the caller's ordered cleanup once this
+        // returns. Release it here so a failed second readiness check does not
+        // strand the recovered AVD out of general allocation forever.
+        await recovery.releaseReadinessReservation?.();
+      } catch (releaseError) {
+        logger.warn(
+          `[DeviceTools] Failed to release System UI recovery readiness reservation: ${releaseError}`,
+          releaseError,
+        );
+      }
       throw readinessError;
     }
     return { ...recovery, recovered: true };
@@ -1374,7 +1450,7 @@ async function reserveRecoveredDeviceForReadiness(
   boot: DeviceBootResult,
   args: StartDeviceArgs,
   requestedIdentity: string,
-  releaseReadinessReservations: Array<() => Promise<void>>,
+  releaseReadinessReservations: DeviceReadinessReservation[],
 ): Promise<void> {
   validateBootIdentity(args, boot.device, boot.source, boot.sourceImage);
   validatePooledDeviceMapping(boot.device, requestedIdentity);
@@ -1393,7 +1469,7 @@ async function reserveRecoveredDeviceForReadiness(
 async function reserveInitialDeviceForReadiness(
   daemonState: DaemonState,
   boot: DeviceBootResult,
-  releaseReadinessReservations: Array<() => Promise<void>>,
+  releaseReadinessReservations: DeviceReadinessReservation[],
 ): Promise<void> {
   const devicePool = getStartDevicePool(daemonState);
   if (!devicePool) {
@@ -1435,12 +1511,12 @@ interface StartDeviceRunnerReadinessInput {
   perf: ReturnType<typeof createPerformanceTracker>;
   requestedIdentity: string;
   ensureCtrlProxyReady: (request: RunnerReadinessRequest) => Promise<void>;
-  releaseReadinessReservations: Array<() => Promise<void>>;
+  releaseReadinessReservations: DeviceReadinessReservation[];
 }
 
 async function prepareStartDeviceRunnerReadiness(
   input: StartDeviceRunnerReadinessInput,
-): Promise<{ boot: DeviceBootResult; preservedSessionId?: string }> {
+): Promise<SystemUiAnrRecoveryResult & { recovered: boolean }> {
   const devicePool = getStartDevicePool(input.daemonState);
   const readinessResult = await ensureRunnerReadyWithSystemUiAnrRecovery(
     input.boot,
@@ -1448,7 +1524,19 @@ async function prepareStartDeviceRunnerReadiness(
     createSystemUiAnrRebooter(input, devicePool),
   );
   if (readinessResult.recovered) {
-    await prepareRecoveredDeviceForRunnerReadiness(input, devicePool, readinessResult);
+    try {
+      await prepareRecoveredDeviceForRunnerReadiness(input, devicePool, readinessResult);
+    } catch (error) {
+      try {
+        await readinessResult.retireReplacement?.();
+      } catch (cleanupError) {
+        logger.warn(
+          `[DeviceTools] Failed to retire replacement after recovered readiness reservation failed: ${cleanupError}`,
+          cleanupError,
+        );
+      }
+      throw error;
+    }
   }
   return readinessResult;
 }
@@ -1580,8 +1668,10 @@ export function registerDeviceTools() {
     const requestedIdentity = describeStartDeviceRequest(args);
     let boot: DeviceBootResult | undefined;
     let ownershipTransferred = false;
-    const releaseReadinessReservations: Array<() => Promise<void>> = [];
+    const releaseReadinessReservations: DeviceReadinessReservation[] = [];
     let preservedSessionId: string | undefined;
+    let validatePreservedSession: (() => Promise<void>) | undefined;
+    let retireRecoveredReplacement: (() => Promise<void>) | undefined;
 
     try {
       const bootService = new DeviceBootService({
@@ -1632,6 +1722,8 @@ export function registerDeviceTools() {
       );
       boot = readinessResult.boot;
       preservedSessionId = readinessResult.preservedSessionId;
+      validatePreservedSession = readinessResult.validatePreservedSession;
+      retireRecoveredReplacement = readinessResult.retireReplacement;
       // Re-check under the later binding lock because pool identity can change
       // while runner setup is in flight.
       validatePooledDeviceMapping(boot.device, requestedIdentity);
@@ -1639,11 +1731,17 @@ export function registerDeviceTools() {
       // Publish only after runner health passes. Readiness remains per-device,
       // so 20-40 concurrent emulators do not serialize on a host-wide gate.
       publishWarmDeviceReady(boot.source, boot.device.deviceId);
+      await validatePreservedSystemUiAnrRecoverySession(
+        preservedSessionId,
+        validatePreservedSession,
+        retireRecoveredReplacement,
+      );
       const sessionId = preservedSessionId ?? await bindBootedDeviceSession(
         boot.device,
         args,
         boot.sourceImage,
         boot.processHandle,
+        new Set(releaseReadinessReservations.map((reservation) => reservation.owner)),
       );
       ownershipTransferred = true;
 
@@ -1687,7 +1785,8 @@ export function registerDeviceTools() {
     device: BootedDevice,
     args: StartDeviceArgs,
     sourceImage?: DeviceInfo,
-    childProcess?: ChildProcess | null
+    childProcess?: ChildProcess | null,
+    readinessReservationOwners?: ReadonlySet<symbol>,
   ): Promise<string> {
     // Reserve the exact ready device before resource notifications publish it
     // to concurrent allocators.
@@ -1700,6 +1799,7 @@ export function registerDeviceTools() {
         sourceImage,
         childProcess,
         device,
+        readinessReservationOwners,
       );
       if (autolockSessionId) {
         return autolockSessionId;
@@ -1717,6 +1817,8 @@ export function registerDeviceTools() {
       sourceImage,
       childProcess,
       device,
+      false,
+      readinessReservationOwners,
     );
   }
 

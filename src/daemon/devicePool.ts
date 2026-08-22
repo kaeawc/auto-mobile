@@ -144,6 +144,21 @@ interface DeviceRemovedListener {
   (deviceId: string): void;
 }
 
+export type DeviceReadinessReservation = (() => Promise<void>) & {
+  readonly owner: symbol;
+};
+
+interface ReadinessReservationTarget {
+  deviceId: string;
+  incarnation: number;
+}
+
+export interface SystemUiAnrRecoveryHandoff {
+  readonly preservedSessionId?: string;
+  readonly replacementDevice: PooledDevice;
+  validatePreservedSession(): Promise<void>;
+}
+
 /**
  * A process can emit output after readiness. Capture its redacted bounded tail
  * so a later unexpected exit has the same useful evidence as an early launch
@@ -261,8 +276,17 @@ export class DevicePool {
   /** Latest refresh request; older discovery snapshots must not overwrite it. */
   private refreshGeneration = 0;
   private readonly readinessReservationCounts: Map<string, number> = new Map();
-  /** Stable runtime names reserved while a booted serial is being replaced. */
-  private readonly readinessReservationNames: Map<string, number> = new Map();
+  /**
+   * Stable runtime names reserved while a booted serial is being replaced,
+   * keyed by reservation owner to its exact device incarnation. Concurrent
+   * readiness for the same device can share that device, while a replacement
+   * serial or incarnation remains unavailable until its owner transfers the
+   * reservation.
+   */
+  private readonly readinessReservationNames: Map<
+    string,
+    Map<symbol, ReadinessReservationTarget>
+  > = new Map();
   /**
    * Captured incarnations that an explicit shutdown is retiring. Unlike a
    * readiness reservation, this excludes direct startDevice/autolock binding
@@ -2536,9 +2560,13 @@ export class DevicePool {
   private async assertIdleDeviceAssignable(
     device: PooledDevice,
     unavailableMessage: string,
+    readinessReservationOwners?: ReadonlySet<symbol>,
   ): Promise<void> {
     if (device.status !== "idle" || device.sessionId) {
       return;
+    }
+    if (this.hasReadinessNameReservation(device, readinessReservationOwners)) {
+      throw new ActionableError(unavailableMessage);
     }
 
     const iosLiveness = device.platform === "ios" ? await this.getIosLivenessSnapshot() : undefined;
@@ -2837,14 +2865,23 @@ export class DevicePool {
   async retireDeviceAfterSystemUiAnrRecoveryFailure(
     expectedDevice: PooledDevice,
   ): Promise<boolean> {
+    let releaseError: unknown;
     if (expectedDevice.sessionId) {
-      await this.releaseSessionForDisconnectedDevice(
-        expectedDevice.sessionId,
-        expectedDevice.id,
-        deviceLossCancellationReason(expectedDevice.id),
-      );
+      try {
+        await this.releaseSessionForDisconnectedDevice(
+          expectedDevice.sessionId,
+          expectedDevice.id,
+          deviceLossCancellationReason(expectedDevice.id),
+        );
+      } catch (error) {
+        releaseError = error;
+      }
     }
-    return await this.retireDeviceForShutdown(expectedDevice);
+    const retired = await this.retireDeviceForShutdown(expectedDevice);
+    if (releaseError) {
+      throw releaseError;
+    }
+    return retired;
   }
 
   /**
@@ -2886,58 +2923,111 @@ export class DevicePool {
     replacement: BootedDevice,
     sourceImage: DeviceInfo,
     childProcess?: ChildProcess | null,
-  ): Promise<string | undefined> {
+  ): Promise<SystemUiAnrRecoveryHandoff> {
     return await this.assignmentMutex.runExclusive(async () => {
-      if (this.devices.get(expectedDevice.id) !== expectedDevice) {
+      const currentExpectedDevice = this.devices.get(expectedDevice.id);
+      const existingReplacement = this.devices.get(replacement.deviceId);
+      if (
+        currentExpectedDevice !== expectedDevice &&
+        (existingReplacement === undefined || existingReplacement === expectedDevice)
+      ) {
         throw new ActionableError(
           `Device '${expectedDevice.id}' changed while System UI recovery was in progress.`,
         );
       }
       this.assertSystemUiAnrReplacement(expectedDevice, replacement, sourceImage);
 
-      const preservedSessionId = this.systemUiAnrRecoverySessionId(expectedDevice);
+      const preservedSession = this.systemUiAnrRecoverySession(expectedDevice);
+      const preservedSessionId = preservedSession?.sessionId;
       const preservedAutolockSessionId = expectedDevice.autolockSessionId;
-      const replacementDevice = await this.replaceStoppedDeviceForSystemUiAnr(
-        expectedDevice,
-        replacement,
-        sourceImage,
-        childProcess,
-      );
+      let replacementDevice: PooledDevice | undefined;
       try {
+        replacementDevice = await this.replaceStoppedDeviceForSystemUiAnr(
+          expectedDevice,
+          replacement,
+          sourceImage,
+        );
+        await this.trackStartedDeviceProcess(replacement, childProcess);
+        if (this.devices.get(replacementDevice.id) !== replacementDevice) {
+          throw new ActionableError(
+            `Replacement device '${replacementDevice.id}' exited before its recovery session was rebound.`,
+          );
+        }
         await this.restoreSystemUiAnrRecoverySession(
-          preservedSessionId,
+          preservedSession,
+          expectedDevice.id,
           replacementDevice,
           preservedAutolockSessionId,
         );
       } catch (error) {
-        // The destructive pool handoff already published the replacement and
-        // removed the old incarnation. If the session rebind fails, roll the
-        // replacement back and release the preserved session so the caller's
-        // cleanup (which targets the removed original) cannot leave an idle,
-        // assignable device still mapped to the stopped serial.
-        await this.rollbackSystemUiAnrRecoveryReplacement(
-          replacementDevice,
-          preservedSessionId,
-          expectedDevice.id,
-        );
+        // Once the handoff has detached the original incarnation, roll any
+        // replacement back and release the preserved session so caller cleanup
+        // cannot leave an idle device mapped to the stopped serial.
+        const originalWasDetached =
+          this.devices.get(expectedDevice.id) !== expectedDevice ||
+          (preservedSession !== undefined && expectedDevice.sessionId === null);
+        if (originalWasDetached) {
+          await this.rollbackSystemUiAnrRecoveryReplacement(
+            replacementDevice,
+            preservedSession,
+          );
+        }
         throw error;
       }
+      if (!replacementDevice) {
+        throw new ActionableError(
+          `Replacement device '${replacement.deviceId}' was not retained by the device pool.`,
+        );
+      }
       this.intentionalShutdowns.delete(expectedDevice.id);
-      return preservedSessionId;
+      return {
+        preservedSessionId,
+        replacementDevice,
+        validatePreservedSession: async () => {
+          await this.validateSystemUiAnrRecoverySession(
+            preservedSession,
+            replacementDevice,
+          );
+        },
+      };
+    });
+  }
+
+  private async validateSystemUiAnrRecoverySession(
+    preservedSession: Session | undefined,
+    replacementDevice: PooledDevice,
+  ): Promise<void> {
+    if (!preservedSession) {
+      return;
+    }
+    await this.assignmentMutex.runExclusive(() => {
+      if (
+        this.devices.get(replacementDevice.id) !== replacementDevice ||
+        replacementDevice.sessionId !== preservedSession.sessionId ||
+        replacementDevice.status !== "busy" ||
+        this.sessionManager.getSession(preservedSession.sessionId) !== preservedSession ||
+        preservedSession.assignedDevice !== replacementDevice.id
+      ) {
+        throw new ActionableError(
+          `Session '${preservedSession.sessionId}' was released while System UI recovery was becoming ready.`,
+        );
+      }
     });
   }
 
   private async rollbackSystemUiAnrRecoveryReplacement(
-    replacementDevice: PooledDevice,
-    preservedSessionId: string | undefined,
-    originalDeviceId: string,
+    replacementDevice: PooledDevice | undefined,
+    preservedSession: Session | undefined,
   ): Promise<void> {
-    await this.removeDevice(replacementDevice.id, false, replacementDevice);
-    if (preservedSessionId) {
-      await this.releaseSessionForDisconnectedDevice(
-        preservedSessionId,
-        originalDeviceId,
-        deviceLossCancellationReason(originalDeviceId),
+    if (replacementDevice) {
+      await this.removeDevice(replacementDevice.id, false, replacementDevice);
+    }
+    if (preservedSession && this.sessionManager.getSession(preservedSession.sessionId) === preservedSession) {
+      await this.sessionManager.releaseSessionIfOwned(
+        preservedSession.sessionId,
+        preservedSession,
+        preservedSession.assignedDevice,
+        deviceLossCancellationReason(replacementDevice?.id ?? preservedSession.assignedDevice),
       );
     }
   }
@@ -2959,7 +3049,7 @@ export class DevicePool {
     }
   }
 
-  private systemUiAnrRecoverySessionId(expectedDevice: PooledDevice): string | undefined {
+  private systemUiAnrRecoverySession(expectedDevice: PooledDevice): Session | undefined {
     const sessionId = expectedDevice.sessionId;
     const session = sessionId ? this.sessionManager.getSession(sessionId) : null;
     if (
@@ -2969,17 +3059,31 @@ export class DevicePool {
     ) {
       return undefined;
     }
-    return sessionId ?? undefined;
+    return session;
   }
 
   private async replaceStoppedDeviceForSystemUiAnr(
     expectedDevice: PooledDevice,
     replacement: BootedDevice,
     sourceImage: DeviceInfo,
-    childProcess: ChildProcess | null | undefined,
   ): Promise<PooledDevice> {
     const priorAssignmentCount = expectedDevice.assignmentCount;
     const priorLastUsedAt = expectedDevice.lastUsedAt;
+    const existingReplacement = this.devices.get(replacement.deviceId);
+
+    if (existingReplacement && existingReplacement !== expectedDevice) {
+      this.assertPooledSystemUiAnrReplacement(existingReplacement, sourceImage);
+      if (this.devices.get(expectedDevice.id) === expectedDevice) {
+        this.releaseCapturedDeviceForShutdown(expectedDevice);
+        await this.removeDevice(expectedDevice.id, false, expectedDevice);
+      }
+      return await this.adoptSystemUiAnrReplacement(
+        existingReplacement,
+        sourceImage,
+        priorAssignmentCount,
+        priorLastUsedAt,
+      );
+    }
 
     // removeDevice rejects busy entries, so detach pool ownership only after
     // capturing any session that must be rebound below. The replacement remains
@@ -2993,7 +3097,6 @@ export class DevicePool {
     }
 
     await this.addDevice(replacement, sourceImage, false);
-    await this.trackStartedDeviceProcess(replacement, childProcess);
     const replacementDevice = this.devices.get(replacement.deviceId);
     if (!replacementDevice) {
       throw new ActionableError(
@@ -3005,20 +3108,71 @@ export class DevicePool {
     return replacementDevice;
   }
 
+  private assertPooledSystemUiAnrReplacement(
+    replacement: PooledDevice,
+    sourceImage: DeviceInfo,
+  ): void {
+    if (
+      replacement.platform !== "android" ||
+      sourceImage.platform !== "android" ||
+      replacement.name !== sourceImage.name
+    ) {
+      throw new ActionableError(
+        `System UI recovery replacement '${replacement.id}' does not match Android AVD '${sourceImage.name}'.`,
+      );
+    }
+    if (replacement.status !== "idle" || replacement.sessionId !== null) {
+      throw new ActionableError(
+        `System UI recovery replacement '${replacement.id}' is already assigned to a session.`,
+      );
+    }
+  }
+
+  private async adoptSystemUiAnrReplacement(
+    replacementDevice: PooledDevice,
+    sourceImage: DeviceInfo,
+    priorAssignmentCount: number,
+    priorLastUsedAt: number,
+  ): Promise<PooledDevice> {
+    this.recordSourceAndroidAvd(replacementDevice.id, sourceImage);
+    replacementDevice.assignmentCount = priorAssignmentCount;
+    replacementDevice.lastUsedAt = priorLastUsedAt;
+    return replacementDevice;
+  }
+
   private async restoreSystemUiAnrRecoverySession(
-    sessionId: string | undefined,
+    session: Session | undefined,
+    originalDeviceId: string,
     replacementDevice: PooledDevice,
     autolockSessionId: string | undefined,
   ): Promise<void> {
-    if (!sessionId) {
+    if (!session) {
       return;
     }
-    await this.sessionManager.rebindSession(
-      sessionId,
+    if (
+      this.sessionManager.getSession(session.sessionId) !== session ||
+      session.assignedDevice !== originalDeviceId
+    ) {
+      throw new ActionableError(
+        `Session '${session.sessionId}' was released while System UI recovery was in progress.`,
+      );
+    }
+    const reboundSession = await this.sessionManager.rebindSession(
+      session.sessionId,
       replacementDevice.id,
       replacementDevice.platform,
+      { force: true },
     );
-    replacementDevice.sessionId = sessionId;
+    if (
+      this.devices.get(replacementDevice.id) !== replacementDevice ||
+      reboundSession !== session ||
+      reboundSession.assignedDevice !== replacementDevice.id
+    ) {
+      throw new ActionableError(
+        `Replacement device '${replacementDevice.id}' disconnected while its recovery session was being rebound.`,
+      );
+    }
+    replacementDevice.sessionId = session.sessionId;
     replacementDevice.status = "busy";
     // addDevice leaves autolockSessionId undefined, which assertAutolockAccess
     // reads as "unlocked" and would let any session drive the recovered device
@@ -3065,15 +3219,17 @@ export class DevicePool {
     deviceId: string,
     expectedIdentity: Pick<BootedDevice, "deviceId" | "name" | "platform" | "transportId">,
     stableRuntimeName = expectedIdentity.name,
-  ): Promise<() => Promise<void>> {
+    verifiedAndroidAvdName?: string,
+  ): Promise<DeviceReadinessReservation> {
     // The stable-name reservation exists to bridge an Android emulator changing
     // serials across a reboot. iOS UDIDs are stable, so a name reservation there
     // only hides other idle simulators that share a (non-unique) display name.
-    const trackStableName = expectedIdentity.platform === "android";
     const stableRuntimeKey = this.readinessReservationNameKey({
       name: stableRuntimeName,
       platform: expectedIdentity.platform,
     });
+    const owner = Symbol("readiness-reservation");
+    let trackStableName = false;
     await this.assignmentMutex.runExclusive(async () => {
       const pooled = this.devices.get(deviceId);
       if (pooled) {
@@ -3083,20 +3239,27 @@ export class DevicePool {
           this.assertRuntimeIdentity(pooled, expectedIdentity);
         }
       }
+      const current = this.devices.get(deviceId);
+      trackStableName =
+        current?.platform === "android" &&
+        current.id.startsWith("emulator-") &&
+        (current.avdName === stableRuntimeName ||
+          verifiedAndroidAvdName === stableRuntimeName);
       this.readinessReservationCounts.set(
         deviceId,
         (this.readinessReservationCounts.get(deviceId) ?? 0) + 1,
       );
-      if (trackStableName) {
-        this.readinessReservationNames.set(
-          stableRuntimeKey,
-          (this.readinessReservationNames.get(stableRuntimeKey) ?? 0) + 1,
-        );
+      if (trackStableName && current) {
+        const owners =
+          this.readinessReservationNames.get(stableRuntimeKey) ??
+          new Map<symbol, ReadinessReservationTarget>();
+        owners.set(owner, { deviceId: current.id, incarnation: current.incarnation });
+        this.readinessReservationNames.set(stableRuntimeKey, owners);
       }
     });
 
     let released = false;
-    return async () => {
+    const release = async (): Promise<void> => {
       if (released) {
         return;
       }
@@ -3111,14 +3274,17 @@ export class DevicePool {
         if (!trackStableName) {
           return;
         }
-        const nameCount = this.readinessReservationNames.get(stableRuntimeKey);
-        if (nameCount === undefined || nameCount <= 1) {
+        const owners = this.readinessReservationNames.get(stableRuntimeKey);
+        if (!owners) {
+          return;
+        }
+        owners.delete(owner);
+        if (owners.size === 0) {
           this.readinessReservationNames.delete(stableRuntimeKey);
-        } else {
-          this.readinessReservationNames.set(stableRuntimeKey, nameCount - 1);
         }
       });
     };
+    return Object.assign(release, { owner });
   }
 
   private isReservedForReadiness(deviceId: string): boolean {
@@ -3131,14 +3297,37 @@ export class DevicePool {
     return `${device.platform}:${device.name}`;
   }
 
-  private hasReadinessNameReservation(device: PooledDevice): boolean {
+  private hasReadinessNameReservation(
+    device: PooledDevice,
+    readinessReservationOwners?: ReadonlySet<symbol>,
+  ): boolean {
     return (
-      this.readinessReservationNames.has(this.readinessReservationNameKey(device)) ||
+      this.hasReadinessReservationName(
+        this.readinessReservationNameKey(device),
+        device,
+        readinessReservationOwners,
+      ) ||
       (device.avdName !== undefined &&
-        this.readinessReservationNames.has(
+        this.hasReadinessReservationName(
           this.readinessReservationNameKey({ name: device.avdName, platform: device.platform }),
+          device,
+          readinessReservationOwners,
         ))
     );
+  }
+
+  private hasReadinessReservationName(
+    nameKey: string,
+    device: PooledDevice,
+    readinessReservationOwners: ReadonlySet<symbol> | undefined,
+  ): boolean {
+    const owners = this.readinessReservationNames.get(nameKey);
+    return owners !== undefined &&
+      Array.from(owners).some(
+        ([owner, target]) =>
+          (target.deviceId !== device.id || target.incarnation !== device.incarnation) &&
+          !readinessReservationOwners?.has(owner),
+      );
   }
 
   /**
@@ -3215,6 +3404,7 @@ export class DevicePool {
     childProcess?: ChildProcess | null,
     expectedIdentity?: Pick<BootedDevice, "deviceId" | "name" | "platform">,
     allowSessionRebind = false,
+    readinessReservationOwners?: ReadonlySet<symbol>,
   ): Promise<string> {
     return await this.assignmentMutex.runExclusive(async () => {
       const alreadyPooled = this.devices.has(deviceId);
@@ -3253,6 +3443,7 @@ export class DevicePool {
       await this.assertIdleDeviceAssignable(
         device,
         `Device '${deviceId}' is not available in the device pool.`,
+        readinessReservationOwners,
       );
 
       device = await this.validateOrReloadIdlePooledDevice(
@@ -3260,6 +3451,7 @@ export class DevicePool {
         expectedIdentity,
         `Device '${deviceId}' is not available in the device pool. ` +
           "It may have been shut down or disconnected.",
+        readinessReservationOwners,
       );
 
       if (device.sessionId) {
@@ -3310,6 +3502,7 @@ export class DevicePool {
     device: PooledDevice,
     expectedIdentity: Pick<BootedDevice, "deviceId" | "name" | "platform"> | undefined,
     unavailableMessage: string,
+    readinessReservationOwners?: ReadonlySet<symbol>,
   ): Promise<PooledDevice> {
     if (await this.ensurePooledDevicePresentForUse(device, false, true)) {
       return device;
@@ -3319,7 +3512,11 @@ export class DevicePool {
       throw new ActionableError(unavailableMessage);
     }
     this.assertRuntimeIdentity(replacement, expectedIdentity);
-    await this.assertIdleDeviceAssignable(replacement, unavailableMessage);
+    await this.assertIdleDeviceAssignable(
+      replacement,
+      unavailableMessage,
+      readinessReservationOwners,
+    );
     return replacement;
   }
 
@@ -3440,6 +3637,7 @@ export class DevicePool {
     sourceImage?: DeviceInfo,
     childProcess?: ChildProcess | null,
     expectedIdentity?: Pick<BootedDevice, "deviceId" | "name" | "platform">,
+    readinessReservationOwners?: ReadonlySet<symbol>,
   ): Promise<string | undefined> {
     if (!isDevicePoolAutolockEnabled()) {
       return undefined;
@@ -3452,6 +3650,7 @@ export class DevicePool {
         sourceImage,
         childProcess,
         expectedIdentity,
+        readinessReservationOwners,
       ),
     );
   }
@@ -3463,6 +3662,7 @@ export class DevicePool {
     sourceImage?: DeviceInfo,
     childProcess?: ChildProcess | null,
     expectedIdentity?: Pick<BootedDevice, "deviceId" | "name" | "platform">,
+    readinessReservationOwners?: ReadonlySet<symbol>,
   ): Promise<string> {
     const sessionId = randomUUID();
 
@@ -3513,6 +3713,7 @@ export class DevicePool {
       device,
       `Device '${deviceId}' is not available for autolock.\n` +
         `The device may have been shut down or disconnected.`,
+      readinessReservationOwners,
     );
 
     device = await this.validateOrReloadIdlePooledDevice(
@@ -3524,6 +3725,7 @@ export class DevicePool {
         `  - Use 'startDevice' with the same criteria to boot a new device\n` +
         `  - Use 'startDevice' with deviceId to restart this specific device\n` +
         `  - Use 'listDevices' to see currently available devices`,
+      readinessReservationOwners,
     );
 
     const assignmentSnapshot = this.snapshotSessionAssignment(device);

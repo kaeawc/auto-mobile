@@ -115,6 +115,14 @@ export interface SessionDeviceAssigner {
   assignDeviceToSession(sessionId: string, platform?: Platform): Promise<string>;
 }
 
+export interface RebindSessionOptions {
+  /**
+   * The runtime behind the same device ID restarted, so device-scoped session
+   * state must be cleared even though the serial is unchanged.
+   */
+  force?: boolean;
+}
+
 const KEEP_SCREEN_AWAKE_RESTORE_TIMEOUT_MS = 1_000;
 const SESSION_SETUP_DRAIN_TIMEOUT_MS = 1_000;
 const EXPIRY_RELEASE_REASONS = new Set([
@@ -463,19 +471,20 @@ export class SessionManager {
     sessionId: string,
     assignedDevice: string,
     platform: Platform,
+    options: RebindSessionOptions = {},
   ): Promise<Session> {
     const existing = this.sessions.get(sessionId);
     if (!existing) {
       return await this.createSession(sessionId, assignedDevice, platform);
     }
-    if (existing.assignedDevice === assignedDevice) {
+    if (existing.assignedDevice === assignedDevice && !options.force) {
       return existing;
     }
 
     const pendingRebind = this.pendingSessionRebinds.get(sessionId);
     if (pendingRebind) {
       await pendingRebind.promise;
-      return await this.rebindSession(sessionId, assignedDevice, platform);
+      return await this.rebindSession(sessionId, assignedDevice, platform, options);
     }
 
     const inFlightRelease = this.releasePromises.get(sessionId);

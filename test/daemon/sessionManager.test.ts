@@ -583,6 +583,37 @@ describe("SessionManager", () => {
       }
     });
 
+    test("clears device-scoped state when a new runtime reuses the serial", async () => {
+      const repository = new FakeDeviceSessionPersistence();
+      const restoredDevices: string[] = [];
+      const manager = new SessionManager(
+        fakeTimer,
+        repository,
+        undefined,
+        device => ({ restore: async () => { restoredDevices.push(device.deviceId); } }),
+      );
+      const unboundDevices: string[] = [];
+
+      try {
+        await manager.createSession("session-1", "emulator-5554", "android");
+        manager.setLastHierarchy("session-1", makeHierarchy("old"));
+        manager.setKeepScreenAwake("session-1", { applied: true });
+        manager.onSessionDeviceUnbound((_sessionId, deviceId) => unboundDevices.push(deviceId));
+
+        await expect(
+          manager.rebindSession("session-1", "emulator-5554", "android", { force: true }),
+        ).resolves.toMatchObject({
+          assignedDevice: "emulator-5554",
+          cacheData: {},
+        });
+
+        expect(restoredDevices).toEqual(["emulator-5554"]);
+        expect(unboundDevices).toEqual(["emulator-5554"]);
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
     test("serializes a pending rebind with release and clears device-scoped state", async () => {
       const repository = new DeferredDeviceSessionPersistence();
       const restoredDevices: string[] = [];

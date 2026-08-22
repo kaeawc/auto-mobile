@@ -411,6 +411,7 @@ export class RunnerReadinessService {
       this.remainingSystemUiAnrRecoveryBudget(recoveryDeadlineMs),
     );
     if (timeoutMs <= 0) {
+      this.throwIfCallerCancelled(context);
       if (!required) {
         return null;
       }
@@ -431,16 +432,17 @@ export class RunnerReadinessService {
           timeoutMs,
         ),
       );
-      // The production client resolves timeouts and transport failures to
-      // `null`. A required read must treat that as an unconfirmed dialog so the
-      // caller reboots, rather than as an ANR that has cleared.
-      if (hierarchy === null && required) {
+      // The production client can fall back to a cached tree when both its
+      // fresh-data wait and synchronous request fail. A required read must not
+      // treat that stale tree as confirmation that the dialog cleared.
+      const isUnavailable = this.isSystemUiAnrHierarchyUnavailable(hierarchy, minTimestamp);
+      if (isUnavailable && required) {
         throw this.systemUiAnrRecoveryRequired(
           context,
           "could not confirm dialog recovery: hierarchy unavailable",
         );
       }
-      return hierarchy;
+      return isUnavailable ? null : hierarchy;
     } catch (error) {
       if (error instanceof SystemUiAnrRecoveryRequiredError) {
         throw error;
@@ -448,9 +450,7 @@ export class RunnerReadinessService {
       // Genuine cancellation or device loss aborts the request signal. Treating
       // that as "no dialog" would let startDevice bind a session after the
       // caller has already given up, so propagate it on every probe.
-      if (context.signal?.aborted) {
-        throw error;
-      }
+      this.throwIfCallerCancelled(context, error);
       if (!required) {
         return null;
       }
@@ -459,6 +459,16 @@ export class RunnerReadinessService {
         `could not confirm dialog recovery: ${normalizeDiagnostic(error)}`,
       );
     }
+  }
+
+  private isSystemUiAnrHierarchyUnavailable(
+    hierarchy: ViewHierarchyResult | null,
+    minTimestamp: number,
+  ): boolean {
+    if (hierarchy === null || hierarchy.fresh === false) {
+      return true;
+    }
+    return hierarchy.updatedAt !== undefined && hierarchy.updatedAt < minTimestamp;
   }
 
   private async selectSystemUiAnrWait(
@@ -484,6 +494,7 @@ export class RunnerReadinessService {
         throw new Error(tap.error ?? "unknown tap failure");
       }
     } catch (error) {
+      this.throwIfCallerCancelled(context, error);
       throw this.systemUiAnrRecoveryRequired(
         context,
         `could not select Wait: ${normalizeDiagnostic(error)}`,
@@ -529,6 +540,12 @@ export class RunnerReadinessService {
 
   private remainingSystemUiAnrRecoveryBudget(recoveryDeadlineMs: number): number {
     return Math.max(0, recoveryDeadlineMs - this.dependencies.timer.now());
+  }
+
+  private throwIfCallerCancelled(context: ReadinessAttemptContext, fallback?: unknown): void {
+    if (context.signal?.aborted) {
+      throw context.signal.reason ?? fallback ?? new Error("System UI ANR recovery cancelled");
+    }
   }
 
   private systemUiAnrRecoveryRequired(
@@ -751,6 +768,7 @@ export class RunnerReadinessService {
       if (controller.signal.aborted) {
         await this.awaitAbortSettlement(operationPromise);
       }
+      this.throwIfCallerCancelled(context, error);
       return this.fail(context, phase, attempts, normalizeDiagnostic(error));
     } finally {
       if (timeoutHandle) {

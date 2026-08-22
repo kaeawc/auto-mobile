@@ -166,14 +166,14 @@ describe("network resource registration", () => {
     ResourceRegistry.clearResources();
   });
 
-  it("registers one raw query template for traffic filters", () => {
+  it("registers one RFC 6570 query template for traffic filters", () => {
     registerNetworkResources();
 
     const templates = ResourceRegistry.getAllTemplates()
-      .filter(template => template.uriTemplate.startsWith("automobile:network/traffic?"));
+      .filter(template => template.uriTemplate.startsWith("automobile:network/traffic"));
 
     expect(templates.map(template => template.uriTemplate)).toEqual([
-      "automobile:network/traffic?{params}"
+      "automobile:network/traffic{?host,method,statusCode,since,limit,deviceId,bucketSeconds}"
     ]);
   });
 });

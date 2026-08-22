@@ -28,6 +28,13 @@ export interface AvdManager {
   listSystemImages(filter?: SystemImageFilter): Promise<SystemImage[]>;
 
   /**
+   * List installed system images.
+   * @param filter - Optional filter criteria for system images
+   * @returns Promise with array of installed system images
+   */
+  listInstalledSystemImages(filter?: SystemImageFilter): Promise<SystemImage[]>;
+
+  /**
    * Download and install a system image
    * @param packageName - Package name of system image to install
    * @param acceptLicense - Whether to accept license (default: true)

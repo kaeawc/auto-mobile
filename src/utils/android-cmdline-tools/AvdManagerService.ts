@@ -1,5 +1,6 @@
 import {
   acceptLicenses,
+  listInstalledSystemImages,
   listSystemImages,
   installSystemImage,
   listDeviceImages,
@@ -41,6 +42,13 @@ export class AvdManagerService implements AvdManager {
       return listSystemImages(filter, this.dependencies);
     }
     return listSystemImages(filter);
+  }
+
+  async listInstalledSystemImages(filter?: SystemImageFilter): Promise<SystemImage[]> {
+    if (this.dependencies) {
+      return listInstalledSystemImages(filter, this.dependencies);
+    }
+    return listInstalledSystemImages(filter);
   }
 
   async installSystemImage(packageName: string, acceptLicense = true): Promise<{

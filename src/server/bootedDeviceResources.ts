@@ -49,7 +49,7 @@ export interface DeviceLockStatesResourceContent {
 }
 
 // Service status for a booted device
-interface DeviceServiceStatus {
+export interface DeviceServiceStatus {
   installed: boolean;
   enabled: boolean;
   running: boolean;
@@ -585,9 +585,7 @@ function withServiceStatus(
   return {
     ...device,
     serviceStatus,
-    readiness: {
-      state: serviceStatus.running && serviceStatus.isCompatible ? "ready" : "not_ready",
-    },
+    readiness: readinessFromServiceStatus(device.platform, serviceStatus),
     capabilities: {
       automation: {
         installed: serviceStatus.installed,
@@ -598,6 +596,21 @@ function withServiceStatus(
       },
     },
   };
+}
+
+export function readinessFromServiceStatus(
+  platform: Platform,
+  serviceStatus: DeviceServiceStatus
+): DeviceReadiness {
+  if (!serviceStatus.installed || !serviceStatus.enabled || !serviceStatus.isCompatible) {
+    return { state: "not_ready" };
+  }
+  if (platform === "android") {
+    // Android's service status only proves the APK is installed and enabled.
+    // Resource reads do not open the CtrlProxy connection, so liveness remains unknown.
+    return { state: "unknown" };
+  }
+  return { state: serviceStatus.running ? "ready" : "not_ready" };
 }
 
 async function enrichDeviceLockStates(devices: BootedDeviceInfo[]): Promise<void> {

@@ -49,6 +49,13 @@ interface ResourceTemplateMetadata {
   // the per-request scan (issue #3427). Patterns are 100% static.
   regex: RegExp;
   paramNames: string[];
+  queryParamNames: string[];
+}
+
+const requestedResourceUri = Symbol("requestedResourceUri");
+
+export function getRequestedResourceUri(params: Record<string, string>): string | undefined {
+  return (params as Record<PropertyKey, unknown>)[requestedResourceUri] as string | undefined;
 }
 
 type RegisteredResourceTemplate = ResourceTemplateMetadata & (
@@ -62,9 +69,15 @@ type RegisteredResourceTemplate = ResourceTemplateMetadata & (
 function compileUriTemplate(template: string): {
   regex: RegExp;
   paramNames: string[];
+  queryParamNames: string[];
 } {
+  const queryExpression = template.match(/\{\?([a-zA-Z0-9_]+(?:,[a-zA-Z0-9_]+)*)\}$/);
+  const queryParamNames = queryExpression?.[1].split(",") ?? [];
+  const pathTemplate = queryExpression
+    ? template.slice(0, template.length - queryExpression[0].length)
+    : template;
   const paramNames: string[] = [];
-  const tokenizedTemplate = template.replace(/\{(\w+)\}/g, (_, paramName) => {
+  const tokenizedTemplate = pathTemplate.replace(/\{(\w+)\}/g, (_, paramName) => {
     paramNames.push(paramName);
     return `__PARAM_${paramNames.length - 1}__`;
   });
@@ -79,7 +92,12 @@ function compileUriTemplate(template: string): {
     return isGreedyTrailingParam ? "(.+)" : "([^/&]+)";
   });
 
-  return { regex: new RegExp(`^${regexPattern}$`), paramNames };
+  const querySuffix = queryParamNames.length > 0 ? "(?:\\?[^#]*)?" : "";
+  return {
+    regex: new RegExp(`^${regexPattern}${querySuffix}$`),
+    paramNames,
+    queryParamNames,
+  };
 }
 
 // Run a precompiled template's regex against a URI and, on a match, extract the
@@ -93,10 +111,23 @@ function extractTemplateParams(
     return null;
   }
 
-  const params: Record<string, string> = {};
+  const params: Record<string, string> = Object.create(null);
   template.paramNames.forEach((name, index) => {
     params[name] = match[index + 1];
   });
+  if (template.queryParamNames.length > 0) {
+    const queryStart = uri.indexOf("?");
+    const query = queryStart >= 0 ? uri.slice(queryStart + 1) : "";
+    const seen = new Set<string>();
+    for (const [name, value] of new URLSearchParams(query)) {
+      if (seen.has(name)) {
+        return null;
+      }
+      seen.add(name);
+      params[name] = value;
+    }
+  }
+  Object.defineProperty(params, requestedResourceUri, { value: uri });
 
   return params;
 }
@@ -132,8 +163,17 @@ class ResourceRegistryClass {
     mimeType: string,
     handler: ResourceTemplateHandler
   ): void {
-    const { regex, paramNames } = compileUriTemplate(uriTemplate);
-    this.templates.set(uriTemplate, { uriTemplate, name, description, mimeType, handler, regex, paramNames });
+    const { regex, paramNames, queryParamNames } = compileUriTemplate(uriTemplate);
+    this.templates.set(uriTemplate, {
+      uriTemplate,
+      name,
+      description,
+      mimeType,
+      handler,
+      regex,
+      paramNames,
+      queryParamNames,
+    });
   }
 
   registerTemplateWithReadContext(
@@ -143,7 +183,7 @@ class ResourceRegistryClass {
     mimeType: string,
     handlerWithReadContext: ContextualResourceTemplateHandler
   ): void {
-    const { regex, paramNames } = compileUriTemplate(uriTemplate);
+    const { regex, paramNames, queryParamNames } = compileUriTemplate(uriTemplate);
     this.templates.set(uriTemplate, {
       uriTemplate,
       name,
@@ -152,6 +192,7 @@ class ResourceRegistryClass {
       handlerWithReadContext,
       regex,
       paramNames,
+      queryParamNames,
     });
   }
 

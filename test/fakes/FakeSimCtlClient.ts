@@ -31,6 +31,8 @@ export class FakeSimCtlClient implements FakeSimCtlClientContract {
   private deviceInfo = new Map<string, AppleDevice | null>();
   private runtimes: AppleDeviceRuntime[] = [];
   private deviceTypes: AppleDeviceType[] = [];
+  private runtimesError: Error | null = null;
+  private deviceTypesError: Error | null = null;
   private installedApps: any[] = [];
   private containerPaths = new Map<string, string>();
   private containerErrors = new Map<string, Error>();
@@ -55,6 +57,14 @@ export class FakeSimCtlClient implements FakeSimCtlClientContract {
 
   setDeviceTypes(deviceTypes: AppleDeviceType[]): void {
     this.deviceTypes = deviceTypes;
+  }
+
+  setRuntimesError(error: Error | null): void {
+    this.runtimesError = error;
+  }
+
+  setDeviceTypesError(error: Error | null): void {
+    this.deviceTypesError = error;
   }
 
   setInstalledApps(apps: any[]): void {
@@ -188,6 +198,22 @@ export class FakeSimCtlClient implements FakeSimCtlClientContract {
 
   async getRuntimes(): Promise<AppleDeviceRuntime[]> {
     this.recordCall("getRuntimes", {});
+    return this.runtimes;
+  }
+
+  async getDeviceTypesChecked(): Promise<AppleDeviceType[]> {
+    this.recordCall("getDeviceTypesChecked", {});
+    if (this.deviceTypesError) {
+      throw this.deviceTypesError;
+    }
+    return this.deviceTypes;
+  }
+
+  async getRuntimesChecked(): Promise<AppleDeviceRuntime[]> {
+    this.recordCall("getRuntimesChecked", {});
+    if (this.runtimesError) {
+      throw this.runtimesError;
+    }
     return this.runtimes;
   }
 

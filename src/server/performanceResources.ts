@@ -5,14 +5,14 @@ import {
   PERFORMANCE_RESULTS_LIMIT_MAX,
   type PerformanceAuditQueryArgs,
 } from "./performanceData";
-import { queryParamsToRecord } from "./queryParamValidation";
 
 const PERFORMANCE_RESOURCE_URIS = {
   BASE: "automobile:performance-results",
 } as const;
 
 const PERFORMANCE_QUERY_KEYS = ["startTime", "endTime", "limit", "offset", "deviceId"] as const;
-const PERFORMANCE_QUERY_TEMPLATE = `${PERFORMANCE_RESOURCE_URIS.BASE}?{params}`;
+const PERFORMANCE_QUERY_TEMPLATE =
+  `${PERFORMANCE_RESOURCE_URIS.BASE}{?${PERFORMANCE_QUERY_KEYS.join(",")}}`;
 const PERFORMANCE_QUERY_PARAM_KEYS = new Set<string>(PERFORMANCE_QUERY_KEYS);
 
 function parseInteger(
@@ -146,8 +146,7 @@ export function registerPerformanceResources(): void {
     "application/json",
     async params => {
     try {
-      const queryParams = queryParamsToRecord(params.params ?? "");
-      const options = parsePerformanceParams(queryParams);
+      const options = parsePerformanceParams(params);
       const uri = buildPerformanceUri(options);
       return getPerformanceResource(options, uri);
     } catch (error) {

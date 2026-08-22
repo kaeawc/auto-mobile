@@ -1505,7 +1505,7 @@ export class UnixSocketServer {
       return await Promise.race([connection, deadline]);
     } catch (error) {
       if (error instanceof McpClientReconnectDeadlineError) {
-        await this.resetMcpClient(input.route.clientKey);
+        await this.resetMcpClient(input.route.clientKey, "detach");
       }
       throw error;
     } finally {
@@ -1524,7 +1524,7 @@ export class UnixSocketServer {
     phase: DeviceControlTransportPhase;
     identity: DeviceControlTransportIdentity;
   }): Promise<unknown> {
-    await this.resetMcpClient(input.route.clientKey);
+    await this.resetMcpClient(input.route.clientKey, "detach");
     if (!this.isDeviceControlTransportIdentityValid(input.identity)) {
       throw this.deviceControlTransportError({
         request: input.request,
@@ -1582,7 +1582,7 @@ export class UnixSocketServer {
       });
     }
     if (!this.isDeviceControlTransportIdentityValid(input.identity)) {
-      await this.resetMcpClient(input.route.clientKey);
+      await this.resetMcpClient(input.route.clientKey, "detach");
       throw this.deviceControlTransportError({
         request: input.request,
         identity: input.identity,
@@ -1604,17 +1604,29 @@ export class UnixSocketServer {
     }
 
     try {
-      return await this.handleIdeRequest(
+      const response = await this.handleIdeRequest(
         freshClient,
         input.request,
         retryRemainingMs,
         input.socketSessionId,
       );
+      if (!this.isDeviceControlTransportIdentityValid(input.identity)) {
+        await this.resetMcpClient(input.route.clientKey, "detach");
+        throw this.deviceControlTransportError({
+          request: input.request,
+          identity: input.identity,
+          phase: input.phase,
+          reconnectAttempted: true,
+          replayAttempted: replayAfterResponse,
+          recoveryExhausted: false,
+        });
+      }
+      return response;
     } catch (error) {
       if (!isUnexpectedSocketClosure(error)) {
         throw error;
       }
-      await this.resetMcpClient(input.route.clientKey);
+      await this.resetMcpClient(input.route.clientKey, "detach");
       throw this.deviceControlTransportError({
         request: input.request,
         identity: input.identity,
@@ -3523,7 +3535,10 @@ export class UnixSocketServer {
     return clientPromise;
   }
 
-  private async resetMcpClient(key: string): Promise<void> {
+  private async resetMcpClient(
+    key: string,
+    closeMode: "wait" | "detach" = "wait",
+  ): Promise<void> {
     this.clearMcpClientIdleTimer(key);
     const existingClient = this.mcpClients.get(key);
     this.mcpClients.delete(key);
@@ -3531,10 +3546,13 @@ export class UnixSocketServer {
     if (!existingClient) {
       return;
     }
-    try {
-      await existingClient.close();
-    } catch (error) {
-      logger.warn(`Error closing MCP client for key ${key}:`, error);
+    const close = Promise.resolve()
+      .then(() => existingClient.close())
+      .catch(error => {
+        logger.warn(`Error closing MCP client for key ${key}:`, error);
+      });
+    if (closeMode === "wait") {
+      await close;
     }
   }
 

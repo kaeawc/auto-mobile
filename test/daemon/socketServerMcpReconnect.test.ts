@@ -334,6 +334,42 @@ describe("UnixSocketServer MCP session reconnect", () => {
     expect(callsDispatched).toBe(2);
   });
 
+  test("reconnects without waiting for a stale client's close to settle", async () => {
+    let clientsCreated = 0;
+    let callsDispatched = 0;
+    let closeCalls = 0;
+
+    server.mcpClientFactory = async () => {
+      const clientIndex = ++clientsCreated;
+      return createFakeMcpClient({
+        callTool: async () => {
+          callsDispatched++;
+          if (clientIndex === 1) {
+            throw socketClosedError();
+          }
+          return { content: [{ type: "text", text: "observed" }] };
+        },
+        close: async () => {
+          closeCalls++;
+          if (clientIndex === 1) {
+            return new Promise<void>(() => {});
+          }
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: { sessionUuid: "session-a" },
+    });
+
+    expect(response.success).toBe(true);
+    expect(clientsCreated).toBe(2);
+    expect(callsDispatched).toBe(2);
+    expect(closeCalls).toBe(1);
+    expect((server as any).mcpClients.size).toBe(1);
+  });
+
   test("does not replay launchApp after an ambiguous response closure", async () => {
     let clientsCreated = 0;
     let callsDispatched = 0;
@@ -462,6 +498,42 @@ describe("UnixSocketServer MCP session reconnect", () => {
       reconnectAttempted: false,
       replayAttempted: false,
     });
+  });
+
+  test("rejects a replay result when the device epoch becomes invalid in flight", async () => {
+    let clientsCreated = 0;
+    let callsDispatched = 0;
+
+    server.mcpClientFactory = async () => {
+      const clientIndex = ++clientsCreated;
+      return createFakeMcpClient({
+        callTool: async () => {
+          callsDispatched++;
+          if (clientIndex === 1) {
+            throw socketClosedError();
+          }
+          sessionIsValid = false;
+          return { content: [{ type: "text", text: "stale observation" }] };
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: { sessionUuid: "session-a" },
+    });
+
+    expect(response.success).toBe(false);
+    expect(clientsCreated).toBe(2);
+    expect(callsDispatched).toBe(2);
+    expect(response.transportFailure).toMatchObject({
+      sessionValid: false,
+      phase: "response",
+      retryable: false,
+      reconnectAttempted: true,
+      replayAttempted: true,
+    });
+    expect((server as any).mcpClients.size).toBe(0);
   });
 
   test("fences recovery to the device-label session and epoch", async () => {

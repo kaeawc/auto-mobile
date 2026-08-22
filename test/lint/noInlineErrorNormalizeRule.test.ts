@@ -38,4 +38,22 @@ describe("auto-mobile/no-inline-error-normalize", () => {
   test("does not flag a different property than .message", () => {
     expect(fires("const m = error instanceof Error ? error.name : String(error);")).toBe(false);
   });
+
+  test("flags a member-expression subject (`result.error`)", () => {
+    expect(
+      fires("const m = result.error instanceof Error ? result.error.message : String(result.error);"),
+    ).toBe(true);
+  });
+
+  test("flags a `this`-rooted member subject", () => {
+    expect(
+      fires("const m = this.err instanceof Error ? this.err.message : String(this.err);"),
+    ).toBe(true);
+  });
+
+  test("does not flag when member subjects differ across positions", () => {
+    expect(
+      fires("const m = a.error instanceof Error ? b.error.message : String(a.error);"),
+    ).toBe(false);
+  });
 });

@@ -504,6 +504,36 @@ function identifierName(node) {
 	return node?.type === "Identifier" ? node.name : null;
 }
 
+// Canonical key for a side-effect-free reference expression: an identifier, `this`,
+// a non-computed member chain (`a.b.c`), or computed access by a literal/identifier
+// index (`a[0]`, `a[i]`). Returns null for anything whose repeated evaluation may not
+// be stable (calls, computed access by an expression), so the rule only fires when the
+// *same* subject provably appears in all three positions of the idiom.
+function stableRefKey(node) {
+	if (!node) {
+		return null;
+	}
+	if (node.type === "Identifier") {
+		return node.name;
+	}
+	if (node.type === "ThisExpression") {
+		return "this";
+	}
+	if (node.type === "MemberExpression") {
+		const objectKey = stableRefKey(node.object);
+		if (objectKey === null) {
+			return null;
+		}
+		if (node.computed) {
+			const indexKey = propertyName(node.property) ?? identifierName(node.property);
+			return indexKey === null ? null : `${objectKey}[${indexKey}]`;
+		}
+		const prop = propertyName(node.property);
+		return prop === null ? null : `${objectKey}.${prop}`;
+	}
+	return null;
+}
+
 const noInlineErrorNormalizeRule = {
 	meta: {
 		type: "suggestion",
@@ -518,27 +548,27 @@ const noInlineErrorNormalizeRule = {
 				if (test?.type !== "BinaryExpression" || test.operator !== "instanceof") {
 					return;
 				}
-				const subject = identifierName(test.left);
-				if (subject === null || identifierName(test.right) !== "Error") {
+				const subjectKey = stableRefKey(test.left);
+				if (subjectKey === null || identifierName(test.right) !== "Error") {
 					return;
 				}
-				// consequent must be `X.message` (non-computed member access).
+				// consequent must be `<subject>.message` (non-computed member access).
 				const consequent = node.consequent;
 				if (
 					consequent?.type !== "MemberExpression" ||
 					consequent.computed ||
-					identifierName(consequent.object) !== subject ||
-					propertyName(consequent.property) !== "message"
+					propertyName(consequent.property) !== "message" ||
+					stableRefKey(consequent.object) !== subjectKey
 				) {
 					return;
 				}
-				// alternate must be `String(X)`.
+				// alternate must be `String(<subject>)`.
 				const alternate = node.alternate;
 				if (
 					alternate?.type !== "CallExpression" ||
 					identifierName(alternate.callee) !== "String" ||
 					alternate.arguments.length !== 1 ||
-					identifierName(alternate.arguments[0]) !== subject
+					stableRefKey(alternate.arguments[0]) !== subjectKey
 				) {
 					return;
 				}

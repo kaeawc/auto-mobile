@@ -1446,13 +1446,19 @@ export class Daemon {
         for (const deviceId of disconnectResult.disconnected) {
           missingByDevice.set(deviceId, []);
         }
-        const adbServerResetCohort = getProcessWideAdbServerResetCohort(
+        const detectedAdbServerResetCohort = getProcessWideAdbServerResetCohort(
           bootedDeviceIds,
           succeededPlatforms,
           this.forceDisconnectedDeviceIds,
           this.devicePool.getAllDevices(),
         );
+        const adbServerResetCohort = detectedAdbServerResetCohort.length > 0
+          ? await this.devicePool.detachAdbServerResetCohort(detectedAdbServerResetCohort)
+          : [];
         const processWideAdbServerReset = adbServerResetCohort.length > 0;
+        const adbServerResetCohortByDeviceId = new Map(
+          adbServerResetCohort.map(device => [device.id, device]),
+        );
         if (processWideAdbServerReset) {
           logger.warn(
             "[DisconnectMonitor] All AutoMobile-owned Android emulators disappeared together; " +
@@ -1504,10 +1510,11 @@ export class Daemon {
             continue;
           }
 
-          if (processWideAdbServerReset && pooledDeviceAtDisconnect) {
+          const adbServerResetTarget = adbServerResetCohortByDeviceId.get(deviceId);
+          if (adbServerResetTarget) {
             if (await this.tryRecoverProcessWideAdbServerResetDevice(
               deviceId,
-              pooledDeviceAtDisconnect,
+              adbServerResetTarget,
               forceGenerationAtDisconnect,
             )) {
               continue;

@@ -1841,22 +1841,13 @@ export class DevicePool {
     deviceId: string,
     expectedDevice?: PooledDevice,
   ): Promise<boolean> {
-    const device = this.devices.get(deviceId);
-    if (
-      !device ||
-      (expectedDevice !== undefined && device !== expectedDevice) ||
-      !device.sessionId ||
-      !this.isAutoMobileOwnedAndroidVirtualDevice(device)
-    ) {
+    const device = this.getAdbResetRecoveryDevice(deviceId, expectedDevice);
+    if (!device) {
       return false;
     }
 
-    const session = this.sessionManager.getSession(device.sessionId);
-    if (
-      !session ||
-      session.assignedDevice !== device.id ||
-      session.platform !== "android"
-    ) {
+    const session = this.getAdbResetRecoverySession(device);
+    if (!session) {
       return false;
     }
 
@@ -1887,6 +1878,70 @@ export class DevicePool {
       logger.warn(`[DevicePool] ADB-reset recovery failed for ${device.id}: ${error}`, error);
       return false;
     }
+  }
+
+  private getAdbResetRecoveryDevice(
+    deviceId: string,
+    expectedDevice: PooledDevice | undefined,
+  ): PooledDevice | undefined {
+    const currentDevice = this.devices.get(deviceId);
+    if (currentDevice === undefined) {
+      return expectedDevice;
+    }
+    if (expectedDevice !== undefined && currentDevice !== expectedDevice) {
+      return undefined;
+    }
+    return this.isAutoMobileOwnedAndroidVirtualDevice(currentDevice)
+      ? currentDevice
+      : undefined;
+  }
+
+  private getAdbResetRecoverySession(device: PooledDevice): Session | undefined {
+    const sessionId = device.sessionId ?? this.sessionManager.getSessionForDevice(device.id);
+    const session = sessionId ? this.sessionManager.getSession(sessionId) : null;
+    if (
+      !session ||
+      session.assignedDevice !== device.id ||
+      session.platform !== "android"
+    ) {
+      return undefined;
+    }
+    return session;
+  }
+
+  /**
+   * Remove every captured reset-cohort connection before any AVD is restarted.
+   * The session manager intentionally retains each old serial until recovery
+   * rebinds it, so a replacement can safely reuse another cohort member's port.
+   */
+  async detachAdbServerResetCohort(
+    cohort: readonly PooledDevice[],
+  ): Promise<readonly PooledDevice[]> {
+    return await this.assignmentMutex.runExclusive(async () => {
+      const detached: PooledDevice[] = [];
+      for (const device of cohort) {
+        if (
+          this.devices.get(device.id) !== device ||
+          !device.sessionId ||
+          !this.isAutoMobileOwnedAndroidVirtualDevice(device)
+        ) {
+          continue;
+        }
+        const session = this.sessionManager.getSession(device.sessionId);
+        if (
+          !session ||
+          session.assignedDevice !== device.id ||
+          session.platform !== "android"
+        ) {
+          continue;
+        }
+        device.sessionId = null;
+        device.status = "idle";
+        await this.removeDevice(device.id, false, device);
+        detached.push(device);
+      }
+      return detached;
+    });
   }
 
   private async releasePreservedAdbResetSessionIfDetached(

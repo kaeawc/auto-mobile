@@ -3,7 +3,6 @@ package dev.jasonpearson.automobile.ctrlproxy
 import dev.jasonpearson.automobile.protocol.SdkNavigationEvent
 import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import dev.jasonpearson.automobile.sdk.NavigationEvent
-import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -36,14 +35,17 @@ data class TimestampedNavigationEvent(
  * - Provides accumulated events since a given timestamp
  */
 class NavigationEventAccumulator {
-  private val events = CopyOnWriteArrayList<TimestampedNavigationEvent>()
+  // ArrayDeque ring buffer: O(1) append (addLast) + evict (removeFirst), no
+  // per-event array copy. Every access is guarded by bufferLock (#5464).
+  private val events = ArrayDeque<TimestampedNavigationEvent>()
   // Incremented from two paths (addEvent + the navigation listener callback);
   // AtomicLong so concurrent events can't collide on a sequence number (#3604).
   private val sequenceNumber = AtomicLong(0L)
   private val maxEvents = 100 // Keep last 100 events
 
-  // Guards the non-atomic add+trim compound and the size/subList read so the
-  // buffer can't be trimmed mid-read (IndexOutOfBoundsException, #3604).
+  // Guards every read/write of the non-thread-safe ArrayDeque so the buffer
+  // can't be trimmed mid-read (IndexOutOfBoundsException, #3604) and reads
+  // return a consistent point-in-time snapshot.
   private val bufferLock = Any()
 
   // StateFlow for reactive consumption - emits latest event
@@ -136,31 +138,39 @@ class NavigationEventAccumulator {
 
   /** Append an event and trim the circular buffer atomically, then emit updates. */
   private fun appendEvent(event: TimestampedNavigationEvent, publishLatestEvent: Boolean = true) {
-    synchronized(bufferLock) {
-      events.add(event)
-      if (events.size > maxEvents) {
-        events.removeAt(0)
+    val size =
+      synchronized(bufferLock) {
+        events.addLast(event)
+        if (events.size > maxEvents) {
+          events.removeFirst()
+        }
+        events.size
       }
-    }
     if (publishLatestEvent) {
       _latestEvent.value = event
     }
-    _eventCount.value = events.size
+    _eventCount.value = size
   }
 
   /** Get all accumulated events. */
   fun getAllEvents(): List<TimestampedNavigationEvent> {
-    return events.toList()
+    synchronized(bufferLock) {
+      return events.toList()
+    }
   }
 
   /** Get events since a given timestamp (inclusive). */
   fun getEventsSince(sinceTimestamp: Long): List<TimestampedNavigationEvent> {
-    return events.filter { it.timestamp >= sinceTimestamp }
+    synchronized(bufferLock) {
+      return events.filter { it.timestamp >= sinceTimestamp }
+    }
   }
 
   /** Get events since a given sequence number (exclusive). */
   fun getEventsSinceSequence(sinceSequence: Long): List<TimestampedNavigationEvent> {
-    return events.filter { it.sequenceNumber > sinceSequence }
+    synchronized(bufferLock) {
+      return events.filter { it.sequenceNumber > sinceSequence }
+    }
   }
 
   /** Get the most recent N events. */
@@ -177,17 +187,21 @@ class NavigationEventAccumulator {
 
   /** Clear all accumulated events. */
   fun clear() {
-    events.clear()
+    synchronized(bufferLock) { events.clear() }
     _latestEvent.value = null
     _eventCount.value = 0
   }
 
   /** Get current statistics. */
   fun getStats(): NavigationStats {
+    val (totalEvents, oldestTimestamp, newestTimestamp) =
+      synchronized(bufferLock) {
+        Triple(events.size, events.firstOrNull()?.timestamp, events.lastOrNull()?.timestamp)
+      }
     return NavigationStats(
-      totalEvents = events.size,
-      oldestTimestamp = events.firstOrNull()?.timestamp,
-      newestTimestamp = events.lastOrNull()?.timestamp,
+      totalEvents = totalEvents,
+      oldestTimestamp = oldestTimestamp,
+      newestTimestamp = newestTimestamp,
       currentSequence = sequenceNumber.get(),
     )
   }

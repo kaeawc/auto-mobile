@@ -56,6 +56,11 @@ class DaemonSocketPathsFlagWiringTest {
 
   @Test
   fun `daemon startup timeout defaults to 30 seconds`() {
+    // CI provides a valid environment override for emulator startup; an invalid
+    // system property takes precedence and exercises this method's fallback.
+    System.setProperty("automobile.daemon.startup.timeout.ms", "not-a-number")
+    SystemPropertyCache.clear()
+
     assertEquals(30_000L, DaemonSocketPaths.daemonStartTimeoutMs())
   }
 

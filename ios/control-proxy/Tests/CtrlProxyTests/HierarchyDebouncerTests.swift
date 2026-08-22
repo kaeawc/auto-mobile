@@ -421,6 +421,137 @@ final class HierarchyDebouncerTests: XCTestCase {
         XCTAssertEqual(transitions.value.first?.hierarchy?.text, "B")
     }
 
+    // MARK: - Idle Backoff Tests (#5477)
+
+    /// Helper: a distinct static hierarchy so the debouncer sees "no change".
+    private func staticHierarchy(_ text: String) -> ViewHierarchy {
+        ViewHierarchy(
+            packageName: "com.test.app",
+            hierarchy: UIElementInfo(
+                text: text,
+                className: "UIView",
+                bounds: ElementBounds(left: 0, top: 0, right: 375, bottom: 812)
+            ),
+            windowInfo: WindowInfo(id: 0, type: 1, isActive: true, isFocused: true)
+        )
+    }
+
+    /// A fresh debouncer whose base interval (200ms) exceeds the 100ms animation
+    /// skip window, so backed-off polls are never mistaken for animation skips —
+    /// matching the production base of 1000ms.
+    private func makeBackoffDebouncer() -> HierarchyDebouncer {
+        HierarchyDebouncer(elementLocator: fakeLocator, timer: fakeTimer, pollIntervalMs: 200)
+    }
+
+    /// On a static screen the poll interval must grow base -> 2x -> 4x and then
+    /// hold at the cap. With base = 200ms the cap is 800ms, so polls land at
+    /// t = 200, 600, 1400, 2200, ... (intervals 200, 400, 800, 800).
+    func testBacksOffPollIntervalWhileIdle() {
+        let debouncer = makeBackoffDebouncer()
+        defer { debouncer.stop() }
+        fakeLocator.setHierarchy(staticHierarchy("Idle"))
+        debouncer.start() // captureInitialState => 1 request
+        let base = fakeLocator.hierarchyRequestCount
+        XCTAssertEqual(base, 1)
+
+        // First poll at t=200 (base interval), then backs off to 400ms.
+        fakeTimer.advance(by: 200)
+        XCTAssertEqual(fakeLocator.hierarchyRequestCount, base + 1, "first poll fires at base interval (t=200)")
+
+        // No poll for the next 200ms (next is 400ms out, at t=600).
+        fakeTimer.advance(by: 200)
+        XCTAssertEqual(fakeLocator.hierarchyRequestCount, base + 1, "interval doubled to 400ms after idle poll")
+
+        // Second poll at t=600, then backs off to 800ms (the cap).
+        fakeTimer.advance(by: 200)
+        XCTAssertEqual(fakeLocator.hierarchyRequestCount, base + 2, "second poll at t=600 (200+400)")
+
+        // No poll for the next 400ms (next is at t=1400).
+        fakeTimer.advance(by: 400)
+        XCTAssertEqual(fakeLocator.hierarchyRequestCount, base + 2, "interval grew to the 800ms cap")
+
+        // Third poll at t=1400, cap holds at 800ms.
+        fakeTimer.advance(by: 400)
+        XCTAssertEqual(fakeLocator.hierarchyRequestCount, base + 3, "third poll at t=1400 (600+800)")
+
+        // Cap holds: the next poll is a further 800ms out (t=2200), not more.
+        fakeTimer.advance(by: 800)
+        XCTAssertEqual(fakeLocator.hierarchyRequestCount, base + 4, "cap holds at 800ms, poll at t=2200")
+    }
+
+    /// A detected structural change resets the cadence back to the fast base
+    /// interval, so the debouncer is immediately responsive after any change even
+    /// if it had backed off while idle.
+    func testResetsToFastIntervalOnStructuralChange() {
+        let debouncer = makeBackoffDebouncer()
+        defer { debouncer.stop() }
+        fakeLocator.setHierarchy(staticHierarchy("Idle"))
+        debouncer.start()
+        let baseCount = fakeLocator.hierarchyRequestCount
+
+        // Idle long enough to reach the 800ms cap: polls at t=200, 600, 1400. Each
+        // poll self-reschedules the next one, so advance in per-interval steps.
+        fakeTimer.advance(by: 200) // t=200 poll, backs off to 400ms
+        fakeTimer.advance(by: 400) // t=600 poll, backs off to 800ms
+        fakeTimer.advance(by: 800) // t=1400 poll, holds at 800ms cap
+        XCTAssertEqual(fakeLocator.hierarchyRequestCount, baseCount + 3, "backed off to the cap while idle")
+
+        // A structural change arrives; the next poll (at the backed-off cadence,
+        // t=2200) detects it and resets the interval to the fast base.
+        fakeLocator.setHierarchy(staticHierarchy("Changed"))
+        fakeTimer.advance(by: 800) // t=2200: change detected, cadence reset to base (200ms)
+        XCTAssertEqual(fakeLocator.hierarchyRequestCount, baseCount + 4, "change detected at backed-off cadence")
+
+        // Now polling is fast again: the very next poll fires only 200ms later.
+        fakeTimer.advance(by: 200)
+        XCTAssertEqual(
+            fakeLocator.hierarchyRequestCount,
+            baseCount + 5,
+            "cadence reset to the fast base interval after the change"
+        )
+    }
+
+    /// An explicit `extractNow` resets the backed-off cadence to the fast base
+    /// interval, matching the "reset on explicit command" acceptance criterion.
+    func testExtractNowResetsBackoff() {
+        let debouncer = makeBackoffDebouncer()
+        defer { debouncer.stop() }
+        fakeLocator.setHierarchy(staticHierarchy("Idle"))
+        debouncer.start()
+        let baseCount = fakeLocator.hierarchyRequestCount
+
+        // Reach the 800ms cap while idle: polls at t=200, 600, 1400 (stepped so each
+        // self-rescheduled poll fires).
+        fakeTimer.advance(by: 200)
+        fakeTimer.advance(by: 400)
+        fakeTimer.advance(by: 800)
+        XCTAssertEqual(fakeLocator.hierarchyRequestCount, baseCount + 3)
+
+        // Explicit extraction (one immediate request) also resets the cadence and
+        // reschedules the next poll at the fast base interval (t=1600), cancelling
+        // the pending backed-off poll that was due at t=2200.
+        debouncer.extractNow()
+        let afterExtract = fakeLocator.hierarchyRequestCount
+        XCTAssertEqual(afterExtract, baseCount + 4, "extractNow performs one immediate extraction")
+
+        // The rescheduled poll fires 200ms later (t=1600), not at the old t=2200.
+        fakeTimer.advance(by: 200)
+        XCTAssertEqual(
+            fakeLocator.hierarchyRequestCount,
+            afterExtract + 1,
+            "reset poll fires at the base interval (t=1600)"
+        )
+
+        // The old backed-off poll (t=2200) was cancelled: advancing to t=2200 fires
+        // no extra poll beyond the rebuilt cadence (next is at t=2400).
+        fakeTimer.advance(by: 600) // t=2200
+        XCTAssertEqual(
+            fakeLocator.hierarchyRequestCount,
+            afterExtract + 1,
+            "the cancelled t=2200 poll does not fire"
+        )
+    }
+
     // MARK: - StructuralHasher Tests
 
     func testHashChangesWhenAlertNodesAdded() {

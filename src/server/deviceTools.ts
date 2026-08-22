@@ -2121,11 +2121,16 @@ export function registerDeviceTools() {
     if (deviceRecord.platform !== "android" && deviceRecord.platform !== "ios") {
       return undefined;
     }
+    const persistedDevice: BootedDevice = {
+      name: deviceRecord.name,
+      platform: deviceRecord.platform,
+      deviceId: deviceRecord.deviceId,
+    };
     return {
       sessionId: result.sessionId,
       deviceId: deviceRecord.deviceId,
       platform: deviceRecord.platform,
-      device: deviceRecord as BootedDevice,
+      device: persistedDevice,
     };
   }
 

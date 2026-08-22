@@ -333,6 +333,23 @@ function parseEmulatorConsolePort(argument: EmulatorConsolePortArgument): number
   return consolePort;
 }
 
+function emulatorDeviceIdForConsolePort(deviceId: string | undefined): string | undefined {
+  if (!deviceId?.startsWith("emulator-")) {
+    return undefined;
+  }
+  const consolePort = Number(deviceId.slice("emulator-".length));
+  if (
+    !Number.isInteger(consolePort) ||
+    consolePort < MIN_EMULATOR_CONSOLE_PORT ||
+    consolePort % EMULATOR_CONSOLE_PORT_STEP !== 0
+  ) {
+    throw new ActionableError(
+      `Expected emulator device ID '${deviceId}' must use an even console port of at least ${MIN_EMULATOR_CONSOLE_PORT}`,
+    );
+  }
+  return `emulator-${consolePort}`;
+}
+
 function configuredEmulatorConsoleDeviceId(args: readonly string[]): string | undefined {
   let configuredPort: number | undefined;
   for (let index = 0; index < args.length; index += 1) {
@@ -1360,6 +1377,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         },
         () => disposed,
         request.deviceId === undefined,
+        request.deviceId,
       );
       if (disposed) {
         if (process && !process.killed) {
@@ -1411,6 +1429,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     onSpawn?: (process: ChildProcess) => void,
     isCancelled?: () => boolean,
     capturePreLaunchDeviceIds: boolean = false,
+    expectedDeviceId?: string,
   ): Promise<ChildProcess | null> {
     logger.info(`Using local emulator for AVD: ${avdName}`);
     const perf = createGlobalPerformanceTracker();
@@ -1481,6 +1500,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     const reservedDeviceId = this.addReservedEmulatorPort(
       args,
       preLaunchEmulatorDeviceIds,
+      expectedDeviceId,
     );
     logger.info(`Starting emulator with AVD: ${avdName}`);
     logger.debug(`Emulator command: ${this.emulatorPath} ${args.join(" ")}`);
@@ -2052,16 +2072,32 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   private reserveEmulatorDeviceId(
     preexistingDeviceIds: ReadonlySet<string> | undefined,
     args: readonly string[],
+    expectedDeviceId?: string,
   ): EmulatorDeviceIdReservation | undefined {
+    const expectedEmulatorDeviceId = emulatorDeviceIdForConsolePort(expectedDeviceId);
+    if (expectedDeviceId && !expectedEmulatorDeviceId) {
+      return undefined;
+    }
     const configuredDeviceId = configuredEmulatorConsoleDeviceId(args);
-    if (configuredDeviceId) {
-      if (this.unavailableEmulatorDeviceIds(preexistingDeviceIds).has(configuredDeviceId)) {
+    if (
+      expectedEmulatorDeviceId &&
+      configuredDeviceId &&
+      expectedEmulatorDeviceId !== configuredDeviceId
+    ) {
+      throw new ActionableError(
+        `Expected emulator device ID '${expectedEmulatorDeviceId}' conflicts with configured ` +
+          `console port ${configuredDeviceId.slice("emulator-".length)}`,
+      );
+    }
+    const deviceId = expectedEmulatorDeviceId ?? configuredDeviceId;
+    if (deviceId) {
+      if (this.unavailableEmulatorDeviceIds(preexistingDeviceIds).has(deviceId)) {
         throw new ActionableError(
-          `Cannot safely launch an Android emulator: configured console port ` +
-            `${configuredDeviceId.slice("emulator-".length)} is already in use`,
+          `Cannot safely launch an Android emulator: console port ` +
+            `${deviceId.slice("emulator-".length)} is already in use`,
         );
       }
-      return { deviceId: configuredDeviceId, appendPort: false };
+      return { deviceId, appendPort: configuredDeviceId === undefined };
     }
     if (!preexistingDeviceIds) {
       return undefined;
@@ -2075,8 +2111,13 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   private addReservedEmulatorPort(
     args: string[],
     preexistingDeviceIds: ReadonlySet<string> | undefined,
+    expectedDeviceId?: string,
   ): string | undefined {
-    const reservation = this.reserveEmulatorDeviceId(preexistingDeviceIds, args);
+    const reservation = this.reserveEmulatorDeviceId(
+      preexistingDeviceIds,
+      args,
+      expectedDeviceId,
+    );
     if (reservation?.appendPort) {
       args.push("-port", reservation.deviceId.slice("emulator-".length));
     }

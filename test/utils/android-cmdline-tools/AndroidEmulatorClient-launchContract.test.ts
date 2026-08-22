@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { Readable } from "node:stream";
 import type { ChildProcess } from "node:child_process";
@@ -32,8 +32,10 @@ function createChild(): ChildProcess & EventEmitter {
   return child;
 }
 
-function createClient(spawnFn: (command: string, args: string[]) => ChildProcess): AndroidEmulatorClient {
-  const adb = new FakeAdbExecutor();
+function createClient(
+  spawnFn: (command: string, args: string[]) => ChildProcess,
+  adb: FakeAdbExecutor = new FakeAdbExecutor(),
+): AndroidEmulatorClient {
   const adbFactory: AdbClientFactory = {
     create: (): AdbExecutor => adb,
   };
@@ -52,6 +54,10 @@ function createClient(spawnFn: (command: string, args: string[]) => ChildProcess
   (client as unknown as { checkArchitectureCompatibility: () => Promise<{ compatible: boolean }> }).checkArchitectureCompatibility = async () => ({ compatible: true });
   return client;
 }
+
+afterEach(() => {
+  AndroidEmulatorClient.resetLaunchReservationsForTesting();
+});
 
 describe("AndroidEmulatorClient launch contract", () => {
   test("uses a JSON argv array so values containing spaces remain one argument", () => {
@@ -103,6 +109,37 @@ describe("AndroidEmulatorClient launch contract", () => {
       child.emit("exit", 0, null);
       AndroidEmulatorClient.resetLaunchReservationsForTesting();
     }
+  });
+
+  test("globally reserves an explicit emulator serial against a concurrent unlabelled launch", async () => {
+    const adb = new FakeAdbExecutor();
+    const firstChild = createChild();
+    const secondChild = createChild();
+    let firstSpawnedArgs: string[] = [];
+    let secondSpawnedArgs: string[] = [];
+    const firstClient = createClient((_command, args) => {
+      firstSpawnedArgs = args;
+      queueMicrotask(() => firstChild.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")));
+      return firstChild;
+    }, adb);
+    const secondClient = createClient((_command, args) => {
+      secondSpawnedArgs = args;
+      queueMicrotask(() => secondChild.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")));
+      return secondChild;
+    }, adb);
+
+    const firstLaunch = await firstClient.launchEmulator({
+      avdName: "Pixel 9",
+      deviceId: "emulator-5554",
+    });
+    const secondLaunch = await secondClient.startEmulator("Pixel 9");
+
+    expect(firstLaunch.targetDeviceId).toBe("emulator-5554");
+    expect(firstSpawnedArgs).toEqual(expect.arrayContaining(["-port", "5554"]));
+    expect(secondSpawnedArgs).toEqual(expect.arrayContaining(["-port", "5556"]));
+    firstChild.emit("exit", 0, null);
+    secondLaunch!.emit("exit", 0, null);
+    AndroidEmulatorClient.resetLaunchReservationsForTesting();
   });
 
   test("does not spawn when launch has already been cancelled", async () => {

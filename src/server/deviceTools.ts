@@ -1,4 +1,5 @@
 import type { ChildProcess } from "child_process";
+import { createHash } from "node:crypto";
 import { z } from "zod/v4";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
@@ -51,8 +52,22 @@ import {
 import { serverConfig } from "../utils/ServerConfig";
 import {
   DEFAULT_DEVICE_READY_TIMEOUT_MS,
+  DEFAULT_PROVISION_DEVICE_TIMEOUT_MS,
   MAX_DEVICE_READY_TIMEOUT_MS,
 } from "../utils/deviceTimeouts";
+import {
+  createDefaultExactDeviceProvisioner,
+  type ExactDeviceProvisioner,
+  type ExactDeviceSpecification,
+  ProvisionDeviceError,
+} from "../utils/exactDeviceProvisioning";
+import { MIN_AVD_RAM_MB } from "../utils/android-cmdline-tools/AvdConfigReader";
+import {
+  ProvisionDeviceOperationRepository,
+  ProvisionDeviceOperationConflictError,
+  type ProvisionDeviceOperationStore,
+} from "../db/provisionDeviceOperationRepository";
+import { stableStringify } from "../utils/stableStringify";
 
 // Schema definitions
 export const listDeviceImagesSchema = z.object({
@@ -149,6 +164,70 @@ export const getAndroidSchema = devicePreparationTimeoutSchema.extend({
 export const getAppleSchema = devicePreparationTimeoutSchema.extend({
   udid: z.string().min(1).describe("iOS Simulator UDID"),
 });
+
+const MODERN_PLAY_IMAGE_MIN_API_LEVEL = 30;
+
+function isModernPlayStoreRuntime(runtime: string): boolean {
+  const [kind, apiIdentifier, tag] = runtime.split(";");
+  const apiMatch = /^android-(\d+)$/.exec(apiIdentifier ?? "");
+  return (
+    kind === "system-images" &&
+    tag === "google_apis_playstore" &&
+    apiMatch !== null &&
+    Number(apiMatch[1]) >= MODERN_PLAY_IMAGE_MIN_API_LEVEL
+  );
+}
+
+const androidProvisionDeviceSpecSchema = z.object({
+  runtime: z.string().min(1).describe("Installed Android system-image package identifier"),
+  deviceType: z.string().min(1).describe("Android avdmanager device profile identifier"),
+  configuration: z.object({
+    memoryMb: z.number().int().positive().optional(),
+  }).strict().optional(),
+}).strict().superRefine((spec, context) => {
+  const memoryMb = spec.configuration?.memoryMb;
+  if (
+    memoryMb !== undefined &&
+    memoryMb < MIN_AVD_RAM_MB &&
+    isModernPlayStoreRuntime(spec.runtime)
+  ) {
+    context.addIssue({
+      code: "custom",
+      message:
+        `memoryMb must be at least ${MIN_AVD_RAM_MB} for Android API ` +
+        `${MODERN_PLAY_IMAGE_MIN_API_LEVEL}+ Play Store images`,
+      path: ["configuration", "memoryMb"],
+    });
+  }
+});
+
+const iosProvisionDeviceSpecSchema = z.object({
+  runtime: z.string().min(1).describe("CoreSimulator runtime identifier"),
+  deviceType: z.string().min(1).describe("CoreSimulator device-type identifier"),
+}).strict();
+
+export const provisionDeviceSchema = z.object({
+  operationId: z.string().min(1).describe("Caller-generated idempotency key"),
+  device: z.discriminatedUnion("platform", [
+    z.object({
+      platform: z.literal("android"),
+      name: z.string().min(1).describe("Exact AVD name"),
+      spec: androidProvisionDeviceSpecSchema,
+    }).strict(),
+    z.object({
+      platform: z.literal("ios"),
+      name: z.string().min(1).describe("Exact simulator name"),
+      spec: iosProvisionDeviceSpecSchema,
+    }).strict(),
+  ]),
+  boot: z.boolean().default(true).optional().describe("Boot the resolved device after creation or adoption"),
+  readiness: z.enum(["automation", "none"]).default("automation").optional().describe(
+    "Whether to wait for the AutoMobile automation runner after device boot",
+  ),
+  timeoutMs: z.number().int().positive().max(MAX_DEVICE_READY_TIMEOUT_MS).optional().describe(
+    "Total provision, boot, and readiness timeout in ms",
+  ),
+}).strict();
 
 export const killDeviceSchema = z.object({
   device: z.object({
@@ -255,6 +334,19 @@ export interface GetAppleArgs {
   automationReadyTimeoutMs?: number;
 }
 
+export interface ProvisionDeviceArgs {
+  operationId: string;
+  device: {
+    platform: "android" | "ios";
+    name: string;
+    spec: ExactDeviceSpecification;
+  };
+  boot: boolean;
+  readiness: "automation" | "none";
+  timeoutMs?: number;
+  __mcpSessionId?: string;
+}
+
 export interface KillDeviceArgs {
   device: BootedDevice;
 }
@@ -293,11 +385,21 @@ export interface DeviceToolsDependencies {
   ensureCtrlProxyReady?: (request: RunnerReadinessRequest) => Promise<void>;
   deviceCreationGateFactory: () => DeviceCreationGate;
   deviceProvisionerFactory: () => DeviceProvisioner;
+  exactDeviceProvisionerFactory: (
+    deviceManager: PlatformDeviceManager,
+    deviceCreationGate: DeviceCreationGate,
+  ) => ExactDeviceProvisioner;
+  provisionDeviceOperationStoreFactory: () => ProvisionDeviceOperationStore;
   clearInstalledAppsForDevice: (deviceId: string) => Promise<void>;
   stopPerformanceMonitoring: (deviceId: string) => void;
   idGenerator: IdGenerator;
   timer: Timer;
 }
+
+const activeProvisionDeviceOperations = new Map<
+  string,
+  { fingerprint: string; promise: Promise<Record<string, unknown>> }
+>();
 
 async function defaultNotifyResourcesChanged(): Promise<void> {
   await notifyBootedDeviceResourcesUpdated();
@@ -1044,6 +1146,9 @@ function getDeviceToolsDependencies(): DeviceToolsDependencies {
       notifyResourcesChanged: defaultNotifyResourcesChanged,
       deviceCreationGateFactory: () => getDeviceCreationGate(),
       deviceProvisionerFactory: () => createDefaultDeviceProvisioner(),
+      exactDeviceProvisionerFactory: (deviceManager, deviceCreationGate) =>
+        createDefaultExactDeviceProvisioner(deviceManager, deviceCreationGate),
+      provisionDeviceOperationStoreFactory: () => new ProvisionDeviceOperationRepository(),
       clearInstalledAppsForDevice: defaultClearInstalledAppsForDevice,
       stopPerformanceMonitoring: deviceId => getPerformanceMonitor().stopMonitoring(deviceId),
       idGenerator: defaultIdGenerator,
@@ -1051,6 +1156,21 @@ function getDeviceToolsDependencies(): DeviceToolsDependencies {
     };
   }
   return moduleDependencies;
+}
+
+function provisionDeviceDependencyOverrides(
+  deps: Partial<DeviceToolsDependencies>,
+  currentDeps: DeviceToolsDependencies,
+): Pick<
+  DeviceToolsDependencies,
+  "exactDeviceProvisionerFactory" | "provisionDeviceOperationStoreFactory"
+> {
+  return {
+    exactDeviceProvisionerFactory:
+      deps.exactDeviceProvisionerFactory ?? currentDeps.exactDeviceProvisionerFactory,
+    provisionDeviceOperationStoreFactory:
+      deps.provisionDeviceOperationStoreFactory ?? currentDeps.provisionDeviceOperationStoreFactory,
+  };
 }
 
 export function setDeviceToolsDependencies(deps: Partial<DeviceToolsDependencies>): void {
@@ -1062,6 +1182,7 @@ export function setDeviceToolsDependencies(deps: Partial<DeviceToolsDependencies
     ensureCtrlProxyReady: deps.ensureCtrlProxyReady ?? currentDeps.ensureCtrlProxyReady,
     deviceCreationGateFactory: deps.deviceCreationGateFactory ?? currentDeps.deviceCreationGateFactory,
     deviceProvisionerFactory: deps.deviceProvisionerFactory ?? currentDeps.deviceProvisionerFactory,
+    ...provisionDeviceDependencyOverrides(deps, currentDeps),
     clearInstalledAppsForDevice:
       deps.clearInstalledAppsForDevice ?? currentDeps.clearInstalledAppsForDevice,
     stopPerformanceMonitoring:
@@ -1073,6 +1194,7 @@ export function setDeviceToolsDependencies(deps: Partial<DeviceToolsDependencies
 
 export function resetDeviceToolsDependencies(): void {
   moduleDependencies = null;
+  activeProvisionDeviceOperations.clear();
 }
 
 function describeStartDeviceRequest(args: StartDeviceArgs): string {
@@ -1092,6 +1214,125 @@ function resolveRunnerReadinessTimeoutMs(args: StartDeviceArgs): number {
     args.timeoutMs ??
     serverConfig.getRunnerReadinessTimeoutMs()
   );
+}
+
+function provisionDeviceFingerprint(args: ProvisionDeviceArgs): string {
+  return createHash("sha256")
+    .update(stableStringify({
+      device: args.device,
+      boot: args.boot,
+      readiness: args.readiness,
+      timeoutMs: args.timeoutMs,
+    }))
+    .digest("hex");
+}
+
+function parseProvisionDeviceArgs(input: ProvisionDeviceArgs): ProvisionDeviceArgs {
+  const __mcpSessionId = input.__mcpSessionId;
+  const publicInput: Record<string, unknown> = { ...input };
+  delete publicInput.__mcpSessionId;
+  delete publicInput.__executionId;
+  delete publicInput.__executionStartTime;
+  const parsed = provisionDeviceSchema.parse(publicInput);
+  return {
+    ...parsed,
+    boot: parsed.boot ?? true,
+    readiness: parsed.readiness ?? "automation",
+    __mcpSessionId,
+  };
+}
+
+function provisionDeviceTimeoutError(phase: string): ProvisionDeviceError {
+  return new ProvisionDeviceError(
+    "timeout",
+    `provisionDevice timeout exhausted while ${phase}; remainingBudgetMs=0`,
+  );
+}
+
+async function runProvisionDeviceWithinDeadline<T>(
+  timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">,
+  totalDeadlineMs: number,
+  requestSignal: AbortSignal | undefined,
+  phase: string,
+  operation: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  const remainingMs = Math.floor(totalDeadlineMs - timer.now());
+  if (remainingMs <= 0) {
+    throw provisionDeviceTimeoutError(phase);
+  }
+
+  const controller = new AbortController();
+  const signal = requestSignal
+    ? AbortSignal.any([requestSignal, controller.signal])
+    : controller.signal;
+  let timeoutHandle: NodeJS.Timeout | undefined;
+  let removeAbortListener: (() => void) | undefined;
+  const operationPromise = operation(signal);
+  void operationPromise.catch(() => {});
+
+  try {
+    return await Promise.race([
+      operationPromise,
+      new Promise<never>((_resolve, reject) => {
+        timeoutHandle = timer.setTimeout(() => {
+          const error = provisionDeviceTimeoutError(phase);
+          controller.abort(error);
+          reject(error);
+        }, remainingMs);
+      }),
+      ...(requestSignal
+        ? [new Promise<never>((_resolve, reject) => {
+            const rejectForAbort = () => reject(requestSignal.reason);
+            if (requestSignal.aborted) {
+              rejectForAbort();
+              return;
+            }
+            requestSignal.addEventListener("abort", rejectForAbort, { once: true });
+            removeAbortListener = () =>
+              requestSignal.removeEventListener("abort", rejectForAbort);
+          })]
+        : []),
+    ]);
+  } finally {
+    if (timeoutHandle) {
+      timer.clearTimeout(timeoutHandle);
+    }
+    removeAbortListener?.();
+  }
+}
+
+async function waitForProvisionDeviceOperation<T>(
+  promise: Promise<T>,
+  signal: AbortSignal | undefined,
+): Promise<T> {
+  if (!signal) {
+    return await promise;
+  }
+  if (signal.aborted) {
+    throw signal.reason;
+  }
+
+  let removeAbortListener: (() => void) | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        const rejectForAbort = () => reject(signal.reason);
+        signal.addEventListener("abort", rejectForAbort, { once: true });
+        removeAbortListener = () => signal.removeEventListener("abort", rejectForAbort);
+      }),
+    ]);
+  } finally {
+    removeAbortListener?.();
+  }
+}
+
+function createProvisionDeviceResponse(result: Record<string, unknown>) {
+  const device = result.device as { name: string; platform: string };
+  return createJSONToolResponse({
+    message: `${device.platform} '${device.name}' provisioned (${result.lifecycleState})`,
+    ...result,
+  });
 }
 
 function validateBootIdentity(
@@ -1711,6 +1952,415 @@ export function registerDeviceTools() {
     });
   };
 
+  const provisionDeviceHandler = async (
+    input: ProvisionDeviceArgs,
+    _progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ) => {
+    const args = parseProvisionDeviceArgs(input);
+    const fingerprint = provisionDeviceFingerprint(args);
+    const active = activeProvisionDeviceOperations.get(args.operationId);
+    if (active) {
+      if (active.fingerprint !== fingerprint) {
+        return createToolErrorResponse(
+          "operation_conflict",
+          `operationId '${args.operationId}' is already running with a different provisionDevice request.`,
+        );
+      }
+      try {
+        return createProvisionDeviceResponse(
+          await waitForProvisionDeviceOperation(active.promise, signal),
+        );
+      } catch (error) {
+        return provisionDeviceErrorResponse(error);
+      }
+    }
+
+    const sharedController = new AbortController();
+    const promise = executeProvisionDevice(args, fingerprint, sharedController.signal);
+    activeProvisionDeviceOperations.set(args.operationId, { fingerprint, promise });
+    void promise.then(
+      () => {
+        if (activeProvisionDeviceOperations.get(args.operationId)?.promise === promise) {
+          activeProvisionDeviceOperations.delete(args.operationId);
+        }
+      },
+      () => {
+        if (activeProvisionDeviceOperations.get(args.operationId)?.promise === promise) {
+          activeProvisionDeviceOperations.delete(args.operationId);
+        }
+      },
+    );
+    try {
+      return createProvisionDeviceResponse(
+        await waitForProvisionDeviceOperation(promise, signal),
+      );
+    } catch (error) {
+      return provisionDeviceErrorResponse(error);
+    }
+  };
+
+  async function executeProvisionDevice(
+    args: ProvisionDeviceArgs,
+    fingerprint: string,
+    signal: AbortSignal | undefined,
+  ): Promise<Record<string, unknown>> {
+    const deps = getDeviceToolsDependencies();
+    const store = deps.provisionDeviceOperationStoreFactory();
+    const operation = await store.begin(args.operationId, fingerprint);
+    if (!operation.started) {
+      if (!args.boot) {
+        return operation.result;
+      }
+      if (hasLiveProvisionDeviceSession(operation.result)) {
+        return operation.result;
+      }
+
+      // Sessions are daemon-local and are expired during daemon startup. A
+      // replay of a completed boot operation therefore runs the idempotent
+      // lifecycle again to bind a live session before reporting readiness.
+      const rebound = await runProvisionDeviceLifecycle(
+        args,
+        deps,
+        operation.reconcileExistingConfiguration,
+        () => store.markDeviceCreationStarted(args.operationId),
+        signal,
+      );
+      const refreshed = preserveProvisionDeviceOwnership(operation.result, rebound);
+      await store.complete(args.operationId, refreshed);
+      return refreshed;
+    }
+
+    try {
+      const result = await runProvisionDeviceLifecycle(
+        args,
+        deps,
+        operation.reconcileExistingConfiguration,
+        () => store.markDeviceCreationStarted(args.operationId),
+        signal,
+      );
+      await store.complete(args.operationId, result);
+      return result;
+    } catch (error) {
+      const provisionError = toProvisionDeviceError(args, error);
+      await store.fail(args.operationId, provisionError.code, provisionError.message);
+      throw provisionError;
+    }
+  }
+
+  function hasLiveProvisionDeviceSession(result: Record<string, unknown>): boolean {
+    const persistedSession = getPersistedProvisionDeviceSession(result);
+    const daemonState = DaemonState.getInstance();
+    if (!persistedSession || !daemonState.isInitialized()) {
+      return false;
+    }
+
+    const session = daemonState.getSessionManager().getSession(persistedSession.sessionId);
+    const pooledDevice = daemonState.getDevicePool().getDeviceForSession(persistedSession.sessionId);
+    return (
+      session?.assignedDevice === persistedSession.deviceId &&
+      session.platform === persistedSession.platform &&
+      pooledDevice?.id === persistedSession.deviceId &&
+      pooledDevice.platform === persistedSession.platform
+    );
+  }
+
+  function getPersistedProvisionDeviceSession(
+    result: Record<string, unknown>,
+  ): { sessionId: string; deviceId: string; platform: "android" | "ios" } | undefined {
+    if (typeof result.sessionId !== "string") {
+      return undefined;
+    }
+    const device = result.device;
+    if (typeof device !== "object" || device === null || Array.isArray(device)) {
+      return undefined;
+    }
+    const deviceRecord = device as Record<string, unknown>;
+    if (typeof deviceRecord.deviceId !== "string") {
+      return undefined;
+    }
+    if (deviceRecord.platform !== "android" && deviceRecord.platform !== "ios") {
+      return undefined;
+    }
+    return {
+      sessionId: result.sessionId,
+      deviceId: deviceRecord.deviceId,
+      platform: deviceRecord.platform,
+    };
+  }
+
+  function preserveProvisionDeviceOwnership(
+    persisted: Record<string, unknown>,
+    refreshed: Record<string, unknown>,
+  ): Record<string, unknown> {
+    return {
+      ...refreshed,
+      created: persisted.created,
+      adopted: persisted.adopted,
+    };
+  }
+
+  function toProvisionDeviceError(
+    args: ProvisionDeviceArgs,
+    error: unknown,
+  ): ProvisionDeviceError {
+    if (error instanceof ProvisionDeviceError) {
+      return error;
+    }
+    return new ProvisionDeviceError(
+      "platform_command_failed",
+      `Failed to provision ${args.device.platform} device '${args.device.name}': ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  async function runProvisionDeviceLifecycle(
+    args: ProvisionDeviceArgs,
+    deps: DeviceToolsDependencies,
+    reconcileExistingConfiguration: boolean,
+    markDeviceCreationStarted: () => Promise<void>,
+    signal: AbortSignal | undefined,
+  ): Promise<Record<string, unknown>> {
+    const perf = createPerformanceTracker(true);
+    perf.serial("provisionDevice");
+    const totalDeadlineMs = deps.timer.now() +
+      (args.timeoutMs ?? DEFAULT_PROVISION_DEVICE_TIMEOUT_MS);
+    try {
+      const deviceManager = deps.deviceManagerFactory();
+      const deviceCreationGate = deps.deviceCreationGateFactory();
+      const provisioned = await provisionExactDevice(
+        args,
+        deps.exactDeviceProvisionerFactory(deviceManager, deviceCreationGate),
+        perf,
+        deps.timer,
+        totalDeadlineMs,
+        reconcileExistingConfiguration,
+        markDeviceCreationStarted,
+        signal,
+      );
+      if (!args.boot) {
+        if (provisioned.created) {
+          await deps.notifyResourcesChanged();
+        }
+        perf.end();
+        return buildProvisionDeviceResult(args, provisioned, perf, undefined);
+      }
+
+      const booted = await bootExactProvisionedDevice(
+        args,
+        deps,
+        deviceManager,
+        deviceCreationGate,
+        provisioned,
+        perf,
+        totalDeadlineMs,
+        signal,
+      );
+      if (provisioned.created || booted.source === "cold-boot") {
+        await deps.notifyResourcesChanged();
+      }
+      perf.end();
+      return buildProvisionDeviceResult(args, provisioned, perf, booted);
+    } catch (error) {
+      perf.end();
+      throw error;
+    }
+  }
+
+  async function provisionExactDevice(
+    args: ProvisionDeviceArgs,
+    provisioner: ExactDeviceProvisioner,
+    perf: ReturnType<typeof createPerformanceTracker>,
+    timer: Timer,
+    totalDeadlineMs: number,
+    reconcileExistingConfiguration: boolean,
+    markDeviceCreationStarted: () => Promise<void>,
+    signal: AbortSignal | undefined,
+  ): Promise<Awaited<ReturnType<ExactDeviceProvisioner["provision"]>>> {
+    perf.startOperation("provisionExactDevice");
+    try {
+      return await runProvisionDeviceWithinDeadline(
+        timer,
+        totalDeadlineMs,
+        signal,
+        "provisioning the exact device",
+        async deadlineSignal => await provisioner.provision({
+          platform: args.device.platform,
+          name: args.device.name,
+          spec: args.device.spec,
+          reconcileExistingConfiguration,
+          onBeforeCreate: markDeviceCreationStarted,
+          signal: deadlineSignal,
+        }),
+      );
+    } finally {
+      perf.endOperation("provisionExactDevice");
+    }
+  }
+
+  async function bootExactProvisionedDevice(
+    args: ProvisionDeviceArgs,
+    deps: DeviceToolsDependencies,
+    deviceManager: PlatformDeviceManager,
+    deviceCreationGate: DeviceCreationGate,
+    provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>>,
+    perf: ReturnType<typeof createPerformanceTracker>,
+    totalDeadlineMs: number,
+    signal: AbortSignal | undefined,
+  ): Promise<{ device: BootedDevice; sessionId: string; source: "booted" | "cold-boot" }> {
+    const requestedIdentity = `platform=${args.device.platform} name=${args.device.name}`;
+    const bootService = new DeviceBootService({
+      deviceManager,
+      deviceMatcher: deps.deviceMatcherFactory(),
+      deviceCreationGate,
+      deviceProvisioner: deps.deviceProvisionerFactory(),
+      matchingStrategy: DEVICE_POOL_MATCHING,
+      timer: deps.timer,
+    });
+    let boot: DeviceBootResult | undefined;
+    let ownershipTransferred = false;
+    let releaseReadinessReservation: (() => Promise<void>) | undefined;
+    try {
+      const alreadyBooted = await runProvisionDeviceWithinDeadline(
+        deps.timer,
+        totalDeadlineMs,
+        signal,
+        "discovering an already-running exact device",
+        async () => await deviceManager.getBootedDevices(args.device.platform),
+      );
+      const exactBootedDevice = args.device.platform === "ios"
+        ? alreadyBooted.find((device) => device.deviceId === provisioned.device.deviceId)
+        : alreadyBooted.find(
+          (device) =>
+            device.deviceId === provisioned.device.deviceId ||
+            device.name === provisioned.device.name,
+        );
+      if (args.device.platform === "ios" && !provisioned.device.deviceId) {
+        throw new ProvisionDeviceError(
+          "identity_conflict",
+          `Exact iOS simulator '${args.device.name}' has no UDID.`,
+        );
+      }
+      perf.startOperation("bootDevice");
+      boot = await bootService.boot({
+        platform: args.device.platform,
+        deviceId: exactBootedDevice?.deviceId ??
+          provisioned.device.deviceId ??
+          provisioned.device.name,
+        timeoutMs: Math.max(1, totalDeadlineMs - deps.timer.now()),
+        totalDeadlineMs,
+        signal,
+      });
+      perf.endOperation("bootDevice");
+      if (
+        args.device.platform === "ios" &&
+        boot.device.deviceId !== provisioned.device.deviceId
+      ) {
+        throw new ProvisionDeviceError(
+          "identity_conflict",
+          `Exact iOS simulator '${args.device.name}' resolved to unexpected UDID '${boot.device.deviceId}'.`,
+        );
+      }
+      validatePooledDeviceMapping(boot.device, requestedIdentity);
+      releaseReadinessReservation = await reserveProvisionDeviceReadiness(boot.device);
+      clearColdBootShutdownMarker(boot.source, boot.device.deviceId);
+      await ensureProvisionDeviceReadiness(args, deps, boot.device, requestedIdentity, totalDeadlineMs, perf, signal);
+      validatePooledDeviceMapping(boot.device, requestedIdentity);
+      publishWarmDeviceReady(boot.source, boot.device.deviceId);
+      const sessionId = await bindBootedDeviceSession(
+        boot.device,
+        {
+          platform: args.device.platform,
+          name: args.device.name,
+          timeoutMs: args.timeoutMs,
+          __mcpSessionId: args.__mcpSessionId,
+        },
+        provisioned.device,
+        boot.processHandle,
+      );
+      ownershipTransferred = true;
+      return { device: boot.device, sessionId, source: boot.source };
+    } catch (error) {
+      if (!ownershipTransferred) {
+        cancelUnownedColdBoot(boot);
+      }
+      throw error;
+    } finally {
+      await releaseReadinessReservation?.();
+    }
+  }
+
+  async function reserveProvisionDeviceReadiness(
+    device: BootedDevice,
+  ): Promise<(() => Promise<void>) | undefined> {
+    const daemonState = DaemonState.getInstance();
+    if (!daemonState.isInitialized()) {
+      return undefined;
+    }
+    return await daemonState.getDevicePool().reserveDeviceForReadiness(device.deviceId, device);
+  }
+
+  async function ensureProvisionDeviceReadiness(
+    args: ProvisionDeviceArgs,
+    deps: DeviceToolsDependencies,
+    device: BootedDevice,
+    requestedIdentity: string,
+    totalDeadlineMs: number,
+    perf: ReturnType<typeof createPerformanceTracker>,
+    signal: AbortSignal | undefined,
+  ): Promise<void> {
+    if (args.readiness !== "automation") {
+      return;
+    }
+    const ctrlProxySetup = deps.ensureCtrlProxyReady ?? ensureCtrlProxyReady;
+    await ctrlProxySetup({
+      device,
+      requestedIdentity,
+      totalDeadlineMs,
+      readinessTimeoutMs: args.timeoutMs ?? serverConfig.getRunnerReadinessTimeoutMs(),
+      skipCtrlProxyDownload: serverConfig.isSkipCtrlProxyDownloadEnabled(),
+      perf,
+      signal,
+    });
+  }
+
+  function buildProvisionDeviceResult(
+    args: ProvisionDeviceArgs,
+    provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>>,
+    perf: ReturnType<typeof createPerformanceTracker>,
+    booted: { device: BootedDevice; sessionId: string } | undefined,
+  ): Record<string, unknown> {
+    return {
+      operationId: args.operationId,
+      device: booted?.device ?? provisioned.device,
+      requestedSpec: args.device.spec,
+      resolvedSpec: provisioned.resolvedSpec,
+      created: provisioned.created,
+      adopted: !provisioned.created,
+      lifecycleState: booted ? "ready" : provisioned.created ? "created" : "adopted",
+      readiness: {
+        mode: args.readiness,
+        status: booted
+          ? args.readiness === "automation" ? "automation_ready" : "device_ready"
+          : "not_requested",
+      },
+      ...(booted ? { sessionId: booted.sessionId } : {}),
+      timing: perf.getTimings(),
+    };
+  }
+
+  function provisionDeviceErrorResponse(error: unknown) {
+    if (error instanceof ProvisionDeviceError) {
+      return createToolErrorResponse(error.code, error.message);
+    }
+    if (error instanceof ProvisionDeviceOperationConflictError) {
+      return createToolErrorResponse("operation_conflict", error.message);
+    }
+    return createToolErrorResponse(
+      "platform_command_failed",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+
   type DevicePreparationBudgets = {
     bootTimeoutMs: number;
     automationReadyTimeoutMs: number;
@@ -2160,6 +2810,13 @@ export function registerDeviceTools() {
     startDeviceSchema,
     startDeviceHandler,
     { supportsProgress: true, hidden: true },
+  );
+
+  ToolRegistry.register(
+    "provisionDevice",
+    "Provision exact virtual device",
+    provisionDeviceSchema,
+    provisionDeviceHandler,
   );
 
   ToolRegistry.register(

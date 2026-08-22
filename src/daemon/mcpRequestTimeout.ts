@@ -1,6 +1,7 @@
 import type { DaemonRequest } from "./types";
 import {
   DEFAULT_DEVICE_READY_TIMEOUT_MS,
+  DEFAULT_PROVISION_DEVICE_TIMEOUT_MS,
   MAX_DEVICE_READY_TIMEOUT_MS,
   START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
 } from "../utils/deviceTimeouts";
@@ -25,6 +26,14 @@ export const MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS = 600_000;
  * host performance (especially under emulation/Rosetta).
  */
 export const MIN_START_DEVICE_MCP_TIMEOUT_MS = 180_000;
+
+/**
+ * Floor for exact virtual-device provisioning. Android AVD creation alone
+ * permits a five-minute command budget before the shared boot/readiness path,
+ * and the transport needs time to persist and return its final result.
+ */
+export const MIN_PROVISION_DEVICE_MCP_TIMEOUT_MS =
+  DEFAULT_PROVISION_DEVICE_TIMEOUT_MS + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS;
 
 /**
  * Floor for `launchApp` — an iOS cold launch waits for CtrlProxy to deliver the
@@ -92,6 +101,8 @@ function resolveToolTimeoutFloorMs(toolName: string | undefined): number | undef
     case "getApple":
     case "startDevice":
       return MIN_START_DEVICE_MCP_TIMEOUT_MS;
+    case "provisionDevice":
+      return MIN_PROVISION_DEVICE_MCP_TIMEOUT_MS;
     case "launchApp":
       return MIN_LAUNCH_APP_MCP_TIMEOUT_MS;
     case "uninstallApp":
@@ -161,6 +172,13 @@ function resolveDevicePreparationToolBudgetMs(request: DaemonRequest): number | 
       return resolveNamedDevicePreparationBudgetMs(argumentsRecord);
     case "startDevice":
       return resolveLegacyStartDeviceBudgetMs(argumentsRecord);
+    case "provisionDevice": {
+      const timeoutMs =
+        positiveFiniteNumber(argumentsRecord.timeoutMs) ??
+        DEFAULT_PROVISION_DEVICE_TIMEOUT_MS;
+      return Math.min(timeoutMs, MAX_DEVICE_READY_TIMEOUT_MS) +
+        START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS;
+    }
     default:
       return undefined;
   }

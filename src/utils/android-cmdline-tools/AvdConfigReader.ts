@@ -1,4 +1,5 @@
 import { logger } from "../logger";
+import { dirname, join } from "node:path";
 
 /** Minimum guest memory required by modern Play Store system images. */
 export const MIN_AVD_RAM_MB = 2048;
@@ -56,6 +57,25 @@ export function apiLevelToVersion(apiLevel: number): string | undefined {
   return API_LEVEL_TO_VERSION[apiLevel];
 }
 
+function nonEmptyEnvironmentValue(value: string | undefined): string | undefined {
+  return value || undefined;
+}
+
+export function resolveAndroidAvdHome(
+  environment: NodeJS.ProcessEnv,
+  homeDirectory?: string,
+): string {
+  const androidUserHome = nonEmptyEnvironmentValue(environment.ANDROID_USER_HOME);
+  const avdHome = nonEmptyEnvironmentValue(environment.ANDROID_AVD_HOME);
+  const androidSdkHome = nonEmptyEnvironmentValue(environment.ANDROID_SDK_HOME);
+  const configHome =
+    nonEmptyEnvironmentValue(environment.ANDROID_EMULATOR_HOME) ??
+    androidUserHome ??
+    (androidSdkHome ? join(androidSdkHome, ".android") : undefined) ??
+    (homeDirectory ? join(homeDirectory, ".android") : "");
+  return avdHome ?? join(configHome, "avd");
+}
+
 /**
  * Reads AVD config.ini files from the AVD home directory.
  */
@@ -76,21 +96,22 @@ export class FileAvdConfigReader implements AvdConfigReader {
     this.existsFn = existsFn ?? ((p: string) => fs.existsSync(p));
 
     const homeDir = process.env.HOME || process.env.USERPROFILE;
-    const androidUserHome = process.env.ANDROID_USER_HOME || undefined;
-    const avdHomeEnv = process.env.ANDROID_AVD_HOME || undefined;
-    const configHome = process.env.ANDROID_EMULATOR_HOME
+    const androidUserHome = nonEmptyEnvironmentValue(process.env.ANDROID_USER_HOME);
+    const avdHomeEnv = nonEmptyEnvironmentValue(process.env.ANDROID_AVD_HOME);
+    const androidSdkHome = nonEmptyEnvironmentValue(process.env.ANDROID_SDK_HOME);
+    const configHome = nonEmptyEnvironmentValue(process.env.ANDROID_EMULATOR_HOME)
       || androidUserHome
-      || (process.env.ANDROID_SDK_HOME ? path.join(process.env.ANDROID_SDK_HOME, ".android") : undefined)
+      || (androidSdkHome ? path.join(androidSdkHome, ".android") : undefined)
       || (homeDir ? path.join(homeDir, ".android") : "");
     this.avdHome = avdHome
       ?? avdHomeEnv
-      ?? path.join(configHome, "avd");
+      ?? resolveAndroidAvdHome(process.env, homeDir);
     this.configHome = avdHome
-      ? path.dirname(avdHome)
-      : (process.env.ANDROID_EMULATOR_HOME
+      ? dirname(avdHome)
+      : (nonEmptyEnvironmentValue(process.env.ANDROID_EMULATOR_HOME)
         || androidUserHome
-        || (process.env.ANDROID_SDK_HOME ? path.join(process.env.ANDROID_SDK_HOME, ".android") : undefined)
-        || (avdHomeEnv ? path.dirname(this.avdHome) : configHome));
+        || (androidSdkHome ? path.join(androidSdkHome, ".android") : undefined)
+        || (avdHomeEnv ? dirname(this.avdHome) : configHome));
   }
 
   async readConfig(avdName: string): Promise<AvdConfig | null> {

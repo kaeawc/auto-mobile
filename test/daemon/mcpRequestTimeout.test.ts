@@ -7,6 +7,7 @@ import {
   LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
   MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS,
   MIN_LAUNCH_APP_MCP_TIMEOUT_MS,
+  MIN_PROVISION_DEVICE_MCP_TIMEOUT_MS,
   MIN_START_DEVICE_MCP_TIMEOUT_MS,
   MIN_UNINSTALL_APP_MCP_TIMEOUT_MS,
   OBSERVE_MCP_TIMEOUT_ENV_VAR,
@@ -16,6 +17,7 @@ import {
 } from "../../src/daemon/mcpRequestTimeout";
 import type { DaemonRequest } from "../../src/daemon/types";
 import {
+  DEFAULT_PROVISION_DEVICE_TIMEOUT_MS,
   DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS,
   MAX_DEVICE_READY_TIMEOUT_MS,
 } from "../../src/utils/deviceTimeouts";
@@ -67,6 +69,7 @@ describe("resolveMcpRequestTimeoutMs", () => {
     { name: "tool without a floor -> default", tool: "tapOn", expected: DEFAULT_MCP_REQUEST_TIMEOUT_MS },
     { name: "executePlan floor when timeoutMs omitted", tool: "executePlan", expected: MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS },
     { name: "startDevice floor when timeoutMs omitted", tool: "startDevice", expected: MIN_START_DEVICE_MCP_TIMEOUT_MS },
+    { name: "provisionDevice floor when timeoutMs omitted", tool: "provisionDevice", expected: MIN_PROVISION_DEVICE_MCP_TIMEOUT_MS },
     { name: "launchApp floor when timeoutMs omitted", tool: "launchApp", expected: MIN_LAUNCH_APP_MCP_TIMEOUT_MS },
     { name: "uninstallApp floor when timeoutMs omitted", tool: "uninstallApp", expected: MIN_UNINSTALL_APP_MCP_TIMEOUT_MS },
     { name: "observe default floor when timeoutMs omitted", tool: "observe", expected: DEFAULT_OBSERVE_MCP_TIMEOUT_MS },
@@ -75,6 +78,7 @@ describe("resolveMcpRequestTimeoutMs", () => {
     // --- Short timeouts are raised to the floor (base < floor) ---
     { name: "raises short executePlan to floor", tool: "executePlan", timeoutMs: 180_000, expected: MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS },
     { name: "raises short startDevice to floor", tool: "startDevice", timeoutMs: 60_000, expected: MIN_START_DEVICE_MCP_TIMEOUT_MS },
+    { name: "raises short provisionDevice to floor", tool: "provisionDevice", timeoutMs: 60_000, expected: MIN_PROVISION_DEVICE_MCP_TIMEOUT_MS },
     { name: "raises short launchApp to floor", tool: "launchApp", timeoutMs: 10_000, expected: MIN_LAUNCH_APP_MCP_TIMEOUT_MS },
     { name: "raises short uninstallApp to floor", tool: "uninstallApp", timeoutMs: 30_000, expected: MIN_UNINSTALL_APP_MCP_TIMEOUT_MS },
     { name: "raises short observe to floor", tool: "observe", timeoutMs: 30_000, expected: DEFAULT_OBSERVE_MCP_TIMEOUT_MS },
@@ -83,6 +87,12 @@ describe("resolveMcpRequestTimeoutMs", () => {
     // --- Timeouts above the floor are preserved (base > floor) ---
     { name: "preserves executePlan above floor", tool: "executePlan", timeoutMs: 900_000, expected: 900_000 },
     { name: "preserves startDevice above floor", tool: "startDevice", timeoutMs: 300_000, expected: 300_000 },
+    {
+      name: "preserves provisionDevice outer request timeout above the floor",
+      tool: "provisionDevice",
+      timeoutMs: 600_000,
+      expected: 600_000,
+    },
     { name: "preserves launchApp above floor", tool: "launchApp", timeoutMs: 150_000, expected: 150_000 },
     { name: "preserves uninstallApp above floor", tool: "uninstallApp", timeoutMs: 90_000, expected: 90_000 },
     { name: "preserves observe above floor", tool: "observe", timeoutMs: 150_000, expected: 150_000 },
@@ -165,6 +175,7 @@ describe("resolveMcpRequestTimeoutMs", () => {
   });
 
   test("keeps transport alive for getAndroid's named preparation budgets", () => {
+
     const request: DaemonRequest = {
       id: "1",
       type: "mcp_request",
@@ -177,6 +188,41 @@ describe("resolveMcpRequestTimeoutMs", () => {
 
     expect(resolveMcpRequestTimeoutMs(request)).toBe(
       345_000 + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+    );
+  });
+
+  test("keeps transport alive beyond the provisionDevice tool budget", () => {
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: {
+        name: "provisionDevice",
+        arguments: { timeoutMs: 600_000 },
+      },
+    };
+
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(
+      600_000 + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+    );
+  });
+
+  test("keeps transport headroom when provisionDevice uses its default lifecycle budget", () => {
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: {
+        name: "provisionDevice",
+        arguments: {},
+      },
+    };
+
+    expect(MIN_PROVISION_DEVICE_MCP_TIMEOUT_MS).toBe(
+      DEFAULT_PROVISION_DEVICE_TIMEOUT_MS + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+    );
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(
+      DEFAULT_PROVISION_DEVICE_TIMEOUT_MS + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
     );
   });
 
@@ -200,7 +246,6 @@ describe("resolveMcpRequestTimeoutMs", () => {
     );
     expect(resolved).toBeLessThan(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
   });
-
   test("keeps transport alive for the legacy nested startDevice timeout", () => {
     const request: DaemonRequest = {
       id: "1",

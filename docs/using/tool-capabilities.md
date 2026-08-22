@@ -44,12 +44,12 @@ below.
 
 ## Tool capabilities (the primary registration flags)
 
-Advanced tools are grouped into **14 capabilities**. Each is **off by default**;
+Advanced tools are grouped into **15 capabilities**. Each is **off by default**;
 an agent opts into the ones it needs for the current session. Opting in is
 cheap, reversible, and scoped to the session — it does not change what any other
 connected client sees.
 
-### The 14 capabilities
+### The 15 capabilities
 
 | Capability | Tools it exposes | Extra process gate on some tools |
 |---|---|---|
@@ -57,6 +57,7 @@ connected client sees.
 | `advanced-interaction` | `openLink`, `imeAction`, `dragAndDrop`, `pinchOn`, `shake`, `rotate` | — |
 | `app-permissions` | `getAppPermissions`, `setAppPermissions` | — |
 | `device-settings` | `changeLocalization`, `getDeviceState`, `setDeviceState` | — |
+| `device-control` | `provisionDevice` | — |
 | `app-data-interop` | `putAppFile`, `getPreference`, `setPreference`, `sqlQuery`, `setKeyValue`, `removeKeyValue`, `clearKeyValueFile` | `sqlQuery`, `setKeyValue`, `removeKeyValue`, `clearKeyValueFile` also need **`--embedded-sdk`** |
 | `notifications` | `systemTray`, `postNotification`, `getNotificationPolicy`, `setNotificationPolicy` | — |
 | `telephony` | `phoneCall`, `sendSms` | — |
@@ -199,7 +200,7 @@ surface them in `tools/list` — this is by design.
 Because the gates are cumulative, work through them in order:
 
 1. **Is it a capability tool?** Find the tool in the
-   [14-capability table](#the-14-capabilities). If it's there, enable that
+   [15-capability table](#the-15-capabilities). If it's there, enable that
    capability — `setToolCapability` for this session, or `AUTOMOBILE_TOOLSET_*`
    at startup.
 2. **Does it carry an extra process gate?** The right-hand column of that table

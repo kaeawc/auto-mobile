@@ -7675,6 +7675,141 @@
     }
   },
   {
+    "name": "provisionDevice",
+    "description": "Provision exact virtual device",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "operationId": {
+          "description": "Caller-generated idempotency key",
+          "type": "string",
+          "minLength": 1
+        },
+        "device": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "platform": {
+                  "type": "string",
+                  "const": "android"
+                },
+                "name": {
+                  "description": "Exact AVD name",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "spec": {
+                  "type": "object",
+                  "properties": {
+                    "runtime": {
+                      "description": "Installed Android system-image package identifier",
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "deviceType": {
+                      "description": "Android avdmanager device profile identifier",
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "configuration": {
+                      "type": "object",
+                      "properties": {
+                        "memoryMb": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "runtime",
+                    "deviceType"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "platform",
+                "name",
+                "spec"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "platform": {
+                  "type": "string",
+                  "const": "ios"
+                },
+                "name": {
+                  "description": "Exact simulator name",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "spec": {
+                  "type": "object",
+                  "properties": {
+                    "runtime": {
+                      "description": "CoreSimulator runtime identifier",
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "deviceType": {
+                      "description": "CoreSimulator device-type identifier",
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "runtime",
+                    "deviceType"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "platform",
+                "name",
+                "spec"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "boot": {
+          "description": "Boot the resolved device after creation or adoption",
+          "default": true,
+          "type": "boolean"
+        },
+        "readiness": {
+          "description": "Whether to wait for the AutoMobile automation runner after device boot",
+          "default": "automation",
+          "type": "string",
+          "enum": [
+            "automation",
+            "none"
+          ]
+        },
+        "timeoutMs": {
+          "description": "Total provision, boot, and readiness timeout in ms",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 890000
+        }
+      },
+      "required": [
+        "operationId",
+        "device"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "putAppFile",
     "description": "Write file/text/base64 content into an app container.",
     "inputSchema": {
@@ -8410,6 +8545,7 @@
             "advanced-interaction",
             "app-permissions",
             "device-settings",
+            "device-control",
             "app-data-interop",
             "notifications",
             "telephony",

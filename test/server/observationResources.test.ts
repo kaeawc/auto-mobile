@@ -3,6 +3,7 @@ import type { BootedDevice, ObserveResult } from "../../src/models";
 import type { ScreenshotResult } from "../../src/models/ScreenshotResult";
 import type { TrackedScreenshotService } from "../../src/features/observe/screenshot/ObserveScreenshotRecorder";
 import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
+import { ScreenshotJobTracker } from "../../src/utils/ScreenshotJobTracker";
 import {
   RESOURCE_URIS,
   registerObservationResources,
@@ -33,9 +34,13 @@ function readTemplate(uri: string) {
   return match!.template.handler(match!.params);
 }
 
-function createTrackedScreenshot(result: ScreenshotResult): TrackedScreenshotService {
+function createTrackedScreenshot(
+  result: ScreenshotResult,
+  onExecute: () => void = () => {},
+): TrackedScreenshotService {
   return {
     async execute(): Promise<ScreenshotResult> {
+      onExecute();
       return result;
     },
     generateScreenshotPath(): string {
@@ -124,12 +129,48 @@ describe("session screenshot resources", () => {
     });
   });
 
+  test("waits for a pending capture before taking a distinct fresh capture", async () => {
+    let resolvePendingCapture: (result: ScreenshotResult) => void = () => {};
+    const pendingCapture = new Promise<ScreenshotResult>(resolve => {
+      resolvePendingCapture = resolve;
+    });
+    ScreenshotJobTracker.startJob(sessionDevice.deviceId, async () => pendingCapture);
+
+    const image = Buffer.from("fresh screenshot");
+    let freshCaptureCount = 0;
+    setSessionScreenshotResourceDependencies({
+      resolveActiveSession: () => activeSession(),
+      createScreenshotService: () => createTrackedScreenshot(
+        { success: true, path: "/tmp/fresh.png" },
+        () => {
+          freshCaptureCount++;
+        },
+      ),
+    });
+    setScreenshotFileSystem({
+      stat: async () => ({ isFile: () => true }),
+      readFile: async () => image,
+    });
+
+    const contentPromise = readTemplate(
+      "automobile:device-session/session-123/screenshot",
+    );
+    await Promise.resolve();
+    expect(freshCaptureCount).toBe(0);
+
+    resolvePendingCapture({ success: true, path: "/tmp/older.png" });
+    const content = await contentPromise;
+
+    expect(freshCaptureCount).toBe(1);
+    expect(content.blob).toBe(image.toString("base64"));
+  });
+
   test("rejects a fresh capture when the session no longer owns its device", async () => {
     let reads = 0;
     setSessionScreenshotResourceDependencies({
       resolveActiveSession: () => {
         reads += 1;
-        return reads === 1 ? activeSession() : undefined;
+        return reads <= 2 ? activeSession() : undefined;
       },
       createScreenshotService: () => createTrackedScreenshot({
         success: true,

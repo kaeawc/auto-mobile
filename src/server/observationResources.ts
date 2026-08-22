@@ -87,6 +87,8 @@ export const RESOURCE_URIS = {
   FRESH_SESSION_SCREENSHOT: "automobile:device-session/{sessionUuid}/screenshot",
 } as const;
 
+const FRESH_SCREENSHOT_PENDING_WAIT_MS = 10_000;
+
 // Helper to get the latest screenshot path from cache
 async function getLatestScreenshotPath(): Promise<string | undefined> {
   try {
@@ -315,16 +317,31 @@ async function getFreshSessionScreenshot(params: Record<string, string>): Promis
   }
 
   try {
-    const screenshotService =
-      sessionScreenshotResourceDependencies.createScreenshotService(activeSession.device);
-    const { promise } = screenshotService.startTrackedCapture(
-      { format: "png" },
-      { coalesceWithPending: true },
+    const pendingResult = await ScreenshotJobTracker.waitForCompletion(
+      activeSession.device.deviceId,
+      FRESH_SCREENSHOT_PENDING_WAIT_MS,
     );
-    const result = await promise;
+    if (pendingResult === null && ScreenshotJobTracker.isPending(activeSession.device.deviceId)) {
+      return {
+        uri,
+        mimeType: "application/json",
+        text: JSON.stringify({
+          error: "Timed out waiting for an in-progress screenshot capture.",
+        }, null, 2),
+      };
+    }
 
     const currentSession = sessionScreenshotResourceDependencies.resolveActiveSession(sessionUuid);
     if (currentSession?.device.deviceId !== activeSession.device.deviceId) {
+      return sessionResourceError(uri, sessionUuid);
+    }
+
+    const screenshotService =
+      sessionScreenshotResourceDependencies.createScreenshotService(currentSession.device);
+    const result = await screenshotService.execute({ format: "png" });
+
+    const completedSession = sessionScreenshotResourceDependencies.resolveActiveSession(sessionUuid);
+    if (completedSession?.device.deviceId !== activeSession.device.deviceId) {
       return sessionResourceError(uri, sessionUuid);
     }
     if (!result.success || !result.path) {

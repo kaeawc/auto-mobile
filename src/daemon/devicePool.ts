@@ -102,6 +102,8 @@ export interface PooledDevice {
   androidImage?: DeviceInfo;
   /** Session captured before a process-wide ADB reset detaches this connection. */
   adbServerResetSessionId?: string;
+  /** Autolock owner captured before a process-wide ADB reset detaches this connection. */
+  adbServerResetAutolockSessionId?: string;
   /**
    * Monotonic id for this pooled connection incarnation, assigned when the
    * device is first added to the pool. A serial (`id`) can be reused across
@@ -158,6 +160,7 @@ interface ReadinessReservationTarget {
 interface AdbServerResetRecoveryReservation {
   deviceId: string;
   image: DeviceInfo;
+  cancelled: boolean;
   settled: Promise<void>;
   resolve(): void;
 }
@@ -290,6 +293,8 @@ export class DevicePool {
    */
   private readonly adbServerResetRecoveryReservations:
     Map<string, AdbServerResetRecoveryReservation> = new Map();
+  /** Child-process handles retained after reset cohort pool entries are detached. */
+  private readonly adbServerResetTrackedProcesses: WeakMap<PooledDevice, ChildProcess> = new WeakMap();
   private readonly recoveringAndroidDeviceIds: Set<string> = new Set();
   private readonly startedDeviceProcesses: Map<string, ChildProcess> = new Map();
   private readonly startedDeviceProcessOutput: Map<string, EmulatorProcessOutputTail> = new Map();
@@ -1012,15 +1017,19 @@ export class DevicePool {
       // Tie the marker to the incarnation present now, so a later same-serial
       // replacement is not treated as intentionally stopped.
       this.intentionalShutdowns.set(deviceId, device.incarnation);
-    } else if (
-      this.recoveringAndroidDeviceIds.has(deviceId) ||
-      Array.from(this.adbServerResetRecoveryReservations.values()).some(
-        reservation => reservation.deviceId === deviceId,
-      )
-    ) {
+      return;
+    }
+    const resetReservation = Array.from(this.adbServerResetRecoveryReservations.values()).find(
+      reservation => reservation.deviceId === deviceId,
+    );
+    if (resetReservation) {
+      // The cohort member is no longer pooled and its former serial can be
+      // reused by an earlier recovery. Keep this cancellation on its AVD
+      // reservation rather than a serial-scoped marker.
+      resetReservation.cancelled = true;
+    } else if (this.recoveringAndroidDeviceIds.has(deviceId)) {
       // No pooled device yet (an in-flight recovery owns the serial); the mark
-      // applies to whatever incarnation the recovery produces. A reset cohort
-      // reserves detached later members before their own recovery turn.
+      // applies to whatever incarnation the recovery produces.
       this.intentionalShutdowns.set(deviceId, INCARNATION_ANY);
     }
   }
@@ -1980,6 +1989,11 @@ export class DevicePool {
           }
           device.adbServerResetSessionId = device.sessionId;
         }
+        device.adbServerResetAutolockSessionId = device.autolockSessionId;
+        const trackedProcess = this.startedDeviceProcesses.get(device.id);
+        if (trackedProcess) {
+          this.adbServerResetTrackedProcesses.set(device, trackedProcess);
+        }
         this.reserveAdbServerResetRecovery(device);
         device.sessionId = null;
         device.status = "idle";
@@ -2057,6 +2071,7 @@ export class DevicePool {
         source: "local",
       },
       deviceId: device.id,
+      cancelled: false,
       settled,
       resolve,
     });
@@ -2121,6 +2136,8 @@ export class DevicePool {
 
     const avdName = device.avdName;
     const preservedSessionId = options.preserveSessionId;
+    const preservedAutolockSessionId =
+      device.adbServerResetAutolockSessionId ?? device.autolockSessionId;
     const recoveryDeviceIds = new Set([device.id]);
     const recoveryImage: DeviceInfo = {
       ...device.androidImage,
@@ -2154,16 +2171,14 @@ export class DevicePool {
         return false;
       }
       if (replacementState === "same-avd") {
-        if (!await this.rebindSameAvdReplacementSession(
+        return await this.recoverSameAvdReplacement(
           device,
           avdName,
           preservedSessionId,
+          preservedAutolockSessionId,
           recoveryImage,
-        )) {
-          return false;
-        }
-        await this.completeEmulatorLossRecovery(incidentId, "recovered");
-        return true;
+          incidentId,
+        );
       }
       if (!this.detachSessionForAndroidRecovery(device, preservedSessionId)) {
         return false;
@@ -2172,7 +2187,7 @@ export class DevicePool {
       let intentionallyStopped = false;
       let intentionalShutdownCleanupError: unknown;
       const recovered = await this.androidDeviceReboot.run(target, async () => {
-        if (this.consumeIntentionalShutdown(recoveryDeviceIds)) {
+        if (this.consumeAndroidRecoveryCancellation(device, recoveryDeviceIds)) {
           intentionallyStopped = true;
           return;
         }
@@ -2204,12 +2219,12 @@ export class DevicePool {
           readinessCompleted = true;
           recoveryDeviceIds.add(ready.deviceId);
           this.recoveringAndroidDeviceIds.add(ready.deviceId);
-          if (this.consumeIntentionalShutdown(recoveryDeviceIds)) {
+          if (this.consumeAndroidRecoveryCancellation(device, recoveryDeviceIds)) {
             await stopCancelledRecovery();
             return;
           }
           await this.addDevice(ready, recoveryImage);
-          if (this.consumeIntentionalShutdown(recoveryDeviceIds)) {
+          if (this.consumeAndroidRecoveryCancellation(device, recoveryDeviceIds)) {
             await stopCancelledRecovery(ready);
             return;
           }
@@ -2220,13 +2235,14 @@ export class DevicePool {
             ready,
             recoveryImage,
             childProcess,
+            preservedAutolockSessionId,
           );
           await this.recordEmulatorLossRecoveryAttempt(incidentId, {
             attempt,
             outcome: "succeeded",
           });
         } catch (error) {
-          if (this.consumeIntentionalShutdown(recoveryDeviceIds)) {
+          if (this.consumeAndroidRecoveryCancellation(device, recoveryDeviceIds)) {
             await stopCancelledRecovery(readinessCompleted ? ready : undefined);
             return;
           }
@@ -2274,6 +2290,12 @@ export class DevicePool {
       );
       return "stopped";
     }
+    const detachedProcess = this.adbServerResetTrackedProcesses.get(device);
+    if (detachedProcess) {
+      this.adbServerResetTrackedProcesses.delete(device);
+      await this.stopEmulatorProcess(detachedProcess);
+      return "stopped";
+    }
     const hadTrackedProcess = this.startedDeviceProcesses.has(device.id);
     await this.stopTrackedEmulatorProcess(device.id);
     if (!hadTrackedProcess) {
@@ -2286,6 +2308,7 @@ export class DevicePool {
     device: PooledDevice,
     avdName: string,
     preservedSessionId: string | undefined,
+    preservedAutolockSessionId: string | undefined,
     recoveryImage: DeviceInfo,
   ): Promise<boolean> {
     const replacement = this.devices.get(device.id);
@@ -2309,6 +2332,12 @@ export class DevicePool {
         },
         true,
       );
+      replacement.autolockSessionId = preservedAutolockSessionId;
+      const detachedProcess = this.adbServerResetTrackedProcesses.get(device);
+      if (detachedProcess) {
+        this.adbServerResetTrackedProcesses.delete(device);
+        this.startedDeviceProcesses.set(replacement.id, detachedProcess);
+      }
       return this.sessionManager.getSession(preservedSessionId)?.assignedDevice === replacement.id;
     } catch (error) {
       logger.warn(
@@ -2317,6 +2346,27 @@ export class DevicePool {
       );
       return false;
     }
+  }
+
+  private async recoverSameAvdReplacement(
+    device: PooledDevice,
+    avdName: string,
+    preservedSessionId: string | undefined,
+    preservedAutolockSessionId: string | undefined,
+    recoveryImage: DeviceInfo,
+    incidentId: string | undefined,
+  ): Promise<boolean> {
+    if (!await this.rebindSameAvdReplacementSession(
+      device,
+      avdName,
+      preservedSessionId,
+      preservedAutolockSessionId,
+      recoveryImage,
+    )) {
+      return false;
+    }
+    await this.completeEmulatorLossRecovery(incidentId, "recovered");
+    return true;
   }
 
   private detachSessionForAndroidRecovery(
@@ -2343,6 +2393,7 @@ export class DevicePool {
     ready: BootedDevice,
     recoveryImage: DeviceInfo,
     childProcess: ChildProcess | null,
+    preservedAutolockSessionId: string | undefined,
   ): Promise<void> {
     if (!preservedSessionId) {
       await this.trackStartedDeviceProcess(ready, childProcess);
@@ -2362,6 +2413,30 @@ export class DevicePool {
       ready,
       true,
     );
+    const replacement = this.devices.get(ready.deviceId);
+    if (replacement?.sessionId === preservedSessionId) {
+      replacement.autolockSessionId = preservedAutolockSessionId;
+    }
+  }
+
+  private consumeAdbServerResetRecoveryCancellation(device: PooledDevice): boolean {
+    if (!device.avdName) {
+      return false;
+    }
+    const reservation = this.adbServerResetRecoveryReservations.get(device.avdName);
+    if (!reservation || reservation.deviceId !== device.id || !reservation.cancelled) {
+      return false;
+    }
+    reservation.cancelled = false;
+    return true;
+  }
+
+  private consumeAndroidRecoveryCancellation(
+    device: PooledDevice,
+    recoveryDeviceIds: ReadonlySet<string>,
+  ): boolean {
+    return this.consumeAdbServerResetRecoveryCancellation(device) ||
+      this.consumeIntentionalShutdown(recoveryDeviceIds);
   }
 
   private consumeIntentionalShutdown(deviceIds: ReadonlySet<string>): boolean {

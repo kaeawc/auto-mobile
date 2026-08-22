@@ -121,6 +121,10 @@ describe("DaemonClient device-control transport response", () => {
         reconnectAttempted: true,
         replayAttempted: false,
       };
+      const wireFailure = {
+        ...failure,
+        endpoint: "https://secret.invalid?token=hidden",
+      };
 
       server = createServer((connection: Socket) => {
         connection.once("data", data => {
@@ -130,7 +134,7 @@ describe("DaemonClient device-control transport response", () => {
             type: "mcp_response",
             success: false,
             error: "Device-control transport closed while handling launchApp",
-            transportFailure: failure,
+            transportFailure: wireFailure,
           })}\n`);
         });
       });
@@ -148,6 +152,9 @@ describe("DaemonClient device-control transport response", () => {
       } catch (error) {
         expect(error).toBeInstanceOf(DeviceControlTransportError);
         expect((error as DeviceControlTransportError).failure).toEqual(failure);
+        expect(JSON.stringify((error as DeviceControlTransportError).failure)).not.toContain(
+          "secret.invalid",
+        );
       } finally {
         await client.close();
       }

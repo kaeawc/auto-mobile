@@ -12,6 +12,7 @@ export interface DeviceControlTransportFailure {
   deviceId?: string;
   deviceSessionUuid?: string;
   sessionUuid?: string;
+  /** True only while the daemon session assignment and captured device epoch remain valid. */
   sessionValid: boolean;
   phase: DeviceControlTransportPhase;
   retryable: boolean;
@@ -27,6 +28,98 @@ export class DeviceControlTransportError extends Error {
     super(message);
     this.name = "DeviceControlTransportError";
   }
+}
+
+function hasTransportFailureHeader(
+  record: Record<string, unknown>,
+): record is Record<string, unknown> & {
+  code: typeof DEVICE_CONTROL_TRANSPORT_FAILURE_CODE;
+  transport: "daemon_loopback_http";
+  toolName: string;
+} {
+  return (
+    record.code === DEVICE_CONTROL_TRANSPORT_FAILURE_CODE
+    && record.transport === "daemon_loopback_http"
+    && typeof record.toolName === "string"
+    && record.toolName.length > 0
+  );
+}
+
+function sanitizeTransportFailureIdentity(
+  record: Record<string, unknown>,
+): Pick<
+  DeviceControlTransportFailure,
+  "deviceId" | "deviceSessionUuid" | "sessionUuid"
+> | undefined {
+  const identity: Pick<
+    DeviceControlTransportFailure,
+    "deviceId" | "deviceSessionUuid" | "sessionUuid"
+  > = {};
+  if (record.deviceId !== undefined) {
+    if (typeof record.deviceId !== "string") {
+      return undefined;
+    }
+    identity.deviceId = record.deviceId;
+  }
+  if (record.deviceSessionUuid !== undefined) {
+    if (typeof record.deviceSessionUuid !== "string") {
+      return undefined;
+    }
+    identity.deviceSessionUuid = record.deviceSessionUuid;
+  }
+  if (record.sessionUuid !== undefined) {
+    if (typeof record.sessionUuid !== "string") {
+      return undefined;
+    }
+    identity.sessionUuid = record.sessionUuid;
+  }
+  return identity;
+}
+
+function hasTransportFailureState(
+  record: Record<string, unknown>,
+): record is Record<string, unknown> & {
+  sessionValid: boolean;
+  phase: DeviceControlTransportPhase;
+  retryable: boolean;
+  reconnectAttempted: boolean;
+  replayAttempted: boolean;
+} {
+  return (
+    typeof record.sessionValid === "boolean"
+    && (record.phase === "connect" || record.phase === "response")
+    && typeof record.retryable === "boolean"
+    && typeof record.reconnectAttempted === "boolean"
+    && typeof record.replayAttempted === "boolean"
+  );
+}
+
+export function sanitizeDeviceControlTransportFailure(
+  value: unknown,
+): DeviceControlTransportFailure | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const identity = sanitizeTransportFailureIdentity(record);
+  if (
+    !hasTransportFailureHeader(record)
+    || !identity
+    || !hasTransportFailureState(record)
+  ) {
+    return undefined;
+  }
+  return {
+    code: DEVICE_CONTROL_TRANSPORT_FAILURE_CODE,
+    transport: "daemon_loopback_http",
+    toolName: record.toolName,
+    ...identity,
+    sessionValid: record.sessionValid,
+    phase: record.phase,
+    retryable: record.retryable,
+    reconnectAttempted: record.reconnectAttempted,
+    replayAttempted: record.replayAttempted,
+  };
 }
 
 export function isUnexpectedSocketClosure(error: unknown): boolean {

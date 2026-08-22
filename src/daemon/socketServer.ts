@@ -1275,7 +1275,7 @@ export class UnixSocketServer {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (message.includes("Session not found")) {
-        return this.retryExpiredMcpSession(context);
+        return this.retryExpiredMcpSession(context, identity);
       }
       if (this.isDeviceControlSocketClosure(context.request, error)) {
         return this.recoverDeviceControlTransport({
@@ -1290,14 +1290,30 @@ export class UnixSocketServer {
 
   private async retryExpiredMcpSession(
     context: McpForwardRecoveryContext,
+    identity: DeviceControlTransportIdentity,
   ): Promise<unknown> {
     logger.warn("MCP client session expired, reconnecting and retrying...");
     await this.resetMcpClient(context.route.clientKey);
-    const freshClient = await this.getMcpClient(
-      context.route.clientKey,
-      context.route.sessionUuid,
-      context.route.toolSelectionProfileUuid,
-    );
+    let freshClient: Client;
+    try {
+      freshClient = await this.getMcpClient(
+        context.route.clientKey,
+        context.route.sessionUuid,
+        context.route.toolSelectionProfileUuid,
+      );
+    } catch (error) {
+      if (!this.isDeviceControlSocketClosure(context.request, error)) {
+        throw error;
+      }
+      throw this.deviceControlTransportError({
+        request: context.request,
+        identity,
+        phase: "connect",
+        reconnectAttempted: true,
+        replayAttempted: false,
+        recoveryExhausted: true,
+      });
+    }
     const retryRemainingMs =
       context.remainingTimeoutMs - (this.timer.now() - context.forwardStartMs);
     if (retryRemainingMs <= 0) {
@@ -1311,12 +1327,27 @@ export class UnixSocketServer {
         detail: `no budget remaining after session reconnect (elapsed ${this.timer.now() - context.forwardStartMs}ms)`,
       });
     }
-    return this.handleIdeRequest(
-      freshClient,
-      context.request,
-      retryRemainingMs,
-      context.socketSessionId,
-    );
+    try {
+      return await this.handleIdeRequest(
+        freshClient,
+        context.request,
+        retryRemainingMs,
+        context.socketSessionId,
+      );
+    } catch (error) {
+      if (!this.isDeviceControlSocketClosure(context.request, error)) {
+        throw error;
+      }
+      await this.resetMcpClient(context.route.clientKey, "detach");
+      throw this.deviceControlTransportError({
+        request: context.request,
+        identity,
+        phase: "response",
+        reconnectAttempted: true,
+        replayAttempted: true,
+        recoveryExhausted: true,
+      });
+    }
   }
 
   private getDeviceControlTransportIdentity(

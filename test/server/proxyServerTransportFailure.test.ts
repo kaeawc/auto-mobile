@@ -34,11 +34,15 @@ describe("proxy server device-control transport errors", () => {
       reconnectAttempted: true,
       replayAttempted: false,
     };
+    const unsafeFailure = {
+      ...failure,
+      endpoint: "https://secret.invalid?token=hidden",
+    } as DeviceControlTransportFailure;
     const fakeClient = new FakeDaemonClient({
       onCallTool: () => {
         throw new DeviceControlTransportError(
           "Device-control transport closed while handling launchApp",
-          failure,
+          unsafeFailure,
         );
       },
     });
@@ -80,6 +84,7 @@ describe("proxy server device-control transport errors", () => {
         ],
         isError: true,
       });
+      expect(JSON.stringify(result)).not.toContain("secret.invalid");
     } finally {
       await client.close();
       await server.close();

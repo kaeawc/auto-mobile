@@ -17,7 +17,10 @@ import {
 } from "../daemon/daemonMcpProxy";
 import { ActionableError } from "../models";
 import { getMcpServerVersion } from "../utils/mcpVersion";
-import { DeviceControlTransportError } from "../daemon/deviceControlTransportFailure";
+import {
+  DeviceControlTransportError,
+  sanitizeDeviceControlTransportFailure,
+} from "../daemon/deviceControlTransportFailure";
 
 /**
  * Options for creating a proxy MCP server
@@ -66,6 +69,7 @@ function sessionOwnershipLostError(error: DaemonBoundSessionExpiredError): McpEr
 function deviceControlTransportFailureResult(
   error: DeviceControlTransportError,
 ): CallToolResult {
+  const failure = sanitizeDeviceControlTransportFailure(error.failure);
   return {
     content: [
       {
@@ -73,7 +77,7 @@ function deviceControlTransportFailureResult(
         text: JSON.stringify({
           error: {
             message: error.message,
-            ...error.failure,
+            ...failure,
           },
         }),
       },

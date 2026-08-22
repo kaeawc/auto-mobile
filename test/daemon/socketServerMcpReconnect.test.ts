@@ -46,6 +46,8 @@ function socketClosedError(sensitiveDetail = ""): Error {
 function createFakeDaemonState(
   sessionIsValid: () => boolean,
   secondarySessionIsValid: () => boolean,
+  resolveDeviceEpochUuid: () => string | undefined,
+  resolveSecondaryDeviceEpochUuid: () => string | undefined,
   resolveAutolockSession: () => string | undefined,
 ) {
   const session = {
@@ -104,10 +106,21 @@ function createFakeDaemonState(
       resolveAutolockSessionForMcpSession: () => resolveAutolockSession(),
     }),
     getDeviceSessionRegistry: () => ({
-      list: () => [
-        ...(sessionIsValid() ? [deviceSession] : []),
-        ...(secondarySessionIsValid() ? [secondaryDeviceSession] : []),
-      ],
+      list: () => {
+        const deviceEpochUuid = resolveDeviceEpochUuid();
+        const secondaryDeviceEpochUuid = resolveSecondaryDeviceEpochUuid();
+        return [
+          ...(deviceEpochUuid
+            ? [{ ...deviceSession, deviceSessionUuid: deviceEpochUuid }]
+            : []),
+          ...(secondaryDeviceEpochUuid
+            ? [{
+              ...secondaryDeviceSession,
+              deviceSessionUuid: secondaryDeviceEpochUuid,
+            }]
+            : []),
+        ];
+      },
     }),
   };
 }
@@ -186,6 +199,8 @@ describe("UnixSocketServer MCP session reconnect", () => {
   let fakeTimer: FakeTimer;
   let sessionIsValid: boolean;
   let secondarySessionIsValid: boolean;
+  let deviceEpochUuid: string | undefined;
+  let secondaryDeviceEpochUuid: string | undefined;
   let autolockSessionUuid: string | undefined;
 
   beforeEach(async () => {
@@ -193,6 +208,8 @@ describe("UnixSocketServer MCP session reconnect", () => {
     fakeTimer = new FakeTimer();
     sessionIsValid = true;
     secondarySessionIsValid = true;
+    deviceEpochUuid = "device-epoch-a";
+    secondaryDeviceEpochUuid = "device-epoch-b";
     autolockSessionUuid = undefined;
     server = new UnixSocketServer(
       socketPath,
@@ -200,6 +217,8 @@ describe("UnixSocketServer MCP session reconnect", () => {
       createFakeDaemonState(
         () => sessionIsValid,
         () => secondarySessionIsValid,
+        () => deviceEpochUuid,
+        () => secondaryDeviceEpochUuid,
         () => autolockSessionUuid,
       ),
       fakeTimer,
@@ -305,6 +324,43 @@ describe("UnixSocketServer MCP session reconnect", () => {
     expect(response.success).toBe(true);
     expect(clientsCreated).toBe(2);
     expect(callsDispatched).toBe(1);
+  });
+
+  test("classifies a closure during the existing session-expiry replay", async () => {
+    let clientsCreated = 0;
+    let callsDispatched = 0;
+
+    server.mcpClientFactory = async () => {
+      const clientIndex = ++clientsCreated;
+      return createFakeMcpClient({
+        callTool: async () => {
+          callsDispatched++;
+          if (clientIndex === 1) {
+            throw new Error("Session not found");
+          }
+          throw socketClosedError(" endpoint=https://secret.invalid?token=hidden");
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: { sessionUuid: "session-a" },
+    });
+
+    expect(response.success).toBe(false);
+    expect(clientsCreated).toBe(2);
+    expect(callsDispatched).toBe(2);
+    expect(response.error).toBe("Device-control transport recovery exhausted while handling observe");
+    expect(JSON.stringify(response)).not.toContain("secret.invalid");
+    expect(response.transportFailure).toMatchObject({
+      sessionValid: true,
+      phase: "response",
+      retryable: true,
+      reconnectAttempted: true,
+      replayAttempted: true,
+    });
+    expect((server as any).mcpClients.size).toBe(0);
   });
 
   test("reconnects and replays observe after a socket closure while handling the response", async () => {
@@ -500,6 +556,40 @@ describe("UnixSocketServer MCP session reconnect", () => {
     });
   });
 
+  test("does not replay when only the captured device epoch becomes invalid", async () => {
+    let clientsCreated = 0;
+    let callsDispatched = 0;
+
+    server.mcpClientFactory = async () => {
+      clientsCreated++;
+      return createFakeMcpClient({
+        callTool: async () => {
+          callsDispatched++;
+          deviceEpochUuid = "device-epoch-a-replacement";
+          throw socketClosedError();
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: { sessionUuid: "session-a" },
+    });
+
+    expect(response.success).toBe(false);
+    expect(sessionIsValid).toBe(true);
+    expect(clientsCreated).toBe(1);
+    expect(callsDispatched).toBe(1);
+    expect(response.transportFailure).toMatchObject({
+      deviceId: "emulator-5554",
+      deviceSessionUuid: "device-epoch-a",
+      sessionUuid: "session-a",
+      sessionValid: false,
+      reconnectAttempted: false,
+      replayAttempted: false,
+    });
+  });
+
   test("rejects a replay result when the device epoch becomes invalid in flight", async () => {
     let clientsCreated = 0;
     let callsDispatched = 0;
@@ -512,7 +602,7 @@ describe("UnixSocketServer MCP session reconnect", () => {
           if (clientIndex === 1) {
             throw socketClosedError();
           }
-          sessionIsValid = false;
+          deviceEpochUuid = "device-epoch-a-replacement";
           return { content: [{ type: "text", text: "stale observation" }] };
         },
       });
@@ -524,6 +614,7 @@ describe("UnixSocketServer MCP session reconnect", () => {
     });
 
     expect(response.success).toBe(false);
+    expect(sessionIsValid).toBe(true);
     expect(clientsCreated).toBe(2);
     expect(callsDispatched).toBe(2);
     expect(response.transportFailure).toMatchObject({

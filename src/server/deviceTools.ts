@@ -424,10 +424,20 @@ async function defaultClearInstalledAppsForDevice(deviceId: string): Promise<voi
 
 async function defaultStopAndroidObservers(device: BootedDevice): Promise<void> {
   const { AndroidCtrlProxyClient } = await import("../features/observe/android/AndroidCtrlProxyClient");
-  // Detaching the per-device CtrlProxy singleton disables its auto-reconnect,
-  // health-check, screenshot-backoff, and work-profile loops so they stop
-  // re-referencing the emulator transport while it shuts down.
-  await AndroidCtrlProxyClient.getExistingInstance(device.deviceId)?.close();
+  const observer = AndroidCtrlProxyClient.getExistingInstance(device.deviceId);
+  if (!observer) {
+    return;
+  }
+  try {
+    // Detaching the per-device CtrlProxy singleton disables its auto-reconnect,
+    // health-check, screenshot-backoff, and work-profile loops so they stop
+    // re-referencing the emulator transport while it shuts down.
+    await observer.close();
+  } finally {
+    // close() disables auto-reconnect permanently, so evict the detached client
+    // rather than let a re-booted same-serial emulator reuse a stale one.
+    AndroidCtrlProxyClient.removeInstance(device.deviceId);
+  }
 }
 
 async function clearInstalledAppsAfterShutdown(

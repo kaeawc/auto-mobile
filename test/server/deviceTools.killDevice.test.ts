@@ -2435,6 +2435,9 @@ describe("killDevice handler", () => {
       await tool.handler({ device });
 
       expect(closeSpy).toHaveBeenCalledTimes(1);
+      // The detached observer is evicted so a re-booted same-serial emulator
+      // does not reuse a closed, reconnect-disabled client.
+      expect(AndroidCtrlProxyClient.getExistingInstance(device.deviceId)).toBeNull();
     } finally {
       closeSpy.mockRestore();
     }

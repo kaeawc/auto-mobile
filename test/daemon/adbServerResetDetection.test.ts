@@ -32,10 +32,20 @@ describe("ADB server reset detection", () => {
     const second = ownedAndroidEmulator("emulator-5556");
 
     expect(
-      isProcessWideAdbServerReset(new Set(), new Set(["android"]), [first, second]),
+      isProcessWideAdbServerReset(
+        new Set(),
+        new Set(["android"]),
+        new Set([first.id]),
+        [first, second],
+      ),
     ).toBe(true);
     expect(
-      isProcessWideAdbServerReset(new Set([first.id]), new Set(["android"]), [first, second]),
+      isProcessWideAdbServerReset(
+        new Set([first.id]),
+        new Set(["android"]),
+        new Set([first.id]),
+        [first, second],
+      ),
     ).toBe(false);
   });
 
@@ -47,16 +57,25 @@ describe("ADB server reset detection", () => {
       androidImage: undefined,
     };
 
-    expect(isProcessWideAdbServerReset(new Set(), new Set(["android"]), [physical])).toBe(false);
+    expect(
+      isProcessWideAdbServerReset(new Set(), new Set(["android"]), new Set([physical.id]), [physical]),
+    ).toBe(false);
   });
 
-  test("returns every absent owned emulator for recovery even when miss counting only forces one", () => {
+  test("requires an ADB missing-device event before returning the reset cohort", () => {
     const first = ownedAndroidEmulator("emulator-5554");
     const second = ownedAndroidEmulator("emulator-5556");
 
     expect(getProcessWideAdbServerResetCohort(
       new Set(),
       new Set(["android"]),
+      new Set(),
+      [first, second],
+    )).toEqual([]);
+    expect(getProcessWideAdbServerResetCohort(
+      new Set(),
+      new Set(["android"]),
+      new Set([first.id]),
       [first, second],
     )).toEqual([first, second]);
   });

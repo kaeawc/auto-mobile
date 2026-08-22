@@ -639,13 +639,6 @@ export class DevicePool {
     }
   }
 
-  /** Persist a verified Android AVD identity without claiming a new process start. */
-  async recordAndroidAvdIdentity(deviceId: string, sourceImage: DeviceInfo): Promise<void> {
-    await this.assignmentMutex.runExclusive(() => {
-      this.recordSourceAndroidAvd(deviceId, sourceImage);
-    });
-  }
-
   /**
    * Replace a pooled connection whose stable serial now identifies a different
    * runtime. Preserve AutoMobile-owned emulator state because the process and
@@ -3572,14 +3565,16 @@ export class DevicePool {
     expectedIdentity?: Pick<BootedDevice, "deviceId" | "name" | "platform">,
     allowSessionRebind = false,
     readinessReservationOwners?: ReadonlySet<symbol>,
+    verifiedAndroidAvdIdentity?: DeviceInfo,
   ): Promise<string> {
     return await this.assignmentMutex.runExclusive(async () => {
+      const androidAvdIdentity = verifiedAndroidAvdIdentity ?? sourceImage;
       const alreadyPooled = this.devices.has(deviceId);
       if (!alreadyPooled) {
         const bootedDevices = await this.deviceManager.getBootedDevices(platform);
         const booted = bootedDevices.find((d) => d.deviceId === deviceId);
         if (booted) {
-          await this.addDevice(booted, sourceImage);
+          await this.addDevice(booted, androidAvdIdentity);
         }
       }
 
@@ -3593,7 +3588,7 @@ export class DevicePool {
         `Device '${deviceId}' is shutting down and cannot be assigned.`,
       );
       if (alreadyPooled) {
-        this.recordSourceAndroidAvd(deviceId, sourceImage);
+        this.recordSourceAndroidAvd(deviceId, androidAvdIdentity);
         this.notifyDeviceReady(deviceId);
       }
       await this.trackStartedDeviceProcess(
@@ -3805,6 +3800,7 @@ export class DevicePool {
     childProcess?: ChildProcess | null,
     expectedIdentity?: Pick<BootedDevice, "deviceId" | "name" | "platform">,
     readinessReservationOwners?: ReadonlySet<symbol>,
+    verifiedAndroidAvdIdentity?: DeviceInfo,
   ): Promise<string | undefined> {
     if (!isDevicePoolAutolockEnabled()) {
       return undefined;
@@ -3818,6 +3814,7 @@ export class DevicePool {
         childProcess,
         expectedIdentity,
         readinessReservationOwners,
+        verifiedAndroidAvdIdentity,
       ),
     );
   }
@@ -3830,8 +3827,10 @@ export class DevicePool {
     childProcess?: ChildProcess | null,
     expectedIdentity?: Pick<BootedDevice, "deviceId" | "name" | "platform">,
     readinessReservationOwners?: ReadonlySet<symbol>,
+    verifiedAndroidAvdIdentity?: DeviceInfo,
   ): Promise<string> {
     const sessionId = randomUUID();
+    const androidAvdIdentity = verifiedAndroidAvdIdentity ?? sourceImage;
 
     // Ensure device is in the pool (it may have been freshly booted)
     const alreadyPooled = this.devices.has(deviceId);
@@ -3839,7 +3838,7 @@ export class DevicePool {
       const bootedDevices = await this.deviceManager.getBootedDevices(platform);
       const booted = bootedDevices.find((d) => d.deviceId === deviceId);
       if (booted) {
-        await this.addDevice(booted, sourceImage);
+        await this.addDevice(booted, androidAvdIdentity);
       }
     }
 
@@ -3861,7 +3860,7 @@ export class DevicePool {
       `Device '${deviceId}' is shutting down and cannot be autolocked.`,
     );
     if (alreadyPooled) {
-      this.recordSourceAndroidAvd(deviceId, sourceImage);
+      this.recordSourceAndroidAvd(deviceId, androidAvdIdentity);
       this.notifyDeviceReady(deviceId);
     }
     await this.trackStartedDeviceProcess(

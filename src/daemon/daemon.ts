@@ -144,6 +144,7 @@ type DeviceSessionRoutingTargets = {
 export function getProcessWideAdbServerResetCohort(
   bootedDeviceIds: ReadonlySet<string>,
   succeededPlatforms: ReadonlySet<Platform>,
+  forceDisconnectedDeviceIds: ReadonlySet<string>,
   pooledDevices: readonly PooledDevice[],
 ): readonly PooledDevice[] {
   const ownedAndroidEmulators = pooledDevices.filter(device =>
@@ -154,8 +155,9 @@ export function getProcessWideAdbServerResetCohort(
   );
   if (
     !succeededPlatforms.has("android") ||
-    ownedAndroidEmulators.length === 0 ||
-    !ownedAndroidEmulators.every(device => !bootedDeviceIds.has(device.id))
+    ownedAndroidEmulators.length < 2 ||
+    !ownedAndroidEmulators.every(device => !bootedDeviceIds.has(device.id)) ||
+    !ownedAndroidEmulators.some(device => forceDisconnectedDeviceIds.has(device.id))
   ) {
     return [];
   }
@@ -165,11 +167,13 @@ export function getProcessWideAdbServerResetCohort(
 export function isProcessWideAdbServerReset(
   bootedDeviceIds: ReadonlySet<string>,
   succeededPlatforms: ReadonlySet<Platform>,
+  forceDisconnectedDeviceIds: ReadonlySet<string>,
   pooledDevices: readonly PooledDevice[],
 ): boolean {
   return getProcessWideAdbServerResetCohort(
     bootedDeviceIds,
     succeededPlatforms,
+    forceDisconnectedDeviceIds,
     pooledDevices,
   ).length > 0;
 }
@@ -1445,6 +1449,7 @@ export class Daemon {
         const adbServerResetCohort = getProcessWideAdbServerResetCohort(
           bootedDeviceIds,
           succeededPlatforms,
+          this.forceDisconnectedDeviceIds,
           this.devicePool.getAllDevices(),
         );
         const processWideAdbServerReset = adbServerResetCohort.length > 0;

@@ -20,6 +20,7 @@ describe("MCP Booted Device Resources", () => {
     name: "Pixel_7_API_34",
     platform: "android",
     deviceId: "emulator-5554",
+    transportId: "1",
     source: "local"
   };
 
@@ -165,6 +166,27 @@ describe("MCP Booted Device Resources", () => {
       expect(data.physicalCount).toBe(0);
       expect(data.devices).toHaveLength(3);
       expect(data.poolStatus).toBeUndefined();
+      expect(data.observationComplete).toBe(true);
+      expect(data.platformObservations).toEqual({
+        android: { observationComplete: true },
+        ios: { observationComplete: true }
+      });
+      expect(data.devices[0]).toMatchObject({
+        identity: {
+          stableId: "Pixel_7_API_34",
+          connectionId: "1",
+          transportId: "1",
+        },
+        lifecycleState: "booted",
+        readiness: { state: "unknown" },
+        capabilities: { automation: null }
+      });
+      expect(data.devices[2]).toMatchObject({
+        identity: {
+          stableId: "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
+          connectionId: "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
+        },
+      });
 
       // Verify lastUpdated is a valid ISO 8601 date
       expect(() => new Date(data.lastUpdated)).not.toThrow();
@@ -603,6 +625,17 @@ describe("MCP Booted Device Resources", () => {
       const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text!);
       // The Android phantom is dropped (android discovery succeeded, empty), but
       // the still-tracked iOS device is preserved because iOS discovery failed.
+      expect(data.observationComplete).toBe(false);
+      expect(data.platformObservations).toEqual({
+        android: { observationComplete: true },
+        ios: {
+          observationComplete: false,
+          discoveryError: {
+            code: "unavailable",
+            message: "iOS booted-device discovery is unavailable."
+          }
+        }
+      });
       expect(data.poolStatus).toEqual({
         enabled: true,
         idle: 0,

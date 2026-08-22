@@ -10,6 +10,7 @@ import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheW
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { getIosInstalledAppBundleId } from "../utils/ios-cmdline-tools/iosInstalledApp";
+import { queryParamsToRecord } from "./queryParamValidation";
 
 // Resource URI templates
 export const APP_RESOURCE_TEMPLATES = {
@@ -23,7 +24,8 @@ export const APPS_RESOURCE_URIS = {
 } as const;
 
 const APPS_QUERY_KEYS = ["deviceId", "platform", "search", "type", "profile"] as const;
-type AppsQueryKey = typeof APPS_QUERY_KEYS[number];
+const APPS_QUERY_TEMPLATE = `${APPS_RESOURCE_URIS.BASE}?{params}`;
+const APPS_QUERY_PARAM_KEYS = new Set<string>(APPS_QUERY_KEYS);
 type AppsQueryType = "user" | "system";
 
 interface AppsQueryOptions {
@@ -412,9 +414,8 @@ function decodeQueryParam(value: string | undefined): string | undefined {
   if (!value) {
     return undefined;
   }
-  const normalized = value.replace(/\+/g, " ");
-  const decoded = decodeURIComponent(normalized).trim();
-  return decoded ? decoded : undefined;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
 }
 
 function parseProfileParam(value: string | undefined): number | undefined {
@@ -430,6 +431,11 @@ function parseProfileParam(value: string | undefined): number | undefined {
 }
 
 function parseAppsQueryParams(params: Record<string, string>): AppsQueryOptions {
+  const unknownKeys = Object.keys(params).filter(key => !APPS_QUERY_PARAM_KEYS.has(key));
+  if (unknownKeys.length > 0) {
+    throw new Error(`Unknown query parameters: ${unknownKeys.join(", ")}`);
+  }
+
   const platformRaw = decodeQueryParam(params.platform);
   const typeRaw = decodeQueryParam(params.type);
   const search = decodeQueryParam(params.search);
@@ -484,11 +490,6 @@ function buildAppsUri(options: AppsQueryOptions): string {
 
   const queryString = query.toString();
   return queryString ? `${APPS_RESOURCE_URIS.BASE}?${queryString}` : APPS_RESOURCE_URIS.BASE;
-}
-
-function buildAppsQueryTemplate(keys: readonly AppsQueryKey[]): string {
-  const query = keys.map(key => `${key}={${key}}`).join("&");
-  return `${APPS_RESOURCE_URIS.BASE}?${query}`;
 }
 
 function filterAppsByQuery(apps: AppsQueryAppInfo[], options: AppsQueryOptions): AppsQueryAppInfo[] {
@@ -844,27 +845,6 @@ async function getAppMetadataResource(
   }
 }
 
-function registerAppsQueryTemplates(
-  handler: (params: Record<string, string>) => Promise<ResourceContent>
-): void {
-  const optionalKeys = APPS_QUERY_KEYS.filter(key => key !== "deviceId");
-  const optionalKeyCount = optionalKeys.length;
-
-  for (let mask = 0; mask < (1 << optionalKeyCount); mask += 1) {
-    const keys = [
-      "deviceId",
-      ...optionalKeys.filter((_, index) => (mask & (1 << index)) !== 0)
-    ];
-    ResourceRegistry.registerTemplate(
-      buildAppsQueryTemplate(keys),
-      "Installed Apps",
-      "List installed apps across booted devices with optional query filters.",
-      "application/json",
-      handler
-    );
-  }
-}
-
 export function registerAppResources(): void {
   ResourceRegistry.register(
     APPS_RESOURCE_URIS.BASE,
@@ -874,9 +854,15 @@ export function registerAppResources(): void {
     () => getAppsQueryResource({}, APPS_RESOURCE_URIS.BASE)
   );
 
-  registerAppsQueryTemplates(async params => {
+  ResourceRegistry.registerTemplate(
+    APPS_QUERY_TEMPLATE,
+    "Installed Apps",
+    "List installed apps across booted devices with optional query filters.",
+    "application/json",
+    async params => {
     try {
-      const options = parseAppsQueryParams(params);
+      const queryParams = queryParamsToRecord(params.params ?? "");
+      const options = parseAppsQueryParams(queryParams);
       const uri = buildAppsUri(options);
       return getAppsQueryResource(options, uri);
     } catch (error) {

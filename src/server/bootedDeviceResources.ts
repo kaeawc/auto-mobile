@@ -1,5 +1,8 @@
 import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
-import { PlatformDeviceManager } from "../utils/deviceUtils";
+import {
+  type DeviceDiscoveryError,
+  PlatformDeviceManager,
+} from "../utils/deviceUtils";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import { logger } from "../utils/logger";
 import { BootedDevice, Platform } from "../models";
@@ -62,14 +65,37 @@ interface DeviceServiceStatus {
   supportedCommandsComplete?: boolean | null;
 }
 
+interface DeviceIdentity {
+  stableId: string;
+  connectionId: string;
+  transportId?: string;
+}
+
+interface DeviceReadiness {
+  state: "ready" | "not_ready" | "unknown";
+}
+
+interface DeviceCapabilities {
+  automation: Pick<
+    DeviceServiceStatus,
+    "installed" | "enabled" | "running" | "isCompatible" | "supportedCommandsComplete"
+  > | null;
+}
+
 // Booted device info for resource response
 interface BootedDeviceInfo {
   name: string;
   platform: Platform;
   deviceId: string;
+  identity: DeviceIdentity;
   source: "local" | "remote";
   isVirtual: boolean;
   status: "booted";
+  lifecycleState: "booted";
+  runtime?: string;
+  formFactor?: BootedDevice["formFactor"];
+  readiness: DeviceReadiness;
+  capabilities: DeviceCapabilities;
   poolStatus?: PoolDeviceStatus;
   assignedSession?: string;
   recoveryEligibility?: DeviceRecoveryEligibility;
@@ -91,8 +117,15 @@ export interface BootedDevicesResourceContent {
   virtualCount: number;
   physicalCount: number;
   lastUpdated: string;  // ISO 8601
+  observationComplete: boolean;
+  platformObservations: Partial<Record<Platform, PlatformObservation>>;
   poolStatus?: PoolStatusSummary;
   devices: BootedDeviceInfo[];
+}
+
+interface PlatformObservation {
+  observationComplete: boolean;
+  discoveryError?: DeviceDiscoveryError;
 }
 
 type PoolDeviceStatus = "idle" | "assigned" | "error";
@@ -120,6 +153,7 @@ interface PoolDeviceInfo {
   poolStatus: PoolDeviceStatus;
   assignedSession?: string;
   recoveryEligibility: DeviceRecoveryEligibility;
+  avdName?: string;
 }
 
 /**
@@ -249,28 +283,53 @@ function toBootedDeviceInfo(
   poolInfo?: PoolDeviceInfo,
   sessionInfo?: DeviceSessionInfo
 ): BootedDeviceInfo {
+  const isVirtual = isVirtualDevice(device);
+  const runtime = device.iosVersion ?? device.osVersion;
   const info: BootedDeviceInfo = {
     name: device.name,
     platform: device.platform,
     deviceId: device.deviceId,
+    identity: toDeviceIdentity(device, poolInfo, isVirtual),
     source: device.source || "local",
-    isVirtual: isVirtualDevice(device),
-    status: "booted"
+    isVirtual,
+    status: "booted",
+    lifecycleState: "booted",
+    readiness: { state: "unknown" },
+    capabilities: { automation: null },
   };
 
-  if (!poolInfo && !sessionInfo) {
-    return info;
+  if (runtime) {
+    info.runtime = runtime;
   }
+  if (device.formFactor) {
+    info.formFactor = device.formFactor;
+  }
+  if (poolInfo) {
+    info.poolStatus = poolInfo.poolStatus;
+    info.assignedSession = poolInfo.assignedSession;
+    info.recoveryEligibility = poolInfo.recoveryEligibility;
+  }
+  if (sessionInfo) {
+    info.session = sessionInfo;
+  }
+  return info;
+}
 
-  return {
-    ...info,
-    ...(poolInfo ? {
-      poolStatus: poolInfo.poolStatus,
-      ...(poolInfo.assignedSession ? { assignedSession: poolInfo.assignedSession } : {}),
-      recoveryEligibility: poolInfo.recoveryEligibility,
-    } : {}),
-    ...(sessionInfo ? { session: sessionInfo } : {})
+function toDeviceIdentity(
+  device: BootedDevice,
+  poolInfo: PoolDeviceInfo | undefined,
+  isVirtual: boolean
+): DeviceIdentity {
+  const identity: DeviceIdentity = {
+    stableId: device.platform === "android" && isVirtual
+      ? poolInfo?.avdName ?? device.name
+      : device.deviceId,
+    connectionId: device.transportId ?? device.deviceId,
   };
+  if (device.transportId) {
+    identity.transportId = device.transportId;
+  }
+  return identity;
 }
 
 function isVirtualDevice(device: BootedDevice): boolean {
@@ -299,6 +358,7 @@ function getPoolDeviceInfo(devicePool: DevicePool | null, deviceId: string): Poo
     poolStatus,
     assignedSession: pooledDevice.sessionId || undefined,
     recoveryEligibility: devicePool.getRecoveryEligibility(deviceId),
+    avdName: pooledDevice.avdName,
   };
 }
 
@@ -392,162 +452,216 @@ async function getBootedDevicesByPlatform(params: Record<string, string>): Promi
   };
 }
 
-// Core function to fetch booted devices for specified platforms
-async function getBootedDevicesForPlatforms(platforms: Platform[]): Promise<BootedDevicesResourceContent> {
-  const devices: BootedDeviceInfo[] = [];
-  let androidCount = 0;
-  let iosCount = 0;
+interface PlatformDiscoveryResult {
+  devices: BootedDeviceInfo[];
+  succeededPlatforms: Set<Platform>;
+  observation: PlatformObservation;
+}
+
+async function discoverBootedDevicesForPlatform(
+  platform: Platform,
+  devicePool: DevicePool | null,
+  sessionInfoByDeviceId: Map<string, DeviceSessionInfo> | null
+): Promise<PlatformDiscoveryResult> {
+  try {
+    const discovery = await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed(platform);
+    const complete = discovery.succeededPlatforms.has(platform);
+    return {
+      devices: discovery.devices.map(device => toBootedDeviceInfo(
+        device,
+        getPoolDeviceInfo(devicePool, device.deviceId),
+        sessionInfoByDeviceId?.get(device.deviceId)
+      )),
+      succeededPlatforms: discovery.succeededPlatforms,
+      observation: complete
+        ? { observationComplete: true }
+        : {
+          observationComplete: false,
+          discoveryError: discovery.discoveryErrors?.[platform] ?? {
+            code: "failed",
+            message: `${platform === "android" ? "Android" : "iOS"} booted-device discovery did not complete.`,
+          },
+        },
+    };
+  } catch (error) {
+    const platformName = platform === "android" ? "Android" : "iOS";
+    logger.warn(`[BootedDeviceResources] Failed to get booted ${platformName} devices: ${error}`);
+    return {
+      devices: [],
+      succeededPlatforms: new Set(),
+      observation: {
+        observationComplete: false,
+        discoveryError: {
+          code: "failed",
+          message: `${platformName} booted-device discovery failed: ${errorMessage(error)}`,
+        },
+      },
+    };
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+interface DaemonDeviceContext {
+  devicePool: DevicePool | null;
+  poolStatus?: PoolStatusSummary;
+  sessionInfoByDeviceId: Map<string, DeviceSessionInfo> | null;
+}
+
+function readDaemonDeviceContext(): DaemonDeviceContext {
+  const daemonState = DaemonState.getInstance();
+  if (!daemonState.isInitialized()) {
+    return { devicePool: null, sessionInfoByDeviceId: null };
+  }
+
   let devicePool: DevicePool | null = null;
   let poolStatus: PoolStatusSummary | undefined;
   let sessionInfoByDeviceId: Map<string, DeviceSessionInfo> | null = null;
-
-  const daemonState = DaemonState.getInstance();
-  if (daemonState.isInitialized()) {
-    try {
-      devicePool = daemonState.getDevicePool();
-      poolStatus = {
-        enabled: true,
-        idle: 0,
-        assigned: 0,
-        error: 0,
-        total: 0,
-        recoveryPolicy: devicePool.getRecoveryPolicy(),
-      };
-    } catch (error) {
-      logger.warn(`[BootedDeviceResources] Failed to read device pool status: ${error}`);
-      devicePool = null;
-    }
-
-    try {
-      const sessionManager = daemonState.getSessionManager();
-      const sessions = sessionManager.getAllSessions();
-      sessionInfoByDeviceId = new Map(
-        sessions.map(session => [session.assignedDevice, toDeviceSessionInfo(session)])
-      );
-    } catch (error) {
-      logger.warn(`[BootedDeviceResources] Failed to read session manager state: ${error}`);
-      sessionInfoByDeviceId = null;
-    }
+  try {
+    devicePool = daemonState.getDevicePool();
+    poolStatus = {
+      enabled: true,
+      idle: 0,
+      assigned: 0,
+      error: 0,
+      total: 0,
+      recoveryPolicy: devicePool.getRecoveryPolicy(),
+    };
+  } catch (error) {
+    logger.warn(`[BootedDeviceResources] Failed to read device pool status: ${error}`);
   }
-
-  const succeededPlatforms = new Set<Platform>();
 
   try {
-    // Fetch Android booted devices if requested
-    if (platforms.includes("android")) {
-      try {
-        const androidDiscovery = await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed("android");
-        for (const discoveredPlatform of androidDiscovery.succeededPlatforms) {
-          succeededPlatforms.add(discoveredPlatform);
-        }
-        for (const device of androidDiscovery.devices) {
-          devices.push(
-            toBootedDeviceInfo(
-              device,
-              getPoolDeviceInfo(devicePool, device.deviceId),
-              sessionInfoByDeviceId?.get(device.deviceId)
-            )
-          );
-          androidCount++;
-        }
-      } catch (error) {
-        logger.warn(`[BootedDeviceResources] Failed to get booted Android devices: ${error}`);
-      }
-    }
-
-    // Fetch iOS booted simulators if requested
-    if (platforms.includes("ios")) {
-      try {
-        const iosDiscovery = await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed("ios");
-        for (const discoveredPlatform of iosDiscovery.succeededPlatforms) {
-          succeededPlatforms.add(discoveredPlatform);
-        }
-        for (const device of iosDiscovery.devices) {
-          devices.push(
-            toBootedDeviceInfo(
-              device,
-              getPoolDeviceInfo(devicePool, device.deviceId),
-              sessionInfoByDeviceId?.get(device.deviceId)
-            )
-          );
-          iosCount++;
-        }
-      } catch (error) {
-        logger.warn(`[BootedDeviceResources] Failed to get booted iOS simulators: ${error}`);
-      }
-    }
+    const sessions = daemonState.getSessionManager().getAllSessions();
+    sessionInfoByDeviceId = new Map(
+      sessions.map(session => [session.assignedDevice, toDeviceSessionInfo(session)])
+    );
   } catch (error) {
-    logger.error(`[BootedDeviceResources] Error fetching booted devices: ${error}`);
+    logger.warn(`[BootedDeviceResources] Failed to read session manager state: ${error}`);
   }
 
-  // Query service status for each device in parallel with per-device timeout
-  if (serviceStatusEnabled) {
-    const SERVICE_STATUS_TIMEOUT_MS = 5000;
-    const serviceStatusResults = await Promise.allSettled(
-      devices.map(async device => {
-        try {
-          return await Promise.race([
-            queryDeviceServiceStatus(device),
-            new Promise<undefined>(resolve =>
-              defaultTimer.setTimeout(() => {
-                logger.warn(`[BootedDeviceResources] Service status timeout for ${device.deviceId}`);
-                resolve(undefined);
-              }, SERVICE_STATUS_TIMEOUT_MS)
-            ),
-          ]);
-        } catch (error) {
-          logger.warn(`[BootedDeviceResources] Failed to query service status for ${device.deviceId}: ${error}`);
-          return undefined;
-        }
-      })
-    );
+  return { devicePool, poolStatus, sessionInfoByDeviceId };
+}
 
-    for (let i = 0; i < devices.length; i++) {
-      const result = serviceStatusResults[i];
-      if (result.status === "fulfilled" && result.value) {
-        devices[i] = { ...devices[i], serviceStatus: result.value };
+async function enrichDeviceServiceStatuses(devices: BootedDeviceInfo[]): Promise<void> {
+  if (!serviceStatusEnabled) {
+    return;
+  }
+
+  const SERVICE_STATUS_TIMEOUT_MS = 5000;
+  const serviceStatusResults = await Promise.allSettled(
+    devices.map(async device => {
+      try {
+        return await Promise.race([
+          queryDeviceServiceStatus(device),
+          new Promise<undefined>(resolve =>
+            defaultTimer.setTimeout(() => {
+              logger.warn(`[BootedDeviceResources] Service status timeout for ${device.deviceId}`);
+              resolve(undefined);
+            }, SERVICE_STATUS_TIMEOUT_MS)
+          ),
+        ]);
+      } catch (error) {
+        logger.warn(`[BootedDeviceResources] Failed to query service status for ${device.deviceId}: ${error}`);
+        return undefined;
       }
+    })
+  );
+
+  for (let i = 0; i < devices.length; i++) {
+    const result = serviceStatusResults[i];
+    if (result.status === "fulfilled" && result.value) {
+      devices[i] = withServiceStatus(devices[i], result.value);
     }
   }
+}
 
-  // Query per-device lock state so the desktop can gate its contextual Unlock control (#4694). Runs
-  // only with an injected probe (tests) or a real device manager (production), never against a fake
-  // manager's mock devices. Best-effort with a per-device timeout: a slow/failed read leaves `locked`
-  // unset rather than stalling the whole resource.
+function withServiceStatus(
+  device: BootedDeviceInfo,
+  serviceStatus: DeviceServiceStatus
+): BootedDeviceInfo {
+  return {
+    ...device,
+    serviceStatus,
+    readiness: {
+      state: serviceStatus.running && serviceStatus.isCompatible ? "ready" : "not_ready",
+    },
+    capabilities: {
+      automation: {
+        installed: serviceStatus.installed,
+        enabled: serviceStatus.enabled,
+        running: serviceStatus.running,
+        isCompatible: serviceStatus.isCompatible,
+        supportedCommandsComplete: serviceStatus.supportedCommandsComplete,
+      },
+    },
+  };
+}
+
+async function enrichDeviceLockStates(devices: BootedDeviceInfo[]): Promise<void> {
   const lockProbe = activeLockProbe();
-  if (lockProbe) {
-    const lockResults = await Promise.allSettled(
-      // The adb lock probe only needs the device identity; `source` (whose BootedDeviceInfo type is
-      // wider than BootedDevice's) is irrelevant, so omit it rather than force a cast.
-      devices.map(device =>
-        probeDeviceLock(
-          { name: device.name, platform: device.platform, deviceId: device.deviceId },
-          lockProbe
-        )
-      )
-    );
+  if (!lockProbe) {
+    return;
+  }
 
-    for (let i = 0; i < devices.length; i++) {
-      const result = lockResults[i];
-      if (result.status === "fulfilled" && result.value !== undefined) {
-        devices[i] = { ...devices[i], locked: result.value };
-      }
+  const lockResults = await Promise.allSettled(
+    devices.map(device =>
+      probeDeviceLock(
+        { name: device.name, platform: device.platform, deviceId: device.deviceId },
+        lockProbe
+      )
+    )
+  );
+
+  for (let i = 0; i < devices.length; i++) {
+    const result = lockResults[i];
+    if (result.status === "fulfilled" && result.value !== undefined) {
+      devices[i] = { ...devices[i], locked: result.value };
     }
   }
+}
+
+// Core function to fetch booted devices for specified platforms
+async function getBootedDevicesForPlatforms(platforms: Platform[]): Promise<BootedDevicesResourceContent> {
+  const devices: BootedDeviceInfo[] = [];
+  const daemonContext = readDaemonDeviceContext();
+
+  const succeededPlatforms = new Set<Platform>();
+  const platformObservations: Partial<Record<Platform, PlatformObservation>> = {};
+
+  for (const platform of platforms) {
+    const discovery = await discoverBootedDevicesForPlatform(
+      platform,
+      daemonContext.devicePool,
+      daemonContext.sessionInfoByDeviceId
+    );
+    devices.push(...discovery.devices);
+    platformObservations[platform] = discovery.observation;
+    for (const discoveredPlatform of discovery.succeededPlatforms) {
+      succeededPlatforms.add(discoveredPlatform);
+    }
+  }
+
+  await enrichDeviceServiceStatuses(devices);
+  await enrichDeviceLockStates(devices);
 
   const virtualCount = devices.filter(device => device.isVirtual).length;
   const physicalCount = devices.length - virtualCount;
-  if (poolStatus && devicePool) {
-    poolStatus = summarizePoolStatus(devicePool, devices, succeededPlatforms);
-  }
+  const poolStatus = daemonContext.poolStatus && daemonContext.devicePool
+    ? summarizePoolStatus(daemonContext.devicePool, devices, succeededPlatforms)
+    : undefined;
 
   return {
     totalCount: devices.length,
-    androidCount,
-    iosCount,
+    androidCount: devices.filter(device => device.platform === "android").length,
+    iosCount: devices.filter(device => device.platform === "ios").length,
     virtualCount,
     physicalCount,
     lastUpdated: new Date().toISOString(),
+    observationComplete: platforms.every(platform => platformObservations[platform]?.observationComplete === true),
+    platformObservations,
     poolStatus,
     devices
   };

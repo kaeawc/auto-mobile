@@ -8,6 +8,7 @@ import {
 import { NetworkState } from "./NetworkState";
 import { BODY_TRUNCATION_LIMIT } from "../utils/truncateBodyText";
 import { computePercentile } from "../utils/percentile";
+import { queryParamsToRecord } from "./queryParamValidation";
 
 const NETWORK_RESOURCE_URIS = {
   REQUEST: "automobile:network/request/{requestId}",
@@ -30,12 +31,9 @@ const TRAFFIC_QUERY_KEYS = [
   "deviceId",
   "bucketSeconds",
 ] as const;
-type TrafficQueryKey = (typeof TRAFFIC_QUERY_KEYS)[number];
 
-function buildQueryTemplate(keys: readonly TrafficQueryKey[]): string {
-  const query = keys.map(key => `${key}={${key}}`).join("&");
-  return `${NETWORK_RESOURCE_URIS.TRAFFIC}?${query}`;
-}
+const TRAFFIC_QUERY_TEMPLATE = `${NETWORK_RESOURCE_URIS.TRAFFIC}?{params}`;
+const TRAFFIC_QUERY_PARAM_KEYS = new Set<string>(TRAFFIC_QUERY_KEYS);
 
 function eventToSummary(event: NetworkEventWithId) {
   return {
@@ -84,29 +82,30 @@ function eventToDetail(event: NetworkEventWithId) {
 }
 
 function parseTrafficParams(params: Record<string, string>) {
+  const unknownKeys = Object.keys(params).filter(key => !TRAFFIC_QUERY_PARAM_KEYS.has(key));
+  if (unknownKeys.length > 0) {
+    throw new Error(`Unknown query parameters: ${unknownKeys.join(", ")}`);
+  }
+
   const since = params.since
-    ? parseInt(decodeURIComponent(params.since), 10)
+    ? parseInt(params.since, 10)
     : undefined;
   const limitRaw = params.limit
-    ? parseInt(decodeURIComponent(params.limit), 10)
+    ? parseInt(params.limit, 10)
     : undefined;
   const limit = limitRaw ? Math.min(Math.max(1, limitRaw), 200) : 50;
   const bucketRaw = params.bucketSeconds
-    ? parseInt(decodeURIComponent(params.bucketSeconds), 10)
+    ? parseInt(params.bucketSeconds, 10)
     : undefined;
   const bucketSeconds = bucketRaw && Number.isFinite(bucketRaw) && bucketRaw > 0 ? bucketRaw : undefined;
 
   return {
-    host: params.host ? decodeURIComponent(params.host) : undefined,
-    method: params.method ? decodeURIComponent(params.method) : undefined,
-    statusCode: params.statusCode
-      ? decodeURIComponent(params.statusCode)
-      : undefined,
+    host: params.host,
+    method: params.method,
+    statusCode: params.statusCode,
     sinceTimestamp: since && Number.isFinite(since) ? since : undefined,
     limit,
-    deviceId: params.deviceId
-      ? decodeURIComponent(params.deviceId)
-      : undefined,
+    deviceId: params.deviceId,
     bucketSeconds,
   };
 }
@@ -255,22 +254,6 @@ async function handleTrafficQuery(
   }
 }
 
-function registerTrafficTemplates(): void {
-  const keyCount = TRAFFIC_QUERY_KEYS.length;
-  for (let mask = 1; mask < 1 << keyCount; mask += 1) {
-    const keys = TRAFFIC_QUERY_KEYS.filter(
-      (_, index) => (mask & (1 << index)) !== 0
-    );
-    ResourceRegistry.registerTemplate(
-      buildQueryTemplate(keys),
-      "Network Traffic",
-      "Query captured network traffic with optional filters.",
-      "application/json",
-      handleTrafficQuery
-    );
-  }
-}
-
 export function registerNetworkResources(): void {
   // Base traffic resource (no filters, returns latest 50)
   ResourceRegistry.register(
@@ -281,8 +264,13 @@ export function registerNetworkResources(): void {
     () => handleTrafficQuery({})
   );
 
-  // Traffic query templates
-  registerTrafficTemplates();
+  ResourceRegistry.registerTemplate(
+    TRAFFIC_QUERY_TEMPLATE,
+    "Network Traffic",
+    "Query captured network traffic with optional filters.",
+    "application/json",
+    async params => handleTrafficQuery(queryParamsToRecord(params.params ?? ""))
+  );
 
   // Single request detail by ID
   ResourceRegistry.registerTemplate(

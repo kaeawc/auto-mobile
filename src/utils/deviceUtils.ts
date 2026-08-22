@@ -11,6 +11,13 @@ import { defaultTimer, type Timer } from "./SystemTimer";
 
 export { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "./deviceTimeouts";
 
+export type DeviceDiscoveryErrorCode = "unavailable" | "failed";
+
+export interface DeviceDiscoveryError {
+  code: DeviceDiscoveryErrorCode;
+  message: string;
+}
+
 /**
  * Result of a discovery sweep that distinguishes per-platform success.
  *
@@ -22,11 +29,17 @@ export { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "./deviceTimeouts";
 export interface BootedDeviceDiscovery {
   devices: BootedDevice[];
   succeededPlatforms: Set<Platform>;
+  /** Platform-specific typed failures for incomplete observations. */
+  discoveryErrors?: Partial<Record<Platform, DeviceDiscoveryError>>;
 }
 
 export interface BootedDeviceDiscoveryOptions {
   /** Bypass Android's short device-list cache to verify ADB transport identity. */
   bypassAndroidDeviceListCache?: boolean;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 /** Bounds and cancels a platform shutdown command. */
@@ -309,6 +322,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   ): Promise<BootedDeviceDiscovery> {
     const devices: BootedDevice[] = [];
     const succeededPlatforms = new Set<Platform>();
+    const discoveryErrors: Partial<Record<Platform, DeviceDiscoveryError>> = {};
 
     if (platform === "android" || platform === "either") {
       try {
@@ -321,6 +335,10 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
         logger.warn(
           `[DeviceManager] Android booted-device discovery failed; retaining tracked Android devices: ${error}`
         );
+        discoveryErrors.android = {
+          code: "failed",
+          message: `Android booted-device discovery failed: ${errorMessage(error)}`,
+        };
       }
     }
 
@@ -329,17 +347,30 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       if (ios.succeeded) {
         devices.push(...ios.devices);
         succeededPlatforms.add("ios");
+      } else if (ios.error) {
+        discoveryErrors.ios = ios.error;
       }
     }
 
-    return { devices, succeededPlatforms };
+    return { devices, succeededPlatforms, discoveryErrors };
   }
 
-  private async discoverBootedIosDevices(): Promise<{ devices: BootedDevice[]; succeeded: boolean }> {
+  private async discoverBootedIosDevices(): Promise<{
+    devices: BootedDevice[];
+    succeeded: boolean;
+    error?: DeviceDiscoveryError;
+  }> {
     // iOS tooling that is genuinely unavailable on this host cannot confirm a
     // device is gone, so report it as un-discovered rather than empty.
     if (!(await this.canDiscoverIosLocally())) {
-      return { devices: [], succeeded: false };
+      return {
+        devices: [],
+        succeeded: false,
+        error: {
+          code: "unavailable",
+          message: "iOS booted-device discovery is unavailable.",
+        },
+      };
     }
     try {
       const devices = await this.simctl.getBootedSimulatorsChecked();
@@ -348,7 +379,14 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       logger.warn(
         `[DeviceManager] iOS booted-device discovery failed; retaining tracked iOS devices: ${error}`
       );
-      return { devices: [], succeeded: false };
+      return {
+        devices: [],
+        succeeded: false,
+        error: {
+          code: "failed",
+          message: `iOS booted-device discovery failed: ${errorMessage(error)}`,
+        },
+      };
     }
   }
 

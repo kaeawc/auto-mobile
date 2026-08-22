@@ -117,3 +117,23 @@ describe("ResourceRegistry list-changed fan-out (issue #3223)", () => {
     }
   });
 });
+
+describe("ResourceRegistry URI-template matching", () => {
+  beforeEach(() => {
+    ResourceRegistry.clearResources();
+  });
+
+  test("captures a raw query-string template with multiple query parameters", () => {
+    ResourceRegistry.registerTemplate(
+      "automobile:test?{params}",
+      "Test",
+      "Test raw query template",
+      "application/json",
+      async () => ({ uri: "automobile:test", text: "{}" })
+    );
+
+    expect(ResourceRegistry.matchTemplate("automobile:test?first=one&second=two")).toMatchObject({
+      params: { params: "first=one&second=two" }
+    });
+  });
+});

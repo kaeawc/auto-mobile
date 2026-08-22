@@ -30,6 +30,7 @@ type FakeSimCtlClientContract = Pick<
 export class FakeSimCtlClient implements FakeSimCtlClientContract {
   private deviceInfo = new Map<string, AppleDevice | null>();
   private runtimes: AppleDeviceRuntime[] = [];
+  private deviceTypes: AppleDeviceType[] = [];
   private installedApps: any[] = [];
   private containerPaths = new Map<string, string>();
   private containerErrors = new Map<string, Error>();
@@ -50,6 +51,10 @@ export class FakeSimCtlClient implements FakeSimCtlClientContract {
 
   setRuntimes(runtimes: AppleDeviceRuntime[]): void {
     this.runtimes = runtimes;
+  }
+
+  setDeviceTypes(deviceTypes: AppleDeviceType[]): void {
+    this.deviceTypes = deviceTypes;
   }
 
   setInstalledApps(apps: any[]): void {
@@ -178,7 +183,7 @@ export class FakeSimCtlClient implements FakeSimCtlClientContract {
 
   async getDeviceTypes(): Promise<AppleDeviceType[]> {
     this.recordCall("getDeviceTypes", {});
-    return [];
+    return this.deviceTypes;
   }
 
   async getRuntimes(): Promise<AppleDeviceRuntime[]> {

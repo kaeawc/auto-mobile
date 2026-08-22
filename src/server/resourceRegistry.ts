@@ -56,14 +56,14 @@ function compileUriTemplate(template: string): {
     return `__PARAM_${paramNames.length - 1}__`;
   });
   const escapedTemplate = tokenizedTemplate.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&");
-  // Use [^/&]+ so query-string params stop at the & delimiter; a trailing
-  // {path} param is greedy so it can capture nested slashes.
+  // Use [^/&]+ so regular query-string params stop at the & delimiter; trailing
+  // {path} and {params} params are greedy for nested paths and raw query strings.
   const regexPattern = escapedTemplate.replace(/__PARAM_(\d+)__/g, (_placeholder, indexText) => {
     const index = Number(indexText);
-    const isTrailingPathParam =
-      paramNames[index] === "path" &&
+    const isGreedyTrailingParam =
+      (paramNames[index] === "path" || paramNames[index] === "params") &&
       escapedTemplate.endsWith(`__PARAM_${index}__`);
-    return isTrailingPathParam ? "(.+)" : "([^/&]+)";
+    return isGreedyTrailingParam ? "(.+)" : "([^/&]+)";
   });
 
   return { regex: new RegExp(`^${regexPattern}$`), paramNames };

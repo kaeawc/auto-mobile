@@ -1,23 +1,117 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
 import { FakeAvdManager } from "../../fakes/FakeAvdManager";
+import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
 import {
   createDeviceImageResourcesHandler,
   DeviceImagesResourceContent
 } from "../../../src/server/deviceImageResources";
 import { DeviceInfo } from "../../../src/models";
 import { AvdInfo } from "../../../src/utils/android-cmdline-tools/avdmanager";
+import type {
+  AppleDeviceRuntime,
+  AppleDeviceType,
+} from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 
 describe("Device Image Resources with Fakes", () => {
   let fakeDeviceUtils: FakeDeviceUtils;
   let fakeAvdManager: FakeAvdManager;
+  let fakeSimCtl: FakeSimCtlClient;
 
   beforeEach(() => {
     fakeDeviceUtils = new FakeDeviceUtils();
     fakeAvdManager = new FakeAvdManager();
+    fakeSimCtl = new FakeSimCtlClient();
   });
 
   describe("createDeviceImageResourcesHandler", () => {
+    test("returns a normalized provisioning catalog for Android and iOS", async () => {
+      fakeDeviceUtils.setDeviceImages("android", []);
+      fakeDeviceUtils.setDeviceImages("ios", []);
+      fakeAvdManager.setListSystemImagesResponse([{
+        packageName: "system-images;android-35;google_apis;x86_64",
+        apiLevel: 35,
+        tag: "google_apis",
+        abi: "x86_64",
+        versionInfo: "Google APIs Intel x86_64 Atom System Image",
+      }]);
+      fakeAvdManager.setListDevicesResponse([{
+        id: "pixel_9",
+        name: "Pixel 9",
+        oem: "Google",
+      }]);
+      const runtimes: AppleDeviceRuntime[] = [{
+        bundlePath: "/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 18.0.simruntime",
+        buildversion: "22A3354",
+        runtimeRoot: "/Library/Developer/CoreSimulator/Volumes/iOS_22A3354/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 18.0.simruntime/Contents/Resources/RuntimeRoot",
+        identifier: "com.apple.CoreSimulator.SimRuntime.iOS-18-0",
+        version: "18.0",
+        isAvailable: true,
+        name: "iOS 18.0",
+      }];
+      const deviceTypes: AppleDeviceType[] = [{
+        minRuntimeVersion: 17,
+        bundlePath: "/Library/Developer/CoreSimulator/Profiles/DeviceTypes/iPhone 16.simdevicetype",
+        maxRuntimeVersion: 18,
+        name: "iPhone 16",
+        identifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-16",
+        productFamily: "iPhone",
+      }];
+      fakeSimCtl.setRuntimes(runtimes);
+      fakeSimCtl.setDeviceTypes(deviceTypes);
+
+      const handler = createDeviceImageResourcesHandler({
+        deviceManager: fakeDeviceUtils,
+        avdManager: fakeAvdManager,
+        simctl: fakeSimCtl,
+      });
+
+      const result = await handler.getDeviceImagesForPlatforms(["android", "ios"]);
+
+      expect(result.catalogComplete).toBe(true);
+      expect(result.provisioningCatalog).toEqual({
+        runtimes: expect.arrayContaining([
+          expect.objectContaining({
+            platform: "android",
+            id: "system-images;android-35;google_apis;x86_64",
+            version: "35",
+          }),
+          expect.objectContaining({
+            platform: "ios",
+            id: "com.apple.CoreSimulator.SimRuntime.iOS-18-0",
+            version: "18.0",
+          }),
+        ]),
+        deviceTypes: expect.arrayContaining([
+          expect.objectContaining({
+            platform: "android",
+            id: "pixel_9",
+            name: "Pixel 9",
+          }),
+          expect.objectContaining({
+            platform: "ios",
+            id: "com.apple.CoreSimulator.SimDeviceType.iPhone-16",
+            name: "iPhone 16",
+          }),
+        ]),
+        systemImages: [{
+          platform: "android",
+          id: "system-images;android-35;google_apis;x86_64",
+          name: "Google APIs Intel x86_64 Atom System Image",
+          apiLevel: 35,
+          tag: "google_apis",
+          abi: "x86_64",
+          version: "35",
+        }],
+        profiles: [{
+          platform: "android",
+          id: "pixel_9",
+          name: "Pixel 9",
+          manufacturer: "Google",
+        }],
+      });
+    });
+
     test("should return correct image counts when there are images", async () => {
       // Set up mock Android devices
       const androidDevices: DeviceInfo[] = [

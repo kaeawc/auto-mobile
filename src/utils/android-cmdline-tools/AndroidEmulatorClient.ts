@@ -350,6 +350,10 @@ function emulatorDeviceIdForConsolePort(deviceId: string | undefined): string | 
   return `emulator-${consolePort}`;
 }
 
+function shouldCaptureEmulatorReservationSnapshot(deviceId: string | undefined): boolean {
+  return deviceId === undefined || deviceId.startsWith("emulator-");
+}
+
 function configuredEmulatorConsoleDeviceId(args: readonly string[]): string | undefined {
   let configuredPort: number | undefined;
   for (let index = 0; index < args.length; index += 1) {
@@ -1376,7 +1380,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           }
         },
         () => disposed,
-        request.deviceId === undefined,
+        shouldCaptureEmulatorReservationSnapshot(request.deviceId),
         request.deviceId,
       );
       if (disposed) {

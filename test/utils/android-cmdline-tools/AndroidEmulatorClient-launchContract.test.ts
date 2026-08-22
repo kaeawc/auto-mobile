@@ -142,6 +142,37 @@ describe("AndroidEmulatorClient launch contract", () => {
     AndroidEmulatorClient.resetLaunchReservationsForTesting();
   });
 
+  test("reuses an explicit emulator serial after an all-state snapshot confirms it is absent", async () => {
+    const adb = new FakeAdbExecutor();
+    const firstChild = createChild();
+    const secondChild = createChild();
+    const children = [firstChild, secondChild];
+    const spawnedArgs: string[][] = [];
+    const client = createClient((_command, args) => {
+      spawnedArgs.push(args);
+      const child = children.shift()!;
+      queueMicrotask(() => child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")));
+      return child;
+    }, adb);
+
+    const firstLaunch = await client.launchEmulator({
+      avdName: "Pixel 9",
+      deviceId: "emulator-5554",
+    });
+    firstChild.emit("exit", 0, null);
+    await client.launchEmulator({
+      avdName: "Pixel 9",
+      deviceId: "emulator-5554",
+    });
+
+    expect(firstLaunch.targetDeviceId).toBe("emulator-5554");
+    expect(spawnedArgs).toEqual([
+      expect.arrayContaining(["-port", "5554"]),
+      expect.arrayContaining(["-port", "5554"]),
+    ]);
+    secondChild.emit("exit", 0, null);
+  });
+
   test("does not spawn when launch has already been cancelled", async () => {
     const controller = new AbortController();
     controller.abort();

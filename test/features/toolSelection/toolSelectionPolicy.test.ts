@@ -79,6 +79,30 @@ describe("exact-tool selection union policy", () => {
     ).toBe(true);
   });
 
+  test("routing sessions resolve explicit choices before inherited defaults", async () => {
+    const overrides = new Map<string, boolean>([["base:B", false]]);
+    const service: Pick<SessionToolSelectionService, "isEnabled" | "getOverride"> = {
+      isEnabled: async (sessionUuid, _toolName, declaredDefault) =>
+        (sessionUuid ? overrides.get(sessionUuid) : undefined) ?? declaredDefault,
+      getOverride: async (sessionUuid) => overrides.get(sessionUuid),
+    };
+    const candidates = ["connection", "base", "base:B"];
+
+    expect(
+      await isToolEnabledForAnySession("observe", true, candidates, service, "connection"),
+    ).toBe(false);
+
+    overrides.set("base", true);
+    expect(
+      await isToolEnabledForAnySession("observe", true, candidates, service, "connection"),
+    ).toBe(true);
+
+    overrides.clear();
+    expect(
+      await isToolEnabledForAnySession("observe", true, candidates, service, "connection"),
+    ).toBe(true);
+  });
+
   test("reports the exact disabled tool rather than a capability group", async () => {
     const disabled: Pick<SessionToolSelectionService, "isEnabled"> = {
       isEnabled: async () => false,

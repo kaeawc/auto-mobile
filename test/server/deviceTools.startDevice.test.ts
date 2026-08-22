@@ -25,6 +25,7 @@ import {
   MAX_RUNNER_READINESS_TIMEOUT_MS,
   MIN_RUNNER_READINESS_TIMEOUT_MS,
 } from "../../src/utils/runnerReadinessConfig";
+import { SystemUiAnrRecoveryRequiredError } from "../../src/utils/RunnerReadinessService";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import * as os from "os";
 
@@ -544,6 +545,564 @@ describe("startDevice handler", () => {
 
     expect(pool.getIdleDevices().map((device) => device.id)).toEqual([androidDevice.deviceId]);
     expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBeNull();
+  });
+
+  it("restarts the pooled AVD and preserves its session after a System UI ANR", async () => {
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    const recoveryImage = {
+      ...androidImage,
+      deviceId: "emulator-5556",
+    };
+    const unknownRuntimeDevice = {
+      ...androidDevice,
+      name: `Unknown (${androidDevice.deviceId})`,
+    };
+    fakeDeviceUtils.setBootedDevices("android", [unknownRuntimeDevice]);
+    await pool.initializeWithDevices([unknownRuntimeDevice]);
+    await pool.bindOrReuseDeviceSession(
+      "owner-session",
+      unknownRuntimeDevice.deviceId,
+      "android",
+      recoveryImage,
+    );
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    fakeDeviceUtils.setDeviceImages("android", [recoveryImage]);
+    fakeMatcher.setBootedResult(unknownRuntimeDevice);
+    fakeMatcher.setImageResult(recoveryImage);
+    const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
+    fakeDeviceUtils.killDevice = async (device, options) => {
+      await originalKillDevice(device, options);
+      fakeDeviceUtils.setBootedDevices("android", []);
+    };
+    let readinessAttempts = 0;
+    setDeviceToolsDependencies({
+      timer,
+      ensureCtrlProxyReady: async () => {
+        readinessAttempts++;
+        if (readinessAttempts === 1) {
+          throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+        }
+      },
+    });
+    registerDeviceTools();
+
+    const result = await callStartDevice({ platform: "android" });
+
+    expect(result.deviceId).toBe("emulator-5556");
+    expect(result.sessionId).toBe("owner-session");
+    expect(fakeDeviceUtils.getExecutedOperations()).toContain(
+      "killDevice:Unknown (emulator-5554)",
+    );
+    expect(fakeDeviceUtils.getExecutedOperations()).toContain(
+      "startDevice:Pixel_7_API_34:120000",
+    );
+    expect(pool.getDevice("emulator-5556")).toMatchObject({
+      sessionId: "owner-session",
+      status: "busy",
+      avdName: "Pixel_7_API_34",
+    });
+    expect(pool.getIdleDevices()).toEqual([]);
+    expect(daemonSessionManager.getSession("owner-session")?.assignedDevice).toBe(
+      "emulator-5556",
+    );
+  });
+
+  it("binds an idle System UI recovery replacement through its own readiness reservation", async () => {
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    const recoveryImage = {
+      ...androidImage,
+      deviceId: "emulator-5556",
+    };
+    const unknownRuntimeDevice = {
+      ...androidDevice,
+      name: `Unknown (${androidDevice.deviceId})`,
+    };
+    fakeDeviceUtils.setBootedDevices("android", [unknownRuntimeDevice]);
+    await pool.initializeWithDevices([unknownRuntimeDevice]);
+    await pool.addDevice(unknownRuntimeDevice, recoveryImage);
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    fakeDeviceUtils.setDeviceImages("android", [recoveryImage]);
+    fakeMatcher.setBootedResult(unknownRuntimeDevice);
+    fakeMatcher.setImageResult(recoveryImage);
+    const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
+    fakeDeviceUtils.killDevice = async (device, options) => {
+      await originalKillDevice(device, options);
+      fakeDeviceUtils.setBootedDevices("android", []);
+    };
+    let readinessAttempts = 0;
+    setDeviceToolsDependencies({
+      timer,
+      idGenerator: new CountingIdGenerator("session"),
+      ensureCtrlProxyReady: async () => {
+        readinessAttempts++;
+        if (readinessAttempts === 1) {
+          throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+        }
+      },
+    });
+    registerDeviceTools();
+
+    const result = await callStartDevice({ platform: "android" });
+
+    expect(result.deviceId).toBe("emulator-5556");
+    expect(result.sessionId).toBe("session-1");
+    expect(pool.getDevice("emulator-5556")).toMatchObject({
+      sessionId: "session-1",
+      status: "busy",
+    });
+  });
+
+  it("retires an adopted replacement when its second readiness check fails", async () => {
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    const recoveryImage = {
+      ...androidImage,
+      deviceId: "emulator-5556",
+    };
+    const unknownRuntimeDevice = {
+      ...androidDevice,
+      name: `Unknown (${androidDevice.deviceId})`,
+    };
+    const replacementProcess = new FakeExitChildProcess();
+    fakeDeviceUtils.setBootedDevices("android", [unknownRuntimeDevice]);
+    await pool.initializeWithDevices([unknownRuntimeDevice]);
+    await pool.bindOrReuseDeviceSession(
+      "owner-session",
+      unknownRuntimeDevice.deviceId,
+      "android",
+      recoveryImage,
+    );
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    fakeDeviceUtils.setDeviceImages("android", [recoveryImage]);
+    fakeDeviceUtils.setMockChildProcess(
+      recoveryImage.name,
+      replacementProcess as unknown as ChildProcess,
+    );
+    fakeMatcher.setBootedResult(unknownRuntimeDevice);
+    fakeMatcher.setImageResult(recoveryImage);
+    const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
+    fakeDeviceUtils.killDevice = async (device, options) => {
+      await originalKillDevice(device, options);
+      fakeDeviceUtils.setBootedDevices("android", []);
+    };
+    setDeviceToolsDependencies({
+      timer,
+      ensureCtrlProxyReady: async () => {
+        throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+      },
+    });
+    registerDeviceTools();
+
+    await expect(callStartDevice({ platform: "android" })).rejects.toThrow(
+      "System UI ANR persisted after Wait",
+    );
+
+    expect(replacementProcess.killed).toBe(true);
+    expect(pool.getDevice(unknownRuntimeDevice.deviceId)).toBeNull();
+    expect(pool.getDevice(recoveryImage.deviceId!)).toBeNull();
+    expect(pool.getIdleDevices()).toEqual([]);
+    expect(daemonSessionManager.getSession("owner-session")).toBeNull();
+  });
+
+  it("retires an adopted replacement when its recovered readiness reservation fails", async () => {
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    const recoveryImage = {
+      ...androidImage,
+      deviceId: "emulator-5556",
+    };
+    const unknownRuntimeDevice = {
+      ...androidDevice,
+      name: `Unknown (${androidDevice.deviceId})`,
+    };
+    const replacementProcess = new FakeExitChildProcess();
+    fakeDeviceUtils.setBootedDevices("android", [unknownRuntimeDevice]);
+    await pool.initializeWithDevices([unknownRuntimeDevice]);
+    await pool.bindOrReuseDeviceSession(
+      "owner-session",
+      unknownRuntimeDevice.deviceId,
+      "android",
+      recoveryImage,
+    );
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    fakeDeviceUtils.setDeviceImages("android", [recoveryImage]);
+    fakeDeviceUtils.setMockChildProcess(
+      recoveryImage.name,
+      replacementProcess as unknown as ChildProcess,
+    );
+    fakeMatcher.setBootedResult(unknownRuntimeDevice);
+    fakeMatcher.setImageResult(recoveryImage);
+    const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
+    fakeDeviceUtils.killDevice = async (device, options) => {
+      await originalKillDevice(device, options);
+      fakeDeviceUtils.setBootedDevices("android", []);
+    };
+    const reserveDeviceForReadiness = pool.reserveDeviceForReadiness.bind(pool);
+    let readinessReservations = 0;
+    pool.reserveDeviceForReadiness = async (...args) => {
+      readinessReservations++;
+      if (readinessReservations === 3) {
+        throw new Error("recovered reservation identity changed");
+      }
+      return await reserveDeviceForReadiness(...args);
+    };
+    let readinessAttempts = 0;
+    setDeviceToolsDependencies({
+      timer,
+      ensureCtrlProxyReady: async () => {
+        readinessAttempts++;
+        if (readinessAttempts === 1) {
+          throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+        }
+      },
+    });
+    registerDeviceTools();
+
+    await expect(callStartDevice({ platform: "android" })).rejects.toThrow(
+      "recovered reservation identity changed",
+    );
+
+    expect(replacementProcess.killed).toBe(true);
+    expect(pool.getDevice(unknownRuntimeDevice.deviceId)).toBeNull();
+    expect(pool.getDevice(recoveryImage.deviceId!)).toBeNull();
+    expect(pool.getIdleDevices()).toEqual([]);
+    expect(daemonSessionManager.getSession("owner-session")).toBeNull();
+  });
+
+  it("preserves the second readiness error when recovery cleanup fails", async () => {
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+      undefined,
+      undefined,
+      undefined,
+      async () => {
+        throw new Error("cleanup persistence failed");
+      },
+    );
+    const recoveryImage = {
+      ...androidImage,
+      deviceId: "emulator-5556",
+    };
+    const unknownRuntimeDevice = {
+      ...androidDevice,
+      name: `Unknown (${androidDevice.deviceId})`,
+    };
+    const replacementProcess = new FakeExitChildProcess();
+    fakeDeviceUtils.setBootedDevices("android", [unknownRuntimeDevice]);
+    await pool.initializeWithDevices([unknownRuntimeDevice]);
+    await pool.bindOrReuseDeviceSession(
+      "owner-session",
+      unknownRuntimeDevice.deviceId,
+      "android",
+      recoveryImage,
+    );
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    fakeDeviceUtils.setDeviceImages("android", [recoveryImage]);
+    fakeDeviceUtils.setMockChildProcess(
+      recoveryImage.name,
+      replacementProcess as unknown as ChildProcess,
+    );
+    fakeMatcher.setBootedResult(unknownRuntimeDevice);
+    fakeMatcher.setImageResult(recoveryImage);
+    const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
+    fakeDeviceUtils.killDevice = async (device, options) => {
+      await originalKillDevice(device, options);
+      fakeDeviceUtils.setBootedDevices("android", []);
+    };
+    let readinessAttempts = 0;
+    setDeviceToolsDependencies({
+      timer,
+      ensureCtrlProxyReady: async () => {
+        readinessAttempts++;
+        if (readinessAttempts === 1) {
+          throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+        }
+        throw new Error("replacement runner unavailable");
+      },
+    });
+    registerDeviceTools();
+
+    await expect(callStartDevice({ platform: "android" })).rejects.toThrow(
+      "replacement runner unavailable",
+    );
+    expect(replacementProcess.killed).toBe(true);
+    expect(pool.getDevice(recoveryImage.deviceId!)).toBeNull();
+    expect(pool.getIdleDevices()).toEqual([]);
+  });
+
+  it("fails rather than returning a System UI recovery session released during readiness", async () => {
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    const recoveryImage = {
+      ...androidImage,
+      deviceId: "emulator-5556",
+    };
+    const unknownRuntimeDevice = {
+      ...androidDevice,
+      name: `Unknown (${androidDevice.deviceId})`,
+    };
+    const replacementProcess = new FakeExitChildProcess();
+    fakeDeviceUtils.setBootedDevices("android", [unknownRuntimeDevice]);
+    await pool.initializeWithDevices([unknownRuntimeDevice]);
+    await pool.bindOrReuseDeviceSession(
+      "owner-session",
+      unknownRuntimeDevice.deviceId,
+      "android",
+      recoveryImage,
+    );
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    fakeDeviceUtils.setDeviceImages("android", [recoveryImage]);
+    fakeDeviceUtils.setMockChildProcess(
+      recoveryImage.name,
+      replacementProcess as unknown as ChildProcess,
+    );
+    fakeMatcher.setBootedResult(unknownRuntimeDevice);
+    fakeMatcher.setImageResult(recoveryImage);
+    const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
+    fakeDeviceUtils.killDevice = async (device, options) => {
+      await originalKillDevice(device, options);
+      fakeDeviceUtils.setBootedDevices("android", []);
+    };
+    let beginSecondReadiness!: () => void;
+    const secondReadinessStarted = new Promise<void>((resolve) => {
+      beginSecondReadiness = resolve;
+    });
+    let finishSecondReadiness!: () => void;
+    const secondReadiness = new Promise<void>((resolve) => {
+      finishSecondReadiness = resolve;
+    });
+    let readinessAttempts = 0;
+    setDeviceToolsDependencies({
+      timer,
+      ensureCtrlProxyReady: async () => {
+        readinessAttempts++;
+        if (readinessAttempts === 1) {
+          throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+        }
+        beginSecondReadiness();
+        await secondReadiness;
+      },
+    });
+    registerDeviceTools();
+
+    const start = callStartDevice({ platform: "android" });
+    await secondReadinessStarted;
+    await daemonSessionManager.releaseSession("owner-session", "test released during readiness");
+    finishSecondReadiness();
+
+    await expect(start).rejects.toThrow(
+      "was released while System UI recovery was becoming ready",
+    );
+    expect(replacementProcess.killed).toBe(true);
+    expect(pool.getDevice(recoveryImage.deviceId!)).toBeNull();
+    expect(daemonSessionManager.getSession("owner-session")).toBeNull();
+  });
+
+  it("keeps the original session when System UI recovery cannot stop the emulator", async () => {
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    await pool.initializeWithDevices([androidDevice]);
+    await pool.bindOrReuseDeviceSession(
+      "owner-session",
+      androidDevice.deviceId,
+      "android",
+      androidImage,
+    );
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    fakeDeviceUtils.setDeviceImages("android", [androidImage]);
+    fakeMatcher.setBootedResult(androidDevice);
+    fakeDeviceUtils.killDevice = async () => {
+      throw new Error("emulator shutdown failed");
+    };
+    setDeviceToolsDependencies({
+      timer,
+      ensureCtrlProxyReady: async () => {
+        throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+      },
+    });
+    registerDeviceTools();
+
+    await expect(callStartDevice({ platform: "android" })).rejects.toThrow(
+      /emulator shutdown failed/,
+    );
+
+    expect(pool.getDevice(androidDevice.deviceId)).toMatchObject({
+      sessionId: "owner-session",
+      status: "busy",
+    });
+    expect(daemonSessionManager.getSession("owner-session")?.assignedDevice).toBe(
+      androidDevice.deviceId,
+    );
+  });
+
+  it("releases the session when confirmed System UI recovery cannot restart the AVD", async () => {
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    await pool.initializeWithDevices([androidDevice]);
+    await pool.bindOrReuseDeviceSession(
+      "owner-session",
+      androidDevice.deviceId,
+      "android",
+      androidImage,
+    );
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    fakeDeviceUtils.setDeviceImages("android", [androidImage]);
+    fakeMatcher.setBootedResult(androidDevice);
+    fakeMatcher.setImageResult(androidImage);
+    const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
+    fakeDeviceUtils.killDevice = async (device, options) => {
+      await originalKillDevice(device, options);
+      fakeDeviceUtils.setBootedDevices("android", []);
+    };
+    fakeDeviceUtils.startDevice = async () => {
+      throw new Error("AVD restart failed");
+    };
+    setDeviceToolsDependencies({
+      timer,
+      ensureCtrlProxyReady: async () => {
+        throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+      },
+    });
+    registerDeviceTools();
+
+    await expect(callStartDevice({ platform: "android" })).rejects.toThrow(/AVD restart failed/);
+
+    expect(pool.getDevice(androidDevice.deviceId)).toBeNull();
+    expect(daemonSessionManager.getSession("owner-session")).toBeNull();
+  });
+
+  it("preserves an AVD reboot failure when post-shutdown cleanup fails", async () => {
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+      undefined,
+      undefined,
+      undefined,
+      async () => {
+        throw new Error("cleanup persistence failed");
+      },
+    );
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    await pool.initializeWithDevices([androidDevice]);
+    await pool.bindOrReuseDeviceSession(
+      "owner-session",
+      androidDevice.deviceId,
+      "android",
+      androidImage,
+    );
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    fakeDeviceUtils.setDeviceImages("android", [androidImage]);
+    fakeMatcher.setBootedResult(androidDevice);
+    fakeMatcher.setImageResult(androidImage);
+    const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
+    fakeDeviceUtils.killDevice = async (device, options) => {
+      await originalKillDevice(device, options);
+      fakeDeviceUtils.setBootedDevices("android", []);
+    };
+    fakeDeviceUtils.startDevice = async () => {
+      throw new Error("AVD restart failed");
+    };
+    setDeviceToolsDependencies({
+      timer,
+      ensureCtrlProxyReady: async () => {
+        throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+      },
+    });
+    registerDeviceTools();
+
+    await expect(callStartDevice({ platform: "android" })).rejects.toThrow(/AVD restart failed/);
+
+    expect(pool.getDevice(androidDevice.deviceId)).toBeNull();
+    expect(daemonSessionManager.getSession("owner-session")?.assignedDevice).toBe(
+      androidDevice.deviceId,
+    );
+  });
+
+  it("does not guess an AVD when an unknown Android runtime needs System UI recovery", async () => {
+    const unknownDevice = {
+      ...androidDevice,
+      name: "Unknown (emulator-5554)",
+    };
+    fakeDeviceUtils.setBootedDevices("android", [unknownDevice]);
+    fakeDeviceUtils.setDeviceImages("android", [androidImage]);
+    fakeMatcher.setBootedResult(unknownDevice);
+    let readinessAttempts = 0;
+    setDeviceToolsDependencies({
+      ensureCtrlProxyReady: async () => {
+        readinessAttempts++;
+        throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+      },
+    });
+    registerDeviceTools();
+
+    await expect(callStartDevice({ platform: "android" })).rejects.toThrow(/AVD name is unknown/);
+
+    expect(readinessAttempts).toBe(1);
+    expect(fakeDeviceUtils.wasMethodCalled("killDevice")).toBe(false);
   });
 
   it("cold-boots without a process handle (adopted device: startDevice returns null)", async () => {

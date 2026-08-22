@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import {
   RunnerReadinessService,
+  SystemUiAnrRecoveryRequiredError,
   type ReadinessAndroidManager,
   type ReadinessClient,
   type ReadinessIosManager,
@@ -26,6 +27,10 @@ class FakeReadinessClient implements ReadinessClient {
   connectionResults: boolean[] = [true];
   healthCalls = 0;
   connectionCalls = 0;
+  accessibilityHierarchies: Array<ViewHierarchyResult | null> = [];
+  tapResult = { success: true };
+  tapCoordinates: Array<{ x: number; y: number }> = [];
+  onTap?: () => Promise<void> | void;
 
   isConnected(): boolean {
     return this.connected;
@@ -41,6 +46,16 @@ class FakeReadinessClient implements ReadinessClient {
   async verifyServiceReady(): Promise<boolean> {
     this.healthCalls++;
     return this.healthResults.shift() ?? false;
+  }
+
+  async getAccessibilityHierarchy(): Promise<ViewHierarchyResult | null> {
+    return this.accessibilityHierarchies.shift() ?? null;
+  }
+
+  async requestTapCoordinates(x: number, y: number): Promise<{ success: boolean; error?: string }> {
+    this.tapCoordinates.push({ x, y });
+    await this.onTap?.();
+    return this.tapResult;
   }
 }
 
@@ -167,6 +182,79 @@ function createService(
   };
 }
 
+function clearedAnrHierarchy(): ViewHierarchyResult {
+  return { hierarchy: {}, windows: [] };
+}
+
+function systemUiAnrHierarchy(): ViewHierarchyResult {
+  return {
+    packageName: "com.android.systemui",
+    hierarchy: {},
+    windows: [
+      {
+        windowLayer: 100,
+        hierarchy: {
+          node: [
+            { text: "System UI isn't responding" },
+            { text: "Close app" },
+            { text: "Wait", bounds: "[100,200][300,260]" },
+          ],
+        },
+      },
+    ],
+  };
+}
+
+function localizedSystemUiAnrHierarchy(windowType = 3): ViewHierarchyResult {
+  return {
+    packageName: "com.android.systemui",
+    hierarchy: {},
+    windows: [
+      {
+        windowLayer: 100,
+        type: windowType,
+        hierarchy: {
+          node: [
+            {
+              text: "Systemoberflache reagiert nicht",
+              "resource-id": "android:id/alertTitle",
+            },
+            {
+              text: "App schliessen",
+              "resource-id": "android:id/button1",
+            },
+            {
+              text: "Warten",
+              "resource-id": "android:id/button2",
+              bounds: "[100,200][300,260]",
+            },
+          ],
+        },
+      },
+    ],
+  };
+}
+
+function appScreenMimickingEnglishSystemUiAnr(): ViewHierarchyResult {
+  return {
+    packageName: "com.example.app",
+    hierarchy: {},
+    windows: [
+      {
+        windowLayer: 100,
+        type: 3,
+        hierarchy: {
+          node: [
+            { text: "System UI isn't responding" },
+            { text: "Close app" },
+            { text: "Wait", bounds: "[100,200][300,260]" },
+          ],
+        },
+      },
+    ],
+  };
+}
+
 describe("RunnerReadinessService", () => {
   test("keeps an already-ready Android device on the fast path", async () => {
     const { service, androidManager, androidClient } = createService();
@@ -180,6 +268,199 @@ describe("RunnerReadinessService", () => {
 
     expect(androidManager.setupCalls).toBe(0);
     expect(androidClient.healthCalls).toBe(1);
+  });
+
+  test("checks for a System UI ANR while runner health is failing", async () => {
+    const androidClient = new FakeReadinessClient();
+    androidClient.healthResults = [false, false, true];
+    androidClient.accessibilityHierarchies = [
+      systemUiAnrHierarchy(),
+      clearedAnrHierarchy(),
+      clearedAnrHierarchy(),
+    ];
+    const { service, androidManager } = createService({ androidClient });
+
+    await service.ensureReady({
+      device: androidDevice(),
+      requestedIdentity: "platform=android name=Pixel_9_Pro",
+      totalDeadlineMs: 30_000,
+      readinessTimeoutMs: 30_000,
+    });
+
+    expect(androidManager.setupCalls).toBe(1);
+    expect(androidClient.tapCoordinates).toEqual([{ x: 200, y: 230 }]);
+    expect(androidClient.healthCalls).toBe(3);
+  });
+
+  test("requires device replacement when the ANR Wait tap fails", async () => {
+    const androidClient = new FakeReadinessClient();
+    androidClient.healthResults = [false];
+    androidClient.accessibilityHierarchies = [systemUiAnrHierarchy()];
+    androidClient.tapResult = { success: false, error: "tap transport failed" };
+    const { service } = createService({ androidClient });
+
+    await expect(
+      service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android name=Pixel_9_Pro",
+        totalDeadlineMs: 30_000,
+        readinessTimeoutMs: 30_000,
+      }),
+    ).rejects.toThrow("could not select Wait: tap transport failed");
+  });
+
+  test("requires device replacement when the ANR persists after Wait", async () => {
+    const androidClient = new FakeReadinessClient();
+    androidClient.healthResults = [false];
+    androidClient.accessibilityHierarchies = Array.from(
+      { length: 32 },
+      () => systemUiAnrHierarchy(),
+    );
+    const { service } = createService({ androidClient });
+
+    await expect(
+      service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android name=Pixel_9_Pro",
+        totalDeadlineMs: 30_000,
+        readinessTimeoutMs: 30_000,
+      }),
+    ).rejects.toThrow(SystemUiAnrRecoveryRequiredError);
+  });
+
+  test("recognizes a localized ANR from a System UI window", async () => {
+    const androidClient = new FakeReadinessClient();
+    androidClient.healthResults = [false, false, true];
+    androidClient.accessibilityHierarchies = [
+      localizedSystemUiAnrHierarchy(),
+      clearedAnrHierarchy(),
+      clearedAnrHierarchy(),
+    ];
+    const { service } = createService({ androidClient });
+
+    await service.ensureReady({
+      device: androidDevice(),
+      requestedIdentity: "platform=android name=Pixel_9_Pro",
+      totalDeadlineMs: 30_000,
+      readinessTimeoutMs: 30_000,
+    });
+
+    expect(androidClient.tapCoordinates).toEqual([{ x: 200, y: 230 }]);
+  });
+
+  test("does not tap an app screen mimicking the English System UI ANR", async () => {
+    const androidClient = new FakeReadinessClient();
+    androidClient.healthResults = [false, true];
+    androidClient.accessibilityHierarchies = [appScreenMimickingEnglishSystemUiAnr()];
+    const { service } = createService({ androidClient });
+
+    await service.ensureReady({
+      device: androidDevice(),
+      requestedIdentity: "platform=android name=Pixel_9_Pro",
+      totalDeadlineMs: 30_000,
+      readinessTimeoutMs: 30_000,
+    });
+
+    expect(androidClient.tapCoordinates).toEqual([]);
+  });
+
+  test("does not tap a generic System UI AlertDialog as a localized ANR", async () => {
+    const androidClient = new FakeReadinessClient();
+    androidClient.healthResults = [false, true];
+    androidClient.accessibilityHierarchies = [localizedSystemUiAnrHierarchy(1)];
+    const { service } = createService({ androidClient });
+
+    await service.ensureReady({
+      device: androidDevice(),
+      requestedIdentity: "platform=android name=Pixel_9_Pro",
+      totalDeadlineMs: 30_000,
+      readinessTimeoutMs: 30_000,
+    });
+
+    expect(androidClient.tapCoordinates).toEqual([]);
+  });
+
+  test("propagates cancellation that interrupts the ANR Wait tap", async () => {
+    const androidClient = new FakeReadinessClient();
+    const abortController = new AbortController();
+    const cancellation = new Error("caller cancelled readiness");
+    androidClient.healthResults = [false];
+    androidClient.accessibilityHierarchies = [systemUiAnrHierarchy()];
+    androidClient.onTap = () => {
+      abortController.abort(cancellation);
+      throw cancellation;
+    };
+    const { service } = createService({ androidClient });
+
+    await expect(
+      service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android name=Pixel_9_Pro",
+        totalDeadlineMs: 30_000,
+        readinessTimeoutMs: 30_000,
+        signal: abortController.signal,
+      }),
+    ).rejects.toBe(cancellation);
+  });
+
+  test("treats unreadable confirmation hierarchies as an unrecovered ANR", async () => {
+    const androidClient = new FakeReadinessClient();
+    androidClient.healthResults = [false, false, true];
+    // The dialog is present, then both post-tap confirmation reads fail. A failed
+    // read must not be mistaken for a cleared dialog (#5430 review), so recovery
+    // is still required rather than reported as healthy.
+    androidClient.accessibilityHierarchies = [systemUiAnrHierarchy(), null, null];
+    const { service } = createService({ androidClient });
+
+    await expect(
+      service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android name=Pixel_9_Pro",
+        totalDeadlineMs: 30_000,
+        readinessTimeoutMs: 30_000,
+      }),
+    ).rejects.toThrow(SystemUiAnrRecoveryRequiredError);
+  });
+
+  test("does not confirm ANR recovery from stale hierarchies", async () => {
+    const androidClient = new FakeReadinessClient();
+    androidClient.healthResults = [false, false, true];
+    // CtrlProxy may return this cached tree after both its fresh-data wait and
+    // sync fallback fail. It must not count toward the two healthy polls.
+    androidClient.accessibilityHierarchies = [
+      systemUiAnrHierarchy(),
+      { ...clearedAnrHierarchy(), fresh: false },
+      { ...clearedAnrHierarchy(), fresh: false },
+    ];
+    const { service } = createService({ androidClient });
+
+    await expect(
+      service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android name=Pixel_9_Pro",
+        totalDeadlineMs: 30_000,
+        readinessTimeoutMs: 30_000,
+      }),
+    ).rejects.toThrow(SystemUiAnrRecoveryRequiredError);
+  });
+
+  test("does not confirm ANR recovery from an older hierarchy", async () => {
+    const androidClient = new FakeReadinessClient();
+    androidClient.healthResults = [false, false, true];
+    androidClient.accessibilityHierarchies = [
+      { ...systemUiAnrHierarchy(), updatedAt: 10 },
+      { ...clearedAnrHierarchy(), fresh: true, updatedAt: 10 },
+    ];
+    const { service } = createService({ androidClient });
+
+    await expect(
+      service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android name=Pixel_9_Pro",
+        totalDeadlineMs: 30_000,
+        readinessTimeoutMs: 30_000,
+      }),
+    ).rejects.toThrow(SystemUiAnrRecoveryRequiredError);
   });
 
   test("repairs a missing Android package before checking observation health", async () => {

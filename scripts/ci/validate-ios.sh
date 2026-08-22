@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Master CI validation script for all iOS components
-# Runs both Swift and TypeScript validations
+# Runs Swift component validation
 
 set -euo pipefail
 
@@ -20,19 +20,6 @@ if "${SCRIPT_DIR}/validate-ios-swift.sh"; then
   echo "✓ Swift validation passed"
 else
   echo "❌ Swift validation failed"
-  FAILED=1
-fi
-
-echo ""
-echo "---"
-echo ""
-
-# Run TypeScript validation
-echo "Running TypeScript component validation..."
-if "${SCRIPT_DIR}/validate-ios-typescript.sh"; then
-  echo "✓ TypeScript validation passed"
-else
-  echo "❌ TypeScript validation failed"
   FAILED=1
 fi
 

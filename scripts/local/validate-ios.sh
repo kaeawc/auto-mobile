@@ -114,31 +114,6 @@ for component in "${SWIFT_COMPONENTS[@]}"; do
 done
 
 echo "========================================="
-echo "Building TypeScript Components"
-echo "========================================="
-echo ""
-
-SIMCTL_PATH="${PROJECT_ROOT}/ios/SimctlIntegration"
-
-if [[ -d "${SIMCTL_PATH}" ]]; then
-  echo "Building ios/SimctlIntegration..."
-
-  (cd "${SIMCTL_PATH}" && bun install)
-
-  if (cd "${SIMCTL_PATH}" && bun run build); then
-    echo "✓ SimctlIntegration build successful"
-    PASSED_BUILDS+=("ios/SimctlIntegration")
-  else
-    echo "❌ SimctlIntegration build failed"
-    FAILED_BUILDS+=("ios/SimctlIntegration")
-  fi
-else
-  echo "⚠️  SimctlIntegration not found, skipping"
-fi
-
-echo ""
-
-echo "========================================="
 echo "Running Tests"
 echo "========================================="
 echo ""
@@ -161,19 +136,6 @@ for component in "${SWIFT_COMPONENTS[@]}"; do
 
   echo ""
 done
-
-# Run TypeScript tests
-if [[ -d "${SIMCTL_PATH}" ]]; then
-  echo "Testing ios/SimctlIntegration..."
-
-  if (cd "${SIMCTL_PATH}" && bun test); then
-    echo "✓ SimctlIntegration tests passed"
-  else
-    echo "⚠️  SimctlIntegration tests failed"
-  fi
-
-  echo ""
-fi
 
 echo "========================================="
 echo "Validation Summary"

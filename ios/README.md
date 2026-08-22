@@ -109,10 +109,6 @@ for dir in ios/*/; do
     (cd "$dir" && swift build)
   fi
 done
-
-# Build TypeScript components
-cd ios/SimctlIntegration
-bun install && bun run build
 ```
 
 ## Development Workflow

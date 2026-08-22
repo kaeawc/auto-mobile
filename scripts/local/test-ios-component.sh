@@ -12,7 +12,6 @@ if [[ $# -eq 0 ]]; then
   echo "Usage: $0 <component-name>"
   echo ""
   echo "Available components:"
-  echo "  SimctlIntegration"
   echo "  XCTestRunner"
   exit 1
 fi

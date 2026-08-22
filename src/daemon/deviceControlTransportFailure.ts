@@ -1,5 +1,6 @@
 import type { DaemonRequest } from "./types";
 import { McpError } from "@modelcontextprotocol/sdk/types.js";
+import { errorMessage } from "../utils/describeUnknownError";
 
 export const DEVICE_CONTROL_TRANSPORT_FAILURE_CODE = "device_control_transport_failure";
 
@@ -126,8 +127,7 @@ export function isUnexpectedSocketClosure(error: unknown): boolean {
   if (error instanceof McpError) {
     return false;
   }
-  const message = error instanceof Error ? error.message : String(error);
-  return message.includes("The socket connection was closed unexpectedly");
+  return errorMessage(error).includes("The socket connection was closed unexpectedly");
 }
 
 export function isDeviceControlTransportRequest(request: DaemonRequest): boolean {

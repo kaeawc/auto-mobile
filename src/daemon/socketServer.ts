@@ -1273,7 +1273,7 @@ export class UnixSocketServer {
         context.socketSessionId,
       );
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorMessage(error);
       if (message.includes("Session not found")) {
         return this.retryExpiredMcpSession(context, identity);
       }

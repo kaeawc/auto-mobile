@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/describeUnknownError";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
 import { ActionableError, BootedDevice } from "../models/index";
@@ -56,10 +57,10 @@ const barrierHandler = async (
     // until their own barrier timeout.
     coordinator.forceCleanup(lock, namespace);
 
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    logger.error(`Device ${device.deviceId} error at barrier "${lock}": ${errorMessage}`);
+    const errorMsg = errorMessage(error);
+    logger.error(`Device ${device.deviceId} error at barrier "${lock}": ${errorMsg}`);
     throw new ActionableError(
-      `Barrier "${lock}" failed for device ${device.deviceId}: ${errorMessage}`,
+      `Barrier "${lock}" failed for device ${device.deviceId}: ${errorMsg}`,
     );
   }
 

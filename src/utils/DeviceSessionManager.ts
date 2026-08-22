@@ -1,3 +1,4 @@
+import { errorMessage } from "./describeUnknownError";
 import { ActionableError, BootedDevice, Platform, SomePlatform } from "../models";
 import { MultiPlatformDeviceManager, waitForDeviceReadyOrCancel } from "./deviceUtils";
 import { AdbClientFactory, defaultAdbClientFactory } from "./android-cmdline-tools/AdbClientFactory";
@@ -550,9 +551,9 @@ export class DeviceSessionManager implements DeviceSessionManager {
         }
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMsg = errorMessage(error);
       throw new ActionableError(
-        `Failed to verify Android device ${deviceId} readiness: ${errorMessage}`
+        `Failed to verify Android device ${deviceId} readiness: ${errorMsg}`
       );
     }
 
@@ -591,9 +592,9 @@ export class DeviceSessionManager implements DeviceSessionManager {
           logger.info(`[DeviceSessionManager] Accessibility service version compatible for ${deviceId}`);
           return;
         }
-        const errorMessage = "Accessibility service version mismatch detected. Run without skipCtrlProxyDownload to install a compatible version.";
-        logger.warn(`[DeviceSessionManager] ${errorMessage} Device: ${deviceId}`);
-        throw new ActionableError(errorMessage);
+        const errorMsg = "Accessibility service version mismatch detected. Run without skipCtrlProxyDownload to install a compatible version.";
+        logger.warn(`[DeviceSessionManager] ${errorMsg} Device: ${deviceId}`);
+        throw new ActionableError(errorMsg);
       };
 
       const [isInstalled, isEnabled] = await perf.track("checkStatus", () => Promise.all([
@@ -646,8 +647,8 @@ export class DeviceSessionManager implements DeviceSessionManager {
             logger.info(`[DeviceSessionManager] Accessibility service enabled for ${deviceId}, verifying version compatibility`);
           }
         } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          logger.warn(`[DeviceSessionManager] Failed to enable accessibility service: ${errorMessage}`);
+          const errorMsg = errorMessage(error);
+          logger.warn(`[DeviceSessionManager] Failed to enable accessibility service: ${errorMsg}`);
           if (skipCtrlProxyDownload) {
             return;
           }
@@ -676,8 +677,8 @@ export class DeviceSessionManager implements DeviceSessionManager {
         }
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      logger.error(`[DeviceSessionManager] Failed to setup accessibility service: ${errorMessage}`);
+      const errorMsg = errorMessage(error);
+      logger.error(`[DeviceSessionManager] Failed to setup accessibility service: ${errorMsg}`);
       // Rethrow ActionableErrors to preserve their specific error messages
       if (error instanceof ActionableError) {
         throw error;

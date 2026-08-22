@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { platform } from "node:os";
 import path from "node:path";
 import { promises as fsPromises } from "node:fs";
@@ -643,7 +644,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       const text = (result.stdout || result.stderr || "").replace(/\s+/g, " ").trim();
       return text ? `simulator state: ${text.slice(0, 500)}` : "simulator state: (empty)";
     } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
+      const reason = errorMessage(error);
       return `simulator state unavailable: ${reason}`;
     }
   }
@@ -660,7 +661,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     try {
       await waitForRecordingFileReady(capturePath);
     } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
+      const reason = errorMessage(error);
       throw new ActionableError(
         this.buildProcessFailureMessage(
           `iOS recording file missing at ${capturePath}: ${reason}`,

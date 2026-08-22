@@ -1,3 +1,4 @@
+import { errorMessage } from "./describeUnknownError";
 import type { BootedDevice } from "../models";
 import { ActionableError } from "../models";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
@@ -859,7 +860,7 @@ export class RunnerReadinessService {
 }
 
 function normalizeDiagnostic(error: unknown): string {
-  const raw = error instanceof Error ? error.message : String(error);
+  const raw = errorMessage(error);
   const redacted = redactAndroidCommandOutput(raw);
   if (redacted.length <= MAX_DIAGNOSTIC_LENGTH) {
     return redacted;

@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { Builder, parseStringPromise } from "xml2js";
 import { defaultAdbClientFactory, type AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -594,7 +595,7 @@ function shellQuoteUnlessSafe(value: string): string {
 }
 
 function looksLikeMissingAndroidPrefsFile(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = errorMessage(error);
   if (!/No such file|not found|does not exist/i.test(message)) {
     return false;
   }
@@ -602,7 +603,7 @@ function looksLikeMissingAndroidPrefsFile(error: unknown): boolean {
 }
 
 function looksLikeMissingIosDefault(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = errorMessage(error);
   return /does not exist|Domain .* does not exist|does not contain/i.test(message);
 }
 

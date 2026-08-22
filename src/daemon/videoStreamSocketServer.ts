@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/describeUnknownError";
 import type { Socket } from "node:net";
 import { logger } from "../utils/logger";
 import { toActionableError } from "../models/ActionableError";
@@ -179,7 +180,7 @@ function subscribeFailureResponse(
     id: requestId,
     type: "video_stream_response",
     success: false,
-    error: error instanceof Error ? error.message : String(error),
+    error: errorMessage(error),
   };
 }
 

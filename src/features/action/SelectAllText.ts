@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
@@ -52,7 +53,7 @@ export class SelectAllText extends BaseVisualChange {
           perf.end();
           return {
             success: false,
-            error: `Failed to select all text: ${error instanceof Error ? error.message : String(error)}`
+            error: `Failed to select all text: ${errorMessage(error)}`
           };
         }
       },

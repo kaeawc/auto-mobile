@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import {
   ActionableError,
@@ -233,7 +234,7 @@ export class PinchOn extends BaseVisualChange {
       };
     } catch (error) {
       perf.end();
-      const baseErrorMessage = error instanceof Error ? error.message : String(error);
+      const baseErrorMessage = errorMessage(error);
       let finalErrorMessage = `Failed to perform pinch: ${baseErrorMessage}`;
 
       if (this.visionConfig.enabled && options.container) {

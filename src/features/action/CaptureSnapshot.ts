@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { BootedDevice, ActionableError, DeviceSnapshotManifest, DeviceSnapshotType } from "../../models";
 import type { SnapshotCaptureProvider } from "../../utils/interfaces/SnapshotProvider";
 import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
@@ -172,7 +173,7 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
 
       return manifest;
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorMessage(error);
       logger.error(`Failed to capture VM snapshot: ${message}`);
       throw new ActionableError(`Failed to capture VM snapshot: ${message}`);
     }

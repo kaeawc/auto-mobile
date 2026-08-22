@@ -1,3 +1,4 @@
+import { errorMessage } from "../describeUnknownError";
 import {
   Plan,
   PlanStep,
@@ -271,7 +272,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
     } catch (error) {
       return {
         capturedAtMs: Date.now(),
-        observeError: error instanceof Error ? error.message : String(error),
+        observeError: errorMessage(error),
       };
     }
   }
@@ -316,7 +317,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
     } catch (error) {
       return {
         capturedAtMs: Date.now(),
-        observeError: error instanceof Error ? error.message : String(error),
+        observeError: errorMessage(error),
       };
     }
   }
@@ -517,7 +518,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
       if (isDeviceLostError(error)) {
         throw error;
       }
-      const errorMessage = `${error}`;
+      const errorMsg = `${error}`;
       if (step.optional && !context.signal?.aborted && !(error instanceof ZodError)) {
         this.logger.warn(
           `${context.logPrefix} optional step ${step.tool} threw; returning skipped status`,
@@ -525,10 +526,10 @@ export class DefaultPlanExecutor implements PlanExecutor {
         );
         return {
           status: "skipped",
-          error: errorMessage,
+          error: errorMsg,
           details: {
             params: step.params,
-            error: errorMessage,
+            error: errorMsg,
             optional: true,
           },
         };
@@ -549,10 +550,10 @@ export class DefaultPlanExecutor implements PlanExecutor {
       );
       return {
         status: "failed",
-        error: errorMessage,
+        error: errorMsg,
         details: {
           params: step.params,
-          error: errorMessage,
+          error: errorMsg,
           ...(failureObservation ? { failureObservation } : {}),
         },
         failureObservation,
@@ -885,8 +886,8 @@ export class DefaultPlanExecutor implements PlanExecutor {
         if (isDeviceLostError(error)) {
           throw error;
         }
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        logger.error(`[PARALLEL_EXEC][${device}] Unexpected error: ${errorMessage}`);
+        const errorMsg = errorMessage(error);
+        logger.error(`[PARALLEL_EXEC][${device}] Unexpected error: ${errorMsg}`);
 
         const deviceResult: DeviceExecutionResult = {
           device,
@@ -898,7 +899,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
             stepIndex: -1,
             trackIndex: -1,
             tool: "unknown",
-            error: errorMessage,
+            error: errorMsg,
           },
         };
 
@@ -909,7 +910,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
             device,
             stepIndex: -1,
             tool: "unknown",
-            error: errorMessage,
+            error: errorMsg,
           };
         }
 
@@ -925,7 +926,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
             stepIndex: -1,
             trackIndex: -1,
             tool: "unknown",
-            error: errorMessage,
+            error: errorMsg,
           },
           skippedSteps: [],
         };
@@ -1090,8 +1091,8 @@ export class DefaultPlanExecutor implements PlanExecutor {
       if (isDeviceLostError(error)) {
         throw error;
       }
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      logger.error(`[PARALLEL_EXEC][${device}] Track execution error: ${errorMessage}`);
+      const errorMsg = errorMessage(error);
+      logger.error(`[PARALLEL_EXEC][${device}] Track execution error: ${errorMsg}`);
 
       return {
         success: false,
@@ -1101,7 +1102,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
           stepIndex: -1,
           trackIndex: -1,
           tool: "unknown",
-          error: errorMessage,
+          error: errorMsg,
         },
         skippedSteps,
       };

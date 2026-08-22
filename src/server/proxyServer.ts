@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/describeUnknownError";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
   ListToolsRequestSchema,
@@ -137,7 +138,7 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
       }
       logger.error(`[ProxyServer] Failed to list tools: ${error}`);
       throw new ActionableError(
-        `Failed to list tools from daemon: ${error instanceof Error ? error.message : String(error)}`
+        `Failed to list tools from daemon: ${errorMessage(error)}`
       );
     }
   });
@@ -169,7 +170,7 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
         content: [
           {
             type: "text",
-            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+            text: `Error: ${errorMessage(error)}`,
           },
         ],
         isError: true,
@@ -188,7 +189,7 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
       }
       logger.error(`[ProxyServer] Failed to list resources: ${error}`);
       throw new ActionableError(
-        `Failed to list resources from daemon: ${error instanceof Error ? error.message : String(error)}`
+        `Failed to list resources from daemon: ${errorMessage(error)}`
       );
     }
   });
@@ -204,7 +205,7 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
       }
       logger.error(`[ProxyServer] Failed to list resource templates: ${error}`);
       throw new ActionableError(
-        `Failed to list resource templates from daemon: ${error instanceof Error ? error.message : String(error)}`
+        `Failed to list resource templates from daemon: ${errorMessage(error)}`
       );
     }
   });
@@ -228,7 +229,7 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
       }
       logger.error(`[ProxyServer] Resource read failed: ${uri} - ${error}`);
       throw new ActionableError(
-        `Failed to read resource from daemon: ${error instanceof Error ? error.message : String(error)}`
+        `Failed to read resource from daemon: ${errorMessage(error)}`
       );
     }
   });

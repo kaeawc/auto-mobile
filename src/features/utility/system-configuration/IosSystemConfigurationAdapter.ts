@@ -1,3 +1,4 @@
+import { errorMessage } from "../../../utils/describeUnknownError";
 import type { HostCommandExecutor } from "../../../utils/HostCommandExecutor";
 import { logger } from "../../../utils/logger";
 import type {
@@ -74,11 +75,11 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
         method: "defaults write AppleLocale + AppleLanguages"
       };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMsg = errorMessage(error);
       return {
         success: false,
         languageTag,
-        error: `Failed to set locale: ${errorMessage}`
+        error: `Failed to set locale: ${errorMsg}`
       };
     }
   }
@@ -116,11 +117,11 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
         previousZoneId
       };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMsg = errorMessage(error);
       return {
         success: false,
         zoneId,
-        error: `Failed to set time zone: ${errorMessage}`
+        error: `Failed to set time zone: ${errorMsg}`
       };
     }
   }
@@ -165,11 +166,11 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
         previousFormat
       };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMsg = errorMessage(error);
       return {
         success: false,
         enabled,
-        error: `Failed to set 24-hour format: ${errorMessage}`
+        error: `Failed to set 24-hour format: ${errorMsg}`
       };
     }
   }
@@ -197,11 +198,11 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
         previousCalendarSystem
       };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMsg = errorMessage(error);
       return {
         success: false,
         calendarSystem,
-        error: `Failed to set calendar system: ${errorMessage}`
+        error: `Failed to set calendar system: ${errorMsg}`
       };
     }
   }

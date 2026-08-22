@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/describeUnknownError";
 import type { Kysely } from "kysely";
 import { getDatabase } from "./database";
 import type { Database } from "./types";
@@ -98,7 +99,7 @@ export class ProvisionDeviceOperationRepository implements ProvisionDeviceOperat
       if (!raced) {
         throw new Error(
           `Could not create provisionDevice operation '${operationId}': ` +
-          `${error instanceof Error ? error.message : String(error)}`,
+          `${errorMessage(error)}`,
         );
       }
       return this.resolveExisting(operationId, requestFingerprint, raced);

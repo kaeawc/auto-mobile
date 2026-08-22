@@ -1,3 +1,4 @@
+import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import { BootedDevice } from "../../../models";
 import { ScreenshotResult } from "../../../models/ScreenshotResult";
@@ -129,13 +130,13 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
         await promise;
       });
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      if (errorMessage.includes(OPERATION_CANCELLED_MESSAGE)) {
+      const errorMsg = errorMessage(error);
+      if (errorMsg.includes(OPERATION_CANCELLED_MESSAGE)) {
         logger.debug("[OBSERVE] Screenshot capture cancelled");
         return;
       }
-      this.store.update(this.device.deviceId, undefined, errorMessage);
-      logger.warn(`[OBSERVE] Screenshot capture failed: ${errorMessage}`);
+      this.store.update(this.device.deviceId, undefined, errorMsg);
+      logger.warn(`[OBSERVE] Screenshot capture failed: ${errorMsg}`);
     }
   }
 
@@ -144,13 +145,13 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
     options: { ignoreCancel?: boolean } = {}
   ): Promise<void> {
     if (!screenshotResult.success) {
-      const errorMessage = screenshotResult.error || "Failed to capture screenshot";
-      if (options.ignoreCancel && errorMessage.includes(OPERATION_CANCELLED_MESSAGE)) {
+      const errorMsg = screenshotResult.error || "Failed to capture screenshot";
+      if (options.ignoreCancel && errorMsg.includes(OPERATION_CANCELLED_MESSAGE)) {
         logger.debug("[OBSERVE] Screenshot capture cancelled");
         return;
       }
-      this.store.update(this.device.deviceId, undefined, errorMessage);
-      logger.warn(`[OBSERVE] Screenshot capture failed: ${errorMessage}`);
+      this.store.update(this.device.deviceId, undefined, errorMsg);
+      logger.warn(`[OBSERVE] Screenshot capture failed: ${errorMsg}`);
       return;
     }
 

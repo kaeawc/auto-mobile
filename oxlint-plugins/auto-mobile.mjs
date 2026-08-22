@@ -494,12 +494,117 @@ const namingConventionRule = {
 	},
 };
 
+// Bans the inline message-only idiom `X instanceof Error ? X.message :
+// String(X)` (issue #5457). There is one canonical helper, errorMessage(X) from
+// utils/describeUnknownError, so the ternary should never be written by hand.
+// Matches only the EXACT message-only shape where all three occurrences are the
+// same identifier; richer variants (`.stack`, `: new Error(String(x))`, `.name`)
+// are deliberately left alone.
+function identifierName(node) {
+	return node?.type === "Identifier" ? node.name : null;
+}
+
+// Structural token list for a side-effect-free reference expression: an identifier,
+// `this`, a non-computed member chain (`a.b.c`), or computed access by a literal or
+// identifier index (`a[0]`, `a["0"]`, `a[i]`). Returns null for anything whose repeated
+// evaluation may not be stable (calls, computed access by an expression). Each segment
+// is canonicalized to how JavaScript resolves the property key, so the *same* property
+// compares equal regardless of spelling (`.error`/`["error"]`, `[0]`/`["0"]`), while a
+// computed identifier key stays distinct (its value can differ from a same-text literal).
+function refTokens(node) {
+	if (!node) {
+		return null;
+	}
+	if (node.type === "Identifier") {
+		return [["root", node.name]];
+	}
+	if (node.type === "ThisExpression") {
+		return [["this"]];
+	}
+	if (node.type === "MemberExpression") {
+		const base = refTokens(node.object);
+		if (base === null) {
+			return null;
+		}
+		let segment = null;
+		if (node.computed) {
+			const property = node.property;
+			if (property?.type === "Literal" && (typeof property.value === "string" || typeof property.value === "number")) {
+				segment = ["prop", String(property.value)];
+			} else if (property?.type === "Identifier") {
+				segment = ["dyn", property.name];
+			}
+		} else {
+			const prop = propertyName(node.property);
+			segment = prop === null ? null : ["prop", prop];
+		}
+		return segment === null ? null : [...base, segment];
+	}
+	return null;
+}
+
+// Canonical, collision-proof key: JSON.stringify of the structural token list, so a
+// literal property value can never be confused with the serializer's own delimiters
+// (`a["b.prop:c"]` and `a.b.c` produce different token arrays, hence different keys).
+function stableRefKey(node) {
+	const tokens = refTokens(node);
+	return tokens === null ? null : JSON.stringify(tokens);
+}
+
+const noInlineErrorNormalizeRule = {
+	meta: {
+		type: "suggestion",
+		messages: {
+			inlineNormalize: "Do not inline `X instanceof Error ? X.message : String(X)`. Use the canonical errorMessage(X) helper (import { errorMessage } from 'utils/describeUnknownError'), issue #5457.",
+		},
+	},
+	create(context) {
+		return {
+			ConditionalExpression(node) {
+				const test = node.test;
+				if (test?.type !== "BinaryExpression" || test.operator !== "instanceof") {
+					return;
+				}
+				const subjectKey = stableRefKey(test.left);
+				if (subjectKey === null || identifierName(test.right) !== "Error") {
+					return;
+				}
+				// consequent must be `<subject>.message` or `<subject>["message"]` (a
+				// computed access is only `.message` when its key is the string literal
+				// "message" — a computed identifier key like `[message]` is a different var).
+				const consequent = node.consequent;
+				const consequentIsMessage =
+					consequent?.type === "MemberExpression" &&
+					stableRefKey(consequent.object) === subjectKey &&
+					(consequent.computed
+						? consequent.property?.type === "Literal" && consequent.property.value === "message"
+						: propertyName(consequent.property) === "message");
+				if (!consequentIsMessage) {
+					return;
+				}
+				// alternate must be `String(<subject>)`.
+				const alternate = node.alternate;
+				if (
+					alternate?.type !== "CallExpression" ||
+					identifierName(alternate.callee) !== "String" ||
+					alternate.arguments.length !== 1 ||
+					stableRefKey(alternate.arguments[0]) !== subjectKey
+				) {
+					return;
+				}
+				context.report({ node, messageId: "inlineNormalize" });
+			},
+		};
+	},
+};
+
 const plugin = {
 	meta: {
 		name: "auto-mobile",
 	},
 	rules: {
 		"catch-convention": catchConventionRule,
+		"no-inline-error-normalize": noInlineErrorNormalizeRule,
 		"no-unknown-cast": noUnknownCastRule,
 		"no-accumulator-foreach": noAccumulatorForEachRule,
 		"no-bare-expect": noBareExpectRule,

@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/describeUnknownError";
 import { ToolRegistry } from "../server/toolRegistry";
 import { logger } from "../utils/logger";
 import { ActionableError } from "../models";
@@ -393,7 +394,7 @@ async function runToolViaDaemon(
     if (error instanceof ActionableError) {
       throw error;
     }
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorMessage(error);
     throw new ActionableError(
       `Error calling daemon: ${message}. ` +
       `Try: auto-mobile --daemon restart`

@@ -1,3 +1,4 @@
+import { errorMessage } from "./describeUnknownError";
 import type { Dirent } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
@@ -227,6 +228,3 @@ async function restoreOwnerWritable(dir: string): Promise<void> {
   }
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}

@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { ActionableError } from "../../models/ActionableError";
@@ -183,7 +184,7 @@ export async function prefetchVideoServerJar(deps: PrefetchVideoServerJarDeps = 
   } catch (error) {
     // Best-effort: the first stream re-resolves and surfaces any fatal error.
     logger.warn(
-      `[VIDEO_JAR] Background jar prefetch failed: ${error instanceof Error ? error.message : String(error)}`,
+      `[VIDEO_JAR] Background jar prefetch failed: ${errorMessage(error)}`,
       error
     );
   }

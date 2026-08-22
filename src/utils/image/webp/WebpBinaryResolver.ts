@@ -1,3 +1,4 @@
+import { errorMessage } from "../../describeUnknownError";
 import type { ChildProcess } from "node:child_process";
 import { constants as fsConstants, existsSync } from "node:fs";
 import * as fs from "node:fs/promises";
@@ -342,10 +343,6 @@ async function waitForCompletion(
 
 function actionableProcessError(toolName: WebpBinary, envVar: string, detail: string): ActionableError {
   return new ActionableError(`${toolName} failed (${detail}). Set ${envVar} to a working ${toolName} binary.`);
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function defaultProjectRoot(): string {

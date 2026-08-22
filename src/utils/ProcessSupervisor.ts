@@ -1,3 +1,4 @@
+import { errorMessage } from "./describeUnknownError";
 import { type BackoffPolicy } from "./Backoff";
 import { type Timer } from "./SystemTimer";
 import { logger } from "./logger";
@@ -96,7 +97,7 @@ export class DefaultProcessSupervisor implements ProcessSupervisor {
     } catch (error) {
       logger.warn(
         `[ProcessSupervisor] ${this.options.name} liveness check failed: ` +
-        `${error instanceof Error ? error.message : String(error)}`
+        `${errorMessage(error)}`
       );
     }
   }
@@ -140,7 +141,7 @@ export class DefaultProcessSupervisor implements ProcessSupervisor {
       await this.options.onRestartFailure?.(error);
       logger.warn(
         `[ProcessSupervisor] ${this.options.name} restart attempt ${attempt} failed: ` +
-        `${error instanceof Error ? error.message : String(error)}`
+        `${errorMessage(error)}`
       );
       this.scheduleRestart();
     }

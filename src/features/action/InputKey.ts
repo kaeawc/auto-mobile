@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import type { BootedDevice } from "../../models";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
@@ -122,7 +123,7 @@ export class InputKey {
         keyCode,
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorMessage(error);
       logger.warn(`input/key failed for ${key}: ${message}`, error);
       return {
         success: false,

@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/describeUnknownError";
 import { Kysely, sql } from "kysely";
 import * as path from "path";
 import * as os from "os";
@@ -343,7 +344,7 @@ function createStartupMigrationError(cause: unknown): Error {
   if (isMissingMigrationDependencyError(cause)) {
     return createIncompleteExtractionError(extractMissingPackageName(cause), cause);
   }
-  const causeMessage = cause instanceof Error ? cause.message : String(cause);
+  const causeMessage = errorMessage(cause);
   return new Error(`${DATABASE_STARTUP_MIGRATION_FAILURE} Cause: ${causeMessage}`, { cause });
 }
 

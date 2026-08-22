@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import type { BootedDevice } from "../../models";
 import { logger } from "../../utils/logger";
 import type { VoiceOverResult } from "../../models/AccessibilityResult";
@@ -57,7 +58,7 @@ export class VoiceOverToggle {
         logger.debug("[VoiceOverToggle] VoiceOver service was already stopped");
       }
     } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
+      const reason = errorMessage(error);
       logger.warn(`[VoiceOverToggle] Failed to ${enabled ? "enable" : "disable"} VoiceOver: ${reason}`);
       return {
         supported: true,

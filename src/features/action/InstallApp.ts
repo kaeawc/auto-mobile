@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import path from "path";
 import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -306,7 +307,7 @@ export class InstallApp {
       const bundleId = (await this.plist.extractRawFile("CFBundleIdentifier", path.join(appPath, "Info.plist"))).trim();
       return bundleId || undefined;
     } catch (error) {
-      logger.warn(`[InstallApp] Failed to read bundle identifier from ${appPath}: ${error instanceof Error ? error.message : String(error)}`);
+      logger.warn(`[InstallApp] Failed to read bundle identifier from ${appPath}: ${errorMessage(error)}`);
       return undefined;
     }
   }

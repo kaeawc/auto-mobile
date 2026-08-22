@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/describeUnknownError";
 import { z } from "zod/v4";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { BootedDevice } from "../models";
@@ -146,7 +147,7 @@ const startTestRecordingTool = async (device: BootedDevice): Promise<any> => {
     logger.error(`[startTestRecording] Failed to start recording: ${error}`);
     return createStructuredToolResponse({
       success: false,
-      error: error instanceof Error ? error.message : String(error),
+      error: errorMessage(error),
     });
   }
 };
@@ -205,7 +206,7 @@ const exportPlanTool = async (params: {
     logger.error(`[exportPlan] Failed to export plan: ${error}`);
     return createStructuredToolResponse({
       success: false,
-      error: error instanceof Error ? error.message : String(error),
+      error: errorMessage(error),
     });
   }
 };
@@ -287,11 +288,11 @@ const recordStepsTool = async (params: {
       durationMs: result.durationMs,
     });
   } catch (error) {
-    logger.error(`[recordSteps] Failed: ${error instanceof Error ? error.message : String(error)}`);
+    logger.error(`[recordSteps] Failed: ${errorMessage(error)}`);
     return createStructuredToolResponse({
       success: false,
       action: params.action,
-      error: error instanceof Error ? error.message : String(error),
+      error: errorMessage(error),
     });
   }
 };

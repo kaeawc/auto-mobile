@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { BootedDevice } from "../../models";
 import { logger } from "../../utils/logger";
 import { PressButton } from "./PressButton";
@@ -29,7 +30,7 @@ export class IosLockScreenUnlocker implements IosScreenUnlocker {
         error: swipe.success === false ? (swipe.warning ?? "iOS lock-screen swipe did not report success") : undefined
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorMessage(error);
       logger.warn(`[IosLockScreenUnlocker] wake+dismiss failed: ${message}`);
       return { success: false, error: message };
     }

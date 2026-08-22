@@ -1,3 +1,4 @@
+import { errorMessage } from "./describeUnknownError";
 import { AdbClientFactory, defaultAdbClientFactory } from "./android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "./android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "./logger";
@@ -319,7 +320,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       return AndroidCtrlProxyManager.prefetchedApkPath;
     } catch (error) {
       // APK prefetch is an optimization; callers can proceed without a prefetched APK.
-      logger.debug(`[CTRL_PROXY] Prefetched APK unavailable: ${error instanceof Error ? error.message : String(error)}`, error);
+      logger.debug(`[CTRL_PROXY] Prefetched APK unavailable: ${errorMessage(error)}`, error);
       return null;
     }
   }
@@ -346,7 +347,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       return true;
     } catch (error) {
       logger.warn("[CTRL_PROXY] Failed to copy prefetched APK", {
-        error: error instanceof Error ? error.message : String(error)
+        error: errorMessage(error)
       });
       return false;
     }
@@ -371,7 +372,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       return true;
     } catch (error) {
       logger.warn("[CTRL_PROXY] Failed to copy completed prefetched APK", {
-        error: error instanceof Error ? error.message : String(error)
+        error: errorMessage(error)
       });
       return false;
     }
@@ -388,7 +389,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         logger.info("[CTRL_PROXY] Cleaned up prefetched APK", { path: tempDir });
       } catch (error) {
         logger.warn("[CTRL_PROXY] Failed to clean up prefetched APK", {
-          error: error instanceof Error ? error.message : String(error)
+          error: errorMessage(error)
         });
       }
       AndroidCtrlProxyManager.prefetchedApkPath = null;
@@ -512,7 +513,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         throw new Error("AndroidManifest.xml missing");
       }
     } catch (error) {
-      throw new Error(`APK integrity check failed: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(`APK integrity check failed: ${errorMessage(error)}`);
     }
   }
 
@@ -848,7 +849,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
       return await this.installDownloadedApk(apkPath, result, isInstalled, needsReinstallDueToUnknownSha, perf);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorMessage(error);
       const downloadUnavailable = this.isNetworkError(message);
       const failedResult: AccessibilityVersionCheckResult = {
         ...result,
@@ -943,7 +944,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         };
       } catch (upgradeError) {
         perf.endOperation("installApk");
-        const upgradeMessage = upgradeError instanceof Error ? upgradeError.message : String(upgradeError);
+        const upgradeMessage = errorMessage(upgradeError);
         logger.warn("[CTRL_PROXY] Upgrade failed, attempting reinstall", { error: upgradeMessage });
         result.upgradeError = upgradeMessage;
       }
@@ -965,7 +966,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         status: isInstalled ? "reinstalled" : "installed"
       };
     } catch (reinstallError) {
-      const reinstallMessage = reinstallError instanceof Error ? reinstallError.message : String(reinstallError);
+      const reinstallMessage = errorMessage(reinstallError);
       logger.warn(`[CTRL_PROXY] APK reinstall failed: ${reinstallMessage}`, reinstallError);
       this.clearServiceAvailabilityCache();
       return {
@@ -1050,10 +1051,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         await this.cleanupApk(apkPath);
       } catch (cleanupError) {
         // Failed-download cleanup is best-effort; the original download error still surfaces below.
-        logger.debug(`[CTRL_PROXY] Failed to clean up incomplete APK download: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`, cleanupError);
+        logger.debug(`[CTRL_PROXY] Failed to clean up incomplete APK download: ${errorMessage(cleanupError)}`, cleanupError);
       }
 
-      throw new Error(`Failed to download APK: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(`Failed to download APK: ${errorMessage(error)}`);
     }
   }
 
@@ -1066,7 +1067,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         throw new Error("AndroidManifest.xml missing");
       }
     } catch (error) {
-      throw new Error(`APK integrity check failed: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(`APK integrity check failed: ${errorMessage(error)}`);
     }
   }
 
@@ -1111,7 +1112,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
       logger.info("APK installed successfully");
     } catch (error) {
-      throw new Error(`Failed to install APK: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(`Failed to install APK: ${errorMessage(error)}`);
     }
   }
 
@@ -1166,7 +1167,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       logger.info("Accessibility Service enabled successfully via settings");
 
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
+      const errorMsg = errorMessage(error);
       const errorLower = errorMsg.toLowerCase();
 
       // Categorize error types for clearer feedback
@@ -1239,7 +1240,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
       logger.info("Accessibility Service disabled successfully via settings");
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
+      const errorMsg = errorMessage(error);
       const errorLower = errorMsg.toLowerCase();
 
       // Categorize error types for clearer feedback
@@ -1315,7 +1316,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       logger.info(`[CTRL_PROXY] Accessibility Service enabled successfully via settings for user ${userId}`);
 
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
+      const errorMsg = errorMessage(error);
       const errorLower = errorMsg.toLowerCase();
 
       // Categorize error types for clearer feedback
@@ -1359,7 +1360,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     } catch (error) {
       logger.warn("Failed to clean up temporary APK file", {
         path: apkPath,
-        error: error instanceof Error ? error.message : String(error)
+        error: errorMessage(error)
       });
     }
   }
@@ -1450,7 +1451,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       };
 
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
+      const errorMsg = errorMessage(error);
       const errorLower = errorMsg.toLowerCase();
 
       // Provide categorized error messages for better debugging
@@ -1621,7 +1622,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       }
     } catch (error) {
       logger.warn("[CTRL_PROXY] sha256sum unavailable or failed, falling back to host hash", {
-        error: error instanceof Error ? error.message : String(error)
+        error: errorMessage(error)
       });
     }
 
@@ -1640,20 +1641,20 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       };
     } catch (error) {
       logger.warn("[CTRL_PROXY] Failed to compute installed APK hash via host fallback", {
-        error: error instanceof Error ? error.message : String(error)
+        error: errorMessage(error)
       });
       return {
         sha256: null,
         source: "none",
         apkPath,
-        error: error instanceof Error ? error.message : String(error)
+        error: errorMessage(error)
       };
     } finally {
       try {
         await fs.rm(tempDir, { recursive: true, force: true });
       } catch (cleanupError) {
         // Temp-dir cleanup is best-effort; checksum fallback already completed or returned.
-        logger.debug(`[CTRL_PROXY] Failed to remove temporary APK hash directory: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`, cleanupError);
+        logger.debug(`[CTRL_PROXY] Failed to remove temporary APK hash directory: ${errorMessage(cleanupError)}`, cleanupError);
       }
     }
   }
@@ -1678,7 +1679,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       return line.replace("package:", "").trim() || null;
     } catch (error) {
       logger.warn("[CTRL_PROXY] Failed to resolve installed APK path", {
-        error: error instanceof Error ? error.message : String(error)
+        error: errorMessage(error)
       });
       return null;
     }

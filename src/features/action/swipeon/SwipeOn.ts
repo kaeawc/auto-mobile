@@ -1,3 +1,4 @@
+import { errorMessage } from "../../../utils/describeUnknownError";
 import { BaseVisualChange, ProgressCallback } from "../BaseVisualChange";
 import {
   ActionableError,
@@ -301,8 +302,8 @@ export class SwipeOn extends BaseVisualChange {
         : undefined;
 
       // Apply vision fallback for element-related errors
-      const baseErrorMessage = error instanceof Error ? error.message : String(error);
-      let errorMessage = `Failed to perform swipeOn: ${baseErrorMessage}`;
+      const baseErrorMessage = errorMessage(error);
+      let errorMsg = `Failed to perform swipeOn: ${baseErrorMessage}`;
 
       if (this.visionConfig.enabled && (normalizedOptions.lookFor || normalizedOptions.container)) {
         let searchCriteria: import("../../../vision/VisionTypes").ElementSearchCriteria | null = null;
@@ -323,12 +324,12 @@ export class SwipeOn extends BaseVisualChange {
         if (searchCriteria) {
           const cachedObserve = await this.observeScreen.getMostRecentCachedObserveResult();
           const viewHierarchy = cachedObserve?.viewHierarchy ?? null;
-          errorMessage = await getVisionEnrichedError(
+          errorMsg = await getVisionEnrichedError(
             this.screenshotCapturer,
             viewHierarchy,
             searchCriteria,
             this.visionConfig,
-            errorMessage,
+            errorMsg,
             undefined,
             this.visionAnalyzer
           );
@@ -337,7 +338,7 @@ export class SwipeOn extends BaseVisualChange {
 
       return {
         success: false,
-        error: errorMessage,
+        error: errorMsg,
         targetType: normalizedOptions.container ? "element" : "screen",
         x1: 0,
         y1: 0,

@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { Socket } from "node:net";
 import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
@@ -59,7 +60,7 @@ export abstract class RequestResponseSocketServer<
       logger.error(`[${this.serverName}] Request handler error: ${error}`);
       const errorResponse = this.createErrorResponse(
         request.id,
-        error instanceof Error ? error.message : String(error)
+        errorMessage(error)
       );
       this.sendJson(socket, errorResponse);
     }

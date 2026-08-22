@@ -1,3 +1,4 @@
+import { errorMessage } from "../describeUnknownError";
 import { promises as fsPromises } from "node:fs";
 import os from "node:os";
 import { logger } from "../logger";
@@ -81,7 +82,7 @@ export async function secureFile(filePath: string): Promise<void> {
 }
 
 const normalize = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error);
+  errorMessage(error);
 
 /** Default implementation backed by the real filesystem. */
 export const defaultSecurePermissions: SecurePermissions = {

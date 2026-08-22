@@ -1,3 +1,4 @@
+import { errorMessage } from "./describeUnknownError";
 export interface CommandErrorFormatOptions {
   command: string;
   args?: string[];
@@ -36,7 +37,7 @@ export function formatCommandError(error: unknown, options: CommandErrorFormatOp
     stderr?: string | Buffer;
     signal?: NodeJS.Signals;
   };
-  const baseMessage = outputExcerpt(error instanceof Error ? error.message : String(error));
+  const baseMessage = outputExcerpt(errorMessage(error));
   const stdout = textFrom(options.stdout) || textFrom(err.stdout);
   const stderr = textFrom(options.stderr) || textFrom(err.stderr);
   const lines = [`Command failed: ${commandLine(options.command, options.args)}`];

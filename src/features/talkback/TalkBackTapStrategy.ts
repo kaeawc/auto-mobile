@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import type { Element } from "../../models/Element";
 import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
@@ -247,15 +248,15 @@ export class TalkBackTapStrategy {
       return { ...activationResult, screenReaderNavigation: navigationResult };
 
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      logger.warn(`[TalkBackTapStrategy] Focus navigation failed: ${errorMessage}`);
+      const errorMsg = errorMessage(error);
+      logger.warn(`[TalkBackTapStrategy] Focus navigation failed: ${errorMsg}`);
       return {
         success: false,
         method: "focus-navigation",
-        error: errorMessage,
+        error: errorMsg,
         screenReaderNavigation: screenReaderNavigation
-          ? { ...screenReaderNavigation, focusTrapDetected: this.isFocusTrapError(errorMessage) }
-          : { reachable: false, traversalOrder: [], focusTrapDetected: this.isFocusTrapError(errorMessage) }
+          ? { ...screenReaderNavigation, focusTrapDetected: this.isFocusTrapError(errorMsg) }
+          : { reachable: false, traversalOrder: [], focusTrapDetected: this.isFocusTrapError(errorMsg) }
       };
     }
   }

@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AndroidDeviceShellToolResult, BootedDevice } from "../../models";
@@ -53,7 +54,7 @@ export class SetAndroidNotificationsEnabled {
       logger.info(`[SetAndroidNotificationsEnabled] ${input.enabled ? "enabled" : "disabled"} notifications for ${packageName}`);
       return { success: true, appId: packageName };
     } catch (cause) {
-      const message = cause instanceof Error ? cause.message : String(cause);
+      const message = errorMessage(cause);
       logger.warn(`[SetAndroidNotificationsEnabled] failed for ${packageName}: ${message}`);
       return { success: false, appId: packageName, error: message };
     } finally {

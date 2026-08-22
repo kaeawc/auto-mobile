@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import { BootedDevice, BiometricAuthResult, ExecResult } from "../../models";
@@ -265,7 +266,7 @@ export class BiometricAuth extends BaseVisualChange {
         fingerprintId: options.fingerprintId,
         errorCode: options.errorCode,
         supported: true,
-        error: `Failed to post iOS biometric notification: ${error instanceof Error ? error.message : String(error)}`
+        error: `Failed to post iOS biometric notification: ${errorMessage(error)}`
       };
     }
   }
@@ -413,7 +414,7 @@ export class BiometricAuth extends BaseVisualChange {
         fingerprintId,
         errorCode: options.errorCode,
         supported: true,
-        error: `Failed to execute emu finger commands: ${error instanceof Error ? error.message : String(error)}`
+        error: `Failed to execute emu finger commands: ${errorMessage(error)}`
       };
     }
   }

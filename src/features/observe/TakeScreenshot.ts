@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { promises as fsPromises } from "node:fs";
 import { pathExists } from "../../utils/filesystem/DefaultFileSystem";
 import path from "path";
@@ -174,11 +175,11 @@ export class TakeScreenshot implements ScreenshotService {
       return captureResult;
     } catch (err) {
       const totalDuration = this.timer.now() - startTime;
-      const errorMessage = err instanceof Error ? err.message : String(err);
-      logger.warn(`[SCREENSHOT] Execute failed after ${totalDuration}ms: ${errorMessage}`);
+      const errorMsg = errorMessage(err);
+      logger.warn(`[SCREENSHOT] Execute failed after ${totalDuration}ms: ${errorMsg}`);
       return {
         success: false,
-        error: `Failed to take screenshot: ${errorMessage}`
+        error: `Failed to take screenshot: ${errorMsg}`
       };
     }
   }
@@ -239,9 +240,9 @@ export class TakeScreenshot implements ScreenshotService {
     try {
       return await this.captureScreenshotBase64(finalPath, options, signal);
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : String(err);
-      if (errorMessage.includes("maxBuffer") || errorMessage.includes("stdout") || errorMessage.includes("buffer")) {
-        logger.info(`[SCREENSHOT] Base64 approach failed (${errorMessage}), falling back to file pull approach`);
+      const errorMsg = errorMessage(err);
+      if (errorMsg.includes("maxBuffer") || errorMsg.includes("stdout") || errorMsg.includes("buffer")) {
+        logger.info(`[SCREENSHOT] Base64 approach failed (${errorMsg}), falling back to file pull approach`);
         return await this.captureScreenshotFilePull(finalPath, options, signal);
       } else {
         // For other errors, don't fallback
@@ -279,11 +280,11 @@ export class TakeScreenshot implements ScreenshotService {
       const result = await client.requestScreenshot(10000); // 10 second timeout
       return await this.writeiOSScreenshot(finalPath, result, startTime, signal);
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      logger.error(`[SCREENSHOT] iOS screenshot capture failed: ${errorMessage}`);
+      const errorMsg = errorMessage(error);
+      logger.error(`[SCREENSHOT] iOS screenshot capture failed: ${errorMsg}`);
       return {
         success: false,
-        error: errorMessage,
+        error: errorMsg,
       };
     }
   }
@@ -511,8 +512,8 @@ export class TakeScreenshot implements ScreenshotService {
       };
     } catch (err) {
       const totalDuration = this.timer.now() - startTime;
-      const errorMessage = err instanceof Error ? err.message : String(err);
-      logger.warn(`[SCREENSHOT] File pull screenshot capture failed after ${totalDuration}ms: ${errorMessage}`);
+      const errorMsg = errorMessage(err);
+      logger.warn(`[SCREENSHOT] File pull screenshot capture failed after ${totalDuration}ms: ${errorMsg}`);
 
       // Clean up any temp files
       try {

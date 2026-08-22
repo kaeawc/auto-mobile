@@ -1,3 +1,4 @@
+import { errorMessage } from "../describeUnknownError";
 import { promises as fs } from "fs";
 import { homedir } from "os";
 import { join } from "path";
@@ -145,7 +146,7 @@ const fingerprintFromCertificate = (base64Der: string): CertificateInfo | null =
       issuer: cert.issuer
     };
   } catch (error) {
-    logger.warn(`[XcodeSigning] Failed to parse certificate: ${error instanceof Error ? error.message : String(error)}`);
+    logger.warn(`[XcodeSigning] Failed to parse certificate: ${errorMessage(error)}`);
     return null;
   }
 };
@@ -323,7 +324,7 @@ export class XcodeSigningManager {
       }
       return [...teams];
     } catch (error) {
-      logger.warn(`[XcodeSigning] Failed to detect team IDs: ${error instanceof Error ? error.message : String(error)}`);
+      logger.warn(`[XcodeSigning] Failed to detect team IDs: ${errorMessage(error)}`);
       return [];
     }
   }
@@ -514,7 +515,7 @@ export class XcodeSigningManager {
         path
       };
     } catch (error) {
-      logger.warn(`[XcodeSigning] Failed to parse provisioning profile: ${error instanceof Error ? error.message : String(error)}`);
+      logger.warn(`[XcodeSigning] Failed to parse provisioning profile: ${errorMessage(error)}`);
       return null;
     }
   }

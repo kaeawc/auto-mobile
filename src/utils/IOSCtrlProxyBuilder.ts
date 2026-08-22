@@ -1,3 +1,4 @@
+import { errorMessage } from "./describeUnknownError";
 import * as fs from "fs/promises";
 import * as path from "path";
 import os from "os";
@@ -489,7 +490,7 @@ export class IOSCtrlProxyBuilder {
         }
       }
     } catch (error) {
-      logger.warn(`[IOSCtrlProxyBuilder] Failed to clean stale xctestrun files: ${error instanceof Error ? error.message : String(error)}`);
+      logger.warn(`[IOSCtrlProxyBuilder] Failed to clean stale xctestrun files: ${errorMessage(error)}`);
     }
   }
 
@@ -604,7 +605,7 @@ export class IOSCtrlProxyBuilder {
         xctestrunPath: xctestrunPath || undefined,
       };
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
+      const errorMsg = errorMessage(error);
       logger.error("[IOSCtrlProxyBuilder] Download failed:", errorMsg);
 
       perf.end();
@@ -928,7 +929,7 @@ export class IOSCtrlProxyBuilder {
           await this.downloader.download(this.getBundleUrl(), bundlePath);
         } catch (error) {
           if (isLatest && cachedBundleExists) {
-            logger.warn(`[IOSCtrlProxyBuilder] Download failed, using cached bundle: ${error instanceof Error ? error.message : String(error)}`);
+            logger.warn(`[IOSCtrlProxyBuilder] Download failed, using cached bundle: ${errorMessage(error)}`);
             // `cachedBundleExists` only proves the cached IPA is size-valid — NOT
             // that its checksum matches. build() skips extractBundle+verifyBundle
             // for the fallback path, so checksum-verify here before reuse instead
@@ -1239,7 +1240,7 @@ export class IOSCtrlProxyBuilder {
       // as a non-fatal warning by default so a broken toolchain does not block
       // launch; fail closed only when the operator opted in.
       const message = `Code-signing verification could not run for the ${platform} runner: ` +
-        `${error instanceof Error ? error.message : String(error)}`;
+        `${errorMessage(error)}`;
       this.applyCodesignPolicy(message, requireCodesign, error);
       return;
     }

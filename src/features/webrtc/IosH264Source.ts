@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { existsSync } from "node:fs";
 import { basename } from "node:path";
 import type { Readable, Writable } from "node:stream";
@@ -1623,7 +1624,7 @@ export class IosH264Source implements H264CaptureSource {
       } catch (error) {
         logger.warn(
           `[IosH264Source] reconnect attempt ${attempt}/${this.runningReconnectMaxAttempts} failed: ` +
-          `${error instanceof Error ? error.message : String(error)}`
+          `${errorMessage(error)}`
         );
         await this.beginTeardown();
         const phase = this.phaseNow();
@@ -1913,7 +1914,7 @@ async function validateFfmpegAvailability(
   try {
     await ffmpegClient.probe({ requiredEncoders: ["h264_videotoolbox"] });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorMessage(error);
     if (message.includes("missing required encoder")) {
       throw new ActionableError(
         "iOS WebRTC streaming requires an ffmpeg build with the h264_videotoolbox encoder."
@@ -1934,7 +1935,7 @@ async function validateFfmpegAvailabilityWithRunner(
     version = await commandRunner(ffmpegPath, ["-version"]);
   } catch (error) {
     throw new ActionableError(
-      `iOS WebRTC streaming requires ffmpeg. Set ${IOS_WEBRTC_FFMPEG_ENV} to a working ffmpeg binary. ${error instanceof Error ? error.message : String(error)}`
+      `iOS WebRTC streaming requires ffmpeg. Set ${IOS_WEBRTC_FFMPEG_ENV} to a working ffmpeg binary. ${errorMessage(error)}`
     );
   }
   if (version.exitCode !== 0) {

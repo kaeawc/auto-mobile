@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/describeUnknownError";
 import { promises as fsPromises } from "node:fs";
 import path from "node:path";
 import { logger } from "../utils/logger";
@@ -47,7 +48,7 @@ export async function writeSegmentManifest(
   } catch (error) {
     logger.warn(
       `[VideoRecording] Failed to write segment manifest for session ${sessionId}: ` +
-      `${error instanceof Error ? error.message : String(error)}`
+      `${errorMessage(error)}`
     );
     return undefined;
   }

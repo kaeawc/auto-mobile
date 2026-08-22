@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/describeUnknownError";
 import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
 import {
   type DeviceDiscoveryError,
@@ -498,10 +499,6 @@ async function discoverBootedDevicesForPlatform(
       },
     };
   }
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 interface DaemonDeviceContext {

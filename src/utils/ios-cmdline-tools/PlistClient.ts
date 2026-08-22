@@ -1,3 +1,4 @@
+import { errorMessage } from "../describeUnknownError";
 import { spawn } from "node:child_process";
 import { ActionableError } from "../../models";
 import { defaultTimer, type Timer } from "../SystemTimer";
@@ -149,7 +150,7 @@ export class PlistClient implements PlistReader {
       return result.stdout;
     } catch (error) {
       if (error instanceof ActionableError) {throw error;}
-      const detail = error instanceof Error ? error.message : String(error);
+      const detail = errorMessage(error);
       throw new ActionableError(`plutil failed (${command}): ${detail}`);
     } finally {
       if (timeout) {this.timer.clearTimeout(timeout);}
@@ -161,7 +162,7 @@ export class PlistClient implements PlistReader {
     try {
       return JSON.parse(output.toString("utf8"));
     } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
+      const detail = errorMessage(error);
       throw new ActionableError(`plutil produced malformed JSON: ${detail}`);
     }
   }

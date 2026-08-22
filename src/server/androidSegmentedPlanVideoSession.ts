@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/describeUnknownError";
 import type { BootedDevice } from "../models";
 import {
   ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS,
@@ -148,7 +149,7 @@ export class AndroidSegmentedPlanVideoSession {
       this.pendingRotation = this.rotateToNextSegment()
         .catch(error => {
           logger.warn(
-            `[SegmentedTimerVideo] Rotation failed: ${error instanceof Error ? error.message : String(error)}`
+            `[SegmentedTimerVideo] Rotation failed: ${errorMessage(error)}`
           );
         })
         .then(() => {
@@ -167,7 +168,7 @@ export class AndroidSegmentedPlanVideoSession {
       );
       this.stop().catch(error => {
         logger.warn(
-          `[SegmentedPlanVideo] Auto-stop at maxDurationSeconds failed: ${error instanceof Error ? error.message : String(error)}`
+          `[SegmentedPlanVideo] Auto-stop at maxDurationSeconds failed: ${errorMessage(error)}`
         );
       });
     }, this.maxDurationSeconds * 1000);
@@ -254,7 +255,7 @@ export class AndroidSegmentedPlanVideoSession {
       );
     } catch (error) {
       logger.warn(
-        `[SegmentedPlanVideo] Failed to stop segment ${previousId}: ${error instanceof Error ? error.message : String(error)}`
+        `[SegmentedPlanVideo] Failed to stop segment ${previousId}: ${errorMessage(error)}`
       );
     } finally {
       this.activeRecordingId = undefined;
@@ -264,7 +265,7 @@ export class AndroidSegmentedPlanVideoSession {
       await this.startSegment();
     } catch (error) {
       logger.warn(
-        `[SegmentedPlanVideo] Failed to start next segment after ${previousId}: ${error instanceof Error ? error.message : String(error)}`
+        `[SegmentedPlanVideo] Failed to start next segment after ${previousId}: ${errorMessage(error)}`
       );
     }
   }
@@ -282,7 +283,7 @@ export class AndroidSegmentedPlanVideoSession {
         logger.info(`[SegmentedPlanVideo] Final stop recordingId=${id} path=${stopped.metadata.filePath}`);
       } catch (error) {
         logger.warn(
-          `[SegmentedPlanVideo] Failed to finalize segment ${id}: ${error instanceof Error ? error.message : String(error)}`
+          `[SegmentedPlanVideo] Failed to finalize segment ${id}: ${errorMessage(error)}`
         );
       } finally {
         this.activeRecordingId = undefined;

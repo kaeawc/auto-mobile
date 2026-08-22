@@ -111,7 +111,10 @@ update_gradle_version "$version"
 
 echo ""
 echo -e "${GREEN}Step 2: Publish to Maven Central${NC}"
-run_gradle :protocol:publishAndReleaseToMavenCentral :test-plan-validation:publishAndReleaseToMavenCentral :junit-runner:publishAndReleaseToMavenCentral :auto-mobile-sdk:publishAndReleaseToMavenCentral --no-configuration-cache
+# Isolated Projects forbids --no-configuration-cache, so force it off for this
+# publish invocation only — a global/CI ~/.gradle enabling IP must not break the
+# release. Does not touch IP for normal builds. See android/gradle.properties.
+run_gradle :protocol:publishAndReleaseToMavenCentral :test-plan-validation:publishAndReleaseToMavenCentral :junit-runner:publishAndReleaseToMavenCentral :auto-mobile-sdk:publishAndReleaseToMavenCentral --no-configuration-cache -Dorg.gradle.unsafe.isolated-projects=false
 
 echo ""
 echo -e "${GREEN}Step 3: Restore snapshot version ($next_snapshot)${NC}"

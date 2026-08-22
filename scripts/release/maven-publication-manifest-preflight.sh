@@ -52,8 +52,12 @@ else
   (
     cd "$android_dir"
     rm -rf build/central-manifest
+    # Isolated Projects forbids --no-configuration-cache; force it off for this
+    # preflight invocation only so a global/CI ~/.gradle enabling IP can't break
+    # staging. Normal builds are unaffected. See android/gradle.properties.
     ./gradlew ${tasks[@]+"${tasks[@]}"} -PVERSION_NAME="$VERSION" \
-      -PmavenManifestStaging --no-configuration-cache
+      -PmavenManifestStaging --no-configuration-cache \
+      -Dorg.gradle.unsafe.isolated-projects=false
   )
 fi
 

@@ -1664,6 +1664,20 @@ async function prepareRecoveredDeviceForRunnerReadiness(
   );
 }
 
+async function recordWarmAndroidAvdIdentity(
+  devicePool: DevicePool | undefined,
+  boot: DeviceBootResult,
+  sourceImage: DeviceInfo | undefined,
+): Promise<void> {
+  if (boot.source === "booted" && sourceImage?.platform === "android") {
+    await devicePool?.recordAndroidAvdIdentity(boot.device.deviceId, sourceImage);
+  }
+}
+
+function getInitializedDevicePool(daemonState: DaemonState): DevicePool | undefined {
+  return daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
+}
+
 export function registerDeviceTools() {
   // List AVDs handler
   const listDeviceImagesHandler = async (args: ListDeviceImagesArgs) => {
@@ -1819,7 +1833,7 @@ export function registerDeviceTools() {
         validatePreservedSession,
         retireRecoveredReplacement,
       );
-      const devicePool = daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
+      const devicePool = getInitializedDevicePool(daemonState);
       const sessionId = preservedSessionId ?? await bindBootedDeviceSession(
         boot.device,
         args,
@@ -1827,9 +1841,7 @@ export function registerDeviceTools() {
         boot.processHandle,
         new Set(releaseReadinessReservations.map((reservation) => reservation.owner)),
       );
-      if (boot.source === "booted" && sourceImage?.platform === "android") {
-        await devicePool?.recordAndroidAvdIdentity(boot.device.deviceId, sourceImage);
-      }
+      await recordWarmAndroidAvdIdentity(devicePool, boot, sourceImage);
       ownershipTransferred = true;
 
       await notifyResourcesAfterDeviceBoot(boot, perf, deps.notifyResourcesChanged);

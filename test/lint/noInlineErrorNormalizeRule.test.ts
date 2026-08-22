@@ -94,4 +94,11 @@ describe("auto-mobile/no-inline-error-normalize", () => {
       fires('const m = result.error instanceof Error ? result["error"].message : String(result.error);'),
     ).toBe(true);
   });
+
+  test("does not collide a literal key containing serializer delimiters with a member chain", () => {
+    // a["b.prop:c"] and a.b.c are different references; the structural key must keep them apart.
+    expect(
+      fires('const m = a["b.prop:c"] instanceof Error ? a.b.c.message : String(a["b.prop:c"]);'),
+    ).toBe(false);
+  });
 });

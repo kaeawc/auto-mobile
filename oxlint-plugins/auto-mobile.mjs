@@ -504,47 +504,51 @@ function identifierName(node) {
 	return node?.type === "Identifier" ? node.name : null;
 }
 
-// Canonical key for a side-effect-free reference expression: an identifier, `this`,
-// a non-computed member chain (`a.b.c`), or computed access by a literal/identifier
-// index (`a[0]`, `a[i]`). Returns null for anything whose repeated evaluation may not
-// be stable (calls, computed access by an expression), so the rule only fires when the
-// *same* subject provably appears in all three positions of the idiom.
-function stableRefKey(node) {
+// Structural token list for a side-effect-free reference expression: an identifier,
+// `this`, a non-computed member chain (`a.b.c`), or computed access by a literal or
+// identifier index (`a[0]`, `a["0"]`, `a[i]`). Returns null for anything whose repeated
+// evaluation may not be stable (calls, computed access by an expression). Each segment
+// is canonicalized to how JavaScript resolves the property key, so the *same* property
+// compares equal regardless of spelling (`.error`/`["error"]`, `[0]`/`["0"]`), while a
+// computed identifier key stays distinct (its value can differ from a same-text literal).
+function refTokens(node) {
 	if (!node) {
 		return null;
 	}
 	if (node.type === "Identifier") {
-		return node.name;
+		return [["root", node.name]];
 	}
 	if (node.type === "ThisExpression") {
-		return "this";
+		return [["this"]];
 	}
 	if (node.type === "MemberExpression") {
-		const objectKey = stableRefKey(node.object);
-		if (objectKey === null) {
+		const base = refTokens(node.object);
+		if (base === null) {
 			return null;
 		}
-		// Canonicalize each segment to how JavaScript resolves the property key, so
-		// accesses that reach the *same* property compare equal regardless of spelling:
-		//   .error, ["error"]        -> prop:error
-		//   [0], ["0"]               -> prop:0   (numbers coerce to their string key)
-		// while a *computed identifier* key stays distinct, since its value can differ:
-		//   [i]                      -> dyn:i    (never equal to prop:i)
 		let segment = null;
 		if (node.computed) {
 			const property = node.property;
 			if (property?.type === "Literal" && (typeof property.value === "string" || typeof property.value === "number")) {
-				segment = `prop:${String(property.value)}`;
+				segment = ["prop", String(property.value)];
 			} else if (property?.type === "Identifier") {
-				segment = `dyn:${property.name}`;
+				segment = ["dyn", property.name];
 			}
 		} else {
 			const prop = propertyName(node.property);
-			segment = prop === null ? null : `prop:${prop}`;
+			segment = prop === null ? null : ["prop", prop];
 		}
-		return segment === null ? null : `${objectKey}.${segment}`;
+		return segment === null ? null : [...base, segment];
 	}
 	return null;
+}
+
+// Canonical, collision-proof key: JSON.stringify of the structural token list, so a
+// literal property value can never be confused with the serializer's own delimiters
+// (`a["b.prop:c"]` and `a.b.c` produce different token arrays, hence different keys).
+function stableRefKey(node) {
+	const tokens = refTokens(node);
+	return tokens === null ? null : JSON.stringify(tokens);
 }
 
 const noInlineErrorNormalizeRule = {

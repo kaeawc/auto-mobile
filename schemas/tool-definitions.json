@@ -16,7 +16,10 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -41,10 +44,17 @@
         },
         "service": {
           "type": "string",
-          "enum": ["talkback", "voiceover", "unknown"]
+          "enum": [
+            "talkback",
+            "voiceover",
+            "unknown"
+          ]
         }
       },
-      "required": ["enabled", "service"],
+      "required": [
+        "enabled",
+        "service"
+      ],
       "additionalProperties": {}
     }
   },
@@ -58,7 +68,10 @@
         "action": {
           "description": "set default or clear TalkBack focus",
           "type": "string",
-          "enum": ["set", "clear"]
+          "enum": [
+            "set",
+            "clear"
+          ]
         },
         "resourceId": {
           "description": "Target resource ID",
@@ -74,7 +87,10 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -131,7 +147,12 @@
                       "type": "number"
                     }
                   },
-                  "required": ["left", "top", "right", "bottom"],
+                  "required": [
+                    "left",
+                    "top",
+                    "right",
+                    "bottom"
+                  ],
                   "additionalProperties": false
                 },
                 {
@@ -317,14 +338,18 @@
               ]
             }
           },
-          "required": ["bounds"],
+          "required": [
+            "bounds"
+          ],
           "additionalProperties": {}
         },
         "confirmed": {
           "type": "boolean"
         }
       },
-      "required": ["success"],
+      "required": [
+        "success"
+      ],
       "additionalProperties": {}
     }
   },
@@ -356,7 +381,10 @@
           "type": "string"
         }
       },
-      "required": ["lock", "deviceCount"],
+      "required": [
+        "lock",
+        "deviceCount"
+      ],
       "additionalProperties": false
     }
   },
@@ -370,12 +398,21 @@
         "action": {
           "description": "match/fail/cancel/error; cancel/error require Android SDK hook",
           "type": "string",
-          "enum": ["match", "fail", "cancel", "error"]
+          "enum": [
+            "match",
+            "fail",
+            "cancel",
+            "error"
+          ]
         },
         "modality": {
           "description": "Modality: any default, fingerprint, or face",
           "type": "string",
-          "enum": ["any", "fingerprint", "face"]
+          "enum": [
+            "any",
+            "fingerprint",
+            "face"
+          ]
         },
         "fingerprintId": {
           "description": "Fingerprint ID: default 1 for match/error, 2 for fail/cancel",
@@ -391,7 +428,10 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -405,7 +445,9 @@
           "type": "string"
         }
       },
-      "required": ["action"],
+      "required": [
+        "action"
+      ],
       "additionalProperties": false
     }
   },
@@ -418,7 +460,10 @@
       "properties": {
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "appId": {
           "description": "App package ID to filter logcat for specific app",
@@ -444,7 +489,9 @@
           "type": "string"
         }
       },
-      "required": ["platform"],
+      "required": [
+        "platform"
+      ],
       "additionalProperties": false
     }
   },
@@ -457,7 +504,10 @@
       "properties": {
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "appId": {
           "description": "Android app package for locale changes",
@@ -477,12 +527,18 @@
         "textDirection": {
           "description": "Text direction",
           "type": "string",
-          "enum": ["ltr", "rtl"]
+          "enum": [
+            "ltr",
+            "rtl"
+          ]
         },
         "timeFormat": {
           "description": "Time format",
           "type": "string",
-          "enum": ["12", "24"]
+          "enum": [
+            "12",
+            "24"
+          ]
         },
         "calendarSystem": {
           "description": "Calendar system (e.g., gregory, japanese, buddhist, islamic-civil)",
@@ -506,7 +562,9 @@
           "type": "string"
         }
       },
-      "required": ["platform"],
+      "required": [
+        "platform"
+      ],
       "additionalProperties": false,
       "if": {
         "properties": {
@@ -514,10 +572,15 @@
             "const": "android"
           }
         },
-        "required": ["platform", "locale"]
+        "required": [
+          "platform",
+          "locale"
+        ]
       },
       "then": {
-        "required": ["appId"]
+        "required": [
+          "appId"
+        ]
       }
     }
   },
@@ -541,7 +604,10 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -555,7 +621,9 @@
           "type": "string"
         }
       },
-      "required": ["appId"],
+      "required": [
+        "appId"
+      ],
       "additionalProperties": false
     }
   },
@@ -572,7 +640,10 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -598,7 +669,10 @@
       "properties": {
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -612,7 +686,9 @@
           "type": "string"
         }
       },
-      "required": ["platform"],
+      "required": [
+        "platform"
+      ],
       "additionalProperties": false
     }
   },
@@ -626,7 +702,12 @@
         "action": {
           "description": "Clipboard action",
           "type": "string",
-          "enum": ["copy", "paste", "clear", "get"]
+          "enum": [
+            "copy",
+            "paste",
+            "clear",
+            "get"
+          ]
         },
         "text": {
           "description": "Text to copy (required for 'copy' action)",
@@ -635,7 +716,10 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -649,7 +733,10 @@
           "type": "string"
         }
       },
-      "required": ["action", "platform"],
+      "required": [
+        "action",
+        "platform"
+      ],
       "additionalProperties": false,
       "if": {
         "properties": {
@@ -657,10 +744,14 @@
             "const": "copy"
           }
         },
-        "required": ["action"]
+        "required": [
+          "action"
+        ]
       },
       "then": {
-        "required": ["text"]
+        "required": [
+          "text"
+        ]
       }
     }
   },
@@ -699,7 +790,10 @@
                 "type": "string"
               }
             },
-            "required": ["tool", "params"],
+            "required": [
+              "tool",
+              "params"
+            ],
             "additionalProperties": {}
           }
         },
@@ -721,7 +815,10 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -735,7 +832,11 @@
           "type": "string"
         }
       },
-      "required": ["lock", "steps", "deviceCount"],
+      "required": [
+        "lock",
+        "steps",
+        "deviceCount"
+      ],
       "additionalProperties": false
     }
   },
@@ -748,7 +849,10 @@
       "properties": {
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "text": {
           "description": "Text to search for in elements",
@@ -769,7 +873,9 @@
                   "type": "string"
                 }
               },
-              "required": ["elementId"],
+              "required": [
+                "elementId"
+              ],
               "additionalProperties": false
             },
             {
@@ -780,7 +886,9 @@
                   "type": "string"
                 }
               },
-              "required": ["text"],
+              "required": [
+                "text"
+              ],
               "additionalProperties": false
             }
           ]
@@ -813,7 +921,9 @@
           "type": "string"
         }
       },
-      "required": ["platform"],
+      "required": [
+        "platform"
+      ],
       "additionalProperties": false
     }
   },
@@ -826,7 +936,10 @@
       "properties": {
         "action": {
           "type": "string",
-          "enum": ["capture", "restore"]
+          "enum": [
+            "capture",
+            "restore"
+          ]
         },
         "snapshotName": {
           "description": "Snapshot name",
@@ -856,7 +969,10 @@
         "userApps": {
           "description": "Apps to back up: current or all",
           "type": "string",
-          "enum": ["current", "all"]
+          "enum": [
+            "current",
+            "all"
+          ]
         },
         "vmSnapshotTimeoutMs": {
           "description": "VM snapshot timeout ms",
@@ -871,7 +987,10 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -885,7 +1004,9 @@
           "type": "string"
         }
       },
-      "required": ["action"],
+      "required": [
+        "action"
+      ],
       "additionalProperties": false,
       "if": {
         "properties": {
@@ -893,10 +1014,14 @@
             "const": "restore"
           }
         },
-        "required": ["action"]
+        "required": [
+          "action"
+        ]
       },
       "then": {
-        "required": ["snapshotName"]
+        "required": [
+          "snapshotName"
+        ]
       }
     }
   },
@@ -922,10 +1047,14 @@
           },
           "oneOf": [
             {
-              "required": ["elementId"]
+              "required": [
+                "elementId"
+              ]
             },
             {
-              "required": ["text"]
+              "required": [
+                "text"
+              ]
             }
           ],
           "description": "Source element"
@@ -945,10 +1074,14 @@
           },
           "oneOf": [
             {
-              "required": ["elementId"]
+              "required": [
+                "elementId"
+              ]
             },
             {
-              "required": ["text"]
+              "required": [
+                "text"
+              ]
             }
           ],
           "description": "Target element"
@@ -973,7 +1106,10 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -987,7 +1123,11 @@
           "type": "string"
         }
       },
-      "required": ["source", "target", "platform"],
+      "required": [
+        "source",
+        "target",
+        "platform"
+      ],
       "additionalProperties": false
     }
   },
@@ -1009,7 +1149,10 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -1041,7 +1184,10 @@
           "description": "Abort strategy",
           "default": "immediate",
           "type": "string",
-          "enum": ["immediate", "finish-current-step"]
+          "enum": [
+            "immediate",
+            "finish-current-step"
+          ]
         },
         "testMetadata": {
           "description": "Test metadata",
@@ -1077,7 +1223,10 @@
               "type": "boolean"
             }
           },
-          "required": ["testClass", "testMethod"],
+          "required": [
+            "testClass",
+            "testMethod"
+          ],
           "additionalProperties": false
         },
         "cleanupAppId": {
@@ -1091,7 +1240,10 @@
         "captureObserveSteps": {
           "description": "Attach observe snapshots",
           "type": "string",
-          "enum": ["summary", "full"]
+          "enum": [
+            "summary",
+            "full"
+          ]
         }
       },
       "required": [
@@ -1139,7 +1291,11 @@
             },
             "failureObservation": {}
           },
-          "required": ["stepIndex", "tool", "error"],
+          "required": [
+            "stepIndex",
+            "tool",
+            "error"
+          ],
           "additionalProperties": false
         },
         "error": {
@@ -1147,7 +1303,10 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "deviceId": {
           "type": "string"
@@ -1179,7 +1338,11 @@
                   },
                   "status": {
                     "type": "string",
-                    "enum": ["completed", "failed", "skipped"]
+                    "enum": [
+                      "completed",
+                      "failed",
+                      "skipped"
+                    ]
                   },
                   "durationMs": {
                     "type": "integer",
@@ -1188,7 +1351,11 @@
                   },
                   "details": {}
                 },
-                "required": ["step", "status", "durationMs"],
+                "required": [
+                  "step",
+                  "status",
+                  "durationMs"
+                ],
                 "additionalProperties": false
               }
             },
@@ -1205,11 +1372,18 @@
               "additionalProperties": false
             }
           },
-          "required": ["executionTimeMs", "steps"],
+          "required": [
+            "executionTimeMs",
+            "steps"
+          ],
           "additionalProperties": false
         }
       },
-      "required": ["success", "executedSteps", "totalSteps"],
+      "required": [
+        "success",
+        "executedSteps",
+        "totalSteps"
+      ],
       "additionalProperties": {}
     }
   },
@@ -1231,7 +1405,11 @@
         "strategy": {
           "description": "Strategy (default: weighted)",
           "type": "string",
-          "enum": ["breadth-first", "depth-first", "weighted"]
+          "enum": [
+            "breadth-first",
+            "depth-first",
+            "weighted"
+          ]
         },
         "resetToHome": {
           "description": "Reset to home periodically (default: false)",
@@ -1244,7 +1422,11 @@
         "mode": {
           "description": "Mode (default: hybrid)",
           "type": "string",
-          "enum": ["discover", "validate", "hybrid"]
+          "enum": [
+            "discover",
+            "validate",
+            "hybrid"
+          ]
         },
         "packageName": {
           "description": "Package to limit exploration",
@@ -1257,7 +1439,10 @@
         "platform": {
           "default": "android",
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -1271,7 +1456,9 @@
           "type": "string"
         }
       },
-      "required": ["platform"],
+      "required": [
+        "platform"
+      ],
       "additionalProperties": false
     }
   },
@@ -1323,7 +1510,9 @@
           "type": "string"
         }
       },
-      "required": ["success"],
+      "required": [
+        "success"
+      ],
       "additionalProperties": false
     }
   },
@@ -1352,7 +1541,9 @@
           "minLength": 1
         }
       },
-      "required": ["avdName"],
+      "required": [
+        "avdName"
+      ],
       "additionalProperties": false
     }
   },
@@ -1381,7 +1572,9 @@
           "minLength": 1
         }
       },
-      "required": ["udid"],
+      "required": [
+        "udid"
+      ],
       "additionalProperties": false
     }
   },
@@ -1405,7 +1598,10 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -1419,7 +1615,9 @@
           "type": "string"
         }
       },
-      "required": ["appId"],
+      "required": [
+        "appId"
+      ],
       "additionalProperties": false
     }
   },
@@ -1435,7 +1633,10 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -1449,7 +1650,9 @@
           "type": "string"
         }
       },
-      "required": ["appId"],
+      "required": [
+        "appId"
+      ],
       "additionalProperties": false
     }
   },
@@ -1465,12 +1668,17 @@
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["doNotDisturb"]
+            "enum": [
+              "doNotDisturb"
+            ]
           }
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -1497,7 +1705,10 @@
         "platform": {
           "default": "android",
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "appId": {
           "description": "Scope the graph to this app id instead of the device's current foreground app",
@@ -1515,7 +1726,9 @@
           "type": "string"
         }
       },
-      "required": ["platform"],
+      "required": [
+        "platform"
+      ],
       "additionalProperties": false
     }
   },
@@ -1543,7 +1756,10 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -1573,7 +1789,10 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -1587,7 +1806,9 @@
           "type": "string"
         }
       },
-      "required": ["appId"],
+      "required": [
+        "appId"
+      ],
       "additionalProperties": false
     }
   },
@@ -1601,7 +1822,11 @@
         "scope": {
           "description": "Preference scope",
           "type": "string",
-          "enum": ["systemProperty", "sharedPreferences", "userDefaults"]
+          "enum": [
+            "systemProperty",
+            "sharedPreferences",
+            "userDefaults"
+          ]
         },
         "appId": {
           "description": "App package or bundle id",
@@ -1618,7 +1843,10 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -1632,7 +1860,10 @@
           "type": "string"
         }
       },
-      "required": ["scope", "key"],
+      "required": [
+        "scope",
+        "key"
+      ],
       "additionalProperties": false
     }
   },
@@ -1645,7 +1876,10 @@
       "properties": {
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "deviceId": {
           "type": "string"
@@ -1718,7 +1952,12 @@
                       ]
                     }
                   },
-                  "required": ["x", "y", "width", "height"],
+                  "required": [
+                    "x",
+                    "y",
+                    "width",
+                    "height"
+                  ],
                   "additionalProperties": false
                 },
                 "style": {
@@ -1767,7 +2006,12 @@
                           "anyOf": [
                             {
                               "type": "string",
-                              "enum": ["none", "catmull-rom", "bezier", "douglas-peucker"]
+                              "enum": [
+                                "none",
+                                "catmull-rom",
+                                "bezier",
+                                "douglas-peucker"
+                              ]
                             },
                             {
                               "type": "null"
@@ -1790,7 +2034,11 @@
                           "anyOf": [
                             {
                               "type": "string",
-                              "enum": ["butt", "round", "square"]
+                              "enum": [
+                                "butt",
+                                "round",
+                                "square"
+                              ]
                             },
                             {
                               "type": "null"
@@ -1801,7 +2049,11 @@
                           "anyOf": [
                             {
                               "type": "string",
-                              "enum": ["miter", "round", "bevel"]
+                              "enum": [
+                                "miter",
+                                "round",
+                                "bevel"
+                              ]
                             },
                             {
                               "type": "null"
@@ -1817,7 +2069,10 @@
                   ]
                 }
               },
-              "required": ["type", "bounds"],
+              "required": [
+                "type",
+                "bounds"
+              ],
               "additionalProperties": false
             },
             {
@@ -1875,7 +2130,12 @@
                       ]
                     }
                   },
-                  "required": ["x", "y", "width", "height"],
+                  "required": [
+                    "x",
+                    "y",
+                    "width",
+                    "height"
+                  ],
                   "additionalProperties": false
                 },
                 "style": {
@@ -1924,7 +2184,12 @@
                           "anyOf": [
                             {
                               "type": "string",
-                              "enum": ["none", "catmull-rom", "bezier", "douglas-peucker"]
+                              "enum": [
+                                "none",
+                                "catmull-rom",
+                                "bezier",
+                                "douglas-peucker"
+                              ]
                             },
                             {
                               "type": "null"
@@ -1947,7 +2212,11 @@
                           "anyOf": [
                             {
                               "type": "string",
-                              "enum": ["butt", "round", "square"]
+                              "enum": [
+                                "butt",
+                                "round",
+                                "square"
+                              ]
                             },
                             {
                               "type": "null"
@@ -1958,7 +2227,11 @@
                           "anyOf": [
                             {
                               "type": "string",
-                              "enum": ["miter", "round", "bevel"]
+                              "enum": [
+                                "miter",
+                                "round",
+                                "bevel"
+                              ]
                             },
                             {
                               "type": "null"
@@ -1974,7 +2247,10 @@
                   ]
                 }
               },
-              "required": ["type", "bounds"],
+              "required": [
+                "type",
+                "bounds"
+              ],
               "additionalProperties": false
             },
             {
@@ -1997,7 +2273,10 @@
                         "type": "number"
                       }
                     },
-                    "required": ["x", "y"],
+                    "required": [
+                      "x",
+                      "y"
+                    ],
                     "additionalProperties": false
                   }
                 },
@@ -2051,7 +2330,12 @@
                           ]
                         }
                       },
-                      "required": ["x", "y", "width", "height"],
+                      "required": [
+                        "x",
+                        "y",
+                        "width",
+                        "height"
+                      ],
                       "additionalProperties": false
                     },
                     {
@@ -2105,7 +2389,12 @@
                           "anyOf": [
                             {
                               "type": "string",
-                              "enum": ["none", "catmull-rom", "bezier", "douglas-peucker"]
+                              "enum": [
+                                "none",
+                                "catmull-rom",
+                                "bezier",
+                                "douglas-peucker"
+                              ]
                             },
                             {
                               "type": "null"
@@ -2128,7 +2417,11 @@
                           "anyOf": [
                             {
                               "type": "string",
-                              "enum": ["butt", "round", "square"]
+                              "enum": [
+                                "butt",
+                                "round",
+                                "square"
+                              ]
                             },
                             {
                               "type": "null"
@@ -2139,7 +2432,11 @@
                           "anyOf": [
                             {
                               "type": "string",
-                              "enum": ["miter", "round", "bevel"]
+                              "enum": [
+                                "miter",
+                                "round",
+                                "bevel"
+                              ]
                             },
                             {
                               "type": "null"
@@ -2155,7 +2452,10 @@
                   ]
                 }
               },
-              "required": ["type", "points"],
+              "required": [
+                "type",
+                "points"
+              ],
               "additionalProperties": false
             }
           ]
@@ -2179,7 +2479,9 @@
                   "type": "string"
                 }
               },
-              "required": ["elementId"],
+              "required": [
+                "elementId"
+              ],
               "additionalProperties": false
             },
             {
@@ -2190,7 +2492,9 @@
                   "type": "string"
                 }
               },
-              "required": ["text"],
+              "required": [
+                "text"
+              ],
               "additionalProperties": false
             }
           ]
@@ -2202,7 +2506,10 @@
         "selectionStrategy": {
           "description": "Selection strategy when multiple match (default: first)",
           "type": "string",
-          "enum": ["first", "random"]
+          "enum": [
+            "first",
+            "random"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -2216,7 +2523,9 @@
           "type": "string"
         }
       },
-      "required": ["platform"],
+      "required": [
+        "platform"
+      ],
       "additionalProperties": false
     }
   },
@@ -2229,7 +2538,10 @@
       "properties": {
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -2243,7 +2555,9 @@
           "type": "string"
         }
       },
-      "required": ["platform"],
+      "required": [
+        "platform"
+      ],
       "additionalProperties": false
     }
   },
@@ -2256,7 +2570,10 @@
       "properties": {
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "filter": {
           "description": "Filter options",
@@ -2267,7 +2584,13 @@
               "type": "array",
               "items": {
                 "type": "string",
-                "enum": ["navigation", "input", "action", "scroll", "toggle"]
+                "enum": [
+                  "navigation",
+                  "input",
+                  "action",
+                  "scroll",
+                  "toggle"
+                ]
               }
             },
             "minConfidence": {
@@ -2316,7 +2639,9 @@
           "type": "string"
         }
       },
-      "required": ["platform"],
+      "required": [
+        "platform"
+      ],
       "additionalProperties": false
     }
   },
@@ -2330,11 +2655,21 @@
         "action": {
           "description": "IME action",
           "type": "string",
-          "enum": ["done", "next", "search", "send", "go", "previous"]
+          "enum": [
+            "done",
+            "next",
+            "search",
+            "send",
+            "go",
+            "previous"
+          ]
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -2348,7 +2683,10 @@
           "type": "string"
         }
       },
-      "required": ["action", "platform"],
+      "required": [
+        "action",
+        "platform"
+      ],
       "additionalProperties": false
     }
   },
@@ -2366,12 +2704,24 @@
         "mode": {
           "description": "Android text mode: a11y default; eventLast and eventAll start with accessibility setText; eventOnly clears and types supported ASCII with key events only",
           "type": "string",
-          "enum": ["a11y", "eventLast", "eventAll", "eventOnly"]
+          "enum": [
+            "a11y",
+            "eventLast",
+            "eventAll",
+            "eventOnly"
+          ]
         },
         "imeAction": {
           "description": "IME action after input",
           "type": "string",
-          "enum": ["done", "next", "search", "send", "go", "previous"]
+          "enum": [
+            "done",
+            "next",
+            "search",
+            "send",
+            "go",
+            "previous"
+          ]
         },
         "dismissKeyboard": {
           "description": "Android: dismiss keyboard after input",
@@ -2379,7 +2729,10 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -2393,7 +2746,10 @@
           "type": "string"
         }
       },
-      "required": ["text", "platform"],
+      "required": [
+        "text",
+        "platform"
+      ],
       "additionalProperties": false
     }
   },
@@ -2410,7 +2766,10 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -2424,7 +2783,9 @@
           "type": "string"
         }
       },
-      "required": ["artifactPath"],
+      "required": [
+        "artifactPath"
+      ],
       "additionalProperties": false
     }
   },
@@ -2438,11 +2799,18 @@
         "action": {
           "description": "Keyboard action",
           "type": "string",
-          "enum": ["open", "close", "detect"]
+          "enum": [
+            "open",
+            "close",
+            "detect"
+          ]
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -2456,7 +2824,10 @@
           "type": "string"
         }
       },
-      "required": ["action", "platform"],
+      "required": [
+        "action",
+        "platform"
+      ],
       "additionalProperties": false
     }
   },
@@ -2479,17 +2850,26 @@
             },
             "platform": {
               "type": "string",
-              "enum": ["android", "ios"]
+              "enum": [
+                "android",
+                "ios"
+              ]
             },
             "transportId": {
               "type": "string"
             }
           },
-          "required": ["name", "deviceId", "platform"],
+          "required": [
+            "name",
+            "deviceId",
+            "platform"
+          ],
           "additionalProperties": false
         }
       },
-      "required": ["device"],
+      "required": [
+        "device"
+      ],
       "additionalProperties": false
     }
   },
@@ -2513,7 +2893,10 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -2527,7 +2910,9 @@
           "type": "string"
         }
       },
-      "required": ["appId"],
+      "required": [
+        "appId"
+      ],
       "additionalProperties": false
     }
   },
@@ -2550,10 +2935,15 @@
       "properties": {
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         }
       },
-      "required": ["platform"],
+      "required": [
+        "platform"
+      ],
       "additionalProperties": false
     }
   },
@@ -2566,7 +2956,10 @@
       "properties": {
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         }
       },
       "additionalProperties": false
@@ -2623,7 +3016,10 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -2637,7 +3033,10 @@
           "type": "string"
         }
       },
-      "required": ["host", "path"],
+      "required": [
+        "host",
+        "path"
+      ],
       "additionalProperties": false
     }
   },
@@ -2655,7 +3054,10 @@
         "platform": {
           "default": "android",
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -2669,7 +3071,10 @@
           "type": "string"
         }
       },
-      "required": ["targetScreen", "platform"],
+      "required": [
+        "targetScreen",
+        "platform"
+      ],
       "additionalProperties": false
     }
   },
@@ -2691,7 +3096,13 @@
             "errorType": {
               "description": "Error type; default http500",
               "type": "string",
-              "enum": ["http500", "timeout", "connectionRefused", "dnsFailure", "tlsFailure"]
+              "enum": [
+                "http500",
+                "timeout",
+                "connectionRefused",
+                "dnsFailure",
+                "tlsFailure"
+              ]
             },
             "limit": {
               "description": "Max errors",
@@ -2714,7 +3125,11 @@
         "notifFilter": {
           "description": "Notification filter",
           "type": "string",
-          "enum": ["all", "errors", "slow"]
+          "enum": [
+            "all",
+            "errors",
+            "slow"
+          ]
         },
         "notifDebounceMs": {
           "description": "Notification debounce ms",
@@ -2730,7 +3145,10 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -2756,18 +3174,31 @@
       "properties": {
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "waitFor": {
           "type": "object",
           "additionalProperties": false,
           "not": {
-            "required": ["timeout", "timeoutMs"]
+            "required": [
+              "timeout",
+              "timeoutMs"
+            ]
           },
           "properties": {
             "for": {
               "type": "string",
-              "enum": ["appear", "disappear", "clickable", "textEquals", "countStable", "stable"]
+              "enum": [
+                "appear",
+                "disappear",
+                "clickable",
+                "textEquals",
+                "countStable",
+                "stable"
+              ]
             },
             "pollMs": {
               "type": "number"
@@ -2795,11 +3226,18 @@
             },
             "matchType": {
               "type": "string",
-              "enum": ["all", "any"]
+              "enum": [
+                "all",
+                "any"
+              ]
             },
             "textMatch": {
               "type": "string",
-              "enum": ["exact", "contains", "regex"],
+              "enum": [
+                "exact",
+                "contains",
+                "regex"
+              ],
               "description": "How to match waitFor.text; does not affect contentDescription"
             },
             "activeWindow": {
@@ -2821,16 +3259,24 @@
               },
               "anyOf": [
                 {
-                  "required": ["appId"]
+                  "required": [
+                    "appId"
+                  ]
                 },
                 {
-                  "required": ["packageName"]
+                  "required": [
+                    "packageName"
+                  ]
                 },
                 {
-                  "required": ["bundleId"]
+                  "required": [
+                    "bundleId"
+                  ]
                 },
                 {
-                  "required": ["activityName"]
+                  "required": [
+                    "activityName"
+                  ]
                 }
               ]
             },
@@ -2854,16 +3300,24 @@
               },
               "anyOf": [
                 {
-                  "required": ["elementId"]
+                  "required": [
+                    "elementId"
+                  ]
                 },
                 {
-                  "required": ["text"]
+                  "required": [
+                    "text"
+                  ]
                 },
                 {
-                  "required": ["className"]
+                  "required": [
+                    "className"
+                  ]
                 },
                 {
-                  "required": ["contentDescription"]
+                  "required": [
+                    "contentDescription"
+                  ]
                 }
               ]
             },
@@ -2880,10 +3334,14 @@
               "additionalProperties": false,
               "oneOf": [
                 {
-                  "required": ["elementId"]
+                  "required": [
+                    "elementId"
+                  ]
                 },
                 {
-                  "required": ["text"]
+                  "required": [
+                    "text"
+                  ]
                 }
               ]
             },
@@ -2901,20 +3359,30 @@
                   "const": "stable"
                 }
               },
-              "required": ["for"],
+              "required": [
+                "for"
+              ],
               "not": {
-                "required": ["container"]
+                "required": [
+                  "container"
+                ]
               }
             },
             {
               "properties": {
                 "for": {
                   "not": {
-                    "enum": ["stable", "textEquals"]
+                    "enum": [
+                      "stable",
+                      "textEquals"
+                    ]
                   }
                 }
               },
-              "required": ["for", "elementId"]
+              "required": [
+                "for",
+                "elementId"
+              ]
             },
             {
               "properties": {
@@ -2924,29 +3392,46 @@
                   }
                 }
               },
-              "required": ["for", "text"]
+              "required": [
+                "for",
+                "text"
+              ]
             },
             {
-              "required": ["textAny"],
+              "required": [
+                "textAny"
+              ],
               "not": {
                 "anyOf": [
                   {
-                    "required": ["elementId"]
+                    "required": [
+                      "elementId"
+                    ]
                   },
                   {
-                    "required": ["text"]
+                    "required": [
+                      "text"
+                    ]
                   },
                   {
-                    "required": ["className"]
+                    "required": [
+                      "className"
+                    ]
                   },
                   {
-                    "required": ["contentDescription"]
+                    "required": [
+                      "contentDescription"
+                    ]
                   },
                   {
-                    "required": ["matchType"]
+                    "required": [
+                      "matchType"
+                    ]
                   },
                   {
-                    "required": ["textMatch"]
+                    "required": [
+                      "textMatch"
+                    ]
                   }
                 ]
               }
@@ -2955,31 +3440,47 @@
               "not": {
                 "anyOf": [
                   {
-                    "required": ["textAny"]
+                    "required": [
+                      "textAny"
+                    ]
                   },
                   {
-                    "required": ["for"]
+                    "required": [
+                      "for"
+                    ]
                   }
                 ]
               },
               "anyOf": [
                 {
-                  "required": ["elementId"]
+                  "required": [
+                    "elementId"
+                  ]
                 },
                 {
-                  "required": ["text"]
+                  "required": [
+                    "text"
+                  ]
                 },
                 {
-                  "required": ["className"]
+                  "required": [
+                    "className"
+                  ]
                 },
                 {
-                  "required": ["contentDescription"]
+                  "required": [
+                    "contentDescription"
+                  ]
                 },
                 {
-                  "required": ["activeWindow"]
+                  "required": [
+                    "activeWindow"
+                  ]
                 },
                 {
-                  "required": ["absent"]
+                  "required": [
+                    "absent"
+                  ]
                 }
               ]
             }
@@ -2996,7 +3497,9 @@
               "maximum": 9007199254740991
             }
           },
-          "required": ["quietPeriodMs"],
+          "required": [
+            "quietPeriodMs"
+          ],
           "additionalProperties": false
         },
         "raw": {
@@ -3006,7 +3509,10 @@
         "project": {
           "description": "Output projection. 'full' (default) returns the whole view hierarchy; 'skeleton' returns a flat, actionable-only list (id/label/bounds/affordances) in place of viewHierarchy/elements. Each skeleton id/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
           "type": "string",
-          "enum": ["full", "skeleton"]
+          "enum": [
+            "full",
+            "skeleton"
+          ]
         },
         "skipBackStack": {
           "description": "Skip back stack during waitFor polling",
@@ -3068,7 +3574,12 @@
                       "maximum": 1
                     }
                   },
-                  "required": ["x1", "y1", "x2", "y2"],
+                  "required": [
+                    "x1",
+                    "y1",
+                    "x2",
+                    "y2"
+                  ],
                   "additionalProperties": false
                 }
               ]
@@ -3092,29 +3603,44 @@
           "type": "string"
         }
       },
-      "required": ["platform"],
+      "required": [
+        "platform"
+      ],
       "additionalProperties": false,
       "if": {
-        "required": ["platform", "waitFor"],
+        "required": [
+          "platform",
+          "waitFor"
+        ],
         "properties": {
           "platform": {
             "const": "ios"
           },
           "waitFor": {
-            "required": ["activeWindow"],
+            "required": [
+              "activeWindow"
+            ],
             "properties": {
               "activeWindow": {
-                "required": ["activityName"],
+                "required": [
+                  "activityName"
+                ],
                 "not": {
                   "anyOf": [
                     {
-                      "required": ["appId"]
+                      "required": [
+                        "appId"
+                      ]
                     },
                     {
-                      "required": ["bundleId"]
+                      "required": [
+                        "bundleId"
+                      ]
                     },
                     {
-                      "required": ["packageName"]
+                      "required": [
+                        "packageName"
+                      ]
                     }
                   ]
                 }
@@ -3125,7 +3651,9 @@
       },
       "then": false,
       "dependentRequired": {
-        "settled": ["waitFor"]
+        "settled": [
+          "waitFor"
+        ]
       }
     },
     "outputSchema": {
@@ -3159,7 +3687,12 @@
                       "type": "number"
                     }
                   },
-                  "required": ["left", "top", "right", "bottom"],
+                  "required": [
+                    "left",
+                    "top",
+                    "right",
+                    "bottom"
+                  ],
                   "additionalProperties": false
                 },
                 {
@@ -3224,7 +3757,10 @@
               "maximum": 9007199254740991
             }
           },
-          "required": ["width", "height"],
+          "required": [
+            "width",
+            "height"
+          ],
           "additionalProperties": false
         },
         "systemInsets": {
@@ -3243,7 +3779,12 @@
               "type": "number"
             }
           },
-          "required": ["top", "right", "bottom", "left"],
+          "required": [
+            "top",
+            "right",
+            "bottom",
+            "left"
+          ],
           "additionalProperties": false
         },
         "insets": {
@@ -3263,7 +3804,11 @@
             },
             "units": {
               "type": "string",
-              "enum": ["physical-pixels", "points", "unknown"]
+              "enum": [
+                "physical-pixels",
+                "points",
+                "unknown"
+              ]
             },
             "systemBars": {
               "anyOf": [
@@ -3286,7 +3831,12 @@
                           "type": "number"
                         }
                       },
-                      "required": ["top", "right", "bottom", "left"],
+                      "required": [
+                        "top",
+                        "right",
+                        "bottom",
+                        "left"
+                      ],
                       "additionalProperties": false
                     },
                     "stable": {
@@ -3305,11 +3855,19 @@
                           "type": "number"
                         }
                       },
-                      "required": ["top", "right", "bottom", "left"],
+                      "required": [
+                        "top",
+                        "right",
+                        "bottom",
+                        "left"
+                      ],
                       "additionalProperties": false
                     }
                   },
-                  "required": ["visible", "stable"],
+                  "required": [
+                    "visible",
+                    "stable"
+                  ],
                   "additionalProperties": false
                 },
                 {
@@ -3335,7 +3893,12 @@
                       "type": "number"
                     }
                   },
-                  "required": ["top", "right", "bottom", "left"],
+                  "required": [
+                    "top",
+                    "right",
+                    "bottom",
+                    "left"
+                  ],
                   "additionalProperties": false
                 },
                 {
@@ -3361,7 +3924,12 @@
                       "type": "number"
                     }
                   },
-                  "required": ["top", "right", "bottom", "left"],
+                  "required": [
+                    "top",
+                    "right",
+                    "bottom",
+                    "left"
+                  ],
                   "additionalProperties": false
                 },
                 {
@@ -3387,7 +3955,12 @@
                       "type": "number"
                     }
                   },
-                  "required": ["top", "right", "bottom", "left"],
+                  "required": [
+                    "top",
+                    "right",
+                    "bottom",
+                    "left"
+                  ],
                   "additionalProperties": false
                 },
                 {
@@ -3413,7 +3986,12 @@
                       "type": "number"
                     }
                   },
-                  "required": ["top", "right", "bottom", "left"],
+                  "required": [
+                    "top",
+                    "right",
+                    "bottom",
+                    "left"
+                  ],
                   "additionalProperties": false
                 },
                 {
@@ -3437,7 +4015,12 @@
                   "type": "number"
                 }
               },
-              "required": ["top", "right", "bottom", "left"],
+              "required": [
+                "top",
+                "right",
+                "bottom",
+                "left"
+              ],
               "additionalProperties": false
             },
             "systemChrome": {
@@ -3447,15 +4030,28 @@
                   "properties": {
                     "visibility": {
                       "type": "string",
-                      "enum": ["visible", "hidden", "partial", "unknown"]
+                      "enum": [
+                        "visible",
+                        "hidden",
+                        "partial",
+                        "unknown"
+                      ]
                     },
                     "statusBar": {
                       "type": "string",
-                      "enum": ["visible", "hidden", "unknown"]
+                      "enum": [
+                        "visible",
+                        "hidden",
+                        "unknown"
+                      ]
                     },
                     "navigationBar": {
                       "type": "string",
-                      "enum": ["visible", "hidden", "unknown"]
+                      "enum": [
+                        "visible",
+                        "hidden",
+                        "unknown"
+                      ]
                     },
                     "homeIndicatorAutoHideRequested": {
                       "anyOf": [
@@ -3469,10 +4065,17 @@
                     },
                     "source": {
                       "type": "string",
-                      "enum": ["android-window-insets", "ios-status-bar-manager"]
+                      "enum": [
+                        "android-window-insets",
+                        "ios-status-bar-manager"
+                      ]
                     }
                   },
-                  "required": ["visibility", "statusBar", "source"],
+                  "required": [
+                    "visibility",
+                    "statusBar",
+                    "source"
+                  ],
                   "additionalProperties": false
                 },
                 {
@@ -3481,7 +4084,11 @@
               ]
             }
           },
-          "required": ["available", "source", "units"],
+          "required": [
+            "available",
+            "source",
+            "units"
+          ],
           "additionalProperties": false
         },
         "layoutWarnings": {
@@ -3489,7 +4096,11 @@
           "properties": {
             "scope": {
               "type": "string",
-              "enum": ["full", "truncated", "scoped"]
+              "enum": [
+                "full",
+                "truncated",
+                "scoped"
+              ]
             },
             "total": {
               "type": "number"
@@ -3508,7 +4119,10 @@
                   },
                   "severity": {
                     "type": "string",
-                    "enum": ["warning", "info"]
+                    "enum": [
+                      "warning",
+                      "info"
+                    ]
                   },
                   "element": {
                     "type": "object",
@@ -3550,7 +4164,12 @@
                                 "type": "number"
                               }
                             },
-                            "required": ["left", "top", "right", "bottom"],
+                            "required": [
+                              "left",
+                              "top",
+                              "right",
+                              "bottom"
+                            ],
                             "additionalProperties": false
                           },
                           {
@@ -3574,14 +4193,19 @@
                         ]
                       }
                     },
-                    "required": ["bounds"],
+                    "required": [
+                      "bounds"
+                    ],
                     "additionalProperties": false
                   },
                   "categories": {
                     "type": "array",
                     "items": {
                       "type": "string",
-                      "enum": ["text", "interaction"]
+                      "enum": [
+                        "text",
+                        "interaction"
+                      ]
                     }
                   },
                   "insetTypes": {
@@ -3601,7 +4225,12 @@
                     "type": "array",
                     "items": {
                       "type": "string",
-                      "enum": ["top", "right", "bottom", "left"]
+                      "enum": [
+                        "top",
+                        "right",
+                        "bottom",
+                        "left"
+                      ]
                     }
                   },
                   "overflowPx": {
@@ -3647,7 +4276,10 @@
                   },
                   "confidence": {
                     "type": "string",
-                    "enum": ["high", "medium"]
+                    "enum": [
+                      "high",
+                      "medium"
+                    ]
                   }
                 },
                 "required": [
@@ -3666,7 +4298,10 @@
               }
             }
           },
-          "required": ["scope", "warnings"],
+          "required": [
+            "scope",
+            "warnings"
+          ],
           "additionalProperties": false
         },
         "viewHierarchy": {
@@ -3726,7 +4361,12 @@
                                 "type": "number"
                               }
                             },
-                            "required": ["left", "top", "right", "bottom"],
+                            "required": [
+                              "left",
+                              "top",
+                              "right",
+                              "bottom"
+                            ],
                             "additionalProperties": false
                           },
                           {
@@ -3793,7 +4433,12 @@
                                 "type": "number"
                               }
                             },
-                            "required": ["left", "top", "right", "bottom"],
+                            "required": [
+                              "left",
+                              "top",
+                              "right",
+                              "bottom"
+                            ],
                             "additionalProperties": false
                           },
                           {
@@ -3823,7 +4468,11 @@
                         "type": "number"
                       }
                     },
-                    "required": ["bounds", "reason", "areaPercent"],
+                    "required": [
+                      "bounds",
+                      "reason",
+                      "areaPercent"
+                    ],
                     "additionalProperties": {}
                   }
                 },
@@ -3851,7 +4500,12 @@
                   "type": "number"
                 }
               },
-              "required": ["top", "right", "bottom", "left"],
+              "required": [
+                "top",
+                "right",
+                "bottom",
+                "left"
+              ],
               "additionalProperties": false
             },
             "insets": {
@@ -3871,7 +4525,11 @@
                 },
                 "units": {
                   "type": "string",
-                  "enum": ["physical-pixels", "points", "unknown"]
+                  "enum": [
+                    "physical-pixels",
+                    "points",
+                    "unknown"
+                  ]
                 },
                 "systemBars": {
                   "anyOf": [
@@ -3894,7 +4552,12 @@
                               "type": "number"
                             }
                           },
-                          "required": ["top", "right", "bottom", "left"],
+                          "required": [
+                            "top",
+                            "right",
+                            "bottom",
+                            "left"
+                          ],
                           "additionalProperties": false
                         },
                         "stable": {
@@ -3913,11 +4576,19 @@
                               "type": "number"
                             }
                           },
-                          "required": ["top", "right", "bottom", "left"],
+                          "required": [
+                            "top",
+                            "right",
+                            "bottom",
+                            "left"
+                          ],
                           "additionalProperties": false
                         }
                       },
-                      "required": ["visible", "stable"],
+                      "required": [
+                        "visible",
+                        "stable"
+                      ],
                       "additionalProperties": false
                     },
                     {
@@ -3943,7 +4614,12 @@
                           "type": "number"
                         }
                       },
-                      "required": ["top", "right", "bottom", "left"],
+                      "required": [
+                        "top",
+                        "right",
+                        "bottom",
+                        "left"
+                      ],
                       "additionalProperties": false
                     },
                     {
@@ -3969,7 +4645,12 @@
                           "type": "number"
                         }
                       },
-                      "required": ["top", "right", "bottom", "left"],
+                      "required": [
+                        "top",
+                        "right",
+                        "bottom",
+                        "left"
+                      ],
                       "additionalProperties": false
                     },
                     {
@@ -3995,7 +4676,12 @@
                           "type": "number"
                         }
                       },
-                      "required": ["top", "right", "bottom", "left"],
+                      "required": [
+                        "top",
+                        "right",
+                        "bottom",
+                        "left"
+                      ],
                       "additionalProperties": false
                     },
                     {
@@ -4021,7 +4707,12 @@
                           "type": "number"
                         }
                       },
-                      "required": ["top", "right", "bottom", "left"],
+                      "required": [
+                        "top",
+                        "right",
+                        "bottom",
+                        "left"
+                      ],
                       "additionalProperties": false
                     },
                     {
@@ -4045,7 +4736,12 @@
                       "type": "number"
                     }
                   },
-                  "required": ["top", "right", "bottom", "left"],
+                  "required": [
+                    "top",
+                    "right",
+                    "bottom",
+                    "left"
+                  ],
                   "additionalProperties": false
                 },
                 "systemChrome": {
@@ -4055,15 +4751,28 @@
                       "properties": {
                         "visibility": {
                           "type": "string",
-                          "enum": ["visible", "hidden", "partial", "unknown"]
+                          "enum": [
+                            "visible",
+                            "hidden",
+                            "partial",
+                            "unknown"
+                          ]
                         },
                         "statusBar": {
                           "type": "string",
-                          "enum": ["visible", "hidden", "unknown"]
+                          "enum": [
+                            "visible",
+                            "hidden",
+                            "unknown"
+                          ]
                         },
                         "navigationBar": {
                           "type": "string",
-                          "enum": ["visible", "hidden", "unknown"]
+                          "enum": [
+                            "visible",
+                            "hidden",
+                            "unknown"
+                          ]
                         },
                         "homeIndicatorAutoHideRequested": {
                           "anyOf": [
@@ -4077,10 +4786,17 @@
                         },
                         "source": {
                           "type": "string",
-                          "enum": ["android-window-insets", "ios-status-bar-manager"]
+                          "enum": [
+                            "android-window-insets",
+                            "ios-status-bar-manager"
+                          ]
                         }
                       },
-                      "required": ["visibility", "statusBar", "source"],
+                      "required": [
+                        "visibility",
+                        "statusBar",
+                        "source"
+                      ],
                       "additionalProperties": false
                     },
                     {
@@ -4089,7 +4805,11 @@
                   ]
                 }
               },
-              "required": ["available", "source", "units"],
+              "required": [
+                "available",
+                "source",
+                "units"
+              ],
               "additionalProperties": false
             }
           },
@@ -4128,14 +4848,23 @@
                 "type": "array",
                 "items": {
                   "type": "string",
-                  "enum": ["tap", "long-press", "input", "scroll", "toggle"]
+                  "enum": [
+                    "tap",
+                    "long-press",
+                    "input",
+                    "scroll",
+                    "toggle"
+                  ]
                 }
               },
               "checked": {
                 "type": "boolean"
               }
             },
-            "required": ["bounds", "affordances"],
+            "required": [
+              "bounds",
+              "affordances"
+            ],
             "additionalProperties": {}
           }
         },
@@ -4164,15 +4893,25 @@
           "properties": {
             "platform": {
               "type": "string",
-              "enum": ["ios", "android"]
+              "enum": [
+                "ios",
+                "android"
+              ]
             },
             "source": {
               "type": "string",
-              "enum": ["heuristic", "sdk"]
+              "enum": [
+                "heuristic",
+                "sdk"
+              ]
             },
             "confidence": {
               "type": "string",
-              "enum": ["high", "medium", "low"]
+              "enum": [
+                "high",
+                "medium",
+                "low"
+              ]
             },
             "key": {
               "type": "string"
@@ -4211,7 +4950,13 @@
               "additionalProperties": {}
             }
           },
-          "required": ["platform", "source", "confidence", "key", "components"],
+          "required": [
+            "platform",
+            "source",
+            "confidence",
+            "key",
+            "components"
+          ],
           "additionalProperties": {}
         },
         "elements": {
@@ -4265,7 +5010,12 @@
                             "type": "number"
                           }
                         },
-                        "required": ["left", "top", "right", "bottom"],
+                        "required": [
+                          "left",
+                          "top",
+                          "right",
+                          "bottom"
+                        ],
                         "additionalProperties": false
                       },
                       {
@@ -4293,7 +5043,12 @@
               }
             }
           },
-          "required": ["clickable", "scrollable", "text", "media"],
+          "required": [
+            "clickable",
+            "scrollable",
+            "text",
+            "media"
+          ],
           "additionalProperties": {}
         },
         "selectedElements": {
@@ -4335,7 +5090,12 @@
                         "type": "number"
                       }
                     },
-                    "required": ["left", "top", "right", "bottom"],
+                    "required": [
+                      "left",
+                      "top",
+                      "right",
+                      "bottom"
+                    ],
                     "additionalProperties": false
                   },
                   {
@@ -4376,7 +5136,10 @@
                 "properties": {
                   "method": {
                     "type": "string",
-                    "enum": ["accessibility", "visual"]
+                    "enum": [
+                      "accessibility",
+                      "visual"
+                    ]
                   },
                   "confidence": {
                     "type": "number"
@@ -4385,7 +5148,10 @@
                     "type": "string"
                   }
                 },
-                "required": ["method", "confidence"],
+                "required": [
+                  "method",
+                  "confidence"
+                ],
                 "additionalProperties": false
               }
             },
@@ -4420,7 +5186,12 @@
                       "type": "number"
                     }
                   },
-                  "required": ["left", "top", "right", "bottom"],
+                  "required": [
+                    "left",
+                    "top",
+                    "right",
+                    "bottom"
+                  ],
                   "additionalProperties": false
                 },
                 {
@@ -4606,7 +5377,9 @@
               ]
             }
           },
-          "required": ["bounds"],
+          "required": [
+            "bounds"
+          ],
           "additionalProperties": {}
         },
         "accessibilityFocusedElement": {
@@ -4637,7 +5410,12 @@
                       "type": "number"
                     }
                   },
-                  "required": ["left", "top", "right", "bottom"],
+                  "required": [
+                    "left",
+                    "top",
+                    "right",
+                    "bottom"
+                  ],
                   "additionalProperties": false
                 },
                 {
@@ -4823,7 +5601,9 @@
               ]
             }
           },
-          "required": ["bounds"],
+          "required": [
+            "bounds"
+          ],
           "additionalProperties": {}
         },
         "awaitedElement": {
@@ -4854,7 +5634,12 @@
                       "type": "number"
                     }
                   },
-                  "required": ["left", "top", "right", "bottom"],
+                  "required": [
+                    "left",
+                    "top",
+                    "right",
+                    "bottom"
+                  ],
                   "additionalProperties": false
                 },
                 {
@@ -5040,7 +5825,9 @@
               ]
             }
           },
-          "required": ["bounds"],
+          "required": [
+            "bounds"
+          ],
           "additionalProperties": {}
         },
         "matched": {
@@ -5089,7 +5876,12 @@
                       "type": "number"
                     }
                   },
-                  "required": ["left", "top", "right", "bottom"],
+                  "required": [
+                    "left",
+                    "top",
+                    "right",
+                    "bottom"
+                  ],
                   "additionalProperties": false
                 },
                 {
@@ -5275,7 +6067,9 @@
               ]
             }
           },
-          "required": ["bounds"],
+          "required": [
+            "bounds"
+          ],
           "additionalProperties": {}
         },
         "candidates": {
@@ -5308,7 +6102,12 @@
                         "type": "number"
                       }
                     },
-                    "required": ["left", "top", "right", "bottom"],
+                    "required": [
+                      "left",
+                      "top",
+                      "right",
+                      "bottom"
+                    ],
                     "additionalProperties": false
                   },
                   {
@@ -5494,7 +6293,9 @@
                 ]
               }
             },
-            "required": ["bounds"],
+            "required": [
+              "bounds"
+            ],
             "additionalProperties": {}
           }
         },
@@ -5531,7 +6332,9 @@
               "type": "string"
             }
           },
-          "required": ["isFresh"],
+          "required": [
+            "isFresh"
+          ],
           "additionalProperties": {}
         },
         "predictions": {
@@ -5603,7 +6406,12 @@
                     "type": "number"
                   }
                 },
-                "required": ["action", "target", "predictedScreen", "confidence"],
+                "required": [
+                  "action",
+                  "target",
+                  "predictedScreen",
+                  "confidence"
+                ],
                 "additionalProperties": {}
               }
             },
@@ -5629,10 +6437,15 @@
                       },
                       "basedOn": {
                         "type": "string",
-                        "enum": ["navigation_graph"]
+                        "enum": [
+                          "navigation_graph"
+                        ]
                       }
                     },
-                    "required": ["screenName", "basedOn"],
+                    "required": [
+                      "screenName",
+                      "basedOn"
+                    ],
                     "additionalProperties": false
                   }
                 },
@@ -5640,7 +6453,10 @@
               }
             }
           },
-          "required": ["likelyActions", "interactableElements"],
+          "required": [
+            "likelyActions",
+            "interactableElements"
+          ],
           "additionalProperties": {}
         },
         "accessibilityState": {
@@ -5651,10 +6467,17 @@
             },
             "service": {
               "type": "string",
-              "enum": ["talkback", "voiceover", "unknown"]
+              "enum": [
+                "talkback",
+                "voiceover",
+                "unknown"
+              ]
             }
           },
-          "required": ["enabled", "service"],
+          "required": [
+            "enabled",
+            "service"
+          ],
           "additionalProperties": {}
         },
         "deviceLock": {
@@ -5670,7 +6493,10 @@
               "type": "boolean"
             }
           },
-          "required": ["locked", "keyguardShowing"],
+          "required": [
+            "locked",
+            "keyguardShowing"
+          ],
           "additionalProperties": false
         },
         "perfSnapshot": {
@@ -5712,7 +6538,12 @@
                       "type": "number"
                     }
                   },
-                  "required": ["p50", "p90", "p95", "p99"],
+                  "required": [
+                    "p50",
+                    "p90",
+                    "p95",
+                    "p99"
+                  ],
                   "additionalProperties": false
                 },
                 {
@@ -5738,7 +6569,12 @@
                       "type": "number"
                     }
                   },
-                  "required": ["p50", "p90", "p95", "p99"],
+                  "required": [
+                    "p50",
+                    "p90",
+                    "p95",
+                    "p99"
+                  ],
                   "additionalProperties": false
                 },
                 {
@@ -5765,7 +6601,10 @@
                       ]
                     }
                   },
-                  "required": ["total", "perSecond"],
+                  "required": [
+                    "total",
+                    "perSecond"
+                  ],
                   "additionalProperties": false
                 },
                 {
@@ -5788,7 +6627,11 @@
                       "type": "number"
                     }
                   },
-                  "required": ["p50", "p95", "latest"],
+                  "required": [
+                    "p50",
+                    "p95",
+                    "latest"
+                  ],
                   "additionalProperties": false
                 },
                 {
@@ -5808,7 +6651,10 @@
                       "type": "number"
                     }
                   },
-                  "required": ["avg", "latest"],
+                  "required": [
+                    "avg",
+                    "latest"
+                  ],
                   "additionalProperties": false
                 },
                 {
@@ -5828,7 +6674,10 @@
                       "type": "number"
                     }
                   },
-                  "required": ["avg", "latest"],
+                  "required": [
+                    "avg",
+                    "latest"
+                  ],
                   "additionalProperties": false
                 },
                 {
@@ -5940,7 +6789,10 @@
                       "type": "number"
                     }
                   },
-                  "required": ["displayedMs", "ageMs"],
+                  "required": [
+                    "displayedMs",
+                    "ageMs"
+                  ],
                   "additionalProperties": false
                 },
                 {
@@ -5971,14 +6823,22 @@
               "type": "array",
               "items": {
                 "type": "string",
-                "enum": ["focus", "region", "overview"]
+                "enum": [
+                  "focus",
+                  "region",
+                  "overview"
+                ]
               }
             },
             "gatedOff": {
               "type": "array",
               "items": {
                 "type": "string",
-                "enum": ["focus", "region", "overview"]
+                "enum": [
+                  "focus",
+                  "region",
+                  "overview"
+                ]
               }
             },
             "nodesBefore": {
@@ -6016,7 +6876,12 @@
                       "type": "number"
                     }
                   },
-                  "required": ["left", "top", "right", "bottom"],
+                  "required": [
+                    "left",
+                    "top",
+                    "right",
+                    "bottom"
+                  ],
                   "additionalProperties": false
                 },
                 {
@@ -6044,7 +6909,10 @@
               "properties": {
                 "by": {
                   "type": "string",
-                  "enum": ["anchor", "foreground-app"]
+                  "enum": [
+                    "anchor",
+                    "foreground-app"
+                  ]
                 },
                 "matched": {
                   "type": "boolean"
@@ -6053,11 +6921,18 @@
                   "type": "string"
                 }
               },
-              "required": ["by", "matched"],
+              "required": [
+                "by",
+                "matched"
+              ],
               "additionalProperties": {}
             }
           },
-          "required": ["applied", "nodesBefore", "nodesAfter"],
+          "required": [
+            "applied",
+            "nodesBefore",
+            "nodesAfter"
+          ],
           "additionalProperties": {}
         },
         "artifact": {
@@ -6082,7 +6957,13 @@
               "type": "string"
             }
           },
-          "required": ["path", "format", "payload", "bytes", "tool"],
+          "required": [
+            "path",
+            "format",
+            "payload",
+            "bytes",
+            "tool"
+          ],
           "additionalProperties": {}
         }
       }
@@ -6106,18 +6987,31 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "waitFor": {
           "type": "object",
           "additionalProperties": false,
           "not": {
-            "required": ["timeout", "timeoutMs"]
+            "required": [
+              "timeout",
+              "timeoutMs"
+            ]
           },
           "properties": {
             "for": {
               "type": "string",
-              "enum": ["appear", "disappear", "clickable", "textEquals", "countStable", "stable"]
+              "enum": [
+                "appear",
+                "disappear",
+                "clickable",
+                "textEquals",
+                "countStable",
+                "stable"
+              ]
             },
             "pollMs": {
               "type": "number"
@@ -6145,11 +7039,18 @@
             },
             "matchType": {
               "type": "string",
-              "enum": ["all", "any"]
+              "enum": [
+                "all",
+                "any"
+              ]
             },
             "textMatch": {
               "type": "string",
-              "enum": ["exact", "contains", "regex"],
+              "enum": [
+                "exact",
+                "contains",
+                "regex"
+              ],
               "description": "How to match waitFor.text; does not affect contentDescription"
             },
             "activeWindow": {
@@ -6171,16 +7072,24 @@
               },
               "anyOf": [
                 {
-                  "required": ["appId"]
+                  "required": [
+                    "appId"
+                  ]
                 },
                 {
-                  "required": ["packageName"]
+                  "required": [
+                    "packageName"
+                  ]
                 },
                 {
-                  "required": ["bundleId"]
+                  "required": [
+                    "bundleId"
+                  ]
                 },
                 {
-                  "required": ["activityName"]
+                  "required": [
+                    "activityName"
+                  ]
                 }
               ]
             },
@@ -6204,16 +7113,24 @@
               },
               "anyOf": [
                 {
-                  "required": ["elementId"]
+                  "required": [
+                    "elementId"
+                  ]
                 },
                 {
-                  "required": ["text"]
+                  "required": [
+                    "text"
+                  ]
                 },
                 {
-                  "required": ["className"]
+                  "required": [
+                    "className"
+                  ]
                 },
                 {
-                  "required": ["contentDescription"]
+                  "required": [
+                    "contentDescription"
+                  ]
                 }
               ]
             },
@@ -6230,10 +7147,14 @@
               "additionalProperties": false,
               "oneOf": [
                 {
-                  "required": ["elementId"]
+                  "required": [
+                    "elementId"
+                  ]
                 },
                 {
-                  "required": ["text"]
+                  "required": [
+                    "text"
+                  ]
                 }
               ]
             },
@@ -6251,20 +7172,30 @@
                   "const": "stable"
                 }
               },
-              "required": ["for"],
+              "required": [
+                "for"
+              ],
               "not": {
-                "required": ["container"]
+                "required": [
+                  "container"
+                ]
               }
             },
             {
               "properties": {
                 "for": {
                   "not": {
-                    "enum": ["stable", "textEquals"]
+                    "enum": [
+                      "stable",
+                      "textEquals"
+                    ]
                   }
                 }
               },
-              "required": ["for", "elementId"]
+              "required": [
+                "for",
+                "elementId"
+              ]
             },
             {
               "properties": {
@@ -6274,29 +7205,46 @@
                   }
                 }
               },
-              "required": ["for", "text"]
+              "required": [
+                "for",
+                "text"
+              ]
             },
             {
-              "required": ["textAny"],
+              "required": [
+                "textAny"
+              ],
               "not": {
                 "anyOf": [
                   {
-                    "required": ["elementId"]
+                    "required": [
+                      "elementId"
+                    ]
                   },
                   {
-                    "required": ["text"]
+                    "required": [
+                      "text"
+                    ]
                   },
                   {
-                    "required": ["className"]
+                    "required": [
+                      "className"
+                    ]
                   },
                   {
-                    "required": ["contentDescription"]
+                    "required": [
+                      "contentDescription"
+                    ]
                   },
                   {
-                    "required": ["matchType"]
+                    "required": [
+                      "matchType"
+                    ]
                   },
                   {
-                    "required": ["textMatch"]
+                    "required": [
+                      "textMatch"
+                    ]
                   }
                 ]
               }
@@ -6305,31 +7253,47 @@
               "not": {
                 "anyOf": [
                   {
-                    "required": ["textAny"]
+                    "required": [
+                      "textAny"
+                    ]
                   },
                   {
-                    "required": ["for"]
+                    "required": [
+                      "for"
+                    ]
                   }
                 ]
               },
               "anyOf": [
                 {
-                  "required": ["elementId"]
+                  "required": [
+                    "elementId"
+                  ]
                 },
                 {
-                  "required": ["text"]
+                  "required": [
+                    "text"
+                  ]
                 },
                 {
-                  "required": ["className"]
+                  "required": [
+                    "className"
+                  ]
                 },
                 {
-                  "required": ["contentDescription"]
+                  "required": [
+                    "contentDescription"
+                  ]
                 },
                 {
-                  "required": ["activeWindow"]
+                  "required": [
+                    "activeWindow"
+                  ]
                 },
                 {
-                  "required": ["absent"]
+                  "required": [
+                    "absent"
+                  ]
                 }
               ]
             }
@@ -6346,7 +7310,9 @@
               "maximum": 9007199254740991
             }
           },
-          "required": ["quietPeriodMs"],
+          "required": [
+            "quietPeriodMs"
+          ],
           "additionalProperties": false
         },
         "sessionUuid": {
@@ -6361,29 +7327,45 @@
           "type": "string"
         }
       },
-      "required": ["url", "platform"],
+      "required": [
+        "url",
+        "platform"
+      ],
       "additionalProperties": false,
       "if": {
-        "required": ["platform", "waitFor"],
+        "required": [
+          "platform",
+          "waitFor"
+        ],
         "properties": {
           "platform": {
             "const": "ios"
           },
           "waitFor": {
-            "required": ["activeWindow"],
+            "required": [
+              "activeWindow"
+            ],
             "properties": {
               "activeWindow": {
-                "required": ["activityName"],
+                "required": [
+                  "activityName"
+                ],
                 "not": {
                   "anyOf": [
                     {
-                      "required": ["appId"]
+                      "required": [
+                        "appId"
+                      ]
                     },
                     {
-                      "required": ["bundleId"]
+                      "required": [
+                        "bundleId"
+                      ]
                     },
                     {
-                      "required": ["packageName"]
+                      "required": [
+                        "packageName"
+                      ]
                     }
                   ]
                 }
@@ -6394,7 +7376,9 @@
       },
       "then": false,
       "dependentRequired": {
-        "settled": ["waitFor"]
+        "settled": [
+          "waitFor"
+        ]
       }
     }
   },
@@ -6408,7 +7392,13 @@
         "action": {
           "description": "call/accept/cancel/busy/hold; hold needs no phoneNumber",
           "type": "string",
-          "enum": ["call", "accept", "cancel", "busy", "hold"]
+          "enum": [
+            "call",
+            "accept",
+            "cancel",
+            "busy",
+            "hold"
+          ]
         },
         "phoneNumber": {
           "description": "Phone number; required except for hold",
@@ -6416,7 +7406,10 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -6430,7 +7423,9 @@
           "type": "string"
         }
       },
-      "required": ["action"],
+      "required": [
+        "action"
+      ],
       "additionalProperties": false
     }
   },
@@ -6444,7 +7439,10 @@
         "direction": {
           "description": "Pinch direction",
           "type": "string",
-          "enum": ["in", "out"]
+          "enum": [
+            "in",
+            "out"
+          ]
         },
         "distanceStart": {
           "description": "Initial finger distance (px, default: 400)",
@@ -6485,10 +7483,14 @@
           },
           "oneOf": [
             {
-              "required": ["elementId"]
+              "required": [
+                "elementId"
+              ]
             },
             {
-              "required": ["text"]
+              "required": [
+                "text"
+              ]
             }
           ],
           "description": "Scope search to a container"
@@ -6499,7 +7501,10 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -6513,7 +7518,10 @@
           "type": "string"
         }
       },
-      "required": ["direction", "platform"],
+      "required": [
+        "direction",
+        "platform"
+      ],
       "additionalProperties": false
     }
   },
@@ -6537,7 +7545,10 @@
         "imageType": {
           "description": "Notification image type (default: normal)",
           "type": "string",
-          "enum": ["normal", "bigPicture"]
+          "enum": [
+            "normal",
+            "bigPicture"
+          ]
         },
         "imagePath": {
           "description": "Host image path for bigPicture",
@@ -6560,7 +7571,10 @@
                 "minLength": 1
               }
             },
-            "required": ["label", "actionId"],
+            "required": [
+              "label",
+              "actionId"
+            ],
             "additionalProperties": false
           }
         },
@@ -6575,7 +7589,10 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["ios", "android"]
+          "enum": [
+            "ios",
+            "android"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -6589,7 +7606,11 @@
           "type": "string"
         }
       },
-      "required": ["title", "body", "platform"],
+      "required": [
+        "title",
+        "body",
+        "platform"
+      ],
       "additionalProperties": false,
       "if": {
         "properties": {
@@ -6597,10 +7618,14 @@
             "const": "ios"
           }
         },
-        "required": ["platform"]
+        "required": [
+          "platform"
+        ]
       },
       "then": {
-        "required": ["appId"]
+        "required": [
+          "appId"
+        ]
       }
     }
   },
@@ -6613,11 +7638,22 @@
       "properties": {
         "button": {
           "type": "string",
-          "enum": ["home", "back", "menu", "power", "volume_up", "volume_down", "recent"]
+          "enum": [
+            "home",
+            "back",
+            "menu",
+            "power",
+            "volume_up",
+            "volume_down",
+            "recent"
+          ]
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -6631,7 +7667,10 @@
           "type": "string"
         }
       },
-      "required": ["button", "platform"],
+      "required": [
+        "button",
+        "platform"
+      ],
       "additionalProperties": false
     }
   },
@@ -6686,11 +7725,18 @@
                       "additionalProperties": false
                     }
                   },
-                  "required": ["runtime", "deviceType"],
+                  "required": [
+                    "runtime",
+                    "deviceType"
+                  ],
                   "additionalProperties": false
                 }
               },
-              "required": ["platform", "name", "spec"],
+              "required": [
+                "platform",
+                "name",
+                "spec"
+              ],
               "additionalProperties": false
             },
             {
@@ -6719,11 +7765,18 @@
                       "minLength": 1
                     }
                   },
-                  "required": ["runtime", "deviceType"],
+                  "required": [
+                    "runtime",
+                    "deviceType"
+                  ],
                   "additionalProperties": false
                 }
               },
-              "required": ["platform", "name", "spec"],
+              "required": [
+                "platform",
+                "name",
+                "spec"
+              ],
               "additionalProperties": false
             }
           ]
@@ -6737,7 +7790,10 @@
           "description": "Whether to wait for the AutoMobile automation runner after device boot",
           "default": "automation",
           "type": "string",
-          "enum": ["automation", "none"]
+          "enum": [
+            "automation",
+            "none"
+          ]
         },
         "timeoutMs": {
           "description": "Total provision, boot, and readiness timeout in ms",
@@ -6746,7 +7802,10 @@
           "maximum": 890000
         }
       },
-      "required": ["operationId", "device"],
+      "required": [
+        "operationId",
+        "device"
+      ],
       "additionalProperties": false
     }
   },
@@ -6764,7 +7823,13 @@
         "container": {
           "description": "App container",
           "type": "string",
-          "enum": ["documents", "library", "cache", "tmp", "externalFiles"]
+          "enum": [
+            "documents",
+            "library",
+            "cache",
+            "tmp",
+            "externalFiles"
+          ]
         },
         "sourcePath": {
           "description": "Host file path",
@@ -6785,7 +7850,10 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -6799,7 +7867,11 @@
           "type": "string"
         }
       },
-      "required": ["appId", "container", "destinationPath"],
+      "required": [
+        "appId",
+        "container",
+        "destinationPath"
+      ],
       "additionalProperties": false
     }
   },
@@ -6812,7 +7884,10 @@
       "properties": {
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -6826,7 +7901,9 @@
           "type": "string"
         }
       },
-      "required": ["platform"],
+      "required": [
+        "platform"
+      ],
       "additionalProperties": false
     }
   },
@@ -6839,14 +7916,20 @@
       "properties": {
         "action": {
           "type": "string",
-          "enum": ["begin", "end", "status"]
+          "enum": [
+            "begin",
+            "end",
+            "status"
+          ]
         },
         "planName": {
           "description": "Plan name for action=end",
           "type": "string"
         }
       },
-      "required": ["action"],
+      "required": [
+        "action"
+      ],
       "additionalProperties": false
     },
     "outputSchema": {
@@ -6858,7 +7941,11 @@
         },
         "action": {
           "type": "string",
-          "enum": ["begin", "end", "status"]
+          "enum": [
+            "begin",
+            "end",
+            "status"
+          ]
         },
         "recording": {
           "type": "boolean"
@@ -6888,7 +7975,9 @@
           "type": "string"
         }
       },
-      "required": ["success"],
+      "required": [
+        "success"
+      ],
       "additionalProperties": false
     }
   },
@@ -6916,7 +8005,10 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -6930,7 +8022,10 @@
           "type": "string"
         }
       },
-      "required": ["appId", "key"],
+      "required": [
+        "appId",
+        "key"
+      ],
       "additionalProperties": false
     }
   },
@@ -6943,11 +8038,17 @@
       "properties": {
         "orientation": {
           "type": "string",
-          "enum": ["portrait", "landscape"]
+          "enum": [
+            "portrait",
+            "landscape"
+          ]
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -6961,7 +8062,10 @@
           "type": "string"
         }
       },
-      "required": ["orientation", "platform"],
+      "required": [
+        "orientation",
+        "platform"
+      ],
       "additionalProperties": false
     }
   },
@@ -6974,7 +8078,10 @@
       "properties": {
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -6988,7 +8095,9 @@
           "type": "string"
         }
       },
-      "required": ["platform"],
+      "required": [
+        "platform"
+      ],
       "additionalProperties": false
     }
   },
@@ -7009,7 +8118,10 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -7023,7 +8135,10 @@
           "type": "string"
         }
       },
-      "required": ["phoneNumber", "message"],
+      "required": [
+        "phoneNumber",
+        "message"
+      ],
       "additionalProperties": false
     }
   },
@@ -7039,7 +8154,10 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -7049,7 +8167,10 @@
           "type": "boolean"
         }
       },
-      "required": ["deviceId", "platform"],
+      "required": [
+        "deviceId",
+        "platform"
+      ],
       "additionalProperties": false
     }
   },
@@ -7064,7 +8185,11 @@
           "type": "string"
         },
         "action": {
-          "enum": ["grant", "revoke", "reset"]
+          "enum": [
+            "grant",
+            "revoke",
+            "reset"
+          ]
         },
         "permissions": {
           "type": "array",
@@ -7085,11 +8210,17 @@
           "type": "boolean"
         },
         "scheduleExactAlarm": {
-          "enum": ["allow", "deny"]
+          "enum": [
+            "allow",
+            "deny"
+          ]
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "type": "string"
@@ -7101,7 +8232,9 @@
           "type": "string"
         }
       },
-      "required": ["appId"],
+      "required": [
+        "appId"
+      ],
       "additionalProperties": false,
       "if": {
         "properties": {
@@ -7109,12 +8242,18 @@
             "const": "reset"
           }
         },
-        "required": ["action"]
+        "required": [
+          "action"
+        ]
       },
       "then": {
-        "required": ["permissions"],
+        "required": [
+          "permissions"
+        ],
         "not": {
-          "required": ["userId"]
+          "required": [
+            "userId"
+          ]
         },
         "if": {
           "properties": {
@@ -7122,7 +8261,9 @@
               "const": "android"
             }
           },
-          "required": ["platform"]
+          "required": [
+            "platform"
+          ]
         },
         "then": {
           "properties": {
@@ -7156,14 +8297,22 @@
             "mode": {
               "description": "Do Not Disturb mode",
               "type": "string",
-              "enum": ["off", "none", "priority", "alarms"]
+              "enum": [
+                "off",
+                "none",
+                "priority",
+                "alarms"
+              ]
             }
           },
           "additionalProperties": false
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -7233,7 +8382,10 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -7247,7 +8399,12 @@
           "type": "string"
         }
       },
-      "required": ["appId", "key", "value", "type"],
+      "required": [
+        "appId",
+        "key",
+        "value",
+        "type"
+      ],
       "additionalProperties": false
     }
   },
@@ -7268,7 +8425,10 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -7282,7 +8442,10 @@
           "type": "string"
         }
       },
-      "required": ["appId", "policyAccess"],
+      "required": [
+        "appId",
+        "policyAccess"
+      ],
       "additionalProperties": false
     }
   },
@@ -7296,7 +8459,11 @@
         "scope": {
           "description": "Preference scope",
           "type": "string",
-          "enum": ["systemProperty", "sharedPreferences", "userDefaults"]
+          "enum": [
+            "systemProperty",
+            "sharedPreferences",
+            "userDefaults"
+          ]
         },
         "appId": {
           "description": "App package or bundle id",
@@ -7328,11 +8495,19 @@
         "type": {
           "description": "Value type for typed preference stores",
           "type": "string",
-          "enum": ["string", "bool", "int", "float"]
+          "enum": [
+            "string",
+            "bool",
+            "int",
+            "float"
+          ]
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -7346,7 +8521,12 @@
           "type": "string"
         }
       },
-      "required": ["scope", "key", "value", "type"],
+      "required": [
+        "scope",
+        "key",
+        "value",
+        "type"
+      ],
       "additionalProperties": false
     }
   },
@@ -7373,7 +8553,9 @@
           "minLength": 1
         }
       },
-      "required": ["toolName"],
+      "required": [
+        "toolName"
+      ],
       "additionalProperties": false
     }
   },
@@ -7415,18 +8597,26 @@
                 "type": "boolean"
               }
             },
-            "required": ["selector"],
+            "required": [
+              "selector"
+            ],
             "additionalProperties": false
           }
         },
         "scrollDirection": {
           "description": "Initial search scroll direction",
           "type": "string",
-          "enum": ["up", "down"]
+          "enum": [
+            "up",
+            "down"
+          ]
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -7440,7 +8630,9 @@
           "type": "string"
         }
       },
-      "required": ["fields"],
+      "required": [
+        "fields"
+      ],
       "additionalProperties": false
     },
     "outputSchema": {
@@ -7483,13 +8675,23 @@
               },
               "fieldType": {
                 "type": "string",
-                "enum": ["text", "checkbox", "toggle", "dropdown", "unknown"]
+                "enum": [
+                  "text",
+                  "checkbox",
+                  "toggle",
+                  "dropdown",
+                  "unknown"
+                ]
               },
               "skipped": {
                 "type": "boolean"
               }
             },
-            "required": ["selector", "success", "attempts"],
+            "required": [
+              "selector",
+              "success",
+              "attempts"
+            ],
             "additionalProperties": false
           }
         },
@@ -7502,7 +8704,11 @@
           "type": "string"
         }
       },
-      "required": ["success", "fields", "totalAttempts"],
+      "required": [
+        "success",
+        "fields",
+        "totalAttempts"
+      ],
       "additionalProperties": false
     }
   },
@@ -7523,7 +8729,10 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -7537,7 +8746,9 @@
           "type": "string"
         }
       },
-      "required": ["platform"],
+      "required": [
+        "platform"
+      ],
       "additionalProperties": false
     }
   },
@@ -7561,7 +8772,10 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -7575,7 +8789,11 @@
           "type": "string"
         }
       },
-      "required": ["appId", "databasePath", "query"],
+      "required": [
+        "appId",
+        "databasePath",
+        "query"
+      ],
       "additionalProperties": false
     }
   },
@@ -7611,7 +8829,9 @@
           "type": "string"
         }
       },
-      "required": ["success"],
+      "required": [
+        "success"
+      ],
       "additionalProperties": false
     }
   },
@@ -7641,10 +8861,14 @@
           },
           "oneOf": [
             {
-              "required": ["elementId"]
+              "required": [
+                "elementId"
+              ]
             },
             {
-              "required": ["text"]
+              "required": [
+                "text"
+              ]
             }
           ],
           "description": "Scope search to a container"
@@ -7656,12 +8880,20 @@
         "direction": {
           "description": "Swipe/scroll direction",
           "type": "string",
-          "enum": ["up", "down", "left", "right"]
+          "enum": [
+            "up",
+            "down",
+            "left",
+            "right"
+          ]
         },
         "gestureType": {
           "description": "Finger direction or content scroll direction; default: scrollTowardsDirection",
           "type": "string",
-          "enum": ["swipeFingerTowardsDirection", "scrollTowardsDirection"]
+          "enum": [
+            "swipeFingerTowardsDirection",
+            "scrollTowardsDirection"
+          ]
         },
         "lookFor": {
           "type": "object",
@@ -7678,10 +8910,14 @@
           },
           "oneOf": [
             {
-              "required": ["elementId"]
+              "required": [
+                "elementId"
+              ]
             },
             {
-              "required": ["text"]
+              "required": [
+                "text"
+              ]
             }
           ],
           "description": "Element to look for during swipe"
@@ -7705,11 +8941,18 @@
         "speed": {
           "description": "Swipe speed preset",
           "type": "string",
-          "enum": ["slow", "normal", "fast"]
+          "enum": [
+            "slow",
+            "normal",
+            "fast"
+          ]
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -7723,7 +8966,10 @@
           "type": "string"
         }
       },
-      "required": ["direction", "platform"],
+      "required": [
+        "direction",
+        "platform"
+      ],
       "additionalProperties": false
     }
   },
@@ -7737,7 +8983,14 @@
         "action": {
           "description": "open/close/find/tap/dismiss/clearAll notification",
           "type": "string",
-          "enum": ["open", "close", "find", "tap", "dismiss", "clearAll"]
+          "enum": [
+            "open",
+            "close",
+            "find",
+            "tap",
+            "dismiss",
+            "clearAll"
+          ]
         },
         "notification": {
           "description": "Notification criteria to match",
@@ -7768,7 +9021,10 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -7782,7 +9038,10 @@
           "type": "string"
         }
       },
-      "required": ["action", "platform"],
+      "required": [
+        "action",
+        "platform"
+      ],
       "additionalProperties": false
     }
   },
@@ -7808,10 +9067,14 @@
           },
           "oneOf": [
             {
-              "required": ["elementId"]
+              "required": [
+                "elementId"
+              ]
             },
             {
-              "required": ["text"]
+              "required": [
+                "text"
+              ]
             }
           ],
           "description": "Scope search to a container"
@@ -7819,7 +9082,10 @@
         "selectionStrategy": {
           "description": "Element selection strategy: 'first' (default) or 'random'",
           "type": "string",
-          "enum": ["first", "random"]
+          "enum": [
+            "first",
+            "random"
+          ]
         },
         "scrollableContainer": {
           "description": "Search only scrollable containers/lists",
@@ -7829,7 +9095,11 @@
           "description": "Action type (default: tap)",
           "default": "tap",
           "type": "string",
-          "enum": ["tap", "doubleTap", "longPress"]
+          "enum": [
+            "tap",
+            "doubleTap",
+            "longPress"
+          ]
         },
         "duration": {
           "description": "Long press duration (ms)",
@@ -7850,7 +9120,10 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -7864,7 +9137,10 @@
           "type": "string"
         }
       },
-      "required": ["action", "platform"],
+      "required": [
+        "action",
+        "platform"
+      ],
       "additionalProperties": false
     }
   },
@@ -7906,16 +9182,24 @@
           },
           "oneOf": [
             {
-              "required": ["elementId"]
+              "required": [
+                "elementId"
+              ]
             },
             {
-              "required": ["testTag"]
+              "required": [
+                "testTag"
+              ]
             },
             {
-              "required": ["text"]
+              "required": [
+                "text"
+              ]
             },
             {
-              "required": ["textAny"]
+              "required": [
+                "textAny"
+              ]
             }
           ],
           "description": "Element to tap: elementId, Android testTag, text, or ordered text variants"
@@ -7939,10 +9223,14 @@
           },
           "oneOf": [
             {
-              "required": ["elementId"]
+              "required": [
+                "elementId"
+              ]
             },
             {
-              "required": ["text"]
+              "required": [
+                "text"
+              ]
             }
           ],
           "description": "Scope search to a container"
@@ -7951,12 +9239,20 @@
           "description": "Action type (default: tap)",
           "default": "tap",
           "type": "string",
-          "enum": ["tap", "doubleTap", "longPress", "focus"]
+          "enum": [
+            "tap",
+            "doubleTap",
+            "longPress",
+            "focus"
+          ]
         },
         "selectionStrategy": {
           "description": "Selection strategy when multiple match (default: first)",
           "type": "string",
-          "enum": ["first", "random"]
+          "enum": [
+            "first",
+            "random"
+          ]
         },
         "index": {
           "description": "0-based index to tap the Nth on-screen match (in hierarchy order, i.e. top-to-bottom for a vertical list) instead of applying selectionStrategy — for repeated controls with no unique text. Out of range → no match.",
@@ -7995,7 +9291,10 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -8009,7 +9308,11 @@
           "type": "string"
         }
       },
-      "required": ["selector", "action", "platform"],
+      "required": [
+        "selector",
+        "action",
+        "platform"
+      ],
       "additionalProperties": false
     },
     "outputSchema": {
@@ -8053,7 +9356,12 @@
                       "type": "number"
                     }
                   },
-                  "required": ["left", "top", "right", "bottom"],
+                  "required": [
+                    "left",
+                    "top",
+                    "right",
+                    "bottom"
+                  ],
                   "additionalProperties": false
                 },
                 {
@@ -8239,7 +9547,9 @@
               ]
             }
           },
-          "required": ["bounds"],
+          "required": [
+            "bounds"
+          ],
           "additionalProperties": {}
         },
         "observation": {
@@ -8286,7 +9596,12 @@
                                 "type": "number"
                               }
                             },
-                            "required": ["left", "top", "right", "bottom"],
+                            "required": [
+                              "left",
+                              "top",
+                              "right",
+                              "bottom"
+                            ],
                             "additionalProperties": false
                           },
                           {
@@ -8327,7 +9642,10 @@
                         "properties": {
                           "method": {
                             "type": "string",
-                            "enum": ["accessibility", "visual"]
+                            "enum": [
+                              "accessibility",
+                              "visual"
+                            ]
                           },
                           "confidence": {
                             "type": "number"
@@ -8336,7 +9654,10 @@
                             "type": "string"
                           }
                         },
-                        "required": ["method", "confidence"],
+                        "required": [
+                          "method",
+                          "confidence"
+                        ],
                         "additionalProperties": false
                       }
                     },
@@ -8371,7 +9692,12 @@
                               "type": "number"
                             }
                           },
-                          "required": ["left", "top", "right", "bottom"],
+                          "required": [
+                            "left",
+                            "top",
+                            "right",
+                            "bottom"
+                          ],
                           "additionalProperties": false
                         },
                         {
@@ -8557,7 +9883,9 @@
                       ]
                     }
                   },
-                  "required": ["bounds"],
+                  "required": [
+                    "bounds"
+                  ],
                   "additionalProperties": {}
                 },
                 "accessibilityFocusedElement": {
@@ -8588,7 +9916,12 @@
                               "type": "number"
                             }
                           },
-                          "required": ["left", "top", "right", "bottom"],
+                          "required": [
+                            "left",
+                            "top",
+                            "right",
+                            "bottom"
+                          ],
                           "additionalProperties": false
                         },
                         {
@@ -8774,7 +10107,9 @@
                       ]
                     }
                   },
-                  "required": ["bounds"],
+                  "required": [
+                    "bounds"
+                  ],
                   "additionalProperties": {}
                 },
                 "activeWindow": {
@@ -8802,15 +10137,25 @@
                   "properties": {
                     "platform": {
                       "type": "string",
-                      "enum": ["ios", "android"]
+                      "enum": [
+                        "ios",
+                        "android"
+                      ]
                     },
                     "source": {
                       "type": "string",
-                      "enum": ["heuristic", "sdk"]
+                      "enum": [
+                        "heuristic",
+                        "sdk"
+                      ]
                     },
                     "confidence": {
                       "type": "string",
-                      "enum": ["high", "medium", "low"]
+                      "enum": [
+                        "high",
+                        "medium",
+                        "low"
+                      ]
                     },
                     "key": {
                       "type": "string"
@@ -8849,7 +10194,13 @@
                       "additionalProperties": {}
                     }
                   },
-                  "required": ["platform", "source", "confidence", "key", "components"],
+                  "required": [
+                    "platform",
+                    "source",
+                    "confidence",
+                    "key",
+                    "components"
+                  ],
                   "additionalProperties": {}
                 }
               },
@@ -8880,11 +10231,19 @@
                       "type": "string"
                     }
                   },
-                  "required": ["path", "format", "payload", "bytes", "tool"],
+                  "required": [
+                    "path",
+                    "format",
+                    "payload",
+                    "bytes",
+                    "tool"
+                  ],
                   "additionalProperties": {}
                 }
               },
-              "required": ["artifact"],
+              "required": [
+                "artifact"
+              ],
               "additionalProperties": {}
             }
           ]
@@ -8894,7 +10253,10 @@
           "properties": {
             "mode": {
               "type": "string",
-              "enum": ["diff", "full"]
+              "enum": [
+                "diff",
+                "full"
+              ]
             },
             "reason": {
               "type": "string",
@@ -8939,15 +10301,25 @@
                   "properties": {
                     "platform": {
                       "type": "string",
-                      "enum": ["ios", "android"]
+                      "enum": [
+                        "ios",
+                        "android"
+                      ]
                     },
                     "source": {
                       "type": "string",
-                      "enum": ["heuristic", "sdk"]
+                      "enum": [
+                        "heuristic",
+                        "sdk"
+                      ]
                     },
                     "confidence": {
                       "type": "string",
-                      "enum": ["high", "medium", "low"]
+                      "enum": [
+                        "high",
+                        "medium",
+                        "low"
+                      ]
                     },
                     "key": {
                       "type": "string"
@@ -8986,7 +10358,13 @@
                       "additionalProperties": {}
                     }
                   },
-                  "required": ["platform", "source", "confidence", "key", "components"],
+                  "required": [
+                    "platform",
+                    "source",
+                    "confidence",
+                    "key",
+                    "components"
+                  ],
                   "additionalProperties": {}
                 }
               },
@@ -9023,15 +10401,25 @@
                   "properties": {
                     "platform": {
                       "type": "string",
-                      "enum": ["ios", "android"]
+                      "enum": [
+                        "ios",
+                        "android"
+                      ]
                     },
                     "source": {
                       "type": "string",
-                      "enum": ["heuristic", "sdk"]
+                      "enum": [
+                        "heuristic",
+                        "sdk"
+                      ]
                     },
                     "confidence": {
                       "type": "string",
-                      "enum": ["high", "medium", "low"]
+                      "enum": [
+                        "high",
+                        "medium",
+                        "low"
+                      ]
                     },
                     "key": {
                       "type": "string"
@@ -9070,14 +10458,23 @@
                       "additionalProperties": {}
                     }
                   },
-                  "required": ["platform", "source", "confidence", "key", "components"],
+                  "required": [
+                    "platform",
+                    "source",
+                    "confidence",
+                    "key",
+                    "components"
+                  ],
                   "additionalProperties": {}
                 }
               },
               "additionalProperties": {}
             }
           },
-          "required": ["mode", "reason"],
+          "required": [
+            "mode",
+            "reason"
+          ],
           "additionalProperties": {}
         },
         "selectedElement": {
@@ -9117,7 +10514,12 @@
                       "type": "number"
                     }
                   },
-                  "required": ["left", "top", "right", "bottom"],
+                  "required": [
+                    "left",
+                    "top",
+                    "right",
+                    "bottom"
+                  ],
                   "additionalProperties": false
                 },
                 {
@@ -9158,7 +10560,10 @@
               "properties": {
                 "method": {
                   "type": "string",
-                  "enum": ["accessibility", "visual"]
+                  "enum": [
+                    "accessibility",
+                    "visual"
+                  ]
                 },
                 "confidence": {
                   "type": "number"
@@ -9167,7 +10572,10 @@
                   "type": "string"
                 }
               },
-              "required": ["method", "confidence"],
+              "required": [
+                "method",
+                "confidence"
+              ],
               "additionalProperties": false
             }
           },
@@ -9212,7 +10620,12 @@
                         "type": "number"
                       }
                     },
-                    "required": ["left", "top", "right", "bottom"],
+                    "required": [
+                      "left",
+                      "top",
+                      "right",
+                      "bottom"
+                    ],
                     "additionalProperties": false
                   },
                   {
@@ -9253,7 +10666,10 @@
                 "properties": {
                   "method": {
                     "type": "string",
-                    "enum": ["accessibility", "visual"]
+                    "enum": [
+                      "accessibility",
+                      "visual"
+                    ]
                   },
                   "confidence": {
                     "type": "number"
@@ -9262,7 +10678,10 @@
                     "type": "string"
                   }
                 },
-                "required": ["method", "confidence"],
+                "required": [
+                  "method",
+                  "confidence"
+                ],
                 "additionalProperties": false
               }
             },
@@ -9300,7 +10719,11 @@
               "maximum": 9007199254740991
             }
           },
-          "required": ["durationMs", "requestCount", "changeCount"],
+          "required": [
+            "durationMs",
+            "requestCount",
+            "changeCount"
+          ],
           "additionalProperties": {}
         },
         "screenReaderNavigation": {
@@ -9341,7 +10764,12 @@
                             "type": "number"
                           }
                         },
-                        "required": ["left", "top", "right", "bottom"],
+                        "required": [
+                          "left",
+                          "top",
+                          "right",
+                          "bottom"
+                        ],
                         "additionalProperties": false
                       },
                       {
@@ -9527,7 +10955,9 @@
                     ]
                   }
                 },
-                "required": ["bounds"],
+                "required": [
+                  "bounds"
+                ],
                 "additionalProperties": {}
               }
             },
@@ -9536,12 +10966,18 @@
               "type": "boolean"
             }
           },
-          "required": ["reachable", "traversalOrder", "focusTrapDetected"],
+          "required": [
+            "reachable",
+            "traversalOrder",
+            "focusTrapDetected"
+          ],
           "additionalProperties": {}
         },
         "debug": {}
       },
-      "required": ["success"],
+      "required": [
+        "success"
+      ],
       "additionalProperties": {}
     }
   },
@@ -9557,7 +10993,10 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -9571,7 +11010,9 @@
           "type": "string"
         }
       },
-      "required": ["appId"],
+      "required": [
+        "appId"
+      ],
       "additionalProperties": false
     }
   },
@@ -9591,7 +11032,10 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -9605,7 +11049,9 @@
           "type": "string"
         }
       },
-      "required": ["appId"],
+      "required": [
+        "appId"
+      ],
       "additionalProperties": false
     }
   },
@@ -9618,11 +11064,17 @@
       "properties": {
         "action": {
           "type": "string",
-          "enum": ["start", "stop"]
+          "enum": [
+            "start",
+            "stop"
+          ]
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "deviceId": {
           "type": "string"
@@ -9633,7 +11085,11 @@
         },
         "qualityPreset": {
           "type": "string",
-          "enum": ["low", "medium", "high"]
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
         },
         "targetBitrateKbps": {
           "description": "Bitrate Kbps",
@@ -9667,12 +11123,17 @@
               "maximum": 9007199254740991
             }
           },
-          "required": ["width", "height"],
+          "required": [
+            "width",
+            "height"
+          ],
           "additionalProperties": false
         },
         "format": {
           "type": "string",
-          "enum": ["mp4"]
+          "enum": [
+            "mp4"
+          ]
         },
         "maxDuration": {
           "description": "Max duration seconds",
@@ -9752,7 +11213,12 @@
                             ]
                           }
                         },
-                        "required": ["x", "y", "width", "height"],
+                        "required": [
+                          "x",
+                          "y",
+                          "width",
+                          "height"
+                        ],
                         "additionalProperties": false
                       },
                       "style": {
@@ -9801,7 +11267,12 @@
                                 "anyOf": [
                                   {
                                     "type": "string",
-                                    "enum": ["none", "catmull-rom", "bezier", "douglas-peucker"]
+                                    "enum": [
+                                      "none",
+                                      "catmull-rom",
+                                      "bezier",
+                                      "douglas-peucker"
+                                    ]
                                   },
                                   {
                                     "type": "null"
@@ -9824,7 +11295,11 @@
                                 "anyOf": [
                                   {
                                     "type": "string",
-                                    "enum": ["butt", "round", "square"]
+                                    "enum": [
+                                      "butt",
+                                      "round",
+                                      "square"
+                                    ]
                                   },
                                   {
                                     "type": "null"
@@ -9835,7 +11310,11 @@
                                 "anyOf": [
                                   {
                                     "type": "string",
-                                    "enum": ["miter", "round", "bevel"]
+                                    "enum": [
+                                      "miter",
+                                      "round",
+                                      "bevel"
+                                    ]
                                   },
                                   {
                                     "type": "null"
@@ -9851,7 +11330,10 @@
                         ]
                       }
                     },
-                    "required": ["type", "bounds"],
+                    "required": [
+                      "type",
+                      "bounds"
+                    ],
                     "additionalProperties": false
                   },
                   {
@@ -9909,7 +11391,12 @@
                             ]
                           }
                         },
-                        "required": ["x", "y", "width", "height"],
+                        "required": [
+                          "x",
+                          "y",
+                          "width",
+                          "height"
+                        ],
                         "additionalProperties": false
                       },
                       "style": {
@@ -9958,7 +11445,12 @@
                                 "anyOf": [
                                   {
                                     "type": "string",
-                                    "enum": ["none", "catmull-rom", "bezier", "douglas-peucker"]
+                                    "enum": [
+                                      "none",
+                                      "catmull-rom",
+                                      "bezier",
+                                      "douglas-peucker"
+                                    ]
                                   },
                                   {
                                     "type": "null"
@@ -9981,7 +11473,11 @@
                                 "anyOf": [
                                   {
                                     "type": "string",
-                                    "enum": ["butt", "round", "square"]
+                                    "enum": [
+                                      "butt",
+                                      "round",
+                                      "square"
+                                    ]
                                   },
                                   {
                                     "type": "null"
@@ -9992,7 +11488,11 @@
                                 "anyOf": [
                                   {
                                     "type": "string",
-                                    "enum": ["miter", "round", "bevel"]
+                                    "enum": [
+                                      "miter",
+                                      "round",
+                                      "bevel"
+                                    ]
                                   },
                                   {
                                     "type": "null"
@@ -10008,7 +11508,10 @@
                         ]
                       }
                     },
-                    "required": ["type", "bounds"],
+                    "required": [
+                      "type",
+                      "bounds"
+                    ],
                     "additionalProperties": false
                   },
                   {
@@ -10031,7 +11534,10 @@
                               "type": "number"
                             }
                           },
-                          "required": ["x", "y"],
+                          "required": [
+                            "x",
+                            "y"
+                          ],
                           "additionalProperties": false
                         }
                       },
@@ -10085,7 +11591,12 @@
                                 ]
                               }
                             },
-                            "required": ["x", "y", "width", "height"],
+                            "required": [
+                              "x",
+                              "y",
+                              "width",
+                              "height"
+                            ],
                             "additionalProperties": false
                           },
                           {
@@ -10139,7 +11650,12 @@
                                 "anyOf": [
                                   {
                                     "type": "string",
-                                    "enum": ["none", "catmull-rom", "bezier", "douglas-peucker"]
+                                    "enum": [
+                                      "none",
+                                      "catmull-rom",
+                                      "bezier",
+                                      "douglas-peucker"
+                                    ]
                                   },
                                   {
                                     "type": "null"
@@ -10162,7 +11678,11 @@
                                 "anyOf": [
                                   {
                                     "type": "string",
-                                    "enum": ["butt", "round", "square"]
+                                    "enum": [
+                                      "butt",
+                                      "round",
+                                      "square"
+                                    ]
                                   },
                                   {
                                     "type": "null"
@@ -10173,7 +11693,11 @@
                                 "anyOf": [
                                   {
                                     "type": "string",
-                                    "enum": ["miter", "round", "bevel"]
+                                    "enum": [
+                                      "miter",
+                                      "round",
+                                      "bevel"
+                                    ]
                                   },
                                   {
                                     "type": "null"
@@ -10189,7 +11713,10 @@
                         ]
                       }
                     },
-                    "required": ["type", "points"],
+                    "required": [
+                      "type",
+                      "points"
+                    ],
                     "additionalProperties": false
                   }
                 ]
@@ -10208,7 +11735,9 @@
                 "additionalProperties": false
               }
             },
-            "required": ["shape"],
+            "required": [
+              "shape"
+            ],
             "additionalProperties": false
           }
         },
@@ -10224,7 +11753,10 @@
           "type": "string"
         }
       },
-      "required": ["action", "platform"],
+      "required": [
+        "action",
+        "platform"
+      ],
       "additionalProperties": false
     }
   },
@@ -10241,7 +11773,10 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": [
+            "android",
+            "ios"
+          ]
         },
         "sessionUuid": {
           "description": "Session",
@@ -10255,7 +11790,9 @@
           "type": "string"
         }
       },
-      "required": ["platform"],
+      "required": [
+        "platform"
+      ],
       "additionalProperties": false
     }
   }

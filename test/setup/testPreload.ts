@@ -2,6 +2,7 @@ import {
   TelemetryRecorder,
   getNoOpTelemetryRepository,
 } from "../../src/features/telemetry/TelemetryRecorder";
+import { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 
 /**
  * Globally neutralize the {@link TelemetryRecorder} for the whole suite so a
@@ -21,3 +22,9 @@ import {
  * write path, it does not block explicit assertions.
  */
 TelemetryRecorder.setDefaultRepositoryOverride(getNoOpTelemetryRepository());
+
+// Emulator launch tests must never create real TCP probes. Individual tests
+// inject unavailable ports when exercising allocation behavior.
+AndroidEmulatorClient.setHostPortAvailabilityCheckerForTesting({
+  isAvailable: async () => true,
+});

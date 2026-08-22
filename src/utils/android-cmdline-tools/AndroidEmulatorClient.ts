@@ -503,6 +503,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   private static readonly pendingLaunchDeviceIds = new Map<string, EmulatorDeviceIdReservation>();
   private static readonly terminalReservedDeviceIds = new Map<string, TerminalEmulatorReservation>();
   private static terminalReservationGeneration = 0;
+  private static hostPortAvailabilityCheckerForTesting: HostPortAvailabilityChecker | undefined;
   private readonly launchErrors = new WeakMap<ChildProcess, ActionableError>();
   private readonly launchErrorFinalizations = new WeakMap<
     ChildProcess,
@@ -530,7 +531,9 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     avdConfigReader?: AvdConfigReader,
     platform: NodeJS.Platform = process.platform,
     hostArchitecture: string = arch(),
-    hostPortAvailabilityChecker: HostPortAvailabilityChecker = new TcpHostPortAvailabilityChecker(),
+    hostPortAvailabilityChecker: HostPortAvailabilityChecker =
+      AndroidEmulatorClient.hostPortAvailabilityCheckerForTesting ??
+      new TcpHostPortAvailabilityChecker(),
   ) {
     this.execAsync = execAsyncFn || execAsync;
     this.spawnFn = spawnFn || spawn;
@@ -549,6 +552,12 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     AndroidEmulatorClient.pendingLaunchDeviceIds.clear();
     AndroidEmulatorClient.terminalReservedDeviceIds.clear();
     AndroidEmulatorClient.terminalReservationGeneration = 0;
+  }
+
+  static setHostPortAvailabilityCheckerForTesting(
+    checker: HostPortAvailabilityChecker | undefined,
+  ): void {
+    AndroidEmulatorClient.hostPortAvailabilityCheckerForTesting = checker;
   }
 
   /**

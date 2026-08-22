@@ -526,11 +526,17 @@ function stableRefKey(node) {
 		}
 		if (node.computed) {
 			const property = node.property;
-			const numericIndex =
-				property?.type === "Literal" && typeof property.value === "number"
-					? String(property.value)
-					: null;
-			const indexKey = propertyName(property) ?? identifierName(property) ?? numericIndex;
+			// Tag the key by node kind so a string-literal index and an identifier index
+			// with the same text (`errors["i"]` vs `errors[i]`) never compare equal — they
+			// can reference different values when the identifier's value differs.
+			let indexKey = null;
+			if (property?.type === "Literal" && typeof property.value === "string") {
+				indexKey = `str:${property.value}`;
+			} else if (property?.type === "Literal" && typeof property.value === "number") {
+				indexKey = `num:${property.value}`;
+			} else if (property?.type === "Identifier") {
+				indexKey = `id:${property.name}`;
+			}
 			return indexKey === null ? null : `${objectKey}[${indexKey}]`;
 		}
 		const prop = propertyName(node.property);
@@ -557,14 +563,17 @@ const noInlineErrorNormalizeRule = {
 				if (subjectKey === null || identifierName(test.right) !== "Error") {
 					return;
 				}
-				// consequent must be `<subject>.message` (non-computed member access).
+				// consequent must be `<subject>.message` or `<subject>["message"]` (a
+				// computed access is only `.message` when its key is the string literal
+				// "message" — a computed identifier key like `[message]` is a different var).
 				const consequent = node.consequent;
-				if (
-					consequent?.type !== "MemberExpression" ||
-					consequent.computed ||
-					propertyName(consequent.property) !== "message" ||
-					stableRefKey(consequent.object) !== subjectKey
-				) {
+				const consequentIsMessage =
+					consequent?.type === "MemberExpression" &&
+					stableRefKey(consequent.object) === subjectKey &&
+					(consequent.computed
+						? consequent.property?.type === "Literal" && consequent.property.value === "message"
+						: propertyName(consequent.property) === "message");
+				if (!consequentIsMessage) {
 					return;
 				}
 				// alternate must be `String(<subject>)`.

@@ -62,4 +62,23 @@ describe("auto-mobile/no-inline-error-normalize", () => {
       fires("const m = errors[0] instanceof Error ? errors[0].message : String(errors[0]);"),
     ).toBe(true);
   });
+
+  test("flags the bracket-notation `[\"message\"]` spelling", () => {
+    expect(
+      fires('const m = error instanceof Error ? error["message"] : String(error);'),
+    ).toBe(true);
+  });
+
+  test("does not conflate a string-literal index with an identifier index", () => {
+    // errors["i"] and errors[i] can reference different values — not equivalent.
+    expect(
+      fires('const m = errors["i"] instanceof Error ? errors[i].message : String(errors["i"]);'),
+    ).toBe(false);
+  });
+
+  test("does not flag a computed identifier key `[message]` (a different variable)", () => {
+    expect(
+      fires("const m = error instanceof Error ? error[message] : String(error);"),
+    ).toBe(false);
+  });
 });

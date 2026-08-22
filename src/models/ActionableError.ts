@@ -19,5 +19,5 @@ export function toActionableError(error: unknown, context: string): ActionableEr
     return error;
   }
   const message = error instanceof Error ? error.message : String(error);
-  return new ActionableError(`${context}: ${message}`);
+  return new ActionableError(`${context}: ${message}`, { cause: error });
 }

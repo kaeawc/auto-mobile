@@ -217,13 +217,20 @@ class NetworkFacetTest {
 
     onNodeWithContentDescription("Retry loading network requests").performClick()
 
-    // waitForIdle() is not enough: the gated reload is still in flight on Dispatchers.IO, yet
-    // waitForIdle() has already returned. The recovered row must therefore be absent here.
-    waitForIdle()
-    onNodeWithText("api.example.com/health", substring = true).assertDoesNotExist()
+    // Always release the gate, even if an assertion below throws: the parked getRequests() sits on
+    // gate.await() on a Dispatchers.IO thread that CountDownLatch will not free on cancellation, so
+    // an early failure would otherwise leak that thread for the life of the (shared, forkEvery=0)
+    // JVM.
+    try {
+      // waitForIdle() is not enough: the gated reload is still in flight on Dispatchers.IO, yet
+      // waitForIdle() has already returned. The recovered row must therefore be absent here.
+      waitForIdle()
+      onNodeWithText("api.example.com/health", substring = true).assertDoesNotExist()
+    } finally {
+      gate.countDown()
+    }
 
     // Releasing the gate lets the IO reload complete; a bounded waitUntil awaits the recomposition.
-    gate.countDown()
     waitUntil {
       onAllNodesWithText("api.example.com/health", substring = true)
         .fetchSemanticsNodes()

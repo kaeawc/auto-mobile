@@ -153,7 +153,8 @@ tasks.withType<Test>().configureEach {
   // processes, so this is pure CPU contention -- process-wide Compose snapshot state cannot cross
   // a fork boundary, which is why `forkEvery` isolation did not help but removing the
   // over-subscription does. Cross-module parallelism (org.gradle.parallel) still runs desktop-core
-  // concurrently with other modules; only this suite is serialized, at ~18% local wall-clock (the
-  // suite is compile/startup-dominated, not test-execution-bound).
+  // concurrently with other modules; only this suite is serialized. The wall-clock cost is small
+  // because the suite is compile/startup-dominated, not test-execution-bound: ~18% locally going
+  // 8->1 forks on a 16-core box (CI's 2->1 on a 4-vCPU runner was not separately benchmarked).
   maxParallelForks = 1
 }

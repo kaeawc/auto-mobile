@@ -222,40 +222,59 @@ internal fun navigationEventResponse(event: TimestampedNavigationEvent): Navigat
       ),
   )
 
-/** Outcome of applying the event-driven broadcast policy to a [HierarchyResult] (#5468). */
+/** Outcome of the content-addressed hierarchy-broadcast dedup gate (#5468). */
 internal enum class HierarchyBroadcastDecision {
-  /** Serialize and broadcast the full `hierarchy_update` payload. */
-  BroadcastFull,
-  /** Drop the frame: a full broadcast happened too recently (throttled). */
-  SkipThrottled,
+  /** Serialize and send the `hierarchy_update` frame; update the last-broadcast dedup key. */
+  Broadcast,
   /**
-   * Drop the frame: the structural-hash gate declared the hierarchy unchanged, so the client
-   * already holds this exact hierarchy and a full re-broadcast would be byte-identical waste.
+   * Suppress the frame: its wire payload is byte-identical to the one already broadcast, so the
+   * client already holds it. This is the only case that skips a send.
    */
-  SkipUnchanged,
+  SkipDuplicate,
 }
 
+/** Sentinel `updatedAt` used so the dedup key ignores the per-extraction wall-clock timestamp. */
+internal const val HIERARCHY_DEDUP_KEY_UPDATED_AT: Long = 0L
+
 /**
- * Pure event-driven broadcast policy, extracted so the "unchanged hierarchies are never
- * re-broadcast" invariant (#5468) is unit-testable without standing up the AccessibilityService.
+ * Derive the content-addressed dedup key for a hierarchy: a normalized copy whose only difference
+ * from the wire payload is that the per-extraction wall-clock [ViewHierarchy.updatedAt] is masked
+ * to a constant. `updatedAt` defaults to `System.currentTimeMillis()` at every extraction, so a raw
+ * serialized-payload comparison would never match even when the screen is genuinely unchanged.
+ * Every OTHER field (bounds, rotation, windows, insets, occlusion, focus, text, structure, ...)
+ * stays in the key, so any observable change — including the structurally-"Unchanged" bounds /
+ * rotation / insets-only changes that [StructuralHasher] deliberately excludes — produces a
+ * distinct key and is therefore never suppressed.
+ */
+internal fun hierarchyBroadcastDedupKey(hierarchy: ViewHierarchy): ViewHierarchy =
+  hierarchy.copy(updatedAt = HIERARCHY_DEDUP_KEY_UPDATED_AT)
+
+/**
+ * Pure content-addressed dedup policy, extracted so the "identical hierarchies are not re-sent, but
+ * every differing payload still flows" invariant (#5468) is unit-testable without standing up the
+ * AccessibilityService.
  *
- * - [HierarchyResult.Changed]: broadcast the full payload when the throttler allows, else skip.
- * - [HierarchyResult.Unchanged]: never broadcast — the debouncer's structural-hash gate already
- *   declared this byte-identical to what the client holds, so a full re-send is pure waste. Skip
- *   regardless of the throttle window (no consumer relies on periodic re-sends of unchanged
- *   hierarchies; the client retains its last hierarchy).
- * - [HierarchyResult.Error]: never broadcast — handled by the error branch, not this policy.
+ * The throttle gate and `Changed`/`Unchanged` flow handling are UNCHANGED from main — this policy
+ * only decides, at the actual broadcast call, whether the freshly-serialized payload is a
+ * byte-identical resend of the last one broadcast. It never suppresses:
+ * - a `sync` broadcast (explicit request-response / critical-ordering pushes must always deliver —
+ *   this is also how a newly-connected client bootstraps its first frame via `request_hierarchy`),
+ * - the first frame seen by a newly-connected client ([newClientConnected]),
+ * - any payload whose dedup key differs from the last broadcast (a real content change, or a
+ *   structurally-"Unchanged"-but-observably-different bounds / rotation / insets frame).
  */
 internal fun decideHierarchyBroadcast(
-  result: HierarchyResult,
-  shouldBroadcast: () -> Boolean,
+  dedupKey: ViewHierarchy,
+  lastBroadcastKey: ViewHierarchy?,
+  sync: Boolean,
+  newClientConnected: Boolean,
 ): HierarchyBroadcastDecision =
-  when (result) {
-    is HierarchyResult.Changed ->
-      if (shouldBroadcast()) HierarchyBroadcastDecision.BroadcastFull
-      else HierarchyBroadcastDecision.SkipThrottled
-    is HierarchyResult.Unchanged -> HierarchyBroadcastDecision.SkipUnchanged
-    is HierarchyResult.Error -> HierarchyBroadcastDecision.SkipUnchanged
+  when {
+    sync -> HierarchyBroadcastDecision.Broadcast
+    newClientConnected -> HierarchyBroadcastDecision.Broadcast
+    lastBroadcastKey != null && lastBroadcastKey == dedupKey ->
+      HierarchyBroadcastDecision.SkipDuplicate
+    else -> HierarchyBroadcastDecision.Broadcast
   }
 
 /**
@@ -596,6 +615,18 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   // extraction-time token lets broadcast fail closed if an accessibility event intervenes.
   private val extractedHierarchyFrameContexts =
     Collections.synchronizedMap(IdentityHashMap<ViewHierarchy, String>())
+
+  // Content-addressed dedup for event-driven hierarchy pushes (#5468). Holds the normalized
+  // dedup key (updatedAt masked) of the last hierarchy actually broadcast, so a subsequent
+  // byte-identical async push can be suppressed instead of re-serialized and re-sent. Written
+  // only from broadcastHierarchyUpdate; @Volatile because that runs both on serviceScope and via
+  // runBlocking on caller threads. A benign race can at worst cost one extra send or one missed
+  // dedup — never a lost distinct payload.
+  @Volatile private var lastBroadcastHierarchyKey: ViewHierarchy? = null
+
+  // Connection count observed at the last actual broadcast. A rise means a client connected since
+  // then, so the next frame must send in full (bypass dedup) to bootstrap the newcomer.
+  @Volatile private var lastBroadcastConnectionCount: Int = 0
 
   @Volatile private var isRecording: Boolean = false
 
@@ -1289,33 +1320,30 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                   "Hierarchy changed (hash=${result.hash}, extraction=${result.extractionTimeMs}ms)",
                 )
                 writeHierarchyToFile(result.hierarchy)
-                when (decideHierarchyBroadcast(result, broadcastThrottler::shouldBroadcast)) {
-                  HierarchyBroadcastDecision.BroadcastFull ->
-                    broadcastHierarchyUpdate(result.hierarchy)
-                  else -> {
-                    // Throttled: a full broadcast happened too recently. Drop this frame and
-                    // release its retained frame context so the identity map does not leak.
-                    extractedHierarchyFrameContexts.remove(result.hierarchy)
-                    Log.d(
-                      TAG,
-                      "Throttled event-driven broadcast (${broadcastThrottler.timeSinceLastBroadcastMs()}ms since last)",
-                    )
-                  }
+                if (broadcastThrottler.shouldBroadcast()) {
+                  broadcastHierarchyUpdate(result.hierarchy)
+                } else {
+                  extractedHierarchyFrameContexts.remove(result.hierarchy)
+                  Log.d(
+                    TAG,
+                    "Throttled event-driven broadcast (${broadcastThrottler.timeSinceLastBroadcastMs()}ms since last)",
+                  )
                 }
               }
               is HierarchyResult.Unchanged -> {
-                // #5468: the debouncer's structural-hash gate already declared this hierarchy
-                // byte-identical to the one the client holds, so re-serializing and
-                // re-broadcasting the full payload at the throttle cadence is pure waste during
-                // idle/animation. Drop the frame entirely — no consumer relies on periodic
-                // re-sends of unchanged hierarchies (the client retains its last hierarchy), so
-                // there is nothing to keep current. Release the retained frame context so the
-                // identity map does not leak.
                 Log.d(
                   TAG,
-                  "Hierarchy unchanged (animation mode, skipped=${result.skippedEventCount}); skipping full re-broadcast (#5468)",
+                  "Hierarchy unchanged (animation mode, skipped=${result.skippedEventCount})",
                 )
-                extractedHierarchyFrameContexts.remove(result.hierarchy)
+                if (broadcastThrottler.shouldBroadcast()) {
+                  broadcastHierarchyUpdate(result.hierarchy)
+                } else {
+                  extractedHierarchyFrameContexts.remove(result.hierarchy)
+                  Log.d(
+                    TAG,
+                    "Throttled event-driven broadcast (${broadcastThrottler.timeSinceLastBroadcastMs()}ms since last)",
+                  )
+                }
               }
               is HierarchyResult.Error -> {
                 Log.w(TAG, "Hierarchy extraction error: ${result.message}")
@@ -2965,6 +2993,22 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
+    // Content-addressed dedup (#5468): suppress ONLY a byte-identical async resend. Any payload
+    // that differs — including bounds/rotation/insets frames the debouncer classifies as
+    // structurally "Unchanged" — still flows. sync pushes and the first frame after a new client
+    // connects always send. Computed before serialization so a duplicate skips the serialize +
+    // socket write + client re-processing entirely (a normalized-copy equals walk, no allocation).
+    val connectionCount = webSocketServer.getConnectionCount()
+    val dedupKey = hierarchyBroadcastDedupKey(hierarchy)
+    val newClientConnected = connectionCount > lastBroadcastConnectionCount
+    if (
+      decideHierarchyBroadcast(dedupKey, lastBroadcastHierarchyKey, sync, newClientConnected) ==
+        HierarchyBroadcastDecision.SkipDuplicate
+    ) {
+      Log.d(TAG, "Skipping byte-identical hierarchy re-broadcast (#5468)")
+      return
+    }
+
     try {
       val jsonString =
         perfProvider.track("serializeHierarchy") { jsonCompact.encodeToString(hierarchy) }
@@ -2991,6 +3035,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         // Async broadcast - for normal event-driven updates
         webSocketServer.broadcastWithPerf(messageBuilder)
       }
+      // Record what was actually broadcast so the next identical async push can be deduped, and
+      // the connection count so a later newcomer forces a full send (#5468).
+      lastBroadcastHierarchyKey = dedupKey
+      lastBroadcastConnectionCount = connectionCount
       Log.d(
         TAG,
         "Broadcasted hierarchy update to ${webSocketServer.getConnectionCount()} clients (sync=$sync)",

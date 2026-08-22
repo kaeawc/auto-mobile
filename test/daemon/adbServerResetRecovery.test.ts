@@ -243,6 +243,78 @@ describe("ADB server reset session recovery", () => {
     }
   });
 
+  test("does not partially detach a cohort when an idle tracked process cannot stop", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const manager = new FakeDeviceManager();
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+    );
+    const active: BootedDevice = {
+      platform: "android",
+      name: "Pixel_8_API_35",
+      deviceId: "emulator-5554",
+    };
+    const idle: BootedDevice = {
+      platform: "android",
+      name: "Pixel_9_API_36",
+      deviceId: "emulator-5556",
+    };
+    const image = (device: BootedDevice): DeviceInfo => ({
+      name: device.name,
+      platform: "android",
+      isRunning: true,
+      source: "local",
+    });
+    manager.bootedDevices = [active, idle];
+    await pool.addDevice(active, image(active));
+    await pool.addDevice(idle, image(idle));
+    await pool.bindOrReuseDeviceSession("session-active", active.deviceId, "android", image(active));
+    const childProcess = {
+      pid: 123,
+      kill: () => {
+        throw new Error("process did not stop");
+      },
+      once: () => childProcess,
+    } as ChildProcess;
+    await pool.bindOrReuseDeviceSession(
+      "session-idle",
+      idle.deviceId,
+      "android",
+      image(idle),
+      childProcess,
+      idle,
+    );
+    await pool.releaseDevice(idle.deviceId, "session-idle");
+
+    try {
+      await expect(
+        pool.detachAdbServerResetCohort([
+          pool.getDevice(active.deviceId)!,
+          pool.getDevice(idle.deviceId)!,
+        ]),
+      ).rejects.toThrow("process did not stop");
+
+      expect(pool.getDevice(active.deviceId)).toMatchObject({
+        sessionId: "session-active",
+        status: "busy",
+      });
+      expect(pool.getDevice(idle.deviceId)).toMatchObject({
+        sessionId: null,
+        status: "idle",
+      });
+      expect(sessionManager.getSession("session-active")?.assignedDevice).toBe(active.deviceId);
+      await expect(pool.waitForAdbServerResetRecovery(active.name)).resolves.toBeUndefined();
+    } finally {
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
   test("recovers both captured AVDs when the first reuses the second serial", async () => {
     class SwappedSerialDeviceManager extends FakeDeviceManager {
       override async startDevice(device: DeviceInfo): Promise<ChildProcess> {

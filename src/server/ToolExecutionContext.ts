@@ -81,6 +81,7 @@ export async function createToolExecutionContext(
     return {};
   }
 
+  devicePool.assertSessionReadyForAutomation(sessionUuid);
   const existingSession = sessionManager.getSessionForNewExecution(sessionUuid, execution);
 
   // Get or create session

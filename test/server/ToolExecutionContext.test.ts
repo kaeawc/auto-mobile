@@ -9,13 +9,14 @@ import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepositor
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
-import { BootedDevice } from "../../src/models";
+import type { BootedDevice, DeviceInfo } from "../../src/models";
 
 describe("ToolExecutionContext", () => {
   let sessionManager: SessionManager;
   let devicePool: DevicePool;
   let fakeAppsRepo: FakeInstalledAppsRepository;
   let fakeTimer: FakeTimer;
+  let fakeDeviceManager: FakeDeviceManager;
   let originalGetInstance: typeof AndroidCtrlProxyManager.getInstance;
   let originalClientGetInstance: typeof AndroidCtrlProxyClient.getInstance;
   const sessionOptions = { keepScreenAwake: false };
@@ -30,7 +31,7 @@ describe("ToolExecutionContext", () => {
     fakeTimer.enableAutoAdvance();
     sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
     fakeAppsRepo = new FakeInstalledAppsRepository();
-    const fakeDeviceManager = new FakeDeviceManager();
+    fakeDeviceManager = new FakeDeviceManager();
     devicePool = new DevicePool(sessionManager, "test-daemon-session-id", fakeTimer, fakeAppsRepo, fakeDeviceManager);
     await devicePool.initializeWithDevices([createBootedDevice("device-1")]);
     originalGetInstance = AndroidCtrlProxyManager.getInstance;
@@ -137,6 +138,44 @@ describe("ToolExecutionContext", () => {
 
     expect(context.deviceId).toBe("device-1");
     expect(setupCalls).toBe(0);
+  });
+
+  test("quarantines preserved reset-cohort session routing until recovery settles", async () => {
+    const first: BootedDevice = {
+      name: "Pixel_8_API_35",
+      platform: "android",
+      deviceId: "emulator-5554",
+    };
+    const second: BootedDevice = {
+      name: "Pixel_9_API_36",
+      platform: "android",
+      deviceId: "emulator-5556",
+    };
+    const image = (device: BootedDevice): DeviceInfo => ({
+      name: device.name,
+      platform: "android",
+      isRunning: true,
+      source: "local",
+    });
+    fakeDeviceManager.bootedDevices = [first, second];
+    await devicePool.addDevice(first, image(first));
+    await devicePool.addDevice(second, image(second));
+    await devicePool.bindOrReuseDeviceSession("reset-session-1", first.deviceId, "android", image(first));
+    await devicePool.bindOrReuseDeviceSession("reset-session-2", second.deviceId, "android", image(second));
+    const detached = await devicePool.detachAdbServerResetCohort([
+      devicePool.getDevice(first.deviceId)!,
+      devicePool.getDevice(second.deviceId)!,
+    ]);
+
+    try {
+      await expect(
+        createToolExecutionContext("reset-session-2", sessionManager, devicePool, sessionOptions),
+      ).rejects.toThrow(/recovering from a process-wide ADB reset/);
+    } finally {
+      await devicePool.releaseAdbServerResetCohortReservations(detached.devices);
+    }
+
+    expect(() => devicePool.assertSessionReadyForAutomation("reset-session-2")).not.toThrow();
   });
 
   test("runs first-session setup when a released UUID is recreated during context creation", async () => {

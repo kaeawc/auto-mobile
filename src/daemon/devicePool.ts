@@ -310,6 +310,8 @@ export class DevicePool {
    * through session binding so a reset cohort cannot detach that AVD mid-start.
    */
   private readonly androidStartupLeases: Map<symbol, AndroidStartupLeaseRequest> = new Map();
+  /** Sessions whose old serial may be reused before their reset cohort settles. */
+  private readonly adbServerResetQuarantinedSessions: Set<string> = new Set();
   private readonly recoveringAndroidDeviceIds: Set<string> = new Set();
   private readonly startedDeviceProcesses: Map<string, ChildProcess> = new Map();
   private readonly startedDeviceProcessOutput: Map<string, EmulatorProcessOutputTail> = new Map();
@@ -1995,6 +1997,7 @@ export class DevicePool {
         // disconnects, permanently separating their preserved sessions.
         return { devices: [], deferred: true };
       }
+      await this.stopTrackedIdleAdbResetCohortProcesses(cohort);
       const detached: PooledDevice[] = [];
       for (const device of cohort) {
         if (
@@ -2014,15 +2017,12 @@ export class DevicePool {
             continue;
           }
           device.adbServerResetSessionId = device.sessionId;
+          this.adbServerResetQuarantinedSessions.add(device.sessionId);
         }
         device.adbServerResetAutolockSessionId = device.autolockSessionId;
         const trackedProcess = this.startedDeviceProcesses.get(device.id);
         if (trackedProcess && sessionId) {
           this.adbServerResetTrackedProcesses.set(device, trackedProcess);
-        } else if (trackedProcess) {
-          // Idle cohort members cannot restore ownership through session
-          // recovery, so terminate their tracked process before detaching.
-          await this.stopTrackedEmulatorProcess(device.id);
         }
         this.reserveAdbServerResetRecovery(device);
         device.sessionId = null;
@@ -2032,6 +2032,24 @@ export class DevicePool {
       }
       return { devices: detached, deferred: false };
     });
+  }
+
+  private async stopTrackedIdleAdbResetCohortProcesses(
+    cohort: readonly PooledDevice[],
+  ): Promise<void> {
+    // Stop every fallible idle process before reserving or detaching any cohort
+    // member. A failed stop then leaves all session routes and reservations intact.
+    for (const device of cohort) {
+      if (
+        this.devices.get(device.id) !== device ||
+        !this.isAutoMobileOwnedAndroidVirtualDevice(device) ||
+        device.sessionId !== null ||
+        !this.startedDeviceProcesses.has(device.id)
+      ) {
+        continue;
+      }
+      await this.stopTrackedEmulatorProcess(device.id);
+    }
   }
 
   /**
@@ -2108,6 +2126,9 @@ export class DevicePool {
   ): Promise<void> {
     await this.assignmentMutex.runExclusive(() => {
       for (const device of cohort) {
+        if (device.adbServerResetSessionId) {
+          this.adbServerResetQuarantinedSessions.delete(device.adbServerResetSessionId);
+        }
         if (!device.avdName) {
           continue;
         }
@@ -2549,9 +2570,9 @@ export class DevicePool {
 
   private async stopTrackedEmulatorProcess(deviceId: string): Promise<void> {
     const childProcess = this.startedDeviceProcesses.get(deviceId);
+    await this.stopEmulatorProcess(childProcess);
     this.startedDeviceProcesses.delete(deviceId);
     this.startedDeviceProcessOutput.delete(deviceId);
-    await this.stopEmulatorProcess(childProcess);
   }
 
   private async stopDiscoveredEmulatorByAvdName(avdName: string): Promise<void> {
@@ -4633,6 +4654,14 @@ export class DevicePool {
    */
   getDeviceForSession(sessionId: string): PooledDevice | null {
     return Array.from(this.devices.values()).find((d) => d.sessionId === sessionId) || null;
+  }
+
+  assertSessionReadyForAutomation(sessionId: string): void {
+    if (this.adbServerResetQuarantinedSessions.has(sessionId)) {
+      throw new ActionableError(
+        `Session '${sessionId}' is recovering from a process-wide ADB reset. Retry after device recovery completes.`,
+      );
+    }
   }
 
   /**

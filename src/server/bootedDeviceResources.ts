@@ -321,8 +321,10 @@ function toDeviceIdentity(
   isVirtual: boolean
 ): DeviceIdentity {
   const identity: DeviceIdentity = {
-    stableId: poolInfo?.avdName ?? (isVirtual ? device.name : device.deviceId),
-    connectionId: device.deviceId,
+    stableId: device.platform === "android" && isVirtual
+      ? poolInfo?.avdName ?? device.name
+      : device.deviceId,
+    connectionId: device.transportId ?? device.deviceId,
   };
   if (device.transportId) {
     identity.transportId = device.transportId;

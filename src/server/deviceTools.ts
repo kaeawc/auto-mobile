@@ -241,6 +241,8 @@ export interface StartDeviceArgs {
   runnerReadinessTimeoutMs?: number;
   createIfMissing?: boolean;
   __mcpSessionId?: string;
+  /** Internal exact runtime identity used by getAndroid. */
+  matchExactName?: boolean;
 }
 
 export interface GetAndroidArgs {
@@ -1817,10 +1819,14 @@ export function registerDeviceTools() {
         validatePreservedSession,
         retireRecoveredReplacement,
       );
+      const devicePool = daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
+      if (boot.source === "booted" && sourceImage?.platform === "android") {
+        await devicePool?.recordAndroidAvdIdentity(boot.device.deviceId, sourceImage);
+      }
       const sessionId = preservedSessionId ?? await bindBootedDeviceSession(
         boot.device,
         args,
-        sourceImage,
+        boot.source === "cold-boot" ? sourceImage : undefined,
         boot.processHandle,
         new Set(releaseReadinessReservations.map((reservation) => reservation.owner)),
       );
@@ -1896,6 +1902,7 @@ export function registerDeviceTools() {
       {
         platform: "android",
         name: args.avdName,
+        matchExactName: true,
         preferRunning: true,
         createIfMissing: false,
         __mcpSessionId: typeof __mcpSessionId === "string" ? __mcpSessionId : undefined,

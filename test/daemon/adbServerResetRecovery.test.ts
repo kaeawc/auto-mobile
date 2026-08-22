@@ -4,6 +4,7 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
+import type { AndroidDeviceReboot } from "../../src/utils/androidDeviceReboot";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
@@ -119,6 +120,65 @@ describe("ADB server reset session recovery", () => {
         pool.recoverSessionBoundAndroidDeviceAfterAdbServerReset(device.deviceId),
       ).resolves.toBe(false);
       expect(sessionManager.getSession("session-1")?.assignedDevice).toBe(device.deviceId);
+    } finally {
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
+  test("releases the preserved session when recovery exhausts after detaching the old serial", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const manager = new FakeDeviceManager();
+    const releasedSessionIds: string[] = [];
+    const reboot: AndroidDeviceReboot = {
+      run: async (_target, attempt) => {
+        try {
+          await attempt();
+        } catch {
+          // Exercise the exhausted-retry result after the pool removed the old serial.
+        }
+        return false;
+      },
+    };
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+      undefined,
+      undefined,
+      async (sessionId) => {
+        releasedSessionIds.push(sessionId);
+      },
+      undefined,
+      reboot,
+    );
+    const original: BootedDevice = {
+      platform: "android",
+      name: "Pixel_8_API_35",
+      deviceId: "emulator-5554",
+    };
+    const image: DeviceInfo = {
+      name: original.name,
+      platform: "android",
+      isRunning: true,
+      source: "local",
+    };
+    manager.bootedDevices = [original];
+    await pool.addDevice(original, image);
+    await pool.bindOrReuseDeviceSession("session-1", original.deviceId, "android", image);
+    manager.startDevice = async () => {
+      throw new Error("emulator launch failed");
+    };
+
+    try {
+      await expect(
+        pool.recoverSessionBoundAndroidDeviceAfterAdbServerReset(original.deviceId),
+      ).resolves.toBe(false);
+      expect(pool.getDevice(original.deviceId)).toBeNull();
+      expect(releasedSessionIds).toEqual(["session-1"]);
     } finally {
       sessionManager.stopCleanupTimer();
     }

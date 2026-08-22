@@ -639,6 +639,13 @@ export class DevicePool {
     }
   }
 
+  /** Persist a verified Android AVD identity without claiming a new process start. */
+  async recordAndroidAvdIdentity(deviceId: string, sourceImage: DeviceInfo): Promise<void> {
+    await this.assignmentMutex.runExclusive(() => {
+      this.recordSourceAndroidAvd(deviceId, sourceImage);
+    });
+  }
+
   /**
    * Replace a pooled connection whose stable serial now identifies a different
    * runtime. Preserve AutoMobile-owned emulator state because the process and
@@ -1866,10 +1873,37 @@ export class DevicePool {
       undefined,
       "absent",
     );
-    return await this.rebootDisconnectedAndroidDevice(device, incidentId, {
-      preserveSessionId: session.sessionId,
-      bypassRecoveryPolicy: true,
-    });
+    try {
+      const recovered = await this.rebootDisconnectedAndroidDevice(device, incidentId, {
+        preserveSessionId: session.sessionId,
+        bypassRecoveryPolicy: true,
+      });
+      if (!recovered) {
+        await this.releasePreservedAdbResetSessionIfDetached(device, session.sessionId, incidentId);
+      }
+      return recovered;
+    } catch (error) {
+      await this.releasePreservedAdbResetSessionIfDetached(device, session.sessionId, incidentId);
+      throw error;
+    }
+  }
+
+  private async releasePreservedAdbResetSessionIfDetached(
+    device: PooledDevice,
+    sessionId: string,
+    incidentId: string | undefined,
+  ): Promise<void> {
+    if (
+      this.devices.get(device.id) === device ||
+      this.sessionManager.getSession(sessionId)?.assignedDevice !== device.id
+    ) {
+      return;
+    }
+    await this.releaseSessionForDisconnectedDevice(
+      sessionId,
+      device.id,
+      deviceLossCancellationReason(device.id, incidentId),
+    );
   }
 
   private async rebootDisconnectedAndroidDevice(
@@ -3816,8 +3850,8 @@ export class DevicePool {
         `Device '${deviceId}' is not available for autolock.\n` +
           `The device may have been shut down or disconnected.\n\n` +
           `Options:\n` +
-          `  - Use 'startDevice' with the same criteria to boot a new device\n` +
-          `  - Use 'startDevice' with deviceId to restart this specific device\n` +
+          `  - Use 'getAndroid' or 'getApple' with the target's stable identifier to prepare a device\n` +
+          `  - Use the returned sessionId to target this specific device\n` +
           `  - Use 'listDevices' to see currently available devices`,
       );
     }
@@ -3855,8 +3889,8 @@ export class DevicePool {
       `Device '${deviceId}' is not available for autolock.\n` +
         `The device may have been shut down or disconnected.\n\n` +
         `Options:\n` +
-        `  - Use 'startDevice' with the same criteria to boot a new device\n` +
-        `  - Use 'startDevice' with deviceId to restart this specific device\n` +
+        `  - Use 'getAndroid' or 'getApple' with the target's stable identifier to prepare a device\n` +
+        `  - Use the returned sessionId to target this specific device\n` +
         `  - Use 'listDevices' to see currently available devices`,
       readinessReservationOwners,
     );
@@ -4054,10 +4088,10 @@ export class DevicePool {
       throw new ActionableError(
         `Device '${deviceId}' is locked to another session.\n` +
           `Autolock is enabled, so tool calls must either come from the same MCP session ` +
-          `that called 'startDevice' or include the sessionId returned for this device.\n\n` +
+          `that called 'getAndroid' or 'getApple', or include the sessionId returned for this device.\n\n` +
           `Options:\n` +
-          `  - Pass the sessionId from the 'startDevice' that locked this device\n` +
-          `  - Use 'startDevice' to lock a different available device\n` +
+          `  - Pass the sessionId from getAndroid or getApple that locked this device\n` +
+          `  - Use getAndroid or getApple to lock a different available device\n` +
           `  - Wait for the idle timeout to release this device`,
       );
     }

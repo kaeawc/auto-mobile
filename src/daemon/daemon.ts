@@ -98,7 +98,7 @@ import {
   setFatalProcessHandler,
   setProcessShutdownHandler,
 } from "../processLifecycle";
-import type { BootedDevice } from "../models";
+import type { BootedDevice, Platform } from "../models";
 import {
   DAEMON_LAUNCH_CWD_ENV,
   safeProcessCwd,
@@ -142,7 +142,8 @@ type DeviceSessionRoutingTargets = {
 };
 
 export function isProcessWideAdbServerReset(
-  disconnectedDeviceIds: ReadonlySet<string>,
+  bootedDeviceIds: ReadonlySet<string>,
+  succeededPlatforms: ReadonlySet<Platform>,
   pooledDevices: readonly PooledDevice[],
 ): boolean {
   const ownedAndroidEmulators = pooledDevices.filter(device =>
@@ -152,8 +153,9 @@ export function isProcessWideAdbServerReset(
     device.id.startsWith("emulator-"),
   );
   return (
+    succeededPlatforms.has("android") &&
     ownedAndroidEmulators.length > 0 &&
-    ownedAndroidEmulators.every(device => disconnectedDeviceIds.has(device.id))
+    ownedAndroidEmulators.every(device => !bootedDeviceIds.has(device.id))
   );
 }
 
@@ -1426,7 +1428,8 @@ export class Daemon {
           missingByDevice.set(deviceId, []);
         }
         const processWideAdbServerReset = isProcessWideAdbServerReset(
-          new Set(disconnectResult.disconnected),
+          bootedDeviceIds,
+          succeededPlatforms,
           this.devicePool.getAllDevices(),
         );
         if (processWideAdbServerReset) {

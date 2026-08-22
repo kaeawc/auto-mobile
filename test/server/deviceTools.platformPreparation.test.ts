@@ -8,14 +8,21 @@ import {
 } from "../../src/server/deviceTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
+import { DaemonState } from "../../src/daemon/daemonState";
+import { DevicePool } from "../../src/daemon/devicePool";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 describe("platform device preparation tools", () => {
   let deviceUtils: FakeDeviceUtils;
   let matcher: FakeDeviceMatcher;
   let timer: FakeTimer;
+  let sessionManager: SessionManager | undefined;
 
   beforeEach(() => {
     deviceUtils = new FakeDeviceUtils();
@@ -33,6 +40,8 @@ describe("platform device preparation tools", () => {
 
   afterEach(() => {
     resetDeviceToolsDependencies();
+    DaemonState.getInstance().reset();
+    sessionManager?.stopCleanupTimer();
   });
 
   async function callTool(name: "getAndroid" | "getApple", args: Record<string, unknown>) {
@@ -94,7 +103,7 @@ describe("platform device preparation tools", () => {
       isRunning: false,
     };
     let readinessRequest: { readinessTimeoutMs: number; totalDeadlineMs: number } | undefined;
-    matcher.setImageResult(image);
+    deviceUtils.setDeviceImages("android", [image]);
     setDeviceToolsDependencies({
       ensureCtrlProxyReady: async (request) => {
         readinessRequest = {
@@ -119,5 +128,50 @@ describe("platform device preparation tools", () => {
       getAndroidSchema.parse({ avdName: image.name, deviceId: "emulator-5554" }),
     ).toThrow();
     expect(() => getAppleSchema.parse({ udid: "sim-udid", platform: "ios" })).toThrow();
+  });
+
+  test("matches the requested Android AVD name exactly", async () => {
+    const exact: BootedDevice = {
+      platform: "android",
+      name: "Pixel_9",
+      deviceId: "emulator-5554",
+    };
+    const overlapping: BootedDevice = {
+      platform: "android",
+      name: "Pixel_9_Pro",
+      deviceId: "emulator-5556",
+    };
+    deviceUtils.setBootedDevices("android", [overlapping, exact]);
+
+    const result = await callTool("getAndroid", { avdName: exact.name });
+
+    expect(result.name).toBe(exact.name);
+    expect(result.deviceIdentity).toMatchObject({ avdName: exact.name, adbSerial: exact.deviceId });
+  });
+
+  test("reuses the existing session for repeated warm getAndroid calls", async () => {
+    const emulator: BootedDevice = {
+      platform: "android",
+      name: "Pixel_9_API_36",
+      deviceId: "emulator-5562",
+    };
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      deviceUtils,
+      new DefaultRetryExecutor(timer),
+    );
+    await pool.addDevice(emulator);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    deviceUtils.setBootedDevices("android", [emulator]);
+
+    const first = await callTool("getAndroid", { avdName: emulator.name });
+    const second = await callTool("getAndroid", { avdName: emulator.name });
+
+    expect(second.sessionId).toBe(first.sessionId);
+    expect(pool.getDevice(emulator.deviceId)).toMatchObject({ avdName: emulator.name });
   });
 });

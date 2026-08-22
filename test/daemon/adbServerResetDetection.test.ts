@@ -28,8 +28,12 @@ describe("ADB server reset detection", () => {
     const first = ownedAndroidEmulator("emulator-5554");
     const second = ownedAndroidEmulator("emulator-5556");
 
-    expect(isProcessWideAdbServerReset(new Set([first.id, second.id]), [first, second])).toBe(true);
-    expect(isProcessWideAdbServerReset(new Set([first.id]), [first, second])).toBe(false);
+    expect(
+      isProcessWideAdbServerReset(new Set(), new Set(["android"]), [first, second]),
+    ).toBe(true);
+    expect(
+      isProcessWideAdbServerReset(new Set([first.id]), new Set(["android"]), [first, second]),
+    ).toBe(false);
   });
 
   test("does not infer an ADB reset from physical Android devices", () => {
@@ -40,6 +44,15 @@ describe("ADB server reset detection", () => {
       androidImage: undefined,
     };
 
-    expect(isProcessWideAdbServerReset(new Set([physical.id]), [physical])).toBe(false);
+    expect(isProcessWideAdbServerReset(new Set(), new Set(["android"]), [physical])).toBe(false);
+  });
+
+  test("detects the reset before an individual forced disconnect bypasses miss counting", () => {
+    const first = ownedAndroidEmulator("emulator-5554");
+    const second = ownedAndroidEmulator("emulator-5556");
+
+    expect(
+      isProcessWideAdbServerReset(new Set(), new Set(["android"]), [first, second]),
+    ).toBe(true);
   });
 });

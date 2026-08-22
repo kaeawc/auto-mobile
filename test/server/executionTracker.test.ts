@@ -140,6 +140,25 @@ describe("ExecutionTracker", function() {
     expect(tracker.hasActiveAutolockSessionExecutions("autolock-session")).toBe(false);
   });
 
+  test("cancels explicit and implicit work for one device session", async function() {
+    const tracker = new ExecutionTracker(
+      new FakeTimer(),
+      new FakeIdGenerator(["explicit", "implicit"]),
+    );
+    const explicit = tracker.startExecution("tapOn", "mcp-explicit", "device-session");
+    const implicit = tracker.startExecution("tapOn", "mcp-implicit");
+    tracker.setResolvedAutolockSessionUuid(implicit.id, "device-session");
+
+    const cancelled = await tracker.cancelDeviceSessionExecutions(
+      "device-session",
+      "device-disconnected:process-wide-adb-reset",
+    );
+
+    expect(cancelled).toBe(2);
+    expect(explicit.abortController.signal.aborted).toBe(true);
+    expect(implicit.abortController.signal.aborted).toBe(true);
+  });
+
   // #4183 item 6 (A3): the scope fallback in hasActiveToolExecution (executionTracker.ts)
   // had no table coverage. The scope order is: explicit "global" → sessionUuid map →
   // sessionId map → global fallback when neither key is provided.

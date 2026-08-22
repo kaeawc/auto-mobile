@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { isProcessWideAdbServerReset } from "../../src/daemon/daemon";
+import {
+  getProcessWideAdbServerResetCohort,
+  isProcessWideAdbServerReset,
+} from "../../src/daemon/daemon";
 import type { PooledDevice } from "../../src/daemon/devicePool";
 
 function ownedAndroidEmulator(id: string): PooledDevice {
@@ -28,8 +31,22 @@ describe("ADB server reset detection", () => {
     const first = ownedAndroidEmulator("emulator-5554");
     const second = ownedAndroidEmulator("emulator-5556");
 
-    expect(isProcessWideAdbServerReset(new Set([first.id, second.id]), [first, second])).toBe(true);
-    expect(isProcessWideAdbServerReset(new Set([first.id]), [first, second])).toBe(false);
+    expect(
+      isProcessWideAdbServerReset(
+        new Set(),
+        new Set(["android"]),
+        new Set([first.id]),
+        [first, second],
+      ),
+    ).toBe(true);
+    expect(
+      isProcessWideAdbServerReset(
+        new Set([first.id]),
+        new Set(["android"]),
+        new Set([first.id]),
+        [first, second],
+      ),
+    ).toBe(false);
   });
 
   test("does not infer an ADB reset from physical Android devices", () => {
@@ -40,6 +57,26 @@ describe("ADB server reset detection", () => {
       androidImage: undefined,
     };
 
-    expect(isProcessWideAdbServerReset(new Set([physical.id]), [physical])).toBe(false);
+    expect(
+      isProcessWideAdbServerReset(new Set(), new Set(["android"]), new Set([physical.id]), [physical]),
+    ).toBe(false);
+  });
+
+  test("requires an ADB missing-device event before returning the reset cohort", () => {
+    const first = ownedAndroidEmulator("emulator-5554");
+    const second = ownedAndroidEmulator("emulator-5556");
+
+    expect(getProcessWideAdbServerResetCohort(
+      new Set(),
+      new Set(["android"]),
+      new Set(),
+      [first, second],
+    )).toEqual([]);
+    expect(getProcessWideAdbServerResetCohort(
+      new Set(),
+      new Set(["android"]),
+      new Set([first.id]),
+      [first, second],
+    )).toEqual([first, second]);
   });
 });

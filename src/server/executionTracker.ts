@@ -145,6 +145,28 @@ export class ExecutionTracker {
     );
   }
 
+  /**
+   * Cancels both explicit and implicit work bound to a concrete device session.
+   * Implicit autolock calls are added to a separate index after routing resolves.
+   */
+  async cancelDeviceSessionExecutions(
+    sessionUuid: string,
+    reason: string = "unspecified",
+    options: ExecutionCancellationOptions = {},
+  ): Promise<number> {
+    const executionIds = new Set<string>([
+      ...(this.sessionUuidExecutions.get(sessionUuid) ?? []),
+      ...(this.autolockSessionExecutions.get(sessionUuid) ?? []),
+    ]);
+    return this.cancelExecutionIds(
+      executionIds,
+      "deviceSessionUuid",
+      sessionUuid,
+      reason,
+      options,
+    );
+  }
+
   hasActiveSessionUuidExecutions(sessionUuid: string, query?: ActiveExecutionQuery): boolean {
     return this.hasActiveExecutionsForKey(this.sessionUuidExecutions, sessionUuid, query);
   }
@@ -269,13 +291,28 @@ export class ExecutionTracker {
     cancelReason: string = "unspecified",
     options: ExecutionCancellationOptions = {},
   ): Promise<number> {
-    const executions = executionMap.get(key);
-    if (!executions || executions.size === 0) {
+    return this.cancelExecutionIds(
+      executionMap.get(key),
+      label,
+      key,
+      cancelReason,
+      options,
+    );
+  }
+
+  private async cancelExecutionIds(
+    executionIds: Iterable<string> | undefined,
+    label: "sessionId" | "sessionUuid" | "deviceSessionUuid",
+    key: string,
+    cancelReason: string = "unspecified",
+    options: ExecutionCancellationOptions = {},
+  ): Promise<number> {
+    if (!executionIds) {
       return 0;
     }
 
     let cancelled = 0;
-    for (const executionId of executions) {
+    for (const executionId of executionIds) {
       const execution = this.executions.get(executionId);
       if (!execution) {
         continue;

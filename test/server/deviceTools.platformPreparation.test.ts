@@ -8,14 +8,21 @@ import {
 } from "../../src/server/deviceTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
+import { DaemonState } from "../../src/daemon/daemonState";
+import { DevicePool } from "../../src/daemon/devicePool";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 describe("platform device preparation tools", () => {
   let deviceUtils: FakeDeviceUtils;
   let matcher: FakeDeviceMatcher;
   let timer: FakeTimer;
+  let sessionManager: SessionManager | undefined;
 
   beforeEach(() => {
     deviceUtils = new FakeDeviceUtils();
@@ -33,9 +40,11 @@ describe("platform device preparation tools", () => {
 
   afterEach(() => {
     resetDeviceToolsDependencies();
+    DaemonState.getInstance().reset();
+    sessionManager?.stopCleanupTimer();
   });
 
-  async function callTool(name: "getAndroid" | "getApple", args: Record<string, unknown>) {
+  async function callTool(name: "getAndroid" | "getApple" | "startDevice", args: Record<string, unknown>) {
     const tool = ToolRegistry.getTool(name);
     if (!tool) {
       throw new Error(`${name} is not registered`);
@@ -94,7 +103,7 @@ describe("platform device preparation tools", () => {
       isRunning: false,
     };
     let readinessRequest: { readinessTimeoutMs: number; totalDeadlineMs: number } | undefined;
-    matcher.setImageResult(image);
+    deviceUtils.setDeviceImages("android", [image]);
     setDeviceToolsDependencies({
       ensureCtrlProxyReady: async (request) => {
         readinessRequest = {
@@ -119,5 +128,204 @@ describe("platform device preparation tools", () => {
       getAndroidSchema.parse({ avdName: image.name, deviceId: "emulator-5554" }),
     ).toThrow();
     expect(() => getAppleSchema.parse({ udid: "sim-udid", platform: "ios" })).toThrow();
+  });
+
+  test("matches the requested Android AVD name exactly", async () => {
+    const exact: BootedDevice = {
+      platform: "android",
+      name: "Pixel_9",
+      deviceId: "emulator-5554",
+    };
+    const overlapping: BootedDevice = {
+      platform: "android",
+      name: "Pixel_9_Pro",
+      deviceId: "emulator-5556",
+    };
+    deviceUtils.setBootedDevices("android", [overlapping, exact]);
+
+    const result = await callTool("getAndroid", { avdName: exact.name });
+
+    expect(result.name).toBe(exact.name);
+    expect(result.deviceIdentity).toMatchObject({ avdName: exact.name, adbSerial: exact.deviceId });
+  });
+
+  test("reuses the existing session for repeated warm getAndroid calls", async () => {
+    const emulator: BootedDevice = {
+      platform: "android",
+      name: "Pixel_9_API_36",
+      deviceId: "emulator-5562",
+    };
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      deviceUtils,
+      new DefaultRetryExecutor(timer),
+    );
+    await pool.addDevice(emulator);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    deviceUtils.setBootedDevices("android", [emulator]);
+
+    const first = await callTool("getAndroid", { avdName: emulator.name });
+    const second = await callTool("getAndroid", { avdName: emulator.name });
+
+    expect(second.sessionId).toBe(first.sessionId);
+    expect(pool.getDevice(emulator.deviceId)).toMatchObject({ avdName: emulator.name });
+  });
+
+  test("records the AVD identity after binding an externally booted emulator", async () => {
+    const emulator: BootedDevice = {
+      platform: "android",
+      name: "Pixel_9_API_36",
+      deviceId: "emulator-5562",
+    };
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      deviceUtils,
+      new DefaultRetryExecutor(timer),
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    deviceUtils.setBootedDevices("android", [emulator]);
+
+    await callTool("getAndroid", { avdName: emulator.name });
+
+    expect(pool.getDevice(emulator.deviceId)).toMatchObject({
+      avdName: emulator.name,
+      androidImage: { name: emulator.name, platform: "android" },
+    });
+  });
+
+  test("waits for a reset-cohort reservation before booting the requested AVD", async () => {
+    const stale: BootedDevice = {
+      platform: "android",
+      name: "Pixel_9_API_36",
+      deviceId: "emulator-5562",
+    };
+    const image: DeviceInfo = {
+      platform: "android",
+      name: stale.name,
+      isRunning: false,
+      source: "local",
+    };
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      deviceUtils,
+      new DefaultRetryExecutor(timer),
+    );
+    await pool.addDevice(stale, image);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    deviceUtils.setDeviceImages("android", [image]);
+    const detached = await pool.detachAdbServerResetCohort([pool.getDevice(stale.deviceId)!]);
+
+    let settled = false;
+    const preparation = callTool("getAndroid", { avdName: stale.name }).then(result => {
+      settled = true;
+      return result;
+    });
+    await Promise.resolve();
+
+    expect(settled).toBe(false);
+    expect(deviceUtils.getExecutedOperations()).not.toContain(`startDevice:${stale.name}:120000`);
+
+    await pool.releaseAdbServerResetCohortReservations(detached.devices);
+    await expect(preparation).resolves.toMatchObject({
+      deviceIdentity: { avdName: stale.name },
+    });
+  });
+
+  test("applies the named boot deadline while waiting for reset recovery", async () => {
+    const stale: BootedDevice = {
+      platform: "android",
+      name: "Pixel_9_API_36",
+      deviceId: "emulator-5562",
+    };
+    const image: DeviceInfo = {
+      platform: "android",
+      name: stale.name,
+      isRunning: false,
+      source: "local",
+    };
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      deviceUtils,
+      new DefaultRetryExecutor(timer),
+    );
+    await pool.addDevice(stale, image);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    const detached = await pool.detachAdbServerResetCohort([pool.getDevice(stale.deviceId)!]);
+    const preparation = callTool("startDevice", {
+      platform: "android",
+      name: stale.name,
+      timeoutMs: 10,
+    });
+
+    try {
+      await Promise.resolve();
+      timer.advanceTime(10);
+      await expect(preparation).rejects.toThrow(/Timed out waiting for Android AVD reset recovery/);
+    } finally {
+      await pool.releaseAdbServerResetCohortReservations(detached.devices);
+    }
+  });
+
+  test("waits for fuzzy legacy Android names that match a reserved AVD", async () => {
+    const stale: BootedDevice = {
+      platform: "android",
+      name: "Pixel_9_API_36",
+      deviceId: "emulator-5562",
+    };
+    const image: DeviceInfo = {
+      platform: "android",
+      name: stale.name,
+      isRunning: false,
+      source: "local",
+    };
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      deviceUtils,
+      new DefaultRetryExecutor(timer),
+    );
+    await pool.addDevice(stale, image);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    deviceUtils.setDeviceImages("android", [image]);
+    const detached = await pool.detachAdbServerResetCohort([pool.getDevice(stale.deviceId)!]);
+    let settled = false;
+    const preparation = callTool("startDevice", {
+      platform: "android",
+      name: "Pixel",
+    }).finally(() => {
+      settled = true;
+    });
+
+    try {
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      expect(deviceUtils.getExecutedOperations()).not.toContain(`startDevice:${stale.name}:120000`);
+
+      deviceUtils.setBootedDevices("android", [stale]);
+      await pool.releaseAdbServerResetCohortReservations(detached.devices);
+      await preparation.catch(() => undefined);
+      expect(settled).toBe(true);
+    } finally {
+      await pool.releaseAdbServerResetCohortReservations(detached.devices);
+    }
   });
 });

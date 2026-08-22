@@ -324,6 +324,8 @@ export interface StartDeviceArgs {
   runnerReadinessTimeoutMs?: number;
   createIfMissing?: boolean;
   __mcpSessionId?: string;
+  /** Internal exact runtime identity used by getAndroid. */
+  matchExactName?: boolean;
 }
 
 export interface GetAndroidArgs {
@@ -1857,6 +1859,54 @@ function getStartDevicePool(daemonState: DaemonState): DevicePool | undefined {
   return daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
 }
 
+async function reserveAndroidStartupLease(
+  args: StartDeviceArgs,
+  budgets: { androidAvdName?: string },
+  bootDeadlineMs: number,
+  timer: Timer,
+  signal?: AbortSignal,
+): Promise<(() => Promise<void>) | undefined> {
+  if (args.platform !== "android") {
+    return undefined;
+  }
+  const devicePool = getStartDevicePool(DaemonState.getInstance());
+  if (!devicePool) {
+    return undefined;
+  }
+  const remainingMs = bootDeadlineMs - timer.now();
+  const requestedName = budgets.androidAvdName ?? args.name;
+  if (remainingMs <= 0) {
+    throw new ActionableError(
+      `Timed out waiting for Android AVD reset recovery${requestedName ? ` of '${requestedName}'` : ""}`,
+    );
+  }
+  const timeoutController = new AbortController();
+  const abortForTimeout = () => timeoutController.abort(
+    new ActionableError(
+      `Timed out waiting for Android AVD reset recovery${requestedName ? ` of '${requestedName}'` : ""}`,
+    ),
+  );
+  const abortForCaller = () => timeoutController.abort(
+    signal?.reason ?? new Error("Device preparation cancelled"),
+  );
+  if (signal?.aborted) {
+    abortForCaller();
+  } else {
+    signal?.addEventListener("abort", abortForCaller, { once: true });
+  }
+  const timeout = timer.setTimeout(abortForTimeout, remainingMs);
+  try {
+    return await devicePool.reserveAndroidStartupLease(
+      requestedName,
+      budgets.androidAvdName !== undefined,
+      timeoutController.signal,
+    );
+  } finally {
+    timer.clearTimeout(timeout);
+    signal?.removeEventListener("abort", abortForCaller);
+  }
+}
+
 function createRunnerReadinessAttempt(
   input: StartDeviceRunnerReadinessInput,
 ): (candidate: DeviceBootResult) => Promise<void> {
@@ -1905,6 +1955,16 @@ async function prepareRecoveredDeviceForRunnerReadiness(
     input.requestedIdentity,
     input.releaseReadinessReservations,
   );
+}
+
+function getVerifiedWarmAndroidAvdIdentity(
+  boot: DeviceBootResult,
+  sourceImage: DeviceInfo | undefined,
+): DeviceInfo | undefined {
+  if (boot.source === "booted" && sourceImage?.platform === "android") {
+    return sourceImage;
+  }
+  return undefined;
 }
 
 export function registerDeviceTools() {
@@ -2521,8 +2581,16 @@ export function registerDeviceTools() {
     let preservedSessionId: string | undefined;
     let validatePreservedSession: (() => Promise<void>) | undefined;
     let retireRecoveredReplacement: (() => Promise<void>) | undefined;
+    let releaseAndroidStartupLease: (() => Promise<void>) | undefined;
 
     try {
+      releaseAndroidStartupLease = await reserveAndroidStartupLease(
+        args,
+        budgets,
+        bootDeadlineMs,
+        deps.timer,
+        signal,
+      );
       const bootService = new DeviceBootService({
         deviceManager: deviceUtils,
         deviceMatcher: deps.deviceMatcherFactory(),
@@ -2601,12 +2669,17 @@ export function registerDeviceTools() {
         validatePreservedSession,
         retireRecoveredReplacement,
       );
+      const verifiedWarmAndroidAvdIdentity = getVerifiedWarmAndroidAvdIdentity(
+        boot,
+        sourceImage,
+      );
       const sessionId = preservedSessionId ?? await bindBootedDeviceSession(
         boot.device,
         args,
-        sourceImage,
+        boot.source === "cold-boot" ? sourceImage : undefined,
         boot.processHandle,
         new Set(releaseReadinessReservations.map((reservation) => reservation.owner)),
+        verifiedWarmAndroidAvdIdentity,
       );
       ownershipTransferred = true;
 
@@ -2629,10 +2702,21 @@ export function registerDeviceTools() {
       }
       throw new ActionableError(`Failed to start ${args.platform} device: ${error}`);
     } finally {
-      for (const releaseReservation of releaseReadinessReservations.reverse()) {
-        await releaseReservation();
-      }
+      await releaseDevicePreparationReservations(
+        releaseReadinessReservations,
+        releaseAndroidStartupLease,
+      );
     }
+  };
+
+  const releaseDevicePreparationReservations = async (
+    readinessReservations: DeviceReadinessReservation[],
+    releaseAndroidStartupLease: (() => Promise<void>) | undefined,
+  ): Promise<void> => {
+    for (const releaseReservation of readinessReservations.reverse()) {
+      await releaseReservation();
+    }
+    await releaseAndroidStartupLease?.();
   };
 
   // Compatibility implementation. New callers use getAndroid/getApple so their
@@ -2680,6 +2764,7 @@ export function registerDeviceTools() {
       {
         platform: "android",
         name: args.avdName,
+        matchExactName: true,
         preferRunning: true,
         createIfMissing: false,
         __mcpSessionId: typeof __mcpSessionId === "string" ? __mcpSessionId : undefined,
@@ -2748,6 +2833,7 @@ export function registerDeviceTools() {
     sourceImage?: DeviceInfo,
     childProcess?: ChildProcess | null,
     readinessReservationOwners?: ReadonlySet<symbol>,
+    verifiedAndroidAvdIdentity?: DeviceInfo,
   ): Promise<string> {
     // Reserve the exact ready device before resource notifications publish it
     // to concurrent allocators.
@@ -2761,6 +2847,7 @@ export function registerDeviceTools() {
         childProcess,
         device,
         readinessReservationOwners,
+        verifiedAndroidAvdIdentity,
       );
       if (autolockSessionId) {
         return autolockSessionId;
@@ -2781,6 +2868,7 @@ export function registerDeviceTools() {
       device,
       false,
       readinessReservationOwners,
+      verifiedAndroidAvdIdentity,
     );
   }
 

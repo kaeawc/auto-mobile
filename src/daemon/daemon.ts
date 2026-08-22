@@ -98,7 +98,7 @@ import {
   setFatalProcessHandler,
   setProcessShutdownHandler,
 } from "../processLifecycle";
-import type { BootedDevice } from "../models";
+import type { BootedDevice, Platform } from "../models";
 import {
   DAEMON_LAUNCH_CWD_ENV,
   safeProcessCwd,
@@ -141,20 +141,41 @@ type DeviceSessionRoutingTargets = {
   telemetryPush: ReturnType<typeof getTelemetryPushServer>;
 };
 
-export function isProcessWideAdbServerReset(
-  disconnectedDeviceIds: ReadonlySet<string>,
+export function getProcessWideAdbServerResetCohort(
+  bootedDeviceIds: ReadonlySet<string>,
+  succeededPlatforms: ReadonlySet<Platform>,
+  forceDisconnectedDeviceIds: ReadonlySet<string>,
   pooledDevices: readonly PooledDevice[],
-): boolean {
+): readonly PooledDevice[] {
   const ownedAndroidEmulators = pooledDevices.filter(device =>
     device.platform === "android" &&
     device.avdName !== undefined &&
     device.androidImage !== undefined &&
     device.id.startsWith("emulator-"),
   );
-  return (
-    ownedAndroidEmulators.length > 0 &&
-    ownedAndroidEmulators.every(device => disconnectedDeviceIds.has(device.id))
-  );
+  if (
+    !succeededPlatforms.has("android") ||
+    ownedAndroidEmulators.length < 2 ||
+    !ownedAndroidEmulators.every(device => !bootedDeviceIds.has(device.id)) ||
+    !ownedAndroidEmulators.some(device => forceDisconnectedDeviceIds.has(device.id))
+  ) {
+    return [];
+  }
+  return ownedAndroidEmulators;
+}
+
+export function isProcessWideAdbServerReset(
+  bootedDeviceIds: ReadonlySet<string>,
+  succeededPlatforms: ReadonlySet<Platform>,
+  forceDisconnectedDeviceIds: ReadonlySet<string>,
+  pooledDevices: readonly PooledDevice[],
+): boolean {
+  return getProcessWideAdbServerResetCohort(
+    bootedDeviceIds,
+    succeededPlatforms,
+    forceDisconnectedDeviceIds,
+    pooledDevices,
+  ).length > 0;
 }
 
 /**
@@ -323,6 +344,7 @@ export class Daemon {
       recoveryConfiguration.policy,
       deviceId => this.deviceSessionRegistry.onDeviceDisconnected(deviceId),
       new EmulatorLossIncidentRepository(this.timer, this.idGenerator),
+      (sessionId, reason) => executionTracker.cancelDeviceSessionExecutions(sessionId, reason),
     );
     // Initialize singleton for daemon state access
     DaemonState.getInstance().initialize(
@@ -1367,6 +1389,7 @@ export class Daemon {
     const deviceManager = new MultiPlatformDeviceManager();
 
     this.deviceDisconnectMonitor = new SingleFlightInterval(this.timer, DEVICE_DISCONNECT_POLL_INTERVAL_MS, async () => {
+      let adbServerResetCohort: readonly PooledDevice[] = [];
       try {
         if (serverConfig.isPlanExecutionActive()) {
           logger.debug("[DisconnectMonitor] Skipping — plan execution active");
@@ -1425,15 +1448,34 @@ export class Daemon {
         for (const deviceId of disconnectResult.disconnected) {
           missingByDevice.set(deviceId, []);
         }
-        const processWideAdbServerReset = isProcessWideAdbServerReset(
-          new Set(disconnectResult.disconnected),
+        const detectedAdbServerResetCohort = getProcessWideAdbServerResetCohort(
+          bootedDeviceIds,
+          succeededPlatforms,
+          this.forceDisconnectedDeviceIds,
           this.devicePool.getAllDevices(),
+        );
+        const adbServerResetDetachment = detectedAdbServerResetCohort.length > 0
+          ? await this.devicePool.detachAdbServerResetCohort(detectedAdbServerResetCohort)
+          : { devices: [], deferred: false };
+        if (adbServerResetDetachment.deferred) {
+          logger.info(
+            "[DisconnectMonitor] Deferring process-wide ADB reset recovery until matching Android startup completes",
+          );
+          return;
+        }
+        adbServerResetCohort = adbServerResetDetachment.devices;
+        const processWideAdbServerReset = adbServerResetCohort.length > 0;
+        const adbServerResetCohortByDeviceId = new Map(
+          adbServerResetCohort.map(device => [device.id, device]),
         );
         if (processWideAdbServerReset) {
           logger.warn(
             "[DisconnectMonitor] All AutoMobile-owned Android emulators disappeared together; " +
               "treating this as an ADB server reset and recovering by AVD name",
           );
+          for (const device of adbServerResetCohort) {
+            missingByDevice.set(device.id, []);
+          }
         }
 
         for (const recording of activeRecordings) {
@@ -1451,7 +1493,8 @@ export class Daemon {
             ? this.sessionManager.getSession(sessionIdAtDisconnect)
             : null;
           const forceGenerationAtDisconnect = this.forceDisconnectedDeviceGenerations.get(deviceId);
-          if (await this.shouldSkipStaleDisconnectCleanup(
+          const adbServerResetTarget = adbServerResetCohortByDeviceId.get(deviceId);
+          if (!adbServerResetTarget && await this.shouldSkipStaleDisconnectCleanup(
             pooledDeviceAtDisconnect,
             deviceId,
             forceGenerationAtDisconnect,
@@ -1469,7 +1512,7 @@ export class Daemon {
             }
           }
 
-          if (await this.shouldSkipStaleDisconnectCleanup(
+          if (!adbServerResetTarget && await this.shouldSkipStaleDisconnectCleanup(
             pooledDeviceAtDisconnect,
             deviceId,
             forceGenerationAtDisconnect,
@@ -1477,10 +1520,10 @@ export class Daemon {
             continue;
           }
 
-          if (processWideAdbServerReset && pooledDeviceAtDisconnect) {
-            if (await this.recoverProcessWideAdbServerResetDevice(
+          if (adbServerResetTarget) {
+            if (await this.tryRecoverProcessWideAdbServerResetDevice(
               deviceId,
-              pooledDeviceAtDisconnect,
+              adbServerResetTarget,
               forceGenerationAtDisconnect,
             )) {
               continue;
@@ -1562,9 +1605,30 @@ export class Daemon {
         }
       } catch (error) {
         logger.warn(`[Daemon] Device disconnect monitor failed: ${error}`);
+      } finally {
+        await this.devicePool.releaseAdbServerResetCohortReservations(adbServerResetCohort);
       }
     });
     this.deviceDisconnectMonitor.start();
+  }
+
+  private async tryRecoverProcessWideAdbServerResetDevice(
+    deviceId: string,
+    pooledDevice: PooledDevice,
+    forceGenerationAtDisconnect: number | undefined,
+  ): Promise<boolean> {
+    try {
+      return await this.recoverProcessWideAdbServerResetDevice(
+        deviceId,
+        pooledDevice,
+        forceGenerationAtDisconnect,
+      );
+    } catch (error) {
+      logger.warn(
+        `[DisconnectMonitor] ADB-reset recovery failed for ${deviceId}; continuing cohort cleanup: ${error}`,
+      );
+      return false;
+    }
   }
 
   private async recoverProcessWideAdbServerResetDevice(
@@ -1575,9 +1639,18 @@ export class Daemon {
     const recovered = await this.devicePool
       .recoverSessionBoundAndroidDeviceAfterAdbServerReset(deviceId, pooledDevice);
     if (!recovered) {
+      this.retireAdbServerResetDisconnectState(deviceId, forceGenerationAtDisconnect);
       return false;
     }
 
+    this.retireAdbServerResetDisconnectState(deviceId, forceGenerationAtDisconnect);
+    return true;
+  }
+
+  private retireAdbServerResetDisconnectState(
+    deviceId: string,
+    forceGenerationAtDisconnect: number | undefined,
+  ): void {
     this.socketServer?.evictDeviceInputCache(deviceId);
     this.deviceDisconnectMisses.delete(deviceId);
     this.deviceDisconnectMissIncarnations.delete(deviceId);
@@ -1586,7 +1659,6 @@ export class Daemon {
       this.forceDisconnectedDeviceIds.delete(deviceId);
       this.forceDisconnectedDeviceGenerations.delete(deviceId);
     }
-    return true;
   }
 
   private async stopRecordingAfterDeviceDisconnect(recordingId: string, deviceId: string): Promise<boolean> {

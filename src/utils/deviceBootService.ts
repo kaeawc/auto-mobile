@@ -57,6 +57,8 @@ export interface DeviceBootRequest {
   createIfMissing?: boolean;
   /** Internal CI policy: preserve OS bounds for provisioning while matching its exact owned name across runtime fallback. */
   matchNamedDeviceIgnoringOsVersion?: boolean;
+  /** Internal identity policy: select a named runtime only when its name is an exact match. */
+  matchExactName?: boolean;
 }
 
 export interface DeviceBootProgress {
@@ -202,7 +204,9 @@ export class DeviceBootService {
     if (running) {
       return running;
     }
-    const image = deviceMatcher.matchDeviceImage(criteria, images, matchingStrategy);
+    const image = request.matchExactName && request.name
+      ? images.find(candidate => candidate.name === request.name) ?? null
+      : deviceMatcher.matchDeviceImage(criteria, images, matchingStrategy);
     if (image) {
       return this.bootMatchedImage(image, context, progress);
     }
@@ -225,11 +229,14 @@ export class DeviceBootService {
       () => this.dependencies.deviceManager.getBootedDevices(request.platform),
       false,
     );
-    const match = this.dependencies.deviceMatcher.matchBootedDevice(
-      criteria,
-      enrichBootedDevicesFromImages(booted, images),
-      this.dependencies.matchingStrategy,
-    );
+    const enriched = enrichBootedDevicesFromImages(booted, images);
+    const match = request.matchExactName && request.name
+      ? enriched.find(candidate => candidate.name === request.name) ?? null
+      : this.dependencies.deviceMatcher.matchBootedDevice(
+        criteria,
+        enriched,
+        this.dependencies.matchingStrategy,
+      );
     if (!match) {
       return undefined;
     }

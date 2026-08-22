@@ -109,6 +109,30 @@ export async function isToolEnabledForAnySession(
   return false;
 }
 
+export async function isToolEnabledForAnyRoute(
+  toolName: string,
+  declaredDefault: boolean,
+  routingSessionRoutes: ReadonlyArray<ReadonlyArray<string | undefined>>,
+  sessionToolSelectionService?: ToolSelectionReader,
+  connectionProfileUuid?: string,
+): Promise<boolean> {
+  const routes = routingSessionRoutes.length > 0 ? routingSessionRoutes : [[]];
+  for (const routingSessions of routes) {
+    if (
+      await isToolEnabledForAnySession(
+        toolName,
+        declaredDefault,
+        [connectionProfileUuid, ...routingSessions],
+        sessionToolSelectionService,
+        connectionProfileUuid,
+      )
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export async function assertToolEnabledForAnySession(
   toolName: string,
   declaredDefault: boolean,

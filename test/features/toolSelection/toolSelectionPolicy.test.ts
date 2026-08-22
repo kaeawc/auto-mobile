@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { SessionToolSelectionService } from "../../../src/features/toolSelection/SessionToolSelectionService";
 import {
   assertToolEnabledForAnySession,
+  isToolEnabledForAnyRoute,
   isToolEnabledForAnySession,
 } from "../../../src/features/toolSelection/toolSelectionPolicy";
 
@@ -101,6 +102,62 @@ describe("exact-tool selection union policy", () => {
     expect(
       await isToolEnabledForAnySession("observe", true, candidates, service, "connection"),
     ).toBe(true);
+  });
+
+  test("unions independent sibling-label routes without sharing their disables", async () => {
+    const overrides = new Map<string, boolean>([["base:A", false]]);
+    const service: Pick<SessionToolSelectionService, "isEnabled" | "getOverride"> = {
+      isEnabled: async (sessionUuid, _toolName, declaredDefault) =>
+        (sessionUuid ? overrides.get(sessionUuid) : undefined) ?? declaredDefault,
+      getOverride: async (sessionUuid) => overrides.get(sessionUuid),
+    };
+    const routes = [
+      ["base", "base:A"],
+      ["base", "base:B"],
+    ];
+
+    expect(
+      await isToolEnabledForAnySession(
+        "observe",
+        true,
+        ["connection", ...routes[0]],
+        service,
+        "connection",
+      ),
+    ).toBe(false);
+    expect(
+      await isToolEnabledForAnySession(
+        "observe",
+        true,
+        ["connection", ...routes[1]],
+        service,
+        "connection",
+      ),
+    ).toBe(true);
+    expect(await isToolEnabledForAnyRoute("observe", true, routes, service, "connection")).toBe(
+      true,
+    );
+
+    overrides.set("base:B", false);
+    expect(await isToolEnabledForAnyRoute("observe", true, routes, service, "connection")).toBe(
+      false,
+    );
+
+    overrides.set("base:B", true);
+    expect(await isToolEnabledForAnyRoute("observe", true, routes, service, "connection")).toBe(
+      true,
+    );
+
+    overrides.clear();
+    overrides.set("connection", false);
+    expect(await isToolEnabledForAnyRoute("observe", true, routes, service, "connection")).toBe(
+      false,
+    );
+
+    overrides.set("base:B", true);
+    expect(await isToolEnabledForAnyRoute("observe", true, routes, service, "connection")).toBe(
+      true,
+    );
   });
 
   test("reports the exact disabled tool rather than a capability group", async () => {

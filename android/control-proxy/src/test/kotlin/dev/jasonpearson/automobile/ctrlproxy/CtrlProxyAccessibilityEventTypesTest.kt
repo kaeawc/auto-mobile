@@ -95,6 +95,26 @@ class CtrlProxyAccessibilityEventTypesTest {
   }
 
   @Test
+  fun `every classifier-handled event type is present in the subscribed mask`() {
+    // Reverse direction (CodeRabbit on #5497): the derivation tests prove each HANDLED type is
+    // handled, but not that every type the shared classifier acts on is actually subscribed. If a
+    // future branch dispatches on a type absent from CANDIDATE_EVENT_TYPES, HANDLED_EVENT_TYPES
+    // would miss it and the OS would filter it out. Walk every individual accessibility event bit;
+    // whenever the classifier says it is handled, the subscription mask must include it.
+    var bit = 1
+    while (bit != 0) {
+      if (AccessibilityEvent.TYPES_ALL_MASK and bit != 0 && isHandledEventType(bit)) {
+        assertEquals(
+          "classifier handles type $bit but the subscribed mask omits it",
+          bit,
+          CtrlProxy.SUBSCRIBED_EVENT_TYPES_MASK and bit,
+        )
+      }
+      bit = bit shl 1
+    }
+  }
+
+  @Test
   fun `framework cache-coherence types are retained for focus and node correctness`() {
     val expectedCacheTypes =
       setOf(

@@ -111,6 +111,36 @@ describe("AndroidEmulatorClient launch contract", () => {
     }
   });
 
+  test("reserves the ADB endpoint supplied by -ports for concurrent launches", async () => {
+    const adb = new FakeAdbExecutor();
+    const firstChild = createChild();
+    const secondChild = createChild();
+    let firstSpawnedArgs: string[] = [];
+    let secondSpawnedArgs: string[] = [];
+    const firstClient = createClient((_command, args) => {
+      firstSpawnedArgs = args;
+      queueMicrotask(() => firstChild.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")));
+      return firstChild;
+    }, adb);
+    const secondClient = createClient((_command, args) => {
+      secondSpawnedArgs = args;
+      queueMicrotask(() => secondChild.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")));
+      return secondChild;
+    }, adb);
+
+    const firstLaunch = await firstClient.launchEmulator({
+      avdName: "Pixel 9",
+      extraArgs: ["-ports", "5562,5555"],
+    });
+    const secondLaunch = await secondClient.startEmulator("Pixel 9");
+
+    expect(firstLaunch.targetDeviceId).toBe("emulator-5562");
+    expect(firstSpawnedArgs).toEqual(expect.arrayContaining(["-ports", "5562,5555"]));
+    expect(secondSpawnedArgs).toEqual(expect.arrayContaining(["-port", "5556"]));
+    firstChild.emit("exit", 0, null);
+    secondLaunch!.emit("exit", 0, null);
+  });
+
   test("globally reserves an explicit emulator serial against a concurrent unlabelled launch", async () => {
     const adb = new FakeAdbExecutor();
     const firstChild = createChild();

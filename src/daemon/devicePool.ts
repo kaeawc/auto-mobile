@@ -159,6 +159,11 @@ export interface SystemUiAnrRecoveryHandoff {
   validatePreservedSession(): Promise<void>;
 }
 
+interface AndroidEmulatorRecoveryOptions {
+  preserveSessionId?: string;
+  bypassRecoveryPolicy?: boolean;
+}
+
 /**
  * A process can emit output after readiness. Capture its redacted bounded tail
  * so a later unexpected exit has the same useful evidence as an early launch
@@ -1817,23 +1822,67 @@ export class DevicePool {
 
   private shouldRebootDisconnectedAndroidDevice(
     device: PooledDevice,
+    options: AndroidEmulatorRecoveryOptions = {},
   ): device is PooledDevice & { avdName: string } {
     return (
-      this.getRecoveryPolicy().onLoss &&
+      (options.bypassRecoveryPolicy || this.getRecoveryPolicy().onLoss) &&
       this.isAutoMobileOwnedAndroidVirtualDevice(device) &&
       !this.recoveringAndroidImages.has(device.avdName)
     );
   }
 
+  /**
+   * A process-wide ADB reset can make every emulator disappear at once. Only a
+   * session already bound to an AutoMobile-started AVD can retain its ownership:
+   * the replacement is selected by that recorded AVD name, never by a reused
+   * emulator port or serial.
+   */
+  async recoverSessionBoundAndroidDeviceAfterAdbServerReset(
+    deviceId: string,
+    expectedDevice?: PooledDevice,
+  ): Promise<boolean> {
+    const device = this.devices.get(deviceId);
+    if (
+      !device ||
+      (expectedDevice !== undefined && device !== expectedDevice) ||
+      !device.sessionId ||
+      !this.isAutoMobileOwnedAndroidVirtualDevice(device)
+    ) {
+      return false;
+    }
+
+    const session = this.sessionManager.getSession(device.sessionId);
+    if (
+      !session ||
+      session.assignedDevice !== device.id ||
+      session.platform !== "android"
+    ) {
+      return false;
+    }
+
+    const incidentId = await this.recordEmulatorLossIncident(
+      device.id,
+      "adb-server-reset",
+      undefined,
+      "absent",
+    );
+    return await this.rebootDisconnectedAndroidDevice(device, incidentId, {
+      preserveSessionId: session.sessionId,
+      bypassRecoveryPolicy: true,
+    });
+  }
+
   private async rebootDisconnectedAndroidDevice(
     device: PooledDevice,
     incidentId?: string,
+    options: AndroidEmulatorRecoveryOptions = {},
   ): Promise<boolean> {
-    if (!this.shouldRebootDisconnectedAndroidDevice(device)) {
+    if (!this.shouldRebootDisconnectedAndroidDevice(device, options)) {
       return false;
     }
 
     const avdName = device.avdName;
+    const preservedSessionId = options.preserveSessionId;
     const recoveryDeviceIds = new Set([device.id]);
     const recoveryImage: DeviceInfo = {
       ...device.androidImage,
@@ -1853,7 +1902,7 @@ export class DevicePool {
     let recoveryAttempt = 0;
     try {
       try {
-        await this.stopTrackedEmulatorProcess(device.id);
+        await this.stopAndroidEmulatorForRecovery(device.id, avdName);
       } catch (error) {
         logger.warn(
           `[DevicePool] Could not terminate disconnected emulator ${device.id}: ${error}`,
@@ -1866,6 +1915,9 @@ export class DevicePool {
       if (current && current !== device) {
         await this.completeEmulatorLossRecovery(incidentId, "recovered");
         return true;
+      }
+      if (!this.detachSessionForAndroidRecovery(device, preservedSessionId)) {
+        return false;
       }
       await this.removeDevice(device.id);
       let intentionallyStopped = false;
@@ -1912,7 +1964,14 @@ export class DevicePool {
             await stopCancelledRecovery(ready);
             return;
           }
-          await this.trackStartedDeviceProcess(ready, childProcess);
+          await this.bindRecoveredAndroidDeviceSession(
+            device.id,
+            avdName,
+            preservedSessionId,
+            ready,
+            recoveryImage,
+            childProcess,
+          );
           await this.recordEmulatorLossRecoveryAttempt(incidentId, {
             attempt,
             outcome: "succeeded",
@@ -1952,6 +2011,59 @@ export class DevicePool {
     }
   }
 
+  private async stopAndroidEmulatorForRecovery(deviceId: string, avdName: string): Promise<void> {
+    const hadTrackedProcess = this.startedDeviceProcesses.has(deviceId);
+    await this.stopTrackedEmulatorProcess(deviceId);
+    if (!hadTrackedProcess) {
+      await this.stopDiscoveredEmulatorByAvdName(avdName);
+    }
+  }
+
+  private detachSessionForAndroidRecovery(
+    device: PooledDevice,
+    preservedSessionId: string | undefined,
+  ): boolean {
+    if (!preservedSessionId) {
+      return true;
+    }
+    if (this.sessionManager.getSession(preservedSessionId)?.assignedDevice !== device.id) {
+      return false;
+    }
+    // Keep the session manager's old routing until the ready replacement is
+    // proven. removeDevice requires an unassigned pool entry.
+    device.sessionId = null;
+    device.status = "idle";
+    return true;
+  }
+
+  private async bindRecoveredAndroidDeviceSession(
+    previousDeviceId: string,
+    avdName: string,
+    preservedSessionId: string | undefined,
+    ready: BootedDevice,
+    recoveryImage: DeviceInfo,
+    childProcess: ChildProcess | null,
+  ): Promise<void> {
+    if (!preservedSessionId) {
+      await this.trackStartedDeviceProcess(ready, childProcess);
+      return;
+    }
+    if (this.sessionManager.getSession(preservedSessionId)?.assignedDevice !== previousDeviceId) {
+      throw new ActionableError(
+        `Session '${preservedSessionId}' changed while Android AVD '${avdName}' was recovering.`,
+      );
+    }
+    await this.bindOrReuseDeviceSession(
+      preservedSessionId,
+      ready.deviceId,
+      "android",
+      recoveryImage,
+      childProcess,
+      ready,
+      true,
+    );
+  }
+
   private consumeIntentionalShutdown(deviceIds: ReadonlySet<string>): boolean {
     // Recovery cancellation is deliberately serial-scoped: a user's kill of a
     // serial cancels a pool reboot of that same serial regardless of incarnation
@@ -1969,6 +2081,27 @@ export class DevicePool {
     this.startedDeviceProcesses.delete(deviceId);
     this.startedDeviceProcessOutput.delete(deviceId);
     await this.stopEmulatorProcess(childProcess);
+  }
+
+  private async stopDiscoveredEmulatorByAvdName(avdName: string): Promise<void> {
+    try {
+      const booted = await this.deviceManager.getBootedDevices("android");
+      const matchingAvd = booted.find(device =>
+        device.platform === "android" && device.name === avdName,
+      );
+      if (!matchingAvd) {
+        return;
+      }
+      await this.deviceManager.killDevice(matchingAvd);
+      logger.info(`[DevicePool] Stopped untracked Android emulator ${avdName} before recovery`);
+    } catch (error) {
+      // ADB may still be rebuilding after a process-wide kill-server. The
+      // bounded launch retries below make another recovery attempt without
+      // ever selecting an emulator by its recycled serial.
+      logger.warn(
+        `[DevicePool] Could not stop untracked Android emulator ${avdName} before recovery: ${error}`,
+      );
+    }
   }
 
   private async stopEmulatorProcess(childProcess: ChildProcess | null | undefined): Promise<void> {

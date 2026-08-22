@@ -110,6 +110,7 @@ import {
   type ObservationStreamHealth,
 } from "./ObservationStreamHealth";
 import { onAdbMissingDevice } from "../utils/android-cmdline-tools/AdbDeviceHealth";
+import { stopManagedAdbServer } from "../utils/android-cmdline-tools/AdbServerLifecycle";
 import { iosSimulatorCaptureHelperPool } from "../features/screen-stream";
 import { runShutdownCleanupStages } from "../shutdownCleanup";
 import { cleanupDaemonChildProcesses } from "./childProcessCleanup";
@@ -132,12 +133,29 @@ const MIGRATION_SETTLE_TIMEOUT_MS = 5_000;
 
 type HealthFailureKind = "http" | "socket" | "database" | "unknown";
 type DatabaseHealthFailureRecovery = (code: number) => void | Promise<void>;
+type ManagedAdbServerShutdown = () => Promise<void>;
 type DeviceSessionRoutingTargets = {
   deviceDataStream: ReturnType<typeof getDeviceDataStreamServer>;
   performancePush: ReturnType<typeof getPerformancePushServer>;
   failuresPush: ReturnType<typeof getFailuresPushServer>;
   telemetryPush: ReturnType<typeof getTelemetryPushServer>;
 };
+
+export function isProcessWideAdbServerReset(
+  disconnectedDeviceIds: ReadonlySet<string>,
+  pooledDevices: readonly PooledDevice[],
+): boolean {
+  const ownedAndroidEmulators = pooledDevices.filter(device =>
+    device.platform === "android" &&
+    device.avdName !== undefined &&
+    device.androidImage !== undefined &&
+    device.id.startsWith("emulator-"),
+  );
+  return (
+    ownedAndroidEmulators.length > 0 &&
+    ownedAndroidEmulators.every(device => disconnectedDeviceIds.has(device.id))
+  );
+}
 
 /**
  * Main daemon process
@@ -180,6 +198,7 @@ export class Daemon {
   private databaseHealthProbe: DatabaseHealthProbe;
   private startupFailureTracker: StartupFailureTracker;
   private recoverFromDatabaseHealthFailure: DatabaseHealthFailureRecovery;
+  private readonly stopManagedAdbServer: ManagedAdbServerShutdown;
   private observationStreamHealth: ObservationStreamHealth;
   private deviceDataStreamServer: ReturnType<typeof getDeviceDataStreamServer> = null;
   private readonly navigationGraphListenerManagers = new WeakSet<NavigationGraphManager>();
@@ -200,6 +219,7 @@ export class Daemon {
     databaseHealthProbe: DatabaseHealthProbe = new DefaultDatabaseHealthProbe({ timer }),
     recoverFromDatabaseHealthFailure?: DatabaseHealthFailureRecovery,
     recoveryPolicyEnvironment: NodeJS.ProcessEnv = process.env,
+    managedAdbServerShutdown: ManagedAdbServerShutdown = stopManagedAdbServer,
   ) {
     this.options = { ...options };
     this.port = options.port || DEFAULT_DAEMON_PORT;
@@ -213,6 +233,7 @@ export class Daemon {
     this.databaseInitializer = databaseInitializer;
     this.databaseHealthProbe = databaseHealthProbe;
     this.startupFailureTracker = startupFailureTracker;
+    this.stopManagedAdbServer = managedAdbServerShutdown;
     this.recoverFromDatabaseHealthFailure = recoverFromDatabaseHealthFailure ?? (async code => {
       cleanupDaemonFilesSync(this.getDaemonFileCleanupOptions());
       try {
@@ -1404,6 +1425,16 @@ export class Daemon {
         for (const deviceId of disconnectResult.disconnected) {
           missingByDevice.set(deviceId, []);
         }
+        const processWideAdbServerReset = isProcessWideAdbServerReset(
+          new Set(disconnectResult.disconnected),
+          this.devicePool.getAllDevices(),
+        );
+        if (processWideAdbServerReset) {
+          logger.warn(
+            "[DisconnectMonitor] All AutoMobile-owned Android emulators disappeared together; " +
+              "treating this as an ADB server reset and recovering by AVD name",
+          );
+        }
 
         for (const recording of activeRecordings) {
           if (missingByDevice.has(recording.deviceId)) {
@@ -1444,6 +1475,16 @@ export class Daemon {
             forceGenerationAtDisconnect,
           )) {
             continue;
+          }
+
+          if (processWideAdbServerReset && pooledDeviceAtDisconnect) {
+            if (await this.recoverProcessWideAdbServerResetDevice(
+              deviceId,
+              pooledDeviceAtDisconnect,
+              forceGenerationAtDisconnect,
+            )) {
+              continue;
+            }
           }
 
           // Cancel active executions and release the session so the test fails
@@ -1524,6 +1565,28 @@ export class Daemon {
       }
     });
     this.deviceDisconnectMonitor.start();
+  }
+
+  private async recoverProcessWideAdbServerResetDevice(
+    deviceId: string,
+    pooledDevice: PooledDevice,
+    forceGenerationAtDisconnect: number | undefined,
+  ): Promise<boolean> {
+    const recovered = await this.devicePool
+      .recoverSessionBoundAndroidDeviceAfterAdbServerReset(deviceId, pooledDevice);
+    if (!recovered) {
+      return false;
+    }
+
+    this.socketServer?.evictDeviceInputCache(deviceId);
+    this.deviceDisconnectMisses.delete(deviceId);
+    this.deviceDisconnectMissIncarnations.delete(deviceId);
+    this.confirmedDisconnectedDeviceIds.delete(deviceId);
+    if (this.forceDisconnectedDeviceGenerations.get(deviceId) === forceGenerationAtDisconnect) {
+      this.forceDisconnectedDeviceIds.delete(deviceId);
+      this.forceDisconnectedDeviceGenerations.delete(deviceId);
+    }
+    return true;
   }
 
   private async stopRecordingAfterDeviceDisconnect(recordingId: string, deviceId: string): Promise<boolean> {
@@ -2027,6 +2090,7 @@ export class Daemon {
           run: () => this.closeHttpListener(),
         },
         { name: "active device sessions", run: () => this.releaseActiveSessionsForShutdown() },
+        { name: "managed ADB server", run: this.stopManagedAdbServer },
         { name: "daemon files", run: () => cleanupDaemonFiles(this.getDaemonFileCleanupOptions()) },
         {
           name: "database write drain",

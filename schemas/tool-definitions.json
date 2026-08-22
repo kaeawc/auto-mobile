@@ -1517,6 +1517,68 @@
     }
   },
   {
+    "name": "getAndroid",
+    "description": "Find or recover an Android AVD and prepare it for automation.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "bootTimeoutMs": {
+          "description": "Maximum time to find, recover, or boot the device operating system",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 890000
+        },
+        "automationReadyTimeoutMs": {
+          "description": "Maximum time to install, update, start, and verify the automation runner",
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 120000
+        },
+        "avdName": {
+          "description": "Configured Android Virtual Device name",
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "avdName"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "getApple",
+    "description": "Find or recover an iOS Simulator and prepare it for automation.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "bootTimeoutMs": {
+          "description": "Maximum time to find, recover, or boot the device operating system",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 890000
+        },
+        "automationReadyTimeoutMs": {
+          "description": "Maximum time to install, update, start, and verify the automation runner",
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 120000
+        },
+        "udid": {
+          "description": "iOS Simulator UDID",
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "udid"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "getAppPermissions",
     "description": "Read app permission state",
     "inputSchema": {
@@ -8611,89 +8673,6 @@
         "appId",
         "databasePath",
         "query"
-      ],
-      "additionalProperties": false
-    }
-  },
-  {
-    "name": "startDevice",
-    "description": "Start device",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {
-        "platform": {
-          "type": "string",
-          "enum": [
-            "android",
-            "ios"
-          ]
-        },
-        "minOsVersion": {
-          "description": "Minimum OS version, inclusive (e.g., '14', '17.2')",
-          "type": "string"
-        },
-        "maxOsVersion": {
-          "description": "Maximum OS version, inclusive (e.g., '15', '18.0')",
-          "type": "string"
-        },
-        "name": {
-          "description": "Device name to match (e.g., 'iPhone 16e', 'Pixel_9_Pro')",
-          "type": "string"
-        },
-        "formFactor": {
-          "description": "Device form factor",
-          "type": "string",
-          "enum": [
-            "phone",
-            "tablet"
-          ]
-        },
-        "screenSize": {
-          "description": "Desired screen dimensions",
-          "type": "object",
-          "properties": {
-            "width": {
-              "description": "Screen width in pixels",
-              "type": "number"
-            },
-            "height": {
-              "description": "Screen height in pixels",
-              "type": "number"
-            }
-          },
-          "required": [
-            "width",
-            "height"
-          ],
-          "additionalProperties": false
-        },
-        "deviceId": {
-          "type": "string"
-        },
-        "preferRunning": {
-          "description": "Prefer already-booted device (default true)",
-          "type": "boolean"
-        },
-        "timeoutMs": {
-          "description": "Total device boot and automation-readiness timeout in ms",
-          "type": "integer",
-          "exclusiveMinimum": 0,
-          "maximum": 890000
-        },
-        "runnerReadinessTimeoutMs": {
-          "description": "Runner-readiness budget in ms within timeoutMs; overrides the shared timeout (1000-120000)",
-          "type": "integer",
-          "minimum": 1000,
-          "maximum": 120000
-        },
-        "createIfMissing": {
-          "description": "Create a device when nothing matches (CLI: --create-if-missing). Default off; AUTOMOBILE_ALLOW_DEVICE_CREATE=1 enables it when this flag is not supplied, and the flag wins.",
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "platform"
       ],
       "additionalProperties": false
     }

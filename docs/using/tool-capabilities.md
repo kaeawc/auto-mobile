@@ -20,7 +20,7 @@ These tools are never gated — they are present the moment you connect:
 `observe`, `tapOn`, `tapAny`, `swipeOn`, `inputText`, `clearText`, `keyboard`,
 `pressButton`, `homeScreen`, `recentApps`, `launchApp`, `terminateApp`,
 `installApp`, `uninstallApp`, `listApps`, `listDevices`, `listDeviceImages`,
-`startDevice`, `killDevice`, `setActiveDevice`, `wakeAndUnlock`, and the
+`getAndroid`, `getApple`, `killDevice`, `setActiveDevice`, `wakeAndUnlock`, and the
 capability control tool `setToolCapability`.
 
 Everything beyond this is reached through one of the three gates below.

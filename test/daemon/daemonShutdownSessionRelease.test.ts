@@ -122,6 +122,53 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     }
   });
 
+  test("stops a managed ADB server after releasing active sessions", async () => {
+    const timer = new FakeTimer();
+    const repository = new FakeDeviceSessionRepository();
+    const daemon = new Daemon(
+      {},
+      new FakeInstalledAppsRepository(),
+      timer,
+      repository as unknown as DeviceSessionRepository,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      process.env,
+      async () => {
+        repository.events.push("stopManagedAdbServer");
+      },
+    );
+    const sessionManager = daemon.getSessionManager();
+    const devicePool = daemon.getDevicePool();
+    const loggerCloseSpy = spyOn(logger, "closeAfterFlush").mockResolvedValue(undefined);
+    const closeDatabaseSpy = spyOn(databaseModule, "closeDatabase").mockImplementation(async () => {
+      repository.events.push("closeDatabase");
+    });
+
+    try {
+      await devicePool.initializeWithDevices([{
+        name: "Managed Android",
+        deviceId: "managed-physical-device",
+        platform: "android",
+      }]);
+      await devicePool.assignDeviceToSession("managed-adb-session", "android");
+
+      await daemon.stop();
+
+      expect(sessionManager.getSession("managed-adb-session")).toBeNull();
+      expect(repository.events).toEqual([
+        "markReleased",
+        "stopManagedAdbServer",
+        "closeDatabase",
+      ]);
+    } finally {
+      loggerCloseSpy.mockRestore();
+      closeDatabaseSpy.mockRestore();
+    }
+  });
+
   test("continues releasing other sessions when one teardown fails", async () => {
     const timer = new FakeTimer();
     const repository = new FakeDeviceSessionRepository();

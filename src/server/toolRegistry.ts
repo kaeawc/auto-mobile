@@ -112,6 +112,7 @@ function preservesPlanCapabilityAuthorization(
 interface ToolRegistrationOptions {
   supportsProgress?: boolean;
   debugOnly?: boolean;
+  hidden?: boolean;
   outputSchema?: any;
   /** Accept the plan executor's internal coordination namespace. */
   acceptsPlanLockNamespace?: boolean;
@@ -153,6 +154,7 @@ export interface RegisteredTool {
   requiresDevice?: boolean;
   deviceAwareHandler?: DeviceAwareToolHandler;
   debugOnly?: boolean;
+  hidden?: boolean;
   embeddedSdkOnly?: boolean;
   planExecutable?: boolean;
   planOnly?: boolean;
@@ -973,6 +975,7 @@ export class ToolRegistryClass {
       supportsProgress: options.supportsProgress ?? false,
       requiresDevice: false,
       debugOnly: options.debugOnly ?? false,
+      hidden: options.hidden ?? false,
       embeddedSdkOnly: false,
       acceptsPlanLockNamespace: options.acceptsPlanLockNamespace ?? false,
       outputSchema: options.outputSchema,
@@ -1141,9 +1144,9 @@ export class ToolRegistryClass {
   getAllTools(options: ToolListingOptions = {}): RegisteredTool[] {
     const tools = Array.from(this.tools.values());
     if (options.includeUnavailable) {
-      return tools;
+      return tools.filter(tool => !tool.hidden);
     }
-    return tools.filter(tool => this.isToolAvailable(tool));
+    return tools.filter(tool => !tool.hidden && this.isToolAvailable(tool));
   }
 
   // Get a specific tool by name
@@ -1351,7 +1354,7 @@ export class ToolRegistryClass {
     this.trackServer(server);
 
     this.tools.forEach(tool => {
-      if (!this.isToolAvailable(tool)) {
+      if (tool.hidden || !this.isToolAvailable(tool)) {
         return;
       }
 

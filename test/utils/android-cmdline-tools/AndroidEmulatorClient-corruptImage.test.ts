@@ -420,6 +420,42 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
     expect(fakeAdb.getExecutedCommands().some(command => command.includes("get-state"))).toBe(true);
   });
 
+  test("adopts the existing AVD after a post-validation duplicate-AVD exit", async () => {
+    const fakeChild = createFakeChildProcess();
+    const spawnFn = ((_cmd: string, _args: string[]) => {
+      process.nextTick(() => {
+        fakeChild.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+      });
+      return fakeChild;
+    }) as any;
+    const execAsync = async (_file: string, args: string[]): Promise<ExecResult> =>
+      args.includes("-list-avds") ? createExecResult("Pixel_9_Pro\n") : createExecResult("");
+
+    fakeTimer.enableAutoAdvance();
+    fakeAdb.setCommandResponse("emu avd name", createExecResult("Pixel_9_Pro\n"));
+    fakeAdb.setCommandResponse("get-state", createExecResult("device\n"));
+    fakeAdb.setCommandResponse("shell pm list packages", createExecResult("package:android\n"));
+    fakeAdb.setCommandResponse("shell getprop sys.boot_completed", createExecResult("1\n"));
+    fakeAdb.setCommandResponse("shell getprop init.svc.bootanim", createExecResult("stopped\n"));
+    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory, fakeAvdConfigReader);
+    skipEmulatorPathDetection(client);
+
+    const child = await client.startEmulator("Pixel_9_Pro");
+    fakeChild.stderr!.emit(
+      "data",
+      Buffer.from("Running multiple emulators with the same AVD is an experimental feature.\n"),
+    );
+    fakeChild.emit("exit", 1);
+    fakeChild.emit("close", 1);
+    fakeAdb.setDevices([
+      { name: "Pixel_9_Pro", platform: "android", deviceId: "emulator-5556", source: "local" },
+    ]);
+
+    await expect(client.waitForEmulatorReady("Pixel_9_Pro", 5_000, child)).resolves.toMatchObject({
+      deviceId: "emulator-5556",
+    });
+  });
+
   test("keeps an exited launch port reserved while ADB reports its serial offline", async () => {
     const firstChild = createFakeChildProcess();
     const secondChild = createFakeChildProcess();

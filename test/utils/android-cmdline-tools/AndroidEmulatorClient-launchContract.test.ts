@@ -81,6 +81,30 @@ describe("AndroidEmulatorClient launch contract", () => {
     expect(handle.process).toBe(child);
   });
 
+  test("honors caller-supplied emulator console ports without adding another port flag", async () => {
+    for (const [extraArgs, targetDeviceId] of [
+      [["-port", "5560"], "emulator-5560"],
+      [["-ports", "5562,5563"], "emulator-5562"],
+    ] as const) {
+      const child = createChild();
+      let spawnedArgs: string[] = [];
+      const client = createClient((_command, args) => {
+        spawnedArgs = args;
+        queueMicrotask(() => child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")));
+        return child;
+      });
+
+      const handle = await client.launchEmulator({ avdName: "Pixel 9", extraArgs });
+
+      expect(handle.targetDeviceId).toBe(targetDeviceId);
+      expect(spawnedArgs.filter(argument => argument === "-port" || argument === "-ports")).toEqual([
+        extraArgs[0],
+      ]);
+      child.emit("exit", 0, null);
+      AndroidEmulatorClient.resetLaunchReservationsForTesting();
+    }
+  });
+
   test("does not spawn when launch has already been cancelled", async () => {
     const controller = new AbortController();
     controller.abort();

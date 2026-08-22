@@ -289,6 +289,76 @@ export function parseExtraEmulatorArguments(raw: string): string[] {
   return [...parsed];
 }
 
+type EmulatorConsolePortArgument = {
+  readonly option: "-port" | "-ports";
+  readonly value: string | undefined;
+  readonly consumesFollowingArgument: boolean;
+};
+
+function emulatorConsolePortArgument(
+  args: readonly string[],
+  index: number,
+): EmulatorConsolePortArgument | undefined {
+  const argument = args[index];
+  if (argument === "-port" || argument === "-ports") {
+    return {
+      option: argument,
+      value: args[index + 1],
+      consumesFollowingArgument: true,
+    };
+  }
+  const match = argument.match(/^-(port|ports)=(.*)$/);
+  return match
+    ? {
+        option: `-${match[1]}` as "-port" | "-ports",
+        value: match[2],
+        consumesFollowingArgument: false,
+      }
+    : undefined;
+}
+
+function parseEmulatorConsolePort(argument: EmulatorConsolePortArgument): number {
+  const consolePortText = argument.value?.split(",", 1)[0];
+  const consolePort = Number(consolePortText);
+  if (
+    !consolePortText ||
+    !Number.isInteger(consolePort) ||
+    consolePort < MIN_EMULATOR_CONSOLE_PORT ||
+    consolePort % EMULATOR_CONSOLE_PORT_STEP !== 0
+  ) {
+    throw new ActionableError(
+      `Emulator ${argument.option} must specify an even console port of at least ${MIN_EMULATOR_CONSOLE_PORT}`,
+    );
+  }
+  return consolePort;
+}
+
+function configuredEmulatorConsoleDeviceId(args: readonly string[]): string | undefined {
+  let configuredPort: number | undefined;
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = emulatorConsolePortArgument(args, index);
+    if (!argument) {
+      continue;
+    }
+    if (argument.consumesFollowingArgument) {
+      index += 1;
+    }
+    const consolePort = parseEmulatorConsolePort(argument);
+    if (configuredPort !== undefined && configuredPort !== consolePort) {
+      throw new ActionableError(
+        "Emulator arguments specify multiple different console ports",
+      );
+    }
+    configuredPort = consolePort;
+  }
+  return configuredPort === undefined ? undefined : `emulator-${configuredPort}`;
+}
+
+type EmulatorDeviceIdReservation = {
+  readonly deviceId: string;
+  readonly appendPort: boolean;
+};
+
 const execAsync = async (
   file: string,
   args: string[],
@@ -1503,11 +1573,12 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           return;
         }
         clearExitDrainTimeout();
-        if (
+      if (
           duplicateAvdDetected ||
           output.includes("Running multiple emulators with the same AVD")
         ) {
           this.launchErrors.delete(child);
+          this.launchTargetDeviceIds.delete(child);
           const resolveFinalization = resolvePostValidationExit;
           resolvePostValidationExit = undefined;
           resolveFinalization(undefined);
@@ -1951,11 +2022,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   private allocateReservedEmulatorDeviceId(
     preexistingDeviceIds: ReadonlySet<string>,
   ): string {
-    const unavailableDeviceIds = new Set([
-      ...preexistingDeviceIds,
-      ...AndroidEmulatorClient.reservedLaunchDeviceIds.values(),
-      ...AndroidEmulatorClient.terminalReservedDeviceIds,
-    ]);
+    const unavailableDeviceIds = this.unavailableEmulatorDeviceIds(preexistingDeviceIds);
     for (
       let port = MIN_EMULATOR_CONSOLE_PORT;
       port <= MAX_EMULATOR_CONSOLE_PORT;
@@ -1972,24 +2039,48 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     );
   }
 
+  private unavailableEmulatorDeviceIds(
+    preexistingDeviceIds: ReadonlySet<string> | undefined,
+  ): Set<string> {
+    return new Set([
+      ...(preexistingDeviceIds ?? []),
+      ...AndroidEmulatorClient.reservedLaunchDeviceIds.values(),
+      ...AndroidEmulatorClient.terminalReservedDeviceIds,
+    ]);
+  }
+
   private reserveEmulatorDeviceId(
     preexistingDeviceIds: ReadonlySet<string> | undefined,
-  ): string | undefined {
+    args: readonly string[],
+  ): EmulatorDeviceIdReservation | undefined {
+    const configuredDeviceId = configuredEmulatorConsoleDeviceId(args);
+    if (configuredDeviceId) {
+      if (this.unavailableEmulatorDeviceIds(preexistingDeviceIds).has(configuredDeviceId)) {
+        throw new ActionableError(
+          `Cannot safely launch an Android emulator: configured console port ` +
+            `${configuredDeviceId.slice("emulator-".length)} is already in use`,
+        );
+      }
+      return { deviceId: configuredDeviceId, appendPort: false };
+    }
     if (!preexistingDeviceIds) {
       return undefined;
     }
-    return this.allocateReservedEmulatorDeviceId(preexistingDeviceIds);
+    return {
+      deviceId: this.allocateReservedEmulatorDeviceId(preexistingDeviceIds),
+      appendPort: true,
+    };
   }
 
   private addReservedEmulatorPort(
     args: string[],
     preexistingDeviceIds: ReadonlySet<string> | undefined,
   ): string | undefined {
-    const deviceId = this.reserveEmulatorDeviceId(preexistingDeviceIds);
-    if (deviceId) {
-      args.push("-port", deviceId.slice("emulator-".length));
+    const reservation = this.reserveEmulatorDeviceId(preexistingDeviceIds, args);
+    if (reservation?.appendPort) {
+      args.push("-port", reservation.deviceId.slice("emulator-".length));
     }
-    return deviceId;
+    return reservation?.deviceId;
   }
 
   private recordReservedEmulatorDeviceId(

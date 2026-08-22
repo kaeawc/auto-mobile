@@ -1621,10 +1621,7 @@ async function waitForPendingAndroidResetRecovery(
   timer: Timer,
   signal?: AbortSignal,
 ): Promise<void> {
-  const avdName = args.platform === "android"
-    ? budgets.androidAvdName ?? args.name
-    : undefined;
-  if (!avdName) {
+  if (args.platform !== "android") {
     return;
   }
   const devicePool = getStartDevicePool(DaemonState.getInstance());
@@ -1632,18 +1629,25 @@ async function waitForPendingAndroidResetRecovery(
     return;
   }
   const remainingMs = bootDeadlineMs - timer.now();
+  const requestedName = budgets.androidAvdName ?? args.name;
   if (remainingMs <= 0) {
-    throw new ActionableError(`Timed out waiting for Android AVD reset recovery of '${avdName}'`);
+    throw new ActionableError(
+      `Timed out waiting for Android AVD reset recovery${requestedName ? ` of '${requestedName}'` : ""}`,
+    );
   }
   let timeout: NodeJS.Timeout | undefined;
   const timeoutPromise = new Promise<never>((_resolve, reject) => {
     timeout = timer.setTimeout(() => {
-      reject(new ActionableError(`Timed out waiting for Android AVD reset recovery of '${avdName}'`));
+      reject(new ActionableError(
+        `Timed out waiting for Android AVD reset recovery${requestedName ? ` of '${requestedName}'` : ""}`,
+      ));
     }, remainingMs);
   });
   try {
     await Promise.race([
-      devicePool.waitForAdbServerResetRecovery(avdName, signal),
+      budgets.androidAvdName
+        ? devicePool.waitForAdbServerResetRecovery(budgets.androidAvdName, signal)
+        : devicePool.waitForAdbServerResetRecoveryMatchingName(args.name, signal),
       timeoutPromise,
     ]);
   } finally {

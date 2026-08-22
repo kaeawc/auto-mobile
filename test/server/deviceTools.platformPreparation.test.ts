@@ -281,4 +281,51 @@ describe("platform device preparation tools", () => {
       await pool.releaseAdbServerResetCohortReservations(detached);
     }
   });
+
+  test("waits for fuzzy legacy Android names that match a reserved AVD", async () => {
+    const stale: BootedDevice = {
+      platform: "android",
+      name: "Pixel_9_API_36",
+      deviceId: "emulator-5562",
+    };
+    const image: DeviceInfo = {
+      platform: "android",
+      name: stale.name,
+      isRunning: false,
+      source: "local",
+    };
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      deviceUtils,
+      new DefaultRetryExecutor(timer),
+    );
+    await pool.addDevice(stale, image);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    deviceUtils.setDeviceImages("android", [image]);
+    const detached = await pool.detachAdbServerResetCohort([pool.getDevice(stale.deviceId)!]);
+    let settled = false;
+    const preparation = callTool("startDevice", {
+      platform: "android",
+      name: "Pixel",
+    }).finally(() => {
+      settled = true;
+    });
+
+    try {
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      expect(deviceUtils.getExecutedOperations()).not.toContain(`startDevice:${stale.name}:120000`);
+
+      deviceUtils.setBootedDevices("android", [stale]);
+      await pool.releaseAdbServerResetCohortReservations(detached);
+      await preparation.catch(() => undefined);
+      expect(settled).toBe(true);
+    } finally {
+      await pool.releaseAdbServerResetCohortReservations(detached);
+    }
+  });
 });

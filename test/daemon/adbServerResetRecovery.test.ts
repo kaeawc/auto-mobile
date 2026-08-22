@@ -270,6 +270,140 @@ describe("ADB server reset session recovery", () => {
     }
   });
 
+  test("rebinds the preserved session before accepting a same-AVD replacement", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const manager = new FakeDeviceManager();
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+    );
+    const original: BootedDevice = {
+      platform: "android",
+      name: "Pixel_8_API_35",
+      deviceId: "emulator-5554",
+    };
+    const image: DeviceInfo = {
+      name: original.name,
+      platform: "android",
+      isRunning: true,
+      source: "local",
+    };
+    manager.bootedDevices = [original];
+    await pool.addDevice(original, image);
+    await pool.bindOrReuseDeviceSession("session-1", original.deviceId, "android", image);
+    const detached = await pool.detachAdbServerResetCohort([pool.getDevice(original.deviceId)!]);
+
+    try {
+      await pool.addDevice(original, image);
+
+      await expect(
+        pool.recoverSessionBoundAndroidDeviceAfterAdbServerReset(original.deviceId, detached[0]),
+      ).resolves.toBe(true);
+
+      expect(manager.startedDevices).toHaveLength(0);
+      expect(pool.getDevice(original.deviceId)).toMatchObject({
+        avdName: original.name,
+        sessionId: "session-1",
+        status: "busy",
+      });
+      expect(sessionManager.getSession("session-1")?.assignedDevice).toBe(original.deviceId);
+    } finally {
+      await pool.releaseAdbServerResetCohortReservations(detached);
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
+  test("cancels a detached reset member and releases its preserved session", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const manager = new FakeDeviceManager();
+    const releasedSessionIds: string[] = [];
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+      undefined,
+      undefined,
+      async (sessionId) => {
+        releasedSessionIds.push(sessionId);
+      },
+    );
+    const original: BootedDevice = {
+      platform: "android",
+      name: "Pixel_8_API_35",
+      deviceId: "emulator-5554",
+    };
+    const image: DeviceInfo = {
+      name: original.name,
+      platform: "android",
+      isRunning: true,
+      source: "local",
+    };
+    manager.bootedDevices = [original];
+    await pool.addDevice(original, image);
+    await pool.bindOrReuseDeviceSession("session-1", original.deviceId, "android", image);
+    const detached = await pool.detachAdbServerResetCohort([pool.getDevice(original.deviceId)!]);
+
+    try {
+      pool.markIntentionalShutdown(original.deviceId);
+
+      await expect(
+        pool.recoverSessionBoundAndroidDeviceAfterAdbServerReset(original.deviceId, detached[0]),
+      ).resolves.toBe(false);
+
+      expect(manager.startedDevices).toHaveLength(0);
+      expect(releasedSessionIds).toEqual(["session-1"]);
+    } finally {
+      await pool.releaseAdbServerResetCohortReservations(detached);
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
+  test("cancels reset reservation waits when the caller aborts", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const manager = new FakeDeviceManager();
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+    );
+    const original: BootedDevice = {
+      platform: "android",
+      name: "Pixel_8_API_35",
+      deviceId: "emulator-5554",
+    };
+    const image: DeviceInfo = {
+      name: original.name,
+      platform: "android",
+      isRunning: true,
+      source: "local",
+    };
+    await pool.addDevice(original, image);
+    const detached = await pool.detachAdbServerResetCohort([pool.getDevice(original.deviceId)!]);
+    const controller = new AbortController();
+
+    try {
+      const waiting = pool.waitForAdbServerResetRecovery(original.name, controller.signal);
+      controller.abort(new Error("request cancelled"));
+      await expect(waiting).rejects.toThrow("request cancelled");
+    } finally {
+      await pool.releaseAdbServerResetCohortReservations(detached);
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
   test("releases the preserved session when reboot rejects after detaching the old serial", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());

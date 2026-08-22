@@ -156,6 +156,7 @@ interface ReadinessReservationTarget {
 }
 
 interface AdbServerResetRecoveryReservation {
+  deviceId: string;
   image: DeviceInfo;
   settled: Promise<void>;
   resolve(): void;
@@ -1011,9 +1012,15 @@ export class DevicePool {
       // Tie the marker to the incarnation present now, so a later same-serial
       // replacement is not treated as intentionally stopped.
       this.intentionalShutdowns.set(deviceId, device.incarnation);
-    } else if (this.recoveringAndroidDeviceIds.has(deviceId)) {
+    } else if (
+      this.recoveringAndroidDeviceIds.has(deviceId) ||
+      Array.from(this.adbServerResetRecoveryReservations.values()).some(
+        reservation => reservation.deviceId === deviceId,
+      )
+    ) {
       // No pooled device yet (an in-flight recovery owns the serial); the mark
-      // applies to whatever incarnation the recovery produces.
+      // applies to whatever incarnation the recovery produces. A reset cohort
+      // reserves detached later members before their own recovery turn.
       this.intentionalShutdowns.set(deviceId, INCARNATION_ANY);
     }
   }
@@ -1992,7 +1999,24 @@ export class DevicePool {
     if (!reservation) {
       return;
     }
-    await runWithAbortSignal(signal, async () => await reservation.settled);
+    await this.waitForAdbServerResetReservations([reservation], signal);
+  }
+
+  /**
+   * Legacy startDevice accepts a partial name, unlike getAndroid's exact AVD
+   * name. Do not let that compatibility path select a reserved reset member.
+   */
+  async waitForAdbServerResetRecoveryMatchingName(
+    name: string | undefined,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const normalizedName = name?.toLowerCase();
+    const reservations = Array.from(this.adbServerResetRecoveryReservations.values()).filter(
+      reservation =>
+        normalizedName === undefined ||
+        reservation.image.name.toLowerCase().includes(normalizedName),
+    );
+    await this.waitForAdbServerResetReservations(reservations, signal);
   }
 
   async releaseAdbServerResetCohortReservations(
@@ -2032,9 +2056,40 @@ export class DevicePool {
         isRunning: false,
         source: "local",
       },
+      deviceId: device.id,
       settled,
       resolve,
     });
+  }
+
+  private async waitForAdbServerResetReservations(
+    reservations: readonly AdbServerResetRecoveryReservation[],
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (reservations.length === 0) {
+      return;
+    }
+    let abortListener: (() => void) | undefined;
+    const cancellation = signal
+      ? new Promise<never>((_resolve, reject) => {
+        abortListener = () => reject(signal.reason ?? new Error("Device preparation cancelled"));
+        if (signal.aborted) {
+          abortListener();
+          return;
+        }
+        signal.addEventListener("abort", abortListener, { once: true });
+      })
+      : undefined;
+    try {
+      await Promise.race([
+        Promise.all(reservations.map(reservation => reservation.settled)),
+        ...(cancellation ? [cancellation] : []),
+      ]);
+    } finally {
+      if (abortListener) {
+        signal?.removeEventListener("abort", abortListener);
+      }
+    }
   }
 
   private async releasePreservedAdbResetSessionIfDetached(
@@ -2099,6 +2154,14 @@ export class DevicePool {
         return false;
       }
       if (replacementState === "same-avd") {
+        if (!await this.rebindSameAvdReplacementSession(
+          device,
+          avdName,
+          preservedSessionId,
+          recoveryImage,
+        )) {
+          return false;
+        }
         await this.completeEmulatorLossRecovery(incidentId, "recovered");
         return true;
       }
@@ -2182,7 +2245,7 @@ export class DevicePool {
           `[DevicePool] Cancelled Android emulator ${avdName} recovery after intentional shutdown`,
         );
         await this.completeEmulatorLossRecovery(incidentId, "not-attempted");
-        return true;
+        return false;
       }
       if (recovered) {
         logger.info(`[DevicePool] Restarted Android emulator ${avdName} after disconnect`);
@@ -2217,6 +2280,43 @@ export class DevicePool {
       await this.stopDiscoveredEmulatorByAvdName(avdName);
     }
     return "stopped";
+  }
+
+  private async rebindSameAvdReplacementSession(
+    device: PooledDevice,
+    avdName: string,
+    preservedSessionId: string | undefined,
+    recoveryImage: DeviceInfo,
+  ): Promise<boolean> {
+    const replacement = this.devices.get(device.id);
+    if (!replacement || replacement.avdName !== avdName) {
+      return false;
+    }
+    if (!preservedSessionId) {
+      return true;
+    }
+    try {
+      await this.bindOrReuseDeviceSession(
+        preservedSessionId,
+        replacement.id,
+        "android",
+        recoveryImage,
+        undefined,
+        {
+          deviceId: replacement.id,
+          name: replacement.name,
+          platform: "android",
+        },
+        true,
+      );
+      return this.sessionManager.getSession(preservedSessionId)?.assignedDevice === replacement.id;
+    } catch (error) {
+      logger.warn(
+        `[DevicePool] Could not rebind session ${preservedSessionId} to same-AVD replacement ${avdName}: ${error}`,
+        error,
+      );
+      return false;
+    }
   }
 
   private detachSessionForAndroidRecovery(

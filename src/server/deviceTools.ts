@@ -398,6 +398,7 @@ export interface DeviceToolsDependencies {
   provisionDeviceOperationStoreFactory: () => ProvisionDeviceOperationStore;
   clearInstalledAppsForDevice: (deviceId: string) => Promise<void>;
   stopPerformanceMonitoring: (deviceId: string) => void;
+  stopAndroidObservers: (device: BootedDevice) => Promise<void>;
   idGenerator: IdGenerator;
   timer: Timer;
 }
@@ -419,6 +420,14 @@ async function defaultClearInstalledAppsForDevice(deviceId: string): Promise<voi
   await getInstalledAppsCacheWriteCoordinator().invalidate(deviceId, () =>
     getDbWriteBarrier().track(() => repo.clearDeviceSession(deviceId)).then(() => undefined)
   );
+}
+
+async function defaultStopAndroidObservers(device: BootedDevice): Promise<void> {
+  const { AndroidCtrlProxyClient } = await import("../features/observe/android/AndroidCtrlProxyClient");
+  // Detaching the per-device CtrlProxy singleton disables its auto-reconnect,
+  // health-check, screenshot-backoff, and work-profile loops so they stop
+  // re-referencing the emulator transport while it shuts down.
+  await AndroidCtrlProxyClient.getExistingInstance(device.deviceId)?.close();
 }
 
 async function clearInstalledAppsAfterShutdown(
@@ -546,6 +555,42 @@ async function stopIosCtrlProxyBeforeShutdown(
     logger.warn(`[DeviceTools] Failed to stop CtrlProxy iOS before kill: ${error}`);
   } finally {
     perf.endOperation("stopCtrlProxy");
+  }
+}
+
+async function stopAndroidCtrlProxyBeforeShutdown(
+  context: ShutdownDeadlineContext,
+  perf: ReturnType<typeof createPerformanceTracker>,
+  stopAndroidObservers: (device: BootedDevice) => Promise<void>,
+): Promise<void> {
+  if (context.device.platform !== "android") {
+    return;
+  }
+  let stop: Promise<void> | undefined;
+  perf.startOperation("stopAndroidCtrlProxy");
+  try {
+    stop = stopAndroidObservers(context.device);
+    await runWithinShutdownDeadline(
+      context.device,
+      context.timer,
+      context.deadlineMs,
+      "Android observer detach did not complete",
+      context.requestAbortSignal,
+      async () => await stop,
+    );
+  } catch (error) {
+    if (shouldPropagateShutdownPreparationError(error, context.requestAbortSignal)) {
+      if (stop) {
+        // Observer detach can keep mutating adb/port state after its caller stops
+        // waiting. Hold the device unavailable until it settles, releasing after a
+        // failed pre-kill teardown because the platform was never shut down.
+        context.retainReservationUntil?.(stop, true);
+      }
+      throw error;
+    }
+    logger.warn(`[DeviceTools] Failed to stop Android observers before kill: ${error}`);
+  } finally {
+    perf.endOperation("stopAndroidCtrlProxy");
   }
 }
 
@@ -1157,6 +1202,7 @@ function getDeviceToolsDependencies(): DeviceToolsDependencies {
       provisionDeviceOperationStoreFactory: () => new ProvisionDeviceOperationRepository(),
       clearInstalledAppsForDevice: defaultClearInstalledAppsForDevice,
       stopPerformanceMonitoring: deviceId => getPerformanceMonitor().stopMonitoring(deviceId),
+      stopAndroidObservers: defaultStopAndroidObservers,
       idGenerator: defaultIdGenerator,
       timer: defaultTimer,
     };
@@ -1193,6 +1239,7 @@ export function setDeviceToolsDependencies(deps: Partial<DeviceToolsDependencies
       deps.clearInstalledAppsForDevice ?? currentDeps.clearInstalledAppsForDevice,
     stopPerformanceMonitoring:
       deps.stopPerformanceMonitoring ?? currentDeps.stopPerformanceMonitoring,
+    stopAndroidObservers: deps.stopAndroidObservers ?? currentDeps.stopAndroidObservers,
     idGenerator: deps.idGenerator ?? currentDeps.idGenerator,
     timer: deps.timer ?? currentDeps.timer,
   };
@@ -2958,6 +3005,7 @@ export function registerDeviceTools() {
       };
       await stopVideoRecordingsBeforeShutdown(shutdownContext, perf);
       await stopIosCtrlProxyBeforeShutdown(shutdownContext, perf);
+      await stopAndroidCtrlProxyBeforeShutdown(shutdownContext, perf, deps.stopAndroidObservers);
 
       const alreadyStoppedMessage = await killProcessAndRetireOwnership(
         deps,

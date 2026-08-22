@@ -1820,9 +1820,6 @@ export function registerDeviceTools() {
         retireRecoveredReplacement,
       );
       const devicePool = daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
-      if (boot.source === "booted" && sourceImage?.platform === "android") {
-        await devicePool?.recordAndroidAvdIdentity(boot.device.deviceId, sourceImage);
-      }
       const sessionId = preservedSessionId ?? await bindBootedDeviceSession(
         boot.device,
         args,
@@ -1830,6 +1827,9 @@ export function registerDeviceTools() {
         boot.processHandle,
         new Set(releaseReadinessReservations.map((reservation) => reservation.owner)),
       );
+      if (boot.source === "booted" && sourceImage?.platform === "android") {
+        await devicePool?.recordAndroidAvdIdentity(boot.device.deviceId, sourceImage);
+      }
       ownershipTransferred = true;
 
       await notifyResourcesAfterDeviceBoot(boot, perf, deps.notifyResourcesChanged);

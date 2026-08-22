@@ -174,4 +174,30 @@ describe("platform device preparation tools", () => {
     expect(second.sessionId).toBe(first.sessionId);
     expect(pool.getDevice(emulator.deviceId)).toMatchObject({ avdName: emulator.name });
   });
+
+  test("records the AVD identity after binding an externally booted emulator", async () => {
+    const emulator: BootedDevice = {
+      platform: "android",
+      name: "Pixel_9_API_36",
+      deviceId: "emulator-5562",
+    };
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      deviceUtils,
+      new DefaultRetryExecutor(timer),
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    deviceUtils.setBootedDevices("android", [emulator]);
+
+    await callTool("getAndroid", { avdName: emulator.name });
+
+    expect(pool.getDevice(emulator.deviceId)).toMatchObject({
+      avdName: emulator.name,
+      androidImage: { name: emulator.name, platform: "android" },
+    });
+  });
 });

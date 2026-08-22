@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { isProcessWideAdbServerReset } from "../../src/daemon/daemon";
+import {
+  getProcessWideAdbServerResetCohort,
+  isProcessWideAdbServerReset,
+} from "../../src/daemon/daemon";
 import type { PooledDevice } from "../../src/daemon/devicePool";
 
 function ownedAndroidEmulator(id: string): PooledDevice {
@@ -47,12 +50,14 @@ describe("ADB server reset detection", () => {
     expect(isProcessWideAdbServerReset(new Set(), new Set(["android"]), [physical])).toBe(false);
   });
 
-  test("detects the reset before an individual forced disconnect bypasses miss counting", () => {
+  test("returns every absent owned emulator for recovery even when miss counting only forces one", () => {
     const first = ownedAndroidEmulator("emulator-5554");
     const second = ownedAndroidEmulator("emulator-5556");
 
-    expect(
-      isProcessWideAdbServerReset(new Set(), new Set(["android"]), [first, second]),
-    ).toBe(true);
+    expect(getProcessWideAdbServerResetCohort(
+      new Set(),
+      new Set(["android"]),
+      [first, second],
+    )).toEqual([first, second]);
   });
 });

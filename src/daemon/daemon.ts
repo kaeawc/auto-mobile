@@ -141,22 +141,37 @@ type DeviceSessionRoutingTargets = {
   telemetryPush: ReturnType<typeof getTelemetryPushServer>;
 };
 
-export function isProcessWideAdbServerReset(
+export function getProcessWideAdbServerResetCohort(
   bootedDeviceIds: ReadonlySet<string>,
   succeededPlatforms: ReadonlySet<Platform>,
   pooledDevices: readonly PooledDevice[],
-): boolean {
+): readonly PooledDevice[] {
   const ownedAndroidEmulators = pooledDevices.filter(device =>
     device.platform === "android" &&
     device.avdName !== undefined &&
     device.androidImage !== undefined &&
     device.id.startsWith("emulator-"),
   );
-  return (
-    succeededPlatforms.has("android") &&
-    ownedAndroidEmulators.length > 0 &&
-    ownedAndroidEmulators.every(device => !bootedDeviceIds.has(device.id))
-  );
+  if (
+    !succeededPlatforms.has("android") ||
+    ownedAndroidEmulators.length === 0 ||
+    !ownedAndroidEmulators.every(device => !bootedDeviceIds.has(device.id))
+  ) {
+    return [];
+  }
+  return ownedAndroidEmulators;
+}
+
+export function isProcessWideAdbServerReset(
+  bootedDeviceIds: ReadonlySet<string>,
+  succeededPlatforms: ReadonlySet<Platform>,
+  pooledDevices: readonly PooledDevice[],
+): boolean {
+  return getProcessWideAdbServerResetCohort(
+    bootedDeviceIds,
+    succeededPlatforms,
+    pooledDevices,
+  ).length > 0;
 }
 
 /**
@@ -1427,16 +1442,20 @@ export class Daemon {
         for (const deviceId of disconnectResult.disconnected) {
           missingByDevice.set(deviceId, []);
         }
-        const processWideAdbServerReset = isProcessWideAdbServerReset(
+        const adbServerResetCohort = getProcessWideAdbServerResetCohort(
           bootedDeviceIds,
           succeededPlatforms,
           this.devicePool.getAllDevices(),
         );
+        const processWideAdbServerReset = adbServerResetCohort.length > 0;
         if (processWideAdbServerReset) {
           logger.warn(
             "[DisconnectMonitor] All AutoMobile-owned Android emulators disappeared together; " +
               "treating this as an ADB server reset and recovering by AVD name",
           );
+          for (const device of adbServerResetCohort) {
+            missingByDevice.set(device.id, []);
+          }
         }
 
         for (const recording of activeRecordings) {

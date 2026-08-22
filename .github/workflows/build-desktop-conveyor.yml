@@ -77,10 +77,12 @@ jobs:
           lfs: true
           persist-credentials: false
 
-      - name: "Validate version"
+      - name: "Validate inputs"
         shell: bash
         env:
           VERSION: ${{ inputs.version }}
+          PUBLISH: ${{ inputs.publish }}
+          SIGNED: ${{ inputs.signed }}
         run: |
           set -euo pipefail
           if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
@@ -90,6 +92,13 @@ jobs:
           major="${VERSION%%.*}"
           if [[ "$major" -lt 1 ]]; then
             echo "Conveyor requires a macOS major version >= 1; got $VERSION" >&2
+            exit 1
+          fi
+          # Refuse to publish self-signed packages: publish uses the base config (sign = false), whose
+          # unsigned macOS bundles would fail Gatekeeper for everyone who downloads the release.
+          # Signing (ci.conveyor.conf) is mandatory when pushing to a public GitHub Release.
+          if [[ "$PUBLISH" == "true" && "$SIGNED" != "true" ]]; then
+            echo "::error::publish=true requires signed=true — refusing to publish unsigned macOS packages" >&2
             exit 1
           fi
 

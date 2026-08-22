@@ -703,8 +703,14 @@ jobs:
           TAG: ${{ needs.validate-release-tag.outputs.tag }}
         run: |
           set -euo pipefail
-          core="${TAG%%[-+]*}"
-          IFS=. read -r major minor patch <<<"$core"
+          # Conveyor has no field for a prerelease/build qualifier, so stripping the suffix would make
+          # copied-site target a different base version than the release tag. Refuse rather than
+          # publish to the wrong version (the jpackage macOS/Linux assets are already omitted here).
+          if [[ "$TAG" == *-* || "$TAG" == *+* ]]; then
+            echo "::error::Conveyor desktop publish does not support prerelease/build-metadata tags: $TAG" >&2
+            exit 1
+          fi
+          IFS=. read -r major minor patch <<<"$TAG"
           if [[ "${major:-0}" -lt 1 ]]; then major=1; fi
           echo "version=${major}.${minor:-0}.${patch:-0}" >> "$GITHUB_OUTPUT"
 

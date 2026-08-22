@@ -338,7 +338,7 @@ describe("TapOnElement relative position", () => {
         elementId: "test:id/spannable_text",
         relativePosition: { x: 0.98, y: 0.5 },
       },
-      true,
+      false,
     );
 
     expect(semanticActions).toEqual([]);

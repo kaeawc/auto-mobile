@@ -443,6 +443,23 @@ export class TapOnElement extends BaseVisualChange {
     };
   }
 
+  private updateObservationHierarchy(
+    observeResult: ObserveResult,
+    viewHierarchy: ViewHierarchyResult
+  ): void {
+    observeResult.viewHierarchy = viewHierarchy;
+    const screenSize = this.getScreenSizeFromHierarchy(viewHierarchy);
+    if (screenSize) {
+      observeResult.screenSize = screenSize;
+    }
+  }
+
+  private logClickableParentSelection(usedParent: boolean): void {
+    if (usedParent) {
+      logger.info("[TapOnElement] Using clickable parent for non-clickable element");
+    }
+  }
+
   private findElementInHierarchy(
     options: TapOnElementOptions,
     viewHierarchy: ViewHierarchyResult
@@ -1232,10 +1249,7 @@ export class TapOnElement extends BaseVisualChange {
             this.searchForElement(options, observeResult, signal)
           );
           searchUntilStats = searchOutcome.stats;
-          observeResult.viewHierarchy = searchOutcome.viewHierarchy;
-          observeResult.screenSize =
-            this.getScreenSizeFromHierarchy(searchOutcome.viewHierarchy) ??
-            observeResult.screenSize;
+          this.updateObservationHierarchy(observeResult, searchOutcome.viewHierarchy);
           viewHierarchy = searchOutcome.viewHierarchy;
           if (!searchOutcome.selection.element) {
             await this.handleElementNotFound(options, observeResult, searchOutcome.containerFound, signal);
@@ -1299,18 +1313,13 @@ export class TapOnElement extends BaseVisualChange {
               perf.end();
               return { success: false, error: stable.error };
             }
-            observeResult.viewHierarchy = stable.viewHierarchy;
-            observeResult.screenSize =
-              this.getScreenSizeFromHierarchy(stable.viewHierarchy) ??
-              observeResult.screenSize;
+            this.updateObservationHierarchy(observeResult, stable.viewHierarchy);
             viewHierarchy = stable.viewHierarchy;
             tapElement = stable.tapElement;
             usedParent = stable.usedParent;
           }
 
-          if (usedParent) {
-            logger.info("[TapOnElement] Using clickable parent for non-clickable element");
-          }
+          this.logClickableParentSelection(usedParent);
           const tapPoint = this.resolveTapPoint(
             tapElement,
             observeResult.screenSize,
@@ -1489,20 +1498,21 @@ export class TapOnElement extends BaseVisualChange {
       ? isTalkBackEnabled
       : (await this.accessibilityDetector.detectMethod(this.device.deviceId, this.adb)) === "talkback";
 
-    if (talkBackEnabled && !options?.relativePosition) {
-      // TalkBack mode: Use accessibility actions with coordinate fallback
+    if (talkBackEnabled) {
+      // TalkBack mode: Use accessibility actions or precise coordinate
+      // gestures through its CtrlProxy driver, with ADB as the last fallback.
       return this.executeAndroidTapWithAccessibility(action, x, y, element, durationMs, options, signal);
-    } else {
-      // Standard mode and precise targets use coordinates. A relative target
-      // must not be replaced by node-level ACTION_CLICK under TalkBack because
-      // that cannot distinguish ClickableSpans within one TextView.
-      if (options?.relativePosition) {
-        await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal, true);
-      } else {
-        await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal);
-      }
-      return undefined;
     }
+
+    // Standard mode and precise targets use coordinates. Precise long presses
+    // must not be replaced by node-level ACTION_LONG_CLICK because that cannot
+    // distinguish targets within one element.
+    if (options?.relativePosition) {
+      await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal, true);
+    } else {
+      await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal);
+    }
+    return undefined;
   }
 
   /**
@@ -1637,6 +1647,32 @@ export class TapOnElement extends BaseVisualChange {
   ): Promise<ScreenReaderNavigationResult | undefined> {
     const driver = this.talkBackDriverFactory.createDriver(this.device);
     let screenReaderNavigation: ScreenReaderNavigationResult | undefined;
+
+    if (options?.relativePosition) {
+      const preciseResult = await this.talkBackStrategy.executeCoordinateFallback(
+        x,
+        y,
+        action as "tap" | "doubleTap" | "longPress",
+        durationMs,
+        driver
+      );
+      if (!preciseResult.success) {
+        logger.warn(
+          `[TapOnElement] Precise TalkBack coordinate gesture failed (${preciseResult.error}), ` +
+          `falling back to ADB input at (${x}, ${y})`
+        );
+        await this.executeAndroidTapWithCoordinates(
+          action,
+          x,
+          y,
+          durationMs,
+          element,
+          signal,
+          true
+        );
+      }
+      return undefined;
+    }
 
     if (action === "longPress") {
       // Long press: try ACTION_LONG_CLICK first, then coordinate gesture fallback

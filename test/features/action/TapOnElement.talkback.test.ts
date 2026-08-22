@@ -153,16 +153,16 @@ describe("TapOnElement TalkBack mode detection", () => {
         options
       );
 
-      expect(executeAndroidTapWithCoordinates).toHaveBeenCalledWith(
+      expect(executeAndroidTapWithAccessibility).toHaveBeenCalledWith(
         "tap",
         491,
         230,
-        500,
         element,
+        500,
+        options,
         undefined,
-        true
       );
-      expect(executeAndroidTapWithAccessibility).not.toHaveBeenCalled();
+      expect(executeAndroidTapWithCoordinates).not.toHaveBeenCalled();
     });
 
     test("passes options to accessibility method", async () => {
@@ -709,6 +709,24 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
   });
 
   describe("longPress (unaffected by navigation mode)", () => {
+    test("uses a CtrlProxy coordinate gesture for a precise long press", async () => {
+      const element = makeElement();
+      const options = {
+        relativePosition: { x: 0.9, y: 0.5 },
+      };
+
+      await (tapOnElement as any).executeAndroidTapWithAccessibility(
+        "longPress", 90, 50, element, 1000, options, undefined
+      );
+
+      expect(fakeTalkBackStrategy.longPressCalls).toHaveLength(0);
+      expect(fakeTalkBackStrategy.directActivationCalls).toHaveLength(0);
+      expect(fakeTalkBackStrategy.fallbackCalls).toEqual([
+        { x: 90, y: 50, action: "longPress", durationMs: 1000 }
+      ]);
+      expect(executeAndroidTapWithCoordinates).not.toHaveBeenCalled();
+    });
+
     test("uses executeLongPress for longPress action", async () => {
       const element = makeElement();
 

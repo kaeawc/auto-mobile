@@ -127,7 +127,7 @@ describe("Tool Registration Validation (Integration Tests)", () => {
   //      tools (barrier/criticalSection) too — they are deliberately absent
   //      from getToolDefinitions() (see A1) but present in the committed file,
   //      so a plan-inclusive roster is the correct comparison.
-  //   3. body/description: each committed entry's description and inputSchema
+  //   3. body/description: each committed entry's description, inputSchema, and outputSchema
   //      deep-match the live definition (drift is 0 today).
   test("committed tool-definitions.json matches the live schemas in both directions", async () => {
     const fs = await import("fs/promises");
@@ -163,6 +163,9 @@ describe("Tool Registration Validation (Integration Tests)", () => {
         expect(committedDef, `${liveDef.name} missing from committed file`).toBeDefined();
         expect(committedDef!.description).toBe(liveDef.description);
         expect(committedDef!.inputSchema).toEqual(liveDef.inputSchema as ToolSchemaDefinition["inputSchema"]);
+        expect(committedDef!.outputSchema).toEqual(
+          liveDef.outputSchema as ToolSchemaDefinition["outputSchema"]
+        );
       }
     } finally {
       ToolRegistry.clearTools();

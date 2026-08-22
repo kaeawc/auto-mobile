@@ -95,9 +95,11 @@ const startupTimeoutOverride =
 const parsedStartupTimeout = startupTimeoutOverride
   ? Number.parseInt(startupTimeoutOverride, 10)
   : NaN;
+// Node and Bun clamp timer delays above this value to 1ms.
+const MAX_DAEMON_STARTUP_TIMEOUT_MS = 2_147_483_647;
 export const DAEMON_STARTUP_TIMEOUT_MS =
   Number.isFinite(parsedStartupTimeout) && parsedStartupTimeout > 0
-    ? parsedStartupTimeout
+    ? Math.min(parsedStartupTimeout, MAX_DAEMON_STARTUP_TIMEOUT_MS)
     : 30000;
 
 /**

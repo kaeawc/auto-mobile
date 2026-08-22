@@ -55,14 +55,33 @@ class DaemonSocketPathsFlagWiringTest {
   }
 
   @Test
-  fun `daemon startup timeout defaults to 30 seconds`() {
+  fun `daemon launcher timeout reserves full lifecycle defaults`() {
     // CI provides a valid environment override for emulator startup; an invalid
     // system property takes precedence and exercises this method's fallback.
     System.setProperty("automobile.daemon.startup.timeout.ms", "not-a-number")
     SystemPropertyCache.clear()
 
     assertEquals(30_000L, DaemonSocketPaths.daemonStartTimeoutMs())
-    assertEquals(90_000L, DaemonSocketPaths.daemonLauncherTimeoutMs())
+    assertEquals(140_000L, DaemonSocketPaths.daemonLauncherTimeoutMs(isRestart = false))
+    assertEquals(152_000L, DaemonSocketPaths.daemonLauncherTimeoutMs(isRestart = true))
+  }
+
+  @Test
+  fun `daemon restart launcher timeout includes full lifecycle allowance for configured startup timeout`() {
+    System.setProperty("automobile.daemon.startup.timeout.ms", "120000")
+    SystemPropertyCache.clear()
+
+    assertEquals(410_000L, DaemonSocketPaths.daemonLauncherTimeoutMs(isRestart = false))
+    assertEquals(422_000L, DaemonSocketPaths.daemonLauncherTimeoutMs(isRestart = true))
+  }
+
+  @Test
+  fun `daemon launcher timeout saturates for extreme configured startup timeout`() {
+    System.setProperty("automobile.daemon.startup.timeout.ms", Long.MAX_VALUE.toString())
+    SystemPropertyCache.clear()
+
+    assertEquals(Long.MAX_VALUE, DaemonSocketPaths.daemonLauncherTimeoutMs(isRestart = false))
+    assertEquals(Long.MAX_VALUE, DaemonSocketPaths.daemonLauncherTimeoutMs(isRestart = true))
   }
 
   @Test

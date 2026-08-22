@@ -405,7 +405,7 @@ export class DaemonManager implements DaemonManagerLike {
       spawn: processSpawner?.spawn.bind(processSpawner),
       timer,
     });
-    this.clientFactory = clientFactory ?? (() => new DaemonClient(this.socketPath));
+    this.clientFactory = clientFactory ?? (() => new DaemonClient(this.socketPath, undefined, timer));
   }
 
   /**
@@ -632,7 +632,8 @@ export class DaemonManager implements DaemonManagerLike {
             },
             timeoutMs: DAEMON_STARTUP_TIMEOUT_MS,
             waitForReady: (timeoutMs, signal) => this.waitForReady(timeoutMs, signal),
-            isReadyForLaunchedProcess: pid => this.isLaunchedProcessReady(pid),
+            isReadyForLaunchedProcess: (pid, timeoutMs, signal) =>
+              this.isLaunchedProcessReady(pid, timeoutMs, signal),
             formatFailure: summary => this.createDaemonStartupFailure(summary, logPath),
             formatExitFailure: (code, signal) => this.createDaemonExitFailure(code, signal, logPath),
           });
@@ -1016,10 +1017,13 @@ export class DaemonManager implements DaemonManagerLike {
       Object.entries(options).filter(([, value]) => value !== undefined)
     ) as DaemonOptions;
     const restartOptions: DaemonOptions = { ...runningOptions, ...requestedOptions };
-    if (status.running) {
-      await this.stop();
-    }
-    await this.stopUnrecordedDaemonsForExplicitRestart(status.pid);
+    // All restart cleanup follows the same 10s graceful + 1s forced-stop
+    // budget. Run the PID-recorded daemon and every cross-namespace candidate
+    // concurrently so the launcher timeout remains bounded by one cleanup window.
+    await this.awaitRestartCleanup([
+      () => status.running ? this.stop() : undefined,
+      () => this.stopUnrecordedDaemonsForExplicitRestart(status.pid),
+    ]);
     // Wait a bit before starting
     await this.timer.sleep(1000);
     await this.start(restartOptions);
@@ -1041,8 +1045,22 @@ export class DaemonManager implements DaemonManagerLike {
     stderrLog(
       `Explicit restart force-stopping ${candidates.length} live AutoMobile daemon candidate(s) without this namespace's PID record...`
     );
-    for (const pid of candidates) {
-      await this.stopUnrecordedDaemonProcess(pid);
+    await this.awaitRestartCleanup(
+      candidates.map(pid => () => this.stopUnrecordedDaemonProcess(pid))
+    );
+  }
+
+  private async awaitRestartCleanup(
+    operations: ReadonlyArray<() => void | Promise<void>>,
+  ): Promise<void> {
+    const results = await Promise.allSettled(
+      operations.map(operation => Promise.resolve().then(operation))
+    );
+    const failure = results.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected"
+    );
+    if (failure) {
+      throw failure.reason;
     }
   }
 
@@ -1098,11 +1116,12 @@ export class DaemonManager implements DaemonManagerLike {
    */
   async waitForReady(timeout: number, signal?: AbortSignal): Promise<boolean> {
     const startTime = this.timer.now();
+    const deadline = startTime + timeout;
     const pollInterval = 100; // Poll every 100ms
     let pollCount = 0;
     let socketObserved = false;
 
-    while (this.timer.now() - startTime < timeout) {
+    while (this.timer.now() < deadline) {
       if (signal?.aborted) {
         return false;
       }
@@ -1112,7 +1131,7 @@ export class DaemonManager implements DaemonManagerLike {
         // A daemon started from another checkout can own this namespace's socket
         // without writing this namespace's PID record. The socket connection is
         // authoritative readiness in that case; status() cannot prove ownership.
-        if (await this.verifyDaemonConnection()) {
+        if (await this.verifyDaemonConnection(this.remainingTime(deadline), signal)) {
           stderrLog(
             `Daemon readiness probe succeeded after ${this.timer.now() - startTime}ms ` +
             `(${pollCount} polls; socket observed)`
@@ -1128,7 +1147,11 @@ export class DaemonManager implements DaemonManagerLike {
         }
       }
 
-      await this.sleepUnlessAborted(pollInterval, signal);
+      const remainingPollTimeMs = this.remainingTime(deadline);
+      if (remainingPollTimeMs === 0) {
+        break;
+      }
+      await this.sleepUnlessAborted(Math.min(pollInterval, remainingPollTimeMs), signal);
     }
 
     stderrLog(
@@ -1140,13 +1163,18 @@ export class DaemonManager implements DaemonManagerLike {
 
   private async waitForExistingDaemon(timeout: number): Promise<boolean> {
     const startTime = this.timer.now();
+    const deadline = startTime + timeout;
     const pollInterval = 100;
 
-    while (this.timer.now() - startTime < timeout) {
-      if (await this.verifyDaemonConnection()) {
+    while (this.timer.now() < deadline) {
+      if (await this.verifyDaemonConnection(this.remainingTime(deadline))) {
         return true;
       }
-      await this.timer.sleep(pollInterval);
+      const remainingPollTimeMs = this.remainingTime(deadline);
+      if (remainingPollTimeMs === 0) {
+        break;
+      }
+      await this.timer.sleep(Math.min(pollInterval, remainingPollTimeMs));
     }
 
     return false;
@@ -1175,7 +1203,13 @@ export class DaemonManager implements DaemonManagerLike {
     });
   }
 
-  private async verifyDaemonConnection(): Promise<boolean> {
+  private remainingTime(deadline: number): number {
+    return Math.max(0, deadline - this.timer.now());
+  }
+
+  private async verifyDaemonConnection(timeoutMs: number, signal?: AbortSignal): Promise<boolean> {
+    const deadline = this.timer.now() + timeoutMs;
+
     // Retry the connect probe before declaring the socket dead. A single failed
     // probe is not authoritative — a live daemon under load can transiently
     // refuse a connection. Only a socket that fails every attempt is treated as
@@ -1183,9 +1217,13 @@ export class DaemonManager implements DaemonManagerLike {
     // healthy daemon's socket from being unlinked on a flaky probe, the dominant
     // cause of "devices not found after daemon start/restart".
     for (let attempt = 1; attempt <= READINESS_PROBE_MAX_ATTEMPTS; attempt++) {
+      const remainingTimeoutMs = this.remainingTime(deadline);
+      if (remainingTimeoutMs === 0 || signal?.aborted) {
+        return false;
+      }
       const client = this.createClient();
       try {
-        await client.connect();
+        await this.connectReadinessProbe(client, remainingTimeoutMs, signal);
         return true;
       } catch (error) {
         logger.debug(
@@ -1199,21 +1237,62 @@ export class DaemonManager implements DaemonManagerLike {
         }
       }
 
-      if (attempt < READINESS_PROBE_MAX_ATTEMPTS) {
-        await this.timer.sleep(READINESS_PROBE_BACKOFF_MS);
+      const remainingAfterProbeMs = this.remainingTime(deadline);
+      if (attempt < READINESS_PROBE_MAX_ATTEMPTS && remainingAfterProbeMs > 0) {
+        await this.sleepUnlessAborted(
+          Math.min(READINESS_PROBE_BACKOFF_MS, remainingAfterProbeMs),
+          signal,
+        );
       }
     }
 
     return false;
   }
 
-  private async isLaunchedProcessReady(pid: number | undefined): Promise<boolean> {
+  private async connectReadinessProbe(
+    client: DaemonClientLike,
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const probeAbort = new AbortController();
+    const forwardAbort = () => probeAbort.abort();
+    signal?.addEventListener("abort", forwardAbort, { once: true });
+    let timeout: NodeJS.Timeout | undefined;
+
+    try {
+      await Promise.race([
+        client.connect(timeoutMs, probeAbort.signal),
+        new Promise<never>((_, reject) => {
+          timeout = this.timer.setTimeout(() => {
+            probeAbort.abort();
+            reject(new Error(`Daemon readiness probe timed out after ${timeoutMs}ms`));
+          }, timeoutMs);
+        }),
+      ]);
+    } finally {
+      probeAbort.abort();
+      signal?.removeEventListener("abort", forwardAbort);
+      if (timeout) {
+        this.timer.clearTimeout(timeout);
+      }
+    }
+  }
+
+  private async isLaunchedProcessReady(
+    pid: number | undefined,
+    timeoutMs: number,
+    signal: AbortSignal,
+  ): Promise<boolean> {
     if (pid === undefined) {
       return false;
     }
 
     const status = await this.status();
-    return status.running === true && status.pid === pid && await this.verifyDaemonConnection();
+    return (
+      status.running === true &&
+      status.pid === pid &&
+      await this.verifyDaemonConnection(timeoutMs, signal)
+    );
   }
 
   /**

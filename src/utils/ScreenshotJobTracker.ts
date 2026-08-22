@@ -2,6 +2,7 @@ import { logger } from "./logger";
 import { ScreenshotResult } from "../models/ScreenshotResult";
 import { Timer, defaultTimer } from "./SystemTimer";
 import { defaultIdGenerator, type IdGenerator, createTimestampedId } from "./IdGenerator";
+import { OPERATION_CANCELLED_MESSAGE } from "./constants";
 
 export interface ScreenshotJobHandle {
   jobId: string;
@@ -29,6 +30,14 @@ export interface ScreenshotJobOptions {
    * previous in-flight screencap before it can complete.
    */
   coalesceWithPending?: boolean;
+  /**
+   * Register a distinct capture immediately, but do not start its runner until
+   * the most recently registered capture for this device has settled.
+   *
+   * The queued job remains tracked, so device/session cleanup can cancel it
+   * before it reaches the runner.
+   */
+  queueAfterPending?: boolean;
 }
 
 interface ScreenshotJobEntry {
@@ -36,11 +45,13 @@ interface ScreenshotJobEntry {
   promise: Promise<ScreenshotResult>;
   abortController: AbortController;
   startedAt: number;
+  allowsCoalescing: boolean;
   cleanupParentSignal?: () => void;
 }
 
 export class ScreenshotJobTracker {
-  private static jobs: Map<string, ScreenshotJobEntry> = new Map();
+  private static jobs: Map<string, ScreenshotJobEntry[]> = new Map();
+  private static latestJobIds: Map<string, string> = new Map();
   private static timer: Timer = defaultTimer;
   private static idGenerator: IdGenerator = defaultIdGenerator;
 
@@ -60,13 +71,27 @@ export class ScreenshotJobTracker {
     ScreenshotJobTracker.idGenerator = defaultIdGenerator;
   }
 
+  private static shouldQueueAfterPending(
+    options: ScreenshotJobOptions,
+    existingJobs: ScreenshotJobEntry[],
+  ): boolean {
+    if (options.queueAfterPending) {
+      return true;
+    }
+    return options.coalesceWithPending === true &&
+      existingJobs.some(entry => !entry.abortController.signal.aborted);
+  }
+
   static startJob(
     deviceId: string,
     runner: (signal: AbortSignal) => Promise<ScreenshotResult>,
     options: ScreenshotJobOptions = {}
   ): ScreenshotJobHandle {
+    const existingJobs = ScreenshotJobTracker.jobs.get(deviceId) ?? [];
     if (options.coalesceWithPending) {
-      const existing = ScreenshotJobTracker.jobs.get(deviceId);
+      const existing = [...existingJobs]
+        .reverse()
+        .find(entry => entry.allowsCoalescing && !entry.abortController.signal.aborted);
       if (existing && !existing.abortController.signal.aborted) {
         return {
           jobId: existing.jobId,
@@ -76,7 +101,14 @@ export class ScreenshotJobTracker {
       }
     }
 
-    ScreenshotJobTracker.cancelJob(deviceId);
+    const queueAfterPending = ScreenshotJobTracker.shouldQueueAfterPending(
+      options,
+      existingJobs,
+    );
+    if (!queueAfterPending) {
+      ScreenshotJobTracker.cancelJob(deviceId);
+    }
+    const previous = queueAfterPending ? existingJobs.at(-1) : undefined;
 
     const abortController = new AbortController();
     let cleanupParentSignal: (() => void) | undefined;
@@ -101,7 +133,18 @@ export class ScreenshotJobTracker {
       ScreenshotJobTracker.idGenerator
     );
     const promise = Promise.resolve()
-      .then(() => runner(abortController.signal))
+      .then(async () => {
+        if (previous) {
+          await previous.promise;
+          if (abortController.signal.aborted) {
+            return { success: false, error: OPERATION_CANCELLED_MESSAGE };
+          }
+        }
+        if (queueAfterPending) {
+          ScreenshotJobTracker.latestJobIds.set(deviceId, jobId);
+        }
+        return runner(abortController.signal);
+      })
       .catch(error => {
         const message = error instanceof Error ? error.message : String(error);
         return { success: false, error: message };
@@ -130,15 +173,29 @@ export class ScreenshotJobTracker {
       promise,
       abortController,
       startedAt: ScreenshotJobTracker.timer.now(),
+      allowsCoalescing: !options.queueAfterPending,
       cleanupParentSignal
     };
 
-    ScreenshotJobTracker.jobs.set(deviceId, entry);
+    existingJobs.push(entry);
+    ScreenshotJobTracker.jobs.set(deviceId, existingJobs);
+    if (!queueAfterPending) {
+      ScreenshotJobTracker.latestJobIds.set(deviceId, jobId);
+    }
 
     promise.finally(() => {
       const current = ScreenshotJobTracker.jobs.get(deviceId);
-      if (current?.jobId === jobId) {
+      if (!current) {
+        cleanupParentSignal?.();
+        return;
+      }
+      const entryIndex = current.findIndex(candidate => candidate.jobId === jobId);
+      if (entryIndex !== -1) {
+        current.splice(entryIndex, 1);
+      }
+      if (current.length === 0) {
         ScreenshotJobTracker.jobs.delete(deviceId);
+        ScreenshotJobTracker.latestJobIds.delete(deviceId);
       }
       cleanupParentSignal?.();
     });
@@ -151,12 +208,14 @@ export class ScreenshotJobTracker {
   }
 
   static cancelJob(deviceId: string): void {
-    const entry = ScreenshotJobTracker.jobs.get(deviceId);
-    if (!entry) {
+    const entries = ScreenshotJobTracker.jobs.get(deviceId);
+    if (!entries) {
       return;
     }
-    if (!entry.abortController.signal.aborted) {
-      entry.abortController.abort();
+    for (const entry of entries) {
+      if (!entry.abortController.signal.aborted) {
+        entry.abortController.abort();
+      }
     }
   }
 
@@ -165,18 +224,19 @@ export class ScreenshotJobTracker {
   }
 
   static isLatest(deviceId: string, jobId: string): boolean {
-    const entry = ScreenshotJobTracker.jobs.get(deviceId);
-    return entry?.jobId === jobId;
+    return ScreenshotJobTracker.latestJobIds.get(deviceId) === jobId;
   }
 
   static getMostRecentPendingDeviceId(): string | undefined {
     let latestDeviceId: string | undefined;
     let latestStart = 0;
 
-    for (const [deviceId, entry] of ScreenshotJobTracker.jobs.entries()) {
-      if (entry.startedAt >= latestStart) {
-        latestStart = entry.startedAt;
-        latestDeviceId = deviceId;
+    for (const [deviceId, entries] of ScreenshotJobTracker.jobs.entries()) {
+      for (const entry of entries) {
+        if (entry.startedAt >= latestStart) {
+          latestStart = entry.startedAt;
+          latestDeviceId = deviceId;
+        }
       }
     }
 
@@ -184,7 +244,7 @@ export class ScreenshotJobTracker {
   }
 
   static async waitForCompletion(deviceId: string, timeoutMs: number): Promise<ScreenshotResult | null> {
-    const entry = ScreenshotJobTracker.jobs.get(deviceId);
+    const entry = ScreenshotJobTracker.jobs.get(deviceId)?.at(-1);
     if (!entry) {
       return null;
     }
@@ -204,12 +264,15 @@ export class ScreenshotJobTracker {
   }
 
   static clear(): void {
-    for (const entry of ScreenshotJobTracker.jobs.values()) {
-      if (!entry.abortController.signal.aborted) {
-        entry.abortController.abort();
+    for (const entries of ScreenshotJobTracker.jobs.values()) {
+      for (const entry of entries) {
+        if (!entry.abortController.signal.aborted) {
+          entry.abortController.abort();
+        }
+        entry.cleanupParentSignal?.();
       }
-      entry.cleanupParentSignal?.();
     }
     ScreenshotJobTracker.jobs.clear();
+    ScreenshotJobTracker.latestJobIds.clear();
   }
 }

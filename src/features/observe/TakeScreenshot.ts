@@ -16,6 +16,7 @@ import { selectScreenshotsToEvict, SCREENSHOT_MIN_EVICT_AGE_MS } from "./screens
 import { IOSCtrlProxyClient } from "./ios";
 import { getDeviceDataStreamServer } from "../../daemon/deviceDataStreamSocketServer";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
+import { defaultIdGenerator, IdGenerator } from "../../utils/IdGenerator";
 import {
   ANDROID_ADB_SCREENSHOT_METADATA,
   IOS_CTRLPROXY_SCREENSHOT_METADATA,
@@ -50,6 +51,7 @@ export class TakeScreenshot implements ScreenshotService {
   private adbFactory: AdbClientFactory;
   private window: Window;
   private timer: Timer;
+  private idGenerator: IdGenerator;
   private static cacheDir: string | null = null;
   private static readonly MAX_CACHE_SIZE_BYTES = 128 * 1024 * 1024; // 128MB
 
@@ -73,12 +75,14 @@ export class TakeScreenshot implements ScreenshotService {
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     timer: Timer = defaultTimer,
+    idGenerator: IdGenerator = defaultIdGenerator,
   ) {
     this.device = device;
     this.adbFactory = adbFactory;
     this.adb = adbFactory.create(device);
     this.window = new Window(device, this.adbFactory);
     this.timer = timer;
+    this.idGenerator = idGenerator;
 
     // Manage cache size (getCacheDir ensures directory exists with secure permissions)
     this.cleanupCache();
@@ -121,13 +125,16 @@ export class TakeScreenshot implements ScreenshotService {
 
   /**
    * Generate screenshot file path
-   * @param timestamp - Timestamp for unique filename
+   * @param timestamp - Timestamp for readable filename ordering
    * @param options - Screenshot options
    * @returns Full file path for screenshot
    */
   generateScreenshotPath(timestamp: number, options: ScreenshotOptions): string {
     const fileExtension = options.format === "webp" ? "webp" : "png";
-    return path.join(TakeScreenshot.getCacheDir(), `screenshot_${timestamp}.${fileExtension}`);
+    return path.join(
+      TakeScreenshot.getCacheDir(),
+      `screenshot_${timestamp}_${this.idGenerator.next()}.${fileExtension}`,
+    );
   }
 
   /**

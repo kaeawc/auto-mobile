@@ -292,7 +292,9 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   });
 
   // Register all resources with the server
-  ResourceRegistry.registerWithServer(server);
+  ResourceRegistry.registerWithServer(server, () => ({
+    sessionUuid: sessionToolBinding.effectiveSessionUuid(options.sessionContext?.sessionId),
+  }));
 
   // Tear down this transport's server-side SessionToolBinding when the daemon
   // actually releases a session (issue #4611 Gap D). Two release sources funnel

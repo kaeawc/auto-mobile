@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { SubscribeRequestSchema, UnsubscribeRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import {
+  ReadResourceRequestSchema,
+  SubscribeRequestSchema,
+  UnsubscribeRequestSchema,
+} from "@modelcontextprotocol/sdk/types.js";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { ListChangedBroadcaster } from "../../src/server/listChangedBroadcast";
 
@@ -134,6 +138,34 @@ describe("ResourceRegistry URI-template matching", () => {
 
     expect(ResourceRegistry.matchTemplate("automobile:test?first=one&second=two")).toMatchObject({
       params: { params: "first=one&second=two" }
+    });
+  });
+
+  test("passes the registered server's read context to template handlers", async () => {
+    const server = new FakeMcpServer();
+    ResourceRegistry.registerTemplateWithReadContext(
+      "automobile:test/{id}",
+      "Test",
+      "Test contextual template",
+      "application/json",
+      async (params, context) => ({
+        uri: `automobile:test/${params.id}`,
+        text: JSON.stringify(context),
+      }),
+    );
+    ResourceRegistry.registerWithServer(
+      server as unknown as McpServer,
+      () => ({ sessionUuid: "session-bound" }),
+    );
+
+    const readHandler = server.server.handlersBySchema.get(ReadResourceRequestSchema);
+    expect(readHandler).toBeDefined();
+    const response = await readHandler!({ params: { uri: "automobile:test/one" } }) as {
+      contents: Array<{ text?: string }>;
+    };
+
+    expect(JSON.parse(response.contents[0].text!)).toEqual({
+      sessionUuid: "session-bound",
     });
   });
 });

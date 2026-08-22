@@ -39,6 +39,10 @@ import { getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
 import { getToolCapabilityContext } from "../features/toolCapabilities/toolCapabilityContext";
 import { executionTracker } from "./executionTracker";
 import {
+  registerDirectSessionDevice,
+  unregisterDirectSessionsForDevice,
+} from "./directSessionDeviceRegistry";
+import {
   createDefaultRunnerReadinessService,
   type RunnerReadinessRequest,
   SystemUiAnrRecoveryRequiredError,
@@ -1985,6 +1989,7 @@ export function registerDeviceTools() {
 
     const sessionId = getDeviceToolsDependencies().idGenerator.next();
     if (!daemonState.isInitialized()) {
+      registerDirectSessionDevice(sessionId, device);
       return sessionId;
     }
     return daemonState.getDevicePool().bindOrReuseDeviceSession(
@@ -2101,6 +2106,7 @@ export function registerDeviceTools() {
 
       await shutdownReservation?.release();
       shutdownReservation = undefined;
+      unregisterDirectSessionsForDevice(args.device.deviceId);
 
       perf.startOperation("cleanup");
       await clearInstalledAppsAfterShutdown(deps, args.device.deviceId);

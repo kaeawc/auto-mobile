@@ -138,18 +138,20 @@ class NavigationEventAccumulator {
 
   /** Append an event and trim the circular buffer atomically, then emit updates. */
   private fun appendEvent(event: TimestampedNavigationEvent, publishLatestEvent: Boolean = true) {
-    val size =
-      synchronized(bufferLock) {
-        events.addLast(event)
-        if (events.size > maxEvents) {
-          events.removeFirst()
-        }
-        events.size
+    // Publish both StateFlows while holding bufferLock so concurrent producers cannot interleave
+    // their emits: without the lock, a later producer could publish its (larger) count and then an
+    // earlier producer overwrites it with a stale one, leaving eventCount behind the buffer
+    // (#5464).
+    synchronized(bufferLock) {
+      events.addLast(event)
+      if (events.size > maxEvents) {
+        events.removeFirst()
       }
-    if (publishLatestEvent) {
-      _latestEvent.value = event
+      if (publishLatestEvent) {
+        _latestEvent.value = event
+      }
+      _eventCount.value = events.size
     }
-    _eventCount.value = size
   }
 
   /** Get all accumulated events. */

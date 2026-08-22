@@ -182,6 +182,94 @@ describe("ADB server reset session recovery", () => {
     }
   });
 
+  test("recovers both captured AVDs when the first reuses the second serial", async () => {
+    class SwappedSerialDeviceManager extends FakeDeviceManager {
+      override async startDevice(device: DeviceInfo): Promise<ChildProcess> {
+        this.startedDevices.push(device);
+        const deviceId = device.name === "Pixel_8_API_35" ? "emulator-5556" : "emulator-5558";
+        this.bootedDevices = [{
+          name: device.name,
+          platform: "android",
+          deviceId,
+        }];
+        return { pid: 0 } as ChildProcess;
+      }
+
+      override async killDevice(device: BootedDevice): Promise<void> {
+        this.bootedDevices = this.bootedDevices.filter(candidate => candidate.deviceId !== device.deviceId);
+      }
+
+      override async waitForDeviceReady(device: DeviceInfo): Promise<BootedDevice> {
+        return {
+          name: device.name,
+          platform: "android",
+          deviceId: device.name === "Pixel_8_API_35" ? "emulator-5556" : "emulator-5558",
+        };
+      }
+    }
+
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const manager = new SwappedSerialDeviceManager();
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+    );
+    const originals: BootedDevice[] = [
+      { platform: "android", name: "Pixel_8_API_35", deviceId: "emulator-5554" },
+      { platform: "android", name: "Pixel_9_API_36", deviceId: "emulator-5556" },
+    ];
+    manager.bootedDevices = originals;
+    for (const [index, device] of originals.entries()) {
+      const image: DeviceInfo = {
+        name: device.name,
+        platform: "android",
+        isRunning: true,
+        source: "local",
+      };
+      await pool.addDevice(device, image);
+      await pool.bindOrReuseDeviceSession(`session-${index}`, device.deviceId, "android", image);
+    }
+    const detached = await pool.detachAdbServerResetCohort(
+      originals.map(device => pool.getDevice(device.deviceId)!),
+    );
+
+    try {
+      await expect(
+        pool.recoverSessionBoundAndroidDeviceAfterAdbServerReset(
+          originals[0].deviceId,
+          detached[0],
+        ),
+      ).resolves.toBe(true);
+      await expect(
+        pool.recoverSessionBoundAndroidDeviceAfterAdbServerReset(
+          originals[1].deviceId,
+          detached[1],
+        ),
+      ).resolves.toBe(true);
+
+      expect(manager.startedDevices.map(device => device.name)).toEqual([
+        "Pixel_8_API_35",
+        "Pixel_9_API_36",
+      ]);
+      expect(pool.getDevice("emulator-5556")).toMatchObject({
+        avdName: "Pixel_8_API_35",
+        sessionId: "session-0",
+      });
+      expect(pool.getDevice("emulator-5558")).toMatchObject({
+        avdName: "Pixel_9_API_36",
+        sessionId: "session-1",
+      });
+    } finally {
+      await pool.releaseAdbServerResetCohortReservations(detached);
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
   test("releases the preserved session when reboot rejects after detaching the old serial", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());

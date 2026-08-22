@@ -44,7 +44,7 @@ describe("platform device preparation tools", () => {
     sessionManager?.stopCleanupTimer();
   });
 
-  async function callTool(name: "getAndroid" | "getApple", args: Record<string, unknown>) {
+  async function callTool(name: "getAndroid" | "getApple" | "startDevice", args: Record<string, unknown>) {
     const tool = ToolRegistry.getTool(name);
     if (!tool) {
       throw new Error(`${name} is not registered`);
@@ -241,5 +241,44 @@ describe("platform device preparation tools", () => {
     await expect(preparation).resolves.toMatchObject({
       deviceIdentity: { avdName: stale.name },
     });
+  });
+
+  test("applies the named boot deadline while waiting for reset recovery", async () => {
+    const stale: BootedDevice = {
+      platform: "android",
+      name: "Pixel_9_API_36",
+      deviceId: "emulator-5562",
+    };
+    const image: DeviceInfo = {
+      platform: "android",
+      name: stale.name,
+      isRunning: false,
+      source: "local",
+    };
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      deviceUtils,
+      new DefaultRetryExecutor(timer),
+    );
+    await pool.addDevice(stale, image);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    const detached = await pool.detachAdbServerResetCohort([pool.getDevice(stale.deviceId)!]);
+    const preparation = callTool("startDevice", {
+      platform: "android",
+      name: stale.name,
+      timeoutMs: 10,
+    });
+
+    try {
+      await Promise.resolve();
+      timer.advanceTime(10);
+      await expect(preparation).rejects.toThrow(/Timed out waiting for Android AVD reset recovery/);
+    } finally {
+      await pool.releaseAdbServerResetCohortReservations(detached);
+    }
   });
 });

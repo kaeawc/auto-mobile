@@ -1617,15 +1617,40 @@ function getStartDevicePool(daemonState: DaemonState): DevicePool | undefined {
 async function waitForPendingAndroidResetRecovery(
   args: StartDeviceArgs,
   budgets: { androidAvdName?: string },
+  bootDeadlineMs: number,
+  timer: Timer,
   signal?: AbortSignal,
 ): Promise<void> {
-  if (args.platform !== "android" || !budgets.androidAvdName) {
+  const avdName = args.platform === "android"
+    ? budgets.androidAvdName ?? args.name
+    : undefined;
+  if (!avdName) {
     return;
   }
-  await getStartDevicePool(DaemonState.getInstance())?.waitForAdbServerResetRecovery(
-    budgets.androidAvdName,
-    signal,
-  );
+  const devicePool = getStartDevicePool(DaemonState.getInstance());
+  if (!devicePool) {
+    return;
+  }
+  const remainingMs = bootDeadlineMs - timer.now();
+  if (remainingMs <= 0) {
+    throw new ActionableError(`Timed out waiting for Android AVD reset recovery of '${avdName}'`);
+  }
+  let timeout: NodeJS.Timeout | undefined;
+  const timeoutPromise = new Promise<never>((_resolve, reject) => {
+    timeout = timer.setTimeout(() => {
+      reject(new ActionableError(`Timed out waiting for Android AVD reset recovery of '${avdName}'`));
+    }, remainingMs);
+  });
+  try {
+    await Promise.race([
+      devicePool.waitForAdbServerResetRecovery(avdName, signal),
+      timeoutPromise,
+    ]);
+  } finally {
+    if (timeout) {
+      timer.clearTimeout(timeout);
+    }
+  }
 }
 
 function createRunnerReadinessAttempt(
@@ -1765,7 +1790,7 @@ export function registerDeviceTools() {
     let retireRecoveredReplacement: (() => Promise<void>) | undefined;
 
     try {
-      await waitForPendingAndroidResetRecovery(args, budgets, signal);
+      await waitForPendingAndroidResetRecovery(args, budgets, bootDeadlineMs, deps.timer, signal);
       const bootService = new DeviceBootService({
         deviceManager: deviceUtils,
         deviceMatcher: deps.deviceMatcherFactory(),

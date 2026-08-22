@@ -1485,7 +1485,8 @@ export class Daemon {
             ? this.sessionManager.getSession(sessionIdAtDisconnect)
             : null;
           const forceGenerationAtDisconnect = this.forceDisconnectedDeviceGenerations.get(deviceId);
-          if (await this.shouldSkipStaleDisconnectCleanup(
+          const adbServerResetTarget = adbServerResetCohortByDeviceId.get(deviceId);
+          if (!adbServerResetTarget && await this.shouldSkipStaleDisconnectCleanup(
             pooledDeviceAtDisconnect,
             deviceId,
             forceGenerationAtDisconnect,
@@ -1503,7 +1504,7 @@ export class Daemon {
             }
           }
 
-          if (await this.shouldSkipStaleDisconnectCleanup(
+          if (!adbServerResetTarget && await this.shouldSkipStaleDisconnectCleanup(
             pooledDeviceAtDisconnect,
             deviceId,
             forceGenerationAtDisconnect,
@@ -1511,7 +1512,6 @@ export class Daemon {
             continue;
           }
 
-          const adbServerResetTarget = adbServerResetCohortByDeviceId.get(deviceId);
           if (adbServerResetTarget) {
             if (await this.tryRecoverProcessWideAdbServerResetDevice(
               deviceId,

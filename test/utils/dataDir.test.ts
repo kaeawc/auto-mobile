@@ -13,7 +13,7 @@ import {
 } from "../../src/utils/tempDir";
 
 describe("resolveAutoMobileBaseDir", () => {
-  const home = "/home/tester";
+  const home = path.resolve("/home/tester");
 
   test("prefers AUTOMOBILE_DATA_DIR override, resolved to absolute", () => {
     expect(resolveAutoMobileBaseDir({ AUTOMOBILE_DATA_DIR: "/srv/automobile" }, home)).toBe(

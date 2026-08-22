@@ -360,14 +360,13 @@ internal object DaemonSocketPaths {
   }
 
   /**
-   * Bound the launcher process for the daemon's full startup lifecycle: one
-   * lock-holder wait plus up to two startup attempts.
+   * Bound the launcher process for the daemon's full startup lifecycle: one lock-holder wait plus
+   * up to two startup attempts.
    */
   fun daemonLauncherTimeoutMs(): Long {
-    return (
-      daemonStartTimeoutMs()
-        .coerceAtMost(Long.MAX_VALUE / DAEMON_STARTUP_LIFECYCLE_BUDGETS)
-      ) * DAEMON_STARTUP_LIFECYCLE_BUDGETS
+    return (daemonStartTimeoutMs()
+      .coerceAtMost(Long.MAX_VALUE / DAEMON_STARTUP_LIFECYCLE_BUDGETS)) *
+      DAEMON_STARTUP_LIFECYCLE_BUDGETS
   }
 
   fun buildDaemonStartCommand(): List<String> {

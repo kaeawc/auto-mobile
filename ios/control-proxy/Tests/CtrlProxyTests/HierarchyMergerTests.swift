@@ -1,8 +1,7 @@
-import XCTest
 @testable import CtrlProxy
+import XCTest
 
 final class HierarchyMergerTests: XCTestCase {
-
     // MARK: - Helpers
 
     private func makeElement(
@@ -12,7 +11,9 @@ final class HierarchyMergerTests: XCTestCase {
         contentDesc: String? = nil,
         extras: [String: String]? = nil,
         children: [UIElementInfo]? = nil
-    ) -> UIElementInfo {
+    )
+        -> UIElementInfo
+    {
         UIElementInfo(
             text: text,
             contentDesc: contentDesc,
@@ -40,7 +41,9 @@ final class HierarchyMergerTests: XCTestCase {
         isOccluded: Bool = false,
         isUserInteractionEnabled: Bool = true,
         children: [SdkViewNode]? = nil
-    ) -> SdkViewNode {
+    )
+        -> SdkViewNode
+    {
         SdkViewNode(
             className: className,
             bounds: bounds,
@@ -716,7 +719,7 @@ final class HierarchyMergerTests: XCTestCase {
     }
 
     func testSdkOnlyChildrenAreNotDuplicatedUnderContainmentMatches() {
-        let xcuiChildren = (0..<3).map { index in
+        let xcuiChildren = (0 ..< 3).map { index in
             makeElement(
                 className: "ListCollectionViewCell",
                 bounds: ElementBounds(left: 0, top: 100 + index * 60, right: 390, bottom: 150 + index * 60),
@@ -902,6 +905,73 @@ final class HierarchyMergerTests: XCTestCase {
         XCTAssertEqual(injected?.extras?["sdk.isLayerNode"], "true")
         XCTAssertEqual(injected?.extras?["sdk.backgroundColor"], "#FF000080")
         XCTAssertEqual(injected?.extras?["sdk.cornerRadius"], "20.0")
+    }
+
+    // MARK: - Single match pass (#5475)
+
+    /// The XCUITest tree is matched against the SDK tree exactly once — one match
+    /// resolution per node — rather than the three passes (enrich, collect, inject)
+    /// the pre-#5475 implementation performed.
+    func testTreeIsMatchedExactlyOncePerNode() {
+        let grandchild = makeElement(
+            className: "UILabel",
+            bounds: ElementBounds(left: 10, top: 60, right: 200, bottom: 90),
+            text: "Leaf"
+        )
+        let child = makeElement(
+            className: "UIStackView",
+            bounds: ElementBounds(left: 0, top: 50, right: 375, bottom: 200),
+            children: [grandchild]
+        )
+        let root = makeElement(
+            className: "UIView",
+            bounds: ElementBounds(left: 0, top: 0, right: 375, bottom: 812),
+            children: [child]
+        )
+        // 3 XCUITest nodes total.
+
+        let sdkRoot = makeSdkNode(
+            className: "UIView",
+            bounds: SdkBounds(left: 0, top: 0, right: 375, bottom: 812),
+            children: [
+                makeSdkNode(
+                    className: "UILabel",
+                    bounds: SdkBounds(left: 10, top: 60, right: 200, bottom: 90),
+                    accessibilityTraits: ["staticText"]
+                ),
+            ]
+        )
+
+        let counter = HierarchyMerger.MatchCounter()
+        _ = HierarchyMerger.merge(
+            xcuitest: makeHierarchy(root: root),
+            sdk: makeSdkHierarchy(root: sdkRoot),
+            matchCounter: counter
+        )
+
+        XCTAssertEqual(counter.count, 3, "Each XCUITest node should be matched exactly once")
+    }
+
+    /// A matched SDK node whose fields are all at their defaults contributes no
+    /// `sdk.*` keys, so a node with no prior extras yields no extras dictionary.
+    func testDefaultValuedSdkMatchYieldsNoExtras() {
+        let xcuiRoot = makeElement(
+            className: "UIView",
+            bounds: ElementBounds(left: 0, top: 0, right: 100, bottom: 100)
+        )
+        // All-default SDK node (alpha 1.0, isAccessibilityElement false,
+        // hasTapTarget false, isUserInteractionEnabled true, no visual props).
+        let sdkRoot = makeSdkNode(
+            className: "UIView",
+            bounds: SdkBounds(left: 0, top: 0, right: 100, bottom: 100)
+        )
+
+        let result = HierarchyMerger.merge(
+            xcuitest: makeHierarchy(root: xcuiRoot),
+            sdk: makeSdkHierarchy(root: sdkRoot)
+        )
+
+        XCTAssertNil(result.hierarchy?.extras, "Default-valued SDK match should add no extras")
     }
 
     func testLayerNodeBorderOnlyIsWorthInjecting() {

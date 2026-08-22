@@ -107,7 +107,7 @@ describe("MCP Tools Registry", () => {
       interaction: ["tapOn", "inputText", "clearText", "pressButton", "swipeOn", "dragAndDrop", "pinchOn"],
       app: ["launchApp", "terminateApp", "installApp", "uninstallApp", "listApps"],
       utility: ["rotate", "setActiveDevice", "openLink", "getDeviceState", "setDeviceState"],
-      device: ["listDeviceImages", "listDevices", "startDevice", "killDevice"],
+      device: ["listDeviceImages", "listDevices", "getAndroid", "getApple", "killDevice"],
     };
 
     for (const [category, expected] of Object.entries(expectedByCategory)) {

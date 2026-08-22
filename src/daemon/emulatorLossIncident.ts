@@ -9,7 +9,8 @@ export const DEFAULT_MAX_RETAINED_EMULATOR_LOSS_INCIDENTS = 50;
 export type EmulatorLossDetectionPath =
   | "watched-process-exit"
   | "device-discovery-miss"
-  | "adb-transport-failure";
+  | "adb-transport-failure"
+  | "adb-server-reset";
 
 export type EmulatorRecoveryOutcome = "recovered" | "exhausted" | "not-attempted";
 

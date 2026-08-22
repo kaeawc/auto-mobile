@@ -164,6 +164,43 @@ describe("resolveMcpRequestTimeoutMs", () => {
     );
   });
 
+  test("keeps transport alive for getAndroid's named preparation budgets", () => {
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: {
+        name: "getAndroid",
+        arguments: { bootTimeoutMs: 300_000, automationReadyTimeoutMs: 45_000 },
+      },
+    };
+
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(
+      345_000 + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+    );
+  });
+
+  test("caps getApple's combined preparation budgets below the daemon socket idle timeout", () => {
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: {
+        name: "getApple",
+        arguments: {
+          bootTimeoutMs: Number.MAX_SAFE_INTEGER,
+          automationReadyTimeoutMs: Number.MAX_SAFE_INTEGER,
+        },
+      },
+    };
+
+    const resolved = resolveMcpRequestTimeoutMs(request);
+    expect(resolved).toBe(
+      MAX_DEVICE_READY_TIMEOUT_MS + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+    );
+    expect(resolved).toBeLessThan(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
+  });
+
   test("keeps transport alive for the legacy nested startDevice timeout", () => {
     const request: DaemonRequest = {
       id: "1",

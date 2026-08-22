@@ -1,5 +1,10 @@
 import type { DaemonRequest } from "./types";
-import { MAX_DEVICE_READY_TIMEOUT_MS, START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS } from "../utils/deviceTimeouts";
+import {
+  DEFAULT_DEVICE_READY_TIMEOUT_MS,
+  MAX_DEVICE_READY_TIMEOUT_MS,
+  START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+} from "../utils/deviceTimeouts";
+import { DEFAULT_RUNNER_READINESS_TIMEOUT_MS } from "../utils/runnerReadinessConfig";
 
 export { START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS };
 
@@ -16,7 +21,7 @@ export const DEFAULT_MCP_REQUEST_TIMEOUT_MS = 30_000;
 export const MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS = 600_000;
 
 /**
- * Floor for `startDevice` — cold-booting an emulator can take 45-90s depending on
+ * Floor for device preparation — cold-booting an emulator can take 45-90s depending on
  * host performance (especially under emulation/Rosetta).
  */
 export const MIN_START_DEVICE_MCP_TIMEOUT_MS = 180_000;
@@ -83,6 +88,8 @@ function resolveToolTimeoutFloorMs(toolName: string | undefined): number | undef
   switch (toolName) {
     case "executePlan":
       return MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS;
+    case "getAndroid":
+    case "getApple":
     case "startDevice":
       return MIN_START_DEVICE_MCP_TIMEOUT_MS;
     case "launchApp":
@@ -118,14 +125,17 @@ function positiveFiniteNumber(value: unknown): number | undefined {
     : undefined;
 }
 
-function resolveStartDeviceToolBudgetMs(request: DaemonRequest): number | undefined {
-  if (request.method !== "tools/call" || request.params?.name !== "startDevice") {
-    return undefined;
-  }
-  const argumentsRecord = asRecord(request.params?.arguments);
-  if (!argumentsRecord) {
-    return undefined;
-  }
+function resolveNamedDevicePreparationBudgetMs(argumentsRecord: Record<string, unknown>): number {
+  const bootTimeoutMs =
+    positiveFiniteNumber(argumentsRecord.bootTimeoutMs) ?? DEFAULT_DEVICE_READY_TIMEOUT_MS;
+  const automationReadyTimeoutMs =
+    positiveFiniteNumber(argumentsRecord.automationReadyTimeoutMs) ??
+    DEFAULT_RUNNER_READINESS_TIMEOUT_MS;
+  return Math.min(bootTimeoutMs + automationReadyTimeoutMs, MAX_DEVICE_READY_TIMEOUT_MS) +
+    START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS;
+}
+
+function resolveLegacyStartDeviceBudgetMs(argumentsRecord: Record<string, unknown>): number | undefined {
   const legacyTimeoutMs = asRecord(argumentsRecord.device)?.timeoutMs;
   // Match startDeviceSchema's legacy normalization: an explicit top-level value
   // wins over the nested device payload.
@@ -137,6 +147,25 @@ function resolveStartDeviceToolBudgetMs(request: DaemonRequest): number | undefi
     START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS;
 }
 
+function resolveDevicePreparationToolBudgetMs(request: DaemonRequest): number | undefined {
+  if (request.method !== "tools/call") {
+    return undefined;
+  }
+  const argumentsRecord = asRecord(request.params?.arguments);
+  if (!argumentsRecord) {
+    return undefined;
+  }
+  switch (request.params?.name) {
+    case "getAndroid":
+    case "getApple":
+      return resolveNamedDevicePreparationBudgetMs(argumentsRecord);
+    case "startDevice":
+      return resolveLegacyStartDeviceBudgetMs(argumentsRecord);
+    default:
+      return undefined;
+  }
+}
+
 export function resolveMcpRequestTimeoutMs(request: DaemonRequest): number {
   const raw = request.timeoutMs;
   const base =
@@ -146,6 +175,6 @@ export function resolveMcpRequestTimeoutMs(request: DaemonRequest): number {
   const floor = request.method === "tools/call"
     ? resolveToolTimeoutFloorMs(request.params?.name)
     : undefined;
-  const startDeviceBudget = resolveStartDeviceToolBudgetMs(request);
-  return Math.max(base, floor ?? 0, startDeviceBudget ?? 0);
+  const devicePreparationBudget = resolveDevicePreparationToolBudgetMs(request);
+  return Math.max(base, floor ?? 0, devicePreparationBudget ?? 0);
 }

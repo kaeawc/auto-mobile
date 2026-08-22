@@ -114,6 +114,7 @@ async function main() {
   const { IOSCtrlProxyBuilder } = await import("./utils/IOSCtrlProxyBuilder");
   const { IOSCtrlProxyManager } = await import("./utils/IOSCtrlProxyManager");
   const { cleanupDaemonChildProcesses } = await import("./daemon/childProcessCleanup");
+  const { stopManagedAdbServer } = await import("./utils/android-cmdline-tools/AdbServerLifecycle");
   startupBenchmark.endPhase("moduleImports");
 
   const { startVideoRecordingSocketServer, stopVideoRecordingSocketServer } =
@@ -138,6 +139,14 @@ async function main() {
           run: async () => {
             if (directModeActive) {
               await cleanupDaemonChildProcesses();
+            }
+          },
+        },
+        {
+          name: "direct-mode managed ADB server",
+          run: async () => {
+            if (directModeActive) {
+              await stopManagedAdbServer();
             }
           },
         },

@@ -124,9 +124,9 @@ explicitly, per run or per environment.
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
-| `AUTOMOBILE_ALLOW_DEVICE_CREATE` | When `1` or `true`, `startDevice` creates a device (iOS: `simctl create`; Android: `avdmanager create avd`) instead of failing when nothing matches the requested criteria. | unset (off) |
+| `AUTOMOBILE_ALLOW_DEVICE_CREATE` | Legacy `startDevice` compatibility only: when `1` or `true`, its broad matcher may create a device (iOS: `simctl create`; Android: `avdmanager create avd`). `getAndroid` and `getApple` never create devices. | unset (off) |
 
-The equivalent per-call flag is `--create-if-missing` on the device-start path:
+The equivalent per-call flag is available only on the hidden compatibility path:
 
 ```bash
 auto-mobile --cli startDevice --platform ios --create-if-missing
@@ -140,6 +140,21 @@ neither, creation is off.
 Created devices are named `AutoMobile-<model>-<id>` so they are easy to find and
 clean up (`xcrun simctl delete <udid>` / `avdmanager delete avd -n <name>`), and
 the resolved device type and runtime are logged at creation time.
+
+## Managed ADB server lifecycle
+
+By default, AutoMobile treats the local ADB server as shared infrastructure and
+does not stop it at process shutdown. This is safe for developer machines and
+for hosts where another service or user may use the same server.
+
+| Variable | Legacy alias | Purpose | Default |
+|----------|--------------|---------|---------|
+| `AUTOMOBILE_MANAGED_ADB_SERVER` | `AUTO_MOBILE_MANAGED_ADB_SERVER` | When `1` or `true`, declares that the daemon or direct AutoMobile process owns the local ADB server lifecycle. A clean shutdown runs a bounded `adb kill-server` after active device sessions are released. | unset (off) |
+
+Enable this only when the surrounding service scope owns the local ADB server.
+Do not enable it for a server shared with another AutoMobile daemon, developer,
+or unrelated Android tool. Proxy clients never stop the server; cleanup runs in
+the daemon or explicit direct (`--no-proxy`) process that performs Android work.
 
 ## Managed-device recovery
 

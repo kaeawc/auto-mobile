@@ -44,6 +44,7 @@ import {
   SystemUiAnrRecoveryRequiredError,
 } from "../utils/RunnerReadinessService";
 import {
+  DEFAULT_RUNNER_READINESS_TIMEOUT_MS,
   MAX_RUNNER_READINESS_TIMEOUT_MS,
   MIN_RUNNER_READINESS_TIMEOUT_MS,
 } from "../utils/runnerReadinessConfig";
@@ -113,6 +114,41 @@ export const startDeviceSchema = z.preprocess(input => {
     ...parsed,
   };
 }, startDeviceParametersSchema);
+
+const devicePreparationTimeoutSchema = z.object({
+  bootTimeoutMs: z.number()
+    .int()
+    .positive()
+    .max(MAX_DEVICE_READY_TIMEOUT_MS)
+    .optional()
+    .describe("Maximum time to find, recover, or boot the device operating system"),
+  automationReadyTimeoutMs: z.number()
+    .int()
+    .min(MIN_RUNNER_READINESS_TIMEOUT_MS)
+    .max(MAX_RUNNER_READINESS_TIMEOUT_MS)
+    .optional()
+    .describe("Maximum time to install, update, start, and verify the automation runner"),
+}).strict().superRefine((value, context) => {
+  const totalTimeoutMs =
+    (value.bootTimeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS) +
+    (value.automationReadyTimeoutMs ?? DEFAULT_RUNNER_READINESS_TIMEOUT_MS);
+  if (totalTimeoutMs > MAX_DEVICE_READY_TIMEOUT_MS) {
+    context.addIssue({
+      code: "custom",
+      message:
+        `bootTimeoutMs + automationReadyTimeoutMs must be <= ${MAX_DEVICE_READY_TIMEOUT_MS}`,
+      path: ["bootTimeoutMs"],
+    });
+  }
+});
+
+export const getAndroidSchema = devicePreparationTimeoutSchema.extend({
+  avdName: z.string().min(1).describe("Configured Android Virtual Device name"),
+});
+
+export const getAppleSchema = devicePreparationTimeoutSchema.extend({
+  udid: z.string().min(1).describe("iOS Simulator UDID"),
+});
 
 export const killDeviceSchema = z.object({
   device: z.object({
@@ -207,8 +243,39 @@ export interface StartDeviceArgs {
   __mcpSessionId?: string;
 }
 
+export interface GetAndroidArgs {
+  avdName: string;
+  bootTimeoutMs?: number;
+  automationReadyTimeoutMs?: number;
+}
+
+export interface GetAppleArgs {
+  udid: string;
+  bootTimeoutMs?: number;
+  automationReadyTimeoutMs?: number;
+}
+
 export interface KillDeviceArgs {
   device: BootedDevice;
+}
+
+function deviceIdentityPayload(device: BootedDevice, sourceImage?: DeviceInfo): Record<string, unknown> {
+  if (device.platform === "android") {
+    const portMatch = /^emulator-(\d+)$/.exec(device.deviceId);
+    return {
+      platform: "android",
+      avdName: sourceImage?.platform === "android" ? sourceImage.name : device.name,
+      adbSerial: device.deviceId,
+      emulatorConsolePort: portMatch ? Number(portMatch[1]) : null,
+      adbTransportId: device.transportId ?? null,
+    };
+  }
+
+  return {
+    platform: "ios",
+    simulatorUdid: device.deviceId,
+    simulatorName: device.name,
+  };
 }
 
 export interface ListDeviceImagesArgs {
@@ -1629,9 +1696,9 @@ export function registerDeviceTools() {
         `  - automobile:devices/images/android - Android AVDs\n` +
         `  - automobile:devices/images/ios - iOS simulator runtimes\n\n` +
         "WORKFLOW:\n" +
-        "  1. Read 'automobile:devices/booted' to see running devices and get deviceId\n" +
-        "  2. Use deviceId with other resources (e.g., automobile:devices/{deviceId}/apps)\n" +
-        "  3. To start a new device, read 'automobile:devices/images' then use startDevice tool",
+        "  1. Read 'automobile:devices/images/android' to select an Android AVD by name\n" +
+        "  2. Read 'automobile:devices/images/ios' to select an iOS simulator by UDID\n" +
+        "  3. Call getAndroid or getApple, then use its returned sessionId for automation",
       resources: [
         BOOTED_DEVICE_RESOURCE_URIS.ALL_BOOTED,
         `${BOOTED_DEVICE_RESOURCE_URIS.ALL_BOOTED}/android`,
@@ -1644,27 +1711,25 @@ export function registerDeviceTools() {
     });
   };
 
-  // Start device handler — matches criteria against booted devices and images
-  const startDeviceHandler = async (
+  type DevicePreparationBudgets = {
+    bootTimeoutMs: number;
+    automationReadyTimeoutMs: number;
+    automationDeadlineMs: number;
+    operationName: string;
+    androidAvdName?: string;
+  };
+
+  const prepareDevice = async (
     args: StartDeviceArgs,
+    budgets: DevicePreparationBudgets,
     progress?: ProgressCallback,
     signal?: AbortSignal,
   ) => {
-    const internalSessionId = args.__mcpSessionId;
-    args = {
-      ...startDeviceSchema.parse(args),
-      __mcpSessionId: internalSessionId,
-    };
     const perf = createPerformanceTracker(true);
-    perf.serial("startDevice");
+    perf.serial(budgets.operationName);
     const deps = getDeviceToolsDependencies();
     const deviceUtils = deps.deviceManagerFactory();
-    const totalTimeoutMs = args.timeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS;
-    // An explicit timeoutMs is an end-to-end startDevice contract. Preserve it
-    // for runner readiness unless the caller deliberately supplies a narrower
-    // phase-specific budget.
-    const readinessTimeoutMs = resolveRunnerReadinessTimeoutMs(args);
-    const totalDeadlineMs = deps.timer.now() + totalTimeoutMs;
+    const bootDeadlineMs = deps.timer.now() + budgets.bootTimeoutMs;
     const requestedIdentity = describeStartDeviceRequest(args);
     let boot: DeviceBootResult | undefined;
     let ownershipTransferred = false;
@@ -1684,12 +1749,27 @@ export function registerDeviceTools() {
       });
       perf.startOperation("bootDevice");
       boot = await bootService.boot(
-        { ...args, totalDeadlineMs, signal },
+        {
+          ...args,
+          timeoutMs: budgets.bootTimeoutMs,
+          totalDeadlineMs: bootDeadlineMs,
+          signal,
+        },
         progress ? { report: progress } : undefined,
       );
       perf.endOperation("bootDevice");
       validateBootIdentity(args, boot.device, boot.source, boot.sourceImage);
       validatePooledDeviceMapping(boot.device, requestedIdentity);
+      // A warm AVD has no cold-boot source image, but its explicit getAndroid
+      // identifier is still the stable identity needed for later recovery.
+      let sourceImage = boot.sourceImage ?? (budgets.androidAvdName
+        ? {
+          name: budgets.androidAvdName,
+          platform: "android" as const,
+          isRunning: true,
+          source: "local" as const,
+        }
+        : undefined);
       const daemonState = DaemonState.getInstance();
       await reserveInitialDeviceForReadiness(
         daemonState,
@@ -1709,8 +1789,8 @@ export function registerDeviceTools() {
           bootService,
           deviceUtils,
           daemonState,
-          totalDeadlineMs,
-          readinessTimeoutMs,
+          totalDeadlineMs: budgets.automationDeadlineMs,
+          readinessTimeoutMs: budgets.automationReadyTimeoutMs,
           timer: deps.timer,
           signal,
           progress,
@@ -1724,6 +1804,7 @@ export function registerDeviceTools() {
       preservedSessionId = readinessResult.preservedSessionId;
       validatePreservedSession = readinessResult.validatePreservedSession;
       retireRecoveredReplacement = readinessResult.retireReplacement;
+      sourceImage = boot.sourceImage ?? sourceImage;
       // Re-check under the later binding lock because pool identity can change
       // while runner setup is in flight.
       validatePooledDeviceMapping(boot.device, requestedIdentity);
@@ -1739,7 +1820,7 @@ export function registerDeviceTools() {
       const sessionId = preservedSessionId ?? await bindBootedDeviceSession(
         boot.device,
         args,
-        boot.sourceImage,
+        sourceImage,
         boot.processHandle,
         new Set(releaseReadinessReservations.map((reservation) => reservation.owner)),
       );
@@ -1752,6 +1833,7 @@ export function registerDeviceTools() {
         perf,
         sessionId,
         boot.processId,
+        sourceImage,
       );
     } catch (error) {
       perf.end();
@@ -1767,6 +1849,101 @@ export function registerDeviceTools() {
         await releaseReservation();
       }
     }
+  };
+
+  // Compatibility implementation. New callers use getAndroid/getApple so their
+  // platform identity and readiness budgets are explicit.
+  const startDeviceHandler = async (
+    rawArgs: StartDeviceArgs,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ) => {
+    const internalSessionId = rawArgs.__mcpSessionId;
+    const args = {
+      ...startDeviceSchema.parse(rawArgs),
+      __mcpSessionId: internalSessionId,
+    };
+    const totalTimeoutMs = args.timeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS;
+    return await prepareDevice(
+      args,
+      {
+        bootTimeoutMs: totalTimeoutMs,
+        automationReadyTimeoutMs: resolveRunnerReadinessTimeoutMs(args),
+        automationDeadlineMs: getDeviceToolsDependencies().timer.now() + totalTimeoutMs,
+        operationName: "startDevice",
+      },
+      progress,
+      signal,
+    );
+  };
+
+  const getAndroidHandler = async (
+    rawArgs: GetAndroidArgs & Record<string, unknown>,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ) => {
+    const { __mcpSessionId } = rawArgs;
+    const externalArgs = { ...rawArgs };
+    delete externalArgs.__mcpSessionId;
+    delete externalArgs.__executionId;
+    delete externalArgs.__executionStartTime;
+    const args = getAndroidSchema.parse(externalArgs);
+    const bootTimeoutMs = args.bootTimeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS;
+    const automationReadyTimeoutMs =
+      args.automationReadyTimeoutMs ?? DEFAULT_RUNNER_READINESS_TIMEOUT_MS;
+    const startedAtMs = getDeviceToolsDependencies().timer.now();
+    return await prepareDevice(
+      {
+        platform: "android",
+        name: args.avdName,
+        preferRunning: true,
+        createIfMissing: false,
+        __mcpSessionId: typeof __mcpSessionId === "string" ? __mcpSessionId : undefined,
+      },
+      {
+        bootTimeoutMs,
+        automationReadyTimeoutMs,
+        automationDeadlineMs: startedAtMs + bootTimeoutMs + automationReadyTimeoutMs,
+        operationName: "getAndroid",
+        androidAvdName: args.avdName,
+      },
+      progress,
+      signal,
+    );
+  };
+
+  const getAppleHandler = async (
+    rawArgs: GetAppleArgs & Record<string, unknown>,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ) => {
+    const { __mcpSessionId } = rawArgs;
+    const externalArgs = { ...rawArgs };
+    delete externalArgs.__mcpSessionId;
+    delete externalArgs.__executionId;
+    delete externalArgs.__executionStartTime;
+    const args = getAppleSchema.parse(externalArgs);
+    const bootTimeoutMs = args.bootTimeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS;
+    const automationReadyTimeoutMs =
+      args.automationReadyTimeoutMs ?? DEFAULT_RUNNER_READINESS_TIMEOUT_MS;
+    const startedAtMs = getDeviceToolsDependencies().timer.now();
+    return await prepareDevice(
+      {
+        platform: "ios",
+        deviceId: args.udid,
+        preferRunning: true,
+        createIfMissing: false,
+        __mcpSessionId: typeof __mcpSessionId === "string" ? __mcpSessionId : undefined,
+      },
+      {
+        bootTimeoutMs,
+        automationReadyTimeoutMs,
+        automationDeadlineMs: startedAtMs + bootTimeoutMs + automationReadyTimeoutMs,
+        operationName: "getApple",
+      },
+      progress,
+      signal,
+    );
   };
 
 
@@ -1828,6 +2005,7 @@ export function registerDeviceTools() {
     perf: ReturnType<typeof createPerformanceTracker>,
     sessionId: string,
     processId?: number,
+    sourceImage?: DeviceInfo,
   ) {
     perf.end();
     const timing = perf.getTimings();
@@ -1851,6 +2029,7 @@ export function registerDeviceTools() {
     return createJSONToolResponse({
       message: `${device.platform} '${device.name}' is ready (${source})`,
       ...result,
+      deviceIdentity: deviceIdentityPayload(device, sourceImage),
     });
   }
 
@@ -1959,7 +2138,29 @@ export function registerDeviceTools() {
     listDevicesHandler
   );
 
-  ToolRegistry.register("startDevice", "Start device", startDeviceSchema, startDeviceHandler, { supportsProgress: true });
+  ToolRegistry.register(
+    "getAndroid",
+    "Find or recover an Android AVD and prepare it for automation.",
+    getAndroidSchema,
+    getAndroidHandler,
+    { supportsProgress: true },
+  );
+
+  ToolRegistry.register(
+    "getApple",
+    "Find or recover an iOS Simulator and prepare it for automation.",
+    getAppleSchema,
+    getAppleHandler,
+    { supportsProgress: true },
+  );
+
+  ToolRegistry.register(
+    "startDevice",
+    "Start device",
+    startDeviceSchema,
+    startDeviceHandler,
+    { supportsProgress: true, hidden: true },
+  );
 
   ToolRegistry.register(
     "killDevice",

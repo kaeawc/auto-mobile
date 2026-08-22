@@ -524,23 +524,25 @@ function stableRefKey(node) {
 		if (objectKey === null) {
 			return null;
 		}
+		// Canonicalize each segment to how JavaScript resolves the property key, so
+		// accesses that reach the *same* property compare equal regardless of spelling:
+		//   .error, ["error"]        -> prop:error
+		//   [0], ["0"]               -> prop:0   (numbers coerce to their string key)
+		// while a *computed identifier* key stays distinct, since its value can differ:
+		//   [i]                      -> dyn:i    (never equal to prop:i)
+		let segment = null;
 		if (node.computed) {
 			const property = node.property;
-			// Tag the key by node kind so a string-literal index and an identifier index
-			// with the same text (`errors["i"]` vs `errors[i]`) never compare equal — they
-			// can reference different values when the identifier's value differs.
-			let indexKey = null;
-			if (property?.type === "Literal" && typeof property.value === "string") {
-				indexKey = `str:${property.value}`;
-			} else if (property?.type === "Literal" && typeof property.value === "number") {
-				indexKey = `num:${property.value}`;
+			if (property?.type === "Literal" && (typeof property.value === "string" || typeof property.value === "number")) {
+				segment = `prop:${String(property.value)}`;
 			} else if (property?.type === "Identifier") {
-				indexKey = `id:${property.name}`;
+				segment = `dyn:${property.name}`;
 			}
-			return indexKey === null ? null : `${objectKey}[${indexKey}]`;
+		} else {
+			const prop = propertyName(node.property);
+			segment = prop === null ? null : `prop:${prop}`;
 		}
-		const prop = propertyName(node.property);
-		return prop === null ? null : `${objectKey}.${prop}`;
+		return segment === null ? null : `${objectKey}.${segment}`;
 	}
 	return null;
 }

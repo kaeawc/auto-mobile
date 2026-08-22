@@ -81,4 +81,17 @@ describe("auto-mobile/no-inline-error-normalize", () => {
       fires("const m = error instanceof Error ? error[message] : String(error);"),
     ).toBe(false);
   });
+
+  test("flags mixed numeric/string index spellings of the same property", () => {
+    // errors[0] and errors["0"] resolve to the same property in JavaScript.
+    expect(
+      fires('const m = errors[0] instanceof Error ? errors["0"].message : String(errors[0]);'),
+    ).toBe(true);
+  });
+
+  test("flags mixed dot/bracket spellings of the same property", () => {
+    expect(
+      fires('const m = result.error instanceof Error ? result["error"].message : String(result.error);'),
+    ).toBe(true);
+  });
 });

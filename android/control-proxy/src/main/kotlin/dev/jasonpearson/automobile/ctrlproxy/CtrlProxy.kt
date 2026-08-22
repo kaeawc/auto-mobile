@@ -1194,12 +1194,19 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       sdkEventBatchProcessor.start()
       Log.d(TAG, "SDK event batch processor started")
 
-      // Start logcat reader for automatic log capture
-      logcatReader = LogcatReader { response ->
-        if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
-          serviceScope.launch { webSocketServer.broadcast(response) }
-        }
-      }
+      // Start logcat reader for automatic log capture. Gate parsing on a connected client so a
+      // chatty device is not regex-parsed while nobody is consuming logs.
+      logcatReader =
+        LogcatReader(
+          onLogEvent = { response ->
+            if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+              serviceScope.launch { webSocketServer.broadcast(response) }
+            }
+          },
+          hasConsumer = {
+            ::webSocketServer.isInitialized && webSocketServer.getConnectionCount() > 0
+          },
+        )
       logcatReader?.start()
       Log.d(TAG, "Logcat reader started")
 

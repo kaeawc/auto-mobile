@@ -59,6 +59,9 @@ public enum SdkHierarchyExtractor {
     /// Matches SDK's `SdkEventType.viewHierarchy.rawValue` (separate package, can't share the enum).
     private static let viewHierarchyEventType = "view_hierarchy"
 
+    /// UTF-8 bytes of `viewHierarchyEventType`, used for the raw-buffer presence scan.
+    private static let viewHierarchyEventTypeBytes = Data(viewHierarchyEventType.utf8)
+
     /// Try to extract a view hierarchy event from the raw batch data.
     /// Called on every `POST /sdk-events` — skips full decode when no hierarchy event is present.
     public static func extractIfPresent(
@@ -66,9 +69,9 @@ public enum SdkHierarchyExtractor {
         into cache: any SdkHierarchyCaching,
         onHierarchyUpdated: (() -> Void)? = nil
     ) {
-        // Fast path: skip full JSON decode if batch doesn't contain a hierarchy event
-        guard let jsonString = String(data: batchData, encoding: .utf8),
-              jsonString.contains(viewHierarchyEventType) else { return }
+        // Fast path: skip full JSON decode if batch doesn't contain a hierarchy event.
+        // Scan the raw UTF-8 bytes rather than allocating a whole-buffer String copy.
+        guard batchData.range(of: viewHierarchyEventTypeBytes) != nil else { return }
 
         guard let batch = try? JSONDecoder().decode(SdkEventBatchEnvelope.self, from: batchData) else { return }
 

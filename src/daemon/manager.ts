@@ -9,7 +9,7 @@ import {
   INCOMPLETE_EXTRACTION_CODE,
   INCOMPLETE_EXTRACTION_EXIT_CODE,
 } from "../db/migrationDependencyIntegrity";
-import { ensureSecureLogsDirSync, resolveAutoMobileLogsDir } from "../utils/tempDir";
+import { ensureSecureLogsDirSync } from "../utils/tempDir";
 import { outputReductionFlagsToArgs } from "../utils/outputReductionFlags";
 import {
   EVENT_ALL_MARKERS_FLAG,
@@ -359,6 +359,7 @@ export class DaemonManager implements DaemonManagerLike {
   private readonly launcher: DaemonLauncher;
   private readonly fallbackLauncher: DaemonLauncher;
   private readonly launchCommandResolver: (() => DaemonLaunchCommand) | undefined;
+  private readonly ensureLogsDir: () => string;
   private heldLockLogPath: string | undefined;
 
   constructor(
@@ -373,6 +374,7 @@ export class DaemonManager implements DaemonManagerLike {
     extractionCleaner: ExtractionCleaner = fileSystemExtractionCleaner,
     launcher: DaemonLauncher | (() => DaemonLaunchCommand) | undefined = undefined,
     processSignaler: DaemonProcessSignaler = defaultDaemonProcessSignaler,
+    ensureLogsDir: () => string = ensureSecureLogsDirSync,
   ) {
     this.stateProvider = stateProvider;
     this.timer = timer;
@@ -392,6 +394,7 @@ export class DaemonManager implements DaemonManagerLike {
     }
     this.processSignaler = processSignaler;
     this.extractionCleaner = extractionCleaner;
+    this.ensureLogsDir = ensureLogsDir;
     this.launchCommandResolver = typeof launcher === "function" ? launcher : undefined;
     this.launcher = (typeof launcher === "object" ? launcher : undefined) ?? new DaemonLauncher({
       spawn: processSpawner?.spawn.bind(processSpawner),
@@ -592,7 +595,6 @@ export class DaemonManager implements DaemonManagerLike {
     // owner-only (0o700) by ensureSecureLogsDirSync, so a fixed, predictable
     // filename inside it is not exposed to other users.
     const logPath = this.heldLockLogPath ?? this.daemonLaunchLogPath();
-    ensureSecureLogsDirSync();
     // Open with restricted permissions (0o600 = owner read/write only).
     // Truncate per launch so a single manager's bootstrap captures don't grow
     // unbounded across restarts.
@@ -829,7 +831,7 @@ export class DaemonManager implements DaemonManagerLike {
   }
 
   private daemonLaunchLogPath(): string {
-    return join(resolveAutoMobileLogsDir(), `daemon-launch-${process.pid}.log`);
+    return join(this.ensureLogsDir(), `daemon-launch-${process.pid}.log`);
   }
 
   private async createDaemonExitFailure(

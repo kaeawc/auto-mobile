@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { ActionableError } from "../../src/models/ActionableError";
 import {
   resolveAutoMobileBaseDir,
   resolveAutoMobileLogsDir,
@@ -39,14 +40,25 @@ describe("resolveAutoMobileBaseDir", () => {
     expect(resolved.endsWith(path.join("rel", "data"))).toBe(true);
   });
 
+  test("anchors a relative override to the daemon launch directory", () => {
+    expect(
+      resolveAutoMobileBaseDir({ AUTOMOBILE_DATA_DIR: "rel/data" }, home, "/launch")
+    ).toBe(path.resolve("/launch", "rel/data"));
+  });
+
+  test("anchors a relative home directory to the daemon launch directory", () => {
+    expect(resolveAutoMobileBaseDir({}, "relative-home", "/launch"))
+      .toBe(path.resolve("/launch", "relative-home", ".auto-mobile"));
+  });
+
   test("ignores a blank override and uses the stable home default", () => {
     expect(resolveAutoMobileBaseDir({ AUTOMOBILE_DATA_DIR: "   " }, home))
-      .toBe(path.join(home, ".auto-mobile"));
+      .toBe(path.resolve(home, ".auto-mobile"));
   });
 
   test("defaults to ~/.auto-mobile, never under os.tmpdir()", () => {
     const base = resolveAutoMobileBaseDir({}, home);
-    expect(base).toBe(path.join(home, ".auto-mobile"));
+    expect(base).toBe(path.resolve(home, ".auto-mobile"));
     expect(base.startsWith(os.tmpdir())).toBe(false);
   });
 
@@ -60,7 +72,7 @@ describe("resolveAutoMobileBaseDir", () => {
       { TMPDIR: "/ephemeral/bunx-123", TMP: "/ephemeral/bunx-123", TEMP: "/ephemeral/bunx-123" },
       home
     );
-    expect(base).toBe(path.join(home, ".auto-mobile"));
+    expect(base).toBe(path.resolve(home, ".auto-mobile"));
   });
 });
 
@@ -105,17 +117,33 @@ describe("resolveAutoMobileLogsDir", () => {
     ).toBe(path.resolve("/injected-launch", "logs"));
   });
 
-  test("falls back to the data-dir logs child for an unset or blank override", () => {
+  test("defaults to an owner-controlled logs directory independently of AUTOMOBILE_DATA_DIR", () => {
+    const defaultLogDir = path.resolve(home, ".auto-mobile", "logs");
     expect(
       resolveAutoMobileLogsDir({ AUTOMOBILE_DATA_DIR: "/srv/data" }, home, "/launch")
-    ).toBe(path.join(path.resolve("/srv/data"), "logs"));
+    ).toBe(defaultLogDir);
     expect(
       resolveAutoMobileLogsDir(
         { AUTOMOBILE_LOG_DIR: "   ", AUTOMOBILE_DATA_DIR: "/srv/data" },
         home,
         "/launch",
       )
-    ).toBe(path.join(path.resolve("/srv/data"), "logs"));
+    ).toBe(defaultLogDir);
+  });
+
+  test("anchors a relative home directory to the daemon launch directory", () => {
+    expect(resolveAutoMobileLogsDir({}, "relative-home", "/launch"))
+      .toBe(path.resolve("/launch", "relative-home", ".auto-mobile", "logs"));
+  });
+
+  test("does not inherit a bunx TMPDIR", () => {
+    expect(
+      resolveAutoMobileLogsDir(
+        { TMPDIR: "/ephemeral/bunx-123", TMP: "/ephemeral/bunx-123", TEMP: "/ephemeral/bunx-123" },
+        home,
+        "/launch",
+      )
+    ).toBe(path.resolve(home, ".auto-mobile", "logs"));
   });
 });
 
@@ -218,6 +246,34 @@ describe("ensureSecureTempDirSync", () => {
     }
   });
 
+  test.skipIf(process.platform === "win32")("falls back to the configured data directory when the default home is unusable", () => {
+    const tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), "am-log-data-fallback-"));
+    try {
+      expect(
+        ensureSecureLogsDirSync({ AUTOMOBILE_DATA_DIR: tmpBase }, "/dev/null")
+      ).toBe(path.join(tmpBase, "logs"));
+    } finally {
+      fs.rmSync(tmpBase, { recursive: true, force: true });
+    }
+  });
+
+  test.skipIf(process.platform === "win32")("anchors a relative data fallback to the daemon launch directory", () => {
+    const tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), "am-relative-log-data-fallback-"));
+    try {
+      expect(
+        ensureSecureLogsDirSync(
+          {
+            AUTOMOBILE_DATA_DIR: "relative-data",
+            AUTOMOBILE_DAEMON_LAUNCH_CWD: tmpBase,
+          },
+          "/dev/null"
+        )
+      ).toBe(path.join(tmpBase, "relative-data", "logs"));
+    } finally {
+      fs.rmSync(tmpBase, { recursive: true, force: true });
+    }
+  });
+
   test.skipIf(process.platform === "win32")("rejects a symbolic-link log directory", () => {
     const tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), "am-log-link-"));
     const targetDir = path.join(tmpBase, "target");
@@ -227,7 +283,15 @@ describe("ensureSecureTempDirSync", () => {
     fs.symlinkSync(targetDir, linkDir, "dir");
     process.env.AUTOMOBILE_LOG_DIR = linkDir;
     try {
-      expect(() => ensureSecureLogsDirSync()).toThrow("symbolic-link directory");
+      let thrown: unknown;
+      try {
+        ensureSecureLogsDirSync();
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeInstanceOf(ActionableError);
+      expect((thrown as Error).message).toBe("Refusing to use symbolic-link directory for AutoMobile logs");
+      expect((thrown as Error & { cause?: unknown }).cause).toBeInstanceOf(Error);
     } finally {
       if (previousLogDir === undefined) {
         delete process.env.AUTOMOBILE_LOG_DIR;

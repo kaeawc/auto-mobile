@@ -3,17 +3,17 @@
  *
  * Provides consistent, secure working directory creation with restrictive
  * permissions. The base resolves to a STABLE, non-ephemeral location so that
- * long-lived state (daemon logs, persistent caches) survives package-runner
- * temp-dir cleanup. When AutoMobile is launched via `bunx`, `os.tmpdir()` can
- * point into an extraction tree that bunx later reaps while the daemon still
- * holds open file descriptors — leaving on-disk logs at 0 bytes and cache
- * writes failing with ENOENT (issue #2724). Anchoring on the user's home dir
- * (`~/.auto-mobile`) avoids that lifecycle entirely.
+ * long-lived non-log state (persistent caches) survives package-runner temp-dir
+ * cleanup. When AutoMobile is launched via `bunx`, `os.tmpdir()` can point into
+ * an extraction tree that bunx later reaps while the daemon still holds open
+ * file descriptors, so persistent state is anchored on the user's home dir
+ * (`~/.auto-mobile`).
  */
 
 import fs from "node:fs";
 import os from "os";
 import path from "path";
+import { ActionableError } from "../models/ActionableError";
 import { resolveDaemonLaunchWorkingDirectory } from "./workingDirectory";
 
 /**
@@ -21,6 +21,23 @@ import { resolveDaemonLaunchWorkingDirectory } from "./workingDirectory";
  * Prevents other users from accessing auto-mobile files.
  */
 const SECURE_DIR_MODE = 0o700;
+
+function defaultAutoMobileLogsDir(homeDir: string, daemonLaunchWorkingDirectory: string): string {
+  if (homeDir && homeDir.length > 0) {
+    return path.resolve(daemonLaunchWorkingDirectory, homeDir, ".auto-mobile", "logs");
+  }
+
+  const userId = process.platform === "win32"
+    ? os.userInfo().username || "default"
+    : process.getuid?.()?.toString() || "default";
+  const temporaryRoot = process.platform === "win32" ? os.tmpdir() : "/tmp";
+  return path.join(temporaryRoot, `auto-mobile-${userId}`);
+}
+
+function resolveAutoMobileLogsDirOverride(env: NodeJS.ProcessEnv): string | undefined {
+  const override = (env.AUTOMOBILE_LOG_DIR ?? env.AUTO_MOBILE_LOG_DIR)?.trim();
+  return override && override.length > 0 ? override : undefined;
+}
 
 /**
  * Resolve the stable base directory for AutoMobile's non-log on-disk state.
@@ -44,15 +61,16 @@ const SECURE_DIR_MODE = 0o700;
  */
 export function resolveAutoMobileBaseDir(
   env: NodeJS.ProcessEnv = process.env,
-  homeDir: string = os.homedir()
+  homeDir: string = os.homedir(),
+  daemonLaunchWorkingDirectory: string = resolveDaemonLaunchWorkingDirectory(undefined, env)
 ): string {
   const override = (env.AUTOMOBILE_DATA_DIR ?? env.AUTO_MOBILE_DATA_DIR)?.trim();
   if (override && override.length > 0) {
-    return path.resolve(override);
+    return path.resolve(daemonLaunchWorkingDirectory, override);
   }
 
   if (homeDir && homeDir.length > 0) {
-    return path.join(homeDir, ".auto-mobile");
+    return path.resolve(daemonLaunchWorkingDirectory, homeDir, ".auto-mobile");
   }
 
   return path.join(os.tmpdir(), "auto-mobile");
@@ -61,22 +79,27 @@ export function resolveAutoMobileBaseDir(
 /**
  * Resolve the directory for structured and daemon-launch logs.
  *
- * A log-dir override intentionally takes precedence over the data-dir-derived
- * logs child without changing the base directory for any other AutoMobile
- * state. Relative overrides are anchored to the daemon launch directory so a
- * manager and its spawned daemon agree even after the daemon changes cwd.
+ * A log-dir override intentionally takes precedence over the default without
+ * changing the base directory for any other AutoMobile state. Without an
+ * override, logs use the owner-controlled `~/.auto-mobile/logs` directory.
+ * If that directory cannot be initialized and `AUTOMOBILE_DATA_DIR` is set,
+ * initialization falls back to `<data-dir>/logs`. This avoids both
+ * package-runner temporary-directory cleanup and a predictable directory entry
+ * in a shared system temporary root. Relative overrides are anchored to the
+ * daemon launch directory so a manager and its spawned daemon agree even after
+ * the daemon changes cwd.
  */
 export function resolveAutoMobileLogsDir(
   env: NodeJS.ProcessEnv = process.env,
   homeDir: string = os.homedir(),
   daemonLaunchWorkingDirectory: string = resolveDaemonLaunchWorkingDirectory(undefined, env)
 ): string {
-  const override = (env.AUTOMOBILE_LOG_DIR ?? env.AUTO_MOBILE_LOG_DIR)?.trim();
-  if (override && override.length > 0) {
+  const override = resolveAutoMobileLogsDirOverride(env);
+  if (override) {
     return path.resolve(daemonLaunchWorkingDirectory, override);
   }
 
-  return path.join(resolveAutoMobileBaseDir(env, homeDir), TEMP_SUBDIRS.LOGS);
+  return defaultAutoMobileLogsDir(homeDir, daemonLaunchWorkingDirectory);
 }
 
 /**
@@ -117,8 +140,41 @@ export function ensureSecureTempDirSync(subdirectory: string): string {
 /**
  * Synchronously ensure the shared log directory exists with restrictive permissions.
  */
-export function ensureSecureLogsDirSync(): string {
-  return ensureSecureDirectorySync(resolveAutoMobileLogsDir());
+export function ensureSecureLogsDirSync(
+  env: NodeJS.ProcessEnv = process.env,
+  homeDir: string = os.homedir()
+): string {
+  try {
+    const daemonLaunchWorkingDirectory = resolveDaemonLaunchWorkingDirectory(undefined, env);
+    const logsDir = resolveAutoMobileLogsDir(env, homeDir, daemonLaunchWorkingDirectory);
+    try {
+      return ensureSecureDirectorySync(logsDir);
+    } catch (error) {
+      if (resolveAutoMobileLogsDirOverride(env)) {
+        throw error;
+      }
+
+      const dataDirLogs = path.join(
+        resolveAutoMobileBaseDir(env, homeDir, daemonLaunchWorkingDirectory),
+        "logs"
+      );
+      if (dataDirLogs === logsDir) {
+        throw error;
+      }
+      return ensureSecureDirectorySync(dataDirLogs);
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("symbolic-link directory")) {
+      throw new ActionableError(
+        "Refusing to use symbolic-link directory for AutoMobile logs",
+        { cause: error }
+      );
+    }
+    throw new ActionableError(
+      "Unable to initialize the AutoMobile log directory. Set AUTOMOBILE_LOG_DIR to a writable directory.",
+      { cause: error }
+    );
+  }
 }
 
 // Common subdirectory constants for consistency

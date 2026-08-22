@@ -578,8 +578,10 @@ jobs:
           install_status=${PIPESTATUS[0]}
           set -e
           mkdir -p ci-logs/daemon-logs
-          if [[ -d "${HOME}/.auto-mobile/logs" ]]; then
-            cp -R "${HOME}/.auto-mobile/logs/." ci-logs/daemon-logs/ || true
+          source scripts/lib/auto-mobile-log-dir.sh
+          daemon_log_dir="$(resolve_automobile_log_dir)"
+          if [[ -d "${daemon_log_dir}" ]]; then
+            cp -R "${daemon_log_dir}/." ci-logs/daemon-logs/ || true
           else
             echo "No daemon logs directory was created" > ci-logs/daemon-logs/README.txt
           fi

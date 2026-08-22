@@ -8,7 +8,7 @@ import {
   getBestAndroidToolsLocation,
   validateRequiredTools,
 } from "./detection";
-import { AvdManagerClient } from "./AvdManagerClient";
+import { AvdManagerClient, type AvdManagerExecutionOptions } from "./AvdManagerClient";
 import {
   SdkManagerClient,
   type SdkManagerCommandResult,
@@ -124,9 +124,10 @@ export async function createAvd(
 /** Delete an AVD through the dedicated avdmanager boundary. */
 export async function deleteAvd(
   name: string,
-  dependencies = createDefaultDependencies(),
+  dependencies: AvdManagerDependencies = createDefaultDependencies(),
+  options: AvdManagerExecutionOptions = {},
 ): Promise<{ success: boolean; message: string }> {
-  return createAvdManagerClient(dependencies).deleteAvd(name);
+  return createAvdManagerClient(dependencies).deleteAvd(name, options);
 }
 
 /** List device profiles through the dedicated avdmanager boundary. */

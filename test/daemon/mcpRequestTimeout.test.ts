@@ -9,6 +9,7 @@ import {
   MIN_LAUNCH_APP_MCP_TIMEOUT_MS,
   MIN_PROVISION_DEVICE_MCP_TIMEOUT_MS,
   MIN_START_DEVICE_MCP_TIMEOUT_MS,
+  MIN_TEARDOWN_DEVICE_MCP_TIMEOUT_MS,
   MIN_UNINSTALL_APP_MCP_TIMEOUT_MS,
   OBSERVE_MCP_TIMEOUT_ENV_VAR,
   OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
@@ -17,6 +18,7 @@ import {
 } from "../../src/daemon/mcpRequestTimeout";
 import type { DaemonRequest } from "../../src/daemon/types";
 import {
+  DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS,
   DEFAULT_PROVISION_DEVICE_TIMEOUT_MS,
   DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS,
   MAX_DEVICE_READY_TIMEOUT_MS,
@@ -70,6 +72,7 @@ describe("resolveMcpRequestTimeoutMs", () => {
     { name: "executePlan floor when timeoutMs omitted", tool: "executePlan", expected: MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS },
     { name: "startDevice floor when timeoutMs omitted", tool: "startDevice", expected: MIN_START_DEVICE_MCP_TIMEOUT_MS },
     { name: "provisionDevice floor when timeoutMs omitted", tool: "provisionDevice", expected: MIN_PROVISION_DEVICE_MCP_TIMEOUT_MS },
+    { name: "deleteDevice floor when timeoutMs omitted", tool: "deleteDevice", expected: MIN_TEARDOWN_DEVICE_MCP_TIMEOUT_MS },
     { name: "launchApp floor when timeoutMs omitted", tool: "launchApp", expected: MIN_LAUNCH_APP_MCP_TIMEOUT_MS },
     { name: "uninstallApp floor when timeoutMs omitted", tool: "uninstallApp", expected: MIN_UNINSTALL_APP_MCP_TIMEOUT_MS },
     { name: "observe default floor when timeoutMs omitted", tool: "observe", expected: DEFAULT_OBSERVE_MCP_TIMEOUT_MS },
@@ -79,6 +82,7 @@ describe("resolveMcpRequestTimeoutMs", () => {
     { name: "raises short executePlan to floor", tool: "executePlan", timeoutMs: 180_000, expected: MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS },
     { name: "raises short startDevice to floor", tool: "startDevice", timeoutMs: 60_000, expected: MIN_START_DEVICE_MCP_TIMEOUT_MS },
     { name: "raises short provisionDevice to floor", tool: "provisionDevice", timeoutMs: 60_000, expected: MIN_PROVISION_DEVICE_MCP_TIMEOUT_MS },
+    { name: "raises short deleteDevice to floor", tool: "deleteDevice", timeoutMs: 30_000, expected: MIN_TEARDOWN_DEVICE_MCP_TIMEOUT_MS },
     { name: "raises short launchApp to floor", tool: "launchApp", timeoutMs: 10_000, expected: MIN_LAUNCH_APP_MCP_TIMEOUT_MS },
     { name: "raises short uninstallApp to floor", tool: "uninstallApp", timeoutMs: 30_000, expected: MIN_UNINSTALL_APP_MCP_TIMEOUT_MS },
     { name: "raises short observe to floor", tool: "observe", timeoutMs: 30_000, expected: DEFAULT_OBSERVE_MCP_TIMEOUT_MS },
@@ -93,6 +97,7 @@ describe("resolveMcpRequestTimeoutMs", () => {
       timeoutMs: 600_000,
       expected: 600_000,
     },
+    { name: "preserves deleteDevice above floor", tool: "deleteDevice", timeoutMs: 120_000, expected: 120_000 },
     { name: "preserves launchApp above floor", tool: "launchApp", timeoutMs: 150_000, expected: 150_000 },
     { name: "preserves uninstallApp above floor", tool: "uninstallApp", timeoutMs: 90_000, expected: 90_000 },
     { name: "preserves observe above floor", tool: "observe", timeoutMs: 150_000, expected: 150_000 },
@@ -223,6 +228,41 @@ describe("resolveMcpRequestTimeoutMs", () => {
     );
     expect(resolveMcpRequestTimeoutMs(request)).toBe(
       DEFAULT_PROVISION_DEVICE_TIMEOUT_MS + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+    );
+  });
+
+  test("keeps transport alive beyond the deleteDevice tool budget", () => {
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: {
+        name: "deleteDevice",
+        arguments: { timeoutMs: 600_000 },
+      },
+    };
+
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(
+      600_000 + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+    );
+  });
+
+  test("keeps transport headroom when deleteDevice uses its default lifecycle budget", () => {
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: {
+        name: "deleteDevice",
+        arguments: {},
+      },
+    };
+
+    expect(MIN_TEARDOWN_DEVICE_MCP_TIMEOUT_MS).toBe(
+      DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+    );
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(
+      DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
     );
   });
 

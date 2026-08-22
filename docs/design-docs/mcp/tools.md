@@ -145,6 +145,7 @@ cat "$APP_CONTAINER/Documents/fixtures/hello.txt"
 - 🚀 `startDevice` starts a device with the specified device image.
 - 🧱 `provisionDevice` creates or adopts an exact virtual-device identity. It requires the `device-control` capability.
 - ❌ `killDevice` terminates a running device.
+- 🧹 `deleteDevice` stops and permanently deletes a device identified by its `platform` and stable identity from `automobile:devices/booted`, then verifies its absence from that platform inventory.
 - 🔧 `setActiveDevice` sets the active device for subsequent operations. It is a
   compatibility API; new multi-client daemon integrations should bind a
   device-pool session when the MCP connection starts.

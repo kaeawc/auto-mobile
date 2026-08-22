@@ -15,6 +15,13 @@ import { AvdManagerClient } from "./android-cmdline-tools/AvdManagerClient";
 import type { CreateAvdParams } from "./android-cmdline-tools/avdmanager";
 import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
 import { throwIfAborted } from "./toolUtils";
+import { defaultTimer, type Timer } from "./SystemTimer";
+import {
+  getVirtualDeviceLifecycleCoordinator,
+  type VirtualDeviceLifecycleCoordinator,
+  type VirtualDeviceLifecycleIdentity,
+  type VirtualDeviceLifecycleLease,
+} from "./virtualDeviceLifecycleCoordinator";
 
 export interface AndroidDeviceSpecification {
   runtime: string;
@@ -40,6 +47,10 @@ export interface ExactDeviceProvisionRequest {
   reconcileExistingConfiguration?: boolean;
   /** Persist ownership immediately before creating a previously absent device. */
   onBeforeCreate?: () => Promise<void>;
+  /** Shared lifecycle lease held by a higher-level operation through boot/readiness. */
+  lifecycleLease?: VirtualDeviceLifecycleLease;
+  /** Absolute deadline for acquiring lifecycle coordination. */
+  deadlineMs?: number;
   signal?: AbortSignal;
 }
 
@@ -108,8 +119,7 @@ function defaultAndroidAvdConfigWriterDependencies(): FileAndroidAvdConfigWriter
  */
 export class FileAndroidAvdConfigWriter implements AndroidAvdConfigWriter {
   constructor(
-    private readonly dependencies: FileAndroidAvdConfigWriterDependencies =
-      defaultAndroidAvdConfigWriterDependencies(),
+    private readonly dependencies: FileAndroidAvdConfigWriterDependencies = defaultAndroidAvdConfigWriterDependencies(),
   ) {}
 
   async setMemoryMb(avdName: string, memoryMb: number): Promise<void> {
@@ -155,13 +165,17 @@ export interface DefaultExactDeviceProvisionerDependencies {
   androidConfigReader: AvdConfigReader;
   androidConfigWriter: AndroidAvdConfigWriter;
   iosSimulator: ExactIosSimulatorClient;
+  lifecycleCoordinator?: VirtualDeviceLifecycleCoordinator;
+  timer?: Pick<Timer, "now">;
 }
 
-function requestedAndroidRuntime(runtime: string): {
-  apiLevel: number;
-  tag: string;
-  architecture: string;
-} | undefined {
+function requestedAndroidRuntime(runtime: string):
+  | {
+      apiLevel: number;
+      tag: string;
+      architecture: string;
+    }
+  | undefined {
   const parts = runtime.split(";");
   if (parts.length !== 4 || parts[0] !== "system-images") {
     return undefined;
@@ -200,70 +214,11 @@ function sameAndroidSpecification(
   spec: AndroidDeviceSpecification,
   config: Awaited<ReturnType<AvdConfigReader["readConfig"]>>,
 ): boolean {
-  return sameAndroidDeviceIdentity(spec, config) && (
-    spec.configuration?.memoryMb === undefined ||
-    config?.ramSizeMb === spec.configuration.memoryMb
+  return (
+    sameAndroidDeviceIdentity(spec, config) &&
+    (spec.configuration?.memoryMb === undefined ||
+      config?.ramSizeMb === spec.configuration.memoryMb)
   );
-}
-
-const exactProvisioningLocks = new Map<string, Promise<void>>();
-
-async function runWithExactProvisioningLock<T>(
-  platform: "android" | "ios",
-  name: string,
-  signal: AbortSignal | undefined,
-  operation: () => Promise<T>,
-): Promise<T> {
-  const key = `${platform}:${name}`;
-  const previous = exactProvisioningLocks.get(key);
-  let release!: () => void;
-  const current = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  exactProvisioningLocks.set(key, current);
-  try {
-    await waitForExactProvisioningTurn(previous, signal);
-    return await operation();
-  } finally {
-    release();
-    if (exactProvisioningLocks.get(key) === current) {
-      exactProvisioningLocks.delete(key);
-    }
-  }
-}
-
-async function waitForExactProvisioningTurn(
-  previous: Promise<void> | undefined,
-  signal: AbortSignal | undefined,
-): Promise<void> {
-  throwIfAborted(signal);
-  if (!previous || !signal) {
-    await previous;
-    return;
-  }
-
-  let removeAbortListener: (() => void) | undefined;
-  const aborted = new Promise<never>((_resolve, reject) => {
-    const rejectIfAborted = (): void => {
-      try {
-        throwIfAborted(signal);
-      } catch (error) {
-        reject(error);
-      }
-    };
-    if (signal.aborted) {
-      rejectIfAborted();
-      return;
-    }
-    signal.addEventListener("abort", rejectIfAborted, { once: true });
-    removeAbortListener = () => signal.removeEventListener("abort", rejectIfAborted);
-  });
-  try {
-    await Promise.race([previous, aborted]);
-  } finally {
-    removeAbortListener?.();
-  }
-  throwIfAborted(signal);
 }
 
 /**
@@ -271,18 +226,70 @@ async function waitForExactProvisioningTurn(
  * never falls back to a "close enough" image, runtime, or device profile.
  */
 export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
-  constructor(private readonly dependencies: DefaultExactDeviceProvisionerDependencies) {}
+  private readonly lifecycleCoordinator: VirtualDeviceLifecycleCoordinator;
+  private readonly timer: Pick<Timer, "now">;
 
-  async provision(request: ExactDeviceProvisionRequest): Promise<ExactProvisionedDevice> {
-    return await runWithExactProvisioningLock(
-      request.platform,
-      request.name,
-      request.signal,
-      async () => await this.provisionLocked(request),
-    );
+  constructor(private readonly dependencies: DefaultExactDeviceProvisionerDependencies) {
+    this.lifecycleCoordinator =
+      dependencies.lifecycleCoordinator ?? getVirtualDeviceLifecycleCoordinator();
+    this.timer = dependencies.timer ?? defaultTimer;
   }
 
-  private async provisionLocked(request: ExactDeviceProvisionRequest): Promise<ExactProvisionedDevice> {
+  async provision(request: ExactDeviceProvisionRequest): Promise<ExactProvisionedDevice> {
+    const ownLease = request.lifecycleLease === undefined;
+    const lease =
+      request.lifecycleLease ??
+      (await this.lifecycleCoordinator.reserve(this.initialLifecycleIdentity(request), {
+        operation: "provision",
+        deadlineMs: request.deadlineMs ?? this.timer.now() + 300_000,
+        signal: request.signal,
+      }));
+    const signals = [request.signal, lease.signal].filter(
+      (signal): signal is AbortSignal => signal !== undefined,
+    );
+    const coordinatedRequest = {
+      ...request,
+      signal: signals.length === 1 ? signals[0] : AbortSignal.any(signals),
+    };
+    try {
+      throwIfAborted(coordinatedRequest.signal);
+      const result = await this.provisionLocked(coordinatedRequest);
+      const stableId =
+        result.device.platform === "android" ? result.device.name : result.device.deviceId;
+      if (!stableId) {
+        throw new ProvisionDeviceError(
+          "identity_conflict",
+          `Exact iOS simulator '${request.name}' has no UDID.`,
+        );
+      }
+      await lease.bindCanonicalIdentity({
+        platform: result.device.platform,
+        stableId,
+      });
+      return result;
+    } finally {
+      if (ownLease) {
+        lease.release();
+      }
+    }
+  }
+
+  private initialLifecycleIdentity(
+    request: ExactDeviceProvisionRequest,
+  ): VirtualDeviceLifecycleIdentity {
+    if (request.platform === "android" || request.deviceId) {
+      return {
+        kind: "stable",
+        platform: request.platform,
+        stableId: request.platform === "android" ? request.name : request.deviceId!,
+      };
+    }
+    return { kind: "selector", platform: "ios", selector: request.name };
+  }
+
+  private async provisionLocked(
+    request: ExactDeviceProvisionRequest,
+  ): Promise<ExactProvisionedDevice> {
     const images = await this.dependencies.listDeviceImages(request.platform);
     const existing = this.findExisting(images, request);
     if (existing) {
@@ -313,9 +320,10 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
     request: ExactDeviceProvisionRequest,
   ): DeviceInfo | undefined {
     if (request.platform !== "ios") {
-      return images.find((image) =>
-        image.name === request.name ||
-        (request.deviceId !== undefined && image.deviceId === request.deviceId),
+      return images.find(
+        (image) =>
+          image.name === request.name ||
+          (request.deviceId !== undefined && image.deviceId === request.deviceId),
       );
     }
 
@@ -325,14 +333,18 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
 
     const candidates = images.filter((image) => image.name === request.name);
     const spec = request.spec as IosDeviceSpecification;
-    return candidates.find((image) =>
-      image.isAvailable !== false &&
-      image.runtime === spec.runtime &&
-      image.deviceType === spec.deviceType,
-    ) ?? candidates.find((image) =>
-      image.runtime === spec.runtime &&
-      image.deviceType === spec.deviceType,
-    ) ?? candidates[0];
+    return (
+      candidates.find(
+        (image) =>
+          image.isAvailable !== false &&
+          image.runtime === spec.runtime &&
+          image.deviceType === spec.deviceType,
+      ) ??
+      candidates.find(
+        (image) => image.runtime === spec.runtime && image.deviceType === spec.deviceType,
+      ) ??
+      candidates[0]
+    );
   }
 
   private async assertExistingMatches(
@@ -374,7 +386,10 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
       spec.configuration?.memoryMb !== undefined &&
       sameAndroidDeviceIdentity(spec, config)
     ) {
-      await this.dependencies.androidConfigWriter.setMemoryMb(existing.name, spec.configuration.memoryMb);
+      await this.dependencies.androidConfigWriter.setMemoryMb(
+        existing.name,
+        spec.configuration.memoryMb,
+      );
       const reconciled = await this.dependencies.androidConfigReader.readConfig(existing.name);
       if (sameAndroidSpecification(spec, reconciled)) {
         return;
@@ -409,11 +424,14 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
     request: ExactDeviceProvisionRequest,
     spec: AndroidDeviceSpecification,
   ): Promise<ExactProvisionedDevice> {
-    const created = await this.dependencies.avdManager.createAvd({
-      name: request.name,
-      package: spec.runtime,
-      device: spec.deviceType,
-    }, { signal: request.signal });
+    const created = await this.dependencies.avdManager.createAvd(
+      {
+        name: request.name,
+        package: spec.runtime,
+        device: spec.deviceType,
+      },
+      { signal: request.signal },
+    );
     if (!created.success) {
       throw new ProvisionDeviceError(
         "platform_command_failed",
@@ -421,7 +439,10 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
       );
     }
     if (spec.configuration?.memoryMb !== undefined) {
-      await this.dependencies.androidConfigWriter.setMemoryMb(request.name, spec.configuration.memoryMb);
+      await this.dependencies.androidConfigWriter.setMemoryMb(
+        request.name,
+        spec.configuration.memoryMb,
+      );
     }
     return {
       created: true,

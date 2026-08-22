@@ -1,11 +1,11 @@
 import { ChildProcess } from "child_process";
+import { BootedDevice, DeviceInfo, SomePlatform, Platform } from "../../src/models";
 import {
-  BootedDevice,
-  DeviceInfo,
-  SomePlatform,
-  Platform,
-} from "../../src/models";
-import { BootedDeviceDiscovery, PlatformDeviceManager } from "../../src/utils/deviceUtils";
+  BootedDeviceDiscovery,
+  DeviceDestroyOptions,
+  DeviceImageDiscovery,
+  PlatformDeviceManager,
+} from "../../src/utils/deviceUtils";
 
 /**
  * Fake implementation of PlatformDeviceManager for testing
@@ -38,7 +38,7 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
   setBootedDevices(platform: Platform, devices: BootedDevice[]): void {
     this.bootedDevices.set(platform, devices);
     // Track running device names
-    devices.forEach(device => {
+    devices.forEach((device) => {
       this.runningDeviceNames.add(device.name);
       this.runningDeviceNames.add(device.deviceId);
     });
@@ -112,7 +112,7 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
    * @returns true if the operation was called at least once
    */
   wasMethodCalled(operationName: string): boolean {
-    return this.executedOperations.some(op => op.includes(operationName));
+    return this.executedOperations.some((op) => op.includes(operationName));
   }
 
   /**
@@ -121,8 +121,7 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
    * @returns Number of times the operation was called
    */
   getCallCount(operationName: string): number {
-    return this.executedOperations.filter(op => op.includes(operationName))
-      .length;
+    return this.executedOperations.filter((op) => op.includes(operationName)).length;
   }
 
   /**
@@ -190,6 +189,25 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
     return { devices, succeededPlatforms, discoveryErrors };
   }
 
+  async getDeviceImagesDetailed(platform: SomePlatform): Promise<DeviceImageDiscovery> {
+    const requested: Platform[] = platform === "either" ? ["android", "ios"] : [platform];
+    const devices: DeviceInfo[] = [];
+    const succeededPlatforms = new Set<Platform>();
+    const discoveryErrors: DeviceImageDiscovery["discoveryErrors"] = {};
+    for (const p of requested) {
+      if (this.failedPlatforms.has(p)) {
+        discoveryErrors[p] = {
+          code: "unavailable",
+          message: `${p === "ios" ? "iOS" : "Android"} device inventory is unavailable.`,
+        };
+        continue;
+      }
+      devices.push(...(await this.listDeviceImages(p)));
+      succeededPlatforms.add(p);
+    }
+    return { devices, succeededPlatforms, discoveryErrors };
+  }
+
   async startDevice(device: DeviceInfo, timeoutMs?: number): Promise<ChildProcess | null> {
     this.executedOperations.push(`startDevice:${device.name}:${timeoutMs ?? "default"}`);
     this.runningDeviceNames.add(device.name);
@@ -204,7 +222,7 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
       iosVersion: device.iosVersion,
     };
     const existingBootedDevices = this.bootedDevices.get(device.platform) || [];
-    if (!existingBootedDevices.some(booted => booted.deviceId === bootedDevice.deviceId)) {
+    if (!existingBootedDevices.some((booted) => booted.deviceId === bootedDevice.deviceId)) {
       this.bootedDevices.set(device.platform, [...existingBootedDevices, bootedDevice]);
     }
 
@@ -231,6 +249,21 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
     this.runningDeviceNames.delete(device.name);
   }
 
+  async destroyDevice(device: DeviceInfo, _options?: DeviceDestroyOptions): Promise<void> {
+    this.executedOperations.push(
+      `destroyDevice:${device.platform}:${device.deviceId ?? device.name}`,
+    );
+    const images = this.deviceImages.get(device.platform) ?? [];
+    this.deviceImages.set(
+      device.platform,
+      images.filter((image) =>
+        device.platform === "ios"
+          ? (image.deviceId ?? image.name) !== (device.deviceId ?? device.name)
+          : image.name !== device.name,
+      ),
+    );
+  }
+
   async waitForDeviceReady(
     device: DeviceInfo,
     timeoutMs: number = 120000,
@@ -239,9 +272,7 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
   ): Promise<BootedDevice> {
     this.waitForDeviceReadyChildProcess = childProcess;
     this.waitForDeviceReadySignal = signal;
-    this.executedOperations.push(
-      `waitForDeviceReady:${device.name}:${timeoutMs}`,
-    );
+    this.executedOperations.push(`waitForDeviceReady:${device.name}:${timeoutMs}`);
 
     if (this.waitForDeviceReadyError) {
       throw this.waitForDeviceReadyError;

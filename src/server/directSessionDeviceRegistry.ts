@@ -1,4 +1,4 @@
-import type { BootedDevice } from "../models";
+import type { BootedDevice, Platform } from "../models";
 
 interface DirectSessionDevice {
   sessionUuid: string;
@@ -20,6 +20,22 @@ export function resolveDirectSessionDevice(sessionUuid: string): DirectSessionDe
 export function unregisterDirectSessionsForDevice(deviceId: string): void {
   for (const [sessionUuid, device] of sessions) {
     if (device.deviceId === deviceId) {
+      sessions.delete(sessionUuid);
+    }
+  }
+}
+
+export function unregisterDirectSessionsForStableIdentity(
+  platform: Platform,
+  stableId: string,
+): void {
+  for (const [sessionUuid, device] of sessions) {
+    if (
+      device.platform === platform &&
+      (platform === "android"
+        ? device.deviceId.startsWith("emulator-") && device.name === stableId
+        : device.deviceId === stableId)
+    ) {
       sessions.delete(sessionUuid);
     }
   }

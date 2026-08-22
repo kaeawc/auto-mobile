@@ -4,6 +4,7 @@ import type { BootedDevice } from "../../../src/models";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 
 function execResult(stdout: string) {
   return {
@@ -23,6 +24,12 @@ class FailingDiscoveryAdbExecutor extends FakeAdbExecutor {
 
 class RecordingAdbExecutor extends FakeAdbExecutor {
   lastDiscoveryOptions: { bypassCache?: boolean; throwOnMissingAdb?: boolean } | undefined;
+  lastExecuteOptions: AdbExecuteOptions | undefined;
+
+  override async execute(args: string[], options: AdbExecuteOptions = {}) {
+    this.lastExecuteOptions = options;
+    return await super.execute(args, options);
+  }
 
   override async getBootedAndroidDevices(
     options?: { bypassCache?: boolean; throwOnMissingAdb?: boolean }
@@ -100,6 +107,10 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
     expect(adb.lastDiscoveryOptions).toMatchObject({
       bypassCache: true,
       throwOnMissingAdb: true,
+    });
+    expect(adb.lastExecuteOptions).toMatchObject({
+      noRetry: true,
+      waitForProcessSettlementAfterAbort: true,
     });
   });
 

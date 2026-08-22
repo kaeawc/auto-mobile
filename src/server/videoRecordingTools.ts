@@ -9,7 +9,11 @@ import {
   VideoQualityPreset,
 } from "../models";
 import { createJSONToolResponse } from "../utils/toolUtils";
-import { addDeviceTargetingToSchema, platformSchema } from "./toolSchemaHelpers";
+import {
+  addDeviceTargetingToSchema,
+  platformSchema,
+  withCanonicalDiscriminatedUnionJsonSchema,
+} from "./toolSchemaHelpers";
 import {
   IOS_MAX_DURATION_SECONDS,
   listActiveVideoRecordings,
@@ -193,7 +197,7 @@ const highlightTimingSchema = z.object({
 
 const highlightSchema = z.object({
   description: z.string().optional().describe("Highlight description"),
-  shape: highlightShapeSchema.describe("Highlight shape"),
+  shape: withCanonicalDiscriminatedUnionJsonSchema(highlightShapeSchema, "Highlight shape"),
   timing: highlightTimingSchema.optional().describe("Highlight timing"),
 });
 

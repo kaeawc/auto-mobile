@@ -1,4 +1,4 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, spyOn } from "bun:test";
 import {
   DefaultDeviceProvisioner,
   buildCreatedDeviceName,
@@ -12,6 +12,7 @@ import { ActionableError } from "../../src/models/ActionableError";
 import type { AppleDeviceType } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import type { SystemImage } from "../../src/utils/android-cmdline-tools/avdmanager";
 import { FakeAndroidAvdCreator, FakeIosSimulatorCreator } from "../fakes/FakeDeviceProvisioner";
+import { logger } from "../../src/utils/logger";
 
 function deviceType(name: string, productFamily = "iPhone"): AppleDeviceType {
   return {
@@ -43,7 +44,9 @@ describe("buildCreatedDeviceName", () => {
   });
 
   it("falls back to a placeholder when the base name has no usable characters", () => {
-    expect(buildCreatedDeviceName("///", new CountingIdGenerator("x"))).toBe("AutoMobile-device-x1");
+    expect(buildCreatedDeviceName("///", new CountingIdGenerator("x"))).toBe(
+      "AutoMobile-device-x1",
+    );
   });
 });
 
@@ -73,7 +76,7 @@ describe("pickIosDeviceType", () => {
 
   it("throws an actionable error when the requested family is absent", () => {
     expect(() => pickIosDeviceType([deviceType("iPhone 17")], { formFactor: "tablet" })).toThrow(
-      /No iPad simulator device type/
+      /No iPad simulator device type/,
     );
   });
 });
@@ -91,7 +94,7 @@ describe("pickAndroidSystemImage tag preference", () => {
     ];
 
     expect(pickAndroidSystemImage(images, {}, "arm64").packageName).toBe(
-      "system-images;android-35;google_apis;arm64-v8a"
+      "system-images;android-35;google_apis;arm64-v8a",
     );
   });
 
@@ -102,7 +105,7 @@ describe("pickAndroidSystemImage tag preference", () => {
     ];
 
     expect(pickAndroidSystemImage(images, {}, "arm64").packageName).toBe(
-      "system-images;android-35;default;arm64-v8a"
+      "system-images;android-35;default;arm64-v8a",
     );
   });
 });
@@ -117,13 +120,13 @@ describe("pickAndroidSystemImage", () => {
 
   it("prefers the newest API level with a host-runnable ABI", () => {
     expect(pickAndroidSystemImage(images, {}, "x64").packageName).toBe(
-      "system-images;android-35;google_apis;x86_64"
+      "system-images;android-35;google_apis;x86_64",
     );
   });
 
   it("prefers the host ABI when several API levels tie", () => {
     expect(pickAndroidSystemImage(images.slice(0, 3), {}, "arm64").packageName).toBe(
-      "system-images;android-34;google_apis;arm64-v8a"
+      "system-images;android-34;google_apis;arm64-v8a",
     );
   });
 
@@ -134,7 +137,7 @@ describe("pickAndroidSystemImage", () => {
 
   it("throws an actionable error when nothing is installed in range", () => {
     expect(() => pickAndroidSystemImage(images, { minOsVersion: "99" }, "x64")).toThrow(
-      /No installed Android system image/
+      /No installed Android system image/,
     );
   });
 
@@ -149,7 +152,7 @@ describe("DefaultDeviceProvisioner", () => {
     const simctl = new FakeIosSimulatorCreator(
       [deviceType("iPhone 17")],
       "com.apple.CoreSimulator.SimRuntime.iOS-26-3",
-      "NEW-UDID"
+      "NEW-UDID",
     );
     const provisioner = new DefaultDeviceProvisioner({
       iosCreator: () => simctl,
@@ -176,6 +179,84 @@ describe("DefaultDeviceProvisioner", () => {
     ]);
   });
 
+  it("reserves the generated iOS name before creation and binds the returned UDID", async () => {
+    const events: string[] = [];
+    const controller = new AbortController();
+    const simctl = new FakeIosSimulatorCreator(
+      [deviceType("iPhone 17")],
+      "com.apple.CoreSimulator.SimRuntime.iOS-26-3",
+      "NEW-UDID",
+    );
+    const createSimulator = simctl.createSimulator.bind(simctl);
+    simctl.createSimulator = async (name, deviceTypeIdentifier, runtime) => {
+      events.push(`create:${name}`);
+      return await createSimulator(name, deviceTypeIdentifier, runtime);
+    };
+    const provisioner = new DefaultDeviceProvisioner({
+      iosCreator: () => simctl,
+      androidCreator: () => new FakeAndroidAvdCreator(),
+      idGenerator: new CountingIdGenerator("uuid"),
+      architecture: "arm64",
+      identityHooks: {
+        reserveBeforeCreate: async (identity) => {
+          events.push(`reserve:${identity.name}`);
+          return controller.signal;
+        },
+        bindAfterCreate: async (device) => {
+          events.push(`bind:${device.deviceId}`);
+        },
+      },
+    });
+
+    await provisioner.provision({ platform: "ios" });
+
+    expect(events).toEqual([
+      "reserve:AutoMobile-iPhone-17-uuid1",
+      "create:AutoMobile-iPhone-17-uuid1",
+      "bind:NEW-UDID",
+    ]);
+  });
+
+  it("logs a created iOS simulator identity before canonical binding rejects", async () => {
+    const bindingError = new Error("lifecycle binding failed");
+    const infoSpy = spyOn(logger, "info").mockImplementation(() => {});
+    const provisioner = new DefaultDeviceProvisioner({
+      iosCreator: () =>
+        new FakeIosSimulatorCreator(
+          [deviceType("iPhone 17")],
+          "com.apple.CoreSimulator.SimRuntime.iOS-26-3",
+          "NEW-UDID",
+        ),
+      androidCreator: () => new FakeAndroidAvdCreator(),
+      idGenerator: new CountingIdGenerator("uuid"),
+      architecture: "arm64",
+      identityHooks: {
+        reserveBeforeCreate: async () => undefined,
+        bindAfterCreate: async () => {
+          throw bindingError;
+        },
+      },
+    });
+
+    try {
+      await expect(provisioner.provision({ platform: "ios" })).rejects.toBe(bindingError);
+      expect(
+        infoSpy.mock.calls.some(([message]) =>
+          String(message).includes(
+            "Created iOS simulator 'AutoMobile-iPhone-17-uuid1' (udid=NEW-UDID",
+          ),
+        ),
+      ).toBe(true);
+      expect(
+        infoSpy.mock.calls.some(([message]) =>
+          String(message).includes("xcrun simctl delete NEW-UDID"),
+        ),
+      ).toBe(true);
+    } finally {
+      infoSpy.mockRestore();
+    }
+  });
+
   it("creates an Android AVD from an installed system image", async () => {
     const avd = new FakeAndroidAvdCreator([systemImage(34, "google_apis", "arm64-v8a")]);
     const provisioner = new DefaultDeviceProvisioner({
@@ -194,7 +275,45 @@ describe("DefaultDeviceProvisioner", () => {
       runtime: "android-34",
     });
     expect(avd.createCalls).toEqual([
-      { name: "AutoMobile-android-34-uuid1", package: "system-images;android-34;google_apis;arm64-v8a" },
+      {
+        name: "AutoMobile-android-34-uuid1",
+        package: "system-images;android-34;google_apis;arm64-v8a",
+      },
+    ]);
+  });
+
+  it("reserves the generated Android AVD name before creation and binds afterward", async () => {
+    const events: string[] = [];
+    const controller = new AbortController();
+    const avd = new FakeAndroidAvdCreator([systemImage(34, "google_apis", "arm64-v8a")]);
+    const createAvd = avd.createAvd.bind(avd);
+    avd.createAvd = async (params, signal) => {
+      events.push(`create:${params.name}`);
+      expect(signal).toBe(controller.signal);
+      return await createAvd(params, signal);
+    };
+    const provisioner = new DefaultDeviceProvisioner({
+      iosCreator: () => undefined,
+      androidCreator: () => avd,
+      idGenerator: new CountingIdGenerator("uuid"),
+      architecture: "arm64",
+      identityHooks: {
+        reserveBeforeCreate: async (identity) => {
+          events.push(`reserve:${identity.name}`);
+          return controller.signal;
+        },
+        bindAfterCreate: async (device) => {
+          events.push(`bind:${device.name}`);
+        },
+      },
+    });
+
+    await provisioner.provision({ platform: "android" });
+
+    expect(events).toEqual([
+      "reserve:AutoMobile-android-34-uuid1",
+      "create:AutoMobile-android-34-uuid1",
+      "bind:AutoMobile-android-34-uuid1",
     ]);
   });
 
@@ -209,7 +328,7 @@ describe("DefaultDeviceProvisioner", () => {
     });
 
     await expect(provisioner.provision({ platform: "android" })).rejects.toThrow(
-      /Failed to create Android AVD .*package not installed/
+      /Failed to create Android AVD .*package not installed/,
     );
   });
 
@@ -220,7 +339,7 @@ describe("DefaultDeviceProvisioner", () => {
     });
 
     await expect(provisioner.provision({ platform: "ios" })).rejects.toThrow(
-      /iOS simulator tools \(xcrun simctl\) are not available/
+      /iOS simulator tools \(xcrun simctl\) are not available/,
     );
   });
 });

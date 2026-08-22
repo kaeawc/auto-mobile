@@ -525,7 +525,12 @@ function stableRefKey(node) {
 			return null;
 		}
 		if (node.computed) {
-			const indexKey = propertyName(node.property) ?? identifierName(node.property);
+			const property = node.property;
+			const numericIndex =
+				property?.type === "Literal" && typeof property.value === "number"
+					? String(property.value)
+					: null;
+			const indexKey = propertyName(property) ?? identifierName(property) ?? numericIndex;
 			return indexKey === null ? null : `${objectKey}[${indexKey}]`;
 		}
 		const prop = propertyName(node.property);

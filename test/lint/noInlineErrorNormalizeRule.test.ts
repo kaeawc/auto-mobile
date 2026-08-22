@@ -56,4 +56,10 @@ describe("auto-mobile/no-inline-error-normalize", () => {
       fires("const m = a.error instanceof Error ? b.error.message : String(a.error);"),
     ).toBe(false);
   });
+
+  test("flags a numeric index-access subject (`errors[0]`)", () => {
+    expect(
+      fires("const m = errors[0] instanceof Error ? errors[0].message : String(errors[0]);"),
+    ).toBe(true);
+  });
 });

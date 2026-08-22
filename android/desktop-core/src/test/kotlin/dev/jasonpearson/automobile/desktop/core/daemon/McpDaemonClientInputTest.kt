@@ -154,12 +154,7 @@ class McpDaemonClientInputTest {
 
   @Test
   fun `tool selection fails when the control tool is unavailable`() {
-    TestDaemonSocket(
-        responses =
-          listOf(
-            SocketResponse(error = "Unknown tool: setToolEnabled"),
-          )
-      )
+    TestDaemonSocket(responses = listOf(SocketResponse(error = "Unknown tool: setToolEnabled")))
       .use { server ->
         val client = McpDaemonClient(socketPathValue = server.socketPath.toString())
 

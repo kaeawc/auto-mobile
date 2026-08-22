@@ -153,6 +153,12 @@ interface ReadinessReservationTarget {
   incarnation: number;
 }
 
+interface AdbServerResetRecoveryReservation {
+  image: DeviceInfo;
+  settled: Promise<void>;
+  resolve(): void;
+}
+
 export interface SystemUiAnrRecoveryHandoff {
   readonly preservedSessionId?: string;
   readonly replacementDevice: PooledDevice;
@@ -274,6 +280,13 @@ export class DevicePool {
   private readonly androidDeviceReboot: AndroidDeviceReboot;
   private readonly recoveryPolicy: DeviceRecoveryPolicy;
   private readonly recoveringAndroidImages: Map<string, DeviceInfo> = new Map();
+  /**
+   * A reset cohort is reserved before its first member is restarted. This keeps
+   * a concurrent named getAndroid call from booting a later cohort member while
+   * its detached AVD/session relationship is still being restored.
+   */
+  private readonly adbServerResetRecoveryReservations:
+    Map<string, AdbServerResetRecoveryReservation> = new Map();
   private readonly recoveringAndroidDeviceIds: Set<string> = new Set();
   private readonly startedDeviceProcesses: Map<string, ChildProcess> = new Map();
   private readonly startedDeviceProcessOutput: Map<string, EmulatorProcessOutputTail> = new Map();
@@ -1629,20 +1642,33 @@ export class DevicePool {
     return (
       this.suppressedAutoStartDeviceImageKeys.has(this.criteriaMatcher.getDeviceImageKey(image)) ||
       this.suppressedAutoStartDeviceImageKeys.has(`${image.platform}:${image.name}`) ||
-      (image.platform === "android" && this.recoveringAndroidImages.has(image.name))
+      (image.platform === "android" && (
+        this.recoveringAndroidImages.has(image.name) ||
+        this.adbServerResetRecoveryReservations.has(image.name)
+      ))
     );
   }
 
   private hasPendingAndroidRecovery(platform?: Platform): boolean {
     return (
-      (platform === undefined || platform === "android") && this.recoveringAndroidImages.size > 0
+      (platform === undefined || platform === "android") &&
+      (
+        this.recoveringAndroidImages.size > 0 ||
+        this.adbServerResetRecoveryReservations.size > 0
+      )
     );
   }
 
   private hasPendingAndroidRecoveryMatching(criteria?: DeviceAllocationCriteria): boolean {
-    return this.criteriaMatcher.someDeviceImageMatchesCriteria(
-      this.recoveringAndroidImages.values(),
-      criteria,
+    return (
+      this.criteriaMatcher.someDeviceImageMatchesCriteria(
+        this.recoveringAndroidImages.values(),
+        criteria,
+      ) ||
+      this.criteriaMatcher.someDeviceImageMatchesCriteria(
+        Array.from(this.adbServerResetRecoveryReservations.values(), reservation => reservation.image),
+        criteria,
+      )
     );
   }
 
@@ -1922,25 +1948,81 @@ export class DevicePool {
       for (const device of cohort) {
         if (
           this.devices.get(device.id) !== device ||
-          !device.sessionId ||
           !this.isAutoMobileOwnedAndroidVirtualDevice(device)
         ) {
           continue;
         }
-        const session = this.sessionManager.getSession(device.sessionId);
-        if (
-          !session ||
-          session.assignedDevice !== device.id ||
-          session.platform !== "android"
-        ) {
-          continue;
+        if (device.sessionId) {
+          const session = this.sessionManager.getSession(device.sessionId);
+          if (
+            !session ||
+            session.assignedDevice !== device.id ||
+            session.platform !== "android"
+          ) {
+            continue;
+          }
         }
+        this.reserveAdbServerResetRecovery(device);
         device.sessionId = null;
         device.status = "idle";
         await this.removeDevice(device.id, false, device);
         detached.push(device);
       }
       return detached;
+    });
+  }
+
+  /**
+   * Wait for a cohort-level reservation created before ADB-reset recovery
+   * starts. Named startup uses this so it cannot race a later cohort member.
+   */
+  async waitForAdbServerResetRecovery(avdName: string, signal?: AbortSignal): Promise<void> {
+    const reservation = this.adbServerResetRecoveryReservations.get(avdName);
+    if (!reservation) {
+      return;
+    }
+    await runWithAbortSignal(signal, async () => await reservation.settled);
+  }
+
+  async releaseAdbServerResetCohortReservations(
+    cohort: readonly PooledDevice[],
+  ): Promise<void> {
+    await this.assignmentMutex.runExclusive(() => {
+      for (const device of cohort) {
+        if (!device.avdName) {
+          continue;
+        }
+        const reservation = this.adbServerResetRecoveryReservations.get(device.avdName);
+        if (!reservation) {
+          continue;
+        }
+        this.adbServerResetRecoveryReservations.delete(device.avdName);
+        reservation.resolve();
+      }
+    });
+  }
+
+  private reserveAdbServerResetRecovery(device: PooledDevice): void {
+    if (!device.avdName || !device.androidImage) {
+      return;
+    }
+    if (this.adbServerResetRecoveryReservations.has(device.avdName)) {
+      return;
+    }
+    let resolve!: () => void;
+    const settled = new Promise<void>(resolvePromise => {
+      resolve = resolvePromise;
+    });
+    this.adbServerResetRecoveryReservations.set(device.avdName, {
+      image: {
+        ...device.androidImage,
+        name: device.avdName,
+        platform: "android",
+        isRunning: false,
+        source: "local",
+      },
+      settled,
+      resolve,
     });
   }
 

@@ -125,7 +125,7 @@ describe("ADB server reset session recovery", () => {
     }
   });
 
-  test("detaches every reset-cohort serial while retaining its session mapping", async () => {
+  test("detaches every reset-cohort serial while retaining bound session mappings", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const manager = new FakeDeviceManager();
@@ -140,6 +140,7 @@ describe("ADB server reset session recovery", () => {
     const devices: BootedDevice[] = [
       { platform: "android", name: "Pixel_8_API_35", deviceId: "emulator-5554" },
       { platform: "android", name: "Pixel_9_API_36", deviceId: "emulator-5556" },
+      { platform: "android", name: "Pixel_9_Pro_API_36", deviceId: "emulator-5558" },
     ];
     manager.bootedDevices = devices;
     for (const [index, device] of devices.entries()) {
@@ -150,7 +151,9 @@ describe("ADB server reset session recovery", () => {
         source: "local",
       };
       await pool.addDevice(device, image);
-      await pool.bindOrReuseDeviceSession(`session-${index}`, device.deviceId, "android", image);
+      if (index < 2) {
+        await pool.bindOrReuseDeviceSession(`session-${index}`, device.deviceId, "android", image);
+      }
     }
     const cohort = devices.map(device => pool.getDevice(device.deviceId)!);
 
@@ -160,8 +163,20 @@ describe("ADB server reset session recovery", () => {
       expect(detached).toEqual(cohort);
       expect(pool.getDevice(devices[0].deviceId)).toBeNull();
       expect(pool.getDevice(devices[1].deviceId)).toBeNull();
+      expect(pool.getDevice(devices[2].deviceId)).toBeNull();
       expect(sessionManager.getSession("session-0")?.assignedDevice).toBe(devices[0].deviceId);
       expect(sessionManager.getSession("session-1")?.assignedDevice).toBe(devices[1].deviceId);
+      let idleReservationSettled = false;
+      const idleReservation = pool
+        .waitForAdbServerResetRecovery(devices[2].name)
+        .then(() => {
+          idleReservationSettled = true;
+        });
+      await Promise.resolve();
+      expect(idleReservationSettled).toBe(false);
+      await pool.releaseAdbServerResetCohortReservations(detached);
+      await idleReservation;
+      expect(idleReservationSettled).toBe(true);
     } finally {
       sessionManager.stopCleanupTimer();
     }

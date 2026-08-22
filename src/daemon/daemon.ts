@@ -1388,6 +1388,7 @@ export class Daemon {
     const deviceManager = new MultiPlatformDeviceManager();
 
     this.deviceDisconnectMonitor = new SingleFlightInterval(this.timer, DEVICE_DISCONNECT_POLL_INTERVAL_MS, async () => {
+      let adbServerResetCohort: readonly PooledDevice[] = [];
       try {
         if (serverConfig.isPlanExecutionActive()) {
           logger.debug("[DisconnectMonitor] Skipping — plan execution active");
@@ -1452,7 +1453,7 @@ export class Daemon {
           this.forceDisconnectedDeviceIds,
           this.devicePool.getAllDevices(),
         );
-        const adbServerResetCohort = detectedAdbServerResetCohort.length > 0
+        adbServerResetCohort = detectedAdbServerResetCohort.length > 0
           ? await this.devicePool.detachAdbServerResetCohort(detectedAdbServerResetCohort)
           : [];
         const processWideAdbServerReset = adbServerResetCohort.length > 0;
@@ -1596,6 +1597,8 @@ export class Daemon {
         }
       } catch (error) {
         logger.warn(`[Daemon] Device disconnect monitor failed: ${error}`);
+      } finally {
+        await this.devicePool.releaseAdbServerResetCohortReservations(adbServerResetCohort);
       }
     });
     this.deviceDisconnectMonitor.start();
@@ -1628,9 +1631,18 @@ export class Daemon {
     const recovered = await this.devicePool
       .recoverSessionBoundAndroidDeviceAfterAdbServerReset(deviceId, pooledDevice);
     if (!recovered) {
+      this.retireAdbServerResetDisconnectState(deviceId, forceGenerationAtDisconnect);
       return false;
     }
 
+    this.retireAdbServerResetDisconnectState(deviceId, forceGenerationAtDisconnect);
+    return true;
+  }
+
+  private retireAdbServerResetDisconnectState(
+    deviceId: string,
+    forceGenerationAtDisconnect: number | undefined,
+  ): void {
     this.socketServer?.evictDeviceInputCache(deviceId);
     this.deviceDisconnectMisses.delete(deviceId);
     this.deviceDisconnectMissIncarnations.delete(deviceId);
@@ -1639,7 +1651,6 @@ export class Daemon {
       this.forceDisconnectedDeviceIds.delete(deviceId);
       this.forceDisconnectedDeviceGenerations.delete(deviceId);
     }
-    return true;
   }
 
   private async stopRecordingAfterDeviceDisconnect(recordingId: string, deviceId: string): Promise<boolean> {

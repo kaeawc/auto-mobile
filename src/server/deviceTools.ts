@@ -1614,6 +1614,20 @@ function getStartDevicePool(daemonState: DaemonState): DevicePool | undefined {
   return daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
 }
 
+async function waitForPendingAndroidResetRecovery(
+  args: StartDeviceArgs,
+  budgets: { androidAvdName?: string },
+  signal?: AbortSignal,
+): Promise<void> {
+  if (args.platform !== "android" || !budgets.androidAvdName) {
+    return;
+  }
+  await getStartDevicePool(DaemonState.getInstance())?.waitForAdbServerResetRecovery(
+    budgets.androidAvdName,
+    signal,
+  );
+}
+
 function createRunnerReadinessAttempt(
   input: StartDeviceRunnerReadinessInput,
 ): (candidate: DeviceBootResult) => Promise<void> {
@@ -1751,6 +1765,7 @@ export function registerDeviceTools() {
     let retireRecoveredReplacement: (() => Promise<void>) | undefined;
 
     try {
+      await waitForPendingAndroidResetRecovery(args, budgets, signal);
       const bootService = new DeviceBootService({
         deviceManager: deviceUtils,
         deviceMatcher: deps.deviceMatcherFactory(),

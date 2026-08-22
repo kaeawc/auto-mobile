@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { AndroidEmulatorClient } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { ExecResult, BootedDevice } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -73,16 +73,16 @@ class DeviceScopedAdbExecutor extends FakeAdbExecutor {
 
 class DeviceScopedAdbClientFactory implements AdbClientFactory {
   readonly commandLog: string[] = [];
-  private readonly deviceScans: BootedDevice[][];
+  private readonly deviceScans: Array<BootedDevice[] | Error>;
   private scanIndex = 0;
 
   constructor(
-    devices: BootedDevice[] | BootedDevice[][],
+    devices: BootedDevice[] | Array<BootedDevice[] | Error>,
     private readonly avdNamesByDeviceId = new Map<string, string>(),
   ) {
     const firstScan = devices[0];
-    this.deviceScans = Array.isArray(firstScan)
-      ? devices as BootedDevice[][]
+    this.deviceScans = Array.isArray(firstScan) || firstScan instanceof Error
+      ? devices as Array<BootedDevice[] | Error>
       : [devices as BootedDevice[]];
   }
 
@@ -93,6 +93,9 @@ class DeviceScopedAdbClientFactory implements AdbClientFactory {
   nextDevices(): BootedDevice[] {
     const devices = this.deviceScans[Math.min(this.scanIndex, this.deviceScans.length - 1)] ?? [];
     this.scanIndex += 1;
+    if (devices instanceof Error) {
+      throw devices;
+    }
     return devices;
   }
 
@@ -117,6 +120,10 @@ const mockExecAsync = async (_file: string, _args: string[]): Promise<ExecResult
 function skipEmulatorPathDetection(client: AndroidEmulatorClient): void {
   (client as any).ensureEmulatorPath = async () => "emulator";
 }
+
+afterEach(() => {
+  AndroidEmulatorClient.resetLaunchReservationsForTesting();
+});
 
 describe("AndroidEmulatorClient detectCorruptImage", () => {
   let client: AndroidEmulatorClient;
@@ -369,11 +376,13 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
     expect(error.message).toContain("exited with code: 1");
   });
 
-  test("uses spawned process output deviceId to target readiness when AVD name is unavailable", async () => {
+  test("uses a reserved console port to target readiness when AVD name is unavailable", async () => {
     const fakeChild = createFakeChildProcess();
-    const spawnFn = ((_cmd: string, _args: string[]) => {
+    let spawnedArgs: string[] = [];
+    const spawnFn = ((_cmd: string, args: string[]) => {
+      spawnedArgs = args;
       process.nextTick(() => {
-        fakeChild.stdout!.emit("data", Buffer.from("emulator-5558: INFO: console port 5558\nDetected GPU type: host\n"));
+        fakeChild.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
       });
       return fakeChild;
     }) as any;
@@ -400,13 +409,82 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
     const child = await client.startEmulator("Pixel_9_Pro");
     fakeAdb.setDevices([
       { name: "Unknown (emulator-5554)", platform: "android", deviceId: "emulator-5554", source: "local" },
-      { name: "Unknown (emulator-5558)", platform: "android", deviceId: "emulator-5558", source: "local" },
+      { name: "Unknown (emulator-5556)", platform: "android", deviceId: "emulator-5556", source: "local" },
     ]);
 
     const readyDevice = await client.waitForEmulatorReady("Pixel_9_Pro", 5_000, child);
 
-    expect(readyDevice.deviceId).toBe("emulator-5558");
+    expect(spawnedArgs).toContain("-port");
+    expect(spawnedArgs).toContain("5556");
+    expect(readyDevice.deviceId).toBe("emulator-5556");
     expect(fakeAdb.getExecutedCommands().some(command => command.includes("get-state"))).toBe(true);
+  });
+
+  test("adopts the existing AVD after a post-validation duplicate-AVD exit", async () => {
+    const fakeChild = createFakeChildProcess();
+    const spawnFn = ((_cmd: string, _args: string[]) => {
+      process.nextTick(() => {
+        fakeChild.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+      });
+      return fakeChild;
+    }) as any;
+    const execAsync = async (_file: string, args: string[]): Promise<ExecResult> =>
+      args.includes("-list-avds") ? createExecResult("Pixel_9_Pro\n") : createExecResult("");
+
+    fakeTimer.enableAutoAdvance();
+    fakeAdb.setCommandResponse("emu avd name", createExecResult("Pixel_9_Pro\n"));
+    fakeAdb.setCommandResponse("get-state", createExecResult("device\n"));
+    fakeAdb.setCommandResponse("shell pm list packages", createExecResult("package:android\n"));
+    fakeAdb.setCommandResponse("shell getprop sys.boot_completed", createExecResult("1\n"));
+    fakeAdb.setCommandResponse("shell getprop init.svc.bootanim", createExecResult("stopped\n"));
+    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory, fakeAvdConfigReader);
+    skipEmulatorPathDetection(client);
+
+    const child = await client.startEmulator("Pixel_9_Pro");
+    fakeChild.stderr!.emit(
+      "data",
+      Buffer.from("Running multiple emulators with the same AVD is an experimental feature.\n"),
+    );
+    fakeChild.emit("exit", 1);
+    fakeChild.emit("close", 1);
+    fakeAdb.setDevices([
+      { name: "Pixel_9_Pro", platform: "android", deviceId: "emulator-5556", source: "local" },
+    ]);
+
+    await expect(client.waitForEmulatorReady("Pixel_9_Pro", 5_000, child)).resolves.toMatchObject({
+      deviceId: "emulator-5556",
+    });
+  });
+
+  test("keeps an exited launch port reserved while ADB reports its serial offline", async () => {
+    const firstChild = createFakeChildProcess();
+    const secondChild = createFakeChildProcess();
+    const children = [firstChild, secondChild];
+    const spawnedArgs: string[][] = [];
+    const spawnFn = ((_cmd: string, args: string[]) => {
+      spawnedArgs.push(args);
+      const child = children.shift()!;
+      process.nextTick(() => {
+        child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+      });
+      return child;
+    }) as any;
+    const execAsync = async (_file: string, args: string[]): Promise<ExecResult> =>
+      args.includes("-list-avds") ? createExecResult("Pixel_9_Pro\n") : createExecResult("");
+
+    fakeTimer.enableAutoAdvance();
+    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory, fakeAvdConfigReader);
+    skipEmulatorPathDetection(client);
+
+    const firstLaunch = await client.startEmulator("Pixel_9_Pro");
+    firstLaunch!.emit("exit", 0);
+    fakeAdb.setDeviceStates([{ deviceId: "emulator-5554", state: "offline" }]);
+    await client.startEmulator("Pixel_9_Pro");
+
+    expect(spawnedArgs).toEqual([
+      expect.arrayContaining(["-port", "5554"]),
+      expect.arrayContaining(["-port", "5556"]),
+    ]);
   });
 });
 
@@ -745,6 +823,246 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
 
     expect(scopedFactory.commandLog.some(command => command.startsWith("emulator-5558:get-state"))).toBe(false);
     expect(scopedFactory.commandLog.some(command => command.startsWith("emulator-5554:get-state"))).toBe(false);
+  });
+
+  test("uses its reserved console port when launch output and AVD-name lookup are unavailable", async () => {
+    fakeTimer.enableAutoAdvance();
+    const fakeChild = createFakeChildProcess();
+    const existingDevice: BootedDevice = {
+      name: "Unknown (emulator-5554)",
+      platform: "android",
+      deviceId: "emulator-5554",
+      source: "local",
+    };
+    const launchedDevice: BootedDevice = {
+      name: "Unknown (emulator-5556)",
+      platform: "android",
+      deviceId: "emulator-5556",
+      source: "local",
+    };
+    const scopedFactory = new DeviceScopedAdbClientFactory([
+      [existingDevice],
+      [existingDevice],
+      [existingDevice, launchedDevice],
+    ]);
+    let spawnedArgs: string[] = [];
+    const spawnFn = ((_cmd: string, args: string[]) => {
+      spawnedArgs = args;
+      process.nextTick(() => {
+        fakeChild.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+      });
+      return fakeChild;
+    }) as any;
+    const execAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
+      if (args.includes("-list-avds")) {
+        return createExecResult("am-api33-ga-arm64\n");
+      }
+      return createExecResult("");
+    };
+    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, scopedFactory);
+    skipEmulatorPathDetection(client);
+
+    const child = await client.startEmulator("am-api33-ga-arm64");
+    const result = await client.waitForEmulatorReady("am-api33-ga-arm64", 5_000, child);
+
+    expect(spawnedArgs).toContain("-port");
+    expect(spawnedArgs).toContain("5556");
+    expect(result.deviceId).toBe("emulator-5556");
+    expect(scopedFactory.commandLog.some(command => command.startsWith("emulator-5556:get-state"))).toBe(true);
+    expect(scopedFactory.commandLog.some(command => command.startsWith("emulator-5554:get-state"))).toBe(false);
+  });
+
+  test("does not adopt an externally launched unknown emulator during concurrent launches", async () => {
+    fakeTimer.enableAutoAdvance();
+    const firstChild = createFakeChildProcess();
+    const secondChild = createFakeChildProcess();
+    const candidate: BootedDevice = {
+      name: "Unknown (emulator-5558)",
+      platform: "android",
+      deviceId: "emulator-5558",
+      source: "local",
+    };
+    const scopedFactory = new DeviceScopedAdbClientFactory([
+      [],
+      [],
+      [],
+      [],
+      [candidate],
+    ]);
+    const children = [firstChild, secondChild];
+    const spawnedArgs: string[][] = [];
+    const spawnFn = ((_cmd: string, args: string[]) => {
+      spawnedArgs.push(args);
+      const child = children.shift()!;
+      process.nextTick(() => {
+        child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+      });
+      return child;
+    }) as any;
+    const execAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
+      if (args.includes("-list-avds")) {
+        return createExecResult("am-api33-ga-arm64\n");
+      }
+      return createExecResult("");
+    };
+    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, scopedFactory);
+    skipEmulatorPathDetection(client);
+
+    const firstLaunch = await client.startEmulator("am-api33-ga-arm64");
+    const secondLaunch = await client.startEmulator("am-api33-ga-arm64");
+    await expect(
+      client.waitForEmulatorReady("am-api33-ga-arm64", 100, firstLaunch),
+    ).rejects.toThrow("failed to become ready within 100ms");
+
+    expect(spawnedArgs).toEqual(expect.arrayContaining([
+      expect.arrayContaining(["-port", "5554"]),
+      expect.arrayContaining(["-port", "5556"]),
+    ]));
+    expect(scopedFactory.commandLog.some(command => command.startsWith("emulator-5558:get-state"))).toBe(false);
+    secondLaunch!.emit("exit", 0);
+  });
+
+  test("does not infer an unknown emulator when a pre-launch snapshot fails", async () => {
+    fakeTimer.enableAutoAdvance();
+    const firstChild = createFakeChildProcess();
+    const secondChild = createFakeChildProcess();
+    const candidate: BootedDevice = {
+      name: "Unknown (emulator-5558)",
+      platform: "android",
+      deviceId: "emulator-5558",
+      source: "local",
+    };
+    const scopedFactory = new DeviceScopedAdbClientFactory([
+      [],
+      [],
+      [],
+      new Error("temporary adb device-list failure"),
+      [candidate],
+    ]);
+    const children = [firstChild, secondChild];
+    const spawnedArgs: string[][] = [];
+    const spawnFn = ((_cmd: string, args: string[]) => {
+      spawnedArgs.push(args);
+      const child = children.shift()!;
+      process.nextTick(() => {
+        child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+      });
+      return child;
+    }) as any;
+    const execAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
+      if (args.includes("-list-avds")) {
+        return createExecResult("am-api33-ga-arm64\n");
+      }
+      return createExecResult("");
+    };
+    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, scopedFactory);
+    skipEmulatorPathDetection(client);
+
+    const firstLaunch = await client.startEmulator("am-api33-ga-arm64");
+    const secondLaunch = await client.startEmulator("am-api33-ga-arm64");
+    await expect(
+      client.waitForEmulatorReady("am-api33-ga-arm64", 100, secondLaunch),
+    ).rejects.toThrow("failed to become ready within 100ms");
+
+    expect(spawnedArgs.some(args => !args.includes("-port"))).toBe(true);
+    expect(scopedFactory.commandLog.some(command => command.startsWith("emulator-5558:get-state"))).toBe(false);
+    firstLaunch!.emit("exit", 0);
+    secondLaunch!.emit("exit", 0);
+  });
+
+  test("keeps an exited launch port reserved while ADB still reports its serial", async () => {
+    fakeTimer.enableAutoAdvance();
+    const firstChild = createFakeChildProcess();
+    const secondChild = createFakeChildProcess();
+    const retainedDevice: BootedDevice = {
+      name: "Unknown (emulator-5554)",
+      platform: "android",
+      deviceId: "emulator-5554",
+      source: "local",
+    };
+    const scopedFactory = new DeviceScopedAdbClientFactory([
+      [],
+      [],
+      [retainedDevice],
+      [retainedDevice],
+    ]);
+    const children = [firstChild, secondChild];
+    const spawnedArgs: string[][] = [];
+    const spawnFn = ((_cmd: string, args: string[]) => {
+      spawnedArgs.push(args);
+      const child = children.shift()!;
+      process.nextTick(() => {
+        child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+      });
+      return child;
+    }) as any;
+    const execAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
+      if (args.includes("-list-avds")) {
+        return createExecResult("am-api33-ga-arm64\n");
+      }
+      return createExecResult("");
+    };
+    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, scopedFactory);
+    skipEmulatorPathDetection(client);
+
+    const firstLaunch = await client.startEmulator("am-api33-ga-arm64");
+    firstLaunch!.emit("exit", 0);
+    await client.startEmulator("am-api33-ga-arm64");
+
+    expect(spawnedArgs).toEqual([
+      expect.arrayContaining(["-port", "5554"]),
+      expect.arrayContaining(["-port", "5556"]),
+    ]);
+  });
+
+  test("does not probe externally launched unknown emulators when the reserved target is absent", async () => {
+    fakeTimer.enableAutoAdvance();
+    const fakeChild = createFakeChildProcess();
+    const existingDevice: BootedDevice = {
+      name: "Unknown (emulator-5554)",
+      platform: "android",
+      deviceId: "emulator-5554",
+      source: "local",
+    };
+    const firstCandidate: BootedDevice = {
+      name: "Unknown (emulator-5558)",
+      platform: "android",
+      deviceId: "emulator-5558",
+      source: "local",
+    };
+    const secondCandidate: BootedDevice = {
+      name: "Unknown (emulator-5560)",
+      platform: "android",
+      deviceId: "emulator-5560",
+      source: "local",
+    };
+    const scopedFactory = new DeviceScopedAdbClientFactory([
+      [existingDevice],
+      [existingDevice],
+      [existingDevice, firstCandidate, secondCandidate],
+    ]);
+    const spawnFn = ((_cmd: string, _args: string[]) => {
+      process.nextTick(() => {
+        fakeChild.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+      });
+      return fakeChild;
+    }) as any;
+    const execAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
+      if (args.includes("-list-avds")) {
+        return createExecResult("am-api33-ga-arm64\n");
+      }
+      return createExecResult("");
+    };
+    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, scopedFactory);
+    skipEmulatorPathDetection(client);
+
+    const child = await client.startEmulator("am-api33-ga-arm64");
+    await expect(
+      client.waitForEmulatorReady("am-api33-ga-arm64", 100, child),
+    ).rejects.toThrow("failed to become ready within 100ms");
+
+    expect(scopedFactory.commandLog.some(command => command.startsWith("emulator-5558:get-state"))).toBe(false);
+    expect(scopedFactory.commandLog.some(command => command.startsWith("emulator-5560:get-state"))).toBe(false);
   });
 
   test("does not readiness-check multiple new unknown emulators", async () => {

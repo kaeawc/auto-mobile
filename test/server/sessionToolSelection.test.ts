@@ -147,6 +147,95 @@ describe("per-session exact-tool selection", () => {
     ).rejects.toThrow("Tool observe is disabled");
   });
 
+  test("an omitted update after routing binds creates an independent connection profile", async () => {
+    const persisted: Array<{ sessionUuid: string; toolName: string; enabled: boolean }> = [];
+    fixture = new McpTestFixture({
+      sessionContext: { initialSessionToolBinding: "routing-session" },
+      sessionToolSelectionService: {
+        isEnabled: async (_sessionUuid, _toolName, declaredDefault) => declaredDefault,
+        setEnabled: async (sessionUuid, toolName, enabled) => {
+          persisted.push({ sessionUuid, toolName, enabled });
+        },
+      },
+    });
+    await fixture.setup();
+
+    ToolRegistry.clearTools();
+    ToolRegistry.register(
+      "clipboard",
+      "clipboard",
+      z.object({}),
+      async () => ({ content: [{ type: "text", text: "clipboard" }] }),
+      { defaultEnabled: false },
+    );
+    registerToolSelectionTools();
+
+    await fixture.client.request(
+      {
+        method: "tools/call",
+        params: {
+          name: "setToolEnabled",
+          arguments: { toolName: "clipboard" },
+        },
+      },
+      z.any(),
+    );
+
+    expect(persisted).toHaveLength(1);
+    expect(persisted[0]?.sessionUuid).not.toBe("routing-session");
+    expect(persisted[0]?.sessionUuid.length).toBeGreaterThan(0);
+  });
+
+  test("an explicit routing-session update does not become the connection profile", async () => {
+    const overrides = new Map<string, Map<string, boolean>>();
+    fixture = new McpTestFixture({
+      sessionToolSelectionService: {
+        isEnabled: async (sessionUuid, toolName, declaredDefault) =>
+          (sessionUuid ? overrides.get(sessionUuid)?.get(toolName) : undefined) ?? declaredDefault,
+        getOverride: async (sessionUuid, toolName) => overrides.get(sessionUuid)?.get(toolName),
+        setEnabled: async (sessionUuid, toolName, enabled) => {
+          const sessionOverrides = overrides.get(sessionUuid) ?? new Map<string, boolean>();
+          sessionOverrides.set(toolName, enabled);
+          overrides.set(sessionUuid, sessionOverrides);
+        },
+      },
+    });
+    await fixture.setup();
+
+    ToolRegistry.clearTools();
+    ToolRegistry.register(
+      "observe",
+      "observe",
+      z.object({ sessionUuid: z.string().optional() }),
+      async () => ({ content: [{ type: "text", text: "ran" }] }),
+      { defaultEnabled: true },
+    );
+    registerToolSelectionTools();
+
+    await fixture.client.request(
+      {
+        method: "tools/call",
+        params: {
+          name: "setToolEnabled",
+          arguments: { toolName: "observe", enabled: false, sessionUuid: "routing-a" },
+        },
+      },
+      z.any(),
+    );
+
+    const result = await fixture.client.request(
+      {
+        method: "tools/call",
+        params: {
+          name: "observe",
+          arguments: { sessionUuid: "routing-b" },
+        },
+      },
+      z.any(),
+    );
+    expect(result.content[0]?.text).toBe("ran");
+  });
+
   test("a derived routing binding retains the base session grant for discovery and calls", async () => {
     const profileService: Pick<SessionToolSelectionService, "isEnabled" | "getOverride"> = {
       isEnabled: async (sessionUuid, toolName, declaredDefault) =>

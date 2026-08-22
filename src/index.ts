@@ -94,7 +94,7 @@ async function main() {
   }
 
   const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/stdio.js");
-  const { createMcpServer } = await import("./server");
+  const { createMcpServer, registerMcpTools } = await import("./server");
   const { createProxyMcpServer } = await import("./server/proxyServer");
   const { logger, LogLevel } = await import("./utils/logger");
   fatalLogger = logger;
@@ -228,6 +228,10 @@ async function main() {
       disabledTools,
     } = parseArgs(process.argv.slice(2), logger);
     configureToolSelectionCliDefaults(enabledTools, disabledTools);
+    // Validate exact startup names before daemon/direct listeners can publish
+    // readiness. createMcpServer repeats this registration for direct embedded
+    // consumers, but daemon mode creates MCP servers lazily on first request.
+    registerMcpTools(daemonMode);
 
     if (debug) {
       logger.setLogLevel(LogLevel.DEBUG);

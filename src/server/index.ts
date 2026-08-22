@@ -223,24 +223,14 @@ export function formatToolParamError(toolName: string, error: unknown): string {
   return `${issueSummary}${hintSummary}`;
 }
 
-export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
-  const sessionToolBinding = new SessionToolBinding(
-    options.sessionContext?.initialSessionToolBinding,
-    options.sessionContext?.initialToolSelectionProfile,
-  );
-  // Plan execution lock with per-session scope to prevent interference during executePlan
-  // Each test thread gets its own sessionUuid, enabling parallel execution on different devices
-  const planExecutionLock = options.planExecutionLock ?? createDefaultPlanExecutionLock();
-  const daemonMode = options.daemonMode ?? false;
-  void FeatureFlagService.getInstance()
-    .initialize()
-    .catch((error) => {
-      logger.warn(`Failed to initialize feature flags: ${error}`);
-    });
-  // Get configuration and device session managers
-
-  // Register all tool categories
-  startupBenchmark.startPhase("toolRegistration");
+/**
+ * Populate the canonical production registry and validate exact-tool startup
+ * defaults. The process entrypoint calls this before opening daemon listeners;
+ * createMcpServer calls it again because tests and embedded consumers may create
+ * a server directly. Registration is idempotent because the registry is keyed
+ * by exact tool name.
+ */
+export function registerMcpTools(daemonMode: boolean): void {
   registerObserveTools();
   registerInteractionTools();
   registerAppTools();
@@ -275,6 +265,27 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   registerDebugTools();
   registerToolSelectionTools();
   validateConfiguredToolSelectionDefaults(new Set(ToolRegistry.getConfigurableToolNames()));
+}
+
+export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
+  const sessionToolBinding = new SessionToolBinding(
+    options.sessionContext?.initialSessionToolBinding,
+    options.sessionContext?.initialToolSelectionProfile,
+  );
+  // Plan execution lock with per-session scope to prevent interference during executePlan
+  // Each test thread gets its own sessionUuid, enabling parallel execution on different devices
+  const planExecutionLock = options.planExecutionLock ?? createDefaultPlanExecutionLock();
+  const daemonMode = options.daemonMode ?? false;
+  void FeatureFlagService.getInstance()
+    .initialize()
+    .catch((error) => {
+      logger.warn(`Failed to initialize feature flags: ${error}`);
+    });
+  // Get configuration and device session managers
+
+  // Register all tool categories
+  startupBenchmark.startPhase("toolRegistration");
+  registerMcpTools(daemonMode);
   startupBenchmark.endPhase("toolRegistration");
 
   // Register all resources
@@ -471,7 +482,6 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     const sessionId = options.sessionContext?.sessionId;
     const routingSessionUuid = sessionToolBinding.effectiveSessionUuid(sessionId, toolParams);
     let connectionProfileUuid = sessionToolBinding.connectionToolSelectionProfileUuid(sessionId);
-    let selectionSessionUuid = connectionProfileUuid ?? routingSessionUuid;
     const rawRequestedToolSelectionProfileUuid = (toolParams as Record<string, unknown>)
       .sessionUuid;
     const requestedToolSelectionProfileUuid =
@@ -484,20 +494,15 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     if (!tool) {
       throw new ActionableError(`Unknown tool: ${name}`);
     }
-    // Tool selection must be callable before an agent has chosen a
-    // device. Establish a transport-local profile that the control tool can
-    // persist and that later tools/list calls use for discovery.
-    if (name === SET_TOOL_ENABLED_TOOL_NAME && !selectionSessionUuid) {
-      selectionSessionUuid = sessionToolBinding.createAndBindToolSelectionProfile(sessionId);
-      connectionProfileUuid = selectionSessionUuid;
-    }
+    // An omitted selection target always belongs to an independent
+    // transport-local profile, even after device routing binds. Device-session
+    // release must not erase choices for a still-open MCP connection.
     if (
       name === SET_TOOL_ENABLED_TOOL_NAME &&
       !connectionProfileUuid &&
-      requestedToolSelectionProfileUuid?.trim().length
+      !requestedToolSelectionProfileUuid?.trim().length
     ) {
-      connectionProfileUuid = requestedToolSelectionProfileUuid;
-      sessionToolBinding.bindToolSelectionProfile(sessionId, connectionProfileUuid);
+      connectionProfileUuid = sessionToolBinding.createAndBindToolSelectionProfile(sessionId);
     }
     // Tool selection honors the UNION of the base and the derived
     // `${base}:${label}` device-label sessions (issue #4611): a tool is enabled
@@ -573,7 +578,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       typeof rawSessionUuid === "string" && rawSessionUuid.trim().length > 0
         ? rawSessionUuid
         : undefined;
-    if (sessionToolBinding.bind(sessionId, providedSessionUuid)) {
+    if (
+      name !== SET_TOOL_ENABLED_TOOL_NAME &&
+      sessionToolBinding.bind(sessionId, providedSessionUuid)
+    ) {
       ToolRegistry.notifyToolListChanged();
     }
 

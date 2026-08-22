@@ -327,12 +327,66 @@ function arraysEqual(left: readonly string[], right: readonly string[]): boolean
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
-function stringSetsEqual(left: readonly string[], right: readonly string[]): boolean {
-  const leftSet = new Set(left);
-  const rightSet = new Set(right);
-  return (
-    leftSet.size === rightSet.size && Array.from(leftSet).every((value) => rightSet.has(value))
+function applyExactToolSelections(
+  assignments: Map<string, boolean>,
+  options: DaemonOptions | undefined,
+): void {
+  for (const toolName of stringArrayOption(options, "enabledTools") ?? []) {
+    assignments.set(toolName, true);
+  }
+  for (const toolName of stringArrayOption(options, "disabledTools") ?? []) {
+    assignments.set(toolName, false);
+  }
+}
+
+function exactToolSelectionDeficits(
+  requested: DaemonOptions | undefined,
+  running: DaemonOptions | undefined,
+): string[] {
+  const requestedAssignments = new Map<string, boolean>();
+  const runningAssignments = new Map<string, boolean>();
+  applyExactToolSelections(requestedAssignments, requested);
+  applyExactToolSelections(runningAssignments, running);
+  return Array.from(requestedAssignments).flatMap(([toolName, enabled]) =>
+    runningAssignments.get(toolName) === enabled
+      ? []
+      : [
+          `${enabled ? "enabledTools" : "disabledTools"} ` +
+            `(tool=${toolName}, requested=${enabled ? "enabled" : "disabled"}, ` +
+            `running=${
+              runningAssignments.has(toolName)
+                ? runningAssignments.get(toolName)
+                  ? "enabled"
+                  : "disabled"
+                : "unset"
+            })`,
+        ],
   );
+}
+
+function mergedExactToolSelections(
+  running: DaemonOptions | undefined,
+  requested: DaemonOptions | undefined,
+): Pick<DaemonOptions, "enabledTools" | "disabledTools"> | undefined {
+  const selectionsSpecified = REUSE_CRITICAL_ARRAY_OPTION_KEYS.some(
+    (key) =>
+      stringArrayOption(running, key) !== undefined ||
+      stringArrayOption(requested, key) !== undefined,
+  );
+  if (!selectionsSpecified) {
+    return undefined;
+  }
+  const assignments = new Map<string, boolean>();
+  applyExactToolSelections(assignments, running);
+  applyExactToolSelections(assignments, requested);
+  return {
+    enabledTools: Array.from(assignments)
+      .filter(([, enabled]) => enabled)
+      .map(([toolName]) => toolName),
+    disabledTools: Array.from(assignments)
+      .filter(([, enabled]) => !enabled)
+      .map(([toolName]) => toolName),
+  };
 }
 
 function requestedOptionDeficits<T>(
@@ -365,9 +419,10 @@ function requestedOptionDeficits<T>(
  * particular caller (e.g. a bare short-lived CLI client) didn't request it.
  * Booleans are compared strictly (`=== true`), so `undefined` and `false` both
  * read as "no opinion"; strings and marker arrays count only when the client
- * supplies one that differs from the daemon's. Returns a human-readable list
- * (empty when the daemon already satisfies every requested flag) for logging and
- * error messages.
+ * supplies one that differs from the daemon's. Exact-tool defaults are checked
+ * assignment by assignment, so a running daemon may retain additional choices.
+ * Returns a human-readable list (empty when the daemon already satisfies every
+ * requested flag) for logging and error messages.
  */
 function startupOptionDeficits(
   requested: DaemonOptions | undefined,
@@ -395,14 +450,7 @@ function startupOptionDeficits(
       numberOption,
       (options, key) => numberOption(options, key) ?? Number.NaN,
     ),
-    ...requestedOptionDeficits(
-      REUSE_CRITICAL_ARRAY_OPTION_KEYS,
-      requested,
-      running,
-      (options, key) => stringArrayOption(options, key),
-      (options, key) => stringArrayOption(options, key) ?? [],
-      stringSetsEqual,
-    ),
+    ...exactToolSelectionDeficits(requested, running),
     ...requestedOptionDeficits(
       ["eventAllMarkers"],
       requested,
@@ -447,25 +495,9 @@ function mergeDaemonOptions(
       mergedRecord[key] = runningNumber;
     }
   }
-  for (const key of REUSE_CRITICAL_ARRAY_OPTION_KEYS) {
-    const runningArray = stringArrayOption(running, key);
-    if (stringArrayOption(requested, key) === undefined && runningArray !== undefined) {
-      mergedRecord[key] = [...runningArray];
-    }
-  }
-  const requestedEnabledTools = stringArrayOption(requested, "enabledTools");
-  if (requestedEnabledTools !== undefined) {
-    const enabledSet = new Set(requestedEnabledTools);
-    mergedRecord.disabledTools = (stringArrayOption(merged, "disabledTools") ?? []).filter(
-      (toolName) => !enabledSet.has(toolName),
-    );
-  }
-  const requestedDisabledTools = stringArrayOption(requested, "disabledTools");
-  if (requestedDisabledTools !== undefined) {
-    const disabledSet = new Set(requestedDisabledTools);
-    mergedRecord.enabledTools = (stringArrayOption(merged, "enabledTools") ?? []).filter(
-      (toolName) => !disabledSet.has(toolName),
-    );
+  const exactToolSelections = mergedExactToolSelections(running, requested);
+  if (exactToolSelections) {
+    Object.assign(merged, exactToolSelections);
   }
   return merged;
 }

@@ -1122,6 +1122,64 @@ describe("DaemonMcpProxy", () => {
         }
       });
 
+      test("does not restart when running exact-tool selections satisfy the requested subset", async () => {
+        const fakeClient = new FakeDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        });
+        const fakeManager = new FakeDaemonManager();
+        fakeManager.statusResults = [
+          runningStatus({ enabledTools: ["clipboard", "sqlQuery"] }),
+          runningStatus({ enabledTools: ["clipboard", "sqlQuery"] }),
+          runningStatus({ enabledTools: ["clipboard", "sqlQuery"] }),
+          runningStatus({ enabledTools: ["clipboard"] }),
+        ];
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => fakeClient,
+          daemonManager: fakeManager,
+          daemonOptions: { enabledTools: ["clipboard"] },
+        });
+
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCalled).toBe(false);
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("preserves running same-polarity exact-tool selections when adding a requested override", async () => {
+        const fakeClient = new FakeDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        });
+        const fakeManager = new FakeDaemonManager();
+        fakeManager.statusResults = [
+          runningStatus({ disabledTools: ["tapOn"] }),
+          runningStatus({ disabledTools: ["tapOn"] }),
+          runningStatus({ disabledTools: ["tapOn"] }),
+          runningStatus({ disabledTools: ["tapOn", "swipeOn"] }),
+        ];
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => fakeClient,
+          daemonManager: fakeManager,
+          daemonOptions: { disabledTools: ["swipeOn"] },
+        });
+
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCalled).toBe(true);
+          expect(fakeManager.restartOptions).toEqual({
+            enabledTools: [],
+            disabledTools: ["tapOn", "swipeOn"],
+          });
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
       test("a requested disable removes the running daemon's opposite enable on restart", async () => {
         const fakeClient = new FakeDaemonClient({
           daemonMethodResults: new Map([["tools/list", { tools: [] }]]),

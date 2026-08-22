@@ -7,8 +7,11 @@ import { McpTestFixture } from "../fixtures/mcpTestFixture";
 
 describe("per-session exact-tool selection", () => {
   let fixture: McpTestFixture | undefined;
+  let restoreToolPipeline: (() => void) | undefined;
 
   afterEach(async () => {
+    restoreToolPipeline?.();
+    restoreToolPipeline = undefined;
     await fixture?.teardown();
     fixture = undefined;
     ToolRegistry.clearTools();
@@ -351,6 +354,56 @@ describe("per-session exact-tool selection", () => {
     expect((await fixture.client.listTools()).tools.map((tool) => tool.name)).not.toContain(
       "observe",
     );
+  });
+
+  test("resolves a sibling label from the base when bound to a derived route", async () => {
+    fixture = new McpTestFixture({
+      sessionContext: { initialSessionToolBinding: "base-session:B" },
+      toolSelectionSessionManager: {
+        getDeviceLabels: (sessionUuid) =>
+          sessionUuid === "base-session" ? { A: "base-session", B: "base-session:B" } : undefined,
+      },
+    });
+    await fixture.setup();
+
+    let resolvedSessionUuid: string | undefined;
+    restoreToolPipeline = ToolRegistry.setPipelineOverridesForTesting({
+      executionTargetResolver: {
+        resolveExecutionTarget: async ({ args }) => {
+          resolvedSessionUuid = args.sessionUuid;
+          return {
+            args,
+            baseSessionUuid: args.sessionUuid,
+            device: undefined,
+            internalCall: false,
+            sessionUuid: args.sessionUuid,
+            shouldResolveDevice: false,
+          };
+        },
+      },
+    });
+    ToolRegistry.clearTools();
+    ToolRegistry.registerDeviceAware(
+      "observe",
+      "observe",
+      z.object({ device: z.string().optional() }),
+      async () => ({ content: [{ type: "text", text: "device" }] }),
+      {
+        defaultEnabled: true,
+        nonDeviceHandler: async () => ({ content: [{ type: "text", text: "ran" }] }),
+      },
+    );
+
+    const result = await fixture.client.request(
+      {
+        method: "tools/call",
+        params: { name: "observe", arguments: { device: "A" } },
+      },
+      z.any(),
+    );
+
+    expect(result.content[0]?.text).toBe("ran");
+    expect(resolvedSessionUuid).toBe("base-session");
   });
 
   test("rejects unknown, structural, and self-disable targets", async () => {

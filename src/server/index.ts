@@ -524,9 +524,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     // would let a caller borrow the label's grants for a base-disabled plain tool
     // with `{ sessionUuid: base, device: label }`. For a plain tool, enforcement
     // is base-only; only a `requiresDevice` tool actually uses the device field.
+    const rawRequestedDeviceLabel = (toolParams as Record<string, unknown>).device;
     const requestedDeviceLabel =
-      typeof (toolParams as Record<string, unknown>).device === "string"
-        ? ((toolParams as Record<string, unknown>).device as string)
+      typeof rawRequestedDeviceLabel === "string" && rawRequestedDeviceLabel.trim().length > 0
+        ? rawRequestedDeviceLabel
         : undefined;
     const selectionSessionManager =
       options.toolSelectionSessionManager ??
@@ -541,33 +542,14 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       tool.requiresDevice && requestedDeviceLabel && routingBaseSessionUuid
         ? selectionSessionManager?.getDeviceLabels(routingBaseSessionUuid)?.[requestedDeviceLabel]
         : undefined;
-    const requestedDeviceId =
-      typeof (toolParams as Record<string, unknown>).deviceId === "string"
-        ? ((toolParams as Record<string, unknown>).deviceId as string)
-        : undefined;
-    const deviceOwnershipSessionManager =
-      tool.requiresDevice && requestedDeviceId && DaemonState.getInstance().isInitialized()
-        ? DaemonState.getInstance().getSessionManager()
-        : undefined;
-    const owningSessionUuid =
-      deviceOwnershipSessionManager && requestedDeviceId
-        ? deviceOwnershipSessionManager.getSessionForDevice?.(requestedDeviceId)
-        : undefined;
-    const owningBaseSessionUuid = resolveToolSelectionBaseSessionUuid(
-      owningSessionUuid ?? undefined,
-      deviceOwnershipSessionManager,
-    );
+    // Tool selection follows the connection's routing profile. A raw deviceId is
+    // only an execution target and must not borrow an unrelated owning session's
+    // grants (which discovery cannot advertise). When both fields are present,
+    // ToolRegistry intentionally ignores deviceId in favor of the label.
     await assertToolEnabledForAnySession(
       name,
       tool.defaultEnabled,
-      [
-        connectionProfileUuid,
-        routingBaseSessionUuid,
-        routingSessionUuid,
-        derivedLabelSessionUuid,
-        owningBaseSessionUuid,
-        owningSessionUuid ?? undefined,
-      ],
+      [connectionProfileUuid, routingBaseSessionUuid, routingSessionUuid, derivedLabelSessionUuid],
       options.sessionToolSelectionService,
       connectionProfileUuid,
     );
@@ -615,6 +597,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
 
     const executionSessionUuid =
       derivedLabelSessionUuid ?? providedSessionUuid ?? routingSessionUuid;
+    const handlerRoutingSessionUuid =
+      tool.requiresDevice && requestedDeviceLabel && routingBaseSessionUuid
+        ? routingBaseSessionUuid
+        : routingSessionUuid;
     const executionSessionId = requestMcpSessionId ?? sessionId;
     const execution = executionTracker.startExecution(
       name,
@@ -658,7 +644,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       const result = await runWithAbortSignal(execution.abortController.signal, () =>
         runWithToolSelectionContext(
           {
-            routingSessionUuid,
+            // A bound derived session may still target a sibling label. Resolve
+            // that label from the base map; unlabeled calls retain the derived
+            // ambient session.
+            routingSessionUuid: handlerRoutingSessionUuid,
             execution: {
               executionId: execution.id,
               startTime: execution.startTime,

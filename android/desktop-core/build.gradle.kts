@@ -142,4 +142,18 @@ tasks.withType<Test>().configureEach {
   screenshotProperties.forEach { key ->
     System.getProperty(key)?.let { value -> systemProperty(key, value) }
   }
+
+  // Run this module's tests in a single worker JVM (#5422). desktop-core's Compose UI tests
+  // (`runComposeUiTest`) drive real dispatchers, a frame/animation clock, and gesture timing;
+  // their waits (`waitForIdle`, bounded `waitUntil`) assume the work they are pacing gets CPU.
+  // automobile.test-defaults sets `maxParallelForks = processors/2`, so several such JVMs ran at
+  // once and over-subscribed the CPU. Under that contention a timing-sensitive wait would miss
+  // its deadline and a *different* test would fail on each run (NetworkFacetTest one run,
+  // DeviceControlSessionTest or LogsPanelTest the next) with no code change. Forks are separate
+  // processes, so this is pure CPU contention -- process-wide Compose snapshot state cannot cross
+  // a fork boundary, which is why `forkEvery` isolation did not help but removing the
+  // over-subscription does. Cross-module parallelism (org.gradle.parallel) still runs desktop-core
+  // concurrently with other modules; only this suite is serialized, at ~18% local wall-clock (the
+  // suite is compile/startup-dominated, not test-execution-bound).
+  maxParallelForks = 1
 }

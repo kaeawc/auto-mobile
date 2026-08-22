@@ -124,7 +124,11 @@ export class CtrlProxyHierarchy {
         (cachedHierarchy.captureReceivedAt ?? cachedHierarchy.receivedAt);
       const cacheAge = cachedCaptureAgeMs;
       // `fresh` is honoured as well as elapsed time: without it, invalidateCache()
-      // would be an observable no-op inside the TTL (issue #4193).
+      // would be an observable no-op inside the TTL (issue #4193). The TTL
+      // (`cacheFreshTtlMs`) was raised toward `maxObservationAgeMs` so multi-step
+      // sequences hit this cache instead of the device (#5472); it stays capped by
+      // `maxObservationAgeMs` here, and the `cacheStale` check below still forces a
+      // synchronous re-verification once a capture ages past that budget.
       const isFresh = cachedHierarchy.fresh && cacheAge < Math.min(this.context.cacheFreshTtlMs, maxObservationAgeMs());
       const meetsMinTimestamp = minTimestamp === 0 || cachedHierarchy.hierarchy.updatedAt >= minTimestamp;
 

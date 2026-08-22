@@ -667,7 +667,8 @@ describe("DeviceDataStreamSocketServer", () => {
       expect(server.getSubscriberCount()).toBe(0);
       expect(server.hasSubscriberForDevice("device-1")).toBe(false);
       expect(server.getScreenshotIntervalMsForDevice("device-1")).toBe(3000);
-      expect(server.getHierarchyIntervalMsForDevice("device-1")).toBe(1000);
+      // No subscriber: the hierarchy cadence is paused, not the 1Hz default (#5472).
+      expect(server.getHierarchyIntervalMsForDevice("device-1")).toBe(2_147_483_647);
     });
 
     it("rejects a blank deviceSessionUuid", async () => {
@@ -1482,6 +1483,28 @@ describe("DeviceDataStreamSocketServer", () => {
       expect(server.getHierarchyIntervalMsForDevice("device-1", 250)).toBe(250);
     });
 
+    it("pauses hierarchy cadence when no subscriber wants the device (#5472)", () => {
+      // No subscription at all: do NOT instruct the runner to poll at 1Hz.
+      expect(server.getHierarchyIntervalMsForDevice("device-1")).toBe(2_147_483_647);
+      // A caller-provided fallback is still overridden by the no-subscriber pause.
+      expect(server.getHierarchyIntervalMsForDevice("device-1", 250)).toBe(2_147_483_647);
+    });
+
+    it("restores fast hierarchy cadence once a subscriber appears (#5472)", () => {
+      expect(server.getHierarchyIntervalMsForDevice("device-1")).toBe(2_147_483_647);
+
+      server.simulateSubscription({ deviceId: "device-1", hierarchyIntervalMs: 500 });
+
+      expect(server.getHierarchyIntervalMsForDevice("device-1")).toBe(500);
+    });
+
+    it("pauses only devices with no subscriber, leaving subscribed peers fast (#5472)", () => {
+      server.simulateSubscription({ deviceId: "device-1", hierarchyIntervalMs: 500 });
+
+      expect(server.getHierarchyIntervalMsForDevice("device-1")).toBe(500);
+      expect(server.getHierarchyIntervalMsForDevice("device-2")).toBe(2_147_483_647);
+    });
+
     it("parses requested hierarchy cadence from subscribe commands", async () => {
       const socket = new FakeSocket();
 
@@ -1559,7 +1582,7 @@ describe("DeviceDataStreamSocketServer", () => {
       expect(server.getHierarchyIntervalMsForDevice("device-1")).toBe(500);
     });
 
-    it("removes requested hierarchy cadence after unsubscribe", async () => {
+    it("pauses hierarchy cadence after unsubscribe leaves no subscriber", async () => {
       const { socket } = server.simulateSubscription({
         deviceId: "device-1",
         hierarchyIntervalMs: 500,
@@ -1574,7 +1597,8 @@ describe("DeviceDataStreamSocketServer", () => {
         }),
       );
 
-      expect(server.getHierarchyIntervalMsForDevice("device-1")).toBe(1000);
+      // No subscriber remains: pause runner polling rather than fall back to 1Hz (#5472).
+      expect(server.getHierarchyIntervalMsForDevice("device-1")).toBe(2_147_483_647);
     });
 
     it("ignores destroyed subscriber sockets when aggregating hierarchy cadence", () => {
@@ -1584,7 +1608,8 @@ describe("DeviceDataStreamSocketServer", () => {
       });
       socket.destroy();
 
-      expect(server.getHierarchyIntervalMsForDevice("device-1")).toBe(1000);
+      // A destroyed socket is not an active subscriber, so cadence is paused (#5472).
+      expect(server.getHierarchyIntervalMsForDevice("device-1")).toBe(2_147_483_647);
     });
 
     it("notifies when subscribe changes hierarchy cadence", async () => {
@@ -2109,7 +2134,8 @@ describe("DeviceDataStreamSocketServer", () => {
       expect(frames(socket).filter(f => f.type === "hierarchy_update")).toHaveLength(0);
       expect(server.hasSubscriberForDevice("device-a")).toBe(false);
       expect(server.getScreenshotIntervalMsForDevice("device-a")).toBe(3000);
-      expect(server.getHierarchyIntervalMsForDevice("device-a")).toBe(1000);
+      // Retired subscriber: hierarchy cadence pauses instead of the 1Hz default (#5472).
+      expect(server.getHierarchyIntervalMsForDevice("device-a")).toBe(2_147_483_647);
     });
 
     it("retires the previous uuid when a fake resolver rebinds a device", () => {

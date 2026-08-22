@@ -40,15 +40,17 @@ const SECURE_DIR_MODE = 0o700;
  *
  * @param env - Environment to read overrides from (injectable for tests)
  * @param homeDir - Home directory to anchor the default on (injectable for tests)
+ * @param daemonLaunchWorkingDirectory - Directory used to resolve relative overrides
  * @returns Absolute path to the auto-mobile base directory
  */
 export function resolveAutoMobileBaseDir(
   env: NodeJS.ProcessEnv = process.env,
-  homeDir: string = os.homedir()
+  homeDir: string = os.homedir(),
+  daemonLaunchWorkingDirectory: string = resolveDaemonLaunchWorkingDirectory(undefined, env),
 ): string {
   const override = (env.AUTOMOBILE_DATA_DIR ?? env.AUTO_MOBILE_DATA_DIR)?.trim();
   if (override && override.length > 0) {
-    return path.resolve(override);
+    return path.resolve(daemonLaunchWorkingDirectory, override);
   }
 
   if (homeDir && homeDir.length > 0) {
@@ -69,14 +71,17 @@ export function resolveAutoMobileBaseDir(
 export function resolveAutoMobileLogsDir(
   env: NodeJS.ProcessEnv = process.env,
   homeDir: string = os.homedir(),
-  daemonLaunchWorkingDirectory: string = resolveDaemonLaunchWorkingDirectory(undefined, env)
+  daemonLaunchWorkingDirectory: string = resolveDaemonLaunchWorkingDirectory(undefined, env),
 ): string {
   const override = (env.AUTOMOBILE_LOG_DIR ?? env.AUTO_MOBILE_LOG_DIR)?.trim();
   if (override && override.length > 0) {
     return path.resolve(daemonLaunchWorkingDirectory, override);
   }
 
-  return path.join(resolveAutoMobileBaseDir(env, homeDir), TEMP_SUBDIRS.LOGS);
+  return path.join(
+    resolveAutoMobileBaseDir(env, homeDir, daemonLaunchWorkingDirectory),
+    TEMP_SUBDIRS.LOGS,
+  );
 }
 
 /**

@@ -1034,10 +1034,13 @@ require_command jq
 # Give benchmark children one explicit log destination. This keeps timeout
 # diagnostics independent of the runtime's platform-specific default. Git Bash
 # needs a native Windows value for Bun and a POSIX spelling for shell reads.
-if [[ -n "${AUTOMOBILE_LOG_DIR:-}" ]]; then
-  benchmark_log_dir="$AUTOMOBILE_LOG_DIR"
+configured_log_dir="${AUTOMOBILE_LOG_DIR:-${AUTO_MOBILE_LOG_DIR:-}}"
+if [[ -n "$configured_log_dir" ]]; then
+  AUTOMOBILE_LOG_DIR="$configured_log_dir"
+  export AUTOMOBILE_LOG_DIR
+  benchmark_log_dir="$configured_log_dir"
   if [[ "${OS:-}" == "Windows_NT" ]] && command -v cygpath >/dev/null 2>&1; then
-    benchmark_log_dir="$(cygpath -u "$AUTOMOBILE_LOG_DIR")"
+    benchmark_log_dir="$(cygpath -u "$configured_log_dir")"
   fi
 else
   benchmark_log_dir="$(mktemp -d "${TMPDIR:-/tmp}/auto-mobile-benchmark-logs.XXXXXX")"

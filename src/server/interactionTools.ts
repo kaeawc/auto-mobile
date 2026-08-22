@@ -199,6 +199,28 @@ export const tapOnSchema = withJsonSchemaOverride(
               "selectionStrategy — for repeated controls with no unique text. Out of range → no match.",
           ),
         duration: z.number().optional().describe("Long press duration (ms)"),
+        relativePosition: z
+          .object({
+            x: z
+              .number()
+              .min(0)
+              .max(1)
+              .describe(
+                "Horizontal position within the resolved element: 0 is left, 1 is the rightmost addressable pixel",
+              ),
+            y: z
+              .number()
+              .min(0)
+              .max(1)
+              .describe(
+                "Vertical position within the resolved element: 0 is top, 1 is the bottommost addressable pixel",
+              ),
+          })
+          .strict()
+          .optional()
+          .describe(
+            "Android-only precise target within the resolved element; omit to tap its center",
+          ),
         searchUntil: z
           .object({
             duration: z
@@ -681,6 +703,7 @@ export function registerInteractionTools() {
         preTapStability: args.preTapStability,
         retryIfNoChange: args.retryIfNoChange,
         ensureTap: args.ensureTap,
+        relativePosition: args.relativePosition,
       },
       progress,
     );

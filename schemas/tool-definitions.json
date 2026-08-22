@@ -9264,6 +9264,29 @@
           "description": "Long press duration (ms)",
           "type": "number"
         },
+        "relativePosition": {
+          "description": "Android-only precise target within the resolved element; omit to tap its center",
+          "type": "object",
+          "properties": {
+            "x": {
+              "description": "Horizontal position within the resolved element: 0 is left, 1 is the rightmost addressable pixel",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "y": {
+              "description": "Vertical position within the resolved element: 0 is top, 1 is the bottommost addressable pixel",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          },
+          "required": [
+            "x",
+            "y"
+          ],
+          "additionalProperties": false
+        },
         "searchUntil": {
           "description": "Poll for element before tapping",
           "type": "object",
@@ -9327,6 +9350,14 @@
         },
         "message": {
           "type": "string"
+        },
+        "x": {
+          "description": "Horizontal coordinate of the resolved target used for the tap",
+          "type": "number"
+        },
+        "y": {
+          "description": "Vertical coordinate of the resolved target used for the tap",
+          "type": "number"
         },
         "element": {
           "type": "object",

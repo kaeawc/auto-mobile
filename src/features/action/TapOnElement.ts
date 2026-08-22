@@ -11,7 +11,10 @@ import {
   ViewHierarchyResult
 } from "../../models";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
-import { TapOnElementOptions } from "../../models/TapOnElementOptions";
+import type {
+  RelativeTapPosition,
+  TapOnElementOptions
+} from "../../models/TapOnElementOptions";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
@@ -253,7 +256,107 @@ export class TapOnElement extends BaseVisualChange {
       }
     }
 
+    return this.validateRelativePosition(options);
+  }
+
+  private validateRelativePosition(options: TapOnElementOptions): string | null {
+    if (!options.relativePosition) {
+      return null;
+    }
+    if (this.device.platform !== "android") {
+      return "tapOn relativePosition is only supported on Android";
+    }
+    if (options.action === "focus") {
+      return "tapOn relativePosition cannot be used with the focus action";
+    }
+
+    const { x, y } = options.relativePosition;
+    if (![x, y].every(Number.isFinite)) {
+      return "tapOn relativePosition x and y must be finite numbers";
+    }
+    if (x < 0 || x > 1 || y < 0 || y > 1) {
+      return "tapOn relativePosition x and y must be between 0 and 1";
+    }
+
     return null;
+  }
+
+  private hasAddressablePixels(bounds: Element["bounds"]): boolean {
+    const coordinates = [bounds.left, bounds.top, bounds.right, bounds.bottom];
+    return coordinates.every(Number.isFinite)
+      && bounds.right - bounds.left >= 1
+      && bounds.bottom - bounds.top >= 1;
+  }
+
+  private hasValidScreenDimensions(screenSize: ObserveResult["screenSize"]): boolean {
+    if (!screenSize) {
+      return false;
+    }
+    return [screenSize.width, screenSize.height].every(
+      dimension => Number.isFinite(dimension) && dimension >= 1
+    );
+  }
+
+  private isPointInHalfOpenBounds(
+    point: { x: number; y: number },
+    bounds: Element["bounds"]
+  ): boolean {
+    return point.x >= bounds.left
+      && point.x < bounds.right
+      && point.y >= bounds.top
+      && point.y < bounds.bottom;
+  }
+
+  private resolveTapPoint(
+    element: Element,
+    screenSize: ObserveResult["screenSize"],
+    relativePosition?: RelativeTapPosition
+  ): { x: number; y: number } {
+    if (!relativePosition) {
+      return this.geometry.getElementCenter(element);
+    }
+
+    const bounds = element.bounds;
+    const width = bounds.right - bounds.left;
+    const height = bounds.bottom - bounds.top;
+    if (!this.hasAddressablePixels(bounds)) {
+      throw new ActionableError(
+        `tapOn relativePosition requires valid element bounds, received ${JSON.stringify(bounds)}`
+      );
+    }
+
+    if (!this.hasValidScreenDimensions(screenSize)) {
+      throw new ActionableError(
+        "tapOn relativePosition requires valid Android screen dimensions"
+      );
+    }
+
+    // Android bounds are half-open. Scale across addressable pixels so 0 and 1
+    // map to the first and last valid pixels rather than the exclusive edge.
+    const x = bounds.left + Math.round(relativePosition.x * (width - 1));
+    const y = bounds.top + Math.round(relativePosition.y * (height - 1));
+    const point = { x, y };
+    if (!this.isPointInHalfOpenBounds(point, bounds)) {
+      throw new ActionableError(
+        `tapOn relativePosition resolved to (${x}, ${y}) outside element bounds `
+        + `${JSON.stringify(bounds)}`
+      );
+    }
+
+    const screenBounds = {
+      left: 0,
+      top: 0,
+      right: screenSize.width,
+      bottom: screenSize.height
+    };
+    if (!this.isPointInHalfOpenBounds(point, screenBounds)) {
+      throw new ActionableError(
+        `tapOn relativePosition resolved to (${x}, ${y}) outside screen bounds `
+        + `[0, ${screenSize.width}) x [0, ${screenSize.height})`
+      );
+    }
+
+    return point;
   }
 
   private getSearchUntilDuration(options: TapOnElementOptions): number {
@@ -1163,7 +1266,11 @@ export class TapOnElement extends BaseVisualChange {
           if (usedParent) {
             logger.info("[TapOnElement] Using clickable parent for non-clickable element");
           }
-          const tapPoint = this.geometry.getElementCenter(tapElement);
+          const tapPoint = this.resolveTapPoint(
+            tapElement,
+            observeResult.screenSize,
+            options.relativePosition
+          );
           const tapBounds = tapElement.bounds;
           logger.info(
             `[TapOnElement] Tapping (${tapPoint.x}, ${tapPoint.y}) on element: ` +
@@ -1228,6 +1335,8 @@ export class TapOnElement extends BaseVisualChange {
             element: tapElement,
             selectedElement: selectedElementMetadata,
             searchUntil: searchOutcome.stats,
+            x: tapPoint.x,
+            y: tapPoint.y,
             ...(screenReaderNavigation ? { screenReaderNavigation } : {}),
           };
         },
@@ -1253,6 +1362,7 @@ export class TapOnElement extends BaseVisualChange {
               container: options.container,
               searchUntil: options.searchUntil,
               selectionStrategy: options.selectionStrategy,
+              relativePosition: options.relativePosition,
               platform: this.device.platform
             }
           }
@@ -1334,11 +1444,13 @@ export class TapOnElement extends BaseVisualChange {
       ? isTalkBackEnabled
       : (await this.accessibilityDetector.detectMethod(this.device.deviceId, this.adb)) === "talkback";
 
-    if (talkBackEnabled) {
+    if (talkBackEnabled && !options?.relativePosition) {
       // TalkBack mode: Use accessibility actions with coordinate fallback
       return this.executeAndroidTapWithAccessibility(action, x, y, element, durationMs, options, signal);
     } else {
-      // Standard mode: Use coordinate-based taps
+      // Standard mode and precise targets use coordinates. A relative target
+      // must not be replaced by node-level ACTION_CLICK under TalkBack because
+      // that cannot distinguish ClickableSpans within one TextView.
       await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal);
       return undefined;
     }

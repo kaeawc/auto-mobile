@@ -54,6 +54,21 @@ describe("elementBoundsSchema: object + compact tuple (#2990)", () => {
 });
 
 describe("tool output artifact metadata schema (#3480)", () => {
+  test("tapOn results advertise and accept resolved target coordinates", () => {
+    const result = tapOnResultSchema.parse({
+      success: true,
+      action: "tap",
+      x: 491,
+      y: 230,
+    });
+    const json = JSON.stringify(toJSONSchema(tapOnResultSchema));
+
+    expect(result).toMatchObject({ x: 491, y: 230 });
+    expect(json).toContain("\"x\"");
+    expect(json).toContain("\"y\"");
+    expect(json).toContain("resolved target");
+  });
+
   test("advertises screen-reader navigation fidelity assertions (#3963)", () => {
     const json = JSON.stringify(toJSONSchema(tapOnResultSchema));
 

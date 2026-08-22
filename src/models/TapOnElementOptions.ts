@@ -1,5 +1,12 @@
 import type { ElementSelectionStrategy } from "./ElementSelectionStrategy";
 
+export interface RelativeTapPosition {
+  /** Horizontal position from 0 (left) to 1 (rightmost addressable pixel). */
+  x: number;
+  /** Vertical position from 0 (top) to 1 (bottommost addressable pixel). */
+  y: number;
+}
+
 export interface TapOnElementOptions {
   // Element selection - one of these must be provided
   text?: string;
@@ -50,4 +57,8 @@ export interface TapOnElementOptions {
   preTapStability?: boolean;
   retryIfNoChange?: boolean;
   ensureTap?: boolean;
+
+  // Android-only normalized position within the final resolved element.
+  // Omit to preserve center tapping.
+  relativePosition?: RelativeTapPosition;
 }

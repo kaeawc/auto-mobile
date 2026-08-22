@@ -131,6 +131,39 @@ describe("TapOnElement TalkBack mode detection", () => {
       expect(executeAndroidTapWithCoordinates).not.toHaveBeenCalled();
     });
 
+    test("uses the requested coordinate instead of semantic activation for a relative position", async () => {
+      const element = {
+        "bounds": { left: 100, top: 200, right: 500, bottom: 260 },
+        "resource-id": "test:id/spannable_text",
+        "text": "Left link and ordinary text and right link",
+      } as any;
+      const options = {
+        action: "tap" as const,
+        elementId: "test:id/spannable_text",
+        relativePosition: { x: 0.98, y: 0.5 },
+      };
+
+      await (tapOnElement as any).executeAndroidTap(
+        "tap",
+        491,
+        230,
+        500,
+        element,
+        undefined,
+        options
+      );
+
+      expect(executeAndroidTapWithCoordinates).toHaveBeenCalledWith(
+        "tap",
+        491,
+        230,
+        500,
+        element,
+        undefined
+      );
+      expect(executeAndroidTapWithAccessibility).not.toHaveBeenCalled();
+    });
+
     test("passes options to accessibility method", async () => {
       const element = {
         "bounds": { left: 0, top: 0, right: 100, bottom: 100 },

@@ -110,6 +110,40 @@ describe("tapOn schema", () => {
       selector: { text: "Login" },
     });
     expect(result.sibling).toBeUndefined();
+    expect(result.relativePosition).toBeUndefined();
+  });
+
+  test("accepts a normalized position within the matched Android element", () => {
+    const result = tapOnSchema.parse({
+      platform: "android",
+      selector: { text: "Read @mention now" },
+      relativePosition: { x: 0.95, y: 0.5 },
+    });
+
+    expect(result.relativePosition).toEqual({ x: 0.95, y: 0.5 });
+  });
+
+  test.each([
+    ["x below the element", { x: -0.01, y: 0.5 }, "x", "too_small"],
+    ["x beyond the element", { x: 1.01, y: 0.5 }, "x", "too_big"],
+    ["y above the element", { x: 0.5, y: -0.01 }, "y", "too_small"],
+    ["y below the element", { x: 0.5, y: 1.01 }, "y", "too_big"],
+  ] as const)("rejects an out-of-bounds relative position: %s", (
+    _reason,
+    relativePosition,
+    coordinate,
+    expectedCode
+  ) => {
+    const issue = zodIssues(() =>
+      tapOnSchema.parse({
+        platform: "android",
+        selector: { text: "Read @mention now" },
+        relativePosition,
+      })
+    ).find(candidate => candidate.path.join(".") === `relativePosition.${coordinate}`);
+
+    expect(issue).toBeDefined();
+    expect(issue!.code).toBe(expectedCode);
   });
 
   test("accepts container", () => {
@@ -135,11 +169,13 @@ describe("tapOn schema", () => {
       preTapStability: true,
       retryIfNoChange: true,
       ensureTap: true,
+      relativePosition: { x: 0.1, y: 0.9 },
     });
     expect(result.action).toBe("longPress");
     expect(result.duration).toBe(2000);
     expect(result.index).toBe(1);
     expect(result.preTapStability).toBe(true);
+    expect(result.relativePosition).toEqual({ x: 0.1, y: 0.9 });
   });
 
   test.each([

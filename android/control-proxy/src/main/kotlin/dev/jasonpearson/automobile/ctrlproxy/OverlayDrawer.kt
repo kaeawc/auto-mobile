@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import android.animation.ValueAnimator
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.DashPathEffect
@@ -9,6 +10,7 @@ import android.graphics.PathMeasure
 import android.graphics.PointF
 import android.graphics.RectF
 import android.util.Log
+import androidx.annotation.VisibleForTesting
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightBounds
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightLineCap
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightLineJoin
@@ -42,7 +44,7 @@ class OverlayDrawer(
     private const val DEFAULT_STROKE_WIDTH = 8f
     private const val DEFAULT_PATH_STROKE_WIDTH = 8f
     private const val DEFAULT_PATH_TENSION = 0.5f
-    private const val ELLIPSE_SEGMENT_COUNT = 160
+    private const val ELLIPSE_SEGMENT_COUNT = 64
     private const val ELLIPSE_JITTER_RATIO = 0.035f
     private const val ELLIPSE_JITTER_FREQ_X = 2.3f
     private const val ELLIPSE_JITTER_FREQ_Y = 3.7f
@@ -59,6 +61,17 @@ class OverlayDrawer(
 
   private val lock = Any()
   private val highlights = LinkedHashMap<String, HighlightRenderState>()
+
+  // Reusable render snapshot rebuilt only when the highlight set changes, so the
+  // hot onDraw path does not allocate a fresh list every frame (issue #5465).
+  private var renderSnapshot: List<HighlightRenderState> = emptyList()
+  private var snapshotRebuildCount = 0
+
+  // Coalesces the per-frame invalidations: the animator updates alpha and draw
+  // progress separately each frame, but we only need to schedule one redraw. The
+  // flag is cleared in draw() once the frame is consumed (issue #5465).
+  private var invalidatePending = false
+
   private var overlayView: HighlightOverlayView? = null
   private val pathSmoother = PathSmoother()
   private val animator =
@@ -77,6 +90,12 @@ class OverlayDrawer(
     overlayView = view
     view.setAnimationActive(animator.isAnimating())
   }
+
+  @VisibleForTesting
+  internal fun getAnimatorForTest(id: String): ValueAnimator? = animator.getAnimatorForTest(id)
+
+  @VisibleForTesting
+  internal fun snapshotRebuildCountForTest(): Int = synchronized(lock) { snapshotRebuildCount }
 
   fun addHighlight(id: String?, shape: HighlightShape?): HighlightOperationResult {
     if (id.isNullOrBlank()) {
@@ -101,9 +120,12 @@ class OverlayDrawer(
     }
 
     animator.cancel(id)
-    synchronized(lock) { highlights[id] = renderState }
+    synchronized(lock) {
+      highlights[id] = renderState
+      rebuildSnapshotLocked()
+    }
     animator.startFadeOut(id)
-    overlayView?.invalidate()
+    scheduleInvalidate()
     return HighlightOperationResult(true, null)
   }
 
@@ -111,6 +133,7 @@ class OverlayDrawer(
     animator.cancelAll()
     synchronized(lock) {
       highlights.clear()
+      rebuildSnapshotLocked()
       overlayManager?.hide()
     }
     overlayView = null
@@ -124,16 +147,43 @@ class OverlayDrawer(
 
     synchronized(lock) {
       highlights.remove(id)
+      rebuildSnapshotLocked()
       if (highlights.isEmpty()) {
         overlayManager?.hide()
       }
     }
 
-    overlayView?.invalidate()
+    scheduleInvalidate()
+  }
+
+  private fun rebuildSnapshotLocked() {
+    renderSnapshot = ArrayList(highlights.values)
+    snapshotRebuildCount++
+  }
+
+  private fun scheduleInvalidate() {
+    val view = overlayView ?: return
+    val shouldInvalidate =
+      synchronized(lock) {
+        if (invalidatePending) {
+          false
+        } else {
+          invalidatePending = true
+          true
+        }
+      }
+    if (shouldInvalidate) {
+      view.invalidate()
+    }
   }
 
   internal fun draw(canvas: Canvas) {
-    val snapshot = synchronized(lock) { highlights.values.toList() }
+    val snapshot =
+      synchronized(lock) {
+        // Frame consumed: allow the next animation update to schedule a redraw.
+        invalidatePending = false
+        renderSnapshot
+      }
     snapshot.forEach { renderState ->
       when (renderState.shapeType) {
         ShapeType.BOX,
@@ -212,13 +262,13 @@ class OverlayDrawer(
   private fun updateHighlightAlpha(id: String, alpha: Float) {
     val clamped = alpha.coerceIn(0f, 1f)
     synchronized(lock) { highlights[id]?.alpha = clamped }
-    overlayView?.invalidate()
+    scheduleInvalidate()
   }
 
   private fun updateHighlightDrawProgress(id: String, progress: Float) {
     val clamped = progress.coerceIn(0f, 1f)
     synchronized(lock) { highlights[id]?.drawProgress = clamped }
-    overlayView?.invalidate()
+    scheduleInvalidate()
   }
 
   private fun applyStrokeAlpha(renderState: HighlightRenderState, paint: Paint) {
@@ -467,7 +517,7 @@ class OverlayDrawer(
   }
 
   private fun buildEllipseSegments(rect: RectF, baseStrokeWidth: Float): List<EllipseSegment> {
-    val segmentCount = ELLIPSE_SEGMENT_COUNT.coerceAtLeast(100)
+    val segmentCount = ELLIPSE_SEGMENT_COUNT
     if (segmentCount <= 0) {
       return emptyList()
     }

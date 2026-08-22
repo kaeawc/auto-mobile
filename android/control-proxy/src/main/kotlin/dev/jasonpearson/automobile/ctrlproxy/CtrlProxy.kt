@@ -1925,14 +1925,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
 
     try {
-      // Log accessibility events for debugging
-      if (event.packageName?.toString()?.contains("playground") == true) {
-        Log.d(
-          TAG,
-          "A11Y event type=${event.eventType} class=${event.className} pkg=${event.packageName} text=${event.text} contentChange=${event.contentChangeTypes} action=${event.action}",
-        )
-      }
-
       if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
         lastWindowClassName = event.className?.toString()
       }
@@ -2804,14 +2796,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     try {
       val jsonString =
         perfProvider.track("serializeHierarchy") { jsonCompact.encodeToString(hierarchy) }
-
-      // Debug: Check if text labels are in the serialized hierarchy
-      val hasTapText = jsonString.contains("\"text\":\"Tap\"")
-      val hasDiscoverText = jsonString.contains("\"text\":\"Discover\"")
-      Log.d(
-        TAG,
-        "[BROADCAST] Hierarchy contains: Tap=$hasTapText, Discover=$hasDiscoverText, size=${jsonString.length}",
-      )
 
       val messageBuilder: (kotlinx.serialization.json.JsonElement?) -> String = { perfTiming ->
         buildString {

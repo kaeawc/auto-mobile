@@ -81,6 +81,7 @@ describe("MCP Tools List", () => {
       expect(toolNames).toContain("inputText");
       expect(toolNames).not.toContain("clipboard");
       expect(toolNames).not.toContain("openLink");
+      expect(toolNames).not.toContain("provisionDevice");
       expect(toolNames).not.toContain("settleObserve");
       expect(toolNames).not.toContain("waitForCondition");
     });

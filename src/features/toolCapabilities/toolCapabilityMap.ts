@@ -5,6 +5,7 @@ const groups: Record<ToolCapability, readonly string[]> = {
   "advanced-interaction": ["openLink", "imeAction", "dragAndDrop", "pinchOn", "shake", "rotate"],
   "app-permissions": ["getAppPermissions", "setAppPermissions"],
   "device-settings": ["changeLocalization", "getDeviceState", "setDeviceState"],
+  "device-control": ["provisionDevice"],
   "app-data-interop": ["putAppFile", "getPreference", "setPreference", "sqlQuery", "setKeyValue", "removeKeyValue", "clearKeyValueFile"],
   "notifications": ["systemTray", "postNotification", "getNotificationPolicy", "setNotificationPolicy"],
   "telephony": ["phoneCall", "sendSms"],

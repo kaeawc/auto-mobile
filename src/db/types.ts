@@ -533,6 +533,18 @@ export interface EmulatorLossIncidentsTable {
   created_at: Generated<string>;
 }
 
+export interface ProvisionDeviceOperationsTable {
+  operation_id: string;
+  request_fingerprint: string;
+  status: string;
+  result_json: string | null;
+  error_code: string | null;
+  error_message: string | null;
+  creation_started: number;
+  created_at: Generated<string>;
+  updated_at: Generated<string>;
+}
+
 // Feature flags table
 export interface FeatureFlagsTable {
   key: string;
@@ -763,6 +775,7 @@ export interface Database {
   device_sessions: DeviceSessionsTable;
   device_locks: DeviceLocksTable;
   emulator_loss_incidents: EmulatorLossIncidentsTable;
+  provision_device_operations: ProvisionDeviceOperationsTable;
 }
 
 // Convenience types for each table

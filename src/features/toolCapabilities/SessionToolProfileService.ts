@@ -4,6 +4,7 @@ export const TOOL_CAPABILITIES = [
   "advanced-interaction",
   "app-permissions",
   "device-settings",
+  "device-control",
   "app-data-interop",
   "notifications",
   "telephony",

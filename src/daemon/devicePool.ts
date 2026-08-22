@@ -3959,6 +3959,37 @@ export class DevicePool {
   }
 
   /**
+   * Associate a live autolock session with a reconnected MCP client session.
+   */
+  async attachAutolockSessionToMcpSession(
+    sessionId: string,
+    mcpSessionId: string | undefined,
+  ): Promise<void> {
+    if (!mcpSessionId) {
+      return;
+    }
+    await this.assignmentMutex.runExclusive(async () => {
+      const session = this.sessionManager.getSession(sessionId);
+      const device = session ? this.devices.get(session.assignedDevice) : undefined;
+      if (
+        !session ||
+        !device ||
+        device.sessionId !== sessionId ||
+        device.autolockSessionId !== sessionId
+      ) {
+        return;
+      }
+      await this.deviceSessionRepository.markAutolockSession(sessionId, {
+        mcpSessionId,
+        daemonSessionId: this.daemonSessionId,
+        lastUsedAtMs: session.lastUsedAt,
+        expiresAtMs: session.expiresAt,
+      });
+      this.mcpSessionAutolockMap.set(mcpSessionId, sessionId);
+    });
+  }
+
+  /**
    * Free a device whose autolock session has been released or has expired.
    *
    * Invoked via the SessionManager expiry callback. Only acts when the device

@@ -106,6 +106,7 @@ jobs:
         env:
           MACOS_DEVELOPER_ID_CERT_BASE64: ${{ secrets.MACOS_DEVELOPER_ID_CERT_BASE64 }}
           APPLE_NOTARY_PRIVATE_KEY_BASE64: ${{ secrets.APPLE_NOTARY_PRIVATE_KEY_BASE64 }}
+          MACOS_DEVELOPER_ID_CERT_PASSWORD: ${{ secrets.MACOS_DEVELOPER_ID_CERT_PASSWORD }}
         run: |
           set -euo pipefail
           mkdir -p "${RUNNER_TEMP}/conveyor-signing"
@@ -115,6 +116,10 @@ jobs:
           printf '%s' "$APPLE_NOTARY_PRIVATE_KEY_BASE64" | base64 --decode > "$p8"
           echo "CONVEYOR_MAC_CERTIFICATE_P12=$cert" >> "$GITHUB_ENV"
           echo "CONVEYOR_NOTARY_PRIVATE_KEY_P8=$p8" >> "$GITHUB_ENV"
+          # Forward the .p12 password under the name ci.conveyor.conf reads
+          # (certificate-password = ${env.CONVEYOR_MAC_CERTIFICATE_PASSWORD}).
+          echo "::add-mask::${MACOS_DEVELOPER_ID_CERT_PASSWORD}"
+          echo "CONVEYOR_MAC_CERTIFICATE_PASSWORD=${MACOS_DEVELOPER_ID_CERT_PASSWORD}" >> "$GITHUB_ENV"
 
       - name: "Run Conveyor (make site)"
         uses: hydraulic-software/conveyor/actions/build@v22.0
@@ -129,7 +134,9 @@ jobs:
           agree_to_license: 1
         env:
           CONVEYOR_APP_VERSION: ${{ inputs.version }}
-          MACOS_DEVELOPER_ID_CERT_PASSWORD: ${{ secrets.MACOS_DEVELOPER_ID_CERT_PASSWORD }}
+          # The cert password reaches Conveyor as CONVEYOR_MAC_CERTIFICATE_PASSWORD via GITHUB_ENV
+          # from the prepare step above (matching ci.conveyor.conf). The notary issuer/key ids are
+          # read directly under their own names by ci.conveyor.conf.
           APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
           APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
 

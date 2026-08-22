@@ -39,16 +39,30 @@ function createHarness(element: Element = SPANNABLE_TEXT_ELEMENT) {
     containerFound: true,
     stats: { durationMs: 0, requestCount: 1, changeCount: 0 },
   });
-  spyOn(command as any, "resolveTapTargetElement").mockReturnValue({
+  const resolveTapTargetElement = spyOn(command as any, "resolveTapTargetElement").mockReturnValue({
     element,
     usedParent: false,
   });
-  spyOn((command as any).strategy, "isAccessibilityServiceEnabled").mockResolvedValue(false);
-  spyOn((command as any).selectionStateTracker, "prepare").mockResolvedValue(null);
+  const isAccessibilityServiceEnabled = spyOn(
+    (command as any).strategy,
+    "isAccessibilityServiceEnabled",
+  ).mockResolvedValue(false);
+  const prepareSelectionState = spyOn(
+    (command as any).selectionStateTracker,
+    "prepare",
+  ).mockResolvedValue(null);
   spyOn((command as any).selectionStateTracker, "finalize").mockResolvedValue([]);
   const executeAndroidTap = spyOn(command as any, "executeAndroidTap").mockResolvedValue(undefined);
 
-  return { command, executeAndroidTap, observation, searchForElement };
+  return {
+    command,
+    executeAndroidTap,
+    isAccessibilityServiceEnabled,
+    observation,
+    prepareSelectionState,
+    resolveTapTargetElement,
+    searchForElement,
+  };
 }
 
 describe("TapOnElement relative position", () => {
@@ -99,6 +113,19 @@ describe("TapOnElement relative position", () => {
       expect.not.objectContaining({ relativePosition: expect.anything() }),
       false,
     );
+  });
+
+  test("skips best-effort selection capture before a precise coordinate tap", async () => {
+    const { command, prepareSelectionState } = createHarness();
+
+    const result = await command.execute({
+      action: "tap",
+      elementId: "test:id/spannable_text",
+      relativePosition: { x: 0.98, y: 0.5 },
+    });
+
+    expect(result).toMatchObject({ success: true, x: 491, y: 230 });
+    expect(prepareSelectionState).not.toHaveBeenCalled();
   });
 
   test("resolves against the stable final element bounds", async () => {
@@ -168,6 +195,132 @@ describe("TapOnElement relative position", () => {
       stableElement,
       undefined,
       expect.anything(),
+      false,
+    );
+  });
+
+  test("uses refreshed screen dimensions while polling for the target", async () => {
+    const refreshedElement = {
+      ...SPANNABLE_TEXT_ELEMENT,
+      bounds: { left: 650, top: 100, right: 700, bottom: 200 },
+    };
+    const {
+      command,
+      executeAndroidTap,
+      observation,
+      searchForElement,
+    } = createHarness(refreshedElement);
+    searchForElement.mockRestore();
+    const refreshedHierarchy = {
+      hierarchy: { node: { text: "refreshed" } },
+      screenWidth: 800,
+      screenHeight: 600,
+    };
+    spyOn(command as any, "findElementInHierarchy").mockImplementation(
+      (_options: unknown, hierarchy: unknown) => ({
+        selection: hierarchy === observation.viewHierarchy
+          ? { element: null }
+          : {
+            element: refreshedElement,
+            indexInMatches: 0,
+            totalMatches: 1,
+            strategy: "first",
+          },
+        containerFound: true,
+      }),
+    );
+    spyOn(command as any, "refreshViewHierarchy").mockResolvedValue(refreshedHierarchy);
+
+    const result = await command.execute({
+      action: "tap",
+      elementId: "test:id/spannable_text",
+      relativePosition: { x: 1, y: 0.5 },
+    });
+
+    expect(result).toMatchObject({ success: true, x: 699, y: 150 });
+    expect(executeAndroidTap).toHaveBeenCalledWith(
+      "tap",
+      699,
+      150,
+      expect.any(Number),
+      refreshedElement,
+      undefined,
+      expect.anything(),
+      false,
+    );
+  });
+
+  test("polls visibility using the promoted tap parent", async () => {
+    const child = {
+      ...SPANNABLE_TEXT_ELEMENT,
+      clickable: false,
+      bounds: { left: 0, top: 10, right: 100, bottom: 50 },
+    };
+    const offscreenParent = {
+      ...SPANNABLE_TEXT_ELEMENT,
+      text: "parent",
+      bounds: { left: -400, top: 0, right: 600, bottom: 100 },
+    };
+    const onscreenParent = {
+      ...offscreenParent,
+      bounds: { left: 0, top: 0, right: 1000, bottom: 100 },
+    };
+    const {
+      command,
+      executeAndroidTap,
+      isAccessibilityServiceEnabled,
+      observation,
+      resolveTapTargetElement,
+      searchForElement,
+    } = createHarness(child);
+    isAccessibilityServiceEnabled.mockResolvedValue(true);
+    searchForElement.mockRestore();
+    const initialHierarchy = observation.viewHierarchy;
+    const refreshedHierarchy = {
+      hierarchy: { node: { text: "refreshed" } },
+      screenWidth: 1000,
+      screenHeight: 800,
+    };
+    spyOn(command as any, "findElementInHierarchy").mockReturnValue({
+      selection: {
+        element: child,
+        indexInMatches: 0,
+        totalMatches: 1,
+        strategy: "first",
+      },
+      containerFound: true,
+    });
+    resolveTapTargetElement.mockImplementation(
+      (_element: unknown, hierarchy: unknown) => ({
+        element: hierarchy === initialHierarchy
+          ? offscreenParent
+          : onscreenParent,
+        usedParent: true,
+      }),
+    );
+    spyOn(command as any, "refreshViewHierarchy").mockResolvedValue(refreshedHierarchy);
+
+    const result = await command.execute({
+      action: "tap",
+      elementId: "test:id/spannable_text",
+      relativePosition: { x: 0, y: 0.5 },
+    });
+
+    expect(result).toMatchObject({ success: true, x: 0, y: 50 });
+    expect(executeAndroidTap).toHaveBeenCalledWith(
+      "tap",
+      0,
+      50,
+      expect.any(Number),
+      onscreenParent,
+      undefined,
+      expect.anything(),
+      true,
+    );
+    expect(resolveTapTargetElement).toHaveBeenCalledWith(
+      child,
+      refreshedHierarchy,
+      "tap",
       false,
     );
   });

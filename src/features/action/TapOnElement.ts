@@ -432,6 +432,18 @@ export class TapOnElement extends BaseVisualChange {
            centerY < 0 || centerY > screenSize.height;
   }
 
+  private isSelectionTapTargetOffScreen(
+    element: Element,
+    viewHierarchy: ViewHierarchyResult,
+    screenSize: ObserveResult["screenSize"] | undefined,
+    options: TapOnElementOptions
+  ): boolean {
+    const target = options.relativePosition
+      ? this.resolveTapTargetElement(element, viewHierarchy, options.action, false).element
+      : element;
+    return this.isElementTapTargetOffScreen(target, screenSize, options.relativePosition);
+  }
+
   private getScreenSizeFromHierarchy(viewHierarchy: ViewHierarchyResult): ObserveResult["screenSize"] | undefined {
     if (!viewHierarchy.screenWidth || !viewHierarchy.screenHeight) {
       return undefined;
@@ -458,6 +470,33 @@ export class TapOnElement extends BaseVisualChange {
     if (usedParent) {
       logger.info("[TapOnElement] Using clickable parent for non-clickable element");
     }
+  }
+
+  private requiresResourceIdForTapTarget(
+    isAccessibilityServiceEnabled: boolean,
+    options: TapOnElementOptions
+  ): boolean {
+    return isAccessibilityServiceEnabled && !options.relativePosition;
+  }
+
+  private async prepareSelectionCapture(
+    options: TapOnElementOptions,
+    action: string,
+    observation: ObserveResult,
+    element: Element,
+    signal?: AbortSignal
+  ): Promise<SelectionCaptureState | null> {
+    if (options.relativePosition) {
+      // Visual selection enrichment is best-effort; its screenshot await can
+      // make a precise coordinate stale before dispatch.
+      return null;
+    }
+    return this.selectionStateTracker.prepare({
+      action,
+      observation,
+      element,
+      signal
+    });
   }
 
   private findElementInHierarchy(
@@ -514,13 +553,12 @@ export class TapOnElement extends BaseVisualChange {
           });
         lastSelection = selection;
         if (selection.element) {
-          if (
-            this.isElementTapTargetOffScreen(
-              selection.element,
-              screenSize,
-              options.relativePosition
-            )
-          ) {
+          if (this.isSelectionTapTargetOffScreen(
+            selection.element,
+            viewHierarchy,
+            screenSize,
+            options
+          )) {
             offScreenSelection = selection;
             continue;
           }
@@ -648,7 +686,7 @@ export class TapOnElement extends BaseVisualChange {
     options: TapOnElementOptions,
     observeResult: ObserveResult,
     action: TapOnElementOptions["action"],
-    isTalkBackEnabled: boolean,
+    requireResourceId: boolean,
     signal?: AbortSignal
   ): Promise<
     | { ok: true; viewHierarchy: ViewHierarchyResult; tapElement: Element; usedParent: boolean }
@@ -775,7 +813,7 @@ export class TapOnElement extends BaseVisualChange {
         refind.selection.element as Element,
         freshHierarchy,
         action,
-        isTalkBackEnabled
+        requireResourceId
       );
       const b = refreshed.element.bounds;
       if (b === undefined || b === null) {
@@ -837,6 +875,8 @@ export class TapOnElement extends BaseVisualChange {
     let lastHash = this.hashViewHierarchy(viewHierarchy);
 
     let latestViewHierarchy = viewHierarchy;
+    let latestScreenSize =
+      this.getScreenSizeFromHierarchy(latestViewHierarchy) ?? observeResult.screenSize;
     const initialSearch = this.findElementInHierarchy(options, latestViewHierarchy);
     let selection = initialSearch.selection;
     let element = selection.element;
@@ -844,13 +884,18 @@ export class TapOnElement extends BaseVisualChange {
 
     if (
       !element ||
-      this.isElementTapTargetOffScreen(element, observeResult.screenSize, options.relativePosition)
+      this.isSelectionTapTargetOffScreen(
+        element,
+        latestViewHierarchy,
+        latestScreenSize,
+        options
+      )
     ) {
       if (element) {
         logger.warn(
           `[TapOnElement] Element found but tap target is off-screen, will retry. ` +
           `bounds=${JSON.stringify(element.bounds)}, ` +
-          `screen=${observeResult.screenSize?.width}x${observeResult.screenSize?.height}`
+          `screen=${latestScreenSize?.width}x${latestScreenSize?.height}`
         );
         selection = { ...selection, element: null };
         element = null;
@@ -862,7 +907,7 @@ export class TapOnElement extends BaseVisualChange {
         const remainingTimeMs = Math.max(0, deadline - this.timer.now());
         const refreshedHierarchy = await this.refreshViewHierarchy(
           remainingTimeMs,
-          observeResult.screenSize,
+          latestScreenSize,
           signal
         );
         requestCount += 1;
@@ -872,6 +917,8 @@ export class TapOnElement extends BaseVisualChange {
         }
 
         latestViewHierarchy = refreshedHierarchy;
+        latestScreenSize =
+          this.getScreenSizeFromHierarchy(refreshedHierarchy) ?? latestScreenSize;
         const hash = this.hashViewHierarchy(refreshedHierarchy);
         if (hash && hash !== lastHash) {
           changeCount += 1;
@@ -887,7 +934,12 @@ export class TapOnElement extends BaseVisualChange {
         containerFoundEver = containerFoundEver || searchResult.containerFound;
         if (
           element &&
-          this.isElementTapTargetOffScreen(element, observeResult.screenSize, options.relativePosition)
+          this.isSelectionTapTargetOffScreen(
+            element,
+            refreshedHierarchy,
+            latestScreenSize,
+            options
+          )
         ) {
           logger.warn(
             `[TapOnElement] Element found but tap target is off-screen, retrying. ` +
@@ -1290,13 +1342,17 @@ export class TapOnElement extends BaseVisualChange {
           // Android, VoiceOver on iOS. Downstream call paths are split by
           // the platform switch below, so a single flag suffices.
           const isAccessibilityServiceEnabled = await this.strategy.isAccessibilityServiceEnabled();
+          const requireResourceId = this.requiresResourceIdForTapTarget(
+            isAccessibilityServiceEnabled,
+            options
+          );
           let tapElement: Element;
           let usedParent: boolean;
           const initialTapTarget = this.resolveTapTargetElement(
             element,
             viewHierarchy,
             action,
-            isAccessibilityServiceEnabled
+            requireResourceId
           );
           tapElement = initialTapTarget.element;
           usedParent = initialTapTarget.usedParent;
@@ -1306,7 +1362,7 @@ export class TapOnElement extends BaseVisualChange {
               options,
               observeResult,
               action,
-              isAccessibilityServiceEnabled,
+              requireResourceId,
               signal
             );
             if (!stable.ok) {
@@ -1333,12 +1389,13 @@ export class TapOnElement extends BaseVisualChange {
             `clickable=${tapElement.clickable}, usedParent=${usedParent}`
           );
 
-          selectionCapture = await this.selectionStateTracker.prepare({
+          selectionCapture = await this.prepareSelectionCapture(
+            options,
             action,
-            observation: observeResult,
-            element: tapElement,
+            observeResult,
+            tapElement,
             signal
-          });
+          );
 
           const preTapHash = options.retryIfNoChange
             ? this.hashViewHierarchy(viewHierarchy)
@@ -1657,12 +1714,15 @@ export class TapOnElement extends BaseVisualChange {
         driver
       );
       if (!preciseResult.success) {
+        const remainingAction = action === "doubleTap" && preciseResult.completedTaps === 1
+          ? "tap"
+          : action;
         logger.warn(
           `[TapOnElement] Precise TalkBack coordinate gesture failed (${preciseResult.error}), ` +
           `falling back to ADB input at (${x}, ${y})`
         );
         await this.executeAndroidTapWithCoordinates(
-          action,
+          remainingAction,
           x,
           y,
           durationMs,

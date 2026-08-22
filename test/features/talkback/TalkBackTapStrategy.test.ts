@@ -497,6 +497,7 @@ describe("TalkBackTapStrategy", () => {
       expect(result.success).toBe(false);
       expect(result.method).toBe("coordinate-fallback");
       expect(result.error).toContain("First tap failed");
+      expect(result.completedTaps).toBe(0);
       expect(driver.getTapCount()).toBe(1);
     });
 
@@ -509,6 +510,7 @@ describe("TalkBackTapStrategy", () => {
       expect(result.success).toBe(false);
       expect(result.method).toBe("coordinate-fallback");
       expect(result.error).toContain("Second tap failed");
+      expect(result.completedTaps).toBe(1);
       expect(driver.getTapCount()).toBe(2);
     });
 

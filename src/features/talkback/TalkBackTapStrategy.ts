@@ -19,6 +19,8 @@ export interface TalkBackTapResult {
   error?: string;
   /** A stable selector and advertised action rejected the semantic request. */
   semanticActionFailure?: boolean;
+  /** Number of taps completed before a coordinate double-tap failed. */
+  completedTaps?: number;
   screenReaderNavigation?: ScreenReaderNavigationResult;
 }
 
@@ -365,7 +367,8 @@ export class TalkBackTapStrategy {
         return {
           success: false,
           method: "coordinate-fallback",
-          error: `First tap failed: ${firstResult.error}`
+          error: `First tap failed: ${firstResult.error}`,
+          completedTaps: 0
         };
       }
 
@@ -378,7 +381,8 @@ export class TalkBackTapStrategy {
         return {
           success: false,
           method: "coordinate-fallback",
-          error: `Second tap failed: ${secondResult.error}`
+          error: `Second tap failed: ${secondResult.error}`,
+          completedTaps: 1
         };
       }
 

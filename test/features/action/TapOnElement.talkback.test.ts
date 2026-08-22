@@ -585,6 +585,37 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
       expect(fakeTalkBackStrategy.fallbackCalls).toHaveLength(1);
       expect(fakeTalkBackStrategy.fallbackCalls[0].action).toBe("doubleTap");
     });
+
+    test("precise doubleTap retries only the missing second tap", async () => {
+      fakeTalkBackStrategy.setFallbackResult({
+        success: false,
+        method: "coordinate-fallback",
+        error: "Second tap failed",
+        completedTaps: 1
+      });
+      const element = makeElement();
+
+      await (tapOnElement as any).executeAndroidTapWithAccessibility(
+        "doubleTap",
+        50,
+        50,
+        element,
+        500,
+        { relativePosition: { x: 0.5, y: 0.5 } },
+        undefined
+      );
+
+      expect(fakeTalkBackStrategy.fallbackCalls).toHaveLength(1);
+      expect(executeAndroidTapWithCoordinates).toHaveBeenCalledWith(
+        "tap",
+        50,
+        50,
+        500,
+        element,
+        undefined,
+        true
+      );
+    });
   });
 
   describe("opt-in screen-reader navigation (fidelity mode)", () => {

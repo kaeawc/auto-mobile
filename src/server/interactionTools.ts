@@ -244,8 +244,36 @@ export const tapOnSchema = withJsonSchemaOverride(
         platform: platformSchema,
       })
       .strict(),
-  ),
-  (js) => compactExclusiveSelectorProperties(js, ["selector", "container"]),
+  ).superRefine((value, ctx) => {
+    if (!value.relativePosition) {
+      return;
+    }
+    if (value.platform !== "android") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "relativePosition is supported only on Android",
+        path: ["relativePosition"],
+      });
+    }
+    if (value.action === "focus") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "relativePosition is not supported for focus actions",
+        path: ["relativePosition"],
+      });
+    }
+  }),
+  (js) => {
+    compactExclusiveSelectorProperties(js, ["selector", "container"]);
+    js.if = { required: ["relativePosition"] };
+    js.then = {
+      properties: {
+        action: { not: { const: "focus" } },
+        platform: { const: "android" },
+      },
+      required: ["platform"],
+    };
+  },
 );
 
 export const tapAnySchema = withJsonSchemaOverride(

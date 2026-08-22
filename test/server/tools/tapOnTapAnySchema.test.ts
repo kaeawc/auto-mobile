@@ -124,6 +124,19 @@ describe("tapOn schema", () => {
   });
 
   test.each([
+    ["iOS", { platform: "ios", action: "tap" }],
+    ["focus", { platform: "android", action: "focus" }],
+  ] as const)("rejects relativePosition with unsupported %s targeting", (_label, target) => {
+    expect(() =>
+      tapOnSchema.parse({
+        ...target,
+        selector: { text: "Read @mention now" },
+        relativePosition: { x: 0.95, y: 0.5 },
+      })
+    ).toThrow();
+  });
+
+  test.each([
     ["x below the element", { x: -0.01, y: 0.5 }, "x", "too_small"],
     ["x beyond the element", { x: 1.01, y: 0.5 }, "x", "too_big"],
     ["y above the element", { x: 0.5, y: -0.01 }, "y", "too_small"],

@@ -4,6 +4,7 @@ import { createMcpServer } from "../../src/server";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { setDebugModeEnabled } from "../../src/utils/debug";
 import { compileJsonSchema } from "../helpers/jsonSchemaCompile";
+import Ajv2020 from "ajv/dist/2020";
 
 /**
  * Tool Registration Regression Tests
@@ -109,6 +110,23 @@ describe("Tool Registration Validation (Integration Tests)", () => {
         expect(() => compileJsonSchema(schema.outputSchema), `${schema.name} outputSchema`).not.toThrow();
       }
     }
+  });
+
+  test("committed tapOn schema rejects unsupported relativePosition combinations", async () => {
+    const fs = await import("fs/promises");
+    const path = await import("path");
+    const schemaPath = path.join(process.cwd(), "schemas", "tool-definitions.json");
+    const schemas = JSON.parse(await fs.readFile(schemaPath, "utf-8")) as ToolSchemaDefinition[];
+    const tapOn = schemas.find(schema => schema.name === "tapOn");
+    const validate = new Ajv2020({ strict: false }).compile(tapOn!.inputSchema);
+    const baseInput = {
+      selector: { text: "Read @mention now" },
+      relativePosition: { x: 0.95, y: 0.5 },
+    };
+
+    expect(validate({ ...baseInput, platform: "android", action: "tap" })).toBe(true);
+    expect(validate({ ...baseInput, platform: "ios", action: "tap" })).toBe(false);
+    expect(validate({ ...baseInput, platform: "android", action: "focus" })).toBe(false);
   });
 
   // R9 (issue #4183): a negative assertion so the compile check cannot silently

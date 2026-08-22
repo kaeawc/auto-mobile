@@ -36,12 +36,12 @@ describe("daemon log artifact wiring", () => {
 });
 
 describe("startup benchmark log wiring", () => {
-  test("promotes the legacy override after canonical precedence", () => {
+  test("delegates configured overrides to the canonical runtime resolver", () => {
     const script = readFileSync(BENCHMARK_SCRIPT, "utf8");
 
     expect(script).toContain(
-      'configured_log_dir="${AUTOMOBILE_LOG_DIR:-${AUTO_MOBILE_LOG_DIR:-}}"',
+      '[[ "${AUTOMOBILE_LOG_DIR+x}" == "x" || "${AUTO_MOBILE_LOG_DIR+x}" == "x" ]]',
     );
-    expect(script).toContain('AUTOMOBILE_LOG_DIR="$configured_log_dir"');
+    expect(script).toContain('AUTOMOBILE_LOG_DIR="$(bun scripts/resolve-auto-mobile-log-dir.ts)"');
   });
 });

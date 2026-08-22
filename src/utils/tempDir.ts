@@ -14,6 +14,7 @@
 import fs from "node:fs";
 import os from "os";
 import path from "path";
+import { toActionableError } from "../models/ActionableError";
 import { resolveDaemonLaunchWorkingDirectory } from "./workingDirectory";
 
 /**
@@ -54,7 +55,7 @@ export function resolveAutoMobileBaseDir(
   }
 
   if (homeDir && homeDir.length > 0) {
-    return path.join(homeDir, ".auto-mobile");
+    return path.resolve(daemonLaunchWorkingDirectory, homeDir, ".auto-mobile");
   }
 
   return path.join(os.tmpdir(), "auto-mobile");
@@ -122,8 +123,21 @@ export function ensureSecureTempDirSync(subdirectory: string): string {
 /**
  * Synchronously ensure the shared log directory exists with restrictive permissions.
  */
-export function ensureSecureLogsDirSync(): string {
-  return ensureSecureDirectorySync(resolveAutoMobileLogsDir());
+export function ensureSecureLogsDirSync(
+  env: NodeJS.ProcessEnv = process.env,
+  homeDir: string = os.homedir(),
+): string {
+  try {
+    return ensureSecureDirectorySync(resolveAutoMobileLogsDir(env, homeDir));
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("symbolic-link directory")) {
+      throw toActionableError(error, "Refusing to use symbolic-link directory for AutoMobile logs");
+    }
+    throw toActionableError(
+      error,
+      "Unable to initialize the AutoMobile log directory. Set AUTOMOBILE_LOG_DIR to a writable directory.",
+    );
+  }
 }
 
 // Common subdirectory constants for consistency

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { ActionableError } from "../../src/models/ActionableError";
 import {
   resolveAutoMobileBaseDir,
   resolveAutoMobileLogsDir,
@@ -57,6 +58,12 @@ describe("resolveAutoMobileBaseDir", () => {
     const base = resolveAutoMobileBaseDir({}, home);
     expect(base).toBe(path.join(home, ".auto-mobile"));
     expect(base.startsWith(os.tmpdir())).toBe(false);
+  });
+
+  test("anchors a relative home directory to the daemon launch directory", () => {
+    expect(resolveAutoMobileBaseDir({}, "relative-home", "/launch")).toBe(
+      path.resolve("/launch", "relative-home", ".auto-mobile"),
+    );
   });
 
   test("falls back to os.tmpdir()/auto-mobile only when no home dir is available", () => {
@@ -257,6 +264,27 @@ describe("ensureSecureTempDirSync", () => {
       } else {
         process.env.AUTOMOBILE_LOG_DIR = previousLogDir;
       }
+      fs.rmSync(tmpBase, { recursive: true, force: true });
+    }
+  });
+
+  test("wraps an unusable log directory with actionable context", () => {
+    const tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), "am-log-error-test-"));
+    const blockingFile = path.join(tmpBase, "not-a-directory");
+    fs.writeFileSync(blockingFile, "blocked");
+
+    try {
+      ensureSecureLogsDirSync(
+        { AUTOMOBILE_LOG_DIR: path.join(blockingFile, "logs") },
+        "/home/tester",
+      );
+      throw new Error("Expected ensureSecureLogsDirSync to throw");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ActionableError);
+      expect((error as Error).message).toContain("Set AUTOMOBILE_LOG_DIR to a writable directory");
+      expect((error as Error).message).toContain(blockingFile);
+      expect((error as Error).cause).toBeInstanceOf(Error);
+    } finally {
       fs.rmSync(tmpBase, { recursive: true, force: true });
     }
   });

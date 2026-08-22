@@ -2,8 +2,8 @@
  If thrown, the MCP server will catch it and send the message to the client.
  */
 export class ActionableError extends Error {
-  constructor(message: string) {
-    super(message);
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
   }
 }
 
@@ -19,5 +19,5 @@ export function toActionableError(error: unknown, context: string): ActionableEr
     return error;
   }
   const message = error instanceof Error ? error.message : String(error);
-  return new ActionableError(`${context}: ${message}`);
+  return new ActionableError(`${context}: ${message}`, { cause: error });
 }

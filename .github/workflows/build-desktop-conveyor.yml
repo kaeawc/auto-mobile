@@ -24,6 +24,11 @@ on:
         required: false
         type: boolean
         default: false
+      publish:
+        description: "Publish the update site to GitHub Releases (make copied-site) instead of artifacts-only"
+        required: false
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       version:
@@ -31,6 +36,10 @@ on:
         required: true
         type: string
       signed:
+        required: false
+        type: boolean
+        default: false
+      publish:
         required: false
         type: boolean
         default: false
@@ -50,7 +59,9 @@ on:
         required: false
 
 permissions:
-  contents: read
+  # `contents: write` is needed only for publish mode (make copied-site → GitHub Releases). The
+  # default artifacts-only run does not push anything; the elevated scope is unused there.
+  contents: write
 
 jobs:
   conveyor:
@@ -121,10 +132,12 @@ jobs:
           echo "::add-mask::${MACOS_DEVELOPER_ID_CERT_PASSWORD}"
           echo "CONVEYOR_MAC_CERTIFICATE_PASSWORD=${MACOS_DEVELOPER_ID_CERT_PASSWORD}" >> "$GITHUB_ENV"
 
-      - name: "Run Conveyor (make site)"
+      - name: "Run Conveyor"
         uses: hydraulic-software/conveyor/actions/build@v22.0
         with:
-          command: make site
+          # publish -> `make copied-site` pushes the site to app.site.copy-to (GitHub Releases);
+          # otherwise `make site` writes to ./output only (artifacts-only).
+          command: ${{ inputs.publish && 'make copied-site' || 'make site' }}
           # The action runs from the repo root and has no working-dir input, so point Conveyor at the
           # config with -f; Conveyor treats the config file's directory (android/) as the project
           # root, so its `./gradlew` include and relative asset paths resolve there. A signed run uses
@@ -134,6 +147,10 @@ jobs:
           agree_to_license: 1
         env:
           CONVEYOR_APP_VERSION: ${{ inputs.version }}
+          # In publish mode, set conveyor.conf's env-gated site.copy-to to this repo's GitHub Releases
+          # and hand Conveyor the token to attach the Sparkle/apt assets. Unset otherwise -> no push.
+          CONVEYOR_SITE_COPY_TO: ${{ inputs.publish && 'github:kaeawc/auto-mobile' || '' }}
+          GITHUB_TOKEN: ${{ inputs.publish && secrets.GITHUB_TOKEN || '' }}
           # The cert password reaches Conveyor as CONVEYOR_MAC_CERTIFICATE_PASSWORD via GITHUB_ENV
           # from the prepare step above (matching ci.conveyor.conf). The notary issuer/key ids are
           # read directly under their own names by ci.conveyor.conf.

@@ -211,7 +211,12 @@ jobs:
       # Desktop installers are direct user downloads, not runtime-fetched
       # dependencies, so they carry no source-checksum entry in the release
       # constants; they are attached to the GitHub release as-is.
+      # macOS + Linux desktop assets come from jpackage by default. When DESKTOP_PUBLISHER=conveyor
+      # they are published instead by publish-desktop-conveyor.yml (Sparkle/apt), so skip the jpackage
+      # download+upload for those two here. Windows stays on jpackage regardless — Conveyor does not
+      # build Windows yet (#5227, PR-C4).
       - name: "Download desktop macOS DMG"
+        if: ${{ vars.DESKTOP_PUBLISHER != 'conveyor' }}
         uses: actions/download-artifact@v7
         with:
           name: automobile-desktop-macos
@@ -230,6 +235,7 @@ jobs:
           run-id: ${{ inputs.prepare_run_id }}
 
       - name: "Download desktop Linux Deb"
+        if: ${{ vars.DESKTOP_PUBLISHER != 'conveyor' }}
         uses: actions/download-artifact@v7
         with:
           name: automobile-desktop-linux
@@ -238,7 +244,11 @@ jobs:
           repository: ${{ github.repository }}
           run-id: ${{ inputs.prepare_run_id }}
 
+      # The verifier checks all three jpackage installers, so it only applies to the default
+      # (all-jpackage) path. In conveyor mode macOS/Linux are absent here (Conveyor verifies its own
+      # signed/notarized output), so verify only the Windows .msi that jpackage still ships.
       - name: Verify prepared desktop installers
+        if: ${{ vars.DESKTOP_PUBLISHER != 'conveyor' }}
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: bash scripts/ci/verify-desktop-installer-assets.sh "$VERSION" /tmp/desktop
@@ -347,6 +357,7 @@ jobs:
           REPO: ${{ github.repository }}
           TAG: ${{ needs.validate-release-tag.outputs.tag }}
           VERSION: ${{ steps.version.outputs.version }}
+          DESKTOP_PUBLISHER: ${{ vars.DESKTOP_PUBLISHER }}
         run: |
           set -euo pipefail
           files=(
@@ -354,10 +365,17 @@ jobs:
             /tmp/control-proxy.ipa
             /tmp/automobile-video.jar
             /tmp/screen-capture-helper-macos-universal.zip
-            /tmp/desktop/AutoMobile-${VERSION}-macos.dmg
             /tmp/desktop/AutoMobile-${VERSION}-windows.msi
-            /tmp/desktop/AutoMobile-${VERSION}-linux.deb
           )
+          # macOS .dmg + Linux .deb are attached by jpackage in the default path, or by
+          # publish-desktop-conveyor.yml (Sparkle/apt) when DESKTOP_PUBLISHER=conveyor. Windows .msi
+          # above is always jpackage — Conveyor does not build Windows yet (#5227, PR-C4).
+          if [ "${DESKTOP_PUBLISHER:-jpackage}" != "conveyor" ]; then
+            files+=(
+              /tmp/desktop/AutoMobile-${VERSION}-macos.dmg
+              /tmp/desktop/AutoMobile-${VERSION}-linux.deb
+            )
+          fi
 
           # Use the GitHub Release API directly through gh. `gh release create`
           # uploads through a draft before publishing, so a failed first attempt
@@ -654,3 +672,48 @@ jobs:
           MSG="The npm package includes APK and IPA checksums at"
           MSG="$MSG build time, ensuring integrity verification."
           echo "$MSG" >> "$S"
+
+  # --- Conveyor desktop publish (macOS + Linux) --------------------------------
+  # Gated on the DESKTOP_PUBLISHER repo variable. When it is set to "conveyor", the macOS + Linux
+  # desktop assets are published here — signed + notarized, delivered via Sparkle (macOS) and a
+  # generated apt repo (Linux) — instead of by jpackage; the verify-and-release job above skips the
+  # jpackage .dmg/.deb in that mode but always ships the Windows .msi (Conveyor does not build Windows
+  # yet). When the variable is unset or "jpackage" both jobs below skip and the release is byte-for-
+  # byte what it is today. These run after verify-and-release so the GitHub Release already exists for
+  # Conveyor's copied-site to attach to. See #5227 (PR-C4).
+  #
+  # PREREQUISITES before flipping DESKTOP_PUBLISHER=conveyor (documented on the PR): (1) add the
+  # CONVEYOR_SIGNING_KEY repo secret; (2) verify a manual dispatch of build-desktop-conveyor.yml; and
+  # (3) resolve desktop >=1.0 versioning so Conveyor's floored version matches the release tag (the
+  # repo is on 0.0.x, which Conveyor cannot use as a macOS version — see resolve step below).
+  resolve-conveyor-version:
+    name: "Resolve Conveyor version"
+    if: ${{ vars.DESKTOP_PUBLISHER == 'conveyor' }}
+    needs: [validate-release-tag, verify-and-release]
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      # Conveyor requires a macOS major >= 1; floor a 0-major to 1 (0.0.61 -> 1.0.61), mirroring
+      # desktopMacPackageVersion in desktop-app/build.gradle.kts. NOTE: this diverges from the release
+      # tag until the repo adopts real >=1.0 desktop versioning; see the prerequisites above.
+      - name: "Floor major to >= 1 for Conveyor"
+        id: v
+        env:
+          TAG: ${{ needs.validate-release-tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          core="${TAG%%[-+]*}"
+          IFS=. read -r major minor patch <<<"$core"
+          if [[ "${major:-0}" -lt 1 ]]; then major=1; fi
+          echo "version=${major}.${minor:-0}.${patch:-0}" >> "$GITHUB_OUTPUT"
+
+  publish-desktop-conveyor:
+    name: "Publish desktop via Conveyor"
+    needs: resolve-conveyor-version
+    uses: ./.github/workflows/build-desktop-conveyor.yml
+    with:
+      version: ${{ needs.resolve-conveyor-version.outputs.version }}
+      signed: true
+      publish: true
+    secrets: inherit

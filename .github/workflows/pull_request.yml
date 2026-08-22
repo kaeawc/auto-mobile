@@ -1147,7 +1147,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: ["typescript"]
+        language: [ 'typescript' ]
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -2087,8 +2087,8 @@ jobs:
       - name: "Install JDK"
         uses: actions/setup-java@v5
         with:
-          distribution: "zulu"
-          java-version: "21"
+          distribution: 'zulu'
+          java-version: '21'
 
       - name: "Validate Kotlin 2.2 consumer compatibility"
         run: bash scripts/android/validate-junit-runner-kotlin-consumer.sh
@@ -2128,7 +2128,7 @@ jobs:
       - uses: ./.github/actions/android-emulator
         with:
           script: "./gradlew :junit-runner:test --stacktrace --info"
-          working-directory: "./android/"
+          working-directory: './android/'
           accessibility-apk-path: control-proxy/build/outputs/apk/debug/control-proxy-debug.apk
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           release-keystore-base64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
@@ -2156,7 +2156,7 @@ jobs:
         if: always()
         with:
           check_name: "JUnit Runner Emulator Test Report"
-          report_paths: "**/build/test-results/**/*.xml"
+          report_paths: '**/build/test-results/**/*.xml'
 
   # Emulator.wtf session-based tests (see #94 for investigation context)
   # Requires EMULATOR_WTF_ENABLED=true variable and EMULATOR_WTF_API_KEY secret
@@ -2233,7 +2233,7 @@ jobs:
         if: always()
         with:
           check_name: "JUnit Runner Emulator.wtf Test Report"
-          report_paths: "**/build/test-results/**/*.xml"
+          report_paths: '**/build/test-results/**/*.xml'
 
   playground-automobile-emulator-tests:
     name: "Run Playground Automobile Emulator Tests"
@@ -2261,7 +2261,7 @@ jobs:
           AUTOMOBILE_ENABLED_TOOLS: "navigateTo,getNavigationGraph,explore"
         with:
           script: "../scripts/android/verify-sdk-ctrl-proxy-permission-contract.sh control-proxy/build/outputs/apk/debug/control-proxy-debug.apk && ../scripts/android/navigation-graph-sdk-event-integration.sh && ./gradlew :playground:app:test --stacktrace --info"
-          working-directory: "./android/"
+          working-directory: './android/'
           accessibility-apk-path: control-proxy/build/outputs/apk/debug/control-proxy-debug.apk
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           release-keystore-base64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
@@ -2281,7 +2281,7 @@ jobs:
         if: always()
         with:
           check_name: "Playground Automobile Emulator Test Report"
-          report_paths: "**/build/test-results/**/*.xml"
+          report_paths: '**/build/test-results/**/*.xml'
 
   build-junit-runner-library:
     timeout-minutes: 20
@@ -2386,7 +2386,7 @@ jobs:
 
       - name: "Store Sample APK"
         uses: actions/upload-artifact@v6
-        if: success() # Only upload if build succeeded
+        if: success()  # Only upload if build succeeded
         with:
           name: playground-app-apk
           path: android/playground/app/build/outputs/apk/debug/playground-app-debug.apk
@@ -2881,6 +2881,7 @@ jobs:
           name: pinned-runtime-graph-report
           path: ci-logs/pinned-runtime-graph.log
           retention-days: 90
+
 
   # =============================================================================
   # Gate Jobs for Branch Protection

@@ -419,12 +419,17 @@ public class CommandHandler: CommandHandling {
     }
 
     private func handleRequestScreenshot(_ request: RequestEnvelope, startTime _: Date) throws -> ScreenshotResponse {
-        // Read the hierarchy on both sides of the pixel capture. A change during capture leaves
-        // the context absent, which makes a context-aware client fail closed instead of pairing
-        // pixels from one screen with the identity of another.
-        let before = currentFrameContext()
+        // Frame-context correlation is opt-in: only when the client supplies a `frameContext`
+        // does the screenshot pay for the surrounding hierarchy walks. A plain screenshot
+        // performs zero extractions and returns `frameContext: nil`.
+        //
+        // When requested, read the hierarchy on both sides of the pixel capture. A change during
+        // capture leaves the context absent, which makes a context-aware client fail closed
+        // instead of pairing pixels from one screen with the identity of another.
+        let correlate = request.frameContext != nil
+        let before = correlate ? currentFrameContext() : nil
         let screenshot = try gesturePerformer.getScreenshotCapture()
-        let after = currentFrameContext()
+        let after = correlate ? currentFrameContext() : nil
         let base64 = screenshot.data.base64EncodedString()
 
         return ScreenshotResponse(
@@ -432,7 +437,7 @@ public class CommandHandler: CommandHandling {
             data: base64,
             format: "png",
             rotation: screenshot.rotation,
-            frameContext: before == after ? before : nil
+            frameContext: correlate && before == after ? before : nil
         )
     }
 
@@ -440,14 +445,7 @@ public class CommandHandler: CommandHandling {
         guard let hierarchy = try? elementLocator.getViewHierarchy(disableAllFiltering: false) else {
             return nil
         }
-        return frameContext.context(for: enrichWithMatchingSdkHierarchy(hierarchy))
-    }
-
-    private func requireCurrentFrameContext(_ expected: String?) throws {
-        guard let expected else { return }
-        guard currentFrameContext() == expected else {
-            throw CommandError.executionFailed("Stale frame context; observe a fresh frame before retrying")
-        }
+        return frameContext.context(for: enrichWithCachedSdkHierarchy(hierarchy))
     }
 
     private func performContextCheckedGesture<T>(
@@ -456,10 +454,18 @@ public class CommandHandler: CommandHandling {
     )
         throws -> T
     {
-        let hierarchy = try? elementLocator.getViewHierarchy(disableAllFiltering: false)
+        // No expected context means there is nothing to validate: `performIfCurrent` returns
+        // `operation()` immediately for a nil `expected` (dispatched on the transition executor),
+        // so skip the hierarchy extraction and blocking SDK fetch entirely on this fast path.
+        // When context IS supplied, extract once and prefer the zero-device-cost cached SDK
+        // hierarchy — the observe that produced `expected` also warmed that cache — instead of
+        // the slow `/hierarchy/fresh` main-thread walk in the target app.
+        let hierarchy = expected == nil
+            ? nil
+            : (try? elementLocator.getViewHierarchy(disableAllFiltering: false)).map(enrichWithCachedSdkHierarchy)
         return try frameContext.performIfCurrent(
             expected: expected,
-            hierarchy: hierarchy.map(enrichWithMatchingSdkHierarchy),
+            hierarchy: hierarchy,
             operation: operation
         )
     }
@@ -488,7 +494,6 @@ public class CommandHandler: CommandHandling {
     }
 
     private func handleTapCoordinates(_ request: RequestTapCoordinates, startTime: Date) throws -> WebSocketResponse {
-        try requireCurrentFrameContext(request.frameContext)
         try requireFinite(request.x, field: "x")
         try requireFinite(request.y, field: "y")
         let duration = request.duration ?? 0
@@ -504,7 +509,6 @@ public class CommandHandler: CommandHandling {
     }
 
     private func handleSwipe(_ request: RequestSwipe, startTime: Date) throws -> WebSocketResponse {
-        try requireCurrentFrameContext(request.frameContext)
         try requireFinite(request.x1, field: "x1")
         try requireFinite(request.y1, field: "y1")
         try requireFinite(request.x2, field: "x2")
@@ -563,7 +567,6 @@ public class CommandHandler: CommandHandling {
     }
 
     private func handleDrag(_ request: RequestDrag, startTime: Date) throws -> WebSocketResponse {
-        try requireCurrentFrameContext(request.frameContext)
         try requireFinite(request.x1, field: "x1")
         try requireFinite(request.y1, field: "y1")
         try requireFinite(request.x2, field: "x2")
@@ -632,7 +635,6 @@ public class CommandHandler: CommandHandling {
             )
 
         do {
-            try requireCurrentFrameContext(request.frameContext)
             try performContextCheckedGesture(expected: request.frameContext) {
                 if let resourceId = resourceId {
                     try perfProvider.track("setText.byResourceId") {
@@ -669,7 +671,6 @@ public class CommandHandler: CommandHandling {
         perfProvider.serial("handleAppendText")
         defer { perfProvider.end() }
 
-        try requireCurrentFrameContext(request.frameContext)
         try performContextCheckedGesture(expected: request.frameContext) {
             try perfProvider.track("appendText") {
                 try gesturePerformer.appendText(text: request.text)
@@ -821,7 +822,6 @@ public class CommandHandler: CommandHandling {
         perfProvider.serial("handlePressButton")
         defer { perfProvider.end() }
 
-        try requireCurrentFrameContext(request.frameContext)
         try performContextCheckedGesture(expected: request.frameContext) {
             try perfProvider.track("pressButton") {
                 try gesturePerformer.pressButton(button)
@@ -848,7 +848,6 @@ public class CommandHandler: CommandHandling {
         perfProvider.serial("handlePressHome")
         defer { perfProvider.end() }
 
-        try requireCurrentFrameContext(request.frameContext)
         try performContextCheckedGesture(expected: request.frameContext) {
             try perfProvider.track("pressHome") {
                 try gesturePerformer.pressHome()
@@ -874,7 +873,6 @@ public class CommandHandler: CommandHandling {
         perfProvider.serial("handlePressBack")
         defer { perfProvider.end() }
 
-        try requireCurrentFrameContext(request.frameContext)
         try performContextCheckedGesture(expected: request.frameContext) {
             try perfProvider.track("pressBack") {
                 try gesturePerformer.pressBack()
@@ -907,7 +905,6 @@ public class CommandHandler: CommandHandling {
         perfProvider.serial("handleRecentApps")
         defer { perfProvider.end() }
 
-        try requireCurrentFrameContext(request.frameContext)
         let didOpen = try performContextCheckedGesture(expected: request.frameContext) {
             try perfProvider.track("openRecentApps") {
                 try gesturePerformer.openRecentApps()

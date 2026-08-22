@@ -39,9 +39,73 @@ final class FrameContextSafetyTests: XCTestCase {
             frameContext?.recordTransition(to: screenA)
         }
 
-        let response = commandHandler.handle(.requestScreenshot(RequestEnvelope(requestId: "capture"))) as? ScreenshotResponse
+        // Correlation is opt-in via a supplied frameContext; the ABA transition during capture
+        // still makes the before/after contexts disagree, so the paired context is withheld.
+        let response = commandHandler.handle(
+            .requestScreenshot(RequestEnvelope(requestId: "capture", frameContext: "correlate"))
+        ) as? ScreenshotResponse
 
         XCTAssertNil(response?.frameContext)
+    }
+
+    func testScreenshotWithoutRequestedContextSkipsExtractionAndReturnsNilContext() {
+        let screenA = makeHierarchy(text: "A")
+        fakeElementLocator.setHierarchy(screenA)
+
+        let response = commandHandler
+            .handle(.requestScreenshot(RequestEnvelope(requestId: "capture"))) as? ScreenshotResponse
+
+        XCTAssertNotNil(response?.data)
+        XCTAssertNil(response?.frameContext)
+        // Opt-out means neither the before nor the after hierarchy is walked.
+        XCTAssertEqual(fakeElementLocator.hierarchyRequestCount, 0)
+    }
+
+    func testScreenshotWithRequestedContextPairsStableScreen() {
+        let screenA = makeHierarchy(text: "A")
+        fakeElementLocator.setHierarchy(screenA)
+
+        let response = commandHandler.handle(
+            .requestScreenshot(RequestEnvelope(requestId: "capture", frameContext: "correlate"))
+        ) as? ScreenshotResponse
+
+        // No transition during capture, so the before/after contexts agree and one is returned.
+        XCTAssertNotNil(response?.frameContext)
+        XCTAssertEqual(response?.frameContext, frameContext.context(for: screenA))
+    }
+
+    func testContextlessGesturePerformsNoHierarchyExtraction() {
+        fakeElementLocator.setHierarchy(makeHierarchy(text: "A"))
+
+        let response = commandHandler.handle(.tapCoordinates(RequestTapCoordinates(
+            requestId: "tap",
+            x: 10,
+            y: 20,
+            frameContext: nil
+        ))) as? WebSocketResponse
+
+        XCTAssertEqual(response?.success, true)
+        XCTAssertEqual(fakeGesturePerformer.getTapHistory().count, 1)
+        // No expected context means no staleness check, so the hierarchy is never extracted.
+        XCTAssertEqual(fakeElementLocator.hierarchyRequestCount, 0)
+    }
+
+    func testContextBearingGesturePerformsExactlyOneHierarchyExtraction() {
+        let screenA = makeHierarchy(text: "A")
+        let expected = frameContext.context(for: screenA)
+        fakeElementLocator.setHierarchy(screenA)
+
+        let response = commandHandler.handle(.tapCoordinates(RequestTapCoordinates(
+            requestId: "tap",
+            x: 10,
+            y: 20,
+            frameContext: expected
+        ))) as? WebSocketResponse
+
+        XCTAssertEqual(response?.success, true)
+        XCTAssertEqual(fakeGesturePerformer.getTapHistory().count, 1)
+        // The redundant pre-check is gone: the dispatch boundary extracts the hierarchy once.
+        XCTAssertEqual(fakeElementLocator.hierarchyRequestCount, 1)
     }
 
     func testContextBearingGesturesRevalidateAtDispatchBoundary() {
@@ -96,14 +160,10 @@ final class FrameContextSafetyTests: XCTestCase {
         ]
 
         for request in requests {
-            fakeElementLocator.setHierarchy(screenA)
-            fakeElementLocator.onHierarchyRead = { [fakeElementLocator] in
-                // FakeElementLocator invokes this after returning the first hierarchy, so the
-                // initial requireCurrentFrameContext sees A and the serialized execution check
-                // sees B.
-                fakeElementLocator?.setHierarchy(screenB)
-                fakeElementLocator?.onHierarchyRead = nil
-            }
+            // `expected` was computed from screen A, but the screen has since transitioned to B.
+            // The single dispatch-boundary extraction now sees B, so the hash mismatch rejects
+            // the stale context and the gesture never executes.
+            fakeElementLocator.setHierarchy(screenB)
             let response = commandHandler.handle(request) as? WebSocketResponse
             XCTAssertEqual(response?.success, false)
         }

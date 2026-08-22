@@ -15,11 +15,19 @@ import type { ChildProcess, SpawnOptions } from "node:child_process";
 class ProbeClient implements DaemonClientLike {
   connectCallCount = 0;
   closeCallCount = 0;
+  readonly connectionTimeouts: number[] = [];
+  readonly connectionSignals: AbortSignal[] = [];
 
   constructor(private readonly canConnect: boolean) {}
 
-  async connect(): Promise<void> {
+  async connect(timeoutMs?: number, signal?: AbortSignal): Promise<void> {
     this.connectCallCount++;
+    if (timeoutMs !== undefined) {
+      this.connectionTimeouts.push(timeoutMs);
+    }
+    if (signal !== undefined) {
+      this.connectionSignals.push(signal);
+    }
     if (!this.canConnect) {
       throw new Error("socket not accepting connections");
     }
@@ -205,9 +213,11 @@ describe("DaemonManager readiness", () => {
     );
 
     await expect(manager.waitForReady(250)).resolves.toBe(false);
-    // The probe is retried before the socket is treated as dead, so a fully
-    // unreachable socket is probed READINESS_PROBE_MAX_ATTEMPTS times.
-    expect(clients).toHaveLength(READINESS_PROBE_MAX_ATTEMPTS);
+    // The probe is retried before the socket is treated as dead, bounded by the
+    // remaining readiness deadline. A slow probe can consume the remaining budget
+    // before every retry runs.
+    expect(clients.length).toBeGreaterThan(0);
+    expect(clients.length).toBeLessThanOrEqual(READINESS_PROBE_MAX_ATTEMPTS);
     expect(clients[0].connectCallCount).toBe(1);
     expect(clients[0].closeCallCount).toBe(1);
     expect(existsSync(socketPath)).toBe(false);
@@ -252,7 +262,8 @@ describe("DaemonManager readiness", () => {
       );
 
       await expect(manager.waitForReady(250)).resolves.toBe(false);
-      expect(clients).toHaveLength(READINESS_PROBE_MAX_ATTEMPTS);
+      expect(clients.length).toBeGreaterThan(0);
+      expect(clients.length).toBeLessThanOrEqual(READINESS_PROBE_MAX_ATTEMPTS);
       expect(clients[0].connectCallCount).toBe(1);
       expect(clients[0].closeCallCount).toBe(1);
       expect(existsSync(socketPath)).toBe(false);
@@ -321,6 +332,50 @@ describe("DaemonManager readiness", () => {
     await expect(ready).resolves.toBe(false);
     expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
     expect(clients).toHaveLength(0);
+  });
+
+  test("bounds a stalled socket connection by the remaining readiness deadline", async () => {
+    const { lockPath, pidPath, socketPath } = createPaths();
+    const fakeTimer = new FakeTimer();
+    const clients: ProbeClient[] = [];
+    writeFileSync(socketPath, "socket placeholder");
+
+    const manager = new DaemonManager(
+      () => {
+        const client = new ProbeClient(true);
+        client.connect = async (timeoutMs?: number, signal?: AbortSignal) => {
+          client.connectCallCount++;
+          if (timeoutMs !== undefined) {
+            client.connectionTimeouts.push(timeoutMs);
+          }
+          if (signal !== undefined) {
+            client.connectionSignals.push(signal);
+          }
+          await new Promise<void>((_resolve, reject) => {
+            signal?.addEventListener("abort", () => reject(new Error("probe aborted")), {
+              once: true,
+            });
+          });
+        };
+        clients.push(client);
+        return client;
+      },
+      undefined,
+      fakeTimer,
+      lockPath,
+      pidPath,
+      socketPath
+    );
+
+    const ready = manager.waitForReady(100);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(clients).toHaveLength(1);
+    expect(clients[0].connectionTimeouts).toEqual([100]);
+
+    fakeTimer.advanceTime(100);
+
+    await expect(ready).resolves.toBe(false);
+    expect(clients[0].connectionSignals[0].aborted).toBe(true);
   });
 
   test("reports elapsed readiness timing when no daemon socket appears", async () => {

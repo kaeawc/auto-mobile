@@ -189,26 +189,44 @@ export class DaemonClient {
   /**
    * Connect to the daemon
    */
-  async connect(): Promise<void> {
+  async connect(timeoutMs: number = this.connectionTimeout, signal?: AbortSignal): Promise<void> {
     if (this.connected) {
       return;
     }
 
+    const deadline = this.timer.now() + timeoutMs;
     try {
-      await this.connectOnce();
+      await this.connectOnce(this.remainingConnectTimeout(deadline, timeoutMs), signal);
       return;
     } catch (error) {
-      if (DaemonClient.cleanupStaleSocketIfDaemonDead(this.socketPath, this.recoveryOptions)) {
-        await this.connectOnce();
+      if (
+        !signal?.aborted &&
+        DaemonClient.cleanupStaleSocketIfDaemonDead(this.socketPath, this.recoveryOptions)
+      ) {
+        await this.connectOnce(this.remainingConnectTimeout(deadline, timeoutMs), signal);
         return;
       }
       throw error;
     }
   }
 
-  private async connectOnce(): Promise<void> {
+  private remainingConnectTimeout(deadline: number, timeoutMs: number): number {
+    const remaining = deadline - this.timer.now();
+    if (remaining <= 0) {
+      throw new DaemonUnavailableError(
+        `Failed to connect to daemon within ${timeoutMs}ms`
+      );
+    }
+    return remaining;
+  }
+
+  private async connectOnce(connectionTimeout: number, signal?: AbortSignal): Promise<void> {
     if (this.connected) {
       return;
+    }
+
+    if (signal?.aborted) {
+      throw new DaemonUnavailableError("Daemon connection attempt aborted");
     }
 
     if (!existsSync(this.socketPath)) {
@@ -219,6 +237,7 @@ export class DaemonClient {
 
     return new Promise((resolve, reject) => {
       let settled = false;
+      let removeAbortListener = () => {};
 
       const rejectPendingRequests = (error: Error) => {
         for (const [, { reject, timeout }] of this.pendingRequests) {
@@ -230,6 +249,7 @@ export class DaemonClient {
 
       const fail = (error: Error) => {
         this.timer.clearTimeout(timeout);
+        removeAbortListener();
         this.connected = false;
         if (this.socket) {
           this.socket.destroy();
@@ -249,13 +269,20 @@ export class DaemonClient {
       const timeout = this.timer.setTimeout(() => {
         fail(
           new DaemonUnavailableError(
-            `Failed to connect to daemon within ${this.connectionTimeout}ms`
+            `Failed to connect to daemon within ${connectionTimeout}ms`
           )
         );
-      }, this.connectionTimeout);
+      }, connectionTimeout);
+
+      if (signal) {
+        const onAbort = () => fail(new DaemonUnavailableError("Daemon connection attempt aborted"));
+        signal.addEventListener("abort", onAbort, { once: true });
+        removeAbortListener = () => signal.removeEventListener("abort", onAbort);
+      }
 
       this.socket = createConnection(this.socketPath, () => {
         this.timer.clearTimeout(timeout);
+        removeAbortListener();
         this.connected = true;
         logger.info(`Connected to daemon at ${this.socketPath}`);
         if (!settled) {
@@ -538,7 +565,7 @@ export class DaemonClient {
 }
 
 export interface DaemonClientLike {
-  connect(): Promise<void>;
+  connect(timeoutMs?: number, signal?: AbortSignal): Promise<void>;
   close(): Promise<void>;
   callTool(toolName: string, params: Record<string, any>): Promise<any>;
   readResource(uri: string, params?: Record<string, any>): Promise<any>;

@@ -1028,6 +1028,193 @@ describe("Daemon manager process detection", () => {
     }
   });
 
+  test("explicit restart bounds recorded and cross-namespace shutdown in one cleanup window", async () => {
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const recordedPid = 451;
+    const crossNamespacePid = 452;
+    const livePids = new Set([recordedPid, crossNamespacePid]);
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses: () => [recordedPid, crossNamespacePid].map(pid => ({
+        pid,
+        ppid: 1,
+        command: "bun /other-checkout/dist/src/index.js --daemon-mode",
+      })),
+      isProcessRunning: pid => livePids.has(pid),
+    };
+    const signaler = new FakeDaemonProcessSignaler((pid, signal) => {
+      if (pid === crossNamespacePid && signal === "SIGKILL") {
+        fakeTimer.setTimeout(() => { livePids.delete(pid); }, 1_000);
+      }
+    });
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      fakeTimer,
+      undefined,
+      undefined,
+      undefined,
+      processFinder,
+      undefined,
+      undefined,
+      undefined,
+      signaler,
+    );
+    const statusSpy = spyOn(manager, "status").mockResolvedValue({
+      running: true,
+      pid: recordedPid,
+    });
+    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+    const killSpy = spyOn(process, "kill").mockImplementation((_pid, signal) => {
+      if (signal === "SIGKILL") {
+        fakeTimer.setTimeout(() => { livePids.delete(recordedPid); }, 1_000);
+      }
+      return true;
+    });
+
+    try {
+      await manager.restart();
+
+      expect(killSpy.mock.calls.filter(([pid]) => pid === recordedPid)).toEqual([
+        [recordedPid, "SIGTERM"],
+        [recordedPid, "SIGKILL"],
+      ]);
+      expect(signaler.signals).toEqual([
+        { pid: crossNamespacePid, signal: "SIGTERM" },
+        { pid: crossNamespacePid, signal: "SIGKILL" },
+      ]);
+      expect(fakeTimer.now()).toBe(12_000);
+      expect(startSpy).toHaveBeenCalledWith({});
+    } finally {
+      killSpy.mockRestore();
+      startSpy.mockRestore();
+      statusSpy.mockRestore();
+    }
+  });
+
+  test("explicit restart awaits the recorded daemon cleanup after a cross-namespace failure", async () => {
+    const fakeTimer = new FakeTimer();
+    const recordedPid = 451;
+    const crossNamespacePid = 452;
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses: () => [recordedPid, crossNamespacePid].map(pid => ({
+        pid,
+        ppid: 1,
+        command: "bun /other-checkout/dist/src/index.js --daemon-mode",
+      })),
+      isProcessRunning: () => true,
+    };
+    const signaler = new FakeDaemonProcessSignaler(() => {
+      throw new Error("EPERM");
+    });
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      fakeTimer,
+      undefined,
+      undefined,
+      undefined,
+      processFinder,
+      undefined,
+      undefined,
+      undefined,
+      signaler,
+    );
+    const statusSpy = spyOn(manager, "status").mockResolvedValue({
+      running: true,
+      pid: recordedPid,
+    });
+    let recordedCleanupCompleted = false;
+    const stopSpy = spyOn(manager, "stop").mockImplementation(async () => {
+      await fakeTimer.sleep(1_000);
+      recordedCleanupCompleted = true;
+    });
+    const restart = manager.restart();
+    let restartSettled = false;
+    void restart.then(
+      () => { restartSettled = true; },
+      () => { restartSettled = true; },
+    );
+
+    try {
+      await new Promise<void>(resolve => setImmediate(resolve));
+
+      expect(restartSettled).toBe(false);
+      expect(recordedCleanupCompleted).toBe(false);
+
+      await fakeTimer.advanceTimersByTimeAsync(1_000);
+
+      await expect(restart).rejects.toThrow("Failed to stop verified daemon process 452");
+      expect(recordedCleanupCompleted).toBe(true);
+    } finally {
+      stopSpy.mockRestore();
+      statusSpy.mockRestore();
+    }
+  });
+
+  test("explicit restart awaits every cross-namespace cleanup after one candidate fails", async () => {
+    const fakeTimer = new FakeTimer();
+    const failingPid = 452;
+    const slowPid = 453;
+    const livePids = new Set([failingPid, slowPid]);
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses: () => [failingPid, slowPid].map(pid => ({
+        pid,
+        ppid: 1,
+        command: "bun /other-checkout/dist/src/index.js --daemon-mode",
+      })),
+      isProcessRunning: pid => livePids.has(pid),
+    };
+    const signaler = new FakeDaemonProcessSignaler((pid, signal) => {
+      if (pid === failingPid && signal === "SIGTERM") {
+        throw new Error("EPERM");
+      }
+      if (pid === slowPid && signal === "SIGTERM") {
+        fakeTimer.setTimeout(() => { livePids.delete(pid); }, 1_000);
+      }
+    });
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      fakeTimer,
+      undefined,
+      undefined,
+      undefined,
+      processFinder,
+      undefined,
+      undefined,
+      undefined,
+      signaler,
+    );
+    const statusSpy = spyOn(manager, "status").mockResolvedValue({ running: false });
+    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+    const restart = manager.restart();
+    let restartSettled = false;
+    void restart.then(
+      () => { restartSettled = true; },
+      () => { restartSettled = true; },
+    );
+
+    try {
+      await new Promise<void>(resolve => setImmediate(resolve));
+
+      expect(restartSettled).toBe(false);
+      expect(signaler.signals).toEqual([
+        { pid: failingPid, signal: "SIGTERM" },
+        { pid: slowPid, signal: "SIGTERM" },
+      ]);
+
+      await fakeTimer.advanceTimersByTimeAsync(1_000);
+
+      await expect(restart).rejects.toThrow("Failed to stop verified daemon process 452");
+      expect(livePids.has(slowPid)).toBe(false);
+      expect(startSpy).not.toHaveBeenCalled();
+    } finally {
+      startSpy.mockRestore();
+      statusSpy.mockRestore();
+    }
+  });
+
   test("explicit restart does not signal a candidate that exits before the forced stop", async () => {
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();

@@ -46,7 +46,11 @@ export interface DaemonLaunchRequest {
    * Rechecks that the exact spawned PID is now the reachable daemon before the
    * launcher terminates it for a readiness timeout.
    */
-  isReadyForLaunchedProcess?: (pid: number | undefined) => Promise<boolean>;
+  isReadyForLaunchedProcess?: (
+    pid: number | undefined,
+    timeoutMs: number,
+    signal: AbortSignal,
+  ) => Promise<boolean>;
   formatFailure: (summary: string) => Promise<Error>;
   formatExitFailure?: (code: number | null, signal: NodeJS.Signals | null) => Promise<Error>;
 }
@@ -204,9 +208,15 @@ export class DaemonLauncher {
         readinessAbort.abort();
         // Keep the startup listeners installed while the final check awaits so
         // a late child error or exit cannot become unobserved in that window.
+        const finalReadinessAbort = new AbortController();
         const isReadyAtDeadline = await this.waitForFinalReadinessCheck(
-          request.isReadyForLaunchedProcess?.(daemonProcess.pid) ?? Promise.resolve(false),
+          request.isReadyForLaunchedProcess?.(
+            daemonProcess.pid,
+            DAEMON_SHUTDOWN_TIMEOUT_MS,
+            finalReadinessAbort.signal,
+          ) ?? Promise.resolve(false),
           processFailure,
+          finalReadinessAbort,
         );
         if (processFailureObserved) {
           await processFailure;
@@ -242,6 +252,7 @@ export class DaemonLauncher {
   private async waitForFinalReadinessCheck(
     readinessCheck: Promise<boolean>,
     processFailure: Promise<never>,
+    readinessAbort: AbortController,
   ): Promise<boolean> {
     let timeout: NodeJS.Timeout | undefined;
     const deadline = new Promise<boolean>(resolve => {
@@ -250,6 +261,7 @@ export class DaemonLauncher {
     try {
       return await Promise.race([readinessCheck, processFailure, deadline]);
     } finally {
+      readinessAbort.abort();
       if (timeout) {
         this.timer.clearTimeout(timeout);
       }

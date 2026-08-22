@@ -249,13 +249,19 @@ describe("DaemonLauncher", () => {
       timer,
     });
 
+    let finalTimeoutMs: number | undefined;
+    let finalReadinessSignal: AbortSignal | undefined;
     const launch = launcher.launchAndWait({
       command: "auto-mobile",
       args: ["--daemon-mode"],
       spawnOptions: {},
       timeoutMs: 100,
       waitForReady: async () => false,
-      isReadyForLaunchedProcess: async () => new Promise<boolean>(() => {}),
+      isReadyForLaunchedProcess: async (_pid, timeoutMs, signal) => {
+        finalTimeoutMs = timeoutMs;
+        finalReadinessSignal = signal;
+        return new Promise<boolean>(() => {});
+      },
       formatFailure: async summary => new Error(summary),
     });
 
@@ -268,6 +274,8 @@ describe("DaemonLauncher", () => {
 
     expect(spawner.process.signals).toEqual(["SIGTERM"]);
     expect(timer.getPendingTimeoutCount()).toBe(0);
+    expect(finalTimeoutMs).toBe(DAEMON_SHUTDOWN_TIMEOUT_MS);
+    expect(finalReadinessSignal?.aborted).toBe(true);
   });
 
   test("escalates the detached POSIX process group to reap a package-runner child", async () => {

@@ -33,7 +33,7 @@ function createHarness(element: Element = SPANNABLE_TEXT_ELEMENT) {
     ...(await block(observation)),
     observation,
   }));
-  spyOn(command as any, "searchForElement").mockResolvedValue({
+  const searchForElement = spyOn(command as any, "searchForElement").mockResolvedValue({
     selection: { element, indexInMatches: 0, totalMatches: 1, strategy: "first" },
     viewHierarchy: observation.viewHierarchy,
     containerFound: true,
@@ -48,7 +48,7 @@ function createHarness(element: Element = SPANNABLE_TEXT_ELEMENT) {
   spyOn((command as any).selectionStateTracker, "finalize").mockResolvedValue([]);
   const executeAndroidTap = spyOn(command as any, "executeAndroidTap").mockResolvedValue(undefined);
 
-  return { command, executeAndroidTap, observation };
+  return { command, executeAndroidTap, observation, searchForElement };
 }
 
 describe("TapOnElement relative position", () => {
@@ -201,27 +201,40 @@ describe("TapOnElement relative position", () => {
     expect(retryTapIfNoChange.mock.calls[0]?.[0]).toBe("stable-hash");
   });
 
-  test("keeps a partially clipped element when its requested point is visible", () => {
+  test("executes against a partially clipped element when its requested point is visible", async () => {
     const partiallyVisible = {
       ...SPANNABLE_TEXT_ELEMENT,
       bounds: { left: -400, top: 10, right: 100, bottom: 50 },
     };
-    const { command } = createHarness(partiallyVisible);
+    const { command, executeAndroidTap, searchForElement } = createHarness(partiallyVisible);
+    searchForElement.mockRestore();
+    spyOn(command as any, "findElementInHierarchy").mockReturnValue({
+      selection: {
+        element: partiallyVisible,
+        indexInMatches: 0,
+        totalMatches: 1,
+        strategy: "first",
+      },
+      containerFound: true,
+    });
 
-    expect(
-      (command as any).isElementTapTargetOffScreen(
-        partiallyVisible,
-        { width: 600, height: 800 },
-        { x: 1, y: 0.5 },
-      ),
-    ).toBe(false);
-    expect(
-      (command as any).isElementTapTargetOffScreen(
-        partiallyVisible,
-        { width: 600, height: 800 },
-        { x: 0, y: 0.5 },
-      ),
-    ).toBe(true);
+    const result = await command.execute({
+      action: "tap",
+      elementId: "test:id/spannable_text",
+      relativePosition: { x: 1, y: 0.5 },
+    });
+
+    expect(result).toMatchObject({ success: true, x: 99, y: 30 });
+    expect(executeAndroidTap).toHaveBeenCalledWith(
+      "tap",
+      99,
+      30,
+      expect.any(Number),
+      partiallyVisible,
+      undefined,
+      expect.anything(),
+      false,
+    );
   });
 
   test("rejects a resolved point outside the screen before device contact", () => {

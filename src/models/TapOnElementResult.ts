@@ -25,9 +25,9 @@ export interface TapOnSelectedElement {
 export interface TapOnElementResult extends BaseActionResult {
   action: string;
   element: Element;
-  /** Actual horizontal coordinate used for a successful tap. */
+  /** Resolved horizontal target coordinate for a successful interaction. */
   x?: number;
-  /** Actual vertical coordinate used for a successful tap. */
+  /** Resolved vertical target coordinate for a successful interaction. */
   y?: number;
   selectedElement?: TapOnSelectedElement;
   debug?: ToolDebugInfo;

@@ -14,7 +14,7 @@ Understanding these differences helps explain why `observe` output may look diff
 
 TalkBack takes over single-finger swipes for linear navigation through focusable elements (swipe right = next, swipe left = previous). A single tap announces an element; a double-tap activates it. Two-finger swipes scroll content. Three-finger swipes are reserved for system navigation.
 
-Because standard coordinate-based taps and single-finger swipes conflict with TalkBack gestures, AutoMobile replaces them with accessibility actions internally.
+Because standard coordinate-based taps and single-finger swipes conflict with TalkBack gestures, AutoMobile normally replaces them with accessibility actions internally. Android `tapOn` calls with `relativePosition` are the exception: they intentionally use a CtrlProxy coordinate gesture so a target such as one `ClickableSpan` inside a larger text element is not replaced by node-level activation.
 
 ### View hierarchy differences
 
@@ -49,13 +49,13 @@ AutoMobile reads the active accessibility services from ADB secure settings when
 
 | Tool | Standard behavior | TalkBack behavior |
 |------|------------------|-------------------|
-| `tapOn` | Coordinate-based tap | `ACTION_CLICK` on the target element |
+| `tapOn` | Coordinate-based tap | `ACTION_CLICK` on the target element; `relativePosition` uses the requested coordinate |
 | `swipeOn` / scroll | Single-finger swipe | `ACTION_SCROLL_FORWARD`/`BACKWARD` or two-finger swipe |
 | `inputText` / `clearText` | `ACTION_SET_TEXT` | `ACTION_SET_TEXT` (unchanged) |
 | `pressButton` | Device/navigation button | Device/navigation button (unchanged; see note below) |
 | `launchApp`, `terminateApp`, `installApp` | Standard | Unchanged |
 
-No tool parameters change. Existing automation scripts work without modification.
+Existing automation scripts work without modification. For precise Android targeting, optional `relativePosition: { x, y }` values range from `0` to `1` within the resolved element; it is unsupported on iOS and with the `focus` action.
 
 **Back button note.** When TalkBack's local context menu is open, the back button closes the menu rather than navigating back in the app. If navigation behaves unexpectedly after a back press, this is the likely cause.
 

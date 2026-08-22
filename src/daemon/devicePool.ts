@@ -165,6 +165,11 @@ interface AdbServerResetRecoveryReservation {
   resolve(): void;
 }
 
+interface AndroidStartupLeaseRequest {
+  name?: string;
+  exactName: boolean;
+}
+
 export interface SystemUiAnrRecoveryHandoff {
   readonly preservedSessionId?: string;
   readonly replacementDevice: PooledDevice;
@@ -295,6 +300,11 @@ export class DevicePool {
     Map<string, AdbServerResetRecoveryReservation> = new Map();
   /** Child-process handles retained after reset cohort pool entries are detached. */
   private readonly adbServerResetTrackedProcesses: WeakMap<PooledDevice, ChildProcess> = new WeakMap();
+  /**
+   * A named Android start holds this lease from reset-reservation preflight
+   * through session binding so a reset cohort cannot detach that AVD mid-start.
+   */
+  private readonly androidStartupLeases: Map<symbol, AndroidStartupLeaseRequest> = new Map();
   private readonly recoveringAndroidDeviceIds: Set<string> = new Set();
   private readonly startedDeviceProcesses: Map<string, ChildProcess> = new Map();
   private readonly startedDeviceProcessOutput: Map<string, EmulatorProcessOutputTail> = new Map();
@@ -1974,10 +1984,12 @@ export class DevicePool {
       for (const device of cohort) {
         if (
           this.devices.get(device.id) !== device ||
-          !this.isAutoMobileOwnedAndroidVirtualDevice(device)
+          !this.isAutoMobileOwnedAndroidVirtualDevice(device) ||
+          this.isLeasedForAndroidStartup(device.avdName)
         ) {
           continue;
         }
+        const sessionId = device.sessionId;
         if (device.sessionId) {
           const session = this.sessionManager.getSession(device.sessionId);
           if (
@@ -1991,8 +2003,12 @@ export class DevicePool {
         }
         device.adbServerResetAutolockSessionId = device.autolockSessionId;
         const trackedProcess = this.startedDeviceProcesses.get(device.id);
-        if (trackedProcess) {
+        if (trackedProcess && sessionId) {
           this.adbServerResetTrackedProcesses.set(device, trackedProcess);
+        } else if (trackedProcess) {
+          // Idle cohort members cannot restore ownership through session
+          // recovery, so terminate their tracked process before detaching.
+          await this.stopTrackedEmulatorProcess(device.id);
         }
         this.reserveAdbServerResetRecovery(device);
         device.sessionId = null;
@@ -2014,6 +2030,46 @@ export class DevicePool {
       return;
     }
     await this.waitForAdbServerResetReservations([reservation], signal);
+  }
+
+  /**
+   * Atomically wait for matching reset recovery and reserve the requested AVD
+   * against a concurrent reset-cohort detachment. The returned release must
+   * remain held until startup has bound or abandoned the device.
+   */
+  async reserveAndroidStartupLease(
+    name: string | undefined,
+    exactName: boolean,
+    signal?: AbortSignal,
+  ): Promise<() => Promise<void>> {
+    const owner = Symbol("android-startup-lease");
+    const request: AndroidStartupLeaseRequest = { name, exactName };
+    for (;;) {
+      let matchingReservations: AdbServerResetRecoveryReservation[] = [];
+      await this.assignmentMutex.runExclusive(() => {
+        matchingReservations = Array.from(this.adbServerResetRecoveryReservations.entries())
+          .filter(([avdName]) => this.androidStartupRequestMatchesAvd(request, avdName))
+          .map(([, reservation]) => reservation);
+        if (matchingReservations.length === 0) {
+          this.androidStartupLeases.set(owner, request);
+        }
+      });
+      if (matchingReservations.length === 0) {
+        break;
+      }
+      await this.waitForAdbServerResetReservations(matchingReservations, signal);
+    }
+
+    let released = false;
+    return async () => {
+      if (released) {
+        return;
+      }
+      released = true;
+      await this.assignmentMutex.runExclusive(() => {
+        this.androidStartupLeases.delete(owner);
+      });
+    };
   }
 
   /**
@@ -2075,6 +2131,26 @@ export class DevicePool {
       settled,
       resolve,
     });
+  }
+
+  private isLeasedForAndroidStartup(avdName: string): boolean {
+    return Array.from(this.androidStartupLeases.values()).some(request =>
+      this.androidStartupRequestMatchesAvd(request, avdName),
+    );
+  }
+
+  private androidStartupRequestMatchesAvd(
+    request: AndroidStartupLeaseRequest,
+    avdName: string,
+  ): boolean {
+    if (!request.name) {
+      return true;
+    }
+    const normalizedName = request.name.toLowerCase();
+    const normalizedAvdName = avdName.toLowerCase();
+    return request.exactName
+      ? normalizedAvdName === normalizedName
+      : normalizedAvdName.includes(normalizedName);
   }
 
   private async waitForAdbServerResetReservations(
@@ -2331,6 +2407,9 @@ export class DevicePool {
           platform: "android",
         },
         true,
+        undefined,
+        undefined,
+        device.id,
       );
       replacement.autolockSessionId = preservedAutolockSessionId;
       const detachedProcess = this.adbServerResetTrackedProcesses.get(device);
@@ -2412,6 +2491,9 @@ export class DevicePool {
       childProcess,
       ready,
       true,
+      undefined,
+      undefined,
+      previousDeviceId,
     );
     const replacement = this.devices.get(ready.deviceId);
     if (replacement?.sessionId === preservedSessionId) {
@@ -3914,6 +3996,7 @@ export class DevicePool {
     allowSessionRebind = false,
     readinessReservationOwners?: ReadonlySet<symbol>,
     verifiedAndroidAvdIdentity?: DeviceInfo,
+    expectedExistingSessionDeviceId?: string,
   ): Promise<string> {
     return await this.assignmentMutex.runExclusive(async () => {
       const androidAvdIdentity = verifiedAndroidAvdIdentity ?? sourceImage;
@@ -3986,6 +4069,13 @@ export class DevicePool {
 
       const assignmentSnapshot = this.snapshotSessionAssignment(device);
       const previousSession = this.sessionManager.getSession(sessionId);
+      this.assertExpectedRecoverySession(
+        previousSession,
+        sessionId,
+        deviceId,
+        platform,
+        expectedExistingSessionDeviceId,
+      );
       device.sessionId = sessionId;
       device.status = "busy";
       device.lastUsedAt = this.nextLastUsedAt();
@@ -4006,6 +4096,27 @@ export class DevicePool {
       logger.info(`Bound device ${deviceId} to session ${sessionId}`);
       return sessionId;
     });
+  }
+
+  private assertExpectedRecoverySession(
+    session: Session | null,
+    sessionId: string,
+    deviceId: string,
+    platform: Platform,
+    expectedDeviceId: string | undefined,
+  ): void {
+    if (
+      expectedDeviceId !== undefined &&
+      (
+        !session ||
+        session.assignedDevice !== expectedDeviceId ||
+        session.platform !== platform
+      )
+    ) {
+      throw new ActionableError(
+        `Session '${sessionId}' changed while device '${deviceId}' was recovering.`,
+      );
+    }
   }
 
   private async validateOrReloadIdlePooledDevice(

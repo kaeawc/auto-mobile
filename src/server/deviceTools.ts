@@ -1614,19 +1614,19 @@ function getStartDevicePool(daemonState: DaemonState): DevicePool | undefined {
   return daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
 }
 
-async function waitForPendingAndroidResetRecovery(
+async function reserveAndroidStartupLease(
   args: StartDeviceArgs,
   budgets: { androidAvdName?: string },
   bootDeadlineMs: number,
   timer: Timer,
   signal?: AbortSignal,
-): Promise<void> {
+): Promise<(() => Promise<void>) | undefined> {
   if (args.platform !== "android") {
-    return;
+    return undefined;
   }
   const devicePool = getStartDevicePool(DaemonState.getInstance());
   if (!devicePool) {
-    return;
+    return undefined;
   }
   const remainingMs = bootDeadlineMs - timer.now();
   const requestedName = budgets.androidAvdName ?? args.name;
@@ -1635,25 +1635,30 @@ async function waitForPendingAndroidResetRecovery(
       `Timed out waiting for Android AVD reset recovery${requestedName ? ` of '${requestedName}'` : ""}`,
     );
   }
-  let timeout: NodeJS.Timeout | undefined;
-  const timeoutPromise = new Promise<never>((_resolve, reject) => {
-    timeout = timer.setTimeout(() => {
-      reject(new ActionableError(
-        `Timed out waiting for Android AVD reset recovery${requestedName ? ` of '${requestedName}'` : ""}`,
-      ));
-    }, remainingMs);
-  });
+  const timeoutController = new AbortController();
+  const abortForTimeout = () => timeoutController.abort(
+    new ActionableError(
+      `Timed out waiting for Android AVD reset recovery${requestedName ? ` of '${requestedName}'` : ""}`,
+    ),
+  );
+  const abortForCaller = () => timeoutController.abort(
+    signal?.reason ?? new Error("Device preparation cancelled"),
+  );
+  if (signal?.aborted) {
+    abortForCaller();
+  } else {
+    signal?.addEventListener("abort", abortForCaller, { once: true });
+  }
+  const timeout = timer.setTimeout(abortForTimeout, remainingMs);
   try {
-    await Promise.race([
-      budgets.androidAvdName
-        ? devicePool.waitForAdbServerResetRecovery(budgets.androidAvdName, signal)
-        : devicePool.waitForAdbServerResetRecoveryMatchingName(args.name, signal),
-      timeoutPromise,
-    ]);
+    return await devicePool.reserveAndroidStartupLease(
+      requestedName,
+      budgets.androidAvdName !== undefined,
+      timeoutController.signal,
+    );
   } finally {
-    if (timeout) {
-      timer.clearTimeout(timeout);
-    }
+    timer.clearTimeout(timeout);
+    signal?.removeEventListener("abort", abortForCaller);
   }
 }
 
@@ -1792,9 +1797,16 @@ export function registerDeviceTools() {
     let preservedSessionId: string | undefined;
     let validatePreservedSession: (() => Promise<void>) | undefined;
     let retireRecoveredReplacement: (() => Promise<void>) | undefined;
+    let releaseAndroidStartupLease: (() => Promise<void>) | undefined;
 
     try {
-      await waitForPendingAndroidResetRecovery(args, budgets, bootDeadlineMs, deps.timer, signal);
+      releaseAndroidStartupLease = await reserveAndroidStartupLease(
+        args,
+        budgets,
+        bootDeadlineMs,
+        deps.timer,
+        signal,
+      );
       const bootService = new DeviceBootService({
         deviceManager: deviceUtils,
         deviceMatcher: deps.deviceMatcherFactory(),
@@ -1906,10 +1918,21 @@ export function registerDeviceTools() {
       }
       throw new ActionableError(`Failed to start ${args.platform} device: ${error}`);
     } finally {
-      for (const releaseReservation of releaseReadinessReservations.reverse()) {
-        await releaseReservation();
-      }
+      await releaseDevicePreparationReservations(
+        releaseReadinessReservations,
+        releaseAndroidStartupLease,
+      );
     }
+  };
+
+  const releaseDevicePreparationReservations = async (
+    readinessReservations: DeviceReadinessReservation[],
+    releaseAndroidStartupLease: (() => Promise<void>) | undefined,
+  ): Promise<void> => {
+    for (const releaseReservation of readinessReservations.reverse()) {
+      await releaseReservation();
+    }
+    await releaseAndroidStartupLease?.();
   };
 
   // Compatibility implementation. New callers use getAndroid/getApple so their

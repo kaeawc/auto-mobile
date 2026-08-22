@@ -1953,6 +1953,8 @@ export class Daemon {
           undefined,
           undefined,
           FeatureFlagService.getInstance(),
+          undefined,
+          this.idGenerator,
         );
         try {
           await this.socketServer.start();

@@ -214,6 +214,42 @@ describe("AndroidEmulatorClient launch contract", () => {
     expect(spawns).toBe(0);
   });
 
+  test("cancels the reservation snapshot before starting the raw-state scan", async () => {
+    const controller = new AbortController();
+    const adb = new FakeAdbExecutor();
+    let releaseBootedDevices: (devices: DeviceInfo[]) => void = () => {};
+    const bootedDevices = new Promise<DeviceInfo[]>(resolve => {
+      releaseBootedDevices = resolve;
+    });
+    let bootedDeviceSignal: AbortSignal | undefined;
+    let rawStateScanStarted = false;
+    let spawns = 0;
+    adb.getBootedAndroidDevices = async options => {
+      bootedDeviceSignal = options?.signal;
+      return bootedDevices;
+    };
+    adb.getDeviceStates = async () => {
+      rawStateScanStarted = true;
+      return [];
+    };
+    const client = createClient(() => {
+      spawns += 1;
+      return createChild();
+    }, adb);
+
+    const launch = client.launchEmulator({ avdName: "Pixel 9", signal: controller.signal });
+    while (!bootedDeviceSignal) {
+      await Promise.resolve();
+    }
+    controller.abort();
+    releaseBootedDevices([]);
+
+    await expect(launch).rejects.toThrow("cancelled");
+    expect(bootedDeviceSignal).toBe(controller.signal);
+    expect(rawStateScanStarted).toBe(false);
+    expect(spawns).toBe(0);
+  });
+
   test("cancels and cleans up when aborted while startup validation is pending", async () => {
     const controller = new AbortController();
     const child = createChild();

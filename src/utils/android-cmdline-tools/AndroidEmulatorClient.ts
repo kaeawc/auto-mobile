@@ -1382,6 +1382,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         () => disposed,
         shouldCaptureEmulatorReservationSnapshot(request.deviceId),
         request.deviceId,
+        request.signal,
       );
       if (disposed) {
         if (process && !process.killed) {
@@ -1434,6 +1435,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     isCancelled?: () => boolean,
     capturePreLaunchDeviceIds: boolean = false,
     expectedDeviceId?: string,
+    signal?: AbortSignal,
   ): Promise<ChildProcess | null> {
     logger.info(`Using local emulator for AVD: ${avdName}`);
     const perf = createGlobalPerformanceTracker();
@@ -1499,6 +1501,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     this.throwIfLaunchCancelled(avdName, isCancelled);
     const preLaunchEmulatorDeviceIds = await this.capturePreLaunchEmulatorDeviceIds(
       capturePreLaunchDeviceIds,
+      signal,
     );
     this.throwIfLaunchCancelled(avdName, isCancelled);
     const reservedDeviceId = this.addReservedEmulatorPort(
@@ -2011,6 +2014,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
   private async capturePreLaunchEmulatorDeviceIds(
     capture: boolean,
+    signal?: AbortSignal,
   ): Promise<ReadonlySet<string> | undefined> {
     if (!capture) {
       return undefined;
@@ -2020,13 +2024,17 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       const devices = await adb.getBootedAndroidDevices({
         bypassCache: true,
         throwOnMissingAdb: true,
+        signal,
       });
       const deviceIds = new Set(
         devices
           .map((device) => device.deviceId)
           .filter((deviceId): deviceId is string => deviceId.startsWith("emulator-")),
       );
-      const deviceStates = (await adb.getDeviceStates?.()) ?? [];
+      if (signal?.aborted) {
+        throw signal.reason ?? new Error("Android emulator reservation snapshot was cancelled");
+      }
+      const deviceStates = (await adb.getDeviceStates?.({ signal })) ?? [];
       for (const { deviceId } of deviceStates) {
         if (deviceId.startsWith("emulator-")) {
           deviceIds.add(deviceId);
@@ -2035,6 +2043,9 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       this.releaseAbsentTerminalReservations(deviceIds);
       return deviceIds;
     } catch (error) {
+      if (signal?.aborted) {
+        throw error;
+      }
       // Without a current device list, do not select a port that could belong to
       // another local emulator. Readiness can still use a captured serial or an
       // exact AVD-name match.

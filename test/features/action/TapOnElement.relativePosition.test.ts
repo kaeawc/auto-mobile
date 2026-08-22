@@ -134,6 +134,96 @@ describe("TapOnElement relative position", () => {
     );
   });
 
+  test("uses refreshed screen dimensions after stable re-resolution", async () => {
+    const { command, executeAndroidTap } = createHarness();
+    const stableHierarchy = {
+      hierarchy: {},
+      screenWidth: 800,
+      screenHeight: 600,
+    };
+    const stableElement = {
+      ...SPANNABLE_TEXT_ELEMENT,
+      bounds: { left: 600, top: 100, right: 800, bottom: 200 },
+    };
+    spyOn(command as any, "resolveAndroidStableTapTargetAfterRefreshes").mockResolvedValue({
+      ok: true,
+      viewHierarchy: stableHierarchy,
+      tapElement: stableElement,
+      usedParent: false,
+    });
+
+    const result = await command.execute({
+      action: "tap",
+      elementId: "test:id/spannable_text",
+      relativePosition: { x: 0.5, y: 0.5 },
+      preTapStability: true,
+    });
+
+    expect(result).toMatchObject({ success: true, x: 700, y: 150 });
+    expect(executeAndroidTap).toHaveBeenCalledWith(
+      "tap",
+      700,
+      150,
+      expect.any(Number),
+      stableElement,
+      undefined,
+      expect.anything(),
+      false,
+    );
+  });
+
+  test("hashes the stable hierarchy before checking whether to retry", async () => {
+    const { command, observation } = createHarness();
+    const stableHierarchy = { hierarchy: { node: { text: "stable" } } };
+    spyOn(command as any, "resolveAndroidStableTapTargetAfterRefreshes").mockResolvedValue({
+      ok: true,
+      viewHierarchy: stableHierarchy,
+      tapElement: SPANNABLE_TEXT_ELEMENT,
+      usedParent: false,
+    });
+    spyOn(command as any, "hashViewHierarchy").mockImplementation(
+      (hierarchy: unknown) => hierarchy === stableHierarchy ? "stable-hash" : "initial-hash",
+    );
+    const retryTapIfNoChange = spyOn(
+      command as any,
+      "retryTapIfNoChange",
+    ).mockResolvedValue(undefined);
+
+    await command.execute({
+      action: "tap",
+      elementId: "test:id/spannable_text",
+      relativePosition: { x: 0.5, y: 0.5 },
+      preTapStability: true,
+      retryIfNoChange: true,
+    });
+
+    expect(observation.viewHierarchy).toBe(stableHierarchy);
+    expect(retryTapIfNoChange.mock.calls[0]?.[0]).toBe("stable-hash");
+  });
+
+  test("keeps a partially clipped element when its requested point is visible", () => {
+    const partiallyVisible = {
+      ...SPANNABLE_TEXT_ELEMENT,
+      bounds: { left: -400, top: 10, right: 100, bottom: 50 },
+    };
+    const { command } = createHarness(partiallyVisible);
+
+    expect(
+      (command as any).isElementTapTargetOffScreen(
+        partiallyVisible,
+        { width: 600, height: 800 },
+        { x: 1, y: 0.5 },
+      ),
+    ).toBe(false);
+    expect(
+      (command as any).isElementTapTargetOffScreen(
+        partiallyVisible,
+        { width: 600, height: 800 },
+        { x: 0, y: 0.5 },
+      ),
+    ).toBe(true);
+  });
+
   test("rejects a resolved point outside the screen before device contact", () => {
     const partiallyOffscreen = {
       ...SPANNABLE_TEXT_ELEMENT,
@@ -149,6 +239,22 @@ describe("TapOnElement relative position", () => {
       ),
     ).toThrow("outside screen bounds");
     expect(executeAndroidTap).not.toHaveBeenCalled();
+  });
+
+  test("validates the integer coordinate Android actually dispatches", () => {
+    const fractionalBounds = {
+      ...SPANNABLE_TEXT_ELEMENT,
+      bounds: { left: 0.25, top: 10.25, right: 1.25, bottom: 11.25 },
+    };
+    const { command } = createHarness(fractionalBounds);
+
+    expect(() =>
+      (command as any).resolveTapPoint(
+        fractionalBounds,
+        { width: 600, height: 800 },
+        { x: 0, y: 0 },
+      ),
+    ).toThrow("outside element bounds");
   });
 
   test("rejects a target for an element without an addressable pixel", () => {

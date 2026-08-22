@@ -307,6 +307,18 @@ export class TapOnElement extends BaseVisualChange {
       && point.y < bounds.bottom;
   }
 
+  private relativeTapPoint(
+    bounds: Element["bounds"],
+    relativePosition: RelativeTapPosition
+  ): { x: number; y: number } {
+    const width = bounds.right - bounds.left;
+    const height = bounds.bottom - bounds.top;
+    return {
+      x: Math.round(bounds.left + relativePosition.x * (width - 1)),
+      y: Math.round(bounds.top + relativePosition.y * (height - 1))
+    };
+  }
+
   private resolveTapPoint(
     element: Element,
     screenSize: ObserveResult["screenSize"],
@@ -317,8 +329,6 @@ export class TapOnElement extends BaseVisualChange {
     }
 
     const bounds = element.bounds;
-    const width = bounds.right - bounds.left;
-    const height = bounds.bottom - bounds.top;
     if (!this.hasAddressablePixels(bounds)) {
       throw new ActionableError(
         `tapOn relativePosition requires valid element bounds, received ${JSON.stringify(bounds)}`
@@ -333,9 +343,9 @@ export class TapOnElement extends BaseVisualChange {
 
     // Android bounds are half-open. Scale across addressable pixels so 0 and 1
     // map to the first and last valid pixels rather than the exclusive edge.
-    const x = bounds.left + Math.round(relativePosition.x * (width - 1));
-    const y = bounds.top + Math.round(relativePosition.y * (height - 1));
-    const point = { x, y };
+    // Round here, before validation and reporting, to match Android dispatch.
+    const point = this.relativeTapPoint(bounds, relativePosition);
+    const { x, y } = point;
     if (!this.isPointInHalfOpenBounds(point, bounds)) {
       throw new ActionableError(
         `tapOn relativePosition resolved to (${x}, ${y}) outside element bounds `
@@ -393,12 +403,28 @@ export class TapOnElement extends BaseVisualChange {
     }
   }
 
-  private isElementCenterOffScreen(
+  private isElementTapTargetOffScreen(
     element: Element,
-    screenSize?: ObserveResult["screenSize"]
+    screenSize?: ObserveResult["screenSize"],
+    relativePosition?: RelativeTapPosition
   ): boolean {
     if (!screenSize?.width || !screenSize?.height || !element.bounds) {
       return false;
+    }
+    if (relativePosition) {
+      if (!this.hasAddressablePixels(element.bounds)) {
+        return false;
+      }
+      const point = this.relativeTapPoint(element.bounds, relativePosition);
+      if (!this.isPointInHalfOpenBounds(point, element.bounds)) {
+        return false;
+      }
+      return !this.isPointInHalfOpenBounds(point, {
+        left: 0,
+        top: 0,
+        right: screenSize.width,
+        bottom: screenSize.height
+      });
     }
     const centerX = (element.bounds.left + element.bounds.right) / 2;
     const centerY = (element.bounds.top + element.bounds.bottom) / 2;
@@ -471,7 +497,13 @@ export class TapOnElement extends BaseVisualChange {
           });
         lastSelection = selection;
         if (selection.element) {
-          if (this.isElementCenterOffScreen(selection.element, screenSize)) {
+          if (
+            this.isElementTapTargetOffScreen(
+              selection.element,
+              screenSize,
+              options.relativePosition
+            )
+          ) {
             offScreenSelection = selection;
             continue;
           }
@@ -793,10 +825,13 @@ export class TapOnElement extends BaseVisualChange {
     let element = selection.element;
     let containerFoundEver = initialSearch.containerFound;
 
-    if (!element || this.isElementCenterOffScreen(element, observeResult.screenSize)) {
+    if (
+      !element ||
+      this.isElementTapTargetOffScreen(element, observeResult.screenSize, options.relativePosition)
+    ) {
       if (element) {
         logger.warn(
-          `[TapOnElement] Element found but center is off-screen, will retry. ` +
+          `[TapOnElement] Element found but tap target is off-screen, will retry. ` +
           `bounds=${JSON.stringify(element.bounds)}, ` +
           `screen=${observeResult.screenSize?.width}x${observeResult.screenSize?.height}`
         );
@@ -833,9 +868,12 @@ export class TapOnElement extends BaseVisualChange {
         selection = searchResult.selection;
         element = selection.element;
         containerFoundEver = containerFoundEver || searchResult.containerFound;
-        if (element && this.isElementCenterOffScreen(element, observeResult.screenSize)) {
+        if (
+          element &&
+          this.isElementTapTargetOffScreen(element, observeResult.screenSize, options.relativePosition)
+        ) {
           logger.warn(
-            `[TapOnElement] Element found but center is off-screen, retrying. ` +
+            `[TapOnElement] Element found but tap target is off-screen, retrying. ` +
             `bounds=${JSON.stringify(element.bounds)}`
           );
           selection = { ...selection, element: null };
@@ -1195,6 +1233,9 @@ export class TapOnElement extends BaseVisualChange {
           );
           searchUntilStats = searchOutcome.stats;
           observeResult.viewHierarchy = searchOutcome.viewHierarchy;
+          observeResult.screenSize =
+            this.getScreenSizeFromHierarchy(searchOutcome.viewHierarchy) ??
+            observeResult.screenSize;
           viewHierarchy = searchOutcome.viewHierarchy;
           if (!searchOutcome.selection.element) {
             await this.handleElementNotFound(options, observeResult, searchOutcome.containerFound, signal);
@@ -1259,6 +1300,10 @@ export class TapOnElement extends BaseVisualChange {
               return { success: false, error: stable.error };
             }
             observeResult.viewHierarchy = stable.viewHierarchy;
+            observeResult.screenSize =
+              this.getScreenSizeFromHierarchy(stable.viewHierarchy) ??
+              observeResult.screenSize;
+            viewHierarchy = stable.viewHierarchy;
             tapElement = stable.tapElement;
             usedParent = stable.usedParent;
           }

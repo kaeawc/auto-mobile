@@ -540,6 +540,93 @@ final class WebSocketServerTests: XCTestCase {
             "health body should report status:ok"
         )
     }
+
+    // MARK: - Client presence gating (#5477)
+
+    /// Presence tracks only upgraded WebSocket clients and fires the hook exactly
+    /// on the zero <-> non-zero transitions, so the device samplers can start on
+    /// the first client and stop on the last disconnect.
+    func testClientPresenceTogglesOnFirstAndLastClient() {
+        let server = makeServer()
+        let events = Box<[Bool]>([])
+        server.onClientPresenceChanged = { events.value.append($0) }
+
+        XCTAssertFalse(server.hasConnectedClients, "no clients at start")
+
+        server.clientDidUpgrade(1)
+        XCTAssertTrue(server.hasConnectedClients)
+        XCTAssertEqual(events.value, [true], "first client fires presence=true")
+
+        // A second client is already-present; presence must not re-fire.
+        server.clientDidUpgrade(2)
+        XCTAssertEqual(events.value, [true], "second client does not re-fire")
+        XCTAssertTrue(server.hasConnectedClients)
+
+        // One of two disconnecting keeps presence.
+        server.clientDidDisconnect(1)
+        XCTAssertEqual(events.value, [true], "one remaining client keeps presence")
+        XCTAssertTrue(server.hasConnectedClients)
+
+        // The last disconnect fires presence=false.
+        server.clientDidDisconnect(2)
+        XCTAssertEqual(events.value, [true, false], "last disconnect fires presence=false")
+        XCTAssertFalse(server.hasConnectedClients)
+    }
+
+    /// A transient HTTP connection (`GET /health`, `POST /sdk-events`) never
+    /// upgrades, so its close must not toggle presence — otherwise health probes
+    /// would thrash the samplers on and off.
+    func testHttpOnlyConnectionCloseDoesNotTogglePresence() {
+        let server = makeServer()
+        let events = Box<[Bool]>([])
+        server.onClientPresenceChanged = { events.value.append($0) }
+
+        // An id that never upgraded closes; no transition should be reported.
+        server.clientDidDisconnect(42)
+        XCTAssertTrue(events.value.isEmpty, "an unupgraded connection close is a no-op")
+        XCTAssertFalse(server.hasConnectedClients)
+    }
+
+    // MARK: - Inbound frame unmasking (#5477 wire micro-opt)
+
+    /// The vectorized unmask must produce byte-for-byte the same result as the
+    /// reference per-byte XOR it replaces, across payload sizes and mask offsets.
+    func testUnmaskFrameMatchesReferenceXor() {
+        let mask: [UInt8] = [0x37, 0xFA, 0x21, 0x3D]
+        let payload = Array("Hello, WebSocket unmasking! 0123456789".utf8)
+        var frame = Data(mask)
+        frame.append(contentsOf: payload.enumerated().map { $0.element ^ mask[$0.offset % 4] })
+
+        XCTAssertEqual(Array(WebSocketConnection.unmaskFrame(frame)), payload)
+    }
+
+    /// A masked frame with a zero-length payload (mask key only) unmasks to empty.
+    func testUnmaskFrameEmptyPayload() {
+        let frame = Data([0x01, 0x02, 0x03, 0x04])
+        XCTAssertEqual(WebSocketConnection.unmaskFrame(frame), Data())
+    }
+
+    /// A single-byte payload exercises the offset-0 mask byte only.
+    func testUnmaskFrameSingleByte() {
+        let mask: [UInt8] = [0xAA, 0xBB, 0xCC, 0xDD]
+        let payload: [UInt8] = [0x42]
+        var frame = Data(mask)
+        frame.append(payload[0] ^ mask[0])
+        XCTAssertEqual(Array(WebSocketConnection.unmaskFrame(frame)), payload)
+    }
+
+    /// The received `Data` may be a slice with a non-zero start index; the helper
+    /// must index relative to the slice, not the backing buffer.
+    func testUnmaskFrameHandlesSlicedData() {
+        let mask: [UInt8] = [0x11, 0x22, 0x33, 0x44]
+        let payload = Array("sliced payload crossing the mask several times".utf8)
+        var full = Data([0xDE, 0xAD]) // leading bytes so the frame is a mid-buffer slice
+        full.append(Data(mask))
+        full.append(contentsOf: payload.enumerated().map { $0.element ^ mask[$0.offset % 4] })
+        let slice = full.suffix(from: 2)
+
+        XCTAssertEqual(Array(WebSocketConnection.unmaskFrame(slice)), payload)
+    }
 }
 
 /// Lock-protected reference cell so an escaping completion handler can publish a

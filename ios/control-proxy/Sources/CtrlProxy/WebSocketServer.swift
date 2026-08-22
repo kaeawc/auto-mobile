@@ -104,9 +104,48 @@ public class WebSocketServer: WebSocketServing {
         case encodingError
     }
 
+    /// Reusable JSON coders. `JSONEncoder`/`JSONDecoder` are safe to share once
+    /// configured (we never mutate them after construction), so a single
+    /// pre-configured instance per role avoids allocating and reconfiguring one on
+    /// every encoded/decoded message on the hot wire path (issue #5477).
+    static let sortedKeysEncoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        return encoder
+    }()
+
+    /// Plain encoder for payloads that do not require deterministic key ordering
+    /// (e.g. the one-shot connected event).
+    static let sharedEncoder = JSONEncoder()
+
+    /// Reusable decoder for inbound request framing.
+    static let sharedDecoder = JSONDecoder()
+
     private var listener: NWListener?
     private let connections = ConnectionRegistry<WebSocketConnection>()
     private var nextConnectionId = 1
+
+    /// Ids of connections that have completed the WebSocket upgrade handshake,
+    /// i.e. real subscribed clients — as distinct from transient HTTP connections
+    /// (`GET /health`, `POST /sdk-events`) that briefly appear in `connections`.
+    /// Guarded by `presenceLock`. Used to gate the always-on device samplers so
+    /// they run only while a client is actually connected (issue #5477).
+    private var upgradedClientIds = Set<Int>()
+    private let presenceLock = NSLock()
+
+    /// Invoked when the connected-client count transitions between zero and
+    /// non-zero: `true` when the first client connects, `false` when the last one
+    /// disconnects. A transient HTTP request never toggles this. Callbacks fire off
+    /// the caller's queue; consumers should hop to their own queue if needed.
+    public var onClientPresenceChanged: ((Bool) -> Void)?
+
+    /// Whether at least one WebSocket client is currently connected (upgraded).
+    public var hasConnectedClients: Bool {
+        presenceLock.lock()
+        defer { presenceLock.unlock() }
+        return !upgradedClientIds.isEmpty
+    }
+
     private let port: UInt16
     private let commandHandler: CommandHandler
     private let perfProvider: PerfProvider
@@ -213,15 +252,49 @@ public class WebSocketServer: WebSocketServing {
             sdkHierarchyCache: sdkHierarchyCache,
             onSdkHierarchyUpdated: { [weak self] in
                 self?.onSdkHierarchyUpdated?()
+            },
+            onUpgrade: { [weak self] in
+                self?.clientDidUpgrade(connectionId)
             }
         ) { [weak self] message in
             self?.handleMessage(message, connectionId: connectionId)
         } onClose: { [weak self] in
             self?.connections.removeValue(forId: connectionId)
+            self?.clientDidDisconnect(connectionId)
         }
 
         connections.set(connection, forId: connectionId)
         connection.start()
+    }
+
+    /// Records that a connection completed the WebSocket upgrade, firing the
+    /// presence hook only on the zero → non-zero transition. Internal (not
+    /// `private`) so `WebSocketServerTests` can drive the presence bookkeeping
+    /// without a live socket (issue #5477).
+    func clientDidUpgrade(_ id: Int) {
+        presenceLock.lock()
+        let wasEmpty = upgradedClientIds.isEmpty
+        upgradedClientIds.insert(id)
+        presenceLock.unlock()
+
+        if wasEmpty {
+            onClientPresenceChanged?(true)
+        }
+    }
+
+    /// Records that a connection closed, firing the presence hook only on the
+    /// non-zero → zero transition. A never-upgraded (HTTP-only) connection is a
+    /// no-op here, so `/health` probes never toggle presence.
+    func clientDidDisconnect(_ id: Int) {
+        presenceLock.lock()
+        let wasPresent = !upgradedClientIds.isEmpty
+        upgradedClientIds.remove(id)
+        let nowEmpty = upgradedClientIds.isEmpty
+        presenceLock.unlock()
+
+        if wasPresent, nowEmpty {
+            onClientPresenceChanged?(false)
+        }
     }
 
     private func handleMessage(_ data: Data, connectionId: Int) {
@@ -256,7 +329,7 @@ public class WebSocketServer: WebSocketServing {
     /// fake responder, no live `NWConnection` (issue #2859 part 4).
     func handleMessage(_ data: Data, responder: WebSocketResponding) {
         do {
-            let request = try JSONDecoder().decode(WebSocketRequest.self, from: data)
+            let request = try Self.sharedDecoder.decode(WebSocketRequest.self, from: data)
             print("[WebSocketServer] Received request type=\(request.typeString) requestId=\(request.requestId ?? "nil")")
 
             // Track the entire request handling with PerfProvider
@@ -298,8 +371,7 @@ public class WebSocketServer: WebSocketServing {
     }
 
     private func encodeResponse(_ response: Any, totalTimeMs: Int64, perfTiming: PerfTiming?) throws -> Data {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = .sortedKeys
+        let encoder = Self.sortedKeysEncoder
 
         if var wsResponse = response as? WebSocketResponse {
             // Inject perfTiming if present and response doesn't already have it.
@@ -361,9 +433,7 @@ public class WebSocketServer: WebSocketServing {
         )
 
         do {
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = .sortedKeys
-            let data = try encoder.encode(response)
+            let data = try Self.sortedKeysEncoder.encode(response)
             broadcast(data)
             print("[WebSocketServer] Broadcast hierarchy update to \(connections.count) client(s)")
         } catch {
@@ -378,9 +448,7 @@ public class WebSocketServer: WebSocketServing {
         let response = PerformanceUpdateResponse(data: snapshot)
 
         do {
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = .sortedKeys
-            let data = try encoder.encode(response)
+            let data = try Self.sortedKeysEncoder.encode(response)
             broadcast(data)
         } catch {
             print("[WebSocketServer] Failed to encode performance update: \(error)")
@@ -418,9 +486,7 @@ public class WebSocketServer: WebSocketServing {
         )
 
         do {
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = .sortedKeys
-            return try encoder.encode(errorResponse)
+            return try sortedKeysEncoder.encode(errorResponse)
         } catch {
             let sanitizedError = String(
                 errorResponse.error?
@@ -571,6 +637,7 @@ class WebSocketConnection: WebSocketResponding {
     private let queue: DispatchQueue
     private let onMessage: (Data) -> Void
     private let onClose: () -> Void
+    private let onUpgrade: (() -> Void)?
     private let sdkHierarchyCache: (any SdkHierarchyCaching)?
     private let onSdkHierarchyUpdated: (() -> Void)?
     /// The port the server is actually bound to; echoed in /health so the daemon
@@ -587,6 +654,7 @@ class WebSocketConnection: WebSocketResponding {
         boundPort: UInt16,
         sdkHierarchyCache: (any SdkHierarchyCaching)? = nil,
         onSdkHierarchyUpdated: (() -> Void)? = nil,
+        onUpgrade: (() -> Void)? = nil,
         onMessage: @escaping (Data) -> Void,
         onClose: @escaping () -> Void
     ) {
@@ -596,6 +664,7 @@ class WebSocketConnection: WebSocketResponding {
         self.boundPort = boundPort
         self.sdkHierarchyCache = sdkHierarchyCache
         self.onSdkHierarchyUpdated = onSdkHierarchyUpdated
+        self.onUpgrade = onUpgrade
         self.onMessage = onMessage
         self.onClose = onClose
     }
@@ -821,6 +890,7 @@ class WebSocketConnection: WebSocketResponding {
             }
 
             self?.isWebSocketUpgraded = true
+            self?.onUpgrade?()
             self?.sendConnectedEvent()
             self?.receiveWebSocketFrame()
         })
@@ -829,7 +899,7 @@ class WebSocketConnection: WebSocketResponding {
     private func sendConnectedEvent() {
         let event = ConnectedEvent(id: id)
         do {
-            let data = try JSONEncoder().encode(event)
+            let data = try WebSocketServer.sharedEncoder.encode(event)
             send(data)
         } catch {
             let fallback = "{\"type\":\"connected\",\"id\":\(id)}"
@@ -934,6 +1004,30 @@ class WebSocketConnection: WebSocketResponding {
         return Int(payloadLength) + (isMasked ? 4 : 0)
     }
 
+    /// Unmask a masked WebSocket frame whose first 4 bytes are the masking key and
+    /// whose remaining bytes are the masked payload (RFC 6455 §5.3).
+    ///
+    /// The previous implementation appended one byte at a time to a growing `Data`,
+    /// reallocating repeatedly for large payloads. This pre-sizes the output and
+    /// XORs through raw buffer pointers, so a payload of N bytes is a single
+    /// allocation plus a tight loop (issue #5477). Internal (not `private`) so
+    /// `WebSocketServerTests` can pin it against a reference XOR.
+    static func unmaskFrame(_ frame: Data) -> Data {
+        guard frame.count > 4 else { return Data() }
+        let payloadCount = frame.count - 4
+        var unmasked = Data(count: payloadCount)
+        frame.withUnsafeBytes { (rawIn: UnsafeRawBufferPointer) in
+            unmasked.withUnsafeMutableBytes { (rawOut: UnsafeMutableRawBufferPointer) in
+                let src = rawIn.bindMemory(to: UInt8.self)
+                let dst = rawOut.bindMemory(to: UInt8.self)
+                for i in 0 ..< payloadCount {
+                    dst[i] = src[4 + i] ^ src[i & 3]
+                }
+            }
+        }
+        return unmasked
+    }
+
     private func readPayload(length: UInt64, isMasked: Bool, opcode: UInt8) {
         guard let totalLength = Self.frameReadLength(payloadLength: length, isMasked: isMasked) else {
             print("[WebSocketConnection] Frame payload too large (\(length) bytes), closing connection")
@@ -953,18 +1047,7 @@ class WebSocketConnection: WebSocketResponding {
                     return
                 }
 
-                var payload: Data
-                if isMasked {
-                    let mask = Array(data.prefix(4))
-                    let maskedData = data.suffix(from: 4)
-                    var unmasked = Data()
-                    for (i, byte) in maskedData.enumerated() {
-                        unmasked.append(byte ^ mask[i % 4])
-                    }
-                    payload = unmasked
-                } else {
-                    payload = data
-                }
+                let payload: Data = isMasked ? Self.unmaskFrame(data) : data
 
                 // Handle text or binary frame
                 if opcode == 0x01 || opcode == 0x02 {

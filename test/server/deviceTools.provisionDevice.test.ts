@@ -42,6 +42,8 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
     string,
     { fingerprint: string; result?: Record<string, unknown>; creationStarted: boolean }
   >();
+  completeError: Error | undefined;
+  failCalls = 0;
 
   async begin(operationId: string, requestFingerprint: string) {
     const existing = this.results.get(operationId);
@@ -76,6 +78,9 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
   }
 
   async complete(operationId: string, result: Record<string, unknown>): Promise<void> {
+    if (this.completeError) {
+      throw this.completeError;
+    }
     const operation = this.results.get(operationId);
     if (!operation) {
       throw new Error(`missing operation ${operationId}`);
@@ -83,7 +88,9 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
     operation.result = result;
   }
 
-  async fail(): Promise<void> {}
+  async fail(): Promise<void> {
+    this.failCalls++;
+  }
 }
 
 describe("provisionDevice handler", () => {
@@ -401,6 +408,12 @@ describe("provisionDevice handler", () => {
     }]);
     await pool.initializeWithDevices([bootedDevice]);
     DaemonState.getInstance().initialize(sessionManager, pool);
+    let readinessCalls = 0;
+    setDeviceToolsDependencies({
+      ensureCtrlProxyReady: async () => {
+        readinessCalls++;
+      },
+    });
 
     const tool = ToolRegistry.getTool("provisionDevice");
     if (!tool) {
@@ -417,7 +430,7 @@ describe("provisionDevice handler", () => {
         },
       },
       boot: true,
-      readiness: "none" as const,
+      readiness: "automation" as const,
     };
 
     const first = JSON.parse((await tool.handler(args) as any).content[0].text);
@@ -426,6 +439,122 @@ describe("provisionDevice handler", () => {
     expect(second).toEqual(first);
     expect(exactProvisioner.requests).toHaveLength(1);
     expect(deviceManager.getCallCount("startDevice")).toBe(1);
+    expect(readinessCalls).toBe(2);
+    sessionManager.stopCleanupTimer();
+  });
+
+  test("rebinds an errored persisted session instead of replaying its stale readiness", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      deviceManager,
+    );
+    const bootedDevice = {
+      name: "phone-api-36-a",
+      platform: "android" as const,
+      deviceId: "mock-phone-api-36-a",
+    };
+    deviceManager.setDeviceImages("android", [{
+      name: "phone-api-36-a",
+      platform: "android",
+      isRunning: false,
+    }]);
+    await pool.initializeWithDevices([bootedDevice]);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+    const args = {
+      operationId: "operation-errored-session",
+      device: {
+        platform: "android" as const,
+        name: "phone-api-36-a",
+        spec: {
+          runtime: "system-images;android-36;google_apis;x86_64",
+          deviceType: "pixel_9",
+        },
+      },
+      boot: true,
+      readiness: "none" as const,
+    };
+
+    const first = JSON.parse((await tool.handler(args) as any).content[0].text);
+    const pooledDevice = pool.getDevice(bootedDevice.deviceId);
+    if (!pooledDevice) {
+      throw new Error("expected pooled device");
+    }
+    pooledDevice.status = "error";
+    const second = JSON.parse((await tool.handler(args) as any).content[0].text);
+
+    expect(second).toMatchObject({
+      lifecycleState: "ready",
+      sessionId: expect.any(String),
+    });
+    expect(second.sessionId).not.toBe(first.sessionId);
+    expect(exactProvisioner.requests).toHaveLength(2);
+    expect(pool.getDevice(bootedDevice.deviceId)?.status).toBe("busy");
+    sessionManager.stopCleanupTimer();
+  });
+
+  test("releases the bound session when completion persistence fails", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      deviceManager,
+    );
+    const bootedDevice = {
+      name: "phone-api-36-a",
+      platform: "android" as const,
+      deviceId: "mock-phone-api-36-a",
+    };
+    deviceManager.setDeviceImages("android", [{
+      name: "phone-api-36-a",
+      platform: "android",
+      isRunning: false,
+    }]);
+    await pool.initializeWithDevices([bootedDevice]);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    operationStore.completeError = new Error("database unavailable");
+
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+    const response = JSON.parse((await tool.handler({
+      operationId: "operation-persistence-failure",
+      device: {
+        platform: "android",
+        name: "phone-api-36-a",
+        spec: {
+          runtime: "system-images;android-36;google_apis;x86_64",
+          deviceType: "pixel_9",
+        },
+      },
+      boot: true,
+      readiness: "none",
+    }) as any).content[0].text);
+
+    expect(response).toMatchObject({
+      success: false,
+      error: {
+        code: "platform_command_failed",
+      },
+    });
+    expect(pool.getDevice(bootedDevice.deviceId)).toMatchObject({
+      sessionId: null,
+      status: "idle",
+    });
+    expect(operationStore.failCalls).toBe(1);
     sessionManager.stopCleanupTimer();
   });
 

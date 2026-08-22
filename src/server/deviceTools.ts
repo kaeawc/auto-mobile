@@ -2008,30 +2008,31 @@ export function registerDeviceTools() {
     const deps = getDeviceToolsDependencies();
     const store = deps.provisionDeviceOperationStoreFactory();
     const operation = await store.begin(args.operationId, fingerprint);
-    if (!operation.started) {
-      if (!args.boot) {
-        return operation.result;
-      }
-      if (hasLiveProvisionDeviceSession(operation.result)) {
-        return operation.result;
-      }
-
-      // Sessions are daemon-local and are expired during daemon startup. A
-      // replay of a completed boot operation therefore runs the idempotent
-      // lifecycle again to bind a live session before reporting readiness.
-      const rebound = await runProvisionDeviceLifecycle(
-        args,
-        deps,
-        operation.reconcileExistingConfiguration,
-        () => store.markDeviceCreationStarted(args.operationId),
-        signal,
-      );
-      const refreshed = preserveProvisionDeviceOwnership(operation.result, rebound);
-      await store.complete(args.operationId, refreshed);
-      return refreshed;
-    }
-
     try {
+      if (!operation.started) {
+        if (!args.boot) {
+          return operation.result;
+        }
+        if (await revalidateLiveProvisionDeviceSession(args, deps, operation.result, signal)) {
+          return operation.result;
+        }
+        await releaseErroredProvisionDeviceSession(operation.result);
+
+        // Sessions are daemon-local and are expired during daemon startup. A
+        // replay of a completed boot operation therefore runs the idempotent
+        // lifecycle again to bind a live session before reporting readiness.
+        const rebound = await runProvisionDeviceLifecycle(
+          args,
+          deps,
+          operation.reconcileExistingConfiguration,
+          () => store.markDeviceCreationStarted(args.operationId),
+          signal,
+        );
+        const refreshed = preserveProvisionDeviceOwnership(operation.result, rebound);
+        await completeProvisionDeviceOperation(store, args.operationId, refreshed);
+        return refreshed;
+      }
+
       const result = await runProvisionDeviceLifecycle(
         args,
         deps,
@@ -2039,7 +2040,7 @@ export function registerDeviceTools() {
         () => store.markDeviceCreationStarted(args.operationId),
         signal,
       );
-      await store.complete(args.operationId, result);
+      await completeProvisionDeviceOperation(store, args.operationId, result);
       return result;
     } catch (error) {
       const provisionError = toProvisionDeviceError(args, error);
@@ -2048,26 +2049,64 @@ export function registerDeviceTools() {
     }
   }
 
-  function hasLiveProvisionDeviceSession(result: Record<string, unknown>): boolean {
+  async function revalidateLiveProvisionDeviceSession(
+    args: ProvisionDeviceArgs,
+    deps: DeviceToolsDependencies,
+    result: Record<string, unknown>,
+    signal: AbortSignal | undefined,
+  ): Promise<boolean> {
+    const liveSession = getLiveProvisionDeviceSession(result);
+    if (!liveSession) {
+      return false;
+    }
+    if (args.readiness === "automation") {
+      const perf = createPerformanceTracker(true);
+      perf.serial("provisionDeviceReplay");
+      try {
+        const totalDeadlineMs = deps.timer.now() +
+          (args.timeoutMs ?? DEFAULT_PROVISION_DEVICE_TIMEOUT_MS);
+        await ensureProvisionDeviceReadiness(
+          args,
+          deps,
+          liveSession.device,
+          `platform=${args.device.platform} name=${args.device.name}`,
+          totalDeadlineMs,
+          perf,
+          signal,
+        );
+      } finally {
+        perf.end();
+      }
+    }
+    return getLiveProvisionDeviceSession(result) !== undefined;
+  }
+
+  function getLiveProvisionDeviceSession(
+    result: Record<string, unknown>,
+  ): { device: BootedDevice } | undefined {
     const persistedSession = getPersistedProvisionDeviceSession(result);
     const daemonState = DaemonState.getInstance();
     if (!persistedSession || !daemonState.isInitialized()) {
-      return false;
+      return undefined;
     }
 
     const session = daemonState.getSessionManager().getSession(persistedSession.sessionId);
     const pooledDevice = daemonState.getDevicePool().getDeviceForSession(persistedSession.sessionId);
-    return (
+    if (
       session?.assignedDevice === persistedSession.deviceId &&
       session.platform === persistedSession.platform &&
       pooledDevice?.id === persistedSession.deviceId &&
-      pooledDevice.platform === persistedSession.platform
-    );
+      pooledDevice.platform === persistedSession.platform &&
+      pooledDevice.status === "busy"
+    ) {
+      return { device: persistedSession.device };
+    }
+    return undefined;
   }
 
   function getPersistedProvisionDeviceSession(
     result: Record<string, unknown>,
-  ): { sessionId: string; deviceId: string; platform: "android" | "ios" } | undefined {
+  ): { sessionId: string; deviceId: string; platform: "android" | "ios"; device: BootedDevice } | undefined {
     if (typeof result.sessionId !== "string") {
       return undefined;
     }
@@ -2076,7 +2115,7 @@ export function registerDeviceTools() {
       return undefined;
     }
     const deviceRecord = device as Record<string, unknown>;
-    if (typeof deviceRecord.deviceId !== "string") {
+    if (typeof deviceRecord.deviceId !== "string" || typeof deviceRecord.name !== "string") {
       return undefined;
     }
     if (deviceRecord.platform !== "android" && deviceRecord.platform !== "ios") {
@@ -2086,7 +2125,63 @@ export function registerDeviceTools() {
       sessionId: result.sessionId,
       deviceId: deviceRecord.deviceId,
       platform: deviceRecord.platform,
+      device: deviceRecord as BootedDevice,
     };
+  }
+
+  async function releaseErroredProvisionDeviceSession(result: Record<string, unknown>): Promise<void> {
+    const persistedSession = getPersistedProvisionDeviceSession(result);
+    const daemonState = DaemonState.getInstance();
+    if (!persistedSession || !daemonState.isInitialized()) {
+      return;
+    }
+    const pooledDevice = daemonState.getDevicePool().getDeviceForSession(persistedSession.sessionId);
+    if (pooledDevice?.status !== "error") {
+      return;
+    }
+    await releaseProvisionDeviceSession(result, "provision-device-errored-replay");
+  }
+
+  async function completeProvisionDeviceOperation(
+    store: ProvisionDeviceOperationStore,
+    operationId: string,
+    result: Record<string, unknown>,
+  ): Promise<void> {
+    try {
+      await store.complete(operationId, result);
+    } catch (error) {
+      await releaseProvisionDeviceSession(result, "provision-device-persistence-failed");
+      throw error;
+    }
+  }
+
+  async function releaseProvisionDeviceSession(
+    result: Record<string, unknown>,
+    reason: string,
+  ): Promise<void> {
+    const persistedSession = getPersistedProvisionDeviceSession(result);
+    const daemonState = DaemonState.getInstance();
+    if (!persistedSession || !daemonState.isInitialized()) {
+      return;
+    }
+    const sessionManager = daemonState.getSessionManager();
+    const session = sessionManager.getSession(persistedSession.sessionId);
+    if (
+      session?.assignedDevice !== persistedSession.deviceId ||
+      session.platform !== persistedSession.platform
+    ) {
+      return;
+    }
+    try {
+      const releasedDeviceId = await sessionManager.releaseSession(persistedSession.sessionId, reason);
+      if (releasedDeviceId === persistedSession.deviceId) {
+        await daemonState.getDevicePool().releaseDevice(releasedDeviceId, persistedSession.sessionId);
+      }
+    } catch (error) {
+      logger.warn(
+        `[DeviceTools] Failed to release provisionDevice session ${persistedSession.sessionId}: ${error}`,
+      );
+    }
   }
 
   function preserveProvisionDeviceOwnership(

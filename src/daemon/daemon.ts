@@ -399,6 +399,7 @@ export class Daemon {
       (deviceId) => this.deviceSessionRegistry.onDeviceDisconnected(deviceId),
       new EmulatorLossIncidentRepository(this.timer, this.idGenerator),
       (sessionId, reason) => executionTracker.cancelDeviceSessionExecutions(sessionId, reason),
+      this.idGenerator,
     );
     // Initialize singleton for daemon state access
     DaemonState.getInstance().initialize(
@@ -532,6 +533,8 @@ export class Daemon {
       undefined,
       undefined,
       FeatureFlagService.getInstance(),
+      undefined,
+      this.idGenerator,
     );
     logger.info("Starting Unix socket server...");
     startupBenchmark.startPhase("socketServerStart");

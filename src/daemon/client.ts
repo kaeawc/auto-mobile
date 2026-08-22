@@ -1,5 +1,4 @@
 import { createConnection, Socket } from "node:net";
-import { randomUUID } from "node:crypto";
 import { existsSync, statSync } from "node:fs";
 import { platform } from "node:os";
 import { logger } from "../utils/logger";
@@ -15,6 +14,7 @@ import { type BuildIdentity, getCurrentBuildIdentity } from "./buildIdentity";
 import { resolveMcpRequestTimeoutMs } from "./mcpRequestTimeout";
 import { McpTimeoutError } from "./McpTimeoutError";
 import { type Timer, defaultTimer } from "../utils/SystemTimer";
+import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
 import {
   cleanupStaleDaemonFilesForDeadPidSync,
   getDaemonSocketPathList,
@@ -88,6 +88,7 @@ export class DaemonClient {
   private notificationHandlers: Set<(notification: DaemonNotification) => void> = new Set();
   private recoveryOptions: DaemonClientRecoveryOptions;
   private readonly clientIdentity: { version: string; build: BuildIdentity } | null;
+  private readonly idGenerator: IdGenerator;
 
   constructor(
     socketPath: string = SOCKET_PATH,
@@ -101,12 +102,14 @@ export class DaemonClient {
       version: DAEMON_VERSION,
       build: getCurrentBuildIdentity(),
     },
+    idGenerator: IdGenerator = defaultIdGenerator,
   ) {
     this.socketPath = socketPath;
     this.connectionTimeout = connectionTimeout;
     this.timer = timer;
     this.recoveryOptions = recoveryOptions;
     this.clientIdentity = clientIdentity;
+    this.idGenerator = idGenerator;
   }
 
   /**
@@ -442,7 +445,7 @@ export class DaemonClient {
       await this.connect();
     }
 
-    const requestId = randomUUID();
+    const requestId = this.idGenerator.next();
 
     const request: DaemonRequest = {
       id: requestId,
@@ -499,7 +502,7 @@ export class DaemonClient {
       await this.connect();
     }
 
-    const requestId = randomUUID();
+    const requestId = this.idGenerator.next();
 
     const request: DaemonRequest = {
       id: requestId,

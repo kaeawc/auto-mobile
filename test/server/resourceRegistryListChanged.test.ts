@@ -143,7 +143,7 @@ describe("ResourceRegistry URI-template matching", () => {
 
   test("passes the registered server's read context to template handlers", async () => {
     const server = new FakeMcpServer();
-    ResourceRegistry.registerTemplate(
+    ResourceRegistry.registerTemplateWithReadContext(
       "automobile:test/{id}",
       "Test",
       "Test contextual template",

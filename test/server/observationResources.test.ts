@@ -39,7 +39,12 @@ function readTemplate(uri: string, context: ResourceReadContext = {}) {
   registerObservationResources();
   const match = ResourceRegistry.matchTemplate(uri);
   expect(match).toBeDefined();
-  return match!.template.handler(match!.params, context);
+  const { template, params } = match!;
+  expect("handlerWithReadContext" in template).toBe(true);
+  if ("handlerWithReadContext" in template) {
+    return template.handlerWithReadContext(params, context);
+  }
+  return template.handler(params);
 }
 
 function createTrackedScreenshot(

@@ -78,7 +78,7 @@ export class ScreenshotJobTracker {
     if (options.queueAfterPending) {
       return true;
     }
-    return options.coalesceWithPending &&
+    return options.coalesceWithPending === true &&
       existingJobs.some(entry => !entry.abortController.signal.aborted);
   }
 

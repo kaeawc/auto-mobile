@@ -9,11 +9,15 @@ export interface ResourceReadContext {
 
 // Interface for resource content handlers
 interface ResourceHandler {
-  (context: ResourceReadContext): Promise<ResourceContent>;
+  (): Promise<ResourceContent>;
 }
 
 // Interface for resource template handlers (with parameters)
 interface ResourceTemplateHandler {
+  (params: Record<string, string>): Promise<ResourceContent>;
+}
+
+interface ContextualResourceTemplateHandler {
   (params: Record<string, string>, context: ResourceReadContext): Promise<ResourceContent>;
 }
 
@@ -26,7 +30,7 @@ export interface ResourceContent {
 }
 
 // Interface for a registered resource
-interface RegisteredResource {
+interface ResourceMetadata {
   uri: string;
   name: string;
   description?: string;
@@ -34,18 +38,23 @@ interface RegisteredResource {
   handler: ResourceHandler;
 }
 
-// Interface for a registered resource template
-interface RegisteredResourceTemplate {
+type RegisteredResource = ResourceMetadata;
+
+interface ResourceTemplateMetadata {
   uriTemplate: string;
   name: string;
   description?: string;
   mimeType?: string;
-  handler: ResourceTemplateHandler;
   // Precompiled at registration so matchTemplate never compiles a RegExp inside
   // the per-request scan (issue #3427). Patterns are 100% static.
   regex: RegExp;
   paramNames: string[];
 }
+
+type RegisteredResourceTemplate = ResourceTemplateMetadata & (
+  | { handler: ResourceTemplateHandler }
+  | { handlerWithReadContext: ContextualResourceTemplateHandler }
+);
 
 // Compile an RFC 6570 URI template into an anchored RegExp plus its ordered
 // parameter names. Pure and called once per template at registration.
@@ -125,6 +134,25 @@ class ResourceRegistryClass {
   ): void {
     const { regex, paramNames } = compileUriTemplate(uriTemplate);
     this.templates.set(uriTemplate, { uriTemplate, name, description, mimeType, handler, regex, paramNames });
+  }
+
+  registerTemplateWithReadContext(
+    uriTemplate: string,
+    name: string,
+    description: string,
+    mimeType: string,
+    handlerWithReadContext: ContextualResourceTemplateHandler
+  ): void {
+    const { regex, paramNames } = compileUriTemplate(uriTemplate);
+    this.templates.set(uriTemplate, {
+      uriTemplate,
+      name,
+      description,
+      mimeType,
+      handlerWithReadContext,
+      regex,
+      paramNames,
+    });
   }
 
   // Get all registered templates
@@ -239,7 +267,7 @@ class ResourceRegistryClass {
       // First, try to find an exact match resource
       const resource = this.getResource(uri);
       if (resource) {
-        const content = await resource.handler(getReadContext());
+        const content = await resource.handler();
         return {
           contents: [content]
         };
@@ -248,10 +276,10 @@ class ResourceRegistryClass {
       // If not found, try to match a template
       const templateMatch = this.matchTemplate(uri);
       if (templateMatch) {
-        const content = await templateMatch.template.handler(
-          templateMatch.params,
-          getReadContext(),
-        );
+        const { template, params } = templateMatch;
+        const content = "handlerWithReadContext" in template
+          ? await template.handlerWithReadContext(params, getReadContext())
+          : await template.handler(params);
         return {
           contents: [content]
         };

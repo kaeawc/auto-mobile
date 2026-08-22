@@ -416,7 +416,7 @@ export function registerObservationResources(): void {
   );
 
   // Register session-scoped observation template
-  ResourceRegistry.registerTemplate(
+  ResourceRegistry.registerTemplateWithReadContext(
     RESOURCE_URIS.SESSION_OBSERVATION,
     "Session Observation",
     "Cached screen observation for an active device session.",
@@ -425,7 +425,7 @@ export function registerObservationResources(): void {
   );
 
   // Register session-scoped cached screenshot template
-  ResourceRegistry.registerTemplate(
+  ResourceRegistry.registerTemplateWithReadContext(
     RESOURCE_URIS.SESSION_SCREENSHOT,
     "Session Screenshot",
     "Cached screen capture for an active device session.",
@@ -434,7 +434,7 @@ export function registerObservationResources(): void {
   );
 
   // Register fresh session screenshot template
-  ResourceRegistry.registerTemplate(
+  ResourceRegistry.registerTemplateWithReadContext(
     RESOURCE_URIS.FRESH_SESSION_SCREENSHOT,
     "Fresh Session Screenshot",
     "Fresh PNG screen capture for an active device session. Every read captures the current screen.",

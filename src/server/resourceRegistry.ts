@@ -3,14 +3,18 @@ import { Resource, ResourceTemplate, ReadResourceRequestSchema, ListResourcesReq
 import { logger } from "../utils/logger";
 import { ListChangedBroadcaster } from "./listChangedBroadcast";
 
+export interface ResourceReadContext {
+  sessionUuid?: string;
+}
+
 // Interface for resource content handlers
 interface ResourceHandler {
-  (): Promise<ResourceContent>;
+  (context: ResourceReadContext): Promise<ResourceContent>;
 }
 
 // Interface for resource template handlers (with parameters)
 interface ResourceTemplateHandler {
-  (params: Record<string, string>): Promise<ResourceContent>;
+  (params: Record<string, string>, context: ResourceReadContext): Promise<ResourceContent>;
 }
 
 // Resource content can be text or blob
@@ -197,7 +201,10 @@ class ResourceRegistryClass {
   }
 
   // Register all resources with an MCP server
-  registerWithServer(server: McpServer): void {
+  registerWithServer(
+    server: McpServer,
+    getReadContext: () => ResourceReadContext = () => ({}),
+  ): void {
     this.trackServer(server);
 
     // Set handler for listing resources
@@ -232,7 +239,7 @@ class ResourceRegistryClass {
       // First, try to find an exact match resource
       const resource = this.getResource(uri);
       if (resource) {
-        const content = await resource.handler();
+        const content = await resource.handler(getReadContext());
         return {
           contents: [content]
         };
@@ -241,7 +248,10 @@ class ResourceRegistryClass {
       // If not found, try to match a template
       const templateMatch = this.matchTemplate(uri);
       if (templateMatch) {
-        const content = await templateMatch.template.handler(templateMatch.params);
+        const content = await templateMatch.template.handler(
+          templateMatch.params,
+          getReadContext(),
+        );
         return {
           contents: [content]
         };

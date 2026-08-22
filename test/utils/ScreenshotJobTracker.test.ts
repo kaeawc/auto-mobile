@@ -206,6 +206,68 @@ describe("ScreenshotJobTracker", () => {
     expect(secondResult.path).toBe("second");
   });
 
+  test("keeps the active capture latest until its queued successor starts", async () => {
+    let resolveFirst: (result: { success: boolean; path?: string }) => void = () => {};
+    let firstWasLatest = false;
+    const first = ScreenshotJobTracker.startJob(
+      "device-queued-latest",
+      () => new Promise(resolve => {
+        resolveFirst = resolve;
+      }),
+      {
+        onComplete: completion => {
+          firstWasLatest = completion.isLatest;
+        },
+      },
+    );
+    const queued = ScreenshotJobTracker.startJob(
+      "device-queued-latest",
+      async () => ({ success: true, path: "queued" }),
+      { queueAfterPending: true },
+    );
+
+    await Promise.resolve();
+    resolveFirst({ success: true, path: "active" });
+    await first.promise;
+
+    expect(firstWasLatest).toBe(true);
+    await queued.promise;
+  });
+
+  test("queues an observe capture behind an active fresh capture", async () => {
+    let resolveFresh: (result: { success: boolean; path?: string }) => void = () => {};
+    let observeRunnerCalls = 0;
+    const fresh = ScreenshotJobTracker.startJob(
+      "device-fresh-then-observe",
+      () => new Promise(resolve => {
+        resolveFresh = resolve;
+      }),
+      { queueAfterPending: true },
+    );
+    await Promise.resolve();
+
+    const observe = ScreenshotJobTracker.startJob(
+      "device-fresh-then-observe",
+      async () => {
+        observeRunnerCalls++;
+        return { success: true, path: "observe" };
+      },
+      { coalesceWithPending: true },
+    );
+    await Promise.resolve();
+
+    expect(observe.jobId).not.toBe(fresh.jobId);
+    expect(observeRunnerCalls).toBe(0);
+    expect(fresh.signal.aborted).toBe(false);
+
+    resolveFresh({ success: true, path: "fresh" });
+    const [freshResult, observeResult] = await Promise.all([fresh.promise, observe.promise]);
+
+    expect(freshResult.path).toBe("fresh");
+    expect(observeRunnerCalls).toBe(1);
+    expect(observeResult.path).toBe("observe");
+  });
+
   test("queueAfterPending remains cancellable before its runner starts", async () => {
     let resolveFirst: (result: { success: boolean; path?: string }) => void = () => {};
     const first = ScreenshotJobTracker.startJob(

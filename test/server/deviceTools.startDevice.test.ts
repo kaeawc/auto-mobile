@@ -18,6 +18,10 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import {
+  clearDirectSessionDevices,
+  resolveDirectSessionDevice,
+} from "../../src/server/directSessionDeviceRegistry";
+import {
   DEFAULT_DEVICE_READY_TIMEOUT_MS,
   MAX_DEVICE_READY_TIMEOUT_MS,
 } from "../../src/utils/deviceTimeouts";
@@ -78,6 +82,7 @@ describe("startDevice handler", () => {
   afterEach(() => {
     resetDeviceToolsDependencies();
     clearAutolockEnv();
+    clearDirectSessionDevices();
     DaemonState.getInstance().reset();
     daemonSessionManager?.stopCleanupTimer();
   });
@@ -268,6 +273,10 @@ describe("startDevice handler", () => {
     const result = await callStartDevice({ platform: "android" });
 
     expect(result.sessionId).toBe("session-1");
+    expect(resolveDirectSessionDevice("session-1")).toEqual({
+      sessionUuid: "session-1",
+      device: androidDevice,
+    });
   });
 
   it("fails closed on an unusable iOS runner override, before touching the cached runner (#4221)", async () => {

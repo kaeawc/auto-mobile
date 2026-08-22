@@ -1,10 +1,15 @@
-import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
+import {
+  ResourceRegistry,
+  ResourceContent,
+  type ResourceReadContext,
+} from "./resourceRegistry";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { logger } from "../utils/logger";
 import { stringifyToolResponse } from "../utils/toolUtils";
 import { ScreenshotJobTracker } from "../utils/ScreenshotJobTracker";
 import { DaemonState } from "../daemon/daemonState";
 import { TakeScreenshot } from "../features/observe/TakeScreenshot";
+import { resolveDirectSessionDevice } from "./directSessionDeviceRegistry";
 import type { TrackedScreenshotService } from "../features/observe/screenshot/ObserveScreenshotRecorder";
 import type { BootedDevice } from "../models";
 import * as realFs from "fs/promises";
@@ -37,7 +42,7 @@ interface SessionScreenshotResourceDependencies {
 function resolveActiveSession(sessionUuid: string): ActiveSessionDevice | undefined {
   const daemonState = DaemonState.getInstance();
   if (!daemonState.isInitialized()) {
-    return undefined;
+    return resolveDirectSessionDevice(sessionUuid);
   }
 
   const session = daemonState.getSessionManager().getSession(sessionUuid);
@@ -212,10 +217,33 @@ function sessionResourceError(uri: string, sessionUuid: string): ResourceContent
   };
 }
 
+function unauthorizedSessionResourceError(uri: string): ResourceContent {
+  return {
+    uri,
+    mimeType: "application/json",
+    text: JSON.stringify({
+      error: "This resource can only be read by its bound device session.",
+    }, null, 2),
+  };
+}
+
+function isAuthorizedSessionResource(
+  context: ResourceReadContext,
+  sessionUuid: string,
+): boolean {
+  return !context.sessionUuid || context.sessionUuid === sessionUuid;
+}
+
 // Session-scoped handler for a cached observation.
-async function getSessionObservation(params: Record<string, string>): Promise<ResourceContent> {
+async function getSessionObservation(
+  params: Record<string, string>,
+  context: ResourceReadContext,
+): Promise<ResourceContent> {
   const { sessionUuid } = params;
   const uri = `automobile:observation/session/${sessionUuid}/latest`;
+  if (!isAuthorizedSessionResource(context, sessionUuid)) {
+    return unauthorizedSessionResourceError(uri);
+  }
   const activeSession = sessionScreenshotResourceDependencies.resolveActiveSession(sessionUuid);
   if (!activeSession) {
     return sessionResourceError(uri, sessionUuid);
@@ -253,9 +281,15 @@ async function getSessionObservation(params: Record<string, string>): Promise<Re
 }
 
 // Session-scoped handler for a cached screenshot.
-async function getSessionScreenshot(params: Record<string, string>): Promise<ResourceContent> {
+async function getSessionScreenshot(
+  params: Record<string, string>,
+  context: ResourceReadContext,
+): Promise<ResourceContent> {
   const { sessionUuid } = params;
   const uri = `automobile:observation/session/${sessionUuid}/latest/screenshot`;
+  if (!isAuthorizedSessionResource(context, sessionUuid)) {
+    return unauthorizedSessionResourceError(uri);
+  }
   const activeSession = sessionScreenshotResourceDependencies.resolveActiveSession(sessionUuid);
   if (!activeSession) {
     return sessionResourceError(uri, sessionUuid);
@@ -306,9 +340,15 @@ async function getSessionScreenshot(params: Record<string, string>): Promise<Res
 
 // Session-scoped handler for a fresh screenshot. Every successful read captures
 // the screen; it deliberately does not fall back to an observe cache.
-async function getFreshSessionScreenshot(params: Record<string, string>): Promise<ResourceContent> {
+async function getFreshSessionScreenshot(
+  params: Record<string, string>,
+  context: ResourceReadContext,
+): Promise<ResourceContent> {
   const { sessionUuid } = params;
   const uri = `automobile:device-session/${sessionUuid}/screenshot`;
+  if (!isAuthorizedSessionResource(context, sessionUuid)) {
+    return unauthorizedSessionResourceError(uri);
+  }
   const activeSession = sessionScreenshotResourceDependencies.resolveActiveSession(sessionUuid);
   if (!activeSession) {
     return sessionResourceError(uri, sessionUuid);

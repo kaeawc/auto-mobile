@@ -523,12 +523,13 @@ export class DaemonManager implements DaemonManagerLike {
       }
       // Another process won the retry race — wait for it to finish
       stderrLog("Another process is retrying daemon start, waiting...");
+      const retryHolderLogPath = await this.getLockHolderStartupLogPath();
       const retryReady = await this.waitForReady(DAEMON_STARTUP_TIMEOUT_MS);
       if (retryReady) {
         stderrLog("Daemon started by another process (retry)");
         return;
       }
-      throw await this.createLockHolderStartupFailure();
+      throw await this.createLockHolderStartupFailure(retryHolderLogPath);
     }
 
     try {
@@ -793,9 +794,9 @@ export class DaemonManager implements DaemonManagerLike {
     return error;
   }
 
-  private async createLockHolderStartupFailure(): Promise<Error> {
+  private async createLockHolderStartupFailure(retainedLogPath?: string | null): Promise<Error> {
     const summary = "Another process is starting the daemon but it failed to become ready";
-    const logPath = await this.getLockHolderStartupLogPath();
+    const logPath = retainedLogPath ?? await this.getLockHolderStartupLogPath();
     if (!logPath) {
       return new ActionableError(
         `${summary}; the startup lock did not contain a usable holder PID for diagnostics.`

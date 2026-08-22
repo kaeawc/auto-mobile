@@ -193,6 +193,46 @@ describe("DaemonManager file lock", () => {
       holder.releaseLock();
     });
 
+    test("retains retry-holder diagnostics after the retry holder releases its lock", async () => {
+      const lockPath = createTempLockPath();
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+      const holderLogsDir = join(dirname(lockPath), "retry-holder-logs");
+      let retryHolder: DaemonManager | undefined;
+      let waitCount = 0;
+
+      class TestDaemonManager extends DaemonManager {
+        override acquireLock(): boolean {
+          return false;
+        }
+        override async waitForReady(_timeout: number): Promise<boolean> {
+          waitCount++;
+          if (waitCount === 1) {
+            process.env.AUTOMOBILE_LOG_DIR = holderLogsDir;
+            retryHolder = new DaemonManager(undefined, undefined, fakeTimer, lockPath);
+            expect(retryHolder.acquireLock()).toBe(true);
+            mkdirSync(holderLogsDir, { recursive: true });
+            writeFileSync(
+              join(holderLogsDir, `daemon-launch-${process.pid}.log`),
+              "Retry holder failed to start CtrlProxy\n",
+            );
+            return false;
+          }
+
+          retryHolder?.releaseLock();
+          return false;
+        }
+        override findAllDaemonProcesses(): number[] { return []; }
+      }
+
+      const manager = new TestDaemonManager(undefined, undefined, fakeTimer, lockPath);
+
+      await expect(manager.start()).rejects.toThrow(
+        /Another process is starting the daemon but it failed to become ready[\s\S]*retry-holder-logs[\s\S]*Retry holder failed/
+      );
+      expect(waitCount).toBe(2);
+    });
+
     test("releases lock after successful start", async () => {
       const lockPath = createTempLockPath();
       const fakeTimer = new FakeTimer();

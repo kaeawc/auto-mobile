@@ -385,9 +385,9 @@ class DesktopDaemonLifecycleTest {
   }
 
   @Test
-  fun `extends the command timeout for a configured daemon startup timeout`() {
-    assertEquals(125_000L, SystemDaemonCommandExecutor.commandTimeoutMillis("120000"))
-    assertEquals(60_000L, SystemDaemonCommandExecutor.commandTimeoutMillis("invalid"))
+  fun `reserves the full daemon startup lifecycle for commands`() {
+    assertEquals(365_000L, SystemDaemonCommandExecutor.commandTimeoutMillis("120000"))
+    assertEquals(95_000L, SystemDaemonCommandExecutor.commandTimeoutMillis("invalid"))
   }
 
   @Test

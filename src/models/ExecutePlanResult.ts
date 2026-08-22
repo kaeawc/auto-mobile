@@ -1,5 +1,4 @@
 import type { FailureObservationSummary } from "./FailureObservation";
-import type { SessionToolProfileService } from "../features/toolCapabilities/SessionToolProfileService";
 
 /**
  * When passed to plan execution, each successful `observe` step stores a
@@ -16,8 +15,6 @@ export interface PlanStepLifecycleContext {
 
 export interface PlanExecutionOptions {
   captureObserveSteps?: CaptureObserveStepMode;
-  /** Profile reader used to enforce capability policy for internal plan steps. */
-  sessionToolProfileService?: Pick<SessionToolProfileService, "isEnabled">;
 
   /**
    * Invoked at the start of each step (after abort checks), before the tool runs.

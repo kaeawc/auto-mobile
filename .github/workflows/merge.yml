@@ -543,6 +543,9 @@ jobs:
     # Disabled: very slow and not required for release/docs publishing.
     if: ${{ false }}
     runs-on: ${{ matrix.os }}
+    env:
+      # Keep this disabled-job definition aligned with the PR installer lane.
+      AUTOMOBILE_LOG_DIR: "${{ github.workspace }}/ci-logs/daemon-logs"
     strategy:
       fail-fast: false
       matrix:
@@ -577,14 +580,6 @@ jobs:
           bash ./scripts/install.sh --contributor --preset development --non-interactive 2>&1 | tee ci-logs/installer.log
           install_status=${PIPESTATUS[0]}
           set -e
-          mkdir -p ci-logs/daemon-logs
-          source scripts/lib/auto-mobile-log-dir.sh
-          daemon_log_dir="$(resolve_automobile_log_dir)"
-          if [[ -d "${daemon_log_dir}" ]]; then
-            cp -R "${daemon_log_dir}/." ci-logs/daemon-logs/ || true
-          else
-            echo "No daemon logs directory was created" > ci-logs/daemon-logs/README.txt
-          fi
           : > ci-logs/ctrl-proxy-cache-state.txt
           for cache_path in "${TMPDIR:-/tmp}"/auto-mobile-prefetch-* "${HOME}/.automobile/ctrl-proxy-ios"; do
             [[ -e "${cache_path}" ]] || continue

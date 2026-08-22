@@ -31,4 +31,33 @@ final class OSLogReaderTests: XCTestCase {
         XCTAssertEqual(OSLogReader.mapLevel(.error), 4) // Error bucket (>=4)
         XCTAssertGreaterThanOrEqual(OSLogReader.mapLevel(.fault), 4) // Error bucket
     }
+
+    // MARK: - Idle-load reductions (#5477)
+
+    /// The poll interval was raised from 500ms to at least 1s so the idle process
+    /// log store is queried at most once per second.
+    func testPollIntervalIsAtLeastOneSecond() {
+        XCTAssertGreaterThanOrEqual(OSLogReader.pollIntervalMs, 1000)
+    }
+
+    /// The `OSLogStore` is created once and reused across polls, rather than
+    /// allocated on every tick as before.
+    func testReusesSingleOSLogStore() throws {
+        var creations = 0
+        let reader = OSLogReader(storeFactory: {
+            creations += 1
+            return try OSLogStore(scope: .currentProcessIdentifier)
+        })
+
+        let first: OSLogStore
+        do {
+            first = try reader.obtainStore()
+        } catch {
+            throw XCTSkip("OSLogStore is unavailable in this environment: \(error)")
+        }
+        let second = try reader.obtainStore()
+
+        XCTAssertEqual(creations, 1, "store should be created exactly once")
+        XCTAssertTrue(first === second, "the same OSLogStore instance is reused across polls")
+    }
 }

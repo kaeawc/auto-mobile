@@ -29,7 +29,7 @@ stateDiagram-v2
     JUnitRunner --> Daemon
     Daemon --> JUnitRunner
     Daemon --> DeviceSessionManager
-    InteractionLoop --> Daemon: 🖼️ Processed Results 
+    InteractionLoop --> Daemon: 🖼️ Processed Results
     DeviceSessionManager --> InteractionLoop: 📱
 
     InteractionLoop --> Device1
@@ -41,6 +41,7 @@ stateDiagram-v2
 ## Socket Communication
 
 The daemon listens on a Unix socket at:
+
 ```typescript
 /tmp/auto-mobile-daemon-<uid>.sock
 ```
@@ -65,7 +66,7 @@ The packaged stdio entrypoint accepts the same binding as
 `--initial-session-uuid <uuid>`.
 
 The device-pool session is separate from the MCP transport session and from a
-tool-capability profile. When the bound device session is released, the
+tool-selection profile. When the bound device session is released, the
 connection binding is removed; later sessionless calls do not recreate it.
 `setActiveDevice` remains available as a migration compatibility API, but new
 multi-client integrations should use connection-bound device-pool sessions.
@@ -90,12 +91,12 @@ The daemon reclaims sessions whose client heartbeat has gone stale. Sessions usi
 
 Deployment overrides are read from environment variables in milliseconds:
 
-| Variable | Default | Purpose |
-| --- | ---: | --- |
-| `AUTOMOBILE_SESSION_HEARTBEAT_CHECK_INTERVAL_MS` | `10000` | How often the daemon scans for stale sessions. |
-| `AUTOMOBILE_SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS` | `5000` | Grace before reclaiming a default-heartbeat session that never sent its first heartbeat. |
-| `AUTOMOBILE_SESSION_HEARTBEAT_INITIAL_GRACE_MS` | `20000` | Grace before evaluating stale custom-heartbeat sessions that never sent a heartbeat. |
-| `AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS` | `10000` | Default heartbeat timeout assigned to newly created sessions. |
+| Variable                                          | Default | Purpose                                                                                  |
+| ------------------------------------------------- | ------: | ---------------------------------------------------------------------------------------- |
+| `AUTOMOBILE_SESSION_HEARTBEAT_CHECK_INTERVAL_MS`  | `10000` | How often the daemon scans for stale sessions.                                           |
+| `AUTOMOBILE_SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS` |  `5000` | Grace before reclaiming a default-heartbeat session that never sent its first heartbeat. |
+| `AUTOMOBILE_SESSION_HEARTBEAT_INITIAL_GRACE_MS`   | `20000` | Grace before evaluating stale custom-heartbeat sessions that never sent a heartbeat.     |
+| `AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS`         | `10000` | Default heartbeat timeout assigned to newly created sessions.                            |
 
 Each variable also supports the legacy `AUTO_MOBILE_...` prefix.
 

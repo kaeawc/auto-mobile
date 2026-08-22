@@ -13,16 +13,16 @@ import {
   DAEMON_VERSION,
   DAEMON_VERSION_RESTART_COOLDOWN_MS,
   DAEMON_BOUND_SESSION_REPLAY_TTL_MS,
-  DAEMON_CAPABILITY_PROFILE_PARAM,
+  DAEMON_TOOL_SELECTION_PROFILE_PARAM,
   DAEMON_BOUND_SESSION_PARAM,
 } from "./constants";
 import type { DaemonNotification, DaemonOptions } from "./types";
 import { listChangedKindForMethod, type ListChangedKind } from "../server/listChangedBroadcast";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../server/sessionReleaseBroadcast";
 import {
-  capabilityProfileUuidFromToolResponse,
-  SET_TOOL_CAPABILITY_TOOL_NAME,
-} from "../features/toolCapabilities/toolCapabilityControl";
+  toolSelectionProfileUuidFromResponse,
+  SET_TOOL_ENABLED_TOOL_NAME,
+} from "../features/toolSelection/toolSelectionControl";
 import { OUTPUT_REDUCTION_FLAG_SPECS } from "../utils/outputReductionFlags";
 import { compareStrictNumericVersions } from "../server/deviceMatcher";
 import { releaseVersion } from "../utils/mcpVersion";
@@ -291,6 +291,10 @@ export const REUSE_CRITICAL_OPTION_KEYS: (keyof DaemonOptions)[] = [
 const REUSE_CRITICAL_STRING_OPTION_KEYS: (keyof DaemonOptions)[] = ["toolOutputsDir"];
 
 const REUSE_CRITICAL_NUMBER_OPTION_KEYS: (keyof DaemonOptions)[] = ["runnerReadinessTimeoutMs"];
+export const REUSE_CRITICAL_ARRAY_OPTION_KEYS: (keyof DaemonOptions)[] = [
+  "enabledTools",
+  "disabledTools",
+];
 
 /** The value of a startup option when it is a string, else undefined. */
 function stringOption(
@@ -309,8 +313,102 @@ function numberOption(
   return typeof value === "number" ? value : undefined;
 }
 
+function stringArrayOption(
+  options: DaemonOptions | undefined,
+  key: keyof DaemonOptions,
+): readonly string[] | undefined {
+  const value = options?.[key];
+  return Array.isArray(value) && value.every((item) => typeof item === "string")
+    ? value
+    : undefined;
+}
+
 function arraysEqual(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function applyExactToolSelections(
+  assignments: Map<string, boolean>,
+  options: DaemonOptions | undefined,
+): void {
+  for (const toolName of stringArrayOption(options, "enabledTools") ?? []) {
+    assignments.set(toolName, true);
+  }
+  for (const toolName of stringArrayOption(options, "disabledTools") ?? []) {
+    assignments.set(toolName, false);
+  }
+}
+
+function exactToolSelectionDeficits(
+  requested: DaemonOptions | undefined,
+  running: DaemonOptions | undefined,
+): string[] {
+  const requestedAssignments = new Map<string, boolean>();
+  const runningAssignments = new Map<string, boolean>();
+  applyExactToolSelections(requestedAssignments, requested);
+  applyExactToolSelections(runningAssignments, running);
+  return Array.from(requestedAssignments).flatMap(([toolName, enabled]) =>
+    runningAssignments.get(toolName) === enabled
+      ? []
+      : [
+          `${enabled ? "enabledTools" : "disabledTools"} ` +
+            `(tool=${toolName}, requested=${enabled ? "enabled" : "disabled"}, ` +
+            `running=${
+              runningAssignments.has(toolName)
+                ? runningAssignments.get(toolName)
+                  ? "enabled"
+                  : "disabled"
+                : "unset"
+            })`,
+        ],
+  );
+}
+
+function mergedExactToolSelections(
+  running: DaemonOptions | undefined,
+  requested: DaemonOptions | undefined,
+): Pick<DaemonOptions, "enabledTools" | "disabledTools"> | undefined {
+  const selectionsSpecified = REUSE_CRITICAL_ARRAY_OPTION_KEYS.some(
+    (key) =>
+      stringArrayOption(running, key) !== undefined ||
+      stringArrayOption(requested, key) !== undefined,
+  );
+  if (!selectionsSpecified) {
+    return undefined;
+  }
+  const assignments = new Map<string, boolean>();
+  applyExactToolSelections(assignments, running);
+  applyExactToolSelections(assignments, requested);
+  return {
+    enabledTools: Array.from(assignments)
+      .filter(([, enabled]) => enabled)
+      .map(([toolName]) => toolName),
+    disabledTools: Array.from(assignments)
+      .filter(([, enabled]) => !enabled)
+      .map(([toolName]) => toolName),
+  };
+}
+
+function requestedOptionDeficits<T>(
+  keys: readonly (keyof DaemonOptions)[],
+  requested: DaemonOptions | undefined,
+  running: DaemonOptions | undefined,
+  readRequested: (options: DaemonOptions | undefined, key: keyof DaemonOptions) => T | undefined,
+  readRunning: (options: DaemonOptions | undefined, key: keyof DaemonOptions) => T,
+  equals: (requestedValue: T, runningValue: T) => boolean = (left, right) => left === right,
+): string[] {
+  return keys.flatMap((key) => {
+    const requestedValue = readRequested(requested, key);
+    if (requestedValue === undefined) {
+      return [];
+    }
+    const runningValue = readRunning(running, key);
+    return equals(requestedValue, runningValue)
+      ? []
+      : [
+          `${key} (requested=${JSON.stringify(requestedValue)}, running=${JSON.stringify(runningValue)})`,
+        ];
+  });
 }
 
 /**
@@ -321,46 +419,47 @@ function arraysEqual(left: readonly string[], right: readonly string[]): boolean
  * particular caller (e.g. a bare short-lived CLI client) didn't request it.
  * Booleans are compared strictly (`=== true`), so `undefined` and `false` both
  * read as "no opinion"; strings and marker arrays count only when the client
- * supplies one that differs from the daemon's. Returns a human-readable list
- * (empty when the daemon already satisfies every requested flag) for logging and
- * error messages.
+ * supplies one that differs from the daemon's. Exact-tool defaults are checked
+ * assignment by assignment, so a running daemon may retain additional choices.
+ * Returns a human-readable list (empty when the daemon already satisfies every
+ * requested flag) for logging and error messages.
  */
 function startupOptionDeficits(
   requested: DaemonOptions | undefined,
   running: DaemonOptions | undefined,
 ): string[] {
-  const deficits: string[] = [];
-  for (const key of REUSE_CRITICAL_OPTION_KEYS) {
-    const want = requested?.[key] === true;
-    const have = running?.[key] === true;
-    if (want && !have) {
-      deficits.push(`${key} (requested=${want}, running=${have})`);
-    }
-  }
-  for (const key of REUSE_CRITICAL_STRING_OPTION_KEYS) {
-    const want = stringOption(requested, key);
-    const have = stringOption(running, key);
-    if (want !== undefined && want !== have) {
-      deficits.push(`${key} (requested=${want}, running=${have ?? "unset"})`);
-    }
-  }
-  for (const key of REUSE_CRITICAL_NUMBER_OPTION_KEYS) {
-    const want = numberOption(requested, key);
-    const have = numberOption(running, key);
-    if (want !== undefined && want !== have) {
-      deficits.push(`${key} (requested=${want}, running=${have ?? "unset"})`);
-    }
-  }
-  const requestedEventAllMarkers = requested?.eventAllMarkers;
-  if (requestedEventAllMarkers !== undefined) {
-    const runningEventAllMarkers = running?.eventAllMarkers ?? [];
-    if (!arraysEqual(requestedEventAllMarkers, runningEventAllMarkers)) {
-      deficits.push(
-        `eventAllMarkers (requested=${JSON.stringify(requestedEventAllMarkers)}, running=${JSON.stringify(runningEventAllMarkers)})`,
-      );
-    }
-  }
-  return deficits;
+  return [
+    ...requestedOptionDeficits(
+      REUSE_CRITICAL_OPTION_KEYS,
+      requested,
+      running,
+      (options, key) => (options?.[key] === true ? true : undefined),
+      (options, key) => options?.[key] === true,
+    ),
+    ...requestedOptionDeficits(
+      REUSE_CRITICAL_STRING_OPTION_KEYS,
+      requested,
+      running,
+      stringOption,
+      (options, key) => stringOption(options, key) ?? "unset",
+    ),
+    ...requestedOptionDeficits(
+      REUSE_CRITICAL_NUMBER_OPTION_KEYS,
+      requested,
+      running,
+      numberOption,
+      (options, key) => numberOption(options, key) ?? Number.NaN,
+    ),
+    ...exactToolSelectionDeficits(requested, running),
+    ...requestedOptionDeficits(
+      ["eventAllMarkers"],
+      requested,
+      running,
+      (options, key) => stringArrayOption(options, key),
+      (options, key) => stringArrayOption(options, key) ?? [],
+      arraysEqual,
+    ),
+  ];
 }
 
 /**
@@ -395,6 +494,10 @@ function mergeDaemonOptions(
     if (numberOption(requested, key) === undefined && runningNumber !== undefined) {
       mergedRecord[key] = runningNumber;
     }
+  }
+  const exactToolSelections = mergedExactToolSelections(running, requested);
+  if (exactToolSelections) {
+    Object.assign(merged, exactToolSelections);
   }
   return merged;
 }
@@ -435,16 +538,14 @@ export class DaemonMcpProxy {
   // Once the daemon confirms this transport's bound session is gone, preserve
   // that terminal identity instead of clearing it and allowing the same UUID to
   // acquire another device.
-  private terminalBoundSession:
-    | { sessionUuid: string; reason: string }
-    | undefined;
+  private terminalBoundSession: { sessionUuid: string; reason: string } | undefined;
   // Startup bindings remain authoritative until the daemon signals release.
   // Replay expiration only protects bindings inferred from ordinary calls.
   private initialSessionBindingConfigured = false;
-  // A connection-level capability profile is not a daemon device session. It
+  // A connection-level tool-selection profile is not a daemon device session. It
   // survives executePlan's device-session release and is forwarded through the
   // socket only when no explicit/remembered routing session is in use.
-  private capabilityProfileUuid: string | undefined;
+  private toolSelectionProfileUuid: string | undefined;
   // Monotonic release-epoch counter, bumped every time the daemon signals that a
   // session was released (via handleDaemonNotification). `releasedSessionEpochs`
   // records, per released UUID, the epoch at which it was last released. A
@@ -497,7 +598,7 @@ export class DaemonMcpProxy {
       heartbeatIntervalMs(config),
       () => this.sendBoundSessionHeartbeat(),
       {
-        onError: error => {
+        onError: (error) => {
           logger.warn(`[DaemonMcpProxy] Bound-session heartbeat failed: ${error}`);
         },
       },
@@ -681,10 +782,7 @@ export class DaemonMcpProxy {
       releasedSessionUuid === this.boundSessionUuid ||
       releasedSessionUuid === this.terminalBoundSession?.sessionUuid
     ) {
-      this.fenceBoundSessionUuid(
-        releasedSessionUuid,
-        notification.reason ?? "released",
-      );
+      this.fenceBoundSessionUuid(releasedSessionUuid, notification.reason ?? "released");
     }
   }
 
@@ -1015,10 +1113,7 @@ export class DaemonMcpProxy {
           this.boundSessionUuid === attemptedSessionUuid &&
           this.isDaemonSessionNotFoundError(retryError)
         ) {
-          this.fenceBoundSessionUuid(
-            attemptedSessionUuid,
-            "session-not-found",
-          );
+          this.fenceBoundSessionUuid(attemptedSessionUuid, "session-not-found");
           throw this.boundSessionExpiredError();
         }
         throw retryError;
@@ -1084,7 +1179,7 @@ export class DaemonMcpProxy {
       // full unfiltered tool list instead of the session-scoped one. Reusing the
       // session-scoped params re-seeds the retry after a reconnect (issue #4610).
       const discoveryEpoch = this.discoveryEpoch;
-      const forwardedParams = this.withCapabilityProfile(this.withBoundSessionUuid({}));
+      const forwardedParams = this.withToolSelectionProfile(this.withBoundSessionUuid({}));
       const result = await this.withRecoverableReconnect(
         () => this.client!.callDaemonMethod("tools/list", forwardedParams),
         this.sessionUuidFromArgs(forwardedParams),
@@ -1113,8 +1208,8 @@ export class DaemonMcpProxy {
     // not the proxy's retained device-routing session. Preserve that distinction
     // after a device has been bound.
     const routingArgs =
-      name === SET_TOOL_CAPABILITY_TOOL_NAME ? args : this.withBoundSessionUuid(args);
-    const forwardedArgs = this.withCapabilityProfile(routingArgs);
+      name === SET_TOOL_ENABLED_TOOL_NAME ? args : this.withBoundSessionUuid(args);
+    const forwardedArgs = this.withToolSelectionProfile(routingArgs);
     const forwardedSessionUuid = this.sessionUuidFromArgs(forwardedArgs);
     this.retainReleaseEpochReference(forwardedSessionUuid);
     // Snapshot the release epoch at forward time. If a session-released signal for
@@ -1125,14 +1220,11 @@ export class DaemonMcpProxy {
     // so it does not block remembering the session this call forwarded.
     const callReleaseEpoch = this.releaseEpoch;
     try {
-      const result = await this.withRecoverableReconnect(
-        () => {
-          this.throwIfForwardedSessionReleasedSince(forwardedArgs, callReleaseEpoch);
-          return this.client!.callTool(name, forwardedArgs);
-        },
-        forwardedSessionUuid,
-      );
-      this.rememberCapabilityProfile(name, args, result);
+      const result = await this.withRecoverableReconnect(() => {
+        this.throwIfForwardedSessionReleasedSince(forwardedArgs, callReleaseEpoch);
+        return this.client!.callTool(name, forwardedArgs);
+      }, forwardedSessionUuid);
+      this.rememberToolSelectionProfile(name, args, result);
       // Remember what was actually forwarded, not the caller's raw args. An
       // implicit sessionless call injects the bound UUID into forwardedArgs and
       // extends the live daemon session in getOrCreateSession(); refreshing the
@@ -1150,7 +1242,7 @@ export class DaemonMcpProxy {
       // so a later reconnect can no longer replay it (issue #4610).
       this.refreshReplayLeaseAfterAdmittedFailure(name, forwardedArgs, error, callReleaseEpoch);
       // Do NOT clear the binding on a rejected executePlan. A plan can reject
-      // *before* the handler runs — capability enforcement or schema parsing in
+      // *before* the handler runs — tool-selection enforcement or schema parsing in
       // src/server/index.ts — in which case DefaultPlanLifecycleManager
       // .afterExecution() never runs and the daemon session stays LIVE. Forgetting
       // it here would strand a still-live session after a reconnect. The binding is
@@ -1223,27 +1315,30 @@ export class DaemonMcpProxy {
       : undefined;
   }
 
-  private withCapabilityProfile(args: Record<string, unknown>): Record<string, unknown> {
-    if (!this.capabilityProfileUuid) {
+  private withToolSelectionProfile(args: Record<string, unknown>): Record<string, unknown> {
+    if (!this.toolSelectionProfileUuid) {
       return args;
     }
-    return { ...args, [DAEMON_CAPABILITY_PROFILE_PARAM]: this.capabilityProfileUuid };
+    return {
+      ...args,
+      [DAEMON_TOOL_SELECTION_PROFILE_PARAM]: this.toolSelectionProfileUuid,
+    };
   }
 
-  private rememberCapabilityProfile(
+  private rememberToolSelectionProfile(
     name: string,
     requestedArgs: Record<string, unknown>,
     result: unknown,
   ): void {
     if (
-      name !== SET_TOOL_CAPABILITY_TOOL_NAME ||
+      name !== SET_TOOL_ENABLED_TOOL_NAME ||
       (typeof requestedArgs.sessionUuid === "string" && requestedArgs.sessionUuid.trim().length > 0)
     ) {
       return;
     }
-    const sessionUuid = capabilityProfileUuidFromToolResponse(result);
+    const sessionUuid = toolSelectionProfileUuidFromResponse(result);
     if (sessionUuid) {
-      this.capabilityProfileUuid = sessionUuid;
+      this.toolSelectionProfileUuid = sessionUuid;
       this.discoveryEpoch += 1;
       this.cachedTools = null;
     }
@@ -1268,10 +1363,7 @@ export class DaemonMcpProxy {
 
   private fenceBoundSessionUuid(sessionUuid: string, reason: string): void {
     if (this.terminalBoundSession) {
-      if (
-        this.terminalBoundSession.sessionUuid === sessionUuid &&
-        reason !== "released"
-      ) {
+      if (this.terminalBoundSession.sessionUuid === sessionUuid && reason !== "released") {
         this.terminalBoundSession.reason = reason;
       }
       return;
@@ -1319,8 +1411,8 @@ export class DaemonMcpProxy {
       return;
     }
     try {
-      await this.withRecoverableReconnect(() =>
-        this.client!.callDaemonMethod("daemon/heartbeat", { sessionId: sessionUuid }),
+      await this.withRecoverableReconnect(
+        () => this.client!.callDaemonMethod("daemon/heartbeat", { sessionId: sessionUuid }),
         sessionUuid,
       );
     } catch (error) {
@@ -1384,10 +1476,7 @@ export class DaemonMcpProxy {
     forwardEpoch: number,
   ): string | undefined {
     const forwardedUuid = this.sessionUuidFromArgs(forwardedArgs);
-    if (
-      !forwardedUuid ||
-      (this.releasedSessionEpochs.get(forwardedUuid) ?? 0) <= forwardEpoch
-    ) {
+    if (!forwardedUuid || (this.releasedSessionEpochs.get(forwardedUuid) ?? 0) <= forwardEpoch) {
       return undefined;
     }
     return this.releasedSessionReasons.get(forwardedUuid) ?? "released";
@@ -1399,8 +1488,8 @@ export class DaemonMcpProxy {
   ): void {
     const forwardedUuid = this.sessionUuidFromArgs(forwardedArgs) ?? "";
     if (
-      forwardedUuid.length > 0
-      && (!this.boundSessionUuid || this.boundSessionUuid === forwardedUuid)
+      forwardedUuid.length > 0 &&
+      (!this.boundSessionUuid || this.boundSessionUuid === forwardedUuid)
     ) {
       this.fenceBoundSessionUuid(forwardedUuid, reason);
     }
@@ -1437,7 +1526,7 @@ export class DaemonMcpProxy {
       // this transport.
       return;
     }
-    if (name === SET_TOOL_CAPABILITY_TOOL_NAME) {
+    if (name === SET_TOOL_ENABLED_TOOL_NAME) {
       return;
     }
     // A release for the FORWARDED UUID observed WHILE this call was in flight
@@ -1446,8 +1535,7 @@ export class DaemonMcpProxy {
     // sessionless call recreate it (issue #4611). Scoped to the forwarded UUID so
     // an unrelated session's mid-call release does NOT block this remember (issue
     // #4655); a later explicit call re-binds normally.
-    const releaseReason =
-      this.forwardedSessionReleaseReasonSince(forwardedArgs, callReleaseEpoch);
+    const releaseReason = this.forwardedSessionReleaseReasonSince(forwardedArgs, callReleaseEpoch);
     if (releaseReason) {
       this.fenceReleasedForwardedSession(forwardedArgs, releaseReason);
       return;
@@ -1479,7 +1567,7 @@ export class DaemonMcpProxy {
   ): void {
     if (
       name === "executePlan" ||
-      name === SET_TOOL_CAPABILITY_TOOL_NAME ||
+      name === SET_TOOL_ENABLED_TOOL_NAME ||
       this.isRecoverableDaemonSessionError(error)
     ) {
       return;
@@ -1488,8 +1576,7 @@ export class DaemonMcpProxy {
     // mid-flight already recorded it, so an admitted-then-rejected call must not
     // re-refresh the released UUID's lease (issue #4611/#4655). The session is
     // gone; resurrecting the lease would replay it on the next sessionless call.
-    const releaseReason =
-      this.forwardedSessionReleaseReasonSince(forwardedArgs, callReleaseEpoch);
+    const releaseReason = this.forwardedSessionReleaseReasonSince(forwardedArgs, callReleaseEpoch);
     if (releaseReason) {
       this.fenceReleasedForwardedSession(forwardedArgs, releaseReason);
       return;
@@ -1532,8 +1619,8 @@ export class DaemonMcpProxy {
     try {
       const discoveryEpoch = this.discoveryEpoch;
       const forwardedParams = this.withBoundSessionUuid({});
-      const result = await this.withRecoverableReconnect(() =>
-        this.client!.callDaemonMethod("resources/list", forwardedParams),
+      const result = await this.withRecoverableReconnect(
+        () => this.client!.callDaemonMethod("resources/list", forwardedParams),
         this.sessionUuidFromArgs(forwardedParams),
       );
       const resources = result?.resources ?? [];
@@ -1562,8 +1649,8 @@ export class DaemonMcpProxy {
     try {
       const discoveryEpoch = this.discoveryEpoch;
       const forwardedParams = this.withBoundSessionUuid({});
-      const result = await this.withRecoverableReconnect(() =>
-        this.client!.callDaemonMethod("resources/list-templates", forwardedParams),
+      const result = await this.withRecoverableReconnect(
+        () => this.client!.callDaemonMethod("resources/list-templates", forwardedParams),
         this.sessionUuidFromArgs(forwardedParams),
       );
       const templates = result?.resourceTemplates ?? [];
@@ -1584,8 +1671,8 @@ export class DaemonMcpProxy {
    */
   async readResource(uri: string): Promise<any> {
     const forwardedParams = this.withBoundSessionUuid({});
-    return await this.withRecoverableReconnect(() =>
-      this.client!.readResource(uri, forwardedParams),
+    return await this.withRecoverableReconnect(
+      () => this.client!.readResource(uri, forwardedParams),
       this.sessionUuidFromArgs(forwardedParams),
     );
   }

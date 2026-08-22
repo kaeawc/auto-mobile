@@ -11,8 +11,14 @@ import {
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { ActionableError, BootedDevice, DeviceInfo, SomePlatform } from "../models";
 import type { FormFactor, StartDeviceResult } from "../models/DeviceMatchCriteria";
-import { BOOTED_DEVICE_RESOURCE_URIS, notifyBootedDeviceResourcesUpdated } from "./bootedDeviceResources";
-import { DEVICE_IMAGE_RESOURCE_URIS, notifyDeviceImageResourcesUpdated } from "./deviceImageResources";
+import {
+  BOOTED_DEVICE_RESOURCE_URIS,
+  notifyBootedDeviceResourcesUpdated,
+} from "./bootedDeviceResources";
+import {
+  DEVICE_IMAGE_RESOURCE_URIS,
+  notifyDeviceImageResourcesUpdated,
+} from "./deviceImageResources";
 import { syncInstalledAppResources } from "./appResources";
 import { listActiveVideoRecordings, stopVideoRecording } from "./videoRecordingManager";
 import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
@@ -22,14 +28,17 @@ import { getPerformanceMonitor } from "../features/performance/PerformanceMonito
 import { platformSchema } from "./toolSchemaHelpers";
 import { DefaultDeviceMatcher, type DeviceMatcher } from "../utils/deviceMatcher";
 import { DEVICE_POOL_MATCHING, isDevicePoolAutolockEnabled } from "../daemon/poolConfig";
-import { DEVICE_CREATE_ENV_VAR, getDeviceCreationGate, type DeviceCreationGate } from "../utils/deviceCreationGate";
-import { createDefaultDeviceProvisioner, type DeviceProvisioner } from "../utils/deviceProvisioning";
+import {
+  DEVICE_CREATE_ENV_VAR,
+  getDeviceCreationGate,
+  type DeviceCreationGate,
+} from "../utils/deviceCreationGate";
+import {
+  createDefaultDeviceProvisioner,
+  type DeviceProvisioner,
+} from "../utils/deviceProvisioning";
 import { DaemonState } from "../daemon/daemonState";
-import type {
-  DevicePool,
-  DeviceReadinessReservation,
-  PooledDevice,
-} from "../daemon/devicePool";
+import type { DevicePool, DeviceReadinessReservation, PooledDevice } from "../daemon/devicePool";
 import type { SessionManager } from "../daemon/sessionManager";
 import { DeviceBootService, type DeviceBootResult } from "../utils/deviceBootService";
 import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
@@ -37,7 +46,7 @@ import { getDbWriteBarrier } from "../db/dbWriteBarrier";
 import { isAdbMissingDeviceError } from "../utils/android-cmdline-tools/AdbDeviceHealth";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
-import { getToolCapabilityContext } from "../features/toolCapabilities/toolCapabilityContext";
+import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import { executionTracker } from "./executionTracker";
 import {
   registerDirectSessionDevice,
@@ -75,47 +84,61 @@ import { stableStringify } from "../utils/stableStringify";
 
 // Schema definitions
 export const listDeviceImagesSchema = z.object({
-  platform: platformSchema
+  platform: platformSchema,
 });
 
 export const listDevicesSchema = z.object({
-  platform: platformSchema.optional()
+  platform: platformSchema.optional(),
 });
 
 const startDeviceParametersSchema = z.object({
   platform: platformSchema,
-  minOsVersion: z.string().optional().describe("Minimum OS version, inclusive (e.g., '14', '17.2')"),
-  maxOsVersion: z.string().optional().describe("Maximum OS version, inclusive (e.g., '15', '18.0')"),
+  minOsVersion: z
+    .string()
+    .optional()
+    .describe("Minimum OS version, inclusive (e.g., '14', '17.2')"),
+  maxOsVersion: z
+    .string()
+    .optional()
+    .describe("Maximum OS version, inclusive (e.g., '15', '18.0')"),
   name: z.string().optional().describe("Device name to match (e.g., 'iPhone 16e', 'Pixel_9_Pro')"),
   formFactor: z.enum(["phone", "tablet"]).optional().describe("Device form factor"),
-  screenSize: z.object({
-    width: z.number().describe("Screen width in pixels"),
-    height: z.number().describe("Screen height in pixels"),
-  }).optional().describe("Desired screen dimensions"),
+  screenSize: z
+    .object({
+      width: z.number().describe("Screen width in pixels"),
+      height: z.number().describe("Screen height in pixels"),
+    })
+    .optional()
+    .describe("Desired screen dimensions"),
   deviceId: z.string().optional(),
   preferRunning: z.boolean().optional().describe("Prefer already-booted device (default true)"),
-  timeoutMs: z.number()
+  timeoutMs: z
+    .number()
     .int()
     .positive()
     .max(MAX_DEVICE_READY_TIMEOUT_MS)
     .optional()
     .describe("Total device boot and automation-readiness timeout in ms"),
-  runnerReadinessTimeoutMs: z.number()
+  runnerReadinessTimeoutMs: z
+    .number()
     .int()
     .min(MIN_RUNNER_READINESS_TIMEOUT_MS)
     .max(MAX_RUNNER_READINESS_TIMEOUT_MS)
     .optional()
     .describe(
       "Runner-readiness budget in ms within timeoutMs; overrides the shared timeout " +
-      `(${MIN_RUNNER_READINESS_TIMEOUT_MS}-${MAX_RUNNER_READINESS_TIMEOUT_MS})`
+        `(${MIN_RUNNER_READINESS_TIMEOUT_MS}-${MAX_RUNNER_READINESS_TIMEOUT_MS})`,
     ),
-  createIfMissing: z.boolean().optional().describe(
-    `Create a device when nothing matches (CLI: --create-if-missing). Default off; ` +
-    `${DEVICE_CREATE_ENV_VAR}=1 enables it when this flag is not supplied, and the flag wins.`
-  ),
+  createIfMissing: z
+    .boolean()
+    .optional()
+    .describe(
+      `Create a device when nothing matches (CLI: --create-if-missing). Default off; ` +
+        `${DEVICE_CREATE_ENV_VAR}=1 enables it when this flag is not supplied, and the flag wins.`,
+    ),
 });
 
-export const startDeviceSchema = z.preprocess(input => {
+export const startDeviceSchema = z.preprocess((input) => {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     return input;
   }
@@ -129,37 +152,41 @@ export const startDeviceSchema = z.preprocess(input => {
   // Accept both the legacy { device: {...} } payload and the new top-level shape.
   // Top-level fields win so mixed callers can override nested values intentionally.
   return {
-    ...legacyDevice as Record<string, unknown>,
+    ...(legacyDevice as Record<string, unknown>),
     ...parsed,
   };
 }, startDeviceParametersSchema);
 
-const devicePreparationTimeoutSchema = z.object({
-  bootTimeoutMs: z.number()
-    .int()
-    .positive()
-    .max(MAX_DEVICE_READY_TIMEOUT_MS)
-    .optional()
-    .describe("Maximum time to find, recover, or boot the device operating system"),
-  automationReadyTimeoutMs: z.number()
-    .int()
-    .min(MIN_RUNNER_READINESS_TIMEOUT_MS)
-    .max(MAX_RUNNER_READINESS_TIMEOUT_MS)
-    .optional()
-    .describe("Maximum time to install, update, start, and verify the automation runner"),
-}).strict().superRefine((value, context) => {
-  const totalTimeoutMs =
-    (value.bootTimeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS) +
-    (value.automationReadyTimeoutMs ?? DEFAULT_RUNNER_READINESS_TIMEOUT_MS);
-  if (totalTimeoutMs > MAX_DEVICE_READY_TIMEOUT_MS) {
-    context.addIssue({
-      code: "custom",
-      message:
-        `bootTimeoutMs + automationReadyTimeoutMs must be <= ${MAX_DEVICE_READY_TIMEOUT_MS}`,
-      path: ["bootTimeoutMs"],
-    });
-  }
-});
+const devicePreparationTimeoutSchema = z
+  .object({
+    bootTimeoutMs: z
+      .number()
+      .int()
+      .positive()
+      .max(MAX_DEVICE_READY_TIMEOUT_MS)
+      .optional()
+      .describe("Maximum time to find, recover, or boot the device operating system"),
+    automationReadyTimeoutMs: z
+      .number()
+      .int()
+      .min(MIN_RUNNER_READINESS_TIMEOUT_MS)
+      .max(MAX_RUNNER_READINESS_TIMEOUT_MS)
+      .optional()
+      .describe("Maximum time to install, update, start, and verify the automation runner"),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const totalTimeoutMs =
+      (value.bootTimeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS) +
+      (value.automationReadyTimeoutMs ?? DEFAULT_RUNNER_READINESS_TIMEOUT_MS);
+    if (totalTimeoutMs > MAX_DEVICE_READY_TIMEOUT_MS) {
+      context.addIssue({
+        code: "custom",
+        message: `bootTimeoutMs + automationReadyTimeoutMs must be <= ${MAX_DEVICE_READY_TIMEOUT_MS}`,
+        path: ["bootTimeoutMs"],
+      });
+    }
+  });
 
 export const getAndroidSchema = devicePreparationTimeoutSchema.extend({
   avdName: z.string().min(1).describe("Configured Android Virtual Device name"),
@@ -182,56 +209,80 @@ function isModernPlayStoreRuntime(runtime: string): boolean {
   );
 }
 
-const androidProvisionDeviceSpecSchema = z.object({
-  runtime: z.string().min(1).describe("Installed Android system-image package identifier"),
-  deviceType: z.string().min(1).describe("Android avdmanager device profile identifier"),
-  configuration: z.object({
-    memoryMb: z.number().int().positive().optional(),
-  }).strict().optional(),
-}).strict().superRefine((spec, context) => {
-  const memoryMb = spec.configuration?.memoryMb;
-  if (
-    memoryMb !== undefined &&
-    memoryMb < MIN_AVD_RAM_MB &&
-    isModernPlayStoreRuntime(spec.runtime)
-  ) {
-    context.addIssue({
-      code: "custom",
-      message:
-        `memoryMb must be at least ${MIN_AVD_RAM_MB} for Android API ` +
-        `${MODERN_PLAY_IMAGE_MIN_API_LEVEL}+ Play Store images`,
-      path: ["configuration", "memoryMb"],
-    });
-  }
-});
+const androidProvisionDeviceSpecSchema = z
+  .object({
+    runtime: z.string().min(1).describe("Installed Android system-image package identifier"),
+    deviceType: z.string().min(1).describe("Android avdmanager device profile identifier"),
+    configuration: z
+      .object({
+        memoryMb: z.number().int().positive().optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict()
+  .superRefine((spec, context) => {
+    const memoryMb = spec.configuration?.memoryMb;
+    if (
+      memoryMb !== undefined &&
+      memoryMb < MIN_AVD_RAM_MB &&
+      isModernPlayStoreRuntime(spec.runtime)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message:
+          `memoryMb must be at least ${MIN_AVD_RAM_MB} for Android API ` +
+          `${MODERN_PLAY_IMAGE_MIN_API_LEVEL}+ Play Store images`,
+        path: ["configuration", "memoryMb"],
+      });
+    }
+  });
 
-const iosProvisionDeviceSpecSchema = z.object({
-  runtime: z.string().min(1).describe("CoreSimulator runtime identifier"),
-  deviceType: z.string().min(1).describe("CoreSimulator device-type identifier"),
-}).strict();
+const iosProvisionDeviceSpecSchema = z
+  .object({
+    runtime: z.string().min(1).describe("CoreSimulator runtime identifier"),
+    deviceType: z.string().min(1).describe("CoreSimulator device-type identifier"),
+  })
+  .strict();
 
-export const provisionDeviceSchema = z.object({
-  operationId: z.string().min(1).describe("Caller-generated idempotency key"),
-  device: z.discriminatedUnion("platform", [
-    z.object({
-      platform: z.literal("android"),
-      name: z.string().min(1).describe("Exact AVD name"),
-      spec: androidProvisionDeviceSpecSchema,
-    }).strict(),
-    z.object({
-      platform: z.literal("ios"),
-      name: z.string().min(1).describe("Exact simulator name"),
-      spec: iosProvisionDeviceSpecSchema,
-    }).strict(),
-  ]),
-  boot: z.boolean().default(true).optional().describe("Boot the resolved device after creation or adoption"),
-  readiness: z.enum(["automation", "none"]).default("automation").optional().describe(
-    "Whether to wait for the AutoMobile automation runner after device boot",
-  ),
-  timeoutMs: z.number().int().positive().max(MAX_DEVICE_READY_TIMEOUT_MS).optional().describe(
-    "Total provision, boot, and readiness timeout in ms",
-  ),
-}).strict();
+export const provisionDeviceSchema = z
+  .object({
+    operationId: z.string().min(1).describe("Caller-generated idempotency key"),
+    device: z.discriminatedUnion("platform", [
+      z
+        .object({
+          platform: z.literal("android"),
+          name: z.string().min(1).describe("Exact AVD name"),
+          spec: androidProvisionDeviceSpecSchema,
+        })
+        .strict(),
+      z
+        .object({
+          platform: z.literal("ios"),
+          name: z.string().min(1).describe("Exact simulator name"),
+          spec: iosProvisionDeviceSpecSchema,
+        })
+        .strict(),
+    ]),
+    boot: z
+      .boolean()
+      .default(true)
+      .optional()
+      .describe("Boot the resolved device after creation or adoption"),
+    readiness: z
+      .enum(["automation", "none"])
+      .default("automation")
+      .optional()
+      .describe("Whether to wait for the AutoMobile automation runner after device boot"),
+    timeoutMs: z
+      .number()
+      .int()
+      .positive()
+      .max(MAX_DEVICE_READY_TIMEOUT_MS)
+      .optional()
+      .describe("Total provision, boot, and readiness timeout in ms"),
+  })
+  .strict();
 
 export const killDeviceSchema = z.object({
   device: z.object({
@@ -239,7 +290,7 @@ export const killDeviceSchema = z.object({
     deviceId: z.string(),
     platform: platformSchema,
     transportId: z.string().optional(),
-  })
+  }),
 });
 
 export const DEVICE_ALREADY_STOPPED_ERROR_CODE = "device_already_stopped";
@@ -252,7 +303,7 @@ const DEVICE_SHUTDOWN_POLL_INTERVAL_MS = 1_000;
 const DEVICE_SHUTDOWN_POST_RELEASE_RECHECK_TIMEOUT_MS = 1_000;
 
 function getShutdownInitiatingExecutionId(): string | undefined {
-  return getToolCapabilityContext()?.execution?.executionId;
+  return getToolSelectionContext()?.execution?.executionId;
 }
 
 function isAlreadyStoppedDeviceError(
@@ -282,10 +333,12 @@ function isAlreadyStoppedDeviceError(
 function createToolErrorResponse(code: string, message: string) {
   return {
     isError: true,
-    content: [{
-      type: "text" as const,
-      text: JSON.stringify({ success: false, message, error: { code, message } }),
-    }],
+    content: [
+      {
+        type: "text" as const,
+        text: JSON.stringify({ success: false, message, error: { code, message } }),
+      },
+    ],
   };
 }
 
@@ -295,10 +348,7 @@ function createKillDeviceResponse(
   alreadyStoppedMessage?: string,
 ) {
   if (alreadyStoppedMessage !== undefined) {
-    return createToolErrorResponse(
-      DEVICE_ALREADY_STOPPED_ERROR_CODE,
-      alreadyStoppedMessage,
-    );
+    return createToolErrorResponse(DEVICE_ALREADY_STOPPED_ERROR_CODE, alreadyStoppedMessage);
   }
 
   return createJSONToolResponse({
@@ -306,7 +356,7 @@ function createKillDeviceResponse(
     udid: args.device.deviceId,
     name: args.device.name,
     timing,
-    platform: args.device.platform
+    platform: args.device.platform,
   });
 }
 
@@ -357,7 +407,10 @@ export interface KillDeviceArgs {
   device: BootedDevice;
 }
 
-function deviceIdentityPayload(device: BootedDevice, sourceImage?: DeviceInfo): Record<string, unknown> {
+function deviceIdentityPayload(
+  device: BootedDevice,
+  sourceImage?: DeviceInfo,
+): Record<string, unknown> {
   if (device.platform === "android") {
     const portMatch = /^emulator-(\d+)$/.exec(device.deviceId);
     return {
@@ -418,7 +471,9 @@ async function defaultClearInstalledAppsForDevice(deviceId: string): Promise<voi
   const { InstalledAppsRepository } = await import("../db/installedAppsRepository");
   const repo = new InstalledAppsRepository();
   await getInstalledAppsCacheWriteCoordinator().invalidate(deviceId, () =>
-    getDbWriteBarrier().track(() => repo.clearDeviceSession(deviceId)).then(() => undefined)
+    getDbWriteBarrier()
+      .track(() => repo.clearDeviceSession(deviceId))
+      .then(() => undefined),
   );
 }
 
@@ -442,7 +497,7 @@ async function defaultStopAndroidObservers(device: BootedDevice): Promise<void> 
 
 async function clearInstalledAppsAfterShutdown(
   dependencies: DeviceToolsDependencies,
-  deviceId: string
+  deviceId: string,
 ): Promise<void> {
   try {
     await dependencies.clearInstalledAppsForDevice(deviceId);
@@ -450,7 +505,7 @@ async function clearInstalledAppsAfterShutdown(
     // The device is already stopped; the next app verification refreshes stale cache rows.
     logger.warn(
       `[DeviceTools] Failed to clear installed apps for ${deviceId} after shutdown: ${error}`,
-      error
+      error,
     );
   }
 }
@@ -496,9 +551,7 @@ async function stopVideoRecordingBeforeShutdown(
     if (shouldPropagateShutdownPreparationError(error, context.requestAbortSignal)) {
       throw error;
     }
-    logger.warn(
-      `[DeviceTools] Failed to stop recording ${recordingId} before shutdown: ${error}`
-    );
+    logger.warn(`[DeviceTools] Failed to stop recording ${recordingId} before shutdown: ${error}`);
   }
 }
 
@@ -514,10 +567,11 @@ async function stopVideoRecordingsBeforeShutdown(
       context.deadlineMs,
       "recording discovery did not complete",
       context.requestAbortSignal,
-      async () => await listActiveVideoRecordings({
-        deviceId: context.device.deviceId,
-        platform: context.device.platform,
-      }),
+      async () =>
+        await listActiveVideoRecordings({
+          deviceId: context.device.deviceId,
+          platform: context.device.platform,
+        }),
     );
     for (const recording of activeRecordings) {
       await stopVideoRecordingBeforeShutdown(recording.recordingId, context);
@@ -607,13 +661,15 @@ async function stopAndroidCtrlProxyBeforeShutdown(
 function shutdownTimeoutError(device: BootedDevice, detail: string): ActionableError {
   return new ActionableError(
     `Timed out waiting for ${device.platform} device '${device.name}' (${device.deviceId}) ` +
-    `to disappear after ${DEVICE_SHUTDOWN_TIMEOUT_MS}ms: ${detail}. ` +
-    "Verify the platform shutdown state and retry.",
+      `to disappear after ${DEVICE_SHUTDOWN_TIMEOUT_MS}ms: ${detail}. ` +
+      "Verify the platform shutdown state and retry.",
   );
 }
 
 function isShutdownTimeoutError(error: unknown): error is ActionableError {
-  return error instanceof ActionableError && String(error.message).startsWith("Timed out waiting for");
+  return (
+    error instanceof ActionableError && String(error.message).startsWith("Timed out waiting for")
+  );
 }
 
 function shouldClearIntentionalShutdownAfterFailure(
@@ -697,12 +753,14 @@ async function runWithinShutdownDeadline<T>(
     }, remainingMs);
   });
   const requestAbort = abortPromise(requestAbortSignal);
-  const operationPromise = runWithAbortSignal(signal, () => operation(signal, remainingMs)).catch(error => {
-    if (timedOut) {
-      throw shutdownTimeoutError(device, detail);
-    }
-    throw error;
-  });
+  const operationPromise = runWithAbortSignal(signal, () => operation(signal, remainingMs)).catch(
+    (error) => {
+      if (timedOut) {
+        throw shutdownTimeoutError(device, detail);
+      }
+      throw error;
+    },
+  );
   // If the deadline wins while a platform command ignores abort, the race is
   // settled but the underlying promise remains observed rather than leaking an
   // unhandled rejection when it eventually completes.
@@ -734,9 +792,10 @@ async function getShutdownDiscovery(
     deadlineMs,
     "platform discovery did not complete",
     requestAbortSignal ?? getAbortSignal(),
-    async () => await deviceManager.getBootedDevicesDetailed(device.platform, {
-          bypassAndroidDeviceListCache: true,
-        }),
+    async () =>
+      await deviceManager.getBootedDevicesDetailed(device.platform, {
+        bypassAndroidDeviceListCache: true,
+      }),
   );
 }
 
@@ -783,7 +842,11 @@ function isSameBootedDeviceIdentity(device: BootedDevice, candidate: BootedDevic
   if (device.platform !== candidate.platform || device.deviceId !== candidate.deviceId) {
     return false;
   }
-  if (device.platform === "android" && device.transportId !== undefined && candidate.transportId !== undefined) {
+  if (
+    device.platform === "android" &&
+    device.transportId !== undefined &&
+    candidate.transportId !== undefined
+  ) {
     return device.transportId === candidate.transportId;
   }
   return device.name === candidate.name;
@@ -796,8 +859,8 @@ function findDiscoveredDevice(
   if (!discovery.succeededPlatforms.has(device.platform)) {
     return undefined;
   }
-  return discovery.devices.find(candidate =>
-    candidate.platform === device.platform && candidate.deviceId === device.deviceId,
+  return discovery.devices.find(
+    (candidate) => candidate.platform === device.platform && candidate.deviceId === device.deviceId,
   );
 }
 
@@ -809,10 +872,8 @@ async function rebuildSameIdReplacement(
   stopPerformanceMonitoring: (deviceId: string) => void,
 ): Promise<void> {
   const devicePool = daemonState.getDevicePool();
-  const rebuilt = await devicePool.replaceDeviceForShutdown(
-    expectedPooledDevice,
-    replacement,
-    () => stopPerformanceMonitoring(device.deviceId),
+  const rebuilt = await devicePool.replaceDeviceForShutdown(expectedPooledDevice, replacement, () =>
+    stopPerformanceMonitoring(device.deviceId),
   );
   if (!rebuilt) {
     return;
@@ -891,7 +952,7 @@ function finishLateShutdownRetirement(
     );
   };
   const lateRetirement = release.then(continueRetirement, continueRetirement);
-  lateRetirement.catch(lateError => {
+  lateRetirement.catch((lateError) => {
     logger.warn(
       `[DeviceTools] Failed to finish late shutdown retirement for ${device.deviceId}: ${lateError}`,
     );
@@ -913,21 +974,21 @@ function retainFailedShutdownRetirement(
 ): void {
   const retirement = retryAfterFailure
     ? timer.sleep(DEVICE_SHUTDOWN_POST_RELEASE_RECHECK_TIMEOUT_MS).then(async () => {
-      await retireShutdownOwnership(
-        device,
-        expectedPooledDevice,
-        observedReplacement,
-        deviceManager,
-        timer,
-        deadlineMs,
-        undefined,
-        stopPerformanceMonitoring,
-        () => undefined,
-        false,
-      );
-    })
+        await retireShutdownOwnership(
+          device,
+          expectedPooledDevice,
+          observedReplacement,
+          deviceManager,
+          timer,
+          deadlineMs,
+          undefined,
+          stopPerformanceMonitoring,
+          () => undefined,
+          false,
+        );
+      })
     : Promise.reject(error);
-  retirement.catch(lateError => {
+  retirement.catch((lateError) => {
     logger.warn(
       `[DeviceTools] Retaining shutdown reservation after retirement failed for ${device.deviceId}: ${lateError}`,
     );
@@ -948,12 +1009,15 @@ async function findReplacementOrRetainShutdownReservation(
   retryAfterFailure: boolean,
 ): Promise<BootedDevice | undefined> {
   try {
-    return observedReplacement ?? await findReplacementAfterSessionRelease(
-      deviceManager,
-      device,
-      timer,
-      deadlineMs,
-      abortSignal,
+    return (
+      observedReplacement ??
+      (await findReplacementAfterSessionRelease(
+        deviceManager,
+        device,
+        timer,
+        deadlineMs,
+        abortSignal,
+      ))
     );
   } catch (error) {
     retainFailedShutdownRetirement(
@@ -1147,7 +1211,12 @@ async function killProcessAndRetireOwnership(
     );
     shutdownDevice = killedDevice ?? device;
   } catch (error) {
-    alreadyStoppedMessage = handleShutdownCommandError(device, error, devicePool, requestAbortSignal);
+    alreadyStoppedMessage = handleShutdownCommandError(
+      device,
+      error,
+      devicePool,
+      requestAbortSignal,
+    );
   }
   perf.endOperation("killProcess");
 
@@ -1211,7 +1280,7 @@ function getDeviceToolsDependencies(): DeviceToolsDependencies {
         createDefaultExactDeviceProvisioner(deviceManager, deviceCreationGate),
       provisionDeviceOperationStoreFactory: () => new ProvisionDeviceOperationRepository(),
       clearInstalledAppsForDevice: defaultClearInstalledAppsForDevice,
-      stopPerformanceMonitoring: deviceId => getPerformanceMonitor().stopMonitoring(deviceId),
+      stopPerformanceMonitoring: (deviceId) => getPerformanceMonitor().stopMonitoring(deviceId),
       stopAndroidObservers: defaultStopAndroidObservers,
       idGenerator: defaultIdGenerator,
       timer: defaultTimer,
@@ -1242,7 +1311,8 @@ export function setDeviceToolsDependencies(deps: Partial<DeviceToolsDependencies
     deviceMatcherFactory: deps.deviceMatcherFactory ?? currentDeps.deviceMatcherFactory,
     notifyResourcesChanged: deps.notifyResourcesChanged ?? currentDeps.notifyResourcesChanged,
     ensureCtrlProxyReady: deps.ensureCtrlProxyReady ?? currentDeps.ensureCtrlProxyReady,
-    deviceCreationGateFactory: deps.deviceCreationGateFactory ?? currentDeps.deviceCreationGateFactory,
+    deviceCreationGateFactory:
+      deps.deviceCreationGateFactory ?? currentDeps.deviceCreationGateFactory,
     deviceProvisionerFactory: deps.deviceProvisionerFactory ?? currentDeps.deviceProvisionerFactory,
     ...provisionDeviceDependencyOverrides(deps, currentDeps),
     clearInstalledAppsForDevice:
@@ -1268,25 +1338,27 @@ function describeStartDeviceRequest(args: StartDeviceArgs): string {
     args.minOsVersion ? `minOsVersion=${args.minOsVersion}` : undefined,
     args.maxOsVersion ? `maxOsVersion=${args.maxOsVersion}` : undefined,
     args.formFactor ? `formFactor=${args.formFactor}` : undefined,
-  ].filter((value): value is string => value !== undefined).join(" ");
+  ]
+    .filter((value): value is string => value !== undefined)
+    .join(" ");
 }
 
 function resolveRunnerReadinessTimeoutMs(args: StartDeviceArgs): number {
   return (
-    args.runnerReadinessTimeoutMs ??
-    args.timeoutMs ??
-    serverConfig.getRunnerReadinessTimeoutMs()
+    args.runnerReadinessTimeoutMs ?? args.timeoutMs ?? serverConfig.getRunnerReadinessTimeoutMs()
   );
 }
 
 function provisionDeviceFingerprint(args: ProvisionDeviceArgs): string {
   return createHash("sha256")
-    .update(stableStringify({
-      device: args.device,
-      boot: args.boot,
-      readiness: args.readiness,
-      timeoutMs: args.timeoutMs,
-    }))
+    .update(
+      stableStringify({
+        device: args.device,
+        boot: args.boot,
+        readiness: args.readiness,
+        timeoutMs: args.timeoutMs,
+      }),
+    )
     .digest("hex");
 }
 
@@ -1344,16 +1416,18 @@ async function runProvisionDeviceWithinDeadline<T>(
         }, remainingMs);
       }),
       ...(requestSignal
-        ? [new Promise<never>((_resolve, reject) => {
-            const rejectForAbort = () => reject(requestSignal.reason);
-            if (requestSignal.aborted) {
-              rejectForAbort();
-              return;
-            }
-            requestSignal.addEventListener("abort", rejectForAbort, { once: true });
-            removeAbortListener = () =>
-              requestSignal.removeEventListener("abort", rejectForAbort);
-          })]
+        ? [
+            new Promise<never>((_resolve, reject) => {
+              const rejectForAbort = () => reject(requestSignal.reason);
+              if (requestSignal.aborted) {
+                rejectForAbort();
+                return;
+              }
+              requestSignal.addEventListener("abort", rejectForAbort, { once: true });
+              removeAbortListener = () =>
+                requestSignal.removeEventListener("abort", rejectForAbort);
+            }),
+          ]
         : []),
     ]);
   } finally {
@@ -1409,13 +1483,13 @@ function validateBootIdentity(
   if (device.platform !== args.platform) {
     throw new ActionableError(
       `startDevice identity mismatch: requested=[${requested}] resolved=[${resolved}] ` +
-      "phase=pool-match: resolved platform differs from requested platform",
+        "phase=pool-match: resolved platform differs from requested platform",
     );
   }
   if (source === "booted" && args.deviceId && device.deviceId !== args.deviceId) {
     throw new ActionableError(
       `startDevice identity mismatch: requested=[${requested}] resolved=[${resolved}] ` +
-      "phase=pool-match: running device ID differs from the requested device ID",
+        "phase=pool-match: running device ID differs from the requested device ID",
     );
   }
   if (
@@ -1426,8 +1500,8 @@ function validateBootIdentity(
   ) {
     throw new ActionableError(
       `startDevice identity mismatch: requested=[${requested}] selected=[${sourceImage.name} ` +
-      `(${sourceImage.deviceId})] resolved=[${resolved}] phase=pool-match: ` +
-      "iOS runtime UDID differs from the selected simulator UDID",
+        `(${sourceImage.deviceId})] resolved=[${resolved}] phase=pool-match: ` +
+        "iOS runtime UDID differs from the selected simulator UDID",
     );
   }
 }
@@ -1441,9 +1515,9 @@ function validatePooledDeviceMapping(device: BootedDevice, requestedIdentity: st
   if (pooled && (pooled.platform !== device.platform || pooled.name !== device.name)) {
     throw new ActionableError(
       `startDevice identity mismatch: requested=[${requestedIdentity}] ` +
-      `resolved=[${device.name} (${device.deviceId}) platform=${device.platform}] ` +
-      `pooled=[${pooled.name} (${pooled.id}) platform=${pooled.platform}] ` +
-      "phase=pool-match: stale pool identity conflicts with the resolved runtime",
+        `resolved=[${device.name} (${device.deviceId}) platform=${device.platform}] ` +
+        `pooled=[${pooled.name} (${pooled.id}) platform=${pooled.platform}] ` +
+        "phase=pool-match: stale pool identity conflicts with the resolved runtime",
     );
   }
 }
@@ -1554,25 +1628,23 @@ async function rebootAndroidAfterSystemUiAnr(
   );
   const releaseReadinessReservation = devicePool
     ? await devicePool.reserveDeviceForReadiness(
-      boot.device.deviceId,
-      boot.device,
-      sourceImage.name,
-      sourceImage.name,
-    )
+        boot.device.deviceId,
+        boot.device,
+        sourceImage.name,
+        sourceImage.name,
+      )
     : undefined;
   let shutdownReservation: Awaited<ReturnType<DevicePool["reserveDeviceForShutdown"]>>;
   let shutdownWasConfirmed = false;
   let keepReadinessReservation = false;
   let replacementBoot: DeviceBootResult | undefined;
   try {
-    shutdownReservation = await reserveSystemUiAnrShutdown(devicePool, boot.device.deviceId, signal);
-    await shutdownAndroidForSystemUiAnr(
-      boot.device,
-      deviceManager,
-      timer,
-      totalDeadlineMs,
+    shutdownReservation = await reserveSystemUiAnrShutdown(
+      devicePool,
+      boot.device.deviceId,
       signal,
     );
+    await shutdownAndroidForSystemUiAnr(boot.device, deviceManager, timer, totalDeadlineMs, signal);
     shutdownWasConfirmed = true;
 
     replacementBoot = await bootSystemUiAnrReplacement(
@@ -1783,7 +1855,10 @@ async function ensureRunnerReadyWithSystemUiAnrRecovery(
     await ensureRunnerReady(boot);
     return { boot, recovered: false };
   } catch (error) {
-    if (!(error instanceof SystemUiAnrRecoveryRequiredError) || boot.device.platform !== "android") {
+    if (
+      !(error instanceof SystemUiAnrRecoveryRequiredError) ||
+      boot.device.platform !== "android"
+    ) {
       throw error;
     }
     const recovery = await rebootAfterSystemUiAnr(boot);
@@ -1938,14 +2013,14 @@ async function reserveAndroidStartupLease(
     );
   }
   const timeoutController = new AbortController();
-  const abortForTimeout = () => timeoutController.abort(
-    new ActionableError(
-      `Timed out waiting for Android AVD reset recovery${requestedName ? ` of '${requestedName}'` : ""}`,
-    ),
-  );
-  const abortForCaller = () => timeoutController.abort(
-    signal?.reason ?? new Error("Device preparation cancelled"),
-  );
+  const abortForTimeout = () =>
+    timeoutController.abort(
+      new ActionableError(
+        `Timed out waiting for Android AVD reset recovery${requestedName ? ` of '${requestedName}'` : ""}`,
+      ),
+    );
+  const abortForCaller = () =>
+    timeoutController.abort(signal?.reason ?? new Error("Device preparation cancelled"));
   if (signal?.aborted) {
     abortForCaller();
   } else {
@@ -2028,7 +2103,6 @@ export function registerDeviceTools() {
   // List AVDs handler
   const listDeviceImagesHandler = async (args: ListDeviceImagesArgs) => {
     try {
-
       const deps = getDeviceToolsDependencies();
       const deviceUtils = deps.deviceManagerFactory();
       const imageList = await deviceUtils.listDeviceImages(args.platform);
@@ -2037,7 +2111,7 @@ export function registerDeviceTools() {
         message: `Found ${imageList.length} available ${args.platform} AVDs`,
         images: imageList,
         count: imageList.length,
-        platform: args.platform
+        platform: args.platform,
       });
     } catch (error) {
       throw new ActionableError(`Failed to list ${args.platform} AVDs: ${error}`);
@@ -2048,7 +2122,8 @@ export function registerDeviceTools() {
     const platformFilter = args.platform ? ` (${args.platform} only)` : "";
 
     return createJSONToolResponse({
-      message: `To list devices${platformFilter}, use these MCP resources:\n\n` +
+      message:
+        `To list devices${platformFilter}, use these MCP resources:\n\n` +
         "RUNNING DEVICES (booted/active):\n" +
         `  - automobile:devices/booted - All running devices\n` +
         `  - automobile:devices/booted/android - Android devices only\n` +
@@ -2067,9 +2142,9 @@ export function registerDeviceTools() {
         `${BOOTED_DEVICE_RESOURCE_URIS.ALL_BOOTED}/ios`,
         DEVICE_IMAGE_RESOURCE_URIS.ALL_IMAGES,
         `${DEVICE_IMAGE_RESOURCE_URIS.ALL_IMAGES}/android`,
-        `${DEVICE_IMAGE_RESOURCE_URIS.ALL_IMAGES}/ios`
+        `${DEVICE_IMAGE_RESOURCE_URIS.ALL_IMAGES}/ios`,
       ],
-      note: "All resource URIs use the 'automobile:' prefix. URIs like 'android://devices' are not supported."
+      note: "All resource URIs use the 'automobile:' prefix. URIs like 'android://devices' are not supported.",
     });
   };
 
@@ -2113,9 +2188,7 @@ export function registerDeviceTools() {
       },
     );
     try {
-      return createProvisionDeviceResponse(
-        await waitForProvisionDeviceOperation(promise, signal),
-      );
+      return createProvisionDeviceResponse(await waitForProvisionDeviceOperation(promise, signal));
     } catch (error) {
       return provisionDeviceErrorResponse(error);
     }
@@ -2184,8 +2257,8 @@ export function registerDeviceTools() {
       const perf = createPerformanceTracker(true);
       perf.serial("provisionDeviceReplay");
       try {
-        const totalDeadlineMs = deps.timer.now() +
-          (args.timeoutMs ?? DEFAULT_PROVISION_DEVICE_TIMEOUT_MS);
+        const totalDeadlineMs =
+          deps.timer.now() + (args.timeoutMs ?? DEFAULT_PROVISION_DEVICE_TIMEOUT_MS);
         await ensureProvisionDeviceReadiness(
           args,
           deps,
@@ -2203,10 +2276,9 @@ export function registerDeviceTools() {
     if (!revalidatedSession || !getLiveProvisionDeviceSession(result)) {
       return false;
     }
-    await DaemonState.getInstance().getDevicePool().attachAutolockSessionToMcpSession(
-      revalidatedSession.sessionId,
-      args.__mcpSessionId,
-    );
+    await DaemonState.getInstance()
+      .getDevicePool()
+      .attachAutolockSessionToMcpSession(revalidatedSession.sessionId, args.__mcpSessionId);
     return true;
   }
 
@@ -2234,7 +2306,9 @@ export function registerDeviceTools() {
     }
 
     const session = daemonState.getSessionManager().getSession(persistedSession.sessionId);
-    const pooledDevice = daemonState.getDevicePool().getDeviceForSession(persistedSession.sessionId);
+    const pooledDevice = daemonState
+      .getDevicePool()
+      .getDeviceForSession(persistedSession.sessionId);
     if (
       session?.assignedDevice === persistedSession.deviceId &&
       session.platform === persistedSession.platform &&
@@ -2249,7 +2323,9 @@ export function registerDeviceTools() {
 
   function getPersistedProvisionDeviceSession(
     result: Record<string, unknown>,
-  ): { sessionId: string; deviceId: string; platform: "android" | "ios"; device: BootedDevice } | undefined {
+  ):
+    | { sessionId: string; deviceId: string; platform: "android" | "ios"; device: BootedDevice }
+    | undefined {
     if (typeof result.sessionId !== "string") {
       return undefined;
     }
@@ -2277,13 +2353,17 @@ export function registerDeviceTools() {
     };
   }
 
-  async function releaseErroredProvisionDeviceSession(result: Record<string, unknown>): Promise<void> {
+  async function releaseErroredProvisionDeviceSession(
+    result: Record<string, unknown>,
+  ): Promise<void> {
     const persistedSession = getPersistedProvisionDeviceSession(result);
     const daemonState = DaemonState.getInstance();
     if (!persistedSession || !daemonState.isInitialized()) {
       return;
     }
-    const pooledDevice = daemonState.getDevicePool().getDeviceForSession(persistedSession.sessionId);
+    const pooledDevice = daemonState
+      .getDevicePool()
+      .getDeviceForSession(persistedSession.sessionId);
     if (pooledDevice?.status !== "error") {
       return;
     }
@@ -2321,9 +2401,14 @@ export function registerDeviceTools() {
       return;
     }
     try {
-      const releasedDeviceId = await sessionManager.releaseSession(persistedSession.sessionId, reason);
+      const releasedDeviceId = await sessionManager.releaseSession(
+        persistedSession.sessionId,
+        reason,
+      );
       if (releasedDeviceId === persistedSession.deviceId) {
-        await daemonState.getDevicePool().releaseDevice(releasedDeviceId, persistedSession.sessionId);
+        await daemonState
+          .getDevicePool()
+          .releaseDevice(releasedDeviceId, persistedSession.sessionId);
       }
     } catch (error) {
       logger.warn(
@@ -2343,10 +2428,7 @@ export function registerDeviceTools() {
     };
   }
 
-  function toProvisionDeviceError(
-    args: ProvisionDeviceArgs,
-    error: unknown,
-  ): ProvisionDeviceError {
+  function toProvisionDeviceError(args: ProvisionDeviceArgs, error: unknown): ProvisionDeviceError {
     if (error instanceof ProvisionDeviceError) {
       return error;
     }
@@ -2365,8 +2447,8 @@ export function registerDeviceTools() {
   ): Promise<Record<string, unknown>> {
     const perf = createPerformanceTracker(true);
     perf.serial("provisionDevice");
-    const totalDeadlineMs = deps.timer.now() +
-      (args.timeoutMs ?? DEFAULT_PROVISION_DEVICE_TIMEOUT_MS);
+    const totalDeadlineMs =
+      deps.timer.now() + (args.timeoutMs ?? DEFAULT_PROVISION_DEVICE_TIMEOUT_MS);
     try {
       const deviceManager = deps.deviceManagerFactory();
       const deviceCreationGate = deps.deviceCreationGateFactory();
@@ -2386,13 +2468,7 @@ export function registerDeviceTools() {
           await deps.notifyResourcesChanged();
         }
         perf.end();
-        return buildProvisionDeviceResult(
-          args,
-          provisioned,
-          createdByOperation,
-          perf,
-          undefined,
-        );
+        return buildProvisionDeviceResult(args, provisioned, createdByOperation, perf, undefined);
       }
 
       const booted = await bootExactProvisionedDevice(
@@ -2433,14 +2509,15 @@ export function registerDeviceTools() {
         totalDeadlineMs,
         signal,
         "provisioning the exact device",
-        async deadlineSignal => await provisioner.provision({
-          platform: args.device.platform,
-          name: args.device.name,
-          spec: args.device.spec,
-          reconcileExistingConfiguration,
-          onBeforeCreate: markDeviceCreationStarted,
-          signal: deadlineSignal,
-        }),
+        async (deadlineSignal) =>
+          await provisioner.provision({
+            platform: args.device.platform,
+            name: args.device.name,
+            spec: args.device.spec,
+            reconcileExistingConfiguration,
+            onBeforeCreate: markDeviceCreationStarted,
+            signal: deadlineSignal,
+          }),
       );
     } finally {
       perf.endOperation("provisionExactDevice");
@@ -2477,13 +2554,14 @@ export function registerDeviceTools() {
         "discovering an already-running exact device",
         async () => await deviceManager.getBootedDevices(args.device.platform),
       );
-      const exactBootedDevice = args.device.platform === "ios"
-        ? alreadyBooted.find((device) => device.deviceId === provisioned.device.deviceId)
-        : alreadyBooted.find(
-          (device) =>
-            device.deviceId === provisioned.device.deviceId ||
-            device.name === provisioned.device.name,
-        );
+      const exactBootedDevice =
+        args.device.platform === "ios"
+          ? alreadyBooted.find((device) => device.deviceId === provisioned.device.deviceId)
+          : alreadyBooted.find(
+              (device) =>
+                device.deviceId === provisioned.device.deviceId ||
+                device.name === provisioned.device.name,
+            );
       if (args.device.platform === "ios" && !provisioned.device.deviceId) {
         throw new ProvisionDeviceError(
           "identity_conflict",
@@ -2493,18 +2571,14 @@ export function registerDeviceTools() {
       perf.startOperation("bootDevice");
       boot = await bootService.boot({
         platform: args.device.platform,
-        deviceId: exactBootedDevice?.deviceId ??
-          provisioned.device.deviceId ??
-          provisioned.device.name,
+        deviceId:
+          exactBootedDevice?.deviceId ?? provisioned.device.deviceId ?? provisioned.device.name,
         timeoutMs: Math.max(1, totalDeadlineMs - deps.timer.now()),
         totalDeadlineMs,
         signal,
       });
       perf.endOperation("bootDevice");
-      if (
-        args.device.platform === "ios" &&
-        boot.device.deviceId !== provisioned.device.deviceId
-      ) {
+      if (args.device.platform === "ios" && boot.device.deviceId !== provisioned.device.deviceId) {
         throw new ProvisionDeviceError(
           "identity_conflict",
           `Exact iOS simulator '${args.device.name}' resolved to unexpected UDID '${boot.device.deviceId}'.`,
@@ -2513,7 +2587,15 @@ export function registerDeviceTools() {
       validatePooledDeviceMapping(boot.device, requestedIdentity);
       releaseReadinessReservation = await reserveProvisionDeviceReadiness(boot.device);
       clearColdBootShutdownMarker(boot.source, boot.device.deviceId);
-      await ensureProvisionDeviceReadiness(args, deps, boot.device, requestedIdentity, totalDeadlineMs, perf, signal);
+      await ensureProvisionDeviceReadiness(
+        args,
+        deps,
+        boot.device,
+        requestedIdentity,
+        totalDeadlineMs,
+        perf,
+        signal,
+      );
       validatePooledDeviceMapping(boot.device, requestedIdentity);
       publishWarmDeviceReady(boot.source, boot.device.deviceId);
       const sessionId = await bindBootedDeviceSession(
@@ -2591,7 +2673,9 @@ export function registerDeviceTools() {
       readiness: {
         mode: args.readiness,
         status: booted
-          ? args.readiness === "automation" ? "automation_ready" : "device_ready"
+          ? args.readiness === "automation"
+            ? "automation_ready"
+            : "device_ready"
           : "not_requested",
       },
       ...(booted ? { sessionId: booted.sessionId } : {}),
@@ -2671,44 +2755,40 @@ export function registerDeviceTools() {
       validatePooledDeviceMapping(boot.device, requestedIdentity);
       // A warm AVD has no cold-boot source image, but its explicit getAndroid
       // identifier is still the stable identity needed for later recovery.
-      let sourceImage = boot.sourceImage ?? (budgets.androidAvdName
-        ? {
-          name: budgets.androidAvdName,
-          platform: "android" as const,
-          isRunning: true,
-          source: "local" as const,
-        }
-        : undefined);
+      let sourceImage =
+        boot.sourceImage ??
+        (budgets.androidAvdName
+          ? {
+              name: budgets.androidAvdName,
+              platform: "android" as const,
+              isRunning: true,
+              source: "local" as const,
+            }
+          : undefined);
       const daemonState = DaemonState.getInstance();
-      await reserveInitialDeviceForReadiness(
-        daemonState,
-        boot,
-        releaseReadinessReservations,
-      );
+      await reserveInitialDeviceForReadiness(daemonState, boot, releaseReadinessReservations);
 
       // A new incarnation must not inherit a prior intentional-shutdown marker
       // while its per-device runner setup is in flight.
       clearColdBootShutdownMarker(boot.source, boot.device.deviceId);
 
       const ctrlProxySetup = deps.ensureCtrlProxyReady ?? ensureCtrlProxyReady;
-      const readinessResult = await prepareStartDeviceRunnerReadiness(
-        {
-          boot,
-          args,
-          bootService,
-          deviceUtils,
-          daemonState,
-          totalDeadlineMs: budgets.automationDeadlineMs,
-          readinessTimeoutMs: budgets.automationReadyTimeoutMs,
-          timer: deps.timer,
-          signal,
-          progress,
-          perf,
-          requestedIdentity,
-          ensureCtrlProxyReady: ctrlProxySetup,
-          releaseReadinessReservations,
-        },
-      );
+      const readinessResult = await prepareStartDeviceRunnerReadiness({
+        boot,
+        args,
+        bootService,
+        deviceUtils,
+        daemonState,
+        totalDeadlineMs: budgets.automationDeadlineMs,
+        readinessTimeoutMs: budgets.automationReadyTimeoutMs,
+        timer: deps.timer,
+        signal,
+        progress,
+        perf,
+        requestedIdentity,
+        ensureCtrlProxyReady: ctrlProxySetup,
+        releaseReadinessReservations,
+      });
       boot = readinessResult.boot;
       preservedSessionId = readinessResult.preservedSessionId;
       validatePreservedSession = readinessResult.validatePreservedSession;
@@ -2726,18 +2806,17 @@ export function registerDeviceTools() {
         validatePreservedSession,
         retireRecoveredReplacement,
       );
-      const verifiedWarmAndroidAvdIdentity = getVerifiedWarmAndroidAvdIdentity(
-        boot,
-        sourceImage,
-      );
-      const sessionId = preservedSessionId ?? await bindBootedDeviceSession(
-        boot.device,
-        args,
-        boot.source === "cold-boot" ? sourceImage : undefined,
-        boot.processHandle,
-        new Set(releaseReadinessReservations.map((reservation) => reservation.owner)),
-        verifiedWarmAndroidAvdIdentity,
-      );
+      const verifiedWarmAndroidAvdIdentity = getVerifiedWarmAndroidAvdIdentity(boot, sourceImage);
+      const sessionId =
+        preservedSessionId ??
+        (await bindBootedDeviceSession(
+          boot.device,
+          args,
+          boot.source === "cold-boot" ? sourceImage : undefined,
+          boot.processHandle,
+          new Set(releaseReadinessReservations.map((reservation) => reservation.owner)),
+          verifiedWarmAndroidAvdIdentity,
+        ));
       ownershipTransferred = true;
 
       await notifyResourcesAfterDeviceBoot(boot, perf, deps.notifyResourcesChanged);
@@ -2872,13 +2951,12 @@ export function registerDeviceTools() {
     );
   };
 
-
   async function ensureCtrlProxyReady(request: RunnerReadinessRequest): Promise<void> {
     request.perf?.startOperation("ensureCtrlProxy");
     try {
-      await createDefaultRunnerReadinessService(
-        getDeviceToolsDependencies().timer,
-      ).ensureReady(request);
+      await createDefaultRunnerReadinessService(getDeviceToolsDependencies().timer).ensureReady(
+        request,
+      );
     } finally {
       request.perf?.endOperation("ensureCtrlProxy");
     }
@@ -2896,16 +2974,18 @@ export function registerDeviceTools() {
     // to concurrent allocators.
     const daemonState = DaemonState.getInstance();
     if (isDevicePoolAutolockEnabled() && daemonState.isInitialized()) {
-      const autolockSessionId = await daemonState.getDevicePool().autolockDevice(
-        device.deviceId,
-        device.platform,
-        args.__mcpSessionId,
-        sourceImage,
-        childProcess,
-        device,
-        readinessReservationOwners,
-        verifiedAndroidAvdIdentity,
-      );
+      const autolockSessionId = await daemonState
+        .getDevicePool()
+        .autolockDevice(
+          device.deviceId,
+          device.platform,
+          args.__mcpSessionId,
+          sourceImage,
+          childProcess,
+          device,
+          readinessReservationOwners,
+          verifiedAndroidAvdIdentity,
+        );
       if (autolockSessionId) {
         return autolockSessionId;
       }
@@ -2916,17 +2996,19 @@ export function registerDeviceTools() {
       registerDirectSessionDevice(sessionId, device);
       return sessionId;
     }
-    return daemonState.getDevicePool().bindOrReuseDeviceSession(
-      sessionId,
-      device.deviceId,
-      device.platform,
-      sourceImage,
-      childProcess,
-      device,
-      false,
-      readinessReservationOwners,
-      verifiedAndroidAvdIdentity,
-    );
+    return daemonState
+      .getDevicePool()
+      .bindOrReuseDeviceSession(
+        sessionId,
+        device.deviceId,
+        device.platform,
+        sourceImage,
+        childProcess,
+        device,
+        false,
+        readinessReservationOwners,
+        verifiedAndroidAvdIdentity,
+      );
   }
 
   async function buildBootedResponse(
@@ -2946,9 +3028,10 @@ export function registerDeviceTools() {
       platform: device.platform,
       osVersion: device.osVersion ?? device.iosVersion,
       formFactor: device.formFactor,
-      screenSize: device.screenWidth && device.screenHeight
-        ? { width: device.screenWidth, height: device.screenHeight }
-        : undefined,
+      screenSize:
+        device.screenWidth && device.screenHeight
+          ? { width: device.screenWidth, height: device.screenHeight }
+          : undefined,
       sessionId,
       processId,
       isReady: true,
@@ -2962,7 +3045,6 @@ export function registerDeviceTools() {
       deviceIdentity: deviceIdentityPayload(device, sourceImage),
     });
   }
-
 
   const killDeviceHandler = async (
     args: KillDeviceArgs,
@@ -2985,7 +3067,7 @@ export function registerDeviceTools() {
         shutdownDeadlineMs,
         "shutdown preparation did not complete",
         requestAbortSignal,
-        async signal => await devicePool?.reserveDeviceForShutdown(args.device.deviceId, signal),
+        async (signal) => await devicePool?.reserveDeviceForShutdown(args.device.deviceId, signal),
       );
       const expectedPooledDevice = shutdownReservation?.device ?? null;
       const retainReservationUntil = (
@@ -2995,7 +3077,7 @@ export function registerDeviceTools() {
         retainShutdownReservation = true;
         void operation.then(
           () => shutdownReservation?.release(),
-          error => {
+          (error) => {
             if (releaseAfterFailure) {
               void shutdownReservation?.release();
               return;
@@ -3025,7 +3107,7 @@ export function registerDeviceTools() {
         devicePool,
         expectedPooledDevice,
         shutdownDeadlineMs,
-        retirement => {
+        (retirement) => {
           retainReservationUntil(retirement);
         },
       );
@@ -3060,14 +3142,16 @@ export function registerDeviceTools() {
     "listDeviceImages",
     "List device images",
     listDeviceImagesSchema,
-    listDeviceImagesHandler
+    listDeviceImagesHandler,
+    { defaultEnabled: true },
   );
 
   ToolRegistry.register(
     "listDevices",
     "List devices (resource guidance)",
     listDevicesSchema,
-    listDevicesHandler
+    listDevicesHandler,
+    { defaultEnabled: true },
   );
 
   ToolRegistry.register(
@@ -3075,7 +3159,7 @@ export function registerDeviceTools() {
     "Find or recover an Android AVD and prepare it for automation.",
     getAndroidSchema,
     getAndroidHandler,
-    { supportsProgress: true },
+    { defaultEnabled: true, supportsProgress: true },
   );
 
   ToolRegistry.register(
@@ -3083,28 +3167,24 @@ export function registerDeviceTools() {
     "Find or recover an iOS Simulator and prepare it for automation.",
     getAppleSchema,
     getAppleHandler,
-    { supportsProgress: true },
+    { defaultEnabled: true, supportsProgress: true },
   );
 
-  ToolRegistry.register(
-    "startDevice",
-    "Start device",
-    startDeviceSchema,
-    startDeviceHandler,
-    { supportsProgress: true, hidden: true },
-  );
+  ToolRegistry.register("startDevice", "Start device", startDeviceSchema, startDeviceHandler, {
+    defaultEnabled: true,
+    supportsProgress: true,
+    hidden: true,
+  });
 
   ToolRegistry.register(
     "provisionDevice",
     "Provision exact virtual device",
     provisionDeviceSchema,
     provisionDeviceHandler,
+    { defaultEnabled: false },
   );
 
-  ToolRegistry.register(
-    "killDevice",
-    "Kill device",
-    killDeviceSchema,
-    killDeviceHandler
-  );
+  ToolRegistry.register("killDevice", "Kill device", killDeviceSchema, killDeviceHandler, {
+    defaultEnabled: true,
+  });
 }

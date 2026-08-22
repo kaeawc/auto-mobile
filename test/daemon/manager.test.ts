@@ -396,11 +396,10 @@ describe("DaemonLauncher command resolution", () => {
 
 describe("Daemon manager process detection", () => {
   // Tests that reach manager.start() open a daemon launch log; keep it inside the
-  // per-test temp dir rather than the shared `os.tmpdir()/auto-mobile` default.
+  // per-test temp dir (set via AUTOMOBILE_DATA_DIR) rather than the real
+  // `~/.auto-mobile/logs` default (see tempDir.resolveAutoMobileBaseDir).
   afterEach(() => {
     delete process.env.AUTOMOBILE_DATA_DIR;
-    delete process.env.AUTOMOBILE_LOG_DIR;
-    delete process.env.AUTO_MOBILE_LOG_DIR;
   });
 
   test("parses daemon processes from ps pid ppid command output", () => {
@@ -734,7 +733,6 @@ describe("Daemon manager process detection", () => {
   test("start reuses a responsive live daemon when its PID record is unavailable", async () => {
     const dir = mkdtempSync(join(tmpdir(), "daemon-manager-takeover-test-"));
     process.env.AUTOMOBILE_DATA_DIR = dir;
-    process.env.AUTOMOBILE_LOG_DIR = join(dir, "logs");
     const pidFilePath = join(dir, "daemon.pid");
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
@@ -799,7 +797,6 @@ describe("Daemon manager process detection", () => {
   test("start refuses to signal a live daemon that never becomes reachable", async () => {
     const dir = mkdtempSync(join(tmpdir(), "daemon-manager-takeover-revalidate-test-"));
     process.env.AUTOMOBILE_DATA_DIR = dir;
-    process.env.AUTOMOBILE_LOG_DIR = join(dir, "logs");
     const pidFilePath = join(dir, "daemon.pid");
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
@@ -1265,7 +1262,6 @@ describe("Daemon manager process detection", () => {
   test("start takeover does not signal transient daemon-mode candidates that are gone by liveness re-check", async () => {
     const dir = mkdtempSync(join(tmpdir(), "daemon-manager-transient-takeover-test-"));
     process.env.AUTOMOBILE_DATA_DIR = dir;
-    process.env.AUTOMOBILE_LOG_DIR = join(dir, "logs");
     const pidFilePath = join(dir, "daemon.pid");
     writeDaemonPidFile(pidFilePath, 201);
     const fakeTimer = new FakeTimer();
@@ -1326,7 +1322,6 @@ describe("Daemon manager process detection", () => {
   test("surfaces incomplete-extraction remediation when daemon exits with exit code 75", async () => {
     const dir = mkdtempSync(join(tmpdir(), "daemon-manager-incomplete-extraction-message-test-"));
     process.env.AUTOMOBILE_DATA_DIR = dir;
-    process.env.AUTOMOBILE_LOG_DIR = join(dir, "logs");
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     const entryScript = join(
@@ -1382,7 +1377,6 @@ describe("Daemon manager process detection", () => {
   test("removes an incomplete extraction and retries once after exit code 75", async () => {
     const dir = mkdtempSync(join(tmpdir(), "daemon-manager-incomplete-extraction-retry-test-"));
     process.env.AUTOMOBILE_DATA_DIR = dir;
-    process.env.AUTOMOBILE_LOG_DIR = join(dir, "logs");
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     const entryScript = join(
@@ -1454,7 +1448,6 @@ describe("Daemon manager process detection", () => {
     const dir = mkdtempSync(join(tmpdir(), "daemon-manager-default-extraction-cleaner-test-"));
     const dataDir = join(dir, "data");
     process.env.AUTOMOBILE_DATA_DIR = dataDir;
-    process.env.AUTOMOBILE_LOG_DIR = join(dir, "logs");
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     const extractionRoot = join(dir, "bunx-extract");
@@ -1525,7 +1518,6 @@ describe("Daemon manager process detection", () => {
   test("gives up with remediation when the retry exits with exit code 75 again", async () => {
     const dir = mkdtempSync(join(tmpdir(), "daemon-manager-incomplete-extraction-give-up-test-"));
     process.env.AUTOMOBILE_DATA_DIR = dir;
-    process.env.AUTOMOBILE_LOG_DIR = join(dir, "logs");
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     const entryScript = join(
@@ -1587,7 +1579,6 @@ describe("Daemon manager process detection", () => {
   test("does not remove or retry for non-incomplete-extraction daemon exits", async () => {
     const dir = mkdtempSync(join(tmpdir(), "daemon-manager-generic-exit-test-"));
     process.env.AUTOMOBILE_DATA_DIR = dir;
-    process.env.AUTOMOBILE_LOG_DIR = join(dir, "logs");
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     const child = new FakeDaemonChildProcess();

@@ -68,11 +68,25 @@ public class HierarchyDebouncer: HierarchyDebouncing {
     /// Minimum interval between broadcasts (debounce)
     public static let broadcastDebounceMs: Int64 = 50
 
+    /// Factor by which the poll interval grows on each consecutive idle poll
+    /// (structure unchanged since the last broadcast). Backing off eliminates the
+    /// steady-state idle load of a full hierarchy walk every second on a static
+    /// screen (issue #5477).
+    public static let idleBackoffMultiplier: Int64 = 2
+
+    /// Cap on the idle backoff, as a multiple of the base poll interval — i.e. the
+    /// interval progresses base -> 2x -> 4x and then holds (e.g. 1s -> 2s -> 4s).
+    public static let maxIdleBackoffMultiplier: Int64 = 4
+
     // MARK: - Dependencies
 
     private let elementLocator: ElementLocating
     private let timer: Timer
+    /// Base (fast) poll interval; the interval used immediately after any change.
     private var pollIntervalMs: Int64
+    /// Effective interval for the next scheduled poll, grown while idle up to the
+    /// backoff cap and reset to `pollIntervalMs` on any change or explicit command.
+    private var effectivePollIntervalMs: Int64
 
     // MARK: - State
 
@@ -107,6 +121,7 @@ public class HierarchyDebouncer: HierarchyDebouncing {
         self.elementLocator = elementLocator
         self.timer = timer
         self.pollIntervalMs = pollIntervalMs
+        effectivePollIntervalMs = pollIntervalMs
     }
 
     // MARK: - Public Interface
@@ -126,6 +141,7 @@ public class HierarchyDebouncer: HierarchyDebouncing {
     public func setPollIntervalMs(_ intervalMs: Int64) {
         lock.lock()
         pollIntervalMs = max(1, intervalMs)
+        effectivePollIntervalMs = pollIntervalMs
         pollGeneration += 1
         let shouldReschedule = _isRunning
         pollScheduled = false
@@ -165,6 +181,10 @@ public class HierarchyDebouncer: HierarchyDebouncing {
         inAnimationMode = false
         lock.unlock()
 
+        // Explicit command: reset the idle backoff and reschedule the next poll at
+        // the fast base interval, cancelling any pending backed-off poll (#5477).
+        resetPollCadence()
+
         extractAndCompare(skipBroadcast: false)
     }
 
@@ -172,6 +192,8 @@ public class HierarchyDebouncer: HierarchyDebouncing {
         lock.lock()
         inAnimationMode = false
         lock.unlock()
+
+        resetPollCadence()
 
         extractAndCompare(skipBroadcast: skipFlowEmit)
 
@@ -184,6 +206,7 @@ public class HierarchyDebouncer: HierarchyDebouncing {
     public func updatePollIntervalMs(_ pollIntervalMs: Int64) {
         lock.lock()
         self.pollIntervalMs = pollIntervalMs
+        effectivePollIntervalMs = pollIntervalMs
         pollGeneration += 1
         let running = _isRunning
         pollScheduled = false
@@ -209,10 +232,26 @@ public class HierarchyDebouncer: HierarchyDebouncing {
         skippedPollCount = 0
         lastBroadcastTime = 0
         lastHierarchy = nil
+        effectivePollIntervalMs = pollIntervalMs
         lock.unlock()
     }
 
     // MARK: - Private
+
+    /// Reset the idle backoff to the fast base interval and, if running, cancel the
+    /// pending (possibly backed-off) poll and schedule a fresh one at that interval.
+    private func resetPollCadence() {
+        lock.lock()
+        effectivePollIntervalMs = pollIntervalMs
+        let running = _isRunning
+        pollGeneration += 1
+        pollScheduled = false
+        lock.unlock()
+
+        if running {
+            scheduleNextPoll()
+        }
+    }
 
     private func scheduleNextPoll() {
         lock.lock()
@@ -222,7 +261,7 @@ public class HierarchyDebouncer: HierarchyDebouncing {
         }
         pollScheduled = true
         let scheduledGeneration = pollGeneration
-        let intervalMs = pollIntervalMs
+        let intervalMs = effectivePollIntervalMs
         lock.unlock()
 
         timer.schedule(after: intervalMs) { [weak self] in
@@ -330,6 +369,12 @@ public class HierarchyDebouncer: HierarchyDebouncing {
                 inAnimationMode = true
                 animationModeEndTime = timer.now() + HierarchyDebouncer.animationSkipWindowMs
                 lastHierarchy = hierarchy
+                // Idle: nothing changed since the last broadcast, so back off the
+                // poll interval toward the cap to eliminate steady-state load.
+                effectivePollIntervalMs = min(
+                    effectivePollIntervalMs * HierarchyDebouncer.idleBackoffMultiplier,
+                    pollIntervalMs * HierarchyDebouncer.maxIdleBackoffMultiplier
+                )
                 lock.unlock()
 
                 // Don't broadcast unchanged results to reduce noise
@@ -346,6 +391,9 @@ public class HierarchyDebouncer: HierarchyDebouncing {
                 inAnimationMode = false
                 lastHierarchy = hierarchy
                 skippedPollCount = 0
+                // A real change resets the cadence to the fast base interval so we
+                // stay responsive immediately after any content change.
+                effectivePollIntervalMs = pollIntervalMs
                 lock.unlock()
 
                 // Debounce broadcasts

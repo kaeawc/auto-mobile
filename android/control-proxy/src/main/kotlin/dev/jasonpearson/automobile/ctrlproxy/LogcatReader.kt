@@ -13,10 +13,20 @@ import java.io.InputStreamReader
  * Runs `logcat -v threadtime -T 1` to capture only new entries, parses each line with the
  * threadtime format, and invokes [onLogEvent] for every successfully parsed entry.
  *
+ * When no client is consuming logs ([hasConsumer] returns false), delivered lines are dropped
+ * before the [THREADTIME_REGEX] match and [LogEventResponse] allocation, so a chatty device does
+ * not pay for regex + allocation per log line that would be delivered to nobody.
+ *
  * Lifecycle: [start] from onServiceConnected, [stop] from onDestroy. Auto-reconnects if the logcat
  * process dies unexpectedly.
+ *
+ * @param hasConsumer seam returning whether any client is currently connected; injected so the gate
+ *   is unit-testable without a live WebSocket. Defaults to always-on for callers that never gate.
  */
-class LogcatReader(private val onLogEvent: (WebSocketResponse) -> Unit) {
+class LogcatReader(
+  private val onLogEvent: (WebSocketResponse) -> Unit,
+  private val hasConsumer: () -> Boolean = { true },
+) {
 
   companion object {
     private const val TAG = "LogcatReader"
@@ -104,13 +114,7 @@ class LogcatReader(private val onLogEvent: (WebSocketResponse) -> Unit) {
     try {
       var line = reader.readLine()
       while (line != null && running) {
-        parseLine(line)?.let { response ->
-          try {
-            onLogEvent(response)
-          } catch (e: Exception) {
-            Log.w(TAG, "Error broadcasting log event", e)
-          }
-        }
+        handleLine(line)
         line = reader.readLine()
       }
     } finally {
@@ -121,10 +125,30 @@ class LogcatReader(private val onLogEvent: (WebSocketResponse) -> Unit) {
   }
 
   /**
+   * Gate + parse + broadcast a single raw logcat line. Drops the line before any parsing or
+   * allocation when [hasConsumer] reports no connected client, so nothing is parsed for nobody.
+   */
+  internal fun handleLine(line: String) {
+    // No client is consuming logs — skip the regex match + LogEventResponse allocation entirely.
+    if (!hasConsumer()) return
+    parseLine(line)?.let { response ->
+      try {
+        onLogEvent(response)
+      } catch (e: Exception) {
+        Log.w(TAG, "Error broadcasting log event", e)
+      }
+    }
+  }
+
+  /**
    * Parse a single threadtime-formatted logcat line into a [LogEventResponse]. Returns null for
    * lines that don't match the expected format (e.g., headers).
    */
   internal fun parseLine(line: String): LogEventResponse? {
+    // Cheap prefilter: every threadtime entry starts with a two-digit month ("MM-DD ..."). Header
+    // lines ("--------- beginning of main") and blanks never do, so this skips the full regex on
+    // the non-entry lines a chatty logcat interleaves.
+    if (line.length < 2 || !line[0].isDigit() || !line[1].isDigit()) return null
     val match = THREADTIME_REGEX.matchEntire(line) ?: return null
     val (_, _, pidStr, tidStr, levelStr, tag, message) = match.destructured
 

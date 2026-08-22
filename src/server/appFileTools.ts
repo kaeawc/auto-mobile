@@ -12,6 +12,7 @@ export function registerAppFileTools(): void {
     async (device: BootedDevice, args: PutAppFileArgs, _progress, signal) => {
       const result = await getAppFileService().putFile({ ...args, device, signal });
       return createJSONToolResponse(result);
-    }
+    },
+    { defaultEnabled: false },
   );
 }

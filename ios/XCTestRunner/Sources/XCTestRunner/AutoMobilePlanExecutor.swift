@@ -1002,22 +1002,15 @@ public final class AutoMobilePlanExecutor {
             try PerfTimer.measure("mcpClient.initialize") {
                 try mcpClient.initialize(timeout: configuration.timeoutSeconds)
             }
-            do {
-                _ = try PerfTimer.measure("mcpClient.callTool(setToolCapability)") {
-                    try mcpClient.callTool(
-                        name: "setToolCapability",
-                        arguments: [
-                            "capability": "test-authoring",
-                            "sessionUuid": sessionUuid,
-                        ],
-                        timeout: configuration.timeoutSeconds
-                    )
-                }
-            } catch let MCPClientError.serverError(message)
-                where message.localizedCaseInsensitiveContains("unknown tool") {
-                // Older daemons predate capability gating, so executePlan remains
-                // compatible when only this new control tool is unavailable.
-                PerfTimer.log("setToolCapability unavailable on older daemon; continuing")
+            _ = try PerfTimer.measure("mcpClient.callTool(setToolEnabled)") {
+                try mcpClient.callTool(
+                    name: "setToolEnabled",
+                    arguments: [
+                        "toolName": "executePlan",
+                        "sessionUuid": sessionUuid,
+                    ],
+                    timeout: configuration.timeoutSeconds
+                )
             }
             PerfTimer.log("calling executePlan tool with timeout=\(configuration.timeoutSeconds)s")
             let response = try PerfTimer.measure("mcpClient.callTool(executePlan)") {

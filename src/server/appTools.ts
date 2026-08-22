@@ -417,6 +417,7 @@ export function registerAppTools() {
     "Launch app by package name",
     launchAppSchema,
     launchAppHandler,
+    { defaultEnabled: true },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -424,6 +425,7 @@ export function registerAppTools() {
     "Terminate app by package name",
     packageNameSchema,
     terminateAppHandler,
+    { defaultEnabled: true },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -431,6 +433,7 @@ export function registerAppTools() {
     "Install app on device (.apk, .app, or .ipa)",
     installAppSchema,
     installAppHandler,
+    { defaultEnabled: true },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -438,6 +441,7 @@ export function registerAppTools() {
     "Uninstall app by package name or bundle identifier",
     uninstallAppSchema,
     uninstallAppHandler,
+    { defaultEnabled: true },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -445,6 +449,7 @@ export function registerAppTools() {
     "userId grant/revoke; device-wide reset ['all']; no POST_NOTIFICATIONS.",
     setAppPermissionsSchema,
     setAppPermissionsHandler,
+    { defaultEnabled: false },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -452,6 +457,7 @@ export function registerAppTools() {
     "Read app permission state",
     getAppPermissionsSchema,
     getAppPermissionsHandler,
+    { defaultEnabled: false },
   );
 
   ToolRegistry.register(
@@ -459,5 +465,6 @@ export function registerAppTools() {
     "Guide for listing apps via MCP resources",
     listAppsSchema,
     listAppsHandler,
+    { defaultEnabled: true },
   );
 }

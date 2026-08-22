@@ -161,6 +161,53 @@ internal fun nodeActionId(action: String): Int? =
     else -> null
   }
 
+/**
+ * The interaction [CtrlProxy.onAccessibilityEvent] records for an accessibility event type. This is
+ * the single classification primitive shared by the handler's `when` and by the derivation of the
+ * subscribed event-type mask (issue #5467), so the "handled set" and the "subscribed set" cannot
+ * drift — a new dispatch branch here automatically flows into [CtrlProxy.HANDLED_EVENT_TYPES].
+ */
+internal enum class InteractionDispatch {
+  TAP,
+  LONG_PRESS,
+  CONTENT_CHANGED,
+  NAVIGATE,
+  SELECT,
+  INPUT_TEXT,
+  SCROLL,
+}
+
+/**
+ * The interaction the handler's `when` performs for [eventType], or null if it ignores the type.
+ */
+internal fun interactionDispatchFor(eventType: Int): InteractionDispatch? =
+  when (eventType) {
+    AccessibilityEvent.TYPE_VIEW_CLICKED -> InteractionDispatch.TAP
+    AccessibilityEvent.TYPE_VIEW_LONG_CLICKED -> InteractionDispatch.LONG_PRESS
+    AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> InteractionDispatch.CONTENT_CHANGED
+    AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> InteractionDispatch.NAVIGATE
+    AccessibilityEvent.TYPE_VIEW_SELECTED -> InteractionDispatch.SELECT
+    AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> InteractionDispatch.INPUT_TEXT
+    AccessibilityEvent.TYPE_VIEW_SCROLLED -> InteractionDispatch.SCROLL
+    else -> null
+  }
+
+/** True when the handler feeds [eventType] to the hierarchy debouncer for a fresh capture. */
+internal fun triggersHierarchyRefresh(eventType: Int): Boolean =
+  when (eventType) {
+    AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+    AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+    AccessibilityEvent.TYPE_WINDOWS_CHANGED,
+    AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> true
+    else -> false
+  }
+
+/**
+ * True when [CtrlProxy.onAccessibilityEvent] acts on [eventType] at all (interaction or refresh).
+ */
+internal fun isHandledEventType(eventType: Int): Boolean =
+  interactionDispatchFor(eventType) != null || triggersHierarchyRefresh(eventType)
+
 internal fun navigationEventResponse(event: TimestampedNavigationEvent): NavigationEventResponse =
   NavigationEventResponse(
     timestamp = event.timestamp,
@@ -187,6 +234,92 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     // File name for app-scoped storage
     private const val HIERARCHY_FILE_NAME = "latest_hierarchy.json"
     private const val DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS = 250L
+
+    /**
+     * The universe of accessibility event types we classify for subscription. [HANDLED_EVENT_TYPES]
+     * is DERIVED by filtering this through the shared [isHandledEventType] classifier, so the
+     * app-dispatched subscription set is computed from the exact predicate the handler dispatches
+     * on — it cannot be hand-mis-copied out of sync with [interactionDispatchFor] /
+     * [triggersHierarchyRefresh]. Extend this only if a handler branch ever dispatches on a type
+     * not already listed here.
+     */
+    @Suppress("DEPRECATION")
+    private val CANDIDATE_EVENT_TYPES: IntArray =
+      intArrayOf(
+        AccessibilityEvent.TYPE_VIEW_CLICKED,
+        AccessibilityEvent.TYPE_VIEW_LONG_CLICKED,
+        AccessibilityEvent.TYPE_VIEW_SELECTED,
+        AccessibilityEvent.TYPE_VIEW_FOCUSED,
+        AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
+        AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+        AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED,
+        AccessibilityEvent.TYPE_VIEW_HOVER_ENTER,
+        AccessibilityEvent.TYPE_VIEW_HOVER_EXIT,
+        AccessibilityEvent.TYPE_TOUCH_EXPLORATION_GESTURE_START,
+        AccessibilityEvent.TYPE_TOUCH_EXPLORATION_GESTURE_END,
+        AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+        AccessibilityEvent.TYPE_VIEW_SCROLLED,
+        AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
+        AccessibilityEvent.TYPE_ANNOUNCEMENT,
+        AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED,
+        AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUS_CLEARED,
+        AccessibilityEvent.TYPE_VIEW_TEXT_TRAVERSED_AT_MOVEMENT_GRANULARITY,
+        AccessibilityEvent.TYPE_GESTURE_DETECTION_START,
+        AccessibilityEvent.TYPE_GESTURE_DETECTION_END,
+        AccessibilityEvent.TYPE_TOUCH_INTERACTION_START,
+        AccessibilityEvent.TYPE_TOUCH_INTERACTION_END,
+        AccessibilityEvent.TYPE_WINDOWS_CHANGED,
+        AccessibilityEvent.TYPE_VIEW_CONTEXT_CLICKED,
+        AccessibilityEvent.TYPE_ASSIST_READING_CONTEXT,
+        AccessibilityEvent.TYPE_SPEECH_STATE_CHANGE,
+        AccessibilityEvent.TYPE_VIEW_TARGETED_BY_SCROLL,
+      )
+
+    /**
+     * App-dispatched event types [onAccessibilityEvent] acts on, DERIVED from the shared
+     * [isHandledEventType] classifier over [CANDIDATE_EVENT_TYPES] rather than hand-listed, so it
+     * stays in lockstep with the handler's `when` / hierarchy-refresh `if`.
+     */
+    val HANDLED_EVENT_TYPES: IntArray =
+      CANDIDATE_EVENT_TYPES.filter { isHandledEventType(it) }.toIntArray()
+
+    /**
+     * Event types the platform `AccessibilityCache` / `AccessibilityInteractionClient` consume to
+     * keep their node & focus caches coherent. We MUST stay subscribed to these even though
+     * [onAccessibilityEvent] ignores them: the cache only invalidates its focus/node state for an
+     * event when the service is subscribed to that event, so after a focus-only transition an
+     * unsubscribed service would let `rootInActiveWindow` / `findFocus` return STALE nodes to
+     * `observe` and `handleGetCurrentFocus` — the core AutoMobile read paths. Cross-checked against
+     * AOSP `AccessibilityCache.onAccessibilityEvent`; the window/content/scroll/text/click/select
+     * types that also invalidate the cache are already in [HANDLED_EVENT_TYPES], and the union
+     * below absorbs the overlap.
+     */
+    val FRAMEWORK_CACHE_EVENT_TYPES: IntArray =
+      intArrayOf(
+        AccessibilityEvent.TYPE_VIEW_FOCUSED,
+        AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED,
+        AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUS_CLEARED,
+        AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
+      )
+
+    /**
+     * OS-level `eventTypes` subscription mask: the union of [HANDLED_EVENT_TYPES] and
+     * [FRAMEWORK_CACHE_EVENT_TYPES], replacing the former `TYPES_ALL_MASK`. High-frequency noise
+     * the service never consumes — hover, touch-exploration, touch-interaction, gesture-detection,
+     * announcement, notification-state, text-traversal, context-click, speech-state, etc. — is no
+     * longer delivered.
+     */
+    val SUBSCRIBED_EVENT_TYPES_MASK: Int =
+      (HANDLED_EVENT_TYPES + FRAMEWORK_CACHE_EVENT_TYPES).fold(0) { acc, type -> acc or type }
+
+    /**
+     * `notificationTimeout` coalesces bursts of same-type events at the OS boundary before
+     * delivery. 100 ms matches the tightest interaction debounce the handler already applies
+     * ([inputTextDebounceMs]) and sits well under the scroll debounce (300 ms) and hierarchy
+     * broadcast interval (250 ms), so it collapses event floods without adding perceptible latency
+     * to the interaction/telemetry or hierarchy-refresh paths the debouncers rely on.
+     */
+    const val ACCESSIBILITY_NOTIFICATION_TIMEOUT_MS = 100L
 
     // Broadcast actions
     const val ACTION_EXTRACT_HIERARCHY = "dev.jasonpearson.automobile.EXTRACT_HIERARCHY"
@@ -944,11 +1077,16 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     super.onServiceConnected()
     Log.d(TAG, "onServiceConnected")
 
-    // Ensure we receive ALL accessibility event types and include not-important views
-    // (XML config may be cached). flagIncludeNotImportantViews exposes interactive nodes
-    // (e.g. long-clickable ImageViews) that Android otherwise filters as decorative.
+    // Subscribe to SUBSCRIBED_EVENT_TYPES_MASK (the handled set plus the framework cache-coherence
+    // set) instead of TYPES_ALL_MASK, so the OS stops delivering high-frequency events we only drop
+    // while the AccessibilityCache still invalidates focus/node state correctly.
+    // notificationTimeout
+    // coalesces same-type floods at the OS boundary. flagIncludeNotImportantViews exposes
+    // interactive
+    // nodes (e.g. long-clickable ImageViews) that Android otherwise filters as decorative.
     serviceInfo = serviceInfo?.apply {
-      eventTypes = AccessibilityEvent.TYPES_ALL_MASK
+      eventTypes = SUBSCRIBED_EVENT_TYPES_MASK
+      notificationTimeout = ACCESSIBILITY_NOTIFICATION_TIMEOUT_MS
       flags =
         flags or
           AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS or
@@ -1194,12 +1332,19 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       sdkEventBatchProcessor.start()
       Log.d(TAG, "SDK event batch processor started")
 
-      // Start logcat reader for automatic log capture
-      logcatReader = LogcatReader { response ->
-        if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
-          serviceScope.launch { webSocketServer.broadcast(response) }
-        }
-      }
+      // Start logcat reader for automatic log capture. Gate parsing on a connected client so a
+      // chatty device is not regex-parsed while nobody is consuming logs.
+      logcatReader =
+        LogcatReader(
+          onLogEvent = { response ->
+            if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+              serviceScope.launch { webSocketServer.broadcast(response) }
+            }
+          },
+          hasConsumer = {
+            ::webSocketServer.isInitialized && webSocketServer.getConnectionCount() > 0
+          },
+        )
       logcatReader?.start()
       Log.d(TAG, "Logcat reader started")
 
@@ -1918,30 +2063,21 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
 
     try {
-      // Log accessibility events for debugging
-      if (event.packageName?.toString()?.contains("playground") == true) {
-        Log.d(
-          TAG,
-          "A11Y event type=${event.eventType} class=${event.className} pkg=${event.packageName} text=${event.text} contentChange=${event.contentChangeTypes} action=${event.action}",
-        )
-      }
-
       if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
         lastWindowClassName = event.className?.toString()
       }
 
-      // Broadcast interaction events for telemetry tracking.
-      // Also track TYPE_VIEW_ACCESSIBILITY_FOCUSED which fires when Compose
-      // moves accessibility focus after a tap (more reliable than TYPE_VIEW_CLICKED
-      // for Compose UIs). Debounce at 200ms to avoid duplicate events.
-      when (event.eventType) {
-        AccessibilityEvent.TYPE_VIEW_CLICKED -> recordInteractionEvent(event, "tap")
-        AccessibilityEvent.TYPE_VIEW_LONG_CLICKED -> recordInteractionEvent(event, "longPress")
+      // Broadcast interaction events for telemetry tracking. Classification is routed through the
+      // shared [interactionDispatchFor] so the subscribed event-type mask (derived from the same
+      // classifier) can never drift from what this `when` actually acts on.
+      when (interactionDispatchFor(event.eventType)) {
+        InteractionDispatch.TAP -> recordInteractionEvent(event, "tap")
+        InteractionDispatch.LONG_PRESS -> recordInteractionEvent(event, "longPress")
         // Compose doesn't fire TYPE_VIEW_CLICKED — detect taps via content changes
         // on clickable elements. CONTENT_CHANGE_TYPE_STATE_DESCRIPTION (64) fires
         // when Compose state changes (e.g., button click updates counter).
         // CONTENT_CHANGE_TYPE_CONTENT_DESCRIPTION (4) fires on many Compose interactions.
-        AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> {
+        InteractionDispatch.CONTENT_CHANGED -> {
           if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             val ct = event.contentChangeTypes
             // State description change = likely user interaction (Compose state update)
@@ -1950,29 +2086,25 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             }
           }
         }
-        AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> recordInteractionEvent(event, "navigate")
-        AccessibilityEvent.TYPE_VIEW_SELECTED -> recordInteractionEvent(event, "select")
-        AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> {
+        InteractionDispatch.NAVIGATE -> recordInteractionEvent(event, "navigate")
+        InteractionDispatch.SELECT -> recordInteractionEvent(event, "select")
+        InteractionDispatch.INPUT_TEXT -> {
           val now = System.currentTimeMillis()
           if (now - lastInputTextBroadcastMs >= inputTextDebounceMs) {
             lastInputTextBroadcastMs = now
             recordInteractionEvent(event, "inputText")
           }
         }
-        AccessibilityEvent.TYPE_VIEW_SCROLLED -> {
+        InteractionDispatch.SCROLL -> {
           frameContext.incrementAndGet()
           recordDebouncedScroll(event)
         }
+        null -> {} // event type this service does not act on
       }
 
-      // Delegate to the smart debouncer for content/window changes
-      // The debouncer uses structural hash comparison to detect animation vs real changes
-      if (
-        event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED ||
-          event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
-          event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED ||
-          event.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED
-      ) {
+      // Delegate to the smart debouncer for content/window changes (same shared classifier).
+      // The debouncer uses structural hash comparison to detect animation vs real changes.
+      if (triggersHierarchyRefresh(event.eventType)) {
         frameContext.incrementAndGet()
         if (::hierarchyDebouncer.isInitialized) {
           hierarchyDebouncer.onAccessibilityEvent()
@@ -2797,14 +2929,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     try {
       val jsonString =
         perfProvider.track("serializeHierarchy") { jsonCompact.encodeToString(hierarchy) }
-
-      // Debug: Check if text labels are in the serialized hierarchy
-      val hasTapText = jsonString.contains("\"text\":\"Tap\"")
-      val hasDiscoverText = jsonString.contains("\"text\":\"Discover\"")
-      Log.d(
-        TAG,
-        "[BROADCAST] Hierarchy contains: Tap=$hasTapText, Discover=$hasDiscoverText, size=${jsonString.length}",
-      )
 
       val messageBuilder: (kotlinx.serialization.json.JsonElement?) -> String = { perfTiming ->
         buildString {

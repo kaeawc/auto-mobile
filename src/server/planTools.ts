@@ -5,7 +5,11 @@ import { logger } from "../utils/logger";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { Platform } from "../models";
 import { DEVICE_LABEL_DESCRIPTION } from "./toolSchemaHelpers";
-import { startTestRecording, stopTestRecording, getTestRecordingStatus } from "./testRecordingManager";
+import {
+  startTestRecording,
+  stopTestRecording,
+  getTestRecordingStatus,
+} from "./testRecordingManager";
 import { startMcpRecording, stopMcpRecording, getMcpRecordingStatus } from "./mcpRecordingManager";
 import { serverConfig } from "../utils/ServerConfig";
 import { PlanExecutionOrchestrator, PlanExecutionRequest } from "./planExecutionOrchestrator";
@@ -33,52 +37,55 @@ const executePlanSchema = z.object({
   device: z.string().optional().describe(DEVICE_LABEL_DESCRIPTION),
   devices: z.array(z.string()).optional().describe("Device labels"),
   deviceAllocationTimeoutMs: z.number().default(300000).describe("Allocation timeout ms"),
-  abortStrategy: z.enum(["immediate", "finish-current-step"]).default("immediate").describe("Abort strategy"),
+  abortStrategy: z
+    .enum(["immediate", "finish-current-step"])
+    .default("immediate")
+    .describe("Abort strategy"),
   testMetadata: testMetadataSchema.optional().describe("Test metadata"),
   cleanupAppId: z.string().optional().describe("Cleanup app ID"),
   cleanupClearAppData: z.boolean().optional().describe("Clear app data"),
-  captureObserveSteps: z
-    .enum(["summary", "full"])
-    .optional()
-    .describe(
-      "Attach observe snapshots"
-    )
+  captureObserveSteps: z.enum(["summary", "full"]).optional().describe("Attach observe snapshots"),
 });
 
 const executePlanDebugStepSchema = z.object({
   step: z.string(),
   status: z.enum(["completed", "failed", "skipped"]),
   durationMs: z.number().int(),
-  details: z.any().optional()
+  details: z.any().optional(),
 });
 
 const executePlanDebugSchema = z.object({
   executionTimeMs: z.number().int(),
   steps: z.array(executePlanDebugStepSchema),
-  deviceState: z.object({
-    currentActivity: z.string().optional(),
-    focusedWindow: z.string().optional()
-  }).optional()
+  deviceState: z
+    .object({
+      currentActivity: z.string().optional(),
+      focusedWindow: z.string().optional(),
+    })
+    .optional(),
 });
 
-const executePlanResultSchema = z.object({
-  success: z.boolean(),
-  executedSteps: z.number().int(),
-  totalSteps: z.number().int(),
-  failedStep: z.object({
-    stepIndex: z.number().int(),
-    tool: z.string(),
-    error: z.string(),
-    device: z.string().optional(),
-    failureObservation: z.any().optional()
-  }).optional(),
-  error: z.string().optional(),
-  platform: z.enum(["android", "ios"]).optional(),
-  deviceId: z.string().optional(),
-  deviceMapping: z.record(z.string(), z.string()).optional(),
-  debug: executePlanDebugSchema.optional()
-}).passthrough();
-
+const executePlanResultSchema = z
+  .object({
+    success: z.boolean(),
+    executedSteps: z.number().int(),
+    totalSteps: z.number().int(),
+    failedStep: z
+      .object({
+        stepIndex: z.number().int(),
+        tool: z.string(),
+        error: z.string(),
+        device: z.string().optional(),
+        failureObservation: z.any().optional(),
+      })
+      .optional(),
+    error: z.string().optional(),
+    platform: z.enum(["android", "ios"]).optional(),
+    deviceId: z.string().optional(),
+    deviceMapping: z.record(z.string(), z.string()).optional(),
+    debug: executePlanDebugSchema.optional(),
+  })
+  .passthrough();
 
 const executePlanTool = async (
   device: BootedDevice,
@@ -99,7 +106,7 @@ const executePlanTool = async (
     captureObserveSteps?: "summary" | "full";
   },
   progress?: ProgressCallback,
-  signal?: AbortSignal
+  signal?: AbortSignal,
 ): Promise<any> => {
   const orchestrator = new PlanExecutionOrchestrator({
     device,
@@ -110,7 +117,6 @@ const executePlanTool = async (
   const result = await orchestrator.execute();
   return createStructuredToolResponse(result);
 };
-
 
 // Start test recording tool schema (empty - uses active device)
 const startTestRecordingSchema = z.object({});
@@ -230,7 +236,10 @@ const recordStepsResultSchema = z.object({
   error: z.string().optional(),
 });
 
-const recordStepsTool = async (params: { action: "begin" | "end" | "status"; planName?: string }): Promise<any> => {
+const recordStepsTool = async (params: {
+  action: "begin" | "end" | "status";
+  planName?: string;
+}): Promise<any> => {
   // Status is always allowed — lets agents probe recording state even when the flag is off.
   if (params.action === "status") {
     const status = getMcpRecordingStatus();
@@ -289,12 +298,36 @@ const recordStepsTool = async (params: { action: "begin" | "end" | "status"; pla
 
 // Register plan tools for daemon-backed MCP servers and CLI usage.
 export const registerPlanTools = () => {
-  ToolRegistry.registerDeviceAware("executePlan", "Execute YAML plan steps; stops on first failed step.", executePlanSchema, executePlanTool, { supportsProgress: true, outputSchema: executePlanResultSchema });
+  ToolRegistry.registerDeviceAware(
+    "executePlan",
+    "Execute YAML plan steps; stops on first failed step.",
+    executePlanSchema,
+    executePlanTool,
+    { defaultEnabled: false, supportsProgress: true, outputSchema: executePlanResultSchema },
+  );
 
-  ToolRegistry.registerDeviceAware("startTestRecording", "Start recording user interactions for exportPlan.", startTestRecordingSchema, startTestRecordingTool, { outputSchema: startTestRecordingResultSchema });
+  ToolRegistry.registerDeviceAware(
+    "startTestRecording",
+    "Start recording user interactions for exportPlan.",
+    startTestRecordingSchema,
+    startTestRecordingTool,
+    { defaultEnabled: false, outputSchema: startTestRecordingResultSchema },
+  );
 
-  ToolRegistry.register("exportPlan", "Stop active recording and export a YAML plan.", exportPlanSchema, exportPlanTool, { outputSchema: exportPlanResultSchema });
+  ToolRegistry.register(
+    "exportPlan",
+    "Stop active recording and export a YAML plan.",
+    exportPlanSchema,
+    exportPlanTool,
+    { defaultEnabled: false, outputSchema: exportPlanResultSchema },
+  );
 
   // MCP call recording — begin/end gated by "mcp-recording" feature flag; status always available.
-  ToolRegistry.register("recordSteps", "Record MCP tool calls to YAML. begin/end require mcp-recording; status always works.", recordStepsSchema, recordStepsTool, { outputSchema: recordStepsResultSchema });
+  ToolRegistry.register(
+    "recordSteps",
+    "Record MCP tool calls to YAML. begin/end require mcp-recording; status always works.",
+    recordStepsSchema,
+    recordStepsTool,
+    { defaultEnabled: false, outputSchema: recordStepsResultSchema },
+  );
 };

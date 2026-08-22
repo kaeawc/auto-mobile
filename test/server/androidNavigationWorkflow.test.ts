@@ -15,9 +15,12 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { createJSONToolResponse } from "../../src/utils/toolUtils";
 import { setDebugModeEnabled } from "../../src/utils/debug";
 import { serverConfig } from "../../src/utils/ServerConfig";
-import { installInMemoryNavManager, type InMemoryNavManagerHarness } from "../helpers/navigationTestHarness";
+import {
+  installInMemoryNavManager,
+  type InMemoryNavManagerHarness,
+} from "../helpers/navigationTestHarness";
 import { FakeTimer } from "../fakes/FakeTimer";
-import type { SessionToolProfileService } from "../../src/features/toolCapabilities/SessionToolProfileService";
+import type { SessionToolSelectionService } from "../../src/features/toolSelection/SessionToolSelectionService";
 
 describe("Android navigation graph workflow (#4459)", () => {
   const device: BootedDevice = {
@@ -45,26 +48,27 @@ describe("Android navigation graph workflow (#4459)", () => {
   test("serves the debug-gated navigation tools through MCP tools/list", async () => {
     setDebugModeEnabled(true);
     serverConfig.setEmbeddedSdkEnabled(true);
-    const profileService: Pick<SessionToolProfileService, "isEnabled"> = {
+    const profileService: Pick<SessionToolSelectionService, "isEnabled"> = {
       isEnabled: async () => true,
     };
-    const server = createMcpServer({ sessionToolProfileService: profileService });
+    const server = createMcpServer({ sessionToolSelectionService: profileService });
     const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
     await server.connect(serverTransport);
     const client = new Client({ name: "navigation-workflow-test", version: "0.0.1" });
     await client.connect(clientTransport);
 
     try {
-      const result = await client.request({ method: "tools/list", params: {} }, z.object({
-        tools: z.array(z.object({ name: z.string() }).passthrough())
-      }));
-      const toolNames = result.tools.map(tool => tool.name);
+      const result = await client.request(
+        { method: "tools/list", params: {} },
+        z.object({
+          tools: z.array(z.object({ name: z.string() }).passthrough()),
+        }),
+      );
+      const toolNames = result.tools.map((tool) => tool.name);
 
-      expect(toolNames).toEqual(expect.arrayContaining([
-        "explore",
-        "getNavigationGraph",
-        "navigateTo",
-      ]));
+      expect(toolNames).toEqual(
+        expect.arrayContaining(["explore", "getNavigationGraph", "navigateTo"]),
+      );
     } finally {
       await client.close();
     }
@@ -77,7 +81,7 @@ describe("Android navigation graph workflow (#4459)", () => {
     const sessionManager = NavigationGraphManager.createForTesting(
       new NavigationRepository(harness.db),
       new TestCoverageRepository(undefined, harness.db),
-      timer
+      timer,
     );
     NavigationGraphManager.setInstanceForSessionForTesting(sessionUuid, sessionManager);
     expect(harness.manager.getCurrentScreen()).toBeNull();
@@ -98,7 +102,7 @@ describe("Android navigation graph workflow (#4459)", () => {
       "tapOn",
       "Deterministic Android fixture tap",
       z.object({}),
-      async args => {
+      async (args) => {
         replayedArgs = args;
         await sessionManager.recordNavigationEvent({
           destination: "Settings",
@@ -110,30 +114,41 @@ describe("Android navigation graph workflow (#4459)", () => {
           applicationId: appId,
         });
         return createJSONToolResponse({ success: true });
-      }
+      },
     );
-    const explore = new Explore(device, { executeCommand: async () => "" } as never, timer, sessionManager);
+    const explore = new Explore(
+      device,
+      { executeCommand: async () => "" } as never,
+      timer,
+      sessionManager,
+    );
     (explore as any).observeScreen = {
       execute: async () => ({
         viewHierarchy: {
           hierarchy: {
-            node: [{
-              $: {
-                "class": "android.widget.Button",
-                "text": "Settings",
-                "resource-id": "com.example:id/settings",
-                "clickable": "true",
-                "enabled": "true",
+            node: [
+              {
+                $: {
+                  class: "android.widget.Button",
+                  text: "Settings",
+                  "resource-id": "com.example:id/settings",
+                  clickable: "true",
+                  enabled: "true",
+                },
+                bounds: { left: 0, top: 0, right: 100, bottom: 50 },
               },
-              bounds: { left: 0, top: 0, right: 100, bottom: 50 },
-            }],
+            ],
           },
           packageName: appId,
         },
       }),
     };
     (explore as any).performInteraction = async () => {
-      sessionManager.recordToolCall("tapOn", { text: "Settings", action: "tap", platform: "android" });
+      sessionManager.recordToolCall("tapOn", {
+        text: "Settings",
+        action: "tap",
+        platform: "android",
+      });
       await sessionManager.recordNavigationEvent({
         destination: "Settings",
         source: "ANDROID_FIXTURE",
@@ -150,7 +165,11 @@ describe("Android navigation graph workflow (#4459)", () => {
       timeoutMs: 5000,
       packageName: appId,
     });
-    expect(exploration).toMatchObject({ success: true, interactionsPerformed: 1, screensDiscovered: 1 });
+    expect(exploration).toMatchObject({
+      success: true,
+      interactionsPerformed: 1,
+      screensDiscovered: 1,
+    });
 
     setDebugModeEnabled(true);
     serverConfig.setEmbeddedSdkEnabled(true);
@@ -158,7 +177,10 @@ describe("Android navigation graph workflow (#4459)", () => {
 
     const graphTool = ToolRegistry.getTool("getNavigationGraph");
     expect(graphTool).toBeDefined();
-    const observationSpy = spyOn(RealObserveScreen, "getRecentCachedResultForDevice").mockReturnValue({
+    const observationSpy = spyOn(
+      RealObserveScreen,
+      "getRecentCachedResultForDevice",
+    ).mockReturnValue({
       viewHierarchy: { packageName: appId },
     } as never);
     const graphResponse = await (async () => {
@@ -176,17 +198,22 @@ describe("Android navigation graph workflow (#4459)", () => {
       knownEdges: 1,
       unknownEdges: 0,
     });
-    expect(graph.screens.map((screen: { name: string }) => screen.name)).toEqual(["Home", "Settings"]);
-    expect(graph.transitions).toContainEqual(expect.objectContaining({
-      from: "Home",
-      to: "Settings",
-      tool: "tapOn",
-    }));
+    expect(graph.screens.map((screen: { name: string }) => screen.name)).toEqual([
+      "Home",
+      "Settings",
+    ]);
+    expect(graph.transitions).toContainEqual(
+      expect.objectContaining({
+        from: "Home",
+        to: "Settings",
+        tool: "tapOn",
+      }),
+    );
     await sessionManager.recordBackStack({ depth: 1, currentTaskId: 1 });
     const backRecommendation = await new DefaultPathOptimizer(sessionManager).shouldUseBackButton(
       "Settings",
       "Home",
-      1
+      1,
     );
     expect(backRecommendation).toMatchObject({ shouldUseBack: true, backPresses: 1 });
 

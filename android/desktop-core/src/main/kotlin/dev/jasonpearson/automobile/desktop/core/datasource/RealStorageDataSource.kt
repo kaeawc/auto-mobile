@@ -199,7 +199,7 @@ class RealStorageDataSource(
 
     return try {
       val client = provider()
-      client.enableToolCapability("app-data-interop")
+      client.setToolEnabled("sqlQuery")
       val arguments = buildJsonObject {
         put("deviceId", device)
         put("appId", pkg)

@@ -80,6 +80,27 @@ class NavigationEventAccumulatorTest {
     assertEquals(150L, acc.getStats().currentSequence)
   }
 
+  @Test
+  fun `buffer never grows past capacity and evicts oldest first`() {
+    val acc = NavigationEventAccumulator()
+    // Push well past capacity to exercise steady-state eviction, checking bounds
+    // as we cross and stay past the 100-event ceiling.
+    repeat(250) { i ->
+      acc.addEvent("dest-$i", "src", emptyMap(), emptyMap())
+      assertTrue("buffer exceeded capacity at i=$i", acc.getAllEvents().size <= 100)
+    }
+
+    val all = acc.getAllEvents()
+    assertEquals(100, all.size)
+    assertEquals(100, acc.eventCount.value)
+    // Oldest-first eviction: only the last 100 destinations/sequences survive, in order.
+    assertEquals((150..249).map { "dest-$it" }, all.map { it.destination })
+    assertEquals((150L..249L).toList(), all.map { it.sequenceNumber })
+    // The evicted head is gone; the retained window starts at sequence 150.
+    assertEquals(150L, all.first().sequenceNumber)
+    assertEquals(249L, all.last().sequenceNumber)
+  }
+
   /**
    * Concurrent producers must not collide on sequence numbers, and a reader hammering
    * getRecentEvents/getAllEvents must never see an IndexOutOfBoundsException from a trim between

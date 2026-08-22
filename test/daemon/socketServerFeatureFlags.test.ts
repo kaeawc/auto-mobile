@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { z } from "zod/v4";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { unlink } from "node:fs/promises";
@@ -12,16 +13,18 @@ import { FakeFeatureFlagApplier } from "../fakes/FakeFeatureFlagApplier";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { DaemonResponse } from "../../src/daemon/types";
 import { ListChangedBroadcaster } from "../../src/server/listChangedBroadcast";
+import { ToolRegistry } from "../../src/server/toolRegistry";
 
 function createTestService(): FeatureFlagService {
-  return new FeatureFlagService(
-    new FakeFeatureFlagRepository(),
-    new FakeFeatureFlagApplier(),
-    [
-      { key: "debug", label: "Debug mode", description: "Enable debug tools.", defaultValue: false },
-      { key: "ui-perf-mode", label: "UI perf", description: "Run UI perf audits.", defaultValue: true },
-    ]
-  );
+  return new FeatureFlagService(new FakeFeatureFlagRepository(), new FakeFeatureFlagApplier(), [
+    { key: "debug", label: "Debug mode", description: "Enable debug tools.", defaultValue: false },
+    {
+      key: "ui-perf-mode",
+      label: "UI perf",
+      description: "Run UI perf audits.",
+      defaultValue: true,
+    },
+  ]);
 }
 
 function createFakeDaemonState() {
@@ -36,7 +39,11 @@ function createFakeDaemonState() {
   };
 }
 
-function sendRequest(socketPath: string, method: string, params: Record<string, unknown> = {}): Promise<DaemonResponse> {
+function sendRequest(
+  socketPath: string,
+  method: string,
+  params: Record<string, unknown> = {},
+): Promise<DaemonResponse> {
   return sendSocketRequest(socketPath, method, params);
 }
 
@@ -56,7 +63,7 @@ describe("UnixSocketServer feature flag handlers", () => {
       "http://localhost:0/mcp",
       createFakeDaemonState(),
       fakeTimer,
-      featureFlagService
+      featureFlagService,
     );
     await server.start();
   });
@@ -72,7 +79,9 @@ describe("UnixSocketServer feature flag handlers", () => {
     const response = await sendRequest(socketPath, "ide/listFeatureFlags");
 
     expect(response.success).toBe(true);
-    const result = response.result as { flags: Array<{ key: string; label: string; enabled: boolean }> };
+    const result = response.result as {
+      flags: Array<{ key: string; label: string; enabled: boolean }>;
+    };
     expect(result.flags).toHaveLength(2);
     expect(result.flags[0].key).toBe("debug");
     expect(result.flags[0].enabled).toBe(false);
@@ -94,7 +103,7 @@ describe("UnixSocketServer feature flag handlers", () => {
     // Verify persistence
     const listResponse = await sendRequest(socketPath, "ide/listFeatureFlags");
     const listResult = listResponse.result as { flags: Array<{ key: string; enabled: boolean }> };
-    const debugFlag = listResult.flags.find(f => f.key === "debug");
+    const debugFlag = listResult.flags.find((f) => f.key === "debug");
     expect(debugFlag?.enabled).toBe(true);
   });
 
@@ -115,13 +124,16 @@ describe("UnixSocketServer feature flag handlers", () => {
     expect(response.error).toContain("Unknown feature flag");
   });
 
-  test("ide/setSessionToolCapability persists then broadcasts a tools list refresh", async () => {
-    const writes: Array<{ sessionUuid: string; capability: string; enabled: boolean }> = [];
+  test("ide/setSessionToolEnabled persists then broadcasts a tools list refresh", async () => {
+    const writes: Array<{ sessionUuid: string; toolName: string; enabled: boolean }> = [];
     const profileService = {
-      setEnabled: async (sessionUuid: string, capability: string, enabled: boolean) => {
-        writes.push({ sessionUuid, capability, enabled });
+      setEnabled: async (sessionUuid: string, toolName: string, enabled: boolean) => {
+        writes.push({ sessionUuid, toolName, enabled });
       },
     };
+    ToolRegistry.register("clipboard", "clipboard", z.object({}), async () => ({ content: [] }), {
+      defaultEnabled: false,
+    });
     await server.close();
     server = new UnixSocketServer(
       socketPath,
@@ -129,28 +141,31 @@ describe("UnixSocketServer feature flag handlers", () => {
       createFakeDaemonState(),
       fakeTimer,
       featureFlagService,
-      { sessionToolProfileService: profileService }
+      { sessionToolSelectionService: profileService },
     );
     await server.start();
 
     const emitted: string[] = [];
-    const unsubscribe = ListChangedBroadcaster.subscribe(kind => emitted.push(kind));
+    const unsubscribe = ListChangedBroadcaster.subscribe((kind) => emitted.push(kind));
     try {
-      const response = await sendRequest(socketPath, "ide/setSessionToolCapability", {
+      const response = await sendRequest(socketPath, "ide/setSessionToolEnabled", {
         sessionUuid: "device-session-1",
-        capability: "clipboard",
+        toolName: "clipboard",
         enabled: false,
       });
 
       expect(response.success).toBe(true);
-      expect(writes).toEqual([{
-        sessionUuid: "device-session-1",
-        capability: "clipboard",
-        enabled: false,
-      }]);
+      expect(writes).toEqual([
+        {
+          sessionUuid: "device-session-1",
+          toolName: "clipboard",
+          enabled: false,
+        },
+      ]);
       expect(emitted).toEqual(["tools"]);
     } finally {
       unsubscribe();
+      ToolRegistry.clearTools();
     }
   });
 });

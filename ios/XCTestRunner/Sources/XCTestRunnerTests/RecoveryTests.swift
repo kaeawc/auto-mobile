@@ -359,7 +359,7 @@ private final class RecoveryMCPClient: AutoMobileMCPClient {
 
     func callTool(name: String, arguments: [String: Any], timeout _: TimeInterval) throws -> MCPToolResponse {
         calls.append(Call(name: name, arguments: arguments))
-        if name == "setToolCapability" {
+        if name == "setToolEnabled" {
             return MCPToolResponse(text: "{\"enabled\":true}")
         }
         if name == "executePlan" {

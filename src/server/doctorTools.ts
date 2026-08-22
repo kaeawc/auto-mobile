@@ -11,10 +11,12 @@ import { runDoctor } from "../doctor";
 /**
  * Schema for the doctor tool
  */
-export const doctorSchema = z.object({
-  android: z.boolean().optional().describe("Run Android-specific checks only"),
-  ios: z.boolean().optional().describe("Run iOS-specific checks only"),
-}).strict();
+export const doctorSchema = z
+  .object({
+    android: z.boolean().optional().describe("Run Android-specific checks only"),
+    ios: z.boolean().optional().describe("Run iOS-specific checks only"),
+  })
+  .strict();
 
 /**
  * Arguments for the doctor tool
@@ -39,6 +41,7 @@ export function registerDoctorTools(): void {
       });
 
       return createJSONToolResponse(report);
-    }
+    },
+    { defaultEnabled: true },
   );
 }

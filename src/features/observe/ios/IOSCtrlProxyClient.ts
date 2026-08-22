@@ -393,7 +393,12 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
    * WebSocket push events and explicit invalidateCache() calls after actions.
    */
   private cachedHierarchy: CtrlProxyCachedHierarchy | null = null;
-  private static readonly CACHE_FRESH_TTL_MS = 500;
+  // Raised from 500ms toward maxObservationAgeMs so cache hits replace device
+  // round-trips during multi-step sequences, leaning on unsolicited
+  // `hierarchy_update` pushes to keep the cache warm (#5472). Still floored by
+  // `Math.min(cacheFreshTtlMs, maxObservationAgeMs())` in CtrlProxyHierarchy, and
+  // a stale CAPTURE age past maxObservationAgeMs still forces re-verification.
+  private static readonly CACHE_FRESH_TTL_MS = 2000;
   private hierarchyNavigationDetector: HierarchyNavigationDetector | null = null;
   private readonly hierarchyObservationStreamSuppressions: Map<string, NodeJS.Timeout> = new Map();
 
@@ -466,6 +471,14 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   private sdkEventPollAbortController: AbortController | null = null;
   private sdkEventPollInFlight: { generation: number; promise: Promise<SdkEventPollResult> } | null = null;
   private static readonly SDK_EVENT_POLL_TIMEOUT_MS = 2000;
+  // Fast cadence for the CtrlProxy /sdk-events long-poll (was a bare `2000`).
+  private static readonly SDK_EVENT_POLL_INTERVAL_MS = 2000;
+  // After this many consecutive empty batches (e.g. an app with no SDK
+  // integrated) the poll backs off to the slower cadence below. Any inbound WS
+  // activity resets the counter and restores fast cadence (#5472, AC#2).
+  private static readonly SDK_EVENT_POLL_EMPTY_BATCHES_BEFORE_BACKOFF = 5;
+  private static readonly SDK_EVENT_POLL_BACKOFF_INTERVAL_MS = 30_000;
+  private sdkEventPollConsecutiveEmpty = 0;
   private static readonly SDK_IDENTITY_REFRESH_TIMEOUT_MS = 100;
   private static readonly SDK_IDENTITY_REFRESH_RETRY_MS = 10;
 
@@ -954,6 +967,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   }
 
   protected handleMessage(data: WebSocket.Data): void {
+    // Inbound frames indicate an active app; reset the SDK-event poll backoff.
+    this.noteSdkEventPollWsActivity();
     try {
       const message = JSON.parse(data.toString()) as WebSocketMessage;
       this.processMessage(message);
@@ -962,7 +977,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     }
   }
 
-  private sdkEventPollInterval: ReturnType<typeof setInterval> | null = null;
+  private sdkEventPollTimer: ReturnType<typeof setTimeout> | null = null;
 
   protected onConnectionEstablished(): void {
     // Reset failure counter on successful connection
@@ -1064,10 +1079,62 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
   private startSdkEventPolling(): void {
     this.stopSdkEventPolling();
-    void this.pollSdkEvents();
-    this.sdkEventPollInterval = this.timer.setInterval(() => {
-      void this.pollSdkEvents();
-    }, 2000);
+    this.sdkEventPollConsecutiveEmpty = 0;
+    // Self-rescheduling loop (was a fixed setInterval) so the cadence can adapt:
+    // an immediate poll, then reschedule at fast or backed-off cadence based on
+    // whether batches keep coming back empty.
+    void this.runSdkEventPollCycle(this.sdkEventPollGeneration);
+  }
+
+  private async runSdkEventPollCycle(generation: number): Promise<void> {
+    if (generation !== this.sdkEventPollGeneration) {
+      return;
+    }
+    const result = await this.pollSdkEvents();
+    if (generation !== this.sdkEventPollGeneration) {
+      return;
+    }
+    if (result.receivedEvents) {
+      this.sdkEventPollConsecutiveEmpty = 0;
+    } else {
+      this.sdkEventPollConsecutiveEmpty++;
+    }
+    this.scheduleNextSdkEventPoll(generation);
+  }
+
+  private scheduleNextSdkEventPoll(generation: number): void {
+    if (generation !== this.sdkEventPollGeneration) {
+      return;
+    }
+    if (this.sdkEventPollTimer) {
+      this.timer.clearTimeout(this.sdkEventPollTimer);
+    }
+    this.sdkEventPollTimer = this.timer.setTimeout(() => {
+      void this.runSdkEventPollCycle(generation);
+    }, this.currentSdkEventPollIntervalMs());
+  }
+
+  private currentSdkEventPollIntervalMs(): number {
+    return this.sdkEventPollConsecutiveEmpty >= IOSCtrlProxyClient.SDK_EVENT_POLL_EMPTY_BATCHES_BEFORE_BACKOFF
+      ? IOSCtrlProxyClient.SDK_EVENT_POLL_BACKOFF_INTERVAL_MS
+      : IOSCtrlProxyClient.SDK_EVENT_POLL_INTERVAL_MS;
+  }
+
+  /**
+   * Any inbound WebSocket frame from the runner is a signal the app is active,
+   * so reset the empty-batch backoff and — if we had already backed off — restore
+   * fast cadence immediately rather than waiting out the long backoff timer.
+   */
+  private noteSdkEventPollWsActivity(): void {
+    if (this.sdkEventPollConsecutiveEmpty === 0) {
+      return;
+    }
+    const wasBackedOff =
+      this.sdkEventPollConsecutiveEmpty >= IOSCtrlProxyClient.SDK_EVENT_POLL_EMPTY_BATCHES_BEFORE_BACKOFF;
+    this.sdkEventPollConsecutiveEmpty = 0;
+    if (wasBackedOff && this.sdkEventPollTimer) {
+      this.scheduleNextSdkEventPoll(this.sdkEventPollGeneration);
+    }
   }
 
   private async pollSdkEvents(): Promise<SdkEventPollResult> {
@@ -1215,9 +1282,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   }
 
   private stopSdkEventPolling(): void {
-    if (this.sdkEventPollInterval) {
-      this.timer.clearInterval(this.sdkEventPollInterval);
-      this.sdkEventPollInterval = null;
+    if (this.sdkEventPollTimer) {
+      this.timer.clearTimeout(this.sdkEventPollTimer);
+      this.sdkEventPollTimer = null;
     }
   }
 

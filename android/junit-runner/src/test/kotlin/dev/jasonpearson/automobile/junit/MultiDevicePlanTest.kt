@@ -462,8 +462,8 @@ private class MultiDeviceCapturingFakeDaemonToolClient : DaemonToolClient {
     arguments: JsonObject,
     timeoutMs: Long,
   ): DaemonResponse {
-    if (toolName == "setToolCapability") {
-      return DaemonResponse(id = "capability", type = "mcp_response", success = true)
+    if (toolName == "setToolEnabled") {
+      return DaemonResponse(id = "tool-selection", type = "mcp_response", success = true)
     }
     capturedToolName = toolName
     capturedArguments = arguments

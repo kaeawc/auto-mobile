@@ -101,7 +101,9 @@ public class CtrlProxy {
             // Start the server
             try server.start()
 
-            // Wire up hierarchy debouncer to broadcast updates when content changes
+            // Wire up hierarchy debouncer to broadcast updates when content changes.
+            // The result callback is installed once; the debouncer itself is only
+            // started while a client is connected (see gating below).
             hierarchyDebouncer.setOnResult { [weak self] result in
                 switch result {
                 case let .changed(hierarchy, hash, extractionTimeMs):
@@ -118,30 +120,64 @@ public class CtrlProxy {
                     print("[CtrlProxy] Hierarchy extraction error: \(message)")
                 }
             }
-            hierarchyDebouncer.start()
 
-            // Start OSLogStore-based log capture (iOS 15+)
-            if #available(iOS 15.0, *) {
-                OSLogReaderHolder.shared.start()
-                print("[CtrlProxy] OSLogReader active (polling every 500ms)")
-            }
-
-            // Start FPS monitoring and broadcast updates to connected clients
-            fpsMonitor.startMonitoring { [weak self] snapshot in
-                self?.server.broadcastPerformanceUpdate(snapshot)
+            // Gate the always-on device samplers (hierarchy debouncer, OSLog poll,
+            // CADisplayLink FPS monitor) on client presence: they start on the first
+            // connected client and stop on the last disconnect, so an idle session
+            // with no client places no continuous load on the app under test
+            // (issue #5477). Sampler start/stop is hopped to the main queue so the
+            // presence callback never blocks the server queue with a hierarchy walk.
+            server.onClientPresenceChanged = { [weak self] hasClients in
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    if hasClients {
+                        self.startSamplers()
+                    } else {
+                        self.stopSamplers()
+                    }
+                }
             }
 
             print("[CtrlProxy] Service started")
             print("[CtrlProxy] WebSocket server listening on port \(Self.defaultPort)")
             print("[CtrlProxy] Endpoint: ws://localhost:\(Self.defaultPort)/ws")
             print("[CtrlProxy] Health check: http://localhost:\(Self.defaultPort)/health")
+            print("[CtrlProxy] Device samplers idle until a client connects")
+            print("[CtrlProxy] Ready to accept connections")
+        }
+    #endif
+
+    #if canImport(XCTest) && os(iOS)
+        /// Starts the device-side samplers. Called when the first client connects.
+        /// All three start operations are idempotent.
+        private func startSamplers() {
+            hierarchyDebouncer.start()
+
+            if #available(iOS 15.0, *) {
+                OSLogReaderHolder.shared.start()
+                print("[CtrlProxy] OSLogReader active (polling every \(OSLogReader.pollIntervalMs)ms)")
+            }
+
+            fpsMonitor.startMonitoring { [weak self] snapshot in
+                self?.server.broadcastPerformanceUpdate(snapshot)
+            }
+
             print(
                 "[CtrlProxy] Hierarchy debouncer active (polling every \(HierarchyDebouncer.defaultPollIntervalMs)ms)"
             )
             print(
                 "[CtrlProxy] FPS monitor active (reporting every \(DisplayLinkFPSMonitor.defaultReportIntervalSeconds)s)"
             )
-            print("[CtrlProxy] Ready to accept connections")
+        }
+
+        /// Stops the device-side samplers. Called when the last client disconnects.
+        private func stopSamplers() {
+            if #available(iOS 15.0, *) {
+                OSLogReaderHolder.shared.stop()
+            }
+            fpsMonitor.stopMonitoring()
+            hierarchyDebouncer.stop()
+            print("[CtrlProxy] Device samplers paused (no clients connected)")
         }
     #else
         public func start(bundleId _: String? = nil) throws {
@@ -152,6 +188,9 @@ public class CtrlProxy {
 
     /// Stops the service
     public func stop() {
+        // Clear the presence hook first so closing connections during teardown does
+        // not re-enter the sampler start/stop path.
+        server.onClientPresenceChanged = nil
         if #available(iOS 15.0, *) {
             OSLogReaderHolder.shared.stop()
         }

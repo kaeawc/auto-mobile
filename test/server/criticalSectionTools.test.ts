@@ -7,8 +7,8 @@ import { z } from "zod/v4";
 import { setDebugModeEnabled } from "../../src/utils/debug";
 import { logger } from "../../src/utils/logger";
 import { serverConfig } from "../../src/utils/ServerConfig";
-import type { SessionToolProfileService } from "../../src/features/toolCapabilities/SessionToolProfileService";
-import { runWithToolCapabilityContext } from "../../src/features/toolCapabilities/toolCapabilityContext";
+import type { SessionToolSelectionService } from "../../src/features/toolSelection/SessionToolSelectionService";
+import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 
 describe("criticalSection tool", () => {
   beforeAll(() => {
@@ -95,7 +95,7 @@ describe("criticalSection tool", () => {
     };
 
     expect(() => tool!.schema.parse(invalidParams)).toThrow(
-      /Every step inside a criticalSection must declare a non-empty 'device' parameter/
+      /Every step inside a criticalSection must declare a non-empty 'device' parameter/,
     );
   });
 
@@ -110,7 +110,7 @@ describe("criticalSection tool", () => {
     };
 
     expect(() => tool!.schema.parse(invalidParams)).toThrow(
-      /Every step inside a criticalSection must declare a non-empty 'device' parameter/
+      /Every step inside a criticalSection must declare a non-empty 'device' parameter/,
     );
   });
 
@@ -156,7 +156,7 @@ describe("criticalSection tool", () => {
     };
 
     await expect(
-			tool!.deviceAwareHandler!(fakeDevice, params, undefined, undefined)
+      tool!.deviceAwareHandler!(fakeDevice, params, undefined, undefined),
     ).rejects.toThrow(/Nested critical sections are not supported/);
   });
 
@@ -185,7 +185,7 @@ describe("criticalSection tool", () => {
     };
 
     await expect(
-			tool!.deviceAwareHandler!(fakeDevice, params, undefined, undefined)
+      tool!.deviceAwareHandler!(fakeDevice, params, undefined, undefined),
     ).rejects.toThrow(/Nested critical sections are not supported.*barrier/);
   });
 
@@ -208,7 +208,7 @@ describe("criticalSection tool", () => {
       async (params: { message: string }) => {
         executionLog.push(params.message);
         return { success: true };
-      }
+      },
     );
 
     const coordinator = CriticalSectionCoordinator.getInstance();
@@ -224,12 +224,7 @@ describe("criticalSection tool", () => {
       ],
     };
 
-    const response = await tool!.deviceAwareHandler!(
-      fakeDevice,
-      params,
-      undefined,
-      undefined
-    );
+    const response = await tool!.deviceAwareHandler!(fakeDevice, params, undefined, undefined);
 
     // Parse the JSON tool response
     expect(response.content).toBeDefined();
@@ -241,12 +236,17 @@ describe("criticalSection tool", () => {
     expect(executionLog).toEqual(["step1", "step2", "step3"]);
   });
 
-  test("rejects a capability-disabled nested step before invoking its handler", async () => {
+  test("does not apply public tool selection to a nested critical-section step", async () => {
     const tool = ToolRegistry.getToolForPlan("criticalSection");
     expect(tool).toBeDefined();
     const nestedHandler = mock(async () => ({ success: true }));
-    ToolRegistry.register("clipboard", "clipboard", z.object({ device: z.string() }), nestedHandler);
-    const profileService: Pick<SessionToolProfileService, "isEnabled"> = {
+    ToolRegistry.register(
+      "clipboard",
+      "clipboard",
+      z.object({ device: z.string() }),
+      nestedHandler,
+    );
+    const profileService: Pick<SessionToolSelectionService, "isEnabled"> = {
       isEnabled: async (_sessionUuid, capability) => capability === "test-authoring",
     };
     const fakeDevice: BootedDevice = {
@@ -255,24 +255,26 @@ describe("criticalSection tool", () => {
       name: "Test Device Capability",
     };
 
-    await expect(ToolRegistry.callInternal(
-      tool!,
-      {
-        lock: "capability-lock",
-        deviceCount: 1,
-        steps: [{ tool: "clipboard", params: { device: "A" } }],
-      },
-      undefined,
-      undefined,
-      {
-        forPlan: true,
-        targetDevice: fakeDevice,
-        sessionUuid: "session-1",
-        sessionToolProfileService: profileService,
-      },
-    )).rejects.toThrow("requires the 'clipboard' capability");
+    await expect(
+      ToolRegistry.callInternal(
+        tool!,
+        {
+          lock: "capability-lock",
+          deviceCount: 1,
+          steps: [{ tool: "clipboard", params: { device: "A" } }],
+        },
+        undefined,
+        undefined,
+        {
+          forPlan: true,
+          targetDevice: fakeDevice,
+          sessionUuid: "session-1",
+          sessionToolSelectionService: profileService,
+        },
+      ),
+    ).resolves.toBeDefined();
 
-    expect(nestedHandler).not.toHaveBeenCalled();
+    expect(nestedHandler).toHaveBeenCalledTimes(1);
   });
 
   test("routes a labeled critical-section nested step with the derived session (union re-enables)", async () => {
@@ -284,9 +286,15 @@ describe("criticalSection tool", () => {
     const tool = ToolRegistry.getToolForPlan("criticalSection");
     expect(tool).toBeDefined();
     const nestedHandler = mock(async () => ({ success: true }));
-    ToolRegistry.register("clipboard", "clipboard", z.object({ device: z.string(), sessionUuid: z.string().optional() }), nestedHandler);
-    const profileService: Pick<SessionToolProfileService, "isEnabled"> = {
-      isEnabled: async (sessionUuid, capability) => sessionUuid !== "base-session" || capability === "test-authoring",
+    ToolRegistry.register(
+      "clipboard",
+      "clipboard",
+      z.object({ device: z.string(), sessionUuid: z.string().optional() }),
+      nestedHandler,
+    );
+    const profileService: Pick<SessionToolSelectionService, "isEnabled"> = {
+      isEnabled: async (sessionUuid, capability) =>
+        sessionUuid !== "base-session" || capability === "test-authoring",
     };
     const fakeDevice: BootedDevice = {
       platform: "android",
@@ -295,7 +303,7 @@ describe("criticalSection tool", () => {
     };
     const restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
       executionTargetResolver: {
-        resolveExecutionTarget: async input => ({
+        resolveExecutionTarget: async (input) => ({
           args: input.args,
           baseSessionUuid: "base-session",
           device: fakeDevice,
@@ -305,10 +313,10 @@ describe("criticalSection tool", () => {
         }),
       },
       auditRunner: {
-        run: async input => input.handler(input.device, input.args, input.progress, input.signal),
+        run: async (input) => input.handler(input.device, input.args, input.progress, input.signal),
       },
       afterToolCall: {
-        handle: async input => ({ durationMs: 0, finalizedResponse: input.response }),
+        handle: async (input) => ({ durationMs: 0, finalizedResponse: input.response }),
       },
       planLifecycleManager: {
         afterExecution: async () => {},
@@ -316,14 +324,15 @@ describe("criticalSection tool", () => {
     });
 
     try {
-      await runWithToolCapabilityContext(
-        { routingSessionUuid: "base-session", sessionToolProfileService: profileService },
-        () => tool!.handler({
-          lock: "base-profile-lock",
-          device: "B",
-          deviceCount: 1,
-          steps: [{ tool: "clipboard", params: { device: "B" } }],
-        }),
+      await runWithToolSelectionContext(
+        { routingSessionUuid: "base-session", sessionToolSelectionService: profileService },
+        () =>
+          tool!.handler({
+            lock: "base-profile-lock",
+            device: "B",
+            deviceCount: 1,
+            steps: [{ tool: "clipboard", params: { device: "B" } }],
+          }),
       );
 
       expect(nestedHandler).toHaveBeenCalledTimes(1);
@@ -334,14 +343,19 @@ describe("criticalSection tool", () => {
     }
   });
 
-  test("denies a labeled critical-section nested step when base and derived both narrow it away", async () => {
+  test("keeps a labeled nested step independent of public tool selection", async () => {
     // Union semantics remain restrictive when NEITHER session grants the
     // capability (issue #4611 Gap B, the "both narrow" direction).
     const tool = ToolRegistry.getToolForPlan("criticalSection");
     expect(tool).toBeDefined();
     const nestedHandler = mock(async () => ({ success: true }));
-    ToolRegistry.register("clipboard", "clipboard", z.object({ device: z.string(), sessionUuid: z.string().optional() }), nestedHandler);
-    const profileService: Pick<SessionToolProfileService, "isEnabled"> = {
+    ToolRegistry.register(
+      "clipboard",
+      "clipboard",
+      z.object({ device: z.string(), sessionUuid: z.string().optional() }),
+      nestedHandler,
+    );
+    const profileService: Pick<SessionToolSelectionService, "isEnabled"> = {
       // Only test-authoring is granted; clipboard is denied for every session.
       isEnabled: async (_sessionUuid, capability) => capability === "test-authoring",
     };
@@ -352,7 +366,7 @@ describe("criticalSection tool", () => {
     };
     const restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
       executionTargetResolver: {
-        resolveExecutionTarget: async input => ({
+        resolveExecutionTarget: async (input) => ({
           args: input.args,
           baseSessionUuid: "base-session",
           device: fakeDevice,
@@ -362,10 +376,10 @@ describe("criticalSection tool", () => {
         }),
       },
       auditRunner: {
-        run: async input => input.handler(input.device, input.args, input.progress, input.signal),
+        run: async (input) => input.handler(input.device, input.args, input.progress, input.signal),
       },
       afterToolCall: {
-        handle: async input => ({ durationMs: 0, finalizedResponse: input.response }),
+        handle: async (input) => ({ durationMs: 0, finalizedResponse: input.response }),
       },
       planLifecycleManager: {
         afterExecution: async () => {},
@@ -373,17 +387,20 @@ describe("criticalSection tool", () => {
     });
 
     try {
-      await expect(runWithToolCapabilityContext(
-        { routingSessionUuid: "base-session", sessionToolProfileService: profileService },
-        () => tool!.handler({
-          lock: "both-narrow-lock",
-          device: "B",
-          deviceCount: 1,
-          steps: [{ tool: "clipboard", params: { device: "B" } }],
-        }),
-      )).rejects.toThrow("requires the 'clipboard' capability");
+      await expect(
+        runWithToolSelectionContext(
+          { routingSessionUuid: "base-session", sessionToolSelectionService: profileService },
+          () =>
+            tool!.handler({
+              lock: "both-narrow-lock",
+              device: "B",
+              deviceCount: 1,
+              steps: [{ tool: "clipboard", params: { device: "B" } }],
+            }),
+        ),
+      ).resolves.toBeDefined();
 
-      expect(nestedHandler).not.toHaveBeenCalled();
+      expect(nestedHandler).toHaveBeenCalledTimes(1);
     } finally {
       restorePipelineOverrides();
     }
@@ -401,13 +418,19 @@ describe("criticalSection tool", () => {
 
     const executionLog: string[] = [];
     const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
-    ToolRegistry.registerDeviceAware("mockPlanExecutableHiddenStep", "Mock hidden plan-executable step", z.object({
-      device: z.string(),
-      value: z.string(),
-    }), async (_device, params: { device: string; value: string }) => {
-      executionLog.push(`${params.device}:${params.value}`);
-      return { success: true };
-    }, { debugOnly: true, planExecutable: true });
+    ToolRegistry.registerDeviceAware(
+      "mockPlanExecutableHiddenStep",
+      "Mock hidden plan-executable step",
+      z.object({
+        device: z.string(),
+        value: z.string(),
+      }),
+      async (_device, params: { device: string; value: string }) => {
+        executionLog.push(`${params.device}:${params.value}`);
+        return { success: true };
+      },
+      { debugOnly: true, planExecutable: true },
+    );
 
     expect(ToolRegistry.getTool("mockPlanExecutableHiddenStep")).toBeUndefined();
     expect(ToolRegistry.getToolForPlan("mockPlanExecutableHiddenStep")).toBeDefined();
@@ -424,12 +447,7 @@ describe("criticalSection tool", () => {
       ],
     };
 
-    const response = await tool!.deviceAwareHandler!(
-      fakeDevice,
-      params,
-      undefined,
-      undefined
-    );
+    const response = await tool!.deviceAwareHandler!(fakeDevice, params, undefined, undefined);
 
     expect(response.content).toBeDefined();
     const result = JSON.parse(response.content[0].text);
@@ -437,11 +455,9 @@ describe("criticalSection tool", () => {
     expect(result.executedSteps).toBe(1);
     expect(executionLog).toEqual(["A:filled"]);
     expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("Plan execution is using gated tool \"mockPlanExecutableHiddenStep\"")
+      expect.stringContaining('Plan execution is using gated tool "mockPlanExecutableHiddenStep"'),
     );
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("--debug is disabled")
-    );
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("--debug is disabled"));
 
     warnSpy.mockRestore();
   });
@@ -456,7 +472,13 @@ describe("criticalSection tool", () => {
       name: "Test Device Hidden Debug Tool",
     };
 
-    ToolRegistry.registerDeviceAware("mockDebugOnlyHiddenStep", "Mock debug-only hidden step", z.object({ device: z.string() }), async () => ({ success: true }), { debugOnly: true });
+    ToolRegistry.registerDeviceAware(
+      "mockDebugOnlyHiddenStep",
+      "Mock debug-only hidden step",
+      z.object({ device: z.string() }),
+      async () => ({ success: true }),
+      { debugOnly: true },
+    );
 
     expect(ToolRegistry.getTool("mockDebugOnlyHiddenStep")).toBeUndefined();
     expect(ToolRegistry.getToolForPlan("mockDebugOnlyHiddenStep")).toBeUndefined();
@@ -473,7 +495,7 @@ describe("criticalSection tool", () => {
     };
 
     await expect(
-      tool!.deviceAwareHandler!(fakeDevice, params, undefined, undefined)
+      tool!.deviceAwareHandler!(fakeDevice, params, undefined, undefined),
     ).rejects.toThrow(/Tool "mockDebugOnlyHiddenStep" not found in registry/);
   });
 
@@ -489,13 +511,19 @@ describe("criticalSection tool", () => {
 
     const executionLog: string[] = [];
     const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
-    ToolRegistry.registerDeviceAware("mockEmbeddedPlanExecutableStep", "Mock embedded plan-executable step", z.object({
-      device: z.string(),
-      value: z.string(),
-    }), async (_device, params: { device: string; value: string }) => {
-      executionLog.push(`${params.device}:${params.value}`);
-      return { success: true };
-    }, { embeddedSdkOnly: true, planExecutable: true });
+    ToolRegistry.registerDeviceAware(
+      "mockEmbeddedPlanExecutableStep",
+      "Mock embedded plan-executable step",
+      z.object({
+        device: z.string(),
+        value: z.string(),
+      }),
+      async (_device, params: { device: string; value: string }) => {
+        executionLog.push(`${params.device}:${params.value}`);
+        return { success: true };
+      },
+      { embeddedSdkOnly: true, planExecutable: true },
+    );
 
     expect(ToolRegistry.getTool("mockEmbeddedPlanExecutableStep")).toBeUndefined();
     expect(ToolRegistry.getToolForPlan("mockEmbeddedPlanExecutableStep")).toBeDefined();
@@ -512,27 +540,21 @@ describe("criticalSection tool", () => {
       ],
     };
 
-    const response = await tool!.deviceAwareHandler!(
-      fakeDevice,
-      params,
-      undefined,
-      undefined
-    );
+    const response = await tool!.deviceAwareHandler!(fakeDevice, params, undefined, undefined);
 
     const result = JSON.parse(response.content[0].text);
     expect(result.success).toBe(true);
     expect(result.executedSteps).toBe(1);
     expect(executionLog).toEqual(["A:synced"]);
     expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("Plan execution is using gated tool \"mockEmbeddedPlanExecutableStep\"")
+      expect.stringContaining(
+        'Plan execution is using gated tool "mockEmbeddedPlanExecutableStep"',
+      ),
     );
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("embedded SDK mode is disabled")
-    );
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("embedded SDK mode is disabled"));
 
     warnSpy.mockRestore();
   });
-
 
   test("fails fast when a step fails", async () => {
     const tool = ToolRegistry.getToolForPlan("criticalSection");
@@ -553,18 +575,13 @@ describe("criticalSection tool", () => {
       async (params: { message: string }) => {
         executionLog.push(params.message);
         return { success: true };
-      }
+      },
     );
 
-    ToolRegistry.register(
-      "mockFailure",
-      "Mock failure step",
-      z.object({}),
-      async () => {
-        executionLog.push("failure");
-        throw new Error("Simulated failure");
-      }
-    );
+    ToolRegistry.register("mockFailure", "Mock failure step", z.object({}), async () => {
+      executionLog.push("failure");
+      throw new Error("Simulated failure");
+    });
 
     const coordinator = CriticalSectionCoordinator.getInstance();
     coordinator.registerExpectedDevices("fail-lock", 1);
@@ -580,7 +597,7 @@ describe("criticalSection tool", () => {
     };
 
     await expect(
-			tool!.deviceAwareHandler!(fakeDevice, params, undefined, undefined)
+      tool!.deviceAwareHandler!(fakeDevice, params, undefined, undefined),
     ).rejects.toThrow(/Simulated failure/);
 
     // Verify only first two steps executed
@@ -597,31 +614,43 @@ describe("criticalSection tool", () => {
       name: "Test Device Structured Failure",
     };
 
-    ToolRegistry.register("mockStructuredFailure", "structured failure", z.object({}), async () => ({
-      isError: true,
-      content: [{
-        type: "text" as const,
-        text: JSON.stringify({
-          success: false,
-          message: "Failed to kill android device: Emulator is not running",
-          error: {
-            code: "device_already_stopped",
-            message: "Failed to kill android device: Emulator is not running",
+    ToolRegistry.register(
+      "mockStructuredFailure",
+      "structured failure",
+      z.object({}),
+      async () => ({
+        isError: true,
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify({
+              success: false,
+              message: "Failed to kill android device: Emulator is not running",
+              error: {
+                code: "device_already_stopped",
+                message: "Failed to kill android device: Emulator is not running",
+              },
+            }),
           },
-        }),
-      }],
-    }));
+        ],
+      }),
+    );
 
     CriticalSectionCoordinator.getInstance().registerExpectedDevices("structured-failure-lock", 1);
 
     await expect(
-      tool!.deviceAwareHandler!(fakeDevice, {
-        lock: "structured-failure-lock",
-        deviceCount: 1,
-        steps: [{ tool: "mockStructuredFailure", params: {} }],
-      }, undefined, undefined)
+      tool!.deviceAwareHandler!(
+        fakeDevice,
+        {
+          lock: "structured-failure-lock",
+          deviceCount: 1,
+          steps: [{ tool: "mockStructuredFailure", params: {} }],
+        },
+        undefined,
+        undefined,
+      ),
     ).rejects.toThrow(
-      /device_already_stopped: Failed to kill android device: Emulator is not running/
+      /device_already_stopped: Failed to kill android device: Emulator is not running/,
     );
   });
 
@@ -656,9 +685,9 @@ describe("criticalSection tool", () => {
     // Both wrapper layers are documented verbatim: the outer "Critical section
     // <lock> failed for device <id>" and the inner "Failed at step X/Y (<tool>)".
     await expect(
-			tool!.deviceAwareHandler!(fakeDevice, params, undefined, undefined)
+      tool!.deviceAwareHandler!(fakeDevice, params, undefined, undefined),
     ).rejects.toThrow(
-      /Critical section "wrap-lock" failed for device dev-wrap: Failed at step 2\/2 \(mockWrapBoom\): kaboom/
+      /Critical section "wrap-lock" failed for device dev-wrap: Failed at step 2\/2 \(mockWrapBoom\): kaboom/,
     );
   });
 });

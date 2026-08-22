@@ -14,12 +14,12 @@ with grep before citing. Full bug history: `references/history.md`.
 
 ## 1. Four identifiers, three lifecycles — never conflate them
 
-| Identifier | Minted by | Meaning | Persisted |
-|---|---|---|---|
-| `sessionUuid` | `IdGenerator` in startDevice (`src/server/deviceTools.ts`), autolock (`src/daemon/devicePool.ts`), or client-supplied | **Who is driving**: client/test session owning one device; caches, capability profile | yes (`device_sessions` table) |
-| `deviceSessionUuid` | `src/daemon/deviceSessionRegistry.ts` | **One device connection epoch**: minted per pool incarnation, retired on disconnect, re-minted on reconnect even for the same serial. Stream routing key | no — meaningless across daemon restarts |
-| `__mcpSessionId` | socket-server connection / MCP transport | Per-connection transport identity; implicit autolock resolution | no |
-| `deviceId` (serial/UDID) | adb / simctl | Human label + adb target only. **Mutable across reboots — never an identity key** | n/a |
+| Identifier               | Minted by                                                                                                             | Meaning                                                                                                                                                  | Persisted                               |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
+| `sessionUuid`            | `IdGenerator` in startDevice (`src/server/deviceTools.ts`), autolock (`src/daemon/devicePool.ts`), or client-supplied | **Who is driving**: client/test session owning one device; caches, tool-selection profile                                                                | yes (`device_sessions` table)           |
+| `deviceSessionUuid`      | `src/daemon/deviceSessionRegistry.ts`                                                                                 | **One device connection epoch**: minted per pool incarnation, retired on disconnect, re-minted on reconnect even for the same serial. Stream routing key | no — meaningless across daemon restarts |
+| `__mcpSessionId`         | socket-server connection / MCP transport                                                                              | Per-connection transport identity; implicit autolock resolution                                                                                          | no                                      |
+| `deviceId` (serial/UDID) | adb / simctl                                                                                                          | Human label + adb target only. **Mutable across reboots — never an identity key**                                                                        | n/a                                     |
 
 Three lifecycles overlap: (A) pooled device (`PooledDevice.status` +
 `incarnation` in `devicePool.ts`), (B) device-session epoch (registry),
@@ -157,6 +157,7 @@ wildcard (#5372 regression: strict compare broke every Android cold boot).
 ## 5. Fix patterns that stuck / anti-patterns
 
 **Stuck:**
+
 - Single choke point + listeners: route all removals through
   `DevicePool.removeDevice`, all releases through `SessionManager`, and hang
   cross-cutting concerns (registry retire, broadcast) off them.
@@ -172,6 +173,7 @@ wildcard (#5372 regression: strict compare broke every Android cold boot).
   `device_already_stopped`, phase-labeled ActionableErrors).
 
 **Anti-patterns (each caused a real regression):**
+
 - Widening a mutex / adding a barrier to "fix" ordering — breaks the
   shutdown drain contract (see warnings in `sessionManager.ts`).
 - Tightening identity matching without a wildcard for fields older callers

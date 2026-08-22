@@ -1,6 +1,6 @@
 import { ActionableError } from "../models";
 import { DaemonState } from "./daemonState";
-import { resolveCapabilityBaseSessionUuid } from "../features/toolCapabilities/capabilitySessionResolver";
+import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 
 /**
  * Authentication + session-scoping for the two live-screen daemon sockets
@@ -64,7 +64,7 @@ export class SessionScopedStreamAuthenticator implements StreamSocketAuthenticat
   constructor(
     private readonly resolveSessionManager: () => StreamAuthSessionManager | null,
     private readonly operation: string,
-    private readonly env: NodeJS.ProcessEnv = process.env
+    private readonly env: NodeJS.ProcessEnv = process.env,
   ) {}
 
   authorize({ sessionUuid, deviceId }: StreamAuthorizeInput): void {
@@ -77,7 +77,7 @@ export class SessionScopedStreamAuthenticator implements StreamSocketAuthenticat
       throw new ActionableError(
         `${this.operation} requires an authenticated daemon session. Connect through the AutoMobile ` +
           `daemon and include its sessionUuid on the request; set ${STREAM_SOCKET_AUTH_ENV}=0 to disable ` +
-          `this check (not recommended).`
+          `this check (not recommended).`,
       );
     }
 
@@ -85,16 +85,16 @@ export class SessionScopedStreamAuthenticator implements StreamSocketAuthenticat
     if (!sessionManager) {
       throw new ActionableError(
         `${this.operation} cannot be authenticated: the daemon session registry is unavailable. ` +
-          `Ensure the request is made against a running AutoMobile daemon.`
+          `Ensure the request is made against a running AutoMobile daemon.`,
       );
     }
 
     // Resolve derived `${base}:${label}` device-label sessions to the base whose
     // identity the daemon tracks, exactly as the main socket does (#4611/#4655).
-    const baseSessionUuid = resolveCapabilityBaseSessionUuid(uuid, sessionManager) ?? uuid;
+    const baseSessionUuid = resolveToolSelectionBaseSessionUuid(uuid, sessionManager) ?? uuid;
     if (!sessionManager.getSession(baseSessionUuid)) {
       throw new ActionableError(
-        `${this.operation} rejected: session ${uuid} is not an active daemon session (unknown or expired).`
+        `${this.operation} rejected: session ${uuid} is not an active daemon session (unknown or expired).`,
       );
     }
 
@@ -110,17 +110,17 @@ export class SessionScopedStreamAuthenticator implements StreamSocketAuthenticat
   private assertDeviceScope(
     sessionManager: StreamAuthSessionManager,
     deviceId: string,
-    baseSessionUuid: string
+    baseSessionUuid: string,
   ): void {
     const owner = sessionManager.getSessionForDevice(deviceId) ?? undefined;
     if (!owner) {
       return;
     }
-    const ownerBase = resolveCapabilityBaseSessionUuid(owner, sessionManager) ?? owner;
+    const ownerBase = resolveToolSelectionBaseSessionUuid(owner, sessionManager) ?? owner;
     if (ownerBase !== baseSessionUuid) {
       throw new ActionableError(
         `${this.operation} rejected: device ${deviceId} is bound to a different daemon session; ` +
-          `a subscriber cannot attach to another session's capture without authorization.`
+          `a subscriber cannot attach to another session's capture without authorization.`,
       );
     }
   }
@@ -131,7 +131,9 @@ export class SessionScopedStreamAuthenticator implements StreamSocketAuthenticat
  * registry. Fails closed: when the daemon is not initialized the registry is
  * unavailable and every request is rejected.
  */
-export function createDefaultStreamSocketAuthenticator(operation: string): StreamSocketAuthenticator {
+export function createDefaultStreamSocketAuthenticator(
+  operation: string,
+): StreamSocketAuthenticator {
   return new SessionScopedStreamAuthenticator(() => {
     const state = DaemonState.getInstance();
     return state.isInitialized() ? state.getSessionManager() : null;

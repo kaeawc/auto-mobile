@@ -26,7 +26,11 @@ import { formatToolResultLog } from "./toolResultLog";
 import { formatStructuredToolError } from "../utils/formatStructuredToolError";
 import { flattenTopLevelUnion } from "./TopLevelUnionFlattener";
 import { advertiseBoundsForCompact } from "./compactBoundsAdvertisement";
-import { finalizeToolResponse, type ObservationArtifactWriter, type ObservationBaselineStore } from "./finalizeToolResponse";
+import {
+  finalizeToolResponse,
+  type ObservationArtifactWriter,
+  type ObservationBaselineStore,
+} from "./finalizeToolResponse";
 import { INTERNAL_NO_DIFF_PARAM, markInternalToolCall } from "./internalToolCall";
 import { ListChangedBroadcaster } from "./listChangedBroadcast";
 import { getStructuredField, StructuredToolResponse } from "../utils/toolUtils";
@@ -36,17 +40,16 @@ import {
   InternalToolPayloads,
   narrowInternalToolEnvelope,
 } from "./internalToolPayloads";
-import { JsonToolOutputArtifactWriter, type ToolOutputArtifactRetention } from "./toolOutputArtifactWriter";
+import {
+  JsonToolOutputArtifactWriter,
+  type ToolOutputArtifactRetention,
+} from "./toolOutputArtifactWriter";
 import { getDefaultToolOutputsDir } from "../utils/toolOutputArtifacts";
-import type { SessionToolProfileService } from "../features/toolCapabilities/SessionToolProfileService";
+import type { SessionToolSelectionService } from "../features/toolSelection/SessionToolSelectionService";
 import {
-  assertToolEnabledForAnySession,
-} from "../features/toolCapabilities/toolCapabilityPolicy";
-import { resolveCapabilityBaseSessionUuid } from "../features/toolCapabilities/capabilitySessionResolver";
-import {
-  getToolCapabilityContext,
-  runWithToolCapabilityContext,
-} from "../features/toolCapabilities/toolCapabilityContext";
+  getToolSelectionContext,
+  runWithToolSelectionContext,
+} from "../features/toolSelection/toolSelectionContext";
 import { isDeviceLostError } from "./deviceLossOutcome";
 import { executionTracker } from "./executionTracker";
 
@@ -55,17 +58,19 @@ import { executionTracker } from "./executionTracker";
 export { flattenTopLevelUnion } from "./TopLevelUnionFlattener";
 
 function toAdvertisedJsonSchema(schema: any): Record<string, unknown> {
-  return flattenTopLevelUnion(toJSONSchema(schema, {
-    override: ({ zodSchema, jsonSchema }) => {
-      applyJsonSchemaOverride(zodSchema, jsonSchema);
-      if (isInjectedDeviceIdSchema(zodSchema)) {
-        const properties = jsonSchema.properties as Record<string, unknown> | undefined;
-        if (properties) {
-          delete properties.deviceId;
+  return flattenTopLevelUnion(
+    toJSONSchema(schema, {
+      override: ({ zodSchema, jsonSchema }) => {
+        applyJsonSchemaOverride(zodSchema, jsonSchema);
+        if (isInjectedDeviceIdSchema(zodSchema)) {
+          const properties = jsonSchema.properties as Record<string, unknown> | undefined;
+          if (properties) {
+            delete properties.deviceId;
+          }
         }
-      }
-    },
-  }));
+      },
+    }),
+  );
 }
 
 // Progress notification interface
@@ -87,29 +92,23 @@ interface InternalToolCallOptions {
   forPlan?: boolean;
   sessionUuid?: string;
   targetDevice?: BootedDevice;
-  sessionToolProfileService?: Pick<SessionToolProfileService, "isEnabled">;
+  sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled">;
 }
 
 interface InternalToolInvocationContext {
   args: Record<string, unknown>;
   routingSessionUuid?: string;
-  capabilitySessionUuid?: string;
-  planCapabilitiesAuthorized: boolean;
-  sessionToolProfileService?: Pick<SessionToolProfileService, "isEnabled">;
+  toolSelectionProfileUuid?: string;
+  sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled">;
 }
 
 // Gate reason emitted for `planOnly` tools — hidden from discovery by design,
 // expected in plans (so getToolForPlan does not warn about it).
 const PLAN_ONLY_GATE_REASON = "plan-only tool";
 
-function preservesPlanCapabilityAuthorization(
-  toolName: string,
-  parentAuthorized: boolean | undefined,
-): boolean {
-  return parentAuthorized === true || toolName === "executePlan";
-}
-
 interface ToolRegistrationOptions {
+  /** Built-in session default before startup or persisted exact-tool overrides. */
+  defaultEnabled?: boolean;
   supportsProgress?: boolean;
   debugOnly?: boolean;
   hidden?: boolean;
@@ -150,6 +149,8 @@ export interface RegisteredTool {
   description: string;
   schema: any;
   handler: ToolHandler;
+  defaultEnabled: boolean;
+  defaultDeclared: boolean;
   supportsProgress?: boolean;
   requiresDevice?: boolean;
   deviceAwareHandler?: DeviceAwareToolHandler;
@@ -185,13 +186,6 @@ interface ExecutionTargetInput {
 interface ExecutionTargetContext {
   args: any;
   baseSessionUuid: string | undefined;
-  // Capability enforcement session (issue #4611 Gap A). Distinct from the
-  // routing `sessionUuid`: for a deviceId-only call there is no routing session,
-  // so this is derived from the device's owning session and enforcement still
-  // applies. May be a derived `${base}:${label}` label session. Optional so
-  // test pipeline overrides need not set it (the assert falls back to
-  // `sessionUuid`).
-  capabilitySessionUuid?: string | undefined;
   device: BootedDevice | undefined;
   internalCall: boolean;
   sessionUuid: string | undefined;
@@ -216,11 +210,18 @@ interface AuditRunner {
 }
 
 interface NavigationToolCallRecorder {
-  record(name: string, args: any, device: BootedDevice | undefined, sessionUuid: string | undefined): void;
+  record(
+    name: string,
+    args: any,
+    device: BootedDevice | undefined,
+    sessionUuid: string | undefined,
+  ): void;
 }
 
 /** Removes routing and execution implementation details before persisting a navigation edge. */
-export function stripNavigationInternalParams(args: Record<string, unknown>): Record<string, unknown> {
+export function stripNavigationInternalParams(
+  args: Record<string, unknown>,
+): Record<string, unknown> {
   const clean = { ...args };
   delete clean.__mcpSessionId;
   delete clean.__executionId;
@@ -235,23 +236,21 @@ function withAmbientDeviceContext(
   execution: { executionId: string; startTime: number } | undefined,
 ): Record<string, unknown> {
   const needsRoutingSession = routingSessionUuid && args.sessionUuid !== routingSessionUuid;
-  const needsExecution = execution && (
-    args.__executionId !== execution.executionId
-    || args.__executionStartTime !== execution.startTime
-  );
+  const needsExecution =
+    execution &&
+    (args.__executionId !== execution.executionId ||
+      args.__executionStartTime !== execution.startTime);
   if (!needsRoutingSession && !needsExecution) {
     return args;
   }
   return {
     ...args,
-    ...(needsRoutingSession
-      ? { sessionUuid: routingSessionUuid }
-      : {}),
+    ...(needsRoutingSession ? { sessionUuid: routingSessionUuid } : {}),
     ...(needsExecution
       ? {
-        __executionId: execution!.executionId,
-        __executionStartTime: execution!.startTime,
-      }
+          __executionId: execution!.executionId,
+          __executionStartTime: execution!.startTime,
+        }
       : {}),
   };
 }
@@ -281,7 +280,7 @@ interface AfterToolCallHandler {
 type ObservationArtifactWriterFactory = (
   outputDirectory: string,
   timer: Timer,
-  retention?: ToolOutputArtifactRetention
+  retention?: ToolOutputArtifactRetention,
 ) => ObservationArtifactWriter;
 
 const AUTOMATIC_TOOL_OUTPUT_RETENTION: ToolOutputArtifactRetention = {
@@ -316,8 +315,8 @@ export interface PlanLifecycleInput {
   // (issue #4611 Gap D). Invoked AFTER a real release for every session freed —
   // base and derived label sessions alike — never optimistically.
   sessionBindingReleaseHandler?: SessionBindingReleaseHandler;
-  /** Removes persisted capability overrides for sessions actually released. */
-  sessionToolProfileService?: Partial<Pick<SessionToolProfileService, "deleteSession">>;
+  /** Removes persisted tool overrides for sessions actually released. */
+  sessionToolSelectionService?: Partial<Pick<SessionToolSelectionService, "deleteSession">>;
 }
 
 interface PlanLifecycleManager {
@@ -347,9 +346,10 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     const deviceLabel = typeof args.device === "string" ? args.device : undefined;
     const declaredDeviceLabels = Array.isArray(args.devices) ? args.devices : undefined;
     const mcpSessionId = typeof args.__mcpSessionId === "string" ? args.__mcpSessionId : undefined;
-    const execution = typeof args.__executionId === "string" && typeof args.__executionStartTime === "number"
-      ? { executionId: args.__executionId, startTime: args.__executionStartTime }
-      : undefined;
+    const execution =
+      typeof args.__executionId === "string" && typeof args.__executionStartTime === "number"
+        ? { executionId: args.__executionId, startTime: args.__executionStartTime }
+        : undefined;
     // Internal tool-to-tool marker (#3053 / #3087): internal callers (PlanExecutor
     // steps, navigation/setup replays) set this via `markInternalToolCall` so a
     // plan/navigation step's finalized envelope is never diffed/stripped and never
@@ -357,14 +357,17 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     // `.observation.viewHierarchy` reader stays correct).
     const internalCall = args[INTERNAL_NO_DIFF_PARAM] === true;
     let sessionUuid = baseSessionUuid;
-    const keepScreenAwake = typeof args.keepScreenAwake === "boolean" ? args.keepScreenAwake : undefined;
+    const keepScreenAwake =
+      typeof args.keepScreenAwake === "boolean" ? args.keepScreenAwake : undefined;
 
     if (deviceLabel && shouldResolveDevice) {
       if (!DaemonState.getInstance().isInitialized()) {
         throw new ActionableError("Device labels require an active daemon session.");
       }
       if (!baseSessionUuid) {
-        throw new ActionableError(`Device label '${deviceLabel}' requires sessionUuid to be provided.`);
+        throw new ActionableError(
+          `Device label '${deviceLabel}' requires sessionUuid to be provided.`,
+        );
       }
 
       const deviceLabelMap = getDeviceLabelMap(baseSessionUuid);
@@ -380,12 +383,14 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         sessionUuid = baseSessionUuid;
       } else {
         throw new ActionableError(
-          `Device label '${deviceLabel}' is not allocated. Provide a devices list to executePlan before using device labels.`
+          `Device label '${deviceLabel}' is not allocated. Provide a devices list to executePlan before using device labels.`,
         );
       }
 
       if (providedDeviceId) {
-        logger.warn(`[ToolRegistry] Ignoring deviceId because device label '${deviceLabel}' was provided.`);
+        logger.warn(
+          `[ToolRegistry] Ignoring deviceId because device label '${deviceLabel}' was provided.`,
+        );
         providedDeviceId = undefined;
       }
     }
@@ -394,13 +399,24 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     let platform: SomePlatform = args.platform || "either";
 
     if (shouldResolveDevice) {
-      const implicitSessionUuid = this.resolveImplicitAutolockSession(platform, sessionUuid, providedDeviceId, mcpSessionId, execution);
+      const implicitSessionUuid = this.resolveImplicitAutolockSession(
+        platform,
+        sessionUuid,
+        providedDeviceId,
+        mcpSessionId,
+        execution,
+      );
       if (implicitSessionUuid) {
         sessionUuid = implicitSessionUuid;
         if (execution) {
-          executionTracker.setResolvedAutolockSessionUuid(execution.executionId, implicitSessionUuid);
+          executionTracker.setResolvedAutolockSessionUuid(
+            execution.executionId,
+            implicitSessionUuid,
+          );
         }
-        logger.info(`[ToolRegistry] Resolved implicit autolock session for MCP session ${mcpSessionId}: ${implicitSessionUuid}`);
+        logger.info(
+          `[ToolRegistry] Resolved implicit autolock session for MCP session ${mcpSessionId}: ${implicitSessionUuid}`,
+        );
       }
       if (sessionUuid) {
         // Handlers must use the resolved label or implicit session, not the
@@ -408,21 +424,39 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         // that ToolRegistry selected.
         args.sessionUuid = sessionUuid;
       }
-      await this.enforceSessionUuidForMultipleIos(platform, sessionUuid, providedDeviceId, deviceSessionManager);
-      await this.enforceSessionUuidForAutolock(platform, sessionUuid, providedDeviceId, deviceSessionManager);
+      await this.enforceSessionUuidForMultipleIos(
+        platform,
+        sessionUuid,
+        providedDeviceId,
+        deviceSessionManager,
+      );
+      await this.enforceSessionUuidForAutolock(
+        platform,
+        sessionUuid,
+        providedDeviceId,
+        deviceSessionManager,
+      );
     }
 
-    logger.info(`[ToolRegistry] Tool ${name} called, sessionUuid=${sessionUuid}, daemonInitialized=${DaemonState.getInstance().isInitialized()}`);
+    logger.info(
+      `[ToolRegistry] Tool ${name} called, sessionUuid=${sessionUuid}, daemonInitialized=${DaemonState.getInstance().isInitialized()}`,
+    );
 
     // If session UUID provided, resolve device from session
     if (shouldResolveDevice && sessionUuid && DaemonState.getInstance().isInitialized()) {
       logger.info(`[ToolRegistry] Entering session-based device assignment for ${sessionUuid}`);
       const sessionManager = DaemonState.getInstance().getSessionManager();
       const devicePool = DaemonState.getInstance().getDevicePool();
-      const context = await createToolExecutionContext(sessionUuid, sessionManager, devicePool, {
-        keepScreenAwake,
-        platform: platform === "android" || platform === "ios" ? platform : undefined
-      }, execution);
+      const context = await createToolExecutionContext(
+        sessionUuid,
+        sessionManager,
+        devicePool,
+        {
+          keepScreenAwake,
+          platform: platform === "android" || platform === "ios" ? platform : undefined,
+        },
+        execution,
+      );
       if (context.deviceId && !providedDeviceId) {
         providedDeviceId = context.deviceId;
         logger.info(`[ToolRegistry] Resolved device from session: ${providedDeviceId}`);
@@ -439,7 +473,8 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       if (sessionUuid && DaemonState.getInstance().isInitialized() && providedDeviceId) {
         // Daemon session path: device already resolved via createToolExecutionContext.
         // Construct BootedDevice directly to avoid mutating global DeviceSessionManager state.
-        const resolvedPlatform = (platform === "android" || platform === "ios") ? platform : "android";
+        const resolvedPlatform =
+          platform === "android" || platform === "ios" ? platform : "android";
         const pooledDevice = DaemonState.getInstance().getDevicePool().getDevice(providedDeviceId);
         device = {
           deviceId: providedDeviceId,
@@ -450,12 +485,12 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         logger.info(`[ToolRegistry] ${name}: Using session-resolved device ${device.deviceId}`);
       } else {
         // Legacy single-agent path or no session: use DeviceSessionManager (may set global state)
-        logger.info(`[ToolRegistry] ${name}: Resolving device for platform=${platform}, providedDeviceId=${providedDeviceId}`);
-        device = await deviceSessionManager.ensureDeviceReady(
-          platform,
-          providedDeviceId,
-          { skipCtrlProxyDownload: serverConfig.isSkipCtrlProxyDownloadEnabled() }
+        logger.info(
+          `[ToolRegistry] ${name}: Resolving device for platform=${platform}, providedDeviceId=${providedDeviceId}`,
         );
+        device = await deviceSessionManager.ensureDeviceReady(platform, providedDeviceId, {
+          skipCtrlProxyDownload: serverConfig.isSkipCtrlProxyDownloadEnabled(),
+        });
         logger.info(`[ToolRegistry] ${name}: Using device ${device.deviceId}`);
       }
     } else {
@@ -476,29 +511,15 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
           IOSCtrlProxyClient.getInstance(device).bindSession(sessionUuid);
         }
       } catch (error) {
-        this.logger.debug(`[ToolRegistry] Best-effort CtrlProxy session bind skipped for ${name}: ${error}`);
+        this.logger.debug(
+          `[ToolRegistry] Best-effort CtrlProxy session bind skipped for ${name}: ${error}`,
+        );
       }
-    }
-
-    // Capability enforcement session (issue #4611 Gap A). A deviceId-only call
-    // has no routing sessionUuid, so a narrowed profile on the device's owning
-    // session would otherwise be silently bypassed (the policy treats an
-    // undefined session as fully enabled). When a routing session exists it IS
-    // the capability session (possibly a derived `${base}:${label}` label
-    // session); otherwise derive the device's owning session so enforcement
-    // still applies. Guarded on an initialized daemon — outside the daemon
-    // there is no session registry to consult. This mirrors the socket path,
-    // which already resolves deviceId -> session before enforcing.
-    let capabilitySessionUuid = sessionUuid;
-    if (!capabilitySessionUuid && device && DaemonState.getInstance().isInitialized()) {
-      capabilitySessionUuid =
-        DaemonState.getInstance().getSessionManager().getSessionForDevice?.(device.deviceId) ?? undefined;
     }
 
     return {
       args,
       baseSessionUuid,
-      capabilitySessionUuid,
       device,
       internalCall,
       sessionUuid,
@@ -510,7 +531,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     platform: SomePlatform,
     sessionUuid: string | undefined,
     providedDeviceId: string | undefined,
-    deviceSessionManager: DeviceSessionManager
+    deviceSessionManager: DeviceSessionManager,
   ): Promise<void> {
     if (sessionUuid || providedDeviceId) {
       return;
@@ -527,20 +548,20 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     }
 
     const connectedPlatforms = await deviceSessionManager.detectConnectedPlatforms();
-    const iosDevices = connectedPlatforms.filter(device => device.platform === "ios");
+    const iosDevices = connectedPlatforms.filter((device) => device.platform === "ios");
     if (iosDevices.length <= 1) {
       return;
     }
 
     if (platform === "either") {
-      const androidDevices = connectedPlatforms.filter(device => device.platform === "android");
+      const androidDevices = connectedPlatforms.filter((device) => device.platform === "android");
       if (androidDevices.length > 0) {
         return;
       }
     }
 
     throw new ActionableError(
-      "Multiple iOS simulators detected. Provide sessionUuid to target a specific simulator."
+      "Multiple iOS simulators detected. Provide sessionUuid to target a specific simulator.",
     );
   }
 
@@ -578,7 +599,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     platform: SomePlatform,
     sessionUuid: string | undefined,
     providedDeviceId: string | undefined,
-    deviceSessionManager: DeviceSessionManager
+    deviceSessionManager: DeviceSessionManager,
   ): Promise<void> {
     if (!isDevicePoolAutolockEnabled()) {
       return;
@@ -594,9 +615,10 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     }
 
     const connectedPlatforms = await deviceSessionManager.detectConnectedPlatforms();
-    const candidates = platform === "either"
-      ? connectedPlatforms
-      : connectedPlatforms.filter(device => device.platform === platform);
+    const candidates =
+      platform === "either"
+        ? connectedPlatforms
+        : connectedPlatforms.filter((device) => device.platform === platform);
 
     if (candidates.length <= 1) {
       return;
@@ -604,7 +626,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
 
     throw new ActionableError(
       "Device pool autolock is enabled and multiple devices are available. " +
-      "Call getAndroid or getApple first from this MCP session, or provide the returned sessionId (or a deviceId) to target a specific device."
+        "Call getAndroid or getApple first from this MCP session, or provide the returned sessionId (or a deviceId) to target a specific device.",
     );
   }
 }
@@ -622,7 +644,9 @@ export class DefaultAuditRunner implements AuditRunner {
 
     const packageName = await this.getForegroundPackageName(device);
     if (!packageName) {
-      this.log.warn(`[ToolRegistry] Could not determine foreground app, skipping memory audit for ${name}`);
+      this.log.warn(
+        `[ToolRegistry] Could not determine foreground app, skipping memory audit for ${name}`,
+      );
       return handler(device, args, progress, signal);
     }
 
@@ -638,7 +662,7 @@ export class DefaultAuditRunner implements AuditRunner {
       async () => {
         response = await handler(device, args, progress, signal);
       },
-      perf
+      perf,
     );
 
     if (!auditResult.passed) {
@@ -654,9 +678,7 @@ export class DefaultAuditRunner implements AuditRunner {
   private async getForegroundPackageName(device: BootedDevice): Promise<string | null> {
     try {
       const adb = defaultAdbClientFactory.create(device);
-      const { stdout } = await adb.executeCommand(
-        "shell dumpsys window | grep mCurrentFocus"
-      );
+      const { stdout } = await adb.executeCommand("shell dumpsys window | grep mCurrentFocus");
 
       const match = stdout.match(/\s+(\S+)\/\S+\}/);
       return match ? match[1] : null;
@@ -672,12 +694,23 @@ export class DefaultAuditRunner implements AuditRunner {
 // replayable in-app navigation paths. Module-level Set so record() does O(1)
 // membership checks without re-allocating the list on every tool call.
 export const NAVIGATION_RELEVANT_TOOLS = new Set([
-  "tapOn", "swipeOn", "pinchOn", "dragAndDrop",
-  "pressButton", "inputText", "clearText", "imeAction"
+  "tapOn",
+  "swipeOn",
+  "pinchOn",
+  "dragAndDrop",
+  "pressButton",
+  "inputText",
+  "clearText",
+  "imeAction",
 ]);
 
 class DefaultNavigationToolCallRecorder implements NavigationToolCallRecorder {
-  record(name: string, args: any, device: BootedDevice | undefined, sessionUuid: string | undefined): void {
+  record(
+    name: string,
+    args: any,
+    device: BootedDevice | undefined,
+    sessionUuid: string | undefined,
+  ): void {
     // Record tool call for navigation graph correlation before the handler mutates UI state.
     if (!NAVIGATION_RELEVANT_TOOLS.has(name)) {
       return;
@@ -717,24 +750,39 @@ function unwrapToolResponse(response: any): any {
 
 export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
   constructor(
-    private readonly createArtifactWriter: ObservationArtifactWriterFactory =
-    (outputDirectory, timer, retention) => new JsonToolOutputArtifactWriter({ outputDirectory, timer, retention })
+    private readonly createArtifactWriter: ObservationArtifactWriterFactory = (
+      outputDirectory,
+      timer,
+      retention,
+    ) => new JsonToolOutputArtifactWriter({ outputDirectory, timer, retention }),
   ) {}
 
   async handle(input: AfterToolCallInput): Promise<AfterToolCallResult> {
-    const { name, args, internalCall, response, sessionUuid, shouldResolveDevice, signal, timer, toolStartMs } = input;
+    const {
+      name,
+      args,
+      internalCall,
+      response,
+      sessionUuid,
+      shouldResolveDevice,
+      signal,
+      timer,
+      toolStartMs,
+    } = input;
 
     // Unwrap MCP response envelope to get the inner result for success/error checks.
     // Tools may return { content: [{ type: "text", text: '{"success":false,...}' }] }
     // instead of a plain { success, error } object.
     const unwrapped = unwrapToolResponse(response);
 
-    const toolSuccess = unwrapped && typeof unwrapped === "object" && "success" in unwrapped
-      ? unwrapped.success !== false
-      : true;
-    const toolError = unwrapped && typeof unwrapped === "object" && "error" in unwrapped
-      ? formatStructuredToolError(unwrapped.error) ?? String(unwrapped.error ?? "")
-      : null;
+    const toolSuccess =
+      unwrapped && typeof unwrapped === "object" && "success" in unwrapped
+        ? unwrapped.success !== false
+        : true;
+    const toolError =
+      unwrapped && typeof unwrapped === "object" && "error" in unwrapped
+        ? (formatStructuredToolError(unwrapped.error) ?? String(unwrapped.error ?? ""))
+        : null;
     if (unwrapped && typeof unwrapped === "object" && "success" in unwrapped) {
       const resultLog = formatToolResultLog({
         toolName: name,
@@ -758,7 +806,10 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
     // payload — the stringly-typed dead-read footgun is gone.
     if (name === "swipeOn" && args.lookFor) {
       const swipeEnvelope = narrowInternalToolEnvelope("swipeOn", response);
-      if (getStructuredField(swipeEnvelope, "success") && getStructuredField(swipeEnvelope, "found")) {
+      if (
+        getStructuredField(swipeEnvelope, "success") &&
+        getStructuredField(swipeEnvelope, "found")
+      ) {
         const scrollPosition = UIStateExtractor.createScrollPosition(args);
         if (scrollPosition) {
           const scrollNavManager = sessionUuid
@@ -772,7 +823,8 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
     if (shouldResolveDevice && sessionUuid && DaemonState.getInstance().isInitialized()) {
       const sessionManager = DaemonState.getInstance().getSessionManager();
       const observeEnvelope = narrowInternalToolEnvelope("observe", response);
-      const observeHierarchy = name === "observe" ? getStructuredField(observeEnvelope, "viewHierarchy") : undefined;
+      const observeHierarchy =
+        name === "observe" ? getStructuredField(observeEnvelope, "viewHierarchy") : undefined;
       if (observeHierarchy) {
         sessionManager.setLastHierarchy(sessionUuid, observeHierarchy);
       }
@@ -786,9 +838,13 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
     const baselineStore: ObservationBaselineStore | undefined =
       sessionUuid && DaemonState.getInstance().isInitialized()
         ? {
-          get: uuid => DaemonState.getInstance().getSessionManager().getLastRenderedObservation(uuid),
-          set: (uuid, observation) => DaemonState.getInstance().getSessionManager().setLastRenderedObservation(uuid, observation),
-        }
+            get: (uuid) =>
+              DaemonState.getInstance().getSessionManager().getLastRenderedObservation(uuid),
+            set: (uuid, observation) =>
+              DaemonState.getInstance()
+                .getSessionManager()
+                .setLastRenderedObservation(uuid, observation),
+          }
         : undefined;
     const configuredArtifactDirectory = serverConfig.getToolOutputsDir();
     const artifactMode = configuredArtifactDirectory ? "always" : "oversized";
@@ -843,7 +899,7 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
       sessionUuid,
       shouldResolveDevice,
       sessionBindingReleaseHandler,
-      sessionToolProfileService,
+      sessionToolSelectionService,
     } = input;
     if (device && name === "executePlan" && args?.cleanupAppId) {
       await cleanupService.cleanup(device, {
@@ -852,7 +908,12 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
       });
     }
 
-    if (shouldResolveDevice && sessionUuid && name === "executePlan" && DaemonState.getInstance().isInitialized()) {
+    if (
+      shouldResolveDevice &&
+      sessionUuid &&
+      name === "executePlan" &&
+      DaemonState.getInstance().isInitialized()
+    ) {
       try {
         const sessionManager = DaemonState.getInstance().getSessionManager();
         const devicePool = DaemonState.getInstance().getDevicePool();
@@ -862,7 +923,7 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
         // D) — coupled to the REAL release, never cleared optimistically.
         const releasedSessionUuids: string[] = [];
         if (releaseSessionUuid) {
-          releasedSessionUuids.push(...await releaseDeviceLabelSessions(releaseSessionUuid));
+          releasedSessionUuids.push(...(await releaseDeviceLabelSessions(releaseSessionUuid)));
         }
 
         const session = releaseSessionUuid ? sessionManager.getSession(releaseSessionUuid) : null;
@@ -879,7 +940,9 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
           // covers every release path and each derived label session on its device.
           RealObserveScreen.clearCache(deviceId);
           releasedSessionUuids.push(releaseSessionUuid);
-          logger.info(`Auto-released session ${session.sessionId} and freed device ${deviceId} after executePlan`);
+          logger.info(
+            `Auto-released session ${session.sessionId} and freed device ${deviceId} after executePlan`,
+          );
         }
 
         // Clear the per-transport SessionToolBinding for every freed session so a
@@ -888,7 +951,7 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
         // failures, but the release itself has already succeeded regardless.
         for (const releasedUuid of releasedSessionUuids) {
           sessionBindingReleaseHandler?.onSessionReleased(releasedUuid);
-          await sessionToolProfileService?.deleteSession?.(releasedUuid);
+          await sessionToolSelectionService?.deleteSession?.(releasedUuid);
         }
       } catch (releaseError) {
         logger.warn(`Failed to auto-release session ${sessionUuid}: ${releaseError}`);
@@ -915,7 +978,7 @@ export class ToolRegistryClass {
   // Stable aggregate handed to the plan-lifecycle input so afterExecution can
   // fan a released session out to every registered transport handler.
   private readonly sessionBindingReleaseNotifier: SessionBindingReleaseHandler = {
-    onSessionReleased: sessionUuid => this.notifySessionBindingReleased(sessionUuid),
+    onSessionReleased: (sessionUuid) => this.notifySessionBindingReleased(sessionUuid),
   };
   private deviceSessionManager: DeviceSessionManager;
   private cleanupService: AppCleanupService;
@@ -964,7 +1027,7 @@ export class ToolRegistryClass {
     description: string,
     schema: any,
     handler: ToolHandler,
-    options: ToolRegistrationOptions = {}
+    options: ToolRegistrationOptions = {},
   ): void {
     this.invalidateToolDefinitionSchemaCache();
     this.tools.set(name, {
@@ -972,6 +1035,8 @@ export class ToolRegistryClass {
       description,
       schema,
       handler,
+      defaultEnabled: options.defaultEnabled ?? true,
+      defaultDeclared: options.defaultEnabled !== undefined,
       supportsProgress: options.supportsProgress ?? false,
       requiresDevice: false,
       debugOnly: options.debugOnly ?? false,
@@ -979,7 +1044,7 @@ export class ToolRegistryClass {
       embeddedSdkOnly: false,
       acceptsPlanLockNamespace: options.acceptsPlanLockNamespace ?? false,
       outputSchema: options.outputSchema,
-      appUiResourceUri: options.appUiResourceUri
+      appUiResourceUri: options.appUiResourceUri,
     });
   }
 
@@ -995,19 +1060,23 @@ export class ToolRegistryClass {
     description: string,
     schema: any,
     handler: DeviceAwareToolHandler,
-    options: DeviceAwareToolOptions = {}
+    options: DeviceAwareToolOptions = {},
   ): void {
     this.invalidateToolDefinitionSchemaCache();
     // Create a wrapper that handles device ID injection
-    const wrappedHandler: ToolHandler = async (args: any, progress?: ProgressCallback, signal?: AbortSignal) => {
-      const capabilityContext = getToolCapabilityContext();
+    const wrappedHandler: ToolHandler = async (
+      args: any,
+      progress?: ProgressCallback,
+      signal?: AbortSignal,
+    ) => {
+      const selectionContext = getToolSelectionContext();
       // Re-inject the ambient ROUTING session (issue #4611 Gap C) so a nested
       // device-aware call keeps the outer call's derived/label routing identity
       // rather than reverting to the base session.
       const handlerArgs: any = withAmbientDeviceContext(
         args,
-        capabilityContext?.routingSessionUuid,
-        capabilityContext?.execution,
+        selectionContext?.routingSessionUuid,
+        selectionContext?.execution,
       );
       const toolStartMs = this.timer.now();
       const toolCallTimestamp = new Date().toISOString();
@@ -1022,40 +1091,12 @@ export class ToolRegistryClass {
           deviceSessionManager: this.deviceSessionManager,
         });
         sessionUuid = resolvedTarget.sessionUuid;
-        // Capability enforcement is resolved independently of the routing
-        // session (issue #4611 Gaps A/B/C). The derived capability session is
-        // the resolver-derived device session (Gap A) or the routing session;
-        // the base is the caller-supplied base or the label's base resolved via
-        // the shared helper. Enforcement is the UNION of base + derived (Gap B,
-        // product decision): a tool is enabled if EITHER grants it, so a derived
-        // label may re-enable a tool the base narrowed away.
-        const capabilityDerivedSessionUuid = resolvedTarget.capabilitySessionUuid ?? resolvedTarget.sessionUuid;
-        if (!capabilityContext?.planCapabilitiesAuthorized) {
-          await this.assertToolEnabledUnion(
-            name,
-            capabilityDerivedSessionUuid,
-            resolvedTarget.baseSessionUuid,
-            getToolCapabilityContext()?.sessionToolProfileService,
-            capabilityContext?.capabilitySessionUuid,
-          );
-        }
-        return await runWithToolCapabilityContext(
-          // Bind the ROUTING session (Gap C), not the base/capability session, so
+        return await runWithToolSelectionContext(
+          // Bind the ROUTING session, not the selection profile, so
           // nested calls re-inject the correct derived routing UUID.
           {
             routingSessionUuid: resolvedTarget.sessionUuid,
-            // Preserve the connection profile, if any. The derived session is
-            // supplied separately to the union assertion above; replacing the
-            // connection identity here would lose an opt-in when nested calls
-            // route through a labeled or explicitly selected device session.
-            capabilitySessionUuid: capabilityContext?.capabilitySessionUuid,
-            // The outer executePlan tool has already passed its test-authoring
-            // capability gate, so its declarative steps are authorized by that
-            // admission. Other tool handlers retain normal per-tool policy.
-            planCapabilitiesAuthorized: preservesPlanCapabilityAuthorization(
-              name,
-              capabilityContext?.planCapabilitiesAuthorized,
-            ),
+            toolSelectionProfileUuid: selectionContext?.toolSelectionProfileUuid,
           },
           async () => {
             try {
@@ -1066,7 +1107,12 @@ export class ToolRegistryClass {
                 }
                 response = await options.nonDeviceHandler(handlerArgs, progress, signal);
               } else if (resolvedTarget.device !== undefined) {
-                this.navigationToolCallRecorder.record(name, handlerArgs, resolvedTarget.device, resolvedTarget.sessionUuid);
+                this.navigationToolCallRecorder.record(
+                  name,
+                  handlerArgs,
+                  resolvedTarget.device,
+                  resolvedTarget.sessionUuid,
+                );
                 response = await this.auditRunner.run({
                   name,
                   args: handlerArgs,
@@ -1095,7 +1141,9 @@ export class ToolRegistryClass {
               if (error instanceof ActionableError || isDeviceLostError(error)) {
                 throw error;
               }
-              const deviceContext = resolvedTarget.device ? ` on device ${resolvedTarget.device.deviceId}` : "";
+              const deviceContext = resolvedTarget.device
+                ? ` on device ${resolvedTarget.device.deviceId}`
+                : "";
               throw new ActionableError(`Failed to execute tool ${name}${deviceContext}: ${error}`);
             } finally {
               await this.planLifecycleManager.afterExecution({
@@ -1107,10 +1155,10 @@ export class ToolRegistryClass {
                 sessionUuid: resolvedTarget.sessionUuid,
                 shouldResolveDevice: resolvedTarget.shouldResolveDevice,
                 sessionBindingReleaseHandler: this.sessionBindingReleaseNotifier,
-                sessionToolProfileService: getToolCapabilityContext()?.sessionToolProfileService,
+                sessionToolSelectionService: getToolSelectionContext()?.sessionToolSelectionService,
               });
             }
-          }
+          },
         );
       } finally {
         await this.toolCallRepository.recordToolCall({
@@ -1127,6 +1175,8 @@ export class ToolRegistryClass {
       description,
       schema,
       handler: wrappedHandler,
+      defaultEnabled: options.defaultEnabled ?? true,
+      defaultDeclared: options.defaultEnabled !== undefined,
       supportsProgress: options.supportsProgress ?? false,
       requiresDevice: true,
       deviceAwareHandler: handler,
@@ -1136,7 +1186,7 @@ export class ToolRegistryClass {
       planOnly: options.planOnly ?? false,
       acceptsPlanLockNamespace: options.acceptsPlanLockNamespace ?? false,
       outputSchema: options.outputSchema,
-      appUiResourceUri: options.appUiResourceUri
+      appUiResourceUri: options.appUiResourceUri,
     });
   }
 
@@ -1144,9 +1194,30 @@ export class ToolRegistryClass {
   getAllTools(options: ToolListingOptions = {}): RegisteredTool[] {
     const tools = Array.from(this.tools.values());
     if (options.includeUnavailable) {
-      return tools.filter(tool => !tool.hidden);
+      return tools.filter((tool) => !tool.hidden);
     }
-    return tools.filter(tool => !tool.hidden && this.isToolAvailable(tool));
+    return tools.filter((tool) => !tool.hidden && this.isToolAvailable(tool));
+  }
+
+  getConfigurableToolNames(): string[] {
+    return Array.from(this.tools.values())
+      .filter((tool) => !tool.hidden && !tool.planOnly && tool.name !== "setToolEnabled")
+      .map((tool) => tool.name);
+  }
+
+  getToolsMissingDeclaredDefault(): string[] {
+    return Array.from(this.tools.values())
+      .filter((tool) => !tool.defaultDeclared)
+      .map((tool) => tool.name);
+  }
+
+  isUserConfigurableTool(name: string): boolean {
+    const tool = this.tools.get(name);
+    return Boolean(tool && !tool.hidden && !tool.planOnly && tool.name !== "setToolEnabled");
+  }
+
+  getRegisteredTool(name: string): RegisteredTool | undefined {
+    return this.tools.get(name);
   }
 
   // Get a specific tool by name
@@ -1178,29 +1249,21 @@ export class ToolRegistryClass {
     args: Record<string, unknown>,
     progress?: ProgressCallback,
     signal?: AbortSignal,
-    options: InternalToolCallOptions = {}
+    options: InternalToolCallOptions = {},
   ): Promise<any> {
-    const resolved = typeof tool === "string"
-      ? (options.forPlan ? this.getToolForPlan(tool) : this.getTool(tool))
-      : tool;
+    const resolved =
+      typeof tool === "string"
+        ? options.forPlan
+          ? this.getToolForPlan(tool)
+          : this.getTool(tool)
+        : tool;
     if (!resolved) {
       throw new ActionableError(`Tool not found: ${tool}`);
     }
     const invocation = this.createInternalToolInvocationContext(args, options);
 
-    return runWithToolCapabilityContext(
-      invocation,
-      () => this.invokeInternalTool(
-        resolved,
-        invocation.args,
-        progress,
-        signal,
-        options.targetDevice,
-        invocation.routingSessionUuid,
-        invocation.capabilitySessionUuid,
-        invocation.sessionToolProfileService,
-        invocation.planCapabilitiesAuthorized,
-      ),
+    return runWithToolSelectionContext(invocation, () =>
+      this.invokeInternalTool(resolved, invocation.args, progress, signal, options.targetDevice),
     );
   }
 
@@ -1208,21 +1271,20 @@ export class ToolRegistryClass {
     args: Record<string, unknown>,
     options: InternalToolCallOptions,
   ): InternalToolInvocationContext {
-    const context = getToolCapabilityContext();
+    const context = getToolSelectionContext();
     // An internal call inherits the ambient ROUTING session (issue #4611 Gap C)
     // so a plan step or navigation replay routes to the same derived/label
     // session the outer call resolved to, not the base session.
-    const sessionUuid = options.sessionUuid
-      ?? context?.routingSessionUuid
-      ?? (typeof args.sessionUuid === "string" ? args.sessionUuid : undefined);
+    const sessionUuid =
+      options.sessionUuid ??
+      context?.routingSessionUuid ??
+      (typeof args.sessionUuid === "string" ? args.sessionUuid : undefined);
     return {
-      args: sessionUuid && args.sessionUuid !== sessionUuid
-        ? { ...args, sessionUuid }
-        : args,
+      args: sessionUuid && args.sessionUuid !== sessionUuid ? { ...args, sessionUuid } : args,
       routingSessionUuid: sessionUuid,
-      capabilitySessionUuid: context?.capabilitySessionUuid,
-      planCapabilitiesAuthorized: context?.planCapabilitiesAuthorized === true,
-      sessionToolProfileService: options.sessionToolProfileService ?? context?.sessionToolProfileService,
+      toolSelectionProfileUuid: context?.toolSelectionProfileUuid,
+      sessionToolSelectionService:
+        options.sessionToolSelectionService ?? context?.sessionToolSelectionService,
     };
   }
 
@@ -1232,70 +1294,11 @@ export class ToolRegistryClass {
     progress: ProgressCallback | undefined,
     signal: AbortSignal | undefined,
     targetDevice: BootedDevice | undefined,
-    sessionUuid: string | undefined,
-    capabilitySessionUuid: string | undefined,
-    sessionToolProfileService: Pick<SessionToolProfileService, "isEnabled"> | undefined,
-    allowPlanCapabilities: boolean,
   ): Promise<any> {
-    // Honor the UNION of the base + derived `${base}:${label}` sessions here too
-    // (issue #4611). `sessionUuid` is the ambient ROUTING session — a derived
-    // label session for a labeled `criticalSection`/`executePlan` step — so a
-    // single-session assert would reject a tool the base enables but the label
-    // narrowed away. The `targetDevice` path below bypasses the device-aware
-    // wrapper's own union gate entirely, so this pre-gate is the ONLY enforcement
-    // point for it and must apply the union as well.
-    if (!allowPlanCapabilities) {
-      await this.assertToolEnabledUnion(
-        tool.name,
-        sessionUuid,
-        undefined,
-        sessionToolProfileService,
-        capabilitySessionUuid,
-      );
-    }
     if (targetDevice && tool.deviceAwareHandler) {
       return tool.deviceAwareHandler(targetDevice, markInternalToolCall(args), progress, signal);
     }
     return tool.handler(markInternalToolCall(args), progress, signal);
-  }
-
-  /**
-   * Assert a tool is enabled under UNION capability semantics (issue #4611): a
-   * tool is enabled when EITHER the base OR the derived `${base}:${label}`
-   * device-label session grants it. Applied at every enforcement gate — the
-   * device-aware wrapper and the nested internal-call pre-gate — so no gate can
-   * reject a call the union should allow.
-   *
-   * The REAL base is always resolved through the shared resolver, even when the
-   * caller supplies `explicitBaseSessionUuid` (issue #4655). For an internal
-   * device-aware step whose routing session is already the derived `${base}:B`,
-   * the wrapper's resolver reports `baseSessionUuid = ${base}:B` — the derived
-   * value, not the true base. Trusting it verbatim would collapse the union to
-   * `[${base}:B, ${base}:B]` and lose the base grant. Passing the supplied base
-   * (or the derived session when none is supplied) back through
-   * `resolveCapabilityBaseSessionUuid` strips a `:label` when present and is a
-   * no-op for a genuine base, so the union is genuinely `[base, ${base}:B]`.
-   */
-  private async assertToolEnabledUnion(
-    toolName: string,
-    derivedSessionUuid: string | undefined,
-    explicitBaseSessionUuid: string | undefined,
-    sessionToolProfileService: Pick<SessionToolProfileService, "isEnabled"> | undefined,
-    connectionCapabilityProfileUuid?: string,
-  ): Promise<void> {
-    const sessionManager = DaemonState.getInstance().isInitialized()
-      ? DaemonState.getInstance().getSessionManager()
-      : undefined;
-    const baseSessionUuid = resolveCapabilityBaseSessionUuid(
-      explicitBaseSessionUuid ?? derivedSessionUuid,
-      sessionManager,
-    );
-    await assertToolEnabledForAnySession(
-      toolName,
-      [connectionCapabilityProfileUuid, baseSessionUuid, derivedSessionUuid],
-      sessionToolProfileService,
-      connectionCapabilityProfileUuid,
-    );
   }
 
   // Typed variant of `callInternal` for the handful of internally-consumed tools
@@ -1315,7 +1318,7 @@ export class ToolRegistryClass {
     args: Record<string, unknown>,
     progress?: ProgressCallback,
     signal?: AbortSignal,
-    options: InternalToolCallOptions = {}
+    options: InternalToolCallOptions = {},
   ): Promise<StructuredToolResponse<InternalToolPayloads[K]> | undefined> {
     const response = await this.callInternal(name, args, progress, signal, options);
     return narrowInternalToolEnvelope(name, response);
@@ -1336,10 +1339,10 @@ export class ToolRegistryClass {
     // A `planOnly` tool is hidden from discovery by design and is expected in
     // plans, so don't warn about that reason — only surface *other* gate reasons
     // (e.g. a debug-only tool being used inside a plan), which are noteworthy.
-    const unexpectedReasons = gateReasons.filter(r => r !== PLAN_ONLY_GATE_REASON);
+    const unexpectedReasons = gateReasons.filter((r) => r !== PLAN_ONLY_GATE_REASON);
     if (unexpectedReasons.length > 0) {
       logger.warn(
-        `[ToolRegistry] Plan execution is using gated tool "${name}" (${unexpectedReasons.join(", ")}). Tool is hidden from normal MCP discovery but marked planExecutable.`
+        `[ToolRegistry] Plan execution is using gated tool "${name}" (${unexpectedReasons.join(", ")}). Tool is hidden from normal MCP discovery but marked planExecutable.`,
       );
     }
     return tool;
@@ -1353,7 +1356,7 @@ export class ToolRegistryClass {
     // ResourceRegistry retains its servers for resources/list_changed.
     this.trackServer(server);
 
-    this.tools.forEach(tool => {
+    this.tools.forEach((tool) => {
       if (tool.hidden || !this.isToolAvailable(tool)) {
         return;
       }
@@ -1364,7 +1367,11 @@ export class ToolRegistryClass {
 
         if (tool.supportsProgress) {
           const progressToken = extra?._meta?.progressToken ?? `${tool.name}-${this.timer.now()}`;
-          const progressCallback: ProgressCallback = async (progress: number, total?: number, message?: string) => {
+          const progressCallback: ProgressCallback = async (
+            progress: number,
+            total?: number,
+            message?: string,
+          ) => {
             try {
               await extra.sendNotification({
                 method: "notifications/progress",
@@ -1372,8 +1379,8 @@ export class ToolRegistryClass {
                   progressToken,
                   progress,
                   total,
-                  ...(message && { message })
-                }
+                  ...(message && { message }),
+                },
               });
             } catch (error) {
               logger.warn(`Failed to send progress notification: ${error}`);
@@ -1385,13 +1392,17 @@ export class ToolRegistryClass {
         }
       };
 
-      server.registerTool(tool.name, {
-        description: tool.description,
-        inputSchema: tool.schema,
-        ...(process.env.AUTOMOBILE_ALWAYS_LOAD_TOOLS === "true" && {
-          _meta: { "anthropic/alwaysLoad": true },
-        })
-      }, wrappedHandler);
+      server.registerTool(
+        tool.name,
+        {
+          description: tool.description,
+          inputSchema: tool.schema,
+          ...(process.env.AUTOMOBILE_ALWAYS_LOAD_TOOLS === "true" && {
+            _meta: { "anthropic/alwaysLoad": true },
+          }),
+        },
+        wrappedHandler,
+      );
     });
   }
 
@@ -1438,7 +1449,9 @@ export class ToolRegistryClass {
       try {
         handler.onSessionReleased(sessionUuid);
       } catch (error) {
-        logger.warn(`[ToolRegistry] session-binding release handler failed for ${sessionUuid}: ${error}`);
+        logger.warn(
+          `[ToolRegistry] session-binding release handler failed for ${sessionUuid}: ${error}`,
+        );
       }
     }
   }
@@ -1491,11 +1504,11 @@ export class ToolRegistryClass {
     // with the wire (issue #2990), the same way `suppressOutputSchema` above keeps the
     // two in sync for the strip flag.
     const compactBounds = true;
-    return this.getAllTools(options).map(tool => {
+    return this.getAllTools(options).map((tool) => {
       const { inputSchema, outputSchema } = this.getCachedToolDefinitionSchemas(
         tool,
         suppressOutputSchema,
-        compactBounds
+        compactBounds,
       );
 
       const definition: {
@@ -1526,7 +1539,7 @@ export class ToolRegistryClass {
   private getCachedToolDefinitionSchemas(
     tool: RegisteredTool,
     suppressOutputSchema: boolean,
-    compactBounds: boolean
+    compactBounds: boolean,
   ): { inputSchema: Record<string, unknown>; outputSchema: Record<string, unknown> | undefined } {
     let cached = this.toolDefinitionSchemaCache.get(tool.name);
     if (!cached) {
@@ -1539,12 +1552,13 @@ export class ToolRegistryClass {
 
     const outputSchemaCacheKey = `${suppressOutputSchema}:${compactBounds}`;
     if (!cached.outputSchemasByRuntimeFlags.has(outputSchemaCacheKey)) {
-      const outputSchema = toolHasOutputSchema(tool) && !suppressOutputSchema
-        ? advertiseBoundsForCompact(
-          toAdvertisedJsonSchema(tool.outputSchema),
-          compactBounds
-        ) as Record<string, unknown>
-        : undefined;
+      const outputSchema =
+        toolHasOutputSchema(tool) && !suppressOutputSchema
+          ? (advertiseBoundsForCompact(
+              toAdvertisedJsonSchema(tool.outputSchema),
+              compactBounds,
+            ) as Record<string, unknown>)
+          : undefined;
       cached.outputSchemasByRuntimeFlags.set(outputSchemaCacheKey, outputSchema);
     }
 
@@ -1561,7 +1575,7 @@ export class ToolRegistryClass {
   // Get a map of all schema
   getSchemaMap(): Record<string, any> {
     const schemaMap: Record<string, any> = {};
-    this.getAllTools().forEach(tool => {
+    this.getAllTools().forEach((tool) => {
       schemaMap[tool.name] = tool.schema;
     });
     return schemaMap;
@@ -1630,7 +1644,9 @@ export const ToolRegistry = new ToolRegistryClass();
 // fail if the seam regresses; they erase at build time (zero runtime cost).
 type _IsAny<T> = 0 extends 1 & T ? true : false;
 type _AssertTrue<T extends true> = T;
-type _ResolvedTypedEnvelope = NonNullable<Awaited<ReturnType<typeof ToolRegistry.callInternalTyped>>>;
+type _ResolvedTypedEnvelope = NonNullable<
+  Awaited<ReturnType<typeof ToolRegistry.callInternalTyped>>
+>;
 // The aliases are referenced only by the compiler (their constraint check IS the
 // guard); they are intentionally unused at runtime, hence the disable.
 /* eslint-disable @typescript-eslint/no-unused-vars */

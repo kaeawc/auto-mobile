@@ -34,24 +34,20 @@ export const DAEMON_PORT_RANGE_END = 3010;
  * Per-user socket to avoid permission issues
  */
 const socketPathOverride =
-  process.env.AUTOMOBILE_DAEMON_SOCKET_PATH ??
-  process.env.AUTO_MOBILE_DAEMON_SOCKET_PATH;
-export const SOCKET_PATH =
-  socketPathOverride
-    ? resolvePathFromDaemonLaunchWorkingDirectory(socketPathOverride)
-    : `/tmp/auto-mobile-daemon-${uid}.sock`;
+  process.env.AUTOMOBILE_DAEMON_SOCKET_PATH ?? process.env.AUTO_MOBILE_DAEMON_SOCKET_PATH;
+export const SOCKET_PATH = socketPathOverride
+  ? resolvePathFromDaemonLaunchWorkingDirectory(socketPathOverride)
+  : `/tmp/auto-mobile-daemon-${uid}.sock`;
 
 /**
  * PID lock file path
  * Contains daemon process information
  */
 const pidFilePathOverride =
-  process.env.AUTOMOBILE_DAEMON_PID_FILE_PATH ??
-  process.env.AUTO_MOBILE_DAEMON_PID_FILE_PATH;
-export const PID_FILE_PATH =
-  pidFilePathOverride
-    ? resolvePathFromDaemonLaunchWorkingDirectory(pidFilePathOverride)
-    : `/tmp/auto-mobile-daemon-${uid}.pid`;
+  process.env.AUTOMOBILE_DAEMON_PID_FILE_PATH ?? process.env.AUTO_MOBILE_DAEMON_PID_FILE_PATH;
+export const PID_FILE_PATH = pidFilePathOverride
+  ? resolvePathFromDaemonLaunchWorkingDirectory(pidFilePathOverride)
+  : `/tmp/auto-mobile-daemon-${uid}.pid`;
 
 /**
  * Lock file path for coordinating concurrent daemon start operations.
@@ -59,12 +55,10 @@ export const PID_FILE_PATH =
  * the daemon simultaneously.
  */
 const lockFilePathOverride =
-  process.env.AUTOMOBILE_DAEMON_LOCK_FILE_PATH ??
-  process.env.AUTO_MOBILE_DAEMON_LOCK_FILE_PATH;
-export const LOCK_FILE_PATH =
-  lockFilePathOverride
-    ? resolvePathFromDaemonLaunchWorkingDirectory(lockFilePathOverride)
-    : `/tmp/auto-mobile-daemon-${uid}.lock`;
+  process.env.AUTOMOBILE_DAEMON_LOCK_FILE_PATH ?? process.env.AUTO_MOBILE_DAEMON_LOCK_FILE_PATH;
+export const LOCK_FILE_PATH = lockFilePathOverride
+  ? resolvePathFromDaemonLaunchWorkingDirectory(lockFilePathOverride)
+  : `/tmp/auto-mobile-daemon-${uid}.lock`;
 
 /**
  * Connection timeout in milliseconds
@@ -73,8 +67,7 @@ export const LOCK_FILE_PATH =
  * Configurable via AUTOMOBILE_DAEMON_TIMEOUT_MS environment variable.
  */
 const connectionTimeoutOverride =
-  process.env.AUTOMOBILE_DAEMON_TIMEOUT_MS ??
-  process.env.AUTO_MOBILE_DAEMON_TIMEOUT_MS;
+  process.env.AUTOMOBILE_DAEMON_TIMEOUT_MS ?? process.env.AUTO_MOBILE_DAEMON_TIMEOUT_MS;
 const parsedConnectionTimeout = connectionTimeoutOverride
   ? Number.parseInt(connectionTimeoutOverride, 10)
   : NaN;
@@ -134,16 +127,16 @@ export const READINESS_PROBE_BACKOFF_MS = 150;
 export const MCP_STREAMABLE_PATH = "/auto-mobile/streamable";
 
 /**
- * Internal loopback header used to restore a daemon socket's capability
+ * Internal loopback header used to restore a daemon socket's tool-selection
  * profile when its Streamable HTTP MCP transport is recreated.
  */
 export const DAEMON_SESSION_TOOL_BINDING_HEADER = "x-auto-mobile-session-uuid";
 
-/** Loopback-only header for a persisted connection capability profile. */
-export const DAEMON_CAPABILITY_PROFILE_HEADER = "x-auto-mobile-capability-profile-uuid";
+/** Loopback-only header for a persisted connection tool-selection profile. */
+export const DAEMON_TOOL_SELECTION_PROFILE_HEADER = "x-auto-mobile-tool-selection-profile-uuid";
 
 /** Socket RPC field consumed before tool arguments reach the MCP server. */
-export const DAEMON_CAPABILITY_PROFILE_PARAM = "__autoMobileCapabilityProfileUuid";
+export const DAEMON_TOOL_SELECTION_PROFILE_PARAM = "__autoMobileToolSelectionProfileUuid";
 
 /**
  * Socket RPC field identifying a session UUID injected from a connection-bound

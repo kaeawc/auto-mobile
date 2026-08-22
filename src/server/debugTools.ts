@@ -10,12 +10,14 @@ import { isDebugModeEnabled } from "../utils/debug";
 import {
   elementContainerSchema,
   elementIdTextFieldsSchema,
-  validateElementIdTextSelector
+  validateElementIdTextSelector,
 } from "./elementSelectorSchemas";
 
 const ensureDebugEnabled = () => {
   if (!isDebugModeEnabled()) {
-    throw new ActionableError("Debug mode is disabled. Enable the 'debug' feature flag to use this tool.");
+    throw new ActionableError(
+      "Debug mode is disabled. Enable the 'debug' feature flag to use this tool.",
+    );
   }
 };
 
@@ -42,31 +44,54 @@ export interface BugReportArgs {
 }
 
 // Schema definitions
-const debugSearchBaseSchema = z.object({
-  platform: platformSchema,
-  text: z.string().optional().describe("Text to search for in elements"),
-  elementId: elementIdTextFieldsSchema.shape.elementId.describe(
-    "Element resource ID / accessibility identifier to search for"
-  ),
-  container: elementContainerSchema.optional().describe(
-    "Container element to scope the search - specify elementId or text to locate it"
-  ),
-  partialMatch: z.boolean().optional().describe("Whether to use partial matching (substring containment, default: true)"),
-  caseSensitive: z.boolean().optional().describe("Whether to use case-sensitive matching (default: false)"),
-  includeNearMisses: z.boolean().optional().describe("Include elements that almost matched (default: true)"),
-  maxNearMisses: z.number().optional().describe("Maximum number of near-misses to include (default: 10)")
-}).strict();
+const debugSearchBaseSchema = z
+  .object({
+    platform: platformSchema,
+    text: z.string().optional().describe("Text to search for in elements"),
+    elementId: elementIdTextFieldsSchema.shape.elementId.describe(
+      "Element resource ID / accessibility identifier to search for",
+    ),
+    container: elementContainerSchema
+      .optional()
+      .describe("Container element to scope the search - specify elementId or text to locate it"),
+    partialMatch: z
+      .boolean()
+      .optional()
+      .describe("Whether to use partial matching (substring containment, default: true)"),
+    caseSensitive: z
+      .boolean()
+      .optional()
+      .describe("Whether to use case-sensitive matching (default: false)"),
+    includeNearMisses: z
+      .boolean()
+      .optional()
+      .describe("Include elements that almost matched (default: true)"),
+    maxNearMisses: z
+      .number()
+      .optional()
+      .describe("Maximum number of near-misses to include (default: 10)"),
+  })
+  .strict();
 
-export const debugSearchSchema = addDeviceTargetingToSchema(debugSearchBaseSchema).superRefine((value, ctx) => {
-  validateElementIdTextSelector(value, ctx);
-});
+export const debugSearchSchema = addDeviceTargetingToSchema(debugSearchBaseSchema).superRefine(
+  (value, ctx) => {
+    validateElementIdTextSelector(value, ctx);
+  },
+);
 
-export const bugReportSchema = withAppIdAliases(addDeviceTargetingToSchema(z.object({
-  platform: platformSchema,
-  appId: z.string().optional().describe("App package ID to filter logcat for specific app"),
-  logcatLines: z.number().optional().describe("Number of recent logcat lines to include (default: 1000)"),
-  saveDir: z.string().optional().describe("Directory to save report to")
-})));
+export const bugReportSchema = withAppIdAliases(
+  addDeviceTargetingToSchema(
+    z.object({
+      platform: platformSchema,
+      appId: z.string().optional().describe("App package ID to filter logcat for specific app"),
+      logcatLines: z
+        .number()
+        .optional()
+        .describe("Number of recent logcat lines to include (default: 1000)"),
+      saveDir: z.string().optional().describe("Directory to save report to"),
+    }),
+  ),
+);
 
 // Register debug tools
 export function registerDebugTools() {
@@ -86,7 +111,7 @@ export function registerDebugTools() {
         partialMatch: args.partialMatch,
         caseSensitive: args.caseSensitive,
         includeNearMisses: args.includeNearMisses,
-        maxNearMisses: args.maxNearMisses
+        maxNearMisses: args.maxNearMisses,
       });
       return createJSONToolResponse(result);
     } catch (error) {
@@ -105,7 +130,7 @@ export function registerDebugTools() {
       const result = await bugReport.execute({
         appId: args.appId,
         logcatLines: args.logcatLines,
-        saveDir: args.saveDir
+        saveDir: args.saveDir,
       });
       return createJSONToolResponse(result);
     } catch (error) {
@@ -114,7 +139,19 @@ export function registerDebugTools() {
   };
 
   // Register tools with the tool registry
-  ToolRegistry.registerDeviceAware("debugSearch", "Debug element search operations. Shows all matching elements, which one would be selected, and near-misses that almost matched. Use this to understand why an element isn't being found or why the wrong element is being selected.", debugSearchSchema, debugSearchHandler, { debugOnly: true });
+  ToolRegistry.registerDeviceAware(
+    "debugSearch",
+    "Debug element search operations. Shows all matching elements, which one would be selected, and near-misses that almost matched. Use this to understand why an element isn't being found or why the wrong element is being selected.",
+    debugSearchSchema,
+    debugSearchHandler,
+    { defaultEnabled: true, debugOnly: true },
+  );
 
-  ToolRegistry.registerDeviceAware("bugReport", "Generate a comprehensive bug report for debugging AutoMobile interactions. Captures screen state, view hierarchy, logcat, window info, and screenshot. The report is saved to a file for sharing with AutoMobile developers.", bugReportSchema, bugReportHandler, { debugOnly: true });
+  ToolRegistry.registerDeviceAware(
+    "bugReport",
+    "Generate a comprehensive bug report for debugging AutoMobile interactions. Captures screen state, view hierarchy, logcat, window info, and screenshot. The report is saved to a file for sharing with AutoMobile developers.",
+    bugReportSchema,
+    bugReportHandler,
+    { defaultEnabled: true, debugOnly: true },
+  );
 }

@@ -15,6 +15,7 @@ import { NavigationGraphManager } from "../navigation/NavigationGraphManager";
 import { PredictionAnalyzer, PredictionActionContext } from "../observe/PredictionAnalyzer";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { sequenceBackoff } from "../../utils/Backoff";
+import { getDeviceDataStreamServer } from "../../daemon/deviceDataStreamSocketServer";
 
 export interface ProgressCallback {
   (progress: number, total?: number, message?: string): Promise<void>;
@@ -253,6 +254,14 @@ export class BaseVisualChange {
     return `${preamble} Unlock or dismiss the keyguard before continuing.`;
   }
 
+  /**
+   * True when a live-view IDE subscriber is attached for this device, meaning a
+   * device screenshot is still worth capturing on internal re-observes.
+   */
+  private hasLiveViewSubscriber(): boolean {
+    return getDeviceDataStreamServer()?.hasSubscriberForDevice(this.device.deviceId) ?? false;
+  }
+
   private async takeObservation(
     blockResult: any,
     previousObserveResult: ObserveResult | null,
@@ -275,10 +284,17 @@ export class BaseVisualChange {
     const maxRetryAttempts = 4;
     const previousHash = this.hashViewHierarchy(previousObserveResult?.viewHierarchy);
 
+    // Internal post-action re-observes don't need a device screenshot: the PNG is
+    // only consumed by a live-view subscriber (fed separately by the
+    // subscriber-gated screenshot stream) or by tools that return the image.
+    // Skipping the capture here avoids a device round-trip per action, but stays
+    // enabled while a live view is attached (#5472, AC#3).
+    const skipScreenshot = !this.hasLiveViewSubscriber();
+
     perf.serial("finalObserve");
     // Wait for fresh data from accessibility service (skipWaitForFresh=false)
     // This ensures we get observation data that reflects the action that just completed
-    let latestObservation = await this.observeScreen.execute({ queryOptions: options.queryOptions, perf, skipWaitForFresh: false, minTimestamp, signal: options.signal });
+    let latestObservation = await this.observeScreen.execute({ queryOptions: options.queryOptions, perf, skipWaitForFresh: false, minTimestamp, signal: options.signal, skipScreenshot });
     perf.end();
 
     const shouldRetry = (observation: ObserveResult): boolean => {
@@ -304,7 +320,7 @@ export class BaseVisualChange {
       logger.info(`[BaseVisualChange] Observation appears stale/unchanged, retrying in ${delayMs}ms (attempt ${attempt + 1}/${maxRetryAttempts})`);
       await this.timer.sleep(delayMs);
       perf.serial(`finalObserve_retry_${attempt + 1}`);
-      latestObservation = await this.observeScreen.execute({ queryOptions: options.queryOptions, perf, skipWaitForFresh: false, minTimestamp, signal: options.signal });
+      latestObservation = await this.observeScreen.execute({ queryOptions: options.queryOptions, perf, skipWaitForFresh: false, minTimestamp, signal: options.signal, skipScreenshot });
       perf.end();
     }
 

@@ -23,7 +23,7 @@ production code changes ship from the spike itself.
    `@modelcontextprotocol/sdk ^1.x` and get visible value without touching the
    transport.
 2. **A dedicated "migrate to SDK v2 + stateless core" issue gates Tasks.** The
-   Tasks extension *as specified* is built on 2026-07-28 mechanics
+   Tasks extension _as specified_ is built on 2026-07-28 mechanics
    (`server/discover` advertisement + per-request `_meta` extension
    negotiation) that the v1.x monolith (protocol `2025-11-25`) does not speak.
    Tasks therefore requires v2. File the migration as its own child (draft
@@ -39,7 +39,7 @@ production code changes ship from the spike itself.
 The migration is a **contained refactor, not a rewrite**: 8 files import the
 SDK, zod v4 (the v2 schema requirement) is already a dependency, and the
 explicit-handle seam the stateless core prescribes already exists in the code.
-The two things the migration must *design*, not just port, are (a) a durable
+The two things the migration must _design_, not just port, are (a) a durable
 client-carried session identity to replace connection-scoped ids, and (b) the
 notification channel — both called out below.
 
@@ -48,13 +48,13 @@ notification channel — both called out below.
 The issue was drafted against `@beta` packages; that tag is now stale. Verified
 against the public npm registry and the primary specs:
 
-| Package | Latest | Notes |
-| --- | --- | --- |
-| `@modelcontextprotocol/server` | **`2.0.0`** | Published `2026-07-27T23:55Z` on npm, announced with the [2026-07-28 release](https://blog.modelcontextprotocol.io/posts/2026-07-28/). `type: module` (ESM-only), deps `zod ^4.2.0` + `@modelcontextprotocol/core`. **No surviving `beta`/`next` dist-tag** — only `latest: 2.0.0`. |
-| `@modelcontextprotocol/client` | **`2.0.0`** | Same publish/announce timing and lineage. |
-| `@modelcontextprotocol/sdk` (monolith) | `1.30.0` | Still v1.x, speaks protocol `2025-11-25`. **Not** npm-deprecated, but the SDK team's language is "retired in favor of" the split packages. Our `^1.26.0` pin floats to `1.30.0`. |
-| `@mcp-ui/client` / `@mcp-ui/server` | `7.1.1` / `6.1.0` | Community MCP-UI project; pre-dates v2. |
-| `@modelcontextprotocol/ext-apps` | `1.7.5` | Official Apps extension package (an `App` class). |
+| Package                                | Latest            | Notes                                                                                                                                                                                                                                                                               |
+| -------------------------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@modelcontextprotocol/server`         | **`2.0.0`**       | Published `2026-07-27T23:55Z` on npm, announced with the [2026-07-28 release](https://blog.modelcontextprotocol.io/posts/2026-07-28/). `type: module` (ESM-only), deps `zod ^4.2.0` + `@modelcontextprotocol/core`. **No surviving `beta`/`next` dist-tag** — only `latest: 2.0.0`. |
+| `@modelcontextprotocol/client`         | **`2.0.0`**       | Same publish/announce timing and lineage.                                                                                                                                                                                                                                           |
+| `@modelcontextprotocol/sdk` (monolith) | `1.30.0`          | Still v1.x, speaks protocol `2025-11-25`. **Not** npm-deprecated, but the SDK team's language is "retired in favor of" the split packages. Our `^1.26.0` pin floats to `1.30.0`.                                                                                                    |
+| `@mcp-ui/client` / `@mcp-ui/server`    | `7.1.1` / `6.1.0` | Community MCP-UI project; pre-dates v2.                                                                                                                                                                                                                                             |
+| `@modelcontextprotocol/ext-apps`       | `1.7.5`           | Official Apps extension package (an `App` class).                                                                                                                                                                                                                                   |
 
 **"SDK v2" is the split, not a v2 of the monolith.** There is no
 `@modelcontextprotocol/sdk@2`. The v2 story is `@modelcontextprotocol/server` +
@@ -92,13 +92,13 @@ await serveStdio((_ctx) => {
   server.registerTool(
     "echo",
     { description: "…", inputSchema: z.object({ text: z.string() }) },
-    async ({ text }) => ({ content: [{ type: "text", text }] })
+    async ({ text }) => ({ content: [{ type: "text", text }] }),
   );
   server.registerResource(
     "observe-ui",
     "ui://automobile/observe",
     { description: "…", mimeType: "text/html;profile=mcp-app" },
-    async (uri) => ({ contents: [{ uri: uri.href, mimeType: "text/html", text: uiHtml }] })
+    async (uri) => ({ contents: [{ uri: uri.href, mimeType: "text/html", text: uiHtml }] }),
   );
   return server;
 });
@@ -108,7 +108,7 @@ Confirmed facts:
 
 - **`registerTool` / `registerResource`** (declarative, Standard-Schema input)
   **replace** the v1 `server.server.setRequestHandler(ListToolsRequestSchema |
-  CallToolRequestSchema | …)` wiring.
+CallToolRequestSchema | …)` wiring.
 - **`serveStdio` takes a factory `(ctx: McpRequestContext) => McpServer`**, not a
   singleton. For stdio (one connection) that factory runs per-connection; the
   per-request stateless construction is the `createMcpHandler` HTTP path. The
@@ -119,7 +119,7 @@ Confirmed facts:
   `MissingRequiredClientCapabilityError`, `ProtocolEra`.
 - **A stateful HTTP transport still exists**: `StreamableHTTPServerTransport`
   with `sessionIdGenerator` + `onsessioninitialized` / `onsessionclosed`. So the
-  SDK does **not** force *every* leg stateless — relevant to the daemon-internal
+  SDK does **not** force _every_ leg stateless — relevant to the daemon-internal
   HTTP hop (below).
 
 ## Collision map — stateful mechanisms vs. the stateless core
@@ -127,12 +127,12 @@ Confirmed facts:
 Re-verified against `main` (`a3ddc8067`). Four mechanisms key off a stable,
 connection-scoped session identity that the stateless core removes.
 
-| # | Mechanism | Where | Stateless-core equivalent |
-| --- | --- | --- | --- |
-| 1 | **Session identity as primary key.** `SessionToolBinding` is `Map<mcpSessionId → sessionUuid>`; used on every `tools/list` to filter visible tools. | `src/server/SessionToolBinding.ts`, `src/server/index.ts` (~L274) | Partly seamed: `effectiveSessionUuid()` already *prefers* an explicit `sessionUuid` tool argument over the connection id (`SessionToolBinding.ts:4-13`). **But `tools/list` carries no arguments**, so today it recovers the UUID only via the connection-bound map — which the stateless model removes. See the **open design question** below. |
-| 2 | **Device autolock routing (daemon).** Per-connection `sessionId = randomUUID()` keys `sessions` / `clientSockets` / `notificationSubscribers`; `getMcpForwardKey` derives the autolock key; disconnect calls `clearBoundMcpClientKey`. | `src/daemon/socketServer.ts:300,357,382,469,629,716` | The daemon owns its **own** transport (Unix socket + a daemon-internal HTTP hop), so it can keep a connection id internally. The change is at the *external* client boundary: route on a durable client-carried handle, not the random connection id. |
-| 3 | **Per-session tool profiles.** Which tools are enabled, persisted per session. | `src/features/toolCapabilities/SessionToolProfileService.ts`, `SqliteSessionToolProfileRepository.ts` | Re-key on the durable client-carried handle instead of the connection id. |
-| 4 | **`tools/list_changed` push.** `proxy.onListChanged → server.sendToolListChanged()` → daemon `notificationSubscribers` fan-out. A server→client push over a persistent connection. | `src/server/proxyServer.ts:61-67`, `src/daemon/socketServer.ts:382` | The 2026-07-28 core provides an **opt-in subscription channel** for server→client notifications (`subscriptions/listen`); `tools/list` re-polling is the compatibility fallback, not the only option. The **internal** proxy↔daemon channel is our own socket and can keep pushing regardless. Confirm the exact subscription surface and host support in the migration. |
+| #   | Mechanism                                                                                                                                                                                                                              | Where                                                                                                  | Stateless-core equivalent                                                                                                                                                                                                                                                                                                                                                |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | **Session identity as primary key.** `SessionToolBinding` is `Map<mcpSessionId → sessionUuid>`; used on every `tools/list` to filter visible tools.                                                                                    | `src/server/SessionToolBinding.ts`, `src/server/index.ts` (~L274)                                      | Partly seamed: `effectiveSessionUuid()` already _prefers_ an explicit `sessionUuid` tool argument over the connection id (`SessionToolBinding.ts:4-13`). **But `tools/list` carries no arguments**, so today it recovers the UUID only via the connection-bound map — which the stateless model removes. See the **open design question** below.                         |
+| 2   | **Device autolock routing (daemon).** Per-connection `sessionId = randomUUID()` keys `sessions` / `clientSockets` / `notificationSubscribers`; `getMcpForwardKey` derives the autolock key; disconnect calls `clearBoundMcpClientKey`. | `src/daemon/socketServer.ts:300,357,382,469,629,716`                                                   | The daemon owns its **own** transport (Unix socket + a daemon-internal HTTP hop), so it can keep a connection id internally. The change is at the _external_ client boundary: route on a durable client-carried handle, not the random connection id.                                                                                                                    |
+| 3   | **Per-session tool profiles.** Which exact tools are enabled, persisted per session.                                                                                                                                                   | `src/features/toolSelection/SessionToolSelectionService.ts`, `SqliteSessionToolSelectionRepository.ts` | Re-key on the durable client-carried handle instead of the connection id.                                                                                                                                                                                                                                                                                                |
+| 4   | **`tools/list_changed` push.** `proxy.onListChanged → server.sendToolListChanged()` → daemon `notificationSubscribers` fan-out. A server→client push over a persistent connection.                                                     | `src/server/proxyServer.ts:61-67`, `src/daemon/socketServer.ts:382`                                    | The 2026-07-28 core provides an **opt-in subscription channel** for server→client notifications (`subscriptions/listen`); `tools/list` re-polling is the compatibility fallback, not the only option. The **internal** proxy↔daemon channel is our own socket and can keep pushing regardless. Confirm the exact subscription surface and host support in the migration. |
 
 ### Open design question the migration must answer first
 
@@ -182,7 +182,7 @@ lands; the loopback HTTP leg can retain `sessionIdGenerator` if we choose.
 
 - **Can Tasks land without full v2 migration?** **No.** The specified extension
   negotiates via `server/discover` + `_meta.io.modelcontextprotocol/clientCapabilities.extensions`,
-  both 2026-07-28 constructs absent from v1.x. (A *different, incompatible*
+  both 2026-07-28 constructs absent from v1.x. (A _different, incompatible_
   experimental Tasks API shipped in the 2025-11-25 core; the spec blog warns it
   must migrate to the new lifecycle. Don't build on the old one.)
 - **Can Apps land without full v2 migration?** **Yes, qualified.** Apps is
@@ -236,6 +236,7 @@ correctness under handle routing (medium — covered by the existing autolock
 routing tests, extend them); v2 GA API churn (low — `2.0.0` is GA, not beta).
 
 ### Unverified — resolve in the migration's first commit
+
 - Exact v2 `PingRequestSchema` / low-level request-handler escape hatch for
   handlers without a `registerX` helper.
 - The exact `subscriptions/listen` surface and which hosts honor it.
@@ -262,5 +263,5 @@ routing tests, extend them); v2 GA API churn (low — `2.0.0` is GA, not beta).
 - Taskifying short synchronous interaction tools (`tapOn`, `inputText`,
   `pressButton`).
 - A serverless/edge redeployment — AutoMobile binds to local ADB/simctl and is
-  intentionally stateful on its host; the stateless *protocol* is served over a
+  intentionally stateful on its host; the stateless _protocol_ is served over a
   factory, but device state stays on the daemon.

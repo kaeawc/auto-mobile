@@ -75,8 +75,10 @@ describe("#4124 ffmpeg install hoist", () => {
     const daemonStep = stepNamed(steps, "Ensure AutoMobile daemon ready (Xcode 26.5)");
     const navigationStep = stepNamed(steps, "Run iOS navigation graph Simulator workflow");
 
-    expect(videoStep?.env?.AUTOMOBILE_TOOLSET_SCREEN_ARTIFACTS).toBe("1");
-    expect(daemonStep?.env?.AUTOMOBILE_TOOLSET_NAVIGATION_MODELING).toBe("1");
-    expect(navigationStep?.env?.AUTOMOBILE_TOOLSET_NAVIGATION_MODELING).toBe("1");
+    expect(videoStep?.env?.AUTOMOBILE_ENABLED_TOOLS).toBe("videoRecording");
+    expect(daemonStep?.env?.AUTOMOBILE_ENABLED_TOOLS).toBe("navigateTo,getNavigationGraph,explore");
+    expect(navigationStep?.env?.AUTOMOBILE_ENABLED_TOOLS).toBe(
+      "navigateTo,getNavigationGraph,explore",
+    );
   });
 });

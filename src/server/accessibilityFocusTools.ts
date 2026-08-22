@@ -9,23 +9,11 @@ import { accessibilityFocusResultSchema } from "./toolOutputSchemas";
 
 export const accessibilityFocusSchema = addDeviceTargetingToSchema(
   z.object({
-    action: z
-      .enum(["set", "clear"])
-      .optional()
-      .describe("set default or clear TalkBack focus"),
-    resourceId: z
-      .string()
-      .optional()
-      .describe("Target resource ID"),
-    text: z
-      .string()
-      .optional()
-      .describe("Target text"),
-    contentDesc: z
-      .string()
-      .optional()
-      .describe("Target content-desc")
-  })
+    action: z.enum(["set", "clear"]).optional().describe("set default or clear TalkBack focus"),
+    resourceId: z.string().optional().describe("Target resource ID"),
+    text: z.string().optional().describe("Target text"),
+    contentDesc: z.string().optional().describe("Target content-desc"),
+  }),
 );
 
 interface AccessibilityFocusArgs {
@@ -39,11 +27,11 @@ export function registerAccessibilityFocusTools() {
   const handler = async (
     device: BootedDevice,
     args: AccessibilityFocusArgs,
-    _progress?: ProgressCallback
+    _progress?: ProgressCallback,
   ) => {
     if (device.platform !== "android") {
       throw new ActionableError(
-        "accessibilityFocus is only supported on Android (TalkBack). iOS VoiceOver focus is not yet implemented."
+        "accessibilityFocus is only supported on Android (TalkBack). iOS VoiceOver focus is not yet implemented.",
       );
     }
 
@@ -52,7 +40,7 @@ export function registerAccessibilityFocusTools() {
       action: args.action,
       resourceId: args.resourceId,
       text: args.text,
-      contentDesc: args.contentDesc
+      contentDesc: args.contentDesc,
     });
 
     if (!result.success) {
@@ -63,7 +51,7 @@ export function registerAccessibilityFocusTools() {
       success: true,
       focusedElement: result.focusedElement,
       confirmed: result.confirmed,
-      warning: result.warning
+      warning: result.warning,
     });
   };
 
@@ -72,5 +60,11 @@ export function registerAccessibilityFocusTools() {
   // to focus an arbitrary node. Re-evaluate whether it should be removed, kept as
   // an internal debug primitive, or implemented through human-representative
   // TalkBack navigation gestures instead.
-  ToolRegistry.registerDeviceAware("accessibilityFocus", "Set or clear Android TalkBack focus by resourceId, text, or contentDesc.", accessibilityFocusSchema, handler, { debugOnly: true, outputSchema: accessibilityFocusResultSchema });
+  ToolRegistry.registerDeviceAware(
+    "accessibilityFocus",
+    "Set or clear Android TalkBack focus by resourceId, text, or contentDesc.",
+    accessibilityFocusSchema,
+    handler,
+    { defaultEnabled: false, debugOnly: true, outputSchema: accessibilityFocusResultSchema },
+  );
 }

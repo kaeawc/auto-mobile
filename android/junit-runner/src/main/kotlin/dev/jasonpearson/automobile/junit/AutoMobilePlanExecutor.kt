@@ -348,21 +348,19 @@ internal object AutoMobilePlanExecutor {
       appendExecutePlanCleanupArgs(args)
       appendCaptureObserveStepsArgs(args)
 
-      // Plans use test-authoring tools such as executePlan. Opt this generated
-      // device session in before executing the plan so runner behavior remains
-      // unchanged while interactive MCP clients keep the lean core default.
+      // Opt this generated device session into executePlan before invoking it.
       response =
         callDaemonToolForAttempt(
-          "setToolCapability",
+          "setToolEnabled",
           JsonObject(
             mapOf(
-              "capability" to JsonPrimitive("test-authoring"),
+              "toolName" to JsonPrimitive("executePlan"),
               "sessionUuid" to JsonPrimitive(sessionUuid),
             )
           ),
           options.effectiveExecutePlanTimeoutMs(),
         )
-      if (!response.success && !isUnknownToolError(response.error)) {
+      if (!response.success) {
         // Treat the prerequisite like executePlan itself: the retry classifier
         // below handles transient daemon responses rather than throwing before
         // it has a chance to retry the attempt.
@@ -371,7 +369,7 @@ internal object AutoMobilePlanExecutor {
         parsed =
           ParsedToolResult(
             false,
-            response.error ?: "Unable to enable the test-authoring capability",
+            response.error ?: "Unable to enable executePlan",
           )
         toolResults = emptyList()
       } else {
@@ -895,9 +893,6 @@ internal object AutoMobilePlanExecutor {
       normalized.contains("plan execution in progress") ||
       normalized.contains("daemon request timeout")
   }
-
-  private fun isUnknownToolError(errorMessage: String?): Boolean =
-    errorMessage?.contains("unknown tool", ignoreCase = true) == true
 
   // ── Internal types ────────────────────────────────────────────────────────
 

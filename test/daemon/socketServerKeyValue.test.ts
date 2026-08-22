@@ -10,7 +10,7 @@ import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
-import type { SessionToolProfileService } from "../../src/features/toolCapabilities/SessionToolProfileService";
+import type { SessionToolSelectionService } from "../../src/features/toolSelection/SessionToolSelectionService";
 import type { DaemonResponse } from "../../src/daemon/types";
 import type { BootedDevice } from "../../src/models";
 
@@ -51,7 +51,11 @@ function createDaemonState() {
   };
 }
 
-function sendRequest(socketPath: string, method: string, params: Record<string, unknown>): Promise<DaemonResponse> {
+function sendRequest(
+  socketPath: string,
+  method: string,
+  params: Record<string, unknown>,
+): Promise<DaemonResponse> {
   return sendSocketRequest(socketPath, method, params);
 }
 
@@ -101,7 +105,7 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
       clearPreferenceStore: iosClearPreferenceStore,
     })) as unknown as typeof IOSCtrlProxyClient.getInstance;
 
-    const profileService: Pick<SessionToolProfileService, "isEnabled" | "setEnabled"> = {
+    const profileService: Pick<SessionToolSelectionService, "isEnabled" | "setEnabled"> = {
       isEnabled: async () => true,
       setEnabled: async () => {},
     };
@@ -112,7 +116,7 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
       createDaemonState(),
       new FakeTimer(),
       null,
-      { sessionToolProfileService: profileService }
+      { sessionToolSelectionService: profileService },
     );
     await server.start();
   });
@@ -139,7 +143,13 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
     });
 
     expect(response.success).toBe(true);
-    expect(iosSetPreference).toHaveBeenCalledWith("com.example.app", "prefs", "theme", "dark", "STRING");
+    expect(iosSetPreference).toHaveBeenCalledWith(
+      "com.example.app",
+      "prefs",
+      "theme",
+      "dark",
+      "STRING",
+    );
     expect(androidSetPreference).not.toHaveBeenCalled();
   });
 
@@ -197,7 +207,13 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
     });
 
     expect(response.success).toBe(true);
-    expect(androidSetPreference).toHaveBeenCalledWith("com.example.app", "prefs", "theme", "dark", "STRING");
+    expect(androidSetPreference).toHaveBeenCalledWith(
+      "com.example.app",
+      "prefs",
+      "theme",
+      "dark",
+      "STRING",
+    );
     expect(iosSetPreference).not.toHaveBeenCalled();
   });
 

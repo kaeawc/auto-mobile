@@ -17,8 +17,11 @@ import QuartzCore
 ///
 /// Reference: WWDC sessions on hitches and frame pacing
 public class DisplayLinkFPSMonitor: PerformanceMetricsProvider {
-    /// How often to report aggregated metrics (in seconds)
-    public static let defaultReportIntervalSeconds = 0.5
+    /// How often to report aggregated metrics (in seconds). Raised from 0.5 to 1.0
+    /// (issue #5477): each report enumerates all process threads for CPU and reads
+    /// task memory, so halving the report cadence halves that per-report sampling
+    /// cost while a client is connected.
+    public static let defaultReportIntervalSeconds = 1.0
 
     /// Frame time thresholds for jank detection
     /// - 60Hz budget: 16.67ms

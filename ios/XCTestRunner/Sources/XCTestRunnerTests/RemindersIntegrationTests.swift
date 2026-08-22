@@ -19,7 +19,7 @@ private final class LaunchPlanContractMCPClient: AutoMobileMCPClient {
         toolCalls.append(ToolCall(name: name, arguments: arguments, timeout: timeout))
 
         switch name {
-        case "setToolCapability":
+        case "setToolEnabled":
             return MCPToolResponse(text: #"{"success":true}"#)
         case "executePlan":
             return MCPToolResponse(
@@ -111,7 +111,7 @@ final class RemindersLaunchPlanTests: XCTestCase {
         XCTAssertEqual(result.totalSteps, 3)
         XCTAssertEqual(result.platform, "ios")
         XCTAssertEqual(client.initializeTimeouts, [1])
-        XCTAssertEqual(client.toolCalls.map(\.name), ["setToolCapability", "executePlan"])
+        XCTAssertEqual(client.toolCalls.map(\.name), ["setToolEnabled", "executePlan"])
         XCTAssertEqual(client.toolCalls.map(\.timeout), [1, 1])
 
         let executePlanArguments = try XCTUnwrap(client.toolCalls.last?.arguments)

@@ -7,18 +7,21 @@ import { logger } from "../utils/logger";
 import { addDeviceTargetingToSchema, withAppIdAliases } from "./toolSchemaHelpers";
 
 // Schema definitions for tool arguments
-export const getDeepLinksSchema = withAppIdAliases(addDeviceTargetingToSchema(z.object({
-  appId: z.string(),
-})));
+export const getDeepLinksSchema = withAppIdAliases(
+  addDeviceTargetingToSchema(
+    z.object({
+      appId: z.string(),
+    }),
+  ),
+);
 
 // Type definitions for better TypeScript support
 export interface GetDeepLinksArgs {
-    appId: string;
+  appId: string;
 }
 
 // Register tools
 export function registerDeepLinkTools() {
-
   // Get deep links handler
   const getDeepLinksHandler = async (device: BootedDevice, args: GetDeepLinksArgs) => {
     try {
@@ -34,7 +37,7 @@ export function registerDeepLinkTools() {
         intentFilters: result.deepLinks.intentFilters,
         supportedMimeTypes: result.deepLinks.supportedMimeTypes,
         error: result.error,
-        rawOutput: result.rawOutput
+        rawOutput: result.rawOutput,
       });
     } catch (error) {
       logger.error(`[getDeepLinks] Failed to get deep links: ${error}`);
@@ -43,5 +46,11 @@ export function registerDeepLinkTools() {
   };
 
   // Register with the tool registry
-  ToolRegistry.registerDeviceAware("getDeepLinks", "Query app deep links", getDeepLinksSchema, getDeepLinksHandler);
+  ToolRegistry.registerDeviceAware(
+    "getDeepLinks",
+    "Query app deep links",
+    getDeepLinksSchema,
+    getDeepLinksHandler,
+    { defaultEnabled: false },
+  );
 }

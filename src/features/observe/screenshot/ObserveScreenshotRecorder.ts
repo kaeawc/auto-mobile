@@ -107,6 +107,9 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
           { format: "png" },
           {
             parentSignal: signal,
+            // Awaitable observe captures share an ordinary in-flight capture,
+            // but queue behind a non-coalescible fresh resource capture.
+            coalesceWithPending: true,
             onComplete: async completion => {
               if (!completion.isLatest) {
                 return;

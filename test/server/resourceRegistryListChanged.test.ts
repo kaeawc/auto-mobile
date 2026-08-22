@@ -13,10 +13,13 @@ import { ListChangedBroadcaster } from "../../src/server/listChangedBroadcast";
 // fan-out; notifyResourceListChanged sends via `server.server.notification`.
 class FakeUnderlyingServer {
   notifications: Array<{ method: string; params?: unknown }> = [];
-  handlersBySchema = new Map<unknown, (request: unknown) => Promise<unknown>>();
+  handlersBySchema = new Map<unknown, (request: unknown, extra?: unknown) => Promise<unknown>>();
   shouldThrow = false;
   onclose?: () => void;
-  setRequestHandler(schema: unknown, handler: (request: unknown) => Promise<unknown>): void {
+  setRequestHandler(
+    schema: unknown,
+    handler: (request: unknown, extra?: unknown) => Promise<unknown>,
+  ): void {
     this.handlersBySchema.set(schema, handler);
   }
   async notification(payload: { method: string; params?: unknown }): Promise<void> {
@@ -150,22 +153,30 @@ describe("ResourceRegistry URI-template matching", () => {
       "application/json",
       async (params, context) => ({
         uri: `automobile:test/${params.id}`,
-        text: JSON.stringify(context),
+        text: JSON.stringify({
+          sessionUuid: context.sessionUuid,
+          hasSignal: context.signal === controller.signal,
+        }),
       }),
     );
+    const controller = new AbortController();
     ResourceRegistry.registerWithServer(
       server as unknown as McpServer,
-      () => ({ sessionUuid: "session-bound" }),
+      signal => ({ sessionUuid: "session-bound", signal }),
     );
 
     const readHandler = server.server.handlersBySchema.get(ReadResourceRequestSchema);
     expect(readHandler).toBeDefined();
-    const response = await readHandler!({ params: { uri: "automobile:test/one" } }) as {
+    const response = await readHandler!(
+      { params: { uri: "automobile:test/one" } },
+      { signal: controller.signal },
+    ) as {
       contents: Array<{ text?: string }>;
     };
 
     expect(JSON.parse(response.contents[0].text!)).toEqual({
       sessionUuid: "session-bound",
+      hasSignal: true,
     });
   });
 });

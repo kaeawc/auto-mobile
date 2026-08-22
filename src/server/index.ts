@@ -126,6 +126,36 @@ function stripInternalToolParams(params: unknown): unknown {
   return rest;
 }
 
+function getDeviceSessionIdFromResult(result: unknown): string | undefined {
+  if (!result || typeof result !== "object" || !("content" in result)) {
+    return undefined;
+  }
+  const content = (result as { content?: unknown }).content;
+  if (!Array.isArray(content)) {
+    return undefined;
+  }
+  const text = content.find(item => (
+    item
+    && typeof item === "object"
+    && "type" in item
+    && (item as { type?: unknown }).type === "text"
+    && "text" in item
+    && typeof (item as { text?: unknown }).text === "string"
+  )) as { text: string } | undefined;
+  if (!text) {
+    return undefined;
+  }
+  try {
+    const payload = JSON.parse(text.text) as { sessionId?: unknown };
+    return typeof payload.sessionId === "string" && payload.sessionId.trim().length > 0
+      ? payload.sessionId
+      : undefined;
+  } catch (error) {
+    logger.debug("[MCP] Device-start response did not contain JSON", { error });
+    return undefined;
+  }
+}
+
 function flattenZodIssues(issues: ZodIssue[]): ZodIssue[] {
   const flattened: ZodIssue[] = [];
 
@@ -292,8 +322,9 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   });
 
   // Register all resources with the server
-  ResourceRegistry.registerWithServer(server, () => ({
+  ResourceRegistry.registerWithServer(server, signal => ({
     sessionUuid: sessionToolBinding.effectiveSessionUuid(options.sessionContext?.sessionId),
+    signal,
   }));
 
   // Tear down this transport's server-side SessionToolBinding when the daemon
@@ -548,6 +579,12 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
           () => tool.handler(handlerParams, progressCallback, execution.abortController.signal)
         )
       );
+      if (
+        (name === "getAndroid" || name === "getApple" || name === "startDevice")
+        && sessionToolBinding.bind(sessionId, getDeviceSessionIdFromResult(result))
+      ) {
+        ToolRegistry.notifyToolListChanged();
+      }
       // Wire-boundary output policy: strip the duplicated `structuredContent`
       // tree for no-schema tools unconditionally (issue #2759) and for schema
       // tools when the `--tool-results-no-structured-content` flag is on (issue

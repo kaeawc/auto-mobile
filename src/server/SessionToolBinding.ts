@@ -3,6 +3,8 @@ import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 export class SessionToolBinding {
   private readonly boundDeviceSessions = new Map<string, string>();
   private initialSessionUuid?: string;
+  /** The single stdio transport has no MCP session ID, so retain its device session here. */
+  private directDeviceSessionUuid?: string;
   private initialCapabilityProfileUuid?: string;
   /** The single stdio transport has no MCP session ID, so retain its profile here. */
   private directCapabilityProfileUuid?: string;
@@ -17,6 +19,13 @@ export class SessionToolBinding {
     this.initialCapabilityProfileUuid = initialCapabilityProfileUuid;
   }
 
+  private boundSessionUuid(mcpSessionId: string | undefined): string | undefined {
+    if (mcpSessionId) {
+      return this.boundDeviceSessions.get(mcpSessionId) ?? this.initialSessionUuid;
+    }
+    return this.directDeviceSessionUuid ?? this.initialSessionUuid;
+  }
+
   effectiveSessionUuid(mcpSessionId: string | undefined, params?: unknown): string | undefined {
     const explicit = params && typeof params === "object" && !Array.isArray(params)
       ? (params as Record<string, unknown>).sessionUuid
@@ -24,9 +33,7 @@ export class SessionToolBinding {
     const explicitSessionUuid = typeof explicit === "string" && explicit.trim().length > 0
       ? explicit
       : undefined;
-    const boundSessionUuid = mcpSessionId
-      ? this.boundDeviceSessions.get(mcpSessionId) ?? this.initialSessionUuid
-      : this.initialSessionUuid;
+    const boundSessionUuid = this.boundSessionUuid(mcpSessionId);
     if (
       this.initialSessionUuid &&
       explicitSessionUuid &&
@@ -61,11 +68,15 @@ export class SessionToolBinding {
     if (!sessionUuid?.trim()) {
       return false;
     }
-    if (!mcpSessionId) {
-      return false;
-    }
     if (this.initialSessionUuid && sessionUuid !== this.initialSessionUuid) {
       return false;
+    }
+    if (!mcpSessionId) {
+      if (this.directDeviceSessionUuid === sessionUuid) {
+        return false;
+      }
+      this.directDeviceSessionUuid = sessionUuid;
+      return true;
     }
     if (this.boundDeviceSessions.get(mcpSessionId) === sessionUuid) {
       return false;
@@ -126,6 +137,10 @@ export class SessionToolBinding {
     }
     if (this.initialSessionUuid === sessionUuid) {
       this.initialSessionUuid = undefined;
+      removed = true;
+    }
+    if (this.directDeviceSessionUuid === sessionUuid) {
+      this.directDeviceSessionUuid = undefined;
       removed = true;
     }
     return removed;

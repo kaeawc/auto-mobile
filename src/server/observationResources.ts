@@ -231,7 +231,7 @@ function isAuthorizedSessionResource(
   context: ResourceReadContext,
   sessionUuid: string,
 ): boolean {
-  return !context.sessionUuid || context.sessionUuid === sessionUuid;
+  return context.sessionUuid === sessionUuid;
 }
 
 // Session-scoped handler for a cached observation.
@@ -359,7 +359,10 @@ async function getFreshSessionScreenshot(
       sessionScreenshotResourceDependencies.createScreenshotService(activeSession.device);
     const { promise } = screenshotService.startTrackedCapture(
       { format: "png" },
-      { queueAfterPending: true },
+      {
+        parentSignal: context.signal,
+        queueAfterPending: true,
+      },
     );
     const result = await promise;
 

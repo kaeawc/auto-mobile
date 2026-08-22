@@ -8,6 +8,7 @@ interface DirectSessionDevice {
 const sessions = new Map<string, BootedDevice>();
 
 export function registerDirectSessionDevice(sessionUuid: string, device: BootedDevice): void {
+  unregisterDirectSessionsForDevice(device.deviceId);
   sessions.set(sessionUuid, { ...device });
 }
 

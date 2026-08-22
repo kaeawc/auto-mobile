@@ -14,6 +14,7 @@ import { ensureSecureTempDirSync, TEMP_SUBDIRS } from "../../utils/tempDir";
 import type { ScreenshotService } from "./interfaces/ScreenshotService";
 import { selectScreenshotsToEvict, SCREENSHOT_MIN_EVICT_AGE_MS } from "./screenshotCacheEviction";
 import { IOSCtrlProxyClient } from "./ios";
+import type { CtrlProxyScreenshotResult } from "./ios/types";
 import { getDeviceDataStreamServer } from "../../daemon/deviceDataStreamSocketServer";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { defaultIdGenerator, IdGenerator } from "../../utils/IdGenerator";
@@ -214,7 +215,7 @@ export class TakeScreenshot implements ScreenshotService {
       case "android":
         return await this.captureAndroidScreenshot(finalPath, options, signal);
       case "ios":
-        return await this.captureiOSScreenshot(finalPath);
+        return await this.captureiOSScreenshot(finalPath, signal);
       default:
         throw new Error(`Unsupported platform: ${this.device.platform}`);
     }
@@ -256,6 +257,7 @@ export class TakeScreenshot implements ScreenshotService {
    */
   private async captureiOSScreenshot(
     finalPath: string,
+    signal?: AbortSignal,
   ): Promise<ScreenshotResult> {
     const startTime = this.timer.now();
 
@@ -269,31 +271,13 @@ export class TakeScreenshot implements ScreenshotService {
           error: "Failed to connect to CtrlProxy iOS",
         };
       }
+      if (signal?.aborted) {
+        return { success: false, error: OPERATION_CANCELLED_MESSAGE };
+      }
 
       // Request screenshot from CtrlProxy iOS
       const result = await client.requestScreenshot(10000); // 10 second timeout
-
-      if (!result.success || !result.data) {
-        return {
-          success: false,
-          error: result.error || "No screenshot data returned",
-        };
-      }
-
-      // Decode base64 and save to file securely
-      const imageBuffer = Buffer.from(result.data, "base64");
-      await writeFileSecure(finalPath, imageBuffer);
-
-      const durationMs = this.timer.now() - startTime;
-      logger.info(`[SCREENSHOT] iOS screenshot captured in ${durationMs}ms, saved to ${finalPath}`);
-
-      // Push to observation stream for IDE plugins
-      this.pushScreenshotToStream(result.data, imageBuffer);
-
-      return {
-        success: true,
-        path: finalPath,
-      };
+      return await this.writeiOSScreenshot(finalPath, result, startTime, signal);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       logger.error(`[SCREENSHOT] iOS screenshot capture failed: ${errorMessage}`);
@@ -302,6 +286,42 @@ export class TakeScreenshot implements ScreenshotService {
         error: errorMessage,
       };
     }
+  }
+
+  private async writeiOSScreenshot(
+    finalPath: string,
+    result: CtrlProxyScreenshotResult,
+    startTime: number,
+    signal?: AbortSignal,
+  ): Promise<ScreenshotResult> {
+    if (signal?.aborted) {
+      return { success: false, error: OPERATION_CANCELLED_MESSAGE };
+    }
+
+    if (!result.success || !result.data) {
+      return {
+        success: false,
+        error: result.error || "No screenshot data returned",
+      };
+    }
+
+    // Decode base64 and save to file securely
+    const imageBuffer = Buffer.from(result.data, "base64");
+    await writeFileSecure(finalPath, imageBuffer);
+    if (signal?.aborted) {
+      return { success: false, error: OPERATION_CANCELLED_MESSAGE };
+    }
+
+    const durationMs = this.timer.now() - startTime;
+    logger.info(`[SCREENSHOT] iOS screenshot captured in ${durationMs}ms, saved to ${finalPath}`);
+
+    // Push to observation stream for IDE plugins
+    this.pushScreenshotToStream(result.data, imageBuffer);
+
+    return {
+      success: true,
+      path: finalPath,
+    };
   }
 
   /**

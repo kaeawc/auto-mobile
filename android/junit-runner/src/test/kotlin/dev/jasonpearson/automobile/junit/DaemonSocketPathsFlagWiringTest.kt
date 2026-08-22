@@ -62,6 +62,7 @@ class DaemonSocketPathsFlagWiringTest {
     SystemPropertyCache.clear()
 
     assertEquals(30_000L, DaemonSocketPaths.daemonStartTimeoutMs())
+    assertEquals(90_000L, DaemonSocketPaths.daemonLauncherTimeoutMs())
   }
 
   @Test

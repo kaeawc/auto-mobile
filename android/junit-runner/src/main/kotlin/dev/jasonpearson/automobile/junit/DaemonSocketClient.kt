@@ -161,7 +161,7 @@ internal object DaemonSocketClientManager {
     val environmentOverrides = resolveDaemonEnvironmentOverrides()
     AutoMobileSharedUtils.executeCommand(
       startCommand,
-      DaemonSocketPaths.daemonStartTimeoutMs(),
+      DaemonSocketPaths.daemonLauncherTimeoutMs(),
       environmentOverrides,
     )
 
@@ -340,6 +340,7 @@ internal object DaemonSocketClientManager {
 
 internal object DaemonSocketPaths {
   private const val DEFAULT_DAEMON_STARTUP_TIMEOUT_MS = 30000L
+  private const val DAEMON_STARTUP_LIFECYCLE_BUDGETS = 3L
   private const val DAEMON_PACKAGE_NAME = "@kaeawc/auto-mobile"
   private const val DAEMON_PACKAGE_VERSION_PROPERTY = "automobile.daemon.package.version"
   private val ignoredPackageVersions = setOf("latest", "unknown")
@@ -356,6 +357,17 @@ internal object DaemonSocketPaths {
     val configured =
       sysProp.ifEmpty { envVar }.ifEmpty { DEFAULT_DAEMON_STARTUP_TIMEOUT_MS.toString() }
     return configured.toLongOrNull() ?: DEFAULT_DAEMON_STARTUP_TIMEOUT_MS
+  }
+
+  /**
+   * Bound the launcher process for the daemon's full startup lifecycle: one
+   * lock-holder wait plus up to two startup attempts.
+   */
+  fun daemonLauncherTimeoutMs(): Long {
+    return (
+      daemonStartTimeoutMs()
+        .coerceAtMost(Long.MAX_VALUE / DAEMON_STARTUP_LIFECYCLE_BUDGETS)
+      ) * DAEMON_STARTUP_LIFECYCLE_BUDGETS
   }
 
   fun buildDaemonStartCommand(): List<String> {

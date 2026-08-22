@@ -14,10 +14,27 @@ export class McpTestFixture {
   public client!: Client;
   public serverTransport!: any;
   public clientTransport!: any;
+  private readonly serverOptions: Parameters<typeof createMcpServer>[0];
 
-  constructor(
-    private readonly serverOptions: Parameters<typeof createMcpServer>[0] = {}
-  ) {}
+  constructor(serverOptions: Parameters<typeof createMcpServer>[0] = {}) {
+    const overrides = new Map<string, Map<string, boolean>>();
+    this.serverOptions = {
+      sessionToolSelectionService: {
+        isEnabled: async (sessionUuid, toolName, declaredDefault) =>
+          (sessionUuid ? overrides.get(sessionUuid)?.get(toolName) : undefined) ?? declaredDefault,
+        getOverride: async (sessionUuid, toolName) => overrides.get(sessionUuid)?.get(toolName),
+        setEnabled: async (sessionUuid, toolName, enabled) => {
+          const sessionOverrides = overrides.get(sessionUuid) ?? new Map<string, boolean>();
+          sessionOverrides.set(toolName, enabled);
+          overrides.set(sessionUuid, sessionOverrides);
+        },
+        deleteSession: async (sessionUuid) => {
+          overrides.delete(sessionUuid);
+        },
+      },
+      ...serverOptions,
+    };
+  }
 
   async setup(): Promise<void> {
     const { createMcpServer } = await import("../../src/server/index");
@@ -28,7 +45,7 @@ export class McpTestFixture {
 
     this.client = new Client({
       name: "test-client",
-      version: "0.0.1"
+      version: "0.0.1",
     });
 
     await this.client.connect(this.clientTransport);
@@ -45,7 +62,7 @@ export class McpTestFixture {
       server: this.server,
       client: this.client,
       serverTransport: this.serverTransport,
-      clientTransport: this.clientTransport
+      clientTransport: this.clientTransport,
     };
   }
 }

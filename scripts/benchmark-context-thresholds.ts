@@ -12,7 +12,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { Tiktoken } from "js-tiktoken/lite";
 import cl100k_base from "js-tiktoken/ranks/cl100k_base";
-import { TOOL_CAPABILITY_BY_NAME } from "../src/features/toolCapabilities/toolCapabilityMap";
 import { ResourceRegistry } from "../src/server/resourceRegistry";
 import { createMcpServer } from "../src/server/index";
 import { ToolRegistry } from "../src/server/toolRegistry";
@@ -28,7 +27,7 @@ export const CONTEXT_MEASUREMENT_KEYS = [
   "allTotal",
 ] as const;
 
-export type ContextMeasurementKey = typeof CONTEXT_MEASUREMENT_KEYS[number];
+export type ContextMeasurementKey = (typeof CONTEXT_MEASUREMENT_KEYS)[number];
 export type ContextMeasurements = Record<ContextMeasurementKey, number>;
 
 export interface ThresholdConfig {
@@ -69,7 +68,10 @@ function stripOutputSchema(tool: Record<string, unknown>): Record<string, unknow
   return Object.fromEntries(Object.entries(tool).filter(([key]) => key !== "outputSchema"));
 }
 
-function estimateDefinitions(definitions: readonly Record<string, unknown>[], stripOutputs = false): number {
+function estimateDefinitions(
+  definitions: readonly Record<string, unknown>[],
+  stripOutputs = false,
+): number {
   return definitions.reduce((total, definition) => {
     const measuredDefinition = stripOutputs ? stripOutputSchema(definition) : definition;
     return total + estimateTokens(JSON.stringify(measuredDefinition, null, 2));
@@ -77,7 +79,7 @@ function estimateDefinitions(definitions: readonly Record<string, unknown>[], st
 }
 
 export function isCoreTool(toolName: string): boolean {
-  return !TOOL_CAPABILITY_BY_NAME.has(toolName);
+  return ToolRegistry.getRegisteredTool(toolName)?.defaultEnabled === true;
 }
 
 /**
@@ -88,7 +90,7 @@ export function collectContextMeasurements(): ContextMeasurements {
   createMcpServer({ daemonMode: true });
 
   const allTools = ToolRegistry.getToolDefinitions();
-  const coreTools = allTools.filter(tool => isCoreTool(tool.name));
+  const coreTools = allTools.filter((tool) => isCoreTool(tool.name));
   const resources = ResourceRegistry.getResourceDefinitions();
   const resourceTemplates = ResourceRegistry.getTemplateDefinitions();
 
@@ -127,11 +129,13 @@ export function evaluateMeasurements(
       actual,
       baseline,
       delta: actual - baseline,
-      ...(threshold === undefined ? {} : {
-        threshold,
-        passed,
-        usage: Math.round((actual / threshold) * 100),
-      }),
+      ...(threshold === undefined
+        ? {}
+        : {
+            threshold,
+            passed,
+            usage: Math.round((actual / threshold) * 100),
+          }),
     };
   }
 
@@ -192,7 +196,9 @@ export function printReport(report: BenchmarkReport): void {
 
   const formatRow = (label: string, result: MeasurementResult) => {
     const status = report.enforcement.enabled
-      ? result.passed ? "✓ PASS" : "✗ FAIL"
+      ? result.passed
+        ? "✓ PASS"
+        : "✗ FAIL"
       : "• BASELINE";
     return `  ${label.padEnd(25)} ${result.actual.toString().padStart(8)} ${result.baseline.toString().padStart(10)} ${formatDelta(result.delta).padStart(8)}  ${status}`;
   };
@@ -216,7 +222,9 @@ export function printReport(report: BenchmarkReport): void {
   }
 
   const status = report.enforcement.enabled
-    ? report.passed ? "✓ PASSED" : "✗ FAILED"
+    ? report.passed
+      ? "✓ PASSED"
+      : "✗ FAILED"
     : "• BASELINES RECORDED (threshold enforcement pending)";
   console.log(`\nOverall Status: ${status}\n`);
 }
@@ -251,7 +259,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
 }
 
 if (import.meta.main) {
-  main().catch(error => {
+  main().catch((error) => {
     console.error("Fatal error:", error);
     process.exitCode = 1;
   });

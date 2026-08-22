@@ -11,8 +11,18 @@ import type { KeyValueType } from "../features/storage/storageTypes";
 
 // Valid types for key-value storage (union of Android and iOS types)
 const KEY_VALUE_TYPES = [
-  "STRING", "INT", "LONG", "FLOAT", "DOUBLE", "BOOLEAN",
-  "STRING_SET", "DATA", "DATE", "ARRAY", "DICTIONARY", "UNKNOWN",
+  "STRING",
+  "INT",
+  "LONG",
+  "FLOAT",
+  "DOUBLE",
+  "BOOLEAN",
+  "STRING_SET",
+  "DATA",
+  "DATE",
+  "ARRAY",
+  "DICTIONARY",
+  "UNKNOWN",
 ] as const;
 
 // Types only valid on Android
@@ -28,75 +38,90 @@ const TYPE_GUIDANCE: Record<string, string> = {
   "ios:STRING_SET": "STRING_SET is Android-only. On iOS, use ARRAY for collections of strings.",
   // iOS-only types on Android
   "android:DOUBLE": "DOUBLE is iOS-only. On Android, use FLOAT for decimal values.",
-  "android:DATA": "DATA is iOS-only and stores raw binary data (base64 encoded). Not available on Android.",
-  "android:DATE": "DATE is iOS-only and stores ISO 8601 date strings. On Android, store dates as STRING or LONG (epoch millis).",
-  "android:ARRAY": "ARRAY is iOS-only. On Android, use STRING_SET for string collections, or store JSON as STRING.",
+  "android:DATA":
+    "DATA is iOS-only and stores raw binary data (base64 encoded). Not available on Android.",
+  "android:DATE":
+    "DATE is iOS-only and stores ISO 8601 date strings. On Android, store dates as STRING or LONG (epoch millis).",
+  "android:ARRAY":
+    "ARRAY is iOS-only. On Android, use STRING_SET for string collections, or store JSON as STRING.",
   "android:DICTIONARY": "DICTIONARY is iOS-only. On Android, store JSON objects as STRING.",
 };
 
-const STORAGE_NAME_DESCRIPTION =
-  "Storage name";
+const STORAGE_NAME_DESCRIPTION = "Storage name";
 
-const legacyFileNameDescription =
-  "Deprecated alias for name";
+const legacyFileNameDescription = "Deprecated alias for name";
 
 function resolveStorageName(args: { name?: string; fileName?: string }): string {
   return args.name ?? args.fileName!;
 }
 
 // Schema for setKeyValue tool
-const setKeyValueSchema = withAppIdAliases(z.union([
-  addDeviceTargetingToSchema(z.object({
-    appId: z.string(),
-    name: z.string().describe(STORAGE_NAME_DESCRIPTION),
-    fileName: z.string().optional().describe(legacyFileNameDescription),
-    key: z.string().describe("Key"),
-    value: z.string().nullable().describe("Value string; null clears"),
-    type: z.enum(KEY_VALUE_TYPES).describe(
-      "Value type"
+const setKeyValueSchema = withAppIdAliases(
+  z.union([
+    addDeviceTargetingToSchema(
+      z.object({
+        appId: z.string(),
+        name: z.string().describe(STORAGE_NAME_DESCRIPTION),
+        fileName: z.string().optional().describe(legacyFileNameDescription),
+        key: z.string().describe("Key"),
+        value: z.string().nullable().describe("Value string; null clears"),
+        type: z.enum(KEY_VALUE_TYPES).describe("Value type"),
+      }),
     ),
-  })),
-  addDeviceTargetingToSchema(z.object({
-    appId: z.string(),
-    name: z.string().optional().describe(STORAGE_NAME_DESCRIPTION),
-    fileName: z.string().describe(legacyFileNameDescription),
-    key: z.string().describe("Key"),
-    value: z.string().nullable().describe("Value string; null clears"),
-    type: z.enum(KEY_VALUE_TYPES).describe(
-      "Value type"
+    addDeviceTargetingToSchema(
+      z.object({
+        appId: z.string(),
+        name: z.string().optional().describe(STORAGE_NAME_DESCRIPTION),
+        fileName: z.string().describe(legacyFileNameDescription),
+        key: z.string().describe("Key"),
+        value: z.string().nullable().describe("Value string; null clears"),
+        type: z.enum(KEY_VALUE_TYPES).describe("Value type"),
+      }),
     ),
-  })),
-]));
+  ]),
+);
 
 // Schema for removeKeyValue tool
-const removeKeyValueSchema = withAppIdAliases(z.union([
-  addDeviceTargetingToSchema(z.object({
-    appId: z.string(),
-    name: z.string().describe(STORAGE_NAME_DESCRIPTION),
-    fileName: z.string().optional().describe(legacyFileNameDescription),
-    key: z.string().describe("Key"),
-  })),
-  addDeviceTargetingToSchema(z.object({
-    appId: z.string(),
-    name: z.string().optional().describe(STORAGE_NAME_DESCRIPTION),
-    fileName: z.string().describe(legacyFileNameDescription),
-    key: z.string().describe("Key"),
-  })),
-]));
+const removeKeyValueSchema = withAppIdAliases(
+  z.union([
+    addDeviceTargetingToSchema(
+      z.object({
+        appId: z.string(),
+        name: z.string().describe(STORAGE_NAME_DESCRIPTION),
+        fileName: z.string().optional().describe(legacyFileNameDescription),
+        key: z.string().describe("Key"),
+      }),
+    ),
+    addDeviceTargetingToSchema(
+      z.object({
+        appId: z.string(),
+        name: z.string().optional().describe(STORAGE_NAME_DESCRIPTION),
+        fileName: z.string().describe(legacyFileNameDescription),
+        key: z.string().describe("Key"),
+      }),
+    ),
+  ]),
+);
 
 // Schema for clearKeyValueFile tool
-const clearKeyValueFileSchema = withAppIdAliases(z.union([
-  addDeviceTargetingToSchema(z.object({
-    appId: z.string(),
-    name: z.string().describe(STORAGE_NAME_DESCRIPTION),
-    fileName: z.string().optional().describe(legacyFileNameDescription),
-  })),
-  addDeviceTargetingToSchema(z.object({
-    appId: z.string(),
-    name: z.string().optional().describe(STORAGE_NAME_DESCRIPTION),
-    fileName: z.string().describe(legacyFileNameDescription),
-  })),
-]));
+const clearKeyValueFileSchema = withAppIdAliases(
+  z.union([
+    addDeviceTargetingToSchema(
+      z.object({
+        appId: z.string(),
+        name: z.string().describe(STORAGE_NAME_DESCRIPTION),
+        fileName: z.string().optional().describe(legacyFileNameDescription),
+      }),
+    ),
+    addDeviceTargetingToSchema(
+      z.object({
+        appId: z.string(),
+        name: z.string().optional().describe(STORAGE_NAME_DESCRIPTION),
+        fileName: z.string().describe(legacyFileNameDescription),
+      }),
+    ),
+  ]),
+);
 
 interface SetKeyValueArgs {
   appId: string;
@@ -134,7 +159,7 @@ function validateTypeForPlatform(platform: string, type: KeyValueType): void {
   if (type === "UNKNOWN") {
     throw new ActionableError(
       "UNKNOWN type is read-only and cannot be used for write operations. " +
-      "Specify an explicit type (STRING, INT, BOOLEAN, etc.)."
+        "Specify an explicit type (STRING, INT, BOOLEAN, etc.).",
     );
   }
 
@@ -184,7 +209,7 @@ export function registerStorageTools(): void {
 
       // Notify subscribers that entries changed so they re-read fresh data
       void ResourceRegistry.notifyResourceUpdated(
-        buildEntriesUri(device.deviceId, args.appId, storageName)
+        buildEntriesUri(device.deviceId, args.appId, storageName),
       );
 
       return createJSONToolResponse({
@@ -217,7 +242,7 @@ export function registerStorageTools(): void {
       }
 
       void ResourceRegistry.notifyResourceUpdated(
-        buildEntriesUri(device.deviceId, args.appId, storageName)
+        buildEntriesUri(device.deviceId, args.appId, storageName),
       );
 
       return createJSONToolResponse({
@@ -249,7 +274,7 @@ export function registerStorageTools(): void {
       }
 
       void ResourceRegistry.notifyResourceUpdated(
-        buildEntriesUri(device.deviceId, args.appId, storageName)
+        buildEntriesUri(device.deviceId, args.appId, storageName),
       );
 
       return createJSONToolResponse({
@@ -265,9 +290,27 @@ export function registerStorageTools(): void {
     }
   };
 
-  ToolRegistry.registerDeviceAware("setKeyValue", "Set app key-value storage entry.", setKeyValueSchema, setKeyValueHandler, { embeddedSdkOnly: true });
+  ToolRegistry.registerDeviceAware(
+    "setKeyValue",
+    "Set app key-value storage entry.",
+    setKeyValueSchema,
+    setKeyValueHandler,
+    { defaultEnabled: false, embeddedSdkOnly: true },
+  );
 
-  ToolRegistry.registerDeviceAware("removeKeyValue", "Remove app key-value storage entry.", removeKeyValueSchema, removeKeyValueHandler, { embeddedSdkOnly: true });
+  ToolRegistry.registerDeviceAware(
+    "removeKeyValue",
+    "Remove app key-value storage entry.",
+    removeKeyValueSchema,
+    removeKeyValueHandler,
+    { defaultEnabled: false, embeddedSdkOnly: true },
+  );
 
-  ToolRegistry.registerDeviceAware("clearKeyValueFile", "Clear app key-value storage file.", clearKeyValueFileSchema, clearKeyValueFileHandler, { embeddedSdkOnly: true });
+  ToolRegistry.registerDeviceAware(
+    "clearKeyValueFile",
+    "Clear app key-value storage file.",
+    clearKeyValueFileSchema,
+    clearKeyValueFileHandler,
+    { defaultEnabled: false, embeddedSdkOnly: true },
+  );
 }

@@ -63,7 +63,7 @@ describe("DefaultAuditRunner", () => {
 
   const makeInput = (
     device: BootedDevice,
-    handler: AuditRunnerInput["handler"]
+    handler: AuditRunnerInput["handler"],
   ): AuditRunnerInput => ({
     name: "tapOn",
     args: { x: 1, y: 2 },
@@ -85,7 +85,7 @@ describe("DefaultAuditRunner", () => {
       makeInput(androidDevice, async (device, args) => {
         handlerArgs = { device, args };
         return { success: true, sentinel: "direct" };
-      })
+      }),
     );
 
     expect(result).toEqual({ success: true, sentinel: "direct" });
@@ -104,7 +104,7 @@ describe("DefaultAuditRunner", () => {
 
     const runner = new DefaultAuditRunner();
     const result = await runner.run(
-      makeInput(iosDevice, async () => ({ success: true, sentinel: "ios" }))
+      makeInput(iosDevice, async () => ({ success: true, sentinel: "ios" })),
     );
 
     expect(result).toEqual({ success: true, sentinel: "ios" });
@@ -114,7 +114,9 @@ describe("DefaultAuditRunner", () => {
   test("looks up the foreground package via adb and skips the audit when none is focused", async () => {
     serverConfig.setMemPerfAuditMode(true);
     let receivedCommand: string | undefined;
-    (defaultAdbClientFactory as { create: typeof originalCreate }).create = ((device?: BootedDevice) => {
+    (defaultAdbClientFactory as { create: typeof originalCreate }).create = ((
+      device?: BootedDevice,
+    ) => {
       expect(device).toBe(androidDevice);
       return {
         async executeCommand(command: string) {
@@ -132,16 +134,18 @@ describe("DefaultAuditRunner", () => {
       makeInput(androidDevice, async () => {
         handlerCalled = true;
         return { success: true, sentinel: "no-package" };
-      })
+      }),
     );
 
     expect(receivedCommand).toContain("dumpsys window");
     expect(receivedCommand).toContain("mCurrentFocus");
     expect(handlerCalled).toBe(true);
     expect(result).toEqual({ success: true, sentinel: "no-package" });
-    expect(log.at("warn")).toContainEqual(expect.objectContaining({
-      message: expect.stringContaining("skipping memory audit"),
-    }));
+    expect(log.at("warn")).toContainEqual(
+      expect.objectContaining({
+        message: expect.stringContaining("skipping memory audit"),
+      }),
+    );
   });
 
   test("swallows adb failures during foreground lookup and still runs the handler", async () => {
@@ -155,13 +159,15 @@ describe("DefaultAuditRunner", () => {
     const log = new FakeLogger();
     const runner = new DefaultAuditRunner(log);
     const result = await runner.run(
-      makeInput(androidDevice, async () => ({ success: true, sentinel: "adb-error" }))
+      makeInput(androidDevice, async () => ({ success: true, sentinel: "adb-error" })),
     );
 
     expect(result).toEqual({ success: true, sentinel: "adb-error" });
-    expect(log.at("warn")).toContainEqual(expect.objectContaining({
-      message: expect.stringContaining("Failed to get foreground package name"),
-    }));
+    expect(log.at("warn")).toContainEqual(
+      expect.objectContaining({
+        message: expect.stringContaining("Failed to get foreground package name"),
+      }),
+    );
   });
 });
 
@@ -179,7 +185,7 @@ describe("DefaultPlanLifecycleManager", () => {
   });
 
   const makeInput = (
-    overrides: Partial<PlanLifecycleInput> & { cleanupService: AppCleanupService }
+    overrides: Partial<PlanLifecycleInput> & { cleanupService: AppCleanupService },
   ): PlanLifecycleInput => ({
     name: "executePlan",
     args: {},
@@ -198,7 +204,7 @@ describe("DefaultPlanLifecycleManager", () => {
       makeInput({
         cleanupService,
         args: { cleanupAppId: "com.example.app", cleanupClearAppData: true },
-      })
+      }),
     );
 
     expect(cleanupService.calls).toEqual([
@@ -227,7 +233,7 @@ describe("DefaultPlanLifecycleManager", () => {
         cleanupService,
         name: "tapOn",
         args: { cleanupAppId: "com.example.app" },
-      })
+      }),
     );
 
     expect(cleanupService.calls).toEqual([]);
@@ -242,7 +248,7 @@ describe("DefaultPlanLifecycleManager", () => {
         cleanupService,
         device: undefined,
         args: { cleanupAppId: "com.example.app" },
-      })
+      }),
     );
 
     expect(cleanupService.calls).toEqual([]);
@@ -266,7 +272,7 @@ describe("DefaultPlanLifecycleManager", () => {
         baseSessionUuid: "session-1",
         args: {},
         sessionBindingReleaseHandler: releaseHandler,
-      })
+      }),
     );
 
     // Cleanup path is independent of the release path and stays untouched here.
@@ -286,10 +292,19 @@ describe("DefaultPlanLifecycleManager server-side binding teardown (issue #4611 
     const timer = new FakeTimer();
     // In-memory migrated DB so createSession persists without resolving the real
     // ~/.auto-mobile file DB (CLAUDE.md unit-test guard, issue #3067).
-    sessionManager = new SessionManager(timer, new DeviceSessionRepository(await createTestDatabase()));
+    sessionManager = new SessionManager(
+      timer,
+      new DeviceSessionRepository(await createTestDatabase()),
+    );
     const fakeDeviceUtils = new FakeDeviceUtils();
     fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
-    const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, fakeDeviceUtils);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
     await pool.initializeWithDevices([androidDevice]);
     DaemonState.getInstance().initialize(sessionManager, pool);
   });
@@ -335,8 +350,8 @@ describe("DefaultPlanLifecycleManager server-side binding teardown (issue #4611 
       device: androidDevice,
       sessionUuid: "base",
       shouldResolveDevice: true,
-      sessionToolProfileService: {
-        deleteSession: async sessionUuid => {
+      sessionToolSelectionService: {
+        deleteSession: async (sessionUuid) => {
           deletedSessions.push(sessionUuid);
         },
       },

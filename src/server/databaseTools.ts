@@ -10,13 +10,15 @@ import { IOSCtrlProxyClient } from "../features/observe/ios";
 import type { SQLResult } from "../features/database/DatabaseInspector";
 
 // Schema for sqlQuery tool
-const sqlQuerySchema = withAppIdAliases(addDeviceTargetingToSchema(
-  z.object({
-    appId: z.string(),
-    databasePath: z.string().describe("Database path"),
-    query: z.string().describe("SQL query")
-  })
-));
+const sqlQuerySchema = withAppIdAliases(
+  addDeviceTargetingToSchema(
+    z.object({
+      appId: z.string(),
+      databasePath: z.string().describe("Database path"),
+      query: z.string().describe("SQL query"),
+    }),
+  ),
+);
 
 // Type interface for tool arguments
 interface SqlQueryArgs {
@@ -44,7 +46,7 @@ function extractAffectedTables(query: string): string[] {
     /ALTER\s+TABLE\s+["']?(\w+)["']?/gi,
     /DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?["']?(\w+)["']?/gi,
     /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["']?(\w+)["']?/gi,
-    /TRUNCATE\s+(?:TABLE\s+)?["']?(\w+)["']?/gi
+    /TRUNCATE\s+(?:TABLE\s+)?["']?(\w+)["']?/gi,
   ];
 
   for (const pattern of patterns) {
@@ -126,7 +128,9 @@ export function isMutationQuery(query: string): boolean {
  * Prevents matching CTE names like "select_cte" as statement keywords.
  */
 function startsWithKeyword(text: string, keyword: string): boolean {
-  if (!text.startsWith(keyword)) {return false;}
+  if (!text.startsWith(keyword)) {
+    return false;
+  }
   const nextChar = text[keyword.length];
   // Word boundary: next char is undefined (end of string) or not a word character
   return nextChar === undefined || !/\w/.test(nextChar);
@@ -152,10 +156,18 @@ function findStatementAfterCTE(upperQuery: string): string | null {
     } else if (depth === 0) {
       // Check for statement keywords at this position (with word boundary)
       const remaining = upperQuery.slice(i).trimStart();
-      if (startsWithKeyword(remaining, "SELECT")) {return "SELECT";}
-      if (startsWithKeyword(remaining, "INSERT")) {return "INSERT";}
-      if (startsWithKeyword(remaining, "UPDATE")) {return "UPDATE";}
-      if (startsWithKeyword(remaining, "DELETE")) {return "DELETE";}
+      if (startsWithKeyword(remaining, "SELECT")) {
+        return "SELECT";
+      }
+      if (startsWithKeyword(remaining, "INSERT")) {
+        return "INSERT";
+      }
+      if (startsWithKeyword(remaining, "UPDATE")) {
+        return "UPDATE";
+      }
+      if (startsWithKeyword(remaining, "DELETE")) {
+        return "DELETE";
+      }
     }
     i++;
   }
@@ -179,12 +191,7 @@ export function registerDatabaseTools() {
       // If this was a mutation, notify resource subscribers of the change
       if (isMutationQuery(args.query)) {
         const affectedTables = extractAffectedTables(args.query);
-        await notifyDatabaseChanged(
-          device.deviceId,
-          args.appId,
-          args.databasePath,
-          affectedTables
-        );
+        await notifyDatabaseChanged(device.deviceId, args.appId, args.databasePath, affectedTables);
       }
 
       const message =
@@ -194,7 +201,7 @@ export function registerDatabaseTools() {
 
       return createJSONToolResponse({
         message,
-        ...result
+        ...result,
       });
     } catch (error) {
       if (error instanceof ActionableError) {
@@ -205,7 +212,13 @@ export function registerDatabaseTools() {
   };
 
   // Register the sqlQuery tool
-  ToolRegistry.registerDeviceAware("sqlQuery", "Execute SQL on app SQLite database.", sqlQuerySchema, sqlQueryHandler, { embeddedSdkOnly: true });
+  ToolRegistry.registerDeviceAware(
+    "sqlQuery",
+    "Execute SQL on app SQLite database.",
+    sqlQuerySchema,
+    sqlQueryHandler,
+    { defaultEnabled: false, embeddedSdkOnly: true },
+  );
 }
 
 /**
@@ -215,20 +228,20 @@ async function executeSqlForDevice(device: BootedDevice, args: SqlQueryArgs): Pr
   if (device.platform === "android") {
     const adb = defaultAdbClientFactory.create(device);
     const inspector = new DatabaseInspector(device, adb);
-    return inspector.executeSQL(
-      args.appId,
-      args.databasePath,
-      args.query
-    );
+    return inspector.executeSQL(args.appId, args.databasePath, args.query);
   }
 
   if (device.platform === "ios") {
     try {
-      return await IOSCtrlProxyClient.getInstance(device).executeSQLForIos(args.appId, args.databasePath, args.query);
+      return await IOSCtrlProxyClient.getInstance(device).executeSQLForIos(
+        args.appId,
+        args.databasePath,
+        args.query,
+      );
     } catch (error) {
       throw new ActionableError(
         "Failed to execute SQL on iOS. Ensure the app embeds the AutoMobile SDK in a DEBUG build " +
-        `and calls DatabaseInspector.shared.setEnabled(true): ${error}`
+          `and calls DatabaseInspector.shared.setEnabled(true): ${error}`,
       );
     }
   }

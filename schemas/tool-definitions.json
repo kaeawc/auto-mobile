@@ -8531,35 +8531,19 @@
     }
   },
   {
-    "name": "setToolCapability",
-    "description": "Enable or disable an optional AutoMobile tool capability for this MCP session.",
+    "name": "setToolEnabled",
+    "description": "Enable or disable one exact AutoMobile tool for this MCP session.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
-        "capability": {
-          "description": "Optional tool capability to enable or disable for this MCP session.",
+        "toolName": {
+          "description": "Exact case-sensitive AutoMobile tool name to enable or disable.",
           "type": "string",
-          "enum": [
-            "clipboard",
-            "advanced-interaction",
-            "app-permissions",
-            "device-settings",
-            "device-control",
-            "app-data-interop",
-            "notifications",
-            "telephony",
-            "accessibility-tools",
-            "screen-artifacts",
-            "test-authoring",
-            "network-inspection",
-            "app-routing",
-            "navigation-modeling",
-            "biometric-auth"
-          ]
+          "minLength": 1
         },
         "enabled": {
-          "description": "Whether to enable the capability (default: true).",
+          "description": "Whether to enable the tool (default: true).",
           "default": true,
           "type": "boolean"
         },
@@ -8570,7 +8554,7 @@
         }
       },
       "required": [
-        "capability"
+        "toolName"
       ],
       "additionalProperties": false
     }

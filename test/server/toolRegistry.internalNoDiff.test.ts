@@ -12,7 +12,7 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import type { ObserveResult } from "../../src/models/ObserveResult";
-import { runWithToolCapabilityContext } from "../../src/features/toolCapabilities/toolCapabilityContext";
+import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 
 /**
  * Internal tool-to-tool no-diff guard (issue #3053 part 2).
@@ -29,12 +29,16 @@ import { runWithToolCapabilityContext } from "../../src/features/toolCapabilitie
  * These exercise the real wrapped-handler → finalize path end-to-end.
  */
 describe("ToolRegistry internal no-diff guard (#3053)", () => {
-  const androidA: BootedDevice = { name: "Pixel A", deviceId: "emulator-5554", platform: "android" };
-  const enabledCapabilityProfile = { isEnabled: async () => true };
+  const androidA: BootedDevice = {
+    name: "Pixel A",
+    deviceId: "emulator-5554",
+    platform: "android",
+  };
+  const enabledToolSelectionProfile = { isEnabled: async () => true };
 
   function runWithEnabledCapabilities<T>(fn: () => Promise<T>): Promise<T> {
-    return runWithToolCapabilityContext(
-      { sessionToolProfileService: enabledCapabilityProfile },
+    return runWithToolSelectionContext(
+      { sessionToolSelectionService: enabledToolSelectionProfile },
       fn,
     );
   }
@@ -54,7 +58,9 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
       activeWindow: { appId: "com.example", activityName: ".Main", layoutSeqSum: 1 },
       viewHierarchy: {
         packageName: "com.example",
-        hierarchy: { node: { "resource-id": "com.example:id/root", "content-desc": "keep" } as any },
+        hierarchy: {
+          node: { "resource-id": "com.example:id/root", "content-desc": "keep" } as any,
+        },
       },
     } as ObserveResult;
   }
@@ -65,7 +71,13 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const fakeDeviceUtils = new FakeDeviceUtils();
     fakeDeviceUtils.setBootedDevices("android", [androidA]);
-    const pool = new DevicePool(daemonSessionManager, "daemon-session", timer, undefined, fakeDeviceUtils);
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
     await pool.initializeWithDevices([androidA]);
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     const sessionId = (await pool.autolockDevice(androidA.deviceId, "android", "mcp-session-1"))!;
@@ -83,17 +95,11 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
   });
 
   function registerObserveAndTap(): void {
-    ToolRegistry.registerDeviceAware(
-      "observe",
-      "observe",
-      baseSchema,
-      async () => createStructuredToolResponse(sameScreenObserve())
+    ToolRegistry.registerDeviceAware("observe", "observe", baseSchema, async () =>
+      createStructuredToolResponse(sameScreenObserve()),
     );
-    ToolRegistry.registerDeviceAware(
-      "tapOn",
-      "tapOn",
-      baseSchema,
-      async () => createStructuredToolResponse({ success: true, observation: sameScreenObserve() })
+    ToolRegistry.registerDeviceAware("tapOn", "tapOn", baseSchema, async () =>
+      createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
     );
   }
 
@@ -113,10 +119,10 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
         node: {
           "resource-id": "com.example:id/root",
           "content-desc": "keep",
-          "node": [
+          node: [
             {
               "resource-id": "com.example:id/field",
-              "checked": checked ? "true" : undefined,
+              checked: checked ? "true" : undefined,
             } as any,
           ],
         } as any,
@@ -126,11 +132,8 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
   }
 
   function registerObserveAndTextActions(): void {
-    ToolRegistry.registerDeviceAware(
-      "observe",
-      "observe",
-      baseSchema,
-      async () => createStructuredToolResponse(lowConfidenceObserve(false))
+    ToolRegistry.registerDeviceAware("observe", "observe", baseSchema, async () =>
+      createStructuredToolResponse(lowConfidenceObserve(false)),
     );
     ToolRegistry.registerDeviceAware(
       "inputText",
@@ -139,7 +142,8 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
         text: z.string().optional(),
         imeAction: z.string().optional(),
       }),
-      async () => createStructuredToolResponse({ success: true, observation: lowConfidenceObserve(true) })
+      async () =>
+        createStructuredToolResponse({ success: true, observation: lowConfidenceObserve(true) }),
     );
     ToolRegistry.registerDeviceAware(
       "imeAction",
@@ -147,7 +151,8 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
       baseSchema.extend({
         action: z.string().optional(),
       }),
-      async () => createStructuredToolResponse({ success: true, observation: lowConfidenceObserve(true) })
+      async () =>
+        createStructuredToolResponse({ success: true, observation: lowConfidenceObserve(true) }),
     );
   }
 
@@ -179,7 +184,10 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
     registerObserveAndTap();
 
     // Establish the baseline via observe (resets lastRenderedObservation).
-    await ToolRegistry.getTool("observe")!.handler({ platform: "android", __mcpSessionId: "mcp-session-1" });
+    await ToolRegistry.getTool("observe")!.handler({
+      platform: "android",
+      __mcpSessionId: "mcp-session-1",
+    });
 
     // A normal (non-internal) same-screen tapOn emits a diff.
     const normal = await ToolRegistry.getTool("tapOn")!.handler({
@@ -190,7 +198,10 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
 
     // Re-seed the baseline (the diffing tapOn advanced it), then an internal tapOn
     // must emit the FULL observation instead of a diff.
-    await ToolRegistry.getTool("observe")!.handler({ platform: "android", __mcpSessionId: "mcp-session-1" });
+    await ToolRegistry.getTool("observe")!.handler({
+      platform: "android",
+      __mcpSessionId: "mcp-session-1",
+    });
     const internal = await ToolRegistry.getTool("tapOn")!.handler({
       platform: "android",
       __mcpSessionId: "mcp-session-1",
@@ -230,7 +241,10 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
     await setupAutolockedSession();
     registerObserveAndTextActions();
 
-    await ToolRegistry.getTool("observe")!.handler({ platform: "android", __mcpSessionId: "mcp-session-1" });
+    await ToolRegistry.getTool("observe")!.handler({
+      platform: "android",
+      __mcpSessionId: "mcp-session-1",
+    });
     const inputSearch = await ToolRegistry.getTool("inputText")!.handler({
       platform: "android",
       __mcpSessionId: "mcp-session-1",
@@ -244,12 +258,17 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
       reason: "screen_changed",
     });
 
-    await ToolRegistry.getTool("observe")!.handler({ platform: "android", __mcpSessionId: "mcp-session-1" });
-    const imeGo = await runWithEnabledCapabilities(() => ToolRegistry.getTool("imeAction")!.handler({
+    await ToolRegistry.getTool("observe")!.handler({
       platform: "android",
       __mcpSessionId: "mcp-session-1",
-      action: "go",
-    }));
+    });
+    const imeGo = await runWithEnabledCapabilities(() =>
+      ToolRegistry.getTool("imeAction")!.handler({
+        platform: "android",
+        __mcpSessionId: "mcp-session-1",
+        action: "go",
+      }),
+    );
     expect((imeGo.structuredContent as any).observation.isDiff).toBeUndefined();
     expect((imeGo.structuredContent as any).observation.viewHierarchy).toBeDefined();
     expect((imeGo.structuredContent as any).observationDiff).toMatchObject({
@@ -264,7 +283,10 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
     await setupAutolockedSession();
     registerObserveAndTextActions();
 
-    await ToolRegistry.getTool("observe")!.handler({ platform: "android", __mcpSessionId: "mcp-session-1" });
+    await ToolRegistry.getTool("observe")!.handler({
+      platform: "android",
+      __mcpSessionId: "mcp-session-1",
+    });
     const inputNext = await ToolRegistry.getTool("inputText")!.handler({
       platform: "android",
       __mcpSessionId: "mcp-session-1",
@@ -277,12 +299,17 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
       reason: "diff_emitted",
     });
 
-    await ToolRegistry.getTool("observe")!.handler({ platform: "android", __mcpSessionId: "mcp-session-1" });
-    const imePrevious = await runWithEnabledCapabilities(() => ToolRegistry.getTool("imeAction")!.handler({
+    await ToolRegistry.getTool("observe")!.handler({
       platform: "android",
       __mcpSessionId: "mcp-session-1",
-      action: "previous",
-    }));
+    });
+    const imePrevious = await runWithEnabledCapabilities(() =>
+      ToolRegistry.getTool("imeAction")!.handler({
+        platform: "android",
+        __mcpSessionId: "mcp-session-1",
+        action: "previous",
+      }),
+    );
     expect((imePrevious.structuredContent as any).observation.isDiff).toBe(true);
     expect((imePrevious.structuredContent as any).observationDiff).toMatchObject({
       mode: "diff",

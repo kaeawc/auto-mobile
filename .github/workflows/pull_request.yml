@@ -1950,7 +1950,7 @@ jobs:
           AUTOMOBILE_DAEMON_EMBEDDED_SDK: "1"
           # These integration workflows exercise advanced tools deliberately;
           # keep the daemon's ordinary session surface core-only.
-          AUTOMOBILE_TOOLSET_NAVIGATION_MODELING: "1"
+          AUTOMOBILE_ENABLED_TOOLS: "navigateTo,getNavigationGraph,explore"
         run: ./scripts/ci/ensure-daemon-ready.sh
 
       # Launch CtrlProxy on the booted sim now (a slow, one-time xcodebuild launch)
@@ -1973,7 +1973,7 @@ jobs:
       - name: "Run videoRecording MP4 integration test"
         timeout-minutes: 10
         env:
-          AUTOMOBILE_TOOLSET_SCREEN_ARTIFACTS: "1"
+          AUTOMOBILE_ENABLED_TOOLS: "videoRecording"
         run: ./scripts/ios/video-recording-start-stop-integration.sh
 
       - name: "Run iOS navigation graph Simulator workflow"
@@ -1981,7 +1981,7 @@ jobs:
         timeout-minutes: 5
         env:
           # Also supply this on the client in case it restarts the daemon.
-          AUTOMOBILE_TOOLSET_NAVIGATION_MODELING: "1"
+          AUTOMOBILE_ENABLED_TOOLS: "navigateTo,getNavigationGraph,explore"
         run: |
           ./scripts/ios/navigation-graph-sdk-event-integration.sh "${{ steps.ctrlproxy-simulator.outputs.simulator_udid }}"
 
@@ -2247,7 +2247,7 @@ jobs:
       # Run AutoMobile tests that require emulator
       - uses: ./.github/actions/android-emulator
         env:
-          AUTOMOBILE_TOOLSET_NAVIGATION_MODELING: "1"
+          AUTOMOBILE_ENABLED_TOOLS: "navigateTo,getNavigationGraph,explore"
         with:
           script: "../scripts/android/verify-sdk-ctrl-proxy-permission-contract.sh control-proxy/build/outputs/apk/debug/control-proxy-debug.apk && ../scripts/android/navigation-graph-sdk-event-integration.sh && ./gradlew :playground:app:test --stacktrace --info"
           working-directory: './android/'

@@ -86,20 +86,20 @@ class AutoMobilePlanExecutorTest {
     val result = executePlan()
 
     assertTrue(result.success)
-    assertEquals(1, fakeDaemonClient.capabilityArguments.size)
+    assertEquals(1, fakeDaemonClient.toolSelectionArguments.size)
     assertEquals(
-      "test-authoring",
-      fakeDaemonClient.capabilityArguments.single()["capability"]?.jsonPrimitive?.content,
+      "executePlan",
+      fakeDaemonClient.toolSelectionArguments.single()["toolName"]?.jsonPrimitive?.content,
     )
     assertEquals(1, result.toolResults.size)
     assertEquals("Test Channel", result.getSelection(0))
   }
 
   @Test
-  fun `retries a transient test-authoring capability failure`() {
-    fakeDaemonClient.queueCapabilityResponse(
+  fun `retries a transient executePlan selection failure`() {
+    fakeDaemonClient.queueToolSelectionResponse(
       DaemonResponse(
-        id = "capability-timeout",
+        id = "tool-selection-timeout",
         type = "mcp_response",
         success = false,
         error = "daemon request timeout",
@@ -114,17 +114,17 @@ class AutoMobilePlanExecutorTest {
     val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 1))
 
     assertTrue(result.success)
-    assertEquals(2, fakeDaemonClient.capabilityArguments.size)
+    assertEquals(2, fakeDaemonClient.toolSelectionArguments.size)
   }
 
   @Test
-  fun `executes plan when an older daemon lacks the capability tool`() {
-    fakeDaemonClient.queueCapabilityResponse(
+  fun `fails when the exact-tool control is unavailable`() {
+    fakeDaemonClient.queueToolSelectionResponse(
       DaemonResponse(
-        id = "capability-unknown-tool",
+        id = "tool-selection-unknown-tool",
         type = "mcp_response",
         success = false,
-        error = "Unknown tool: setToolCapability",
+        error = "Unknown tool: setToolEnabled",
       )
     )
     fakeDaemonClient.setResponse(
@@ -134,8 +134,8 @@ class AutoMobilePlanExecutorTest {
 
     val result = executePlan()
 
-    assertTrue(result.success)
-    assertEquals(1, fakeDaemonClient.capabilityArguments.size)
+    assertEquals(false, result.success)
+    assertEquals(1, fakeDaemonClient.toolSelectionArguments.size)
   }
 
   @Test
@@ -301,16 +301,16 @@ class AutoMobilePlanExecutorTest {
 
 private class FakeDaemonToolClient : DaemonToolClient {
   private val responses = mutableMapOf<String, DaemonResponse>()
-  private val capabilityResponses = mutableListOf<DaemonResponse>()
-  val capabilityArguments = mutableListOf<JsonObject>()
+  private val toolSelectionResponses = mutableListOf<DaemonResponse>()
+  val toolSelectionArguments = mutableListOf<JsonObject>()
   override var sessionUuid: String = "test-session"
 
   fun setResponse(toolName: String, response: DaemonResponse) {
     responses[toolName] = response
   }
 
-  fun queueCapabilityResponse(response: DaemonResponse) {
-    capabilityResponses.add(response)
+  fun queueToolSelectionResponse(response: DaemonResponse) {
+    toolSelectionResponses.add(response)
   }
 
   override fun callTool(
@@ -318,10 +318,10 @@ private class FakeDaemonToolClient : DaemonToolClient {
     arguments: JsonObject,
     timeoutMs: Long,
   ): DaemonResponse {
-    if (toolName == "setToolCapability") {
-      capabilityArguments.add(arguments)
-      return capabilityResponses.removeFirstOrNull()
-        ?: DaemonResponse(id = "capability", type = "mcp_response", success = true)
+    if (toolName == "setToolEnabled") {
+      toolSelectionArguments.add(arguments)
+      return toolSelectionResponses.removeFirstOrNull()
+        ?: DaemonResponse(id = "tool-selection", type = "mcp_response", success = true)
     }
     return responses[toolName]
       ?: throw IllegalStateException("No response configured for tool: $toolName")

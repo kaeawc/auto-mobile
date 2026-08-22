@@ -18,10 +18,12 @@ import {
 import { DaemonState } from "../daemon/daemonState";
 
 // Schema definitions
-export const setActiveDeviceSchema = addSessionUuidToSchema(z.object({
-  deviceId: z.string(),
-  platform: platformSchema
-}));
+export const setActiveDeviceSchema = addSessionUuidToSchema(
+  z.object({
+    deviceId: z.string(),
+    platform: platformSchema,
+  }),
+);
 
 const changeLocalizationBaseSchema = z.object({
   platform: platformSchema,
@@ -30,41 +32,58 @@ const changeLocalizationBaseSchema = z.object({
   timeZone: z.string().min(1).optional().describe("Zone ID (e.g., America/Los_Angeles)"),
   textDirection: z.enum(["ltr", "rtl"]).optional().describe("Text direction"),
   timeFormat: z.enum(["12", "24"]).optional().describe("Time format"),
-  calendarSystem: z.string().min(1).optional().describe("Calendar system (e.g., gregory, japanese, buddhist, islamic-civil)"),
-  restartApp: z.string().min(1).optional().describe("iOS bundle ID to relaunch after locale change")
+  calendarSystem: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Calendar system (e.g., gregory, japanese, buddhist, islamic-civil)"),
+  restartApp: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("iOS bundle ID to relaunch after locale change"),
 });
 
 export const changeLocalizationSchema = withJsonSchemaOverride(
-  withAppIdAliases(addDeviceTargetingToSchema(changeLocalizationBaseSchema)).superRefine((values, ctx) => {
-    if (!values.locale && !values.timeZone && !values.textDirection && !values.timeFormat && !values.calendarSystem) {
-      ctx.addIssue({
-        code: "custom",
-        message: "At least one of locale, timeZone, textDirection, timeFormat, or calendarSystem must be provided.",
-      });
-    }
-    if (values.appId && values.platform !== "android") {
-      ctx.addIssue({
-        code: "custom",
-        path: ["appId"],
-        message: "appId is only supported for Android locale changes.",
-      });
-    }
-    if (values.appId && !values.locale) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["appId"],
-        message: "appId only applies when locale is provided.",
-      });
-    }
-    if (values.platform === "android" && values.locale && !values.appId) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["appId"],
-        message: "appId is required for Android locale changes.",
-      });
-    }
-  }),
-  jsonSchema => {
+  withAppIdAliases(addDeviceTargetingToSchema(changeLocalizationBaseSchema)).superRefine(
+    (values, ctx) => {
+      if (
+        !values.locale &&
+        !values.timeZone &&
+        !values.textDirection &&
+        !values.timeFormat &&
+        !values.calendarSystem
+      ) {
+        ctx.addIssue({
+          code: "custom",
+          message:
+            "At least one of locale, timeZone, textDirection, timeFormat, or calendarSystem must be provided.",
+        });
+      }
+      if (values.appId && values.platform !== "android") {
+        ctx.addIssue({
+          code: "custom",
+          path: ["appId"],
+          message: "appId is only supported for Android locale changes.",
+        });
+      }
+      if (values.appId && !values.locale) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["appId"],
+          message: "appId only applies when locale is provided.",
+        });
+      }
+      if (values.platform === "android" && values.locale && !values.appId) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["appId"],
+          message: "appId is required for Android locale changes.",
+        });
+      }
+    },
+  ),
+  (jsonSchema) => {
     jsonSchema.if = {
       properties: {
         platform: { const: "android" },
@@ -74,34 +93,41 @@ export const changeLocalizationSchema = withJsonSchemaOverride(
     jsonSchema.then = {
       required: ["appId"],
     };
-  }
+  },
 );
 
-const doNotDisturbStateInputSchema = z.object({
-  enabled: z.boolean().optional().describe("Enable or disable Do Not Disturb"),
-  mode: z.enum(["off", "none", "priority", "alarms"]).optional().describe("Do Not Disturb mode")
-}).refine(values => values.enabled !== undefined || values.mode !== undefined, {
-  message: "Provide enabled or mode for doNotDisturb"
-});
+const doNotDisturbStateInputSchema = z
+  .object({
+    enabled: z.boolean().optional().describe("Enable or disable Do Not Disturb"),
+    mode: z.enum(["off", "none", "priority", "alarms"]).optional().describe("Do Not Disturb mode"),
+  })
+  .refine((values) => values.enabled !== undefined || values.mode !== undefined, {
+    message: "Provide enabled or mode for doNotDisturb",
+  });
 
-export const getDeviceStateSchema = addDeviceTargetingToSchema(z.object({
-  include: z.array(z.enum(["doNotDisturb"]))
-    .optional()
-    .describe("State fields to read; supports doNotDisturb")
-}));
+export const getDeviceStateSchema = addDeviceTargetingToSchema(
+  z.object({
+    include: z
+      .array(z.enum(["doNotDisturb"]))
+      .optional()
+      .describe("State fields to read; supports doNotDisturb"),
+  }),
+);
 
-export const setDeviceStateSchema = addDeviceTargetingToSchema(z.object({
-  doNotDisturb: doNotDisturbStateInputSchema
-    .optional()
-    .describe("Do Not Disturb state to apply.")
-})).refine(values => values.doNotDisturb !== undefined, {
-  message: "At least one device state field must be provided"
+export const setDeviceStateSchema = addDeviceTargetingToSchema(
+  z.object({
+    doNotDisturb: doNotDisturbStateInputSchema
+      .optional()
+      .describe("Do Not Disturb state to apply."),
+  }),
+).refine((values) => values.doNotDisturb !== undefined, {
+  message: "At least one device state field must be provided",
 });
 
 // Export interfaces for type safety
 export interface SetActiveDeviceArgs {
   deviceId: string;
-    platform: Platform;
+  platform: Platform;
 }
 
 export interface ChangeLocalizationArgs {
@@ -140,7 +166,7 @@ export function registerUtilityTools() {
           const owningSession = sessionManager.getSession(pooledDevice.sessionId);
           if (owningSession) {
             throw new ActionableError(
-              `Device '${args.deviceId}' is already assigned to session ${pooledDevice.sessionId}`
+              `Device '${args.deviceId}' is already assigned to session ${pooledDevice.sessionId}`,
             );
           }
         }
@@ -159,11 +185,13 @@ export function registerUtilityTools() {
           );
           if (boundSession !== args.sessionUuid) {
             throw new ActionableError(
-              `Device '${args.deviceId}' is already assigned to session ${boundSession}`
+              `Device '${args.deviceId}' is already assigned to session ${boundSession}`,
             );
           }
         }
-        logger.info(`[setActiveDevice] Bound device ${args.deviceId} to session ${args.sessionUuid}`);
+        logger.info(
+          `[setActiveDevice] Bound device ${args.deviceId} to session ${args.sessionUuid}`,
+        );
       } else {
         // Legacy single-agent path: sets global active device
         const sessionManager = DeviceSessionManager.getInstance();
@@ -177,7 +205,7 @@ export function registerUtilityTools() {
         if (previousPlatform && previousPlatform !== args.platform && previousDevice) {
           logger.info(
             `[setActiveDevice] Platform switch detected (${previousPlatform} -> ${args.platform}), ` +
-            `clearing observation cache for previous device ${previousDevice.deviceId}`
+              `clearing observation cache for previous device ${previousDevice.deviceId}`,
           );
           RealObserveScreen.clearCache(previousDevice.deviceId);
         }
@@ -210,9 +238,10 @@ export function registerUtilityTools() {
     } = {};
 
     if (args.locale !== undefined) {
-      const localeOptions = args.appId && device.platform === "android"
-        ? { broadcast: false, appId: args.appId }
-        : { broadcast: false };
+      const localeOptions =
+        args.appId && device.platform === "android"
+          ? { broadcast: false, appId: args.appId }
+          : { broadcast: false };
       const result = await manager.setLocale(args.locale, localeOptions);
       if (result.success) {
         changes.locale = result.languageTag;
@@ -266,7 +295,9 @@ export function registerUtilityTools() {
 
     const success = errors.length === 0;
     let intentBroadcast = false;
-    let liveChanges: { springBoardRestarted: boolean; notificationPosted: boolean; appRestarted?: boolean } | undefined;
+    let liveChanges:
+      | { springBoardRestarted: boolean; notificationPosted: boolean; appRestarted?: boolean }
+      | undefined;
 
     if (Object.keys(changes).length > 0) {
       if (device.platform === "android") {
@@ -282,7 +313,7 @@ export function registerUtilityTools() {
       intentBroadcast,
       ...localeMetadata,
       ...(liveChanges ? { iosLiveChanges: liveChanges } : {}),
-      ...(success ? {} : { error: errors.join("; ") })
+      ...(success ? {} : { error: errors.join("; ") }),
     });
   };
 
@@ -293,7 +324,7 @@ export function registerUtilityTools() {
     return createJSONToolResponse({
       message: result.success
         ? "Read device state"
-        : result.error ?? "Failed to read device state",
+        : (result.error ?? "Failed to read device state"),
       ...result,
     });
   };
@@ -307,7 +338,7 @@ export function registerUtilityTools() {
     return createJSONToolResponse({
       message: result.success
         ? "Applied device state"
-        : result.error ?? "Failed to apply device state",
+        : (result.error ?? "Failed to apply device state"),
       ...result,
     });
   };
@@ -317,27 +348,31 @@ export function registerUtilityTools() {
     "setActiveDevice",
     "Set active device",
     setActiveDeviceSchema,
-    setActiveDeviceHandler
+    setActiveDeviceHandler,
+    { defaultEnabled: true },
   );
 
   ToolRegistry.registerDeviceAware(
     "changeLocalization",
     "Change locale, time zone, text direction, time format, and calendar system",
     changeLocalizationSchema,
-    changeLocalizationHandler
+    changeLocalizationHandler,
+    { defaultEnabled: false },
   );
 
   ToolRegistry.registerDeviceAware(
     "getDeviceState",
     "Read device-level state such as Do Not Disturb",
     getDeviceStateSchema,
-    getDeviceStateHandler
+    getDeviceStateHandler,
+    { defaultEnabled: false },
   );
 
   ToolRegistry.registerDeviceAware(
     "setDeviceState",
     "Set device state such as Do Not Disturb.",
     setDeviceStateSchema,
-    setDeviceStateHandler
+    setDeviceStateHandler,
+    { defaultEnabled: false },
   );
 }

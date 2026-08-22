@@ -11,28 +11,39 @@ import { Platform } from "../models";
 import { addDeviceTargetingToSchema, platformSchema } from "./toolSchemaHelpers";
 
 // Schema definitions
-export const navigateToSchema = addDeviceTargetingToSchema(z.object({
-  targetScreen: z.string().describe("Target screen name"),
-  platform: platformSchema.default("android")
-}));
+export const navigateToSchema = addDeviceTargetingToSchema(
+  z.object({
+    targetScreen: z.string().describe("Target screen name"),
+    platform: platformSchema.default("android"),
+  }),
+);
 
-export const getNavigationGraphSchema = addDeviceTargetingToSchema(z.object({
-  platform: platformSchema.default("android"),
-  appId: z.string().optional().describe("Scope the graph to this app id instead of the device's current foreground app")
-}));
+export const getNavigationGraphSchema = addDeviceTargetingToSchema(
+  z.object({
+    platform: platformSchema.default("android"),
+    appId: z
+      .string()
+      .optional()
+      .describe("Scope the graph to this app id instead of the device's current foreground app"),
+  }),
+);
 
-export const exploreSchema = addDeviceTargetingToSchema(z.object({
-  maxInteractions: z.number().optional().describe("Max interactions (default: 50)"),
-  timeoutMs: z.number().optional().describe("Timeout ms (default: 300000)"),
-  strategy: z.enum(["breadth-first", "depth-first", "weighted"]).optional().describe("Strategy (default: weighted)"),
-  resetToHome: z.boolean().optional().describe("Reset to home periodically (default: false)"),
-  resetInterval: z.number().optional().describe("Reset interval (default: 15)"),
-  mode: z.enum(["discover", "validate", "hybrid"]).optional().describe("Mode (default: hybrid)"),
-  packageName: z.string().optional().describe("Package to limit exploration"),
-  dryRun: z.boolean().optional().describe("Dry run (no interactions)"),
-  platform: platformSchema.default("android")
-}));
-
+export const exploreSchema = addDeviceTargetingToSchema(
+  z.object({
+    maxInteractions: z.number().optional().describe("Max interactions (default: 50)"),
+    timeoutMs: z.number().optional().describe("Timeout ms (default: 300000)"),
+    strategy: z
+      .enum(["breadth-first", "depth-first", "weighted"])
+      .optional()
+      .describe("Strategy (default: weighted)"),
+    resetToHome: z.boolean().optional().describe("Reset to home periodically (default: false)"),
+    resetInterval: z.number().optional().describe("Reset interval (default: 15)"),
+    mode: z.enum(["discover", "validate", "hybrid"]).optional().describe("Mode (default: hybrid)"),
+    packageName: z.string().optional().describe("Package to limit exploration"),
+    dryRun: z.boolean().optional().describe("Dry run (no interactions)"),
+    platform: platformSchema.default("android"),
+  }),
+);
 
 // Export interfaces for type safety
 export interface NavigateToArgs {
@@ -64,7 +75,7 @@ export function registerNavigationTools() {
   const navigateToHandler = async (
     device: BootedDevice,
     args: NavigateToArgs,
-    progress?: ProgressCallback
+    progress?: ProgressCallback,
   ) => {
     try {
       const navigationManager = getNavigationManager(args.sessionUuid);
@@ -76,24 +87,24 @@ export function registerNavigationTools() {
         navigationManager,
         undefined,
         new DefaultPathOptimizer(navigationManager),
-        args.sessionUuid
+        args.sessionUuid,
       );
       const options: NavigateToOptions = {
         targetScreen: args.targetScreen,
         platform: args.platform || "android",
-        sessionUuid: args.sessionUuid
+        sessionUuid: args.sessionUuid,
       };
       const result = await navigateTo.execute(options, progress);
 
       if (result.success) {
         return createJSONToolResponse({
           message: result.message || `Navigated to ${args.targetScreen}`,
-          ...result
+          ...result,
         });
       } else {
         return createJSONToolResponse({
           error: result.error || "Navigation failed",
-          ...result
+          ...result,
         });
       }
     } catch (error) {
@@ -102,14 +113,12 @@ export function registerNavigationTools() {
   };
 
   // Get navigation graph handler (for debugging)
-  const getNavigationGraphHandler = async (
-    device: BootedDevice,
-    args: GetNavigationGraphArgs
-  ) => {
+  const getNavigationGraphHandler = async (device: BootedDevice, args: GetNavigationGraphArgs) => {
     try {
       const manager = getNavigationManager(args.sessionUuid);
       const observation = RealObserveScreen.getRecentCachedResultForDevice(device.deviceId);
-      const observedAppId = observation?.viewHierarchy?.packageName ?? observation?.activeWindow?.appId ?? null;
+      const observedAppId =
+        observation?.viewHierarchy?.packageName ?? observation?.activeWindow?.appId ?? null;
       // An explicit appId scopes the read to the requested app so a concurrent
       // hierarchy update that marks a different app current (e.g. SpringBoard)
       // cannot redirect the query away from the app the caller cares about
@@ -128,19 +137,19 @@ export function registerNavigationTools() {
         edgeCount: stats.edgeCount,
         knownEdges: stats.knownEdgeCount,
         unknownEdges: stats.unknownEdgeCount,
-        screens: graph.nodes.map(n => ({
+        screens: graph.nodes.map((n) => ({
           name: n.screenName,
           visitCount: n.visitCount,
-          lastVisited: new Date(n.lastSeenAt).toISOString()
+          lastVisited: new Date(n.lastSeenAt).toISOString(),
         })),
-        transitions: graph.edges.map(e => ({
+        transitions: graph.edges.map((e) => ({
           from: e.from,
           to: e.to,
           type: e.edgeType,
           tool: e.interaction?.toolName,
           args: e.interaction?.args,
-          uiState: e.uiState
-        }))
+          uiState: e.uiState,
+        })),
       });
     } catch (error) {
       throw new ActionableError(`Failed to get navigation graph: ${error}`);
@@ -148,16 +157,28 @@ export function registerNavigationTools() {
   };
 
   // Register with the tool registry
-  ToolRegistry.registerDeviceAware("navigateTo", "Navigate to screen using navigation graph", navigateToSchema, navigateToHandler, { supportsProgress: true, debugOnly: true, embeddedSdkOnly: true });
+  ToolRegistry.registerDeviceAware(
+    "navigateTo",
+    "Navigate to screen using navigation graph",
+    navigateToSchema,
+    navigateToHandler,
+    { defaultEnabled: false, supportsProgress: true, debugOnly: true, embeddedSdkOnly: true },
+  );
 
-  ToolRegistry.registerDeviceAware("getNavigationGraph", "Get navigation graph for debugging", getNavigationGraphSchema, getNavigationGraphHandler, { debugOnly: true, embeddedSdkOnly: true });
+  ToolRegistry.registerDeviceAware(
+    "getNavigationGraph",
+    "Get navigation graph for debugging",
+    getNavigationGraphSchema,
+    getNavigationGraphHandler,
+    { defaultEnabled: false, debugOnly: true, embeddedSdkOnly: true },
+  );
 
   // Explore handler
   const exploreHandler = async (
     device: BootedDevice,
     args: ExploreArgs,
     progress?: ProgressCallback,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ) => {
     try {
       const explore = new Explore(
@@ -165,7 +186,7 @@ export function registerNavigationTools() {
         null,
         undefined,
         getNavigationManager(args.sessionUuid),
-        args.sessionUuid
+        args.sessionUuid,
       );
       const options: ExploreOptions = {
         maxInteractions: args.maxInteractions,
@@ -175,25 +196,31 @@ export function registerNavigationTools() {
         resetInterval: args.resetInterval,
         mode: args.mode,
         packageName: args.packageName,
-        dryRun: args.dryRun
+        dryRun: args.dryRun,
       };
       const result = await explore.execute(options, progress, signal);
 
       if ("dryRun" in result && result.dryRun) {
         return createJSONToolResponse({
           message: `Exploration dry run completed: ${result.plannedInteractions.length} planned interactions`,
-          ...result
+          ...result,
         });
       }
 
       return createJSONToolResponse({
         message: `Exploration completed: ${result.interactionsPerformed} interactions, ${result.screensDiscovered} new screens discovered, ${result.coverage.percentage}% coverage`,
-        ...result
+        ...result,
       });
     } catch (error) {
       throw new ActionableError(`Failed to execute exploration: ${error}`);
     }
   };
 
-  ToolRegistry.registerDeviceAware("explore", "Automatically explore app to build navigation graph", exploreSchema, exploreHandler, { supportsProgress: true, debugOnly: true, embeddedSdkOnly: true });
+  ToolRegistry.registerDeviceAware(
+    "explore",
+    "Automatically explore app to build navigation graph",
+    exploreSchema,
+    exploreHandler,
+    { defaultEnabled: false, supportsProgress: true, debugOnly: true, embeddedSdkOnly: true },
+  );
 }

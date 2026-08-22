@@ -3,10 +3,14 @@ import {
   BootedDevice,
   ExecutePlanResult,
   Platform,
-  PlanExecutionResult
+  PlanExecutionResult,
 } from "../models";
 import { ExecutePlanStepDebugInfo, PlanExecutionOptions } from "../models/ExecutePlanResult";
-import { TestExecutionRepository, TestExecutionStatus, TestStepRecord } from "../db/testExecutionRepository";
+import {
+  TestExecutionRepository,
+  TestExecutionStatus,
+  TestStepRecord,
+} from "../db/testExecutionRepository";
 import { PlanSchemaValidator } from "../utils/plan/PlanSchemaValidator";
 import { normalizePlanDevices } from "../utils/plan/PlanDevices";
 
@@ -26,7 +30,7 @@ import { serverConfig } from "../utils/ServerConfig";
 import { defaultTimer, Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
 import { ProgressCallback } from "./toolRegistry";
-import { getToolCapabilityContext } from "../features/toolCapabilities/toolCapabilityContext";
+import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import type { Plan } from "../models/Plan";
 import { isDeviceLostError } from "./deviceLossOutcome";
 
@@ -129,7 +133,7 @@ const rethrowDeviceLoss = (error: unknown): void => {
  * TestExecutionRepository. Exported for unit testing — used to be inlined.
  */
 export function convertDebugStepsToRecords(
-  debugSteps: ExecutePlanStepDebugInfo[] | undefined
+  debugSteps: ExecutePlanStepDebugInfo[] | undefined,
 ): TestStepRecord[] {
   if (!debugSteps || debugSteps.length === 0) {
     return [];
@@ -139,7 +143,9 @@ export function convertDebugStepsToRecords(
     const toolMatch = step.step.match(/:\s*(\w+)$/);
     const action = toolMatch ? toolMatch[1] : step.step;
 
-    const details = step.details as { params?: Record<string, unknown>; error?: string } | undefined;
+    const details = step.details as
+      | { params?: Record<string, unknown>; error?: string }
+      | undefined;
 
     return {
       stepIndex: index,
@@ -172,7 +178,7 @@ function buildStepRecordTarget(params: Record<string, unknown> | undefined): str
 }
 
 export function convertPerDeviceSkippedStepsToRecords(
-  perDeviceResults: PlanExecutionResult["perDeviceResults"] | undefined
+  perDeviceResults: PlanExecutionResult["perDeviceResults"] | undefined,
 ): TestStepRecord[] {
   if (!perDeviceResults) {
     return [];
@@ -181,7 +187,9 @@ export function convertPerDeviceSkippedStepsToRecords(
   const skippedRecords: TestStepRecord[] = [];
   for (const deviceResult of perDeviceResults.values()) {
     for (const skippedStep of deviceResult.skippedSteps ?? []) {
-      const details = skippedStep.details as { params?: Record<string, unknown>; error?: string } | undefined;
+      const details = skippedStep.details as
+        | { params?: Record<string, unknown>; error?: string }
+        | undefined;
       skippedRecords.push({
         stepIndex: skippedStep.stepIndex,
         action: skippedStep.tool,
@@ -200,7 +208,9 @@ export function convertPerDeviceSkippedStepsToRecords(
     }
   }
 
-  return skippedRecords.sort((a, b) => a.stepIndex - b.stepIndex || a.action.localeCompare(b.action));
+  return skippedRecords.sort(
+    (a, b) => a.stepIndex - b.stepIndex || a.action.localeCompare(b.action),
+  );
 }
 
 /**
@@ -225,7 +235,10 @@ export class PlanExecutionOrchestrator {
   private readonly signal?: AbortSignal;
   private readonly timer: Timer;
   private readonly testExecutionRepository: TestExecutionRepository;
-  private readonly createSchemaValidator: () => Pick<PlanSchemaValidator, "loadSchema" | "validateYaml">;
+  private readonly createSchemaValidator: () => Pick<
+    PlanSchemaValidator,
+    "loadSchema" | "validateYaml"
+  >;
   private readonly videoRecorder: VideoRecorder;
 
   // Set in execute(); used by all phase methods for [PERF +Xms] elapsed-time logs.
@@ -265,7 +278,7 @@ export class PlanExecutionOrchestrator {
       logger.info("=== Starting executePlanTool ===");
       logger.info(
         `[PERF +0ms] Device: ${this.device.platform} (${this.device.deviceId}), ` +
-        `Start Step: ${this.request.startStep}, SessionUUID: ${this.request.sessionUuid}`
+          `Start Step: ${this.request.startStep}, SessionUUID: ${this.request.sessionUuid}`,
       );
 
       const plan = await this.preparePlan();
@@ -319,9 +332,9 @@ export class PlanExecutionOrchestrator {
         ...(this.request.captureObserveSteps && result.debug ? { debug: result.debug } : {}),
         ...(finalizedVideo.videoFilePaths.length > 0
           ? {
-            videoFilePaths: finalizedVideo.videoFilePaths,
-            videoRecordingIds: finalizedVideo.videoRecordingIds,
-          }
+              videoFilePaths: finalizedVideo.videoFilePaths,
+              videoRecordingIds: finalizedVideo.videoRecordingIds,
+            }
           : {}),
       };
 
@@ -369,14 +382,18 @@ export class PlanExecutionOrchestrator {
     await validator.loadSchema();
     const validation = validator.validateYaml(yamlContent);
     if (!validation.valid) {
-      const errorMessages = validation.errors?.map(err =>
-        `${err.field}: ${err.message}${err.line !== undefined ? ` (line ${err.line})` : ""}`
-      ).join("\n") || "Unknown validation error";
+      const errorMessages =
+        validation.errors
+          ?.map(
+            (err) =>
+              `${err.field}: ${err.message}${err.line !== undefined ? ` (line ${err.line})` : ""}`,
+          )
+          .join("\n") || "Unknown validation error";
 
       throw new ActionableError(
         `Plan YAML validation failed:\n${errorMessages}\n\n` +
-        "The plan does not conform to the AutoMobile test plan schema. " +
-        "Check the schema at schemas/test-plan.schema.json for details."
+          "The plan does not conform to the AutoMobile test plan schema. " +
+          "Check the schema at schemas/test-plan.schema.json for details.",
       );
     }
     this.perfLog("Plan YAML schema validation passed");
@@ -403,7 +420,7 @@ export class PlanExecutionOrchestrator {
       if (!same) {
         throw new ActionableError(
           `Devices list does not match plan devices. ` +
-          `Plan devices: [${declaredSorted.join(", ")}], provided: [${providedSorted.join(", ")}].`
+            `Plan devices: [${declaredSorted.join(", ")}], provided: [${providedSorted.join(", ")}].`,
         );
       }
     }
@@ -417,9 +434,10 @@ export class PlanExecutionOrchestrator {
   private async allocateDevices(_plan: Plan): Promise<Record<string, string> | undefined> {
     const normalized = this.normalizedDevices ?? normalizePlanDevices();
     const planDeviceLabels = normalized.labels;
-    const effectiveLabels = this.request.devices && this.request.devices.length > 0
-      ? this.request.devices
-      : planDeviceLabels;
+    const effectiveLabels =
+      this.request.devices && this.request.devices.length > 0
+        ? this.request.devices
+        : planDeviceLabels;
 
     if (effectiveLabels.length === 0) {
       if (this.request.device) {
@@ -434,7 +452,7 @@ export class PlanExecutionOrchestrator {
     }
     if (this.request.device && !effectiveLabels.includes(this.request.device)) {
       throw new ActionableError(
-        `Device label '${this.request.device}' was not declared in devices list: ${effectiveLabels.join(", ")}`
+        `Device label '${this.request.device}' was not declared in devices list: ${effectiveLabels.join(", ")}`,
       );
     }
 
@@ -446,7 +464,11 @@ export class PlanExecutionOrchestrator {
 
     const devicePool = DaemonState.getInstance().getDevicePool();
     const sessionManager = DaemonState.getInstance().getSessionManager();
-    const labelToSessionMap = buildDeviceLabelMap(effectiveLabels, sessionUuid, this.request.device);
+    const labelToSessionMap = buildDeviceLabelMap(
+      effectiveLabels,
+      sessionUuid,
+      this.request.device,
+    );
     const sessionIds = Object.values(labelToSessionMap);
 
     // The plan execution is tracked on its base session. Publish its derived
@@ -457,7 +479,7 @@ export class PlanExecutionOrchestrator {
 
     logger.info(
       `Requesting allocation of ${sessionIds.length} devices for labels: ${Object.keys(labelToSessionMap).join(", ")} ` +
-      `(timeout: ${this.request.deviceAllocationTimeoutMs / 1000}s)`
+        `(timeout: ${this.request.deviceAllocationTimeoutMs / 1000}s)`,
     );
 
     const restorePreviousDeviceLabels = (error: unknown): never => {
@@ -469,19 +491,25 @@ export class PlanExecutionOrchestrator {
       throw error;
     };
 
-    const allocation = Promise.resolve().then(() => this.requestDeviceAllocation(
-      devicePool,
-      normalized,
-      effectiveLabels,
-      labelToSessionMap,
-      sessionIds
-    ));
+    const allocation = Promise.resolve().then(() =>
+      this.requestDeviceAllocation(
+        devicePool,
+        normalized,
+        effectiveLabels,
+        labelToSessionMap,
+        sessionIds,
+      ),
+    );
 
-    const sessionToDeviceMap = await allocation.catch(error => {
+    const sessionToDeviceMap = await allocation.catch((error) => {
       return restorePreviousDeviceLabels(error);
     });
 
-    const deviceMapping = this.buildDeviceMapping(sessionManager, sessionToDeviceMap, labelToSessionMap);
+    const deviceMapping = this.buildDeviceMapping(
+      sessionManager,
+      sessionToDeviceMap,
+      labelToSessionMap,
+    );
 
     this.perfLog("Device allocation complete");
     for (const [label, deviceId] of Object.entries(deviceMapping)) {
@@ -494,7 +522,7 @@ export class PlanExecutionOrchestrator {
       effectiveLabels,
       this.request.device,
       { keepScreenAwake: this.request.keepScreenAwake, platform: this.request.platform },
-      getToolCapabilityContext()?.execution,
+      getToolSelectionContext()?.execution,
     );
 
     return deviceMapping;
@@ -505,24 +533,24 @@ export class PlanExecutionOrchestrator {
     normalized: NormalizedPlanDevices,
     effectiveLabels: string[],
     labelToSessionMap: Record<string, string>,
-    sessionIds: string[]
+    sessionIds: string[],
   ): Promise<Map<string, string>> {
     if (!normalized.hasDefinitions) {
       return devicePool.assignMultipleDevices(
         sessionIds,
         this.request.deviceAllocationTimeoutMs,
-        this.request.platform
+        this.request.platform,
       );
     }
 
     const definitionMap = new Map(
-      normalized.definitions.map(definition => [definition.label, definition])
+      normalized.definitions.map((definition) => [definition.label, definition]),
     );
-    const requests = effectiveLabels.map(label => {
+    const requests = effectiveLabels.map((label) => {
       const definition = definitionMap.get(label);
       if (!definition) {
         throw new ActionableError(
-          `Device definition for label '${label}' not found in plan devices.`
+          `Device definition for label '${label}' not found in plan devices.`,
         );
       }
       return {
@@ -537,19 +565,19 @@ export class PlanExecutionOrchestrator {
 
     return devicePool.assignMultipleDevicesByCriteria(
       requests,
-      this.request.deviceAllocationTimeoutMs
+      this.request.deviceAllocationTimeoutMs,
     );
   }
 
   private buildDeviceMapping(
     sessionManager: SessionManager,
     sessionToDeviceMap: Map<string, string>,
-    labelToSessionMap: Record<string, string>
+    labelToSessionMap: Record<string, string>,
   ): Record<string, string> {
     for (const sessionUuid of sessionToDeviceMap.keys()) {
       if (!sessionManager.getSession(sessionUuid)) {
         throw new ActionableError(
-          `Internal error: Session ${sessionUuid} not found after device allocation`
+          `Internal error: Session ${sessionUuid} not found after device allocation`,
         );
       }
     }
@@ -559,7 +587,7 @@ export class PlanExecutionOrchestrator {
       const deviceId = sessionToDeviceMap.get(sessionUuid);
       if (!deviceId) {
         throw new ActionableError(
-          `Internal error: No device allocated for session ${sessionUuid} (label: ${label})`
+          `Internal error: No device allocated for session ${sessionUuid} (label: ${label})`,
         );
       }
       deviceMapping[label] = deviceId;
@@ -602,7 +630,9 @@ export class PlanExecutionOrchestrator {
         this.perfLog(`Video recording started: ${recording.recordingId}`);
       }
     } catch (videoError) {
-      logger.warn(`[PERF +${this.timer.now() - this.perfStart}ms] Failed to start automatic video recording: ${videoError}`);
+      logger.warn(
+        `[PERF +${this.timer.now() - this.perfStart}ms] Failed to start automatic video recording: ${videoError}`,
+      );
     }
 
     return state;
@@ -610,7 +640,9 @@ export class PlanExecutionOrchestrator {
 
   private async runPlan(plan: Plan, video: VideoState): Promise<PlanExecutionResult> {
     const planExecutionOptions = this.buildPlanExecutionOptions(video);
-    this.perfLog(`Starting plan execution on device ${this.device.deviceId} (${this.device.platform})`);
+    this.perfLog(
+      `Starting plan execution on device ${this.device.deviceId} (${this.device.platform})`,
+    );
     // Note: the plan-execution guard is enabled earlier in execute(), before
     // device allocation, so the disconnect monitor is already suppressed here.
     const result = await executePlan(
@@ -621,11 +653,11 @@ export class PlanExecutionOrchestrator {
       this.request.sessionUuid,
       this.signal,
       this.request.abortStrategy,
-      planExecutionOptions
+      planExecutionOptions,
     );
     this.perfLog(
       `Plan execution completed: ${result.success ? "SUCCESS" : "FAILED"} ` +
-      `(${result.executedSteps}/${result.totalSteps} steps)`
+        `(${result.executedSteps}/${result.totalSteps} steps)`,
     );
     return result;
   }
@@ -662,7 +694,7 @@ export class PlanExecutionOrchestrator {
             await writeSegmentManifest(segments[0].recordingId, segments);
           }
           return { videoFilePaths: finalized.filePaths, videoRecordingIds: finalized.recordingIds };
-        }
+        },
       );
     }
     if (video.iosRecordingId) {
@@ -673,8 +705,11 @@ export class PlanExecutionOrchestrator {
         async () => {
           const stopResult = await this.videoRecorder.stopVideoRecording(recordingId);
           this.perfLog(`Video recording stopped successfully: ${stopResult.metadata.filePath}`);
-          return { videoFilePaths: [stopResult.metadata.filePath], videoRecordingIds: [recordingId] };
-        }
+          return {
+            videoFilePaths: [stopResult.metadata.filePath],
+            videoRecordingIds: [recordingId],
+          };
+        },
       );
     }
     return { videoFilePaths: [], videoRecordingIds: [] };
@@ -683,13 +718,15 @@ export class PlanExecutionOrchestrator {
   private async finalizeWithFallback(
     startMessage: string,
     failureMessage: string,
-    finalize: () => Promise<FinalizedVideo>
+    finalize: () => Promise<FinalizedVideo>,
   ): Promise<FinalizedVideo> {
     try {
       this.perfLog(startMessage);
       return await finalize();
     } catch (videoError) {
-      logger.warn(`[PERF +${this.timer.now() - this.perfStart}ms] ${failureMessage}: ${videoError}`);
+      logger.warn(
+        `[PERF +${this.timer.now() - this.perfStart}ms] ${failureMessage}: ${videoError}`,
+      );
       return { videoFilePaths: [], videoRecordingIds: [] };
     }
   }
@@ -701,7 +738,7 @@ export class PlanExecutionOrchestrator {
       steps?: TestStepRecord[];
       errorMessage?: string;
       videoPath?: string;
-    }
+    },
   ): Promise<void> {
     if (!this.request.testMetadata) {
       return;
@@ -746,9 +783,11 @@ export class PlanExecutionOrchestrator {
     let stopped = false;
     let count = 0;
     const handle = this.timer.setInterval(() => {
-      if (stopped) { return; }
+      if (stopped) {
+        return;
+      }
       count++;
-      this.progress!(count, undefined, "executing").catch(err => {
+      this.progress!(count, undefined, "executing").catch((err) => {
         logger.debug(`[executePlan] Progress heartbeat delivery failed: ${err}`);
       });
     }, HEARTBEAT_INTERVAL_MS);

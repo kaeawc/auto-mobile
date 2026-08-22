@@ -38,10 +38,20 @@ import {
   waitForSchema,
 } from "./observeTools";
 import { defaultTimer } from "../utils/SystemTimer";
-import { createJSONToolResponse, createStructuredToolResponse, StructuredToolResponse } from "../utils/toolUtils";
+import {
+  createJSONToolResponse,
+  createStructuredToolResponse,
+  StructuredToolResponse,
+} from "../utils/toolUtils";
 import { resolveSwipeDirection } from "../utils/swipeOnUtils";
 import { RecompositionTracker } from "../features/performance/RecompositionTracker";
-import { addDeviceTargetingToSchema, platformSchema, withAppIdAliases, withJsonSchemaOverride, compactExclusiveSelectorProperties } from "./toolSchemaHelpers";
+import {
+  addDeviceTargetingToSchema,
+  platformSchema,
+  withAppIdAliases,
+  withJsonSchemaOverride,
+  compactExclusiveSelectorProperties,
+} from "./toolSchemaHelpers";
 import { serverConfig } from "../utils/ServerConfig";
 import {
   createElementIdTextSelectorSchema,
@@ -120,247 +130,380 @@ export type {
 };
 
 // Re-export system tray helpers for backward compatibility
-export type {
-  SystemTrayObserver,
-  SystemTrayAdb,
-  SystemTrayDependencies,
-};
+export type { SystemTrayObserver, SystemTrayAdb, SystemTrayDependencies };
 
-export {
-  setSystemTrayDependencies,
-  resetSystemTrayDependencies,
-  waitForNotificationMatch,
-};
+export { setSystemTrayDependencies, resetSystemTrayDependencies, waitForNotificationMatch };
 
 // ============================================================================
 // Schema Definitions
 // ============================================================================
 
-export const shakeSchema = addDeviceTargetingToSchema(z.object({
-  duration: z.number().optional().describe("Shake duration ms (default 1000)"),
-  intensity: z.number().optional().describe("Shake intensity (Android; default 100)"),
-  platform: platformSchema
-}));
+export const shakeSchema = addDeviceTargetingToSchema(
+  z.object({
+    duration: z.number().optional().describe("Shake duration ms (default 1000)"),
+    intensity: z.number().optional().describe("Shake intensity (Android; default 100)"),
+    platform: platformSchema,
+  }),
+);
 
-export const keyboardSchema = addDeviceTargetingToSchema(z.object({
-  action: z.enum(["open", "close", "detect"]).describe("Keyboard action"),
-  platform: platformSchema
-}));
+export const keyboardSchema = addDeviceTargetingToSchema(
+  z.object({
+    action: z.enum(["open", "close", "detect"]).describe("Keyboard action"),
+    platform: platformSchema,
+  }),
+);
 
-const tapOnSelectorSchema = z.union([
-  z.object({ elementId: z.string().min(1).describe("Resource ID, e.g. com.app:id/btn_login") }).strict(),
-  z.object({ testTag: z.string().min(1).describe("Android accessibility test tag") }).strict(),
-  z.object({ text: z.string().min(1).describe("Text, content-desc, or placeholder") }).strict(),
-  z.object({ textAny: z.array(z.string().min(1)).min(1).describe("Ordered text variants; first visible match wins") }).strict()
-]).describe("Element to tap: elementId, Android testTag, text, or ordered text variants");
+const tapOnSelectorSchema = z
+  .union([
+    z
+      .object({ elementId: z.string().min(1).describe("Resource ID, e.g. com.app:id/btn_login") })
+      .strict(),
+    z.object({ testTag: z.string().min(1).describe("Android accessibility test tag") }).strict(),
+    z.object({ text: z.string().min(1).describe("Text, content-desc, or placeholder") }).strict(),
+    z
+      .object({
+        textAny: z
+          .array(z.string().min(1))
+          .min(1)
+          .describe("Ordered text variants; first visible match wins"),
+      })
+      .strict(),
+  ])
+  .describe("Element to tap: elementId, Android testTag, text, or ordered text variants");
 
-export const tapOnSchema = withJsonSchemaOverride(addDeviceTargetingToSchema(z.object({
-  selector: tapOnSelectorSchema,
-  sibling: z.boolean().optional().describe(
-    "Tap a clickable sibling of the match, e.g. checkbox beside label"
+export const tapOnSchema = withJsonSchemaOverride(
+  addDeviceTargetingToSchema(
+    z
+      .object({
+        selector: tapOnSelectorSchema,
+        sibling: z
+          .boolean()
+          .optional()
+          .describe("Tap a clickable sibling of the match, e.g. checkbox beside label"),
+        container: elementContainerSchema.optional().describe("Scope search to a container"),
+        action: z
+          .enum(["tap", "doubleTap", "longPress", "focus"])
+          .default("tap")
+          .describe("Action type (default: tap)"),
+        selectionStrategy: elementSelectionStrategySchema
+          .optional()
+          .describe("Selection strategy when multiple match (default: first)"),
+        index: z
+          .number()
+          .int()
+          .nonnegative()
+          .optional()
+          .describe(
+            "0-based index to tap the Nth on-screen match (in hierarchy order, i.e. top-to-bottom " +
+              "for a vertical list) instead of applying " +
+              "selectionStrategy — for repeated controls with no unique text. Out of range → no match.",
+          ),
+        duration: z.number().optional().describe("Long press duration (ms)"),
+        searchUntil: z
+          .object({
+            duration: z
+              .number()
+              .min(100)
+              .max(12000)
+              .optional()
+              .describe("Polling duration (ms, default: 500)"),
+          })
+          .optional()
+          .describe("Poll for element before tapping"),
+        preTapStability: z
+          .boolean()
+          .optional()
+          .describe("Require stable bounds before tapping; use for dynamic UI"),
+        retryIfNoChange: z
+          .boolean()
+          .optional()
+          .describe("Retry once if the view hierarchy is unchanged after tap"),
+        ensureTap: z.boolean().optional().describe("Enable preTapStability and retryIfNoChange"),
+        platform: platformSchema,
+      })
+      .strict(),
   ),
-  container: elementContainerSchema.optional().describe(
-    "Scope search to a container"
-  ),
-  action: z.enum(["tap", "doubleTap", "longPress", "focus"]).default("tap").describe("Action type (default: tap)"),
-  selectionStrategy: elementSelectionStrategySchema.optional().describe(
-    "Selection strategy when multiple match (default: first)"
-  ),
-  index: z.number().int().nonnegative().optional().describe(
-    "0-based index to tap the Nth on-screen match (in hierarchy order, i.e. top-to-bottom "
-    + "for a vertical list) instead of applying "
-    + "selectionStrategy — for repeated controls with no unique text. Out of range → no match."
-  ),
-  duration: z.number().optional().describe("Long press duration (ms)"),
-  searchUntil: z.object({
-    duration: z.number().min(100).max(12000).optional().describe("Polling duration (ms, default: 500)"),
-  }).optional().describe("Poll for element before tapping"),
-  preTapStability: z.boolean().optional().describe(
-    "Require stable bounds before tapping; use for dynamic UI"
-  ),
-  retryIfNoChange: z.boolean().optional().describe(
-    "Retry once if the view hierarchy is unchanged after tap"
-  ),
-  ensureTap: z.boolean().optional().describe(
-    "Enable preTapStability and retryIfNoChange"
-  ),
-  platform: platformSchema
-}).strict()), js => compactExclusiveSelectorProperties(js, ["selector", "container"]));
+  (js) => compactExclusiveSelectorProperties(js, ["selector", "container"]),
+);
 
-export const tapAnySchema = withJsonSchemaOverride(addDeviceTargetingToSchema(z.object({
-  container: elementContainerSchema.optional().describe(
-    "Scope search to a container"
+export const tapAnySchema = withJsonSchemaOverride(
+  addDeviceTargetingToSchema(
+    z
+      .object({
+        container: elementContainerSchema.optional().describe("Scope search to a container"),
+        selectionStrategy: elementSelectionStrategySchema
+          .optional()
+          .describe("Element selection strategy: 'first' (default) or 'random'"),
+        scrollableContainer: z
+          .boolean()
+          .optional()
+          .describe("Search only scrollable containers/lists"),
+        action: z
+          .enum(["tap", "doubleTap", "longPress"])
+          .default("tap")
+          .describe("Action type (default: tap)"),
+        duration: z.number().optional().describe("Long press duration (ms)"),
+        searchUntil: z
+          .object({
+            duration: z
+              .number()
+              .min(100)
+              .max(12000)
+              .optional()
+              .describe("Polling duration (ms, default: 500)"),
+          })
+          .optional()
+          .describe("Poll for clickable element before tapping"),
+        platform: platformSchema,
+      })
+      .strict(),
   ),
-  selectionStrategy: elementSelectionStrategySchema.optional().describe(
-    "Element selection strategy: 'first' (default) or 'random'"
-  ),
-  scrollableContainer: z.boolean().optional().describe(
-    "Search only scrollable containers/lists"
-  ),
-  action: z.enum(["tap", "doubleTap", "longPress"]).default("tap").describe("Action type (default: tap)"),
-  duration: z.number().optional().describe("Long press duration (ms)"),
-  searchUntil: z.object({
-    duration: z.number().min(100).max(12000).optional().describe("Polling duration (ms, default: 500)"),
-  }).optional().describe("Poll for clickable element before tapping"),
-  platform: platformSchema
-}).strict()), js => compactExclusiveSelectorProperties(js, ["container"]));
+  (js) => compactExclusiveSelectorProperties(js, ["container"]),
+);
 
 const dragAndDropSelectorSchema = (label: "Source" | "Target") =>
   createElementIdTextSelectorSchema({
     elementId: `${label} ID`,
-    text: `${label} text`
+    text: `${label} text`,
   }).describe(`${label} element`);
 
 const swipeOnLookForSchema = createElementIdTextSelectorSchema({
   elementId: "ID of the element to look for",
-  text: "Text to look for"
+  text: "Text to look for",
 });
 
-export const dragAndDropSchema = withJsonSchemaOverride(addDeviceTargetingToSchema(z.object({
-  source: dragAndDropSelectorSchema("Source"),
-  target: dragAndDropSelectorSchema("Target"),
-  pressDurationMs: z.number().min(600).max(3000).optional().describe(
-    "Press duration ms (min: 600, max: 3000, default: 600)"
+export const dragAndDropSchema = withJsonSchemaOverride(
+  addDeviceTargetingToSchema(
+    z.object({
+      source: dragAndDropSelectorSchema("Source"),
+      target: dragAndDropSelectorSchema("Target"),
+      pressDurationMs: z
+        .number()
+        .min(600)
+        .max(3000)
+        .optional()
+        .describe("Press duration ms (min: 600, max: 3000, default: 600)"),
+      dragDurationMs: z
+        .number()
+        .min(300)
+        .max(1000)
+        .optional()
+        .describe("Drag duration ms (min: 300, max: 1000, default: 300)"),
+      holdDurationMs: z
+        .number()
+        .min(100)
+        .max(3000)
+        .optional()
+        .describe("Hold duration ms (min: 100, max: 3000, default: 100)"),
+      platform: platformSchema,
+    }),
   ),
-  dragDurationMs: z.number().min(300).max(1000).optional().describe(
-    "Drag duration ms (min: 300, max: 1000, default: 300)"
-  ),
-  holdDurationMs: z.number().min(100).max(3000).optional().describe(
-    "Hold duration ms (min: 100, max: 3000, default: 100)"
-  ),
-  platform: platformSchema
-})), js => compactExclusiveSelectorProperties(js, ["source", "target"]));
+  (js) => compactExclusiveSelectorProperties(js, ["source", "target"]),
+);
 
-export const swipeOnSchema = withJsonSchemaOverride(addDeviceTargetingToSchema(z.object({
-  includeSystemInsets: z.boolean().optional().describe("Use full screen including status/nav bars"),
-  container: elementContainerSchema.optional().describe(
-    "Scope search to a container"
+export const swipeOnSchema = withJsonSchemaOverride(
+  addDeviceTargetingToSchema(
+    z.object({
+      includeSystemInsets: z
+        .boolean()
+        .optional()
+        .describe("Use full screen including status/nav bars"),
+      container: elementContainerSchema.optional().describe("Scope search to a container"),
+      autoTarget: z
+        .boolean()
+        .optional()
+        .describe("Auto-target scrollable containers (default: true)"),
+      direction: z.enum(["up", "down", "left", "right"]).describe("Swipe/scroll direction"),
+      gestureType: z
+        .enum(["swipeFingerTowardsDirection", "scrollTowardsDirection"])
+        .optional()
+        .describe("Finger direction or content scroll direction; default: scrollTowardsDirection"),
+      lookFor: swipeOnLookForSchema.optional().describe("Element to look for during swipe"),
+      boomerang: z.boolean().optional().describe("Return to start position after swipe apex"),
+      apexPause: z
+        .number()
+        .min(0)
+        .max(3000)
+        .optional()
+        .describe("Pause duration at swipe apex in ms (0-3000)"),
+      returnSpeed: z
+        .number()
+        .min(0.1)
+        .max(3.0)
+        .optional()
+        .describe("Speed multiplier for return swipe (0.1-3.0)"),
+      speed: z.enum(["slow", "normal", "fast"]).optional().describe("Swipe speed preset"),
+      platform: platformSchema,
+    }),
   ),
-  autoTarget: z.boolean().optional().describe("Auto-target scrollable containers (default: true)"),
-  direction: z.enum(["up", "down", "left", "right"]).describe("Swipe/scroll direction"),
-  gestureType: z.enum(["swipeFingerTowardsDirection", "scrollTowardsDirection"]).optional()
-    .describe("Finger direction or content scroll direction; default: scrollTowardsDirection"),
-  lookFor: swipeOnLookForSchema.optional().describe("Element to look for during swipe"),
-  boomerang: z.boolean().optional().describe("Return to start position after swipe apex"),
-  apexPause: z.number().min(0).max(3000).optional().describe("Pause duration at swipe apex in ms (0-3000)"),
-  returnSpeed: z.number().min(0.1).max(3.0).optional().describe("Speed multiplier for return swipe (0.1-3.0)"),
-  speed: z.enum(["slow", "normal", "fast"]).optional().describe("Swipe speed preset"),
-  platform: platformSchema
-})), js => compactExclusiveSelectorProperties(js, ["container", "lookFor"]));
+  (js) => compactExclusiveSelectorProperties(js, ["container", "lookFor"]),
+);
 
-export const pinchOnSchema = withJsonSchemaOverride(addDeviceTargetingToSchema(z.object({
-  direction: z.enum(["in", "out"]).describe("Pinch direction"),
-  distanceStart: z.number().optional().describe("Initial finger distance (px, default: 400)"),
-  distanceEnd: z.number().optional().describe("Final finger distance (px, default: 100)"),
-  scale: z.number().optional().describe("Scale factor (overrides distances)"),
-  duration: z.number().optional().describe("Gesture duration (ms)"),
-  rotationDegrees: z.number().optional().describe(
-    "Degrees the two-finger axis rotates during the pinch (default: 0). The axis starts horizontal and ends rotated by this amount — a combined pinch+rotate, not a pinch along a fixed rotated axis. Same convention on Android and iOS."
+export const pinchOnSchema = withJsonSchemaOverride(
+  addDeviceTargetingToSchema(
+    z.object({
+      direction: z.enum(["in", "out"]).describe("Pinch direction"),
+      distanceStart: z.number().optional().describe("Initial finger distance (px, default: 400)"),
+      distanceEnd: z.number().optional().describe("Final finger distance (px, default: 100)"),
+      scale: z.number().optional().describe("Scale factor (overrides distances)"),
+      duration: z.number().optional().describe("Gesture duration (ms)"),
+      rotationDegrees: z
+        .number()
+        .optional()
+        .describe(
+          "Degrees the two-finger axis rotates during the pinch (default: 0). The axis starts horizontal and ends rotated by this amount — a combined pinch+rotate, not a pinch along a fixed rotated axis. Same convention on Android and iOS.",
+        ),
+      includeSystemInsets: z
+        .boolean()
+        .optional()
+        .describe("Use full screen including status/nav bars"),
+      container: elementContainerSchema.optional().describe("Scope search to a container"),
+      autoTarget: z.boolean().optional().describe("Auto-target pinchable containers"),
+      platform: platformSchema,
+    }),
   ),
-  includeSystemInsets: z.boolean().optional().describe("Use full screen including status/nav bars"),
-  container: elementContainerSchema.optional().describe(
-    "Scope search to a container"
-  ),
-  autoTarget: z.boolean().optional().describe("Auto-target pinchable containers"),
-  platform: platformSchema
-})), js => compactExclusiveSelectorProperties(js, ["container"]));
+  (js) => compactExclusiveSelectorProperties(js, ["container"]),
+);
 
-export const clearTextSchema = addDeviceTargetingToSchema(z.object({
-  platform: platformSchema
-}));
+export const clearTextSchema = addDeviceTargetingToSchema(
+  z.object({
+    platform: platformSchema,
+  }),
+);
 
-export const selectAllTextSchema = addDeviceTargetingToSchema(z.object({
-  platform: platformSchema
-}));
+export const selectAllTextSchema = addDeviceTargetingToSchema(
+  z.object({
+    platform: platformSchema,
+  }),
+);
 
-export const pressButtonSchema = addDeviceTargetingToSchema(z.object({
-  button: z.enum(["home", "back", "menu", "power", "volume_up", "volume_down", "recent"]),
-  platform: platformSchema
-}));
+export const pressButtonSchema = addDeviceTargetingToSchema(
+  z.object({
+    button: z.enum(["home", "back", "menu", "power", "volume_up", "volume_down", "recent"]),
+    platform: platformSchema,
+  }),
+);
 
 const systemTrayNotificationSchema = z.object({
   title: z.string().optional().describe("Notification title to match"),
   body: z.string().optional().describe("Notification body to match"),
   appId: z.string().optional().describe("App package ID to match"),
-  tapActionLabel: z.string().optional().describe("Action button label to tap (for 'tap' action)")
+  tapActionLabel: z.string().optional().describe("Action button label to tap (for 'tap' action)"),
 });
 
 const systemTraySchemaBase = z.object({
-  action: z.enum(["open", "close", "find", "tap", "dismiss", "clearAll"]).describe(
-    "open/close/find/tap/dismiss/clearAll notification"
-  ),
+  action: z
+    .enum(["open", "close", "find", "tap", "dismiss", "clearAll"])
+    .describe("open/close/find/tap/dismiss/clearAll notification"),
   notification: systemTrayNotificationSchema.optional().describe("Notification criteria to match"),
-  awaitTimeout: z.number().optional().describe("Timeout in ms to wait for notification (default: 5000)"),
-  platform: platformSchema
+  awaitTimeout: z
+    .number()
+    .optional()
+    .describe("Timeout in ms to wait for notification (default: 5000)"),
+  platform: platformSchema,
 });
 
-export const systemTraySchema = withAppIdAliases(addDeviceTargetingToSchema(systemTraySchemaBase).superRefine((value, ctx) => {
-  const notification = value.notification ?? {};
+export const systemTraySchema = withAppIdAliases(
+  addDeviceTargetingToSchema(systemTraySchemaBase).superRefine((value, ctx) => {
+    const notification = value.notification ?? {};
 
-  if (value.action === "open" || value.action === "close") {
-    return;
-  }
+    if (value.action === "open" || value.action === "close") {
+      return;
+    }
 
-  const hasCriteria = notification.title || notification.body || notification.appId;
-  if (!hasCriteria) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: `${value.action} action requires at least one notification criteria (title, body, or appId)`
-    });
-  }
+    const hasCriteria = notification.title || notification.body || notification.appId;
+    if (!hasCriteria) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `${value.action} action requires at least one notification criteria (title, body, or appId)`,
+      });
+    }
 
-  if (value.action === "clearAll" && !notification.appId) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "clearAll action requires notification.appId"
-    });
-  }
+    if (value.action === "clearAll" && !notification.appId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "clearAll action requires notification.appId",
+      });
+    }
 
-  if (notification.tapActionLabel && value.action !== "tap") {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "notification.tapActionLabel is only valid for tap action"
-    });
-  }
-}));
+    if (notification.tapActionLabel && value.action !== "tap") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "notification.tapActionLabel is only valid for tap action",
+      });
+    }
+  }),
+);
 
-export const stopAppSchema = withAppIdAliases(addDeviceTargetingToSchema(z.object({
-  appId: z.string(),
-  platform: platformSchema
-})));
+export const stopAppSchema = withAppIdAliases(
+  addDeviceTargetingToSchema(
+    z.object({
+      appId: z.string(),
+      platform: platformSchema,
+    }),
+  ),
+);
 
-export const clearStateSchema = withAppIdAliases(addDeviceTargetingToSchema(z.object({
-  appId: z.string(),
-  clearKeychain: z.boolean().optional().describe("Clear iOS keychain"),
-  platform: platformSchema
-})));
+export const clearStateSchema = withAppIdAliases(
+  addDeviceTargetingToSchema(
+    z.object({
+      appId: z.string(),
+      clearKeychain: z.boolean().optional().describe("Clear iOS keychain"),
+      platform: platformSchema,
+    }),
+  ),
+);
 
-export const inputTextSchema = addDeviceTargetingToSchema(z.object({
-  text: z.string().min(1),
-  mode: z.enum(["a11y", "eventLast", "eventAll", "eventOnly"]).optional()
-    .describe("Android text mode: a11y default; eventLast and eventAll start with accessibility setText; eventOnly clears and types supported ASCII with key events only"),
-  imeAction: z.enum(["done", "next", "search", "send", "go", "previous"]).optional()
-    .describe("IME action after input"),
-  dismissKeyboard: z.boolean().optional()
-    .describe("Android: dismiss keyboard after input"),
-  platform: platformSchema
-}));
+export const inputTextSchema = addDeviceTargetingToSchema(
+  z.object({
+    text: z.string().min(1),
+    mode: z
+      .enum(["a11y", "eventLast", "eventAll", "eventOnly"])
+      .optional()
+      .describe(
+        "Android text mode: a11y default; eventLast and eventAll start with accessibility setText; eventOnly clears and types supported ASCII with key events only",
+      ),
+    imeAction: z
+      .enum(["done", "next", "search", "send", "go", "previous"])
+      .optional()
+      .describe("IME action after input"),
+    dismissKeyboard: z.boolean().optional().describe("Android: dismiss keyboard after input"),
+    platform: platformSchema,
+  }),
+);
 
-export const wakeAndUnlockSchema = addDeviceTargetingToSchema(z.object({
-  pin: z.string().optional()
-    .describe("Credential to unlock a secure Android device. Optional; logically required to unlock a secure lock unless a pin was already remembered this session. Ignored on iOS."),
-  platform: platformSchema
-}));
+export const wakeAndUnlockSchema = addDeviceTargetingToSchema(
+  z.object({
+    pin: z
+      .string()
+      .optional()
+      .describe(
+        "Credential to unlock a secure Android device. Optional; logically required to unlock a secure lock unless a pin was already remembered this session. Ignored on iOS.",
+      ),
+    platform: platformSchema,
+  }),
+);
 
 // openLink gains an optional integrated waitFor (issue #3490 §5): after opening
 // the URL, poll for the predicate — reusing observe's waitFor/settled schema and
 // semantics — so the open→settle→observe→verify workaround collapses into one call.
-export const openLinkSchema = withAppIdAliases(withJsonSchemaOverride(addDeviceTargetingToSchema(z.object({
-  url: z.string().describe("URL to open"),
-  platform: platformSchema,
-  waitFor: waitForSchema.optional().describe("After opening, wait for this predicate before returning the observation"),
-  settled: settledSchema.optional().describe("After waitFor matches, wait for a quiet hierarchy period (requires waitFor)")
-})).superRefine(refineWaitForArgs), overrideWaitForJsonSchema));
+export const openLinkSchema = withAppIdAliases(
+  withJsonSchemaOverride(
+    addDeviceTargetingToSchema(
+      z.object({
+        url: z.string().describe("URL to open"),
+        platform: platformSchema,
+        waitFor: waitForSchema
+          .optional()
+          .describe("After opening, wait for this predicate before returning the observation"),
+        settled: settledSchema
+          .optional()
+          .describe("After waitFor matches, wait for a quiet hierarchy period (requires waitFor)"),
+      }),
+    ).superRefine(refineWaitForArgs),
+    overrideWaitForJsonSchema,
+  ),
+);
 
 /** Outcome of a post-open waitFor poll, as produced by {@link waitForObservation}. */
 export type OpenLinkWaitOutcome = WaitForObservationOutcome;
@@ -373,7 +516,7 @@ export type OpenLinkWaitOutcome = WaitForObservationOutcome;
 export const buildOpenLinkPayload = (
   url: string,
   openResult: OpenURLResult,
-  waitOutcome: OpenLinkWaitOutcome | null
+  waitOutcome: OpenLinkWaitOutcome | null,
 ) => {
   if (!waitOutcome) {
     return {
@@ -399,53 +542,74 @@ export const buildOpenLinkPayload = (
   };
 };
 
-export const imeActionSchema = addDeviceTargetingToSchema(z.object({
-  action: z.enum(["done", "next", "search", "send", "go", "previous"]).describe("IME action"),
-  platform: platformSchema
-}));
+export const imeActionSchema = addDeviceTargetingToSchema(
+  z.object({
+    action: z.enum(["done", "next", "search", "send", "go", "previous"]).describe("IME action"),
+    platform: platformSchema,
+  }),
+);
 
-export const recentAppsSchema = addDeviceTargetingToSchema(z.object({
-  platform: platformSchema
-}));
+export const recentAppsSchema = addDeviceTargetingToSchema(
+  z.object({
+    platform: platformSchema,
+  }),
+);
 
-export const homeScreenSchema = addDeviceTargetingToSchema(z.object({
-  platform: platformSchema
-}));
+export const homeScreenSchema = addDeviceTargetingToSchema(
+  z.object({
+    platform: platformSchema,
+  }),
+);
 
-export const rotateSchema = addDeviceTargetingToSchema(z.object({
-  orientation: z.enum(["portrait", "landscape"]),
-  platform: platformSchema
-}));
+export const rotateSchema = addDeviceTargetingToSchema(
+  z.object({
+    orientation: z.enum(["portrait", "landscape"]),
+    platform: platformSchema,
+  }),
+);
 
 const clipboardTextRequiredMessage = "text is required when action is copy";
-const optionalClipboardTextSchema = z.string().min(1).optional().describe("Text to copy (required for 'copy' action)");
+const optionalClipboardTextSchema = z
+  .string()
+  .min(1)
+  .optional()
+  .describe("Text to copy (required for 'copy' action)");
 const clipboardPlatformSchema = {
   platform: platformSchema,
 };
 
 export const clipboardSchema = z.discriminatedUnion("action", [
-  addDeviceTargetingToSchema(z.object({
-    action: z.literal("copy").describe("Clipboard action"),
-    text: z.string({ error: clipboardTextRequiredMessage })
-      .min(1, clipboardTextRequiredMessage)
-      .describe("Text to copy (required for 'copy' action)"),
-    ...clipboardPlatformSchema,
-  })),
-  addDeviceTargetingToSchema(z.object({
-    action: z.literal("paste").describe("Clipboard action"),
-    text: optionalClipboardTextSchema,
-    ...clipboardPlatformSchema,
-  })),
-  addDeviceTargetingToSchema(z.object({
-    action: z.literal("clear").describe("Clipboard action"),
-    text: optionalClipboardTextSchema,
-    ...clipboardPlatformSchema,
-  })),
-  addDeviceTargetingToSchema(z.object({
-    action: z.literal("get").describe("Clipboard action"),
-    text: optionalClipboardTextSchema,
-    ...clipboardPlatformSchema,
-  }))
+  addDeviceTargetingToSchema(
+    z.object({
+      action: z.literal("copy").describe("Clipboard action"),
+      text: z
+        .string({ error: clipboardTextRequiredMessage })
+        .min(1, clipboardTextRequiredMessage)
+        .describe("Text to copy (required for 'copy' action)"),
+      ...clipboardPlatformSchema,
+    }),
+  ),
+  addDeviceTargetingToSchema(
+    z.object({
+      action: z.literal("paste").describe("Clipboard action"),
+      text: optionalClipboardTextSchema,
+      ...clipboardPlatformSchema,
+    }),
+  ),
+  addDeviceTargetingToSchema(
+    z.object({
+      action: z.literal("clear").describe("Clipboard action"),
+      text: optionalClipboardTextSchema,
+      ...clipboardPlatformSchema,
+    }),
+  ),
+  addDeviceTargetingToSchema(
+    z.object({
+      action: z.literal("get").describe("Clipboard action"),
+      text: optionalClipboardTextSchema,
+      ...clipboardPlatformSchema,
+    }),
+  ),
 ]);
 
 export function formatClipboardMessage(result: ClipboardResult): string {
@@ -476,7 +640,7 @@ export function formatRecentAppsMessage(result: { success?: boolean; error?: str
 
 export function formatSwipeOnMessage(
   result: Pick<SwipeOnToolPayload, "success" | "error" | "found" | "scrollIterations">,
-  direction: string
+  direction: string,
 ): string {
   if (!result.success) {
     // `||` not `??`: an empty-string error (`error: ""`) must still yield the
@@ -494,96 +658,126 @@ export function formatSwipeOnMessage(
 
 export function registerInteractionTools() {
   // Tap on handler
-  const tapOnHandler = async (device: BootedDevice, args: TapOnArgs, progress?: ProgressCallback) => {
+  const tapOnHandler = async (
+    device: BootedDevice,
+    args: TapOnArgs,
+    progress?: ProgressCallback,
+  ) => {
     RecompositionTracker.getInstance().recordInteraction();
     const tapOnTextCommand = new TapOnElement(device);
-    const result = await tapOnTextCommand.execute({
-      container: args.container,
-      text: args.selector.text,
-      textAny: args.selector.textAny,
-      elementId: args.selector.elementId,
-      testTag: args.selector.testTag,
-      sibling: args.sibling,
-      selectionStrategy: args.selectionStrategy,
-      index: args.index,
-      action: args.action,
-      duration: args.duration,
-      searchUntil: args.searchUntil,
-      preTapStability: args.preTapStability,
-      retryIfNoChange: args.retryIfNoChange,
-      ensureTap: args.ensureTap,
-    }, progress);
+    const result = await tapOnTextCommand.execute(
+      {
+        container: args.container,
+        text: args.selector.text,
+        textAny: args.selector.textAny,
+        elementId: args.selector.elementId,
+        testTag: args.selector.testTag,
+        sibling: args.sibling,
+        selectionStrategy: args.selectionStrategy,
+        index: args.index,
+        action: args.action,
+        duration: args.duration,
+        searchUntil: args.searchUntil,
+        preTapStability: args.preTapStability,
+        retryIfNoChange: args.retryIfNoChange,
+        ensureTap: args.ensureTap,
+      },
+      progress,
+    );
 
     const searchStats = result.searchUntil;
     const freshness = result.observation?.freshness;
-    const hasFreshnessTimestamp = typeof freshness?.requestedAfter === "number"
-      && typeof freshness?.actualTimestamp === "number";
-    const hasConfirmedFreshObservation = hasFreshnessTimestamp
-      && freshness.actualTimestamp >= freshness.requestedAfter;
-    const shouldIncludeSearchSummary = Boolean(searchStats)
-      && (
-        searchStats.requestCount > 0
-        || searchStats.changeCount > 0
-        || (Boolean(args.searchUntil) && hasConfirmedFreshObservation)
-      );
-    const searchSummary = shouldIncludeSearchSummary && searchStats
-      ? `${searchStats.changeCount} view hierarchy changes over ${searchStats.requestCount} requests within ${searchStats.durationMs}ms`
-      : undefined;
+    const hasFreshnessTimestamp =
+      typeof freshness?.requestedAfter === "number" &&
+      typeof freshness?.actualTimestamp === "number";
+    const hasConfirmedFreshObservation =
+      hasFreshnessTimestamp && freshness.actualTimestamp >= freshness.requestedAfter;
+    const shouldIncludeSearchSummary =
+      Boolean(searchStats) &&
+      (searchStats.requestCount > 0 ||
+        searchStats.changeCount > 0 ||
+        (Boolean(args.searchUntil) && hasConfirmedFreshObservation));
+    const searchSummary =
+      shouldIncludeSearchSummary && searchStats
+        ? `${searchStats.changeCount} view hierarchy changes over ${searchStats.requestCount} requests within ${searchStats.durationMs}ms`
+        : undefined;
 
     return createStructuredToolResponse({
       message: searchSummary ? `Tapped on element (${searchSummary})` : "Tapped on element",
       observation: result.observation,
-      ...result
+      ...result,
     });
   };
 
   // TapAny handler
-  const tapAnyHandler = async (device: BootedDevice, args: TapAnyArgs, progress?: ProgressCallback) => {
+  const tapAnyHandler = async (
+    device: BootedDevice,
+    args: TapAnyArgs,
+    progress?: ProgressCallback,
+  ) => {
     RecompositionTracker.getInstance().recordInteraction();
     const tapAnyCommand = new TapAnyElement(device);
-    const result = await tapAnyCommand.execute({
-      container: args.container,
-      selectionStrategy: args.selectionStrategy,
-      scrollableContainer: args.scrollableContainer,
-      action: args.action,
-      duration: args.duration,
-      searchUntil: args.searchUntil,
-    }, progress);
+    const result = await tapAnyCommand.execute(
+      {
+        container: args.container,
+        selectionStrategy: args.selectionStrategy,
+        scrollableContainer: args.scrollableContainer,
+        action: args.action,
+        duration: args.duration,
+        searchUntil: args.searchUntil,
+      },
+      progress,
+    );
 
     const searchStats = result.searchUntil;
-    const shouldIncludeSearchSummary = Boolean(searchStats) && (searchStats!.requestCount > 0 || searchStats!.changeCount > 0);
-    const searchSummary = shouldIncludeSearchSummary && searchStats
-      ? `${searchStats.changeCount} view hierarchy changes over ${searchStats.requestCount} requests within ${searchStats.durationMs}ms`
-      : undefined;
+    const shouldIncludeSearchSummary =
+      Boolean(searchStats) && (searchStats!.requestCount > 0 || searchStats!.changeCount > 0);
+    const searchSummary =
+      shouldIncludeSearchSummary && searchStats
+        ? `${searchStats.changeCount} view hierarchy changes over ${searchStats.requestCount} requests within ${searchStats.durationMs}ms`
+        : undefined;
 
     return createStructuredToolResponse({
-      message: searchSummary ? `Tapped clickable element (${searchSummary})` : "Tapped clickable element",
+      message: searchSummary
+        ? `Tapped clickable element (${searchSummary})`
+        : "Tapped clickable element",
       observation: result.observation,
-      ...result
+      ...result,
     });
   };
 
   // Drag and drop handler
-  const dragAndDropHandler = async (device: BootedDevice, args: DragAndDropArgs, progress?: ProgressCallback) => {
+  const dragAndDropHandler = async (
+    device: BootedDevice,
+    args: DragAndDropArgs,
+    progress?: ProgressCallback,
+  ) => {
     RecompositionTracker.getInstance().recordInteraction();
     const dragAndDrop = new DragAndDrop(device);
-    const result = await dragAndDrop.execute({
-      source: args.source,
-      target: args.target,
-      pressDurationMs: args.pressDurationMs,
-      dragDurationMs: args.dragDurationMs,
-      holdDurationMs: args.holdDurationMs
-    }, progress);
+    const result = await dragAndDrop.execute(
+      {
+        source: args.source,
+        target: args.target,
+        pressDurationMs: args.pressDurationMs,
+        dragDurationMs: args.dragDurationMs,
+        holdDurationMs: args.holdDurationMs,
+      },
+      progress,
+    );
 
     return createJSONToolResponse({
       message: "Dragged element to target",
       observation: result.observation,
-      ...result
+      ...result,
     });
   };
 
   // Clear text handler
-  const clearTextHandler = async (device: BootedDevice, args: ClearTextArgs, progress?: ProgressCallback) => {
+  const clearTextHandler = async (
+    device: BootedDevice,
+    args: ClearTextArgs,
+    progress?: ProgressCallback,
+  ) => {
     try {
       const clearText = new ClearText(device);
       const result = await clearText.execute(progress);
@@ -591,7 +785,7 @@ export function registerInteractionTools() {
       return createJSONToolResponse({
         message: "Cleared text from input field",
         observation: result.observation,
-        ...result
+        ...result,
       });
     } catch (error) {
       throw new ActionableError(`Failed to clear text: ${error}`);
@@ -599,7 +793,11 @@ export function registerInteractionTools() {
   };
 
   // Select all text handler
-  const selectAllTextHandler = async (device: BootedDevice, args: SelectAllTextArgs, progress?: ProgressCallback) => {
+  const selectAllTextHandler = async (
+    device: BootedDevice,
+    args: SelectAllTextArgs,
+    progress?: ProgressCallback,
+  ) => {
     try {
       const selectAllText = new SelectAllText(device);
       const result = await selectAllText.execute(progress);
@@ -607,7 +805,7 @@ export function registerInteractionTools() {
       return createJSONToolResponse({
         message: "Selected all text in focused input field",
         observation: result.observation,
-        ...result
+        ...result,
       });
     } catch (error) {
       throw new ActionableError(`Failed to select all text: ${error}`);
@@ -615,7 +813,11 @@ export function registerInteractionTools() {
   };
 
   // Press button handler
-  const pressButtonHandler = async (device: BootedDevice, args: PressButtonArgs, progress?: ProgressCallback) => {
+  const pressButtonHandler = async (
+    device: BootedDevice,
+    args: PressButtonArgs,
+    progress?: ProgressCallback,
+  ) => {
     RecompositionTracker.getInstance().recordInteraction();
     try {
       const pressButton = new PressButton(device);
@@ -624,7 +826,7 @@ export function registerInteractionTools() {
       return createJSONToolResponse({
         message: `Pressed button ${args.button}`,
         observation: result.observation,
-        ...result
+        ...result,
       });
     } catch (error) {
       throw new ActionableError(`Failed to press button: ${error}`);
@@ -632,7 +834,11 @@ export function registerInteractionTools() {
   };
 
   // System tray handler
-  const systemTrayHandler = async (device: BootedDevice, args: SystemTrayArgs, progress?: ProgressCallback) => {
+  const systemTrayHandler = async (
+    device: BootedDevice,
+    args: SystemTrayArgs,
+    progress?: ProgressCallback,
+  ) => {
     try {
       const awaitTimeoutMs = resolveSystemTrayAwaitTimeout(args.awaitTimeout);
 
@@ -644,7 +850,7 @@ export function registerInteractionTools() {
             : "Opened system tray by swiping down from the status bar",
           observation: result.observation,
           success: true,
-          skipped: result.skipped
+          skipped: result.skipped,
         });
       }
 
@@ -656,7 +862,7 @@ export function registerInteractionTools() {
             : "Closed system tray (collapsed notification shade)",
           observation: result.observation,
           success: true,
-          skipped: result.skipped
+          skipped: result.skipped,
         });
       }
 
@@ -681,7 +887,7 @@ export function registerInteractionTools() {
           notification,
           appMatchTexts,
           awaitTimeoutMs,
-          progress
+          progress,
         );
 
         if (!match) {
@@ -692,7 +898,7 @@ export function registerInteractionTools() {
           message: "Found notification in system tray",
           match: match.match.matches,
           observation,
-          success: true
+          success: true,
         });
       }
 
@@ -702,7 +908,7 @@ export function registerInteractionTools() {
           notification,
           appMatchTexts,
           awaitTimeoutMs,
-          progress
+          progress,
         );
 
         if (!match) {
@@ -719,21 +925,23 @@ export function registerInteractionTools() {
             notification,
             appMatchTexts,
             remainingMs,
-            progress
+            progress,
           );
           if (reMatch.match) {
             match = reMatch.match;
           } else {
             throw new ActionableError(
               "Expanded collapsed notification group but could not re-match the notification. " +
-              "The group may have changed after expansion."
+                "The group may have changed after expansion.",
             );
           }
         }
 
         const tapMatch = resolveNotificationTapElement(match, notification);
         if (!tapMatch) {
-          throw new ActionableError("No notification tap target was resolved within the matched notification.");
+          throw new ActionableError(
+            "No notification tap target was resolved within the matched notification.",
+          );
         }
 
         await tapElement(device, tapMatch.element);
@@ -749,10 +957,10 @@ export function registerInteractionTools() {
           tapTarget: {
             text: tapMatch.text,
             matchType: tapMatch.matchType,
-            bounds: tapMatch.element.bounds
+            bounds: tapMatch.element.bounds,
           },
           observation: nextObservation,
-          success: true
+          success: true,
         });
       }
 
@@ -762,7 +970,7 @@ export function registerInteractionTools() {
           notification,
           appMatchTexts,
           awaitTimeoutMs,
-          progress
+          progress,
         );
 
         if (!match) {
@@ -771,7 +979,9 @@ export function registerInteractionTools() {
 
         const swipeTarget = resolveNotificationSwipeElement(match, notification, appMatchTexts);
         if (!swipeTarget) {
-          throw new ActionableError("No swipeable notification element was resolved within the matched notification.");
+          throw new ActionableError(
+            "No swipeable notification element was resolved within the matched notification.",
+          );
         }
 
         await swipeElement(device, swipeTarget);
@@ -783,7 +993,7 @@ export function registerInteractionTools() {
           message: "Dismissed notification",
           match: match.match.matches,
           observation: nextObservation,
-          success: true
+          success: true,
         });
       }
 
@@ -797,7 +1007,7 @@ export function registerInteractionTools() {
             notification,
             appMatchTexts,
             500,
-            progress
+            progress,
           );
 
           if (!match) {
@@ -819,12 +1029,13 @@ export function registerInteractionTools() {
         const nextObservation = await observeScreen.execute();
 
         return createJSONToolResponse({
-          message: dismissed > 0
-            ? `Cleared ${dismissed} notification(s) for ${notification.appId}`
-            : `No notifications found for ${notification.appId}`,
+          message:
+            dismissed > 0
+              ? `Cleared ${dismissed} notification(s) for ${notification.appId}`
+              : `No notifications found for ${notification.appId}`,
           dismissedCount: dismissed,
           observation: nextObservation,
-          success: true
+          success: true,
         });
       }
 
@@ -838,63 +1049,81 @@ export function registerInteractionTools() {
   };
 
   // Swipe on handler
-  const swipeOnHandler = async (device: BootedDevice, args: SwipeOnArgs, progress?: ProgressCallback): Promise<StructuredToolResponse<SwipeOnToolPayload>> => {
+  const swipeOnHandler = async (
+    device: BootedDevice,
+    args: SwipeOnArgs,
+    progress?: ProgressCallback,
+  ): Promise<StructuredToolResponse<SwipeOnToolPayload>> => {
     RecompositionTracker.getInstance().recordInteraction();
     const swipeOn = new SwipeOn(device);
-    const resolvedDirection = resolveSwipeDirection({ direction: args.direction, gestureType: args.gestureType });
-    const result = await swipeOn.execute({
-      container: args.container,
-      autoTarget: args.autoTarget ?? true,
-      direction: resolvedDirection.direction,
-      lookFor: args.lookFor,
-      speed: args.speed,
-      includeSystemInsets: args.includeSystemInsets ?? false,
-      boomerang: args.boomerang,
-      apexPause: args.apexPause,
-      returnSpeed: args.returnSpeed
-    }, progress);
+    const resolvedDirection = resolveSwipeDirection({
+      direction: args.direction,
+      gestureType: args.gestureType,
+    });
+    const result = await swipeOn.execute(
+      {
+        container: args.container,
+        autoTarget: args.autoTarget ?? true,
+        direction: resolvedDirection.direction,
+        lookFor: args.lookFor,
+        speed: args.speed,
+        includeSystemInsets: args.includeSystemInsets ?? false,
+        boomerang: args.boomerang,
+        apexPause: args.apexPause,
+        returnSpeed: args.returnSpeed,
+      },
+      progress,
+    );
 
     return createStructuredToolResponse({
       message: formatSwipeOnMessage(result, args.direction),
       observation: result.observation,
-      ...result
+      ...result,
     });
   };
 
   // Pinch on handler
-  const pinchOnHandler = async (device: BootedDevice, args: PinchOnArgs, progress?: ProgressCallback) => {
+  const pinchOnHandler = async (
+    device: BootedDevice,
+    args: PinchOnArgs,
+    progress?: ProgressCallback,
+  ) => {
     RecompositionTracker.getInstance().recordInteraction();
     const pinchOn = new PinchOn(device);
-    const result = await pinchOn.execute({
-      direction: args.direction,
-      distanceStart: args.distanceStart,
-      distanceEnd: args.distanceEnd,
-      scale: args.scale,
-      duration: args.duration,
-      rotationDegrees: args.rotationDegrees,
-      includeSystemInsets: args.includeSystemInsets,
-      container: args.container,
-      autoTarget: args.autoTarget
-    }, progress);
+    const result = await pinchOn.execute(
+      {
+        direction: args.direction,
+        distanceStart: args.distanceStart,
+        distanceEnd: args.distanceEnd,
+        scale: args.scale,
+        duration: args.duration,
+        rotationDegrees: args.rotationDegrees,
+        includeSystemInsets: args.includeSystemInsets,
+        container: args.container,
+        autoTarget: args.autoTarget,
+      },
+      progress,
+    );
 
     return createJSONToolResponse({
       message: `Pinched ${args.direction}`,
       observation: result.observation,
-      ...result
+      ...result,
     });
   };
 
   // Input text handler
   const inputTextHandler = async (device: BootedDevice, args: InputTextArgs) => {
     RecompositionTracker.getInstance().recordInteraction();
-    const dismissKeyboard = args.dismissKeyboard ?? serverConfig.isDismissKeyboardAfterInputEnabled();
+    const dismissKeyboard =
+      args.dismissKeyboard ?? serverConfig.isDismissKeyboardAfterInputEnabled();
     const mode = device.platform === "android" ? args.mode : undefined;
     const inputText = new InputText(device);
     const result = await inputText.execute(args.text, args.imeAction, dismissKeyboard, mode);
     return createJSONToolResponse({
       message: `Input text`,
       observation: result.observation,
-      ...result
+      ...result,
     });
   };
 
@@ -903,17 +1132,24 @@ export function registerInteractionTools() {
     const iosUnlocker = device.platform === "ios" ? new IosLockScreenUnlocker(device) : undefined;
     const wakeAndUnlock = new WakeAndUnlock(device, undefined, {
       credentialStore: new DeviceLockStore(),
-      iosUnlocker
+      iosUnlocker,
     });
     const result = await wakeAndUnlock.execute(args.pin);
     const message = result.success
-      ? (result.wasLocked ? "Device unlocked" : "Device awake")
+      ? result.wasLocked
+        ? "Device unlocked"
+        : "Device awake"
       : `Failed to unlock device: ${result.error ?? "unknown error"}`;
     return createJSONToolResponse({ message, ...result });
   };
 
   // Open link handler
-  const openLinkHandler = async (device: BootedDevice, args: OpenLinkArgs, _progress?: ProgressCallback, signal?: AbortSignal) => {
+  const openLinkHandler = async (
+    device: BootedDevice,
+    args: OpenLinkArgs,
+    _progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ) => {
     const openUrl = new OpenURL(device);
     const result = await openUrl.execute(args.url);
 
@@ -922,33 +1158,40 @@ export function registerInteractionTools() {
     // await metadata so callers no longer need a separate observe round-trip.
     const waitOutcome = args.waitFor
       ? await waitForObservation(
-        new RealObserveScreen(device),
-        { ...args.waitFor, settled: args.settled },
-        signal,
-        false,
-        defaultTimer,
-        device.platform
-      )
+          new RealObserveScreen(device),
+          { ...args.waitFor, settled: args.settled },
+          signal,
+          false,
+          defaultTimer,
+          device.platform,
+        )
       : null;
 
     return createJSONToolResponse(buildOpenLinkPayload(args.url, result, waitOutcome));
   };
 
   // Shake handler
-  const shakeHandler = async (device: BootedDevice, args: ShakeArgs, progress?: ProgressCallback) => {
+  const shakeHandler = async (
+    device: BootedDevice,
+    args: ShakeArgs,
+    progress?: ProgressCallback,
+  ) => {
     try {
       const shake = new Shake(device);
-      const result = await shake.execute({
-        duration: args.duration ?? 1000,
-        intensity: args.intensity ?? 100
-      }, progress);
+      const result = await shake.execute(
+        {
+          duration: args.duration ?? 1000,
+          intensity: args.intensity ?? 100,
+        },
+        progress,
+      );
 
       return createJSONToolResponse({
         message: result.success
           ? `Shook device for ${args.duration ?? 1000}ms with intensity ${args.intensity ?? 100}`
           : `Failed to shake device: ${result.error ?? "unknown error"}`,
         observation: result.observation,
-        ...result
+        ...result,
       });
     } catch (error) {
       throw new ActionableError(`Failed to shake device: ${error}`);
@@ -956,7 +1199,11 @@ export function registerInteractionTools() {
   };
 
   // IME action handler
-  const imeActionHandler = async (device: BootedDevice, args: ImeActionArgs, progress?: ProgressCallback) => {
+  const imeActionHandler = async (
+    device: BootedDevice,
+    args: ImeActionArgs,
+    progress?: ProgressCallback,
+  ) => {
     try {
       const imeAction = new ImeAction(device);
       const result = await imeAction.execute(args.action, progress);
@@ -964,7 +1211,7 @@ export function registerInteractionTools() {
       return createJSONToolResponse({
         message: `Executed IME action "${args.action}"`,
         observation: result.observation,
-        ...result
+        ...result,
       });
     } catch (error) {
       throw new ActionableError(`Failed to execute IME action: ${error}`);
@@ -984,7 +1231,11 @@ export function registerInteractionTools() {
   };
 
   // Recent Apps handler
-  const recentAppsHandler = async (device: BootedDevice, args: RecentAppsArgs, progress?: ProgressCallback) => {
+  const recentAppsHandler = async (
+    device: BootedDevice,
+    args: RecentAppsArgs,
+    progress?: ProgressCallback,
+  ) => {
     try {
       const recentApps = new RecentApps(device);
       const result = await recentApps.execute(progress);
@@ -992,7 +1243,7 @@ export function registerInteractionTools() {
       return createJSONToolResponse({
         message: formatRecentAppsMessage(result),
         observation: result.observation,
-        ...result
+        ...result,
       });
     } catch (error) {
       throw new ActionableError(`Failed to open recent apps: ${error}`);
@@ -1000,7 +1251,11 @@ export function registerInteractionTools() {
   };
 
   // Home Screen handler
-  const homeScreenHandler = async (device: BootedDevice, args: any, progress?: ProgressCallback) => {
+  const homeScreenHandler = async (
+    device: BootedDevice,
+    args: any,
+    progress?: ProgressCallback,
+  ) => {
     try {
       const homeScreen = new HomeScreen(device);
       const result = await homeScreen.execute(progress);
@@ -1008,7 +1263,7 @@ export function registerInteractionTools() {
       return createJSONToolResponse({
         message: "Pressed home button to return to the home screen",
         observation: result.observation,
-        ...result
+        ...result,
       });
     } catch (error) {
       throw new ActionableError(`Failed to go to home screen: ${error}`);
@@ -1016,7 +1271,11 @@ export function registerInteractionTools() {
   };
 
   // Rotate handler
-  const rotateHandler = async (device: BootedDevice, args: RotateArgs, progress?: ProgressCallback) => {
+  const rotateHandler = async (
+    device: BootedDevice,
+    args: RotateArgs,
+    progress?: ProgressCallback,
+  ) => {
     try {
       const rotate = new Rotate(device);
       const result = await rotate.execute(args.orientation, progress);
@@ -1024,7 +1283,7 @@ export function registerInteractionTools() {
       return createJSONToolResponse({
         message: `Rotated device to ${args.orientation} orientation`,
         observation: result.observation,
-        ...result
+        ...result,
       });
     } catch (error) {
       throw new ActionableError(`Failed to rotate device: ${error}`);
@@ -1045,7 +1304,7 @@ export function registerInteractionTools() {
 
       return createJSONToolResponse({
         message,
-        ...result
+        ...result,
       });
     } catch (error) {
       throw new ActionableError(`Failed to execute clipboard ${args.action}: ${error}`);
@@ -1053,43 +1312,154 @@ export function registerInteractionTools() {
   };
 
   // Register with the tool registry
-  ToolRegistry.registerDeviceAware("clearText", "Clear text from focused input", clearTextSchema, clearTextHandler, { supportsProgress: true });
+  ToolRegistry.registerDeviceAware(
+    "clearText",
+    "Clear text from focused input",
+    clearTextSchema,
+    clearTextHandler,
+    { defaultEnabled: true, supportsProgress: true },
+  );
 
-  ToolRegistry.registerDeviceAware("selectAllText", "Select all text in focused input", selectAllTextSchema, selectAllTextHandler, { supportsProgress: true });
+  ToolRegistry.registerDeviceAware(
+    "selectAllText",
+    "Select all text in focused input",
+    selectAllTextSchema,
+    selectAllTextHandler,
+    { defaultEnabled: false, supportsProgress: true },
+  );
 
-  ToolRegistry.registerDeviceAware("pressButton", "Press device or navigation button", pressButtonSchema, pressButtonHandler, { supportsProgress: true });
+  ToolRegistry.registerDeviceAware(
+    "pressButton",
+    "Press device or navigation button",
+    pressButtonSchema,
+    pressButtonHandler,
+    { defaultEnabled: true, supportsProgress: true },
+  );
 
-  ToolRegistry.registerDeviceAware("systemTray", "System tray actions for notifications (open/close/find/tap/dismiss/clearAll)", systemTraySchema, systemTrayHandler, { supportsProgress: true });
+  ToolRegistry.registerDeviceAware(
+    "systemTray",
+    "System tray actions for notifications (open/close/find/tap/dismiss/clearAll)",
+    systemTraySchema,
+    systemTrayHandler,
+    { defaultEnabled: false, supportsProgress: true },
+  );
 
-  ToolRegistry.registerDeviceAware("inputText", "Input text. The optional mode field is Android-only and ignored on iOS.", inputTextSchema, inputTextHandler);
+  ToolRegistry.registerDeviceAware(
+    "inputText",
+    "Input text. The optional mode field is Android-only and ignored on iOS.",
+    inputTextSchema,
+    inputTextHandler,
+    { defaultEnabled: true },
+  );
 
-  ToolRegistry.registerDeviceAware("wakeAndUnlock", "Wake a device and unlock its keyguard. Android: swipe lock or secure PIN via `pin`; iOS: wake + swipe-dismiss (pin ignored).", wakeAndUnlockSchema, wakeAndUnlockHandler);
+  ToolRegistry.registerDeviceAware(
+    "wakeAndUnlock",
+    "Wake a device and unlock its keyguard. Android: swipe lock or secure PIN via `pin`; iOS: wake + swipe-dismiss (pin ignored).",
+    wakeAndUnlockSchema,
+    wakeAndUnlockHandler,
+    { defaultEnabled: true },
+  );
 
-  ToolRegistry.registerDeviceAware("openLink", "Open URL in browser", openLinkSchema, openLinkHandler);
+  ToolRegistry.registerDeviceAware(
+    "openLink",
+    "Open URL in browser",
+    openLinkSchema,
+    openLinkHandler,
+    { defaultEnabled: false },
+  );
 
-  ToolRegistry.registerDeviceAware("tapOn", "Tap an element by text/content-desc, resource-id, or Android test tag; use sibling for adjacent controls.", tapOnSchema, tapOnHandler, { supportsProgress: true, outputSchema: tapOnResultSchema });
+  ToolRegistry.registerDeviceAware(
+    "tapOn",
+    "Tap an element by text/content-desc, resource-id, or Android test tag; use sibling for adjacent controls.",
+    tapOnSchema,
+    tapOnHandler,
+    { defaultEnabled: true, supportsProgress: true, outputSchema: tapOnResultSchema },
+  );
 
-  ToolRegistry.registerDeviceAware("tapAny", "Tap any clickable element; scope with container or scrollableContainer.", tapAnySchema, tapAnyHandler, { supportsProgress: true });
+  ToolRegistry.registerDeviceAware(
+    "tapAny",
+    "Tap any clickable element; scope with container or scrollableContainer.",
+    tapAnySchema,
+    tapAnyHandler,
+    { defaultEnabled: true, supportsProgress: true },
+  );
 
-  ToolRegistry.registerDeviceAware("dragAndDrop", "Drag and drop element", dragAndDropSchema, dragAndDropHandler, { supportsProgress: true });
+  ToolRegistry.registerDeviceAware(
+    "dragAndDrop",
+    "Drag and drop element",
+    dragAndDropSchema,
+    dragAndDropHandler,
+    { defaultEnabled: false, supportsProgress: true },
+  );
 
-  ToolRegistry.registerDeviceAware("swipeOn", "Swipe/scroll on screen or elements", swipeOnSchema, swipeOnHandler, { supportsProgress: true });
+  ToolRegistry.registerDeviceAware(
+    "swipeOn",
+    "Swipe/scroll on screen or elements",
+    swipeOnSchema,
+    swipeOnHandler,
+    { defaultEnabled: true, supportsProgress: true },
+  );
 
-  ToolRegistry.registerDeviceAware("pinchOn", "Pinch to zoom", pinchOnSchema, pinchOnHandler, { supportsProgress: true });
+  ToolRegistry.registerDeviceAware("pinchOn", "Pinch to zoom", pinchOnSchema, pinchOnHandler, {
+    defaultEnabled: false,
+    supportsProgress: true,
+  });
 
-  ToolRegistry.registerDeviceAware("shake", "Shake device; iOS Simulator only.", shakeSchema, shakeHandler, { supportsProgress: true });
+  ToolRegistry.registerDeviceAware(
+    "shake",
+    "Shake device; iOS Simulator only.",
+    shakeSchema,
+    shakeHandler,
+    { defaultEnabled: false, supportsProgress: true },
+  );
 
-  ToolRegistry.registerDeviceAware("imeAction", "Perform IME action", imeActionSchema, imeActionHandler, { supportsProgress: true });
+  ToolRegistry.registerDeviceAware(
+    "imeAction",
+    "Perform IME action",
+    imeActionSchema,
+    imeActionHandler,
+    { defaultEnabled: false, supportsProgress: true },
+  );
 
-  ToolRegistry.registerDeviceAware("keyboard", "Open, close, or detect the on-screen keyboard", keyboardSchema, keyboardHandler);
+  ToolRegistry.registerDeviceAware(
+    "keyboard",
+    "Open, close, or detect the on-screen keyboard",
+    keyboardSchema,
+    keyboardHandler,
+    { defaultEnabled: true },
+  );
 
-  ToolRegistry.registerDeviceAware("recentApps", "Open recent apps", recentAppsSchema, recentAppsHandler, { supportsProgress: true });
+  ToolRegistry.registerDeviceAware(
+    "recentApps",
+    "Open recent apps",
+    recentAppsSchema,
+    recentAppsHandler,
+    { defaultEnabled: true, supportsProgress: true },
+  );
 
-  ToolRegistry.registerDeviceAware("homeScreen", "Go to home screen", homeScreenSchema, homeScreenHandler, { supportsProgress: true });
+  ToolRegistry.registerDeviceAware(
+    "homeScreen",
+    "Go to home screen",
+    homeScreenSchema,
+    homeScreenHandler,
+    { defaultEnabled: true, supportsProgress: true },
+  );
 
   // Register the new rotate tool
-  ToolRegistry.registerDeviceAware("rotate", "Rotate device orientation", rotateSchema, rotateHandler, { supportsProgress: true });
+  ToolRegistry.registerDeviceAware(
+    "rotate",
+    "Rotate device orientation",
+    rotateSchema,
+    rotateHandler,
+    { defaultEnabled: false, supportsProgress: true },
+  );
 
   // Register the clipboard tool
-  ToolRegistry.registerDeviceAware("clipboard", "Clipboard operations (copy/paste/clear/get)", clipboardSchema, clipboardHandler);
+  ToolRegistry.registerDeviceAware(
+    "clipboard",
+    "Clipboard operations (copy/paste/clear/get)",
+    clipboardSchema,
+    clipboardHandler,
+    { defaultEnabled: false },
+  );
 }

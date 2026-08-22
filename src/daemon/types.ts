@@ -204,6 +204,10 @@ export interface DaemonOptions {
   networkMockable?: boolean;
   /** Expose tools that require the target app to embed the AutoMobile SDK */
   embeddedSdk?: boolean;
+  /** Exact tool names enabled over their built-in defaults at daemon startup. */
+  enabledTools?: string[];
+  /** Exact tool names disabled under their built-in defaults at daemon startup. */
+  disabledTools?: string[];
   /** Dismiss keyboard after text input (Android only) */
   dismissKeyboardAfterInput?: boolean;
   /** Markers that auto-promote inputText from `a11y` to `eventAll` (Android only) */

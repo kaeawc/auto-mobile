@@ -128,16 +128,16 @@ class VideoRecordingClientTest {
     val recordings = McpVideoRecordingActions { client }.startRecording("emulator-5554")
 
     assertEquals(1, recordings.size)
-    assertEquals(listOf("setToolCapability", "videoRecording"), client.toolCalls.map { it.name })
+    assertEquals(listOf("setToolEnabled", "videoRecording"), client.toolCalls.map { it.name })
     assertEquals(
-      "screen-artifacts",
-      client.toolCalls.first().arguments["capability"]?.jsonPrimitive?.content,
+      "videoRecording",
+      client.toolCalls.first().arguments["toolName"]?.jsonPrimitive?.content,
     )
     assertEquals("rec-1", recordings.single().recordingId)
   }
 
   @Test
-  fun `video actions continue when an older daemon lacks capability controls`() {
+  fun `video actions fail when exact-tool selection is unavailable`() {
     val delegate = FakeAutoMobileClient()
     delegate.callToolResult =
       toolResponse(
@@ -149,21 +149,24 @@ class VideoRecordingClientTest {
           name: String,
           arguments: kotlinx.serialization.json.JsonObject,
         ): JsonElement {
-          if (name == "setToolCapability") {
-            throw McpConnectionException("Unknown tool: setToolCapability")
+          if (name == "setToolEnabled") {
+            throw McpConnectionException("Unknown tool: setToolEnabled")
           }
           return delegate.callTool(name, arguments)
         }
 
-        override fun enableToolCapability(capability: String) {
-          super<AutoMobileClient>.enableToolCapability(capability)
+        override fun setToolEnabled(
+          toolName: String,
+          enabled: Boolean,
+        ) {
+          super<AutoMobileClient>.setToolEnabled(toolName, enabled)
         }
       }
 
-    val recordings = McpVideoRecordingActions { client }.startRecording("emulator-5554")
-
-    assertEquals("rec-1", recordings.single().recordingId)
-    assertEquals(listOf("videoRecording"), delegate.toolCalls.map { it.name })
+    assertFailsWith<McpConnectionException> {
+      McpVideoRecordingActions { client }.startRecording("emulator-5554")
+    }
+    assertEquals(emptyList(), delegate.toolCalls)
   }
 
   @Test

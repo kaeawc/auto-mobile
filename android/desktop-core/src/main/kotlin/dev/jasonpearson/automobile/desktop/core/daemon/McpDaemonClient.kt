@@ -36,8 +36,8 @@ private const val OLD_DAEMON_CAPABILITIES_ERROR = "Unsupported daemon method: da
 private const val OLD_DAEMON_APPEND_MODE_ERROR = "input/typeText unsupported params: mode"
 private const val UNSUPPORTED_APPEND_MODE_ERROR =
   "The connected daemon does not support input/typeText mode:append. Restart or update the daemon before typing into the device."
-private const val SET_TOOL_CAPABILITY_TOOL_NAME = "setToolCapability"
-private const val DAEMON_CAPABILITY_PROFILE_PARAM = "__autoMobileCapabilityProfileUuid"
+private const val SET_TOOL_ENABLED_TOOL_NAME = "setToolEnabled"
+private const val DAEMON_TOOL_SELECTION_PROFILE_PARAM = "__autoMobileToolSelectionProfileUuid"
 
 class McpDaemonClient(
   private val socketPathValue: String = DaemonSocketPaths.socketPath(),
@@ -76,7 +76,7 @@ class McpDaemonClient(
 
   private val testRecordingClient = TestRecordingSocketClient()
   private var daemonCapabilities: CachedDaemonCapabilities? = null
-  private var capabilityProfileUuid: String? = null
+  private var toolSelectionProfileUuid: String? = null
 
   override fun ping() {
     val response = sendRequest("ide/ping")
@@ -102,9 +102,9 @@ class McpDaemonClient(
     val response =
       sendRequest(
         "tools/list",
-        capabilityProfileUuid?.let { profileUuid ->
+        toolSelectionProfileUuid?.let { profileUuid ->
           buildJsonObject {
-            put(DAEMON_CAPABILITY_PROFILE_PARAM, JsonPrimitive(profileUuid))
+            put(DAEMON_TOOL_SELECTION_PROFILE_PARAM, JsonPrimitive(profileUuid))
           }
         } ?: JsonObject(emptyMap()),
       )
@@ -734,7 +734,7 @@ class McpDaemonClient(
   override fun callTool(name: String, arguments: JsonObject): JsonElement {
     val sessionArguments =
       if (
-        sessionUuid != null && name != SET_TOOL_CAPABILITY_TOOL_NAME && "sessionUuid" !in arguments
+        sessionUuid != null && name != SET_TOOL_ENABLED_TOOL_NAME && "sessionUuid" !in arguments
       ) {
         buildJsonObject {
           arguments.forEach { (key, value) -> put(key, value) }
@@ -743,13 +743,13 @@ class McpDaemonClient(
       } else {
         arguments
       }
-    val profileUuid = capabilityProfileUuid
+    val profileUuid = toolSelectionProfileUuid
     val routedArguments =
-      if (name == SET_TOOL_CAPABILITY_TOOL_NAME || profileUuid == null) sessionArguments
+      if (name == SET_TOOL_ENABLED_TOOL_NAME || profileUuid == null) sessionArguments
       else
         buildJsonObject {
           sessionArguments.forEach { (key, value) -> put(key, value) }
-          put(DAEMON_CAPABILITY_PROFILE_PARAM, JsonPrimitive(profileUuid))
+          put(DAEMON_TOOL_SELECTION_PROFILE_PARAM, JsonPrimitive(profileUuid))
         }
     val response =
       sendRequest(
@@ -785,26 +785,24 @@ class McpDaemonClient(
     ensureSuccess(response)
   }
 
-  override fun enableToolCapability(capability: String) {
+  override fun setToolEnabled(
+    toolName: String,
+    enabled: Boolean,
+  ) {
     val response =
-      try {
-        callToolChecked(
-          SET_TOOL_CAPABILITY_TOOL_NAME,
-          buildJsonObject {
-            put("capability", JsonPrimitive(capability))
-            put("enabled", JsonPrimitive(true))
-            capabilityProfileUuid?.let {
-              put(DAEMON_CAPABILITY_PROFILE_PARAM, JsonPrimitive(it))
-            }
-          },
-        )
-      } catch (error: McpConnectionException) {
-        if (error.message?.contains("unknown tool", ignoreCase = true) != true) throw error
-        return
-      }
-    capabilityProfileUuid =
+      callToolChecked(
+        SET_TOOL_ENABLED_TOOL_NAME,
+        buildJsonObject {
+          put("toolName", JsonPrimitive(toolName))
+          put("enabled", JsonPrimitive(enabled))
+          toolSelectionProfileUuid?.let {
+            put(DAEMON_TOOL_SELECTION_PROFILE_PARAM, JsonPrimitive(it))
+          }
+        },
+      )
+    toolSelectionProfileUuid =
       (response as? JsonObject)?.get("sessionUuid")?.jsonPrimitive?.contentOrNull
-        ?: throw DaemonUnavailableException("Capability control response missing profile UUID")
+        ?: throw DaemonUnavailableException("Tool-selection response missing profile UUID")
   }
 
   private fun sendInputRequest(method: String, params: JsonObject): InputActionResult {

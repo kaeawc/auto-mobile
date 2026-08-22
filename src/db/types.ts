@@ -281,7 +281,13 @@ interface CrashesTable {
   signal: string | null; // For native crashes
   fault_address: string | null; // For native crashes
   tombstone_path: string | null;
-  detection_source: "sdk_websocket" | "logcat" | "tombstone" | "dropbox" | "accessibility" | "process_monitor";
+  detection_source:
+    | "sdk_websocket"
+    | "logcat"
+    | "tombstone"
+    | "dropbox"
+    | "accessibility"
+    | "process_monitor";
   raw_log: string | null;
   navigation_node_id: number | null;
   test_execution_id: number | null;
@@ -554,10 +560,10 @@ export interface FeatureFlagsTable {
   updated_at: Generated<string>;
 }
 
-/** Persistent per-device-session MCP tool capability overrides. */
-export interface SessionToolCapabilitiesTable {
+/** Persistent per-device-session overrides keyed by exact MCP tool name. */
+export interface SessionToolOverridesTable {
   session_uuid: string;
-  capability: string;
+  tool_name: string;
   enabled: number;
   updated_at: Generated<string>;
 }
@@ -744,7 +750,7 @@ export interface Database {
   test_execution_steps: TestExecutionStepsTable;
   test_execution_screens: TestExecutionScreensTable;
   feature_flags: FeatureFlagsTable;
-  session_tool_capabilities: SessionToolCapabilitiesTable;
+  session_tool_overrides: SessionToolOverridesTable;
   device_snapshots: DeviceSnapshotsTable;
   device_snapshot_configs: DeviceSnapshotConfigsTable;
   video_recordings: VideoRecordingsTable;

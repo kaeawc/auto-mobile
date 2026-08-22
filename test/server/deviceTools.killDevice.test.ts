@@ -18,7 +18,7 @@ import {
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
-import { runWithToolCapabilityContext } from "../../src/features/toolCapabilities/toolCapabilityContext";
+import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { IOSCtrlProxyManager } from "../../src/utils/IOSCtrlProxyManager";
 import { DeviceSessionRepository } from "../../src/db/DeviceSessionRepository";
 import { executionTracker } from "../../src/server/executionTracker";
@@ -200,7 +200,8 @@ class TransientAbsenceThenSameIncarnationDeviceManager extends DelayedSuccessful
       return await super.getBootedDevicesDetailed(platform);
     }
     this.shutdownDiscoveryCalls++;
-    const isTransientAbsence = this.shutdownDiscoveryCalls === 2 || this.shutdownDiscoveryCalls === 5;
+    const isTransientAbsence =
+      this.shutdownDiscoveryCalls === 2 || this.shutdownDiscoveryCalls === 5;
     return {
       devices: isTransientAbsence ? [] : [this.device],
       succeededPlatforms: new Set([this.device.platform]),
@@ -230,9 +231,13 @@ class AbortAwareHungDiscoveryKillDeviceManager extends DelayedSuccessfulKillDevi
 
   override getBootedDevicesDetailed(): Promise<BootedDeviceDiscovery> {
     const signal = getAbortSignal();
-    signal?.addEventListener("abort", () => {
-      this.discoveryWasAborted = true;
-    }, { once: true });
+    signal?.addEventListener(
+      "abort",
+      () => {
+        this.discoveryWasAborted = true;
+      },
+      { once: true },
+    );
     return new Promise<BootedDeviceDiscovery>(() => {});
   }
 }
@@ -243,9 +248,13 @@ class AbortAwareHungShutdownCommandDeviceManager extends FailingKillDeviceManage
 
   override killDevice(_: BootedDevice, options?: DeviceShutdownOptions): Promise<void> {
     this.commandOptions = options;
-    options?.signal?.addEventListener("abort", () => {
-      this.commandWasAborted = true;
-    }, { once: true });
+    options?.signal?.addEventListener(
+      "abort",
+      () => {
+        this.commandWasAborted = true;
+      },
+      { once: true },
+    );
     return new Promise<void>(() => {});
   }
 }
@@ -303,13 +312,13 @@ class ReplacingDeviceSessionRepository extends FakeDeviceSessionRepository {
 class DeferredReleaseDeviceSessionRepository extends FakeDeviceSessionRepository {
   private releaseMarkReleased: (() => void) | undefined;
   private resolveMarkReleasedStarted: (() => void) | undefined;
-  private readonly markReleasedStarted = new Promise<void>(resolve => {
+  private readonly markReleasedStarted = new Promise<void>((resolve) => {
     this.resolveMarkReleasedStarted = resolve;
   });
 
   override async markReleased(): Promise<void> {
     this.resolveMarkReleasedStarted?.();
-    await new Promise<void>(resolve => {
+    await new Promise<void>((resolve) => {
       this.releaseMarkReleased = resolve;
     });
   }
@@ -388,7 +397,7 @@ describe("killDevice handler", () => {
       new FakeInstalledAppsRepository(),
       manager,
       new DefaultRetryExecutor(timer),
-      deviceSessionRepository
+      deviceSessionRepository,
     );
     DaemonState.getInstance().initialize(sessionManager, pool);
     await pool.assignMultipleDevices(["session-1"], 1_000, "android");
@@ -406,7 +415,7 @@ describe("killDevice handler", () => {
 
     Object.assign(manager.childProcess, { exitCode: 1 });
     manager.childProcess.emit("exit", 1, null);
-    await new Promise(resolve => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
 
     expect(manager.getCallCount("startDevice")).toBe(2);
   });
@@ -442,7 +451,7 @@ describe("killDevice handler", () => {
       new FakeInstalledAppsRepository(),
       successfulManager,
       new DefaultRetryExecutor(timer),
-      deviceSessionRepository
+      deviceSessionRepository,
     );
     DaemonState.getInstance().initialize(sessionManager, pool);
     await pool.assignMultipleDevices(["session-1"], 1_000, "android");
@@ -460,7 +469,7 @@ describe("killDevice handler", () => {
     });
     Object.assign(successfulManager.childProcess, { exitCode: 0 });
     successfulManager.childProcess.emit("exit", 0, null);
-    await new Promise(resolve => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
 
     expect(successfulManager.getCallCount("startDevice")).toBe(1);
     expect(pool.getDevice("emulator-5554")).toBeNull();
@@ -512,21 +521,23 @@ describe("killDevice handler", () => {
 
     try {
       expect(parallelTrackSignal).not.toBe(initiatingPlan.abortController.signal);
-      await runWithToolCapabilityContext(
+      await runWithToolSelectionContext(
         {
           execution: {
             executionId: initiatingPlan.id,
             startTime: initiatingPlan.startTime,
           },
         },
-        async () => await runWithAbortSignal(
-          parallelTrackSignal,
-          async () => await tool.handler(
-            { device: { name: image.name, platform: "android", deviceId: image.deviceId! } },
-            undefined,
+        async () =>
+          await runWithAbortSignal(
             parallelTrackSignal,
+            async () =>
+              await tool.handler(
+                { device: { name: image.name, platform: "android", deviceId: image.deviceId! } },
+                undefined,
+                parallelTrackSignal,
+              ),
           ),
-        ),
       );
 
       expect(initiatingPlan.abortController.signal.aborted).toBe(false);
@@ -629,15 +640,17 @@ describe("killDevice handler", () => {
     }
 
     currentTransportManager.beginShutdownPolls();
-    const result = tool.handler(tool.schema.parse({
-      device: {
-        name: image.name,
-        platform: "android",
-        deviceId: image.deviceId!,
-        transportId: "1",
-      },
-    }));
-    await new Promise(resolve => setImmediate(resolve));
+    const result = tool.handler(
+      tool.schema.parse({
+        device: {
+          name: image.name,
+          platform: "android",
+          deviceId: image.deviceId!,
+          transportId: "1",
+        },
+      }),
+    );
+    await new Promise((resolve) => setImmediate(resolve));
     expect(pool.getDevice(image.deviceId!)).not.toBeNull();
     timer.advanceTime(1_000);
     await expect(result).resolves.toBeDefined();
@@ -690,11 +703,13 @@ describe("killDevice handler", () => {
 
     // `adb emu kill` resolving only means the command was accepted. Keep the
     // fake visible until after the handler starts waiting for its disappearance.
-    delayedManager.setBootedDevices("android", [{
-      name: image.name,
-      platform: "android",
-      deviceId: image.deviceId!,
-    }]);
+    delayedManager.setBootedDevices("android", [
+      {
+        name: image.name,
+        platform: "android",
+        deviceId: image.deviceId!,
+      },
+    ]);
     const tool = ToolRegistry.getTool("killDevice");
     if (!tool) {
       throw new Error("killDevice not registered");
@@ -711,7 +726,7 @@ describe("killDevice handler", () => {
     void result.then(() => {
       settled = true;
     });
-    await new Promise(resolve => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
     expect(settled).toBe(false);
     expect(pool.getDevice(image.deviceId!)).toBe(pooled);
     expect(sessionManager.getSessionForDevice(image.deviceId!)).toBe("session-1");
@@ -743,7 +758,10 @@ describe("killDevice handler", () => {
       await activePool.releaseDevice(image.deviceId!);
       allocationOutcome = await activePool
         .assignMultipleDevices(["racing-session"], 1, "android")
-        .then(() => "assigned" as const, () => "blocked" as const);
+        .then(
+          () => "assigned" as const,
+          () => "blocked" as const,
+        );
     });
     setDeviceToolsDependencies({
       deviceManagerFactory: () => delayedManager,
@@ -769,11 +787,13 @@ describe("killDevice handler", () => {
     if (!original) {
       throw new Error("expected assigned device to be pooled");
     }
-    delayedManager.setBootedDevices("android", [{
-      name: image.name,
-      platform: "android",
-      deviceId: image.deviceId!,
-    }]);
+    delayedManager.setBootedDevices("android", [
+      {
+        name: image.name,
+        platform: "android",
+        deviceId: image.deviceId!,
+      },
+    ]);
     const tool = ToolRegistry.getTool("killDevice");
     if (!tool) {
       throw new Error("killDevice not registered");
@@ -782,7 +802,7 @@ describe("killDevice handler", () => {
     const result = tool.handler({
       device: { name: image.name, platform: "android", deviceId: image.deviceId! },
     });
-    await new Promise(resolve => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
     delayedManager.setBootedDevices("android", []);
     timer.advanceTime(1_000);
     await expect(result).resolves.toBeDefined();
@@ -809,11 +829,7 @@ describe("killDevice handler", () => {
       const activePool = DaemonState.getInstance().getDevicePool();
       await activePool.releaseDevice(image.deviceId!);
       try {
-        await activePool.bindOrReuseDeviceSession(
-          "racing-session",
-          image.deviceId!,
-          "android",
-        );
+        await activePool.bindOrReuseDeviceSession("racing-session", image.deviceId!, "android");
       } catch (error) {
         bindingError = error;
       }
@@ -838,11 +854,13 @@ describe("killDevice handler", () => {
     );
     DaemonState.getInstance().initialize(sessionManager, pool);
     await pool.assignMultipleDevices(["session-1"], 1_000, "android");
-    delayedManager.setBootedDevices("android", [{
-      name: image.name,
-      platform: "android",
-      deviceId: image.deviceId!,
-    }]);
+    delayedManager.setBootedDevices("android", [
+      {
+        name: image.name,
+        platform: "android",
+        deviceId: image.deviceId!,
+      },
+    ]);
     const tool = ToolRegistry.getTool("killDevice");
     if (!tool) {
       throw new Error("killDevice not registered");
@@ -851,7 +869,7 @@ describe("killDevice handler", () => {
     const result = tool.handler({
       device: { name: image.name, platform: "android", deviceId: image.deviceId! },
     });
-    await new Promise(resolve => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
     delayedManager.setBootedDevices("android", []);
     timer.advanceTime(1_000);
     await expect(result).resolves.toBeDefined();
@@ -895,7 +913,10 @@ describe("killDevice handler", () => {
         stopRecording: async () => {
           allocationOutcome = await pool
             .assignMultipleDevices(["racing-session"], 1, "android")
-            .then(() => "assigned" as const, () => "blocked" as const);
+            .then(
+              () => "assigned" as const,
+              () => "blocked" as const,
+            );
           throw new Error("recording already stopped");
         },
       } as never,
@@ -987,7 +1008,7 @@ describe("killDevice handler", () => {
     const result = tool.handler({
       device: { name: image.name, platform: image.platform, deviceId: image.deviceId! },
     });
-    await new Promise(resolve => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
     timer.advanceTime(30_000);
 
     await expect(result).rejects.toThrow("video recording teardown did not complete");
@@ -1019,10 +1040,12 @@ describe("killDevice handler", () => {
     }
 
     const result = tool.handler({ device });
-    await new Promise(resolve => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
     timer.advanceTime(30_000);
 
-    await expect(result).rejects.toThrow("Timed out waiting for android device 'Pixel 8' (emulator-5554) to disappear");
+    await expect(result).rejects.toThrow(
+      "Timed out waiting for android device 'Pixel 8' (emulator-5554) to disappear",
+    );
   });
 
   test("clears the intentional-shutdown marker after confirmation times out", async () => {
@@ -1057,11 +1080,13 @@ describe("killDevice handler", () => {
     );
     DaemonState.getInstance().initialize(sessionManager, pool);
     await pool.assignMultipleDevices(["session-1"], 1_000, "android");
-    delayedManager.setBootedDevices("android", [{
-      name: image.name,
-      platform: "android",
-      deviceId: image.deviceId!,
-    }]);
+    delayedManager.setBootedDevices("android", [
+      {
+        name: image.name,
+        platform: "android",
+        deviceId: image.deviceId!,
+      },
+    ]);
     const tool = ToolRegistry.getTool("killDevice");
     if (!tool) {
       throw new Error("killDevice not registered");
@@ -1070,13 +1095,13 @@ describe("killDevice handler", () => {
     const result = tool.handler({
       device: { name: image.name, platform: "android", deviceId: image.deviceId! },
     });
-    await new Promise(resolve => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
     timer.advanceTime(30_000);
     await expect(result).rejects.toThrow("Timed out waiting for android device");
 
     Object.assign(delayedManager.childProcess, { exitCode: 1 });
     delayedManager.childProcess.emit("exit", 1, null);
-    await new Promise(resolve => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
 
     expect(delayedManager.getCallCount("startDevice")).toBe(2);
   });
@@ -1100,13 +1125,15 @@ describe("killDevice handler", () => {
       timer,
     });
     sessionManager = new SessionManager(timer, deviceSessionRepository);
-    transientManager.setDeviceImages("android", [{
-      name: device.name,
-      platform: device.platform,
-      deviceId: device.deviceId,
-      isRunning: false,
-      source: "local",
-    }]);
+    transientManager.setDeviceImages("android", [
+      {
+        name: device.name,
+        platform: device.platform,
+        deviceId: device.deviceId,
+        isRunning: false,
+        source: "local",
+      },
+    ]);
     const pool = new DevicePool(
       sessionManager,
       "daemon-session",
@@ -1124,9 +1151,9 @@ describe("killDevice handler", () => {
     }
 
     const result = tool.handler(tool.schema.parse({ device }));
-    await new Promise(resolve => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
     timer.advanceTime(1_000);
-    await new Promise(resolve => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
     expect(transientManager.shutdownDiscoveryCalls).toBe(4);
     timer.advanceTime(1_000);
     await expect(result).resolves.toBeDefined();
@@ -1206,9 +1233,11 @@ describe("killDevice handler", () => {
       rejectStop = reject;
     });
     const originalGetInstance = IOSCtrlProxyManager.getInstance;
-    (IOSCtrlProxyManager as unknown as {
-      getInstance: typeof IOSCtrlProxyManager.getInstance;
-    }).getInstance = () => ({ stop: () => deferredStop }) as never;
+    (
+      IOSCtrlProxyManager as unknown as {
+        getInstance: typeof IOSCtrlProxyManager.getInstance;
+      }
+    ).getInstance = () => ({ stop: () => deferredStop }) as never;
     try {
       setDeviceToolsDependencies({
         deviceManagerFactory: () => successfulManager,
@@ -1239,7 +1268,7 @@ describe("killDevice handler", () => {
       const result = tool.handler({
         device: { name: image.name, platform: "ios", deviceId: image.deviceId! },
       });
-      await new Promise(resolve => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
       timer.advanceTime(30_000);
       await expect(result).rejects.toThrow("iOS CtrlProxy shutdown did not complete");
       expect(pool.getStats()).toMatchObject({ idle: 0, assigned: 1 });
@@ -1248,9 +1277,11 @@ describe("killDevice handler", () => {
       await deferredStop.catch(() => undefined);
       expect(pool.getStats()).toMatchObject({ idle: 1, assigned: 0 });
     } finally {
-      (IOSCtrlProxyManager as unknown as {
-        getInstance: typeof IOSCtrlProxyManager.getInstance;
-      }).getInstance = originalGetInstance;
+      (
+        IOSCtrlProxyManager as unknown as {
+          getInstance: typeof IOSCtrlProxyManager.getInstance;
+        }
+      ).getInstance = originalGetInstance;
     }
   });
 
@@ -1276,7 +1307,7 @@ describe("killDevice handler", () => {
     }
 
     const result = tool.handler({ device });
-    await new Promise(resolve => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
     timer.advanceTime(30_000);
 
     await expect(result).rejects.toThrow("platform discovery did not complete");
@@ -1304,7 +1335,7 @@ describe("killDevice handler", () => {
     }
 
     const result = tool.handler({ device });
-    await new Promise(resolve => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
     timer.advanceTime(30_000);
     await expect(result).rejects.toThrow("platform discovery did not complete");
 
@@ -1333,7 +1364,7 @@ describe("killDevice handler", () => {
     }
 
     const result = tool.handler({ device });
-    await new Promise(resolve => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
     timer.advanceTime(30_000);
 
     await expect(result).rejects.toThrow("platform shutdown command did not complete");
@@ -1354,25 +1385,32 @@ describe("killDevice handler", () => {
       clearInstalledAppsForDevice: async () => {},
       timer,
     });
-    DaemonState.getInstance().initialize({} as SessionManager, {
-      markIntentionalShutdown: () => {
-        markedIntentionalShutdown++;
-      },
-      clearIntentionalShutdown: () => {
-        clearedIntentionalShutdown++;
-      },
-      reserveDeviceForShutdown: async () => undefined,
-    } as never);
+    DaemonState.getInstance().initialize(
+      {} as SessionManager,
+      {
+        markIntentionalShutdown: () => {
+          markedIntentionalShutdown++;
+        },
+        clearIntentionalShutdown: () => {
+          clearedIntentionalShutdown++;
+        },
+        reserveDeviceForShutdown: async () => undefined,
+      } as never,
+    );
     const controller = new AbortController();
     const tool = ToolRegistry.getTool("killDevice");
     if (!tool) {
       throw new Error("killDevice not registered");
     }
 
-    const result = tool.handler({
-      device: { name: "Pixel 8", platform: "android", deviceId: "emulator-5554" },
-    }, undefined, controller.signal);
-    await new Promise(resolve => setImmediate(resolve));
+    const result = tool.handler(
+      {
+        device: { name: "Pixel 8", platform: "android", deviceId: "emulator-5554" },
+      },
+      undefined,
+      controller.signal,
+    );
+    await new Promise((resolve) => setImmediate(resolve));
     controller.abort(new Error("caller cancelled shutdown"));
 
     await expect(result).rejects.toThrow("caller cancelled shutdown");
@@ -1436,7 +1474,7 @@ describe("killDevice handler", () => {
         deviceId: image.deviceId!,
       },
     });
-    await new Promise(resolve => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
     timer.advanceTime(30_000);
 
     await expect(result).rejects.toThrow("platform discovery did not succeed");
@@ -1618,7 +1656,7 @@ describe("killDevice handler", () => {
     const deviceSessionRepository = new FakeDeviceSessionRepository();
     let finishCleanup: (() => void) | undefined;
     let resolveCleanupStarted: (() => void) | undefined;
-    const cleanupStarted = new Promise<void>(resolve => {
+    const cleanupStarted = new Promise<void>((resolve) => {
       resolveCleanupStarted = resolve;
     });
     setDeviceToolsDependencies({
@@ -1627,7 +1665,7 @@ describe("killDevice handler", () => {
       ensureCtrlProxyReady: async () => {},
       clearInstalledAppsForDevice: async () => {
         resolveCleanupStarted?.();
-        await new Promise<void>(resolve => {
+        await new Promise<void>((resolve) => {
           finishCleanup = resolve;
         });
       },
@@ -1651,9 +1689,11 @@ describe("killDevice handler", () => {
       throw new Error("killDevice not registered");
     }
 
-    const result = tool.handler(tool.schema.parse({
-      device: { ...image, transportId: "1" },
-    }));
+    const result = tool.handler(
+      tool.schema.parse({
+        device: { ...image, transportId: "1" },
+      }),
+    );
     await cleanupStarted;
 
     const replacementReservation = await pool.reserveDeviceForShutdown(image.deviceId!);
@@ -1721,7 +1761,7 @@ describe("killDevice handler", () => {
     expect(pool.getDevice(image.deviceId!)).toBe(pooled);
 
     deviceSessionRepository.finishMarkReleased();
-    await new Promise(resolve => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
 
     expect(pool.getDevice(image.deviceId!)).toBeNull();
     expect(registry.getByUuid(deviceSession.deviceSessionUuid)).toBeUndefined();
@@ -1780,14 +1820,18 @@ describe("killDevice handler", () => {
       throw new Error("killDevice not registered");
     }
 
-    await expect(tool.handler(tool.schema.parse({
-      device: {
-        name: image.name,
-        platform: "android",
-        deviceId: image.deviceId!,
-        transportId: "1",
-      },
-    }))).resolves.toBeDefined();
+    await expect(
+      tool.handler(
+        tool.schema.parse({
+          device: {
+            name: image.name,
+            platform: "android",
+            deviceId: image.deviceId!,
+            transportId: "1",
+          },
+        }),
+      ),
+    ).resolves.toBeDefined();
 
     const current = pool.getDevice(image.deviceId!);
     expect(current).not.toBeNull();
@@ -1795,7 +1839,10 @@ describe("killDevice handler", () => {
     expect(sessionManager.getSessionForDevice(image.deviceId!)).toBeNull();
     expect(registry.getByUuid(originalSession.deviceSessionUuid)).toBeUndefined();
     expect(registry.getByDeviceId(image.deviceId!)?.deviceSessionUuid).toBeDefined();
-    expect(pool.getRecoveryEligibility(image.deviceId!)).toEqual({ eligible: true, action: "restart" });
+    expect(pool.getRecoveryEligibility(image.deviceId!)).toEqual({
+      eligible: true,
+      action: "restart",
+    });
   });
 
   test("rebuilds a replacement observed by the initial shutdown wait", async () => {
@@ -1841,9 +1888,13 @@ describe("killDevice handler", () => {
       throw new Error("killDevice not registered");
     }
 
-    await expect(tool.handler(tool.schema.parse({
-      device: { ...image, transportId: "1" },
-    }))).resolves.toBeDefined();
+    await expect(
+      tool.handler(
+        tool.schema.parse({
+          device: { ...image, transportId: "1" },
+        }),
+      ),
+    ).resolves.toBeDefined();
 
     expect(pool.getDevice(image.deviceId!)?.name).toBe(replacement.name);
     expect(sessionManager.getSessionForDevice(image.deviceId!)).toBeNull();
@@ -1903,15 +1954,17 @@ describe("killDevice handler", () => {
     }
 
     replacementManager.beginReplacementSequence();
-    const result = tool.handler(tool.schema.parse({
-      device: {
-        name: image.name,
-        platform: "android",
-        deviceId: image.deviceId!,
-        transportId: "1",
-      },
-    }));
-    await new Promise(resolve => setImmediate(resolve));
+    const result = tool.handler(
+      tool.schema.parse({
+        device: {
+          name: image.name,
+          platform: "android",
+          deviceId: image.deviceId!,
+          transportId: "1",
+        },
+      }),
+    );
+    await new Promise((resolve) => setImmediate(resolve));
     timer.advanceTime(1_000);
     await expect(result).resolves.toBeDefined();
 
@@ -1972,9 +2025,11 @@ describe("killDevice handler", () => {
     }
 
     deadlineManager.exhaustDeadlineOnNextShutdownDiscovery();
-    await expect(tool.handler({
-      device: { name: image.name, platform: "android", deviceId: image.deviceId! },
-    })).resolves.toBeDefined();
+    await expect(
+      tool.handler({
+        device: { name: image.name, platform: "android", deviceId: image.deviceId! },
+      }),
+    ).resolves.toBeDefined();
 
     expect(pool.getDevice(image.deviceId!)).toBeNull();
     expect(sessionManager.getSessionForDevice(image.deviceId!)).toBeNull();
@@ -2007,7 +2062,7 @@ describe("killDevice handler", () => {
       notifyResourcesChanged: async () => {},
       ensureCtrlProxyReady: async () => {},
       clearInstalledAppsForDevice: async () => {},
-      stopPerformanceMonitoring: deviceId => stoppedDeviceIds.push(deviceId),
+      stopPerformanceMonitoring: (deviceId) => stoppedDeviceIds.push(deviceId),
       timer,
     });
     sessionManager = new SessionManager(timer, deviceSessionRepository);
@@ -2039,9 +2094,11 @@ describe("killDevice handler", () => {
     }
 
     deadlineManager.exhaustDeadlineOnNextShutdownDiscovery();
-    await expect(tool.handler({
-      device: { name: image.name, platform: "android", deviceId: image.deviceId! },
-    })).resolves.toBeDefined();
+    await expect(
+      tool.handler({
+        device: { name: image.name, platform: "android", deviceId: image.deviceId! },
+      }),
+    ).resolves.toBeDefined();
 
     const current = pool.getDevice(image.deviceId!);
     expect(current).not.toBeNull();
@@ -2070,7 +2127,7 @@ describe("killDevice handler", () => {
       notifyResourcesChanged: async () => {},
       ensureCtrlProxyReady: async () => {},
       clearInstalledAppsForDevice: async () => {},
-      stopPerformanceMonitoring: deviceId => stoppedDeviceIds.push(deviceId),
+      stopPerformanceMonitoring: (deviceId) => stoppedDeviceIds.push(deviceId),
       timer,
     });
     sessionManager = new SessionManager(timer, deviceSessionRepository);
@@ -2091,9 +2148,11 @@ describe("killDevice handler", () => {
       throw new Error("killDevice not registered");
     }
 
-    await expect(tool.handler({
-      device: { name: image.name, platform: "android", deviceId: image.deviceId! },
-    })).resolves.toBeDefined();
+    await expect(
+      tool.handler({
+        device: { name: image.name, platform: "android", deviceId: image.deviceId! },
+      }),
+    ).resolves.toBeDefined();
 
     expect(stoppedDeviceIds).toEqual([image.deviceId]);
   });
@@ -2249,64 +2308,70 @@ describe("killDevice handler", () => {
     ["android", "Emulator 'forge-ivory-crown' is not running"],
     ["android", "adb: device 'emulator-5554' not found"],
     ["ios", "Unable to shutdown device: device is already shut down"],
-  ] as const)("returns a structured terminal error for an already-stopped %s device", async (platform, message) => {
-    let cleanupCalled = false;
-    let notifyCalled = false;
-    let markedIntentionalShutdown = 0;
-    let clearedIntentionalShutdown = 0;
-    const stoppedManager = new AlreadyStoppedKillDeviceManager(message);
-    manager = stoppedManager;
-    if (platform === "android") {
-      DaemonState.getInstance().initialize({} as SessionManager, {
-        markIntentionalShutdown: () => {
-          markedIntentionalShutdown++;
+  ] as const)(
+    "returns a structured terminal error for an already-stopped %s device",
+    async (platform, message) => {
+      let cleanupCalled = false;
+      let notifyCalled = false;
+      let markedIntentionalShutdown = 0;
+      let clearedIntentionalShutdown = 0;
+      const stoppedManager = new AlreadyStoppedKillDeviceManager(message);
+      manager = stoppedManager;
+      if (platform === "android") {
+        DaemonState.getInstance().initialize(
+          {} as SessionManager,
+          {
+            markIntentionalShutdown: () => {
+              markedIntentionalShutdown++;
+            },
+            clearIntentionalShutdown: () => {
+              clearedIntentionalShutdown++;
+            },
+            reserveDeviceForShutdown: async () => undefined,
+          } as never,
+        );
+      }
+      setDeviceToolsDependencies({
+        deviceManagerFactory: () => stoppedManager,
+        notifyResourcesChanged: async () => {
+          notifyCalled = true;
         },
-        clearIntentionalShutdown: () => {
-          clearedIntentionalShutdown++;
+        ensureCtrlProxyReady: async () => {},
+        clearInstalledAppsForDevice: async () => {
+          cleanupCalled = true;
         },
-        reserveDeviceForShutdown: async () => undefined,
-      } as never);
-    }
-    setDeviceToolsDependencies({
-      deviceManagerFactory: () => stoppedManager,
-      notifyResourcesChanged: async () => {
-        notifyCalled = true;
-      },
-      ensureCtrlProxyReady: async () => {},
-      clearInstalledAppsForDevice: async () => {
-        cleanupCalled = true;
-      },
-    });
-    registerDeviceTools();
+      });
+      registerDeviceTools();
 
-    const tool = ToolRegistry.getTool("killDevice");
-    if (!tool) {
-      throw new Error("killDevice not registered");
-    }
-    const response = await tool.handler({
-      device: {
-        name: platform === "android" ? "Pixel 8" : "iPhone 16",
-        platform,
-        deviceId: platform === "android" ? "emulator-5554" : "IOS-UDID",
-      },
-    });
+      const tool = ToolRegistry.getTool("killDevice");
+      if (!tool) {
+        throw new Error("killDevice not registered");
+      }
+      const response = await tool.handler({
+        device: {
+          name: platform === "android" ? "Pixel 8" : "iPhone 16",
+          platform,
+          deviceId: platform === "android" ? "emulator-5554" : "IOS-UDID",
+        },
+      });
 
-    expect(response.isError).toBe(true);
-    expect(JSON.parse(response.content[0].text)).toEqual({
-      success: false,
-      message: expect.stringContaining(message),
-      error: {
-        code: "device_already_stopped",
+      expect(response.isError).toBe(true);
+      expect(JSON.parse(response.content[0].text)).toEqual({
+        success: false,
         message: expect.stringContaining(message),
-      },
-    });
-    expect(cleanupCalled).toBe(true);
-    expect(notifyCalled).toBe(true);
-    if (platform === "android") {
-      expect(markedIntentionalShutdown).toBe(1);
-      expect(clearedIntentionalShutdown).toBe(0);
-    }
-  });
+        error: {
+          code: "device_already_stopped",
+          message: expect.stringContaining(message),
+        },
+      });
+      expect(cleanupCalled).toBe(true);
+      expect(notifyCalled).toBe(true);
+      if (platform === "android") {
+        expect(markedIntentionalShutdown).toBe(1);
+        expect(clearedIntentionalShutdown).toBe(0);
+      }
+    },
+  );
 
   test("keeps recording-list failures as actionable errors", async () => {
     await setVideoRecordingManagerDependencies({
@@ -2327,12 +2392,14 @@ describe("killDevice handler", () => {
       throw new Error("killDevice not registered");
     }
 
-    await expect(tool.handler({
-      device: {
-        name: "Pixel 8",
-        platform: "android",
-        deviceId: "emulator-5554",
-      },
-    })).rejects.toThrow("Failed to kill android device");
+    await expect(
+      tool.handler({
+        device: {
+          name: "Pixel 8",
+          platform: "android",
+          deviceId: "emulator-5554",
+        },
+      }),
+    ).rejects.toThrow("Failed to kill android device");
   });
 });

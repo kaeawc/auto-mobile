@@ -5,10 +5,7 @@ const logger = { warn: () => {} };
 
 describe("parseArgs (#4277)", () => {
   test("parses CLI feature flags without loading the server entrypoint", () => {
-    const parsed = parseArgs(
-      ["--cli", "listApps", "--embedded-sdk", "--network-mockable"],
-      logger
-    );
+    const parsed = parseArgs(["--cli", "listApps", "--embedded-sdk", "--network-mockable"], logger);
 
     expect(parsed.cliMode).toBe(true);
     expect(parsed.embeddedSdk).toBe(true);
@@ -33,11 +30,9 @@ describe("parseArgs (#4277)", () => {
     const fromEnvironment = parseArgs([], logger, {
       AUTOMOBILE_RUNNER_READINESS_TIMEOUT_MS: "20000",
     });
-    const fromCli = parseArgs(
-      ["--runner-readiness-timeout-ms", "45000"],
-      logger,
-      { AUTOMOBILE_RUNNER_READINESS_TIMEOUT_MS: "20000" },
-    );
+    const fromCli = parseArgs(["--runner-readiness-timeout-ms", "45000"], logger, {
+      AUTOMOBILE_RUNNER_READINESS_TIMEOUT_MS: "20000",
+    });
 
     expect(fromEnvironment.runnerReadinessTimeoutMs).toBe(20_000);
     expect(fromCli.runnerReadinessTimeoutMs).toBe(45_000);
@@ -47,5 +42,37 @@ describe("parseArgs (#4277)", () => {
     const parsed = parseArgs([], logger, {});
 
     expect(parsed.runnerReadinessTimeoutMs).toBeUndefined();
+  });
+
+  test("parses repeatable exact-tool startup defaults", () => {
+    const parsed = parseArgs(
+      ["--enable-tool", "clipboard", "--enable-tool", "sqlQuery", "--disable-tool", "observe"],
+      logger,
+      {},
+    );
+
+    expect(parsed.enabledTools).toEqual(["clipboard", "sqlQuery"]);
+    expect(parsed.disabledTools).toEqual(["observe"]);
+  });
+
+  test("rejects conflicting tool defaults and retired environment variables", () => {
+    expect(() =>
+      parseArgs(["--enable-tool", "clipboard", "--disable-tool", "clipboard"], logger, {}),
+    ).toThrow("both enabled and disabled");
+
+    expect(() =>
+      parseArgs([], logger, {
+        AUTOMOBILE_TOOLSET_DEFAULTS: "clipboard",
+      }),
+    ).toThrow("AUTOMOBILE_TOOLSET_DEFAULTS is retired");
+  });
+
+  test("applies CLI tool defaults over environment tool defaults", () => {
+    const parsed = parseArgs(["--enable-tool", "observe"], logger, {
+      AUTOMOBILE_DISABLED_TOOLS: "observe,clipboard",
+    });
+
+    expect(parsed.enabledTools).toEqual(["observe"]);
+    expect(parsed.disabledTools).toEqual(["clipboard"]);
   });
 });

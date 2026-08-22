@@ -178,6 +178,47 @@ describe("ToolExecutionContext", () => {
     expect(() => devicePool.assertSessionReadyForAutomation("reset-session-2")).not.toThrow();
   });
 
+  test("retains an implicit autolock mapping while its reset cohort is quarantined", async () => {
+    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+    const device: BootedDevice = {
+      name: "Pixel_8_API_35",
+      platform: "android",
+      deviceId: "emulator-5554",
+    };
+    const image: DeviceInfo = {
+      name: device.name,
+      platform: "android",
+      isRunning: true,
+      source: "local",
+    };
+    fakeDeviceManager.bootedDevices = [device];
+    await devicePool.addDevice(device, image);
+    const sessionId = await devicePool.autolockDevice(
+      device.deviceId,
+      "android",
+      "mcp-session",
+      image,
+    );
+    const detached = await devicePool.detachAdbServerResetCohort([
+      devicePool.getDevice(device.deviceId)!,
+    ]);
+
+    try {
+      expect(
+        devicePool.resolveAutolockSessionForMcpSession("mcp-session", "android"),
+      ).toBe(sessionId);
+      await expect(
+        createToolExecutionContext(sessionId, sessionManager, devicePool, sessionOptions),
+      ).rejects.toThrow(/recovering from a process-wide ADB reset/);
+      expect(
+        devicePool.resolveAutolockSessionForMcpSession("mcp-session", "android"),
+      ).toBe(sessionId);
+    } finally {
+      await devicePool.releaseAdbServerResetCohortReservations(detached.devices);
+      delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+    }
+  });
+
   test("runs first-session setup when a released UUID is recreated during context creation", async () => {
     let setupCalls = 0;
     AndroidCtrlProxyManager.getInstance = () =>

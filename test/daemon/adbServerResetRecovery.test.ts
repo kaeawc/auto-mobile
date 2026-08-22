@@ -315,6 +315,63 @@ describe("ADB server reset session recovery", () => {
     }
   });
 
+  test("cancels cohort session executions before detaching reusable serials", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const manager = new FakeDeviceManager();
+    const cancellations: Array<{ sessionId: string; deviceStillPooled: boolean }> = [];
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      async sessionId => {
+        cancellations.push({
+          sessionId,
+          deviceStillPooled: pool.getDevice("emulator-5554") !== null,
+        });
+        return 1;
+      },
+    );
+    const device: BootedDevice = {
+      platform: "android",
+      name: "Pixel_8_API_35",
+      deviceId: "emulator-5554",
+    };
+    const image: DeviceInfo = {
+      name: device.name,
+      platform: "android",
+      isRunning: true,
+      source: "local",
+    };
+    manager.bootedDevices = [device];
+    await pool.addDevice(device, image);
+    await pool.bindOrReuseDeviceSession("session-active", device.deviceId, "android", image);
+
+    try {
+      const detached = await pool.detachAdbServerResetCohort([pool.getDevice(device.deviceId)!]);
+
+      expect(cancellations).toEqual([{
+        sessionId: "session-active",
+        deviceStillPooled: true,
+      }]);
+      expect(detached.devices).toHaveLength(1);
+      await pool.releaseAdbServerResetCohortReservations(detached.devices);
+    } finally {
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
   test("recovers both captured AVDs when the first reuses the second serial", async () => {
     class SwappedSerialDeviceManager extends FakeDeviceManager {
       override async startDevice(device: DeviceInfo): Promise<ChildProcess> {

@@ -344,6 +344,7 @@ export class Daemon {
       recoveryConfiguration.policy,
       deviceId => this.deviceSessionRegistry.onDeviceDisconnected(deviceId),
       new EmulatorLossIncidentRepository(this.timer, this.idGenerator),
+      (sessionId, reason) => executionTracker.cancelDeviceSessionExecutions(sessionId, reason),
     );
     // Initialize singleton for daemon state access
     DaemonState.getInstance().initialize(

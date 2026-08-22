@@ -148,6 +148,10 @@ interface DeviceRemovedListener {
   (deviceId: string): void;
 }
 
+interface DeviceSessionExecutionCanceller {
+  (sessionId: string, reason: string): Promise<number>;
+}
+
 export type DeviceReadinessReservation = (() => Promise<void>) & {
   readonly owner: symbol;
 };
@@ -293,6 +297,7 @@ export class DevicePool {
   private readonly releaseSessionForDisconnectedDevice: DeviceDisconnectSessionReleaser;
   private readonly onDeviceReady: DeviceReadyListener | undefined;
   private readonly onDeviceRemoved: DeviceRemovedListener | undefined;
+  private readonly cancelDeviceSessionExecutions: DeviceSessionExecutionCanceller;
   private readonly androidDeviceReboot: AndroidDeviceReboot;
   private readonly recoveryPolicy: DeviceRecoveryPolicy;
   private readonly recoveringAndroidImages: Map<string, DeviceInfo> = new Map();
@@ -384,6 +389,7 @@ export class DevicePool {
     recoveryPolicy?: DeviceRecoveryPolicy,
     onDeviceRemoved?: DeviceRemovedListener,
     emulatorLossIncidentStore: EmulatorLossIncidentStore = new InMemoryEmulatorLossIncidentStore(timer),
+    cancelDeviceSessionExecutions?: DeviceSessionExecutionCanceller,
   ) {
     this.sessionManager = sessionManager;
     this.daemonSessionId = daemonSessionId;
@@ -395,6 +401,7 @@ export class DevicePool {
     this.criteriaMatcher = criteriaMatcher;
     this.onDeviceReady = onDeviceReady;
     this.onDeviceRemoved = onDeviceRemoved;
+    this.cancelDeviceSessionExecutions = cancelDeviceSessionExecutions ?? (async () => 0);
     this.emulatorLossIncidentStore = emulatorLossIncidentStore;
     // Resolve recovery policy once so retries and status agree even if the
     // process environment changes after construction.
@@ -1997,7 +2004,7 @@ export class DevicePool {
         // disconnects, permanently separating their preserved sessions.
         return { devices: [], deferred: true };
       }
-      await this.stopTrackedIdleAdbResetCohortProcesses(cohort);
+      await this.prepareAdbServerResetCohortDetachment(cohort);
       const detached: PooledDevice[] = [];
       for (const device of cohort) {
         if (
@@ -2014,10 +2021,10 @@ export class DevicePool {
             session.assignedDevice !== device.id ||
             session.platform !== "android"
           ) {
+            this.adbServerResetQuarantinedSessions.delete(device.sessionId);
             continue;
           }
           device.adbServerResetSessionId = device.sessionId;
-          this.adbServerResetQuarantinedSessions.add(device.sessionId);
         }
         device.adbServerResetAutolockSessionId = device.autolockSessionId;
         const trackedProcess = this.startedDeviceProcesses.get(device.id);
@@ -2032,6 +2039,51 @@ export class DevicePool {
       }
       return { devices: detached, deferred: false };
     });
+  }
+
+  private async prepareAdbServerResetCohortDetachment(
+    cohort: readonly PooledDevice[],
+  ): Promise<void> {
+    const sessionIds = this.getAdbServerResetCohortSessionIds(cohort);
+    for (const sessionId of sessionIds) {
+      this.adbServerResetQuarantinedSessions.add(sessionId);
+    }
+    try {
+      await Promise.all(
+        sessionIds.map(sessionId =>
+          this.cancelDeviceSessionExecutions(
+            sessionId,
+            "device-disconnected:process-wide-adb-reset",
+          ),
+        ),
+      );
+      await this.stopTrackedIdleAdbResetCohortProcesses(cohort);
+    } catch (error) {
+      for (const sessionId of sessionIds) {
+        this.adbServerResetQuarantinedSessions.delete(sessionId);
+      }
+      throw error;
+    }
+  }
+
+  private getAdbServerResetCohortSessionIds(
+    cohort: readonly PooledDevice[],
+  ): string[] {
+    const sessionIds = new Set<string>();
+    for (const device of cohort) {
+      if (
+        this.devices.get(device.id) !== device ||
+        !this.isAutoMobileOwnedAndroidVirtualDevice(device) ||
+        !device.sessionId
+      ) {
+        continue;
+      }
+      const session = this.sessionManager.getSession(device.sessionId);
+      if (session?.assignedDevice === device.id && session.platform === "android") {
+        sessionIds.add(device.sessionId);
+      }
+    }
+    return [...sessionIds];
   }
 
   private async stopTrackedIdleAdbResetCohortProcesses(
@@ -4493,6 +4545,9 @@ export class DevicePool {
 
     const device = this.devices.get(session.assignedDevice);
     if (!device || device.autolockSessionId !== sessionId) {
+      if (this.adbServerResetQuarantinedSessions.has(sessionId)) {
+        return !platform || session.platform === platform ? sessionId : undefined;
+      }
       this.mcpSessionAutolockMap.delete(mcpSessionId);
       return undefined;
     }

@@ -2,14 +2,8 @@ package dev.jasonpearson.automobile.ctrlproxy
 
 import android.util.Log
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
-import dev.jasonpearson.automobile.protocol.ConnectedResponse
-import dev.jasonpearson.automobile.protocol.ErrorResponse
-import dev.jasonpearson.automobile.protocol.RequestHierarchy
-import dev.jasonpearson.automobile.protocol.RequestHierarchyIfStale
-import dev.jasonpearson.automobile.protocol.SdkEvent
-import dev.jasonpearson.automobile.protocol.WebSocketMessageHandler
+import dev.jasonpearson.automobile.protocol.*
 import dev.jasonpearson.automobile.protocol.WebSocketRequest as ProtocolRequest
-import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import io.ktor.server.application.*
@@ -76,12 +70,86 @@ class WebSocketServer(
         null
       }
 
+    /** Substring every correlated frame carries and no `hierarchy_update`/event frame does. */
+    private const val REQUEST_ID_TOKEN = "\"requestId\""
+
+    /**
+     * Cheap pre-check gating the full JSON parse in [extractRequestId]. The `hierarchy_update`
+     * frame is the highest-frequency, largest payload in the system and provably carries no
+     * `requestId` (see `recordsRequestOwner`), so gating on an `indexOf` lets those frames skip the
+     * O(payload) `parseToJsonElement` + throwaway element-tree allocation entirely. See #5462.
+     */
+    internal fun mightCarryRequestId(raw: String): Boolean = raw.contains(REQUEST_ID_TOKEN)
+
     /**
      * Best-effort extraction of `requestId` from a raw JSON payload for error correlation,
      * mirroring the iOS runner's `extractRequestId`. Returns null when it can't be determined.
-     * See #2985.
+     * Short-circuits without parsing when the payload cannot contain a `requestId`.
+     * See #2985, #5462.
      */
-    internal fun extractRequestId(raw: String): String? = extractStringField(raw, "requestId")
+    internal fun extractRequestId(raw: String): String? =
+      if (mightCarryRequestId(raw)) extractStringField(raw, "requestId") else null
+
+    /**
+     * `requestId` read directly off a typed [response], avoiding the encode→parse round-trip the
+     * raw-string [extractRequestId] path pays. Exhaustive over the sealed hierarchy so a newly
+     * added correlated response type fails to compile until it is wired in here (mirrors what
+     * `sendErrorResponse` reads off `ErrorResponse` directly). See #5462.
+     */
+    internal fun correlationRequestId(response: WebSocketResponse): String? =
+      when (response) {
+        is ErrorResponse -> response.requestId
+        is ScreenshotResult -> response.requestId
+        is ScreenshotErrorResult -> response.requestId
+        is SwipeResult -> response.requestId
+        is TapCoordinatesResult -> response.requestId
+        is DragResult -> response.requestId
+        is PinchResult -> response.requestId
+        is SetTextResult -> response.requestId
+        is ImeActionResult -> response.requestId
+        is SelectAllResult -> response.requestId
+        is ActionResult -> response.requestId
+        is ClipboardResult -> response.requestId
+        is SettingsGetResult -> response.requestId
+        is SettingsPutResult -> response.requestId
+        is SettingsListResult -> response.requestId
+        is CaCertResult -> response.requestId
+        is DeviceOwnerStatusResult -> response.requestId
+        is PermissionResult -> response.requestId
+        is GlobalActionResult -> response.requestId
+        is FrameContextValidationResult -> response.requestId
+        is DeviceInfoResult -> response.requestId
+        is CurrentFocusResult -> response.requestId
+        is TraversalOrderResult -> response.requestId
+        is HighlightResponse -> response.requestId
+        is PreferenceFilesResult -> response.requestId
+        is PreferencesResult -> response.requestId
+        is SubscribeStorageResult -> response.requestId
+        is UnsubscribeStorageResult -> response.requestId
+        is GetPreferenceResult -> response.requestId
+        is SetPreferenceResult -> response.requestId
+        is RemovePreferenceResult -> response.requestId
+        is ClearPreferencesResult -> response.requestId
+        is InstalledPackagesResult -> response.requestId
+        is PackageInfoResult -> response.requestId
+        is LaunchIntentResult -> response.requestId
+        // Uncorrelated event/status frames never echo a requestId.
+        is ConnectedResponse,
+        is HierarchyUpdateEvent,
+        is InteractionEvent,
+        is PackageEvent,
+        is NavigationEventResponse,
+        is HandledExceptionEvent,
+        is NetworkEventResponse,
+        is WebSocketFrameResponse,
+        is LogEventResponse,
+        is BroadcastEventResponse,
+        is LifecycleEventResponse,
+        is FrameMetricsEventResponse,
+        is StorageChangedEvent,
+        is CrashEvent,
+        is AnrEvent -> null
+      }
 
     /**
      * Maps an inbound-decode failure into an actionable, legible wire message. An unknown/
@@ -339,7 +407,7 @@ class WebSocketServer(
     waitForClient: Boolean = false,
   ) {
     val message = responseJson.encodeToString(WebSocketResponse.serializer(), response)
-    val requestId = extractRequestId(message)
+    val requestId = correlationRequestId(response)
     if (response is ErrorResponse) {
       val target =
         if (requestId != null) {

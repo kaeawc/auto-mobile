@@ -188,6 +188,41 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     private const val HIERARCHY_FILE_NAME = "latest_hierarchy.json"
     private const val DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS = 250L
 
+    /**
+     * The exact set of accessibility event types [onAccessibilityEvent] dispatches on (its `when`
+     * branches plus the hierarchy-refresh `if`). This is the single source of truth: the OS
+     * subscription mask [SUBSCRIBED_EVENT_TYPES_MASK] is derived from exactly this set, so the
+     * "handled set" and the "subscribed set" cannot drift. If a new handler branch is added, add
+     * its type here too (the unit test in CtrlProxyAccessibilityEventTypesTest enforces this).
+     */
+    val HANDLED_EVENT_TYPES: IntArray =
+      intArrayOf(
+        AccessibilityEvent.TYPE_VIEW_CLICKED,
+        AccessibilityEvent.TYPE_VIEW_LONG_CLICKED,
+        AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+        AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+        AccessibilityEvent.TYPE_WINDOWS_CHANGED,
+        AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
+        AccessibilityEvent.TYPE_VIEW_SCROLLED,
+        AccessibilityEvent.TYPE_VIEW_SELECTED,
+      )
+
+    /**
+     * OS-level `eventTypes` subscription mask: exactly the union of [HANDLED_EVENT_TYPES],
+     * replacing the former `TYPES_ALL_MASK`. The OS no longer delivers events (hover,
+     * touch-exploration, focus, gesture-detection, announcement, etc.) that the handler only drops.
+     */
+    val SUBSCRIBED_EVENT_TYPES_MASK: Int = HANDLED_EVENT_TYPES.fold(0) { acc, type -> acc or type }
+
+    /**
+     * `notificationTimeout` coalesces bursts of same-type events at the OS boundary before
+     * delivery. 100 ms matches the tightest interaction debounce the handler already applies
+     * ([inputTextDebounceMs]) and sits well under the scroll debounce (300 ms) and hierarchy
+     * broadcast interval (250 ms), so it collapses event floods without adding perceptible latency
+     * to the interaction/telemetry or hierarchy-refresh paths the debouncers rely on.
+     */
+    const val ACCESSIBILITY_NOTIFICATION_TIMEOUT_MS = 100L
+
     // Broadcast actions
     const val ACTION_EXTRACT_HIERARCHY = "dev.jasonpearson.automobile.EXTRACT_HIERARCHY"
 
@@ -944,11 +979,16 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     super.onServiceConnected()
     Log.d(TAG, "onServiceConnected")
 
-    // Ensure we receive ALL accessibility event types and include not-important views
-    // (XML config may be cached). flagIncludeNotImportantViews exposes interactive nodes
-    // (e.g. long-clickable ImageViews) that Android otherwise filters as decorative.
+    // Subscribe to exactly the event types onAccessibilityEvent handles
+    // (SUBSCRIBED_EVENT_TYPES_MASK)
+    // instead of TYPES_ALL_MASK, so the OS stops delivering events we only drop.
+    // notificationTimeout
+    // coalesces same-type floods at the OS boundary. flagIncludeNotImportantViews exposes
+    // interactive
+    // nodes (e.g. long-clickable ImageViews) that Android otherwise filters as decorative.
     serviceInfo = serviceInfo?.apply {
-      eventTypes = AccessibilityEvent.TYPES_ALL_MASK
+      eventTypes = SUBSCRIBED_EVENT_TYPES_MASK
+      notificationTimeout = ACCESSIBILITY_NOTIFICATION_TIMEOUT_MS
       flags =
         flags or
           AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS or

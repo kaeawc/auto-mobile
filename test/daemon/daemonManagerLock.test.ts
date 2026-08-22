@@ -1,6 +1,6 @@
 import { describe, expect, test, afterEach } from "bun:test";
-import { existsSync, writeFileSync, mkdtempSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, writeFileSync, mkdtempSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { DaemonManager } from "../../src/daemon/manager";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -153,15 +153,23 @@ describe("DaemonManager file lock", () => {
       unlinkSync(lockPath);
     });
 
-    test("throws when lock is held and daemon fails to start", async () => {
+    test("waits through the cold-start budget and includes lock-holder diagnostics when startup fails", async () => {
       const lockPath = createTempLockPath();
       const fakeTimer = new FakeTimer();
       fakeTimer.enableAutoAdvance();
 
       writeFileSync(lockPath, String(process.pid));
+      const logsDir = join(dirname(lockPath), "logs");
+      mkdirSync(logsDir, { recursive: true });
+      writeFileSync(
+        join(logsDir, `daemon-launch-${process.pid}.log`),
+        "Initializing CtrlProxy iOS for SIMULATOR-B\nrunner-health: connection refused\n",
+      );
+      const timeouts: number[] = [];
 
       class TestDaemonManager extends DaemonManager {
-        override async waitForReady(_timeout: number): Promise<boolean> {
+        override async waitForReady(timeout: number): Promise<boolean> {
+          timeouts.push(timeout);
           return false; // Daemon never becomes ready
         }
         override findAllDaemonProcesses(): number[] { return []; }
@@ -170,8 +178,9 @@ describe("DaemonManager file lock", () => {
       const manager = new TestDaemonManager(undefined, undefined, fakeTimer, lockPath);
 
       await expect(manager.start()).rejects.toThrow(
-        "Another process is starting the daemon but it failed to become ready"
+        /Another process is starting the daemon but it failed to become ready[\s\S]*daemon-launch-\d+\.log[\s\S]*SIMULATOR-B/
       );
+      expect(timeouts).toEqual([30_000, 30_000]);
 
       // Clean up
       const { unlinkSync } = require("node:fs");

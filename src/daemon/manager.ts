@@ -522,9 +522,7 @@ export class DaemonManager implements DaemonManagerLike {
         stderrLog("Daemon started by another process (retry)");
         return;
       }
-      throw new ActionableError(
-        "Another process is starting the daemon but it failed to become ready"
-      );
+      throw await this.createLockHolderStartupFailure();
     }
 
     try {
@@ -787,6 +785,37 @@ export class DaemonManager implements DaemonManagerLike {
       (error as { code?: string }).code = INCOMPLETE_EXTRACTION_CODE;
     }
     return error;
+  }
+
+  private async createLockHolderStartupFailure(): Promise<Error> {
+    const summary = "Another process is starting the daemon but it failed to become ready";
+    const logPath = await this.getLockHolderStartupLogPath();
+    if (!logPath) {
+      return new ActionableError(
+        `${summary}; the startup lock did not contain a usable holder PID for diagnostics.`
+      );
+    }
+    return new ActionableError(await this.formatDaemonStartupFailure(summary, logPath));
+  }
+
+  private async getLockHolderStartupLogPath(): Promise<string | null> {
+    try {
+      const lockContents = await readFile(this.lockFilePath, "utf-8");
+      const trimmedLockContents = lockContents.trim();
+      if (!/^\d+$/.test(trimmedLockContents)) {
+        return null;
+      }
+      const lockHolderPid = Number.parseInt(trimmedLockContents, 10);
+      if (!Number.isSafeInteger(lockHolderPid) || lockHolderPid <= 0) {
+        return null;
+      }
+      return join(ensureSecureLogsDirSync(), `daemon-launch-${lockHolderPid}.log`);
+    } catch (error) {
+      logger.debug(
+        `[DaemonManager] Unable to read startup lock holder diagnostics: ${this.describeError(error)}`
+      );
+      return null;
+    }
   }
 
   private async createDaemonExitFailure(

@@ -85,7 +85,9 @@ export const CONNECTION_TIMEOUT_MS =
 
 /**
  * Daemon startup timeout in milliseconds
- * How long to wait for daemon to become ready
+ * How long to wait for daemon to become ready. Cold startup serially discovers
+ * devices and initializes iOS services, so the default allows normal
+ * multi-simulator bring-up while remaining bounded.
  */
 const startupTimeoutOverride =
   process.env.AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS ??
@@ -96,7 +98,7 @@ const parsedStartupTimeout = startupTimeoutOverride
 export const DAEMON_STARTUP_TIMEOUT_MS =
   Number.isFinite(parsedStartupTimeout) && parsedStartupTimeout > 0
     ? parsedStartupTimeout
-    : 10000;
+    : 30000;
 
 /**
  * Daemon shutdown timeout in milliseconds

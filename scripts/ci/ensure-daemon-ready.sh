@@ -39,12 +39,8 @@ BUN_BIN_DIR="${HOME}/.bun/bin"
 export PATH="${BUN_BIN_DIR}:${PATH}"
 hash -r 2>/dev/null || true
 
-# Give the cold-runner daemon a realistic startup ceiling. The default is 10s
-# (DAEMON_STARTUP_TIMEOUT_MS, src/daemon/constants.ts), which a cold CI runner can
-# exceed on the first `--daemon start` below — surfacing a misleading
-# "Daemon failed to start within 10000ms" line even though the health-poll loop
-# then brings it up fine. Raise it to 30s so the first attempt reports success
-# instead of a scary error. An explicit outer override still wins.
+# Use the standard 30s daemon startup ceiling on cold CI runners. An explicit
+# outer override still wins.
 export AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS="${AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS:-30000}"
 
 # Persist the bin dir for the *subsequent* workflow steps: `swift test` spawns

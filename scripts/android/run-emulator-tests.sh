@@ -320,7 +320,7 @@ echo "Working directory: $(pwd)"
 echo "About to execute: $TEST_SCRIPT"
 echo ""
 
-# Increase daemon startup timeout for CI environments (default 10s is too short)
+# Increase daemon startup timeout for CI environments (default 30s is too short)
 # The emulator environment is slower, so we give the daemon more time to start
 export AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS=60000
 echo "AutoMobile configuration:"

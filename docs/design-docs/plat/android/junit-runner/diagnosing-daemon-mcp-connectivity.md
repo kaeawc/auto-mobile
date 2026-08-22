@@ -24,17 +24,14 @@ When the daemon log includes **`Full error: {"code":"ConnectionRefused",…}`**,
 
 When **`automobile.debug=true`** (or your CI already prints it), stderr often includes:
 
-- **`Logs: ~/.auto-mobile/logs/daemon-launch-<pid>.log`**
+- **`Logs: /tmp/auto-mobile-daemon-…/daemon.log`**
 
 Open that file on the failed job artifact or add a step to **`cat`** it after tests. Look for:
 
 - **`Error forwarding request to MCP server`** — confirms the failure is the **HTTP MCP client**, not ADB or YAML.
 - The **stack trace** immediately after that line.
 
-If you do not have the path in logs, search
-the resolved directory from
-[CI daemon logs](ci-daemon-logs.md#resolve-the-log-directory-in-shell) for
-`daemon*.log` in the job’s post-failure script.
+If you do not have the path in logs, search under **`/tmp`** for **`auto-mobile-daemon`** or **`daemon.log`** in the job’s post-failure script.
 
 ### 2. Check proxy environment variables
 

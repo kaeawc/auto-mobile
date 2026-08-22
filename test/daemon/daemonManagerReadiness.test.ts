@@ -97,10 +97,9 @@ describe("DaemonManager readiness", () => {
   function createPaths(): { dir: string; lockPath: string; pidPath: string; socketPath: string } {
     const dir = mkdtempSync(join(tmpdir(), "daemon-readiness-test-"));
     tempDirs.push(dir);
-    // Keep the daemon launch log inside this test's temp dir instead of the
-    // shared `os.tmpdir()/auto-mobile` default.
+    // Keep the daemon launch log inside this test's temp dir instead of the real
+    // `~/.auto-mobile/logs` default (see tempDir.resolveAutoMobileBaseDir).
     process.env.AUTOMOBILE_DATA_DIR = dir;
-    process.env.AUTOMOBILE_LOG_DIR = join(dir, "logs");
     return {
       dir,
       lockPath: join(dir, "daemon.lock"),
@@ -131,7 +130,6 @@ describe("DaemonManager readiness", () => {
     }
     tempDirs.length = 0;
     delete process.env.AUTOMOBILE_DATA_DIR;
-    delete process.env.AUTOMOBILE_LOG_DIR;
   });
 
   test("reports ready only after the daemon socket accepts a connection", async () => {

@@ -20,10 +20,6 @@
 #   0 - All benchmarks passed or no comparisons were requested
 #   1 - One or more regressions detected or error occurred
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=scripts/lib/auto-mobile-log-dir.sh disable=SC1091
-source "$SCRIPT_DIR/lib/auto-mobile-log-dir.sh"
-
 DEFAULT_TIMEOUT_MS=15000
 GLOBAL_TIMEOUT_MS=30000
 MCP_PROTOCOL_VERSION="2024-11-05"
@@ -31,6 +27,8 @@ STDERR_TAIL_LINES=20
 verbose="false"
 script_start_ms=""
 current_operation=""
+benchmark_log_dir=""
+benchmark_owns_log_dir="false"
 child_pids=()
 # File-backed PID tracking so subshells (from command substitutions) can
 # share tracked PIDs with the main shell's cleanup handlers.
@@ -120,10 +118,8 @@ global_timeout_handler() {
   fi
   echo "" >&2
 
-  # Show daemon logs in the same location used by the runtime.
-  local automobile_log_dir
-  automobile_log_dir="$(resolve_automobile_log_dir)"
-  for log_file in "$automobile_log_dir"/daemon*.log; do
+  # The benchmark exports this exact directory to every child process.
+  for log_file in "$benchmark_log_dir"/daemon*.log; do
     if [[ -f "$log_file" && -s "$log_file" ]]; then
       echo "Daemon log ($log_file):" >&2
       tail -n 30 "$log_file" 2>/dev/null | sed 's/^/  /' >&2 || true
@@ -1035,6 +1031,25 @@ fi
 require_command bun
 require_command jq
 
+# Give benchmark children one explicit log destination. This keeps timeout
+# diagnostics independent of the runtime's platform-specific default. Git Bash
+# needs a native Windows value for Bun and a POSIX spelling for shell reads.
+if [[ -n "${AUTOMOBILE_LOG_DIR:-}" ]]; then
+  benchmark_log_dir="$AUTOMOBILE_LOG_DIR"
+  if [[ "${OS:-}" == "Windows_NT" ]] && command -v cygpath >/dev/null 2>&1; then
+    benchmark_log_dir="$(cygpath -u "$AUTOMOBILE_LOG_DIR")"
+  fi
+else
+  benchmark_log_dir="$(mktemp -d "${TMPDIR:-/tmp}/auto-mobile-benchmark-logs.XXXXXX")"
+  benchmark_owns_log_dir="true"
+  if [[ "${OS:-}" == "Windows_NT" ]] && command -v cygpath >/dev/null 2>&1; then
+    AUTOMOBILE_LOG_DIR="$(cygpath -w "$benchmark_log_dir")"
+  else
+    AUTOMOBILE_LOG_DIR="$benchmark_log_dir"
+  fi
+  export AUTOMOBILE_LOG_DIR
+fi
+
 # Cleanup handler to kill all tracked children on exit
 # shellcheck disable=SC2317,SC2329  # Function is invoked indirectly via trap
 cleanup_on_exit() {
@@ -1043,6 +1058,9 @@ cleanup_on_exit() {
   stop_global_timeout_monitor
   _kill_all_tracked_pids KILL
   rm -f "$_pid_tracking_file"
+  if [[ "$benchmark_owns_log_dir" == "true" ]]; then
+    rm -rf "$benchmark_log_dir"
+  fi
 }
 
 # Setup global timeout handler

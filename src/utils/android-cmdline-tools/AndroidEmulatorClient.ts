@@ -1322,6 +1322,51 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     }
   }
 
+  private async getRunningAVDName(
+    device: BootedDevice,
+    infoTimeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    const deviceId = device.deviceId;
+    const adbWithDevice = this.adbFactory.create(device);
+    try {
+      const result = await adbWithDevice.executeCommand(
+        "emu avd name",
+        infoTimeoutMs,
+        undefined,
+        true,
+        signal,
+      );
+      const avdName = result.stdout.trim().replace(/\r?\n.*$/, "");
+      logger.debug(
+        `AVD name detection for ${deviceId}: raw="${result.stdout}" (${result.stdout.length} chars), cleaned="${avdName}"`,
+      );
+      if (avdName) {
+        return avdName;
+      }
+    } catch (error) {
+      logger.debug(`Failed to get AVD name for ${deviceId}: ${error}`);
+    }
+
+    try {
+      const result = await adbWithDevice.executeCommand(
+        "shell getprop ro.boot.qemu.avd_name",
+        infoTimeoutMs,
+        undefined,
+        true,
+        signal,
+      );
+      const avdName = result.stdout.trim().replace(/\r?\n.*$/, "");
+      logger.debug(
+        `AVD name property fallback for ${deviceId}: raw="${result.stdout}" (${result.stdout.length} chars), cleaned="${avdName}"`,
+      );
+      return avdName;
+    } catch (error) {
+      logger.debug(`Failed to get AVD name property for ${deviceId}: ${error}`);
+      return "";
+    }
+  }
+
   /**
    * Like {@link getBootedDevices} but rethrows discovery failures (e.g. adb
    * unreachable) instead of swallowing them into an empty list. Callers that
@@ -1353,40 +1398,15 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       perf.startOperation("avdNameResolution");
       for (const device of emulatorDevices) {
         const deviceId = device.deviceId;
-        try {
-          // Try to get the AVD name from the running emulator
-          const adbWithDevice = this.adbFactory.create(device);
-          const result = await adbWithDevice.executeCommand(
-            "emu avd name",
-            infoTimeoutMs,
-            undefined,
-            true,
-            signal,
-          );
-          const avdName = result.stdout.trim().replace(/\r?\n.*$/, ""); // Remove any trailing newlines and additional text
+        const avdName = await this.getRunningAVDName(device, infoTimeoutMs, signal);
 
-          logger.debug(
-            `AVD name detection for ${deviceId}: raw="${result.stdout}" (${result.stdout.length} chars), cleaned="${avdName}"`,
-          );
-
-          runningDevices.push({
-            ...device,
-            name: avdName || this.unknownEmulatorName(deviceId),
-            platform: "android",
-            deviceId: deviceId,
-            source: "local",
-          });
-        } catch (error) {
-          // If we can't get the AVD name, just use the device ID
-          logger.debug(`Failed to get AVD name for ${deviceId}: ${error}`);
-          runningDevices.push({
-            ...device,
-            name: this.unknownEmulatorName(deviceId),
-            platform: "android",
-            deviceId: deviceId,
-            source: "local",
-          });
-        }
+        runningDevices.push({
+          ...device,
+          name: avdName || this.unknownEmulatorName(deviceId),
+          platform: "android",
+          deviceId: deviceId,
+          source: "local",
+        });
       }
 
       for (const device of physicalDevices) {

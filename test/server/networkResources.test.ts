@@ -1,6 +1,8 @@
-import { describe, it, expect } from "bun:test";
+import { afterEach, describe, it, expect } from "bun:test";
 import { aggregateStatsByHost, bucketEvents } from "../../src/server/networkResources";
+import { registerNetworkResources } from "../../src/server/networkResources";
 import type { NetworkEventWithId } from "../../src/db/networkEventRepository";
+import { ResourceRegistry } from "../../src/server/resourceRegistry";
 
 function makeEvent(overrides: Partial<NetworkEventWithId> = {}): NetworkEventWithId {
   return {
@@ -156,5 +158,22 @@ describe("aggregateStatsByHost", () => {
     expect(Object.keys(stats).sort()).toEqual(["api.example.com", "constructor"]);
     expect(stats["constructor"].errors).toBe(0);
     expect(stats["api.example.com"].errors).toBe(1);
+  });
+});
+
+describe("network resource registration", () => {
+  afterEach(() => {
+    ResourceRegistry.clearResources();
+  });
+
+  it("registers one raw query template for traffic filters", () => {
+    registerNetworkResources();
+
+    const templates = ResourceRegistry.getAllTemplates()
+      .filter(template => template.uriTemplate.startsWith("automobile:network/traffic?"));
+
+    expect(templates.map(template => template.uriTemplate)).toEqual([
+      "automobile:network/traffic?{params}"
+    ]);
   });
 });

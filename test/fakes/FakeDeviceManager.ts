@@ -43,14 +43,19 @@ export class FakeDeviceManager implements PlatformDeviceManager {
     const requested: Platform[] = platform === "either" ? ["android", "ios"] : [platform];
     const devices: BootedDevice[] = [];
     const succeededPlatforms = new Set<Platform>();
+    const discoveryErrors: BootedDeviceDiscovery["discoveryErrors"] = {};
     for (const p of requested) {
       if (this.failedPlatforms.has(p)) {
+        discoveryErrors[p] = {
+          code: "unavailable",
+          message: `${p === "ios" ? "iOS" : "Android"} booted-device discovery is unavailable.`,
+        };
         continue;
       }
       succeededPlatforms.add(p);
       devices.push(...this.bootedDevices.filter(device => device.platform === p));
     }
-    return { devices, succeededPlatforms };
+    return { devices, succeededPlatforms, discoveryErrors };
   }
 
   async startDevice(device: DeviceInfo, timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS): Promise<ChildProcess> {

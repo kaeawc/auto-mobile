@@ -126,12 +126,28 @@ Entries are ordered newest-first by the app record's `updated_at`.
 Returns booted device inventory across Android and iOS, including:
 
 - Total, per-platform, virtual, and physical device counts
+- `observationComplete` plus a per-platform completion/error result, so an
+  empty device list is only treated as durable absence after discovery completed
 - Optional daemon pool status (idle/assigned/error) when the daemon is active
 - Per-device pool assignment (status + session UUID) when available
+- Stable device identity, transient connection identity, lifecycle state,
+  runtime, form factor, readiness, and automation capability status
 
 **URI Template**: `automobile:devices/booted/{platform}`
 
 This resource supersedes the device data that the `listDevices` tool used to return. `listDevices` still exists as an MCP tool, but now returns **resource guidance** — a message pointing callers at these resource URIs — rather than device data (see `listDevicesHandler` in `src/server/deviceTools.ts`). The separate `daemon_available_devices` tool was removed.
+
+### Device Images
+
+**URI**: `automobile:devices/images`
+
+Returns startable Android AVDs and iOS simulators plus a normalized
+`provisioningCatalog`. The catalog lists available runtimes, device types,
+Android system images, and Android device profiles where the installed platform
+tools expose them. `catalogComplete` and per-platform `catalogObservations`
+show whether the catalog can safely be used for provisioning decisions.
+
+**URI Template**: `automobile:devices/images/{platform}`
 
 ### Installed Apps
 

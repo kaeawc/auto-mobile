@@ -5,18 +5,15 @@ import {
   PERFORMANCE_RESULTS_LIMIT_MAX,
   type PerformanceAuditQueryArgs,
 } from "./performanceData";
+import { queryParamsToRecord } from "./queryParamValidation";
 
 const PERFORMANCE_RESOURCE_URIS = {
   BASE: "automobile:performance-results",
 } as const;
 
 const PERFORMANCE_QUERY_KEYS = ["startTime", "endTime", "limit", "offset", "deviceId"] as const;
-type PerformanceQueryKey = typeof PERFORMANCE_QUERY_KEYS[number];
-
-function buildQueryTemplate(keys: readonly PerformanceQueryKey[]): string {
-  const query = keys.map(key => `${key}={${key}}`).join("&");
-  return `${PERFORMANCE_RESOURCE_URIS.BASE}?${query}`;
-}
+const PERFORMANCE_QUERY_TEMPLATE = `${PERFORMANCE_RESOURCE_URIS.BASE}?{params}`;
+const PERFORMANCE_QUERY_PARAM_KEYS = new Set<string>(PERFORMANCE_QUERY_KEYS);
 
 function parseInteger(
   value: string | undefined,
@@ -49,30 +46,35 @@ function parseTimestampParam(value: string | undefined, label: string): string |
     return undefined;
   }
 
-  const decoded = decodeURIComponent(value).trim();
-  if (!decoded) {
+  const normalized = value.trim();
+  if (!normalized) {
     return undefined;
   }
 
-  if (/^-?\d+$/.test(decoded)) {
-    const parsed = Number(decoded);
+  if (/^-?\d+$/.test(normalized)) {
+    const parsed = Number(normalized);
     if (!Number.isFinite(parsed)) {
       throw new Error(`Invalid ${label}: ${value}`);
     }
     return parsed;
   }
 
-  return decoded;
+  return normalized;
 }
 
 function parsePerformanceParams(
   params: Record<string, string>
 ): Pick<PerformanceAuditQueryArgs, "startTime" | "endTime" | "limit" | "offset" | "deviceId"> {
+  const unknownKeys = Object.keys(params).filter(key => !PERFORMANCE_QUERY_PARAM_KEYS.has(key));
+  if (unknownKeys.length > 0) {
+    throw new Error(`Unknown query parameters: ${unknownKeys.join(", ")}`);
+  }
+
   const startTime = parseTimestampParam(params.startTime, "startTime");
   const endTime = parseTimestampParam(params.endTime, "endTime");
-  const limitRaw = params.limit ? decodeURIComponent(params.limit).trim() : undefined;
-  const offsetRaw = params.offset ? decodeURIComponent(params.offset).trim() : undefined;
-  const deviceIdRaw = params.deviceId ? decodeURIComponent(params.deviceId).trim() : undefined;
+  const limitRaw = params.limit?.trim();
+  const offsetRaw = params.offset?.trim();
+  const deviceIdRaw = params.deviceId?.trim();
 
   return {
     startTime,
@@ -128,22 +130,6 @@ async function getPerformanceResource(
   }
 }
 
-function registerPerformanceTemplates(
-  handler: (params: Record<string, string>) => Promise<ResourceContent>
-): void {
-  const keyCount = PERFORMANCE_QUERY_KEYS.length;
-  for (let mask = 1; mask < (1 << keyCount); mask += 1) {
-    const keys = PERFORMANCE_QUERY_KEYS.filter((_, index) => (mask & (1 << index)) !== 0);
-    ResourceRegistry.registerTemplate(
-      buildQueryTemplate(keys),
-      "Performance Results",
-      "List UI performance audit results from the local database.",
-      "application/json",
-      handler
-    );
-  }
-}
-
 export function registerPerformanceResources(): void {
   ResourceRegistry.register(
     PERFORMANCE_RESOURCE_URIS.BASE,
@@ -153,9 +139,15 @@ export function registerPerformanceResources(): void {
     () => getPerformanceResource({}, PERFORMANCE_RESOURCE_URIS.BASE)
   );
 
-  registerPerformanceTemplates(async params => {
+  ResourceRegistry.registerTemplate(
+    PERFORMANCE_QUERY_TEMPLATE,
+    "Performance Results",
+    "List UI performance audit results from the local database.",
+    "application/json",
+    async params => {
     try {
-      const options = parsePerformanceParams(params);
+      const queryParams = queryParamsToRecord(params.params ?? "");
+      const options = parsePerformanceParams(queryParams);
       const uri = buildPerformanceUri(options);
       return getPerformanceResource(options, uri);
     } catch (error) {

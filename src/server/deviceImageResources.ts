@@ -4,7 +4,17 @@ import { AvdManagerService } from "../utils/android-cmdline-tools/AvdManagerServ
 import { AvdManager } from "../utils/android-cmdline-tools/interfaces/AvdManager";
 import { logger } from "../utils/logger";
 import { DeviceInfo, Platform } from "../models";
-import { AvdInfo } from "../utils/android-cmdline-tools/avdmanager";
+import {
+  AvdInfo,
+  type DeviceProfile,
+  type SystemImage,
+} from "../utils/android-cmdline-tools/avdmanager";
+import {
+  SimCtlClient,
+  type AppleDeviceRuntime,
+  type AppleDeviceType,
+  type SimCtl,
+} from "../utils/ios-cmdline-tools/SimCtlClient";
 
 // Resource URIs
 export const DEVICE_IMAGE_RESOURCE_URIS = {
@@ -34,12 +44,62 @@ interface DeviceImageInfo {
   architecture?: string;
 }
 
+interface ProvisioningRuntime {
+  platform: Platform;
+  id: string;
+  name: string;
+  version?: string;
+  available?: boolean;
+}
+
+interface ProvisioningDeviceType {
+  platform: Platform;
+  id: string;
+  name: string;
+  family?: string;
+}
+
+interface ProvisioningSystemImage {
+  platform: "android";
+  id: string;
+  name: string;
+  apiLevel: number;
+  tag: string;
+  abi: string;
+  version: string;
+}
+
+interface ProvisioningProfile {
+  platform: "android";
+  id: string;
+  name: string;
+  manufacturer?: string;
+}
+
+interface ProvisioningCatalog {
+  runtimes: ProvisioningRuntime[];
+  deviceTypes: ProvisioningDeviceType[];
+  systemImages: ProvisioningSystemImage[];
+  profiles: ProvisioningProfile[];
+}
+
+interface ProvisioningCatalogObservation {
+  catalogComplete: boolean;
+  error?: {
+    code: "unavailable" | "failed";
+    message: string;
+  };
+}
+
 // Resource content schema
 export interface DeviceImagesResourceContent {
   totalCount: number;
   androidCount: number;
   iosCount: number;
   lastUpdated: string;  // ISO 8601
+  catalogComplete: boolean;
+  catalogObservations: Partial<Record<Platform, ProvisioningCatalogObservation>>;
+  provisioningCatalog: ProvisioningCatalog;
   images: DeviceImageInfo[];
 }
 
@@ -47,6 +107,7 @@ export interface DeviceImagesResourceContent {
 interface DeviceImageResourcesDependencies {
   deviceManager: PlatformDeviceManager;
   avdManager: AvdManager;
+  simctl: Pick<SimCtl, "getDeviceTypes" | "getRuntimes">;
 }
 
 /**
@@ -63,57 +124,34 @@ export function createDeviceImageResourcesHandler(
 } {
   const deviceManager = deps?.deviceManager ?? new MultiPlatformDeviceManager();
   const avdManager = deps?.avdManager ?? new AvdManagerService();
+  // Tests often inject only the Android/device seam. Avoid creating a real simctl
+  // client in those partial fakes; production construction always includes it.
+  const simctl = deps?.simctl ?? (deps ? undefined : new SimCtlClient());
 
   const getDeviceImagesForPlatformsImpl = async (platforms: Platform[]): Promise<DeviceImagesResourceContent> => {
     const images: DeviceImageInfo[] = [];
-    let androidCount = 0;
-    let iosCount = 0;
+    const provisioningCatalog: ProvisioningCatalog = {
+      runtimes: [],
+      deviceTypes: [],
+      systemImages: [],
+      profiles: [],
+    };
+    const catalogObservations: Partial<Record<Platform, ProvisioningCatalogObservation>> = {};
+    const androidCount = platforms.includes("android")
+      ? await appendAndroidImages(deviceManager, avdManager, images)
+      : 0;
+    if (platforms.includes("android")) {
+      catalogObservations.android = await buildAndroidProvisioningCatalog(
+        avdManager,
+        provisioningCatalog
+      );
+    }
 
-    try {
-      // Fetch Android device images if requested
-      if (platforms.includes("android")) {
-        try {
-          const androidDevices = await deviceManager.listDeviceImages("android");
-          let avdInfoList: AvdInfo[] = [];
-
-          // Try to get extended AVD info
-          try {
-            avdInfoList = await avdManager.listDeviceImages();
-          } catch (error) {
-            logger.warn(`[DeviceImageResources] Failed to get extended AVD info: ${error}`);
-          }
-
-          // Create a map for quick lookup
-          const avdInfoMap = new Map<string, AvdInfo>();
-          for (const avd of avdInfoList) {
-            avdInfoMap.set(avd.name, avd);
-          }
-
-          // Merge device info with extended AVD info
-          for (const device of androidDevices) {
-            const avdInfo = avdInfoMap.get(device.name);
-            images.push(toDeviceImageInfo(device, avdInfo));
-            androidCount++;
-          }
-        } catch (error) {
-          logger.warn(`[DeviceImageResources] Failed to list Android device images: ${error}`);
-        }
-      }
-
-      // Fetch iOS simulator images if requested
-      if (platforms.includes("ios")) {
-        try {
-          const iosDevices = await deviceManager.listDeviceImages("ios");
-          for (const device of iosDevices) {
-            images.push(toDeviceImageInfo(device));
-            iosCount++;
-          }
-        } catch (error) {
-          logger.warn(`[DeviceImageResources] Failed to list iOS simulator images: ${error}`);
-        }
-      }
-    } catch (error) {
-      logger.error(`[DeviceImageResources] Error fetching device images: ${error}`);
+    const iosCount = platforms.includes("ios")
+      ? await appendIosImages(deviceManager, images)
+      : 0;
+    if (platforms.includes("ios")) {
+      catalogObservations.ios = await buildIosProvisioningCatalog(simctl, provisioningCatalog);
     }
 
     return {
@@ -121,6 +159,9 @@ export function createDeviceImageResourcesHandler(
       androidCount,
       iosCount,
       lastUpdated: new Date().toISOString(),
+      catalogComplete: platforms.every(platform => catalogObservations[platform]?.catalogComplete === true),
+      catalogObservations,
+      provisioningCatalog,
       images
     };
   };
@@ -161,6 +202,179 @@ export function createDeviceImageResourcesHandler(
     getDeviceImagesByPlatform: getDeviceImagesByPlatformImpl,
     getDeviceImagesForPlatforms: getDeviceImagesForPlatformsImpl
   };
+}
+
+async function appendAndroidImages(
+  deviceManager: PlatformDeviceManager,
+  avdManager: AvdManager,
+  images: DeviceImageInfo[]
+): Promise<number> {
+  try {
+    const [androidDevices, avdInfoList] = await Promise.all([
+      deviceManager.listDeviceImages("android"),
+      readAvdInfo(avdManager),
+    ]);
+    const avdInfoByName = new Map(avdInfoList.map(avd => [avd.name, avd]));
+    for (const device of androidDevices) {
+      images.push(toDeviceImageInfo(device, avdInfoByName.get(device.name)));
+    }
+    return androidDevices.length;
+  } catch (error) {
+    logger.warn(`[DeviceImageResources] Failed to list Android device images: ${error}`);
+    return 0;
+  }
+}
+
+async function readAvdInfo(avdManager: AvdManager): Promise<AvdInfo[]> {
+  try {
+    return await avdManager.listDeviceImages();
+  } catch (error) {
+    logger.warn(`[DeviceImageResources] Failed to get extended AVD info: ${error}`);
+    return [];
+  }
+}
+
+async function appendIosImages(
+  deviceManager: PlatformDeviceManager,
+  images: DeviceImageInfo[]
+): Promise<number> {
+  try {
+    const iosDevices = await deviceManager.listDeviceImages("ios");
+    for (const device of iosDevices) {
+      images.push(toDeviceImageInfo(device));
+    }
+    return iosDevices.length;
+  } catch (error) {
+    logger.warn(`[DeviceImageResources] Failed to list iOS simulator images: ${error}`);
+    return 0;
+  }
+}
+
+async function buildAndroidProvisioningCatalog(
+  avdManager: AvdManager,
+  catalog: ProvisioningCatalog
+): Promise<ProvisioningCatalogObservation> {
+  try {
+    const [systemImages, profiles] = await Promise.all([
+      avdManager.listSystemImages(),
+      avdManager.listDevices(),
+    ]);
+    appendAndroidProvisioningCatalog(catalog, systemImages, profiles);
+    return { catalogComplete: true };
+  } catch (error) {
+    logger.warn(`[DeviceImageResources] Failed to build Android provisioning catalog: ${error}`);
+    return failedCatalogObservation("Android", error);
+  }
+}
+
+async function buildIosProvisioningCatalog(
+  simctl: Pick<SimCtl, "getDeviceTypes" | "getRuntimes"> | undefined,
+  catalog: ProvisioningCatalog
+): Promise<ProvisioningCatalogObservation> {
+  if (!simctl) {
+    return {
+      catalogComplete: false,
+      error: {
+        code: "unavailable",
+        message: "iOS provisioning catalog is unavailable.",
+      },
+    };
+  }
+
+  try {
+    const [runtimes, deviceTypes] = await Promise.all([
+      simctl.getRuntimes(),
+      simctl.getDeviceTypes(),
+    ]);
+    appendIosProvisioningCatalog(catalog, runtimes, deviceTypes);
+    return { catalogComplete: true };
+  } catch (error) {
+    logger.warn(`[DeviceImageResources] Failed to build iOS provisioning catalog: ${error}`);
+    return failedCatalogObservation("iOS", error);
+  }
+}
+
+function failedCatalogObservation(
+  platform: "Android" | "iOS",
+  error: unknown
+): ProvisioningCatalogObservation {
+  return {
+    catalogComplete: false,
+    error: {
+      code: "failed",
+      message: `${platform} provisioning catalog failed: ${errorMessage(error)}`,
+    },
+  };
+}
+
+function appendAndroidProvisioningCatalog(
+  catalog: ProvisioningCatalog,
+  systemImages: SystemImage[],
+  profiles: DeviceProfile[]
+): void {
+  for (const image of systemImages) {
+    catalog.runtimes.push({
+      platform: "android",
+      id: image.packageName,
+      name: image.versionInfo,
+      version: String(image.apiLevel),
+      available: true,
+    });
+    catalog.systemImages.push({
+      platform: "android",
+      id: image.packageName,
+      name: image.versionInfo,
+      apiLevel: image.apiLevel,
+      tag: image.tag,
+      abi: image.abi,
+      version: String(image.apiLevel),
+    });
+  }
+
+  for (const profile of profiles) {
+    const name = profile.name ?? profile.id;
+    catalog.deviceTypes.push({
+      platform: "android",
+      id: profile.id,
+      name,
+      ...(profile.oem ? { family: profile.oem } : {}),
+    });
+    catalog.profiles.push({
+      platform: "android",
+      id: profile.id,
+      name,
+      ...(profile.oem ? { manufacturer: profile.oem } : {}),
+    });
+  }
+}
+
+function appendIosProvisioningCatalog(
+  catalog: ProvisioningCatalog,
+  runtimes: AppleDeviceRuntime[],
+  deviceTypes: AppleDeviceType[]
+): void {
+  for (const runtime of runtimes) {
+    catalog.runtimes.push({
+      platform: "ios",
+      id: runtime.identifier,
+      name: runtime.name,
+      version: runtime.version,
+      available: runtime.isAvailable,
+    });
+  }
+
+  for (const deviceType of deviceTypes) {
+    catalog.deviceTypes.push({
+      platform: "ios",
+      id: deviceType.identifier,
+      name: deviceType.name,
+      family: deviceType.productFamily,
+    });
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 // Convert DeviceInfo to DeviceImageInfo, merging with AvdInfo for Android

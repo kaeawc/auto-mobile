@@ -40,6 +40,16 @@ describe("session-scoped tool discovery", () => {
     expect(binding.effectiveCapabilityProfileUuid(undefined)).toBe("capability-profile-1");
   });
 
+  test("binds a device session returned by direct startup", () => {
+    const binding = new SessionToolBinding();
+
+    expect(binding.bind(undefined, "device-session-a")).toBe(true);
+    expect(binding.effectiveSessionUuid(undefined)).toBe("device-session-a");
+    expect(binding.bind(undefined, "device-session-a")).toBe(false);
+    expect(binding.unbindSession("device-session-a")).toBe(true);
+    expect(binding.effectiveSessionUuid(undefined)).toBeUndefined();
+  });
+
   test("seeds only a recreated transport's initial session binding", () => {
     const binding = new SessionToolBinding("device-session-a");
 

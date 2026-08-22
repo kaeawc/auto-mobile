@@ -210,6 +210,14 @@ describe("DefaultObserveScreenshotRecorder.capture", () => {
 
     expect(store.getError("test-device")).toBe("network down");
   });
+
+  test("capture() coalesces ordinary work so a fresh capture is not cancelled", async () => {
+    svc.setNextResult({ success: false, error: OPERATION_CANCELLED_MESSAGE });
+
+    await recorder.capture(new NoOpPerformanceTracker());
+
+    expect(svc.lastTrackerOptions?.coalesceWithPending).toBe(true);
+  });
 });
 
 describe("DefaultObserveScreenshotRecorder.start", () => {

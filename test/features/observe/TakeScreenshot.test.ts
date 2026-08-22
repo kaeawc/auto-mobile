@@ -6,6 +6,8 @@ import { FakeFileSystem } from "../../fakes/FakeFileSystem";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
+import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
+import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 
 describe("TakeScreenshot", function() {
   describe("Unit Tests for Extracted Methods", function() {
@@ -111,6 +113,48 @@ describe("TakeScreenshot", function() {
       expect(calledCommand).toContain("rm"); // Should cleanup temp file in same command
 
       expect(result.success).toBe(true);
+    });
+  });
+
+  describe("iOS cancellation", function() {
+    test("does not write or publish a screenshot after the request is cancelled", async function() {
+      const iosDevice: BootedDevice = {
+        name: "iPhone",
+        platform: "ios",
+        deviceId: "ios-device-id",
+        source: "local",
+      };
+      const controller = new AbortController();
+      const originalGetInstance = IOSCtrlProxyClient.getInstance;
+      let requestScreenshotCalls = 0;
+      IOSCtrlProxyClient.getInstance = (() => ({
+        ensureConnected: async () => true,
+        requestScreenshot: async () => {
+          requestScreenshotCalls++;
+          controller.abort();
+          return {
+            success: true,
+            data: Buffer.from("image").toString("base64"),
+          };
+        },
+      })) as typeof IOSCtrlProxyClient.getInstance;
+
+      try {
+        const screenshot = new TakeScreenshot(
+          iosDevice,
+          new FakeAdbClientFactory(new FakeAdbExecutor()),
+        );
+
+        const result = await screenshot.execute({ format: "png" }, controller.signal);
+
+        expect(requestScreenshotCalls).toBe(1);
+        expect(result).toEqual({
+          success: false,
+          error: OPERATION_CANCELLED_MESSAGE,
+        });
+      } finally {
+        IOSCtrlProxyClient.getInstance = originalGetInstance;
+      }
     });
   });
 

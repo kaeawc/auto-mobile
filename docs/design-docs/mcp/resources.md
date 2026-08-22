@@ -151,9 +151,10 @@ show whether the catalog can safely be used for provisioning decisions.
 
 ### Session Observations
 
-Session-scoped observation resources take the `sessionUuid` returned by
-`startDevice`. They resolve that active session to its assigned device and reject
-released or rebound sessions rather than accepting a second device selector.
+Session-scoped observation resources take the `sessionId` returned by
+`startDevice` as their `{sessionUuid}` segment. They resolve that active session
+to its assigned device and reject released or rebound sessions rather than
+accepting a second device selector.
 
 **URI Template**: `automobile:observation/session/{sessionUuid}/latest`
 

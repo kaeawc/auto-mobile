@@ -20,6 +20,7 @@ import {
 import {
   clearDirectSessionDevices,
   registerDirectSessionDevice,
+  resolveDirectSessionDevice,
 } from "../../src/server/directSessionDeviceRegistry";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
@@ -35,7 +36,10 @@ function activeSession(device: BootedDevice = sessionDevice) {
   return { sessionUuid, device };
 }
 
-function readTemplate(uri: string, context: ResourceReadContext = {}) {
+function readTemplate(
+  uri: string,
+  context: ResourceReadContext = { sessionUuid },
+) {
   registerObservationResources();
   const match = ResourceRegistry.matchTemplate(uri);
   expect(match).toBeDefined();
@@ -162,6 +166,25 @@ describe("session screenshot resources", () => {
     expect(screenshotServiceCalls).toBe(0);
   });
 
+  test("rejects session resource reads without a bound session", async () => {
+    let resolveCalls = 0;
+    setSessionScreenshotResourceDependencies({
+      resolveActiveSession: () => {
+        resolveCalls++;
+        return activeSession();
+      },
+      createScreenshotService: () => createTrackedScreenshot({ success: true }),
+    });
+
+    const content = await readTemplate(
+      "automobile:observation/session/session-123/latest",
+      {},
+    );
+
+    expect(JSON.parse(content.text!).error).toContain("bound device session");
+    expect(resolveCalls).toBe(0);
+  });
+
   test("returns a fresh PNG capture for an active session", async () => {
     const image = Buffer.from("fresh screenshot");
     let captureDevice: BootedDevice | undefined;
@@ -231,8 +254,34 @@ describe("session screenshot resources", () => {
     const content = await contentPromise;
 
     expect(freshCaptureCount).toBe(1);
-    expect(freshTrackerOptions).toEqual({ queueAfterPending: true });
+    expect(freshTrackerOptions).toMatchObject({ queueAfterPending: true });
     expect(content.blob).toBe(image.toString("base64"));
+  });
+
+  test("forwards the resource read cancellation signal to the fresh capture", async () => {
+    const controller = new AbortController();
+    let receivedSignal: AbortSignal | undefined;
+    setSessionScreenshotResourceDependencies({
+      resolveActiveSession: () => activeSession(),
+      createScreenshotService: () => ({
+        ...createTrackedScreenshot({ success: false, error: "cancelled" }),
+        startTrackedCapture(_options, trackerOptions) {
+          receivedSignal = trackerOptions?.parentSignal;
+          return ScreenshotJobTracker.startJob(
+            sessionDevice.deviceId,
+            async () => ({ success: false, error: "cancelled" }),
+            trackerOptions,
+          );
+        },
+      }),
+    });
+
+    await readTemplate(
+      "automobile:device-session/session-123/screenshot",
+      { sessionUuid, signal: controller.signal },
+    );
+
+    expect(receivedSignal).toBe(controller.signal);
   });
 
   test("rejects a fresh capture when the session no longer owns its device", async () => {
@@ -254,5 +303,16 @@ describe("session screenshot resources", () => {
 
     expect(content.mimeType).toBe("application/json");
     expect(JSON.parse(content.text!).error).toContain("No active device session found");
+  });
+
+  test("replaces an older direct session for the same device", () => {
+    registerDirectSessionDevice("session-old", sessionDevice);
+    registerDirectSessionDevice("session-new", sessionDevice);
+
+    expect(resolveDirectSessionDevice("session-old")).toBeUndefined();
+    expect(resolveDirectSessionDevice("session-new")).toEqual({
+      sessionUuid: "session-new",
+      device: sessionDevice,
+    });
   });
 });

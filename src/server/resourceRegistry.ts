@@ -5,6 +5,7 @@ import { ListChangedBroadcaster } from "./listChangedBroadcast";
 
 export interface ResourceReadContext {
   sessionUuid?: string;
+  signal?: AbortSignal;
 }
 
 // Interface for resource content handlers
@@ -272,7 +273,7 @@ class ResourceRegistryClass {
   // Register all resources with an MCP server
   registerWithServer(
     server: McpServer,
-    getReadContext: () => ResourceReadContext = () => ({}),
+    getReadContext: (signal: AbortSignal) => ResourceReadContext = () => ({}),
   ): void {
     this.trackServer(server);
 
@@ -284,7 +285,7 @@ class ResourceRegistryClass {
     });
 
     // Set handler for reading resource content
-    server.server.setRequestHandler(ReadResourceRequestSchema, async request => {
+    server.server.setRequestHandler(ReadResourceRequestSchema, async (request, extra) => {
       const { uri } = request.params;
       logger.info(`[ResourceRegistry] ReadResource request for URI: ${uri}`);
 
@@ -319,7 +320,7 @@ class ResourceRegistryClass {
       if (templateMatch) {
         const { template, params } = templateMatch;
         const content = "handlerWithReadContext" in template
-          ? await template.handlerWithReadContext(params, getReadContext())
+          ? await template.handlerWithReadContext(params, getReadContext(extra.signal))
           : await template.handler(params);
         return {
           contents: [content]

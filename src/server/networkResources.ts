@@ -8,7 +8,6 @@ import {
 import { NetworkState } from "./NetworkState";
 import { BODY_TRUNCATION_LIMIT } from "../utils/truncateBodyText";
 import { computePercentile } from "../utils/percentile";
-import { queryParamsToRecord } from "./queryParamValidation";
 
 const NETWORK_RESOURCE_URIS = {
   REQUEST: "automobile:network/request/{requestId}",
@@ -32,7 +31,7 @@ const TRAFFIC_QUERY_KEYS = [
   "bucketSeconds",
 ] as const;
 
-const TRAFFIC_QUERY_TEMPLATE = `${NETWORK_RESOURCE_URIS.TRAFFIC}?{params}`;
+const TRAFFIC_QUERY_TEMPLATE = `${NETWORK_RESOURCE_URIS.TRAFFIC}{?${TRAFFIC_QUERY_KEYS.join(",")}}`;
 const TRAFFIC_QUERY_PARAM_KEYS = new Set<string>(TRAFFIC_QUERY_KEYS);
 
 function eventToSummary(event: NetworkEventWithId) {
@@ -269,7 +268,7 @@ export function registerNetworkResources(): void {
     "Network Traffic",
     "Query captured network traffic with optional filters.",
     "application/json",
-    async params => handleTrafficQuery(queryParamsToRecord(params.params ?? ""))
+    async params => handleTrafficQuery(params)
   );
 
   // Single request detail by ID

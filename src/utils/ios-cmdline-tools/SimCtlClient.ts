@@ -1566,12 +1566,26 @@ export class SimCtlClient implements SimCtl {
       signal,
     );
     try {
-      const data = JSON.parse(result.stdout);
+      const data = JSON.parse(result.stdout) as { devicetypes?: AppleDeviceType[] };
       return data.devicetypes ?? [];
     } catch (error) {
       logger.warn(`Failed to parse device types from simctl: ${error}`);
       return [];
     }
+  }
+
+  /** Get device types and preserve malformed simctl output as an error. */
+  async getDeviceTypesChecked(signal?: AbortSignal): Promise<AppleDeviceType[]> {
+    const result = await this.executeCommandArgs(
+      ["list", "devicetypes", "--json"],
+      undefined,
+      signal,
+    );
+    const data = JSON.parse(result.stdout) as { devicetypes?: unknown };
+    if (!Array.isArray(data?.devicetypes)) {
+      throw new Error("simctl device types response does not contain a devicetypes array");
+    }
+    return data.devicetypes as AppleDeviceType[];
   }
 
   /**
@@ -1581,12 +1595,22 @@ export class SimCtlClient implements SimCtl {
   async getRuntimes(): Promise<AppleDeviceRuntime[]> {
     const result = await this.executeCommandArgs(["list", "runtimes", "--json"]);
     try {
-      const data = JSON.parse(result.stdout);
-      return (data.runtimes ?? []).filter((runtime: AppleDeviceRuntime) => runtime.isAvailable);
+      const data = JSON.parse(result.stdout) as { runtimes?: AppleDeviceRuntime[] };
+      return (data.runtimes ?? []).filter(runtime => runtime.isAvailable);
     } catch (error) {
       logger.warn(`Failed to parse runtimes from simctl: ${error}`);
       return [];
     }
+  }
+
+  /** Get available runtimes and preserve malformed simctl output as an error. */
+  async getRuntimesChecked(): Promise<AppleDeviceRuntime[]> {
+    const result = await this.executeCommandArgs(["list", "runtimes", "--json"]);
+    const data = JSON.parse(result.stdout) as { runtimes?: unknown };
+    if (!Array.isArray(data?.runtimes)) {
+      throw new Error("simctl runtimes response does not contain a runtimes array");
+    }
+    return (data.runtimes as AppleDeviceRuntime[]).filter(runtime => runtime.isAvailable);
   }
 
   /**

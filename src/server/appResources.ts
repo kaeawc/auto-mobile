@@ -1,4 +1,8 @@
-import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
+import {
+  ResourceRegistry,
+  ResourceContent,
+  getRequestedResourceUri,
+} from "./resourceRegistry";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import { ListInstalledApps } from "../features/observe/ListInstalledApps";
 import { GetAppMetadata, IosAppMetadataSource } from "../features/observe/GetAppMetadata";
@@ -10,7 +14,6 @@ import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheW
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { getIosInstalledAppBundleId } from "../utils/ios-cmdline-tools/iosInstalledApp";
-import { queryParamsToRecord } from "./queryParamValidation";
 
 // Resource URI templates
 export const APP_RESOURCE_TEMPLATES = {
@@ -24,7 +27,7 @@ export const APPS_RESOURCE_URIS = {
 } as const;
 
 const APPS_QUERY_KEYS = ["deviceId", "platform", "search", "type", "profile"] as const;
-const APPS_QUERY_TEMPLATE = `${APPS_RESOURCE_URIS.BASE}?{params}`;
+const APPS_QUERY_TEMPLATE = `${APPS_RESOURCE_URIS.BASE}{?${APPS_QUERY_KEYS.join(",")}}`;
 const APPS_QUERY_PARAM_KEYS = new Set<string>(APPS_QUERY_KEYS);
 type AppsQueryType = "user" | "system";
 
@@ -861,9 +864,8 @@ export function registerAppResources(): void {
     "application/json",
     async params => {
     try {
-      const queryParams = queryParamsToRecord(params.params ?? "");
-      const options = parseAppsQueryParams(queryParams);
-      const uri = buildAppsUri(options);
+      const options = parseAppsQueryParams(params);
+      const uri = getRequestedResourceUri(params) || buildAppsUri(options);
       return getAppsQueryResource(options, uri);
     } catch (error) {
       logger.error(`[AppResources] Failed to parse apps query params: ${error}`);

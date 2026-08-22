@@ -17,6 +17,7 @@ export class FakeAvdManager implements AvdManager {
     message: "Android SDK licenses accepted"
   };
   private listSystemImagesResponse: SystemImage[] = [];
+  private listInstalledSystemImagesResponse: SystemImage[] = [];
   private installSystemImageResponse: { success: boolean; message: string } = {
     success: true,
     message: "System image installed successfully"
@@ -35,6 +36,7 @@ export class FakeAvdManager implements AvdManager {
   // Call tracking
   private acceptLicensesCalls: number = 0;
   private listSystemImagesCalls: Array<{ filter?: SystemImageFilter }> = [];
+  private listInstalledSystemImagesCalls: Array<{ filter?: SystemImageFilter }> = [];
   private installSystemImageCalls: Array<{ packageName: string; acceptLicense?: boolean }> = [];
   private listDeviceImagesCalls: number = 0;
   private createAvdCalls: Array<{ params: CreateAvdParams }> = [];
@@ -48,6 +50,10 @@ export class FakeAvdManager implements AvdManager {
 
   setListSystemImagesResponse(response: SystemImage[]): void {
     this.listSystemImagesResponse = response;
+  }
+
+  setListInstalledSystemImagesResponse(response: SystemImage[]): void {
+    this.listInstalledSystemImagesResponse = response;
   }
 
   setInstallSystemImageResponse(response: { success: boolean; message: string }): void {
@@ -79,6 +85,10 @@ export class FakeAvdManager implements AvdManager {
     return [...this.listSystemImagesCalls];
   }
 
+  getListInstalledSystemImagesCalls(): Array<{ filter?: SystemImageFilter }> {
+    return [...this.listInstalledSystemImagesCalls];
+  }
+
   getInstallSystemImageCalls(): Array<{ packageName: string; acceptLicense?: boolean }> {
     return [...this.installSystemImageCalls];
   }
@@ -105,6 +115,7 @@ export class FakeAvdManager implements AvdManager {
   clearCallHistory(): void {
     this.acceptLicensesCalls = 0;
     this.listSystemImagesCalls = [];
+    this.listInstalledSystemImagesCalls = [];
     this.installSystemImageCalls = [];
     this.listDeviceImagesCalls = 0;
     this.createAvdCalls = [];
@@ -125,6 +136,11 @@ export class FakeAvdManager implements AvdManager {
   async listSystemImages(filter?: SystemImageFilter): Promise<SystemImage[]> {
     this.listSystemImagesCalls.push({ filter });
     return this.listSystemImagesResponse;
+  }
+
+  async listInstalledSystemImages(filter?: SystemImageFilter): Promise<SystemImage[]> {
+    this.listInstalledSystemImagesCalls.push({ filter });
+    return this.listInstalledSystemImagesResponse;
   }
 
   async installSystemImage(packageName: string, acceptLicense = true): Promise<{

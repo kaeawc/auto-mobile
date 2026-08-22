@@ -5,7 +5,10 @@ import {
   SubscribeRequestSchema,
   UnsubscribeRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { ResourceRegistry } from "../../src/server/resourceRegistry";
+import {
+  getRequestedResourceUri,
+  ResourceRegistry,
+} from "../../src/server/resourceRegistry";
 import { ListChangedBroadcaster } from "../../src/server/listChangedBroadcast";
 
 // Minimal MCP-server stand-in for ResourceRegistry: registerWithServer installs
@@ -125,6 +128,7 @@ describe("ResourceRegistry list-changed fan-out (issue #3223)", () => {
 describe("ResourceRegistry URI-template matching", () => {
   beforeEach(() => {
     ResourceRegistry.clearResources();
+    ResourceRegistry.clearServersForTesting();
   });
 
   test("captures a raw query-string template with multiple query parameters", () => {
@@ -167,5 +171,44 @@ describe("ResourceRegistry URI-template matching", () => {
     expect(JSON.parse(response.contents[0].text!)).toEqual({
       sessionUuid: "session-bound",
     });
+  });
+
+  test("matches an RFC 6570 query expansion in any parameter order", () => {
+    ResourceRegistry.registerTemplate(
+      "automobile:test{?first,second}",
+      "Test",
+      "Test query template",
+      "application/json",
+      async () => ({ uri: "automobile:test", text: "{}" })
+    );
+
+    expect(ResourceRegistry.matchTemplate("automobile:test?second=two&first=one")).toMatchObject({
+      params: { first: "one", second: "two" }
+    });
+  });
+
+  test("retains the requested URI for an RFC 6570 template handler", async () => {
+    const server = new FakeMcpServer();
+    let handlerUri = "";
+    ResourceRegistry.registerTemplate(
+      "automobile:test{?first,second}",
+      "Test",
+      "Test query template",
+      "application/json",
+      async params => {
+        handlerUri = getRequestedResourceUri(params) ?? "";
+        return { uri: handlerUri, text: "{}" };
+      }
+    );
+    ResourceRegistry.registerWithServer(server as unknown as McpServer);
+
+    const readHandler = server.server.handlersBySchema.get(ReadResourceRequestSchema);
+    const requestedUri = "automobile:test?second=two&first=one";
+    const response = await readHandler!({ params: { uri: requestedUri } }) as {
+      contents: Array<{ uri: string }>;
+    };
+
+    expect(handlerUri).toBe(requestedUri);
+    expect(response.contents[0].uri).toBe(requestedUri);
   });
 });

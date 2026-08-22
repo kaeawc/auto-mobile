@@ -4,7 +4,14 @@ import { ResourceRegistry } from "../../../src/server/resourceRegistry";
 import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../../fakes/FakeDeviceSessionPersistence";
-import { setDeviceManager, setDeviceLockProbe, notifyBootedDeviceResourcesUpdated, BootedDevicesResourceContent, DeviceLockStatesResourceContent } from "../../../src/server/bootedDeviceResources";
+import {
+  setDeviceManager,
+  setDeviceLockProbe,
+  notifyBootedDeviceResourcesUpdated,
+  BootedDevicesResourceContent,
+  DeviceLockStatesResourceContent,
+  readinessFromServiceStatus,
+} from "../../../src/server/bootedDeviceResources";
 import { BootedDevice, Platform } from "../../../src/models";
 import { DaemonState } from "../../../src/daemon/daemonState";
 import { DevicePool } from "../../../src/daemon/devicePool";
@@ -922,5 +929,32 @@ describe("ResourceRegistry Template Matching", () => {
     const match = ResourceRegistry.matchTemplate("test://files/app1/dir/sub/file.txt");
     expect(match).toBeDefined();
     expect(match!.params).toEqual({ id: "app1", path: "dir/sub/file.txt" });
+  });
+});
+
+describe("booted device readiness", () => {
+  const compatibleService = {
+    installed: true,
+    enabled: true,
+    running: true,
+    installedSha256: "a".repeat(64),
+    expectedSha256: "a".repeat(64),
+    isCompatible: true,
+  };
+
+  test("keeps Android readiness unknown until the live runner is verified", () => {
+    expect(readinessFromServiceStatus("android", compatibleService)).toEqual({ state: "unknown" });
+  });
+
+  test("reports an unavailable Android service as not ready", () => {
+    expect(readinessFromServiceStatus("android", {
+      ...compatibleService,
+      enabled: false,
+      running: false,
+    })).toEqual({ state: "not_ready" });
+  });
+
+  test("reports a verified iOS runner as ready", () => {
+    expect(readinessFromServiceStatus("ios", compatibleService)).toEqual({ state: "ready" });
   });
 });

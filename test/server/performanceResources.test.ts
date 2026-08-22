@@ -120,15 +120,15 @@ describe("performanceData", () => {
       ResourceRegistry.clearResources();
     });
 
-    test("registers the base URI and one raw query-param template", () => {
+    test("registers the base URI and one RFC 6570 query template", () => {
       registerPerformanceResources();
 
       expect(ResourceRegistry.getResource("automobile:performance-results")).toBeDefined();
 
       const templates = ResourceRegistry.getAllTemplates();
-      const queryTemplates = templates.filter(t => t.uriTemplate.startsWith("automobile:performance-results?"));
+      const queryTemplates = templates.filter(t => t.uriTemplate.startsWith("automobile:performance-results"));
       expect(queryTemplates.map(template => template.uriTemplate)).toEqual([
-        "automobile:performance-results?{params}"
+        "automobile:performance-results{?startTime,endTime,limit,offset,deviceId}"
       ]);
     });
   });

@@ -112,6 +112,60 @@ describe("Device Image Resources with Fakes", () => {
       });
     });
 
+    test("merges installed-only Android system images into the complete catalog", async () => {
+      fakeDeviceUtils.setDeviceImages("android", []);
+      const availableImage = {
+        packageName: "system-images;android-35;google_apis;x86_64",
+        apiLevel: 35,
+        tag: "google_apis",
+        abi: "x86_64",
+        versionInfo: "Google APIs Intel x86_64 Atom System Image",
+      };
+      const installedOnlyImage = {
+        packageName: "system-images;android-34;google_apis;arm64-v8a",
+        apiLevel: 34,
+        tag: "google_apis",
+        abi: "arm64-v8a",
+        versionInfo: "Google APIs ARM 64 v8a System Image",
+      };
+      fakeAvdManager.setListSystemImagesResponse([availableImage]);
+      fakeAvdManager.setListInstalledSystemImagesResponse([availableImage, installedOnlyImage]);
+
+      const handler = createDeviceImageResourcesHandler({
+        deviceManager: fakeDeviceUtils,
+        avdManager: fakeAvdManager,
+      });
+      const result = await handler.getDeviceImagesForPlatforms(["android"]);
+
+      expect(result.catalogComplete).toBe(true);
+      expect(result.provisioningCatalog.systemImages.map(image => image.id)).toEqual([
+        availableImage.packageName,
+        installedOnlyImage.packageName,
+      ]);
+      expect(fakeAvdManager.getListInstalledSystemImagesCalls()).toHaveLength(1);
+    });
+
+    test("reports iOS catalog failure when strict simulator discovery fails", async () => {
+      fakeDeviceUtils.setDeviceImages("ios", []);
+      fakeSimCtl.setRuntimesError(new Error("malformed simctl runtimes JSON"));
+
+      const handler = createDeviceImageResourcesHandler({
+        deviceManager: fakeDeviceUtils,
+        avdManager: fakeAvdManager,
+        simctl: fakeSimCtl,
+      });
+      const result = await handler.getDeviceImagesForPlatforms(["ios"]);
+
+      expect(result.catalogComplete).toBe(false);
+      expect(result.catalogObservations.ios).toMatchObject({
+        catalogComplete: false,
+        error: {
+          code: "failed",
+          message: expect.stringContaining("malformed simctl runtimes JSON"),
+        },
+      });
+    });
+
     test("should return correct image counts when there are images", async () => {
       // Set up mock Android devices
       const androidDevices: DeviceInfo[] = [

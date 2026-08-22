@@ -13,7 +13,6 @@ import {
   SimCtlClient,
   type AppleDeviceRuntime,
   type AppleDeviceType,
-  type SimCtl,
 } from "../utils/ios-cmdline-tools/SimCtlClient";
 
 // Resource URIs
@@ -107,7 +106,7 @@ export interface DeviceImagesResourceContent {
 interface DeviceImageResourcesDependencies {
   deviceManager: PlatformDeviceManager;
   avdManager: AvdManager;
-  simctl: Pick<SimCtl, "getDeviceTypes" | "getRuntimes">;
+  simctl: Pick<SimCtlClient, "getDeviceTypesChecked" | "getRuntimesChecked">;
 }
 
 /**
@@ -255,11 +254,16 @@ async function buildAndroidProvisioningCatalog(
   catalog: ProvisioningCatalog
 ): Promise<ProvisioningCatalogObservation> {
   try {
-    const [systemImages, profiles] = await Promise.all([
+    const [availableSystemImages, installedSystemImages, profiles] = await Promise.all([
       avdManager.listSystemImages(),
+      avdManager.listInstalledSystemImages(),
       avdManager.listDevices(),
     ]);
-    appendAndroidProvisioningCatalog(catalog, systemImages, profiles);
+    const systemImages = new Map(
+      [...availableSystemImages, ...installedSystemImages]
+        .map(image => [image.packageName, image])
+    );
+    appendAndroidProvisioningCatalog(catalog, [...systemImages.values()], profiles);
     return { catalogComplete: true };
   } catch (error) {
     logger.warn(`[DeviceImageResources] Failed to build Android provisioning catalog: ${error}`);
@@ -268,7 +272,7 @@ async function buildAndroidProvisioningCatalog(
 }
 
 async function buildIosProvisioningCatalog(
-  simctl: Pick<SimCtl, "getDeviceTypes" | "getRuntimes"> | undefined,
+  simctl: Pick<SimCtlClient, "getDeviceTypesChecked" | "getRuntimesChecked"> | undefined,
   catalog: ProvisioningCatalog
 ): Promise<ProvisioningCatalogObservation> {
   if (!simctl) {
@@ -283,8 +287,8 @@ async function buildIosProvisioningCatalog(
 
   try {
     const [runtimes, deviceTypes] = await Promise.all([
-      simctl.getRuntimes(),
-      simctl.getDeviceTypes(),
+      simctl.getRuntimesChecked(),
+      simctl.getDeviceTypesChecked(),
     ]);
     appendIosProvisioningCatalog(catalog, runtimes, deviceTypes);
     return { catalogComplete: true };

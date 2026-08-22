@@ -3,7 +3,7 @@ import { z } from "zod/v4";
 import { ProgressCallback, RegisteredTool, ToolRegistry } from "../../src/server/toolRegistry";
 import { INTERNAL_NO_DIFF_PARAM } from "../../src/server/internalToolCall";
 import { ActionableError } from "../../src/models/ActionableError";
-import { runWithToolCapabilityContext } from "../../src/features/toolCapabilities/toolCapabilityContext";
+import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 
 /**
  * Unit guard for the `ToolRegistry.callInternal` seam (#3108).
@@ -42,7 +42,7 @@ describe("ToolRegistry.callInternal (#3108)", () => {
         captured.push({ args, progress, signal });
         return SENTINEL;
       },
-      options
+      options,
     );
   }
 
@@ -110,7 +110,7 @@ describe("ToolRegistry.callInternal (#3108)", () => {
     // Sanity: getTool hides it, so the default (non-forPlan) resolution must fail.
     expect(ToolRegistry.getTool("hiddenStep")).toBeUndefined();
     await expect(ToolRegistry.callInternal("hiddenStep", { text: "Go" })).rejects.toThrow(
-      /Tool not found/
+      /Tool not found/,
     );
 
     // forPlan resolves it via getToolForPlan.
@@ -119,19 +119,18 @@ describe("ToolRegistry.callInternal (#3108)", () => {
       { text: "Go" },
       undefined,
       undefined,
-      { forPlan: true }
+      { forPlan: true },
     );
     expect(response).toBe(SENTINEL);
     expect(captured[0].args[INTERNAL_NO_DIFF_PARAM]).toBe(true);
   });
 
-  test("admits an executePlan-authorized step without separately enabling its capability", async () => {
+  test("does not apply public session selection to an internal plan step", async () => {
     registerCapturingTool("clipboard");
     const profileService = { isEnabled: async () => false };
 
-    await runWithToolCapabilityContext(
-      { planCapabilitiesAuthorized: true, sessionToolProfileService: profileService },
-      () => ToolRegistry.callInternal("clipboard", {}, undefined, undefined, {
+    await runWithToolSelectionContext({ sessionToolSelectionService: profileService }, () =>
+      ToolRegistry.callInternal("clipboard", {}, undefined, undefined, {
         forPlan: true,
       }),
     );
@@ -139,7 +138,7 @@ describe("ToolRegistry.callInternal (#3108)", () => {
     expect(captured).toHaveLength(1);
   });
 
-  test("propagates executePlan authorization to nested plan steps", async () => {
+  test("keeps nested internal plan calls independent of public session selection", async () => {
     captured = [];
     ToolRegistry.register("clipboard", "Mock clipboard", schema, async (args: any) => {
       captured.push({ args });
@@ -150,9 +149,8 @@ describe("ToolRegistry.callInternal (#3108)", () => {
     });
     const profileService = { isEnabled: async () => false };
 
-    await runWithToolCapabilityContext(
-      { planCapabilitiesAuthorized: true, sessionToolProfileService: profileService },
-      () => ToolRegistry.callInternal("criticalSection", {}, undefined, undefined, {
+    await runWithToolSelectionContext({ sessionToolSelectionService: profileService }, () =>
+      ToolRegistry.callInternal("criticalSection", {}, undefined, undefined, {
         forPlan: true,
       }),
     );
@@ -192,12 +190,18 @@ describe("ToolRegistry.callInternal (#3108)", () => {
     (ToolRegistry as any).navigationToolCallRecorder = { record() {} };
     (ToolRegistry as any).toolCallRepository = { async recordToolCall() {} };
     try {
-      ToolRegistry.registerDeviceAware("nestedStep", "Nested step", z.object({}), async (_device, args) => {
-        captured.push({ args });
-        return SENTINEL;
-      }, { planExecutable: true });
+      ToolRegistry.registerDeviceAware(
+        "nestedStep",
+        "Nested step",
+        z.object({}),
+        async (_device, args) => {
+          captured.push({ args });
+          return SENTINEL;
+        },
+        { planExecutable: true },
+      );
 
-      await runWithToolCapabilityContext(
+      await runWithToolSelectionContext(
         { execution: { executionId: "outer-execution", startTime: 123 } },
         () => ToolRegistry.callInternal("nestedStep", {}, undefined, undefined, { forPlan: true }),
       );
@@ -213,7 +217,11 @@ describe("ToolRegistry.callInternal (#3108)", () => {
   });
 
   test("AC3: throws ActionableError when the tool name is unresolved", async () => {
-    await expect(ToolRegistry.callInternal("nonexistent", {})).rejects.toBeInstanceOf(ActionableError);
-    await expect(ToolRegistry.callInternal("nonexistent", {})).rejects.toThrow(/Tool not found: nonexistent/);
+    await expect(ToolRegistry.callInternal("nonexistent", {})).rejects.toBeInstanceOf(
+      ActionableError,
+    );
+    await expect(ToolRegistry.callInternal("nonexistent", {})).rejects.toThrow(
+      /Tool not found: nonexistent/,
+    );
   });
 });

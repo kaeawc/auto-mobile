@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { DaemonManager, parseDaemonArgs } from "../../src/daemon/manager";
-import { REUSE_CRITICAL_OPTION_KEYS } from "../../src/daemon/daemonMcpProxy";
+import {
+  REUSE_CRITICAL_ARRAY_OPTION_KEYS,
+  REUSE_CRITICAL_OPTION_KEYS,
+} from "../../src/daemon/daemonMcpProxy";
 import { OUTPUT_REDUCTION_FLAG_SPECS } from "../../src/utils/outputReductionFlags";
 import type { DaemonOptions } from "../../src/daemon/types";
 
@@ -20,9 +23,14 @@ import type { DaemonOptions } from "../../src/daemon/types";
 /** Reach the pure private arg-builder without spawning anything. */
 function serialize(options: DaemonOptions): string[] {
   const manager = new DaemonManager();
-  const built = (manager as unknown as {
-    withDaemonOptions: (l: { command: string; args: string[] }, o: DaemonOptions) => { args: string[] };
-  }).withDaemonOptions({ command: "auto-mobile", args: [] }, options);
+  const built = (
+    manager as unknown as {
+      withDaemonOptions: (
+        l: { command: string; args: string[] },
+        o: DaemonOptions,
+      ) => { args: string[] };
+    }
+  ).withDaemonOptions({ command: "auto-mobile", args: [] }, options);
   return built.args;
 }
 
@@ -59,7 +67,9 @@ describe("daemon startup-option propagation", () => {
   });
 
   test("all propagating boolean flags round-trip together (no cross-interference)", () => {
-    const allOn = Object.fromEntries(PROPAGATING_BOOLEAN_FLAGS.map(f => [f, true])) as DaemonOptions;
+    const allOn = Object.fromEntries(
+      PROPAGATING_BOOLEAN_FLAGS.map((f) => [f, true]),
+    ) as DaemonOptions;
     const parsed = parseDaemonArgs(serialize(allOn));
     for (const field of PROPAGATING_BOOLEAN_FLAGS) {
       expect({ field, value: parsed[field] }).toEqual({ field, value: true });
@@ -89,15 +99,26 @@ describe("daemon startup-option propagation", () => {
   test("runner readiness timeout round-trips and the CLI value overrides the environment", () => {
     const args = serialize({ runnerReadinessTimeoutMs: 45_000 });
     expect(args).toContain("--runner-readiness-timeout-ms");
-    expect(parseDaemonArgs(args, {
-      AUTOMOBILE_RUNNER_READINESS_TIMEOUT_MS: "20000",
-    })).toMatchObject({ runnerReadinessTimeoutMs: 45_000 });
+    expect(
+      parseDaemonArgs(args, {
+        AUTOMOBILE_RUNNER_READINESS_TIMEOUT_MS: "20000",
+      }),
+    ).toMatchObject({ runnerReadinessTimeoutMs: 45_000 });
   });
 
   test("a missing runner readiness value does not consume the following flag", () => {
     const parsed = parseDaemonArgs(["--runner-readiness-timeout-ms", "--debug"]);
     expect(parsed.debug).toBe(true);
     expect(parsed.runnerReadinessTimeoutMs).toBeUndefined();
+  });
+
+  test("exact tool defaults round-trip through daemon startup arguments", () => {
+    const options: DaemonOptions = {
+      enabledTools: ["clipboard", "sqlQuery"],
+      disabledTools: ["observe"],
+    };
+
+    expect(parseDaemonArgs(serialize(options))).toMatchObject(options);
   });
 });
 
@@ -110,5 +131,10 @@ describe("reuse-critical drift guard", () => {
     for (const spec of OUTPUT_REDUCTION_FLAG_SPECS) {
       expect(REUSE_CRITICAL_OPTION_KEYS).toContain(spec.field);
     }
+  });
+
+  test("explicit tool defaults participate in daemon reuse reconciliation", () => {
+    expect(REUSE_CRITICAL_ARRAY_OPTION_KEYS).toContain("enabledTools");
+    expect(REUSE_CRITICAL_ARRAY_OPTION_KEYS).toContain("disabledTools");
   });
 });

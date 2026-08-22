@@ -5,14 +5,17 @@ import { promises as fsPromises } from "node:fs";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import type { BootedDevice } from "../../src/models";
-import type { TestExecutionRecord, TestExecutionRepository } from "../../src/db/testExecutionRepository";
+import type {
+  TestExecutionRecord,
+  TestExecutionRepository,
+} from "../../src/db/testExecutionRepository";
 import { ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS } from "../../src/features/video/androidScreenrecord";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { runWithToolCapabilityContext } from "../../src/features/toolCapabilities/toolCapabilityContext";
-import { resolveCapabilityBaseSessionUuid } from "../../src/features/toolCapabilities/capabilitySessionResolver";
+import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
+import { resolveToolSelectionBaseSessionUuid } from "../../src/features/toolSelection/selectionSessionResolver";
 import { ExecutionTracker } from "../../src/server/executionTracker";
 
 // Mock planUtils so the orchestrator's runPlan() phase is observable without
@@ -24,7 +27,7 @@ const executePlanMock = mock(() =>
     executedSteps: 2,
     totalSteps: 2,
     debug: { executionTimeMs: 100, steps: [] },
-  })
+  }),
 );
 
 mock.module("../../src/utils/planUtils", () => {
@@ -37,19 +40,19 @@ mock.module("../../src/utils/planUtils", () => {
   };
 });
 
-import { PlanExecutionOrchestrator, convertDebugStepsToRecords, VideoRecorder } from "../../src/server/planExecutionOrchestrator";
+import {
+  PlanExecutionOrchestrator,
+  convertDebugStepsToRecords,
+  VideoRecorder,
+} from "../../src/server/planExecutionOrchestrator";
 import { serverConfig } from "../../src/utils/ServerConfig";
 
 const buildVideoRecorder = (
   filePath: string = "/tmp/fake-recording.mp4",
-  recordingId: string = "rec-1"
+  recordingId: string = "rec-1",
 ): VideoRecorder => ({
-  startVideoRecording: mock(() =>
-    Promise.resolve({ recordingId } as any)
-  ),
-  stopVideoRecording: mock(() =>
-    Promise.resolve({ metadata: { filePath } } as any)
-  ),
+  startVideoRecording: mock(() => Promise.resolve({ recordingId } as any)),
+  stopVideoRecording: mock(() => Promise.resolve({ metadata: { filePath } } as any)),
 });
 
 const iosDevice: BootedDevice = {
@@ -124,7 +127,7 @@ describe("PlanExecutionOrchestrator", () => {
 
     const orchestrator = new PlanExecutionOrchestrator(
       { device: iosDevice, request: baseRequest },
-      baseDeps()
+      baseDeps(),
     );
     await orchestrator.execute();
 
@@ -141,12 +144,12 @@ describe("PlanExecutionOrchestrator", () => {
         executedSteps: 0,
         totalSteps: 2,
         failedStep: { stepIndex: 0, tool: "observe", error: "boom" },
-      })
+      }),
     );
 
     const orchestrator = new PlanExecutionOrchestrator(
       { device: iosDevice, request: baseRequest },
-      baseDeps()
+      baseDeps(),
     );
     await orchestrator.execute();
 
@@ -156,7 +159,7 @@ describe("PlanExecutionOrchestrator", () => {
   test("execute() returns a structured success result for a simple plan", async () => {
     const orchestrator = new PlanExecutionOrchestrator(
       { device: iosDevice, request: baseRequest },
-      baseDeps()
+      baseDeps(),
     );
     const result = await orchestrator.execute();
 
@@ -175,7 +178,7 @@ describe("PlanExecutionOrchestrator", () => {
   test("execute() includes debug payload when captureObserveSteps is requested", async () => {
     const orchestrator = new PlanExecutionOrchestrator(
       { device: iosDevice, request: { ...baseRequest, captureObserveSteps: "summary" } },
-      baseDeps()
+      baseDeps(),
     );
     const result = await orchestrator.execute();
 
@@ -189,7 +192,7 @@ describe("PlanExecutionOrchestrator", () => {
         device: iosDevice,
         request: { ...baseRequest, planContent: "not: a: valid: plan:\n  - missing" },
       },
-      baseDeps()
+      baseDeps(),
     );
     const result = await orchestrator.execute();
 
@@ -203,7 +206,7 @@ describe("PlanExecutionOrchestrator", () => {
     const encoded = "base64:" + Buffer.from(SIMPLE_PLAN, "utf-8").toString("base64");
     const orchestrator = new PlanExecutionOrchestrator(
       { device: iosDevice, request: { ...baseRequest, planContent: encoded } },
-      baseDeps()
+      baseDeps(),
     );
     const result = await orchestrator.execute();
     expect(result.success).toBe(true);
@@ -224,9 +227,14 @@ steps:
     const orchestrator = new PlanExecutionOrchestrator(
       {
         device: iosDevice,
-        request: { ...baseRequest, planContent: planWithDevices, devices: ["A"], sessionUuid: "s-1" },
+        request: {
+          ...baseRequest,
+          planContent: planWithDevices,
+          devices: ["A"],
+          sessionUuid: "s-1",
+        },
       },
-      baseDeps()
+      baseDeps(),
     );
     const result = await orchestrator.execute();
     expect(result.success).toBe(false);
@@ -236,7 +244,7 @@ steps:
   test("execute() rejects device label without devices list", async () => {
     const orchestrator = new PlanExecutionOrchestrator(
       { device: iosDevice, request: { ...baseRequest, device: "A" } },
-      baseDeps()
+      baseDeps(),
     );
     const result = await orchestrator.execute();
     expect(result.success).toBe(false);
@@ -251,29 +259,25 @@ steps:
       deviceId: "emulator-5556",
       name: "Android Emulator 2",
     };
-    const devicePool = new DevicePool(
-      sessionManager,
-      "daemon-session",
-      timer,
-    );
+    const devicePool = new DevicePool(sessionManager, "daemon-session", timer);
     DaemonState.getInstance().initialize(sessionManager, devicePool);
     await sessionManager.createSession("base", androidDevice.deviceId, "android", 1_000);
     const executionTracker = new ExecutionTracker(timer);
     const execution = executionTracker.startExecution("executePlan", undefined, "base");
     const hasActiveExecution = (sessionId: string, query?: { excludeExecutionId?: string }) =>
       executionTracker.hasActiveSessionUuidExecutions(
-        resolveCapabilityBaseSessionUuid(sessionId, sessionManager),
+        resolveToolSelectionBaseSessionUuid(sessionId, sessionManager),
         query,
       );
     sessionManager.setActiveSessionExecutionChecker(hasActiveExecution);
     const heartbeatMonitor = new SessionHeartbeatMonitor(
       sessionManager,
       hasActiveExecution,
-      sessionId => sessionManager.releaseSession(sessionId),
+      (sessionId) => sessionManager.releaseSession(sessionId),
       timer,
     );
 
-    devicePool.assignMultipleDevices = async sessionIds => {
+    devicePool.assignMultipleDevices = async (sessionIds) => {
       const assignments = new Map<string, string>();
       for (const [index, sessionId] of sessionIds.entries()) {
         const device = index === 0 ? androidDevice : secondAndroidDevice;
@@ -309,22 +313,23 @@ steps:
 `;
 
     try {
-      const result = await runWithToolCapabilityContext(
+      const result = await runWithToolSelectionContext(
         { execution: { executionId: "plan-execution", startTime: 0 } },
-        () => new PlanExecutionOrchestrator(
-          {
-            device: androidDevice,
-            request: {
-              ...baseRequest,
-              planContent: multiDevicePlan,
-              platform: "android",
-              sessionUuid: "base",
-              device: "A",
-              devices: ["A", "B"],
+        () =>
+          new PlanExecutionOrchestrator(
+            {
+              device: androidDevice,
+              request: {
+                ...baseRequest,
+                planContent: multiDevicePlan,
+                platform: "android",
+                sessionUuid: "base",
+                device: "A",
+                devices: ["A", "B"],
+              },
             },
-          },
-          { ...baseDeps(), timer },
-        ).execute(),
+            { ...baseDeps(), timer },
+          ).execute(),
       );
 
       expect(result).toMatchObject({ success: true });
@@ -399,7 +404,11 @@ steps:
           testMetadata: { testClass: "FooTest", testMethod: "shouldPass" },
         },
       },
-      { ...baseDeps(), timer: fakeTimer, testExecutionRepository: fakeRepo as unknown as TestExecutionRepository }
+      {
+        ...baseDeps(),
+        timer: fakeTimer,
+        testExecutionRepository: fakeRepo as unknown as TestExecutionRepository,
+      },
     );
 
     const result = await orchestrator.execute();
@@ -416,7 +425,7 @@ steps:
     const fakeRepo = new FakeTestExecutionRepository();
     const orchestrator = new PlanExecutionOrchestrator(
       { device: iosDevice, request: baseRequest },
-      { ...baseDeps(), testExecutionRepository: fakeRepo as unknown as TestExecutionRepository }
+      { ...baseDeps(), testExecutionRepository: fakeRepo as unknown as TestExecutionRepository },
     );
     await orchestrator.execute();
     expect(fakeRepo.recorded).toHaveLength(0);
@@ -430,7 +439,7 @@ steps:
         executedSteps: 1,
         totalSteps: 2,
         failedStep: { stepIndex: 1, tool: "tapOn", error: "element not found" },
-      })
+      }),
     );
     const fakeRepo = new FakeTestExecutionRepository();
     const orchestrator = new PlanExecutionOrchestrator(
@@ -441,7 +450,7 @@ steps:
           testMetadata: { testClass: "FooTest", testMethod: "shouldFail" },
         },
       },
-      { ...baseDeps(), testExecutionRepository: fakeRepo as unknown as TestExecutionRepository }
+      { ...baseDeps(), testExecutionRepository: fakeRepo as unknown as TestExecutionRepository },
     );
     const result = await orchestrator.execute();
     expect(result.success).toBe(false);
@@ -457,28 +466,31 @@ steps:
         executedSteps: 1,
         totalSteps: 2,
         perDeviceResults: new Map([
-          ["device-a", {
-            device: "device-a",
-            success: true,
-            executedSteps: 1,
-            totalSteps: 2,
-            skippedSteps: [
-              {
-                stepIndex: 0,
-                trackIndex: 0,
-                tool: "tapOn",
-                error: "element not found",
-                durationMs: 250,
-                details: {
-                  params: { text: "Not Now", device: "device-a" },
+          [
+            "device-a",
+            {
+              device: "device-a",
+              success: true,
+              executedSteps: 1,
+              totalSteps: 2,
+              skippedSteps: [
+                {
+                  stepIndex: 0,
+                  trackIndex: 0,
+                  tool: "tapOn",
                   error: "element not found",
-                  optional: true,
+                  durationMs: 250,
+                  details: {
+                    params: { text: "Not Now", device: "device-a" },
+                    error: "element not found",
+                    optional: true,
+                  },
                 },
-              },
-            ],
-          }],
+              ],
+            },
+          ],
         ]),
-      })
+      }),
     );
     const fakeRepo = new FakeTestExecutionRepository();
     const orchestrator = new PlanExecutionOrchestrator(
@@ -489,7 +501,7 @@ steps:
           testMetadata: { testClass: "FooTest", testMethod: "parallelOptional" },
         },
       },
-      { ...baseDeps(), testExecutionRepository: fakeRepo as unknown as TestExecutionRepository }
+      { ...baseDeps(), testExecutionRepository: fakeRepo as unknown as TestExecutionRepository },
     );
 
     const result = await orchestrator.execute();
@@ -541,7 +553,7 @@ steps:
         Promise.resolve({
           metadata: { recordingId, filePath: path.join(segmentDir, `${recordingId}.mp4`) },
           evictedRecordingIds: [],
-        } as any)
+        } as any),
       ),
     };
 
@@ -566,7 +578,7 @@ steps:
 
     const orchestrator = new PlanExecutionOrchestrator(
       { device: androidDevice, request: { ...baseRequest, platform: "android" } },
-      { timer: fakeTimer, videoRecorder: androidRecorder }
+      { timer: fakeTimer, videoRecorder: androidRecorder },
     );
     const result = await orchestrator.execute();
 
@@ -585,7 +597,7 @@ steps:
         index,
         recordingId,
         filePath: path.join(segmentDir, `${recordingId}.mp4`),
-      }))
+      })),
     );
   });
 
@@ -602,19 +614,19 @@ steps:
           fileName: `${options.outputName}.mp4`,
           startedAt: new Date(0).toISOString(),
           outputName: options.outputName,
-        } as any)
+        } as any),
       ),
       stopVideoRecording: mock((recordingId?: string) =>
         Promise.resolve({
           metadata: { recordingId, filePath: path.join(missingDir, `${recordingId}.mp4`) },
           evictedRecordingIds: [],
-        } as any)
+        } as any),
       ),
     };
 
     const orchestrator = new PlanExecutionOrchestrator(
       { device: androidDevice, request: { ...baseRequest, platform: "android" } },
-      { timer: new FakeTimer(), videoRecorder: androidRecorder }
+      { timer: new FakeTimer(), videoRecorder: androidRecorder },
     );
     const result = await orchestrator.execute();
 
@@ -637,7 +649,10 @@ steps:
           testMetadata: { testClass: "FooTest", testMethod: "shouldNotCrash" },
         },
       },
-      { timer: new FakeTimer(), testExecutionRepository: exploding as unknown as TestExecutionRepository }
+      {
+        timer: new FakeTimer(),
+        testExecutionRepository: exploding as unknown as TestExecutionRepository,
+      },
     );
     const result = await orchestrator.execute();
     // Even though recording failed, the plan itself succeeded.

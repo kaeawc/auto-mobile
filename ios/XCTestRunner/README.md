@@ -161,7 +161,7 @@ Platform-specific plans should declare a top-level `platform` field (e.g., `plat
 
 `RemindersLaunchPlanTests` is a hermetic contract test. It loads the bundled launch plan,
 executes `AutoMobilePlanExecutor` against an injected MCP fake, and verifies the complete
-`setToolCapability` / `executePlan` request without starting a daemon or simulator:
+`setToolEnabled` / `executePlan` request without starting a daemon or simulator:
 
 ```swift
 import XCTest

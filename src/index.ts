@@ -17,6 +17,7 @@ bootstrapEnvironment();
 process.env[DAEMON_LAUNCH_CWD_ENV] ??= safeProcessCwd();
 
 import type { DaemonOptions } from "./daemon/types";
+import { configureToolSelectionCliDefaults } from "./features/toolSelection/SessionToolSelectionService";
 import type { FeatureFlagKey } from "./features/featureFlags/FeatureFlagDefinitions";
 import { OUTPUT_REDUCTION_FLAG_SPECS } from "./utils/outputReductionFlags";
 import { getGlobalVersionOutput } from "./cli/versionFlag";
@@ -129,54 +130,57 @@ async function main() {
   let stdioProxy: { close(): Promise<void> } | undefined;
   let directModeActive = false;
   let shutdownCleanupFailed = false;
-  setProcessShutdownHandler(async (signal) => {
-    shutdownCleanupFailed = false;
-    logger.info(`Received ${signal} signal, shutting down`);
-    await runShutdownCleanupStages(
-      [
-        {
-          name: "direct-mode capture and iOS CtrlProxy children",
-          run: async () => {
-            if (directModeActive) {
-              await cleanupDaemonChildProcesses();
-            }
+  setProcessShutdownHandler(
+    async (signal) => {
+      shutdownCleanupFailed = false;
+      logger.info(`Received ${signal} signal, shutting down`);
+      await runShutdownCleanupStages(
+        [
+          {
+            name: "direct-mode capture and iOS CtrlProxy children",
+            run: async () => {
+              if (directModeActive) {
+                await cleanupDaemonChildProcesses();
+              }
+            },
           },
-        },
-        {
-          name: "direct-mode managed ADB server",
-          run: async () => {
-            if (directModeActive) {
-              await stopManagedAdbServer();
-            }
+          {
+            name: "direct-mode managed ADB server",
+            run: async () => {
+              if (directModeActive) {
+                await stopManagedAdbServer();
+              }
+            },
           },
-        },
-        { name: "video recording socket server", run: stopVideoRecordingSocketServer },
-        { name: "test recording socket server", run: stopTestRecordingSocketServer },
-        { name: "device snapshot socket server", run: stopDeviceSnapshotSocketServer },
-        { name: "appearance socket server", run: stopAppearanceSocketServer },
-        { name: "WebRTC stream socket server", run: stopWebRtcStreamSocketServer },
-        { name: "appearance sync scheduler", run: stopAppearanceSyncScheduler },
-        {
-          name: "prefetched Android CtrlProxy APK",
-          run: AndroidCtrlProxyManager.cleanupPrefetchedApk,
-        },
-        { name: "stdio proxy", run: async () => await stdioProxy?.close() },
-        {
-          name: "logger",
-          run: async () => {
-            await logger.closeAfterFlush();
+          { name: "video recording socket server", run: stopVideoRecordingSocketServer },
+          { name: "test recording socket server", run: stopTestRecordingSocketServer },
+          { name: "device snapshot socket server", run: stopDeviceSnapshotSocketServer },
+          { name: "appearance socket server", run: stopAppearanceSocketServer },
+          { name: "WebRTC stream socket server", run: stopWebRtcStreamSocketServer },
+          { name: "appearance sync scheduler", run: stopAppearanceSyncScheduler },
+          {
+            name: "prefetched Android CtrlProxy APK",
+            run: AndroidCtrlProxyManager.cleanupPrefetchedApk,
           },
+          { name: "stdio proxy", run: async () => await stdioProxy?.close() },
+          {
+            name: "logger",
+            run: async () => {
+              await logger.closeAfterFlush();
+            },
+          },
+        ],
+        (message, error) => {
+          shutdownCleanupFailed = true;
+          logger.warn(message, error);
         },
-      ],
-      (message, error) => {
-        shutdownCleanupFailed = true;
-        logger.warn(message, error);
-      },
-    );
-  }, async () => {
-    await logger.closeAfterFlush();
-    return shutdownCleanupFailed ? { exitCode: 1 } : undefined;
-  });
+      );
+    },
+    async () => {
+      await logger.closeAfterFlush();
+      return shutdownCleanupFailed ? { exitCode: 1 } : undefined;
+    },
+  );
 
   try {
     // Parse command line arguments
@@ -220,7 +224,10 @@ async function main() {
       noOcclusion,
       outputReduction,
       toolOutputsDir,
+      enabledTools,
+      disabledTools,
     } = parseArgs(process.argv.slice(2), logger);
+    configureToolSelectionCliDefaults(enabledTools, disabledTools);
 
     if (debug) {
       logger.setLogLevel(LogLevel.DEBUG);
@@ -460,6 +467,8 @@ async function main() {
         toolOutputsDir,
         networkMockable,
         embeddedSdk,
+        ...(enabledTools.length > 0 ? { enabledTools } : {}),
+        ...(disabledTools.length > 0 ? { disabledTools } : {}),
         dismissKeyboardAfterInput,
         ...eventAllMarkerDaemonOptions,
         noUiPerfMode: !uiPerfMode,
@@ -516,6 +525,8 @@ async function main() {
       toolOutputsDir,
       networkMockable,
       embeddedSdk,
+      ...(enabledTools.length > 0 ? { enabledTools } : {}),
+      ...(disabledTools.length > 0 ? { disabledTools } : {}),
       dismissKeyboardAfterInput,
       ...eventAllMarkerDaemonOptions,
       noUiPerfMode: !uiPerfMode,

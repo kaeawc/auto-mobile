@@ -10,7 +10,7 @@ import { SOCKET_REQUEST_DEADLINE_MS, sendRawSocketRequest } from "./helpers/sock
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import {
   DAEMON_BOUND_SESSION_PARAM,
-  DAEMON_CAPABILITY_PROFILE_PARAM,
+  DAEMON_TOOL_SELECTION_PROFILE_PARAM,
 } from "../../src/daemon/constants";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
@@ -28,7 +28,7 @@ interface FakeMcpClient {
 function createFakeSession(
   sessionId: string,
   assignedDevice: string,
-  deviceLabels?: DeviceLabelMap
+  deviceLabels?: DeviceLabelMap,
 ): Session {
   return {
     sessionId,
@@ -49,14 +49,16 @@ function createFakeSession(
 function createFakeDaemonState(
   sessionDevices: Map<string, string>,
   sessionDeviceLabels: Map<string, DeviceLabelMap>,
-  mcpAutolockSessions: Map<string, string>
+  mcpAutolockSessions: Map<string, string>,
 ) {
   return {
     isInitialized: () => true,
     getSessionManager: () => ({
       getSession: (sessionId: string) => {
         const assignedDevice = sessionDevices.get(sessionId);
-        return assignedDevice ? createFakeSession(sessionId, assignedDevice, sessionDeviceLabels.get(sessionId)) : null;
+        return assignedDevice
+          ? createFakeSession(sessionId, assignedDevice, sessionDeviceLabels.get(sessionId))
+          : null;
       },
       getDeviceLabels: (sessionId: string) => sessionDeviceLabels.get(sessionId),
       releaseSession: async () => null,
@@ -80,7 +82,7 @@ async function sendRequest(socketPath: string, request: DaemonRequest): Promise<
 function sendToolsCallWithArgs(
   socketPath: string,
   toolName: string,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
 ): Promise<DaemonResponse> {
   return sendRequest(socketPath, {
     id: randomUUID(),
@@ -99,7 +101,10 @@ function sendToolsCallWithoutArgs(socketPath: string, toolName: string): Promise
   });
 }
 
-function sendTwoToolsCallsOnOneSocket(socketPath: string, toolName: string): Promise<DaemonResponse[]> {
+function sendTwoToolsCallsOnOneSocket(
+  socketPath: string,
+  toolName: string,
+): Promise<DaemonResponse[]> {
   return new Promise((resolve, reject) => {
     const client = new Socket();
     const responses: DaemonResponse[] = [];
@@ -107,12 +112,14 @@ function sendTwoToolsCallsOnOneSocket(socketPath: string, toolName: string): Pro
 
     client.connect(socketPath, () => {
       for (let i = 0; i < 2; i++) {
-        client.write(JSON.stringify({
-          id: randomUUID(),
-          type: "mcp_request",
-          method: "tools/call",
-          params: { name: toolName, arguments: {} },
-        }) + "\n");
+        client.write(
+          JSON.stringify({
+            id: randomUUID(),
+            type: "mcp_request",
+            method: "tools/call",
+            params: { name: toolName, arguments: {} },
+          }) + "\n",
+        );
       }
     });
 
@@ -120,13 +127,15 @@ function sendTwoToolsCallsOnOneSocket(socketPath: string, toolName: string): Pro
     // diagnostic, not pend until the suite's wall-clock watchdog (#5391).
     const deadline = defaultTimer.setTimeout(() => {
       client.destroy();
-      reject(new Error(
-        `Received ${responses.length}/2 responses to pipelined tools/call within ${SOCKET_REQUEST_DEADLINE_MS}ms — `
-        + "bounded socket-test deadline hit"
-      ));
+      reject(
+        new Error(
+          `Received ${responses.length}/2 responses to pipelined tools/call within ${SOCKET_REQUEST_DEADLINE_MS}ms — ` +
+            "bounded socket-test deadline hit",
+        ),
+      );
     }, SOCKET_REQUEST_DEADLINE_MS);
 
-    client.on("data", data => {
+    client.on("data", (data) => {
       buffer += data.toString();
       const lines = buffer.split("\n");
       buffer = lines.pop() || "";
@@ -144,7 +153,7 @@ function sendTwoToolsCallsOnOneSocket(socketPath: string, toolName: string): Pro
       }
     });
 
-    client.on("error", error => {
+    client.on("error", (error) => {
       defaultTimer.clearTimeout(deadline);
       reject(error);
     });
@@ -167,7 +176,7 @@ class PersistentSocketClient {
     await new Promise<void>((resolve, reject) => {
       this.socket.connect(socketPath, resolve);
       this.socket.on("error", reject);
-      this.socket.on("data", data => {
+      this.socket.on("data", (data) => {
         this.buffer += data.toString();
         const lines = this.buffer.split("\n");
         this.buffer = lines.pop() ?? "";
@@ -202,9 +211,13 @@ class PersistentSocketClient {
       const deadline = defaultTimer.setTimeout(() => {
         this.waiters.delete(id);
         this.socket.destroy();
-        reject(new Error(`No response to ${method} within ${SOCKET_REQUEST_DEADLINE_MS}ms — bounded socket-test deadline hit`));
+        reject(
+          new Error(
+            `No response to ${method} within ${SOCKET_REQUEST_DEADLINE_MS}ms — bounded socket-test deadline hit`,
+          ),
+        );
       }, SOCKET_REQUEST_DEADLINE_MS);
-      this.waiters.set(id, response => {
+      this.waiters.set(id, (response) => {
         defaultTimer.clearTimeout(deadline);
         resolve(response);
       });
@@ -257,7 +270,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
         callTool: async () => {
           inFlight += 1;
           maxInFlight = Math.max(maxInFlight, inFlight);
-          await new Promise<void>(resolve => {
+          await new Promise<void>((resolve) => {
             fakeTimer.setTimeout(resolve, 40);
           });
           inFlight -= 1;
@@ -282,7 +295,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
     expect(inFlight).toBe(0);
   });
 
-  test("binds a generated capability profile to the socket and reuses it for discovery", async () => {
+  test("binds a generated selection profile to the socket and reuses it for discovery", async () => {
     const clients: FakeMcpClient[] = [];
     server.mcpClientFactory = async () => {
       const client: FakeMcpClient = {
@@ -303,8 +316,8 @@ describe("UnixSocketServer MCP forward serialization", () => {
     await client.connect(socketPath);
     try {
       const set = await client.request("tools/call", {
-        name: "setToolCapability",
-        arguments: { capability: "test-authoring" },
+        name: "setToolEnabled",
+        arguments: { toolName: "executePlan" },
       });
       const list = await client.request("tools/list", {});
 
@@ -319,10 +332,10 @@ describe("UnixSocketServer MCP forward serialization", () => {
     }
   });
 
-  test("preserves a socket-bound capability profile for a later explicit device call", async () => {
+  test("preserves a socket-bound selection profile for a later explicit device call", async () => {
     const factoryArguments: Array<[string | undefined, string | undefined]> = [];
-    server.mcpClientFactory = async (sessionUuid, capabilityProfileUuid) => {
-      factoryArguments.push([sessionUuid, capabilityProfileUuid]);
+    server.mcpClientFactory = async (sessionUuid, toolSelectionProfileUuid) => {
+      factoryArguments.push([sessionUuid, toolSelectionProfileUuid]);
       return {
         callTool: async () => ({
           content: [{ type: "text", text: JSON.stringify({ sessionUuid: "profile-a" }) }],
@@ -339,8 +352,8 @@ describe("UnixSocketServer MCP forward serialization", () => {
     await client.connect(socketPath);
     try {
       await client.request("tools/call", {
-        name: "setToolCapability",
-        arguments: { capability: "test-authoring" },
+        name: "setToolEnabled",
+        arguments: { toolName: "executePlan" },
       });
       const call = await client.request("tools/call", {
         name: "executePlan",
@@ -357,10 +370,10 @@ describe("UnixSocketServer MCP forward serialization", () => {
     }
   });
 
-  test("creates a loopback client with both an explicit device session and its capability profile", async () => {
+  test("creates a loopback client with both an explicit device session and its selection profile", async () => {
     const factoryArguments: Array<[string | undefined, string | undefined]> = [];
-    server.mcpClientFactory = async (sessionUuid, capabilityProfileUuid) => {
-      factoryArguments.push([sessionUuid, capabilityProfileUuid]);
+    server.mcpClientFactory = async (sessionUuid, toolSelectionProfileUuid) => {
+      factoryArguments.push([sessionUuid, toolSelectionProfileUuid]);
       return {
         callTool: async () => ({ content: [] }),
         listTools: async () => ({ tools: [] }),
@@ -373,7 +386,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
 
     const response = await sendToolsCallWithArgs(socketPath, "executePlan", {
       sessionUuid: "device-session-a",
-      [DAEMON_CAPABILITY_PROFILE_PARAM]: "profile-a",
+      [DAEMON_TOOL_SELECTION_PROFILE_PARAM]: "profile-a",
     });
 
     expect(response.success).toBe(true);
@@ -427,7 +440,9 @@ describe("UnixSocketServer MCP forward serialization", () => {
         name: "videoRecording",
         arguments: { action: "stop", recordingId: "recording-1", deviceId: "device-a" },
       });
-      const navigationGraph = await client.request("ide/getNavigationGraph", { deviceId: "device-a" });
+      const navigationGraph = await client.request("ide/getNavigationGraph", {
+        deviceId: "device-a",
+      });
       const refreshedList = await client.request("tools/list", {});
 
       expect(initialList.success).toBe(true);
@@ -472,11 +487,16 @@ describe("UnixSocketServer MCP forward serialization", () => {
     await server.start();
 
     let releaseBlocker: () => void = () => {};
-    const blockerReleased = new Promise<void>(resolve => { releaseBlocker = resolve; });
+    const blockerReleased = new Promise<void>((resolve) => {
+      releaseBlocker = resolve;
+    });
     let signalBlockerStarted: () => void = () => {};
-    const blockerStarted = new Promise<void>(resolve => { signalBlockerStarted = resolve; });
+    const blockerStarted = new Promise<void>((resolve) => {
+      signalBlockerStarted = resolve;
+    });
 
-    const forwardedCalls: Array<{ createdWith: string | undefined; toolName: string | undefined }> = [];
+    const forwardedCalls: Array<{ createdWith: string | undefined; toolName: string | undefined }> =
+      [];
     server.mcpClientFactory = async (createdWith?: string) => {
       const client: FakeMcpClient = {
         listTools: async () => ({ tools: [] }),
@@ -525,25 +545,29 @@ describe("UnixSocketServer MCP forward serialization", () => {
       // Let socket B read the frame and compute its initial (bound) route while
       // the binding still exists.
       for (let i = 0; i < 30; i++) {
-        await new Promise<void>(resolve => setImmediate(resolve));
+        await new Promise<void>((resolve) => setImmediate(resolve));
       }
 
       // Simulate socket B's "close" handler: clear its bound client key while the
       // sessionless call is still queued behind socket A's op.
-      const boundClientKeysBySocketSession = (server as unknown as {
-        boundMcpClientKeysBySocketSession: Map<string, unknown>;
-      }).boundMcpClientKeysBySocketSession;
+      const boundClientKeysBySocketSession = (
+        server as unknown as {
+          boundMcpClientKeysBySocketSession: Map<string, unknown>;
+        }
+      ).boundMcpClientKeysBySocketSession;
       const socketSessionId = boundClientKeysBySocketSession.keys().next().value as string;
       expect(socketSessionId).toBeDefined();
-      (server as unknown as {
-        clearBoundMcpClientKey(socketSessionId: string): void;
-      }).clearBoundMcpClientKey(socketSessionId);
+      (
+        server as unknown as {
+          clearBoundMcpClientKey(socketSessionId: string): void;
+        }
+      ).clearBoundMcpClientKey(socketSessionId);
 
       // Release socket A's op so socket B's queued call runs post-disconnect.
       releaseBlocker();
       await Promise.all([blockerCall, queuedCall]);
 
-      const queued = forwardedCalls.find(call => call.toolName === "videoRecording");
+      const queued = forwardedCalls.find((call) => call.toolName === "videoRecording");
       expect(queued).toBeDefined();
       // The admitted request must still run through B's session-a bound client
       // (created with sessionUuid "session-a"), not the shared unbound client
@@ -581,11 +605,16 @@ describe("UnixSocketServer MCP forward serialization", () => {
     await server.start();
 
     let releaseBlocker: () => void = () => {};
-    const blockerReleased = new Promise<void>(resolve => { releaseBlocker = resolve; });
+    const blockerReleased = new Promise<void>((resolve) => {
+      releaseBlocker = resolve;
+    });
     let signalBlockerStarted: () => void = () => {};
-    const blockerStarted = new Promise<void>(resolve => { signalBlockerStarted = resolve; });
+    const blockerStarted = new Promise<void>((resolve) => {
+      signalBlockerStarted = resolve;
+    });
 
-    const forwardedCalls: Array<{ createdWith: string | undefined; toolName: string | undefined }> = [];
+    const forwardedCalls: Array<{ createdWith: string | undefined; toolName: string | undefined }> =
+      [];
     server.mcpClientFactory = async (createdWith?: string) => {
       const client: FakeMcpClient = {
         listTools: async () => ({ tools: [] }),
@@ -633,7 +662,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
       // Let socket B read the frame and compute its initial (bound) route while
       // session-a is still active.
       for (let i = 0; i < 30; i++) {
-        await new Promise<void>(resolve => setImmediate(resolve));
+        await new Promise<void>((resolve) => setImmediate(resolve));
       }
 
       // Release session-a while the sessionless call is still queued: the fake
@@ -645,7 +674,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
       releaseBlocker();
       await Promise.all([blockerCall, queuedCall]);
 
-      const queued = forwardedCalls.find(call => call.toolName === "videoRecording");
+      const queued = forwardedCalls.find((call) => call.toolName === "videoRecording");
       expect(queued).toBeDefined();
       // The released session must NOT be replayed: the call re-resolves to the
       // shared unbound client socket A created for device:device-a (created with
@@ -679,27 +708,32 @@ describe("UnixSocketServer MCP forward serialization", () => {
     let callCount = 0;
     let closeCalls = 0;
     let releaseBlockingRequest: () => void = () => {};
-    const blockingPromise = new Promise<void>(resolve => { releaseBlockingRequest = resolve; });
-    server.mcpClientFactory = async () => ({
-      listTools: async () => ({ tools: [] }),
-      callTool: async () => {
-        callCount += 1;
-        if (callCount === 1) {
-          await blockingPromise;
-        }
-        return { content: [] };
-      },
-      listResources: async () => ({ resources: [] }),
-      readResource: async () => ({ contents: [] }),
-      listResourceTemplates: async () => ({ resourceTemplates: [] }),
-      close: async () => { closeCalls += 1; },
-    } as FakeMcpClient);
+    const blockingPromise = new Promise<void>((resolve) => {
+      releaseBlockingRequest = resolve;
+    });
+    server.mcpClientFactory = async () =>
+      ({
+        listTools: async () => ({ tools: [] }),
+        callTool: async () => {
+          callCount += 1;
+          if (callCount === 1) {
+            await blockingPromise;
+          }
+          return { content: [] };
+        },
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({ contents: [] }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
+        close: async () => {
+          closeCalls += 1;
+        },
+      }) as FakeMcpClient;
 
     // First request blocks in callTool. tapOn has no per-tool timeout floor so
     // the second request's short timeout is honored verbatim.
     const first = sendToolsCallWithArgs(socketPath, "tapOn", { deviceId: "device-1" });
     for (let i = 0; i < 10; i++) {
-      await new Promise<void>(resolve => setImmediate(resolve));
+      await new Promise<void>((resolve) => setImmediate(resolve));
     }
 
     const second = sendRequest(socketPath, {
@@ -710,7 +744,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
       timeoutMs: 500,
     });
     for (let i = 0; i < 10; i++) {
-      await new Promise<void>(resolve => setImmediate(resolve));
+      await new Promise<void>((resolve) => setImmediate(resolve));
     }
 
     // Advance past the queued request's timeout, then release the blocker.
@@ -729,7 +763,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
     // replacement idle timer was scheduled after the queued-timeout throw.
     await fakeTimer.advanceTimeAsync(5 * 60 * 1000);
     for (let i = 0; i < 20 && closeCalls === 0; i++) {
-      await new Promise<void>(resolve => setImmediate(resolve));
+      await new Promise<void>((resolve) => setImmediate(resolve));
     }
     expect(closeCalls).toBe(1);
   });
@@ -760,10 +794,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
 
     const firstSocket = new PersistentSocketClient();
     const secondSocket = new PersistentSocketClient();
-    await Promise.all([
-      firstSocket.connect(socketPath),
-      secondSocket.connect(socketPath),
-    ]);
+    await Promise.all([firstSocket.connect(socketPath), secondSocket.connect(socketPath)]);
     try {
       const firstBoundCall = await firstSocket.request("tools/call", {
         name: "observe",
@@ -792,7 +823,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
   test("rejects a released implicit proxy binding instead of forwarding unbound", async () => {
     const clientBindings: Array<string | undefined> = [];
     const forwardedArguments: Array<Record<string, unknown>> = [];
-    server.mcpClientFactory = async boundSessionUuid => {
+    server.mcpClientFactory = async (boundSessionUuid) => {
       clientBindings.push(boundSessionUuid);
       return {
         listTools: async () => ({ tools: [] }),
@@ -821,7 +852,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
 
   test("rejects tools/list for a released implicit proxy binding", async () => {
     const clientBindings: Array<string | undefined> = [];
-    server.mcpClientFactory = async boundSessionUuid => {
+    server.mcpClientFactory = async (boundSessionUuid) => {
       clientBindings.push(boundSessionUuid);
       return {
         listTools: async () => ({ tools: [] }),
@@ -850,7 +881,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
 
   test("rejects released bound resource discovery before shared routing", async () => {
     const clientBindings: Array<string | undefined> = [];
-    server.mcpClientFactory = async boundSessionUuid => {
+    server.mcpClientFactory = async (boundSessionUuid) => {
       clientBindings.push(boundSessionUuid);
       return {
         listTools: async () => ({ tools: [] }),
@@ -882,13 +913,15 @@ describe("UnixSocketServer MCP forward serialization", () => {
   test("routes a bound resources/read call through its session-scoped MCP client", async () => {
     sessionDevices.set("session-a", "device-a");
     const clientBindings: Array<string | undefined> = [];
-    server.mcpClientFactory = async boundSessionUuid => {
+    server.mcpClientFactory = async (boundSessionUuid) => {
       clientBindings.push(boundSessionUuid);
       return {
         listTools: async () => ({ tools: [] }),
         callTool: async () => ({ content: [] }),
         listResources: async () => ({ resources: [] }),
-        readResource: async () => ({ contents: [{ uri: "automobile:devices/booted", text: "[]" }] }),
+        readResource: async () => ({
+          contents: [{ uri: "automobile:devices/booted", text: "[]" }],
+        }),
         listResourceTemplates: async () => ({ resourceTemplates: [] }),
         close: async () => {},
       };
@@ -967,34 +1000,35 @@ describe("UnixSocketServer MCP forward serialization", () => {
     let releaseLongCall: () => void = () => {};
     let signalLongCallStarted: () => void = () => {};
     let signalLongCallFinished: () => void = () => {};
-    const longCallStarted = new Promise<void>(resolve => {
+    const longCallStarted = new Promise<void>((resolve) => {
       signalLongCallStarted = resolve;
     });
-    const longCallReleased = new Promise<void>(resolve => {
+    const longCallReleased = new Promise<void>((resolve) => {
       releaseLongCall = resolve;
     });
-    const longCallFinished = new Promise<void>(resolve => {
+    const longCallFinished = new Promise<void>((resolve) => {
       signalLongCallFinished = resolve;
     });
     let callCount = 0;
-    server.mcpClientFactory = async () => ({
-      listTools: async () => ({ tools: [] }),
-      callTool: async () => {
-        callCount++;
-        if (callCount === 2) {
-          signalLongCallStarted();
-          await longCallReleased;
-          signalLongCallFinished();
-        }
-        return { content: [] };
-      },
-      listResources: async () => ({ resources: [] }),
-      readResource: async () => ({ contents: [] }),
-      listResourceTemplates: async () => ({ resourceTemplates: [] }),
-      close: async () => {
-        closeCalls++;
-      },
-    } as FakeMcpClient);
+    server.mcpClientFactory = async () =>
+      ({
+        listTools: async () => ({ tools: [] }),
+        callTool: async () => {
+          callCount++;
+          if (callCount === 2) {
+            signalLongCallStarted();
+            await longCallReleased;
+            signalLongCallFinished();
+          }
+          return { content: [] };
+        },
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({ contents: [] }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
+        close: async () => {
+          closeCalls++;
+        },
+      }) as FakeMcpClient;
 
     const client = new PersistentSocketClient();
     await client.connect(socketPath);
@@ -1008,14 +1042,18 @@ describe("UnixSocketServer MCP forward serialization", () => {
         arguments: { sessionUuid: "session-a" },
       });
       await longCallStarted;
-      const boundClientKeysBySocketSession = (server as unknown as {
-        boundMcpClientKeysBySocketSession: Map<string, unknown>;
-      }).boundMcpClientKeysBySocketSession;
+      const boundClientKeysBySocketSession = (
+        server as unknown as {
+          boundMcpClientKeysBySocketSession: Map<string, unknown>;
+        }
+      ).boundMcpClientKeysBySocketSession;
       const socketSessionId = boundClientKeysBySocketSession.keys().next().value;
       expect(socketSessionId).toBeDefined();
-      (server as unknown as {
-        clearBoundMcpClientKey(socketSessionId: string): void;
-      }).clearBoundMcpClientKey(socketSessionId);
+      (
+        server as unknown as {
+          clearBoundMcpClientKey(socketSessionId: string): void;
+        }
+      ).clearBoundMcpClientKey(socketSessionId);
       await fakeTimer.advanceTimeAsync(5 * 60 * 1000);
 
       try {
@@ -1208,7 +1246,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
         callTool: async () => {
           inFlight += 1;
           maxInFlight = Math.max(maxInFlight, inFlight);
-          await new Promise<void>(resolve => {
+          await new Promise<void>((resolve) => {
             fakeTimer.setTimeout(resolve, 40);
           });
           inFlight -= 1;
@@ -1223,8 +1261,14 @@ describe("UnixSocketServer MCP forward serialization", () => {
     };
 
     const [a, b] = await Promise.all([
-      sendToolsCallWithArgs(socketPath, "observe", { deviceId: "device-1", sessionUuid: "session-a" }),
-      sendToolsCallWithArgs(socketPath, "observe", { deviceId: "device-1", sessionUuid: "session-b" }),
+      sendToolsCallWithArgs(socketPath, "observe", {
+        deviceId: "device-1",
+        sessionUuid: "session-a",
+      }),
+      sendToolsCallWithArgs(socketPath, "observe", {
+        deviceId: "device-1",
+        sessionUuid: "session-b",
+      }),
     ]);
 
     expect(a.success).toBe(true);
@@ -1244,7 +1288,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
         callTool: async () => {
           inFlight += 1;
           maxInFlight = Math.max(maxInFlight, inFlight);
-          await new Promise<void>(resolve => {
+          await new Promise<void>((resolve) => {
             fakeTimer.setTimeout(resolve, 40);
           });
           inFlight -= 1;
@@ -1282,7 +1326,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
         callTool: async () => {
           inFlight += 1;
           maxInFlight = Math.max(maxInFlight, inFlight);
-          await new Promise<void>(resolve => {
+          await new Promise<void>((resolve) => {
             fakeTimer.setTimeout(resolve, 40);
           });
           inFlight -= 1;
@@ -1320,7 +1364,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
         callTool: async () => {
           inFlight += 1;
           maxInFlight = Math.max(maxInFlight, inFlight);
-          await new Promise<void>(resolve => {
+          await new Promise<void>((resolve) => {
             fakeTimer.setTimeout(resolve, 40);
           });
           inFlight -= 1;
@@ -1355,14 +1399,20 @@ describe("UnixSocketServer MCP forward serialization", () => {
     let releaseFirstSessionCall: () => void = () => {};
     let resolveFirstSessionCallStarted: () => void = () => {};
     let resolveSessionBound: () => void = () => {};
-    const firstSessionCallStarted = new Promise<void>(resolve => { resolveFirstSessionCallStarted = resolve; });
-    const firstSessionCallReleased = new Promise<void>(resolve => { releaseFirstSessionCall = resolve; });
-    const sessionBound = new Promise<void>(resolve => { resolveSessionBound = resolve; });
+    const firstSessionCallStarted = new Promise<void>((resolve) => {
+      resolveFirstSessionCallStarted = resolve;
+    });
+    const firstSessionCallReleased = new Promise<void>((resolve) => {
+      releaseFirstSessionCall = resolve;
+    });
+    const sessionBound = new Promise<void>((resolve) => {
+      resolveSessionBound = resolve;
+    });
 
     server.mcpClientFactory = async () => {
       const fake: FakeMcpClient = {
         listTools: async () => ({ tools: [] }),
-        callTool: async request => {
+        callTool: async (request) => {
           const args = (request as { arguments: Record<string, unknown> }).arguments;
           if (args.sessionUuid === "session-a" && !sessionDevices.has("session-a")) {
             resolveFirstSessionCallStarted();
@@ -1378,7 +1428,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
 
           inFlightAfterBind += 1;
           maxInFlightAfterBind = Math.max(maxInFlightAfterBind, inFlightAfterBind);
-          await new Promise<void>(resolve => {
+          await new Promise<void>((resolve) => {
             fakeTimer.setTimeout(resolve, 40);
           });
           inFlightAfterBind -= 1;
@@ -1394,7 +1444,9 @@ describe("UnixSocketServer MCP forward serialization", () => {
 
     const first = sendToolsCallWithArgs(socketPath, "observe", { sessionUuid: "session-a" });
     await firstSessionCallStarted;
-    const queuedSameSession = sendToolsCallWithArgs(socketPath, "observe", { sessionUuid: "session-a" });
+    const queuedSameSession = sendToolsCallWithArgs(socketPath, "observe", {
+      sessionUuid: "session-a",
+    });
     const explicitDevice = sendToolsCallWithArgs(socketPath, "observe", { deviceId: "device-1" });
 
     releaseFirstSessionCall();
@@ -1417,13 +1469,17 @@ describe("UnixSocketServer MCP forward serialization", () => {
     let maxInFlightAfterAutolock = 0;
     let releaseFirstImplicitCall: () => void = () => {};
     let resolveAutolockReady: () => void = () => {};
-    const firstImplicitCallReleased = new Promise<void>(resolve => { releaseFirstImplicitCall = resolve; });
-    const autolockReady = new Promise<void>(resolve => { resolveAutolockReady = resolve; });
+    const firstImplicitCallReleased = new Promise<void>((resolve) => {
+      releaseFirstImplicitCall = resolve;
+    });
+    const autolockReady = new Promise<void>((resolve) => {
+      resolveAutolockReady = resolve;
+    });
 
     server.mcpClientFactory = async () => {
       const fake: FakeMcpClient = {
         listTools: async () => ({ tools: [] }),
-        callTool: async request => {
+        callTool: async (request) => {
           const args = (request as { arguments: Record<string, unknown> }).arguments;
           const mcpSessionId = String(args.__mcpSessionId);
           if (!mcpAutolockSessions.has(mcpSessionId) && !args.sessionUuid) {
@@ -1440,7 +1496,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
 
           inFlightAfterAutolock += 1;
           maxInFlightAfterAutolock = Math.max(maxInFlightAfterAutolock, inFlightAfterAutolock);
-          await new Promise<void>(resolve => {
+          await new Promise<void>((resolve) => {
             fakeTimer.setTimeout(resolve, 40);
           });
           inFlightAfterAutolock -= 1;
@@ -1456,7 +1512,9 @@ describe("UnixSocketServer MCP forward serialization", () => {
 
     const implicitSocketCalls = sendTwoToolsCallsOnOneSocket(socketPath, "observe");
     await autolockReady;
-    const explicitSessionCall = sendToolsCallWithArgs(socketPath, "observe", { sessionUuid: "session-a" });
+    const explicitSessionCall = sendToolsCallWithArgs(socketPath, "observe", {
+      sessionUuid: "session-a",
+    });
 
     releaseFirstImplicitCall();
 
@@ -1465,7 +1523,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
       explicitSessionCall,
     ]);
 
-    expect(implicitResults.every(response => response.success)).toBe(true);
+    expect(implicitResults.every((response) => response.success)).toBe(true);
     expect(explicitSessionResult.success).toBe(true);
     expect(maxInFlightAfterAutolock).toBe(1);
     expect(inFlightAfterAutolock).toBe(0);
@@ -1481,7 +1539,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
         callTool: async () => {
           inFlight += 1;
           maxInFlight = Math.max(maxInFlight, inFlight);
-          await new Promise<void>(resolve => {
+          await new Promise<void>((resolve) => {
             fakeTimer.setTimeout(resolve, 40);
           });
           inFlight -= 1;
@@ -1514,12 +1572,12 @@ describe("UnixSocketServer MCP forward serialization", () => {
     server.mcpClientFactory = async () => {
       const fake: FakeMcpClient = {
         listTools: async () => ({ tools: [] }),
-        callTool: async request => {
+        callTool: async (request) => {
           const args = (request as { arguments: Record<string, unknown> }).arguments;
           forwardedSessionIds.push(String(args.__mcpSessionId));
           inFlight += 1;
           maxInFlight = Math.max(maxInFlight, inFlight);
-          await new Promise<void>(resolve => {
+          await new Promise<void>((resolve) => {
             fakeTimer.setTimeout(resolve, 40);
           });
           inFlight -= 1;
@@ -1551,7 +1609,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
     server.mcpClientFactory = async () => {
       const fake: FakeMcpClient = {
         listTools: async () => ({ tools: [] }),
-        callTool: async request => {
+        callTool: async (request) => {
           forwardedCalls.push(request);
           return { content: [] };
         },
@@ -1587,7 +1645,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
     server.mcpClientFactory = async () => {
       const fake: FakeMcpClient = {
         listTools: async () => ({ tools: [] }),
-        callTool: async request => {
+        callTool: async (request) => {
           forwardedCalls.push(request);
           return { content: [] };
         },
@@ -1601,7 +1659,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
 
     const responses = await sendTwoToolsCallsOnOneSocket(socketPath, "observe");
 
-    expect(responses.every(response => response.success)).toBe(true);
+    expect(responses.every((response) => response.success)).toBe(true);
     expect(forwardedCalls).toHaveLength(2);
     const firstArgs = (forwardedCalls[0] as { arguments: Record<string, unknown> }).arguments;
     const secondArgs = (forwardedCalls[1] as { arguments: Record<string, unknown> }).arguments;
@@ -1615,7 +1673,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
     server.mcpClientFactory = async () => {
       const fake: FakeMcpClient = {
         listTools: async () => ({ tools: [] }),
-        callTool: async request => {
+        callTool: async (request) => {
           forwardedCall = request;
           return { content: [] };
         },
@@ -1639,7 +1697,9 @@ describe("UnixSocketServer MCP forward serialization", () => {
   test("queued request fails fast when queue wait exceeds its timeout", async () => {
     let callCount = 0;
     let releaseBlockingRequest: () => void = () => {};
-    const blockingPromise = new Promise<void>(r => { releaseBlockingRequest = r; });
+    const blockingPromise = new Promise<void>((r) => {
+      releaseBlockingRequest = r;
+    });
 
     server.mcpClientFactory = async () => {
       const fake: FakeMcpClient = {
@@ -1666,7 +1726,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
 
     // Yield to the real event loop so the first request enters callTool
     for (let i = 0; i < 10; i++) {
-      await new Promise<void>(r => setImmediate(r));
+      await new Promise<void>((r) => setImmediate(r));
     }
 
     // Second request: has a short timeout (500ms) that will expire in the queue
@@ -1680,7 +1740,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
 
     // Yield to let socket data reach the server
     for (let i = 0; i < 10; i++) {
-      await new Promise<void>(r => setImmediate(r));
+      await new Promise<void>((r) => setImmediate(r));
     }
 
     // Advance time past the second request's timeout while it's queued

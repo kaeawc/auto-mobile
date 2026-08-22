@@ -9,7 +9,7 @@ import { sendSocketRequest } from "./helpers/socketRequest";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
-import type { SessionToolProfileService } from "../../src/features/toolCapabilities/SessionToolProfileService";
+import type { SessionToolSelectionService } from "../../src/features/toolSelection/SessionToolSelectionService";
 import type { DaemonResponse } from "../../src/daemon/types";
 
 const device = {
@@ -23,12 +23,16 @@ function createDaemonState(options?: { useLabeledSession?: boolean }) {
     isInitialized: () => true,
     getSessionManager: () => ({
       getSession: () => null,
-      getSessionForDevice: (deviceId: string) => deviceId === device.deviceId
-        ? options?.useLabeledSession ? "device-session-1:B" : "device-session-1"
-        : null,
-      getDeviceLabels: (sessionId: string) => sessionId === "device-session-1"
-        ? { A: "device-session-1", B: "device-session-1:B" }
-        : undefined,
+      getSessionForDevice: (deviceId: string) =>
+        deviceId === device.deviceId
+          ? options?.useLabeledSession
+            ? "device-session-1:B"
+            : "device-session-1"
+          : null,
+      getDeviceLabels: (sessionId: string) =>
+        sessionId === "device-session-1"
+          ? { A: "device-session-1", B: "device-session-1:B" }
+          : undefined,
       releaseSession: async () => null,
     }),
     getDevicePool: () => ({
@@ -39,11 +43,15 @@ function createDaemonState(options?: { useLabeledSession?: boolean }) {
   };
 }
 
-function sendRequest(socketPath: string, method: string, params: Record<string, unknown>): Promise<DaemonResponse> {
+function sendRequest(
+  socketPath: string,
+  method: string,
+  params: Record<string, unknown>,
+): Promise<DaemonResponse> {
   return sendSocketRequest(socketPath, method, params);
 }
 
-describe("UnixSocketServer app-data capability enforcement", () => {
+describe("UnixSocketServer exact-tool selection enforcement", () => {
   let socketPath: string;
   let server: UnixSocketServer;
   let isEnabled: ReturnType<typeof mock>;
@@ -53,7 +61,7 @@ describe("UnixSocketServer app-data capability enforcement", () => {
   async function startServer(options?: { useLabeledSession?: boolean }): Promise<void> {
     socketPath = join(tmpdir(), `tool-capabilities-${randomUUID()}.sock`);
     isEnabled = mock(async () => false);
-    const profileService: Pick<SessionToolProfileService, "isEnabled" | "setEnabled"> = {
+    const profileService: Pick<SessionToolSelectionService, "isEnabled" | "setEnabled"> = {
       isEnabled,
       setEnabled: async () => {},
     };
@@ -76,7 +84,7 @@ describe("UnixSocketServer app-data capability enforcement", () => {
       createDaemonState(options),
       new FakeTimer(),
       null,
-      { sessionToolProfileService: profileService }
+      { sessionToolSelectionService: profileService },
     );
     await server.start();
   }
@@ -95,15 +103,34 @@ describe("UnixSocketServer app-data capability enforcement", () => {
   });
 
   test.each([
-    ["ide/setKeyValue", { deviceId: device.deviceId, appId: "com.example", fileName: "prefs", key: "name", value: "value", type: "STRING" }],
-    ["ide/removeKeyValue", { deviceId: device.deviceId, appId: "com.example", fileName: "prefs", key: "name" }],
-    ["ide/clearKeyValueFile", { deviceId: device.deviceId, appId: "com.example", fileName: "prefs" }],
-  ])("denies %s when app-data interop is disabled", async (method, params) => {
+    [
+      "ide/setKeyValue",
+      "setKeyValue",
+      {
+        deviceId: device.deviceId,
+        appId: "com.example",
+        fileName: "prefs",
+        key: "name",
+        value: "value",
+        type: "STRING",
+      },
+    ],
+    [
+      "ide/removeKeyValue",
+      "removeKeyValue",
+      { deviceId: device.deviceId, appId: "com.example", fileName: "prefs", key: "name" },
+    ],
+    [
+      "ide/clearKeyValueFile",
+      "clearKeyValueFile",
+      { deviceId: device.deviceId, appId: "com.example", fileName: "prefs" },
+    ],
+  ])("denies %s when its exact tool is disabled", async (method, toolName, params) => {
     const response = await sendRequest(socketPath, method, params);
 
     expect(response.success).toBe(false);
-    expect(response.error).toContain("requires the 'app-data-interop' capability");
-    expect(isEnabled).toHaveBeenCalledWith("device-session-1", "app-data-interop");
+    expect(response.error).toContain(`Tool ${toolName} is disabled`);
+    expect(isEnabled).toHaveBeenCalledWith("device-session-1", toolName, false);
     expect(getInstanceCalls).toBe(0);
   });
 
@@ -137,20 +164,22 @@ describe("UnixSocketServer app-data capability enforcement", () => {
     });
 
     expect(response.success).toBe(false);
-    expect(response.error).toContain("requires the 'app-data-interop' capability");
+    expect(response.error).toContain("Tool setKeyValue is disabled");
     // UNION consults both the derived label session and its resolved base.
-    expect(isEnabled).toHaveBeenCalledWith("device-session-1", "app-data-interop");
-    expect(isEnabled).toHaveBeenCalledWith("device-session-1:B", "app-data-interop");
+    expect(isEnabled).toHaveBeenCalledWith("device-session-1", "setKeyValue", false);
+    expect(isEnabled).toHaveBeenCalledWith("device-session-1:B", "setKeyValue", false);
     expect(getInstanceCalls).toBe(0);
   });
 
   test("allows a labeled device session when the derived label re-enables the tool (Gap B union symmetry)", async () => {
     await server.close();
     await startServer({ useLabeledSession: true });
-    // Base "device-session-1" narrows app-data-interop away; the derived
+    // Base "device-session-1" narrows setKeyValue away; the derived
     // "device-session-1:B" label grants it. Union => allowed, matching the MCP
     // registerDeviceAware path.
-    isEnabled.mockImplementation(async (sessionUuid: string | undefined) => sessionUuid === "device-session-1:B");
+    isEnabled.mockImplementation(
+      async (sessionUuid: string | undefined) => sessionUuid === "device-session-1:B",
+    );
 
     const response = await sendRequest(socketPath, "ide/setKeyValue", {
       deviceId: device.deviceId,

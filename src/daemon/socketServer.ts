@@ -13,19 +13,14 @@ import { logger } from "../utils/logger";
 import { resolveMcpRequestTimeoutMs } from "./mcpRequestTimeout";
 import { McpTimeoutError } from "./McpTimeoutError";
 import { DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS } from "../utils/deviceTimeouts";
-import {
-  DaemonNotification,
-  DaemonRequest,
-  DaemonResponse,
-  SessionContext,
-} from "./types";
+import { DaemonNotification, DaemonRequest, DaemonResponse, SessionContext } from "./types";
 import {
   SOCKET_PATH,
   DAEMON_HANDSHAKE_ENABLED,
   DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
   DAEMON_SESSION_TOOL_BINDING_HEADER,
-  DAEMON_CAPABILITY_PROFILE_HEADER,
-  DAEMON_CAPABILITY_PROFILE_PARAM,
+  DAEMON_TOOL_SELECTION_PROFILE_HEADER,
+  DAEMON_TOOL_SELECTION_PROFILE_PARAM,
   DAEMON_BOUND_SESSION_PARAM,
   DAEMON_VERSION,
 } from "./constants";
@@ -38,7 +33,10 @@ import {
   SessionReleaseBroadcaster,
   SESSION_RELEASED_NOTIFICATION_METHOD,
 } from "../server/sessionReleaseBroadcast";
-import { capabilityProfileUuidFromToolResponse, SET_TOOL_CAPABILITY_TOOL_NAME } from "../features/toolCapabilities/toolCapabilityControl";
+import {
+  toolSelectionProfileUuidFromResponse,
+  SET_TOOL_ENABLED_TOOL_NAME,
+} from "../features/toolSelection/toolSelectionControl";
 import {
   evaluateClientHandshake,
   extractClientHandshake,
@@ -52,13 +50,12 @@ import { Timer, defaultTimer } from "../utils/SystemTimer";
 import type { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
 import type { FeatureFlagKey } from "../features/featureFlags/FeatureFlagDefinitions";
 import {
-  getSessionToolProfileService,
-  TOOL_CAPABILITIES,
-  type SessionToolProfileService,
-  type ToolCapability,
-} from "../features/toolCapabilities/SessionToolProfileService";
-import { assertToolEnabledForAnySession } from "../features/toolCapabilities/toolCapabilityPolicy";
-import { resolveCapabilityBaseSessionUuid } from "../features/toolCapabilities/capabilitySessionResolver";
+  getSessionToolSelectionService,
+  type SessionToolSelectionService,
+} from "../features/toolSelection/SessionToolSelectionService";
+import { assertToolEnabledForAnySession } from "../features/toolSelection/toolSelectionPolicy";
+import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
+import { ToolRegistry } from "../server/toolRegistry";
 import { getMcpServerVersion } from "../utils/mcpVersion";
 import {
   IOS_CTRL_PROXY_APP_HASH,
@@ -132,7 +129,10 @@ interface SocketFileIdentity {
  * by name (a name-based patch silently no-ops if the internal creator is renamed,
  * leaving forwarding dead but the suite green).
  */
-export type McpClientFactory = (boundSessionUuid?: string, capabilityProfileUuid?: string) => Promise<Client>;
+export type McpClientFactory = (
+  boundSessionUuid?: string,
+  toolSelectionProfileUuid?: string,
+) => Promise<Client>;
 
 /**
  * The narrow append-text surface `input/typeText mode:"append"` needs.
@@ -145,7 +145,7 @@ export interface AppendTextInput {
   appendText(
     text: string,
     timeoutMs?: number,
-    beforeKeyEvent?: AppendKeyEventValidator
+    beforeKeyEvent?: AppendKeyEventValidator,
   ): Promise<{ success: boolean; error?: string; charsSent?: number }>;
 }
 
@@ -158,18 +158,18 @@ interface BoundMcpClient {
   clientKey: string;
   executionKey: string;
   sessionUuid?: string;
-  capabilityProfileUuid?: string;
+  toolSelectionProfileUuid?: string;
   requiresLiveDaemonSession: boolean;
 }
 
 interface McpForwardRoute {
   /** Serializes work that targets the same physical device or session. */
   executionKey: string;
-  /** Owns the loopback MCP transport and its session-local capability profile. */
+  /** Owns the loopback MCP transport and its session-local tool-selection profile. */
   clientKey: string;
   /** Replayed when this transport needs to establish a fresh MCP session. */
   sessionUuid?: string;
-  capabilityProfileUuid?: string;
+  toolSelectionProfileUuid?: string;
 }
 
 const isNonBlankSessionUuid = (value: unknown): value is string =>
@@ -207,7 +207,7 @@ interface KeyValueMutationClient {
     fileName: string,
     key: string,
     value: string,
-    type: KeyValueType
+    type: KeyValueType,
   ): Promise<void>;
   removePreference(packageName: string, fileName: string, key: string): Promise<void>;
   clearPreferenceStore(packageName: string, fileName: string): Promise<void>;
@@ -220,7 +220,7 @@ interface KeyValueMutationClient {
 class InputTypeTextAppendError extends Error {
   constructor(
     message: string,
-    readonly charsSent: number
+    readonly charsSent: number,
   ) {
     super(message);
     this.name = "InputTypeTextAppendError";
@@ -249,7 +249,7 @@ export class UnixSocketServer {
   /**
    * The loopback MCP client that a socket transport most recently bound with a
    * device session. Follow-up requests can omit their session UUID, so reuse
-   * this client to preserve the selected capability profile.
+   * this client to preserve the selected tool-selection profile.
    */
   private boundMcpClientKeysBySocketSession: Map<string, BoundMcpClient> = new Map();
   /** Promise tails that serialize MCP HTTP forwards only within the same execution target. */
@@ -263,14 +263,17 @@ export class UnixSocketServer {
   private featureFlagService: FeatureFlagService | null;
   private readonly handshakeEnforced: boolean;
   private readonly daemonIdentity: DaemonSelfIdentity;
-  private readonly sessionToolProfileService?: Pick<SessionToolProfileService, "isEnabled" | "setEnabled">;
+  private readonly sessionToolSelectionService?: Pick<
+    SessionToolSelectionService,
+    "isEnabled" | "setEnabled"
+  >;
   /**
    * Factory that `getMcpClient()` calls to open the loopback MCP HTTP client.
    * Defaults to the real {@link createMcpClient}; tests assign a fake here to
    * exercise forwarding without a live HTTP endpoint.
    */
-  mcpClientFactory: McpClientFactory = (sessionUuid, capabilityProfileUuid) =>
-    this.createMcpClient(sessionUuid, capabilityProfileUuid);
+  mcpClientFactory: McpClientFactory = (sessionUuid, toolSelectionProfileUuid) =>
+    this.createMcpClient(sessionUuid, toolSelectionProfileUuid);
 
   /**
    * Factory for the Android append-text helper behind `input/typeText mode:"append"`.
@@ -279,7 +282,7 @@ export class UnixSocketServer {
    * this server's timer; tests assign a fake so the append path is exercised without
    * shelling out to a real `adb` (and so a stalled subprocess can be simulated).
    */
-  appendTextFactory: (device: BootedDevice) => AppendTextInput = device =>
+  appendTextFactory: (device: BootedDevice) => AppendTextInput = (device) =>
     new InputText(device, defaultAdbClientFactory, undefined, this.timer);
 
   /**
@@ -322,8 +325,8 @@ export class UnixSocketServer {
     handshakeConfig: {
       identity?: DaemonSelfIdentity;
       enforce?: boolean;
-      sessionToolProfileService?: Pick<SessionToolProfileService, "isEnabled" | "setEnabled">;
-    } = {}
+      sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled" | "setEnabled">;
+    } = {},
   ) {
     this.socketPath = socketPath;
     this.mcpEndpoint = mcpEndpoint;
@@ -331,7 +334,7 @@ export class UnixSocketServer {
     this.timer = timer;
     this.featureFlagService = featureFlagService;
     this.handshakeEnforced = handshakeConfig.enforce ?? DAEMON_HANDSHAKE_ENABLED;
-    this.sessionToolProfileService = handshakeConfig.sessionToolProfileService;
+    this.sessionToolSelectionService = handshakeConfig.sessionToolSelectionService;
     this.daemonIdentity = handshakeConfig.identity ?? {
       version: DAEMON_VERSION,
       build: getCurrentBuildIdentity(),
@@ -359,7 +362,7 @@ export class UnixSocketServer {
       await unlink(this.socketPath);
     }
 
-    this.server = createServer(socket => {
+    this.server = createServer((socket) => {
       this.handleConnection(socket);
     });
 
@@ -367,7 +370,7 @@ export class UnixSocketServer {
     // Subscribed here (not in the daemon) so a socket-server recreation during
     // recovery re-wires itself; close() unsubscribes symmetrically.
     this.listChangedUnsubscribe?.();
-    this.listChangedUnsubscribe = ListChangedBroadcaster.subscribe(kind => {
+    this.listChangedUnsubscribe = ListChangedBroadcaster.subscribe((kind) => {
       this.broadcastListChanged(kind);
     });
 
@@ -388,12 +391,10 @@ export class UnixSocketServer {
         // Restrict the bound socket to the owner (0o600) before start() resolves,
         // so no client can connect while it is still world-accessible. listen()
         // creates the socket at the umask default (issue #4750).
-        secureFile(this.socketPath)
-          .then(resolve)
-          .catch(reject);
+        secureFile(this.socketPath).then(resolve).catch(reject);
       });
 
-      this.server!.on("error", error => {
+      this.server!.on("error", (error) => {
         logger.error(`Unix socket server error: ${error}`);
         reject(error);
       });
@@ -421,12 +422,12 @@ export class UnixSocketServer {
     socket.setTimeout(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
     socket.on("timeout", () => {
       logger.warn(
-        `Daemon RPC socket ${sessionId} idle timeout after ${DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS}ms, destroying`
+        `Daemon RPC socket ${sessionId} idle timeout after ${DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS}ms, destroying`,
       );
       socket.destroy();
     });
 
-    socket.on("data", data => {
+    socket.on("data", (data) => {
       const handler = (async () => {
         buffer += data.toString();
 
@@ -470,7 +471,7 @@ export class UnixSocketServer {
       this.trackRequestHandler(this.cancelOwnedGestures(sessionId));
     });
 
-    socket.on("error", error => {
+    socket.on("error", (error) => {
       logger.error(`Socket error for ${sessionId}:`, error);
       this.sessions.delete(sessionId);
       this.clientSockets.delete(sessionId);
@@ -487,7 +488,7 @@ export class UnixSocketServer {
     this.activeRequestHandlers.add(handler);
     void handler.then(
       () => this.activeRequestHandlers.delete(handler),
-      () => this.activeRequestHandlers.delete(handler)
+      () => this.activeRequestHandlers.delete(handler),
     );
   }
 
@@ -534,7 +535,11 @@ export class UnixSocketServer {
     }
   }
 
-  private writeFrame(socket: Socket, sessionId: string, frame: DaemonResponse | DaemonNotification): void {
+  private writeFrame(
+    socket: Socket,
+    sessionId: string,
+    frame: DaemonResponse | DaemonNotification,
+  ): void {
     if (socket.destroyed) {
       return;
     }
@@ -542,7 +547,7 @@ export class UnixSocketServer {
       const ok = socket.write(JSON.stringify(frame) + "\n");
       if (!ok) {
         logger.debug(
-          `Daemon RPC socket ${sessionId} backpressured; awaiting drain (idle timeout still armed)`
+          `Daemon RPC socket ${sessionId} backpressured; awaiting drain (idle timeout still armed)`,
         );
       }
     } catch (error) {
@@ -556,10 +561,7 @@ export class UnixSocketServer {
   /**
    * Handle a request from a client
    */
-  private async handleRequest(
-    sessionId: string,
-    request: DaemonRequest
-  ): Promise<DaemonResponse> {
+  private async handleRequest(sessionId: string, request: DaemonRequest): Promise<DaemonResponse> {
     const session = this.sessions.get(sessionId);
     if (!session) {
       return {
@@ -614,68 +616,106 @@ export class UnixSocketServer {
         const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
         const initialRoute = this.getMcpForwardRoute(request, sessionId);
 
-        const result = await this.runMcpForwardForCurrentRoute(initialRoute, request, sessionId, async route => {
-          const queueWaitMs = this.timer.now() - queueEnterMs;
-          const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
-          const forwardLabel = UnixSocketServer.describeMcpForwardRequest(request);
-          logger.debug(
-            `[McpForward] start executionKey=${route.executionKey} clientKey=${route.clientKey} socketSession=${sessionId} requestId=${request.id} ${forwardLabel} queueWaitMs=${queueWaitMs} remainingTimeoutMs=${remainingTimeoutMs}`
-          );
+        const result = await this.runMcpForwardForCurrentRoute(
+          initialRoute,
+          request,
+          sessionId,
+          async (route) => {
+            const queueWaitMs = this.timer.now() - queueEnterMs;
+            const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
+            const forwardLabel = UnixSocketServer.describeMcpForwardRequest(request);
+            logger.debug(
+              `[McpForward] start executionKey=${route.executionKey} clientKey=${route.clientKey} socketSession=${sessionId} requestId=${request.id} ${forwardLabel} queueWaitMs=${queueWaitMs} remainingTimeoutMs=${remainingTimeoutMs}`,
+            );
 
-          if (remainingTimeoutMs <= 0) {
-            const toolName = request.method === "tools/call" ? request.params?.name ?? request.method : request.method;
-            throw new McpTimeoutError({
-              toolName,
-              timeoutMs: totalTimeoutMs,
-              origin: "UnixSocketServer.handleRequest",
-              detail: `spent ${queueWaitMs}ms waiting in queue`,
-            });
-          }
+            if (remainingTimeoutMs <= 0) {
+              const toolName =
+                request.method === "tools/call"
+                  ? (request.params?.name ?? request.method)
+                  : request.method;
+              throw new McpTimeoutError({
+                toolName,
+                timeoutMs: totalTimeoutMs,
+                origin: "UnixSocketServer.handleRequest",
+                detail: `spent ${queueWaitMs}ms waiting in queue`,
+              });
+            }
 
-          const forwardStartMs = this.timer.now();
-          try {
-            const mcpClient = await this.getMcpClient(route.clientKey, route.sessionUuid, route.capabilityProfileUuid);
-            const sessionWasActiveBeforeForward = this.wasRequestSessionActive(request);
-
+            const forwardStartMs = this.timer.now();
             try {
-              const response = await this.handleIdeRequest(mcpClient, request, remainingTimeoutMs, sessionId);
-              this.recordBoundMcpClientKey(
-                request, sessionId, route, sessionWasActiveBeforeForward, response
+              const mcpClient = await this.getMcpClient(
+                route.clientKey,
+                route.sessionUuid,
+                route.toolSelectionProfileUuid,
               );
-              return response;
-            } catch (ideError) {
-              const ideErrorMessage = ideError instanceof Error ? ideError.message : String(ideError);
-              if (ideErrorMessage.includes("Session not found")) {
-                logger.warn("MCP client session expired, reconnecting and retrying...");
-                await this.resetMcpClient(route.clientKey);
-                const freshClient = await this.getMcpClient(route.clientKey, route.sessionUuid, route.capabilityProfileUuid);
-                const retryRemainingMs = remainingTimeoutMs - (this.timer.now() - forwardStartMs);
-                if (retryRemainingMs <= 0) {
-                  const toolName = request.method === "tools/call" ? request.params?.name ?? request.method : request.method;
-                  throw new McpTimeoutError({
-                    toolName,
-                    timeoutMs: remainingTimeoutMs,
-                    origin: "UnixSocketServer.handleRequest",
-                    detail: `no budget remaining after session reconnect (elapsed ${this.timer.now() - forwardStartMs}ms)`,
-                  });
-                }
-                const response = await this.handleIdeRequest(freshClient, request, retryRemainingMs, sessionId);
+              const sessionWasActiveBeforeForward = this.wasRequestSessionActive(request);
+
+              try {
+                const response = await this.handleIdeRequest(
+                  mcpClient,
+                  request,
+                  remainingTimeoutMs,
+                  sessionId,
+                );
                 this.recordBoundMcpClientKey(
-                  request, sessionId, route, sessionWasActiveBeforeForward, response
+                  request,
+                  sessionId,
+                  route,
+                  sessionWasActiveBeforeForward,
+                  response,
                 );
                 return response;
+              } catch (ideError) {
+                const ideErrorMessage =
+                  ideError instanceof Error ? ideError.message : String(ideError);
+                if (ideErrorMessage.includes("Session not found")) {
+                  logger.warn("MCP client session expired, reconnecting and retrying...");
+                  await this.resetMcpClient(route.clientKey);
+                  const freshClient = await this.getMcpClient(
+                    route.clientKey,
+                    route.sessionUuid,
+                    route.toolSelectionProfileUuid,
+                  );
+                  const retryRemainingMs = remainingTimeoutMs - (this.timer.now() - forwardStartMs);
+                  if (retryRemainingMs <= 0) {
+                    const toolName =
+                      request.method === "tools/call"
+                        ? (request.params?.name ?? request.method)
+                        : request.method;
+                    throw new McpTimeoutError({
+                      toolName,
+                      timeoutMs: remainingTimeoutMs,
+                      origin: "UnixSocketServer.handleRequest",
+                      detail: `no budget remaining after session reconnect (elapsed ${this.timer.now() - forwardStartMs}ms)`,
+                    });
+                  }
+                  const response = await this.handleIdeRequest(
+                    freshClient,
+                    request,
+                    retryRemainingMs,
+                    sessionId,
+                  );
+                  this.recordBoundMcpClientKey(
+                    request,
+                    sessionId,
+                    route,
+                    sessionWasActiveBeforeForward,
+                    response,
+                  );
+                  return response;
+                }
+                throw ideError;
               }
-              throw ideError;
+            } finally {
+              logger.debug(
+                `[McpForward] end executionKey=${route.executionKey} clientKey=${route.clientKey} socketSession=${sessionId} requestId=${request.id} ${forwardLabel} forwardMs=${this.timer.now() - forwardStartMs}`,
+              );
+              // The idle close is scheduled by runWithActiveMcpClient's wrapper once
+              // this client's active-forward count reaches zero, so it is re-armed
+              // even when a forward throws before reaching this finally (issue #4610).
             }
-          } finally {
-            logger.debug(
-              `[McpForward] end executionKey=${route.executionKey} clientKey=${route.clientKey} socketSession=${sessionId} requestId=${request.id} ${forwardLabel} forwardMs=${this.timer.now() - forwardStartMs}`
-            );
-            // The idle close is scheduled by runWithActiveMcpClient's wrapper once
-            // this client's active-forward count reaches zero, so it is re-armed
-            // even when a forward throws before reaching this finally (issue #4610).
-          }
-        });
+          },
+        );
 
         return {
           id: request.id,
@@ -711,12 +751,15 @@ export class UnixSocketServer {
     if (!this.handshakeEnforced) {
       return null;
     }
-    const evaluation = evaluateClientHandshake(this.daemonIdentity, extractClientHandshake(request));
+    const evaluation = evaluateClientHandshake(
+      this.daemonIdentity,
+      extractClientHandshake(request),
+    );
     if (evaluation.ok) {
       return null;
     }
     logger.warn(
-      `Rejecting daemon client on handshake ${evaluation.reason} mismatch: ${evaluation.message}`
+      `Rejecting daemon client on handshake ${evaluation.reason} mismatch: ${evaluation.message}`,
     );
     return {
       id: request.id,
@@ -733,7 +776,7 @@ export class UnixSocketServer {
   private runKeyedMcpForward<T>(
     executionKey: string,
     fn: () => Promise<T>,
-    idleCloseKey?: string
+    idleCloseKey?: string,
   ): Promise<T> {
     if (idleCloseKey) {
       const idleCloseKeys = this.mcpForwardIdleCloseKeys.get(executionKey) ?? new Set<string>();
@@ -749,7 +792,7 @@ export class UnixSocketServer {
     });
     const tail = run.then(
       () => undefined,
-      () => undefined
+      () => undefined,
     );
     this.mcpForwardTails.set(executionKey, tail);
     void tail.finally(() => {
@@ -769,7 +812,7 @@ export class UnixSocketServer {
     this.clearMcpClientIdleTimer(clientKey);
     this.activeMcpClientForwardCounts.set(
       clientKey,
-      (this.activeMcpClientForwardCounts.get(clientKey) ?? 0) + 1
+      (this.activeMcpClientForwardCounts.get(clientKey) ?? 0) + 1,
     );
     try {
       return await fn();
@@ -794,13 +837,13 @@ export class UnixSocketServer {
     initialRoute: McpForwardRoute,
     request: DaemonRequest,
     socketSessionId: string,
-    fn: (route: McpForwardRoute) => Promise<T>
+    fn: (route: McpForwardRoute) => Promise<T>,
   ): Promise<T> {
     return this.runKeyedMcpForward(initialRoute.executionKey, async () => {
       const currentRoute = this.getMcpForwardRoute(request, socketSessionId);
       if (currentRoute.executionKey !== initialRoute.executionKey) {
         logger.debug(
-          `[McpForward] rekey requestId=${request.id} initialExecutionKey=${initialRoute.executionKey} currentExecutionKey=${currentRoute.executionKey}`
+          `[McpForward] rekey requestId=${request.id} initialExecutionKey=${initialRoute.executionKey} currentExecutionKey=${currentRoute.executionKey}`,
         );
         return await this.runMcpForwardForCurrentRoute(currentRoute, request, socketSessionId, fn);
       }
@@ -808,7 +851,7 @@ export class UnixSocketServer {
       // session it was admitted with. Re-resolving may replace a session-specific
       // clientKey with the shared unbound client (e.g. a mid-flight disconnect
       // cleared the binding before this recompute) under the same executionKey;
-      // that would run the admitted tool with no capability profile. Only the
+      // that would run the admitted tool with no tool-selection profile. Only the
       // execution target may be re-resolved, never the admitted client/session
       // (issue #4610).
       //
@@ -819,7 +862,7 @@ export class UnixSocketServer {
       // reacquires a device the caller never asked for). A mid-flight socket
       // disconnect, by contrast, leaves the daemon session live — so the daemon
       // session still being active is exactly what distinguishes a disconnect
-      // (keep the admitted client, preserving the capability profile above) from a
+      // (keep the admitted client, preserving the tool-selection profile above) from a
       // real release (re-resolve to the current, unseeded route). Only re-resolve
       // when the recompute actually points somewhere else (issue #4610).
       if (
@@ -828,7 +871,7 @@ export class UnixSocketServer {
         !this.hasActiveDaemonSession(initialRoute.sessionUuid)
       ) {
         logger.debug(
-          `[McpForward] released-session re-resolve requestId=${request.id} releasedSession=${initialRoute.sessionUuid} clientKey=${initialRoute.clientKey} -> ${currentRoute.clientKey}`
+          `[McpForward] released-session re-resolve requestId=${request.id} releasedSession=${initialRoute.sessionUuid} clientKey=${initialRoute.clientKey} -> ${currentRoute.clientKey}`,
         );
         return await this.runWithActiveMcpClient(currentRoute.clientKey, () => fn(currentRoute));
       }
@@ -874,25 +917,43 @@ export class UnixSocketServer {
       // seeded loopback transport advertises the session-scoped list, completing
       // the proxy-side reconnect seeding (issue #4610).
       const listSessionUuid = this.getSessionUuid(request.params);
-      const capabilityProfileUuid = this.getCapabilityProfileUuid(request.params);
+      const toolSelectionProfileUuid = this.getToolSelectionProfileUuid(request.params);
       this.throwIfReleasedBoundSession(request.params);
       if (listSessionUuid) {
-        return this.sessionScopedForwardRoute(socketSessionId, listSessionUuid, undefined, capabilityProfileUuid);
+        return this.sessionScopedForwardRoute(
+          socketSessionId,
+          listSessionUuid,
+          undefined,
+          toolSelectionProfileUuid,
+        );
       }
-      if (capabilityProfileUuid) {
-        return this.capabilityProfileScopedForwardRoute(socketSessionId, capabilityProfileUuid, undefined);
+      if (toolSelectionProfileUuid) {
+        return this.toolSelectionProfileScopedForwardRoute(
+          socketSessionId,
+          toolSelectionProfileUuid,
+          undefined,
+        );
       }
       return boundRoute ?? this.sharedMcpForwardRoute(`method:${request.method}`);
     }
 
     const sessionUuid = this.getSessionUuid(request.params);
-    const capabilityProfileUuid = this.getCapabilityProfileUuid(request.params);
+    const toolSelectionProfileUuid = this.getToolSelectionProfileUuid(request.params);
     this.throwIfReleasedBoundSession(request.params);
     if (sessionUuid) {
-      return this.sessionScopedForwardRoute(socketSessionId, sessionUuid, undefined, capabilityProfileUuid);
+      return this.sessionScopedForwardRoute(
+        socketSessionId,
+        sessionUuid,
+        undefined,
+        toolSelectionProfileUuid,
+      );
     }
-    if (capabilityProfileUuid) {
-      return this.capabilityProfileScopedForwardRoute(socketSessionId, capabilityProfileUuid, undefined);
+    if (toolSelectionProfileUuid) {
+      return this.toolSelectionProfileScopedForwardRoute(
+        socketSessionId,
+        toolSelectionProfileUuid,
+        undefined,
+      );
     }
     return boundRoute ?? this.sharedMcpForwardRoute(`method:${request.method}`);
   }
@@ -900,7 +961,7 @@ export class UnixSocketServer {
   private getNavigationGraphForwardRoute(
     request: DaemonRequest,
     socketSessionId: string,
-    boundRoute: McpForwardRoute | undefined
+    boundRoute: McpForwardRoute | undefined,
   ): McpForwardRoute {
     const sessionUuid = this.getSessionUuid(request.params);
     const executionKey = this.getRequestArgumentScopeKey(request.params);
@@ -914,7 +975,9 @@ export class UnixSocketServer {
       return this.sessionScopedForwardRoute(socketSessionId, sessionUuid, executionKey);
     }
     if (executionKey) {
-      return boundRoute ? { ...boundRoute, executionKey } : this.sharedMcpForwardRoute(executionKey);
+      return boundRoute
+        ? { ...boundRoute, executionKey }
+        : this.sharedMcpForwardRoute(executionKey);
     }
     return boundRoute ?? this.sharedMcpForwardRoute(`method:${request.method}`);
   }
@@ -929,7 +992,9 @@ export class UnixSocketServer {
       return this.sessionScopedForwardRoute(socketSessionId, sessionUuid, undefined);
     }
     const uri = request.params?.uri;
-    return this.sharedMcpForwardRoute(typeof uri === "string" ? `resource:${uri}` : "resource:unknown");
+    return this.sharedMcpForwardRoute(
+      typeof uri === "string" ? `resource:${uri}` : "resource:unknown",
+    );
   }
 
   private getToolsCallForwardRoute(args: unknown, socketSessionId: string): McpForwardRoute {
@@ -937,12 +1002,22 @@ export class UnixSocketServer {
     const scopedKey = this.getRequestArgumentScopeKey(args);
     const boundRoute = this.getBoundMcpClientRoute(socketSessionId);
     const sessionUuid = this.getSessionUuid(args);
-    const capabilityProfileUuid = this.getCapabilityProfileUuid(args) ?? boundRoute?.capabilityProfileUuid;
+    const toolSelectionProfileUuid =
+      this.getToolSelectionProfileUuid(args) ?? boundRoute?.toolSelectionProfileUuid;
     if (sessionUuid) {
-      return this.sessionScopedForwardRoute(socketSessionId, sessionUuid, scopedKey, capabilityProfileUuid);
+      return this.sessionScopedForwardRoute(
+        socketSessionId,
+        sessionUuid,
+        scopedKey,
+        toolSelectionProfileUuid,
+      );
     }
-    if (capabilityProfileUuid) {
-      return this.capabilityProfileScopedForwardRoute(socketSessionId, capabilityProfileUuid, scopedKey);
+    if (toolSelectionProfileUuid) {
+      return this.toolSelectionProfileScopedForwardRoute(
+        socketSessionId,
+        toolSelectionProfileUuid,
+        scopedKey,
+      );
     }
 
     if (scopedKey) {
@@ -973,15 +1048,18 @@ export class UnixSocketServer {
   private sessionMcpClientKey(
     socketSessionId: string,
     sessionUuid: string,
-    capabilityProfileUuid?: string,
+    toolSelectionProfileUuid?: string,
   ): string {
-    return capabilityProfileUuid
-      ? `socket:${socketSessionId}:session:${sessionUuid}:capability:${capabilityProfileUuid}`
+    return toolSelectionProfileUuid
+      ? `socket:${socketSessionId}:session:${sessionUuid}:tool-selection:${toolSelectionProfileUuid}`
       : `socket:${socketSessionId}:session:${sessionUuid}`;
   }
 
-  private capabilityProfileMcpClientKey(socketSessionId: string, capabilityProfileUuid: string): string {
-    return `socket:${socketSessionId}:capability:${capabilityProfileUuid}`;
+  private toolSelectionProfileMcpClientKey(
+    socketSessionId: string,
+    toolSelectionProfileUuid: string,
+  ): string {
+    return `socket:${socketSessionId}:tool-selection:${toolSelectionProfileUuid}`;
   }
 
   // Route an explicit-session request (tools/call or an IDE read) to its OWN
@@ -991,25 +1069,25 @@ export class UnixSocketServer {
     socketSessionId: string,
     sessionUuid: string,
     scopedKey: string | undefined,
-    capabilityProfileUuid?: string,
+    toolSelectionProfileUuid?: string,
   ): McpForwardRoute {
     return {
       executionKey: scopedKey ?? `session:${sessionUuid}`,
-      clientKey: this.sessionMcpClientKey(socketSessionId, sessionUuid, capabilityProfileUuid),
+      clientKey: this.sessionMcpClientKey(socketSessionId, sessionUuid, toolSelectionProfileUuid),
       sessionUuid,
-      capabilityProfileUuid,
+      toolSelectionProfileUuid,
     };
   }
 
-  private capabilityProfileScopedForwardRoute(
+  private toolSelectionProfileScopedForwardRoute(
     socketSessionId: string,
-    capabilityProfileUuid: string,
-    scopedKey: string | undefined
+    toolSelectionProfileUuid: string,
+    scopedKey: string | undefined,
   ): McpForwardRoute {
     return {
-      executionKey: scopedKey ?? `capability:${capabilityProfileUuid}`,
-      clientKey: this.capabilityProfileMcpClientKey(socketSessionId, capabilityProfileUuid),
-      capabilityProfileUuid,
+      executionKey: scopedKey ?? `tool-selection:${toolSelectionProfileUuid}`,
+      clientKey: this.toolSelectionProfileMcpClientKey(socketSessionId, toolSelectionProfileUuid),
+      toolSelectionProfileUuid,
     };
   }
 
@@ -1025,7 +1103,7 @@ export class UnixSocketServer {
     }
     const sessionUuid = this.getSessionUuid(request.params?.arguments);
     if (!sessionUuid) {
-      this.recordGeneratedCapabilityProfile(request, response, socketSessionId, route);
+      this.recordGeneratedToolSelectionProfile(request, response, socketSessionId, route);
       return;
     }
     this.recordSessionBoundMcpClientKey(
@@ -1052,8 +1130,8 @@ export class UnixSocketServer {
     }
     const sessionIsActiveAfterForward = this.hasActiveDaemonSession(sessionUuid);
     if (
-      (sessionWasActiveBeforeForward || toolName === "executePlan")
-      && !sessionIsActiveAfterForward
+      (sessionWasActiveBeforeForward || toolName === "executePlan") &&
+      !sessionIsActiveAfterForward
     ) {
       this.clearBoundMcpClientKey(socketSessionId);
       return;
@@ -1063,7 +1141,7 @@ export class UnixSocketServer {
       clientKey: route.clientKey,
       executionKey: route.executionKey,
       sessionUuid,
-      capabilityProfileUuid: route.capabilityProfileUuid,
+      toolSelectionProfileUuid: route.toolSelectionProfileUuid,
       requiresLiveDaemonSession: sessionWasActiveBeforeForward || sessionIsActiveAfterForward,
     });
     if (previousBinding && previousBinding.clientKey !== route.clientKey) {
@@ -1071,21 +1149,21 @@ export class UnixSocketServer {
     }
   }
 
-  private recordGeneratedCapabilityProfile(
+  private recordGeneratedToolSelectionProfile(
     request: DaemonRequest,
     response: unknown,
     socketSessionId: string,
     route: McpForwardRoute,
   ): boolean {
-    const capabilityProfileUuid = this.getGeneratedCapabilityProfileUuid(request, response);
-    if (!capabilityProfileUuid) {
+    const toolSelectionProfileUuid = this.getGeneratedToolSelectionProfileUuid(request, response);
+    if (!toolSelectionProfileUuid) {
       return false;
     }
     const previousBinding = this.boundMcpClientKeysBySocketSession.get(socketSessionId);
     this.boundMcpClientKeysBySocketSession.set(socketSessionId, {
       clientKey: route.clientKey,
       executionKey: route.executionKey,
-      capabilityProfileUuid,
+      toolSelectionProfileUuid,
       requiresLiveDaemonSession: false,
     });
     if (previousBinding && previousBinding.clientKey !== route.clientKey) {
@@ -1104,7 +1182,7 @@ export class UnixSocketServer {
         clientKey: boundClient.clientKey,
         executionKey: boundClient.executionKey,
         sessionUuid: boundClient.sessionUuid,
-        capabilityProfileUuid: boundClient.capabilityProfileUuid,
+        toolSelectionProfileUuid: boundClient.toolSelectionProfileUuid,
       };
     }
     if (boundClient.sessionUuid && this.hasActiveDaemonSession(boundClient.sessionUuid)) {
@@ -1112,26 +1190,29 @@ export class UnixSocketServer {
         clientKey: boundClient.clientKey,
         executionKey: boundClient.executionKey,
         sessionUuid: boundClient.sessionUuid,
-        capabilityProfileUuid: boundClient.capabilityProfileUuid,
+        toolSelectionProfileUuid: boundClient.toolSelectionProfileUuid,
       };
     }
     this.clearBoundMcpClientKey(socketSessionId);
     return undefined;
   }
 
-  private getCapabilityProfileUuid(params: unknown): string | undefined {
+  private getToolSelectionProfileUuid(params: unknown): string | undefined {
     if (!params || typeof params !== "object" || Array.isArray(params)) {
       return undefined;
     }
-    const value = (params as Record<string, unknown>)[DAEMON_CAPABILITY_PROFILE_PARAM];
+    const value = (params as Record<string, unknown>)[DAEMON_TOOL_SELECTION_PROFILE_PARAM];
     return isNonBlankSessionUuid(value) ? value : undefined;
   }
 
-  private getGeneratedCapabilityProfileUuid(request: DaemonRequest, response: unknown): string | undefined {
-    if (request.params?.name !== SET_TOOL_CAPABILITY_TOOL_NAME) {
+  private getGeneratedToolSelectionProfileUuid(
+    request: DaemonRequest,
+    response: unknown,
+  ): string | undefined {
+    if (request.params?.name !== SET_TOOL_ENABLED_TOOL_NAME) {
       return undefined;
     }
-    return capabilityProfileUuidFromToolResponse(response);
+    return toolSelectionProfileUuidFromResponse(response);
   }
 
   private clearBoundMcpClientKey(socketSessionId: string): void {
@@ -1161,9 +1242,8 @@ export class UnixSocketServer {
   }
 
   private wasRequestSessionActive(request: DaemonRequest): boolean {
-    const sessionUuid = request.method === "tools/call"
-      ? this.getSessionUuid(request.params?.arguments)
-      : undefined;
+    const sessionUuid =
+      request.method === "tools/call" ? this.getSessionUuid(request.params?.arguments) : undefined;
     return sessionUuid ? this.hasActiveDaemonSession(sessionUuid) : false;
   }
 
@@ -1188,7 +1268,12 @@ export class UnixSocketServer {
   }
 
   private isReleasedBoundSession(args: unknown): boolean {
-    if (!args || typeof args !== "object" || Array.isArray(args) || !this.daemonState.isInitialized()) {
+    if (
+      !args ||
+      typeof args !== "object" ||
+      Array.isArray(args) ||
+      !this.daemonState.isInitialized()
+    ) {
       return false;
     }
     const record = args as Record<string, unknown>;
@@ -1219,7 +1304,9 @@ export class UnixSocketServer {
     // Precedence (pinned by #2565 review): a device label resolves the mapped session before
     // an explicit deviceId, which in turn beats a raw session, which beats implicit autolock.
     if (hasSessionUuid && hasDeviceLabel) {
-      return this.sessionToScopeKey(this.resolveDeviceLabelSession(record.sessionUuid as string, record.device));
+      return this.sessionToScopeKey(
+        this.resolveDeviceLabelSession(record.sessionUuid as string, record.device),
+      );
     }
     // An explicit target device must serialize by physical device even when a session is present.
     if (typeof record.deviceId === "string" && record.deviceId.length > 0) {
@@ -1229,7 +1316,10 @@ export class UnixSocketServer {
       return this.sessionToScopeKey(record.sessionUuid as string);
     }
     if (typeof record.__mcpSessionId === "string" && record.__mcpSessionId.length > 0) {
-      return this.getImplicitAutolockScopeKey(record.__mcpSessionId, args) ?? `mcp-session:${record.__mcpSessionId}`;
+      return (
+        this.getImplicitAutolockScopeKey(record.__mcpSessionId, args) ??
+        `mcp-session:${record.__mcpSessionId}`
+      );
     }
     return undefined;
   }
@@ -1272,13 +1362,15 @@ export class UnixSocketServer {
   }
 
   private resolveDeviceLabelSession(baseSessionUuid: string, deviceLabel: unknown): string {
-    if (typeof deviceLabel !== "string" || deviceLabel.length === 0 || !this.daemonState.isInitialized()) {
+    if (
+      typeof deviceLabel !== "string" ||
+      deviceLabel.length === 0 ||
+      !this.daemonState.isInitialized()
+    ) {
       return baseSessionUuid;
     }
     try {
-      const labelMap = this.daemonState
-        .getSessionManager()
-        .getDeviceLabels(baseSessionUuid);
+      const labelMap = this.daemonState.getSessionManager().getDeviceLabels(baseSessionUuid);
       if (!labelMap) {
         return baseSessionUuid;
       }
@@ -1287,7 +1379,9 @@ export class UnixSocketServer {
         ? mappedSession
         : baseSessionUuid;
     } catch (error) {
-      logger.debug(`Unable to resolve device label ${deviceLabel} for session ${baseSessionUuid}: ${error}`);
+      logger.debug(
+        `Unable to resolve device label ${deviceLabel} for session ${baseSessionUuid}: ${error}`,
+      );
       return baseSessionUuid;
     }
   }
@@ -1323,7 +1417,7 @@ export class UnixSocketServer {
    */
   private async handleLocalSocketRequest(
     request: DaemonRequest,
-    socketSessionId?: string
+    socketSessionId?: string,
   ): Promise<any | undefined> {
     if (request.method === "input/tap") {
       return await this.handleInputTap(request, socketSessionId);
@@ -1362,26 +1456,48 @@ export class UnixSocketServer {
         if (!this.featureFlagService) {
           throw new Error("Feature flag service not available");
         }
-        const args = request.params as { key?: string; enabled?: boolean; config?: Record<string, unknown> | null };
+        const args = request.params as {
+          key?: string;
+          enabled?: boolean;
+          config?: Record<string, unknown> | null;
+        };
         if (!args.key || typeof args.enabled !== "boolean") {
           throw new Error("setFeatureFlag requires 'key' (string) and 'enabled' (boolean) params");
         }
         const updated = await this.featureFlagService.setFlag(
           args.key as FeatureFlagKey,
           args.enabled,
-          args.config
+          args.config,
         );
         return updated;
       }
-      case "ide/setSessionToolCapability": {
-        const args = request.params as { sessionUuid?: string; capability?: string; enabled?: boolean };
-        if (!args.sessionUuid || !TOOL_CAPABILITIES.includes(args.capability as ToolCapability) || typeof args.enabled !== "boolean") {
-          throw new Error("setSessionToolCapability requires sessionUuid, a known capability, and enabled boolean params");
+      case "ide/setSessionToolEnabled": {
+        const args = request.params as {
+          sessionUuid?: string;
+          toolName?: string;
+          enabled?: boolean;
+        };
+        if (
+          !args.sessionUuid ||
+          !args.toolName ||
+          !ToolRegistry.isUserConfigurableTool(args.toolName) ||
+          typeof args.enabled !== "boolean"
+        ) {
+          throw new Error(
+            "setSessionToolEnabled requires sessionUuid, a user-configurable toolName, and enabled boolean params",
+          );
         }
-        await (this.sessionToolProfileService ?? getSessionToolProfileService())
-          .setEnabled(args.sessionUuid, args.capability as ToolCapability, args.enabled);
+        await (this.sessionToolSelectionService ?? getSessionToolSelectionService()).setEnabled(
+          args.sessionUuid,
+          args.toolName,
+          args.enabled,
+        );
         ListChangedBroadcaster.emit("tools");
-        return { sessionUuid: args.sessionUuid, capability: args.capability, enabled: args.enabled };
+        return {
+          sessionUuid: args.sessionUuid,
+          toolName: args.toolName,
+          enabled: args.enabled,
+        };
       }
       case "ide/ping": {
         return { ok: true, timestamp: this.timer.now() };
@@ -1411,15 +1527,19 @@ export class UnixSocketServer {
       case "ide/updateService": {
         const args = request.params as { deviceId?: string; platform?: string };
         if (!args.deviceId || !args.platform) {
-          throw new Error("updateService requires 'deviceId' (string) and 'platform' (string) params");
+          throw new Error(
+            "updateService requires 'deviceId' (string) and 'platform' (string) params",
+          );
         }
         if (args.platform !== "android" && args.platform !== "ios") {
           throw new Error(`Invalid platform: ${args.platform}. Must be 'android' or 'ios'.`);
         }
 
         // Find the booted device
-        const bootedDevices = await PlatformDeviceManagerFactory.getInstance().getBootedDevices(args.platform);
-        const targetDevice = bootedDevices.find(d => d.deviceId === args.deviceId);
+        const bootedDevices = await PlatformDeviceManagerFactory.getInstance().getBootedDevices(
+          args.platform,
+        );
+        const targetDevice = bootedDevices.find((d) => d.deviceId === args.deviceId);
         if (!targetDevice) {
           throw new Error(`Device not found: ${args.deviceId}`);
         }
@@ -1428,7 +1548,7 @@ export class UnixSocketServer {
           const manager = AndroidCtrlProxyManager.getInstance(targetDevice);
           const result = await manager.ensureCompatibleVersion({
             allowDownloadWhenInstalled: true,
-            bypassVersionCheckCache: true
+            bypassVersionCheckCache: true,
           });
           const successStatuses = new Set(["compatible", "upgraded", "installed", "reinstalled"]);
           return {
@@ -1468,7 +1588,7 @@ export class UnixSocketServer {
             args.fileName,
             args.key,
             args.value,
-            args.type as KeyValueType
+            args.type as KeyValueType,
           );
         }
         return { success: true };
@@ -1517,14 +1637,15 @@ export class UnixSocketServer {
    */
   private async resolveKeyValueMutationClient(
     platformValue: string | undefined,
-    deviceId: string
+    deviceId: string,
   ): Promise<KeyValueMutationClient> {
     const platform = platformValue ?? "android";
     if (platform !== "android" && platform !== "ios") {
       throw new Error(`Invalid platform: ${platform}. Must be 'android' or 'ios'.`);
     }
-    const bootedDevices = await PlatformDeviceManagerFactory.getInstance().getBootedDevices(platform);
-    const targetDevice = bootedDevices.find(d => d.deviceId === deviceId);
+    const bootedDevices =
+      await PlatformDeviceManagerFactory.getInstance().getBootedDevices(platform);
+    const targetDevice = bootedDevices.find((d) => d.deviceId === deviceId);
     if (!targetDevice) {
       throw new Error(`Device not found: ${deviceId}`);
     }
@@ -1534,8 +1655,17 @@ export class UnixSocketServer {
   }
 
   private async assertSocketToolEnabled(deviceId: string, toolName: string): Promise<void> {
+    const registeredTool = ToolRegistry.getRegisteredTool(toolName);
+    // Direct IDE storage routes have a fixed exact-tool allowlist and may run
+    // before any loopback MCP client has populated the process registry.
+    const declaredDefault = registeredTool?.defaultEnabled ?? false;
     if (!this.daemonState.isInitialized()) {
-      await assertToolEnabledForAnySession(toolName, [undefined], this.sessionToolProfileService);
+      await assertToolEnabledForAnySession(
+        toolName,
+        declaredDefault,
+        [undefined],
+        this.sessionToolSelectionService,
+      );
       return;
     }
     const sessionManager = this.daemonState.getSessionManager();
@@ -1544,11 +1674,12 @@ export class UnixSocketServer {
     // decision) so a tool is enabled when EITHER grants it — symmetric with the
     // MCP `registerDeviceAware` path. The shared helper resolves the base.
     const derivedSessionUuid = sessionManager.getSessionForDevice?.(deviceId) ?? undefined;
-    const baseSessionUuid = resolveCapabilityBaseSessionUuid(derivedSessionUuid, sessionManager);
+    const baseSessionUuid = resolveToolSelectionBaseSessionUuid(derivedSessionUuid, sessionManager);
     await assertToolEnabledForAnySession(
       toolName,
+      declaredDefault,
       [baseSessionUuid, derivedSessionUuid],
-      this.sessionToolProfileService,
+      this.sessionToolSelectionService,
     );
   }
 
@@ -1587,7 +1718,7 @@ export class UnixSocketServer {
     queueEnterMs: number,
     totalTimeoutMs: number,
     toolName: string,
-    origin: string
+    origin: string,
   ): number {
     const remaining = totalTimeoutMs - (this.timer.now() - queueEnterMs);
     if (remaining <= 0) {
@@ -1606,14 +1737,16 @@ export class UnixSocketServer {
     deviceId: string,
     coordinates: number[],
     probeTimeoutMs: number,
-    validateCanonicalCoordinates?: (geometry: ScreenScaleMetadata) => void
+    validateCanonicalCoordinates?: (geometry: ScreenScaleMetadata) => void,
   ): Promise<number[]> {
     const knownMetadata = client.getScreenScaleMetadata();
     if (knownMetadata) {
       // Metadata present: a runner upgrade drops any stale confirmed-legacy verdict for this device.
       this.confirmedLegacyScaleDevices.delete(deviceId);
       validateCanonicalCoordinates?.(knownMetadata);
-      return coordinates.map(coordinate => canonicalPixelsToPoints(coordinate, knownMetadata.nativeScale));
+      return coordinates.map((coordinate) =>
+        canonicalPixelsToPoints(coordinate, knownMetadata.nativeScale),
+      );
     }
     if (this.confirmedLegacyScaleDevices.has(deviceId)) {
       // A prior probe SUCCEEDED with no metadata: a confirmed legacy runner. Skip the round trip.
@@ -1624,18 +1757,26 @@ export class UnixSocketServer {
     // one (without an observation-stream push) so the scale is known before we decide the space.
     let probed: unknown;
     try {
-      probed = await client.requestHierarchySyncWithoutObservationStreamPush(undefined, false, undefined, probeTimeoutMs);
+      probed = await client.requestHierarchySyncWithoutObservationStreamPush(
+        undefined,
+        false,
+        undefined,
+        probeTimeoutMs,
+      );
     } catch (error) {
       // Probe threw: a transient failure, NOT evidence of a legacy runner. Fail closed rather than
       // mis-dispatching pixels as points.
-      throw toActionableError(error, `Could not determine iOS screen scale for ${deviceId}; the input coordinate scale probe failed`);
+      throw toActionableError(
+        error,
+        `Could not determine iOS screen scale for ${deviceId}; the input coordinate scale probe failed`,
+      );
     }
     if (!probed) {
       // Probe returned no hierarchy (not connected / timed out): a FAILURE, distinct from a runner
       // that answered with no metadata. Fail closed and do NOT cache — the next input re-probes.
       throw new ActionableError(
         `Could not determine iOS screen scale for ${deviceId}: the hierarchy probe returned no data. ` +
-        `Retry once the device has produced a hierarchy.`
+          `Retry once the device has produced a hierarchy.`,
       );
     }
 
@@ -1648,7 +1789,9 @@ export class UnixSocketServer {
       return coordinates;
     }
     validateCanonicalCoordinates?.(probedMetadata);
-    return coordinates.map(coordinate => canonicalPixelsToPoints(coordinate, probedMetadata.nativeScale));
+    return coordinates.map((coordinate) =>
+      canonicalPixelsToPoints(coordinate, probedMetadata.nativeScale),
+    );
   }
 
   /**
@@ -1658,7 +1801,7 @@ export class UnixSocketServer {
    */
   private requireCoordinatesWithinKnownScreenGeometry(
     coordinates: readonly [number, number],
-    geometry: ScreenScaleMetadata | null
+    geometry: ScreenScaleMetadata | null,
   ): void {
     if (!geometry) {
       return;
@@ -1667,14 +1810,14 @@ export class UnixSocketServer {
     if (x < 0 || x >= geometry.pixelWidth || y < 0 || y >= geometry.pixelHeight) {
       throw new Error(
         `input/tap coordinates x=${x}, y=${y} are outside device canonical pixel bounds ` +
-        `x: 0..${geometry.pixelWidth - 1}, y: 0..${geometry.pixelHeight - 1}`
+          `x: 0..${geometry.pixelWidth - 1}, y: 0..${geometry.pixelHeight - 1}`,
       );
     }
   }
 
   private async handleInputTap(
     request: DaemonRequest,
-    socketSessionId?: string
+    socketSessionId?: string,
   ): Promise<any | undefined> {
     const queueEnterMs = this.timer.now();
     const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
@@ -1683,41 +1826,68 @@ export class UnixSocketServer {
       args.platform,
       args.deviceId,
       socketSessionId,
-      "input/tap"
+      "input/tap",
     );
-    const gestureResult = await this.runKeyedMcpForward(`device:${targetDevice.deviceId}`, async () => {
-      this.requireCurrentFrameContext(targetDevice.deviceId, args.frameContext, "input/tap");
-      const queueWaitMs = this.timer.now() - queueEnterMs;
-      const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
-      if (remainingTimeoutMs <= 0) {
-        throw new McpTimeoutError({
-          toolName: request.method,
-          timeoutMs: totalTimeoutMs,
-          origin: "UnixSocketServer.handleInputTap",
-          detail: `spent ${queueWaitMs}ms waiting in queue`,
-        });
-      }
+    const gestureResult = await this.runKeyedMcpForward(
+      `device:${targetDevice.deviceId}`,
+      async () => {
+        this.requireCurrentFrameContext(targetDevice.deviceId, args.frameContext, "input/tap");
+        const queueWaitMs = this.timer.now() - queueEnterMs;
+        const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
+        if (remainingTimeoutMs <= 0) {
+          throw new McpTimeoutError({
+            toolName: request.method,
+            timeoutMs: totalTimeoutMs,
+            origin: "UnixSocketServer.handleInputTap",
+            detail: `spent ${queueWaitMs}ms waiting in queue`,
+          });
+        }
 
-      if (args.platform === "android") {
-        const client = AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
-        this.requireCoordinatesWithinKnownScreenGeometry([args.x, args.y], client.getScreenScaleMetadata?.() ?? null);
+        if (args.platform === "android") {
+          const client = AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
+          this.requireCoordinatesWithinKnownScreenGeometry(
+            [args.x, args.y],
+            client.getScreenScaleMetadata?.() ?? null,
+          );
+          return args.frameContext === undefined
+            ? await client.requestTapCoordinates(args.x, args.y, args.duration, remainingTimeoutMs)
+            : await client.requestTapCoordinates(
+                args.x,
+                args.y,
+                args.duration,
+                remainingTimeoutMs,
+                undefined,
+                args.frameContext,
+              );
+        }
+        const iosClient = IOSCtrlProxyClient.getInstance(targetDevice);
+        const [x, y] = await this.toIosRunnerCoordinates(
+          iosClient,
+          targetDevice.deviceId,
+          [args.x, args.y],
+          remainingTimeoutMs,
+          (geometry) =>
+            this.requireCoordinatesWithinKnownScreenGeometry([args.x, args.y], geometry),
+        );
+        const gestureTimeoutMs = this.remainingBudgetAfterProbe(
+          queueEnterMs,
+          totalTimeoutMs,
+          request.method,
+          "handleInputTap",
+        );
         return args.frameContext === undefined
-          ? await client.requestTapCoordinates(args.x, args.y, args.duration, remainingTimeoutMs)
-          : await client.requestTapCoordinates(args.x, args.y, args.duration, remainingTimeoutMs, undefined, args.frameContext);
-      }
-      const iosClient = IOSCtrlProxyClient.getInstance(targetDevice);
-      const [x, y] = await this.toIosRunnerCoordinates(
-        iosClient,
-        targetDevice.deviceId,
-        [args.x, args.y],
-        remainingTimeoutMs,
-        geometry => this.requireCoordinatesWithinKnownScreenGeometry([args.x, args.y], geometry)
-      );
-      const gestureTimeoutMs = this.remainingBudgetAfterProbe(queueEnterMs, totalTimeoutMs, request.method, "handleInputTap");
-      return args.frameContext === undefined
-        ? await iosClient.requestTapCoordinates(x, y, args.duration, gestureTimeoutMs)
-        : await iosClient.requestTapCoordinates(x, y, args.duration, gestureTimeoutMs, undefined, args.frameContext);
-    }, `device:${targetDevice.deviceId}`);
+          ? await iosClient.requestTapCoordinates(x, y, args.duration, gestureTimeoutMs)
+          : await iosClient.requestTapCoordinates(
+              x,
+              y,
+              args.duration,
+              gestureTimeoutMs,
+              undefined,
+              args.frameContext,
+            );
+      },
+      `device:${targetDevice.deviceId}`,
+    );
 
     if (!gestureResult.success) {
       throw new Error(gestureResult.error ?? `input/tap failed on ${args.platform}`);
@@ -1734,7 +1904,7 @@ export class UnixSocketServer {
 
   private async handleInputSwipe(
     request: DaemonRequest,
-    socketSessionId?: string
+    socketSessionId?: string,
   ): Promise<any | undefined> {
     const queueEnterMs = this.timer.now();
     const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
@@ -1743,58 +1913,83 @@ export class UnixSocketServer {
       args.platform,
       args.deviceId,
       socketSessionId,
-      "input/swipe"
+      "input/swipe",
     );
-    const gestureResult = await this.runKeyedMcpForward(`device:${targetDevice.deviceId}`, async () => {
-      this.requireCurrentFrameContext(targetDevice.deviceId, args.frameContext, "input/swipe");
-      const queueWaitMs = this.timer.now() - queueEnterMs;
-      const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
-      if (remainingTimeoutMs <= 0) {
-        throw new McpTimeoutError({
-          toolName: request.method,
-          timeoutMs: totalTimeoutMs,
-          origin: "UnixSocketServer.handleInputSwipe",
-          detail: `spent ${queueWaitMs}ms waiting in queue`,
-        });
-      }
+    const gestureResult = await this.runKeyedMcpForward(
+      `device:${targetDevice.deviceId}`,
+      async () => {
+        this.requireCurrentFrameContext(targetDevice.deviceId, args.frameContext, "input/swipe");
+        const queueWaitMs = this.timer.now() - queueEnterMs;
+        const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
+        if (remainingTimeoutMs <= 0) {
+          throw new McpTimeoutError({
+            toolName: request.method,
+            timeoutMs: totalTimeoutMs,
+            origin: "UnixSocketServer.handleInputSwipe",
+            detail: `spent ${queueWaitMs}ms waiting in queue`,
+          });
+        }
 
-      if (args.platform === "android") {
-        const client = AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
-        return args.frameContext === undefined
-          ? await client.requestSwipe(args.startX, args.startY, args.endX, args.endY, args.durationMs, remainingTimeoutMs)
-          : await client.requestSwipe(
-            args.startX,
-            args.startY,
-            args.endX,
-            args.endY,
-            args.durationMs,
-            remainingTimeoutMs,
-            undefined,
-            args.frameContext
-          );
-      }
-      const client = IOSCtrlProxyClient.getInstance(targetDevice);
-      const [startX, startY, endX, endY] = await this.toIosRunnerCoordinates(
-        client,
-        targetDevice.deviceId,
-        [args.startX, args.startY, args.endX, args.endY],
-        remainingTimeoutMs
-      );
-      const gestureTimeoutMs = this.remainingBudgetAfterProbe(queueEnterMs, totalTimeoutMs, request.method, "handleInputSwipe");
-      return args.frameContext === undefined
-        ? await client.requestDrag(startX, startY, endX, endY, 0, args.durationMs, 0, gestureTimeoutMs)
-        : await client.requestDrag(
-          startX,
-          startY,
-          endX,
-          endY,
-          0,
-          args.durationMs,
-          0,
-          gestureTimeoutMs,
-          args.frameContext
+        if (args.platform === "android") {
+          const client = AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
+          return args.frameContext === undefined
+            ? await client.requestSwipe(
+                args.startX,
+                args.startY,
+                args.endX,
+                args.endY,
+                args.durationMs,
+                remainingTimeoutMs,
+              )
+            : await client.requestSwipe(
+                args.startX,
+                args.startY,
+                args.endX,
+                args.endY,
+                args.durationMs,
+                remainingTimeoutMs,
+                undefined,
+                args.frameContext,
+              );
+        }
+        const client = IOSCtrlProxyClient.getInstance(targetDevice);
+        const [startX, startY, endX, endY] = await this.toIosRunnerCoordinates(
+          client,
+          targetDevice.deviceId,
+          [args.startX, args.startY, args.endX, args.endY],
+          remainingTimeoutMs,
         );
-    }, `device:${targetDevice.deviceId}`);
+        const gestureTimeoutMs = this.remainingBudgetAfterProbe(
+          queueEnterMs,
+          totalTimeoutMs,
+          request.method,
+          "handleInputSwipe",
+        );
+        return args.frameContext === undefined
+          ? await client.requestDrag(
+              startX,
+              startY,
+              endX,
+              endY,
+              0,
+              args.durationMs,
+              0,
+              gestureTimeoutMs,
+            )
+          : await client.requestDrag(
+              startX,
+              startY,
+              endX,
+              endY,
+              0,
+              args.durationMs,
+              0,
+              gestureTimeoutMs,
+              args.frameContext,
+            );
+      },
+      `device:${targetDevice.deviceId}`,
+    );
 
     if (!gestureResult.success) {
       throw new Error(gestureResult.error ?? `input/swipe failed on ${args.platform}`);
@@ -1824,7 +2019,7 @@ export class UnixSocketServer {
   private async handleInputGesture(
     request: DaemonRequest,
     kind: "start" | "move" | "end",
-    socketSessionId?: string
+    socketSessionId?: string,
   ): Promise<any | undefined> {
     const method = GESTURE_FRAME_METHODS[kind];
     const queueEnterMs = this.timer.now();
@@ -1834,22 +2029,26 @@ export class UnixSocketServer {
       args.platform,
       args.deviceId,
       socketSessionId,
-      method
+      method,
     );
-    const gestureResult = await this.runKeyedMcpForward(`device:${targetDevice.deviceId}`, async () => {
-      const queueWaitMs = this.timer.now() - queueEnterMs;
-      const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
-      if (remainingTimeoutMs <= 0) {
-        throw new McpTimeoutError({
-          toolName: method,
-          timeoutMs: totalTimeoutMs,
-          origin: "UnixSocketServer.handleInputGesture",
-          detail: `spent ${queueWaitMs}ms waiting in queue`,
-        });
-      }
-      const client = AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
-      return this.forwardGestureFrame(client, kind, args, remainingTimeoutMs);
-    }, `device:${targetDevice.deviceId}`);
+    const gestureResult = await this.runKeyedMcpForward(
+      `device:${targetDevice.deviceId}`,
+      async () => {
+        const queueWaitMs = this.timer.now() - queueEnterMs;
+        const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
+        if (remainingTimeoutMs <= 0) {
+          throw new McpTimeoutError({
+            toolName: method,
+            timeoutMs: totalTimeoutMs,
+            origin: "UnixSocketServer.handleInputGesture",
+            detail: `spent ${queueWaitMs}ms waiting in queue`,
+          });
+        }
+        const client = AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
+        return this.forwardGestureFrame(client, kind, args, remainingTimeoutMs);
+      },
+      `device:${targetDevice.deviceId}`,
+    );
 
     if (!gestureResult.success) {
       throw new Error(gestureResult.error ?? `${method} failed on ${args.platform}`);
@@ -1884,10 +2083,11 @@ export class UnixSocketServer {
   private rememberOwnedGesture(
     socketSessionId: string,
     targetDevice: BootedDevice,
-    gestureId: string
+    gestureId: string,
   ): void {
     const key = UnixSocketServer.ownedGestureKey(targetDevice.deviceId, gestureId);
-    const forSocket = this.ownedGesturesBySocket.get(socketSessionId) ?? new Map<string, OwnedGesture>();
+    const forSocket =
+      this.ownedGesturesBySocket.get(socketSessionId) ?? new Map<string, OwnedGesture>();
     forSocket.set(key, { targetDevice, gestureId });
     this.ownedGesturesBySocket.set(socketSessionId, forSocket);
   }
@@ -1917,14 +2117,21 @@ export class UnixSocketServer {
     this.ownedGesturesBySocket.delete(socketSessionId);
     for (const { targetDevice, gestureId } of forSocket.values()) {
       try {
-        await this.runKeyedMcpForward(`device:${targetDevice.deviceId}`, async () => {
-          const client = AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
-          // Coordinates are ignored for a cancel (the runner lifts in place), so 0,0 is fine.
-          return client.requestGestureEnd(gestureId, 0, 0, true, OWNED_GESTURE_CANCEL_TIMEOUT_MS);
-        }, `device:${targetDevice.deviceId}`);
+        await this.runKeyedMcpForward(
+          `device:${targetDevice.deviceId}`,
+          async () => {
+            const client = AndroidCtrlProxyClient.getInstance(
+              targetDevice,
+              defaultAdbClientFactory,
+            );
+            // Coordinates are ignored for a cancel (the runner lifts in place), so 0,0 is fine.
+            return client.requestGestureEnd(gestureId, 0, 0, true, OWNED_GESTURE_CANCEL_TIMEOUT_MS);
+          },
+          `device:${targetDevice.deviceId}`,
+        );
       } catch (error) {
         logger.warn(
-          `Failed to cancel orphaned gesture ${gestureId} on ${targetDevice.deviceId} for closed socket ${socketSessionId}: ${error}`
+          `Failed to cancel orphaned gesture ${gestureId} on ${targetDevice.deviceId} for closed socket ${socketSessionId}: ${error}`,
         );
       }
     }
@@ -1935,7 +2142,7 @@ export class UnixSocketServer {
     client: AndroidCtrlProxyClient,
     kind: "start" | "move" | "end",
     args: { gestureId: string; x: number; y: number; cancel: boolean },
-    timeoutMs: number
+    timeoutMs: number,
   ) {
     switch (kind) {
       case "start":
@@ -1949,7 +2156,7 @@ export class UnixSocketServer {
 
   private parseInputGestureParams(
     params: unknown,
-    method: string
+    method: string,
   ): {
     platform: "android";
     deviceId?: string;
@@ -1963,7 +2170,7 @@ export class UnixSocketServer {
     }
     const args = params as Record<string, unknown>;
     // Streaming gestures have no XCUITest equivalent, so the wire is Android-only. A client that
-    // reaches here for iOS bypassed the capability check; reject rather than silently degrade.
+    // reaches here for iOS bypassed the tool-selection check; reject rather than silently degrade.
     if (args.platform !== "android") {
       throw new Error(`${method} is only supported on platform 'android'`);
     }
@@ -1997,7 +2204,7 @@ export class UnixSocketServer {
 
   private async handleInputTypeText(
     request: DaemonRequest,
-    socketSessionId?: string
+    socketSessionId?: string,
   ): Promise<any | undefined> {
     const queueEnterMs = this.timer.now();
     const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
@@ -2007,65 +2214,70 @@ export class UnixSocketServer {
       args.deviceId,
       socketSessionId,
       "input/typeText",
-      args.append
+      args.append,
     );
     let confirmedAppendCharsSent: number | undefined;
-    const inputResult = await this.runKeyedMcpForward(`device:${targetDevice.deviceId}`, async () => {
-      // A same-serial emulator may reconnect while this request waits behind an
-      // earlier input. Re-read its ADB transport inside the keyed callback so the
-      // append-helper lookup cannot reuse a capability from that older instance.
-      const executionTargetDevice = args.append && args.platform === "android"
-        ? await this.resolveInputTargetDevice(
-          args.platform,
-          targetDevice.deviceId,
-          socketSessionId,
-          "input/typeText",
-          true
-        )
-        : targetDevice;
-      this.requireCurrentFrameContext(targetDevice.deviceId, args.frameContext, "input/typeText");
-      const queueWaitMs = this.timer.now() - queueEnterMs;
-      const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
-      if (remainingTimeoutMs <= 0) {
-        throw new McpTimeoutError({
-          toolName: request.method,
-          timeoutMs: totalTimeoutMs,
-          origin: "UnixSocketServer.handleInputTypeText",
-          detail: `spent ${queueWaitMs}ms waiting in queue`,
-        });
-      }
+    const inputResult = await this.runKeyedMcpForward(
+      `device:${targetDevice.deviceId}`,
+      async () => {
+        // A same-serial emulator may reconnect while this request waits behind an
+        // earlier input. Re-read its ADB transport inside the keyed callback so the
+        // append-helper lookup cannot reuse a capability from that older instance.
+        const executionTargetDevice =
+          args.append && args.platform === "android"
+            ? await this.resolveInputTargetDevice(
+                args.platform,
+                targetDevice.deviceId,
+                socketSessionId,
+                "input/typeText",
+                true,
+              )
+            : targetDevice;
+        this.requireCurrentFrameContext(targetDevice.deviceId, args.frameContext, "input/typeText");
+        const queueWaitMs = this.timer.now() - queueEnterMs;
+        const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
+        if (remainingTimeoutMs <= 0) {
+          throw new McpTimeoutError({
+            toolName: request.method,
+            timeoutMs: totalTimeoutMs,
+            origin: "UnixSocketServer.handleInputTypeText",
+            detail: `spent ${queueWaitMs}ms waiting in queue`,
+          });
+        }
 
-      const imeAction: ImeAction | undefined = args.submit ? "done" : undefined;
-      return await this.runInputOperationWithTimeout(
-        request.method,
-        totalTimeoutMs,
-        remainingTimeoutMs,
-        "UnixSocketServer.handleInputTypeText",
-        () =>
-          this.executeInputTypeText(
-            args.platform,
-            executionTargetDevice,
-            args.text,
-            imeAction,
-            remainingTimeoutMs,
-            args.append,
-            args.frameContext,
-            charsSent => {
-              confirmedAppendCharsSent = charsSent;
-            }
-          ),
-        timeoutError =>
-          args.append && confirmedAppendCharsSent !== undefined
-            ? new InputTypeTextAppendError(timeoutError.message, confirmedAppendCharsSent)
-            : undefined
-      );
-    }, `device:${targetDevice.deviceId}`);
+        const imeAction: ImeAction | undefined = args.submit ? "done" : undefined;
+        return await this.runInputOperationWithTimeout(
+          request.method,
+          totalTimeoutMs,
+          remainingTimeoutMs,
+          "UnixSocketServer.handleInputTypeText",
+          () =>
+            this.executeInputTypeText(
+              args.platform,
+              executionTargetDevice,
+              args.text,
+              imeAction,
+              remainingTimeoutMs,
+              args.append,
+              args.frameContext,
+              (charsSent) => {
+                confirmedAppendCharsSent = charsSent;
+              },
+            ),
+          (timeoutError) =>
+            args.append && confirmedAppendCharsSent !== undefined
+              ? new InputTypeTextAppendError(timeoutError.message, confirmedAppendCharsSent)
+              : undefined,
+        );
+      },
+      `device:${targetDevice.deviceId}`,
+    );
 
     if (!inputResult.success) {
       if (args.append && inputResult.charsSent !== undefined) {
         throw new InputTypeTextAppendError(
           inputResult.error ?? `input/typeText failed on ${args.platform}`,
-          inputResult.charsSent
+          inputResult.charsSent,
         );
       }
       throw new Error(inputResult.error ?? `input/typeText failed on ${args.platform}`);
@@ -2083,7 +2295,7 @@ export class UnixSocketServer {
 
   private async handleInputPressButton(
     request: DaemonRequest,
-    socketSessionId?: string
+    socketSessionId?: string,
   ): Promise<any | undefined> {
     const queueEnterMs = this.timer.now();
     const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
@@ -2092,26 +2304,34 @@ export class UnixSocketServer {
       args.platform,
       args.deviceId,
       socketSessionId,
-      "input/pressButton"
+      "input/pressButton",
     );
-    const buttonResult = await this.runKeyedMcpForward(`device:${targetDevice.deviceId}`, async () => {
-      this.requireCurrentFrameContext(targetDevice.deviceId, args.frameContext, "input/pressButton");
-      const queueWaitMs = this.timer.now() - queueEnterMs;
-      const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
-      if (remainingTimeoutMs <= 0) {
-        throw new McpTimeoutError({
-          toolName: request.method,
-          timeoutMs: totalTimeoutMs,
-          origin: "UnixSocketServer.handleInputPressButton",
-          detail: `spent ${queueWaitMs}ms waiting in queue`,
-        });
-      }
+    const buttonResult = await this.runKeyedMcpForward(
+      `device:${targetDevice.deviceId}`,
+      async () => {
+        this.requireCurrentFrameContext(
+          targetDevice.deviceId,
+          args.frameContext,
+          "input/pressButton",
+        );
+        const queueWaitMs = this.timer.now() - queueEnterMs;
+        const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
+        if (remainingTimeoutMs <= 0) {
+          throw new McpTimeoutError({
+            toolName: request.method,
+            timeoutMs: totalTimeoutMs,
+            origin: "UnixSocketServer.handleInputPressButton",
+            detail: `spent ${queueWaitMs}ms waiting in queue`,
+          });
+        }
 
-      const pressButton = new PressButton(targetDevice);
-      return args.frameContext === undefined
-        ? await pressButton.press(args.button, remainingTimeoutMs)
-        : await pressButton.press(args.button, remainingTimeoutMs, args.frameContext);
-    }, `device:${targetDevice.deviceId}`);
+        const pressButton = new PressButton(targetDevice);
+        return args.frameContext === undefined
+          ? await pressButton.press(args.button, remainingTimeoutMs)
+          : await pressButton.press(args.button, remainingTimeoutMs, args.frameContext);
+      },
+      `device:${targetDevice.deviceId}`,
+    );
 
     if (!buttonResult.success) {
       throw new Error(buttonResult.error ?? `input/pressButton failed on ${args.platform}`);
@@ -2128,7 +2348,7 @@ export class UnixSocketServer {
 
   private async handleInputKey(
     request: DaemonRequest,
-    socketSessionId?: string
+    socketSessionId?: string,
   ): Promise<any | undefined> {
     const queueEnterMs = this.timer.now();
     const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
@@ -2140,26 +2360,30 @@ export class UnixSocketServer {
       args.platform,
       args.deviceId,
       socketSessionId,
-      "input/key"
+      "input/key",
     );
-    const keyResult = await this.runKeyedMcpForward(`device:${targetDevice.deviceId}`, async () => {
-      this.requireCurrentFrameContext(targetDevice.deviceId, args.frameContext, "input/key");
-      const queueWaitMs = this.timer.now() - queueEnterMs;
-      const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
-      if (remainingTimeoutMs <= 0) {
-        throw new McpTimeoutError({
-          toolName: request.method,
-          timeoutMs: totalTimeoutMs,
-          origin: "UnixSocketServer.handleInputKey",
-          detail: `spent ${queueWaitMs}ms waiting in queue`,
-        });
-      }
+    const keyResult = await this.runKeyedMcpForward(
+      `device:${targetDevice.deviceId}`,
+      async () => {
+        this.requireCurrentFrameContext(targetDevice.deviceId, args.frameContext, "input/key");
+        const queueWaitMs = this.timer.now() - queueEnterMs;
+        const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
+        if (remainingTimeoutMs <= 0) {
+          throw new McpTimeoutError({
+            toolName: request.method,
+            timeoutMs: totalTimeoutMs,
+            origin: "UnixSocketServer.handleInputKey",
+            detail: `spent ${queueWaitMs}ms waiting in queue`,
+          });
+        }
 
-      const inputKey = new InputKey(targetDevice);
-      return args.frameContext === undefined
-        ? await inputKey.press(args.key, remainingTimeoutMs)
-        : await inputKey.press(args.key, remainingTimeoutMs, args.frameContext);
-    }, `device:${targetDevice.deviceId}`);
+        const inputKey = new InputKey(targetDevice);
+        return args.frameContext === undefined
+          ? await inputKey.press(args.key, remainingTimeoutMs)
+          : await inputKey.press(args.key, remainingTimeoutMs, args.frameContext);
+      },
+      `device:${targetDevice.deviceId}`,
+    );
 
     if (!keyResult.success) {
       throw new Error(keyResult.error ?? `input/key failed on ${args.platform}`);
@@ -2182,7 +2406,7 @@ export class UnixSocketServer {
     timeoutMs: number,
     append: boolean = false,
     frameContext?: string,
-    onConfirmedAppendCharsSent?: (charsSent: number) => void
+    onConfirmedAppendCharsSent?: (charsSent: number) => void,
   ): Promise<{ success: boolean; error?: string; charsSent?: number }> {
     // Charge set-text and the optional submit/IME action against a single
     // shared budget. Otherwise submit:true would hand each request the full
@@ -2211,7 +2435,7 @@ export class UnixSocketServer {
         deadline,
         timeoutMs,
         frameContext,
-        client as AndroidCtrlProxyClient
+        client as AndroidCtrlProxyClient,
       );
       if (textResult.charsSent !== undefined) {
         onConfirmedAppendCharsSent?.(textResult.charsSent);
@@ -2226,13 +2450,24 @@ export class UnixSocketServer {
       appendCharsSent = textResult.charsSent;
     } else {
       const textResult = append
-        ? await (client as IOSCtrlProxyClient).requestAppendText(text, timeoutMs, undefined, frameContext)
+        ? await (client as IOSCtrlProxyClient).requestAppendText(
+            text,
+            timeoutMs,
+            undefined,
+            frameContext,
+          )
         : await client.requestSetText(text, { timeoutMs, frameContext });
       if (!textResult.success) {
         return { success: false, error: textResult.error };
       }
     }
-    return await this.runImeActionWithinBudget(client, imeAction, deadline, timeoutMs, appendCharsSent);
+    return await this.runImeActionWithinBudget(
+      client,
+      imeAction,
+      deadline,
+      timeoutMs,
+      appendCharsSent,
+    );
   }
 
   private async executeAndroidAppendText(
@@ -2241,7 +2476,7 @@ export class UnixSocketServer {
     deadline: number,
     totalTimeoutMs: number,
     frameContext: string | undefined,
-    client: AndroidCtrlProxyClient
+    client: AndroidCtrlProxyClient,
   ): Promise<{ success: boolean; error?: string; charsSent?: number }> {
     const appendTimeoutMs = deadline - this.timer.now();
     if (appendTimeoutMs <= 0) {
@@ -2255,7 +2490,7 @@ export class UnixSocketServer {
       appendTimeoutMs,
       frameContext === undefined
         ? undefined
-        : () => this.validateAppendFrameContext(client, frameContext, deadline, totalTimeoutMs)
+        : () => this.validateAppendFrameContext(client, frameContext, deadline, totalTimeoutMs),
     );
   }
 
@@ -2263,7 +2498,7 @@ export class UnixSocketServer {
     client: AndroidCtrlProxyClient,
     frameContext: string,
     deadline: number,
-    totalTimeoutMs: number
+    totalTimeoutMs: number,
   ): Promise<{ success: boolean; error?: string }> {
     const validationTimeoutMs = deadline - this.timer.now();
     if (validationTimeoutMs <= 0) {
@@ -2276,9 +2511,11 @@ export class UnixSocketServer {
     return validation.success
       ? { success: true }
       : {
-        success: false,
-        error: validation.error ?? "Frame context is stale or unavailable; observe a fresh frame before retrying",
-      };
+          success: false,
+          error:
+            validation.error ??
+            "Frame context is stale or unavailable; observe a fresh frame before retrying",
+        };
   }
 
   private async runImeActionWithinBudget(
@@ -2286,7 +2523,7 @@ export class UnixSocketServer {
     imeAction: ImeAction | undefined,
     deadline: number,
     totalTimeoutMs: number,
-    appendCharsSent?: number
+    appendCharsSent?: number,
   ): Promise<{ success: boolean; error?: string; charsSent?: number }> {
     const withAppendProgress = (result: { success: boolean; error?: string }) =>
       appendCharsSent !== undefined ? { ...result, charsSent: appendCharsSent } : result;
@@ -2323,12 +2560,12 @@ export class UnixSocketServer {
     remainingTimeoutMs: number,
     origin: string,
     operation: () => Promise<T>,
-    timeoutError?: (timeout: McpTimeoutError) => Error | undefined
+    timeoutError?: (timeout: McpTimeoutError) => Error | undefined,
   ): Promise<T> {
     let timeoutHandle: NodeJS.Timeout | undefined;
     let timedOut = false;
     const operationPromise = operation();
-    const timeout = new Promise<"timeout">(resolve => {
+    const timeout = new Promise<"timeout">((resolve) => {
       timeoutHandle = this.timer.setTimeout(() => {
         timedOut = true;
         resolve("timeout");
@@ -2392,7 +2629,10 @@ export class UnixSocketServer {
     ) {
       throw new Error("input/tap requires numeric x and y params");
     }
-    if (args.duration !== undefined && (typeof args.duration !== "number" || !Number.isFinite(args.duration))) {
+    if (
+      args.duration !== undefined &&
+      (typeof args.duration !== "number" || !Number.isFinite(args.duration))
+    ) {
       throw new Error("input/tap duration must be numeric when provided");
     }
     if (args.deviceId !== undefined && typeof args.deviceId !== "string") {
@@ -2447,12 +2687,10 @@ export class UnixSocketServer {
     }
     if (
       args.durationMs !== undefined &&
-      (
-        typeof args.durationMs !== "number" ||
+      (typeof args.durationMs !== "number" ||
         !Number.isFinite(args.durationMs) ||
         args.durationMs < 1 ||
-        args.durationMs > 60_000
-      )
+        args.durationMs > 60_000)
     ) {
       throw new Error("input/swipe durationMs must be between 1 and 60000 milliseconds");
     }
@@ -2491,8 +2729,15 @@ export class UnixSocketServer {
     }
 
     const args = params as Record<string, unknown>;
-    const supportedParams = new Set(["platform", "deviceId", "text", "submit", "mode", "frameContext"]);
-    const unsupportedParams = Object.keys(args).filter(key => !supportedParams.has(key));
+    const supportedParams = new Set([
+      "platform",
+      "deviceId",
+      "text",
+      "submit",
+      "mode",
+      "frameContext",
+    ]);
+    const unsupportedParams = Object.keys(args).filter((key) => !supportedParams.has(key));
     if (unsupportedParams.length > 0) {
       throw new Error(`input/typeText unsupported params: ${unsupportedParams.join(", ")}`);
     }
@@ -2543,7 +2788,16 @@ export class UnixSocketServer {
     if (typeof args.button !== "string") {
       throw new Error("input/pressButton requires button");
     }
-    const supportedButtons = ["home", "back", "menu", "power", "volume_up", "volume_down", "recent", "app_switch"];
+    const supportedButtons = [
+      "home",
+      "back",
+      "menu",
+      "power",
+      "volume_up",
+      "volume_down",
+      "recent",
+      "app_switch",
+    ];
     if (!supportedButtons.includes(args.button)) {
       throw new Error(`input/pressButton button must be one of: ${supportedButtons.join(", ")}`);
     }
@@ -2574,7 +2828,7 @@ export class UnixSocketServer {
 
     const args = params as Record<string, unknown>;
     const supportedParams = new Set(["platform", "deviceId", "key", "frameContext"]);
-    const unsupportedParams = Object.keys(args).filter(key => !supportedParams.has(key));
+    const unsupportedParams = Object.keys(args).filter((key) => !supportedParams.has(key));
     if (unsupportedParams.length > 0) {
       throw new Error(`input/key unsupported params: ${unsupportedParams.join(", ")}`);
     }
@@ -2601,7 +2855,10 @@ export class UnixSocketServer {
   }
 
   private validateFrameContextParam(frameContext: unknown, action: string): void {
-    if (frameContext !== undefined && (typeof frameContext !== "string" || frameContext.length === 0)) {
+    if (
+      frameContext !== undefined &&
+      (typeof frameContext !== "string" || frameContext.length === 0)
+    ) {
       throw new Error(`${action} frameContext must be a non-empty string when provided`);
     }
   }
@@ -2611,11 +2868,19 @@ export class UnixSocketServer {
    * device still reports that exact context. Missing context fails closed: a caller can re-observe
    * and retry, whereas executing against an unproven screen could actuate the wrong UI.
    */
-  private requireCurrentFrameContext(deviceId: string, frameContext: string | undefined, action: string): void {
-    if (frameContext === undefined) {return;}
+  private requireCurrentFrameContext(
+    deviceId: string,
+    frameContext: string | undefined,
+    action: string,
+  ): void {
+    if (frameContext === undefined) {
+      return;
+    }
     const current = getDeviceDataStreamServer()?.getCurrentFrameContext(deviceId);
     if (current !== frameContext) {
-      throw new Error(`${action} frameContext is stale or unavailable; observe a fresh frame before retrying`);
+      throw new Error(
+        `${action} frameContext is stale or unavailable; observe a fresh frame before retrying`,
+      );
     }
   }
 
@@ -2632,15 +2897,15 @@ export class UnixSocketServer {
       | "input/gestureStart"
       | "input/gestureMove"
       | "input/gestureEnd",
-    bypassAndroidDeviceListCache: boolean = false
+    bypassAndroidDeviceListCache: boolean = false,
   ): Promise<BootedDevice> {
     const bootedDevices = await this.discoverInputTargetDevices(
       platform,
       action,
-      bypassAndroidDeviceListCache
+      bypassAndroidDeviceListCache,
     );
     if (deviceId) {
-      const targetDevice = bootedDevices.find(device => device.deviceId === deviceId);
+      const targetDevice = bootedDevices.find((device) => device.deviceId === deviceId);
       if (!targetDevice) {
         throw new Error(`Device not found: ${deviceId}`);
       }
@@ -2649,14 +2914,14 @@ export class UnixSocketServer {
 
     const autolockSessionId = this.daemonState.isInitialized()
       ? this.daemonState
-        .getDevicePool()
-        .resolveAutolockSessionForMcpSession?.(socketSessionId, platform)
+          .getDevicePool()
+          .resolveAutolockSessionForMcpSession?.(socketSessionId, platform)
       : undefined;
     const autolockDeviceId = autolockSessionId
       ? this.daemonState.getSessionManager().getSession(autolockSessionId)?.assignedDevice
       : undefined;
     if (autolockDeviceId) {
-      const targetDevice = bootedDevices.find(device => device.deviceId === autolockDeviceId);
+      const targetDevice = bootedDevices.find((device) => device.deviceId === autolockDeviceId);
       if (!targetDevice) {
         throw new Error(`Device not found: ${autolockDeviceId}`);
       }
@@ -2683,11 +2948,14 @@ export class UnixSocketServer {
       | "input/gestureStart"
       | "input/gestureMove"
       | "input/gestureEnd",
-    bypassAndroidDeviceListCache: boolean
+    bypassAndroidDeviceListCache: boolean,
   ): Promise<BootedDevice[]> {
-    const discovery = await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed(platform, {
-      bypassAndroidDeviceListCache,
-    });
+    const discovery = await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed(
+      platform,
+      {
+        bypassAndroidDeviceListCache,
+      },
+    );
     if (!discovery.succeededPlatforms.has(platform)) {
       throw new Error(`Unable to discover booted ${platform} devices for ${action}`);
     }
@@ -2698,7 +2966,7 @@ export class UnixSocketServer {
     mcpClient: Client,
     request: DaemonRequest,
     timeoutMs: number,
-    socketSessionId: string
+    socketSessionId: string,
   ): Promise<any> {
     const requestOptions = { timeout: timeoutMs };
 
@@ -2707,10 +2975,14 @@ export class UnixSocketServer {
         return await mcpClient.listTools();
       }
       case "tools/call": {
-        return await mcpClient.callTool({
-          name: request.params.name,
-          arguments: this.withSocketSessionAutolockKey(request.params.arguments, socketSessionId),
-        }, undefined, requestOptions);
+        return await mcpClient.callTool(
+          {
+            name: request.params.name,
+            arguments: this.withSocketSessionAutolockKey(request.params.arguments, socketSessionId),
+          },
+          undefined,
+          requestOptions,
+        );
       }
       case "resources/list": {
         return await mcpClient.listResources();
@@ -2726,7 +2998,11 @@ export class UnixSocketServer {
       }
       case "ide/getNavigationGraph": {
         const args = request.params ?? {};
-        return await mcpClient.callTool({ name: "getNavigationGraph", arguments: args }, undefined, requestOptions);
+        return await mcpClient.callTool(
+          { name: "getNavigationGraph", arguments: args },
+          undefined,
+          requestOptions,
+        );
       }
       default:
         throw new Error(`Unsupported daemon method: ${request.method}`);
@@ -2745,7 +3021,7 @@ export class UnixSocketServer {
     }
 
     const forwardedArgs = { ...args } as Record<string, unknown>;
-    delete forwardedArgs[DAEMON_CAPABILITY_PROFILE_PARAM];
+    delete forwardedArgs[DAEMON_TOOL_SELECTION_PROFILE_PARAM];
     this.throwIfReleasedBoundSession(forwardedArgs);
     const boundSessionUuid = this.getSessionUuid(forwardedArgs);
     const usesBoundSession = forwardedArgs[DAEMON_BOUND_SESSION_PARAM] === boundSessionUuid;
@@ -2765,28 +3041,32 @@ export class UnixSocketServer {
   /**
    * Create an MCP client connected to the HTTP server
    */
-  private async createMcpClient(boundSessionUuid?: string, capabilityProfileUuid?: string): Promise<Client> {
+  private async createMcpClient(
+    boundSessionUuid?: string,
+    toolSelectionProfileUuid?: string,
+  ): Promise<Client> {
     logger.info(`Creating MCP client with endpoint: "${this.mcpEndpoint}"`);
     if (!this.mcpEndpoint) {
       logger.error(`ERROR: mcpEndpoint is empty or undefined when creating client!`);
       throw new Error("mcpEndpoint is not set");
     }
-    const transport = new StreamableHTTPClientTransport(
-      new URL(this.mcpEndpoint),
-      {
-        reconnectionOptions: DAEMON_LOOPBACK_STREAMABLE_HTTP_RECONNECTION,
-        ...(boundSessionUuid || capabilityProfileUuid
-          ? {
+    const transport = new StreamableHTTPClientTransport(new URL(this.mcpEndpoint), {
+      reconnectionOptions: DAEMON_LOOPBACK_STREAMABLE_HTTP_RECONNECTION,
+      ...(boundSessionUuid || toolSelectionProfileUuid
+        ? {
             requestInit: {
               headers: {
-                ...(boundSessionUuid ? { [DAEMON_SESSION_TOOL_BINDING_HEADER]: boundSessionUuid } : {}),
-                ...(capabilityProfileUuid ? { [DAEMON_CAPABILITY_PROFILE_HEADER]: capabilityProfileUuid } : {}),
+                ...(boundSessionUuid
+                  ? { [DAEMON_SESSION_TOOL_BINDING_HEADER]: boundSessionUuid }
+                  : {}),
+                ...(toolSelectionProfileUuid
+                  ? { [DAEMON_TOOL_SELECTION_PROFILE_HEADER]: toolSelectionProfileUuid }
+                  : {}),
               },
             },
           }
-          : {}),
-      }
-    );
+        : {}),
+    });
 
     const client = new Client(
       {
@@ -2795,7 +3075,7 @@ export class UnixSocketServer {
       },
       {
         capabilities: {},
-      }
+      },
     );
 
     await client.connect(transport);
@@ -2810,7 +3090,7 @@ export class UnixSocketServer {
   private async getMcpClient(
     key: string,
     boundSessionUuid?: string,
-    capabilityProfileUuid?: string,
+    toolSelectionProfileUuid?: string,
   ): Promise<Client> {
     this.clearMcpClientIdleTimer(key);
 
@@ -2825,8 +3105,8 @@ export class UnixSocketServer {
     }
 
     const generation = this.lifecycleGeneration;
-    const clientPromise = this.mcpClientFactory(boundSessionUuid, capabilityProfileUuid)
-      .then(async client => {
+    const clientPromise = this.mcpClientFactory(boundSessionUuid, toolSelectionProfileUuid)
+      .then(async (client) => {
         if (this.closing || generation !== this.lifecycleGeneration) {
           await client.close();
           throw new Error("Unix socket server is closing");
@@ -2837,7 +3117,7 @@ export class UnixSocketServer {
         }
         return client;
       })
-      .catch(error => {
+      .catch((error) => {
         if (this.mcpClientPromises.get(key) === clientPromise) {
           this.mcpClientPromises.delete(key);
         }
@@ -2883,9 +3163,9 @@ export class UnixSocketServer {
   private async closeIdleMcpClient(key: string): Promise<void> {
     this.mcpClientIdleTimers.delete(key);
     if (
-      this.mcpForwardTails.has(key)
-      || this.activeMcpClientForwardCounts.has(key)
-      || this.isMcpClientKeyBound(key)
+      this.mcpForwardTails.has(key) ||
+      this.activeMcpClientForwardCounts.has(key) ||
+      this.isMcpClientKeyBound(key)
     ) {
       return;
     }
@@ -2921,16 +3201,13 @@ export class UnixSocketServer {
   /** Cached-per-device accessor for the append helper; see {@link appendTextInputs}. */
   private getAppendTextInput(device: BootedDevice): AppendTextInput {
     const existing = this.appendTextInputs.get(device.deviceId);
-    if (
-      existing?.transportId !== undefined &&
-      device.transportId === existing.transportId
-    ) {
+    if (existing?.transportId !== undefined && device.transportId === existing.transportId) {
       return existing.input;
     }
     if (existing) {
       logger.debug(
         `[UnixSocketServer] Rebuilding cached append helper for ${device.deviceId}: ` +
-        `ADB transport changed from ${existing.transportId} to ${device.transportId}`
+          `ADB transport changed from ${existing.transportId} to ${device.transportId}`,
       );
     }
     const created = this.appendTextFactory(device);
@@ -2941,10 +3218,7 @@ export class UnixSocketServer {
   /**
    * Enqueue a request in the session to maintain sequential order
    */
-  private async enqueueRequest<T>(
-    session: SessionContext,
-    handler: () => Promise<T>
-  ): Promise<T> {
+  private async enqueueRequest<T>(session: SessionContext, handler: () => Promise<T>): Promise<T> {
     return new Promise((resolve, reject) => {
       session.requestQueue.push(async () => {
         try {
@@ -3058,12 +3332,12 @@ export class UnixSocketServer {
     }
     if (!ownsSocketPath && existsSync(this.socketPath)) {
       logger.warn(
-        `Unix socket path ${this.socketPath} no longer belongs to this server; leaving listener for process teardown`
+        `Unix socket path ${this.socketPath} no longer belongs to this server; leaving listener for process teardown`,
       );
       this.server.unref();
       return Promise.resolve();
     }
-    return new Promise(resolve => {
+    return new Promise((resolve) => {
       this.server!.close(() => {
         logger.info("Unix socket server closed");
         resolve();
@@ -3086,15 +3360,18 @@ export class UnixSocketServer {
     }
 
     let timeoutHandle: NodeJS.Timeout | undefined;
-    const timeout = new Promise<boolean>(resolve => {
-      timeoutHandle = this.timer.setTimeout(() => resolve(false), DAEMON_REQUEST_HANDLER_DRAIN_TIMEOUT_MS);
+    const timeout = new Promise<boolean>((resolve) => {
+      timeoutHandle = this.timer.setTimeout(
+        () => resolve(false),
+        DAEMON_REQUEST_HANDLER_DRAIN_TIMEOUT_MS,
+      );
     });
 
     try {
       const drained = await Promise.race([Promise.allSettled(handlers).then(() => true), timeout]);
       if (!drained) {
         logger.warn(
-          `Timed out waiting for ${handlers.length} in-flight Unix socket request handler(s) to finish during shutdown`
+          `Timed out waiting for ${handlers.length} in-flight Unix socket request handler(s) to finish during shutdown`,
         );
       }
     } finally {
@@ -3121,7 +3398,9 @@ export class UnixSocketServer {
       return false;
     }
     const currentIdentity = this.readSocketFileIdentity();
-    return currentIdentity?.dev === this.socketFileIdentity.dev &&
-      currentIdentity.ino === this.socketFileIdentity.ino;
+    return (
+      currentIdentity?.dev === this.socketFileIdentity.dev &&
+      currentIdentity.ino === this.socketFileIdentity.ino
+    );
   }
 }

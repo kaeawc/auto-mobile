@@ -1,17 +1,20 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
-import { TOOL_CAPABILITY_BY_NAME } from "../../../src/features/toolCapabilities/toolCapabilityMap";
 import { McpTestFixture } from "../../fixtures/mcpTestFixture";
 import { z } from "zod/v4";
 import { compileJsonSchema } from "../../helpers/jsonSchemaCompile";
 
 const listToolsResponseSchema = z.object({
-  tools: z.array(z.object({
-    name: z.string(),
-    description: z.string(),
-    inputSchema: z.object({}).passthrough(),
-    outputSchema: z.object({}).passthrough().optional()
-  }).passthrough())
+  tools: z.array(
+    z
+      .object({
+        name: z.string(),
+        description: z.string(),
+        inputSchema: z.object({}).passthrough(),
+        outputSchema: z.object({}).passthrough().optional(),
+      })
+      .passthrough(),
+  ),
 });
 
 describe("MCP Tools List", () => {
@@ -29,34 +32,39 @@ describe("MCP Tools List", () => {
       }
     });
 
-    test("tools/list serves only the core tool profile by default", async function() {
+    test("tools/list serves only the core tool profile by default", async function () {
       const { client } = fixture.getContext();
 
       const result = await client.request(
         { method: "tools/list", params: {} },
-        listToolsResponseSchema
+        listToolsResponseSchema,
       );
 
-      const wireNames = result.tools.map(tool => tool.name).sort();
+      const wireNames = result.tools.map((tool) => tool.name).sort();
       const advertisedNames = ToolRegistry.getToolDefinitions()
-        .filter(tool => !TOOL_CAPABILITY_BY_NAME.has(tool.name))
-        .map(tool => tool.name)
+        .filter((tool) => ToolRegistry.getRegisteredTool(tool.name)?.defaultEnabled)
+        .map((tool) => tool.name)
         .sort();
-      const allToolNames = ToolRegistry.getAllTools().map(tool => tool.name).sort();
+      const allToolNames = ToolRegistry.getAllTools()
+        .map((tool) => tool.name)
+        .sort();
 
       expect(wireNames).toEqual(advertisedNames);
       // The core profile must stay smaller than the full registered surface.
       expect(wireNames.length).toBeLessThanOrEqual(allToolNames.length);
     });
 
-    test("given a tool is registered, endpoint should return a list with that tool", async function() {
+    test("given a tool is registered, endpoint should return a list with that tool", async function () {
       const { client } = fixture.getContext();
 
       // Send list_tools request
-      const result = await client.request({
-        method: "tools/list",
-        params: {}
-      }, listToolsResponseSchema);
+      const result = await client.request(
+        {
+          method: "tools/list",
+          params: {},
+        },
+        listToolsResponseSchema,
+      );
 
       // Verify tools list contains registered tools
       expect(typeof result).toBe("object");
@@ -65,7 +73,7 @@ describe("MCP Tools List", () => {
       expect(result.tools.length).toBeGreaterThan(0);
 
       // Verify each tool has required properties
-      result.tools.forEach(tool => {
+      result.tools.forEach((tool) => {
         expect(tool).toHaveProperty("name");
         expect(tool).toHaveProperty("description");
         expect(tool).toHaveProperty("inputSchema");
@@ -75,7 +83,7 @@ describe("MCP Tools List", () => {
       });
 
       // Verify we have some expected tools (like observe, etc.)
-      const toolNames = result.tools.map(tool => tool.name);
+      const toolNames = result.tools.map((tool) => tool.name);
       expect(toolNames).toContain("observe");
       expect(toolNames).toContain("tapOn");
       expect(toolNames).toContain("inputText");
@@ -86,15 +94,18 @@ describe("MCP Tools List", () => {
       expect(toolNames).not.toContain("waitForCondition");
     });
 
-    test("strict clients can compile observe outputSchema", async function() {
+    test("strict clients can compile observe outputSchema", async function () {
       const { client } = fixture.getContext();
 
-      const result = await client.request({
-        method: "tools/list",
-        params: {}
-      }, listToolsResponseSchema);
+      const result = await client.request(
+        {
+          method: "tools/list",
+          params: {},
+        },
+        listToolsResponseSchema,
+      );
 
-      const observe = result.tools.find(tool => tool.name === "observe");
+      const observe = result.tools.find((tool) => tool.name === "observe");
 
       expect(observe?.outputSchema).toBeDefined();
       expect(() => compileJsonSchema(observe!.outputSchema)).not.toThrow();

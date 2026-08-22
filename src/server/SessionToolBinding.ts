@@ -5,18 +5,18 @@ export class SessionToolBinding {
   private initialSessionUuid?: string;
   /** The single stdio transport has no MCP session ID, so retain its device session here. */
   private directDeviceSessionUuid?: string;
-  private initialCapabilityProfileUuid?: string;
+  private initialToolSelectionProfileUuid?: string;
   /** The single stdio transport has no MCP session ID, so retain its profile here. */
-  private directCapabilityProfileUuid?: string;
-  private readonly capabilityProfiles = new Map<string, string>();
+  private directToolSelectionProfileUuid?: string;
+  private readonly toolSelectionProfiles = new Map<string, string>();
 
   constructor(
     initialSessionUuid?: string,
-    initialCapabilityProfileUuid?: string,
+    initialToolSelectionProfileUuid?: string,
     private readonly idGenerator: IdGenerator = defaultIdGenerator,
   ) {
     this.initialSessionUuid = initialSessionUuid;
-    this.initialCapabilityProfileUuid = initialCapabilityProfileUuid;
+    this.initialToolSelectionProfileUuid = initialToolSelectionProfileUuid;
   }
 
   private boundSessionUuid(mcpSessionId: string | undefined): string | undefined {
@@ -27,12 +27,12 @@ export class SessionToolBinding {
   }
 
   effectiveSessionUuid(mcpSessionId: string | undefined, params?: unknown): string | undefined {
-    const explicit = params && typeof params === "object" && !Array.isArray(params)
-      ? (params as Record<string, unknown>).sessionUuid
-      : undefined;
-    const explicitSessionUuid = typeof explicit === "string" && explicit.trim().length > 0
-      ? explicit
-      : undefined;
+    const explicit =
+      params && typeof params === "object" && !Array.isArray(params)
+        ? (params as Record<string, unknown>).sessionUuid
+        : undefined;
+    const explicitSessionUuid =
+      typeof explicit === "string" && explicit.trim().length > 0 ? explicit : undefined;
     const boundSessionUuid = this.boundSessionUuid(mcpSessionId);
     if (
       this.initialSessionUuid &&
@@ -41,27 +41,33 @@ export class SessionToolBinding {
     ) {
       throw new Error(
         `MCP connection is bound to device session ${this.initialSessionUuid}; ` +
-        `cannot route this call to ${explicitSessionUuid} until the binding is released.`
+          `cannot route this call to ${explicitSessionUuid} until the binding is released.`,
       );
     }
     return explicitSessionUuid ?? boundSessionUuid;
   }
 
   /**
-   * Resolve the profile used solely for tool-capability policy. A generated
+   * Resolve the profile used solely for exact-tool selection. A generated
    * connection profile deliberately never becomes a routing/device session:
    * executePlan may release device sessions, but that must not erase a user's
-   * capability choices for the still-open MCP connection.
+   * tool choices for the still-open MCP connection.
    */
-  effectiveCapabilityProfileUuid(mcpSessionId: string | undefined, params?: unknown): string | undefined {
-    return this.connectionCapabilityProfileUuid(mcpSessionId) ?? this.effectiveSessionUuid(mcpSessionId, params);
+  effectiveToolSelectionProfileUuid(
+    mcpSessionId: string | undefined,
+    params?: unknown,
+  ): string | undefined {
+    return (
+      this.connectionToolSelectionProfileUuid(mcpSessionId) ??
+      this.effectiveSessionUuid(mcpSessionId, params)
+    );
   }
 
   /** Connection-scoped profile, deliberately independent of routing sessions. */
-  connectionCapabilityProfileUuid(mcpSessionId: string | undefined): string | undefined {
+  connectionToolSelectionProfileUuid(mcpSessionId: string | undefined): string | undefined {
     return mcpSessionId
-      ? this.capabilityProfiles.get(mcpSessionId) ?? this.initialCapabilityProfileUuid
-      : this.directCapabilityProfileUuid ?? this.initialCapabilityProfileUuid;
+      ? (this.toolSelectionProfiles.get(mcpSessionId) ?? this.initialToolSelectionProfileUuid)
+      : (this.directToolSelectionProfileUuid ?? this.initialToolSelectionProfileUuid);
   }
 
   bind(mcpSessionId: string | undefined, sessionUuid: string | undefined): boolean {
@@ -85,28 +91,31 @@ export class SessionToolBinding {
     return true;
   }
 
-  /** Creates and binds a persistent capability profile without selecting a device session. */
-  createAndBindCapabilityProfile(mcpSessionId: string | undefined): string {
+  /** Creates and binds a persistent tool-selection profile without selecting a device session. */
+  createAndBindToolSelectionProfile(mcpSessionId: string | undefined): string {
     const sessionUuid = this.idGenerator.next();
-    this.bindCapabilityProfile(mcpSessionId, sessionUuid);
+    this.bindToolSelectionProfile(mcpSessionId, sessionUuid);
     return sessionUuid;
   }
 
   /** Associate a persisted profile with this MCP connection without changing device routing. */
-  bindCapabilityProfile(mcpSessionId: string | undefined, sessionUuid: string | undefined): boolean {
+  bindToolSelectionProfile(
+    mcpSessionId: string | undefined,
+    sessionUuid: string | undefined,
+  ): boolean {
     if (!sessionUuid?.trim()) {
       return false;
     }
     if (mcpSessionId) {
-      if (this.capabilityProfiles.get(mcpSessionId) === sessionUuid) {
+      if (this.toolSelectionProfiles.get(mcpSessionId) === sessionUuid) {
         return false;
       }
-      this.capabilityProfiles.set(mcpSessionId, sessionUuid);
+      this.toolSelectionProfiles.set(mcpSessionId, sessionUuid);
     } else {
-      if (this.directCapabilityProfileUuid === sessionUuid) {
+      if (this.directToolSelectionProfileUuid === sessionUuid) {
         return false;
       }
-      this.directCapabilityProfileUuid = sessionUuid;
+      this.directToolSelectionProfileUuid = sessionUuid;
     }
     return true;
   }
@@ -116,7 +125,7 @@ export class SessionToolBinding {
    * `sessionUuid` (issue #4611 Gap D). After an executePlan (or a heartbeat/idle)
    * release frees a daemon session, the per-transport binding must be torn down
    * so a later sessionless `tools/list`/`tools/call` on the SAME MCP transport
-   * stops enforcing the released session's (now stale) capability profile.
+   * stops enforcing the released session's (now stale) tool-selection profile.
    *
    * Both binding origins are cleared: any per-transport map entry pointing at the
    * session AND a seeded `initialSessionUuid` fallback that `effectiveSessionUuid`

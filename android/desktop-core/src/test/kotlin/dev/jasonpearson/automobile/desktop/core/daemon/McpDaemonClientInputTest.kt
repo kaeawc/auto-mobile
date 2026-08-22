@@ -41,7 +41,7 @@ class McpDaemonClientInputTest {
   }
 
   @Test
-  fun `capability profile is forwarded across per-request daemon sockets`() {
+  fun `tool-selection profile is forwarded across per-request daemon sockets`() {
     TestDaemonSocket(
         responses =
           listOf(
@@ -56,22 +56,22 @@ class McpDaemonClientInputTest {
       .use { server ->
         val client = McpDaemonClient(socketPathValue = server.socketPath.toString())
 
-        client.enableToolCapability("screen-artifacts")
+        client.setToolEnabled("videoRecording")
         client.listTools()
         client.callTool("videoRecording", JsonObject(emptyMap()))
 
         val requests = server.awaitRequests()
-        assertEquals("setToolCapability", requests[0].params["name"]?.jsonPrimitive?.content)
+        assertEquals("setToolEnabled", requests[0].params["name"]?.jsonPrimitive?.content)
         assertEquals("tools/list", requests[1].method)
         assertEquals(
           "profile-a",
-          requests[1].params["__autoMobileCapabilityProfileUuid"]?.jsonPrimitive?.content,
+          requests[1].params["__autoMobileToolSelectionProfileUuid"]?.jsonPrimitive?.content,
         )
         assertEquals("videoRecording", requests[2].params["name"]?.jsonPrimitive?.content)
         val arguments = requests[2].params["arguments"]?.jsonObject
         assertEquals(
           "profile-a",
-          arguments?.get("__autoMobileCapabilityProfileUuid")?.jsonPrimitive?.content,
+          arguments?.get("__autoMobileToolSelectionProfileUuid")?.jsonPrimitive?.content,
         )
       }
   }
@@ -98,7 +98,7 @@ class McpDaemonClientInputTest {
           "observe",
           JsonObject(mapOf("sessionUuid" to JsonPrimitive("explicit-session"))),
         )
-        client.callTool("setToolCapability", JsonObject(emptyMap()))
+        client.callTool("setToolEnabled", JsonObject(emptyMap()))
 
         val requests = server.awaitRequests()
         assertEquals(
@@ -153,22 +153,22 @@ class McpDaemonClientInputTest {
   }
 
   @Test
-  fun `capability enable tolerates an older daemon without the control tool`() {
+  fun `tool selection fails when the control tool is unavailable`() {
     TestDaemonSocket(
         responses =
           listOf(
-            SocketResponse(error = "Unknown tool: setToolCapability"),
-            SocketResponse("""{"content":[]}""", null),
+            SocketResponse(error = "Unknown tool: setToolEnabled"),
           )
       )
       .use { server ->
         val client = McpDaemonClient(socketPathValue = server.socketPath.toString())
 
-        client.enableToolCapability("screen-artifacts")
-        client.callTool("videoRecording", JsonObject(emptyMap()))
+        assertFailsWith<McpConnectionException> {
+          client.setToolEnabled("videoRecording")
+        }
 
         assertEquals(
-          listOf("setToolCapability", "videoRecording"),
+          listOf("setToolEnabled"),
           server.awaitRequests().map { it.params["name"]?.jsonPrimitive?.content },
         )
       }

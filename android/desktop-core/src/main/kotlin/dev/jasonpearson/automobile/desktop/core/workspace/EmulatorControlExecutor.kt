@@ -90,8 +90,7 @@ class DaemonEmulatorControlExecutor(
       client.setActiveDeviceChecked(deviceId, wire)
       when (control) {
         EmulatorControl.Rotate -> {
-          // `rotate` lives behind the advanced-interaction capability.
-          client.enableToolCapability("advanced-interaction")
+          client.setToolEnabled("rotate")
           client.callToolChecked(
             "rotate",
             buildJsonObject {
@@ -102,8 +101,7 @@ class DaemonEmulatorControlExecutor(
           )
         }
         EmulatorControl.Snapshot -> {
-          // `deviceSnapshot` lives behind the screen-artifacts capability.
-          client.enableToolCapability("screen-artifacts")
+          client.setToolEnabled("deviceSnapshot")
           client.callToolChecked(
             "deviceSnapshot",
             buildJsonObject {
@@ -182,8 +180,7 @@ class DaemonEmulatorControlExecutor(
     withContext(ioDispatcher) {
       val wire = platform.wireName()
       client.setActiveDeviceChecked(deviceId, wire)
-      // `changeLocalization` lives behind the device-settings capability.
-      client.enableToolCapability("device-settings")
+      client.setToolEnabled("changeLocalization")
       // Resolve the foreground app on both platforms: Android *requires* it as the change target,
       // while iOS applies the locale device-wide but must relaunch the app (restartApp) to show it.
       val foregroundApp = foregroundAppResolver.resolve(deviceId)

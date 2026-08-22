@@ -28,12 +28,12 @@ bun run benchmark-context --output reports/context-benchmark.json
 
 ## Opting Into Advanced Tools
 
-The core profile always includes `setToolCapability`. Call it before an advanced
-tool to persist that capability for the current MCP connection; the server then
+The core profile always includes `setToolEnabled`. Call it before an opt-in tool
+to persist that exact-tool choice for the current MCP connection; the server then
 emits `notifications/tools/list_changed` so clients can refresh discovery.
 
 ```json
-{ "capability": "clipboard", "enabled": true }
+{ "toolName": "clipboard", "enabled": true }
 ```
 
 For a new stdio connection, the response includes the generated `sessionUuid`.
@@ -64,14 +64,14 @@ to resume the same persisted profile after reconnecting.
 
 ### Current Baselines (2026-07-30)
 
-| Category | Baseline | Scope |
-|----------|----------|-------|
-| Core Tools | 8,465 tokens | Default core profile |
-| All Tools | 26,184 tokens | All advertised tools |
-| Resources | 1,259 tokens | Shared |
-| Resource Templates | 12,137 tokens | Shared |
-| **Core Total** | **21,861 tokens** | **Default core profile** |
-| **All Total** | **39,580 tokens** | **All advertised tools** |
+| Category           | Baseline          | Scope                    |
+| ------------------ | ----------------- | ------------------------ |
+| Core Tools         | 8,465 tokens      | Default core profile     |
+| All Tools          | 26,184 tokens     | All advertised tools     |
+| Resources          | 1,259 tokens      | Shared                   |
+| Resource Templates | 12,137 tokens     | Shared                   |
+| **Core Total**     | **21,861 tokens** | **Default core profile** |
+| **All Total**      | **39,580 tokens** | **All advertised tools** |
 
 ## Benchmark Report Format
 
@@ -113,14 +113,14 @@ The JSON report marks this state explicitly:
 
 The pull-request workflow uploads the report and posts this table. A baseline-only run is marked with a ruler instead of a pass/fail claim.
 
-| Category | Actual | Baseline | Delta | Status |
-|----------|--------|----------|-------|--------|
-| Core Tools | 8,177 | 8,177 | +0 | 📏 |
-| All Tools | 25,896 | 25,896 | +0 | 📏 |
-| Resources | 1,259 | 1,259 | +0 | 📏 |
-| Resource Templates | 12,137 | 12,137 | +0 | 📏 |
-| **Core Total** | **21,573** | **21,573** | **+0** | 📏 |
-| **All Total** | **39,292** | **39,292** | **+0** | 📏 |
+| Category           | Actual     | Baseline   | Delta  | Status |
+| ------------------ | ---------- | ---------- | ------ | ------ |
+| Core Tools         | 8,177      | 8,177      | +0     | 📏     |
+| All Tools          | 25,896     | 25,896     | +0     | 📏     |
+| Resources          | 1,259      | 1,259      | +0     | 📏     |
+| Resource Templates | 12,137     | 12,137     | +0     | 📏     |
+| **Core Total**     | **21,573** | **21,573** | **+0** | 📏     |
+| **All Total**      | **39,292** | **39,292** | **+0** | 📏     |
 
 ## Adding Thresholds After Baseline Review
 

@@ -97,12 +97,12 @@ class DaemonEmulatorControlExecutorTest {
     // Active device is set before any tool call.
     assertEquals("setActiveDevice", client.calls.first())
     assertTrue(
-      "rotate needs the advanced-interaction capability",
+      "rotate enables its exact tool",
       client.toolCalls.any {
-        it.name == "setToolCapability" &&
+        it.name == "setToolEnabled" &&
           it.arguments ==
             buildJsonObject {
-              put("capability", "advanced-interaction")
+              put("toolName", "rotate")
               put("enabled", true)
             }
       },
@@ -121,7 +121,7 @@ class DaemonEmulatorControlExecutorTest {
   }
 
   @Test
-  fun `snapshot enables screen-artifacts and captures on the target device`() = runTest {
+  fun `snapshot enables its exact tool and captures on the target device`() = runTest {
     val client = FakeAutoMobileClient()
     executor(client)
       .run("emulator-5554", Platform.Android, EmulatorControl.Snapshot, Orientation.Portrait)
@@ -129,10 +129,10 @@ class DaemonEmulatorControlExecutorTest {
     assertEquals("setActiveDevice", client.calls.first())
     assertTrue(
       client.toolCalls.any {
-        it.name == "setToolCapability" &&
+        it.name == "setToolEnabled" &&
           it.arguments ==
             buildJsonObject {
-              put("capability", "screen-artifacts")
+              put("toolName", "deviceSnapshot")
               put("enabled", true)
             }
       }
@@ -291,7 +291,7 @@ class DaemonEmulatorControlExecutorTest {
       }
 
     try {
-      client.enableToolCapability("advanced-interaction")
+      client.setToolEnabled("rotate")
       fail("Expected capability failure")
     } catch (error: McpConnectionException) {
       assertEquals("capability denied", error.message)
@@ -322,16 +322,16 @@ class DaemonEmulatorControlExecutorTest {
   }
 
   @Test
-  fun `setLocale on iOS enables device-settings and changes locale device-wide`() = runTest {
+  fun `setLocale on iOS enables changeLocalization and changes locale device-wide`() = runTest {
     val client = FakeAutoMobileClient()
     executor(client).setLocale("booted-ipad", Platform.Ios, "ja-JP")
 
     assertTrue(
       client.toolCalls.any {
-        it.name == "setToolCapability" &&
+        it.name == "setToolEnabled" &&
           it.arguments ==
             buildJsonObject {
-              put("capability", "device-settings")
+              put("toolName", "changeLocalization")
               put("enabled", true)
             }
       }

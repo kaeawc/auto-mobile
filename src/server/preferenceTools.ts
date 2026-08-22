@@ -6,7 +6,7 @@ import type { BootedDevice } from "../models";
 import {
   AppPreferences,
   type GetPreferenceInput,
-  type SetPreferenceInput
+  type SetPreferenceInput,
 } from "../features/preferences/AppPreferences";
 
 const preferenceScopeSchema = z.enum(["systemProperty", "sharedPreferences", "userDefaults"]);
@@ -16,7 +16,10 @@ const preferenceValueSchema = z.union([z.string(), z.boolean(), z.number()]);
 const getPreferenceBaseSchema = z.object({
   scope: preferenceScopeSchema.describe("Preference scope"),
   appId: z.string().optional().describe("App package or bundle id"),
-  suite: z.string().optional().describe("SharedPreferences file name or UserDefaults suite/app group"),
+  suite: z
+    .string()
+    .optional()
+    .describe("SharedPreferences file name or UserDefaults suite/app group"),
   key: z.string().min(1).describe("Preference key or Android system property name"),
 });
 
@@ -26,11 +29,11 @@ const setPreferenceBaseSchema = getPreferenceBaseSchema.extend({
 });
 
 export const getPreferenceSchema = withAppIdAliases(
-  addDeviceTargetingToSchema(getPreferenceBaseSchema)
+  addDeviceTargetingToSchema(getPreferenceBaseSchema),
 ).superRefine(validatePreferenceArgs);
 
 export const setPreferenceSchema = withAppIdAliases(
-  addDeviceTargetingToSchema(setPreferenceBaseSchema)
+  addDeviceTargetingToSchema(setPreferenceBaseSchema),
 ).superRefine(validatePreferenceArgs);
 
 export type GetPreferenceToolArgs = z.infer<typeof getPreferenceSchema>;
@@ -48,7 +51,7 @@ let preferenceToolsDependencies: PreferenceToolsDependencies | null = null;
 function getPreferenceToolsDependencies(): PreferenceToolsDependencies {
   if (!preferenceToolsDependencies) {
     preferenceToolsDependencies = {
-      appPreferencesFactory: device => new AppPreferences(device),
+      appPreferencesFactory: (device) => new AppPreferences(device),
     };
   }
   return preferenceToolsDependencies;
@@ -68,7 +71,8 @@ export function registerPreferenceTools(): void {
         .appPreferencesFactory(device)
         .getPreference(args);
       return createJSONToolResponse(result);
-    }
+    },
+    { defaultEnabled: false },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -80,11 +84,15 @@ export function registerPreferenceTools(): void {
         .appPreferencesFactory(device)
         .setPreference(args);
       return createJSONToolResponse(result);
-    }
+    },
+    { defaultEnabled: false },
   );
 }
 
-function validatePreferenceArgs(args: z.infer<typeof getPreferenceBaseSchema> & { platform?: string }, context: z.RefinementCtx): void {
+function validatePreferenceArgs(
+  args: z.infer<typeof getPreferenceBaseSchema> & { platform?: string },
+  context: z.RefinementCtx,
+): void {
   if ((args.scope === "sharedPreferences" || args.scope === "userDefaults") && !args.appId) {
     context.addIssue({
       code: "custom",

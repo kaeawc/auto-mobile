@@ -14,26 +14,29 @@ const deviceSnapshotCommonShape = {
   useVmSnapshot: z.boolean().optional().describe("Use emulator VM snapshot"),
   strictBackupMode: z.boolean().optional().describe("Fail if app data backup fails"),
   backupTimeoutMs: z.number().optional().describe("adb backup confirmation timeout ms"),
-  userApps: z.enum(["current", "all"]).optional()
-    .describe("Apps to back up: current or all"),
+  userApps: z.enum(["current", "all"]).optional().describe("Apps to back up: current or all"),
   vmSnapshotTimeoutMs: z.number().optional().describe("VM snapshot timeout ms"),
-  appBundleIds: z.array(z.string()).optional()
-    .describe("iOS bundle IDs for app data snapshot"),
+  appBundleIds: z.array(z.string()).optional().describe("iOS bundle IDs for app data snapshot"),
 };
 
 export const deviceSnapshotSchema = z.discriminatedUnion("action", [
-  addDeviceTargetingToSchema(z.object({
-    action: z.literal("capture"),
-    snapshotName: optionalSnapshotNameSchema,
-    ...deviceSnapshotCommonShape,
-  })),
-  addDeviceTargetingToSchema(z.object({
-    action: z.literal("restore"),
-    snapshotName: z.string({ error: snapshotNameRequiredMessage })
-      .min(1, snapshotNameRequiredMessage)
-      .describe("Snapshot name"),
-    ...deviceSnapshotCommonShape,
-  }))
+  addDeviceTargetingToSchema(
+    z.object({
+      action: z.literal("capture"),
+      snapshotName: optionalSnapshotNameSchema,
+      ...deviceSnapshotCommonShape,
+    }),
+  ),
+  addDeviceTargetingToSchema(
+    z.object({
+      action: z.literal("restore"),
+      snapshotName: z
+        .string({ error: snapshotNameRequiredMessage })
+        .min(1, snapshotNameRequiredMessage)
+        .describe("Snapshot name"),
+      ...deviceSnapshotCommonShape,
+    }),
+  ),
 ]);
 
 export type DeviceSnapshotToolArgs = z.infer<typeof deviceSnapshotSchema>;
@@ -78,7 +81,9 @@ export function registerSnapshotTools() {
 
       // Exhaustive over the discriminated union (args is `never` here); kept
       // as a runtime guard for callers that bypass schema validation.
-      throw new ActionableError(`Unsupported deviceSnapshot action: ${(args as { action: string }).action}`);
+      throw new ActionableError(
+        `Unsupported deviceSnapshot action: ${(args as { action: string }).action}`,
+      );
     } catch (error) {
       throw new ActionableError(`Failed to ${args.action} snapshot: ${error}`);
     }
@@ -88,6 +93,7 @@ export function registerSnapshotTools() {
     "deviceSnapshot",
     "Capture or restore device snapshot.",
     deviceSnapshotSchema,
-    deviceSnapshotHandler
+    deviceSnapshotHandler,
+    { defaultEnabled: false },
   );
 }

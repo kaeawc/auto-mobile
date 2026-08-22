@@ -104,7 +104,7 @@ class McpDeviceSnapshotActions(private val clientProvider: () -> AutoMobileClien
   }
 
   private fun callSnapshotTool(arguments: JsonObject): DeviceSnapshotToolResponse {
-    client.enableToolCapability("screen-artifacts")
+    client.setToolEnabled("deviceSnapshot")
     return decodeToolResponse(
       snapshotJson,
       client.callTool("deviceSnapshot", arguments),

@@ -188,22 +188,21 @@ interface AutoMobileClient {
     return checkToolResponse(callTool(name, arguments), DaemonJson)
   }
 
-  /** Enable one optional server capability for this client connection. */
-  fun enableToolCapability(capability: String) {
-    try {
-      checkToolResponse(
-        callTool(
-          "setToolCapability",
-          buildJsonObject {
-            put("capability", capability)
-            put("enabled", true)
-          },
-        ),
-        DaemonJson,
-      )
-    } catch (error: McpConnectionException) {
-      if (error.message?.contains("unknown tool", ignoreCase = true) != true) throw error
-    }
+  /** Set one exact server tool for this client connection. */
+  fun setToolEnabled(
+    toolName: String,
+    enabled: Boolean = true,
+  ) {
+    checkToolResponse(
+      callTool(
+        "setToolEnabled",
+        buildJsonObject {
+          put("toolName", toolName)
+          put("enabled", enabled)
+        },
+      ),
+      DaemonJson,
+    )
   }
 
   fun close() {}

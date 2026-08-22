@@ -14,7 +14,7 @@ import { registerInteractionTools } from "../src/server/interactionTools";
 import { registerAppTools } from "../src/server/appTools";
 import { registerUtilityTools } from "../src/server/utilityTools";
 import { registerDeviceTools } from "../src/server/deviceTools";
-import { registerToolCapabilityTools } from "../src/server/toolCapabilityTools";
+import { registerToolSelectionTools } from "../src/server/toolSelectionTools";
 import { registerDeepLinkTools } from "../src/server/deepLinkTools";
 import { registerNavigationTools } from "../src/server/navigationTools";
 import { registerNotificationTools } from "../src/server/notificationTools";
@@ -44,7 +44,7 @@ function registerAllTools(): void {
   registerAppTools();
   registerUtilityTools();
   registerDeviceTools();
-  registerToolCapabilityTools();
+  registerToolSelectionTools();
   registerDeepLinkTools();
   registerNavigationTools();
   registerNotificationTools();
@@ -73,14 +73,8 @@ function writeToolDefinitions(outputPath: string): void {
     .sort((left, right) => left.name.localeCompare(right.name));
   const resolvedPath = path.resolve(process.cwd(), outputPath);
   fs.mkdirSync(path.dirname(resolvedPath), { recursive: true });
-  fs.writeFileSync(
-    resolvedPath,
-    `${JSON.stringify(toolDefinitions, null, 2)}\n`,
-    "utf8"
-  );
-  console.log(
-    `Wrote ${toolDefinitions.length} tool definitions to ${resolvedPath}`
-  );
+  fs.writeFileSync(resolvedPath, `${JSON.stringify(toolDefinitions, null, 2)}\n`, "utf8");
+  console.log(`Wrote ${toolDefinitions.length} tool definitions to ${resolvedPath}`);
 }
 
 registerAllTools();

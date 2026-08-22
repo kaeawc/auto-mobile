@@ -146,7 +146,6 @@ src/index.ts: error TS2322: Type 'number | string | undefined' is not assignable
 src/index.ts: error TS2322: Type 'number | string | undefined' is not assignable to type 'number | undefined'.
 src/server/appFileService.ts: error TS2345: Argument of type 'PutAppFileRequest' is not assignable to parameter of type 'PutAppFileArgs'.
 src/server/appFileService.ts: error TS2430: Interface 'PutAppFileRequest' incorrectly extends interface 'PutAppFileArgs'.
-src/server/appResources.ts: error TS2345: Argument of type 'string[]' is not assignable to parameter of type 'readonly ("deviceId" | "platform" | "profile" | "search" | "type")[]'.
 src/server/bootedDeviceResources.ts: error TS2322: Type '"local" | "remote"' is not assignable to type '"local" | undefined'.
 src/server/compactBoundsAdvertisement.ts: error TS2698: Spread types may only be created from object types.
 src/server/deviceTools.ts: error TS2322: Type 'TimingData | null' is not assignable to type 'Record<string, number>'.
@@ -183,10 +182,8 @@ src/utils/image/backend/JimpBackend.ts: error TS2322: Type 'JimpInstanceMethods<
 src/utils/image/backend/JimpBackend.ts: error TS2322: Type 'JimpInstanceMethods<{ bitmap: Bitmap; background: number; formats: Format<any, undefined, undefined>[]; mime?: string | undefined; inspect(): string; toString(): string; readonly width: number; ... 11 more ...; scanIterator(x?: number | undefined, y?: number | undefined, w?: number | undefined, h?: number | undefine...' is not assignable to type '{ bitmap: Bitmap; background: number; formats: Format<any, undefined, undefined>[]; mime?: string | undefined; inspect(): string; toString(): string; readonly width: number; ... 11 more ...; scanIterator(x?: number | undefined, y?: number | undefined, w?: number | undefined, h?: number | undefined): Generator<...>; ...'.
 src/utils/image/backend/JimpBackend.ts: error TS2322: Type 'JimpInstanceMethods<{ bitmap: Bitmap; background: number; formats: Format<any, undefined, undefined>[]; mime?: string | undefined; inspect(): string; toString(): string; readonly width: number; ... 11 more ...; scanIterator(x?: number | undefined, y?: number | undefined, w?: number | undefined, h?: number | undefine...' is not assignable to type '{ bitmap: Bitmap; background: number; formats: Format<any, undefined, undefined>[]; mime?: string | undefined; inspect(): string; toString(): string; readonly width: number; ... 11 more ...; scanIterator(x?: number | undefined, y?: number | undefined, w?: number | undefined, h?: number | undefined): Generator<...>; ...'.
 src/utils/ios-cmdline-tools/XcodeSigning.ts: error TS2322: Type 'Promise<string | undefined>' is not assignable to type 'Promise<void>'.
-# swap-fp: 10 :: src/server/interactionTools.ts: error TS18048: 'freshness.actualTimestamp' is possibly 'undefined'.
 # swap-fp: 10,13,19,25,66 :: src/db/migrator.ts: error TS7006: Parameter 'row' implicitly has an 'any' type.
 # swap-fp: 11 :: src/daemon/SocketServerRegistry.ts: error TS2345: Argument of type 'Promise<BaseSocketServer | void>' is not assignable to parameter of type 'Promise<void>'.
-# swap-fp: 11 :: src/daemon/socketServer.ts: error TS2322: Type 'unknown' is not assignable to type '{ [x: string]: unknown; } | undefined'.
 # swap-fp: 11 :: src/db/failureAnalyticsRepository.ts: error TS2322: Type 'FailureType' is not assignable to type '"anr" | "crash" | "tool_failure"'.
 # swap-fp: 11 :: src/features/action/TapAnyElement.ts: error TS2416: Property 'hashViewHierarchy' in type 'TapAnyElement' is not assignable to the same property in base type 'BaseVisualChange'.
 # swap-fp: 11 :: src/features/action/TapOnElement.ts: error TS2416: Property 'hashViewHierarchy' in type 'TapOnElement' is not assignable to the same property in base type 'BaseVisualChange'.
@@ -199,6 +196,7 @@ src/utils/ios-cmdline-tools/XcodeSigning.ts: error TS2322: Type 'Promise<string 
 # swap-fp: 11,53,57,65 :: src/features/navigation/Explore.ts: error TS2740: Type 'AdbExecutor' is missing the following properties from type 'AdbClient': device, execAsync, spawnFn, adbPath, and 30 more.
 # swap-fp: 12,12 :: src/db/migrations/2026_01_27_000_failures.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type 'ReferenceExpression<unknown, never>'.
 # swap-fp: 12,12 :: src/db/migrations/2026_03_15_000_telemetry_events.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type 'ReferenceExpression<unknown, never>'.
+# swap-fp: 13 :: src/daemon/socketServer.ts: error TS2322: Type 'unknown' is not assignable to type '{ [x: string]: unknown; } | undefined'.
 # swap-fp: 13 :: src/db/migrations/2026_01_27_000_failures.ts: error TS2769: No overload matches this call.
 # swap-fp: 13 :: src/db/migrations/2026_03_15_000_telemetry_events.ts: error TS2769: No overload matches this call.
 # swap-fp: 13 :: src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type '(Element | null)[]' is not assignable to type 'Element[]'.
@@ -227,11 +225,11 @@ src/utils/ios-cmdline-tools/XcodeSigning.ts: error TS2322: Type 'Promise<string 
 # swap-fp: 3 :: src/features/navigation/NavigateTo.ts: error TS2459: Module '"./NavigationGraphManager"' declares 'ToolCallInteraction' locally, but it is not exported.
 # swap-fp: 3 :: src/utils/Backoff.ts: error TS2322: Type 'BackoffPolicy | readonly number[]' is not assignable to type 'BackoffPolicy'.
 # swap-fp: 30 :: src/features/action/IosSimulatorPermissions.ts: error TS2352: Conversion of type 'TccPermissionRow' to type 'Record<string, null | number | string>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
-# swap-fp: 30 :: src/server/appResources.ts: error TS2345: Argument of type 'string[]' is not assignable to parameter of type 'readonly ("deviceId" | "platform" | "profile" | "search" | "type")[]'.
 # swap-fp: 30 :: src/server/observeTools.ts: error TS2322: Type 'TimingData' is not assignable to type 'TimingEntry'.
 # swap-fp: 30,32 :: src/db/performanceAuditRepository.ts: error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'OperandValueExpressionOrList<Database, "performance_audit_results", "timestamp">'.
 # swap-fp: 32 :: src/features/accessibility/WcagAudit.ts: error TS2339: Property 'class' does not exist on type 'ViewHierarchyNode'.
 # swap-fp: 32 :: src/features/observe/ios/CtrlProxyGestures.ts: error TS2459: Module '"./types"' declares 'GestureTimingResult' locally, but it is not exported.
+# swap-fp: 32 :: src/server/interactionTools.ts: error TS18048: 'freshness.actualTimestamp' is possibly 'undefined'.
 # swap-fp: 32,36,56 :: src/utils/android-cmdline-tools/AdbClient.ts: error TS2339: Property 'stdout' does not exist on type 'ExecResult | PromiseLike<ExecResult>'.
 # swap-fp: 33 :: src/db/migrator.ts: error TS7006: Parameter 'table' implicitly has an 'any' type.
 # swap-fp: 33 :: src/features/utility/DefaultElementSelector.ts: error TS2339: Property 'findClickableElementsInContainer' does not exist on type 'ElementFinder'.
@@ -246,7 +244,6 @@ src/utils/ios-cmdline-tools/XcodeSigning.ts: error TS2322: Type 'Promise<string 
 # swap-fp: 36 :: src/features/observe/ObserveScreen.ts: error TS2345: Argument of type 'ViewHierarchyResult | undefined' is not assignable to parameter of type 'ViewHierarchyResult'.
 # swap-fp: 36,61 :: src/server/observeTools.ts: error TS2339: Property 'sessionUuid' does not exist on type 'IdentifyInteractionsOptions'.
 # swap-fp: 39 :: src/features/observe/android/CtrlProxyHierarchy.ts: error TS2554: Expected 0 arguments, but got 1.
-# swap-fp: 39 :: src/server/interactionTools.ts: error TS18048: 'freshness.requestedAfter' is possibly 'undefined'.
 # swap-fp: 39,45 :: src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2345: Argument of type 'AccessibilityHierarchy' is not assignable to parameter of type 'ViewHierarchyResult'.
 # swap-fp: 40 :: src/features/performance/PerformanceAudit.ts: error TS2551: Property 'refreshRateHz' does not exist on type 'DeviceCapabilities'. Did you mean 'refreshRate'?
 # swap-fp: 43 :: src/doctor/index.ts: error TS2367: This comparison appears to be unintentional because the types 'false | undefined' and 'true' have no overlap.
@@ -262,8 +259,8 @@ src/utils/ios-cmdline-tools/XcodeSigning.ts: error TS2322: Type 'Promise<string 
 # swap-fp: 46 :: src/server/observeTools.ts: error TS2488: Type 'TimingData' must have a '[Symbol.iterator]()' method that returns an iterator.
 # swap-fp: 47 :: src/features/navigation/NavigateTo.ts: error TS2740: Type 'AdbExecutor' is missing the following properties from type 'AdbClient': device, execAsync, spawnFn, adbPath, and 30 more.
 # swap-fp: 47 :: src/features/observe/HierarchyPlatformValidator.ts: error TS2339: Property 'startsWith' does not exist on type '{}'.
-# swap-fp: 47 :: src/server/formTools.ts: error TS2345: Argument of type 'AdbExecutor | null' is not assignable to parameter of type 'AdbClient | null | undefined'.
 # swap-fp: 47,64 :: src/features/preferences/AppPreferences.ts: error TS2345: Argument of type 'PreferenceResultValue | null' is not assignable to parameter of type 'PreferenceValue | null'.
+# swap-fp: 49 :: src/server/formTools.ts: error TS2345: Argument of type 'AdbExecutor | null' is not assignable to parameter of type 'AdbClient | null | undefined'.
 # swap-fp: 5 :: src/db/migrator.ts: error TS7006: Parameter 'name' implicitly has an 'any' type.
 # swap-fp: 5 :: src/features/observe/android/CtrlProxyHighlights.ts: error TS2322: Type '{ type: "box"; style?: HighlightStyle | null | undefined; bounds: NormalizedHighlightBounds | undefined; } | { type: "circle"; style?: HighlightStyle | ... 1 more ... | undefined; bounds: NormalizedHighlightBounds | undefined; }' is not assignable to type 'HighlightShape'.
 # swap-fp: 5 :: src/features/observe/ios/CtrlProxyHighlights.ts: error TS2322: Type '{ type: "box"; style?: HighlightStyle | null | undefined; bounds: { x: number; y: number; width: number; height: number; sourceWidth: null | number | undefined; sourceHeight: number | ... 1 more ... | undefined; } | null | undefined; } | { ...; }' is not assignable to type 'HighlightShape'.
@@ -280,6 +277,7 @@ src/utils/ios-cmdline-tools/XcodeSigning.ts: error TS2322: Type 'Promise<string 
 # swap-fp: 58,58 :: src/db/migrator.ts: error TS2339: Property 'execute' does not exist on type 'never'.
 # swap-fp: 59 :: src/features/observe/ios/CtrlProxyGestures.ts: error TS2345: Argument of type '{ idPrefix: string; responseType: string; messageType: string; params: { x1: number; y1: number; x2: number; y2: number; fingerCount: number; duration: number; offset: number | undefined; }; timeoutMs: number; perf: PerformanceTracker | undefined; notConnectedMessage: string; errorLabel: string; }' is not assignable to parameter of type 'SendCommandOptions<GestureTimingResult>'.
 # swap-fp: 6,6,6,6 :: src/db/migrator.ts: error TS2339: Property 'select' does not exist on type 'never'.
+# swap-fp: 61 :: src/server/interactionTools.ts: error TS18048: 'freshness.requestedAfter' is possibly 'undefined'.
 # swap-fp: 66,66 :: src/utils/DeepLinkManager.ts: error TS2339: Property 'toString' does not exist on type 'never'.
 # swap-fp: 67,73 :: src/features/utility/ElementFinder.ts: error TS4104: The type 'readonly string[]' is 'readonly' and cannot be assigned to the mutable type 'string[]'.
 # swap-fp: 7 :: src/features/action/swipeon/SwipeOn.ts: error TS2322: Type '(block: (observeResult: ObserveResult) => Promise<any>, options: ObservedChangeOptions) => Promise<any>' is not assignable to type '<T>(action: (observeResult: ObserveResult) => Promise<T>, options: { changeExpected: boolean; timeoutMs: number; progress?: unknown; perf?: PerformanceTracker | undefined; skipPreviousObserve?: boolean | undefined; queryOptions?: { ...; } | undefined; predictionContext?: { ...; } | undefined; }) => Promise<...>'.
@@ -294,18 +292,18 @@ src/utils/ios-cmdline-tools/XcodeSigning.ts: error TS2322: Type 'Promise<string 
 # swap-fp: 7 :: src/index.ts: error TS2322: Type '["raw-element-search", boolean, string]' is not assignable to type '[FeatureFlagKey, boolean, string, Record<string, unknown> | null | undefined]'.
 # swap-fp: 7 :: src/index.ts: error TS2322: Type '["ui-perf-mode", boolean, string]' is not assignable to type '[FeatureFlagKey, boolean, string, Record<string, unknown> | null | undefined]'.
 # swap-fp: 7 :: src/server/deviceTools.ts: error TS2322: Type 'TimingData | null' is not assignable to type 'Record<string, number>'.
-# swap-fp: 7 :: src/server/interactionTools.ts: error TS2322: Type 'SwipeDirection | undefined' is not assignable to type 'SwipeDirection'.
 # swap-fp: 7,7,7,7,9,9,9,9 :: src/index.ts: error TS2322: Type 'number | string | undefined' is not assignable to type 'number | undefined'.
 # swap-fp: 74 :: src/features/utility/ElementParser.ts: error TS2339: Property 'hierarchy' does not exist on type '{ windowLayer: number; }'.
 # swap-fp: 74,75,76,77,77 :: src/features/action/SetUIState.ts: error TS2554: Expected 0-1 arguments, but got 5.
 # swap-fp: 8,8 :: src/db/migrations/2026_01_30_000_performance_live_metrics.ts: error TS2339: Property 'raw' does not exist on type 'Kysely<unknown>'.
+# swap-fp: 8,9 :: src/server/interactionTools.ts: error TS18048: 'searchStats' is possibly 'undefined'.
 # swap-fp: 85 :: src/daemon/socketServer.ts: error TS2554: Expected 1-2 arguments, but got 3.
 # swap-fp: 9 :: src/daemon/manager.ts: error TS18048: 'signal' is possibly 'undefined'.
 # swap-fp: 9 :: src/features/action/LaunchApp.ts: error TS2322: Type 'boolean | null' is not assignable to type 'boolean'.
 # swap-fp: 9 :: src/features/navigation/NavigationGraphManager.ts: error TS2345: Argument of type 'number | undefined' is not assignable to parameter of type 'number'.
 # swap-fp: 9 :: src/features/observe/android/CtrlProxyHighlights.ts: error TS2322: Type 'null | undefined' is not assignable to type 'NormalizedHighlightBounds | undefined'.
+# swap-fp: 9 :: src/server/interactionTools.ts: error TS2322: Type 'SwipeDirection | undefined' is not assignable to type 'SwipeDirection'.
 # swap-fp: 9 :: src/server/networkGraph.ts: error TS2322: Type 'null | string | undefined' is not assignable to type 'null | string'.
-# swap-fp: 9,12 :: src/server/interactionTools.ts: error TS18048: 'searchStats' is possibly 'undefined'.
 # swap-fp: 9,9,11,11 :: src/utils/image/backend/JimpBackend.ts: error TS2322: Type 'JimpInstanceMethods<{ bitmap: Bitmap; background: number; formats: Format<any, undefined, undefined>[]; mime?: string | undefined; inspect(): string; toString(): string; readonly width: number; ... 11 more ...; scanIterator(x?: number | undefined, y?: number | undefined, w?: number | undefined, h?: number | undefine...' is not assignable to type '{ bitmap: Bitmap; background: number; formats: Format<any, undefined, undefined>[]; mime?: string | undefined; inspect(): string; toString(): string; readonly width: number; ... 11 more ...; scanIterator(x?: number | undefined, y?: number | undefined, w?: number | undefined, h?: number | undefined): Generator<...>; ...'.
 # swap-fp: 9,9,9 :: src/features/navigation/ExploreElementExtraction.ts: error TS2322: Type '{}' is not assignable to type 'string'.
 # swap-fp: 91 :: src/server/testTimingResources.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type '"appVersion" | "deviceId" | "deviceName" | "devicePlatform" | "deviceType" | "gitCommit" | "gradleVersion" | "isCi" | "jdkVersion" | "jvmTarget" | "limit" | "lookbackDays" | ... 6 more ... | "testMethod"'.

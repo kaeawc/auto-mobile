@@ -10,7 +10,7 @@ import {
   HighlightShape,
   Platform,
   ViewHierarchyNode,
-  ViewHierarchyResult
+  ViewHierarchyResult,
 } from "../models";
 import { highlightShapeSchema, VisualHighlightClient } from "../features/debug/VisualHighlight";
 import { generateHighlightId, recordVideoRecordingHighlightAdded } from "./videoRecordingManager";
@@ -25,82 +25,86 @@ import {
   elementContainerSchema,
   elementIdTextFieldsSchema,
   elementSelectionStrategySchema,
-  validateElementIdTextSelector
+  validateElementIdTextSelector,
 } from "./elementSelectorSchemas";
 import { boundsEqual } from "../utils/bounds";
 
-const highlightBaseSchema = z.object({
-  platform: platformSchema,
-  deviceId: z.string().optional(),
-  timeoutMs: z.number().int().positive().optional().describe("Highlight request timeout ms (default: 5000)"),
-  description: z.string().optional().describe("Optional description of the highlight"),
-  shape: highlightShapeSchema.optional().describe("Optional highlight shape definition"),
-  elementId: elementIdTextFieldsSchema.shape.elementId,
-  text: elementIdTextFieldsSchema.shape.text,
-  container: elementContainerSchema.optional().describe(
-    "Scope search to a container"
-  ),
-  containerOf: z.boolean().optional().describe(
-    "Highlight selected element's container"
-  ),
-  selectionStrategy: elementSelectionStrategySchema.optional().describe(
-    "Selection strategy when multiple match (default: first)"
-  )
-}).strict();
+const highlightBaseSchema = z
+  .object({
+    platform: platformSchema,
+    deviceId: z.string().optional(),
+    timeoutMs: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("Highlight request timeout ms (default: 5000)"),
+    description: z.string().optional().describe("Optional description of the highlight"),
+    shape: highlightShapeSchema.optional().describe("Optional highlight shape definition"),
+    elementId: elementIdTextFieldsSchema.shape.elementId,
+    text: elementIdTextFieldsSchema.shape.text,
+    container: elementContainerSchema.optional().describe("Scope search to a container"),
+    containerOf: z.boolean().optional().describe("Highlight selected element's container"),
+    selectionStrategy: elementSelectionStrategySchema
+      .optional()
+      .describe("Selection strategy when multiple match (default: first)"),
+  })
+  .strict();
 
-export const highlightSchema = addDeviceTargetingToSchema(highlightBaseSchema).superRefine((value, ctx) => {
-  const hasShape = Boolean(value.shape);
-  const hasElementId = value.elementId !== undefined;
-  const hasText = value.text !== undefined;
-  const hasSelector = hasElementId || hasText;
+export const highlightSchema = addDeviceTargetingToSchema(highlightBaseSchema).superRefine(
+  (value, ctx) => {
+    const hasShape = Boolean(value.shape);
+    const hasElementId = value.elementId !== undefined;
+    const hasText = value.text !== undefined;
+    const hasSelector = hasElementId || hasText;
 
-  if (hasShape === hasSelector) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "Provide either shape or selector (elementId/text), but not both"
-    });
-  }
-
-  if (!hasSelector) {
-    if (value.container) {
+    if (hasShape === hasSelector) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "container can only be used with selector"
+        message: "Provide either shape or selector (elementId/text), but not both",
       });
     }
-    if (value.containerOf !== undefined) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "containerOf can only be used with selector"
-      });
-    }
-    if (value.selectionStrategy) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "selectionStrategy can only be used with selector"
-      });
-    }
-  }
 
-  if (hasSelector) {
-    validateElementIdTextSelector(value, ctx);
-  }
-});
+    if (!hasSelector) {
+      if (value.container) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "container can only be used with selector",
+        });
+      }
+      if (value.containerOf !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "containerOf can only be used with selector",
+        });
+      }
+      if (value.selectionStrategy) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "selectionStrategy can only be used with selector",
+        });
+      }
+    }
+
+    if (hasSelector) {
+      validateElementIdTextSelector(value, ctx);
+    }
+  },
+);
 
 export type HighlightArgs = z.infer<typeof highlightSchema>;
 
-const toHighlightResponse = (result: HighlightOperationResult) => (
+const toHighlightResponse = (result: HighlightOperationResult) =>
   createJSONToolResponse({
     success: result.success,
-    error: result.error ?? undefined
-  })
-);
+    error: result.error ?? undefined,
+  });
 
 const toHighlightErrorResponse = (error: unknown) => {
   const message = error instanceof ActionableError ? error.message : String(error);
   return createJSONToolResponse({
     success: false,
-    error: message
+    error: message,
   });
 };
 
@@ -108,19 +112,21 @@ const DEFAULT_HIERARCHY_TIMEOUT_MS = 10000;
 
 const findContainerForElement = (
   viewHierarchy: ViewHierarchyResult,
-  target: Element
+  target: Element,
 ): Element | null => {
   const parser = new DefaultElementParser();
   const roots: ViewHierarchyNode[] = [
     ...parser.extractRootNodes(viewHierarchy),
-    ...parser.extractWindowRootNodes(viewHierarchy, "topmost-first")
+    ...parser.extractWindowRootNodes(viewHierarchy, "topmost-first"),
   ];
-  const targetResourceId = typeof target["resource-id"] === "string"
-    ? target["resource-id"]
-    : undefined;
-  const targetLabel = typeof target.text === "string"
-    ? target.text
-    : (typeof target["content-desc"] === "string" ? target["content-desc"] : undefined);
+  const targetResourceId =
+    typeof target["resource-id"] === "string" ? target["resource-id"] : undefined;
+  const targetLabel =
+    typeof target.text === "string"
+      ? target.text
+      : typeof target["content-desc"] === "string"
+        ? target["content-desc"]
+        : undefined;
   let container: Element | null = null;
 
   const resolveContainerFromStack = (stack: ViewHierarchyNode[]): Element | null => {
@@ -146,7 +152,8 @@ const findContainerForElement = (
       return false;
     }
     if (!targetResourceId && targetLabel) {
-      const nodeLabel = nodeProps.text || nodeProps["content-desc"] || nodeProps["ios-accessibility-label"];
+      const nodeLabel =
+        nodeProps.text || nodeProps["content-desc"] || nodeProps["ios-accessibility-label"];
       if (nodeLabel !== targetLabel) {
         return false;
       }
@@ -193,7 +200,7 @@ const findContainerForElement = (
 const resolveHighlightShapeFromSelector = async (
   device: BootedDevice,
   args: HighlightArgs,
-  dependencies: HighlightToolDependencies = {}
+  dependencies: HighlightToolDependencies = {},
 ): Promise<HighlightShape> => {
   if (!args.elementId && !args.text) {
     throw new ActionableError("highlight requires elementId or text when shape is not provided.");
@@ -207,7 +214,7 @@ const resolveHighlightShapeFromSelector = async (
     new NoOpPerformanceTracker(),
     false,
     undefined,
-    hierarchyTimeout
+    hierarchyTimeout,
   );
   if (!syncResult) {
     throw new ActionableError("Unable to retrieve view hierarchy for highlight.");
@@ -224,16 +231,16 @@ const resolveHighlightShapeFromSelector = async (
   const strategy = args.selectionStrategy ?? "first";
   const selection = args.text
     ? elementSelector.selectByText(viewHierarchy, args.text, {
-      container,
-      partialMatch: true,
-      caseSensitive: false,
-      strategy
-    })
+        container,
+        partialMatch: true,
+        caseSensitive: false,
+        strategy,
+      })
     : elementSelector.selectByResourceId(viewHierarchy, args.elementId as string, {
-      container,
-      partialMatch: false,
-      strategy
-    });
+        container,
+        partialMatch: false,
+        strategy,
+      });
 
   const selectedElement = selection.element;
   if (!selectedElement) {
@@ -258,7 +265,7 @@ const resolveHighlightShapeFromSelector = async (
     x: Math.round(bounds.left),
     y: Math.round(bounds.top),
     width,
-    height
+    height,
   };
 
   // The in-app iOS SDK draws into the target app's own view space, so it must
@@ -271,29 +278,29 @@ const resolveHighlightShapeFromSelector = async (
     if (sourceDimensions) {
       return {
         type: "circle",
-        bounds: { ...highlightBounds, ...sourceDimensions }
+        bounds: { ...highlightBounds, ...sourceDimensions },
       };
     }
   }
 
   return {
     type: "circle",
-    bounds: highlightBounds
+    bounds: highlightBounds,
   };
 };
 
 const resolveSourceDimensions = (
-  viewHierarchy: ViewHierarchyResult
+  viewHierarchy: ViewHierarchyResult,
 ): { sourceWidth: number; sourceHeight: number } | null => {
   if (
-    typeof viewHierarchy.screenWidth === "number"
-    && typeof viewHierarchy.screenHeight === "number"
-    && viewHierarchy.screenWidth > 0
-    && viewHierarchy.screenHeight > 0
+    typeof viewHierarchy.screenWidth === "number" &&
+    typeof viewHierarchy.screenHeight === "number" &&
+    viewHierarchy.screenWidth > 0 &&
+    viewHierarchy.screenHeight > 0
   ) {
     return {
       sourceWidth: Math.round(viewHierarchy.screenWidth),
-      sourceHeight: Math.round(viewHierarchy.screenHeight)
+      sourceHeight: Math.round(viewHierarchy.screenHeight),
     };
   }
 
@@ -321,7 +328,7 @@ interface HighlightViewHierarchyClient {
     perf: PerformanceTracker,
     disableAllFiltering: boolean,
     signal: AbortSignal | undefined,
-    timeoutMs: number
+    timeoutMs: number,
   ): Promise<{ hierarchy: unknown } | null>;
   convertToViewHierarchyResult(hierarchy: unknown): ViewHierarchyResult;
 }
@@ -334,7 +341,10 @@ interface HighlightToolDependencies {
 
 const createDefaultViewHierarchyClient = (device: BootedDevice): HighlightViewHierarchyClient => {
   if (device.platform === "android") {
-    return AndroidCtrlProxyClient.getInstance(device, defaultAdbClientFactory) as HighlightViewHierarchyClient;
+    return AndroidCtrlProxyClient.getInstance(
+      device,
+      defaultAdbClientFactory,
+    ) as HighlightViewHierarchyClient;
   }
   if (device.platform === "ios") {
     return IOSCtrlProxyClient.getInstance(device) as HighlightViewHierarchyClient;
@@ -352,14 +362,15 @@ export function registerHighlightTools(dependencies: HighlightToolDependencies =
       deviceId: args.deviceId ?? device.deviceId,
       platform: args.platform as Platform,
       sessionUuid: args.sessionUuid,
-      timeoutMs: args.timeoutMs
+      timeoutMs: args.timeoutMs,
     };
 
     try {
       const highlightId = dependencies.generateHighlightId
         ? dependencies.generateHighlightId()
         : generateHighlightId();
-      const resolvedShape = args.shape ?? await resolveHighlightShapeFromSelector(device, args, dependencies);
+      const resolvedShape =
+        args.shape ?? (await resolveHighlightShapeFromSelector(device, args, dependencies));
       const result = await highlightClient.addHighlight(highlightId, resolvedShape, options);
       await recordVideoRecordingHighlightAdded(device, {
         description: args.description,
@@ -371,5 +382,11 @@ export function registerHighlightTools(dependencies: HighlightToolDependencies =
     }
   };
 
-  ToolRegistry.registerDeviceAware("highlight", "Draw a visual highlight around a UI element.", highlightSchema, highlightHandler);
+  ToolRegistry.registerDeviceAware(
+    "highlight",
+    "Draw a visual highlight around a UI element.",
+    highlightSchema,
+    highlightHandler,
+    { defaultEnabled: false },
+  );
 }

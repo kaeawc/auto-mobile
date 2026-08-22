@@ -33,10 +33,10 @@ class RealStorageDataSourceTest {
     val result = dataSource.executeSQL("/data/data/com.example.app/databases/app.db", "SELECT 1")
 
     assertTrue(result is Result.Success)
-    assertEquals(listOf("setToolCapability", "sqlQuery"), client.toolCalls.map { it.name })
+    assertEquals(listOf("setToolEnabled", "sqlQuery"), client.toolCalls.map { it.name })
     assertEquals(
-      "app-data-interop",
-      client.toolCalls.first().arguments["capability"]?.toString()?.trim('"'),
+      "sqlQuery",
+      client.toolCalls.first().arguments["toolName"]?.toString()?.trim('"'),
     )
   }
 

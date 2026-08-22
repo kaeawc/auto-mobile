@@ -169,6 +169,20 @@ configurations.named("runtimeClasspath") {
   attributes.attribute(ffmpegProgramsStripped, true)
 }
 
+// Conveyor's tasks resolve `runtimeClasspath` to compute `app.inputs`, which triggers the
+// StripFfmpegProgramsTransform on every jar — including this project's module jars (:desktop-core,
+// :protocol, …). The non-ffmpeg passthrough returns the input jar as-is, so those jars must already
+// exist on disk or the transform fails with "output must exist". Depending on the configuration's
+// producer tasks builds the module jars before Conveyor resolves the classpath, so
+// `printConveyorConfig` / `conveyor make` work from a clean checkout without a manual pre-build
+// (see
+// #5227, PR-C3).
+tasks
+  .matching { it.name == "printConveyorConfig" || it.name == "writeConveyorConfig" }
+  .configureEach {
+    dependsOn(configurations.named("runtimeClasspath"))
+  }
+
 dependencies {
   // Shared module (UX, unix socket architecture, settings, data sources)
   implementation(project(":desktop-core"))
@@ -189,6 +203,24 @@ dependencies {
   testImplementation(libs.kotlin.test)
   testImplementation(libs.kotlinx.coroutines.test)
   testImplementation(libs.junit)
+
+  // Conveyor cross-build natives (#5227, PR-C3). `compose.desktop.currentOs` and the host-only
+  // ffmpeg classifier above resolve only the build machine's natives, but `conveyor make` packages
+  // every target from a single machine. The Conveyor Gradle plugin exposes a resolvable
+  // configuration per target machine; declaring each target's Compose/Skiko runtime + bytedeco
+  // ffmpeg/javacpp JNI natives here lets printConveyorConfig emit correct per-machine `app.inputs`.
+  // Windows is intentionally omitted for now (macOS + Linux only).
+  macAmd64(compose.desktop.macos_x64)
+  macAmd64(variantOf(libs.bytedeco.ffmpeg) { classifier("macosx-x86_64") })
+  macAmd64(variantOf(libs.bytedeco.javacpp) { classifier("macosx-x86_64") })
+
+  macAarch64(compose.desktop.macos_arm64)
+  macAarch64(variantOf(libs.bytedeco.ffmpeg) { classifier("macosx-arm64") })
+  macAarch64(variantOf(libs.bytedeco.javacpp) { classifier("macosx-arm64") })
+
+  linuxAmd64(compose.desktop.linux_x64)
+  linuxAmd64(variantOf(libs.bytedeco.ffmpeg) { classifier("linux-x86_64") })
+  linuxAmd64(variantOf(libs.bytedeco.javacpp) { classifier("linux-x86_64") })
 }
 
 compose.desktop {

@@ -193,4 +193,51 @@ describe("TapOnElement relative position", () => {
       }),
     ).toContain("focus");
   });
+
+  test("uses the requested coordinate instead of semantic activation for long press", async () => {
+    const adb = new FakeAdbClient();
+    const command = new TapOnElement(
+      { name: "test-device", platform: "android", deviceId: "emulator-5554" } as any,
+      adb as any,
+      {
+        accessibilityDetector: new FakeAccessibilityDetector(),
+        timer: new FakeTimer(),
+      },
+    );
+    const semanticActions: string[] = [];
+    (command as any).accessibilityService = {
+      supportsNodeActionSelectors: async () => true,
+      requestNodeAction: async (action: string) => {
+        semanticActions.push(action);
+        return { success: true };
+      },
+      requestAction: async (action: string) => {
+        semanticActions.push(action);
+        return { success: true };
+      },
+    };
+
+    await (command as any).executeAndroidTap(
+      "longPress",
+      491,
+      230,
+      750,
+      {
+        ...SPANNABLE_TEXT_ELEMENT,
+        actions: ["long_click"],
+      },
+      undefined,
+      {
+        action: "longPress",
+        elementId: "test:id/spannable_text",
+        relativePosition: { x: 0.98, y: 0.5 },
+      },
+      true,
+    );
+
+    expect(semanticActions).toEqual([]);
+    expect(adb.getAllCommands()).toEqual([
+      "shell input touchscreen swipe 491 230 491 230 750",
+    ]);
+  });
 });

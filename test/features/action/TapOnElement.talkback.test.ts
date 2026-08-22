@@ -159,7 +159,8 @@ describe("TapOnElement TalkBack mode detection", () => {
         230,
         500,
         element,
-        undefined
+        undefined,
+        true
       );
       expect(executeAndroidTapWithAccessibility).not.toHaveBeenCalled();
     });

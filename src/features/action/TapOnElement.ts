@@ -1451,7 +1451,11 @@ export class TapOnElement extends BaseVisualChange {
       // Standard mode and precise targets use coordinates. A relative target
       // must not be replaced by node-level ACTION_CLICK under TalkBack because
       // that cannot distinguish ClickableSpans within one TextView.
-      await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal);
+      if (options?.relativePosition) {
+        await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal, true);
+      } else {
+        await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal);
+      }
       return undefined;
     }
   }
@@ -1466,7 +1470,8 @@ export class TapOnElement extends BaseVisualChange {
     y: number,
     durationMs: number,
     element: Element,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    skipSemanticLongPress: boolean = false
   ): Promise<void> {
     if (action === "tap") {
       const result = await this.accessibilityService.requestTapCoordinates(x, y, 10);
@@ -1477,7 +1482,7 @@ export class TapOnElement extends BaseVisualChange {
         await this.adb.executeCommand(`shell input touchscreen tap ${x} ${y}`, undefined, undefined, undefined, signal);
       }
     } else if (action === "longPress") {
-      await this.executeAndroidLongPress(x, y, durationMs, element, signal);
+      await this.executeAndroidLongPress(x, y, durationMs, element, signal, skipSemanticLongPress);
     } else if (action === "doubleTap") {
       const first = await this.accessibilityService.requestTapCoordinates(x, y, 10);
       if (!first.success) {
@@ -1786,12 +1791,15 @@ export class TapOnElement extends BaseVisualChange {
     y: number,
     durationMs: number,
     element: Element,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    skipSemanticAction: boolean = false
   ): Promise<void> {
     throwIfAborted(signal);
-    const selector = stableNodeSelectorForElement(element);
-    if (selector && await this.trySemanticAndroidLongPress(element, selector)) {
-      return;
+    if (!skipSemanticAction) {
+      const selector = stableNodeSelectorForElement(element);
+      if (selector && await this.trySemanticAndroidLongPress(element, selector)) {
+        return;
+      }
     }
 
     try {

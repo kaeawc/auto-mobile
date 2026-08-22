@@ -158,16 +158,20 @@ describe("DaemonManager file lock", () => {
       const fakeTimer = new FakeTimer();
       fakeTimer.enableAutoAdvance();
 
-      writeFileSync(lockPath, String(process.pid));
+      const lockHolderPid = 424_242;
+      writeFileSync(lockPath, String(lockHolderPid));
       const logsDir = join(dirname(lockPath), "logs");
       mkdirSync(logsDir, { recursive: true });
       writeFileSync(
-        join(logsDir, `daemon-launch-${process.pid}.log`),
+        join(logsDir, `daemon-launch-${lockHolderPid}.log`),
         "Initializing CtrlProxy iOS for SIMULATOR-B\nrunner-health: connection refused\n",
       );
       const timeouts: number[] = [];
 
       class TestDaemonManager extends DaemonManager {
+        override acquireLock(): boolean {
+          return false;
+        }
         override async waitForReady(timeout: number): Promise<boolean> {
           timeouts.push(timeout);
           return false; // Daemon never becomes ready
@@ -178,7 +182,7 @@ describe("DaemonManager file lock", () => {
       const manager = new TestDaemonManager(undefined, undefined, fakeTimer, lockPath);
 
       await expect(manager.start()).rejects.toThrow(
-        /Another process is starting the daemon but it failed to become ready[\s\S]*daemon-launch-\d+\.log[\s\S]*SIMULATOR-B/
+        /Another process is starting the daemon but it failed to become ready[\s\S]*daemon-launch-424242\.log[\s\S]*SIMULATOR-B/
       );
       expect(timeouts).toEqual([30_000, 30_000]);
 

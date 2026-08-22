@@ -1,5 +1,8 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import dev.jasonpearson.automobile.protocol.ErrorResponse
+import dev.jasonpearson.automobile.protocol.HierarchyUpdateEvent
+import dev.jasonpearson.automobile.protocol.SwipeResult
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
@@ -113,6 +116,57 @@ class WebSocketServerTest {
   @Test
   fun `extractRequestId returns null for unparseable payload`() {
     assertNull(WebSocketServer.extractRequestId("""{not valid json"""))
+  }
+
+  // ---------------------------------------------------------------------------
+  // requestId correlation without re-parsing (issue #5462)
+  // ---------------------------------------------------------------------------
+
+  @Test
+  fun `correlationRequestId reads id off a typed correlated response`() {
+    // The typed broadcast path clears requestConnections by this id; reading it off the object
+    // (instead of encode->extractRequestId) must yield the same key the entry was recorded under.
+    val response =
+      SwipeResult(timestamp = 0L, requestId = "req-1", success = true, totalTimeMs = 5L)
+    assertEquals("req-1", WebSocketServer.correlationRequestId(response))
+  }
+
+  @Test
+  fun `correlationRequestId reads id off an error response`() {
+    val response = ErrorResponse(requestId = "err-1", error = "boom")
+    assertEquals("err-1", WebSocketServer.correlationRequestId(response))
+  }
+
+  @Test
+  fun `correlationRequestId is null for an uncorrelated hierarchy frame`() {
+    val event = HierarchyUpdateEvent(timestamp = 0L, data = "{}")
+    assertNull(WebSocketServer.correlationRequestId(event))
+  }
+
+  @Test
+  fun `mightCarryRequestId short-circuits frames without the requestId token`() {
+    // hierarchy_update is the hot, large frame and never carries a requestId; the gate must return
+    // false so extractRequestId skips parseToJsonElement entirely.
+    val hierarchyFrame =
+      """{"type":"hierarchy_update","timestamp":1,"data":"<hierarchy>...</hierarchy>"}"""
+    assertFalse(WebSocketServer.mightCarryRequestId(hierarchyFrame))
+    assertNull(WebSocketServer.extractRequestId(hierarchyFrame))
+  }
+
+  @Test
+  fun `mightCarryRequestId detects the requestId token`() {
+    assertTrue(
+      WebSocketServer.mightCarryRequestId("""{"type":"request_screenshot","requestId":"abc-123"}""")
+    )
+  }
+
+  @Test
+  fun `extractRequestId does not parse a substring-free payload`() {
+    // No `"requestId"` token but otherwise unparseable: proves the parser is never reached, since
+    // the gate returns false before parseToJsonElement would run.
+    val payload = "<<< not json and carries no token >>>"
+    assertFalse(WebSocketServer.mightCarryRequestId(payload))
+    assertNull(WebSocketServer.extractRequestId(payload))
   }
 
   @Test

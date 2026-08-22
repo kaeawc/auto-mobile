@@ -335,10 +335,12 @@ function parseEmulatorConsolePort(
     !consolePortText ||
     !Number.isInteger(consolePort) ||
     consolePort < MIN_EMULATOR_CONSOLE_PORT ||
+    consolePort > MAX_EMULATOR_CONSOLE_PORT ||
     consolePort % EMULATOR_CONSOLE_PORT_STEP !== 0
   ) {
     throw new ActionableError(
-      `Emulator ${option} must specify an even console port of at least ${MIN_EMULATOR_CONSOLE_PORT}`,
+      `Emulator ${option} must specify an even console port from ` +
+        `${MIN_EMULATOR_CONSOLE_PORT} through ${MAX_EMULATOR_CONSOLE_PORT}`,
     );
   }
   return consolePort;
@@ -384,10 +386,12 @@ function emulatorPortsForDeviceId(deviceId: string | undefined): EmulatorPortPai
   if (
     !Number.isInteger(consolePort) ||
     consolePort < MIN_EMULATOR_CONSOLE_PORT ||
+    consolePort > MAX_EMULATOR_CONSOLE_PORT ||
     consolePort % EMULATOR_CONSOLE_PORT_STEP !== 0
   ) {
     throw new ActionableError(
-      `Expected emulator device ID '${deviceId}' must use an even console port of at least ${MIN_EMULATOR_CONSOLE_PORT}`,
+      `Expected emulator device ID '${deviceId}' must use an even console port from ` +
+        `${MIN_EMULATOR_CONSOLE_PORT} through ${MAX_EMULATOR_CONSOLE_PORT}`,
     );
   }
   return { consolePort, adbPort: consolePort + 1 };
@@ -1518,6 +1522,20 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     }
   }
 
+  private releaseReservationIfLaunchCancelled(
+    avdName: string,
+    reservation: EmulatorDeviceIdReservation | undefined,
+    isCancelled?: () => boolean,
+  ): void {
+    if (!isCancelled?.()) {
+      return;
+    }
+    if (reservation) {
+      this.releasePendingEmulatorDeviceId(reservation);
+    }
+    this.throwIfLaunchCancelled(avdName, isCancelled);
+  }
+
   private async startEmulatorProcess(
     avdName: string,
     requestedExtraArgs?: readonly string[],
@@ -1598,7 +1616,9 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       args,
       preLaunchEmulatorDeviceSnapshot,
       expectedDeviceId,
+      signal,
     );
+    this.releaseReservationIfLaunchCancelled(avdName, reservedEmulator, isCancelled);
     logger.info(`Starting emulator with AVD: ${avdName}`);
     logger.debug(`Emulator command: ${this.emulatorPath} ${args.join(" ")}`);
 
@@ -2165,6 +2185,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
   private async allocateReservedEmulatorPorts(
     preexistingDeviceIds: ReadonlySet<string>,
+    signal?: AbortSignal,
   ): Promise<EmulatorDeviceIdReservation> {
     const unavailablePorts = this.unavailableEmulatorPorts(preexistingDeviceIds);
     for (
@@ -2176,7 +2197,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       if (
         !unavailablePorts.has(ports.consolePort) &&
         !unavailablePorts.has(ports.adbPort) &&
-        (await this.areEmulatorPortsAvailableOnHost(ports))
+        (await this.areEmulatorPortsAvailableOnHost(ports, signal))
       ) {
         const currentUnavailablePorts = this.unavailableEmulatorPorts(preexistingDeviceIds);
         if (
@@ -2219,12 +2240,35 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     return unavailablePorts;
   }
 
-  private async areEmulatorPortsAvailableOnHost(ports: EmulatorPortPair): Promise<boolean> {
-    const availability = await Promise.all([
+  private async areEmulatorPortsAvailableOnHost(
+    ports: EmulatorPortPair,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    const availability = Promise.all([
       this.hostPortAvailabilityChecker.isAvailable("127.0.0.1", ports.consolePort),
       this.hostPortAvailabilityChecker.isAvailable("127.0.0.1", ports.adbPort),
     ]);
-    return availability.every(Boolean);
+    if (!signal) {
+      return (await availability).every(Boolean);
+    }
+    if (signal.aborted) {
+      throw new ActionableError("Android emulator launch was cancelled while checking host ports");
+    }
+    let rejectCancellation!: (error: ActionableError) => void;
+    const cancellation = new Promise<never>((_resolve, reject) => {
+      rejectCancellation = reject;
+    });
+    const onAbort = () => {
+      rejectCancellation(
+        new ActionableError("Android emulator launch was cancelled while checking host ports"),
+      );
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    try {
+      return (await Promise.race([availability, cancellation])).every(Boolean);
+    } finally {
+      signal.removeEventListener("abort", onAbort);
+    }
   }
 
   private assertEmulatorPortsNotReserved(
@@ -2243,9 +2287,10 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   private async assertEmulatorPortsAvailable(
     ports: EmulatorPortPair,
     preexistingDeviceIds: ReadonlySet<string> | undefined,
+    signal?: AbortSignal,
   ): Promise<void> {
     this.assertEmulatorPortsNotReserved(ports, preexistingDeviceIds);
-    if (!(await this.areEmulatorPortsAvailableOnHost(ports))) {
+    if (!(await this.areEmulatorPortsAvailableOnHost(ports, signal))) {
       throw new ActionableError(
         `Cannot safely launch an Android emulator: emulator port pair ` +
           `${ports.consolePort}/${ports.adbPort} is already in use`,
@@ -2271,6 +2316,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     preLaunchSnapshot: EmulatorDeviceIdSnapshot | undefined,
     args: readonly string[],
     expectedDeviceId?: string,
+    signal?: AbortSignal,
   ): Promise<EmulatorDeviceIdReservation | undefined> {
     const expectedEmulatorPorts = emulatorPortsForDeviceId(expectedDeviceId);
     if (expectedDeviceId && !expectedEmulatorPorts) {
@@ -2289,7 +2335,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     }
     const ports = configuredPorts ?? expectedEmulatorPorts;
     if (ports) {
-      await this.assertEmulatorPortsAvailable(ports, preLaunchSnapshot?.deviceIds);
+      await this.assertEmulatorPortsAvailable(ports, preLaunchSnapshot?.deviceIds, signal);
       return this.reservePendingEmulatorDeviceId(ports, configuredPorts === undefined);
     }
     if (!preLaunchSnapshot?.isComplete) {
@@ -2297,6 +2343,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     }
     return this.allocateReservedEmulatorPorts(
       preLaunchSnapshot.deviceIds,
+      signal,
     );
   }
 
@@ -2304,11 +2351,13 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     args: string[],
     preLaunchSnapshot: EmulatorDeviceIdSnapshot | undefined,
     expectedDeviceId?: string,
+    signal?: AbortSignal,
   ): Promise<EmulatorDeviceIdReservation | undefined> {
     const reservation = await this.reserveEmulatorDeviceId(
       preLaunchSnapshot,
       args,
       expectedDeviceId,
+      signal,
     );
     if (reservation?.appendPort) {
       args.push("-port", String(reservation.ports.consolePort));

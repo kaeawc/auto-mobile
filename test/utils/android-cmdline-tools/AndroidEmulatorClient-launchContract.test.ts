@@ -119,6 +119,19 @@ describe("AndroidEmulatorClient launch contract", () => {
     }
   });
 
+  test("rejects caller-supplied console ports outside the supported range", async () => {
+    let spawns = 0;
+    const client = createClient(() => {
+      spawns += 1;
+      return createChild();
+    });
+
+    await expect(
+      client.launchEmulator({ avdName: "Pixel 9", extraArgs: ["-port", "5684"] }),
+    ).rejects.toThrow("5554 through 5682");
+    expect(spawns).toBe(0);
+  });
+
   test("reserves the ADB endpoint supplied by -ports for concurrent launches", async () => {
     const adb = new FakeAdbExecutor();
     const firstChild = createChild();
@@ -437,6 +450,40 @@ describe("AndroidEmulatorClient launch contract", () => {
 
     await expect(launch).rejects.toThrow("cancelled");
     expect(spawns).toBe(0);
+  });
+
+  test("cancels host-port reservation before spawning", async () => {
+    const controller = new AbortController();
+    let releaseHostProbe: () => void = () => {};
+    const hostProbe = new Promise<void>(resolve => {
+      releaseHostProbe = resolve;
+    });
+    let hostProbeStarted = false;
+    let spawns = 0;
+    const client = createClient(
+      () => {
+        spawns += 1;
+        return createChild();
+      },
+      new FakeAdbExecutor(),
+      {
+        isAvailable: async () => {
+          hostProbeStarted = true;
+          await hostProbe;
+          return true;
+        },
+      },
+    );
+
+    const launch = client.launchEmulator({ avdName: "Pixel 9", signal: controller.signal });
+    while (!hostProbeStarted) {
+      await Promise.resolve();
+    }
+    controller.abort();
+
+    await expect(launch).rejects.toThrow("cancelled");
+    expect(spawns).toBe(0);
+    releaseHostProbe();
   });
 
   test("cancels the reservation snapshot before starting the raw-state scan", async () => {

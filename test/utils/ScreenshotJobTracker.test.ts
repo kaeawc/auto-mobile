@@ -176,6 +176,68 @@ describe("ScreenshotJobTracker", () => {
     expect(job2.jobId).not.toBe(job1.jobId);
   });
 
+  test("queueAfterPending starts a distinct capture after the current one settles", async () => {
+    let resolveFirst: (result: { success: boolean; path?: string }) => void = () => {};
+    const first = ScreenshotJobTracker.startJob(
+      "device-queue",
+      () => new Promise(resolve => {
+        resolveFirst = resolve;
+      }),
+    );
+    let secondRunnerCalls = 0;
+    const second = ScreenshotJobTracker.startJob(
+      "device-queue",
+      async () => {
+        secondRunnerCalls++;
+        return { success: true, path: "second" };
+      },
+      { queueAfterPending: true },
+    );
+
+    await Promise.resolve();
+    expect(secondRunnerCalls).toBe(0);
+    expect(ScreenshotJobTracker.isPending("device-queue")).toBe(true);
+
+    resolveFirst({ success: true, path: "first" });
+    const [firstResult, secondResult] = await Promise.all([first.promise, second.promise]);
+
+    expect(firstResult.path).toBe("first");
+    expect(secondRunnerCalls).toBe(1);
+    expect(secondResult.path).toBe("second");
+  });
+
+  test("queueAfterPending remains cancellable before its runner starts", async () => {
+    let resolveFirst: (result: { success: boolean; path?: string }) => void = () => {};
+    const first = ScreenshotJobTracker.startJob(
+      "device-cancel-queue",
+      signal => new Promise(resolve => {
+        resolveFirst = resolve;
+        signal.addEventListener("abort", () => {
+          resolve({ success: false, error: OPERATION_CANCELLED_MESSAGE });
+        }, { once: true });
+      }),
+    );
+    let queuedRunnerCalls = 0;
+    const queued = ScreenshotJobTracker.startJob(
+      "device-cancel-queue",
+      async () => {
+        queuedRunnerCalls++;
+        return { success: true, path: "queued" };
+      },
+      { queueAfterPending: true },
+    );
+
+    await Promise.resolve();
+    ScreenshotJobTracker.cancelJob("device-cancel-queue");
+    resolveFirst({ success: false, error: OPERATION_CANCELLED_MESSAGE });
+    const [firstResult, queuedResult] = await Promise.all([first.promise, queued.promise]);
+
+    expect(firstResult.success).toBe(false);
+    expect(queuedResult.success).toBe(false);
+    expect(queuedResult.error).toContain(OPERATION_CANCELLED_MESSAGE);
+    expect(queuedRunnerCalls).toBe(0);
+  });
+
   test("reports isLatest and aborted correctly to each job's completion handler", async () => {
     const completions: Array<{ jobId: string; isLatest: boolean; aborted: boolean }> = [];
     const onComplete = (c: { jobId: string; isLatest: boolean; aborted: boolean }) => {

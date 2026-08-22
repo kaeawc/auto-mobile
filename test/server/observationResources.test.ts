@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import type { BootedDevice, ObserveResult } from "../../src/models";
 import type { ScreenshotResult } from "../../src/models/ScreenshotResult";
 import type { TrackedScreenshotService } from "../../src/features/observe/screenshot/ObserveScreenshotRecorder";
+import type { ScreenshotJobOptions } from "../../src/utils/ScreenshotJobTracker";
 import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
 import { ScreenshotJobTracker } from "../../src/utils/ScreenshotJobTracker";
 import {
@@ -36,11 +37,10 @@ function readTemplate(uri: string) {
 
 function createTrackedScreenshot(
   result: ScreenshotResult,
-  onExecute: () => void = () => {},
+  deviceId: string = sessionDevice.deviceId,
 ): TrackedScreenshotService {
   return {
     async execute(): Promise<ScreenshotResult> {
-      onExecute();
       return result;
     },
     generateScreenshotPath(): string {
@@ -49,13 +49,12 @@ function createTrackedScreenshot(
     async getActivityHash(): Promise<string> {
       return "hash";
     },
-    startTrackedCapture() {
-      const controller = new AbortController();
-      return {
-        jobId: "fresh-capture",
-        promise: Promise.resolve(result),
-        signal: controller.signal,
-      };
+    startTrackedCapture(_options, trackerOptions) {
+      return ScreenshotJobTracker.startJob(
+        deviceId,
+        async () => result,
+        trackerOptions,
+      );
     },
   };
 }
@@ -138,14 +137,23 @@ describe("session screenshot resources", () => {
 
     const image = Buffer.from("fresh screenshot");
     let freshCaptureCount = 0;
+    let freshTrackerOptions: ScreenshotJobOptions | undefined;
     setSessionScreenshotResourceDependencies({
       resolveActiveSession: () => activeSession(),
-      createScreenshotService: () => createTrackedScreenshot(
-        { success: true, path: "/tmp/fresh.png" },
-        () => {
-          freshCaptureCount++;
+      createScreenshotService: () => ({
+        ...createTrackedScreenshot({ success: true, path: "/tmp/fresh.png" }),
+        startTrackedCapture(options, trackerOptions) {
+          freshTrackerOptions = trackerOptions;
+          return ScreenshotJobTracker.startJob(
+            sessionDevice.deviceId,
+            async () => {
+              freshCaptureCount++;
+              return { success: true, path: "/tmp/fresh.png" };
+            },
+            trackerOptions,
+          );
         },
-      ),
+      }),
     });
     setScreenshotFileSystem({
       stat: async () => ({ isFile: () => true }),
@@ -162,6 +170,7 @@ describe("session screenshot resources", () => {
     const content = await contentPromise;
 
     expect(freshCaptureCount).toBe(1);
+    expect(freshTrackerOptions).toEqual({ queueAfterPending: true });
     expect(content.blob).toBe(image.toString("base64"));
   });
 
@@ -170,7 +179,7 @@ describe("session screenshot resources", () => {
     setSessionScreenshotResourceDependencies({
       resolveActiveSession: () => {
         reads += 1;
-        return reads <= 2 ? activeSession() : undefined;
+        return reads === 1 ? activeSession() : undefined;
       },
       createScreenshotService: () => createTrackedScreenshot({
         success: true,

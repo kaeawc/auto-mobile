@@ -149,6 +149,27 @@ show whether the catalog can safely be used for provisioning decisions.
 
 **URI Template**: `automobile:devices/images/{platform}`
 
+### Session Observations
+
+Session-scoped observation resources take the `sessionUuid` returned by
+`startDevice`. They resolve that active session to its assigned device and reject
+released or rebound sessions rather than accepting a second device selector.
+
+**URI Template**: `automobile:observation/session/{sessionUuid}/latest`
+
+Returns the cached observation for the active session. Call `observe` first to
+populate it.
+
+**URI Template**: `automobile:observation/session/{sessionUuid}/latest/screenshot`
+
+Returns the cached screenshot from that observation when available.
+
+**URI Template**: `automobile:device-session/{sessionUuid}/screenshot`
+
+Captures and returns a fresh PNG for the active session. A fresh request queues
+behind an in-flight screenshot for the same device, then takes its own tracked
+capture so session cleanup can cancel it safely.
+
 ### Installed Apps
 
 **URI**: `automobile:apps`

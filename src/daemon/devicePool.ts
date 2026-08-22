@@ -1876,8 +1876,16 @@ export class DevicePool {
       }
       return recovered;
     } catch (error) {
-      await this.releasePreservedAdbResetSessionIfDetached(device, session.sessionId, incidentId);
-      throw error;
+      try {
+        await this.releasePreservedAdbResetSessionIfDetached(device, session.sessionId, incidentId);
+      } catch (releaseError) {
+        logger.warn(
+          `[DevicePool] Failed to release detached session ${session.sessionId}: ${releaseError}`,
+          releaseError,
+        );
+      }
+      logger.warn(`[DevicePool] ADB-reset recovery failed for ${device.id}: ${error}`, error);
+      return false;
     }
   }
 

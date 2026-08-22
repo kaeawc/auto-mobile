@@ -125,7 +125,7 @@ describe("ADB server reset session recovery", () => {
     }
   });
 
-  test("releases the preserved session when recovery exhausts after detaching the old serial", async () => {
+  test("releases the preserved session when reboot rejects after detaching the old serial", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const manager = new FakeDeviceManager();
@@ -135,9 +135,9 @@ describe("ADB server reset session recovery", () => {
         try {
           await attempt();
         } catch {
-          // Exercise the exhausted-retry result after the pool removed the old serial.
+          // Detach the old serial before the reboot implementation itself rejects.
         }
-        return false;
+        throw new Error("reboot runner unavailable");
       },
     };
     const pool = new DevicePool(

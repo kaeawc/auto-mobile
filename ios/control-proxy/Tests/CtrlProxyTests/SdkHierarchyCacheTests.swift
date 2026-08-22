@@ -84,6 +84,40 @@ final class SdkHierarchyCacheTests: XCTestCase {
         XCTAssertNil(cache.latest)
     }
 
+    private func makeHierarchyEventBatch(timestamp: Int64) throws -> Data {
+        let hierarchy = makeSdkHierarchy(timestamp: timestamp)
+        let payload = try JSONEncoder().encode(["hierarchy": hierarchy])
+        return Data(
+            """
+            {"events":[{"eventType":"view_hierarchy","payload":"\(payload.base64EncodedString())"}]}
+            """.utf8
+        )
+    }
+
+    func testBatchContainingViewHierarchyStillDecodes() throws {
+        let cache = SdkHierarchyCache()
+        let batch = try makeHierarchyEventBatch(timestamp: 4242)
+
+        SdkHierarchyExtractor.extractIfPresent(from: batch, into: cache)
+
+        XCTAssertEqual(cache.latest?.timestamp, 4242)
+    }
+
+    func testBatchWithoutViewHierarchyIsSkipped() {
+        let cache = SdkHierarchyCache()
+        // Well-formed batch whose only event is a non-hierarchy type: the raw-byte
+        // scan must not find "view_hierarchy" and must skip the decode entirely.
+        let batch = Data(
+            """
+            {"events":[{"eventType":"lifecycle","payload":"\(Data("{}".utf8).base64EncodedString())"}]}
+            """.utf8
+        )
+
+        SdkHierarchyExtractor.extractIfPresent(from: batch, into: cache)
+
+        XCTAssertNil(cache.latest)
+    }
+
     func testHierarchyEventBroadcastsFreshChromeForUnchangedXcuitestHierarchy() throws {
         let cache = SdkHierarchyCache()
         let xcuitest = ViewHierarchy(

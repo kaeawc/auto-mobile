@@ -1,0 +1,149 @@
+name: "Build Desktop App (Conveyor)"
+
+# Cross-builds the Compose Desktop app (`android/desktop-app`) for macOS + Linux with Hydraulic
+# Conveyor and produces an auto-update site, uploaded as CI artifacts (no live publish). Windows is
+# intentionally out of scope for now. This coexists with build-desktop-app-installers.yml (jpackage);
+# it does not replace it yet (that is PR-C4, #5227).
+#
+# Manual/dispatch only for now — it does not run on release tags, so it never collides with the
+# jpackage .dmg/.deb that release.yml already uploads to the GitHub Release. When jpackage is retired
+# (C4), this becomes the release publisher (via app.vcs-url = github.com/kaeawc/auto-mobile).
+#
+# Conveyor cross-builds every target from one Linux machine; the desktop-app build declares each
+# target's Skiko + ffmpeg natives (macAmd64/macAarch64/linuxAmd64 configurations) so the resolved
+# per-machine `app.inputs` are correct. See android/conveyor.conf and android/ci.conveyor.conf.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Package version (plain semver, macOS major >= 1, e.g. 1.0.0)"
+        required: true
+        type: string
+      signed:
+        description: "Sign + notarize macOS with the Developer ID (needs the Apple secrets)"
+        required: false
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      version:
+        description: "Package version (plain semver, macOS major >= 1)"
+        required: true
+        type: string
+      signed:
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      CONVEYOR_SIGNING_KEY:
+        description: "Conveyor root signing key (conveyor keys generate). Free for OSS."
+        required: true
+      MACOS_DEVELOPER_ID_CERT_BASE64:
+        required: false
+      MACOS_DEVELOPER_ID_CERT_PASSWORD:
+        required: false
+      APPLE_NOTARY_KEY_ID:
+        required: false
+      APPLE_NOTARY_ISSUER_ID:
+        required: false
+      APPLE_NOTARY_PRIVATE_KEY_BASE64:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  conveyor:
+    name: "Conveyor make site (macOS + Linux)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          # Conveyor reads the app icon (conveyor.conf `icons`), which is LFS-tracked, so unlike the
+          # jpackage workflow the pointer must be smudged to the real PNG.
+          lfs: true
+          persist-credentials: false
+
+      - name: "Validate version"
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid version: $VERSION (expected MAJOR.MINOR.PATCH semver)" >&2
+            exit 1
+          fi
+          major="${VERSION%%.*}"
+          if [[ "$major" -lt 1 ]]; then
+            echo "Conveyor requires a macOS major version >= 1; got $VERSION" >&2
+            exit 1
+          fi
+
+      - name: "Set up JDK 21"
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: "Set up AutoMobile npm package"
+        uses: ./.github/actions/setup-auto-mobile-npm-package
+
+      # Build the module jars up front. The Conveyor CLI resolves runtimeClasspath (via
+      # printConveyorConfig) to compute app.inputs; the StripFfmpegProgramsTransform passthrough
+      # requires those jars to exist. printConveyorConfig now depends on runtimeClasspath so this is
+      # belt-and-suspenders, but it also warms the build cache before Conveyor runs.
+      - name: "Build desktop jars"
+        working-directory: android
+        run: ./gradlew :desktop-app:jar
+
+      # Decode the Apple credentials to files only for a signed build. Left unset for the default
+      # (self-signed) artifacts-only run, so no Apple secrets are needed to dispatch.
+      - name: "Prepare macOS signing credentials"
+        if: ${{ inputs.signed }}
+        env:
+          MACOS_DEVELOPER_ID_CERT_BASE64: ${{ secrets.MACOS_DEVELOPER_ID_CERT_BASE64 }}
+          APPLE_NOTARY_PRIVATE_KEY_BASE64: ${{ secrets.APPLE_NOTARY_PRIVATE_KEY_BASE64 }}
+          MACOS_DEVELOPER_ID_CERT_PASSWORD: ${{ secrets.MACOS_DEVELOPER_ID_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/conveyor-signing"
+          cert="${RUNNER_TEMP}/conveyor-signing/developer-id.p12"
+          p8="${RUNNER_TEMP}/conveyor-signing/notary.p8"
+          printf '%s' "$MACOS_DEVELOPER_ID_CERT_BASE64" | base64 --decode > "$cert"
+          printf '%s' "$APPLE_NOTARY_PRIVATE_KEY_BASE64" | base64 --decode > "$p8"
+          echo "CONVEYOR_MAC_CERTIFICATE_P12=$cert" >> "$GITHUB_ENV"
+          echo "CONVEYOR_NOTARY_PRIVATE_KEY_P8=$p8" >> "$GITHUB_ENV"
+          # Forward the .p12 password under the name ci.conveyor.conf reads
+          # (certificate-password = ${env.CONVEYOR_MAC_CERTIFICATE_PASSWORD}).
+          echo "::add-mask::${MACOS_DEVELOPER_ID_CERT_PASSWORD}"
+          echo "CONVEYOR_MAC_CERTIFICATE_PASSWORD=${MACOS_DEVELOPER_ID_CERT_PASSWORD}" >> "$GITHUB_ENV"
+
+      - name: "Run Conveyor (make site)"
+        uses: hydraulic-software/conveyor/actions/build@v22.0
+        with:
+          command: make site
+          # The action runs from the repo root and has no working-dir input, so point Conveyor at the
+          # config with -f; Conveyor treats the config file's directory (android/) as the project
+          # root, so its `./gradlew` include and relative asset paths resolve there. A signed run uses
+          # ci.conveyor.conf (Developer ID + notarization over the base); the default self-signs.
+          extra_flags: ${{ inputs.signed && '-f android/ci.conveyor.conf' || '-f android/conveyor.conf' }}
+          signing_key: ${{ secrets.CONVEYOR_SIGNING_KEY }}
+          agree_to_license: 1
+        env:
+          CONVEYOR_APP_VERSION: ${{ inputs.version }}
+          # The cert password reaches Conveyor as CONVEYOR_MAC_CERTIFICATE_PASSWORD via GITHUB_ENV
+          # from the prepare step above (matching ci.conveyor.conf). The notary issuer/key ids are
+          # read directly under their own names by ci.conveyor.conf.
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+
+      - name: "Upload Conveyor site + packages"
+        uses: actions/upload-artifact@v4
+        with:
+          name: automobile-desktop-conveyor
+          path: android/output
+          if-no-files-found: error
+          retention-days: 7

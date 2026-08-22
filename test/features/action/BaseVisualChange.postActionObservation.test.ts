@@ -93,6 +93,22 @@ describe("BaseVisualChange post-action observation", () => {
     expect(fakeTimer.getSleepHistory()).toEqual([]);
   });
 
+  test("defaults the post-action re-observe to skipScreenshot when no live-view subscriber (#5472)", async () => {
+    const instance = createVisualChange("ios");
+    fakeObserveScreen.setObserveResult(makeObserve());
+
+    // No DeviceDataStream server/subscriber is wired in this unit context, so the
+    // internal re-observe must skip the device PNG capture.
+    await instance.observedInteraction(async () => ({ success: true }), {
+      changeExpected: false,
+      skipPreviousObserve: true
+    });
+
+    const options = fakeObserveScreen.getExecuteOptions();
+    expect(options).toHaveLength(1);
+    expect(options[0].skipScreenshot).toBe(true);
+  });
+
   test("takes the cached fast path with a single execute when the cache is valid", async () => {
     const instance = createVisualChange("ios");
     // A valid cached hierarchy (no error) means the pre-action observe reuses the

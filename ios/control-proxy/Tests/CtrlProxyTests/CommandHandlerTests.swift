@@ -354,6 +354,43 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertEqual(cache.clearCallCount, 1)
     }
 
+    func testContextCheckedGesturePrefersCachedSdkHierarchyOverFreshFetch() {
+        // A fresh hierarchy is available and the server bundle matches, but the gesture hot path
+        // must never pay for the slow `/hierarchy/fresh` walk: it enriches from the cache only.
+        let fetcher = FakeSdkHierarchyFetcher()
+        fetcher.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.test.app"))
+        fetcher.setFreshHierarchy(makeSdkHierarchy(bundleId: "com.test.app"))
+
+        let cache = FakeSdkHierarchyCache()
+        cache.update(makeSdkHierarchy(bundleId: "com.test.app"))
+
+        let frameContext = FrameContext()
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            sdkHierarchyClient: fetcher,
+            sdkHierarchyCache: cache,
+            frameContext: frameContext
+        )
+
+        let hierarchy = makeHierarchy(packageName: "com.test.app")
+        fakeElementLocator.setHierarchy(hierarchy)
+        // Derive the expected context the same way the dispatch boundary will: cached enrichment.
+        let expected = frameContext.context(for: commandHandler.enrichWithCachedSdkHierarchy(hierarchy))
+
+        let response = handleRequest(
+            WebSocketRequest.tapCoordinates(
+                RequestTapCoordinates(requestId: "tap", x: 10, y: 20, frameContext: expected)
+            ),
+            as: WebSocketResponse.self
+        )
+
+        XCTAssertEqual(response?.success, true)
+        XCTAssertEqual(fakeGesturePerformer.getTapHistory().count, 1)
+        XCTAssertEqual(fetcher.fetchFreshCallCount, 0)
+    }
+
     func testRequestHierarchyFetchesFreshSdkHierarchyOnlyWhenServerBundleMatchesForeground() {
         let fetcher = FakeSdkHierarchyFetcher()
         fetcher.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.test.app"))

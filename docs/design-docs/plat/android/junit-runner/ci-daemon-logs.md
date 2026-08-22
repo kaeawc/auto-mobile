@@ -1,400 +1,97 @@
 # Reading the AutoMobile daemon log in CI
 
-Use this when debugging **JUnit / YAML plan** runs that talk to the AutoMobile **daemon** (local checkout via `AUTOMOBILE_DAEMON_LOCAL_PROJECT_PATH` or `bunx @kaeawc/auto-mobile`). The daemon log is the highest-signal place to see **`[LaunchApp]`**, **`CTRL_PROXY`**, **`ConnectionRefused`**, and other server-side errors.
+Use this when debugging **JUnit / YAML plan** runs that talk to the AutoMobile
+**daemon**. The daemon log is the highest-signal place to see `[LaunchApp]`,
+`CTRL_PROXY`, `ConnectionRefused`, and other server-side errors.
 
----
+## Choose the artifact directory before starting AutoMobile
 
-## Where the log file is
+Set `AUTOMOBILE_LOG_DIR` to an absolute directory that the current CI job can
+upload directly. Do not rediscover the default after a failure: path and home
+directory semantics differ across Linux, macOS, Windows, containers, and
+service accounts.
 
-When the daemon is started through the normal **`--daemon start` / `restart`**
-flow, AutoMobile writes logs to **`~/.auto-mobile/logs`** on the CI runner. Set
-`AUTOMOBILE_LOG_DIR` to use another directory.
+AutoMobile creates the configured directory when it initializes logging. It
+writes these files there:
 
-The structured daemon log is:
+- `daemon.log` — structured daemon output
+- `daemon-launch-<manager-pid>.log` — detached daemon stdout and stderr
 
-`~/.auto-mobile/logs/daemon.log`
+Without an override, logs remain under the resolved AutoMobile data directory,
+normally `~/.auto-mobile/logs`.
 
-The daemon manager also captures the daemon process's stdout and stderr per
-launch:
-
-`~/.auto-mobile/logs/daemon-launch-<manager-pid>.log`
-
-This is separate from the Unix socket:
-
-- **Socket:** `/tmp/auto-mobile-daemon-<uid>.sock` (UID = user running the tests, e.g. `id -u` on Linux)
-- **Log directory:** `AUTOMOBILE_LOG_DIR` (or legacy `AUTO_MOBILE_LOG_DIR`) when
-  set; otherwise `~/.auto-mobile/logs`.
-
----
-
-## How to see the exact path
-
-On a successful daemon start, the parent process often prints to **stderr** a line like:
-
-```text
-Logs: /home/ci/.auto-mobile/logs/daemon-launch-12345.log
-```
-
-Search your **CI job log** for **`Logs:`** if Gradle or the wrapper surfaces stderr.
-
-If that line is missing, inspect `daemon.log` and `daemon-launch-*.log` in the
-log directory (see below).
-
----
-
-## Resolve the log directory in shell
-
-Use this Bash helper before the snippets below. It follows the runtime’s
-override precedence, whitespace handling, relative-path anchoring, and
-owner-controlled default.
-
-```bash
-normalize_automobile_log_dir_path() {
-  local root="/" path component last_index protected_component_count=0
-  if [[ "${2:-}" == "preserve-unc" && "$1" == //* ]]; then
-    root="//"
-    path="${1#//}"
-    protected_component_count=2
-  else
-    path="${1#/}"
-  fi
-  local -a components=()
-  while [[ -n "$path" ]]; do
-    component="${path%%/*}"
-    if [[ "$path" == */* ]]; then path="${path#*/}"; else path=""; fi
-    case "$component" in
-      ""|.) ;;
-      ..)
-        if (( ${#components[@]} > protected_component_count )); then
-          last_index=$((${#components[@]} - 1))
-          unset "components[$last_index]"
-        fi
-        ;;
-      *) components+=("$component") ;;
-    esac
-  done
-  if (( ${#components[@]} == 0 )); then printf '%s\n' "$root"; return; fi
-  local IFS="/"
-  printf '%s%s\n' "$root" "${components[*]}"
-}
-
-automobile_windows_path_to_bash_path() {
-  local windows_path="$1"
-  if command -v cygpath >/dev/null 2>&1; then
-    cygpath -u "$windows_path"
-    return
-  fi
-  printf '%s\n' "$windows_path"
-}
-
-automobile_is_windows_path() {
-  [[ "$1" =~ ^[[:alpha:]]: || "$1" == \\\\* || "$1" == //* ]]
-}
-
-automobile_unix_home_dir() {
-  local user_id
-  user_id="$(id -u 2>/dev/null || true)"
-  [[ -n "$user_id" ]] || return
-  if command -v getent >/dev/null 2>&1; then
-    getent passwd "$user_id" | awk -F: 'NR == 1 { print $6 }'
-    return
-  fi
-  if command -v dscl >/dev/null 2>&1; then
-    local user_name
-    user_name="$(id -un 2>/dev/null || true)"
-    [[ -n "$user_name" ]] || return
-    dscl . -read "/Users/$user_name" NFSHomeDirectory 2>/dev/null |
-      awk 'NR == 1 { sub(/^NFSHomeDirectory:[[:space:]]*/, ""); print }'
-  fi
-}
-
-automobile_data_dir_override() {
-  local data_dir
-  if [[ -n "${AUTOMOBILE_DATA_DIR+x}" ]]; then
-    data_dir="$AUTOMOBILE_DATA_DIR"
-  else
-    data_dir="${AUTO_MOBILE_DATA_DIR-}"
-  fi
-  data_dir="${data_dir#"${data_dir%%[![:space:]]*}"}"
-  data_dir="${data_dir%"${data_dir##*[![:space:]]}"}"
-  printf '%s\n' "$data_dir"
-}
-
-automobile_daemon_launch_dir() {
-  local launch_dir="${AUTOMOBILE_DAEMON_LAUNCH_CWD:-$PWD}"
-  launch_dir="${launch_dir#"${launch_dir%%[![:space:]]*}"}"
-  launch_dir="${launch_dir%"${launch_dir##*[![:space:]]}"}"
-  if [[ "${OS:-}" == "Windows_NT" ]] && automobile_is_windows_path "$launch_dir"; then
-    launch_dir="$(automobile_windows_path_to_bash_path "$launch_dir")"
-  fi
-  [[ "$launch_dir" = /* ]] || launch_dir="$PWD"
-  printf '%s\n' "$launch_dir"
-}
-
-automobile_windows_temp_dir() {
-  local temp_dir="${TEMP:-${TMP:-${TMPDIR:-/tmp}}}"
-  if automobile_is_windows_path "$temp_dir"; then
-    automobile_windows_path_to_bash_path "$temp_dir"
-    return
-  fi
-  temp_dir="${temp_dir//\\//}"
-  if [[ "$temp_dir" != /* ]]; then
-    temp_dir="$(automobile_daemon_launch_dir)/$temp_dir"
-  fi
-  if [[ "$temp_dir" == //* ]]; then
-    normalize_automobile_log_dir_path "$temp_dir" "preserve-unc"
-  else
-    normalize_automobile_log_dir_path "$temp_dir"
-  fi
-}
-
-automobile_windows_user_name() {
-  printf '%s\n' "${USERNAME:-${USER:-$(id -un 2>/dev/null || printf 'default')}}"
-}
-
-automobile_windows_rooted_path_from_launch_dir() {
-  local rooted_path="$1"
-  local launch_dir="$2"
-  if [[ "$launch_dir" =~ ^/[[:alpha:]](/|$) ]]; then
-    normalize_automobile_log_dir_path "${launch_dir:0:2}/${rooted_path#/}"
-    return
-  fi
-  if [[ "$launch_dir" == //* ]]; then
-    local unc_path="${launch_dir#//}"
-    local unc_server="${unc_path%%/*}"
-    local unc_remainder="${unc_path#*/}"
-    local unc_share="${unc_remainder%%/*}"
-    if [[ "$unc_server" != "$unc_path" && -n "$unc_share" ]]; then
-      normalize_automobile_log_dir_path "//$unc_server/$unc_share/${rooted_path#/}" "preserve-unc"
-      return
-    fi
-  fi
-  normalize_automobile_log_dir_path "$rooted_path"
-}
-
-automobile_directory_is_owned_by_current_user() {
-  [[ "$(id -u 2>/dev/null || true)" == "0" || -O "$1" ]]
-}
-
-automobile_directory_is_creatable() {
-  local requested_directory="$1"
-  local directory="$requested_directory"
-  if [[ -e "$requested_directory" ]]; then
-    [[ -d "$requested_directory" && ! -L "$requested_directory" ]] || return 1
-    if [[ "${OS:-}" != "Windows_NT" ]]; then
-      automobile_directory_is_owned_by_current_user "$requested_directory"
-    else
-      [[ -w "$requested_directory" && -x "$requested_directory" ]]
-    fi
-    return
-  fi
-  while [[ ! -e "$directory" && ! -L "$directory" && "$directory" != "/" ]]; do
-    if [[ "$directory" == */* ]]; then
-      directory="${directory%/*}"
-      directory="${directory:-/}"
-    else
-      directory="/"
-    fi
-  done
-  [[ -d "$directory" && -w "$directory" && -x "$directory" ]]
-}
-
-resolve_automobile_log_dir() {
-  local log_dir
-  if [[ -n "${AUTOMOBILE_LOG_DIR+x}" ]]; then
-    log_dir="$AUTOMOBILE_LOG_DIR"
-  else
-    log_dir="${AUTO_MOBILE_LOG_DIR-}"
-  fi
-  log_dir="${log_dir#"${log_dir%%[![:space:]]*}"}"
-  log_dir="${log_dir%"${log_dir##*[![:space:]]}"}"
-  if [[ -n "$log_dir" ]]; then
-    if [[ "${OS:-}" == "Windows_NT" ]]; then
-      if automobile_is_windows_path "$log_dir"; then
-        automobile_windows_path_to_bash_path "$log_dir"
-        return
-      fi
-      log_dir="${log_dir//\\//}"
-      if [[ "$log_dir" = /* ]]; then
-        automobile_windows_rooted_path_from_launch_dir "$log_dir" "$(automobile_daemon_launch_dir)"
-        return
-      fi
-    fi
-    if [[ "$log_dir" = /* ]]; then
-      normalize_automobile_log_dir_path "$log_dir"
-      return
-    fi
-    local launch_dir
-    launch_dir="$(automobile_daemon_launch_dir)"
-    if [[ "${OS:-}" == "Windows_NT" && "$launch_dir" == //* ]]; then
-      normalize_automobile_log_dir_path "${launch_dir%/}/$log_dir" "preserve-unc"
-    else
-      normalize_automobile_log_dir_path "${launch_dir%/}/$log_dir"
-    fi
-    return
-  fi
-
-  local home_dir="${HOME:-}"
-  if [[ "${OS:-}" == "Windows_NT" ]]; then
-    home_dir="${USERPROFILE:-$home_dir}"
-    if [[ -z "$home_dir" && -n "${HOMEDRIVE:-}" && -n "${HOMEPATH:-}" ]]; then
-      home_dir="${HOMEDRIVE}${HOMEPATH}"
-    fi
-    if automobile_is_windows_path "$home_dir"; then
-      home_dir="$(automobile_windows_path_to_bash_path "$home_dir")"
-    fi
-  elif [[ -z "$home_dir" ]]; then
-    home_dir="$(automobile_unix_home_dir)"
-  fi
-  if [[ -n "$home_dir" ]]; then
-    local launch_dir
-    launch_dir="$(automobile_daemon_launch_dir)"
-    if [[ "$home_dir" == //* && "${OS:-}" == "Windows_NT" ]]; then
-      home_dir="$(normalize_automobile_log_dir_path "$home_dir" "preserve-unc")"
-    elif [[ "$home_dir" = /* ]]; then
-      home_dir="$(normalize_automobile_log_dir_path "$home_dir")"
-    elif [[ "${OS:-}" == "Windows_NT" && "$launch_dir" == //* ]]; then
-      home_dir="$(normalize_automobile_log_dir_path "${launch_dir%/}/$home_dir" "preserve-unc")"
-    else
-      home_dir="$(normalize_automobile_log_dir_path "${launch_dir%/}/$home_dir")"
-    fi
-    local home_logs_dir="${home_dir%/}/.auto-mobile/logs"
-    local data_dir
-    data_dir="$(automobile_data_dir_override)"
-    if [[ -n "$data_dir" ]] && { [[ -L "$home_logs_dir" ]] || ! automobile_directory_is_creatable "$home_logs_dir"; }; then
-      local data_dir_was_windows_path=false
-      if [[ "${OS:-}" == "Windows_NT" ]]; then
-        if automobile_is_windows_path "$data_dir"; then
-          data_dir="$(automobile_windows_path_to_bash_path "$data_dir")"
-          data_dir_was_windows_path=true
-        else
-          data_dir="${data_dir//\\//}"
-        fi
-      fi
-      if [[ "$data_dir" = /* ]]; then
-        if [[ "${OS:-}" == "Windows_NT" && "$data_dir_was_windows_path" == false ]]; then
-          data_dir="$(automobile_windows_rooted_path_from_launch_dir "$data_dir" "$launch_dir")"
-        fi
-        if [[ "${OS:-}" == "Windows_NT" && "$data_dir" == //* ]]; then
-          normalize_automobile_log_dir_path "${data_dir%/}/logs" "preserve-unc"
-        else
-          normalize_automobile_log_dir_path "${data_dir%/}/logs"
-        fi
-      else
-        if [[ "${OS:-}" == "Windows_NT" && "$launch_dir" == //* ]]; then
-          normalize_automobile_log_dir_path "${launch_dir%/}/$data_dir/logs" "preserve-unc"
-        else
-          normalize_automobile_log_dir_path "${launch_dir%/}/$data_dir/logs"
-        fi
-      fi
-      return
-    fi
-    printf '%s\n' "$home_logs_dir"
-    return
-  fi
-
-  if [[ "${OS:-}" == "Windows_NT" ]]; then
-    local windows_temp_dir
-    windows_temp_dir="$(automobile_windows_temp_dir)"
-    local windows_user_name
-    windows_user_name="$(automobile_windows_user_name)"
-    if [[ "$windows_temp_dir" == //* ]]; then
-      normalize_automobile_log_dir_path "${windows_temp_dir%/}/auto-mobile-${windows_user_name}" "preserve-unc"
-    else
-      normalize_automobile_log_dir_path "${windows_temp_dir%/}/auto-mobile-${windows_user_name}"
-    fi
-    return
-  fi
-
-  local user_id
-  user_id="$(id -u 2>/dev/null || printf 'default')"
-  printf '/tmp/auto-mobile-%s\n' "$user_id"
-}
-```
-
----
-
-## GitLab CI: print the log in the job output
-
-Add an **`after_script`** (runs even when tests fail) so the log is visible in the job log:
+## GitLab CI
 
 ```yaml
+variables:
+  AUTOMOBILE_LOG_DIR: "$CI_PROJECT_DIR/daemon-logs"
+
 after_script:
   - |
-    # Define resolve_automobile_log_dir as shown above.
-    log_dir="$(resolve_automobile_log_dir)"
-    echo "=== AutoMobile daemon logs in $log_dir (if any) ==="
-    find "$log_dir" -maxdepth 1 -type f -name 'daemon*.log' 2>/dev/null | while read -r f; do
-      echo "--- $f ---"
-      tail -n 500 "$f" || true
+    for log_file in "$AUTOMOBILE_LOG_DIR"/daemon*.log; do
+      [ -f "$log_file" ] || continue
+      echo "--- $log_file ---"
+      tail -n 500 "$log_file" || true
     done
-```
 
-Adjust **`tail -n`** if you need more lines.
-
----
-
-## GitLab CI: save logs as a downloadable artifact
-
-Useful when logs are large or you want to attach them to a ticket:
-
-```yaml
 artifacts:
   when: always
   paths:
     - daemon-logs/
   expire_in: 3 days
-
-after_script:
-  - mkdir -p daemon-logs
-  - |
-    # Define resolve_automobile_log_dir as shown above.
-    log_dir="$(resolve_automobile_log_dir)"
-    find "$log_dir" -maxdepth 1 -type f -name 'daemon*.log' -print 2>/dev/null | while read -r f; do
-      cp "$f" daemon-logs/ || true
-    done
 ```
 
-Download the job artifact and open the `daemon-logs/*.log` files.
+## GitHub Actions
 
----
-
-## GitHub Actions (same idea)
+Set the variable at job scope so every process that can start or restart the
+daemon inherits the same destination:
 
 ```yaml
-- name: AutoMobile daemon log
-  if: always()
-  run: |
-    # Define resolve_automobile_log_dir as shown above.
-    log_dir="$(resolve_automobile_log_dir)"
-    find "$log_dir" -maxdepth 1 -type f -name 'daemon*.log' 2>/dev/null | while read -r f; do
-      echo "--- $f ---"
-      tail -n 500 "$f" || true
-    done
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      AUTOMOBILE_LOG_DIR: ${{ github.workspace }}/daemon-logs
+    steps:
+      # Build and test steps go here.
+      - name: Upload AutoMobile daemon logs
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: auto-mobile-daemon-logs
+          path: daemon-logs/
+          if-no-files-found: ignore
 ```
 
----
+`github.workspace` is an absolute native path on Windows as well as on Unix
+runners, so the runtime and artifact action use the same value without a shell
+path conversion.
 
-## One-off on a shell session
+## One-off shell inspection
 
-If you have SSH or a debug shell on the same host that ran the daemon:
+If you have a shell on the host that ran the daemon and did not set an
+override, inspect the normal default:
 
 ```bash
-# Define resolve_automobile_log_dir as shown above.
-log_dir="$(resolve_automobile_log_dir)"
-find "$log_dir" -maxdepth 1 -type f -name 'daemon*.log' 2>/dev/null
-tail -n 200 "$log_dir/daemon.log"
+ls -la "${HOME}/.auto-mobile/logs"
+tail -n 200 "${HOME}/.auto-mobile/logs/daemon.log"
 ```
 
----
+On successful managed starts, stderr also includes the exact launch capture:
+
+```text
+Logs: /home/ci/.auto-mobile/logs/daemon-launch-12345.log
+```
 
 ## Gotchas
 
-- **Same job only:** The logs exist on the runner that started the daemon. A **later** CI job does not see `os.tmpdir()` unless you pass an **artifact** or a shared cache (unusual for logs).
-- **Ephemeral runners:** The default temporary directory may be wiped between jobs—use **`when: always`** and **`after_script`** on the job that runs tests.
-- **Enable more noise:** JVM **`automobile.debug=true`** can help surface daemon-related paths and diagnostics in test output; see the JUnit runner README for system properties.
-
----
+- Logs exist on the runner that started the daemon. Upload them from the same
+  job.
+- Put `AUTOMOBILE_LOG_DIR` at job or process scope, not only on the final test
+  command: setup and helper processes may start the daemon first.
+- JVM `automobile.debug=true` can surface additional daemon diagnostics in test
+  output; see the JUnit runner README for system properties.
 
 ## Related
 

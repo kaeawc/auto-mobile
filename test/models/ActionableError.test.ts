@@ -3,10 +3,12 @@ import { ActionableError, toActionableError } from "../../src/models/ActionableE
 
 describe("toActionableError", () => {
   test("prefixes context and extracts message from an Error", () => {
-    const result = toActionableError(new Error("boom"), "Failed to start recording");
+    const cause = new Error("boom");
+    const result = toActionableError(cause, "Failed to start recording");
 
     expect(result).toBeInstanceOf(ActionableError);
     expect(result.message).toBe("Failed to start recording: boom");
+    expect(result.cause).toBe(cause);
   });
 
   test("stringifies non-Error values", () => {

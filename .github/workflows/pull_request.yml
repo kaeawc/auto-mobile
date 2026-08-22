@@ -674,7 +674,7 @@ jobs:
   fast-validation:
     # Workflow-wiring changes deliberately wait for their forced XCTestRunner
     # result below. Ordinary PRs retain the usual short fast-validation path.
-    timeout-minutes: 50
+    timeout-minutes: 70
     name: "Fast Validation"
     runs-on: ubuntu-latest
     needs: detect-changes
@@ -767,34 +767,6 @@ jobs:
           IOS_INTEGRATION_WORKFLOW_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
         run: bun scripts/ci/validate-ios-integration-workflow-changes.ts
 
-      # Fast Validation remains parallel to XCTestRunner for every ordinary PR.
-      # Only a labeled workflow-wiring change waits for that job to finish, so
-      # this required check cannot pass before the exact macOS validation passes.
-      - name: "Wait for forced XCTestRunner workflow validation"
-        if: steps.validate-ios-workflow-change.outputs.requires_xctest_result == 'true'
-        uses: actions/github-script@v8
-        with:
-          script: |
-            const deadline = Date.now() + 45 * 60 * 1000;
-            while (Date.now() < deadline) {
-              const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                run_id: context.runId,
-                filter: 'latest',
-                per_page: 100,
-              });
-              const xctest = jobs.find(job => job.name === 'XCTestRunner Simulator Tests');
-              if (xctest?.status === 'completed') {
-                if (xctest.conclusion !== 'success') {
-                  core.setFailed(`Forced XCTestRunner job concluded ${xctest.conclusion}.`);
-                }
-                return;
-              }
-              await new Promise(resolve => setTimeout(resolve, 15_000));
-            }
-            core.setFailed('Timed out waiting for the forced XCTestRunner job.');
-
       - wait: [setup-python-lock, setup-uv-lock]
 
       - name: "Run fast validation checks"
@@ -822,6 +794,35 @@ jobs:
         run: bash scripts/versioning/generate-ios-version.sh --check
 
       - wait: hadolint
+
+      # Run every local validation while the macOS job may still be queued.
+      # Only a labeled workflow-wiring change waits here, after the independent
+      # work is complete, so the required check still cannot pass before the
+      # exact XCTestRunner job succeeds.
+      - name: "Wait for forced XCTestRunner workflow validation"
+        if: steps.validate-ios-workflow-change.outputs.requires_xctest_result == 'true'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const deadline = Date.now() + 45 * 60 * 1000;
+            while (Date.now() < deadline) {
+              const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: context.runId,
+                filter: 'latest',
+                per_page: 100,
+              });
+              const xctest = jobs.find(job => job.name === 'XCTestRunner Simulator Tests');
+              if (xctest?.status === 'completed') {
+                if (xctest.conclusion !== 'success') {
+                  core.setFailed(`Forced XCTestRunner job concluded ${xctest.conclusion}.`);
+                }
+                return;
+              }
+              await new Promise(resolve => setTimeout(resolve, 15_000));
+            }
+            core.setFailed('Timed out waiting for the forced XCTestRunner job.');
 
       - name: "Upload Fast Validation Logs"
         if: failure()
@@ -1037,6 +1038,9 @@ jobs:
     needs: detect-changes
     env:
       RUN_INSTALLER: ${{ needs.detect-changes.outputs.docs_only != 'true' }}
+      # Keep daemon logs in the artifact tree instead of rediscovering the
+      # runtime's platform-specific default after a failure.
+      AUTOMOBILE_LOG_DIR: "${{ github.workspace }}/ci-logs/daemon-logs"
       # ffmpeg is a large, slow install (it has timed out this job) and video
       # recording is not exercised here — skip it.
       AUTOMOBILE_INSTALL_SKIP_FFMPEG: "true"
@@ -1080,14 +1084,6 @@ jobs:
           bash ./scripts/install.sh --contributor --preset development --non-interactive 2>&1 | tee ci-logs/installer.log
           install_status=${PIPESTATUS[0]}
           set -e
-          mkdir -p ci-logs/daemon-logs
-          source scripts/lib/auto-mobile-log-dir.sh
-          daemon_log_dir="$(resolve_automobile_log_dir)"
-          if [[ -d "${daemon_log_dir}" ]]; then
-            cp -R "${daemon_log_dir}/." ci-logs/daemon-logs/ || true
-          else
-            echo "No daemon logs directory was created" > ci-logs/daemon-logs/README.txt
-          fi
           : > ci-logs/ctrl-proxy-cache-state.txt
           for cache_path in "${TMPDIR:-/tmp}"/auto-mobile-prefetch-* "${HOME}/.automobile/ctrl-proxy-ios"; do
             [[ -e "${cache_path}" ]] || continue
@@ -1786,6 +1782,10 @@ jobs:
       AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS: "240"
       AUTOMOBILE_OBSERVE_MCP_TIMEOUT_MS: "150000"
       AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS: "60000"
+      # This is both the runtime destination and the uploaded artifact path.
+      # Keeping one explicit absolute path avoids reimplementing Node path
+      # semantics in a failure-only shell step.
+      AUTOMOBILE_LOG_DIR: "${{ github.workspace }}/ci-logs/daemon-logs"
       # This job builds CtrlProxy into /tmp/automobile-ctrl-proxy before daemon
       # startup. Pin both the build script and every restarted daemon to that
       # path, and make the local build authoritative so PR runs do not depend on
@@ -1989,17 +1989,6 @@ jobs:
       # way to diagnose iOS observe failures — the swift-test stdout doesn't include
       # them. Upload on failure only (they aren't needed on green runs, and this
       # avoids publishing env/path details from passing runs).
-      - name: "Collect AutoMobile daemon logs"
-        if: failure()
-        continue-on-error: true
-        run: |
-          mkdir -p ci-logs/daemon-logs
-          source scripts/lib/auto-mobile-log-dir.sh
-          daemon_log_dir="$(resolve_automobile_log_dir)"
-          if [[ -d "${daemon_log_dir}" ]]; then
-            cp -R "${daemon_log_dir}/." ci-logs/daemon-logs/
-          fi
-
       - name: "Upload AutoMobile daemon logs"
         if: failure()
         continue-on-error: true

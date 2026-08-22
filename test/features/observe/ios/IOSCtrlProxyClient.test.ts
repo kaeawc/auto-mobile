@@ -2600,6 +2600,75 @@ describe("IOSCtrlProxyClient", function() {
       }
     });
 
+    test("backs off the SDK-event poll after consecutive empty batches (#5472)", async function() {
+      const { factory } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (async () => ({ ok: true, json: async () => [] })) as unknown as typeof fetch;
+      const internals = testClient as unknown as {
+        runSdkEventPollCycle(generation: number): Promise<void>;
+        currentSdkEventPollIntervalMs(): number;
+        stopSdkEventPolling(): void;
+        sdkEventPollGeneration: number;
+        sdkEventPollConsecutiveEmpty: number;
+      };
+
+      try {
+        const generation = internals.sdkEventPollGeneration;
+        // Below the threshold the poll stays at the fast 2s cadence.
+        for (let i = 0; i < 4; i++) {
+          await internals.runSdkEventPollCycle(generation);
+        }
+        expect(internals.sdkEventPollConsecutiveEmpty).toBe(4);
+        expect(internals.currentSdkEventPollIntervalMs()).toBe(2000);
+
+        // The 5th consecutive empty batch trips the backoff to the slow cadence.
+        await internals.runSdkEventPollCycle(generation);
+        expect(internals.sdkEventPollConsecutiveEmpty).toBe(5);
+        expect(internals.currentSdkEventPollIntervalMs()).toBe(30_000);
+
+        internals.stopSdkEventPolling();
+      } finally {
+        globalThis.fetch = originalFetch;
+        await testClient.close();
+      }
+    });
+
+    test("resets SDK-event poll backoff on inbound WebSocket activity (#5472)", async function() {
+      const { factory } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (async () => ({ ok: true, json: async () => [] })) as unknown as typeof fetch;
+      const internals = testClient as unknown as {
+        runSdkEventPollCycle(generation: number): Promise<void>;
+        handleMessage(data: unknown): void;
+        currentSdkEventPollIntervalMs(): number;
+        stopSdkEventPolling(): void;
+        sdkEventPollGeneration: number;
+        sdkEventPollConsecutiveEmpty: number;
+      };
+
+      try {
+        const generation = internals.sdkEventPollGeneration;
+        for (let i = 0; i < 5; i++) {
+          await internals.runSdkEventPollCycle(generation);
+        }
+        expect(internals.currentSdkEventPollIntervalMs()).toBe(30_000);
+
+        // Any inbound runner frame is treated as app activity: reset the empty
+        // counter and restore fast cadence, even for an unrecognized message type.
+        internals.handleMessage(Buffer.from(JSON.stringify({ type: "unrecognized" })));
+
+        expect(internals.sdkEventPollConsecutiveEmpty).toBe(0);
+        expect(internals.currentSdkEventPollIntervalMs()).toBe(2000);
+
+        internals.stopSdkEventPolling();
+      } finally {
+        globalThis.fetch = originalFetch;
+        await testClient.close();
+      }
+    });
+
     test("orders tracking re-enable before an earlier-arriving navigation event", async function() {
       const { factory } = createCapturingWebSocketFactory(fakeTimer);
       const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);

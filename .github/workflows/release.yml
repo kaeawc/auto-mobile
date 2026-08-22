@@ -477,12 +477,17 @@ jobs:
           # (not SNAPSHOT in gradle.properties)
           # Publish dependency modules first — separate invocation
           # guarantees completion before consumer modules
+          # Isolated Projects forbids --no-configuration-cache; force IP off for
+          # these publish invocations only so a runner-global gradle.properties
+          # enabling IP can't break the release. Normal builds are unaffected.
           ./gradlew :protocol:publish :test-plan-validation:publish \
             -PVERSION_NAME=${{ steps.version.outputs.version }} \
-            --no-configuration-cache
+            --no-configuration-cache \
+            -Dorg.gradle.unsafe.isolated-projects=false
           ./gradlew :junit-runner:publish :auto-mobile-sdk:publish \
             -PVERSION_NAME=${{ steps.version.outputs.version }} \
-            --no-configuration-cache
+            --no-configuration-cache \
+            -Dorg.gradle.unsafe.isolated-projects=false
 
       - name: Publish to npm
         env:

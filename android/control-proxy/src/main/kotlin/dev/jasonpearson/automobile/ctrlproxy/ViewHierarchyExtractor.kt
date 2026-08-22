@@ -107,11 +107,6 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
           Log.d(TAG, "[PROCESS] After optimizeHierarchy: ${optimizedList?.size} elements")
 
           val wrappedElement = optimizedList?.let { wrapOptimizedElements(it) }
-          val wrappedTextCount = wrappedElement?.let { countTextNodes(it) } ?: 0
-          Log.d(
-            TAG,
-            "[PROCESS] After wrapOptimizedElements: hasElement=${wrappedElement != null}, textNodes=$wrappedTextCount",
-          )
 
           // Single-window occlusion filtering is intentionally skipped.
           // After optimizeHierarchy promotes children from bounds-only wrappers, the tree
@@ -292,14 +287,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
           } else {
             element?.let {
               val optimizedList = optimizeHierarchy(it)
-              val wrapped = wrapOptimizedElements(optimizedList)
-              // Debug: Check if Tab elements have text children
-              if (wrapped != null && window.isActive) {
-                val wrappedJson = json.encodeToString(serializer<UIElementInfo>(), wrapped)
-                val hasTabText = wrappedJson.contains("\"text\":\"Tap\"")
-                Log.d(TAG, "[WRAP-ACTIVE] Has Tap text after wrap: $hasTabText")
-              }
-              wrapped
+              wrapOptimizedElements(optimizedList)
             }
           }
         val packageName = rootNode.packageName?.toString()
@@ -418,13 +406,6 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
             if (primaryAppWindowId != null) it.windowId == primaryAppWindowId else it.isActive
           }
           ?.hierarchy ?: mainHierarchy
-
-      // Debug: Check if Tab text survives occlusion filtering
-      mainHierarchy?.let {
-        val filteredJson = json.encodeToString(serializer<UIElementInfo>(), it)
-        val hasTabText = filteredJson.contains("\"text\":\"Tap\"")
-        Log.d(TAG, "[OCCLUSION-FILTERED] Has Tap text after filtering: $hasTabText")
-      }
     }
 
     if (windowEntries.isEmpty()) {
@@ -1382,36 +1363,6 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       }
       else -> false
     }
-  }
-
-  /** Count text nodes recursively in hierarchy */
-  private fun countTextNodes(element: UIElementInfo): Int {
-    val hasText = if (!element.text.isNullOrBlank()) 1 else 0
-    val childrenCount =
-      element.node?.let { node ->
-        when (node) {
-          is JsonObject -> {
-            try {
-              val child = json.decodeFromJsonElement(serializer<UIElementInfo>(), node)
-              countTextNodes(child)
-            } catch (e: Exception) {
-              0
-            }
-          }
-          is JsonArray -> {
-            node.jsonArray.sumOf { childJson ->
-              try {
-                val child = json.decodeFromJsonElement(serializer<UIElementInfo>(), childJson)
-                countTextNodes(child)
-              } catch (e: Exception) {
-                0
-              }
-            }
-          }
-          else -> 0
-        }
-      } ?: 0
-    return hasText + childrenCount
   }
 
   /** Recursively optimize node children (handles both single element and array). */

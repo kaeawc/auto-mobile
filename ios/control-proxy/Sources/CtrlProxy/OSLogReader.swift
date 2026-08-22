@@ -7,11 +7,23 @@ import OSLog
 /// Requires iOS 15+ for OSLogStore access.
 @available(iOS 15.0, macOS 12.0, *)
 public final class OSLogReader {
+    /// How often to poll the process log store. Raised from 500ms to 1000ms
+    /// (issue #5477): the previous cadence re-queried the whole log store twice a
+    /// second for the entire session, loading the device even when idle.
+    public static let pollIntervalMs = 1000
+
     private let lock = NSLock()
     private var timer: DispatchSourceTimer?
     private var lastEntryDate: Date
     private var buffer: [LogEntry] = []
     private let maxBufferSize = 500
+
+    /// A single reused `OSLogStore`. The previous implementation allocated a fresh
+    /// store on every poll; the store is stable for the process lifetime, so it is
+    /// created once and reused, then released on `stop()` (issue #5477). Guarded by
+    /// `lock`.
+    private var store: OSLogStore?
+    private let storeFactory: () throws -> OSLogStore
 
     /// Lightweight struct matching the SdkLogEvent wire format.
     public struct LogEntry: Codable {
@@ -22,7 +34,10 @@ public final class OSLogReader {
         public let message: String
     }
 
-    public init() {
+    public init(storeFactory: @escaping () throws -> OSLogStore = {
+        try OSLogStore(scope: .currentProcessIdentifier)
+    }) {
+        self.storeFactory = storeFactory
         self.lastEntryDate = Date()
     }
 
@@ -35,8 +50,9 @@ public final class OSLogReader {
             return
         }
 
+        let interval = DispatchTimeInterval.milliseconds(Self.pollIntervalMs)
         let source = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
-        source.schedule(deadline: .now() + .milliseconds(500), repeating: .milliseconds(500))
+        source.schedule(deadline: .now() + interval, repeating: interval)
         source.setEventHandler { [weak self] in
             self?.poll()
         }
@@ -44,13 +60,14 @@ public final class OSLogReader {
         timer = source
         lock.unlock()
 
-        print("[OSLogReader] Started polling (500ms interval)")
+        print("[OSLogReader] Started polling (\(Self.pollIntervalMs)ms interval)")
     }
 
     public func stop() {
         lock.lock()
         timer?.cancel()
         timer = nil
+        store = nil
         lock.unlock()
         print("[OSLogReader] Stopped")
     }
@@ -84,9 +101,33 @@ public final class OSLogReader {
 
     // MARK: - Private
 
-    private func poll() {
+    /// Obtain the reused `OSLogStore`, lazily creating it on first use. Internal so
+    /// `OSLogReaderTests` can assert the store is created once and reused.
+    func obtainStore() throws -> OSLogStore {
+        lock.lock()
+        if let existing = store {
+            lock.unlock()
+            return existing
+        }
+        lock.unlock()
+
+        let created = try storeFactory()
+
+        lock.lock()
+        // A concurrent poll may have created one first; keep the first winner.
+        if let existing = store {
+            lock.unlock()
+            return existing
+        }
+        store = created
+        lock.unlock()
+        return created
+    }
+
+    /// Internal (not `private`) so tests can drive one poll deterministically.
+    func poll() {
         do {
-            let store = try OSLogStore(scope: .currentProcessIdentifier)
+            let store = try obtainStore()
             let position = store.position(date: lastEntryDate)
             let entries = try store.getEntries(at: position)
 

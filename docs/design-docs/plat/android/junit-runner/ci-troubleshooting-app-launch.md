@@ -18,8 +18,8 @@ Grab **everything you can** from the same failing CI run; each source answers a 
 
 **Reading order:** CI log + JUnit output → **`daemon.log`** → **`logcat`** (or reproduce launch locally with adb if CI did not save logcat). If you only keep two artifacts, prefer **`daemon.log`** and **`logcat`** (or CI log if logcat is unavailable).
 
-See [CI daemon logs](ci-daemon-logs.md) for printing or uploading **`daemon.log`**
-from the runner's default `~/.auto-mobile/logs` directory.
+See [CI daemon logs](ci-daemon-logs.md) for configuring and uploading the
+directory that contains **`daemon.log`**.
 
 ---
 

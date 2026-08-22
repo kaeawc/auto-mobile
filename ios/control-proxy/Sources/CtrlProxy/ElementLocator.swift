@@ -59,6 +59,7 @@ final class ForegroundTracker {
     private var _observed: Set<String> = []
     private var _didFallbackToSpringboard = false
     private var _lastSwitchTime: UInt64 = 0
+    private var _lastSystemAppSweepMiss: UInt64 = 0
 
     private func locked<T>(_ body: () -> T) -> T {
         lock.lock()
@@ -82,6 +83,15 @@ final class ForegroundTracker {
     }
 
     var lastSwitchTime: UInt64 { locked { _lastSwitchTime } }
+
+    /// Timestamp (uptime nanos) of the last last-resort `checkSystemApps` sweep
+    /// that found no foreground system app. Used to briefly cache the negative
+    /// result so repeated extractions do not each fan out to ~40 state IPCs
+    /// (issue #5474). Reset to 0 on any explicit foreground switch.
+    var lastSystemAppSweepMiss: UInt64 {
+        get { locked { _lastSystemAppSweepMiss } }
+        set { locked { _lastSystemAppSweepMiss = newValue } }
+    }
 
     func trackObserved(_ bundleId: String) {
         locked { _ = _observed.insert(bundleId) }
@@ -108,6 +118,9 @@ final class ForegroundTracker {
             _bundleId = bundleId
             _didFallbackToSpringboard = false
             _lastSwitchTime = now
+            // A foreground change invalidates any cached "no system app is
+            // foreground" result (issue #5474).
+            _lastSystemAppSweepMiss = 0
             if observe {
                 _observed.insert(bundleId)
             }
@@ -437,8 +450,23 @@ public class ElementLocator: ElementLocating {
 
             // Fallback: Check common system apps directly
             // This is necessary because when another app is in foreground,
-            // springboard's element tree may not contain that app's bundle ID
+            // springboard's element tree may not contain that app's bundle ID.
+            //
+            // This is the last-resort path: the SpringBoard card tree and the
+            // observed bundle ids above are the primary candidates. Walking all
+            // ~40 static ids is ~40 sequential state IPCs on the app's main
+            // thread, so a recent miss is cached briefly to avoid repeating the
+            // full fan-out on every extraction (issue #5474).
             return perfProvider.track("checkSystemApps") {
+                let now = DispatchTime.now().uptimeNanoseconds
+                guard Self.shouldRunSystemAppSweep(
+                    now: now,
+                    lastMissTime: tracker.lastSystemAppSweepMiss,
+                    ttlNanos: Self.systemAppSweepMissTtlNanos
+                ) else {
+                    return nil
+                }
+
                 for bundleId in Self.commonSystemApps {
                     // Skip current app (we already know it's not in foreground)
                     if bundleId == currentBundleId {
@@ -457,9 +485,19 @@ public class ElementLocator: ElementLocating {
                         return bundleId
                     }
                 }
+                // No foreground system app found — cache this negative result so
+                // the next extraction within the TTL skips the full sweep.
+                tracker.lastSystemAppSweepMiss = now
                 return nil
             }
         }
+
+        /// TTL for the `checkSystemApps` negative-result cache (issue #5474).
+        /// The hierarchy debouncer runs regularly, so bounding the miss path to at
+        /// most one full sweep per second dampens the ~40-IPC fan-out without
+        /// meaningfully delaying detection of a genuine foreground change (which
+        /// also resets the cache via `switchForegroundApp`).
+        private static let systemAppSweepMissTtlNanos: UInt64 = 1_000_000_000
 
         /// Collect all potential bundle IDs from springboard element tree
         private func collectBundleIdsFromElement(
@@ -543,14 +581,27 @@ public class ElementLocator: ElementLocating {
                     let capture = try DeviceRotation.capture {
                         let freshApp = XCUIApplication(bundleIdentifier: bundleId)
                         let snap = try freshApp.snapshot()
-                        let typedInputs = Self.visibleHittableTextInputSnapshots(in: freshApp)
+                        // Derive text-input candidates by walking the already-captured
+                        // snapshot tree instead of issuing fresh live
+                        // descendants(matching:).allElementsBoundByIndex + per-candidate
+                        // snapshot() queries, each of which is a main-thread IPC round
+                        // trip that re-serializes the app's accessibility tree (issue #5474).
+                        let typedInputs = Self.collectTextInputSnapshots(from: snap)
 
                         // Query keyboard focus via predicate — snapshot.hasFocus reflects
                         // UIKit focus (tvOS/iPad), not keyboard input focus on iPhone.
-                        let focused = freshApp.descendants(matching: .any)
-                            .matching(NSPredicate(format: "hasKeyboardFocus == true"))
-                            .firstMatch
-                        let focusFrame: CGRect? = focused.exists ? focused.frame : nil
+                        // The focus frame is only ever applied to text-input nodes, so skip
+                        // the live requery entirely when the snapshot exposes no text field
+                        // (no keyboard can be focused without one) (issue #5474).
+                        let focusFrame: CGRect?
+                        if Self.shouldQueryKeyboardFocus(textInputSnapshotCount: typedInputs.count) {
+                            let focused = freshApp.descendants(matching: .any)
+                                .matching(NSPredicate(format: "hasKeyboardFocus == true"))
+                                .firstMatch
+                            focusFrame = focused.exists ? focused.frame : nil
+                        } else {
+                            focusFrame = nil
+                        }
                         return (snap, typedInputs, focusFrame, UIScreen.main.bounds)
                     }
 
@@ -728,30 +779,32 @@ public class ElementLocator: ElementLocating {
             )
         }
 
-        /// Snapshot the text inputs whose typed XCTest queries can expose controls
-        /// absent from the application's recursive snapshot tree.
-        private static func visibleHittableTextInputSnapshots(in app: XCUIApplication) -> [XCUIElementSnapshot] {
+        /// Collect text-input element snapshots by walking the already-captured
+        /// application snapshot tree (issue #5474).
+        ///
+        /// This replaces the previous live-query approach
+        /// (`descendants(matching:).allElementsBoundByIndex` + per-candidate
+        /// `snapshot()`), which forced the app to re-serialize its accessibility
+        /// tree over IPC once per element type plus once per candidate. Because the
+        /// root snapshot is already in hand, the same text-input nodes are read
+        /// locally with no further IPC. Zero-area nodes are skipped to mirror the
+        /// old `!frame.isEmpty` visibility filter.
+        private static func collectTextInputSnapshots(from snapshot: XCUIElementSnapshot) -> [XCUIElementSnapshot] {
             var snapshots: [XCUIElementSnapshot] = []
-
-            for type in textInputElementTypes {
-                let candidates = app.descendants(matching: type).allElementsBoundByIndex
-                for candidate in candidates {
-                    let snapshot: XCUIElementSnapshot? = runOnMainThreadNonThrowing({
-                        guard candidate.exists,
-                              candidate.isHittable,
-                              !candidate.frame.isEmpty
-                        else {
-                            return nil
-                        }
-                        return try? candidate.snapshot()
-                    }, fallback: nil)
-                    if let snapshot {
-                        snapshots.append(snapshot)
-                    }
-                }
-            }
-
+            collectTextInputSnapshots(from: snapshot, into: &snapshots)
             return snapshots
+        }
+
+        private static func collectTextInputSnapshots(
+            from snapshot: XCUIElementSnapshot,
+            into snapshots: inout [XCUIElementSnapshot]
+        ) {
+            if textInputElementTypes.contains(snapshot.elementType), !snapshot.frame.isEmpty {
+                snapshots.append(snapshot)
+            }
+            for child in snapshot.children {
+                collectTextInputSnapshots(from: child, into: &snapshots)
+            }
         }
 
         /// Get system alerts from the app snapshot and springboard.
@@ -766,12 +819,25 @@ public class ElementLocator: ElementLocating {
             keyboardFocusFrame: CGRect? = nil
         ) throws -> (alerts: [UIElementInfo], rotation: Int?) {
             // Check for alerts in the app's own snapshot tree
-            let appAlerts = collectAlertElements(from: appSnapshot).map { snapshot in
+            let appAlertSnapshots = collectAlertElements(from: appSnapshot)
+            let appAlerts = appAlertSnapshots.map { snapshot in
                 buildElementInfoFromSnapshot(snapshot, depth: 0, screenBounds: snapshot.frame, keyboardFocusFrame: keyboardFocusFrame)
             }
 
-            // Also check SpringBoard for alerts not in the app's tree
-            let springboardCapture = try getAlertsFromSpringboard(keyboardFocusFrame: keyboardFocusFrame)
+            // Also check SpringBoard for alerts not in the app's tree — but only pay
+            // for the second full-tree serialization when an alert may actually exist.
+            // When the foreground app IS SpringBoard, `appSnapshot` already is
+            // SpringBoard's tree, so its alerts were collected above without a second
+            // snapshot (issue #5474).
+            let foregroundIsSpringboard = (foregroundBundleId ?? "com.apple.springboard") == "com.apple.springboard"
+            let runSpringboardSnapshot = Self.shouldSnapshotSpringboardForAlerts(
+                foregroundIsSpringboard: foregroundIsSpringboard,
+                appHasAlert: !appAlertSnapshots.isEmpty
+            )
+            let springboardCapture = try getAlertsFromSpringboard(
+                runSnapshot: runSpringboardSnapshot,
+                keyboardFocusFrame: keyboardFocusFrame
+            )
 
             // Deduplicate by alert label text
             var seenLabels: Set<String> = []
@@ -806,12 +872,21 @@ public class ElementLocator: ElementLocating {
         /// Uses single snapshot() + tree traversal instead of .alerts query which can hang
         /// indefinitely on system permission dialogs, blocking the main thread.
         /// IMPORTANT: Creates a new XCUIApplication each call to avoid stale cached state.
+        ///
+        /// When `runSnapshot` is false the expensive `springboard.snapshot()` IPC is
+        /// skipped and no alerts are returned, but the (cheap, local) rotation sample
+        /// is still captured so the caller's rotation-agreement check is unaffected
+        /// (issue #5474).
         private func getAlertsFromSpringboard(
+            runSnapshot: Bool,
             keyboardFocusFrame: CGRect? = nil
         ) throws -> (alerts: [UIElementInfo], rotation: Int?) {
             let capture: (alertSnapshots: [XCUIElementSnapshot], rotation: Int?) =
                 try runOnMainThread {
                     let capture = DeviceRotation.capture { () -> [XCUIElementSnapshot] in
+                        guard runSnapshot else {
+                            return []
+                        }
                         let freshSpringboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
                         guard let snapshot = try? freshSpringboard.snapshot() else {
                             return []
@@ -1594,6 +1669,51 @@ public class ElementLocator: ElementLocating {
             || element.resourceId != nil
             || element.contentDesc != nil
             || element.hintText != nil
+    }
+
+    /// Whether the live keyboard-focus predicate query should run (issue #5474).
+    ///
+    /// The keyboard-focus frame is only ever applied to text-input nodes when
+    /// building element info, so when the captured snapshot exposes no text-input
+    /// node there is nothing a focus frame could annotate — the extra live query
+    /// (a main-thread IPC round trip) is pure overhead and is skipped.
+    static func shouldQueryKeyboardFocus(textInputSnapshotCount: Int) -> Bool {
+        return textInputSnapshotCount > 0
+    }
+
+    /// Whether the second, SpringBoard full-tree snapshot should be taken to look
+    /// for system alerts (issue #5474).
+    ///
+    /// When the foreground app IS SpringBoard, the app snapshot already is
+    /// SpringBoard's tree, so a second serialization would be redundant. Otherwise
+    /// the extra snapshot is only warranted when the app's own snapshot already
+    /// shows an alert element (a co-presented system dialog may exist in
+    /// SpringBoard's tree); the common no-alert case skips it.
+    static func shouldSnapshotSpringboardForAlerts(
+        foregroundIsSpringboard: Bool,
+        appHasAlert: Bool
+    ) -> Bool {
+        if foregroundIsSpringboard {
+            return false
+        }
+        return appHasAlert
+    }
+
+    /// Whether the last-resort ~40-app `checkSystemApps` foreground sweep should
+    /// run, or be short-circuited by a recently cached negative result (issue #5474).
+    ///
+    /// A zero `lastMissTime` (never swept, or invalidated by a foreground switch)
+    /// always runs. A clock that appears to run backwards also runs, to avoid
+    /// wedging on a bad sample. Otherwise the sweep is skipped until the TTL since
+    /// the last miss has elapsed.
+    static func shouldRunSystemAppSweep(
+        now: UInt64,
+        lastMissTime: UInt64,
+        ttlNanos: UInt64
+    ) -> Bool {
+        guard lastMissTime != 0 else { return true }
+        guard now >= lastMissTime else { return true }
+        return (now - lastMissTime) >= ttlNanos
     }
 
     /// Resolve the logical screen dimensions reported in the hierarchy.

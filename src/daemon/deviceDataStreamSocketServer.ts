@@ -302,6 +302,14 @@ const MIN_HIERARCHY_INTERVAL_MS = 250;
 const MAX_SCREENSHOT_INTERVAL_MS = 2_147_483_647;
 const MAX_HIERARCHY_INTERVAL_MS = 2_147_483_647;
 
+// With no live-view subscriber, the host must NOT instruct the runner to poll
+// the (expensive) accessibility hierarchy at the fast default cadence. Send this
+// effectively-paused interval instead and rely on the on-demand
+// `request_hierarchy_if_stale` path for observes; a subscriber appearing
+// restores fast cadence via the same cadence-refresh call. This mirrors the
+// screenshot stream, which is already `hasSubscriberForDevice`-gated (#5472).
+const PAUSED_HIERARCHY_INTERVAL_MS = MAX_HIERARCHY_INTERVAL_MS;
+
 /**
  * Socket server that streams device data updates (hierarchy, screenshot, storage) to connected IDE plugins.
  *
@@ -717,6 +725,12 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     deviceId: string,
     defaultIntervalMs: number = DEFAULT_HIERARCHY_INTERVAL_MS,
   ): number {
+    // Subscriber-gate the hierarchy cadence: with no active subscriber, pause
+    // runner polling entirely (observes still refresh on demand via
+    // request_hierarchy_if_stale) rather than falling back to the 1Hz default.
+    if (!this.hasSubscriberForDevice(deviceId)) {
+      return PAUSED_HIERARCHY_INTERVAL_MS;
+    }
     return this.getFastestIntervalMsForDevice(
       deviceId,
       defaultIntervalMs,

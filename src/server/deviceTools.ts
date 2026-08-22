@@ -2013,7 +2013,7 @@ export function registerDeviceTools() {
         if (!args.boot) {
           return operation.result;
         }
-        if (await revalidateLiveProvisionDeviceSession(args, deps, operation.result, signal)) {
+        if (await revalidateProvisionDeviceReplay(args, deps, operation.result, signal)) {
           return operation.result;
         }
         await releaseErroredProvisionDeviceSession(operation.result);
@@ -2078,7 +2078,29 @@ export function registerDeviceTools() {
         perf.end();
       }
     }
-    return getLiveProvisionDeviceSession(result) !== undefined;
+    const revalidatedSession = getPersistedProvisionDeviceSession(result);
+    if (!revalidatedSession || !getLiveProvisionDeviceSession(result)) {
+      return false;
+    }
+    await DaemonState.getInstance().getDevicePool().attachAutolockSessionToMcpSession(
+      revalidatedSession.sessionId,
+      args.__mcpSessionId,
+    );
+    return true;
+  }
+
+  async function revalidateProvisionDeviceReplay(
+    args: ProvisionDeviceArgs,
+    deps: DeviceToolsDependencies,
+    result: Record<string, unknown>,
+    signal: AbortSignal | undefined,
+  ): Promise<boolean> {
+    try {
+      return await revalidateLiveProvisionDeviceSession(args, deps, result, signal);
+    } catch (error) {
+      await releaseProvisionDeviceSession(result, "provision-device-replay-validation-failed");
+      throw error;
+    }
   }
 
   function getLiveProvisionDeviceSession(
@@ -2237,12 +2259,19 @@ export function registerDeviceTools() {
         markDeviceCreationStarted,
         signal,
       );
+      const createdByOperation = reconcileExistingConfiguration || provisioned.created;
       if (!args.boot) {
         if (provisioned.created) {
           await deps.notifyResourcesChanged();
         }
         perf.end();
-        return buildProvisionDeviceResult(args, provisioned, perf, undefined);
+        return buildProvisionDeviceResult(
+          args,
+          provisioned,
+          createdByOperation,
+          perf,
+          undefined,
+        );
       }
 
       const booted = await bootExactProvisionedDevice(
@@ -2259,7 +2288,7 @@ export function registerDeviceTools() {
         await deps.notifyResourcesChanged();
       }
       perf.end();
-      return buildProvisionDeviceResult(args, provisioned, perf, booted);
+      return buildProvisionDeviceResult(args, provisioned, createdByOperation, perf, booted);
     } catch (error) {
       perf.end();
       throw error;
@@ -2426,6 +2455,7 @@ export function registerDeviceTools() {
   function buildProvisionDeviceResult(
     args: ProvisionDeviceArgs,
     provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>>,
+    createdByOperation: boolean,
     perf: ReturnType<typeof createPerformanceTracker>,
     booted: { device: BootedDevice; sessionId: string } | undefined,
   ): Record<string, unknown> {
@@ -2434,9 +2464,9 @@ export function registerDeviceTools() {
       device: booted?.device ?? provisioned.device,
       requestedSpec: args.device.spec,
       resolvedSpec: provisioned.resolvedSpec,
-      created: provisioned.created,
-      adopted: !provisioned.created,
-      lifecycleState: booted ? "ready" : provisioned.created ? "created" : "adopted",
+      created: createdByOperation,
+      adopted: !createdByOperation,
+      lifecycleState: booted ? "ready" : createdByOperation ? "created" : "adopted",
       readiness: {
         mode: args.readiness,
         status: booted

@@ -8,11 +8,13 @@ import type { PlatformDeviceManager } from "./deviceUtils";
 import type { AvdConfigReader } from "./android-cmdline-tools/AvdConfigReader";
 import {
   FileAvdConfigReader,
+  normalizeAndroidArchitecture,
   resolveAndroidAvdHome,
 } from "./android-cmdline-tools/AvdConfigReader";
 import { AvdManagerClient } from "./android-cmdline-tools/AvdManagerClient";
 import type { CreateAvdParams } from "./android-cmdline-tools/avdmanager";
 import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
+import { throwIfAborted } from "./toolUtils";
 
 export interface AndroidDeviceSpecification {
   runtime: string;
@@ -171,7 +173,7 @@ function requestedAndroidRuntime(runtime: string): {
   return {
     apiLevel: Number(apiMatch[1]),
     tag: parts[2],
-    architecture: parts[3] === "arm64-v8a" ? "arm64" : parts[3],
+    architecture: normalizeAndroidArchitecture(parts[3]) ?? parts[3],
   };
 }
 
@@ -209,6 +211,7 @@ const exactProvisioningLocks = new Map<string, Promise<void>>();
 async function runWithExactProvisioningLock<T>(
   platform: "android" | "ios",
   name: string,
+  signal: AbortSignal | undefined,
   operation: () => Promise<T>,
 ): Promise<T> {
   const key = `${platform}:${name}`;
@@ -218,8 +221,8 @@ async function runWithExactProvisioningLock<T>(
     release = resolve;
   });
   exactProvisioningLocks.set(key, current);
-  await previous;
   try {
+    await waitForExactProvisioningTurn(previous, signal);
     return await operation();
   } finally {
     release();
@@ -227,6 +230,40 @@ async function runWithExactProvisioningLock<T>(
       exactProvisioningLocks.delete(key);
     }
   }
+}
+
+async function waitForExactProvisioningTurn(
+  previous: Promise<void> | undefined,
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  throwIfAborted(signal);
+  if (!previous || !signal) {
+    await previous;
+    return;
+  }
+
+  let removeAbortListener: (() => void) | undefined;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    const rejectIfAborted = (): void => {
+      try {
+        throwIfAborted(signal);
+      } catch (error) {
+        reject(error);
+      }
+    };
+    if (signal.aborted) {
+      rejectIfAborted();
+      return;
+    }
+    signal.addEventListener("abort", rejectIfAborted, { once: true });
+    removeAbortListener = () => signal.removeEventListener("abort", rejectIfAborted);
+  });
+  try {
+    await Promise.race([previous, aborted]);
+  } finally {
+    removeAbortListener?.();
+  }
+  throwIfAborted(signal);
 }
 
 /**
@@ -240,6 +277,7 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
     return await runWithExactProvisioningLock(
       request.platform,
       request.name,
+      request.signal,
       async () => await this.provisionLocked(request),
     );
   }

@@ -443,6 +443,137 @@ describe("provisionDevice handler", () => {
     sessionManager.stopCleanupTimer();
   });
 
+  test("associates a live autolock session with a reconnected MCP client", async () => {
+    const originalAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      deviceManager,
+    );
+    const bootedDevice = {
+      name: "phone-api-36-a",
+      platform: "android" as const,
+      deviceId: "mock-phone-api-36-a",
+    };
+    try {
+      deviceManager.setDeviceImages("android", [{
+        name: "phone-api-36-a",
+        platform: "android",
+        isRunning: false,
+      }]);
+      await pool.initializeWithDevices([bootedDevice]);
+      DaemonState.getInstance().initialize(sessionManager, pool);
+      const tool = ToolRegistry.getTool("provisionDevice");
+      if (!tool) {
+        throw new Error("provisionDevice not registered");
+      }
+      const args = {
+        operationId: "operation-reconnected-mcp-session",
+        device: {
+          platform: "android" as const,
+          name: "phone-api-36-a",
+          spec: {
+            runtime: "system-images;android-36;google_apis;x86_64",
+            deviceType: "pixel_9",
+          },
+        },
+        boot: true,
+        readiness: "none" as const,
+      };
+
+      const first = JSON.parse((await tool.handler({
+        ...args,
+        __mcpSessionId: "mcp-session-original",
+      }) as any).content[0].text);
+      const second = JSON.parse((await tool.handler({
+        ...args,
+        __mcpSessionId: "mcp-session-reconnected",
+      }) as any).content[0].text);
+
+      expect(second).toEqual(first);
+      expect(pool.resolveAutolockSessionForMcpSession(
+        "mcp-session-reconnected",
+        "android",
+      )).toBe(first.sessionId);
+    } finally {
+      sessionManager.stopCleanupTimer();
+      if (originalAutolock === undefined) {
+        delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+      } else {
+        process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = originalAutolock;
+      }
+    }
+  });
+
+  test("releases a live replay session when automation readiness fails", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      deviceManager,
+    );
+    const bootedDevice = {
+      name: "phone-api-36-a",
+      platform: "android" as const,
+      deviceId: "mock-phone-api-36-a",
+    };
+    deviceManager.setDeviceImages("android", [{
+      name: "phone-api-36-a",
+      platform: "android",
+      isRunning: false,
+    }]);
+    await pool.initializeWithDevices([bootedDevice]);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    let readinessCalls = 0;
+    setDeviceToolsDependencies({
+      ensureCtrlProxyReady: async () => {
+        readinessCalls++;
+        if (readinessCalls === 2) {
+          throw new Error("readiness failed");
+        }
+      },
+    });
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+    const args = {
+      operationId: "operation-replay-readiness-failure",
+      device: {
+        platform: "android" as const,
+        name: "phone-api-36-a",
+        spec: {
+          runtime: "system-images;android-36;google_apis;x86_64",
+          deviceType: "pixel_9",
+        },
+      },
+      boot: true,
+      readiness: "automation" as const,
+    };
+
+    await tool.handler(args);
+    const failedReplay = JSON.parse((await tool.handler(args) as any).content[0].text);
+
+    expect(failedReplay).toMatchObject({
+      success: false,
+      error: { code: "platform_command_failed" },
+    });
+    expect(pool.getDevice(bootedDevice.deviceId)).toMatchObject({
+      sessionId: null,
+      status: "idle",
+    });
+    expect(operationStore.failCalls).toBe(1);
+    sessionManager.stopCleanupTimer();
+  });
+
   test("rebinds an errored persisted session instead of replaying its stale readiness", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -607,6 +738,67 @@ describe("provisionDevice handler", () => {
     expect(calls).toBe(2);
     expect(first).toMatchObject({ created: true, adopted: false });
     expect(second).toMatchObject({ created: true, adopted: false });
+  });
+
+  test("retains creation ownership after a failed lifecycle retry", async () => {
+    let calls = 0;
+    const retryingProvisioner: ExactDeviceProvisioner = {
+      provision: async (request) => {
+        calls++;
+        if (calls === 1) {
+          await request.onBeforeCreate?.();
+        }
+        return {
+          created: calls === 1,
+          device: {
+            name: request.name,
+            platform: "android",
+            isRunning: false,
+          },
+          resolvedSpec: request.spec,
+        };
+      },
+    };
+    let readinessCalls = 0;
+    deviceManager.setDeviceImages("android", [{
+      name: "phone-api-36-a",
+      platform: "android",
+      isRunning: false,
+    }]);
+    setDeviceToolsDependencies({
+      exactDeviceProvisionerFactory: () => retryingProvisioner,
+      ensureCtrlProxyReady: async () => {
+        readinessCalls++;
+        if (readinessCalls === 1) {
+          throw new Error("first readiness attempt failed");
+        }
+      },
+    });
+    registerDeviceTools();
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+    const args = {
+      operationId: "operation-retry-created-ownership",
+      device: {
+        platform: "android" as const,
+        name: "phone-api-36-a",
+        spec: {
+          runtime: "system-images;android-36;google_apis;x86_64",
+          deviceType: "pixel_9",
+        },
+      },
+      boot: true,
+      readiness: "automation" as const,
+    };
+
+    const failed = JSON.parse((await tool.handler(args) as any).content[0].text);
+    const retried = JSON.parse((await tool.handler(args) as any).content[0].text);
+
+    expect(failed).toMatchObject({ success: false });
+    expect(retried).toMatchObject({ created: true, adopted: false });
+    expect(calls).toBe(2);
   });
 
   test("keeps a shared operation running when its initiating caller aborts", async () => {

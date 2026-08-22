@@ -246,7 +246,7 @@ function parseArchitecture(props: Map<string, string>): Pick<AvdConfig, "archite
     imagePathSegments?.at(-1),
   ];
   for (const candidate of candidates) {
-    const architecture = normalizeArchitecture(candidate);
+    const architecture = normalizeAndroidArchitecture(candidate);
     if (architecture) {
       return { architecture };
     }
@@ -254,7 +254,7 @@ function parseArchitecture(props: Map<string, string>): Pick<AvdConfig, "archite
   return {};
 }
 
-function normalizeArchitecture(value: string | undefined): string | undefined {
+export function normalizeAndroidArchitecture(value: string | undefined): string | undefined {
   switch (value?.trim().toLowerCase()) {
     case "arm64":
     case "arm64-v8a":

@@ -57,6 +57,28 @@ describe("exact-tool selection union policy", () => {
     ).toBe(true);
   });
 
+  test("an unset connection profile does not override an explicit routing disable", async () => {
+    const overrides = new Map<string, boolean>([["routing", false]]);
+    const service: Pick<SessionToolSelectionService, "isEnabled" | "getOverride"> = {
+      isEnabled: async (sessionUuid, _toolName, declaredDefault) =>
+        (sessionUuid ? overrides.get(sessionUuid) : undefined) ?? declaredDefault,
+      getOverride: async (sessionUuid) => overrides.get(sessionUuid),
+    };
+
+    expect(
+      await isToolEnabledForAnySession(
+        "observe",
+        true,
+        ["connection", "routing"],
+        service,
+        "connection",
+      ),
+    ).toBe(false);
+    expect(
+      await isToolEnabledForAnySession("observe", true, ["connection"], service, "connection"),
+    ).toBe(true);
+  });
+
   test("reports the exact disabled tool rather than a capability group", async () => {
     const disabled: Pick<SessionToolSelectionService, "isEnabled"> = {
       isEnabled: async () => false,

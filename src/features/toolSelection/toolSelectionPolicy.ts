@@ -95,7 +95,14 @@ export async function isToolEnabledForAnySession(
   if (connectionOverride !== undefined) {
     return connectionOverride;
   }
-  for (const sessionUuid of candidates) {
+  const routingCandidates =
+    connectionProfileUuid && service.getOverride
+      ? candidates.filter((sessionUuid) => sessionUuid !== connectionProfileUuid)
+      : candidates;
+  if (routingCandidates.length === 0) {
+    return service.isEnabled(connectionProfileUuid, toolName, declaredDefault);
+  }
+  for (const sessionUuid of routingCandidates) {
     if (await service.isEnabled(sessionUuid, toolName, declaredDefault)) {
       return true;
     }

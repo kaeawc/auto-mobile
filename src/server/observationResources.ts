@@ -3,6 +3,10 @@ import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { logger } from "../utils/logger";
 import { stringifyToolResponse } from "../utils/toolUtils";
 import { ScreenshotJobTracker } from "../utils/ScreenshotJobTracker";
+import { DaemonState } from "../daemon/daemonState";
+import { TakeScreenshot } from "../features/observe/TakeScreenshot";
+import type { TrackedScreenshotService } from "../features/observe/screenshot/ObserveScreenshotRecorder";
+import type { BootedDevice } from "../models";
 import * as realFs from "fs/promises";
 
 interface ScreenshotFileSystem {
@@ -20,12 +24,67 @@ export function resetScreenshotFileSystem(): void {
   screenshotFileSystem = realFs;
 }
 
+interface ActiveSessionDevice {
+  sessionUuid: string;
+  device: BootedDevice;
+}
+
+interface SessionScreenshotResourceDependencies {
+  resolveActiveSession(sessionUuid: string): ActiveSessionDevice | undefined;
+  createScreenshotService(device: BootedDevice): TrackedScreenshotService;
+}
+
+function resolveActiveSession(sessionUuid: string): ActiveSessionDevice | undefined {
+  const daemonState = DaemonState.getInstance();
+  if (!daemonState.isInitialized()) {
+    return undefined;
+  }
+
+  const session = daemonState.getSessionManager().getSession(sessionUuid);
+  if (!session) {
+    return undefined;
+  }
+
+  const pooledDevice = daemonState.getDevicePool().getDevice(session.assignedDevice);
+  if (!pooledDevice || pooledDevice.sessionId !== sessionUuid) {
+    return undefined;
+  }
+
+  return {
+    sessionUuid,
+    device: {
+      deviceId: pooledDevice.id,
+      name: pooledDevice.name,
+      platform: pooledDevice.platform,
+      iosVersion: pooledDevice.iosVersion,
+    },
+  };
+}
+
+const defaultSessionScreenshotResourceDependencies: SessionScreenshotResourceDependencies = {
+  resolveActiveSession,
+  createScreenshotService: device => new TakeScreenshot(device),
+};
+
+let sessionScreenshotResourceDependencies = defaultSessionScreenshotResourceDependencies;
+
+export function setSessionScreenshotResourceDependencies(
+  dependencies: SessionScreenshotResourceDependencies,
+): void {
+  sessionScreenshotResourceDependencies = dependencies;
+}
+
+export function resetSessionScreenshotResourceDependencies(): void {
+  sessionScreenshotResourceDependencies = defaultSessionScreenshotResourceDependencies;
+}
+
 // Resource URIs
 export const RESOURCE_URIS = {
   LATEST_OBSERVATION: "automobile:observation/latest",
   LATEST_SCREENSHOT: "automobile:observation/latest/screenshot",
-  DEVICE_OBSERVATION: "automobile:observation/{deviceId}/latest",
-  DEVICE_SCREENSHOT: "automobile:observation/{deviceId}/latest/screenshot",
+  SESSION_OBSERVATION: "automobile:observation/session/{sessionUuid}/latest",
+  SESSION_SCREENSHOT: "automobile:observation/session/{sessionUuid}/latest/screenshot",
+  FRESH_SESSION_SCREENSHOT: "automobile:device-session/{sessionUuid}/screenshot",
 } as const;
 
 // Helper to get the latest screenshot path from cache
@@ -143,10 +202,26 @@ async function getLatestScreenshot(): Promise<ResourceContent> {
   }
 }
 
-// Device-scoped handler for observation (with deviceId parameter)
-async function getDeviceObservation(params: Record<string, string>): Promise<ResourceContent> {
-  const { deviceId } = params;
-  const uri = `automobile:observation/${deviceId}/latest`;
+function sessionResourceError(uri: string, sessionUuid: string): ResourceContent {
+  return {
+    uri,
+    mimeType: "application/json",
+    text: JSON.stringify({
+      error: `No active device session found for sessionUuid ${sessionUuid}.`,
+    }, null, 2),
+  };
+}
+
+// Session-scoped handler for a cached observation.
+async function getSessionObservation(params: Record<string, string>): Promise<ResourceContent> {
+  const { sessionUuid } = params;
+  const uri = `automobile:observation/session/${sessionUuid}/latest`;
+  const activeSession = sessionScreenshotResourceDependencies.resolveActiveSession(sessionUuid);
+  if (!activeSession) {
+    return sessionResourceError(uri, sessionUuid);
+  }
+
+  const { deviceId } = activeSession.device;
   try {
     const cachedResult = RealObserveScreen.getRecentCachedResultForDevice(deviceId);
 
@@ -155,7 +230,7 @@ async function getDeviceObservation(params: Record<string, string>): Promise<Res
         uri,
         mimeType: "application/json",
         text: JSON.stringify({
-          error: `No observation available for device ${deviceId}. Call the 'observe' tool first.`
+          error: `No observation available for sessionUuid ${sessionUuid}. Call the 'observe' tool first.`
         }, null, 2)
       };
     }
@@ -166,21 +241,27 @@ async function getDeviceObservation(params: Record<string, string>): Promise<Res
       text: stringifyToolResponse(cachedResult)
     };
   } catch (error) {
-    logger.error(`[ObservationResources] Failed to get observation for device ${deviceId}: ${error}`);
+    logger.error(`[ObservationResources] Failed to get observation for session ${sessionUuid}: ${error}`);
     return {
       uri,
       mimeType: "application/json",
       text: JSON.stringify({
-        error: `Failed to retrieve observation for device ${deviceId}: ${error}`
+        error: `Failed to retrieve observation for sessionUuid ${sessionUuid}: ${error}`
       }, null, 2)
     };
   }
 }
 
-// Device-scoped handler for screenshot (with deviceId parameter)
-async function getDeviceScreenshot(params: Record<string, string>): Promise<ResourceContent> {
-  const { deviceId } = params;
-  const uri = `automobile:observation/${deviceId}/latest/screenshot`;
+// Session-scoped handler for a cached screenshot.
+async function getSessionScreenshot(params: Record<string, string>): Promise<ResourceContent> {
+  const { sessionUuid } = params;
+  const uri = `automobile:observation/session/${sessionUuid}/latest/screenshot`;
+  const activeSession = sessionScreenshotResourceDependencies.resolveActiveSession(sessionUuid);
+  if (!activeSession) {
+    return sessionResourceError(uri, sessionUuid);
+  }
+
+  const { deviceId } = activeSession.device;
   try {
     const cachedResult = RealObserveScreen.getRecentCachedResultForDevice(deviceId);
     if (!cachedResult) {
@@ -188,7 +269,7 @@ async function getDeviceScreenshot(params: Record<string, string>): Promise<Reso
         uri,
         mimeType: "application/json",
         text: JSON.stringify({
-          error: `No observation available for device ${deviceId}. Call the 'observe' tool first.`
+          error: `No observation available for sessionUuid ${sessionUuid}. Call the 'observe' tool first.`
         }, null, 2)
       };
     }
@@ -197,8 +278,8 @@ async function getDeviceScreenshot(params: Record<string, string>): Promise<Reso
     if (!screenshotPath) {
       const screenshotError = RealObserveScreen.getRecentCachedScreenshotErrorForDevice(deviceId);
       const errorMessage = screenshotError
-        ? `No screenshot available for device ${deviceId}: ${screenshotError}`
-        : `No screenshot available for device ${deviceId}. Call the 'observe' tool again.`;
+        ? `No screenshot available for sessionUuid ${sessionUuid}: ${screenshotError}`
+        : `No screenshot available for sessionUuid ${sessionUuid}. Call the 'observe' tool again.`;
       return {
         uri,
         mimeType: "application/json",
@@ -212,13 +293,64 @@ async function getDeviceScreenshot(params: Record<string, string>): Promise<Reso
 
     return { uri, mimeType, blob: base64Image };
   } catch (error) {
-    logger.error(`[ObservationResources] Failed to get screenshot for device ${deviceId}: ${error}`);
+    logger.error(`[ObservationResources] Failed to get screenshot for session ${sessionUuid}: ${error}`);
     return {
       uri,
       mimeType: "application/json",
       text: JSON.stringify({
-        error: `Failed to retrieve screenshot for device ${deviceId}: ${error}`
+        error: `Failed to retrieve screenshot for sessionUuid ${sessionUuid}: ${error}`
       }, null, 2)
+    };
+  }
+}
+
+// Session-scoped handler for a fresh screenshot. Every successful read captures
+// the screen; it deliberately does not fall back to an observe cache.
+async function getFreshSessionScreenshot(params: Record<string, string>): Promise<ResourceContent> {
+  const { sessionUuid } = params;
+  const uri = `automobile:device-session/${sessionUuid}/screenshot`;
+  const activeSession = sessionScreenshotResourceDependencies.resolveActiveSession(sessionUuid);
+  if (!activeSession) {
+    return sessionResourceError(uri, sessionUuid);
+  }
+
+  try {
+    const screenshotService =
+      sessionScreenshotResourceDependencies.createScreenshotService(activeSession.device);
+    const { promise } = screenshotService.startTrackedCapture(
+      { format: "png" },
+      { coalesceWithPending: true },
+    );
+    const result = await promise;
+
+    const currentSession = sessionScreenshotResourceDependencies.resolveActiveSession(sessionUuid);
+    if (currentSession?.device.deviceId !== activeSession.device.deviceId) {
+      return sessionResourceError(uri, sessionUuid);
+    }
+    if (!result.success || !result.path) {
+      return {
+        uri,
+        mimeType: "application/json",
+        text: JSON.stringify({
+          error: result.error || "Failed to capture a fresh screenshot.",
+        }, null, 2),
+      };
+    }
+
+    const imageBuffer = await screenshotFileSystem.readFile(result.path);
+    return {
+      uri,
+      mimeType: "image/png",
+      blob: imageBuffer.toString("base64"),
+    };
+  } catch (error) {
+    logger.error(`[ObservationResources] Failed to capture fresh screenshot for session ${sessionUuid}: ${error}`);
+    return {
+      uri,
+      mimeType: "application/json",
+      text: JSON.stringify({
+        error: `Failed to capture fresh screenshot for sessionUuid ${sessionUuid}: ${error}`,
+      }, null, 2),
     };
   }
 }
@@ -243,22 +375,31 @@ export function registerObservationResources(): void {
     getLatestScreenshot
   );
 
-  // Register device-scoped observation template
+  // Register session-scoped observation template
   ResourceRegistry.registerTemplate(
-    RESOURCE_URIS.DEVICE_OBSERVATION,
-    "Device Observation",
-    "Screen observation for a specific device. Use when multiple devices are active.",
+    RESOURCE_URIS.SESSION_OBSERVATION,
+    "Session Observation",
+    "Cached screen observation for an active device session.",
     "application/json",
-    getDeviceObservation
+    getSessionObservation
   );
 
-  // Register device-scoped screenshot template
+  // Register session-scoped cached screenshot template
   ResourceRegistry.registerTemplate(
-    RESOURCE_URIS.DEVICE_SCREENSHOT,
-    "Device Screenshot",
-    "Screen capture for a specific device. Use when multiple devices are active.",
+    RESOURCE_URIS.SESSION_SCREENSHOT,
+    "Session Screenshot",
+    "Cached screen capture for an active device session.",
     "image/png",
-    getDeviceScreenshot
+    getSessionScreenshot
+  );
+
+  // Register fresh session screenshot template
+  ResourceRegistry.registerTemplate(
+    RESOURCE_URIS.FRESH_SESSION_SCREENSHOT,
+    "Fresh Session Screenshot",
+    "Fresh PNG screen capture for an active device session. Every read captures the current screen.",
+    "image/png",
+    getFreshSessionScreenshot
   );
 
   logger.info("[ObservationResources] Registered observation resources");

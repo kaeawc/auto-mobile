@@ -5,6 +5,7 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeFileSystem } from "../../fakes/FakeFileSystem";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
+import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 
 describe("TakeScreenshot", function() {
   describe("Unit Tests for Extracted Methods", function() {
@@ -33,7 +34,7 @@ describe("TakeScreenshot", function() {
       const result = takeScreenshot.generateScreenshotPath(timestamp, options);
 
       expect(result).toContain("screenshot_1234567890123");
-      expect(result).toMatch(/screenshot_1234567890123\.png$/);
+      expect(result).toMatch(/screenshot_1234567890123_[^.]+\.png$/);
     });
 
     test("should generate correct screenshot path with webp format", function() {
@@ -43,7 +44,7 @@ describe("TakeScreenshot", function() {
       const result = takeScreenshot.generateScreenshotPath(timestamp, options);
 
       expect(result).toContain("screenshot_1234567890456");
-      expect(result).toMatch(/screenshot_1234567890456\.webp$/);
+      expect(result).toMatch(/screenshot_1234567890456_[^.]+\.webp$/);
     });
 
     test("should generate different timestamps for consecutive calls", async function() {
@@ -57,6 +58,24 @@ describe("TakeScreenshot", function() {
       const result2 = takeScreenshot.generateScreenshotPath(timestamp2, options);
 
       expect(result1).not.toBe(result2);
+    });
+
+    test("uses an injected unique suffix when captures share a timestamp", function() {
+      const idGenerator = new CountingIdGenerator("capture");
+      const sameTime = 1234567890123;
+      const screenshot = new TakeScreenshot(
+        mockDevice,
+        new FakeAdbClientFactory(fakeAdb),
+        new FakeTimer(),
+        idGenerator,
+      );
+
+      const first = screenshot.generateScreenshotPath(sameTime, { format: "png" });
+      const second = screenshot.generateScreenshotPath(sameTime, { format: "png" });
+
+      expect(first).toMatch(/screenshot_1234567890123_capture-1\.png$/);
+      expect(second).toMatch(/screenshot_1234567890123_capture-2\.png$/);
+      expect(first).not.toBe(second);
     });
 
     test("should use single optimized ADB command for screenshot capture", async function() {

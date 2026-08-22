@@ -218,6 +218,48 @@ describe("AndroidEmulatorClient launch contract", () => {
     secondChild.emit("exit", 0, null);
   });
 
+  test("rejects an occupied selected port when the raw-state scan fails", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setDevices([
+      { name: "Unknown", platform: "android", deviceId: "emulator-5554" },
+    ]);
+    adb.getDeviceStates = async () => {
+      throw new Error("raw device-state scan failed");
+    };
+    let spawns = 0;
+    const client = createClient(() => {
+      spawns += 1;
+      return createChild();
+    }, adb);
+
+    await expect(
+      client.launchEmulator({ avdName: "Pixel 9", deviceId: "emulator-5554" }),
+    ).rejects.toThrow("console port 5554 is already in use");
+    expect(spawns).toBe(0);
+  });
+
+  test("does not allocate a console port when the raw-state scan fails", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setDevices([
+      { name: "Unknown", platform: "android", deviceId: "emulator-5554" },
+    ]);
+    adb.getDeviceStates = async () => {
+      throw new Error("raw device-state scan failed");
+    };
+    const child = createChild();
+    let spawnedArgs: string[] = [];
+    const client = createClient((_command, args) => {
+      spawnedArgs = args;
+      queueMicrotask(() => child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")));
+      return child;
+    }, adb);
+
+    await client.startEmulator("Pixel 9");
+
+    expect(spawnedArgs).not.toContain("-port");
+    child.emit("exit", 0, null);
+  });
+
   test("does not spawn when launch has already been cancelled", async () => {
     const controller = new AbortController();
     controller.abort();

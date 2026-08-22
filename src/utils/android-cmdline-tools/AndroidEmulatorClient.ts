@@ -380,6 +380,11 @@ type EmulatorDeviceIdReservation = {
   readonly appendPort: boolean;
 };
 
+type EmulatorDeviceIdSnapshot = {
+  readonly deviceIds: ReadonlySet<string>;
+  readonly isComplete: boolean;
+};
+
 const execAsync = async (
   file: string,
   args: string[],
@@ -1501,14 +1506,14 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       args.push(...parseExtraEmulatorArguments(extraArgsRaw));
     }
     this.throwIfLaunchCancelled(avdName, isCancelled);
-    const preLaunchEmulatorDeviceIds = await this.capturePreLaunchEmulatorDeviceIds(
+    const preLaunchEmulatorDeviceSnapshot = await this.capturePreLaunchEmulatorDeviceIds(
       capturePreLaunchDeviceIds,
       signal,
     );
     this.throwIfLaunchCancelled(avdName, isCancelled);
     const reservedDeviceId = this.addReservedEmulatorPort(
       args,
-      preLaunchEmulatorDeviceIds,
+      preLaunchEmulatorDeviceSnapshot,
       expectedDeviceId,
     );
     logger.info(`Starting emulator with AVD: ${avdName}`);
@@ -2017,13 +2022,14 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   private async capturePreLaunchEmulatorDeviceIds(
     capture: boolean,
     signal?: AbortSignal,
-  ): Promise<ReadonlySet<string> | undefined> {
+  ): Promise<EmulatorDeviceIdSnapshot | undefined> {
     if (!capture) {
       return undefined;
     }
     const terminalReservationsAtSnapshot = new Map(
       AndroidEmulatorClient.terminalReservedDeviceIds,
     );
+    let deviceIds: Set<string> | undefined;
     try {
       const adb = this.adbFactory.create(null);
       const devices = await adb.getBootedAndroidDevices({
@@ -2031,7 +2037,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         throwOnMissingAdb: true,
         signal,
       });
-      const deviceIds = new Set(
+      deviceIds = new Set(
         devices
           .map((device) => device.deviceId)
           .filter((deviceId): deviceId is string => deviceId.startsWith("emulator-")),
@@ -2039,17 +2045,24 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       if (signal?.aborted) {
         throw signal.reason ?? new Error("Android emulator reservation snapshot was cancelled");
       }
-      const deviceStates = (await adb.getDeviceStates?.({ signal })) ?? [];
+      if (!adb.getDeviceStates) {
+        return { deviceIds, isComplete: false };
+      }
+      const deviceStates = await adb.getDeviceStates({ signal });
       for (const { deviceId } of deviceStates) {
         if (deviceId.startsWith("emulator-")) {
           deviceIds.add(deviceId);
         }
       }
       this.releaseAbsentTerminalReservations(deviceIds, terminalReservationsAtSnapshot);
-      return deviceIds;
+      return { deviceIds, isComplete: true };
     } catch (error) {
       if (signal?.aborted) {
         throw error;
+      }
+      if (deviceIds) {
+        logger.debug(`Could not capture all pre-launch emulator device IDs: ${error}`);
+        return { deviceIds, isComplete: false };
       }
       // Without a current device list, do not select a port that could belong to
       // another local emulator. Readiness can still use a captured serial or an
@@ -2090,7 +2103,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   }
 
   private reserveEmulatorDeviceId(
-    preexistingDeviceIds: ReadonlySet<string> | undefined,
+    preLaunchSnapshot: EmulatorDeviceIdSnapshot | undefined,
     args: readonly string[],
     expectedDeviceId?: string,
   ): EmulatorDeviceIdReservation | undefined {
@@ -2111,7 +2124,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     }
     const deviceId = expectedEmulatorDeviceId ?? configuredDeviceId;
     if (deviceId) {
-      if (this.unavailableEmulatorDeviceIds(preexistingDeviceIds).has(deviceId)) {
+      if (this.unavailableEmulatorDeviceIds(preLaunchSnapshot?.deviceIds).has(deviceId)) {
         throw new ActionableError(
           `Cannot safely launch an Android emulator: console port ` +
             `${deviceId.slice("emulator-".length)} is already in use`,
@@ -2119,22 +2132,22 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       }
       return { deviceId, appendPort: configuredDeviceId === undefined };
     }
-    if (!preexistingDeviceIds) {
+    if (!preLaunchSnapshot?.isComplete) {
       return undefined;
     }
     return {
-      deviceId: this.allocateReservedEmulatorDeviceId(preexistingDeviceIds),
+      deviceId: this.allocateReservedEmulatorDeviceId(preLaunchSnapshot.deviceIds),
       appendPort: true,
     };
   }
 
   private addReservedEmulatorPort(
     args: string[],
-    preexistingDeviceIds: ReadonlySet<string> | undefined,
+    preLaunchSnapshot: EmulatorDeviceIdSnapshot | undefined,
     expectedDeviceId?: string,
   ): string | undefined {
     const reservation = this.reserveEmulatorDeviceId(
-      preexistingDeviceIds,
+      preLaunchSnapshot,
       args,
       expectedDeviceId,
     );

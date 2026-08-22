@@ -322,15 +322,25 @@ export abstract class DeviceServiceClient {
     this.isConnecting = true;
     this.connectionAttempts++;
     this.lastConnectionAttempt = this.timer.now();
+    // Snapshot the lifecycle generation before the first await so a close() that
+    // overlaps the awaited platform setup (e.g. adb port-forward) is observed.
+    const generation = this.connectionGeneration;
 
     try {
       // Platform-specific setup (e.g., port forwarding)
       await perf.track("platformSetup", () => this.setupBeforeConnect(perf));
 
+      if (generation !== this.connectionGeneration) {
+        // close() ran during platform setup; do not open a socket to a
+        // shutting-down device transport.
+        logger.info(`[${this.logTag}] Aborting connect: closed during platform setup`);
+        this.isConnecting = false;
+        return false;
+      }
+
       const wsUrl = this.getWebSocketUrl();
       logger.info(`[${this.logTag}] Connecting to WebSocket at ${wsUrl} (attempt ${this.connectionAttempts}/${this.config.maxConnectionAttempts})`);
 
-      const generation = this.connectionGeneration;
       return await perf.track("wsConnect", () => new Promise<boolean>((resolve, reject) => {
         const ws = this.webSocketFactory(wsUrl);
         const connectionTimeout = this.timer.setTimeout(() => {

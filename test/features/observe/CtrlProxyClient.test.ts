@@ -186,6 +186,62 @@ describe("AndroidCtrlProxyClient", function() {
     }
   });
 
+  test("aborts a connect whose platform setup completes after close()", async () => {
+    const manualTimer = new FakeTimer();
+    let releaseForward!: () => void;
+    const forwardGate = new Promise<void>(resolve => {
+      releaseForward = resolve;
+    });
+    class GatedForwardAdb extends FakeAdbExecutor {
+      override async executeCommand(
+        command: string,
+        timeoutMs?: number,
+        maxBuffer?: number,
+        noRetry?: boolean,
+        signal?: AbortSignal,
+      ) {
+        if (command.includes("forward")) {
+          await forwardGate; // hold setupBeforeConnect until the test releases it
+        }
+        return super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+      }
+    }
+    const gatedAdb = new GatedForwardAdb();
+    gatedAdb.setCommandResponse("forward", { stdout: `${serverPort}`, stderr: "" });
+    gatedAdb.setScreenState(true);
+    let socket: FakeWebSocket | null = null;
+    const factory = (url: string): WebSocket => {
+      socket = new FakeWebSocket(url, "timeout", 60_000, manualTimer);
+      return socket as unknown as WebSocket;
+    };
+    const client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      gatedAdb,
+      factory,
+      manualTimer,
+    );
+    try {
+      const connectPromise = client.ensureConnected();
+      await flushPromises(8); // parked inside setupBeforeConnect; no socket yet
+      expect(socket).toBeNull();
+
+      // Shutdown teardown closes the client while port-forward setup is pending.
+      await client.close();
+
+      // Platform setup now finishes — after close().
+      releaseForward();
+      await flushPromises(8);
+
+      // The connect aborts before creating a socket, so the loops cannot restart.
+      expect(socket).toBeNull();
+      expect(client.isConnected()).toBe(false);
+      await expect(connectPromise).resolves.toBe(false);
+    } finally {
+      releaseForward();
+      await client.close();
+    }
+  });
+
   const settleNavigationHierarchyInterleaving = async (timer: FakeTimer): Promise<void> => {
     // recordNavigationEvent commits its in-memory writes across several async
     // query hops before assigning currentScreen. Drain setImmediate + microtasks

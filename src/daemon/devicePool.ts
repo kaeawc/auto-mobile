@@ -165,6 +165,11 @@ interface AdbServerResetRecoveryReservation {
   resolve(): void;
 }
 
+export interface AdbServerResetCohortDetachment {
+  devices: readonly PooledDevice[];
+  deferred: boolean;
+}
+
 interface AndroidStartupLeaseRequest {
   name?: string;
   exactName: boolean;
@@ -1022,6 +1027,15 @@ export class DevicePool {
   }
 
   markIntentionalShutdown(deviceId: string): void {
+    const resetReservation = Array.from(this.adbServerResetRecoveryReservations.values()).find(
+      reservation => reservation.deviceId === deviceId,
+    );
+    if (resetReservation) {
+      // Resolve reset-cohort ownership before consulting the current serial. A
+      // prior recovery may already have reused this serial for a different AVD.
+      resetReservation.cancelled = true;
+      return;
+    }
     const device = this.devices.get(deviceId);
     if (device) {
       // Tie the marker to the incarnation present now, so a later same-serial
@@ -1029,15 +1043,7 @@ export class DevicePool {
       this.intentionalShutdowns.set(deviceId, device.incarnation);
       return;
     }
-    const resetReservation = Array.from(this.adbServerResetRecoveryReservations.values()).find(
-      reservation => reservation.deviceId === deviceId,
-    );
-    if (resetReservation) {
-      // The cohort member is no longer pooled and its former serial can be
-      // reused by an earlier recovery. Keep this cancellation on its AVD
-      // reservation rather than a serial-scoped marker.
-      resetReservation.cancelled = true;
-    } else if (this.recoveringAndroidDeviceIds.has(deviceId)) {
+    if (this.recoveringAndroidDeviceIds.has(deviceId)) {
       // No pooled device yet (an in-flight recovery owns the serial); the mark
       // applies to whatever incarnation the recovery produces.
       this.intentionalShutdowns.set(deviceId, INCARNATION_ANY);
@@ -1978,14 +1984,22 @@ export class DevicePool {
    */
   async detachAdbServerResetCohort(
     cohort: readonly PooledDevice[],
-  ): Promise<readonly PooledDevice[]> {
+  ): Promise<AdbServerResetCohortDetachment> {
     return await this.assignmentMutex.runExclusive(async () => {
+      if (cohort.some(device =>
+        this.isAutoMobileOwnedAndroidVirtualDevice(device) &&
+        this.isLeasedForAndroidStartup(device.avdName),
+      )) {
+        // An ADB reset affects every member of this captured cohort. Leaving a
+        // subset pooled would make later polling treat those members as ordinary
+        // disconnects, permanently separating their preserved sessions.
+        return { devices: [], deferred: true };
+      }
       const detached: PooledDevice[] = [];
       for (const device of cohort) {
         if (
           this.devices.get(device.id) !== device ||
-          !this.isAutoMobileOwnedAndroidVirtualDevice(device) ||
-          this.isLeasedForAndroidStartup(device.avdName)
+          !this.isAutoMobileOwnedAndroidVirtualDevice(device)
         ) {
           continue;
         }
@@ -2016,7 +2030,7 @@ export class DevicePool {
         await this.removeDevice(device.id, false, device);
         detached.push(device);
       }
-      return detached;
+      return { devices: detached, deferred: false };
     });
   }
 
@@ -4054,6 +4068,12 @@ export class DevicePool {
           existingSession.assignedDevice === deviceId &&
           existingSession.platform === device.platform
         ) {
+          this.assertExistingRecoverySessionOwner(
+            existingSession,
+            sessionId,
+            deviceId,
+            expectedExistingSessionDeviceId,
+          );
           return this.reuseExistingDeviceSession(deviceId, existingSession.sessionId, sourceImage);
         }
 
@@ -4113,6 +4133,19 @@ export class DevicePool {
         session.platform !== platform
       )
     ) {
+      throw new ActionableError(
+        `Session '${sessionId}' changed while device '${deviceId}' was recovering.`,
+      );
+    }
+  }
+
+  private assertExistingRecoverySessionOwner(
+    session: Session,
+    sessionId: string,
+    deviceId: string,
+    expectedDeviceId: string | undefined,
+  ): void {
+    if (expectedDeviceId !== undefined && session.sessionId !== sessionId) {
       throw new ActionableError(
         `Session '${sessionId}' changed while device '${deviceId}' was recovering.`,
       );

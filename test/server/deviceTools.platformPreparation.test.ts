@@ -237,7 +237,7 @@ describe("platform device preparation tools", () => {
     expect(settled).toBe(false);
     expect(deviceUtils.getExecutedOperations()).not.toContain(`startDevice:${stale.name}:120000`);
 
-    await pool.releaseAdbServerResetCohortReservations(detached);
+    await pool.releaseAdbServerResetCohortReservations(detached.devices);
     await expect(preparation).resolves.toMatchObject({
       deviceIdentity: { avdName: stale.name },
     });
@@ -278,7 +278,7 @@ describe("platform device preparation tools", () => {
       timer.advanceTime(10);
       await expect(preparation).rejects.toThrow(/Timed out waiting for Android AVD reset recovery/);
     } finally {
-      await pool.releaseAdbServerResetCohortReservations(detached);
+      await pool.releaseAdbServerResetCohortReservations(detached.devices);
     }
   });
 
@@ -321,11 +321,11 @@ describe("platform device preparation tools", () => {
       expect(deviceUtils.getExecutedOperations()).not.toContain(`startDevice:${stale.name}:120000`);
 
       deviceUtils.setBootedDevices("android", [stale]);
-      await pool.releaseAdbServerResetCohortReservations(detached);
+      await pool.releaseAdbServerResetCohortReservations(detached.devices);
       await preparation.catch(() => undefined);
       expect(settled).toBe(true);
     } finally {
-      await pool.releaseAdbServerResetCohortReservations(detached);
+      await pool.releaseAdbServerResetCohortReservations(detached.devices);
     }
   });
 });

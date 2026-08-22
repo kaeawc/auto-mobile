@@ -1453,9 +1453,16 @@ export class Daemon {
           this.forceDisconnectedDeviceIds,
           this.devicePool.getAllDevices(),
         );
-        adbServerResetCohort = detectedAdbServerResetCohort.length > 0
+        const adbServerResetDetachment = detectedAdbServerResetCohort.length > 0
           ? await this.devicePool.detachAdbServerResetCohort(detectedAdbServerResetCohort)
-          : [];
+          : { devices: [], deferred: false };
+        if (adbServerResetDetachment.deferred) {
+          logger.info(
+            "[DisconnectMonitor] Deferring process-wide ADB reset recovery until matching Android startup completes",
+          );
+          return;
+        }
+        adbServerResetCohort = adbServerResetDetachment.devices;
         const processWideAdbServerReset = adbServerResetCohort.length > 0;
         const adbServerResetCohortByDeviceId = new Map(
           adbServerResetCohort.map(device => [device.id, device]),

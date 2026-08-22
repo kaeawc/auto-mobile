@@ -1004,6 +1004,94 @@ final class ElementLocatorTests: XCTestCase {
         XCTAssertNil(ElementLocator.computePixelDimensions(pointWidth: 375, pointHeight: 812, nativeScale: .nan))
     }
 
+    // MARK: - Per-extraction device-load reduction (#5474)
+
+    // AC1: the live keyboard-focus requery is skipped on the no-text-field path.
+    func testShouldQueryKeyboardFocus_skipsWhenNoTextInputPresent() {
+        XCTAssertFalse(ElementLocator.shouldQueryKeyboardFocus(textInputSnapshotCount: 0))
+    }
+
+    func testShouldQueryKeyboardFocus_runsWhenTextInputPresent() {
+        XCTAssertTrue(ElementLocator.shouldQueryKeyboardFocus(textInputSnapshotCount: 1))
+        XCTAssertTrue(ElementLocator.shouldQueryKeyboardFocus(textInputSnapshotCount: 5))
+    }
+
+    // AC2: the second SpringBoard full snapshot is gated behind a cheap precondition.
+    func testShouldSnapshotSpringboardForAlerts_skipsWhenForegroundIsSpringboard() {
+        // SpringBoard's tree is already the app snapshot — never take a second one,
+        // regardless of whether it shows an alert.
+        XCTAssertFalse(
+            ElementLocator.shouldSnapshotSpringboardForAlerts(foregroundIsSpringboard: true, appHasAlert: false)
+        )
+        XCTAssertFalse(
+            ElementLocator.shouldSnapshotSpringboardForAlerts(foregroundIsSpringboard: true, appHasAlert: true)
+        )
+    }
+
+    func testShouldSnapshotSpringboardForAlerts_runsOnlyWhenAppShowsAlert() {
+        // Common per-extraction case: real app, no alert in its tree → skip the
+        // second serialization.
+        XCTAssertFalse(
+            ElementLocator.shouldSnapshotSpringboardForAlerts(foregroundIsSpringboard: false, appHasAlert: false)
+        )
+        // Real app whose own snapshot already shows an alert → a co-presented
+        // system dialog may exist in SpringBoard's tree, so pay for the snapshot.
+        XCTAssertTrue(
+            ElementLocator.shouldSnapshotSpringboardForAlerts(foregroundIsSpringboard: false, appHasAlert: true)
+        )
+    }
+
+    // AC3: the ~40-app foreground-detection sweep is bounded on the miss path.
+    func testShouldRunSystemAppSweep_runsWhenNeverSwept() {
+        // lastMissTime == 0 means the sweep has never cached a miss (or a
+        // foreground switch invalidated it) — always run.
+        XCTAssertTrue(
+            ElementLocator.shouldRunSystemAppSweep(now: 5_000_000_000, lastMissTime: 0, ttlNanos: 1_000_000_000)
+        )
+    }
+
+    func testShouldRunSystemAppSweep_skipsWithinTtlOfRecentMiss() {
+        // A miss 100ms ago with a 1s TTL → skip the ~40-IPC fan-out.
+        let ttl: UInt64 = 1_000_000_000
+        let lastMiss: UInt64 = 5_000_000_000
+        let now = lastMiss + 100_000_000
+        XCTAssertFalse(
+            ElementLocator.shouldRunSystemAppSweep(now: now, lastMissTime: lastMiss, ttlNanos: ttl)
+        )
+    }
+
+    func testShouldRunSystemAppSweep_runsAfterTtlElapsed() {
+        let ttl: UInt64 = 1_000_000_000
+        let lastMiss: UInt64 = 5_000_000_000
+        XCTAssertTrue(
+            ElementLocator.shouldRunSystemAppSweep(now: lastMiss + ttl, lastMissTime: lastMiss, ttlNanos: ttl)
+        )
+        XCTAssertTrue(
+            ElementLocator.shouldRunSystemAppSweep(now: lastMiss + ttl + 1, lastMissTime: lastMiss, ttlNanos: ttl)
+        )
+    }
+
+    func testShouldRunSystemAppSweep_runsWhenClockAppearsToGoBackwards() {
+        // Never wedge on a bad/backwards sample — run the sweep.
+        XCTAssertTrue(
+            ElementLocator.shouldRunSystemAppSweep(now: 10, lastMissTime: 5_000_000_000, ttlNanos: 1_000_000_000)
+        )
+    }
+
+    // AC3: a foreground switch invalidates the cached negative sweep result so the
+    // miss path does not stay wedged after the foreground app changes.
+    func testForegroundTracker_systemAppSweepMissResetOnSwitch() {
+        let tracker = ForegroundTracker()
+        XCTAssertEqual(tracker.lastSystemAppSweepMiss, 0)
+
+        tracker.lastSystemAppSweepMiss = 42
+        XCTAssertEqual(tracker.lastSystemAppSweepMiss, 42)
+
+        // An explicit foreground switch clears the negative cache.
+        _ = tracker.switchForeground(app: nil, bundleId: "com.example.app", observe: true, now: 999)
+        XCTAssertEqual(tracker.lastSystemAppSweepMiss, 0)
+    }
+
     func testForegroundTrackerConcurrentAccessDoesNotCrash() {
         let tracker = ForegroundTracker()
         DispatchQueue.concurrentPerform(iterations: 2_000) { i in

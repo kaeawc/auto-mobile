@@ -1505,7 +1505,7 @@ export class Daemon {
           }
 
           if (processWideAdbServerReset && pooledDeviceAtDisconnect) {
-            if (await this.recoverProcessWideAdbServerResetDevice(
+            if (await this.tryRecoverProcessWideAdbServerResetDevice(
               deviceId,
               pooledDeviceAtDisconnect,
               forceGenerationAtDisconnect,
@@ -1592,6 +1592,25 @@ export class Daemon {
       }
     });
     this.deviceDisconnectMonitor.start();
+  }
+
+  private async tryRecoverProcessWideAdbServerResetDevice(
+    deviceId: string,
+    pooledDevice: PooledDevice,
+    forceGenerationAtDisconnect: number | undefined,
+  ): Promise<boolean> {
+    try {
+      return await this.recoverProcessWideAdbServerResetDevice(
+        deviceId,
+        pooledDevice,
+        forceGenerationAtDisconnect,
+      );
+    } catch (error) {
+      logger.warn(
+        `[DisconnectMonitor] ADB-reset recovery failed for ${deviceId}; continuing cohort cleanup: ${error}`,
+      );
+      return false;
+    }
   }
 
   private async recoverProcessWideAdbServerResetDevice(

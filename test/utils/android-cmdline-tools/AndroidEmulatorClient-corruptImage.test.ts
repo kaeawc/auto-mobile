@@ -419,6 +419,37 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
     expect(readyDevice.deviceId).toBe("emulator-5556");
     expect(fakeAdb.getExecutedCommands().some(command => command.includes("get-state"))).toBe(true);
   });
+
+  test("keeps an exited launch port reserved while ADB reports its serial offline", async () => {
+    const firstChild = createFakeChildProcess();
+    const secondChild = createFakeChildProcess();
+    const children = [firstChild, secondChild];
+    const spawnedArgs: string[][] = [];
+    const spawnFn = ((_cmd: string, args: string[]) => {
+      spawnedArgs.push(args);
+      const child = children.shift()!;
+      process.nextTick(() => {
+        child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+      });
+      return child;
+    }) as any;
+    const execAsync = async (_file: string, args: string[]): Promise<ExecResult> =>
+      args.includes("-list-avds") ? createExecResult("Pixel_9_Pro\n") : createExecResult("");
+
+    fakeTimer.enableAutoAdvance();
+    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory, fakeAvdConfigReader);
+    skipEmulatorPathDetection(client);
+
+    const firstLaunch = await client.startEmulator("Pixel_9_Pro");
+    firstLaunch!.emit("exit", 0);
+    fakeAdb.setDeviceStates([{ deviceId: "emulator-5554", state: "offline" }]);
+    await client.startEmulator("Pixel_9_Pro");
+
+    expect(spawnedArgs).toEqual([
+      expect.arrayContaining(["-port", "5554"]),
+      expect.arrayContaining(["-port", "5556"]),
+    ]);
+  });
 });
 
 describe("AndroidEmulatorClient waitForEmulatorReady with child process monitoring", () => {
@@ -894,11 +925,12 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     const firstLaunch = await client.startEmulator("am-api33-ga-arm64");
     const secondLaunch = await client.startEmulator("am-api33-ga-arm64");
     await expect(
-      client.waitForEmulatorReady("am-api33-ga-arm64", 100, firstLaunch),
+      client.waitForEmulatorReady("am-api33-ga-arm64", 100, secondLaunch),
     ).rejects.toThrow("failed to become ready within 100ms");
 
     expect(spawnedArgs.some(args => !args.includes("-port"))).toBe(true);
     expect(scopedFactory.commandLog.some(command => command.startsWith("emulator-5558:get-state"))).toBe(false);
+    firstLaunch!.emit("exit", 0);
     secondLaunch!.emit("exit", 0);
   });
 

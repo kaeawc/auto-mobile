@@ -1921,7 +1921,8 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       return undefined;
     }
     try {
-      const devices = await this.adbFactory.create(null).getBootedAndroidDevices({
+      const adb = this.adbFactory.create(null);
+      const devices = await adb.getBootedAndroidDevices({
         bypassCache: true,
         throwOnMissingAdb: true,
       });
@@ -1930,6 +1931,12 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           .map((device) => device.deviceId)
           .filter((deviceId): deviceId is string => deviceId.startsWith("emulator-")),
       );
+      const deviceStates = (await adb.getDeviceStates?.()) ?? [];
+      for (const { deviceId } of deviceStates) {
+        if (deviceId.startsWith("emulator-")) {
+          deviceIds.add(deviceId);
+        }
+      }
       this.releaseAbsentTerminalReservations(deviceIds);
       return deviceIds;
     } catch (error) {

@@ -26,6 +26,7 @@ describe("DaemonManager file lock", () => {
     }
     tempDirs.length = 0;
     delete process.env.AUTOMOBILE_DATA_DIR;
+    delete process.env.AUTOMOBILE_LOG_DIR;
   });
 
   describe("acquireLock", () => {
@@ -158,14 +159,17 @@ describe("DaemonManager file lock", () => {
       const fakeTimer = new FakeTimer();
       fakeTimer.enableAutoAdvance();
 
-      const lockHolderPid = 424_242;
-      writeFileSync(lockPath, String(lockHolderPid));
-      const logsDir = join(dirname(lockPath), "logs");
-      mkdirSync(logsDir, { recursive: true });
+      const holderLogsDir = join(dirname(lockPath), "holder-logs");
+      process.env.AUTOMOBILE_LOG_DIR = holderLogsDir;
+      const holder = new DaemonManager(undefined, undefined, fakeTimer, lockPath);
+      expect(holder.acquireLock()).toBe(true);
+      mkdirSync(holderLogsDir, { recursive: true });
       writeFileSync(
-        join(logsDir, `daemon-launch-${lockHolderPid}.log`),
+        join(holderLogsDir, `daemon-launch-${process.pid}.log`),
         "Initializing CtrlProxy iOS for SIMULATOR-B\nrunner-health: connection refused\n",
       );
+
+      process.env.AUTOMOBILE_LOG_DIR = join(dirname(lockPath), "follower-logs");
       const timeouts: number[] = [];
 
       class TestDaemonManager extends DaemonManager {
@@ -182,13 +186,11 @@ describe("DaemonManager file lock", () => {
       const manager = new TestDaemonManager(undefined, undefined, fakeTimer, lockPath);
 
       await expect(manager.start()).rejects.toThrow(
-        /Another process is starting the daemon but it failed to become ready[\s\S]*daemon-launch-424242\.log[\s\S]*SIMULATOR-B/
+        /Another process is starting the daemon but it failed to become ready[\s\S]*holder-logs[\s\S]*SIMULATOR-B/
       );
       expect(timeouts).toEqual([30_000, 30_000]);
 
-      // Clean up
-      const { unlinkSync } = require("node:fs");
-      unlinkSync(lockPath);
+      holder.releaseLock();
     });
 
     test("releases lock after successful start", async () => {

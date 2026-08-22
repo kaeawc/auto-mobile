@@ -339,7 +339,7 @@ internal object DaemonSocketClientManager {
 }
 
 internal object DaemonSocketPaths {
-  private const val DEFAULT_DAEMON_STARTUP_TIMEOUT_MS = 10000L
+  private const val DEFAULT_DAEMON_STARTUP_TIMEOUT_MS = 30000L
   private const val DAEMON_PACKAGE_NAME = "@kaeawc/auto-mobile"
   private const val DAEMON_PACKAGE_VERSION_PROPERTY = "automobile.daemon.package.version"
   private val ignoredPackageVersions = setOf("latest", "unknown")

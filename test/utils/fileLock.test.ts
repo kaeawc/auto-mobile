@@ -220,12 +220,18 @@ describe("fileLock primitive", () => {
     test("formatLockContent keeps the PID a bare integer on line 1", () => {
       expect(formatLockContent(100)).toBe("100");
       expect(formatLockContent(100, "tok-A")).toBe("100\ntok-A");
+      expect(formatLockContent(100, undefined, "holder-log-path")).toBe("100\n\nholder-log-path");
       expect(Number.parseInt(formatLockContent(100, "tok-A"), 10)).toBe(100);
     });
 
     test("parseLockContent round-trips formatLockContent", () => {
       expect(parseLockContent(formatLockContent(100))).toEqual({ pid: 100, token: undefined });
       expect(parseLockContent(formatLockContent(100, "tok-A"))).toEqual({ pid: 100, token: "tok-A" });
+      expect(parseLockContent(formatLockContent(100, undefined, "holder-log-path"))).toEqual({
+        pid: 100,
+        token: undefined,
+        metadata: "holder-log-path",
+      });
     });
 
     test("parseLockContent reports NaN for an unreadable PID line", () => {

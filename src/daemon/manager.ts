@@ -1,7 +1,7 @@
 import { execSync } from "node:child_process";
 import { open, readFile, rm, unlink } from "node:fs/promises";
 import { existsSync, openSync, closeSync } from "node:fs";
-import { join, resolve, sep } from "node:path";
+import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { logger } from "../utils/logger";
 import { resolveDaemonInstallSpecifier } from "../constants/release";
@@ -9,7 +9,7 @@ import {
   INCOMPLETE_EXTRACTION_CODE,
   INCOMPLETE_EXTRACTION_EXIT_CODE,
 } from "../db/migrationDependencyIntegrity";
-import { ensureSecureLogsDirSync } from "../utils/tempDir";
+import { ensureSecureLogsDirSync, resolveAutoMobileLogsDir } from "../utils/tempDir";
 import { outputReductionFlagsToArgs } from "../utils/outputReductionFlags";
 import {
   EVENT_ALL_MARKERS_FLAG,
@@ -48,7 +48,7 @@ import {
   cleanupDaemonFiles,
   isProcessRunning as isDaemonProcessRunning,
 } from "./daemonFiles";
-import { releaseExclusiveLock, tryAcquireExclusiveLock } from "../utils/fileLock";
+import { parseLockContent, releaseExclusiveLock, tryAcquireExclusiveLock } from "../utils/fileLock";
 import {
   DAEMON_LAUNCH_CWD_ENV,
   resolveDaemonLaunchWorkingDirectory,
@@ -359,6 +359,7 @@ export class DaemonManager implements DaemonManagerLike {
   private readonly launcher: DaemonLauncher;
   private readonly fallbackLauncher: DaemonLauncher;
   private readonly launchCommandResolver: (() => DaemonLaunchCommand) | undefined;
+  private heldLockLogPath: string | undefined;
 
   constructor(
     clientFactory: DaemonClientFactory | undefined = undefined,
@@ -415,9 +416,13 @@ export class DaemonManager implements DaemonManagerLike {
    * from another manager instance still reads as actively held.
    */
   acquireLock(): boolean {
-    return tryAcquireExclusiveLock(this.lockFilePath, {
+    const logPath = this.daemonLaunchLogPath();
+    const acquired = tryAcquireExclusiveLock(this.lockFilePath, {
       isProcessRunning: pid => this.isProcessRunning(pid),
+      metadata: Buffer.from(logPath, "utf8").toString("base64url"),
     });
+    this.heldLockLogPath = acquired ? logPath : undefined;
+    return acquired;
   }
 
   /**
@@ -426,6 +431,7 @@ export class DaemonManager implements DaemonManagerLike {
    */
   releaseLock(): void {
     releaseExclusiveLock(this.lockFilePath);
+    this.heldLockLogPath = undefined;
   }
 
   createClient(): DaemonClientLike {
@@ -584,8 +590,8 @@ export class DaemonManager implements DaemonManagerLike {
     // and post-hoc debugging impossible (issue #2724). The logs dir is created
     // owner-only (0o700) by ensureSecureLogsDirSync, so a fixed, predictable
     // filename inside it is not exposed to other users.
-    const logsDir = ensureSecureLogsDirSync();
-    const logPath = join(logsDir, `daemon-launch-${process.pid}.log`);
+    const logPath = this.heldLockLogPath ?? this.daemonLaunchLogPath();
+    ensureSecureLogsDirSync();
     // Open with restricted permissions (0o600 = owner read/write only).
     // Truncate per launch so a single manager's bootstrap captures don't grow
     // unbounded across restarts.
@@ -801,21 +807,28 @@ export class DaemonManager implements DaemonManagerLike {
   private async getLockHolderStartupLogPath(): Promise<string | null> {
     try {
       const lockContents = await readFile(this.lockFilePath, "utf-8");
-      const trimmedLockContents = lockContents.trim();
-      if (!/^\d+$/.test(trimmedLockContents)) {
-        return null;
-      }
-      const lockHolderPid = Number.parseInt(trimmedLockContents, 10);
+      const { pid: lockHolderPid, metadata } = parseLockContent(lockContents.trim());
       if (!Number.isSafeInteger(lockHolderPid) || lockHolderPid <= 0) {
         return null;
       }
-      return join(ensureSecureLogsDirSync(), `daemon-launch-${lockHolderPid}.log`);
+      if (!metadata) {
+        return null;
+      }
+      const logPath = Buffer.from(metadata, "base64url").toString("utf8");
+      if (!isAbsolute(logPath) || basename(logPath) !== `daemon-launch-${lockHolderPid}.log`) {
+        return null;
+      }
+      return logPath;
     } catch (error) {
       logger.debug(
         `[DaemonManager] Unable to read startup lock holder diagnostics: ${this.describeError(error)}`
       );
       return null;
     }
+  }
+
+  private daemonLaunchLogPath(): string {
+    return join(resolveAutoMobileLogsDir(), `daemon-launch-${process.pid}.log`);
   }
 
   private async createDaemonExitFailure(

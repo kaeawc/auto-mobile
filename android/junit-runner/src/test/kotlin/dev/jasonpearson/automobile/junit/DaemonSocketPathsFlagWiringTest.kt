@@ -17,6 +17,7 @@ class DaemonSocketPathsFlagWiringTest {
       "automobile.daemon.no.navigation.screenshots",
       "automobile.daemon.no.waitfor.polling.overhead",
       "automobile.daemon.package.version",
+      "automobile.daemon.startup.timeout.ms",
     )
 
   @Before
@@ -51,6 +52,11 @@ class DaemonSocketPathsFlagWiringTest {
       "should not contain --no-waitfor-polling-overhead",
       command.contains("--no-waitfor-polling-overhead"),
     )
+  }
+
+  @Test
+  fun `daemon startup timeout defaults to 30 seconds`() {
+    assertEquals(30_000L, DaemonSocketPaths.daemonStartTimeoutMs())
   }
 
   @Test

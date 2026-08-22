@@ -3,6 +3,7 @@ import { CaptureSnapshot } from "../../../src/features/action/CaptureSnapshot";
 import { BootedDevice } from "../../../src/models";
 import { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
+import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { DeviceSnapshotStore } from "../../../src/utils/DeviceSnapshotStore";
 import { promises as fs } from "fs";
@@ -403,18 +404,6 @@ describe("CaptureSnapshot", () => {
   });
 
   describe("error scenarios", () => {
-    it("should throw error for non-Android platform", () => {
-      const iosDevice: BootedDevice = {
-        deviceId: "ios-device",
-        name: "iPhone_14",
-        platform: "ios",
-        isEmulator: true
-      };
-
-      expect(() => new CaptureSnapshot(iosDevice, fakeAdbFactory, undefined, fakeTimer))
-        .toThrow("Snapshot capture is currently only supported for Android devices");
-    });
-
     it("should throw error in strictBackupMode when backup fails", async () => {
       const snapshotName = "test-strict-mode";
 
@@ -753,5 +742,153 @@ describe("CaptureSnapshot", () => {
         expect(result.manifest.settings?.global).toEqual(expectedGlobal);
       }
     );
+  });
+});
+
+describe("CaptureSnapshot (iOS)", () => {
+  let device: BootedDevice;
+  let simctl: FakeSimCtlClient;
+  let store: DeviceSnapshotStore;
+  let testBasePath: string;
+
+  beforeEach(async () => {
+    device = {
+      deviceId: "ios-device-1",
+      name: "iPhone 15",
+      platform: "ios",
+    };
+
+    simctl = new FakeSimCtlClient();
+    testBasePath = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-ios-capture-"));
+    store = new DeviceSnapshotStore(testBasePath);
+  });
+
+  afterEach(async () => {
+    try {
+      await fs.rm(testBasePath, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup errors
+    }
+  });
+
+  function makeCapture(): CaptureSnapshot {
+    return new CaptureSnapshot(device, undefined, undefined, undefined, store, simctl as any);
+  }
+
+  it("captures app data and writes metadata", async () => {
+    const snapshotName = "ios-snapshot";
+    const bundleId = "com.example.app";
+    const containerRoot = path.join(testBasePath, "containers", bundleId);
+    const documentsPath = path.join(containerRoot, "Documents");
+    await fs.mkdir(documentsPath, { recursive: true });
+    await fs.writeFile(path.join(documentsPath, "data.txt"), "hello");
+
+    simctl.setContainerPath(bundleId, containerRoot);
+    simctl.setDeviceInfo(device.deviceId, {
+      udid: device.deviceId,
+      name: "iPhone 15",
+      state: "Booted",
+      isAvailable: true,
+      deviceTypeIdentifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-15",
+      os_version: "17.2",
+    });
+
+    const captureSnapshot = makeCapture();
+
+    const result = await captureSnapshot.execute({
+      snapshotName,
+      includeAppData: true,
+      includeSettings: true,
+      appBundleIds: [bundleId, "com.apple.Preferences", ` ${bundleId} `],
+    });
+
+    const pathOptions = { platform: "ios", deviceId: device.deviceId } as const;
+    const metadataPath = store.getMetadataPath(snapshotName, pathOptions);
+    const metadataJson = await fs.readFile(metadataPath, "utf-8");
+    const parsed = JSON.parse(metadataJson) as typeof result.manifest;
+
+    expect(result.manifest.includeSettings).toBe(true);
+    expect(result.manifest.deviceType).toBe("com.apple.CoreSimulator.SimDeviceType.iPhone-15");
+    expect(result.manifest.osVersion).toBe("17.2");
+    expect(parsed.snapshotName).toBe(snapshotName);
+    expect(parsed.platform).toBe("ios");
+    expect(parsed.appDataBackup?.backedUpPackages).toEqual([bundleId]);
+    expect(parsed.appDataBackup?.skippedPackages).toEqual(["com.apple.Preferences"]);
+    expect(parsed.appDataBackup?.totalPackages).toBe(2);
+
+    const appDataPath = store.getAppDataPath(snapshotName, pathOptions);
+    const copiedFile = await fs.readFile(
+      path.join(appDataPath, bundleId, "Documents", "data.txt"),
+      "utf-8"
+    );
+    expect(copiedFile).toBe("hello");
+  });
+
+  it("fails when strictBackupMode is enabled and app data backup fails", async () => {
+    const captureSnapshot = makeCapture();
+
+    await expect(captureSnapshot.execute({
+      snapshotName: "strict-backup",
+      includeAppData: true,
+      strictBackupMode: true,
+      appBundleIds: ["com.example.missing"],
+    })).rejects.toThrow("Failed to backup app data");
+  });
+
+  it("marks backup as none when no bundle IDs are provided", async () => {
+    const captureSnapshot = makeCapture();
+
+    const result = await captureSnapshot.execute({
+      snapshotName: "no-bundles",
+      includeAppData: true,
+      appBundleIds: [],
+    });
+
+    expect(result.manifest.appDataBackup?.backupMethod).toBe("none");
+    expect(result.manifest.appDataBackup?.totalPackages).toBe(0);
+  });
+
+  it("captures iOS settings (locale + UI) into the manifest when includeSettings", async () => {
+    simctl.setCommandArgsResult(
+      ["spawn", device.deviceId, "defaults", "read", ".GlobalPreferences", "AppleLocale"],
+      "nl_BE\n"
+    );
+    simctl.setCommandArgsResult(["ui", device.deviceId, "appearance"], "dark\n");
+    simctl.setCommandArgsResult(["ui", device.deviceId, "content_size"], "large\n");
+
+    const captureSnapshot = makeCapture();
+    const result = await captureSnapshot.execute({
+      snapshotName: "with-settings",
+      includeAppData: false,
+      includeSettings: true,
+    });
+
+    expect(result.manifest.includeSettings).toBe(true);
+    expect(result.manifest.iosSettings?.values[".GlobalPreferences/AppleLocale"]).toBe("nl_BE");
+    expect(result.manifest.iosSettings?.ui).toEqual({ appearance: "dark", contentSize: "large" });
+
+    // Manifest survives the round-trip to disk.
+    const pathOptions = { platform: "ios", deviceId: device.deviceId } as const;
+    const metadataJson = await fs.readFile(store.getMetadataPath("with-settings", pathOptions), "utf-8");
+    const parsed = JSON.parse(metadataJson) as typeof result.manifest;
+    expect(parsed.iosSettings?.values[".GlobalPreferences/AppleLocale"]).toBe("nl_BE");
+  });
+
+  it("omits iosSettings and issues no settings commands when includeSettings is false", async () => {
+    const captureSnapshot = makeCapture();
+    const result = await captureSnapshot.execute({
+      snapshotName: "no-settings",
+      includeAppData: false,
+      includeSettings: false,
+    });
+
+    expect(result.manifest.includeSettings).toBe(false);
+    expect(result.manifest.iosSettings).toBeUndefined();
+
+    const settingsCommands = simctl
+      .getMethodCalls("executeCommandArgs")
+      .map(call => call.args as string[])
+      .filter(args => args.includes("defaults") || args[0] === "ui");
+    expect(settingsCommands).toEqual([]);
   });
 });

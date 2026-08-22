@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { FakeSnapshotProvider } from "../../fakes/FakeSnapshotProvider";
 import { CaptureSnapshot } from "../../../src/features/action/CaptureSnapshot";
-import { CaptureSnapshotIos } from "../../../src/features/action/CaptureSnapshotIos";
 import { RestoreSnapshot } from "../../../src/features/action/RestoreSnapshot";
 import { RestoreSnapshotIos } from "../../../src/features/action/RestoreSnapshotIos";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
@@ -89,7 +88,7 @@ describe("SnapshotProvider interfaces", () => {
 
   const captureCases: ReadonlyArray<[string, () => SnapshotCaptureProvider]> = [
     ["Android CaptureSnapshot", () => new CaptureSnapshot(androidDevice, fakeAdbFactory, undefined, new FakeTimer(), store())],
-    ["iOS CaptureSnapshotIos", () => new CaptureSnapshotIos(iosDevice, new FakeSimCtlClient(), store())],
+    ["iOS CaptureSnapshot", () => new CaptureSnapshot(iosDevice, undefined, undefined, new FakeTimer(), store(), new FakeSimCtlClient())],
   ];
   for (const [name, build] of captureCases) {
     it(`${name} satisfies SnapshotCaptureProvider`, () => {

@@ -76,13 +76,20 @@ public final class FrameContext {
         }
     }
 
+    /// Shared encoder for `semanticHash`. `.outputFormatting` is set once and never mutated
+    /// afterward, so read-only `encode(_:)` calls are safe to share; this avoids allocating a
+    /// fresh `JSONEncoder` on every hash (one per gesture validation and screenshot pairing).
+    private static let semanticHashEncoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        return encoder
+    }()
+
     private static func semanticHash(_ hierarchy: ViewHierarchy) -> String? {
         // `updatedAt` is assigned for every extraction, so including it would reject an unchanged
         // screen merely because validation sampled it a millisecond later. Hash only semantic
         // screen state, with sorted keys for deterministic dictionary encoding.
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = .sortedKeys
-        guard let data = try? encoder.encode(SemanticHierarchy(hierarchy)) else { return nil }
+        guard let data = try? semanticHashEncoder.encode(SemanticHierarchy(hierarchy)) else { return nil }
         var hash: UInt64 = 0xCBF2_9CE4_8422_2325
         for byte in data {
             hash ^= UInt64(byte)

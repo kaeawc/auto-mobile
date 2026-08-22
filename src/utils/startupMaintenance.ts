@@ -1,3 +1,4 @@
+import { errorMessage } from "./describeUnknownError";
 import { defaultTimer, type Timer } from "./SystemTimer";
 import { logger, type Logger } from "./logger";
 
@@ -66,5 +67,5 @@ function startBackgroundCleanup(
 }
 
 function formatError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  return errorMessage(error);
 }

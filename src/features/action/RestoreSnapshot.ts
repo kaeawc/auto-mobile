@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { BootedDevice, ActionableError, DeviceSnapshotManifest, DeviceSnapshotType } from "../../models";
 import type { SnapshotRestoreProvider } from "../../utils/interfaces/SnapshotProvider";
 import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
@@ -133,7 +134,7 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
 
       logger.info("VM snapshot restoration complete");
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorMessage(error);
       logger.error(`Failed to restore VM snapshot: ${message}`);
       throw new ActionableError(`Failed to restore VM snapshot: ${message}`);
     }

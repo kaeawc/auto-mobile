@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { defaultAdbClientFactory, type AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { BootedDevice } from "../../models";
@@ -454,7 +455,7 @@ export class AppPermissions {
         }),
       };
     } catch (error) {
-      return this.androidQueryFailure(normalizedAppId, error instanceof Error ? error.message : String(error));
+      return this.androidQueryFailure(normalizedAppId, errorMessage(error));
     }
   }
 

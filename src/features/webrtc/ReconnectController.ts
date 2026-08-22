@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { exponentialBackoff, normalizeBackoff, type BackoffInput, type BackoffPolicy } from "../../utils/Backoff";
 import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
@@ -143,7 +144,7 @@ export class ReconnectController {
       this.drainPendingReconnect();
     } catch (error) {
       logger.warn(
-        `[WebRTC] reconnect attempt ${this.attemptsThisCycle} failed: ${error instanceof Error ? error.message : String(error)}`
+        `[WebRTC] reconnect attempt ${this.attemptsThisCycle} failed: ${errorMessage(error)}`
       );
       this.scheduleRetryOrFail();
     }

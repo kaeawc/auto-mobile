@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/describeUnknownError";
 import { execSync } from "node:child_process";
 import { open, readFile, rm, unlink } from "node:fs/promises";
 import { existsSync, openSync, closeSync } from "node:fs";
@@ -472,9 +473,7 @@ export class DaemonManager implements DaemonManagerLike {
     try {
       return this.normalizeDaemonProcessRecords(this.processFinder.findDaemonProcesses());
     } catch (error) {
-      throw new ActionableError(
-        `Failed to inspect daemon process table: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      throw new ActionableError(`Failed to inspect daemon process table: ${errorMessage(error)}`);
     }
   }
 
@@ -901,7 +900,7 @@ export class DaemonManager implements DaemonManagerLike {
   }
 
   private describeError(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
+    return errorMessage(error);
   }
 
   private async formatDaemonStartupFailure(summary: string, logPath: string): Promise<string> {
@@ -929,7 +928,7 @@ export class DaemonManager implements DaemonManagerLike {
       const log = buffer.subarray(0, bytesRead).toString("utf-8").trim();
       return start > 0 ? `...${log}` : log;
     } catch (error) {
-      return `Unable to read daemon stdout/stderr log: ${error instanceof Error ? error.message : String(error)}`;
+      return `Unable to read daemon stdout/stderr log: ${errorMessage(error)}`;
     } finally {
       await file?.close();
     }
@@ -1032,9 +1031,7 @@ export class DaemonManager implements DaemonManagerLike {
         options: pidData.options,
       };
     } catch (error) {
-      logger.warn(
-        `Error reading PID file: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      logger.warn(`Error reading PID file: ${errorMessage(error)}`);
       return { running: false };
     }
   }
@@ -1264,15 +1261,13 @@ export class DaemonManager implements DaemonManagerLike {
         return true;
       } catch (error) {
         logger.debug(
-          `Daemon socket readiness probe failed (attempt ${attempt}/${READINESS_PROBE_MAX_ATTEMPTS}): ${error instanceof Error ? error.message : String(error)}`,
+          `Daemon socket readiness probe failed (attempt ${attempt}/${READINESS_PROBE_MAX_ATTEMPTS}): ${errorMessage(error)}`,
         );
       } finally {
         try {
           await client.close();
         } catch (error) {
-          logger.debug(
-            `Failed to close daemon readiness probe client: ${error instanceof Error ? error.message : String(error)}`,
-          );
+          logger.debug(`Failed to close daemon readiness probe client: ${errorMessage(error)}`);
         }
       }
 
@@ -1353,9 +1348,7 @@ export class DaemonManager implements DaemonManagerLike {
       await unlink(this.socketPath);
       logger.debug(`Removed invalid daemon socket path: ${this.socketPath}`);
     } catch (error) {
-      logger.debug(
-        `Failed to remove invalid daemon socket path: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      logger.debug(`Failed to remove invalid daemon socket path: ${errorMessage(error)}`);
     }
   }
 
@@ -1736,9 +1729,7 @@ export async function runDaemonCommand(
             }
             await client.close();
           } catch (error) {
-            throw new ActionableError(
-              `Failed to query available devices: ${error instanceof Error ? error.message : String(error)}`,
-            );
+            throw new ActionableError(`Failed to query available devices: ${errorMessage(error)}`);
           }
         }
         break;
@@ -1777,9 +1768,7 @@ export async function runDaemonCommand(
             console.log(JSON.stringify(result));
             await client.close();
           } catch (error) {
-            throw new ActionableError(
-              `Failed to get session info: ${error instanceof Error ? error.message : String(error)}`,
-            );
+            throw new ActionableError(`Failed to get session info: ${errorMessage(error)}`);
           }
         }
         break;
@@ -1815,9 +1804,7 @@ export async function runDaemonCommand(
             console.log(`Session ${sessionId} released`);
             await client.close();
           } catch (error) {
-            throw new ActionableError(
-              `Failed to release session: ${error instanceof Error ? error.message : String(error)}`,
-            );
+            throw new ActionableError(`Failed to release session: ${errorMessage(error)}`);
           }
         }
         break;
@@ -1841,7 +1828,7 @@ export async function runDaemonCommand(
     if (error instanceof ActionableError) {
       console.error(`Error: ${error.message}`);
     } else {
-      console.error(`Unexpected error: ${error instanceof Error ? error.message : String(error)}`);
+      console.error(`Unexpected error: ${errorMessage(error)}`);
     }
     process.exit(1);
   }

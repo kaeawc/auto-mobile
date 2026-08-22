@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import {
   spawn as nodeSpawn,
   type ChildProcessWithoutNullStreams,
@@ -537,7 +538,7 @@ function parseNativeFrameMetrics(line: string): NativeFrameMetrics | null {
     return value;
   } catch (error) {
     logger.debug(
-      `[IOSScreenCaptureHelper] ignored malformed native frame metrics: ${error instanceof Error ? error.message : String(error)}`
+      `[IOSScreenCaptureHelper] ignored malformed native frame metrics: ${errorMessage(error)}`
     );
     return null;
   }

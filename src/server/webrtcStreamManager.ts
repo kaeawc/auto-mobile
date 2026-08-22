@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/describeUnknownError";
 import { ActionableError, type BootedDevice } from "../models";
 import { logger } from "../utils/logger";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
@@ -284,7 +285,7 @@ function markFailure(
 ): void {
   record.failure = {
     code,
-    message: error instanceof Error ? error.message : String(error),
+    message: errorMessage(error),
     at: dependencies.now().toISOString(),
   };
   setLifecycleState(record, state);
@@ -510,7 +511,7 @@ async function startSource(record: WebRtcStreamRecord): Promise<boolean> {
     await source.start();
   } catch (error) {
     record.sourceState = "failed";
-    record.lastSourceError = error instanceof Error ? error.message : String(error);
+    record.lastSourceError = errorMessage(error);
     record.sourceTelemetry = source.getTelemetry?.() ?? record.sourceTelemetry;
     record.sourceFailed = true;
     markFailure(record, "capture_start_failed", error, "degraded");

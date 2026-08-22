@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/describeUnknownError";
 import { existsSync } from "node:fs";
 import { SOCKET_PATH, PID_FILE_PATH } from "./constants";
 import { DaemonClient } from "./client";
@@ -114,7 +115,7 @@ export async function getDaemonHealthReport(
         );
       }
     } catch (error) {
-      report.lastError = error instanceof Error ? error.message : String(error);
+      report.lastError = errorMessage(error);
       report.recommendations.push(
         "Socket connection test failed. Daemon may be unresponsive or socket may be corrupted."
       );

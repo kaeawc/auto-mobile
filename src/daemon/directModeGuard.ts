@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/describeUnknownError";
 import { realpathSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { ActionableError } from "../models";
@@ -168,7 +169,7 @@ export function createDefaultDirectModeGuardDeps(
       try {
         livePids = manager.findLiveDaemonProcesses();
       } catch (error) {
-        const detail = error instanceof Error ? error.message : String(error);
+        const detail = errorMessage(error);
         logger.warn(
           `Direct-mode guard: process-table scan failed; refusing direct mode ` +
             `because same-DB daemon ownership cannot be verified. ${detail}`,

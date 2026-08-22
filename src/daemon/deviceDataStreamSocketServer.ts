@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/describeUnknownError";
 import { Socket } from "node:net";
 import { logger } from "../utils/logger";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
@@ -870,7 +871,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
           id: request.id,
           type: "error",
           success: false,
-          error: error instanceof Error ? error.message : String(error),
+          error: errorMessage(error),
         };
         this.sendJson(socket, errorResponse);
       }
@@ -890,7 +891,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
           id: request.id,
           type: "error",
           success: false,
-          error: error instanceof Error ? error.message : String(error),
+          error: errorMessage(error),
         };
         this.sendJson(socket, errorResponse);
         return;
@@ -1193,7 +1194,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
         id: request.id,
         type: "error",
         success: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage(error),
       };
       this.sendJson(socket, errorResponse);
     }

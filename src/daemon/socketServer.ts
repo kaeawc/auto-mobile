@@ -13,6 +13,7 @@ import { logger } from "../utils/logger";
 import { resolveMcpRequestTimeoutMs } from "./mcpRequestTimeout";
 import { McpTimeoutError } from "./McpTimeoutError";
 import { DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS } from "../utils/deviceTimeouts";
+import { errorMessage } from "../utils/describeUnknownError";
 import { DaemonNotification, DaemonRequest, DaemonResponse, SessionContext } from "./types";
 import {
   SOCKET_PATH,
@@ -451,7 +452,7 @@ export class UnixSocketServer {
               id: requestId,
               type: "mcp_response",
               success: false,
-              error: error instanceof Error ? error.message : String(error),
+              error: errorMessage(error),
             };
             this.writeFrame(socket, sessionId, errorResponse);
           }
@@ -666,8 +667,7 @@ export class UnixSocketServer {
                 );
                 return response;
               } catch (ideError) {
-                const ideErrorMessage =
-                  ideError instanceof Error ? ideError.message : String(ideError);
+                const ideErrorMessage = errorMessage(ideError);
                 if (ideErrorMessage.includes("Session not found")) {
                   logger.warn("MCP client session expired, reconnecting and retrying...");
                   await this.resetMcpClient(route.clientKey);
@@ -724,16 +724,16 @@ export class UnixSocketServer {
           result,
         };
       } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorMsg = errorMessage(error);
         const errorStack = error instanceof Error ? error.stack : "no stack";
-        logger.error(`Error forwarding request to MCP server: ${errorMessage}`);
+        logger.error(`Error forwarding request to MCP server: ${errorMsg}`);
         logger.error(`Error stack: ${errorStack}`);
         logger.error(`Full error: ${JSON.stringify(error)}`);
         return {
           id: request.id,
           type: "mcp_response",
           success: false,
-          error: errorMessage,
+          error: errorMsg,
           ...(error instanceof InputTypeTextAppendError ? { charsSent: error.charsSent } : {}),
         };
       }
@@ -2548,7 +2548,7 @@ export class UnixSocketServer {
       }
       return {
         success: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage(error),
         charsSent: appendCharsSent,
       };
     }

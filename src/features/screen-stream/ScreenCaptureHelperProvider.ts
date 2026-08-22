@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import AdmZip from "adm-zip";
 import * as fs from "node:fs/promises";
 import path from "node:path";
@@ -128,7 +129,7 @@ export class ScreenCaptureHelperProvider {
       metadata = JSON.parse(await fs.readFile(this.metadataPath, "utf8")) as ScreenCaptureHelperMetadata;
     } catch (error) {
       logger.debug("[SCREEN_CAPTURE_HELPER] No usable cached helper metadata", {
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage(error),
       });
       return null;
     }
@@ -147,7 +148,7 @@ export class ScreenCaptureHelperProvider {
       }
     } catch (error) {
       logger.debug("[SCREEN_CAPTURE_HELPER] No usable cached helper executable", {
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage(error),
       });
       return null;
     }
@@ -227,7 +228,7 @@ function extractHelper(archivePath: string): Buffer {
     archive = new AdmZip(archivePath);
   } catch (error) {
     throw new ActionableError(
-      `screen-capture-helper release asset is not a valid zip archive: ${error instanceof Error ? error.message : String(error)}`
+      `screen-capture-helper release asset is not a valid zip archive: ${errorMessage(error)}`
     );
   }
   const entries = archive.getEntries().filter(candidate =>
@@ -246,7 +247,7 @@ function extractHelper(archivePath: string): Buffer {
       throw error;
     }
     throw new ActionableError(
-      `Unable to extract screen-capture-helper release asset: ${error instanceof Error ? error.message : String(error)}`
+      `Unable to extract screen-capture-helper release asset: ${errorMessage(error)}`
     );
   }
 }

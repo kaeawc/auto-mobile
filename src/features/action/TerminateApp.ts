@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
@@ -235,32 +236,32 @@ export class TerminateApp extends BaseVisualChange {
     }
 
     let wasRunning = true;
-    let errorMessage: string | undefined;
+    let errorMsg: string | undefined;
 
     try {
       await perf.track("terminateApp", () => this.simctl.terminateApp(bundleId, this.device.deviceId));
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorMessage(error);
       // Shared already-gone matcher (issue #3076): a simctl "found nothing to
       // terminate" / process-scoped "not running" means the app was already
       // stopped, so report wasRunning:false rather than a hard error. Any other
-      // failure (e.g. device-level) surfaces as errorMessage. The simulator path
+      // failure (e.g. device-level) surfaces as errorMsg. The simulator path
       // has no tool-specific extras today; add them here (OR-ing the shared
       // helper) if simctl error text ever diverges.
       if (isProcessAlreadyGoneError(message)) {
         wasRunning = false;
       } else {
-        errorMessage = message;
+        errorMsg = message;
       }
     }
 
     return {
-      success: !errorMessage,
+      success: !errorMsg,
       packageName: bundleId,
       wasInstalled: true,
       wasRunning,
       wasForeground: false,
-      ...(errorMessage ? { error: errorMessage } : {})
+      ...(errorMsg ? { error: errorMsg } : {})
     };
   }
 
@@ -289,7 +290,7 @@ export class TerminateApp extends BaseVisualChange {
         wasForeground: false
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorMessage(error);
       // Return a typed failure (matching the simulator path) instead of throwing,
       // but log first so the trace survives even when the client only sees the
       // summarized error (CLAUDE.md error-handling convention #2).

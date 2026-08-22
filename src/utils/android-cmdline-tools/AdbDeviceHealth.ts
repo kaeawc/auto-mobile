@@ -1,3 +1,4 @@
+import { errorMessage } from "../describeUnknownError";
 import { logger } from "../logger";
 
 export interface AdbMissingDeviceEvent {
@@ -10,7 +11,7 @@ type AdbMissingDeviceListener = (event: AdbMissingDeviceEvent) => void;
 const missingDeviceListeners = new Set<AdbMissingDeviceListener>();
 
 export function extractAdbMissingDeviceId(error: unknown): string | null {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = errorMessage(error);
   const match = message.match(/\bdevice\s+'([^']+)'\s+not found\b/i);
   return match?.[1] ?? null;
 }
@@ -25,12 +26,12 @@ export function isAdbMissingDeviceError(error: unknown, expectedDeviceId?: strin
     return false;
   }
 
-  const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  const message = (errorMessage(error)).toLowerCase();
   return message.includes("device not found") || message.includes("no devices");
 }
 
 export function notifyAdbMissingDevice(deviceId: string, error: unknown): void {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = errorMessage(error);
   for (const listener of missingDeviceListeners) {
     try {
       listener({ deviceId, message });

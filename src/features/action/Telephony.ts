@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import {
   BootedDevice,
   PhoneCallAction,
@@ -104,7 +105,7 @@ export class Telephony {
         action: options.action,
         phoneNumber: options.phoneNumber,
         supported: true,
-        error: error instanceof Error ? error.message : String(error)
+        error: errorMessage(error)
       };
     }
   }
@@ -143,7 +144,7 @@ export class Telephony {
         phoneNumber: options.phoneNumber,
         messageLength: options.message.length,
         supported: true,
-        error: error instanceof Error ? error.message : String(error)
+        error: errorMessage(error)
       };
     }
   }

@@ -1,3 +1,4 @@
+import { errorMessage } from "./describeUnknownError";
 import { execFile } from "child_process";
 import { createWriteStream } from "fs";
 import * as fs from "fs/promises";
@@ -30,7 +31,7 @@ export class DefaultFileDownloader implements FileDownloader {
         throw error;
       }
       logger.warn("[FileDownloader] curl unavailable, falling back to wget", {
-        error: error instanceof Error ? error.message : String(error)
+        error: errorMessage(error)
       });
     }
 
@@ -42,7 +43,7 @@ export class DefaultFileDownloader implements FileDownloader {
         throw error;
       }
       logger.warn("[FileDownloader] wget unavailable, falling back to Node HTTP", {
-        error: error instanceof Error ? error.message : String(error)
+        error: errorMessage(error)
       });
     }
 

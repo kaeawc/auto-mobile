@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { DeepLinkManager } from "../../utils/DeepLinkManager";
 import { BootedDevice, DeepLinkResult } from "../../models";
@@ -39,7 +40,7 @@ export class GetDeepLinks {
           intentFilters: [],
           supportedMimeTypes: []
         },
-        error: error instanceof Error ? error.message : String(error)
+        error: errorMessage(error)
       };
     }
   }

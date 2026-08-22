@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BootedDevice, ClipboardResult } from "../../models";
@@ -66,7 +67,7 @@ export class Clipboard {
       return {
         success: false,
         action,
-        error: `Failed to execute clipboard ${action}: ${error instanceof Error ? error.message : String(error)}`
+        error: `Failed to execute clipboard ${action}: ${errorMessage(error)}`
       };
     } finally {
       perf.end();
@@ -155,7 +156,7 @@ export class Clipboard {
         return {
           success: false,
           action,
-          error: `Accessibility clipboard get failed: ${error instanceof Error ? error.message : String(error)}`,
+          error: `Accessibility clipboard get failed: ${errorMessage(error)}`,
           method: "a11y"
         };
       }
@@ -168,7 +169,7 @@ export class Clipboard {
       return {
         success: false,
         action,
-        error: `All clipboard methods failed. Last error: ${error instanceof Error ? error.message : String(error)}`
+        error: `All clipboard methods failed. Last error: ${errorMessage(error)}`
       };
     }
   }
@@ -307,7 +308,7 @@ export class Clipboard {
       return {
         success: false,
         action,
-        error: `ADB clipboard operation failed: ${error instanceof Error ? error.message : String(error)}`,
+        error: `ADB clipboard operation failed: ${errorMessage(error)}`,
         method: "adb"
       };
     }

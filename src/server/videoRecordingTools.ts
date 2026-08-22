@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/describeUnknownError";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
 import {
@@ -494,7 +495,7 @@ export function registerVideoRecordingTools(): void {
             } catch (error) {
               logger.warn(
                 `[VideoRecording] Failed to finalize segmented session ${handle} on ` +
-                  `device ${target.deviceId}: ${error instanceof Error ? error.message : String(error)}`,
+                  `device ${target.deviceId}: ${errorMessage(error)}`,
                 error,
               );
               failures.push({

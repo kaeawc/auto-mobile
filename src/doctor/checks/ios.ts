@@ -13,6 +13,7 @@ import { CheckResult, DoctorOptions } from "../types";
 import { SimCtl, SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { Xcodebuild, XcodebuildClient } from "../../utils/ios-cmdline-tools/XcodebuildClient";
 import { logger, type Logger } from "../../utils/logger";
+import { errorMessage } from "../../utils/describeUnknownError";
 import { resolveAssetVersion, resolvePinnedVersion } from "../../constants/release";
 import { IOSCtrlProxyBuilder } from "../../utils/IOSCtrlProxyBuilder";
 import { IOSCtrlProxyManager } from "../../utils/IOSCtrlProxyManager";
@@ -213,7 +214,7 @@ export function createIosCtrlProxyRunnerInspector(
             // Treated as an unreachable runner (versionStatus=unknown), not a hard
             // failure: doctor still reports installed/running for the simulator.
             log.warn(
-              `iOS CtrlProxy runner command probe failed for ${simulator.deviceId}: ${normalizeErrorMessage(error)}`,
+              `iOS CtrlProxy runner command probe failed for ${simulator.deviceId}: ${errorMessage(error)}`,
               error
             );
           } finally {
@@ -328,7 +329,7 @@ export function createIosObserveRoundTripInspector(
             }
           }
         } catch (error) {
-          hierarchyError = normalizeErrorMessage(error);
+          hierarchyError = errorMessage(error);
           log.warn(
             `iOS observe round-trip failed for ${simulator.deviceId}: ${hierarchyError}`,
             error
@@ -396,12 +397,6 @@ function compareVersions(current: string, minimum: string): number {
   return 0;
 }
 
-function normalizeErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error);
-}
 
 /**
  * Check Xcode installation and minimum version
@@ -450,11 +445,11 @@ export async function checkXcodeInstallation(
       value: version,
     };
   } catch (error) {
-    dependencies.logger.warn(`Xcode installation check failed: ${normalizeErrorMessage(error)}`, error);
+    dependencies.logger.warn(`Xcode installation check failed: ${errorMessage(error)}`, error);
     return {
       name: "Xcode",
       status: "fail",
-      message: `Xcode not detected: ${normalizeErrorMessage(error)}`,
+      message: `Xcode not detected: ${errorMessage(error)}`,
       recommendation: `Install Xcode ${minimumVersion}+ from the App Store.`,
     };
   }
@@ -510,11 +505,11 @@ export async function checkXcodeCommandLineTools(
       value: developerDir,
     };
   } catch (error) {
-    dependencies.logger.warn(`Command Line Tools check failed: ${normalizeErrorMessage(error)}`, error);
+    dependencies.logger.warn(`Command Line Tools check failed: ${errorMessage(error)}`, error);
     return {
       name,
       status: "fail",
-      message: `Command Line Tools not available: ${normalizeErrorMessage(error)}`,
+      message: `Command Line Tools not available: ${errorMessage(error)}`,
       recommendation: "Run: xcode-select --install",
     };
   }
@@ -542,11 +537,11 @@ export async function checkXcrunAvailable(
       message: "xcrun functional",
     };
   } catch (error) {
-    dependencies.logger.warn(`xcrun check failed: ${normalizeErrorMessage(error)}`, error);
+    dependencies.logger.warn(`xcrun check failed: ${errorMessage(error)}`, error);
     return {
       name: "xcrun",
       status: "fail",
-      message: `xcrun not functional: ${normalizeErrorMessage(error)}`,
+      message: `xcrun not functional: ${errorMessage(error)}`,
       recommendation: "Install Xcode Command Line Tools: xcode-select --install",
     };
   }
@@ -585,11 +580,11 @@ export async function checkSimctlAvailable(
       recommendation: "Install Xcode Command Line Tools: xcode-select --install",
     };
   } catch (error) {
-    dependencies.logger.warn(`simctl check failed: ${normalizeErrorMessage(error)}`, error);
+    dependencies.logger.warn(`simctl check failed: ${errorMessage(error)}`, error);
     return {
       name: "simctl",
       status: "fail",
-      message: `simctl check failed: ${normalizeErrorMessage(error)}`,
+      message: `simctl check failed: ${errorMessage(error)}`,
       recommendation: "Install Xcode Command Line Tools: xcode-select --install",
     };
   }
@@ -641,11 +636,11 @@ export async function checkSimulatorRuntimes(
       value: iosRuntimes.length,
     };
   } catch (error) {
-    dependencies.logger.warn(`Simulator runtimes check failed: ${normalizeErrorMessage(error)}`, error);
+    dependencies.logger.warn(`Simulator runtimes check failed: ${errorMessage(error)}`, error);
     return {
       name,
       status: "fail",
-      message: `Failed to list runtimes: ${normalizeErrorMessage(error)}`,
+      message: `Failed to list runtimes: ${errorMessage(error)}`,
       recommendation: "Install an iOS Simulator runtime in Xcode Settings > Platforms.",
     };
   }
@@ -687,11 +682,11 @@ export async function checkCodeSigning(
       recommendation: "Sign in to Xcode and install a development certificate for device testing.",
     };
   } catch (error) {
-    dependencies.logger.warn(`Code signing check failed: ${normalizeErrorMessage(error)}`, error);
+    dependencies.logger.warn(`Code signing check failed: ${errorMessage(error)}`, error);
     return {
       name,
       status: "warn",
-      message: `Code signing check failed: ${normalizeErrorMessage(error)}`,
+      message: `Code signing check failed: ${errorMessage(error)}`,
       recommendation: "Sign in to Xcode and install a development certificate for device testing.",
     };
   }
@@ -723,7 +718,7 @@ export async function checkSecurityCli(
       recommendation: "Install or repair the macOS command line tools, then re-run doctor."
     };
   } catch (error) {
-    dependencies.logger.warn(`Security CLI check failed: ${normalizeErrorMessage(error)}`, error);
+    dependencies.logger.warn(`Security CLI check failed: ${errorMessage(error)}`, error);
     return {
       name,
       status: "fail",
@@ -768,7 +763,7 @@ export async function checkAppleDeveloperAccount(
       recommendation: "Sign in to Xcode to enable device testing.",
     };
   } catch (error) {
-    dependencies.logger.warn(`Apple Developer account check failed: ${normalizeErrorMessage(error)}`, error);
+    dependencies.logger.warn(`Apple Developer account check failed: ${errorMessage(error)}`, error);
     return {
       name,
       status: "warn",
@@ -815,7 +810,7 @@ export async function checkProvisioningProfiles(
       recommendation: "Create a provisioning profile in Xcode to enable device testing.",
     };
   } catch (error) {
-    dependencies.logger.warn(`Provisioning profiles check failed: ${normalizeErrorMessage(error)}`, error);
+    dependencies.logger.warn(`Provisioning profiles check failed: ${errorMessage(error)}`, error);
     return {
       name,
       status: "warn",
@@ -869,11 +864,11 @@ export async function checkBootedSimulators(
       value: simulators.length,
     };
   } catch (error) {
-    dependencies.logger.warn(`Booted simulators check failed: ${normalizeErrorMessage(error)}`, error);
+    dependencies.logger.warn(`Booted simulators check failed: ${errorMessage(error)}`, error);
     return {
       name: "Booted Simulators",
       status: "skip",
-      message: `Could not check simulators: ${normalizeErrorMessage(error)}`,
+      message: `Could not check simulators: ${errorMessage(error)}`,
       value: 0,
     };
   }
@@ -1034,11 +1029,11 @@ export async function checkIosCtrlProxyRunner(
       message,
     };
   } catch (error) {
-    dependencies.logger.warn(`iOS CtrlProxy runner check failed: ${normalizeErrorMessage(error)}`, error);
+    dependencies.logger.warn(`iOS CtrlProxy runner check failed: ${errorMessage(error)}`, error);
     return {
       name,
       status: "skip",
-      message: `Could not check iOS CtrlProxy runner: ${normalizeErrorMessage(error)}`,
+      message: `Could not check iOS CtrlProxy runner: ${errorMessage(error)}`,
     };
   }
 }
@@ -1094,11 +1089,11 @@ export async function checkIosObserveRoundTrip(
       message,
     };
   } catch (error) {
-    dependencies.logger.warn(`iOS observe round-trip check failed: ${normalizeErrorMessage(error)}`, error);
+    dependencies.logger.warn(`iOS observe round-trip check failed: ${errorMessage(error)}`, error);
     return {
       name,
       status: "fail",
-      message: `Could not check iOS observe round trip: ${normalizeErrorMessage(error)}`,
+      message: `Could not check iOS observe round trip: ${errorMessage(error)}`,
       recommendation:
         "Restart the AutoMobile daemon and iOS CtrlProxy runner, then re-run: auto-mobile --doctor --ios.",
     };

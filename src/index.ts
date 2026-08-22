@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import "./runtime/reflectMetadata";
+import { errorMessage } from "./utils/describeUnknownError";
 import { bootstrapEnvironment } from "./utils/envBootstrap";
 import { DAEMON_LAUNCH_CWD_ENV, safeProcessCwd } from "./utils/workingDirectory";
 
@@ -301,7 +302,7 @@ async function main() {
         .ensure()
         .catch((error) => {
           logger.warn(
-            `[SCREEN_CAPTURE_HELPER] Background prefetch failed: ${error instanceof Error ? error.message : String(error)}`,
+            `[SCREEN_CAPTURE_HELPER] Background prefetch failed: ${errorMessage(error)}`,
           );
         });
     }

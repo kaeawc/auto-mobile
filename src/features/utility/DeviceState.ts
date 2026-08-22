@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { defaultAdbClientFactory, type AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { BootedDevice, ExecResult } from "../../models";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
@@ -316,7 +317,7 @@ export class DeviceState {
       return {
         supported: true,
         capability: "full",
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage(error),
       };
     }
   }
@@ -352,7 +353,7 @@ export class DeviceState {
         capability: "full",
         mode,
         method: "android_cmd_notification",
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage(error),
       };
     }
   }
@@ -392,7 +393,7 @@ export class DeviceState {
         capability: "binary",
         method: "ios_simulator_notifyutil",
         bestEffort: true,
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage(error),
       };
     }
   }
@@ -416,7 +417,7 @@ export class DeviceState {
     } catch (error) {
       logger.warn(
         `[DeviceState] could not resolve iOS version for ${this.device.deviceId}: `
-        + `${error instanceof Error ? error.message : String(error)}`,
+        + `${errorMessage(error)}`,
         error
       );
       return null;
@@ -536,7 +537,7 @@ export class DeviceState {
         requestedMode,
         method: "ios_simulator_notifyutil",
         bestEffort: true,
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage(error),
       };
     }
   }

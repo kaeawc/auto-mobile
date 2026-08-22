@@ -1,3 +1,4 @@
+import { errorMessage } from "../describeUnknownError";
 import { execFile, spawn, type ChildProcess } from "child_process";
 import { promisify } from "util";
 import { logger } from "../logger";
@@ -676,7 +677,7 @@ export class AdbClient implements AdbExecutor {
 
   private isMissingExecutableError(error: unknown): boolean {
     const err = error as NodeJS.ErrnoException;
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorMessage(error);
     return err.code === "ENOENT" || message.includes("ENOENT") || message.includes("Executable not found");
   }
 

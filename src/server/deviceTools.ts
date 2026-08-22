@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/describeUnknownError";
 import type { ChildProcess } from "child_process";
 import { createHash } from "node:crypto";
 import { z } from "zod/v4";
@@ -2377,7 +2378,7 @@ export function registerDeviceTools() {
     }
     return new ProvisionDeviceError(
       "platform_command_failed",
-      `Failed to provision ${args.device.platform} device '${args.device.name}': ${error instanceof Error ? error.message : String(error)}`,
+      `Failed to provision ${args.device.platform} device '${args.device.name}': ${errorMessage(error)}`,
     );
   }
 
@@ -2635,7 +2636,7 @@ export function registerDeviceTools() {
     }
     return createToolErrorResponse(
       "platform_command_failed",
-      error instanceof Error ? error.message : String(error),
+      errorMessage(error),
     );
   }
 

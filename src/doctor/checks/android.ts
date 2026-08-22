@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { errorMessage } from "../../utils/describeUnknownError";
 import { existsSync } from "node:fs";
 import { CheckResult, DoctorOptions } from "../types";
 import {
@@ -63,11 +64,11 @@ async function checkCmdlineToolsVersion(
       value: location.path,
     };
   } catch (error) {
-    logger.warn(`Failed to determine cmdline-tools version: ${error instanceof Error ? error.message : String(error)}`);
+    logger.warn(`Failed to determine cmdline-tools version: ${errorMessage(error)}`);
     return {
       name: "Android Command Line Tools",
       status: "warn",
-      message: `Could not determine cmdline-tools version: ${error instanceof Error ? error.message : String(error)}`,
+      message: `Could not determine cmdline-tools version: ${errorMessage(error)}`,
       recommendation: "Install a current Android SDK Command-line Tools package that supports SDK XML v4.",
       value: location.path,
     };
@@ -111,7 +112,7 @@ export async function checkAndroidCommandLineTools(
   try {
     locations = await dependencies.detectAndroidCommandLineTools();
   } catch (error) {
-    dependencies.logger.warn(`Failed to detect Android command line tools: ${error instanceof Error ? error.message : String(error)}`, error);
+    dependencies.logger.warn(`Failed to detect Android command line tools: ${errorMessage(error)}`, error);
     return {
       name,
       status: "warn",
@@ -228,11 +229,11 @@ export async function checkAdbInstallation(
       value: adbPath,
     };
   } catch (error) {
-    logger.warn(`ADB installation check failed: ${error instanceof Error ? error.message : String(error)}`, error);
+    logger.warn(`ADB installation check failed: ${errorMessage(error)}`, error);
     return {
       name: "ADB Installation",
       status: "fail",
-      message: `ADB not found: ${error instanceof Error ? error.message : String(error)}`,
+      message: `ADB not found: ${errorMessage(error)}`,
       recommendation: "Install Android SDK Platform-Tools. " +
         "Via Homebrew: brew install android-platform-tools",
     };
@@ -260,11 +261,11 @@ export async function checkAdbVersion(
       value: version,
     };
   } catch (error) {
-    logger.warn(`ADB version check failed: ${error instanceof Error ? error.message : String(error)}`, error);
+    logger.warn(`ADB version check failed: ${errorMessage(error)}`, error);
     return {
       name: "ADB Version",
       status: "warn",
-      message: `Could not determine ADB version: ${error instanceof Error ? error.message : String(error)}`,
+      message: `Could not determine ADB version: ${errorMessage(error)}`,
     };
   }
 }
@@ -284,7 +285,7 @@ async function checkEmulator(): Promise<CheckResult> {
       message: "Emulator is available",
     };
   } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : String(error);
+    const errorMsg = errorMessage(error);
     logger.warn(`Android emulator check failed: ${errorMsg}`, error);
 
     // Check if it's a "not found" error
@@ -328,7 +329,7 @@ export async function checkConnectedDevices(
     try {
       rawStates = await adb.getDeviceStates?.() ?? [];
     } catch (error) {
-      logger.debug(`Could not query offline Android device states: ${error instanceof Error ? error.message : String(error)}`);
+      logger.debug(`Could not query offline Android device states: ${errorMessage(error)}`);
     }
     const offlineDevices = rawStates.filter((state: AdbDeviceState) => state.state === "offline");
     if (offlineDevices.length > 0) {
@@ -351,11 +352,11 @@ export async function checkConnectedDevices(
       recommendation: "Connect a device via USB or start an emulator",
     };
   } catch (error) {
-    logger.warn(`Connected Android devices check failed: ${error instanceof Error ? error.message : String(error)}`, error);
+    logger.warn(`Connected Android devices check failed: ${errorMessage(error)}`, error);
     return {
       name: "Connected Devices",
       status: "warn",
-      message: `Could not list devices: ${error instanceof Error ? error.message : String(error)}`,
+      message: `Could not list devices: ${errorMessage(error)}`,
       value: 0,
     };
   }
@@ -418,11 +419,11 @@ export async function checkAvdMemory(
     }
     return { name: "AVD Memory", status: "pass", message: `All applicable modern Play-image AVDs meet the ${MIN_AVD_RAM_MB} MB memory minimum.` };
   } catch (error) {
-    logger.warn(`AVD memory check failed: ${error instanceof Error ? error.message : String(error)}`);
+    logger.warn(`AVD memory check failed: ${errorMessage(error)}`);
     return {
       name: "AVD Memory",
       status: "skip",
-      message: `Could not check AVD memory: ${error instanceof Error ? error.message : String(error)}`,
+      message: `Could not check AVD memory: ${errorMessage(error)}`,
     };
   }
 }
@@ -453,7 +454,7 @@ async function checkAvailableAvds(): Promise<CheckResult> {
       value: avds.length,
     };
   } catch (error) {
-    logger.warn(`Failed to list AVDs: ${error instanceof Error ? error.message : String(error)}`, error);
+    logger.warn(`Failed to list AVDs: ${errorMessage(error)}`, error);
     return {
       name: "Available AVDs",
       status: "skip",

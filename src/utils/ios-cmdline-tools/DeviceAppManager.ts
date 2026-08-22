@@ -1,3 +1,4 @@
+import { errorMessage } from "../describeUnknownError";
 import { promises as fs } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -140,7 +141,7 @@ const findAppBundleInDir = async (
 };
 
 const getErrorMessage = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error);
+  errorMessage(error);
 
 /**
  * Full text of a failed `exec` rejection. Promisified `child_process.exec`
@@ -448,7 +449,7 @@ export class DeviceAppManager implements DeviceUrlLauncher {
     try {
       return await this.withInstalledAppBundle(deviceUdid, bundleId, bundlePath => hashAppBundle(bundlePath));
     } catch (error) {
-      this.deps.logger.warn(`[DeviceAppManager] Failed to hash installed app bundle for ${bundleId}: ${error instanceof Error ? error.message : String(error)}`);
+      this.deps.logger.warn(`[DeviceAppManager] Failed to hash installed app bundle for ${bundleId}: ${errorMessage(error)}`);
       return null;
     }
   }
@@ -535,7 +536,7 @@ export class DeviceAppManager implements DeviceUrlLauncher {
 
         bundleOnDisk = await findAppBundleInDir(copyDir, this.deps);
       } catch (error) {
-        this.deps.logger.warn(`[DeviceAppManager] Failed to read installed app bundle for ${bundleId}: ${error instanceof Error ? error.message : String(error)}`);
+        this.deps.logger.warn(`[DeviceAppManager] Failed to read installed app bundle for ${bundleId}: ${errorMessage(error)}`);
         return null;
       }
 

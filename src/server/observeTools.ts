@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/describeUnknownError";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
 import { ResourceRegistry } from "./resourceRegistry";
@@ -1217,7 +1218,7 @@ export function registerObserveTools() {
           manager.resetSetupState();
         } catch (error) {
           logger.warn("[observe] Failed to reset accessibility setup state", {
-            error: error instanceof Error ? error.message : String(error),
+            error: errorMessage(error),
           });
         }
       }

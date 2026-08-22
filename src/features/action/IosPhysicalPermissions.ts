@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import type { BootedDevice } from "../../models";
 import { logger } from "../../utils/logger";
 import { IOSCtrlProxyClient } from "../observe/ios/IOSCtrlProxyClient";
@@ -191,7 +192,7 @@ export class CtrlProxyIosPhysicalPrivacyClient implements IosPhysicalPrivacyClie
           // Best-effort per-permission path: log the unexpected failure (so there is
           // a trace even though the message is also surfaced in the result) and
           // report it as a typed failure rather than aborting the whole batch.
-          const message = error instanceof Error ? error.message : String(error);
+          const message = errorMessage(error);
           logger.warn(`[IosPhysicalPermissions] reset of '${permission}' failed: ${message}`, error);
           return { permission, success: false, error: message };
         }

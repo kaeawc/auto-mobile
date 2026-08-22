@@ -1,3 +1,4 @@
+import { errorMessage } from "../describeUnknownError";
 import { logger } from "../logger";
 import { NodeCryptoService } from "../crypto";
 import { ImageCache } from "./ImageCache";
@@ -184,11 +185,11 @@ export class Image {
     try {
       return await this.backend.metadata(this.buffer);
     } catch (e: unknown) {
-      const errorMessage = e instanceof Error ? e.message : String(e);
+      const errorMsg = errorMessage(e);
       // Log before rethrowing so the underlying decode error leaves a trace,
       // mirroring toBuffer's catch (the summarized message loses the original).
-      logger.warn(`[IMAGE] Metadata read failed: ${errorMessage}`, e);
-      throw new Error(`Failed to get image metadata: ${errorMessage}`);
+      logger.warn(`[IMAGE] Metadata read failed: ${errorMsg}`, e);
+      throw new Error(`Failed to get image metadata: ${errorMsg}`);
     }
   }
 

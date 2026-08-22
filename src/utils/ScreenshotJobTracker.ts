@@ -1,3 +1,4 @@
+import { errorMessage } from "./describeUnknownError";
 import { logger } from "./logger";
 import { ScreenshotResult } from "../models/ScreenshotResult";
 import { Timer, defaultTimer } from "./SystemTimer";
@@ -146,7 +147,7 @@ export class ScreenshotJobTracker {
         return runner(abortController.signal);
       })
       .catch(error => {
-        const message = error instanceof Error ? error.message : String(error);
+        const message = errorMessage(error);
         return { success: false, error: message };
       })
       .then(async result => {

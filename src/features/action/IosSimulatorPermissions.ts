@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import type { BootedDevice, ExecResult } from "../../models";
 import {
   SimulatorTccSqliteClient,
@@ -214,7 +215,7 @@ export class IosSimulatorPermissions {
           return {
             permission,
             success: false,
-            error: error instanceof Error ? error.message : String(error)
+            error: errorMessage(error)
           };
         }
       })
@@ -280,7 +281,7 @@ export class IosSimulatorPermissions {
         })
       };
     } catch (error) {
-      return this.queryFailure(normalizedAppId, error instanceof Error ? error.message : String(error));
+      return this.queryFailure(normalizedAppId, errorMessage(error));
     }
   }
 

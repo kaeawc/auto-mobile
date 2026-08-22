@@ -1,3 +1,4 @@
+import { errorMessage } from "../describeUnknownError";
 import { ChildProcess, execFile, spawn } from "child_process";
 import { existsSync } from "node:fs";
 import { promisify } from "util";
@@ -951,7 +952,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     } catch (error) {
       // Auxiliary diagnostic probe; a failure here must not block readiness polling.
       logger.debug(
-        `Offline-state probe unavailable during emulator readiness: ${error instanceof Error ? error.message : String(error)}`,
+        `Offline-state probe unavailable during emulator readiness: ${errorMessage(error)}`,
       );
       tracker.deviceId = null;
       tracker.since = null;
@@ -1212,7 +1213,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       logger.error("Failed to list AVDs:", error);
 
       // Check if the error is because emulator is not found
-      const errorMsg = error instanceof Error ? error.message : String(error);
+      const errorMsg = errorMessage(error);
       const missingEmulator =
         errorMsg.includes("No such file or directory") ||
         errorMsg.includes("command not found") ||

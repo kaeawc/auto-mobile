@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/describeUnknownError";
 import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
 import { MultiPlatformDeviceManager, PlatformDeviceManager } from "../utils/deviceUtils";
 import { AvdManagerService } from "../utils/android-cmdline-tools/AvdManagerService";
@@ -375,10 +376,6 @@ function appendIosProvisioningCatalog(
       family: deviceType.productFamily,
     });
   }
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 // Convert DeviceInfo to DeviceImageInfo, merging with AvdInfo for Android

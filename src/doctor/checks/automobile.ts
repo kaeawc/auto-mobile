@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { errorMessage } from "../../utils/describeUnknownError";
 import { CheckResult } from "../types";
 import type { DoctorOptions } from "../types";
 import { platform as getHostPlatform } from "node:os";
@@ -127,7 +128,7 @@ export async function checkImageBackend(
         message: `active=jimp-cli; cwebp=${binaries.cwebp}; dwebp=${binaries.dwebp}`,
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorMessage(error);
       log.warn(`Image backend doctor check failed: ${message}`, error);
       return {
         name: "Image Backend",
@@ -157,7 +158,7 @@ export async function checkImageBackend(
         message: "active=sharp; sharp=loaded",
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorMessage(error);
       log.warn(`Image backend doctor check failed: ${message}`, error);
       return {
         name: "Image Backend",
@@ -213,11 +214,11 @@ export async function checkDaemonStatus(
       recommendation: `Start the daemon with: bunx ${resolveDaemonInstallSpecifier()} --daemon start`,
     };
   } catch (error) {
-    logger.warn(`Daemon status check failed: ${error instanceof Error ? error.message : String(error)}`, error);
+    logger.warn(`Daemon status check failed: ${errorMessage(error)}`, error);
     return {
       name: "Daemon Status",
       status: "warn",
-      message: `Could not check daemon: ${error instanceof Error ? error.message : String(error)}`,
+      message: `Could not check daemon: ${errorMessage(error)}`,
       recommendation: `Try: bunx ${resolveDaemonInstallSpecifier()} --daemon start`,
     };
   }
@@ -255,11 +256,11 @@ export async function checkDaemonConnectivity(
       recommendation: report.recommendations.join("; ") || `Try: bunx ${resolveDaemonInstallSpecifier()} --daemon restart`,
     };
   } catch (error) {
-    logger.warn(`Daemon connectivity check failed: ${error instanceof Error ? error.message : String(error)}`, error);
+    logger.warn(`Daemon connectivity check failed: ${errorMessage(error)}`, error);
     return {
       name: "Daemon Connectivity",
       status: "warn",
-      message: `Connectivity check failed: ${error instanceof Error ? error.message : String(error)}`,
+      message: `Connectivity check failed: ${errorMessage(error)}`,
     };
   }
 }
@@ -317,13 +318,13 @@ export async function checkDaemonBuildIdentity(
     // so there is a trace even though the user only sees the summarized message
     // (CLAUDE.md error-handling convention #2).
     logger.warn(
-      `Daemon build identity check failed: ${error instanceof Error ? error.message : String(error)}`,
+      `Daemon build identity check failed: ${errorMessage(error)}`,
       error
     );
     return {
       name: "Daemon Build Identity",
       status: "warn",
-      message: `Could not check daemon build identity: ${error instanceof Error ? error.message : String(error)}`,
+      message: `Could not check daemon build identity: ${errorMessage(error)}`,
     };
   }
 }
@@ -485,11 +486,11 @@ export async function checkCtrlProxy(
         message: error.message,
       };
     }
-    log.warn(`CtrlProxy check failed: ${error instanceof Error ? error.message : String(error)}`, error);
+    log.warn(`CtrlProxy check failed: ${errorMessage(error)}`, error);
     return {
       name: "CtrlProxy",
       status: "skip",
-      message: `Could not check: ${error instanceof Error ? error.message : String(error)}`,
+      message: `Could not check: ${errorMessage(error)}`,
     };
   }
 }
@@ -570,11 +571,11 @@ export async function checkWorkProfileAccessibility(
       recommendation: `The accessibility service needs to be enabled in each work profile for full app install tracking. Run bunx ${resolveDaemonInstallSpecifier()} --cli doctor or enable manually in Settings > Accessibility.`,
     };
   } catch (error) {
-    logger.warn(`Work profile accessibility check failed: ${error instanceof Error ? error.message : String(error)}`, error);
+    logger.warn(`Work profile accessibility check failed: ${errorMessage(error)}`, error);
     return {
       name: "Work Profile Accessibility",
       status: "skip",
-      message: `Could not check: ${error instanceof Error ? error.message : String(error)}`,
+      message: `Could not check: ${errorMessage(error)}`,
     };
   }
 }

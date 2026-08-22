@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/describeUnknownError";
 import { promises as nodeFs } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, posix, relative } from "node:path";
@@ -636,7 +637,7 @@ async function executeIosAppContainerCommand(
 }
 
 function mapIosAppContainerError(error: unknown, context: IosAppContainerCommandContext): ActionableError {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = errorMessage(error);
   if (/not installed|application.*not.*installed|no such app|bundle.*not found|missing bundle/i.test(message)) {
     return new ActionableError(
       `iOS app ${context.appId} is not installed on simulator ${context.device.deviceId}; ` +
@@ -744,7 +745,7 @@ async function executeAndroidAppFileCommand(
 }
 
 function mapAndroidAppFileError(error: unknown, context: AndroidAppFileCommandContext): ActionableError {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = errorMessage(error);
   if (/not debuggable/i.test(message)) {
     return new ActionableError(
       `Android ${context.container} app file ${context.operation} for ${context.appId} on ${context.device.deviceId} ` +

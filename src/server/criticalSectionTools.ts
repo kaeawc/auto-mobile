@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/describeUnknownError";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
 import { ActionableError, BootedDevice } from "../models/index";
@@ -175,13 +176,13 @@ const criticalSectionHandler = async (
       } catch (error) {
         executedSteps.push({ tool: step.tool, success: false });
 
-        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorMsg = errorMessage(error);
         logger.error(
-          `Device ${device.deviceId} failed at step ${i + 1}/${steps.length} in critical section "${lock}": ${errorMessage}`,
+          `Device ${device.deviceId} failed at step ${i + 1}/${steps.length} in critical section "${lock}": ${errorMsg}`,
         );
 
         throw new ActionableError(
-          `Failed at step ${i + 1}/${steps.length} (${step.tool}): ${errorMessage}`,
+          `Failed at step ${i + 1}/${steps.length} (${step.tool}): ${errorMsg}`,
         );
       }
     }
@@ -199,11 +200,11 @@ const criticalSectionHandler = async (
     // Force cleanup on error to prevent other devices from waiting forever
     coordinator.forceCleanup(lock, namespace);
 
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    logger.error(`Device ${device.deviceId} error in critical section "${lock}": ${errorMessage}`);
+    const errorMsg = errorMessage(error);
+    logger.error(`Device ${device.deviceId} error in critical section "${lock}": ${errorMsg}`);
 
     throw new ActionableError(
-      `Critical section "${lock}" failed for device ${device.deviceId}: ${errorMessage}`,
+      `Critical section "${lock}" failed for device ${device.deviceId}: ${errorMsg}`,
     );
   } finally {
     // Release the lock if we acquired it

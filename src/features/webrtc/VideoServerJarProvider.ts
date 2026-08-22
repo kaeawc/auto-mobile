@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import AdmZip from "adm-zip";
 import * as fs from "node:fs/promises";
 import path from "node:path";
@@ -328,7 +329,7 @@ export class VideoServerJarProvider {
       // A truncated download / HTML error page is not a valid zip.
       logger.warn("[VIDEO_JAR] Structural check failed (not a valid zip)", {
         path: filePath,
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage(error),
       });
       return false;
     }

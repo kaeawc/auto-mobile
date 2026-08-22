@@ -1,3 +1,4 @@
+import { errorMessage } from "../describeUnknownError";
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -72,13 +73,13 @@ function parseJsonArray(output: string, context: string): Array<Record<string, u
     }
     return parsed as Array<Record<string, unknown>>;
   } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
+    const detail = errorMessage(error);
     throw new ActionableError(`sqlite3 returned malformed JSON while reading ${context}: ${detail}`);
   }
 }
 
 function sqliteErrorDetail(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  return errorMessage(error);
 }
 
 function hasErrorCode(error: unknown, code: string): boolean {

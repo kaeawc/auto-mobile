@@ -53,7 +53,7 @@ caller's contract, not by local precedent. The building blocks already exist:
    opted into debug logging, which defeats the trace:
    ```ts
    } catch (error) {
-     logger.warn(`simctl check failed: ${normalizeErrorMessage(error)}`, error);
+     logger.warn(`simctl check failed: ${errorMessage(error)}`, error);
      return { name: "simctl", status: "fail", message: "..." };
    }
    ```

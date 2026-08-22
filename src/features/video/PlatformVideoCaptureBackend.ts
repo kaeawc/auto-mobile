@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { ActionableError, BootedDevice } from "../../models";
 import { defaultTimer } from "../../utils/SystemTimer";
 import type { Timer } from "../../utils/SystemTimer";
@@ -99,7 +100,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       );
     } catch (error) {
       logger.warn(
-        `[VideoCapture] Device-side pkill -2 screenrecord failed; will rely on host SIGINT: ${error instanceof Error ? error.message : String(error)}`
+        `[VideoCapture] Device-side pkill -2 screenrecord failed; will rely on host SIGINT: ${errorMessage(error)}`
       );
     }
 

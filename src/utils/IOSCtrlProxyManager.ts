@@ -1,3 +1,4 @@
+import { errorMessage } from "./describeUnknownError";
 import { logger } from "./logger";
 import { BootedDevice } from "../models";
 import { requireBootedDevice } from "./requireBootedDevice";
@@ -324,7 +325,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         logger.info("[IOSCtrlProxy] Auto-restart successful");
       },
       onRestartFailure: error => {
-        logger.warn(`[IOSCtrlProxy] Auto-restart failed: ${error instanceof Error ? error.message : String(error)}`);
+        logger.warn(`[IOSCtrlProxy] Auto-restart failed: ${errorMessage(error)}`);
       },
     });
     this.iproxySupervisor = new DefaultProcessSupervisor({
@@ -342,7 +343,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         this.iproxyProcess = null;
       },
       onRestartFailure: error => {
-        logger.warn(`[IOSCtrlProxy] Failed to restart iproxy: ${error instanceof Error ? error.message : String(error)}`);
+        logger.warn(`[IOSCtrlProxy] Failed to restart iproxy: ${errorMessage(error)}`);
       },
     });
   }
@@ -1094,7 +1095,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
             } catch (error) {
               logger.warn(
                 `[IOSCtrlProxy] Remote runner stop of hung runner ${hungPid} failed: ` +
-                `${error instanceof Error ? error.message : String(error)}`
+                `${errorMessage(error)}`
               );
             }
           } else {
@@ -1158,7 +1159,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
           await this.remoteRunner.stop({ deviceId: this.device.deviceId, pid: this.xcTestProcessId });
         }
       } catch (error) {
-        logger.warn(`[IOSCtrlProxy] Remote runner stop failed: ${error instanceof Error ? error.message : String(error)}`);
+        logger.warn(`[IOSCtrlProxy] Remote runner stop failed: ${errorMessage(error)}`);
       }
 
       if (!this.isSimulator()) {
@@ -1190,7 +1191,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       } catch (error) {
         logger.warn(
           `[IOSCtrlProxy] Failed to terminate tracked CtrlProxy runner ${this.xcTestProcessId}: ` +
-          `${error instanceof Error ? error.message : String(error)}`
+          `${errorMessage(error)}`
         );
       }
       this.xcTestProcessId = null;
@@ -1341,7 +1342,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       };
     } catch (error) {
       this.attemptedSetup = false; // Allow retry on next call
-      const errorMsg = error instanceof Error ? error.message : String(error);
+      const errorMsg = errorMessage(error);
       perf.end();
       return {
         success: false,
@@ -2529,7 +2530,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         await this.deviceAppManager.uninstallApp(this.device.deviceId, IOSCtrlProxyManager.APP_BUNDLE_ID, simulator);
         logger.info("[IOSCtrlProxy] Uninstalled CtrlProxy app to force reinstall");
       } catch (error) {
-        logger.warn(`[IOSCtrlProxy] Failed to uninstall CtrlProxy app: ${error instanceof Error ? error.message : String(error)}`);
+        logger.warn(`[IOSCtrlProxy] Failed to uninstall CtrlProxy app: ${errorMessage(error)}`);
       }
       return;
     }

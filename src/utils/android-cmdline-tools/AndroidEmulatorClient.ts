@@ -8,6 +8,10 @@ import { arch } from "os";
 import { detectAndroidCommandLineTools, getBestAndroidToolsLocation } from "./detection";
 import { defaultTimer, Timer } from "../SystemTimer";
 import { createGlobalPerformanceTracker } from "../PerformanceTracker";
+import {
+  TcpHostPortAvailabilityChecker,
+  type HostPortAvailabilityChecker,
+} from "../ios/IOSHostPortAvailabilityChecker";
 import type { AvdConfig, AvdConfigReader } from "./AvdConfigReader";
 import { FileAvdConfigReader, MIN_AVD_RAM_MB } from "./AvdConfigReader";
 import { WakeAndUnlock } from "../../features/action/WakeAndUnlock";
@@ -389,6 +393,17 @@ function emulatorPortsForDeviceId(deviceId: string | undefined): EmulatorPortPai
   return { consolePort, adbPort: consolePort + 1 };
 }
 
+function observedEmulatorPorts(deviceId: string): EmulatorPortPair | undefined {
+  if (!deviceId.startsWith("emulator-")) {
+    return undefined;
+  }
+  const consolePort = Number(deviceId.slice("emulator-".length));
+  if (!Number.isInteger(consolePort) || consolePort < 1 || consolePort >= 65_535) {
+    return undefined;
+  }
+  return { consolePort, adbPort: consolePort + 1 };
+}
+
 function emulatorDeviceIdForConsolePort(consolePort: number): string {
   return `emulator-${consolePort}`;
 }
@@ -480,10 +495,12 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   private avdConfigReader: AvdConfigReader;
   private platform: NodeJS.Platform;
   private hostArchitecture: string;
+  private readonly hostPortAvailabilityChecker: HostPortAvailabilityChecker;
   private readonly launchTargetDeviceIds = new WeakMap<ChildProcess, string>();
   // startDevice creates a fresh client per request, so reservations must cover
   // every client in the daemon rather than one client instance.
   private static readonly reservedLaunchDeviceIds = new Map<ChildProcess, EmulatorDeviceIdReservation>();
+  private static readonly pendingLaunchDeviceIds = new Map<string, EmulatorDeviceIdReservation>();
   private static readonly terminalReservedDeviceIds = new Map<string, TerminalEmulatorReservation>();
   private static terminalReservationGeneration = 0;
   private readonly launchErrors = new WeakMap<ChildProcess, ActionableError>();
@@ -501,6 +518,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    * @param avdConfigReader - Reader for AVD config.ini files (for testing)
    * @param platform - Host platform (for testing)
    * @param hostArchitecture - Host CPU architecture (for testing)
+   * @param hostPortAvailabilityChecker - Checks whether emulator ports are free (for testing)
    */
   constructor(
     execAsyncFn:
@@ -512,6 +530,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     avdConfigReader?: AvdConfigReader,
     platform: NodeJS.Platform = process.platform,
     hostArchitecture: string = arch(),
+    hostPortAvailabilityChecker: HostPortAvailabilityChecker = new TcpHostPortAvailabilityChecker(),
   ) {
     this.execAsync = execAsyncFn || execAsync;
     this.spawnFn = spawnFn || spawn;
@@ -520,12 +539,14 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     this.avdConfigReader = avdConfigReader ?? new FileAvdConfigReader();
     this.platform = platform;
     this.hostArchitecture = hostArchitecture;
+    this.hostPortAvailabilityChecker = hostPortAvailabilityChecker;
     // Only set a fallback emulator path here; proper detection happens lazily
     this.emulatorPath = this.getFallbackEmulatorPath();
   }
 
   static resetLaunchReservationsForTesting(): void {
     AndroidEmulatorClient.reservedLaunchDeviceIds.clear();
+    AndroidEmulatorClient.pendingLaunchDeviceIds.clear();
     AndroidEmulatorClient.terminalReservedDeviceIds.clear();
     AndroidEmulatorClient.terminalReservationGeneration = 0;
   }
@@ -1564,7 +1585,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       signal,
     );
     this.throwIfLaunchCancelled(avdName, isCancelled);
-    const reservedEmulator = this.addReservedEmulatorPort(
+    const reservedEmulator = await this.addReservedEmulatorPort(
       args,
       preLaunchEmulatorDeviceSnapshot,
       expectedDeviceId,
@@ -1574,7 +1595,15 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
     return new Promise((resolve, reject) => {
       perf.startOperation("spawnEmulator");
-      const child = this.spawnFn(this.emulatorPath, args);
+      let child: ChildProcess;
+      try {
+        child = this.spawnFn(this.emulatorPath, args);
+      } catch (error) {
+        if (reservedEmulator) {
+          this.releasePendingEmulatorDeviceId(reservedEmulator);
+        }
+        throw error;
+      }
       perf.endOperation("spawnEmulator");
       if (reservedEmulator) {
         this.recordReservedEmulatorDeviceId(child, reservedEmulator);
@@ -2125,9 +2154,9 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     }
   }
 
-  private allocateReservedEmulatorPorts(
+  private async allocateReservedEmulatorPorts(
     preexistingDeviceIds: ReadonlySet<string>,
-  ): EmulatorPortPair {
+  ): Promise<EmulatorDeviceIdReservation> {
     const unavailablePorts = this.unavailableEmulatorPorts(preexistingDeviceIds);
     for (
       let port = MIN_EMULATOR_CONSOLE_PORT;
@@ -2135,8 +2164,18 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       port += EMULATOR_CONSOLE_PORT_STEP
     ) {
       const ports = { consolePort: port, adbPort: port + 1 };
-      if (!unavailablePorts.has(ports.consolePort) && !unavailablePorts.has(ports.adbPort)) {
-        return ports;
+      if (
+        !unavailablePorts.has(ports.consolePort) &&
+        !unavailablePorts.has(ports.adbPort) &&
+        (await this.areEmulatorPortsAvailableOnHost(ports))
+      ) {
+        const currentUnavailablePorts = this.unavailableEmulatorPorts(preexistingDeviceIds);
+        if (
+          !currentUnavailablePorts.has(ports.consolePort) &&
+          !currentUnavailablePorts.has(ports.adbPort)
+        ) {
+          return this.reservePendingEmulatorDeviceId(ports, true);
+        }
       }
     }
     throw new ActionableError(
@@ -2154,12 +2193,15 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       unavailablePorts.add(ports.adbPort);
     };
     for (const deviceId of preexistingDeviceIds ?? []) {
-      const ports = emulatorPortsForDeviceId(deviceId);
+      const ports = observedEmulatorPorts(deviceId);
       if (ports) {
         reservePorts(ports);
       }
     }
     for (const reservation of AndroidEmulatorClient.reservedLaunchDeviceIds.values()) {
+      reservePorts(reservation.ports);
+    }
+    for (const reservation of AndroidEmulatorClient.pendingLaunchDeviceIds.values()) {
       reservePorts(reservation.ports);
     }
     for (const reservation of AndroidEmulatorClient.terminalReservedDeviceIds.values()) {
@@ -2168,7 +2210,15 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     return unavailablePorts;
   }
 
-  private assertEmulatorPortsAvailable(
+  private async areEmulatorPortsAvailableOnHost(ports: EmulatorPortPair): Promise<boolean> {
+    const availability = await Promise.all([
+      this.hostPortAvailabilityChecker.isAvailable("127.0.0.1", ports.consolePort),
+      this.hostPortAvailabilityChecker.isAvailable("127.0.0.1", ports.adbPort),
+    ]);
+    return availability.every(Boolean);
+  }
+
+  private assertEmulatorPortsNotReserved(
     ports: EmulatorPortPair,
     preexistingDeviceIds: ReadonlySet<string> | undefined,
   ): void {
@@ -2181,11 +2231,38 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     }
   }
 
-  private reserveEmulatorDeviceId(
+  private async assertEmulatorPortsAvailable(
+    ports: EmulatorPortPair,
+    preexistingDeviceIds: ReadonlySet<string> | undefined,
+  ): Promise<void> {
+    this.assertEmulatorPortsNotReserved(ports, preexistingDeviceIds);
+    if (!(await this.areEmulatorPortsAvailableOnHost(ports))) {
+      throw new ActionableError(
+        `Cannot safely launch an Android emulator: emulator port pair ` +
+          `${ports.consolePort}/${ports.adbPort} is already in use`,
+      );
+    }
+    this.assertEmulatorPortsNotReserved(ports, preexistingDeviceIds);
+  }
+
+  private reservePendingEmulatorDeviceId(
+    ports: EmulatorPortPair,
+    appendPort: boolean,
+  ): EmulatorDeviceIdReservation {
+    const reservation = {
+      deviceId: emulatorDeviceIdForConsolePort(ports.consolePort),
+      ports,
+      appendPort,
+    };
+    AndroidEmulatorClient.pendingLaunchDeviceIds.set(reservation.deviceId, reservation);
+    return reservation;
+  }
+
+  private async reserveEmulatorDeviceId(
     preLaunchSnapshot: EmulatorDeviceIdSnapshot | undefined,
     args: readonly string[],
     expectedDeviceId?: string,
-  ): EmulatorDeviceIdReservation | undefined {
+  ): Promise<EmulatorDeviceIdReservation | undefined> {
     const expectedEmulatorPorts = emulatorPortsForDeviceId(expectedDeviceId);
     if (expectedDeviceId && !expectedEmulatorPorts) {
       return undefined;
@@ -2203,30 +2280,23 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     }
     const ports = configuredPorts ?? expectedEmulatorPorts;
     if (ports) {
-      this.assertEmulatorPortsAvailable(ports, preLaunchSnapshot?.deviceIds);
-      return {
-        deviceId: emulatorDeviceIdForConsolePort(ports.consolePort),
-        ports,
-        appendPort: configuredPorts === undefined,
-      };
+      await this.assertEmulatorPortsAvailable(ports, preLaunchSnapshot?.deviceIds);
+      return this.reservePendingEmulatorDeviceId(ports, configuredPorts === undefined);
     }
     if (!preLaunchSnapshot?.isComplete) {
       return undefined;
     }
-    const allocatedPorts = this.allocateReservedEmulatorPorts(preLaunchSnapshot.deviceIds);
-    return {
-      deviceId: emulatorDeviceIdForConsolePort(allocatedPorts.consolePort),
-      ports: allocatedPorts,
-      appendPort: true,
-    };
+    return this.allocateReservedEmulatorPorts(
+      preLaunchSnapshot.deviceIds,
+    );
   }
 
-  private addReservedEmulatorPort(
+  private async addReservedEmulatorPort(
     args: string[],
     preLaunchSnapshot: EmulatorDeviceIdSnapshot | undefined,
     expectedDeviceId?: string,
-  ): EmulatorDeviceIdReservation | undefined {
-    const reservation = this.reserveEmulatorDeviceId(
+  ): Promise<EmulatorDeviceIdReservation | undefined> {
+    const reservation = await this.reserveEmulatorDeviceId(
       preLaunchSnapshot,
       args,
       expectedDeviceId,
@@ -2241,8 +2311,15 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     childProcess: ChildProcess,
     reservation: EmulatorDeviceIdReservation,
   ): void {
+    this.releasePendingEmulatorDeviceId(reservation);
     AndroidEmulatorClient.reservedLaunchDeviceIds.set(childProcess, reservation);
     this.recordLaunchTargetDeviceId(childProcess, reservation.deviceId, "reserved console port");
+  }
+
+  private releasePendingEmulatorDeviceId(reservation: EmulatorDeviceIdReservation): void {
+    if (AndroidEmulatorClient.pendingLaunchDeviceIds.get(reservation.deviceId) === reservation) {
+      AndroidEmulatorClient.pendingLaunchDeviceIds.delete(reservation.deviceId);
+    }
   }
 
   private releaseReservedEmulatorDeviceId(childProcess?: ChildProcess | null): void {

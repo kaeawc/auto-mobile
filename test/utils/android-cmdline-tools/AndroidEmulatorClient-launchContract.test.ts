@@ -11,6 +11,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import type { HostPortAvailabilityChecker } from "../../../src/utils/ios/IOSHostPortAvailabilityChecker";
 
 const execResult = (stdout = ""): ExecResult => ({
   stdout,
@@ -35,6 +36,9 @@ function createChild(): ChildProcess & EventEmitter {
 function createClient(
   spawnFn: (command: string, args: string[]) => ChildProcess,
   adb: FakeAdbExecutor = new FakeAdbExecutor(),
+  hostPortAvailabilityChecker: HostPortAvailabilityChecker = {
+    isAvailable: async () => true,
+  },
 ): AndroidEmulatorClient {
   const adbFactory: AdbClientFactory = {
     create: (): AdbExecutor => adb,
@@ -44,6 +48,10 @@ function createClient(
     spawnFn as never,
     new FakeTimer(),
     adbFactory,
+    undefined,
+    undefined,
+    undefined,
+    hostPortAvailabilityChecker,
   );
   (client as unknown as { ensureEmulatorPath: () => Promise<string> }).ensureEmulatorPath = async () => "emulator";
   (client as unknown as { listAvds: () => Promise<DeviceInfo[]> }).listAvds = async () => [
@@ -139,6 +147,106 @@ describe("AndroidEmulatorClient launch contract", () => {
     expect(secondSpawnedArgs).toEqual(expect.arrayContaining(["-port", "5556"]));
     firstChild.emit("exit", 0, null);
     secondLaunch!.emit("exit", 0, null);
+  });
+
+  test("skips an automatic port pair whose ADB endpoint is occupied outside ADB", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setDevices([
+      { name: "Unknown", platform: "android", deviceId: "emulator-5562" },
+    ]);
+    const child = createChild();
+    const checkedPorts: number[] = [];
+    let spawnedArgs: string[] = [];
+    const client = createClient(
+      (_command, args) => {
+        spawnedArgs = args;
+        queueMicrotask(() => child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")));
+        return child;
+      },
+      adb,
+      {
+        isAvailable: async (_host, port) => {
+          checkedPorts.push(port);
+          return port !== 5555;
+        },
+      },
+    );
+
+    await client.startEmulator("Pixel 9");
+
+    expect(checkedPorts).toEqual(expect.arrayContaining([5554, 5555, 5556, 5557]));
+    expect(spawnedArgs).toEqual(expect.arrayContaining(["-port", "5556"]));
+    child.emit("exit", 0, null);
+  });
+
+  test("rechecks reservations after concurrent host-port probes", async () => {
+    const adb = new FakeAdbExecutor();
+    const firstChild = createChild();
+    const secondChild = createChild();
+    const children = [firstChild, secondChild];
+    const spawnedArgs: string[][] = [];
+    let firstPairProbeCount = 0;
+    let releaseFirstPairProbes: () => void = () => {};
+    const firstPairProbes = new Promise<void>(resolve => {
+      releaseFirstPairProbes = resolve;
+    });
+    const hostPortAvailabilityChecker: HostPortAvailabilityChecker = {
+      isAvailable: async (_host, port) => {
+        if (port === 5554 || port === 5555) {
+          firstPairProbeCount += 1;
+          await firstPairProbes;
+        }
+        return true;
+      },
+    };
+    const createSharedClient = () => createClient(
+      (_command, args) => {
+        spawnedArgs.push(args);
+        const child = children.shift()!;
+        queueMicrotask(() => child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")));
+        return child;
+      },
+      adb,
+      hostPortAvailabilityChecker,
+    );
+
+    const firstLaunch = createSharedClient().startEmulator("Pixel 9");
+    while (firstPairProbeCount < 2) {
+      await Promise.resolve();
+    }
+    const secondLaunch = createSharedClient().startEmulator("Pixel 9");
+    while (firstPairProbeCount < 4) {
+      await Promise.resolve();
+    }
+    releaseFirstPairProbes();
+    await Promise.all([firstLaunch, secondLaunch]);
+
+    expect(spawnedArgs).toEqual([
+      expect.arrayContaining(["-port", "5554"]),
+      expect.arrayContaining(["-port", "5556"]),
+    ]);
+    firstChild.emit("exit", 0, null);
+    secondChild.emit("exit", 0, null);
+  });
+
+  test("tolerates odd and malformed emulator serials observed through ADB", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setDevices([
+      { name: "Odd", platform: "android", deviceId: "emulator-5555" },
+      { name: "Malformed", platform: "android", deviceId: "emulator-not-a-port" },
+    ]);
+    const child = createChild();
+    let spawnedArgs: string[] = [];
+    const client = createClient((_command, args) => {
+      spawnedArgs = args;
+      queueMicrotask(() => child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")));
+      return child;
+    }, adb);
+
+    await client.startEmulator("Pixel 9");
+
+    expect(spawnedArgs).toEqual(expect.arrayContaining(["-port", "5558"]));
+    child.emit("exit", 0, null);
   });
 
   test("globally reserves an explicit emulator serial against a concurrent unlabelled launch", async () => {

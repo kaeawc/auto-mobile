@@ -222,6 +222,42 @@ internal fun navigationEventResponse(event: TimestampedNavigationEvent): Navigat
       ),
   )
 
+/** Outcome of applying the event-driven broadcast policy to a [HierarchyResult] (#5468). */
+internal enum class HierarchyBroadcastDecision {
+  /** Serialize and broadcast the full `hierarchy_update` payload. */
+  BroadcastFull,
+  /** Drop the frame: a full broadcast happened too recently (throttled). */
+  SkipThrottled,
+  /**
+   * Drop the frame: the structural-hash gate declared the hierarchy unchanged, so the client
+   * already holds this exact hierarchy and a full re-broadcast would be byte-identical waste.
+   */
+  SkipUnchanged,
+}
+
+/**
+ * Pure event-driven broadcast policy, extracted so the "unchanged hierarchies are never
+ * re-broadcast" invariant (#5468) is unit-testable without standing up the AccessibilityService.
+ *
+ * - [HierarchyResult.Changed]: broadcast the full payload when the throttler allows, else skip.
+ * - [HierarchyResult.Unchanged]: never broadcast — the debouncer's structural-hash gate already
+ *   declared this byte-identical to what the client holds, so a full re-send is pure waste. Skip
+ *   regardless of the throttle window (no consumer relies on periodic re-sends of unchanged
+ *   hierarchies; the client retains its last hierarchy).
+ * - [HierarchyResult.Error]: never broadcast — handled by the error branch, not this policy.
+ */
+internal fun decideHierarchyBroadcast(
+  result: HierarchyResult,
+  shouldBroadcast: () -> Boolean,
+): HierarchyBroadcastDecision =
+  when (result) {
+    is HierarchyResult.Changed ->
+      if (shouldBroadcast()) HierarchyBroadcastDecision.BroadcastFull
+      else HierarchyBroadcastDecision.SkipThrottled
+    is HierarchyResult.Unchanged -> HierarchyBroadcastDecision.SkipUnchanged
+    is HierarchyResult.Error -> HierarchyBroadcastDecision.SkipUnchanged
+  }
+
 /**
  * Main AutoMobile Accessibility Service that provides view hierarchy extraction capabilities for
  * automated testing and UI interaction.
@@ -1253,30 +1289,33 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                   "Hierarchy changed (hash=${result.hash}, extraction=${result.extractionTimeMs}ms)",
                 )
                 writeHierarchyToFile(result.hierarchy)
-                if (broadcastThrottler.shouldBroadcast()) {
-                  broadcastHierarchyUpdate(result.hierarchy)
-                } else {
-                  extractedHierarchyFrameContexts.remove(result.hierarchy)
-                  Log.d(
-                    TAG,
-                    "Throttled event-driven broadcast (${broadcastThrottler.timeSinceLastBroadcastMs()}ms since last)",
-                  )
+                when (decideHierarchyBroadcast(result, broadcastThrottler::shouldBroadcast)) {
+                  HierarchyBroadcastDecision.BroadcastFull ->
+                    broadcastHierarchyUpdate(result.hierarchy)
+                  else -> {
+                    // Throttled: a full broadcast happened too recently. Drop this frame and
+                    // release its retained frame context so the identity map does not leak.
+                    extractedHierarchyFrameContexts.remove(result.hierarchy)
+                    Log.d(
+                      TAG,
+                      "Throttled event-driven broadcast (${broadcastThrottler.timeSinceLastBroadcastMs()}ms since last)",
+                    )
+                  }
                 }
               }
               is HierarchyResult.Unchanged -> {
+                // #5468: the debouncer's structural-hash gate already declared this hierarchy
+                // byte-identical to the one the client holds, so re-serializing and
+                // re-broadcasting the full payload at the throttle cadence is pure waste during
+                // idle/animation. Drop the frame entirely — no consumer relies on periodic
+                // re-sends of unchanged hierarchies (the client retains its last hierarchy), so
+                // there is nothing to keep current. Release the retained frame context so the
+                // identity map does not leak.
                 Log.d(
                   TAG,
-                  "Hierarchy unchanged (animation mode, skipped=${result.skippedEventCount})",
+                  "Hierarchy unchanged (animation mode, skipped=${result.skippedEventCount}); skipping full re-broadcast (#5468)",
                 )
-                if (broadcastThrottler.shouldBroadcast()) {
-                  broadcastHierarchyUpdate(result.hierarchy)
-                } else {
-                  extractedHierarchyFrameContexts.remove(result.hierarchy)
-                  Log.d(
-                    TAG,
-                    "Throttled event-driven broadcast (${broadcastThrottler.timeSinceLastBroadcastMs()}ms since last)",
-                  )
-                }
+                extractedHierarchyFrameContexts.remove(result.hierarchy)
               }
               is HierarchyResult.Error -> {
                 Log.w(TAG, "Hierarchy extraction error: ${result.message}")

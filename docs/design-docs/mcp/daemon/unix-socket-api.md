@@ -67,6 +67,7 @@ All messages are newline-delimited JSON sent over the Unix socket. Each request 
 | `success` | `boolean` | `true` on success, `false` on error |
 | `result` | `object` | Present when `success` is `true` |
 | `error` | `string` | Present when `success` is `false` |
+| `transportFailure` | `object` | Optional machine-readable device-control transport failure metadata. New clients can inspect its stable code, tool/device/session identity, phase, validity, retryability, and recovery/replay flags; legacy clients can continue using `error`. |
 
 ---
 

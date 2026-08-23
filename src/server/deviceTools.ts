@@ -837,6 +837,57 @@ function shouldKeepIntentionalShutdownAfterCommandError(
   return requestAbortSignal?.aborted === true || isShutdownTimeoutError(error);
 }
 
+function shouldRestoreAndroidObserverAfterCommandFailure(
+  device: BootedDevice,
+  error: unknown,
+  requestAbortSignal: AbortSignal | undefined,
+): boolean {
+  return (
+    device.platform === "android" &&
+    !isAlreadyStoppedDeviceError(device.platform, device.deviceId, error) &&
+    !shouldKeepIntentionalShutdownAfterCommandError(error, requestAbortSignal)
+  );
+}
+
+async function restoreAndroidObserverAfterCommandFailure(
+  deviceManager: PlatformDeviceManager,
+  device: BootedDevice,
+  error: unknown,
+  timer: Timer,
+  shutdownDeadlineMs: number,
+  requestAbortSignal: AbortSignal | undefined,
+  timeoutMs: number,
+): Promise<void> {
+  if (!shouldRestoreAndroidObserverAfterCommandFailure(device, error, requestAbortSignal)) {
+    return;
+  }
+  try {
+    // The pre-kill teardown evicts the observer to release its transport hold.
+    // Recreate it only after a fresh, uncached discovery proves this exact
+    // incarnation survived the failed command; a disappeared device or a
+    // same-ID reboot must stay detached.
+    const discovery = await getShutdownDiscovery(
+      deviceManager,
+      device,
+      timer,
+      shutdownDeadlineMs,
+      requestAbortSignal,
+      timeoutMs,
+    );
+    const survivingDevice = findDiscoveredDevice(discovery, device);
+    if (survivingDevice && isSameBootedDeviceIdentity(device, survivingDevice)) {
+      AndroidCtrlProxyClient.getInstance(survivingDevice);
+    }
+  } catch (restoreError) {
+    // Preserve the original shutdown command failure. A later explicit tool
+    // call can still recreate the observer if this confirmation was unavailable.
+    logger.warn(
+      `[DeviceTools] Failed to restore Android observer after kill failure for ${device.deviceId}: ${restoreError}`,
+      restoreError,
+    );
+  }
+}
+
 function handleShutdownCommandError(
   device: BootedDevice,
   error: unknown,
@@ -1469,6 +1520,15 @@ async function killProcessAndRetireOwnership(
     shutdownDevice = killedDevice ?? device;
   } catch (error) {
     retainLatePlatformShutdown(platformShutdown, platformShutdownSettled, retainReservationUntil);
+    await restoreAndroidObserverAfterCommandFailure(
+      deviceManager,
+      device,
+      error,
+      dependencies.timer,
+      shutdownDeadlineMs,
+      requestAbortSignal,
+      timeoutMs,
+    );
     alreadyStoppedMessage = handleShutdownCommandError(
       device,
       error,

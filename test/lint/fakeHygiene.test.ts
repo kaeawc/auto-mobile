@@ -26,7 +26,7 @@ const ALLOWLIST: Record<string, string[]> = {
   "FakeIOSCtrlProxy.ts": [
     'import { defaultTimer } from "../../src/utils/SystemTimer";',
     "await defaultTimer.sleep(delay);",
-    "timestamp: Date.now()",
+    "timestamp: Date.now(),",
   ],
   "FakeWebSocket.ts": [
     'import { defaultTimer } from "../../src/utils/SystemTimer";',
@@ -35,7 +35,7 @@ const ALLOWLIST: Record<string, string[]> = {
   "FakeCtrlProxy.ts": [
     'import { defaultTimer } from "../../src/utils/SystemTimer";',
     "await defaultTimer.sleep(delay);",
-    "timestamp: Date.now()",
+    "timestamp: Date.now(),",
   ],
   "FakeObserveCacheStore.ts": [
     'import { Timer, defaultTimer } from "../../src/utils/SystemTimer";',

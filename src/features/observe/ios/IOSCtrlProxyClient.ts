@@ -38,7 +38,7 @@ import { NetworkState } from "../../../server/NetworkState";
 import { buildNetworkMockRules } from "../../../server/networkMockRules";
 import {
   HierarchyNavigationDetector,
-  HierarchyNavigationUpdateMetrics
+  HierarchyNavigationUpdateMetrics,
 } from "../../navigation/HierarchyNavigationDetector";
 import { AccessibilityHierarchy } from "../../navigation/ScreenFingerprint";
 import {
@@ -56,7 +56,10 @@ import type { SetTextOptions } from "../DeviceService";
 import type { SimulatedErrorType } from "../../../server/NetworkState";
 import type { CtrlProxyClient } from "../interfaces/CtrlProxyClient";
 import { TrackedScreenGeometry } from "../TrackedScreenGeometry";
-import { getDeviceDataStreamServer, PerformanceStreamData } from "../../../daemon/deviceDataStreamSocketServer";
+import {
+  getDeviceDataStreamServer,
+  PerformanceStreamData,
+} from "../../../daemon/deviceDataStreamSocketServer";
 import { COORDINATE_SPACE_PX, type CoordinateSpace } from "../../../daemon/canonicalPixels";
 import { getPerformanceMonitor } from "../../performance/PerformanceMonitor";
 import {
@@ -77,7 +80,8 @@ import {
 export type ServiceManagerFactory = (device: BootedDevice) => CtrlProxyIosManager;
 
 /** Default production factory that delegates to the real singleton. */
-const defaultServiceManagerFactory: ServiceManagerFactory = d => IOSCtrlProxyManager.getInstance(d);
+const defaultServiceManagerFactory: ServiceManagerFactory = (d) =>
+  IOSCtrlProxyManager.getInstance(d);
 
 /**
  * Function type that returns currently booted devices.
@@ -94,16 +98,30 @@ const defaultBootedDeviceLister: BootedDeviceLister = () =>
  * a factory never trigger real CtrlProxy setup on connection failure.
  */
 class NoOpIOSCtrlProxyManager implements CtrlProxyIosManager {
-  async setup(): Promise<{ success: false; message: string }> { return { success: false, message: "no-op test stub" }; }
-  async isInstalled(): Promise<boolean> { return false; }
-  async isRunning(): Promise<boolean> { return false; }
-  async isAvailable(): Promise<boolean> { return false; }
+  async setup(): Promise<{ success: false; message: string }> {
+    return { success: false, message: "no-op test stub" };
+  }
+  async isInstalled(): Promise<boolean> {
+    return false;
+  }
+  async isRunning(): Promise<boolean> {
+    return false;
+  }
+  async isAvailable(): Promise<boolean> {
+    return false;
+  }
   async start(): Promise<void> {}
   async stop(): Promise<void> {}
-  getServicePort(): number { return 0; }
-  async getReportedRunnerPort(): Promise<number | null> { return null; }
+  getServicePort(): number {
+    return 0;
+  }
+  async getReportedRunnerPort(): Promise<number | null> {
+    return null;
+  }
   setAutoRestart(): void {}
-  isAutoRestartEnabled(): boolean { return false; }
+  isAutoRestartEnabled(): boolean {
+    return false;
+  }
   async forceRestart(): Promise<void> {}
   resetSetupState(): void {}
 }
@@ -161,7 +179,6 @@ import type {
   WebSocketMessage,
 } from "./types";
 
-
 /**
  * Interface for CtrlProxy providing iOS UI hierarchy and interaction capabilities
  * via WebSocket connection to iOS CtrlProxy
@@ -173,134 +190,194 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     timeout?: number,
     perf?: PerformanceTracker,
     skipWaitForFresh?: boolean,
-    minTimestamp?: number
+    minTimestamp?: number,
   ): Promise<CtrlProxyHierarchyResponse>;
 
   requestHierarchySync(
     perf?: PerformanceTracker,
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
-    timeoutMs?: number
-  ): Promise<{ hierarchy: XCTestHierarchy; perfTiming?: CtrlProxyPerfTiming; frameContext?: string } | null>;
+    timeoutMs?: number,
+  ): Promise<{
+    hierarchy: XCTestHierarchy;
+    perfTiming?: CtrlProxyPerfTiming;
+    frameContext?: string;
+  } | null>;
   requestAddHighlight(
     id: string,
     shape: HighlightShape,
     timeoutMs?: number,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyHighlightResult>;
 
   setNetworkErrorSimulation(
     config: IosNetworkErrorSimulationConfig,
     timeoutMs?: number,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<BaseResult>;
 
   requestHierarchySyncWithoutObservationStreamPush(
     perf?: PerformanceTracker,
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
-    timeoutMs?: number
-  ): Promise<{ hierarchy: XCTestHierarchy; perfTiming?: CtrlProxyPerfTiming; frameContext?: string } | null>;
+    timeoutMs?: number,
+  ): Promise<{
+    hierarchy: XCTestHierarchy;
+    perfTiming?: CtrlProxyPerfTiming;
+    frameContext?: string;
+  } | null>;
 
   convertToViewHierarchyResult(hierarchy: XCTestHierarchy): ViewHierarchyResult;
 
   requestSwipe(
-    x1: number, y1: number, x2: number, y2: number,
-    duration?: number, timeoutMs?: number, perf?: PerformanceTracker, frameContext?: string
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    duration?: number,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    frameContext?: string,
   ): Promise<CtrlProxySwipeResult>;
 
   requestTapCoordinates(
-    x: number, y: number, duration?: number, timeoutMs?: number, perf?: PerformanceTracker, frameContext?: string
+    x: number,
+    y: number,
+    duration?: number,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    frameContext?: string,
   ): Promise<CtrlProxyTapResult>;
 
   requestDrag(
-    x1: number, y1: number, x2: number, y2: number,
-    pressDurationMs: number, dragDurationMs: number, holdDurationMs: number, timeoutMs: number, frameContext?: string
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    pressDurationMs: number,
+    dragDurationMs: number,
+    holdDurationMs: number,
+    timeoutMs: number,
+    frameContext?: string,
   ): Promise<CtrlProxyDragResult>;
 
   requestPinch(
-    centerX: number, centerY: number,
-    distanceStart: number, distanceEnd: number, rotationDegrees: number,
-    duration?: number, timeoutMs?: number, perf?: PerformanceTracker
+    centerX: number,
+    centerY: number,
+    distanceStart: number,
+    distanceEnd: number,
+    rotationDegrees: number,
+    duration?: number,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyPinchResult>;
 
-  requestSetText(
-    text: string, options?: SetTextOptions
-  ): Promise<CtrlProxySetTextResult>;
+  requestSetText(text: string, options?: SetTextOptions): Promise<CtrlProxySetTextResult>;
 
   requestAppendText(
-    text: string, timeoutMs?: number, perf?: PerformanceTracker, frameContext?: string
+    text: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    frameContext?: string,
   ): Promise<CtrlProxySetTextResult>;
 
   requestClearText(
-    resourceId?: string, timeoutMs?: number, perf?: PerformanceTracker
+    resourceId?: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxySetTextResult>;
 
   requestImeAction(
     action: ImeAction,
-    timeoutMs?: number, perf?: PerformanceTracker
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyImeActionResult>;
 
   requestSelectAll(
-    timeoutMs?: number, perf?: PerformanceTracker
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxySelectAllResult>;
 
   requestKeyboard(
     action: "open" | "close" | "detect",
-    timeoutMs?: number, perf?: PerformanceTracker
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyKeyboardResult>;
 
   requestClipboard(
     action: "copy" | "paste" | "clear" | "get",
-    text?: string, timeoutMs?: number, perf?: PerformanceTracker
+    text?: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyClipboardResult>;
 
   requestPressHome(
-    timeoutMs?: number, perf?: PerformanceTracker, frameContext?: string
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    frameContext?: string,
   ): Promise<CtrlProxyPressHomeResult>;
 
   requestPressBack(
-    timeoutMs?: number, perf?: PerformanceTracker, frameContext?: string
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    frameContext?: string,
   ): Promise<CtrlProxyPressBackResult>;
 
-  requestShake(
-    timeoutMs?: number, perf?: PerformanceTracker
-  ): Promise<CtrlProxyShakeResult>;
+  requestShake(timeoutMs?: number, perf?: PerformanceTracker): Promise<CtrlProxyShakeResult>;
 
   requestPressButton(
-    button: string, timeoutMs?: number, perf?: PerformanceTracker, frameContext?: string
+    button: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    frameContext?: string,
   ): Promise<CtrlProxyPressButtonResult>;
 
   requestRecentApps(
-    timeoutMs?: number, perf?: PerformanceTracker, frameContext?: string
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    frameContext?: string,
   ): Promise<CtrlProxyRecentAppsResult>;
 
   requestRotate(
-    orientation: string, timeoutMs?: number, perf?: PerformanceTracker
+    orientation: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyRotateResult>;
 
   requestLaunchApp(
-    bundleId: string, timeoutMs?: number, perf?: PerformanceTracker, coldBoot?: boolean
+    bundleId: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    coldBoot?: boolean,
   ): Promise<CtrlProxyLaunchAppResult>;
 
   requestResetPermissions(
-    bundleId: string, permissions: string[], timeoutMs?: number, perf?: PerformanceTracker
+    bundleId: string,
+    permissions: string[],
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyResetPermissionsResult>;
 
   requestScreenshot(
-    timeoutMs?: number, perf?: PerformanceTracker
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyScreenshotResult>;
 
   requestScreenshotWithoutObservationStreamPush(
-    timeoutMs?: number, perf?: PerformanceTracker
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyScreenshotResult>;
 
   requestVoiceOverState(
-    timeoutMs?: number, perf?: PerformanceTracker
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyVoiceOverResult>;
 
   requestVoiceOverActivate(
-    label: string, action: "activate" | "long_press", timeoutMs?: number, perf?: PerformanceTracker
+    label: string,
+    action: "activate" | "long_press",
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyActionResult>;
 
   requestAction(
@@ -308,12 +385,27 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     resourceId?: string,
     label?: string,
     timeoutMs?: number,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
+  ): Promise<CtrlProxyActionResult>;
+
+  requestActivateAccessibilityLink(
+    text: string,
+    occurrence: number,
+    ownerResourceId?: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyActionResult>;
 
   requestMultiFingerSwipe(
-    x1: number, y1: number, x2: number, y2: number,
-    fingerCount: number, duration?: number, timeoutMs?: number, perf?: PerformanceTracker, fingerSpacing?: number
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    fingerCount: number,
+    duration?: number,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    fingerSpacing?: number,
   ): Promise<CtrlProxySwipeResult>;
 
   clearCache(): void;
@@ -470,7 +562,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   private sdkScreenIdentityClearGeneration = 0;
   private sdkEventPollGeneration = 0;
   private sdkEventPollAbortController: AbortController | null = null;
-  private sdkEventPollInFlight: { generation: number; promise: Promise<SdkEventPollResult> } | null = null;
+  private sdkEventPollInFlight: {
+    generation: number;
+    promise: Promise<SdkEventPollResult>;
+  } | null = null;
   private static readonly SDK_EVENT_POLL_TIMEOUT_MS = 2000;
   // Fast cadence for the CtrlProxy /sdk-events long-poll (was a bare `2000`).
   private static readonly SDK_EVENT_POLL_INTERVAL_MS = 2000;
@@ -492,9 +587,14 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     bootedDeviceLister: BootedDeviceLister = defaultBootedDeviceLister,
     deviceConnectionLostNotifier: DeviceConnectionLostNotifier = observationStreamDeviceConnectionLostNotifier,
     sdkEventIngestor?: IosSdkEventIngestor,
-    retryExecutor: RetryExecutor = defaultRetryExecutor
+    retryExecutor: RetryExecutor = defaultRetryExecutor,
   ) {
-    super(timer, wsFactory, { connectionResetMs: IOSCtrlProxyClient.CONNECTION_RESET_MS }, retryExecutor);
+    super(
+      timer,
+      wsFactory,
+      { connectionResetMs: IOSCtrlProxyClient.CONNECTION_RESET_MS },
+      retryExecutor,
+    );
     this.device = device;
     this.port = port;
     this.serviceManagerFactory = serviceManagerFactory;
@@ -504,26 +604,25 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     // constructor only stores these session-bound closures — it does no I/O and does not
     // resolve the telemetry/failure singletons (those resolve per-call), so eager
     // construction is free even for throwaway probe clients.
-    this.sdkEventIngestor = sdkEventIngestor ?? new DefaultIosSdkEventIngestor({
-      deviceId: this.device.deviceId,
-      getNavigationGraphManager: () => this.getNavigationGraphManager(),
-      captureScreenshot: (timeoutMs: number) => this.requestScreenshot(timeoutMs),
-    });
+    this.sdkEventIngestor =
+      sdkEventIngestor ??
+      new DefaultIosSdkEventIngestor({
+        deviceId: this.device.deviceId,
+        getNavigationGraphManager: () => this.getNavigationGraphManager(),
+        captureScreenshot: (timeoutMs: number) => this.requestScreenshot(timeoutMs),
+      });
   }
 
   /**
    * Get singleton instance for a device
    */
-  public static getInstance(
-    device: BootedDevice,
-    port?: number
-  ): IOSCtrlProxyClient {
+  public static getInstance(device: BootedDevice, port?: number): IOSCtrlProxyClient {
     requireBootedDevice(device, "IOSCtrlProxyClient.getInstance");
-    const resolvedPort = port ?? (
-      device.platform === "ios"
+    const resolvedPort =
+      port ??
+      (device.platform === "ios"
         ? PortManager.allocate(device.deviceId, { reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS })
-        : IOSCtrlProxyClient.DEFAULT_PORT
-    );
+        : IOSCtrlProxyClient.DEFAULT_PORT);
     const key = device.deviceId;
     const existing = IOSCtrlProxyClient.instances.get(key);
     if (existing) {
@@ -575,7 +674,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
    * Observe calls this after reading the hierarchy so a navigation event does
    * not wait for the background poll interval before it reaches the diff gate.
    */
-  public async refreshSdkScreenIdentity(applicationId?: string): Promise<ScreenIdentity | undefined> {
+  public async refreshSdkScreenIdentity(
+    applicationId?: string,
+  ): Promise<ScreenIdentity | undefined> {
     const deadline = this.timer.now() + IOSCtrlProxyClient.SDK_IDENTITY_REFRESH_TIMEOUT_MS;
     while (this.timer.now() < deadline) {
       const result = await this.pollSdkEventsUntil(deadline);
@@ -600,7 +701,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       return undefined;
     }
     let timeoutId: ReturnType<Timer["setTimeout"]> | null = null;
-    const timeout = new Promise<undefined>(resolve => {
+    const timeout = new Promise<undefined>((resolve) => {
       timeoutId = this.timer.setTimeout(() => resolve(undefined), remaining);
     });
     const drained = await Promise.race([this.pollSdkEvents(), timeout]);
@@ -621,9 +722,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
    */
   public static createDetached(device: BootedDevice): IOSCtrlProxyClient {
     requireBootedDevice(device, "IOSCtrlProxyClient.createDetached");
-    const port = device.platform === "ios"
-      ? PortManager.allocate(device.deviceId, { reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS })
-      : IOSCtrlProxyClient.DEFAULT_PORT;
+    const port =
+      device.platform === "ios"
+        ? PortManager.allocate(device.deviceId, { reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS })
+        : IOSCtrlProxyClient.DEFAULT_PORT;
     return new IOSCtrlProxyClient(device, port);
   }
 
@@ -651,7 +753,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       if (this.boundSessionId !== null) {
         logger.debug(
           `[IOSCtrlProxyClient] Rebinding device ${this.device.deviceId} from session ` +
-          `${this.boundSessionId} to ${sessionId}`
+            `${this.boundSessionId} to ${sessionId}`,
         );
       }
       this.boundSessionId = sessionId;
@@ -708,7 +810,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     bootedDeviceLister?: BootedDeviceLister,
     deviceConnectionLostNotifier?: DeviceConnectionLostNotifier,
     sdkEventIngestor?: IosSdkEventIngestor,
-    retryExecutor?: RetryExecutor
+    retryExecutor?: RetryExecutor,
   ): IOSCtrlProxyClient {
     // Default test lister always reports the device as booted so existing tests
     // are unaffected. Tests that verify boot-check behavior supply their own lister.
@@ -722,7 +824,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       lister,
       deviceConnectionLostNotifier,
       sdkEventIngestor,
-      retryExecutor
+      retryExecutor,
     );
   }
 
@@ -745,7 +847,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
    * the WebSocket connection fails. This covers all tool calls (observe, tap, etc.).
    */
   public override async ensureConnected(
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<boolean> {
     // Direct session tools connect here without passing through the manager.
     await IOSCtrlProxyManager.awaitStartupOrphanRunnerReap();
@@ -778,10 +880,12 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       // ⇒ the runner lives and only the WebSocket needs re-opening (fast). (#2825)
       logger.info(
         `[IOSCtrlProxyClient] auto-setup decision: alreadyRunning(health)=${alreadyRunning}, ` +
-        `port=${this.port}, hadOpenWs=${!!this.ws}, device=${this.device.deviceId}`
+          `port=${this.port}, hadOpenWs=${!!this.ws}, device=${this.device.deviceId}`,
       );
       if (alreadyRunning) {
-        logger.info(`[IOSCtrlProxyClient] Service is running but WebSocket failed — transient issue, retrying connection`);
+        logger.info(
+          `[IOSCtrlProxyClient] Service is running but WebSocket failed — transient issue, retrying connection`,
+        );
         this.syncPortFromManager(manager);
         this.connectionAttempts = 0;
         return await super.ensureConnected(perf);
@@ -792,9 +896,11 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       // as a side effect, causing phantom simulators.
       try {
         const bootedDevices = await this.bootedDeviceLister();
-        const stillBooted = bootedDevices.some(d => d.deviceId === this.device.deviceId);
+        const stillBooted = bootedDevices.some((d) => d.deviceId === this.device.deviceId);
         if (!stillBooted) {
-          logger.info(`[IOSCtrlProxyClient] Target simulator ${this.device.deviceId} is no longer booted, skipping auto-setup`);
+          logger.info(
+            `[IOSCtrlProxyClient] Target simulator ${this.device.deviceId} is no longer booted, skipping auto-setup`,
+          );
           return false;
         }
       } catch (error) {
@@ -802,7 +908,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
         // Proceed with auto-setup on failure to check — better to attempt than to silently skip
       }
 
-      logger.info(`[IOSCtrlProxyClient] WebSocket connection failed, attempting auto-setup of CtrlProxy`);
+      logger.info(
+        `[IOSCtrlProxyClient] WebSocket connection failed, attempting auto-setup of CtrlProxy`,
+      );
       const result = await manager.setup(true, perf);
 
       if (!result.success) {
@@ -830,10 +938,14 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
   private updatePort(port: number): void {
     if (port !== this.port) {
-      logger.info(`[IOSCtrlProxyClient] CtrlProxy service port changed from ${this.port} to ${port}`);
+      logger.info(
+        `[IOSCtrlProxyClient] CtrlProxy service port changed from ${this.port} to ${port}`,
+      );
       this.port = port;
       if (this.ws) {
-        logger.info("[IOSCtrlProxyClient] Closing stale WebSocket after CtrlProxy service port change");
+        logger.info(
+          "[IOSCtrlProxyClient] Closing stale WebSocket after CtrlProxy service port change",
+        );
         const staleSocket = this.ws;
         this.ws = null;
         this.stopHealthCheck();
@@ -851,9 +963,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   protected override extraDelegateContextFields(): Partial<DelegateContext> {
     return {
       getReconnectStatus: () => this.getReconnectStatus(),
-      isCommandSupported: messageType => this.isCommandSupported(messageType),
+      isCommandSupported: (messageType) => this.isCommandSupported(messageType),
       getSupportedCommands: () => this.getSupportedCommands(),
-      unsupportedCommandError: messageType => this.buildUnsupportedCommandError(messageType),
+      unsupportedCommandError: (messageType) => this.buildUnsupportedCommandError(messageType),
     };
   }
 
@@ -862,7 +974,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       ...this.createDelegateContext(),
       cacheFreshTtlMs: IOSCtrlProxyClient.CACHE_FRESH_TTL_MS,
       getCachedHierarchy: () => this.cachedHierarchy,
-      setCachedHierarchy: h => { this.cachedHierarchy = h; },
+      setCachedHierarchy: (h) => {
+        this.cachedHierarchy = h;
+      },
       suppressHierarchyObservationStreamPush: (requestId, timeoutMs) =>
         this.suppressHierarchyObservationStreamPush(requestId, timeoutMs),
     };
@@ -875,96 +989,120 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   private get gestures(): CtrlProxyGestures {
     return this.lazyDelegate(
       () => this._gestures,
-      value => { this._gestures = value; },
-      () => new CtrlProxyGestures(this.createDelegateContext())
+      (value) => {
+        this._gestures = value;
+      },
+      () => new CtrlProxyGestures(this.createDelegateContext()),
     );
   }
 
   private get text(): CtrlProxyText {
     return this.lazyDelegate(
       () => this._text,
-      value => { this._text = value; },
-      () => new CtrlProxyText(this.createDelegateContext())
+      (value) => {
+        this._text = value;
+      },
+      () => new CtrlProxyText(this.createDelegateContext()),
     );
   }
 
   private get hierarchy(): CtrlProxyHierarchyDelegate {
     return this.lazyDelegate(
       () => this._hierarchy,
-      value => { this._hierarchy = value; },
-      () => new CtrlProxyHierarchyDelegate(this.createHierarchyDelegateContext())
+      (value) => {
+        this._hierarchy = value;
+      },
+      () => new CtrlProxyHierarchyDelegate(this.createHierarchyDelegateContext()),
     );
   }
 
   private get screenshot(): CtrlProxyScreenshot {
     return this.lazyDelegate(
       () => this._screenshot,
-      value => { this._screenshot = value; },
-      () => new CtrlProxyScreenshot(this.createDelegateContext())
+      (value) => {
+        this._screenshot = value;
+      },
+      () => new CtrlProxyScreenshot(this.createDelegateContext()),
     );
   }
 
   private get navigation(): CtrlProxyNavigation {
     return this.lazyDelegate(
       () => this._navigation,
-      value => { this._navigation = value; },
-      () => new CtrlProxyNavigation(this.createDelegateContext())
+      (value) => {
+        this._navigation = value;
+      },
+      () => new CtrlProxyNavigation(this.createDelegateContext()),
     );
   }
 
   private get clipboard(): CtrlProxyClipboard {
     return this.lazyDelegate(
       () => this._clipboard,
-      value => { this._clipboard = value; },
-      () => new CtrlProxyClipboard(this.createDelegateContext())
+      (value) => {
+        this._clipboard = value;
+      },
+      () => new CtrlProxyClipboard(this.createDelegateContext()),
     );
   }
 
   private get voiceOver(): CtrlProxyVoiceOver {
     return this.lazyDelegate(
       () => this._voiceOver,
-      value => { this._voiceOver = value; },
-      () => new CtrlProxyVoiceOver(this.createDelegateContext())
+      (value) => {
+        this._voiceOver = value;
+      },
+      () => new CtrlProxyVoiceOver(this.createDelegateContext()),
     );
   }
 
   private get storage(): CtrlProxyStorage {
     return this.lazyDelegate(
       () => this._storage,
-      value => { this._storage = value; },
-      () => new CtrlProxyStorage(this.createDelegateContext())
+      (value) => {
+        this._storage = value;
+      },
+      () => new CtrlProxyStorage(this.createDelegateContext()),
     );
   }
 
   private get keyboard(): CtrlProxyKeyboard {
     return this.lazyDelegate(
       () => this._keyboard,
-      value => { this._keyboard = value; },
-      () => new CtrlProxyKeyboard(this.createDelegateContext())
+      (value) => {
+        this._keyboard = value;
+      },
+      () => new CtrlProxyKeyboard(this.createDelegateContext()),
     );
   }
 
   private get highlights(): CtrlProxyHighlights {
     return this.lazyDelegate(
       () => this._highlights,
-      value => { this._highlights = value; },
-      () => new CtrlProxyHighlights(this.createDelegateContext())
+      (value) => {
+        this._highlights = value;
+      },
+      () => new CtrlProxyHighlights(this.createDelegateContext()),
     );
   }
 
   private get database(): CtrlProxyDatabase {
     return this.lazyDelegate(
       () => this._database,
-      value => { this._database = value; },
-      () => new CtrlProxyDatabase(this.createDelegateContext())
+      (value) => {
+        this._database = value;
+      },
+      () => new CtrlProxyDatabase(this.createDelegateContext()),
     );
   }
 
   private get permissions(): CtrlProxyPermissions {
     return this.lazyDelegate(
       () => this._permissions,
-      value => { this._permissions = value; },
-      () => new CtrlProxyPermissions(this.createDelegateContext())
+      (value) => {
+        this._permissions = value;
+      },
+      () => new CtrlProxyPermissions(this.createDelegateContext()),
     );
   }
 
@@ -1026,27 +1164,35 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
   private syncNetworkErrorSimulationToDevice(): void {
     if (!this.isCommandSupported("set_network_error_simulation")) {
-      logger.info("[IOSCtrlProxyClient] Skipping network error simulation sync; runner does not advertise set_network_error_simulation");
+      logger.info(
+        "[IOSCtrlProxyClient] Skipping network error simulation sync; runner does not advertise set_network_error_simulation",
+      );
       return;
     }
     try {
       const sim = NetworkState.getInstance().simulation;
       if (sim === null) {
-        this.sendMessage(JSON.stringify({
-          type: "set_network_error_simulation",
-          enabled: false,
-        }));
+        this.sendMessage(
+          JSON.stringify({
+            type: "set_network_error_simulation",
+            enabled: false,
+          }),
+        );
         return;
       }
-      this.sendMessage(JSON.stringify({
-        type: "set_network_error_simulation",
-        enabled: true,
-        errorType: sim.errorType,
-        limit: sim.limit,
-        expiresAtEpochMs: sim.expiresAt,
-      }));
+      this.sendMessage(
+        JSON.stringify({
+          type: "set_network_error_simulation",
+          enabled: true,
+          errorType: sim.errorType,
+          limit: sim.limit,
+          expiresAtEpochMs: sim.expiresAt,
+        }),
+      );
     } catch (e) {
-      logger.warn(`[IOSCtrlProxyClient] Failed to sync network error simulation on reconnect: ${e}`);
+      logger.warn(
+        `[IOSCtrlProxyClient] Failed to sync network error simulation on reconnect: ${e}`,
+      );
     }
   }
 
@@ -1057,7 +1203,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     }
 
     this.refreshObservationStreamHierarchyCadence(
-      server.getHierarchyIntervalMsForDevice(this.device.deviceId)
+      server.getHierarchyIntervalMsForDevice(this.device.deviceId),
     );
   }
 
@@ -1079,11 +1225,15 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
     // Track connection failure and potentially trigger service restart
     this.consecutiveConnectionFailures++;
-    logger.info(`[IOSCtrlProxyClient] Connection closed (failure count: ${this.consecutiveConnectionFailures})`);
+    logger.info(
+      `[IOSCtrlProxyClient] Connection closed (failure count: ${this.consecutiveConnectionFailures})`,
+    );
 
-    if (this.consecutiveConnectionFailures > 0 &&
-        this.consecutiveConnectionFailures % IOSCtrlProxyClient.MAX_FAILURES_BEFORE_RESTART === 0 &&
-        !this.isRequestingServiceRestart) {
+    if (
+      this.consecutiveConnectionFailures > 0 &&
+      this.consecutiveConnectionFailures % IOSCtrlProxyClient.MAX_FAILURES_BEFORE_RESTART === 0 &&
+      !this.isRequestingServiceRestart
+    ) {
       this.triggerServiceRestart();
     }
   }
@@ -1126,7 +1276,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   }
 
   private currentSdkEventPollIntervalMs(): number {
-    return this.sdkEventPollConsecutiveEmpty >= IOSCtrlProxyClient.SDK_EVENT_POLL_EMPTY_BATCHES_BEFORE_BACKOFF
+    return this.sdkEventPollConsecutiveEmpty >=
+      IOSCtrlProxyClient.SDK_EVENT_POLL_EMPTY_BATCHES_BEFORE_BACKOFF
       ? IOSCtrlProxyClient.SDK_EVENT_POLL_BACKOFF_INTERVAL_MS
       : IOSCtrlProxyClient.SDK_EVENT_POLL_INTERVAL_MS;
   }
@@ -1141,7 +1292,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       return;
     }
     const wasBackedOff =
-      this.sdkEventPollConsecutiveEmpty >= IOSCtrlProxyClient.SDK_EVENT_POLL_EMPTY_BATCHES_BEFORE_BACKOFF;
+      this.sdkEventPollConsecutiveEmpty >=
+      IOSCtrlProxyClient.SDK_EVENT_POLL_EMPTY_BATCHES_BEFORE_BACKOFF;
     this.sdkEventPollConsecutiveEmpty = 0;
     if (wasBackedOff && this.sdkEventPollTimer) {
       this.scheduleNextSdkEventPoll(this.sdkEventPollGeneration);
@@ -1157,11 +1309,13 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     const promise = this.pollSdkEventsOnce(generation);
     const inFlight = { generation, promise };
     this.sdkEventPollInFlight = inFlight;
-    void promise.finally(() => {
-      if (this.sdkEventPollInFlight === inFlight) {
-        this.sdkEventPollInFlight = null;
-      }
-    }).catch(error => logger.debug(`[IOSCtrlProxy] SDK event poll cleanup failed: ${error}`));
+    void promise
+      .finally(() => {
+        if (this.sdkEventPollInFlight === inFlight) {
+          this.sdkEventPollInFlight = null;
+        }
+      })
+      .catch((error) => logger.debug(`[IOSCtrlProxy] SDK event poll cleanup failed: ${error}`));
     return promise;
   }
 
@@ -1180,9 +1334,13 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     );
     try {
       const resp = await fetch(url, { signal: abortController.signal });
-      if (generation !== this.sdkEventPollGeneration) {return this.emptySdkEventPollResult();}
-      if (!resp.ok) {return this.emptySdkEventPollResult();}
-      const batches = await resp.json() as Array<{
+      if (generation !== this.sdkEventPollGeneration) {
+        return this.emptySdkEventPollResult();
+      }
+      if (!resp.ok) {
+        return this.emptySdkEventPollResult();
+      }
+      const batches = (await resp.json()) as Array<{
         bundleId?: string;
         events?: Array<{ eventType: string; payload: string }>;
       }>;
@@ -1211,7 +1369,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       if (generation !== this.sdkEventPollGeneration) {
         return this.emptySdkEventPollResult();
       }
-      const lifecycleEventHasCurrentPoll = this.isSdkScreenIdentityPollCurrent(event.applicationId, pollGeneration);
+      const lifecycleEventHasCurrentPoll = this.isSdkScreenIdentityPollCurrent(
+        event.applicationId,
+        pollGeneration,
+      );
       if (this.applySdkScreenIdentityLifecycleEvent(event)) {
         if (lifecycleEventHasCurrentPoll && event.applicationId) {
           pollGeneration.applicationGenerations.set(
@@ -1221,14 +1382,16 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
         }
         continue;
       }
-      if (this.isSdkScreenIdentityPollCurrent(event.applicationId, pollGeneration)
-        && this.rememberSdkScreenIdentity(
+      if (
+        this.isSdkScreenIdentityPollCurrent(event.applicationId, pollGeneration) &&
+        this.rememberSdkScreenIdentity(
           event.eventType,
           event.applicationId,
           event.payload,
           event.timestamp,
           event.sequenceNumber,
-        )) {
+        )
+      ) {
         rememberedApplicationIds.add(event.applicationId!);
       }
     }
@@ -1278,12 +1441,14 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
         eventType: envelope.eventType,
         applicationId,
         payload,
-        timestamp: typeof payload.timestamp === "number" && Number.isFinite(payload.timestamp)
-          ? payload.timestamp
-          : this.timer.now(),
-        sequenceNumber: typeof payload.sequenceNumber === "number" && Number.isSafeInteger(payload.sequenceNumber)
-          ? payload.sequenceNumber
-          : undefined,
+        timestamp:
+          typeof payload.timestamp === "number" && Number.isFinite(payload.timestamp)
+            ? payload.timestamp
+            : this.timer.now(),
+        sequenceNumber:
+          typeof payload.sequenceNumber === "number" && Number.isSafeInteger(payload.sequenceNumber)
+            ? payload.sequenceNumber
+            : undefined,
       };
     } catch (error) {
       // Malformed SDK envelope (bad base64/JSON) — skip it, but leave a trace.
@@ -1306,19 +1471,22 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     timestamp: number,
     sequenceNumber: number | undefined,
   ): boolean {
-    if (!applicationId
-      || !this.activateSdkScreenIdentitySession(applicationId, payload)
-      || !this.isSdkScreenIdentityTrackingEnabled(applicationId, payload)) {
+    if (
+      !applicationId ||
+      !this.activateSdkScreenIdentitySession(applicationId, payload) ||
+      !this.isSdkScreenIdentityTrackingEnabled(applicationId, payload)
+    ) {
       return false;
     }
     const identity = deriveIosSdkScreenIdentity(eventType, applicationId, payload);
     const currentOrder = this.sdkScreenIdentityOrdersByApplicationId.get(applicationId);
-    const isNewer = currentOrder === undefined
-      || timestamp > currentOrder.timestamp
-      || (timestamp === currentOrder.timestamp
-        && (sequenceNumber === undefined
-          || currentOrder.sequenceNumber === undefined
-          || sequenceNumber > currentOrder.sequenceNumber));
+    const isNewer =
+      currentOrder === undefined ||
+      timestamp > currentOrder.timestamp ||
+      (timestamp === currentOrder.timestamp &&
+        (sequenceNumber === undefined ||
+          currentOrder.sequenceNumber === undefined ||
+          sequenceNumber > currentOrder.sequenceNumber));
     if (identity && isNewer) {
       this.sdkScreenIdentitiesByApplicationId.set(applicationId, identity);
       this.sdkScreenIdentityOrdersByApplicationId.set(applicationId, { timestamp, sequenceNumber });
@@ -1364,10 +1532,19 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       return true;
     }
     const trackingGeneration = this.getSdkScreenIdentityTrackingGeneration(event.payload);
-    const currentGeneration = this.sdkScreenIdentityTrackingGenerationsByApplicationId.get(event.applicationId);
-    if (trackingGeneration === undefined || currentGeneration === undefined || trackingGeneration >= currentGeneration) {
+    const currentGeneration = this.sdkScreenIdentityTrackingGenerationsByApplicationId.get(
+      event.applicationId,
+    );
+    if (
+      trackingGeneration === undefined ||
+      currentGeneration === undefined ||
+      trackingGeneration >= currentGeneration
+    ) {
       if (trackingGeneration !== undefined) {
-        this.sdkScreenIdentityTrackingGenerationsByApplicationId.set(event.applicationId, trackingGeneration);
+        this.sdkScreenIdentityTrackingGenerationsByApplicationId.set(
+          event.applicationId,
+          trackingGeneration,
+        );
       }
     } else {
       return true;
@@ -1384,7 +1561,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     return false;
   }
 
-  private activateSdkScreenIdentitySession(applicationId: string, payload: Record<string, unknown>): boolean {
+  private activateSdkScreenIdentitySession(
+    applicationId: string,
+    payload: Record<string, unknown>,
+  ): boolean {
     const sessionId = typeof payload.sessionId === "string" ? payload.sessionId : undefined;
     if (!sessionId) {
       return true;
@@ -1395,13 +1575,21 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     const sessionEpoch = this.getSdkScreenIdentitySessionEpoch(payload);
     const currentEpoch = this.sdkScreenIdentitySessionEpochsByApplicationId.get(applicationId);
     const currentSessionId = this.sdkScreenIdentitySessionsByApplicationId.get(applicationId);
-    if (sessionEpoch !== undefined && currentEpoch !== undefined
-      && (sessionEpoch < currentEpoch || (sessionEpoch === currentEpoch && currentSessionId && currentSessionId !== sessionId))) {
+    if (
+      sessionEpoch !== undefined &&
+      currentEpoch !== undefined &&
+      (sessionEpoch < currentEpoch ||
+        (sessionEpoch === currentEpoch && currentSessionId && currentSessionId !== sessionId))
+    ) {
       return false;
     }
-    const startedSessionId = this.sdkScreenIdentityStartedSessionsByApplicationId.get(applicationId);
-    if (startedSessionId && startedSessionId !== sessionId
-      && (sessionEpoch === undefined || currentEpoch === undefined || sessionEpoch <= currentEpoch)) {
+    const startedSessionId =
+      this.sdkScreenIdentityStartedSessionsByApplicationId.get(applicationId);
+    if (
+      startedSessionId &&
+      startedSessionId !== sessionId &&
+      (sessionEpoch === undefined || currentEpoch === undefined || sessionEpoch <= currentEpoch)
+    ) {
       return false;
     }
     if (currentSessionId && currentSessionId !== sessionId) {
@@ -1418,7 +1606,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     return true;
   }
 
-  private startSdkScreenIdentitySession(applicationId: string, payload: Record<string, unknown>): boolean {
+  private startSdkScreenIdentitySession(
+    applicationId: string,
+    payload: Record<string, unknown>,
+  ): boolean {
     const sessionId = typeof payload.sessionId === "string" ? payload.sessionId : undefined;
     if (!sessionId || !this.activateSdkScreenIdentitySession(applicationId, payload)) {
       return false;
@@ -1427,13 +1618,19 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     return true;
   }
 
-  private resetSdkScreenIdentityTrackingState(applicationId: string, payload: Record<string, unknown>): void {
+  private resetSdkScreenIdentityTrackingState(
+    applicationId: string,
+    payload: Record<string, unknown>,
+  ): void {
     this.sdkScreenIdentityTrackingDisabledApplicationIds.delete(applicationId);
     const trackingGeneration = this.getSdkScreenIdentityTrackingGeneration(payload);
     if (trackingGeneration === undefined) {
       this.sdkScreenIdentityTrackingGenerationsByApplicationId.delete(applicationId);
     } else {
-      this.sdkScreenIdentityTrackingGenerationsByApplicationId.set(applicationId, trackingGeneration);
+      this.sdkScreenIdentityTrackingGenerationsByApplicationId.set(
+        applicationId,
+        trackingGeneration,
+      );
     }
   }
 
@@ -1446,23 +1643,40 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     retiredSessions.add(sessionId);
   }
 
-  private isSdkScreenIdentityTrackingEnabled(applicationId: string, payload: Record<string, unknown>): boolean {
+  private isSdkScreenIdentityTrackingEnabled(
+    applicationId: string,
+    payload: Record<string, unknown>,
+  ): boolean {
     const trackingGeneration = this.getSdkScreenIdentityTrackingGeneration(payload);
-    const currentGeneration = this.sdkScreenIdentityTrackingGenerationsByApplicationId.get(applicationId);
+    const currentGeneration =
+      this.sdkScreenIdentityTrackingGenerationsByApplicationId.get(applicationId);
     if (this.sdkScreenIdentityTrackingDisabledApplicationIds.has(applicationId)) {
-      if (trackingGeneration === undefined || currentGeneration === undefined || trackingGeneration <= currentGeneration) {
+      if (
+        trackingGeneration === undefined ||
+        currentGeneration === undefined ||
+        trackingGeneration <= currentGeneration
+      ) {
         return false;
       }
       this.sdkScreenIdentityTrackingDisabledApplicationIds.delete(applicationId);
     }
-    if (trackingGeneration !== undefined && (currentGeneration === undefined || trackingGeneration > currentGeneration)) {
-      this.sdkScreenIdentityTrackingGenerationsByApplicationId.set(applicationId, trackingGeneration);
+    if (
+      trackingGeneration !== undefined &&
+      (currentGeneration === undefined || trackingGeneration > currentGeneration)
+    ) {
+      this.sdkScreenIdentityTrackingGenerationsByApplicationId.set(
+        applicationId,
+        trackingGeneration,
+      );
     }
     return true;
   }
 
-  private getSdkScreenIdentityTrackingGeneration(payload: Record<string, unknown>): number | undefined {
-    return typeof payload.trackingGeneration === "number" && Number.isSafeInteger(payload.trackingGeneration)
+  private getSdkScreenIdentityTrackingGeneration(
+    payload: Record<string, unknown>,
+  ): number | undefined {
+    return typeof payload.trackingGeneration === "number" &&
+      Number.isSafeInteger(payload.trackingGeneration)
       ? payload.trackingGeneration
       : undefined;
   }
@@ -1477,10 +1691,12 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     applicationId: string | undefined,
     pollGeneration: SdkScreenIdentityPollGeneration,
   ): applicationId is string {
-    return applicationId !== undefined
-      && pollGeneration.clearGeneration === this.sdkScreenIdentityClearGeneration
-      && (pollGeneration.applicationGenerations.get(applicationId) ?? 0)
-        === this.getSdkScreenIdentityGeneration(applicationId);
+    return (
+      applicationId !== undefined &&
+      pollGeneration.clearGeneration === this.sdkScreenIdentityClearGeneration &&
+      (pollGeneration.applicationGenerations.get(applicationId) ?? 0) ===
+        this.getSdkScreenIdentityGeneration(applicationId)
+    );
   }
 
   /**
@@ -1494,30 +1710,40 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     }
 
     this.isRequestingServiceRestart = true;
-    logger.info(`[IOSCtrlProxyClient] Triggering CtrlProxy restart after ${this.consecutiveConnectionFailures} connection failures`);
+    logger.info(
+      `[IOSCtrlProxyClient] Triggering CtrlProxy restart after ${this.consecutiveConnectionFailures} connection failures`,
+    );
 
     const manager = this.serviceManagerFactory(this.device);
 
     // Check if service is actually not running before restarting
-    void manager.isRunning().then(running => {
-      if (!running) {
-        logger.info(`[IOSCtrlProxyClient] CtrlProxy not running, requesting restart`);
-        void manager.forceRestart().then(() => {
-          logger.info(`[IOSCtrlProxyClient] CtrlProxy restart completed`);
-          this.consecutiveConnectionFailures = 0;
+    void manager
+      .isRunning()
+      .then((running) => {
+        if (!running) {
+          logger.info(`[IOSCtrlProxyClient] CtrlProxy not running, requesting restart`);
+          void manager
+            .forceRestart()
+            .then(() => {
+              logger.info(`[IOSCtrlProxyClient] CtrlProxy restart completed`);
+              this.consecutiveConnectionFailures = 0;
+              this.isRequestingServiceRestart = false;
+            })
+            .catch((error) => {
+              logger.warn(`[IOSCtrlProxyClient] CtrlProxy restart failed: ${error}`);
+              this.isRequestingServiceRestart = false;
+            });
+        } else {
+          logger.info(
+            `[IOSCtrlProxyClient] CtrlProxy is running, connection issue may be transient`,
+          );
           this.isRequestingServiceRestart = false;
-        }).catch(error => {
-          logger.warn(`[IOSCtrlProxyClient] CtrlProxy restart failed: ${error}`);
-          this.isRequestingServiceRestart = false;
-        });
-      } else {
-        logger.info(`[IOSCtrlProxyClient] CtrlProxy is running, connection issue may be transient`);
+        }
+      })
+      .catch((error) => {
+        logger.warn(`[IOSCtrlProxyClient] Failed to check CtrlProxy status: ${error}`);
         this.isRequestingServiceRestart = false;
-      }
-    }).catch(error => {
-      logger.warn(`[IOSCtrlProxyClient] Failed to check CtrlProxy status: ${error}`);
-      this.isRequestingServiceRestart = false;
-    });
+      });
   }
 
   protected async setupBeforeConnect(_perf: PerformanceTracker): Promise<void> {
@@ -1560,11 +1786,18 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       // Push messages (no requestId) are handled in the dedicated push-message branch below
       // to avoid duplicate hierarchy events.
       if (requestId) {
-        const suppressObservationStreamPush = this.consumeHierarchyObservationStreamSuppression(requestId);
+        const suppressObservationStreamPush =
+          this.consumeHierarchyObservationStreamSuppression(requestId);
         if (!suppressObservationStreamPush) {
-          this.pushHierarchyToObservationStream(converted, message.data as XCTestHierarchy, message.frameContext);
+          this.pushHierarchyToObservationStream(
+            converted,
+            message.data as XCTestHierarchy,
+            message.frameContext,
+          );
         } else {
-          logger.debug("[IOSCtrlProxyClient] Suppressed hierarchy observation stream push for explicit initial-frame request");
+          logger.debug(
+            "[IOSCtrlProxyClient] Suppressed hierarchy observation stream push for explicit initial-frame request",
+          );
         }
       }
     }
@@ -1574,7 +1807,11 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       const decoded = decodeCtrlProxyMessage(message);
       if (decoded) {
         if (decoded.errorMessage !== undefined) {
-          this.requestManager.resolveError(decoded.requestId, decoded.errorMessage, decoded.totalTimeMs ?? 0);
+          this.requestManager.resolveError(
+            decoded.requestId,
+            decoded.errorMessage,
+            decoded.totalTimeMs ?? 0,
+          );
         } else {
           this.requestManager.resolve(decoded.requestId, decoded.result);
         }
@@ -1590,9 +1827,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       this.cachedHierarchy = {
         hierarchy: message.data,
         receivedAt: now,
-        captureReceivedAt: previous !== null && previous.hierarchy.updatedAt === message.data.updatedAt
-          ? previous.captureReceivedAt ?? previous.receivedAt
-          : now,
+        captureReceivedAt:
+          previous !== null && previous.hierarchy.updatedAt === message.data.updatedAt
+            ? (previous.captureReceivedAt ?? previous.receivedAt)
+            : now,
         fresh: true,
         perfTiming: message.perfTiming as CtrlProxyPerfTiming | undefined,
         frameContext: message.frameContext,
@@ -1601,7 +1839,11 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
       // Convert and push to observation stream for IDE plugins
       const viewHierarchyResult = this.convertToViewHierarchyResult(message.data);
-      this.pushHierarchyToObservationStream(viewHierarchyResult, message.data as XCTestHierarchy, message.frameContext);
+      this.pushHierarchyToObservationStream(
+        viewHierarchyResult,
+        message.data as XCTestHierarchy,
+        message.frameContext,
+      );
 
       // Start screenshot backoff sequence for real-time screenshot streaming
       this.startScreenshotBackoff();
@@ -1619,7 +1861,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       if (message.performanceData) {
         this.handlePerformanceUpdate(message.performanceData);
       } else {
-        logger.warn(`[IOSCtrlProxyClient] Received performance_update but no performanceData field`);
+        logger.warn(
+          `[IOSCtrlProxyClient] Received performance_update but no performanceData field`,
+        );
       }
       return;
     }
@@ -1654,7 +1898,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   private static readonly HANDSHAKE_POLL_INTERVAL_MS = 50;
 
   private async waitForHandshake(
-    timeoutMs: number = IOSCtrlProxyClient.HANDSHAKE_WAIT_TIMEOUT_MS
+    timeoutMs: number = IOSCtrlProxyClient.HANDSHAKE_WAIT_TIMEOUT_MS,
   ): Promise<void> {
     const deadline = this.timer.now() + timeoutMs;
     while (this.supportedCommands === null && this.timer.now() < deadline) {
@@ -1715,7 +1959,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       server.pushPerformanceUpdate(this.device.deviceId, streamData);
       // Log occasionally to avoid spam
       if (this.timer.now() % 5000 < 600) {
-        logger.debug(`[IOSCtrlProxyClient] iOS FPS: ${streamData.fps.toFixed(1)}, frameTime: ${streamData.frameTimeMs.toFixed(1)}ms, memory: ${streamData.memoryUsageMb.toFixed(1)}MB`);
+        logger.debug(
+          `[IOSCtrlProxyClient] iOS FPS: ${streamData.fps.toFixed(1)}, frameTime: ${streamData.frameTimeMs.toFixed(1)}ms, memory: ${streamData.memoryUsageMb.toFixed(1)}MB`,
+        );
       }
     } catch (error) {
       logger.warn(`[IOSCtrlProxyClient] Failed to push performance update: ${error}`);
@@ -1731,9 +1977,15 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     perf?: PerformanceTracker,
     skipWaitForFresh?: boolean,
     minTimestamp?: number,
-    disableAllFiltering?: boolean
+    disableAllFiltering?: boolean,
   ): Promise<ViewHierarchyResult | null> {
-    return this.hierarchy.getAccessibilityHierarchy(queryOptions, perf, skipWaitForFresh, minTimestamp, disableAllFiltering);
+    return this.hierarchy.getAccessibilityHierarchy(
+      queryOptions,
+      perf,
+      skipWaitForFresh,
+      minTimestamp,
+      disableAllFiltering,
+    );
   }
 
   // Thin pass-throughs: like the delegated methods below, these do NOT restate the
@@ -1745,16 +1997,22 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     timeout?: number,
     perf?: PerformanceTracker,
     skipWaitForFresh?: boolean,
-    minTimestamp?: number
+    minTimestamp?: number,
   ): Promise<CtrlProxyHierarchyResponse> {
-    return this.hierarchy.getLatestHierarchy(waitForFresh, timeout, perf, skipWaitForFresh, minTimestamp);
+    return this.hierarchy.getLatestHierarchy(
+      waitForFresh,
+      timeout,
+      perf,
+      skipWaitForFresh,
+      minTimestamp,
+    );
   }
 
   async requestHierarchySync(
     perf?: PerformanceTracker,
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
-    timeoutMs?: number
+    timeoutMs?: number,
   ): Promise<{ hierarchy: XCTestHierarchy; perfTiming?: CtrlProxyPerfTiming } | null> {
     return this.hierarchy.requestHierarchySync(perf, disableAllFiltering, signal, timeoutMs);
   }
@@ -1763,8 +2021,12 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     perf?: PerformanceTracker,
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
-    timeoutMs?: number
-  ): Promise<{ hierarchy: XCTestHierarchy; perfTiming?: CtrlProxyPerfTiming; frameContext?: string } | null> {
+    timeoutMs?: number,
+  ): Promise<{
+    hierarchy: XCTestHierarchy;
+    perfTiming?: CtrlProxyPerfTiming;
+    frameContext?: string;
+  } | null> {
     return this.hierarchy.requestHierarchySync(perf, disableAllFiltering, signal, timeoutMs, true);
   }
 
@@ -1796,7 +2058,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     id: string,
     shape: HighlightShape,
     timeoutMs?: number,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyHighlightResult> {
     return this.highlights.requestAddHighlight(id, shape, timeoutMs, perf);
   }
@@ -1804,7 +2066,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   async setNetworkErrorSimulation(
     config: IosNetworkErrorSimulationConfig,
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<BaseResult> {
     return sendCommand<BaseResult>(this.createDelegateContext(), {
       idPrefix: "networkErrorSimulation",
@@ -1828,64 +2090,111 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // ===========================================================================
 
   async requestTapCoordinates(
-    x: number, y: number, duration?: number, timeoutMs?: number, perf?: PerformanceTracker, frameContext?: string
+    x: number,
+    y: number,
+    duration?: number,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    frameContext?: string,
   ): Promise<CtrlProxyTapResult> {
     return this.gestures.requestTapCoordinates(x, y, duration, timeoutMs, perf, frameContext);
   }
 
   async requestSwipe(
-    x1: number, y1: number, x2: number, y2: number,
-    duration?: number, timeoutMs?: number, perf?: PerformanceTracker, frameContext?: string
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    duration?: number,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    frameContext?: string,
   ): Promise<CtrlProxySwipeResult> {
     return this.gestures.requestSwipe(x1, y1, x2, y2, duration, timeoutMs, perf, frameContext);
   }
 
   async requestDrag(
-    x1: number, y1: number, x2: number, y2: number,
-    pressDurationMs: number, dragDurationMs: number, holdDurationMs: number, timeoutMs: number, frameContext?: string
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    pressDurationMs: number,
+    dragDurationMs: number,
+    holdDurationMs: number,
+    timeoutMs: number,
+    frameContext?: string,
   ): Promise<CtrlProxyDragResult> {
-    return this.gestures.requestDrag(x1, y1, x2, y2, pressDurationMs, dragDurationMs, holdDurationMs, timeoutMs, frameContext);
+    return this.gestures.requestDrag(
+      x1,
+      y1,
+      x2,
+      y2,
+      pressDurationMs,
+      dragDurationMs,
+      holdDurationMs,
+      timeoutMs,
+      frameContext,
+    );
   }
 
   async requestPinch(
-    centerX: number, centerY: number,
-    distanceStart: number, distanceEnd: number, rotationDegrees: number,
-    duration?: number, timeoutMs?: number, perf?: PerformanceTracker
+    centerX: number,
+    centerY: number,
+    distanceStart: number,
+    distanceEnd: number,
+    rotationDegrees: number,
+    duration?: number,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyPinchResult> {
-    return this.gestures.requestPinch(centerX, centerY, distanceStart, distanceEnd, rotationDegrees, duration, timeoutMs, perf);
+    return this.gestures.requestPinch(
+      centerX,
+      centerY,
+      distanceStart,
+      distanceEnd,
+      rotationDegrees,
+      duration,
+      timeoutMs,
+      perf,
+    );
   }
 
   // ===========================================================================
   // Delegated Public Methods - Text
   // ===========================================================================
 
-  async requestSetText(
-    text: string, options?: SetTextOptions
-  ): Promise<CtrlProxySetTextResult> {
+  async requestSetText(text: string, options?: SetTextOptions): Promise<CtrlProxySetTextResult> {
     return this.text.requestSetText(text, options);
   }
 
   async requestAppendText(
-    text: string, timeoutMs?: number, perf?: PerformanceTracker, frameContext?: string
+    text: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    frameContext?: string,
   ): Promise<CtrlProxySetTextResult> {
     return this.text.requestAppendText(text, timeoutMs, perf, frameContext);
   }
 
   async requestClearText(
-    resourceId?: string, timeoutMs?: number, perf?: PerformanceTracker
+    resourceId?: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxySetTextResult> {
     return this.text.requestClearText(resourceId, timeoutMs, perf);
   }
 
   async requestImeAction(
     action: ImeAction,
-    timeoutMs?: number, perf?: PerformanceTracker
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyImeActionResult> {
     return this.text.requestImeAction(action, timeoutMs, perf);
   }
 
   async requestSelectAll(
-    timeoutMs?: number, perf?: PerformanceTracker
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxySelectAllResult> {
     return this.text.requestSelectAll(timeoutMs, perf);
   }
@@ -1893,7 +2202,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   async requestKeyboard(
     action: "open" | "close" | "detect",
     timeoutMs?: number,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyKeyboardResult> {
     return this.keyboard.requestKeyboard(action, timeoutMs, perf);
   }
@@ -1903,43 +2212,55 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // ===========================================================================
 
   async requestPressHome(
-    timeoutMs?: number, perf?: PerformanceTracker, frameContext?: string
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    frameContext?: string,
   ): Promise<CtrlProxyPressHomeResult> {
     return this.navigation.requestPressHome(timeoutMs, perf, frameContext);
   }
 
   async requestPressBack(
-    timeoutMs?: number, perf?: PerformanceTracker, frameContext?: string
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    frameContext?: string,
   ): Promise<CtrlProxyPressBackResult> {
     return this.navigation.requestPressBack(timeoutMs, perf, frameContext);
   }
 
-  async requestShake(
-    timeoutMs?: number, perf?: PerformanceTracker
-  ): Promise<CtrlProxyShakeResult> {
+  async requestShake(timeoutMs?: number, perf?: PerformanceTracker): Promise<CtrlProxyShakeResult> {
     return this.navigation.requestShake(timeoutMs, perf);
   }
 
   async requestPressButton(
-    button: string, timeoutMs?: number, perf?: PerformanceTracker, frameContext?: string
+    button: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    frameContext?: string,
   ): Promise<CtrlProxyPressButtonResult> {
     return this.navigation.requestPressButton(button, timeoutMs, perf, frameContext);
   }
 
   async requestRecentApps(
-    timeoutMs?: number, perf?: PerformanceTracker, frameContext?: string
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    frameContext?: string,
   ): Promise<CtrlProxyRecentAppsResult> {
     return this.navigation.requestRecentApps(timeoutMs, perf, frameContext);
   }
 
   async requestRotate(
-    orientation: string, timeoutMs?: number, perf?: PerformanceTracker
+    orientation: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyRotateResult> {
     return this.navigation.requestRotate(orientation, timeoutMs, perf);
   }
 
   async requestLaunchApp(
-    bundleId: string, timeoutMs?: number, perf?: PerformanceTracker, coldBoot?: boolean
+    bundleId: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    coldBoot?: boolean,
   ): Promise<CtrlProxyLaunchAppResult> {
     return this.navigation.requestLaunchApp(bundleId, timeoutMs, perf, coldBoot);
   }
@@ -1949,7 +2270,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // ===========================================================================
 
   async requestResetPermissions(
-    bundleId: string, permissions: string[], timeoutMs?: number, perf?: PerformanceTracker
+    bundleId: string,
+    permissions: string[],
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyResetPermissionsResult> {
     return this.permissions.requestResetPermissions(bundleId, permissions, timeoutMs, perf);
   }
@@ -1962,7 +2286,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     action: "copy" | "paste" | "clear" | "get",
     text?: string,
     timeoutMs?: number,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyClipboardResult> {
     return this.clipboard.requestClipboard(action, text, timeoutMs, perf);
   }
@@ -1972,13 +2296,15 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // ===========================================================================
 
   async requestScreenshot(
-    timeoutMs?: number, perf?: PerformanceTracker
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyScreenshotResult> {
     return this.screenshot.requestScreenshot(timeoutMs, perf);
   }
 
   async requestScreenshotWithoutObservationStreamPush(
-    timeoutMs?: number, perf?: PerformanceTracker
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyScreenshotResult> {
     return this.requestScreenshot(timeoutMs, perf);
   }
@@ -1988,7 +2314,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // ===========================================================================
 
   async requestVoiceOverState(
-    timeoutMs?: number, perf?: PerformanceTracker
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyVoiceOverResult> {
     return this.voiceOver.requestVoiceOverState(timeoutMs, perf);
   }
@@ -1997,7 +2324,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     label: string,
     action: "activate" | "long_press",
     timeoutMs?: number,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyActionResult> {
     return this.voiceOver.requestVoiceOverActivate(label, action, timeoutMs, perf);
   }
@@ -2007,47 +2334,104 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     resourceId?: string,
     label?: string,
     timeoutMs?: number,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyActionResult> {
     return this.voiceOver.requestAction(action, resourceId, label, timeoutMs, perf);
   }
 
+  async requestActivateAccessibilityLink(
+    text: string,
+    occurrence: number,
+    ownerResourceId?: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<CtrlProxyActionResult> {
+    return this.voiceOver.requestActivateAccessibilityLink(
+      text,
+      occurrence,
+      ownerResourceId,
+      timeoutMs,
+      perf,
+    );
+  }
+
   async requestMultiFingerSwipe(
-    x1: number, y1: number, x2: number, y2: number,
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
     fingerCount: number,
     duration?: number,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-    fingerSpacing?: number
+    fingerSpacing?: number,
   ): Promise<CtrlProxySwipeResult> {
-    return this.gestures.requestMultiFingerSwipe(x1, y1, x2, y2, fingerCount, duration, timeoutMs, perf, fingerSpacing);
+    return this.gestures.requestMultiFingerSwipe(
+      x1,
+      y1,
+      x2,
+      y2,
+      fingerCount,
+      duration,
+      timeoutMs,
+      perf,
+      fingerSpacing,
+    );
   }
 
   // ===========================================================================
   // Delegated Public Methods - Storage (UserDefaults)
   // ===========================================================================
 
-  async listPreferenceFiles(packageName: string, timeoutMs?: number): Promise<import("../../storage/storageTypes").PreferenceFile[]> {
+  async listPreferenceFiles(
+    packageName: string,
+    timeoutMs?: number,
+  ): Promise<import("../../storage/storageTypes").PreferenceFile[]> {
     return this.storage.listPreferenceFiles(packageName, timeoutMs);
   }
 
-  async getPreferenceEntries(packageName: string, fileName: string, timeoutMs?: number): Promise<import("../../storage/storageTypes").KeyValueEntry[]> {
+  async getPreferenceEntries(
+    packageName: string,
+    fileName: string,
+    timeoutMs?: number,
+  ): Promise<import("../../storage/storageTypes").KeyValueEntry[]> {
     return this.storage.getPreferenceEntries(packageName, fileName, timeoutMs);
   }
 
-  async getPreference(packageName: string, fileName: string, key: string, timeoutMs?: number): Promise<import("../../storage/storageTypes").KeyValueEntry | null> {
+  async getPreference(
+    packageName: string,
+    fileName: string,
+    key: string,
+    timeoutMs?: number,
+  ): Promise<import("../../storage/storageTypes").KeyValueEntry | null> {
     return this.storage.getPreference(packageName, fileName, key, timeoutMs);
   }
 
-  async setPreference(packageName: string, fileName: string, key: string, value: string | null, type: import("../../storage/storageTypes").KeyValueType, timeoutMs?: number): Promise<void> {
+  async setPreference(
+    packageName: string,
+    fileName: string,
+    key: string,
+    value: string | null,
+    type: import("../../storage/storageTypes").KeyValueType,
+    timeoutMs?: number,
+  ): Promise<void> {
     return this.storage.setPreference(packageName, fileName, key, value, type, timeoutMs);
   }
 
-  async removePreference(packageName: string, fileName: string, key: string, timeoutMs?: number): Promise<void> {
+  async removePreference(
+    packageName: string,
+    fileName: string,
+    key: string,
+    timeoutMs?: number,
+  ): Promise<void> {
     return this.storage.removePreference(packageName, fileName, key, timeoutMs);
   }
 
-  async clearPreferenceStore(packageName: string, fileName: string, timeoutMs?: number): Promise<void> {
+  async clearPreferenceStore(
+    packageName: string,
+    fileName: string,
+    timeoutMs?: number,
+  ): Promise<void> {
     return this.storage.clearPreferenceStore(packageName, fileName, timeoutMs);
   }
 
@@ -2059,26 +2443,36 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     appId: string,
     databasePath: string,
     query: string,
-    timeoutMs?: number
+    timeoutMs?: number,
   ): Promise<import("../../database/DatabaseInspector").SQLResult> {
-    return this.database.executeSQL(appId, databasePath, query, timeoutMs, this.boundSessionId ?? undefined);
+    return this.database.executeSQL(
+      appId,
+      databasePath,
+      query,
+      timeoutMs,
+      this.boundSessionId ?? undefined,
+    );
   }
 
   async listDatabasesForIos(
     appId: string,
-    timeoutMs?: number
+    timeoutMs?: number,
   ): Promise<import("../../database/DatabaseInspector").DatabaseInfo[]> {
     return this.database.listDatabases(appId, timeoutMs);
   }
 
   async getStorageCapabilitiesForIos(
     appId: string,
-    timeoutMs?: number
+    timeoutMs?: number,
   ): Promise<import("./CtrlProxyDatabase").StorageCapabilities> {
     return this.database.storageCapabilities(appId, timeoutMs);
   }
 
-  async listTablesForIos(appId: string, databasePath: string, timeoutMs?: number): Promise<string[]> {
+  async listTablesForIos(
+    appId: string,
+    databasePath: string,
+    timeoutMs?: number,
+  ): Promise<string[]> {
     return this.database.listTables(appId, databasePath, timeoutMs);
   }
 
@@ -2088,7 +2482,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     table: string,
     limit?: number,
     offset?: number,
-    timeoutMs?: number
+    timeoutMs?: number,
   ): Promise<import("../../database/DatabaseInspector").TableDataResult> {
     return this.database.getTableData(appId, databasePath, table, limit, offset, timeoutMs);
   }
@@ -2097,7 +2491,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     appId: string,
     databasePath: string,
     table: string,
-    timeoutMs?: number
+    timeoutMs?: number,
   ): Promise<import("../../database/DatabaseInspector").TableStructureResult> {
     return this.database.getTableStructure(appId, databasePath, table, timeoutMs);
   }
@@ -2109,7 +2503,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   public async verifyServiceReady(
     maxAttempts: number = 3,
     delayMs: number = 1000,
-    timeoutMs: number = 5000
+    timeoutMs: number = 5000,
   ): Promise<boolean> {
     // Sits on the shared RetryExecutor (issue #5460), matching how
     // DeviceServiceClient.waitForConnection and AndroidCtrlProxyClient.verifyServiceReady
@@ -2122,11 +2516,16 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     // pure wasted latency on the error path).
     const result = await this.retryExecutor.execute(
       async () => {
-        if (!await this.ensureConnected()) {
+        if (!(await this.ensureConnected())) {
           throw new Error("CtrlProxy WebSocket not connected");
         }
 
-        const hierarchyResult = await this.requestHierarchySync(undefined, false, undefined, timeoutMs);
+        const hierarchyResult = await this.requestHierarchySync(
+          undefined,
+          false,
+          undefined,
+          timeoutMs,
+        );
         if (hierarchyResult?.hierarchy) {
           return true;
         }
@@ -2136,7 +2535,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       {
         maxAttempts,
         delays: delayMs,
-      }
+      },
     );
 
     return result.value ?? false;
@@ -2209,7 +2608,11 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       // all on the first response). A resolution-changing response would then associate its capture
       // id with the old dimensions and screenshots could not pair until another hierarchy arrived.
       this.updateScreenGeometryFrom(source);
-      const captureSequence = server.pushHierarchyUpdate(this.device.deviceId, hierarchy, frameContext);
+      const captureSequence = server.pushHierarchyUpdate(
+        this.device.deviceId,
+        hierarchy,
+        frameContext,
+      );
       // Record the identity the daemon assigned, so screenshot requests initiated from here on are
       // bound to it. A null return (no subscribers), a throw, or a missing server all leave the
       // geometry untracked, and the daemon then omits the identity so a control client fails closed.
@@ -2229,7 +2632,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
    */
   recordInitialObservationStreamHierarchy(
     hierarchy: ViewHierarchyResult,
-    captureSequence: number | null
+    captureSequence: number | null,
   ): void {
     this.screenGeometry.clear();
     this.updateScreenGeometryFrom(hierarchy);
@@ -2262,15 +2665,24 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       // Identity, coordinate space, and native scale travel with the frame from request initiation,
       // never from the latest metadata at delivery time. A hierarchy that flips scale metadata
       // while pixels are in flight must not relabel their geometry or their swipe threshold.
-      server.pushScreenshotUpdate(this.device.deviceId, screenshotBase64, screenWidth, screenHeight, metadata, {
-        captureSequence,
-        ...(coordinateSpace ? { coordinateSpace } : {}),
-        ...(nativeScale === undefined ? {} : { nativeScale }),
-        frameContext,
-        rotation,
-      });
+      server.pushScreenshotUpdate(
+        this.device.deviceId,
+        screenshotBase64,
+        screenWidth,
+        screenHeight,
+        metadata,
+        {
+          captureSequence,
+          ...(coordinateSpace ? { coordinateSpace } : {}),
+          ...(nativeScale === undefined ? {} : { nativeScale }),
+          frameContext,
+          rotation,
+        },
+      );
     } catch (error) {
-      logger.debug(`[IOSCtrlProxyClient] Failed to push screenshot to observation stream: ${error}`);
+      logger.debug(
+        `[IOSCtrlProxyClient] Failed to push screenshot to observation stream: ${error}`,
+      );
     }
   }
 
@@ -2319,7 +2731,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
             binding?.coordinateSpace,
             binding?.nativeScale,
             result.frameContext,
-            result.rotation
+            result.rotation,
           );
         },
         {
@@ -2332,7 +2744,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
         () => {
           const server = getDeviceDataStreamServer();
           return !!server && server.hasSubscriberForDevice(this.device.deviceId);
-        }
+        },
       );
     }
     return this.screenshotBackoffScheduler;
@@ -2373,14 +2785,17 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
    * whatever happens to be cached (issue #3348).
    */
   private updateScreenGeometryFrom(
-    source: {
-      screenWidth?: number;
-      screenHeight?: number;
-      screenScale?: number;
-      nativeScale?: number;
-      pixelWidth?: number;
-      pixelHeight?: number;
-    } | null | undefined
+    source:
+      | {
+          screenWidth?: number;
+          screenHeight?: number;
+          screenScale?: number;
+          nativeScale?: number;
+          pixelWidth?: number;
+          pixelHeight?: number;
+        }
+      | null
+      | undefined,
   ): void {
     const hierarchy = source;
     if (!hierarchy?.screenWidth || !hierarchy.screenHeight) {
@@ -2398,9 +2813,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     const [pixelWidth, pixelHeight] = metadata
       ? [metadata.pixelWidth, metadata.pixelHeight]
       : [
-        Math.round(hierarchy.screenWidth * (hierarchy.screenScale ?? 1)),
-        Math.round(hierarchy.screenHeight * (hierarchy.screenScale ?? 1)),
-      ];
+          Math.round(hierarchy.screenWidth * (hierarchy.screenScale ?? 1)),
+          Math.round(hierarchy.screenHeight * (hierarchy.screenScale ?? 1)),
+        ];
     // A change clears the forwarded flag: the geometry becomes capture-tracked only once a
     // hierarchy carrying it is forwarded (see pushHierarchyToObservationStream) — which will NOT
     // happen while hierarchy pushes are suppressed, or when there is no stream server. The
@@ -2410,7 +2825,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       pixelWidth,
       pixelHeight,
       metadata ? COORDINATE_SPACE_PX : undefined,
-      metadata?.nativeScale
+      metadata?.nativeScale,
     );
   }
 
@@ -2423,7 +2838,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
    * stale values behind. `readScreenScaleMetadata` is the single all-or-nothing validator.
    */
   private retainScaleMetadataFrom(
-    hierarchy: { nativeScale?: number; pixelWidth?: number; pixelHeight?: number } | null | undefined
+    hierarchy:
+      | { nativeScale?: number; pixelWidth?: number; pixelHeight?: number }
+      | null
+      | undefined,
   ): void {
     this.reportedScaleMetadata = readScreenScaleMetadata(hierarchy);
   }
@@ -2452,14 +2870,18 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
   refreshObservationStreamHierarchyCadence(intervalMs: number): void {
     if (!this.isCommandSupported("set_hierarchy_poll_interval")) {
-      logger.info("[IOSCtrlProxyClient] Skipping hierarchy cadence sync; runner does not advertise set_hierarchy_poll_interval");
+      logger.info(
+        "[IOSCtrlProxyClient] Skipping hierarchy cadence sync; runner does not advertise set_hierarchy_poll_interval",
+      );
       return;
     }
 
-    this.sendMessage(JSON.stringify({
-      type: "set_hierarchy_poll_interval",
-      intervalMs,
-    }));
+    this.sendMessage(
+      JSON.stringify({
+        type: "set_hierarchy_poll_interval",
+        intervalMs,
+      }),
+    );
   }
 
   // ===========================================================================
@@ -2470,7 +2892,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     if (!this.hierarchyNavigationDetector) {
       this.hierarchyNavigationDetector = new HierarchyNavigationDetector(
         this.getNavigationGraphManager(),
-        { timer: this.timer }
+        { timer: this.timer },
       );
     }
     return this.hierarchyNavigationDetector;
@@ -2484,27 +2906,35 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
   private handleHierarchyUpdateForNavigation(
     hierarchy: XCTestHierarchy,
-    perfTiming?: CtrlProxyPerfTiming | CtrlProxyPerfTiming[]
+    perfTiming?: CtrlProxyPerfTiming | CtrlProxyPerfTiming[],
   ): void {
     if (!hierarchy.hierarchy) {
-      logger.warn("[IOSCtrlProxyClient] Skipping navigation detection: hierarchy missing in update");
+      logger.warn(
+        "[IOSCtrlProxyClient] Skipping navigation detection: hierarchy missing in update",
+      );
       return;
     }
 
     if (hierarchy.error) {
-      logger.warn(`[IOSCtrlProxyClient] Skipping navigation detection due to hierarchy error: ${hierarchy.error}`);
+      logger.warn(
+        `[IOSCtrlProxyClient] Skipping navigation detection due to hierarchy error: ${hierarchy.error}`,
+      );
       return;
     }
 
     // Track foreground bundle and start performance monitoring when app changes
     const bundleId = hierarchy.packageName;
-    logger.debug(`[IOSCtrlProxyClient] Hierarchy update - bundleId: "${bundleId}", lastForeground: "${this.lastForegroundBundleId}"`);
+    logger.debug(
+      `[IOSCtrlProxyClient] Hierarchy update - bundleId: "${bundleId}", lastForeground: "${this.lastForegroundBundleId}"`,
+    );
     if (bundleId && bundleId !== this.lastForegroundBundleId) {
       this.lastForegroundBundleId = bundleId;
       // Start performance monitoring for this device/bundle
       const monitor = getPerformanceMonitor();
       monitor.startMonitoring(this.device.deviceId, bundleId, "ios");
-      logger.info(`[IOSCtrlProxyClient] Started performance monitoring for ${bundleId} on ${this.device.deviceId}`);
+      logger.info(
+        `[IOSCtrlProxyClient] Started performance monitoring for ${bundleId} on ${this.device.deviceId}`,
+      );
     }
 
     const conversionStart = this.timer.now();
@@ -2514,7 +2944,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     const metrics: HierarchyNavigationUpdateMetrics = {
       source: "ios",
       conversionMs,
-      externalTiming: perfTiming
+      externalTiming: perfTiming,
     };
 
     this.getHierarchyNavigationDetector().onHierarchyUpdate(convertedHierarchy, metrics);
@@ -2524,15 +2954,17 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     return {
       updatedAt: hierarchy.updatedAt,
       packageName: hierarchy.packageName,
-      hierarchy: this.convertNodeForNavigation(hierarchy.hierarchy) as AccessibilityHierarchy["hierarchy"],
+      hierarchy: this.convertNodeForNavigation(
+        hierarchy.hierarchy,
+      ) as AccessibilityHierarchy["hierarchy"],
     };
   }
 
   private convertNodeForNavigation(
-    node: CtrlProxyNode | CtrlProxyNode[]
+    node: CtrlProxyNode | CtrlProxyNode[],
   ): Record<string, unknown> | Record<string, unknown>[] {
     if (Array.isArray(node)) {
-      return node.flatMap(child => {
+      return node.flatMap((child) => {
         const converted = this.convertNodeForNavigation(child);
         return Array.isArray(converted) ? converted : [converted];
       });
@@ -2577,7 +3009,11 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     return converted;
   }
 
-  private readNodeField<T>(node: CtrlProxyNode, camelKey: keyof CtrlProxyNode, dashedKey?: string): T | undefined {
+  private readNodeField<T>(
+    node: CtrlProxyNode,
+    camelKey: keyof CtrlProxyNode,
+    dashedKey?: string,
+  ): T | undefined {
     const record = node as Record<string, unknown>;
     if (record[camelKey as string] !== undefined) {
       return record[camelKey as string] as T;

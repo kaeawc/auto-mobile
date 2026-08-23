@@ -148,6 +148,13 @@ public struct RequestAction: Decodable {
     public var label: String?
 }
 
+public struct RequestActivateAccessibilityLink: Decodable {
+    public var requestId: String?
+    public var text: String
+    public var occurrence: Int
+    public var ownerResourceId: String?
+}
+
 public struct RequestLaunchApp: Decodable {
     public var requestId: String?
     public var bundleId: String
@@ -320,6 +327,7 @@ extension RequestImeAction: CommandPayload {}
 extension RequestKeyboard: CommandPayload {}
 extension RequestPressButton: CommandPayload {}
 extension RequestAction: CommandPayload {}
+extension RequestActivateAccessibilityLink: CommandPayload {}
 extension RequestLaunchApp: CommandPayload {}
 extension RequestResetPermissions: CommandPayload {}
 extension RequestRotate: CommandPayload {}
@@ -372,6 +380,7 @@ public enum WebSocketRequest: Decodable {
     case recentApps(RequestEnvelope)
 
     case action(RequestAction)
+    case activateAccessibilityLink(RequestActivateAccessibilityLink)
     case launchApp(RequestLaunchApp)
     case resetPermissions(RequestResetPermissions)
     case rotate(RequestRotate)
@@ -461,6 +470,8 @@ public enum WebSocketRequest: Decodable {
             self = try .recentApps(RequestEnvelope(from: decoder))
         case .requestAction:
             self = try .action(RequestAction(from: decoder))
+        case .requestActivateAccessibilityLink:
+            self = try .activateAccessibilityLink(RequestActivateAccessibilityLink(from: decoder))
         case .requestLaunchApp:
             self = try .launchApp(RequestLaunchApp(from: decoder))
         case .requestResetPermissions:
@@ -535,6 +546,7 @@ public enum WebSocketRequest: Decodable {
         case .shake: return .requestShake
         case .recentApps: return .requestRecentApps
         case .action: return .requestAction
+        case .activateAccessibilityLink: return .requestActivateAccessibilityLink
         case .launchApp: return .requestLaunchApp
         case .resetPermissions: return .requestResetPermissions
         case .rotate: return .requestRotate
@@ -599,6 +611,7 @@ public enum WebSocketRequest: Decodable {
         case let .keyboard(payload): return payload
         case let .pressButton(payload): return payload
         case let .action(payload): return payload
+        case let .activateAccessibilityLink(payload): return payload
         case let .launchApp(payload): return payload
         case let .resetPermissions(payload): return payload
         case let .rotate(payload): return payload
@@ -1770,6 +1783,7 @@ public enum RequestType: String, CaseIterable {
 
     // Node actions
     case requestAction = "request_action"
+    case requestActivateAccessibilityLink = "request_activate_accessibility_link"
     case requestLaunchApp = "request_launch_app"
 
     /// App privacy permissions
@@ -1899,6 +1913,7 @@ extension RequestType {
         case .requestShake: return .shakeResult
         case .requestRecentApps: return .recentAppsResult
         case .requestAction: return .actionResult
+        case .requestActivateAccessibilityLink: return .actionResult
         case .requestLaunchApp: return .launchAppResult
         case .requestResetPermissions: return .resetPermissionsResult
         case .requestRotate: return .rotateResult

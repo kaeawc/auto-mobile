@@ -152,6 +152,8 @@ public class CommandHandler: CommandHandling {
             // Action commands
             case let .action(payload):
                 return try handleAction(payload, startTime: startTime)
+            case let .activateAccessibilityLink(payload):
+                return try handleActivateAccessibilityLink(payload, startTime: startTime)
 
             case let .launchApp(payload):
                 return try handleLaunchApp(payload, startTime: startTime)
@@ -940,6 +942,22 @@ public class CommandHandler: CommandHandling {
     private func handleAction(_ request: RequestAction, startTime: Date) throws -> WebSocketResponse {
         try gesturePerformer.performAction(request.action, resourceId: request.resourceId, label: request.label)
 
+        return WebSocketResponse.success(
+            type: ResponseType.actionResult.rawValue,
+            requestId: request.requestId,
+            totalTimeMs: totalTimeMs(from: startTime)
+        )
+    }
+
+    private func handleActivateAccessibilityLink(
+        _ request: RequestActivateAccessibilityLink,
+        startTime: Date
+    ) throws -> WebSocketResponse {
+        try gesturePerformer.activateAccessibilityLink(
+            text: request.text,
+            occurrence: request.occurrence,
+            ownerResourceId: request.ownerResourceId
+        )
         return WebSocketResponse.success(
             type: ResponseType.actionResult.rawValue,
             requestId: request.requestId,

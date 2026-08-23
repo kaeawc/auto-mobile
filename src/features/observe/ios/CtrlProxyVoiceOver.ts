@@ -29,7 +29,7 @@ export class CtrlProxyVoiceOver {
    */
   async requestVoiceOverState(
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyVoiceOverResult> {
     return sendCommand<CtrlProxyVoiceOverResult>(this.context, {
       idPrefix: "voiceover",
@@ -38,9 +38,22 @@ export class CtrlProxyVoiceOver {
       timeoutMs,
       perf,
       cancelScreenshotBackoff: false,
-      notConnectedError: () => ({ success: false, enabled: false, error: "Not connected to CtrlProxy" }),
-      unsupportedCommandError: (_messageType, error) => ({ success: false, enabled: false, totalTimeMs: 0, error }),
-      timeoutError: () => ({ success: false, enabled: false, error: "Timeout waiting for voiceover_state_result" }),
+      notConnectedError: () => ({
+        success: false,
+        enabled: false,
+        error: "Not connected to CtrlProxy",
+      }),
+      unsupportedCommandError: (_messageType, error) => ({
+        success: false,
+        enabled: false,
+        totalTimeMs: 0,
+        error,
+      }),
+      timeoutError: () => ({
+        success: false,
+        enabled: false,
+        error: "Timeout waiting for voiceover_state_result",
+      }),
     });
   }
 
@@ -62,7 +75,7 @@ export class CtrlProxyVoiceOver {
     resourceId?: string,
     label?: string,
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyActionResult> {
     return sendCommand<CtrlProxyActionResult>(this.context, {
       idPrefix: "action",
@@ -74,6 +87,33 @@ export class CtrlProxyVoiceOver {
       cancelScreenshotBackoff: false,
       notConnectedError: () => ({ success: false, error: "Not connected to CtrlProxy" }),
       timeoutError: () => ({ success: false, error: "Timeout waiting for action_result" }),
+    });
+  }
+
+  async requestActivateAccessibilityLink(
+    text: string,
+    occurrence: number,
+    ownerResourceId?: string,
+    timeoutMs: number = 5000,
+    perf?: PerformanceTracker,
+  ): Promise<CtrlProxyActionResult> {
+    return sendCommand<CtrlProxyActionResult>(this.context, {
+      idPrefix: "accessibility_link",
+      responseType: "action",
+      messageType: "request_activate_accessibility_link",
+      params: { text, occurrence, ownerResourceId: ownerResourceId ?? null },
+      timeoutMs,
+      perf,
+      cancelScreenshotBackoff: false,
+      notConnectedError: () => ({ success: false, error: "Not connected to CtrlProxy" }),
+      unsupportedCommandError: () => ({
+        success: false,
+        error: "Connected iOS runner does not support semantic accessibility-link activation",
+      }),
+      timeoutError: () => ({
+        success: false,
+        error: "Timeout waiting for semantic link activation",
+      }),
     });
   }
 
@@ -98,7 +138,7 @@ export class CtrlProxyVoiceOver {
     label: string,
     action: "activate" | "long_press",
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyActionResult> {
     return sendCommand<CtrlProxyActionResult>(this.context, {
       idPrefix: "voiceover_action",

@@ -221,6 +221,15 @@ export interface RequestActionMessage {
   };
 }
 
+/** `@SerialName("request_activate_accessibility_link")` → `RequestActivateAccessibilityLink` */
+export interface RequestActivateAccessibilityLinkMessage {
+  type: "request_activate_accessibility_link";
+  requestId: string;
+  text: string;
+  occurrence: number;
+  selector?: RequestActionMessage["selector"];
+}
+
 /**
  * `@SerialName("request_hit_test")` → `RequestHitTest`.
  * Device-supported but currently has no TS sender; typed here for contract completeness.
@@ -565,6 +574,7 @@ export type CtrlProxyRequest =
   | RequestImeActionMessage
   | RequestSelectAllMessage
   | RequestActionMessage
+  | RequestActivateAccessibilityLinkMessage
   | RequestHitTestMessage
   | RequestClipboardMessage
   | RequestSettingsGetMessage
@@ -632,6 +642,7 @@ const REQUEST_TYPE_REGISTRY: Record<CtrlProxyRequestType, true> = {
   request_ime_action: true,
   request_select_all: true,
   request_action: true,
+  request_activate_accessibility_link: true,
   request_hit_test: true,
   request_clipboard: true,
   request_settings_get: true,
@@ -668,8 +679,9 @@ const REQUEST_TYPE_REGISTRY: Record<CtrlProxyRequestType, true> = {
 };
 
 /** All request `type` discriminators known to this contract (mirrors `WebSocketRequest.kt`). */
-export const KNOWN_REQUEST_TYPES: readonly CtrlProxyRequestType[] =
-  Object.keys(REQUEST_TYPE_REGISTRY) as CtrlProxyRequestType[];
+export const KNOWN_REQUEST_TYPES: readonly CtrlProxyRequestType[] = Object.keys(
+  REQUEST_TYPE_REGISTRY,
+) as CtrlProxyRequestType[];
 
 // =============================================================================
 // Serialization
@@ -713,8 +725,15 @@ export const ctrlProxyRequests = {
     };
   },
 
-  requestHierarchyIfStale(args: { requestId: string; sinceTimestamp: number }): RequestHierarchyIfStaleMessage {
-    return { type: "request_hierarchy_if_stale", requestId: args.requestId, sinceTimestamp: args.sinceTimestamp };
+  requestHierarchyIfStale(args: {
+    requestId: string;
+    sinceTimestamp: number;
+  }): RequestHierarchyIfStaleMessage {
+    return {
+      type: "request_hierarchy_if_stale",
+      requestId: args.requestId,
+      sinceTimestamp: args.sinceTimestamp,
+    };
   },
 
   setHierarchyInterval(args: { intervalMs: number | null }): SetHierarchyIntervalMessage {
@@ -736,7 +755,22 @@ export const ctrlProxyRequests = {
       requestId: args.requestId,
       action: args.action,
       resourceId: args.resourceId,
-      selector: args.selector
+      selector: args.selector,
+    };
+  },
+
+  requestActivateAccessibilityLink(args: {
+    requestId: string;
+    text: string;
+    occurrence: number;
+    selector?: RequestActionMessage["selector"];
+  }): RequestActivateAccessibilityLinkMessage {
+    return {
+      type: "request_activate_accessibility_link",
+      requestId: args.requestId,
+      text: args.text,
+      occurrence: args.occurrence,
+      selector: args.selector,
     };
   },
 
@@ -745,7 +779,12 @@ export const ctrlProxyRequests = {
     action: "copy" | "paste" | "clear" | "get";
     text?: string;
   }): RequestClipboardMessage {
-    return { type: "request_clipboard", requestId: args.requestId, action: args.action, text: args.text };
+    return {
+      type: "request_clipboard",
+      requestId: args.requestId,
+      action: args.action,
+      text: args.text,
+    };
   },
 
   requestSettingsGet(args: {
@@ -753,7 +792,12 @@ export const ctrlProxyRequests = {
     namespace: SettingsNamespace;
     key: string;
   }): RequestSettingsGetMessage {
-    return { type: "request_settings_get", requestId: args.requestId, namespace: args.namespace, key: args.key };
+    return {
+      type: "request_settings_get",
+      requestId: args.requestId,
+      namespace: args.namespace,
+      key: args.key,
+    };
   },
 
   requestSettingsPut(args: {
@@ -773,7 +817,10 @@ export const ctrlProxyRequests = {
     };
   },
 
-  requestSettingsList(args: { requestId: string; namespace: SettingsNamespace }): RequestSettingsListMessage {
+  requestSettingsList(args: {
+    requestId: string;
+    namespace: SettingsNamespace;
+  }): RequestSettingsListMessage {
     return { type: "request_settings_list", requestId: args.requestId, namespace: args.namespace };
   },
 
@@ -781,8 +828,15 @@ export const ctrlProxyRequests = {
     return { type: "install_ca_cert", requestId: args.requestId, certificate: args.certificate };
   },
 
-  installCaCertFromPath(args: { requestId: string; devicePath: string }): InstallCaCertFromPathMessage {
-    return { type: "install_ca_cert_from_path", requestId: args.requestId, devicePath: args.devicePath };
+  installCaCertFromPath(args: {
+    requestId: string;
+    devicePath: string;
+  }): InstallCaCertFromPathMessage {
+    return {
+      type: "install_ca_cert_from_path",
+      requestId: args.requestId,
+      devicePath: args.devicePath,
+    };
   },
 
   removeCaCert(args: { requestId: string; alias: string }): RemoveCaCertMessage {
@@ -818,7 +872,11 @@ export const ctrlProxyRequests = {
     return { type: "get_traversal_order", requestId: args.requestId };
   },
 
-  addHighlight(args: { requestId: string; id?: string; shape?: HighlightShape }): AddHighlightMessage {
+  addHighlight(args: {
+    requestId: string;
+    id?: string;
+    shape?: HighlightShape;
+  }): AddHighlightMessage {
     // Match the pre-migration send site: start with { type, requestId } and only attach id/shape
     // when truthy, so falsy values are omitted from the wire rather than serialized as null.
     const message: AddHighlightMessage = { type: "add_highlight", requestId: args.requestId };
@@ -831,11 +889,22 @@ export const ctrlProxyRequests = {
     return message;
   },
 
-  listPreferenceFiles(args: { requestId: string; packageName: string }): ListPreferenceFilesMessage {
-    return { type: "list_preference_files", requestId: args.requestId, packageName: args.packageName };
+  listPreferenceFiles(args: {
+    requestId: string;
+    packageName: string;
+  }): ListPreferenceFilesMessage {
+    return {
+      type: "list_preference_files",
+      requestId: args.requestId,
+      packageName: args.packageName,
+    };
   },
 
-  getPreferences(args: { requestId: string; packageName: string; fileName: string }): GetPreferencesMessage {
+  getPreferences(args: {
+    requestId: string;
+    packageName: string;
+    fileName: string;
+  }): GetPreferencesMessage {
     return {
       type: "get_preferences",
       requestId: args.requestId,
@@ -844,7 +913,11 @@ export const ctrlProxyRequests = {
     };
   },
 
-  subscribeStorage(args: { requestId: string; packageName: string; fileName: string }): SubscribeStorageMessage {
+  subscribeStorage(args: {
+    requestId: string;
+    packageName: string;
+    fileName: string;
+  }): SubscribeStorageMessage {
     return {
       type: "subscribe_storage",
       requestId: args.requestId,
@@ -853,8 +926,15 @@ export const ctrlProxyRequests = {
     };
   },
 
-  unsubscribeStorage(args: { requestId: string; subscriptionId: string }): UnsubscribeStorageMessage {
-    return { type: "unsubscribe_storage", requestId: args.requestId, subscriptionId: args.subscriptionId };
+  unsubscribeStorage(args: {
+    requestId: string;
+    subscriptionId: string;
+  }): UnsubscribeStorageMessage {
+    return {
+      type: "unsubscribe_storage",
+      requestId: args.requestId,
+      subscriptionId: args.subscriptionId,
+    };
   },
 
   getPreference(args: {
@@ -906,7 +986,11 @@ export const ctrlProxyRequests = {
     };
   },
 
-  clearPreferences(args: { requestId: string; packageName: string; fileName: string }): ClearPreferencesMessage {
+  clearPreferences(args: {
+    requestId: string;
+    packageName: string;
+    fileName: string;
+  }): ClearPreferencesMessage {
     return {
       type: "clear_preferences",
       requestId: args.requestId,
@@ -939,7 +1023,10 @@ export const ctrlProxyRequests = {
     };
   },
 
-  setRecompositionTracking(args: { requestId: string; enabled: boolean }): SetRecompositionTrackingMessage {
+  setRecompositionTracking(args: {
+    requestId: string;
+    enabled: boolean;
+  }): SetRecompositionTrackingMessage {
     return { type: "set_recomposition_tracking", requestId: args.requestId, enabled: args.enabled };
   },
 
@@ -1003,8 +1090,15 @@ export const ctrlProxyRequests = {
     };
   },
 
-  requestLaunchIntent(args: { requestId: string; packageName: string }): RequestLaunchIntentMessage {
-    return { type: "request_launch_intent", requestId: args.requestId, packageName: args.packageName };
+  requestLaunchIntent(args: {
+    requestId: string;
+    packageName: string;
+  }): RequestLaunchIntentMessage {
+    return {
+      type: "request_launch_intent",
+      requestId: args.requestId,
+      packageName: args.packageName,
+    };
   },
 
   startRecording(): StartRecordingMessage {

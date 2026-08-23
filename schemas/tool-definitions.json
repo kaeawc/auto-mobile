@@ -9170,6 +9170,11 @@
               "type": "string",
               "minLength": 1
             },
+            "accessibilityLink": {
+              "description": "Exact visible text of a semantic accessibility link",
+              "type": "string",
+              "minLength": 1
+            },
             "textAny": {
               "description": "Ordered text variants; first visible match wins",
               "minItems": 1,
@@ -9198,11 +9203,16 @@
             },
             {
               "required": [
+                "accessibilityLink"
+              ]
+            },
+            {
+              "required": [
                 "textAny"
               ]
             }
           ],
-          "description": "Element to tap: elementId, Android testTag, text, or ordered text variants"
+          "description": "Element to tap: elementId, Android testTag, text, semantic accessibility link, or ordered text variants"
         },
         "sibling": {
           "description": "Tap a clickable sibling of the match, e.g. checkbox beside label",
@@ -9264,6 +9274,27 @@
           "description": "Long press duration (ms)",
           "type": "number"
         },
+        "subtext": {
+          "description": "Semantic link inside the selected element; fails if the platform does not expose that link",
+          "type": "object",
+          "properties": {
+            "text": {
+              "description": "Exact visible text of a semantic link inside the selected element",
+              "type": "string",
+              "minLength": 1
+            },
+            "occurrence": {
+              "description": "Zero-based occurrence among exact semantic-link matches (default: 0)",
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "text"
+          ],
+          "additionalProperties": false
+        },
         "searchUntil": {
           "description": "Poll for element before tapping",
           "type": "object",
@@ -9313,7 +9344,96 @@
         "action",
         "platform"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "if": {
+        "anyOf": [
+          {
+            "required": [
+              "subtext"
+            ]
+          },
+          {
+            "properties": {
+              "selector": {
+                "required": [
+                  "accessibilityLink"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "then": {
+        "properties": {
+          "action": {
+            "const": "tap"
+          },
+          "sibling": {
+            "not": {
+              "const": true
+            }
+          },
+          "retryIfNoChange": {
+            "not": {
+              "const": true
+            }
+          },
+          "ensureTap": {
+            "not": {
+              "const": true
+            }
+          },
+          "searchUntil": {
+            "not": {}
+          }
+        },
+        "allOf": [
+          {
+            "not": {
+              "required": [
+                "subtext"
+              ],
+              "properties": {
+                "selector": {
+                  "required": [
+                    "accessibilityLink"
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "subtext"
+              ]
+            },
+            "then": {
+              "not": {
+                "required": [
+                  "index"
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "subtext"
+              ]
+            },
+            "then": {
+              "properties": {
+                "selectionStrategy": {
+                  "not": {
+                    "const": "random"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
     },
     "outputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -10580,6 +10700,25 @@
             }
           },
           "additionalProperties": {}
+        },
+        "activatedSubtext": {
+          "description": "Semantic accessibility link confirmed by the native runner",
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "occurrence": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "text",
+            "occurrence"
+          ],
+          "additionalProperties": false
         },
         "selectedElements": {
           "type": "array",

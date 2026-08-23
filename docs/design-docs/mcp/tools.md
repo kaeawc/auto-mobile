@@ -8,7 +8,7 @@ Almost all other tool calls have built-in observation via the [interaction loop]
 
 #### Interactions
 
-- 👆 `tapOn` supports tap, double-tap, long press, and long-press drag actions. Selectors include `selector.text`, `selector.textAny`, and `selector.elementId`; `sibling: true` taps a clickable sibling of the selector match. When multiple elements match, `index` (0-based) taps the Nth on-screen match instead of applying `selectionStrategy`.
+- 👆 `tapOn` supports tap, double-tap, long press, and long-press drag actions. Selectors include `selector.text`, `selector.textAny`, and `selector.elementId`; `sibling: true` taps a clickable sibling of the selector match. When multiple elements match, `index` (0-based) taps the Nth on-screen match instead of applying `selectionStrategy`. Semantic links are activated natively on Android and iOS with `selector: { accessibilityLink: "Terms of Service" }` (use `index` for duplicate labels), or `subtext: { text: "Terms of Service", occurrence: 0 }` scoped to a stable outer selector. Unsupported, flattened, stale, or ambiguous links fail explicitly and never fall back to tapping the container.
 - 👉 `swipeOn` handles directional swipes and scrolling within container bounds.
 - ↔️ `dragAndDrop` for element-to-element moves.
 - 🔍 `pinchOn` for zoom in/out gestures.

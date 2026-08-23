@@ -21,10 +21,13 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.PowerManager
 import android.provider.Settings
+import android.text.Spanned
+import android.text.style.ClickableSpan
 import android.util.Base64
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.Display
+import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -1976,6 +1979,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     resourceId: String?,
     selector: NodeSelector?,
   ) = performNodeAction(requestId, action, resourceId, selector)
+
+  override fun requestActivateAccessibilityLink(
+    requestId: String?,
+    text: String,
+    occurrence: Int,
+    selector: NodeSelector?,
+  ) = performAccessibilityLinkActivation(requestId, text, occurrence, selector)
 
   override fun requestClipboard(requestId: String?, action: String, text: String?) =
     performClipboard(requestId, action, text)
@@ -4295,6 +4305,115 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    * preserved as the legacy selector; newer clients can additionally use test tags, Android unique
    * IDs, and collection coordinates.
    */
+  private fun performAccessibilityLinkActivation(
+    requestId: String?,
+    text: String,
+    occurrence: Int,
+    selector: NodeSelector?,
+  ) {
+    val startTime = System.currentTimeMillis()
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+      launchRequestScope(requestId) {
+        broadcastActionResult(
+          requestId,
+          "activate_accessibility_link",
+          false,
+          "Semantic accessibility links require Android API 26 or later",
+          System.currentTimeMillis() - startTime,
+        )
+      }
+      return
+    }
+    if (text.isBlank() || occurrence < 0) {
+      launchRequestScope(requestId) {
+        broadcastActionResult(
+          requestId,
+          "activate_accessibility_link",
+          false,
+          "Link text must be non-blank and occurrence must be non-negative",
+          System.currentTimeMillis() - startTime,
+        )
+      }
+      return
+    }
+
+    try {
+      val root = rootInActiveWindow
+      val owner = selector?.let { findNodeBySelector(root, it) }
+      if (selector != null && owner == null) {
+        throw IllegalStateException("Selected link owner is no longer present")
+      }
+      var matched = 0
+      var activated = false
+      var activationError: String? = null
+      fun visit(node: AccessibilityNodeInfo?) {
+        if (node == null || activated) return
+        val nodeText = node.text as? Spanned
+        if (nodeText != null) {
+          nodeText
+            .getSpans(0, nodeText.length, ClickableSpan::class.java)
+            .sortedBy { nodeText.getSpanStart(it) }
+            .forEach { span ->
+              if (activated) return@forEach
+              val start = nodeText.getSpanStart(span)
+              val end = nodeText.getSpanEnd(span)
+              val spanText = nodeText.subSequence(start, end).toString()
+              if (spanText.equals(text, ignoreCase = true)) {
+                if (matched++ == occurrence) {
+                  try {
+                    // Accessibility exposes ClickableSpan only from API 26. Invoke its public
+                    // contract; no coordinate, reflection, or whole-node fallback is permitted.
+                    span.onClick(View(this))
+                    activated = true
+                  } catch (error: Exception) {
+                    activationError = error.message ?: error.javaClass.simpleName
+                  }
+                }
+              }
+            }
+        }
+        for (index in 0 until node.childCount) {
+          node.getChild(index)?.let { child ->
+            try {
+              visit(child)
+            } finally {
+              child.recycle()
+            }
+          }
+        }
+      }
+      visit(owner ?: root)
+      owner?.recycle()
+
+      val error =
+        when {
+          activated -> null
+          activationError != null -> "Semantic link activation failed: $activationError"
+          else -> "No actionable semantic link matching '$text' at occurrence $occurrence"
+        }
+      launchRequestScope(requestId) {
+        broadcastActionResult(
+          requestId,
+          "activate_accessibility_link",
+          activated,
+          error,
+          System.currentTimeMillis() - startTime,
+        )
+      }
+    } catch (error: Exception) {
+      Log.w(TAG, "Semantic accessibility link activation failed", error)
+      launchRequestScope(requestId) {
+        broadcastActionResult(
+          requestId,
+          "activate_accessibility_link",
+          false,
+          error.message ?: error.javaClass.simpleName,
+          System.currentTimeMillis() - startTime,
+        )
+      }
+    }
+  }
+
   private fun performNodeAction(
     requestId: String?,
     action: String,

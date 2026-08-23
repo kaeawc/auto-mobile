@@ -15,7 +15,10 @@
  */
 
 import WebSocket from "ws";
-import { AdbClientFactory, defaultAdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  AdbClientFactory,
+  defaultAdbClientFactory,
+} from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { AdbClient } from "../../../utils/android-cmdline-tools/AdbClient";
 import { logger, type Logger } from "../../../utils/logger";
@@ -29,15 +32,22 @@ import {
   TraversalOrderResult,
   Element,
   HighlightOperationResult,
-  HighlightShape
+  HighlightShape,
 } from "../../../models";
 import { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOptions";
 import { readScreenScaleMetadata } from "../../../models/ScreenScaleMetadata";
 import { AndroidCtrlProxyManager } from "../../../utils/CtrlProxyManager";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../../utils/SystemTimer";
-import { NavigationGraphManager, NavigationEvent, type NavigationBuildContext } from "../../navigation/NavigationGraphManager";
-import { createContentHashProvider, type ContentHashProvider } from "../../../utils/ContentHashProvider";
+import {
+  NavigationGraphManager,
+  NavigationEvent,
+  type NavigationBuildContext,
+} from "../../navigation/NavigationGraphManager";
+import {
+  createContentHashProvider,
+  type ContentHashProvider,
+} from "../../../utils/ContentHashProvider";
 import { NavigationScreenshotManager } from "../../navigation/NavigationScreenshotManager";
 import { HierarchyNavigationDetector } from "../../navigation/HierarchyNavigationDetector";
 import { InstalledAppsRepository, InstalledAppsStore } from "../../../db/installedAppsRepository";
@@ -46,7 +56,11 @@ import { getInstalledAppsCacheWriteCoordinator } from "../../../db/installedApps
 import { DefaultWorkProfileMonitor, WorkProfileMonitor } from "../../../utils/WorkProfileMonitor";
 import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../../../utils/PortManager";
 import { requireBootedDevice } from "../../../utils/requireBootedDevice";
-import { TrackedScreenGeometry, screenshotBindingPushOptions, type ScreenGeometryBinding } from "../TrackedScreenGeometry";
+import {
+  TrackedScreenGeometry,
+  screenshotBindingPushOptions,
+  type ScreenGeometryBinding,
+} from "../TrackedScreenGeometry";
 import { getDeviceDataStreamServer } from "../../../daemon/deviceDataStreamSocketServer";
 import { COORDINATE_SPACE_PX } from "../../../daemon/canonicalPixels";
 import {
@@ -74,10 +88,7 @@ import {
   type SdkAnrPayload,
   type SdkCrashPayload,
 } from "../crash/sdkCrashIngestion";
-import {
-  AndroidSdkEventIngestor,
-  DefaultAndroidSdkEventIngestor,
-} from "./AndroidSdkEventIngestor";
+import { AndroidSdkEventIngestor, DefaultAndroidSdkEventIngestor } from "./AndroidSdkEventIngestor";
 import { FailureEventRepository } from "../../../db/failureEventRepository";
 import type { CrashEventSink } from "../../../utils/interfaces/CrashMonitor";
 import { serverConfig } from "../../../utils/ServerConfig";
@@ -153,12 +164,20 @@ import type {
   HierarchySyncDiagnostics,
 } from "./types";
 
-
 /**
  * Interface for interaction event from accessibility service
  */
 export interface InteractionEvent {
-  type: "tap" | "longPress" | "swipe" | "inputText" | "select" | "navigate" | "scroll" | "touch" | "stateChange";
+  type:
+    | "tap"
+    | "longPress"
+    | "swipe"
+    | "inputText"
+    | "select"
+    | "navigate"
+    | "scroll"
+    | "touch"
+    | "stateChange";
   timestamp: number;
   packageName?: string;
   screenClassName?: string;
@@ -252,7 +271,7 @@ interface WsScreenshotErrorMessage extends WsMessageBase {
 }
 
 function screenshotPerformanceMetadataFrom(
-  metadata: ScreenshotPerformanceMetadata
+  metadata: ScreenshotPerformanceMetadata,
 ): ScreenshotPerformanceMetadata {
   return {
     screenshotCaptureDurationMs: metadata.screenshotCaptureDurationMs,
@@ -673,7 +692,7 @@ const SDK_TELEMETRY_EVENT_TYPES: ReadonlySet<string> = new Set([
  */
 export function storageTelemetryInputFromWire(
   message: WsStorageChangedMessage,
-  resolvedTimestamp: number
+  resolvedTimestamp: number,
 ): StorageTelemetryInput {
   const input: StorageTelemetryInput = {
     timestamp: resolvedTimestamp,
@@ -750,17 +769,14 @@ type WebSocketMessage =
  * Interface for accessibility service providing Android UI hierarchy and interaction capabilities
  */
 export interface AndroidCtrlProxy extends CtrlProxyClient {
-  setRecompositionTrackingEnabled(
-    enabled: boolean,
-    perf?: PerformanceTracker
-  ): Promise<void>;
+  setRecompositionTrackingEnabled(enabled: boolean, perf?: PerformanceTracker): Promise<void>;
 
   getLatestHierarchy(
     waitForFresh?: boolean,
     timeout?: number,
     perf?: PerformanceTracker,
     skipWaitForFresh?: boolean,
-    minTimestamp?: number
+    minTimestamp?: number,
   ): Promise<AccessibilityHierarchyResponse>;
 
   requestHierarchySync(
@@ -768,132 +784,197 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
     timeoutMs?: number,
-    diagnostics?: HierarchySyncDiagnostics
-  ): Promise<{ hierarchy: AccessibilityHierarchy; perfTiming?: AndroidPerfTiming[]; frameContext?: string } | null>;
+    diagnostics?: HierarchySyncDiagnostics,
+  ): Promise<{
+    hierarchy: AccessibilityHierarchy;
+    perfTiming?: AndroidPerfTiming[];
+    frameContext?: string;
+  } | null>;
 
   requestHierarchySyncWithoutObservationStreamPush(
     perf?: PerformanceTracker,
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
-    timeoutMs?: number
-  ): Promise<{ hierarchy: AccessibilityHierarchy; perfTiming?: AndroidPerfTiming[]; frameContext?: string } | null>;
+    timeoutMs?: number,
+  ): Promise<{
+    hierarchy: AccessibilityHierarchy;
+    perfTiming?: AndroidPerfTiming[];
+    frameContext?: string;
+  } | null>;
 
   convertToViewHierarchyResult(accessibilityHierarchy: AccessibilityHierarchy): ViewHierarchyResult;
 
   requestSwipe(
-    x1: number, y1: number, x2: number, y2: number,
-    duration?: number, timeoutMs?: number, perf?: PerformanceTracker, frameContext?: string
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    duration?: number,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    frameContext?: string,
   ): Promise<A11ySwipeResult>;
 
   requestTapCoordinates(
-    x: number, y: number,
-    duration?: number, timeoutMs?: number, perf?: PerformanceTracker, frameContext?: string
+    x: number,
+    y: number,
+    duration?: number,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    frameContext?: string,
   ): Promise<A11yTapCoordinatesResult>;
 
   requestDrag(
-    x1: number, y1: number, x2: number, y2: number,
-    pressDurationMs: number, dragDurationMs: number, holdDurationMs: number, timeoutMs: number, frameContext?: string
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    pressDurationMs: number,
+    dragDurationMs: number,
+    holdDurationMs: number,
+    timeoutMs: number,
+    frameContext?: string,
   ): Promise<A11yDragResult>;
 
   requestPinch(
-    centerX: number, centerY: number,
-    distanceStart: number, distanceEnd: number, rotationDegrees: number,
-    duration?: number, timeoutMs?: number, perf?: PerformanceTracker
+    centerX: number,
+    centerY: number,
+    distanceStart: number,
+    distanceEnd: number,
+    rotationDegrees: number,
+    duration?: number,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<A11yPinchResult>;
 
-  requestSetText(
-    text: string, options?: SetTextOptions
-  ): Promise<A11ySetTextResult>;
+  requestSetText(text: string, options?: SetTextOptions): Promise<A11ySetTextResult>;
 
   requestClearText(
-    resourceId?: string, timeoutMs?: number, perf?: PerformanceTracker
+    resourceId?: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<A11ySetTextResult>;
 
   requestImeAction(
     action: ImeAction,
-    timeoutMs?: number, perf?: PerformanceTracker
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<A11yImeActionResult>;
 
-  requestSelectAll(
-    timeoutMs?: number, perf?: PerformanceTracker
-  ): Promise<A11ySelectAllResult>;
+  requestSelectAll(timeoutMs?: number, perf?: PerformanceTracker): Promise<A11ySelectAllResult>;
 
   requestAction(
-    action: string, resourceId?: string, timeoutMs?: number, perf?: PerformanceTracker
+    action: string,
+    resourceId?: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<A11yActionResult>;
 
   requestNodeAction(
     action: string,
     selector: AccessibilityNodeSelector,
     timeoutMs?: number,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<A11yActionResult>;
 
   supportsNodeActionSelectors(perf?: PerformanceTracker): Promise<boolean>;
 
+  requestActivateAccessibilityLink(
+    text: string,
+    occurrence: number,
+    selector?: AccessibilityNodeSelector,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<A11yActionResult>;
+
+  supportsAccessibilityLinkActivation(perf?: PerformanceTracker): Promise<boolean>;
+
   requestClipboard(
     action: "copy" | "paste" | "clear" | "get",
-    text?: string, timeoutMs?: number, perf?: PerformanceTracker
+    text?: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<A11yClipboardResult>;
 
   requestSettingsGet(
-    namespace: SettingsNamespace, key: string,
-    timeoutMs?: number, perf?: PerformanceTracker
+    namespace: SettingsNamespace,
+    key: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<A11ySettingsGetResult>;
 
   requestSettingsPut(
-    namespace: SettingsNamespace, key: string, value: string | null,
-    valueType?: SettingsValueType, timeoutMs?: number, perf?: PerformanceTracker
+    namespace: SettingsNamespace,
+    key: string,
+    value: string | null,
+    valueType?: SettingsValueType,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<A11ySettingsPutResult>;
 
   requestSettingsList(
-    namespace: SettingsNamespace, timeoutMs?: number, perf?: PerformanceTracker
+    namespace: SettingsNamespace,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<A11ySettingsListResult>;
 
   requestInstallCaCertificate(
-    certificate: string, timeoutMs?: number, perf?: PerformanceTracker
+    certificate: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<A11yCaCertResult>;
 
   requestInstallCaCertificateFromFile(
-    certificatePath: string, timeoutMs?: number, perf?: PerformanceTracker
+    certificatePath: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<A11yCaCertResult>;
 
   requestRemoveCaCertificate(
-    alias: string, timeoutMs?: number, perf?: PerformanceTracker
+    alias: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<A11yCaCertResult>;
 
   requestDeviceOwnerStatus(
-    timeoutMs?: number, perf?: PerformanceTracker
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<A11yDeviceOwnerStatusResult>;
 
   requestPermission(
-    permission: string, requestPermission?: boolean, timeoutMs?: number, perf?: PerformanceTracker
+    permission: string,
+    requestPermission?: boolean,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<A11yPermissionResult>;
 
   requestAddHighlight(
-    id: string, shape: HighlightShape, timeoutMs?: number, perf?: PerformanceTracker
+    id: string,
+    shape: HighlightShape,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<HighlightOperationResult>;
 
   requestScreenshot(timeoutMs?: number, perf?: PerformanceTracker): Promise<ScreenshotResult>;
 
-  requestScreenshotWithoutObservationStreamPush(timeoutMs?: number, perf?: PerformanceTracker): Promise<ScreenshotResult>;
+  requestScreenshotWithoutObservationStreamPush(
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<ScreenshotResult>;
 
   requestInstalledPackages(
     includeSystem?: boolean,
     userId?: number,
-    timeoutMs?: number
+    timeoutMs?: number,
   ): Promise<A11yInstalledPackagesResult>;
 
   requestPackageInfo(
     packageName: string,
     options?: PackageInfoOptions,
-    timeoutMs?: number
+    timeoutMs?: number,
   ): Promise<A11yPackageInfoResult>;
 
-  requestLaunchIntent(
-    packageName: string,
-    timeoutMs?: number
-  ): Promise<A11yLaunchIntentResult>;
+  requestLaunchIntent(packageName: string, timeoutMs?: number): Promise<A11yLaunchIntentResult>;
 }
 
 /**
@@ -956,7 +1037,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // Interaction listeners
   private interactionListeners: Set<(event: InteractionEvent) => void> = new Set();
   // Last interaction for correlating with navigation events
-  private lastInteraction: { type: string; elementText?: string; elementResourceId?: string; timestamp: number } | null = null;
+  private lastInteraction: {
+    type: string;
+    elementText?: string;
+    elementResourceId?: string;
+    timestamp: number;
+  } | null = null;
   private installedAppsRepository: InstalledAppsStore | null = null;
 
   // Hierarchy navigation detector
@@ -1036,9 +1122,14 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     deviceConnectionLostNotifier?: DeviceConnectionLostNotifier,
     sdkEventIngestor?: AndroidSdkEventIngestor,
     loggerInstance: Logger = logger,
-    certificateFileSystem?: CertificateFileSystem
+    certificateFileSystem?: CertificateFileSystem,
   ) {
-    super(timer ?? defaultTimer, webSocketFactory ?? defaultWebSocketFactory, {}, retryExecutor ?? defaultRetryExecutor);
+    super(
+      timer ?? defaultTimer,
+      webSocketFactory ?? defaultWebSocketFactory,
+      {},
+      retryExecutor ?? defaultRetryExecutor,
+    );
     this.sdkEventIngestorInstance = sdkEventIngestor ?? null;
     this.loggerInstance = loggerInstance;
     this.device = device;
@@ -1057,14 +1148,17 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   /**
    * Get singleton instance for a device
    */
-  public static getInstance(device: BootedDevice, adbFactory: AdbClientFactory = defaultAdbClientFactory): AndroidCtrlProxyClient {
+  public static getInstance(
+    device: BootedDevice,
+    adbFactory: AdbClientFactory = defaultAdbClientFactory,
+  ): AndroidCtrlProxyClient {
     requireBootedDevice(device, "AndroidCtrlProxyClient.getInstance");
     const deviceId = device.deviceId;
     if (!AndroidCtrlProxyClient.instances.has(deviceId)) {
       logger.debug(`[CTRL_PROXY] Creating singleton for device: ${deviceId}`);
       AndroidCtrlProxyClient.instances.set(
         deviceId,
-        new AndroidCtrlProxyClient(device, adbFactory.create(device))
+        new AndroidCtrlProxyClient(device, adbFactory.create(device)),
       );
     }
     return AndroidCtrlProxyClient.instances.get(deviceId)!;
@@ -1105,7 +1199,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       if (this.boundSessionId !== null) {
         logger.debug(
           `[AndroidCtrlProxyClient] Rebinding device ${this.device.deviceId} from session ` +
-          `${this.boundSessionId} to ${sessionId}`
+            `${this.boundSessionId} to ${sessionId}`,
         );
       }
       this.boundSessionId = sessionId;
@@ -1186,7 +1280,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         // cached as version 0 — that would attribute the whole install to a bogus
         // version until a package event. Defer; a later event retries.
         if (!info.success || typeof info.versionCode !== "number") {
-          logger.debug(`[CTRL_PROXY] Package info unavailable for ${appId}; deferring build-context resolution`);
+          logger.debug(
+            `[CTRL_PROXY] Package info unavailable for ${appId}; deferring build-context resolution`,
+          );
           return;
         }
         const versionCode = info.versionCode;
@@ -1195,7 +1291,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           // `adb`, and custom production executors aren't bypassed (#4984).
           this.contentHashProvider = createContentHashProvider(this.device, this.adb);
         }
-        const contentHash = await this.contentHashProvider.resolveContentHash(this.device, appId, versionCode);
+        const contentHash = await this.contentHashProvider.resolveContentHash(
+          this.device,
+          appId,
+          versionCode,
+        );
         // Discard if a package change invalidated this app while we were resolving —
         // applying now would stamp observations with the pre-update build's hash.
         if ((this.buildContextGeneration.get(appId) ?? 0) !== startGeneration) {
@@ -1231,7 +1331,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     // registration synchronous and first, with the hash resolving out-of-band.
     // Fire-and-forget: resolution only sets in-memory build context (no DB write),
     // so it is NOT enlisted in the DB-write shutdown barrier.
-    this.timer.setTimeout(() => { void resolve(); }, 0);
+    this.timer.setTimeout(() => {
+      void resolve();
+    }, 0);
   }
 
   /**
@@ -1292,7 +1394,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     sdkEventIngestor?: AndroidSdkEventIngestor,
     loggerInstance?: Logger,
     certificateFileSystem?: CertificateFileSystem,
-    screenshotBackoffScheduler?: ScreenshotBackoffScheduler
+    screenshotBackoffScheduler?: ScreenshotBackoffScheduler,
   ): AndroidCtrlProxyClient {
     const client = new AndroidCtrlProxyClient(
       device,
@@ -1305,7 +1407,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       deviceConnectionLostNotifier,
       sdkEventIngestor,
       loggerInstance,
-      certificateFileSystem
+      certificateFileSystem,
     );
     // Test-only seam: pre-seed the lazily-built scheduler so tests can assert shared floor
     // accounting (noteCaptureStarted) without the live device-data-stream server. Not exposed on
@@ -1326,9 +1428,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       device: this.device,
       adb: this.adb,
       getCachedHierarchy: () => this.cachedHierarchy,
-      setCachedHierarchy: h => { this.cachedHierarchy = h; },
+      setCachedHierarchy: (h) => {
+        this.cachedHierarchy = h;
+      },
       getLastWebSocketTimeout: () => this.lastWebSocketTimeout,
-      setLastWebSocketTimeout: time => { this.lastWebSocketTimeout = time; },
+      setLastWebSocketTimeout: (time) => {
+        this.lastWebSocketTimeout = time;
+      },
     };
   }
 
@@ -1346,74 +1452,91 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   private get gestures(): CtrlProxyGestures {
     return this.lazyDelegate(
       () => this._gestures,
-      value => { this._gestures = value; },
-      () => new CtrlProxyGestures(this.createDelegateContext())
+      (value) => {
+        this._gestures = value;
+      },
+      () => new CtrlProxyGestures(this.createDelegateContext()),
     );
   }
 
   private get text(): CtrlProxyText {
     return this.lazyDelegate(
       () => this._text,
-      value => { this._text = value; },
-      () => new CtrlProxyText(this.createDelegateContext())
+      (value) => {
+        this._text = value;
+      },
+      () => new CtrlProxyText(this.createDelegateContext()),
     );
   }
 
   private get hierarchy(): CtrlProxyHierarchy {
     return this.lazyDelegate(
       () => this._hierarchy,
-      value => { this._hierarchy = value; },
-      () => new CtrlProxyHierarchy(this.createHierarchyDelegateContext())
+      (value) => {
+        this._hierarchy = value;
+      },
+      () => new CtrlProxyHierarchy(this.createHierarchyDelegateContext()),
     );
   }
 
   private get storage(): CtrlProxyStorage {
     return this.lazyDelegate(
       () => this._storage,
-      value => { this._storage = value; },
-      () => new CtrlProxyStorage(this.createDelegateContext())
+      (value) => {
+        this._storage = value;
+      },
+      () => new CtrlProxyStorage(this.createDelegateContext()),
     );
   }
 
   private get certificates(): CtrlProxyCertificates {
     return this.lazyDelegate(
       () => this._certificates,
-      value => { this._certificates = value; },
-      () => new CtrlProxyCertificates(
-        this.createCertificatesDelegateContext(),
-        this.certificateFileSystem
-      )
+      (value) => {
+        this._certificates = value;
+      },
+      () =>
+        new CtrlProxyCertificates(
+          this.createCertificatesDelegateContext(),
+          this.certificateFileSystem,
+        ),
     );
   }
 
   private get focus(): CtrlProxyFocus {
     return this.lazyDelegate(
       () => this._focus,
-      value => { this._focus = value; },
-      () => new CtrlProxyFocus(this.createDelegateContext())
+      (value) => {
+        this._focus = value;
+      },
+      () => new CtrlProxyFocus(this.createDelegateContext()),
     );
   }
 
   private get highlights(): CtrlProxyHighlights {
     return this.lazyDelegate(
       () => this._highlights,
-      value => { this._highlights = value; },
-      () => new CtrlProxyHighlights(this.createDelegateContext())
+      (value) => {
+        this._highlights = value;
+      },
+      () => new CtrlProxyHighlights(this.createDelegateContext()),
     );
   }
 
   private get packages(): CtrlProxyPackages {
     return this.lazyDelegate(
       () => this._packages,
-      value => { this._packages = value; },
-      () => new CtrlProxyPackages(this.createDelegateContext())
+      (value) => {
+        this._packages = value;
+      },
+      () => new CtrlProxyPackages(this.createDelegateContext()),
     );
   }
 
   async requestInstalledPackages(
     includeSystem: boolean = true,
     userId?: number,
-    timeoutMs: number = 5000
+    timeoutMs: number = 5000,
   ): Promise<A11yInstalledPackagesResult> {
     return this.packages.requestInstalledPackages(includeSystem, userId, timeoutMs);
   }
@@ -1421,14 +1544,14 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   async requestPackageInfo(
     packageName: string,
     options: PackageInfoOptions = {},
-    timeoutMs: number = 5000
+    timeoutMs: number = 5000,
   ): Promise<A11yPackageInfoResult> {
     return this.packages.requestPackageInfo(packageName, options, timeoutMs);
   }
 
   async requestLaunchIntent(
     packageName: string,
-    timeoutMs: number = 5000
+    timeoutMs: number = 5000,
   ): Promise<A11yLaunchIntentResult> {
     return this.packages.requestLaunchIntent(packageName, timeoutMs);
   }
@@ -1458,7 +1581,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    * kept deliberately simple as defense-in-depth so a reused connection can't drift.
    */
   public override async ensureConnected(
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<boolean> {
     const connected = await super.ensureConnected(perf);
     if (connected) {
@@ -1492,12 +1615,16 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       // Always re-sync error simulation state (including disabled) so the
       // device doesn't keep stale simulation config from a previous connection
       const sim = state.simulation;
-      this.sendMessage(serializeCtrlProxyRequest(ctrlProxyRequests.setNetworkErrorSimulation({
-        enabled: sim !== null,
-        errorType: sim?.errorType,
-        limit: sim?.limit,
-        expiresAtEpochMs: sim?.expiresAt,
-      })));
+      this.sendMessage(
+        serializeCtrlProxyRequest(
+          ctrlProxyRequests.setNetworkErrorSimulation({
+            enabled: sim !== null,
+            errorType: sim?.errorType,
+            limit: sim?.limit,
+            expiresAtEpochMs: sim?.expiresAt,
+          }),
+        ),
+      );
     } catch (e) {
       logger.debug(`[AndroidCtrlProxyClient] Failed to sync network state on reconnect: ${e}`);
     }
@@ -1507,14 +1634,16 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     try {
       const flags = serverConfig.getAccessibilityFlagsConfig();
       const allEnabled =
-          flags.includeNotImportantViews && flags.reportViewIds && flags.retrieveInteractiveWindows
-          && flags.occlusionEnabled;
+        flags.includeNotImportantViews &&
+        flags.reportViewIds &&
+        flags.retrieveInteractiveWindows &&
+        flags.occlusionEnabled;
       // Diagnostic: without this, "did the push ever get attempted" is unanswerable from
       // logs alone — the only prior signal was the (info-level) send below, so a no-op
       // skip and "never called" were indistinguishable (issue occlusion-flag).
       logger.debug(
         `[AndroidCtrlProxyClient] syncAccessibilityFlagsToDevice invoked: allEnabled=${allEnabled}, ` +
-        `occlusionEnabled=${flags.occlusionEnabled}`
+          `occlusionEnabled=${flags.occlusionEnabled}`,
       );
       if (allEnabled) {
         return;
@@ -1522,19 +1651,25 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       logger.info(
         `[AndroidCtrlProxyClient] Sending accessibility flags config: ` +
-        `includeNotImportantViews=${flags.includeNotImportantViews}, ` +
-        `reportViewIds=${flags.reportViewIds}, ` +
-        `retrieveInteractiveWindows=${flags.retrieveInteractiveWindows}, ` +
-        `occlusionEnabled=${flags.occlusionEnabled}`
+          `includeNotImportantViews=${flags.includeNotImportantViews}, ` +
+          `reportViewIds=${flags.reportViewIds}, ` +
+          `retrieveInteractiveWindows=${flags.retrieveInteractiveWindows}, ` +
+          `occlusionEnabled=${flags.occlusionEnabled}`,
       );
-      this.sendMessage(serializeCtrlProxyRequest(ctrlProxyRequests.setAccessibilityFlags({
-        includeNotImportantViews: flags.includeNotImportantViews,
-        reportViewIds: flags.reportViewIds,
-        retrieveInteractiveWindows: flags.retrieveInteractiveWindows,
-        occlusionEnabled: flags.occlusionEnabled,
-      })));
+      this.sendMessage(
+        serializeCtrlProxyRequest(
+          ctrlProxyRequests.setAccessibilityFlags({
+            includeNotImportantViews: flags.includeNotImportantViews,
+            reportViewIds: flags.reportViewIds,
+            retrieveInteractiveWindows: flags.retrieveInteractiveWindows,
+            occlusionEnabled: flags.occlusionEnabled,
+          }),
+        ),
+      );
     } catch (e) {
-      logger.debug(`[AndroidCtrlProxyClient] Failed to sync accessibility flags on reconnect: ${e}`);
+      logger.debug(
+        `[AndroidCtrlProxyClient] Failed to sync accessibility flags on reconnect: ${e}`,
+      );
     }
   }
 
@@ -1565,10 +1700,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   /** Every app id with cached or in-flight build-context state (#4984). */
   private knownBuildContextApps(): string[] {
-    return Array.from(new Set([
-      ...this.resolvedBuildContexts.keys(),
-      ...this.buildContextInFlight,
-    ]));
+    return Array.from(
+      new Set([...this.resolvedBuildContexts.keys(), ...this.buildContextInFlight]),
+    );
   }
 
   protected async setupBeforeConnect(perf: PerformanceTracker): Promise<void> {
@@ -1590,12 +1724,23 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     minTimestamp?: number,
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
-    timeoutMs?: number
+    timeoutMs?: number,
   ): Promise<ViewHierarchyResult | null> {
-    return this.hierarchy.getAccessibilityHierarchy(queryOptions, perf, skipWaitForFresh, minTimestamp, disableAllFiltering, signal, timeoutMs);
+    return this.hierarchy.getAccessibilityHierarchy(
+      queryOptions,
+      perf,
+      skipWaitForFresh,
+      minTimestamp,
+      disableAllFiltering,
+      signal,
+      timeoutMs,
+    );
   }
 
-  async setRecompositionTrackingEnabled(enabled: boolean, perf?: PerformanceTracker): Promise<void> {
+  async setRecompositionTrackingEnabled(
+    enabled: boolean,
+    perf?: PerformanceTracker,
+  ): Promise<void> {
     return this.hierarchy.setRecompositionTrackingEnabled(enabled, perf);
   }
 
@@ -1605,9 +1750,16 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     perf?: PerformanceTracker,
     skipWaitForFresh?: boolean,
     minTimestamp?: number,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<AccessibilityHierarchyResponse> {
-    return this.hierarchy.getLatestHierarchy(waitForFresh, timeout, perf, skipWaitForFresh, minTimestamp, signal);
+    return this.hierarchy.getLatestHierarchy(
+      waitForFresh,
+      timeout,
+      perf,
+      skipWaitForFresh,
+      minTimestamp,
+      signal,
+    );
   }
 
   async requestHierarchySync(
@@ -1615,16 +1767,22 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
     timeoutMs?: number,
-    diagnostics?: HierarchySyncDiagnostics
+    diagnostics?: HierarchySyncDiagnostics,
   ): Promise<{ hierarchy: AccessibilityHierarchy; perfTiming?: AndroidPerfTiming[] } | null> {
-    return this.hierarchy.requestHierarchySync(perf, disableAllFiltering, signal, timeoutMs, diagnostics);
+    return this.hierarchy.requestHierarchySync(
+      perf,
+      disableAllFiltering,
+      signal,
+      timeoutMs,
+      diagnostics,
+    );
   }
 
   async requestHierarchySyncWithoutObservationStreamPush(
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     disableAllFiltering: boolean = false,
     signal?: AbortSignal,
-    timeoutMs: number = 10000
+    timeoutMs: number = 10000,
   ): Promise<{ hierarchy: AccessibilityHierarchy; perfTiming?: AndroidPerfTiming[] } | null> {
     const suppression: ObservationStreamSuppression = {
       timeoutHandle: this.timer.setTimeout(() => {
@@ -1635,7 +1793,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     return this.requestHierarchySync(perf, disableAllFiltering, signal, timeoutMs);
   }
 
-  convertToViewHierarchyResult(accessibilityHierarchy: AccessibilityHierarchy): ViewHierarchyResult {
+  convertToViewHierarchyResult(
+    accessibilityHierarchy: AccessibilityHierarchy,
+  ): ViewHierarchyResult {
     return this.hierarchy.convertToViewHierarchyResult(accessibilityHierarchy);
   }
 
@@ -1656,60 +1816,120 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // (the single source of truth) applies its own defaults. This makes the two-copies
   // drift class from issue #3505 unrepresentable.
   async requestSwipe(
-    x1: number, y1: number, x2: number, y2: number,
-    duration?: number, timeoutMs?: number, perf?: PerformanceTracker, frameContext?: string
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    duration?: number,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    frameContext?: string,
   ): Promise<A11ySwipeResult> {
     return this.gestures.requestSwipe(x1, y1, x2, y2, duration, timeoutMs, perf, frameContext);
   }
 
   async requestTapCoordinates(
-    x: number, y: number,
+    x: number,
+    y: number,
     // Deliberate Android-specific override: taps default to a 10ms press, not the
     // delegate's cross-platform 0ms default. This is the one intentional divergence,
     // not restated drift — see issue #3505.
-    duration: number = 10, timeoutMs?: number, perf?: PerformanceTracker, frameContext?: string
+    duration: number = 10,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    frameContext?: string,
   ): Promise<A11yTapCoordinatesResult> {
     return this.gestures.requestTapCoordinates(x, y, duration, timeoutMs, perf, frameContext);
   }
 
   async requestTwoFingerSwipe(
-    x1: number, y1: number, x2: number, y2: number,
-    duration?: number, offset?: number, timeoutMs?: number, perf?: PerformanceTracker
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    duration?: number,
+    offset?: number,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<A11ySwipeResult> {
     return this.gestures.requestTwoFingerSwipe(x1, y1, x2, y2, duration, offset, timeoutMs, perf);
   }
 
   async requestDrag(
-    x1: number, y1: number, x2: number, y2: number,
-    pressDurationMs: number, dragDurationMs: number, holdDurationMs: number, timeoutMs: number, frameContext?: string
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    pressDurationMs: number,
+    dragDurationMs: number,
+    holdDurationMs: number,
+    timeoutMs: number,
+    frameContext?: string,
   ): Promise<A11yDragResult> {
-    return this.gestures.requestDrag(x1, y1, x2, y2, pressDurationMs, dragDurationMs, holdDurationMs, timeoutMs, frameContext);
+    return this.gestures.requestDrag(
+      x1,
+      y1,
+      x2,
+      y2,
+      pressDurationMs,
+      dragDurationMs,
+      holdDurationMs,
+      timeoutMs,
+      frameContext,
+    );
   }
 
   async requestPinch(
-    centerX: number, centerY: number,
-    distanceStart: number, distanceEnd: number, rotationDegrees: number,
-    duration?: number, timeoutMs?: number, perf?: PerformanceTracker
+    centerX: number,
+    centerY: number,
+    distanceStart: number,
+    distanceEnd: number,
+    rotationDegrees: number,
+    duration?: number,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<A11yPinchResult> {
-    return this.gestures.requestPinch(centerX, centerY, distanceStart, distanceEnd, rotationDegrees, duration, timeoutMs, perf);
+    return this.gestures.requestPinch(
+      centerX,
+      centerY,
+      distanceStart,
+      distanceEnd,
+      rotationDegrees,
+      duration,
+      timeoutMs,
+      perf,
+    );
   }
 
   // Streaming gesture input (Android-only): one live drag = start + moves + end sharing a gestureId,
   // chained into a single continued AccessibilityService gesture by the runner.
   async requestGestureStart(
-    gestureId: string, x: number, y: number, timeoutMs?: number, perf?: PerformanceTracker
+    gestureId: string,
+    x: number,
+    y: number,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<A11ySwipeResult> {
     return this.gestures.requestGestureStart(gestureId, x, y, timeoutMs, perf);
   }
 
   async requestGestureMove(
-    gestureId: string, x: number, y: number, timeoutMs?: number, perf?: PerformanceTracker
+    gestureId: string,
+    x: number,
+    y: number,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<A11ySwipeResult> {
     return this.gestures.requestGestureMove(gestureId, x, y, timeoutMs, perf);
   }
 
   async requestGestureEnd(
-    gestureId: string, x: number, y: number, cancel?: boolean, timeoutMs?: number, perf?: PerformanceTracker
+    gestureId: string,
+    x: number,
+    y: number,
+    cancel?: boolean,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<A11ySwipeResult> {
     return this.gestures.requestGestureEnd(gestureId, x, y, cancel, timeoutMs, perf);
   }
@@ -1718,27 +1938,29 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // Delegated Public Methods - Text
   // ===========================================================================
 
-  async requestSetText(
-    text: string, options?: SetTextOptions
-  ): Promise<A11ySetTextResult> {
+  async requestSetText(text: string, options?: SetTextOptions): Promise<A11ySetTextResult> {
     return this.text.requestSetText(text, options);
   }
 
   async requestClearText(
-    resourceId?: string, timeoutMs?: number, perf?: PerformanceTracker
+    resourceId?: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<A11ySetTextResult> {
     return this.text.requestClearText(resourceId, timeoutMs, perf);
   }
 
   async requestImeAction(
     action: ImeAction,
-    timeoutMs?: number, perf?: PerformanceTracker
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<A11yImeActionResult> {
     return this.text.requestImeAction(action, timeoutMs, perf);
   }
 
   async requestSelectAll(
-    timeoutMs?: number, perf?: PerformanceTracker
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<A11ySelectAllResult> {
     return this.text.requestSelectAll(timeoutMs, perf);
   }
@@ -1748,31 +1970,41 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // ===========================================================================
 
   async requestInstallCaCertificate(
-    certificate: string, timeoutMs?: number, perf?: PerformanceTracker
+    certificate: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<A11yCaCertResult> {
     return this.certificates.requestInstallCaCertificate(certificate, timeoutMs, perf);
   }
 
   async requestInstallCaCertificateFromFile(
-    certificatePath: string, timeoutMs?: number, perf?: PerformanceTracker
+    certificatePath: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<A11yCaCertResult> {
     return this.certificates.requestInstallCaCertificateFromFile(certificatePath, timeoutMs, perf);
   }
 
   async requestRemoveCaCertificate(
-    alias: string, timeoutMs?: number, perf?: PerformanceTracker
+    alias: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<A11yCaCertResult> {
     return this.certificates.requestRemoveCaCertificate(alias, timeoutMs, perf);
   }
 
   async requestDeviceOwnerStatus(
-    timeoutMs?: number, perf?: PerformanceTracker
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<A11yDeviceOwnerStatusResult> {
     return this.certificates.requestDeviceOwnerStatus(timeoutMs, perf);
   }
 
   async requestPermission(
-    permission: string, requestPermission?: boolean, timeoutMs?: number, perf?: PerformanceTracker
+    permission: string,
+    requestPermission?: boolean,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<A11yPermissionResult> {
     return this.certificates.requestPermission(permission, requestPermission, timeoutMs, perf);
   }
@@ -1785,27 +2017,56 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     return this.storage.listPreferenceFiles(packageName, timeoutMs);
   }
 
-  async getPreferenceEntries(packageName: string, fileName: string, timeoutMs?: number): Promise<KeyValueEntry[]> {
+  async getPreferenceEntries(
+    packageName: string,
+    fileName: string,
+    timeoutMs?: number,
+  ): Promise<KeyValueEntry[]> {
     return this.storage.getPreferenceEntries(packageName, fileName, timeoutMs);
   }
 
-  async getPreference(packageName: string, fileName: string, key: string, timeoutMs?: number): Promise<KeyValueEntry | null> {
+  async getPreference(
+    packageName: string,
+    fileName: string,
+    key: string,
+    timeoutMs?: number,
+  ): Promise<KeyValueEntry | null> {
     return this.storage.getPreference(packageName, fileName, key, timeoutMs);
   }
 
-  async setPreference(packageName: string, fileName: string, key: string, value: string | null, type: KeyValueType, timeoutMs?: number): Promise<void> {
+  async setPreference(
+    packageName: string,
+    fileName: string,
+    key: string,
+    value: string | null,
+    type: KeyValueType,
+    timeoutMs?: number,
+  ): Promise<void> {
     return this.storage.setPreference(packageName, fileName, key, value, type, timeoutMs);
   }
 
-  async removePreference(packageName: string, fileName: string, key: string, timeoutMs?: number): Promise<void> {
+  async removePreference(
+    packageName: string,
+    fileName: string,
+    key: string,
+    timeoutMs?: number,
+  ): Promise<void> {
     return this.storage.removePreference(packageName, fileName, key, timeoutMs);
   }
 
-  async clearPreferenceStore(packageName: string, fileName: string, timeoutMs?: number): Promise<void> {
+  async clearPreferenceStore(
+    packageName: string,
+    fileName: string,
+    timeoutMs?: number,
+  ): Promise<void> {
     return this.storage.clearPreferenceStore(packageName, fileName, timeoutMs);
   }
 
-  async subscribeStorage(packageName: string, fileName: string, timeoutMs?: number): Promise<StorageSubscription> {
+  async subscribeStorage(
+    packageName: string,
+    fileName: string,
+    timeoutMs?: number,
+  ): Promise<StorageSubscription> {
     return this.storage.subscribeStorage(packageName, fileName, timeoutMs);
   }
 
@@ -1822,25 +2083,31 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // ===========================================================================
 
   async clearAccessibilityFocus(
-    resourceId: string, timeoutMs?: number, perf?: PerformanceTracker
+    resourceId: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<void> {
     return this.focus.clearAccessibilityFocus(resourceId, timeoutMs, perf);
   }
 
   async setAccessibilityFocus(
-    resourceId: string, timeoutMs?: number, perf?: PerformanceTracker
+    resourceId: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<void> {
     return this.focus.setAccessibilityFocus(resourceId, timeoutMs, perf);
   }
 
   async requestCurrentFocus(
-    timeoutMs?: number, perf?: PerformanceTracker
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<CurrentFocusResult> {
     return this.focus.requestCurrentFocus(timeoutMs, perf);
   }
 
   async requestTraversalOrder(
-    timeoutMs?: number, perf?: PerformanceTracker
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<TraversalOrderResult> {
     return this.focus.requestTraversalOrder(timeoutMs, perf);
   }
@@ -1850,7 +2117,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // ===========================================================================
 
   async requestAddHighlight(
-    id: string, shape: HighlightShape, timeoutMs?: number, perf?: PerformanceTracker
+    id: string,
+    shape: HighlightShape,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
   ): Promise<HighlightOperationResult> {
     return this.highlights.requestAddHighlight(id, shape, timeoutMs, perf);
   }
@@ -1864,7 +2134,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     resourceId?: string,
     timeoutMs: number = 5000,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    selector?: AccessibilityNodeSelector
+    selector?: AccessibilityNodeSelector,
   ): Promise<A11yActionResult> {
     const startTime = this.timer.now();
 
@@ -1874,18 +2144,30 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       const connected = await perf.track("ensureConnection", () => this.connectWebSocket(perf));
       if (!connected) {
         logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for action");
-        return { success: false, action, totalTimeMs: this.timer.now() - startTime, error: "Failed to connect to accessibility service" };
+        return {
+          success: false,
+          action,
+          totalTimeMs: this.timer.now() - startTime,
+          error: "Failed to connect to accessibility service",
+        };
       }
 
       const requestId = this.requestManager.generateId("action");
       logger.debug(
         `[CTRL_PROXY] Creating action request (requestId: ${requestId}, action: ${action}, ` +
-        `resourceId: ${resourceId}, selector: ${JSON.stringify(selector)})`
+          `resourceId: ${resourceId}, selector: ${JSON.stringify(selector)})`,
       );
 
       const actionPromise = this.requestManager.register<A11yActionResult>(
-        requestId, "action", timeoutMs,
-        (_id, _type, timeout) => ({ success: false, action, totalTimeMs: this.timer.now() - startTime, error: `Action timeout after ${timeout}ms` })
+        requestId,
+        "action",
+        timeoutMs,
+        (_id, _type, timeout) => ({
+          success: false,
+          action,
+          totalTimeMs: this.timer.now() - startTime,
+          error: `Action timeout after ${timeout}ms`,
+        }),
       );
 
       await perf.track("sendRequest", async () => {
@@ -1893,12 +2175,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           throw new Error("WebSocket not connected");
         }
         const message = serializeCtrlProxyRequest(
-          ctrlProxyRequests.requestAction({ requestId, action, resourceId, selector })
+          ctrlProxyRequests.requestAction({ requestId, action, resourceId, selector }),
         );
         this.ws.send(message);
         logger.debug(
           `[CTRL_PROXY] Sent action request (requestId: ${requestId}, action: ${action}, ` +
-          `resourceId: ${resourceId}, selector: ${JSON.stringify(selector)})`
+            `resourceId: ${resourceId}, selector: ${JSON.stringify(selector)})`,
         );
       });
 
@@ -1906,7 +2188,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       const clientDuration = this.timer.now() - startTime;
 
       if (result.success) {
-        logger.debug(`[CTRL_PROXY] Action completed: clientTime=${clientDuration}ms, deviceTotalTime=${result.totalTimeMs}ms, action=${result.action}`);
+        logger.debug(
+          `[CTRL_PROXY] Action completed: clientTime=${clientDuration}ms, deviceTotalTime=${result.totalTimeMs}ms, action=${result.action}`,
+        );
       } else {
         logger.warn(`[CTRL_PROXY] Action failed after ${clientDuration}ms: ${result.error}`);
       }
@@ -1923,13 +2207,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     action: string,
     selector: AccessibilityNodeSelector,
     timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<A11yActionResult> {
     return this.requestAction(action, selector.resourceId, timeoutMs, perf, selector);
   }
 
   async supportsNodeActionSelectors(
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<boolean> {
     const connected = await perf.track("ensureConnection", () => this.connectWebSocket(perf));
     if (connected && this.supportedCommands === null) {
@@ -1938,27 +2222,112 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     return connected && this.isCommandSupported("node_selector_actions");
   }
 
+  async supportsAccessibilityLinkActivation(
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+  ): Promise<boolean> {
+    const connected = await perf.track("ensureConnection", () => this.connectWebSocket(perf));
+    if (connected && this.supportedCommands === null) {
+      await this.waitForHandshake();
+    }
+    return connected && this.isCommandSupported("request_activate_accessibility_link");
+  }
+
+  async requestActivateAccessibilityLink(
+    text: string,
+    occurrence: number,
+    selector?: AccessibilityNodeSelector,
+    timeoutMs: number = 5000,
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+  ): Promise<A11yActionResult> {
+    const startTime = this.timer.now();
+    const action = "activate_accessibility_link";
+    try {
+      if (!(await this.supportsAccessibilityLinkActivation(perf))) {
+        return {
+          success: false,
+          action,
+          totalTimeMs: this.timer.now() - startTime,
+          error: "Connected Android runner does not support semantic accessibility-link activation",
+        };
+      }
+      const requestId = this.requestManager.generateId("accessibility-link");
+      const resultPromise = this.requestManager.register<A11yActionResult>(
+        requestId,
+        "accessibility-link",
+        timeoutMs,
+        () => ({
+          success: false,
+          action,
+          totalTimeMs: this.timer.now() - startTime,
+          error: `Semantic link activation timed out after ${timeoutMs}ms`,
+        }),
+      );
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        throw new Error("WebSocket not connected");
+      }
+      this.ws.send(
+        serializeCtrlProxyRequest(
+          ctrlProxyRequests.requestActivateAccessibilityLink({
+            requestId,
+            text,
+            occurrence,
+            selector,
+          }),
+        ),
+      );
+      return await resultPromise;
+    } catch (error) {
+      logger.warn(`[CTRL_PROXY] Semantic link activation failed: ${error}`);
+      return {
+        success: false,
+        action,
+        totalTimeMs: this.timer.now() - startTime,
+        error: `${error}`,
+      };
+    }
+  }
+
   async requestClipboard(
-    action: "copy" | "paste" | "clear" | "get", text?: string, timeoutMs: number = 5000, perf: PerformanceTracker = new NoOpPerformanceTracker()
+    action: "copy" | "paste" | "clear" | "get",
+    text?: string,
+    timeoutMs: number = 5000,
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<A11yClipboardResult> {
     const startTime = this.timer.now();
 
     try {
       if (action === "copy" && !text) {
-        return { success: false, action, totalTimeMs: this.timer.now() - startTime, error: "Text is required for copy action" };
+        return {
+          success: false,
+          action,
+          totalTimeMs: this.timer.now() - startTime,
+          error: "Text is required for copy action",
+        };
       }
 
       const connected = await perf.track("ensureConnection", () => this.connectWebSocket(perf));
       if (!connected) {
         logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for clipboard");
-        return { success: false, action, totalTimeMs: this.timer.now() - startTime, error: "Failed to connect to accessibility service" };
+        return {
+          success: false,
+          action,
+          totalTimeMs: this.timer.now() - startTime,
+          error: "Failed to connect to accessibility service",
+        };
       }
 
       const requestId = this.requestManager.generateId("clipboard");
 
       const clipboardPromise = this.requestManager.register<A11yClipboardResult>(
-        requestId, "clipboard", timeoutMs,
-        (_id, _type, timeout) => ({ success: false, action, totalTimeMs: this.timer.now() - startTime, error: `Clipboard ${action} timeout after ${timeout}ms` })
+        requestId,
+        "clipboard",
+        timeoutMs,
+        (_id, _type, timeout) => ({
+          success: false,
+          action,
+          totalTimeMs: this.timer.now() - startTime,
+          error: `Clipboard ${action} timeout after ${timeout}ms`,
+        }),
       );
 
       await perf.track("sendRequest", async () => {
@@ -1966,19 +2335,25 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           throw new Error("WebSocket not connected");
         }
         const message = serializeCtrlProxyRequest(
-          ctrlProxyRequests.requestClipboard({ requestId, action, text })
+          ctrlProxyRequests.requestClipboard({ requestId, action, text }),
         );
         this.ws.send(message);
-        logger.debug(`[CTRL_PROXY] Sent clipboard request (requestId: ${requestId}, action: ${action})`);
+        logger.debug(
+          `[CTRL_PROXY] Sent clipboard request (requestId: ${requestId}, action: ${action})`,
+        );
       });
 
       const result = await perf.track("waitForClipboard", () => clipboardPromise);
       const clientDuration = this.timer.now() - startTime;
 
       if (result.success) {
-        logger.info(`[CTRL_PROXY] Clipboard ${action} completed: clientTime=${clientDuration}ms, deviceTotalTime=${result.totalTimeMs}ms`);
+        logger.info(
+          `[CTRL_PROXY] Clipboard ${action} completed: clientTime=${clientDuration}ms, deviceTotalTime=${result.totalTimeMs}ms`,
+        );
       } else {
-        logger.warn(`[CTRL_PROXY] Clipboard ${action} failed after ${clientDuration}ms: ${result.error}`);
+        logger.warn(
+          `[CTRL_PROXY] Clipboard ${action} failed after ${clientDuration}ms: ${result.error}`,
+        );
       }
 
       return result;
@@ -1993,27 +2368,41 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     namespace: SettingsNamespace,
     key: string,
     timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<A11ySettingsGetResult> {
     const startTime = this.timer.now();
     try {
       if (!this.isConnected()) {
-        return { success: false, found: false, totalTimeMs: this.timer.now() - startTime, error: "WebSocket not connected" };
+        return {
+          success: false,
+          found: false,
+          totalTimeMs: this.timer.now() - startTime,
+          error: "WebSocket not connected",
+        };
       }
 
       const requestId = this.requestManager.generateId("settings_get");
       const promise = this.requestManager.register<A11ySettingsGetResult>(
-        requestId, "settings_get", timeoutMs,
-        (_id, _type, timeout) => ({ success: false, found: false, totalTimeMs: this.timer.now() - startTime, error: `Settings get timeout after ${timeout}ms` })
+        requestId,
+        "settings_get",
+        timeoutMs,
+        (_id, _type, timeout) => ({
+          success: false,
+          found: false,
+          totalTimeMs: this.timer.now() - startTime,
+          error: `Settings get timeout after ${timeout}ms`,
+        }),
       );
 
       await perf.track("sendRequest", async () => {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
           throw new Error("WebSocket not connected");
         }
-        this.ws.send(serializeCtrlProxyRequest(
-          ctrlProxyRequests.requestSettingsGet({ requestId, namespace, key })
-        ));
+        this.ws.send(
+          serializeCtrlProxyRequest(
+            ctrlProxyRequests.requestSettingsGet({ requestId, namespace, key }),
+          ),
+        );
       });
 
       const result = await perf.track("waitForSettingsGet", () => promise);
@@ -2031,27 +2420,39 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     value: string | null,
     valueType: SettingsValueType = "string",
     timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<A11ySettingsPutResult> {
     const startTime = this.timer.now();
     try {
       if (!this.isConnected()) {
-        return { success: false, totalTimeMs: this.timer.now() - startTime, error: "WebSocket not connected" };
+        return {
+          success: false,
+          totalTimeMs: this.timer.now() - startTime,
+          error: "WebSocket not connected",
+        };
       }
 
       const requestId = this.requestManager.generateId("settings_put");
       const promise = this.requestManager.register<A11ySettingsPutResult>(
-        requestId, "settings_put", timeoutMs,
-        (_id, _type, timeout) => ({ success: false, totalTimeMs: this.timer.now() - startTime, error: `Settings put timeout after ${timeout}ms` })
+        requestId,
+        "settings_put",
+        timeoutMs,
+        (_id, _type, timeout) => ({
+          success: false,
+          totalTimeMs: this.timer.now() - startTime,
+          error: `Settings put timeout after ${timeout}ms`,
+        }),
       );
 
       await perf.track("sendRequest", async () => {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
           throw new Error("WebSocket not connected");
         }
-        this.ws.send(serializeCtrlProxyRequest(
-          ctrlProxyRequests.requestSettingsPut({ requestId, namespace, key, value, valueType })
-        ));
+        this.ws.send(
+          serializeCtrlProxyRequest(
+            ctrlProxyRequests.requestSettingsPut({ requestId, namespace, key, value, valueType }),
+          ),
+        );
       });
 
       const result = await perf.track("waitForSettingsPut", () => promise);
@@ -2066,27 +2467,39 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   async requestSettingsList(
     namespace: SettingsNamespace,
     timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<A11ySettingsListResult> {
     const startTime = this.timer.now();
     try {
       if (!this.isConnected()) {
-        return { success: false, totalTimeMs: this.timer.now() - startTime, error: "WebSocket not connected" };
+        return {
+          success: false,
+          totalTimeMs: this.timer.now() - startTime,
+          error: "WebSocket not connected",
+        };
       }
 
       const requestId = this.requestManager.generateId("settings_list");
       const promise = this.requestManager.register<A11ySettingsListResult>(
-        requestId, "settings_list", timeoutMs,
-        (_id, _type, timeout) => ({ success: false, totalTimeMs: this.timer.now() - startTime, error: `Settings list timeout after ${timeout}ms` })
+        requestId,
+        "settings_list",
+        timeoutMs,
+        (_id, _type, timeout) => ({
+          success: false,
+          totalTimeMs: this.timer.now() - startTime,
+          error: `Settings list timeout after ${timeout}ms`,
+        }),
       );
 
       await perf.track("sendRequest", async () => {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
           throw new Error("WebSocket not connected");
         }
-        this.ws.send(serializeCtrlProxyRequest(
-          ctrlProxyRequests.requestSettingsList({ requestId, namespace })
-        ));
+        this.ws.send(
+          serializeCtrlProxyRequest(
+            ctrlProxyRequests.requestSettingsList({ requestId, namespace }),
+          ),
+        );
       });
 
       const result = await perf.track("waitForSettingsList", () => promise);
@@ -2105,33 +2518,54 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     action: string,
     timeoutMs: number = 5000,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    frameContext?: string
+    frameContext?: string,
   ): Promise<{ success: boolean; action: string; totalTimeMs: number; error?: string }> {
     const startTime = this.timer.now();
     try {
       // Fast-fail if not already connected to avoid stalling callers
       // (all callers fall back to ADB keyevent on failure)
       if (!this.isConnected()) {
-        return { success: false, action, totalTimeMs: this.timer.now() - startTime, error: "WebSocket not connected" };
+        return {
+          success: false,
+          action,
+          totalTimeMs: this.timer.now() - startTime,
+          error: "WebSocket not connected",
+        };
       }
 
       const requestId = this.requestManager.generateId("global_action");
-      const promise = this.requestManager.register<{ success: boolean; action: string; totalTimeMs: number; error?: string }>(
-        requestId, "global_action", timeoutMs,
-        (_id, _type, timeout) => ({ success: false, action, totalTimeMs: this.timer.now() - startTime, error: `Global action timeout after ${timeout}ms` })
-      );
+      const promise = this.requestManager.register<{
+        success: boolean;
+        action: string;
+        totalTimeMs: number;
+        error?: string;
+      }>(requestId, "global_action", timeoutMs, (_id, _type, timeout) => ({
+        success: false,
+        action,
+        totalTimeMs: this.timer.now() - startTime,
+        error: `Global action timeout after ${timeout}ms`,
+      }));
 
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
         throw new Error("WebSocket not connected");
       }
-      this.ws.send(serializeCtrlProxyRequest(
-        ctrlProxyRequests.requestGlobalAction({ requestId, action, frameContext })
-      ));
-      logger.debug(`[CTRL_PROXY] Sent global action request (requestId: ${requestId}, action: ${action})`);
+      this.ws.send(
+        serializeCtrlProxyRequest(
+          ctrlProxyRequests.requestGlobalAction({ requestId, action, frameContext }),
+        ),
+      );
+      logger.debug(
+        `[CTRL_PROXY] Sent global action request (requestId: ${requestId}, action: ${action})`,
+      );
 
       return await promise;
     } catch (error) {
-      return { success: false, action, totalTimeMs: this.timer.now() - startTime, error: `${error}` };
+      return {
+        success: false,
+        action,
+        totalTimeMs: this.timer.now() - startTime,
+        error: `${error}`,
+      };
     }
   }
 
@@ -2141,32 +2575,37 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    */
   async validateFrameContext(
     frameContext: string,
-    timeoutMs: number = 5000
+    timeoutMs: number = 5000,
   ): Promise<{ success: boolean; totalTimeMs: number; error?: string }> {
     const startTime = this.timer.now();
     try {
       if (!this.isConnected()) {
-        return { success: false, totalTimeMs: this.timer.now() - startTime, error: "WebSocket not connected" };
+        return {
+          success: false,
+          totalTimeMs: this.timer.now() - startTime,
+          error: "WebSocket not connected",
+        };
       }
 
       const requestId = this.requestManager.generateId("validate_frame_context");
-      const promise = this.requestManager.register<{ success: boolean; totalTimeMs: number; error?: string }>(
-        requestId,
-        "validate_frame_context",
-        timeoutMs,
-        (_id, _type, timeout) => ({
-          success: false,
-          totalTimeMs: this.timer.now() - startTime,
-          error: `Frame context validation timeout after ${timeout}ms`,
-        })
-      );
+      const promise = this.requestManager.register<{
+        success: boolean;
+        totalTimeMs: number;
+        error?: string;
+      }>(requestId, "validate_frame_context", timeoutMs, (_id, _type, timeout) => ({
+        success: false,
+        totalTimeMs: this.timer.now() - startTime,
+        error: `Frame context validation timeout after ${timeout}ms`,
+      }));
 
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
         throw new Error("WebSocket not connected");
       }
-      this.ws.send(serializeCtrlProxyRequest(
-        ctrlProxyRequests.validateFrameContext({ requestId, frameContext })
-      ));
+      this.ws.send(
+        serializeCtrlProxyRequest(
+          ctrlProxyRequests.validateFrameContext({ requestId, frameContext }),
+        ),
+      );
 
       return await promise;
     } catch (error) {
@@ -2179,24 +2618,42 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    */
   async requestDeviceInfo(
     timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<{
-    success: boolean; screenWidth?: number; screenHeight?: number; density?: number;
-    rotation?: number; sdkInt?: number; deviceModel?: string; isEmulator?: boolean;
-    wakefulness?: string; foregroundActivity?: string;
-    totalTimeMs: number; error?: string;
+    success: boolean;
+    screenWidth?: number;
+    screenHeight?: number;
+    density?: number;
+    rotation?: number;
+    sdkInt?: number;
+    deviceModel?: string;
+    isEmulator?: boolean;
+    wakefulness?: string;
+    foregroundActivity?: string;
+    totalTimeMs: number;
+    error?: string;
   }> {
     const startTime = this.timer.now();
     try {
       const connected = await perf.track("ensureConnection", () => this.connectWebSocket(perf));
       if (!connected) {
-        return { success: false, totalTimeMs: this.timer.now() - startTime, error: "Failed to connect to accessibility service" };
+        return {
+          success: false,
+          totalTimeMs: this.timer.now() - startTime,
+          error: "Failed to connect to accessibility service",
+        };
       }
 
       const requestId = this.requestManager.generateId("device_info");
       const promise = this.requestManager.register<any>(
-        requestId, "device_info", timeoutMs,
-        (_id, _type, timeout) => ({ success: false, totalTimeMs: this.timer.now() - startTime, error: `Device info timeout after ${timeout}ms` })
+        requestId,
+        "device_info",
+        timeoutMs,
+        (_id, _type, timeout) => ({
+          success: false,
+          totalTimeMs: this.timer.now() - startTime,
+          error: `Device info timeout after ${timeout}ms`,
+        }),
       );
 
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
@@ -2214,7 +2671,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   async requestScreenshot(
     timeoutMs: number = 5000,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    suppressObservationStreamPush: boolean = false
+    suppressObservationStreamPush: boolean = false,
   ): Promise<ScreenshotResult> {
     const startTime = this.timer.now();
     let suppressedRequestId: string | undefined;
@@ -2241,15 +2698,22 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       const sentRequestId = requestId;
       const screenshotPromise = this.requestManager.register<ScreenshotResult>(
-        sentRequestId, "screenshot", timeoutMs,
-        (_id, _type, timeout) => ({ success: false, error: `Screenshot timeout after ${timeout}ms` })
+        sentRequestId,
+        "screenshot",
+        timeoutMs,
+        (_id, _type, timeout) => ({
+          success: false,
+          error: `Screenshot timeout after ${timeout}ms`,
+        }),
       );
 
       await perf.track("sendRequest", async () => {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
           throw new Error("WebSocket not connected");
         }
-        const message = serializeCtrlProxyRequest(ctrlProxyRequests.requestScreenshot({ requestId: sentRequestId }));
+        const message = serializeCtrlProxyRequest(
+          ctrlProxyRequests.requestScreenshot({ requestId: sentRequestId }),
+        );
         // Shared rate-limit floor accounting (issue #4927): a one-shot screenshot (observe /
         // junit-runner) and the observation-stream scheduler both hit the same rate-limited
         // accessibility takeScreenshot(). Advancing the shared clock here (non-blocking) makes the
@@ -2266,7 +2730,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       if (result.success) {
         const dataSize = result.data ? result.data.length : 0;
-        logger.debug(`[CTRL_PROXY] Screenshot received in ${duration}ms (${dataSize} base64 chars)`);
+        logger.debug(
+          `[CTRL_PROXY] Screenshot received in ${duration}ms (${dataSize} base64 chars)`,
+        );
       } else {
         logger.warn(`[CTRL_PROXY] Screenshot failed after ${duration}ms: ${result.error}`);
       }
@@ -2292,12 +2758,16 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   async requestScreenshotWithoutObservationStreamPush(
     timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<ScreenshotResult> {
     return this.requestScreenshot(timeoutMs, perf, true);
   }
 
-  async verifyServiceReady(maxAttempts: number = 5, delayMs: number = 500, timeoutMs: number = 3000): Promise<boolean> {
+  async verifyServiceReady(
+    maxAttempts: number = 5,
+    delayMs: number = 500,
+    timeoutMs: number = 3000,
+  ): Promise<boolean> {
     // Remember the most recent runner error text across attempts (issue #3062) so the terminal
     // warn — the one visible at the default log level — attributes the deterministic handler
     // failure, rather than collapsing every attempt into an anonymous "no hierarchy" (a runner
@@ -2316,11 +2786,17 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     let identicalRunnerErrorStreak = 0;
     let shortCircuited = false;
     const result = await this.retryExecutor.execute(
-      async attempt => {
+      async (attempt) => {
         logger.debug(`[CTRL_PROXY] Verifying service ready (attempt ${attempt}/${maxAttempts})`);
 
         const diagnostics: HierarchySyncDiagnostics = {};
-        const hierarchyResult = await this.requestHierarchySync(new NoOpPerformanceTracker(), false, undefined, timeoutMs, diagnostics);
+        const hierarchyResult = await this.requestHierarchySync(
+          new NoOpPerformanceTracker(),
+          false,
+          undefined,
+          timeoutMs,
+          diagnostics,
+        );
 
         if (hierarchyResult && hierarchyResult.hierarchy) {
           logger.debug(`[CTRL_PROXY] Service verified ready after ${attempt} attempt(s)`);
@@ -2328,9 +2804,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         }
 
         if (diagnostics.runnerError) {
-          identicalRunnerErrorStreak = diagnostics.runnerError === lastRunnerError
-            ? identicalRunnerErrorStreak + 1
-            : 1;
+          identicalRunnerErrorStreak =
+            diagnostics.runnerError === lastRunnerError ? identicalRunnerErrorStreak + 1 : 1;
           lastRunnerError = diagnostics.runnerError;
         } else {
           // A plain timeout breaks the deterministic-failure streak but keeps lastRunnerError,
@@ -2340,7 +2815,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         const runnerErrorSuffix = diagnostics.runnerError
           ? `: runner error: ${diagnostics.runnerError}`
           : "";
-        throw new Error(`Verification attempt ${attempt} returned no hierarchy${runnerErrorSuffix}`);
+        throw new Error(
+          `Verification attempt ${attempt} returned no hierarchy${runnerErrorSuffix}`,
+        );
       },
       {
         maxAttempts,
@@ -2356,7 +2833,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           logger.debug(`[CTRL_PROXY] Verification attempt ${attempt} failed: ${error.message}`);
           logger.debug(`[CTRL_PROXY] Waiting ${delayMs}ms before next verification attempt`);
         },
-      }
+      },
     );
 
     if (!result.success) {
@@ -2364,7 +2841,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       const attemptsSummary = shortCircuited
         ? `${result.attempts}/${maxAttempts} verification attempts (short-circuited: identical runner error on ${VERIFY_READY_IDENTICAL_RUNNER_ERROR_LIMIT} consecutive attempts)`
         : `${maxAttempts} verification attempts`;
-      this.loggerInstance.warn(`[CTRL_PROXY] Service not ready after ${attemptsSummary}${runnerErrorSuffix}`);
+      this.loggerInstance.warn(
+        `[CTRL_PROXY] Service not ready after ${attemptsSummary}${runnerErrorSuffix}`,
+      );
       return false;
     }
 
@@ -2400,10 +2879,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     if (!this.hierarchyNavigationDetector) {
       this.hierarchyNavigationDetector = new HierarchyNavigationDetector(
         this.getNavigationGraphManager(),
-        { timer: this.timer }
+        { timer: this.timer },
       );
 
-      this.hierarchyNavigationDetector.setNavigationCallback(info => {
+      this.hierarchyNavigationDetector.setNavigationCallback((info) => {
         if (info.packageName && info.screenFingerprint) {
           if (!serverConfig.isNavigationScreenshotsEnabled()) {
             return;
@@ -2412,14 +2891,18 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           const screenName = `screen_${info.screenFingerprint.substring(0, 12)}`;
           NavigationScreenshotManager.getInstance()
             .captureAndStore(this.device, this.adb, appId, screenName)
-            .then(screenshotPath => {
+            .then((screenshotPath) => {
               if (screenshotPath) {
                 this.getNavigationGraphManager()
                   .updateNodeScreenshot(appId, screenName, screenshotPath)
-                  .catch(err => logger.warn(`[CTRL_PROXY] Failed to update hierarchy screenshot: ${err}`));
+                  .catch((err) =>
+                    logger.warn(`[CTRL_PROXY] Failed to update hierarchy screenshot: ${err}`),
+                  );
               }
             })
-            .catch(err => logger.debug(`[CTRL_PROXY] Hierarchy screenshot capture skipped: ${err}`));
+            .catch((err) =>
+              logger.debug(`[CTRL_PROXY] Hierarchy screenshot capture skipped: ${err}`),
+            );
         }
       });
     }
@@ -2450,20 +2933,27 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   refreshObservationStreamHierarchyCadence(intervalMs?: number | null): void {
     if (!this.isCommandSupported("set_hierarchy_interval")) {
-      logger.info("[AndroidCtrlProxyClient] Skipping hierarchy cadence sync; runner does not advertise set_hierarchy_interval");
+      logger.info(
+        "[AndroidCtrlProxyClient] Skipping hierarchy cadence sync; runner does not advertise set_hierarchy_interval",
+      );
       return;
     }
 
-    const resolvedIntervalMs = intervalMs === undefined
-      ? getDeviceDataStreamServer()?.getHierarchyIntervalMsForDevice(
-        this.device.deviceId,
-        AndroidCtrlProxyClient.DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS
-      ) ?? AndroidCtrlProxyClient.DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS
-      : intervalMs;
+    const resolvedIntervalMs =
+      intervalMs === undefined
+        ? (getDeviceDataStreamServer()?.getHierarchyIntervalMsForDevice(
+            this.device.deviceId,
+            AndroidCtrlProxyClient.DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS,
+          ) ?? AndroidCtrlProxyClient.DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS)
+        : intervalMs;
 
-    this.sendMessage(serializeCtrlProxyRequest(ctrlProxyRequests.setHierarchyInterval({
-      intervalMs: resolvedIntervalMs,
-    })));
+    this.sendMessage(
+      serializeCtrlProxyRequest(
+        ctrlProxyRequests.setHierarchyInterval({
+          intervalMs: resolvedIntervalMs,
+        }),
+      ),
+    );
   }
 
   // ===========================================================================
@@ -2502,20 +2992,19 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     const additionalReservedPorts = currentPortIsAvailable ? [] : [this.localPort];
     PortManager.release(this.device.deviceId);
     const nextPort = PortManager.allocate(this.device.deviceId, {
-      reservedPorts: [
-        ...IOS_CTRL_PROXY_RESERVED_PORTS,
-        ...additionalReservedPorts,
-      ],
+      reservedPorts: [...IOS_CTRL_PROXY_RESERVED_PORTS, ...additionalReservedPorts],
     });
     if (nextPort !== this.localPort) {
       logger.info(
-        `[CTRL_PROXY] Reallocated local port from ${this.localPort} to ${nextPort} before adb forward`
+        `[CTRL_PROXY] Reallocated local port from ${this.localPort} to ${nextPort} before adb forward`,
       );
       this.localPort = nextPort;
     }
   }
 
-  private async setupPortForwarding(perf: PerformanceTracker = new NoOpPerformanceTracker()): Promise<void> {
+  private async setupPortForwarding(
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+  ): Promise<void> {
     // Verify port forwarding is still active even if we think it's set up
     // Port forwarding can be lost if ADB server restarts or emulator restarts
     if (this.portForwardingSetup) {
@@ -2531,20 +3020,22 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     try {
       const previousLocalPort = this.localPort;
       await perf.track("clearPortForward", () =>
-        this.adb.executeCommand(`forward --remove tcp:${this.localPort}`).catch(() => {})
+        this.adb.executeCommand(`forward --remove tcp:${this.localPort}`).catch(() => {}),
       );
 
       this.ensureLocalPortAvailableForForwarding();
-      logger.debug(`[CTRL_PROXY] Setting up port forwarding for WebSocket: localhost:${this.localPort} → device:${PortManager.DEVICE_PORT} (device: ${this.device.deviceId})`);
+      logger.debug(
+        `[CTRL_PROXY] Setting up port forwarding for WebSocket: localhost:${this.localPort} → device:${PortManager.DEVICE_PORT} (device: ${this.device.deviceId})`,
+      );
 
       if (this.localPort !== previousLocalPort) {
         await perf.track("clearReallocatedPortForward", () =>
-          this.adb.executeCommand(`forward --remove tcp:${this.localPort}`).catch(() => {})
+          this.adb.executeCommand(`forward --remove tcp:${this.localPort}`).catch(() => {}),
         );
       }
 
       await perf.track("setupPortForward", () =>
-        this.adb.executeCommand(`forward tcp:${this.localPort} tcp:${PortManager.DEVICE_PORT}`)
+        this.adb.executeCommand(`forward tcp:${this.localPort} tcp:${PortManager.DEVICE_PORT}`),
       );
 
       this.portForwardingSetup = true;
@@ -2566,7 +3057,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       // Format is: "serial tcp:localPort tcp:remotePort" per line
       const isActive = result.stdout.includes(expectedForward);
       if (!isActive) {
-        logger.debug(`[CTRL_PROXY] Port forwarding not found in active forwards. Expected: ${expectedForward}`);
+        logger.debug(
+          `[CTRL_PROXY] Port forwarding not found in active forwards. Expected: ${expectedForward}`,
+        );
       }
       return isActive;
     } catch (error) {
@@ -2601,9 +3094,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       if (message.type === "error") {
         const errorText = rewriteUnknownCommandError(
           message.error || "Runner reported an unstructured protocol error",
-          "android"
+          "android",
         );
-        logger.warn(`[CTRL_PROXY] Runner error (requestId: ${message.requestId ?? "none"}): ${errorText}`);
+        logger.warn(
+          `[CTRL_PROXY] Runner error (requestId: ${message.requestId ?? "none"}): ${errorText}`,
+        );
         if (message.requestId) {
           this.requestManager.resolveError(message.requestId, errorText);
           this._hierarchy?.rejectPendingHierarchy(message.requestId, errorText);
@@ -2617,7 +3112,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       // Handle screenshot response
       if (message.type === "screenshot" && message.requestId) {
-        const suppressObservationStreamPush = this.screenshotObservationStreamSuppressions.delete(message.requestId);
+        const suppressObservationStreamPush = this.screenshotObservationStreamSuppressions.delete(
+          message.requestId,
+        );
         const metadata = {
           ...metadataForScreenshotFormat(ANDROID_CTRLPROXY_SCREENSHOT_METADATA, message.format),
           ...screenshotPerformanceMetadataFrom(message),
@@ -2633,7 +3130,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
             message.rotation,
           );
         } else {
-          logger.debug("[CTRL_PROXY] Suppressed screenshot observation stream push for explicit initial-frame request");
+          logger.debug(
+            "[CTRL_PROXY] Suppressed screenshot observation stream push for explicit initial-frame request",
+          );
         }
         this.requestManager.resolve<ScreenshotResult>(message.requestId, {
           success: true,
@@ -2648,114 +3147,152 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       // Handle screenshot error
       if (message.type === "screenshot_error" && message.requestId) {
-        logger.warn(`[CTRL_PROXY] Screenshot error (requestId: ${message.requestId}): ${message.error}`);
-        this.requestManager.resolve<ScreenshotResult>(message.requestId, { success: false, error: message.error || "Unknown error" });
+        logger.warn(
+          `[CTRL_PROXY] Screenshot error (requestId: ${message.requestId}): ${message.error}`,
+        );
+        this.requestManager.resolve<ScreenshotResult>(message.requestId, {
+          success: false,
+          error: message.error || "Unknown error",
+        });
       }
 
       // Handle swipe result
       if (message.type === "swipe_result") {
-        logger.debug(`[CTRL_PROXY] Swipe result (requestId: ${message.requestId}, success: ${message.success})`);
+        logger.debug(
+          `[CTRL_PROXY] Swipe result (requestId: ${message.requestId}, success: ${message.success})`,
+        );
 
         if (message.requestId) {
           this.requestManager.resolve<A11ySwipeResult>(message.requestId, {
-            success: message.success, totalTimeMs: message.totalTimeMs,
-            gestureTimeMs: message.gestureTimeMs, error: message.error, perfTiming: message.perfTiming
+            success: message.success,
+            totalTimeMs: message.totalTimeMs,
+            gestureTimeMs: message.gestureTimeMs,
+            error: message.error,
+            perfTiming: message.perfTiming,
           });
         }
-
       }
 
       // Handle tap coordinates result
       if (message.type === "tap_coordinates_result") {
-        logger.info(`[CTRL_PROXY] Tap coordinates result (requestId: ${message.requestId}, success: ${message.success})`);
+        logger.info(
+          `[CTRL_PROXY] Tap coordinates result (requestId: ${message.requestId}, success: ${message.success})`,
+        );
 
         if (message.requestId) {
           this.requestManager.resolve<A11yTapCoordinatesResult>(message.requestId, {
-            success: message.success, totalTimeMs: message.totalTimeMs, error: message.error, perfTiming: message.perfTiming
+            success: message.success,
+            totalTimeMs: message.totalTimeMs,
+            error: message.error,
+            perfTiming: message.perfTiming,
           });
         }
-
       }
 
       // Handle drag result
       if (message.type === "drag_result" && message.requestId) {
         this.requestManager.resolve<A11yDragResult>(message.requestId, {
-          success: message.success, totalTimeMs: message.totalTimeMs,
-          gestureTimeMs: message.gestureTimeMs, error: message.error, perfTiming: message.perfTiming
+          success: message.success,
+          totalTimeMs: message.totalTimeMs,
+          gestureTimeMs: message.gestureTimeMs,
+          error: message.error,
+          perfTiming: message.perfTiming,
         });
-
       }
 
       // Handle pinch result
       if (message.type === "pinch_result" && message.requestId) {
         this.requestManager.resolve<A11yPinchResult>(message.requestId, {
-          success: message.success, totalTimeMs: message.totalTimeMs,
-          gestureTimeMs: message.gestureTimeMs, error: message.error, perfTiming: message.perfTiming
+          success: message.success,
+          totalTimeMs: message.totalTimeMs,
+          gestureTimeMs: message.gestureTimeMs,
+          error: message.error,
+          perfTiming: message.perfTiming,
         });
-
       }
 
       // Handle set text result
       if (message.type === "set_text_result" && message.requestId) {
         this.requestManager.resolve<A11ySetTextResult>(message.requestId, {
-          success: message.success, totalTimeMs: message.totalTimeMs, error: message.error, perfTiming: message.perfTiming
+          success: message.success,
+          totalTimeMs: message.totalTimeMs,
+          error: message.error,
+          perfTiming: message.perfTiming,
         });
-
       }
 
       // Handle IME action result
       if (message.type === "ime_action_result" && message.requestId) {
         this.requestManager.resolve<A11yImeActionResult>(message.requestId, {
-          success: message.success, action: message.action,
-          totalTimeMs: message.totalTimeMs, error: message.error, perfTiming: message.perfTiming
+          success: message.success,
+          action: message.action,
+          totalTimeMs: message.totalTimeMs,
+          error: message.error,
+          perfTiming: message.perfTiming,
         });
-
       }
 
       // Handle select all result
       if (message.type === "select_all_result" && message.requestId) {
         this.requestManager.resolve<A11ySelectAllResult>(message.requestId, {
-          success: message.success, totalTimeMs: message.totalTimeMs, error: message.error, perfTiming: message.perfTiming
+          success: message.success,
+          totalTimeMs: message.totalTimeMs,
+          error: message.error,
+          perfTiming: message.perfTiming,
         });
-
       }
 
       // Handle action result
       if (message.type === "action_result" && message.requestId) {
         this.requestManager.resolve<A11yActionResult>(message.requestId, {
-          success: message.success, action: message.action,
-          totalTimeMs: message.totalTimeMs, error: message.error, perfTiming: message.perfTiming
+          success: message.success,
+          action: message.action,
+          totalTimeMs: message.totalTimeMs,
+          error: message.error,
+          perfTiming: message.perfTiming,
         });
       }
 
       // Handle clipboard result
       if (message.type === "clipboard_result" && message.requestId) {
         this.requestManager.resolve<A11yClipboardResult>(message.requestId, {
-          success: message.success, action: message.action, text: message.text,
-          totalTimeMs: message.totalTimeMs, error: message.error, perfTiming: message.perfTiming
+          success: message.success,
+          action: message.action,
+          text: message.text,
+          totalTimeMs: message.totalTimeMs,
+          error: message.error,
+          perfTiming: message.perfTiming,
         });
-
       }
 
       // Handle settings results
       if (message.type === "settings_get_result" && message.requestId) {
         this.requestManager.resolve<A11ySettingsGetResult>(message.requestId, {
-          success: message.success, value: message.value, found: message.found ?? false,
-          totalTimeMs: message.totalTimeMs, error: message.error, perfTiming: message.perfTiming
+          success: message.success,
+          value: message.value,
+          found: message.found ?? false,
+          totalTimeMs: message.totalTimeMs,
+          error: message.error,
+          perfTiming: message.perfTiming,
         });
       }
 
       if (message.type === "settings_put_result" && message.requestId) {
         this.requestManager.resolve<A11ySettingsPutResult>(message.requestId, {
           success: message.success,
-          totalTimeMs: message.totalTimeMs, error: message.error, perfTiming: message.perfTiming
+          totalTimeMs: message.totalTimeMs,
+          error: message.error,
+          perfTiming: message.perfTiming,
         });
       }
 
       if (message.type === "settings_list_result" && message.requestId) {
         this.requestManager.resolve<A11ySettingsListResult>(message.requestId, {
-          success: message.success, entries: message.entries,
-          totalTimeMs: message.totalTimeMs, error: message.error, perfTiming: message.perfTiming
+          success: message.success,
+          entries: message.entries,
+          totalTimeMs: message.totalTimeMs,
+          error: message.error,
+          perfTiming: message.perfTiming,
         });
       }
 
@@ -2805,14 +3342,24 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       // Handle CA certificate result
       if (message.type === "ca_cert_result" && message.requestId) {
         // Try delegate handler first (for remove)
-        if (!this.certificates.handleCaCertRemovalResult(message.requestId, {
-          success: message.success, action: message.action, alias: message.alias,
-          totalTimeMs: message.totalTimeMs, error: message.error, perfTiming: message.perfTiming
-        })) {
+        if (
+          !this.certificates.handleCaCertRemovalResult(message.requestId, {
+            success: message.success,
+            action: message.action,
+            alias: message.alias,
+            totalTimeMs: message.totalTimeMs,
+            error: message.error,
+            perfTiming: message.perfTiming,
+          })
+        ) {
           // Fall back to RequestManager (for install)
           this.requestManager.resolve<A11yCaCertResult>(message.requestId, {
-            success: message.success, action: message.action, alias: message.alias,
-            totalTimeMs: message.totalTimeMs, error: message.error, perfTiming: message.perfTiming
+            success: message.success,
+            action: message.action,
+            alias: message.alias,
+            totalTimeMs: message.totalTimeMs,
+            error: message.error,
+            perfTiming: message.perfTiming,
           });
         }
       }
@@ -2820,20 +3367,30 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       // Handle device owner status result
       if (message.type === "device_owner_status_result" && message.requestId) {
         this.requestManager.resolve<A11yDeviceOwnerStatusResult>(message.requestId, {
-          success: message.success, isDeviceOwner: message.isDeviceOwner ?? false,
-          isAdminActive: message.isAdminActive ?? false, packageName: message.packageName,
-          totalTimeMs: message.totalTimeMs, error: message.error, perfTiming: message.perfTiming
+          success: message.success,
+          isDeviceOwner: message.isDeviceOwner ?? false,
+          isAdminActive: message.isAdminActive ?? false,
+          packageName: message.packageName,
+          totalTimeMs: message.totalTimeMs,
+          error: message.error,
+          perfTiming: message.perfTiming,
         });
       }
 
       // Handle permission result
       if (message.type === "permission_result" && message.requestId) {
         this.requestManager.resolve<A11yPermissionResult>(message.requestId, {
-          success: message.success ?? false, permission: message.permission ?? "unknown",
-          granted: message.granted ?? false, totalTimeMs: message.totalTimeMs ?? 0,
-          requestLaunched: message.requestLaunched ?? false, canRequest: message.canRequest ?? false,
-          requiresSettings: message.requiresSettings ?? false, instructions: message.instructions,
-          adbCommand: message.adbCommand, error: message.error, perfTiming: message.perfTiming
+          success: message.success ?? false,
+          permission: message.permission ?? "unknown",
+          granted: message.granted ?? false,
+          totalTimeMs: message.totalTimeMs ?? 0,
+          requestLaunched: message.requestLaunched ?? false,
+          canRequest: message.canRequest ?? false,
+          requiresSettings: message.requiresSettings ?? false,
+          instructions: message.instructions,
+          adbCommand: message.adbCommand,
+          error: message.error,
+          perfTiming: message.perfTiming,
         });
       }
 
@@ -2844,8 +3401,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           : null;
 
         this.requestManager.resolve<CurrentFocusResult>(message.requestId, {
-          focusedElement, totalTimeMs: message.totalTimeMs,
-          requestId: message.requestId, error: message.error
+          focusedElement,
+          totalTimeMs: message.totalTimeMs,
+          requestId: message.requestId,
+          error: message.error,
         });
       }
 
@@ -2855,17 +3414,25 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
         if (result && result.elements) {
           const elements = result.elements.map((node: AccessibilityNode) =>
-            this.focus.convertAccessibilityNodeToElement(node)
+            this.focus.convertAccessibilityNodeToElement(node),
           );
 
           this.requestManager.resolve<TraversalOrderResult>(message.requestId, {
-            elements, focusedIndex: result.focusedIndex, totalCount: result.totalCount,
-            totalTimeMs: message.totalTimeMs, requestId: message.requestId, error: message.error
+            elements,
+            focusedIndex: result.focusedIndex,
+            totalCount: result.totalCount,
+            totalTimeMs: message.totalTimeMs,
+            requestId: message.requestId,
+            error: message.error,
           });
         } else {
           this.requestManager.resolve<TraversalOrderResult>(message.requestId, {
-            elements: [], focusedIndex: null, totalCount: 0,
-            totalTimeMs: message.totalTimeMs, requestId: message.requestId, error: message.error || "No result data"
+            elements: [],
+            focusedIndex: null,
+            totalCount: 0,
+            totalTimeMs: message.totalTimeMs,
+            requestId: message.requestId,
+            error: message.error || "No result data",
           });
         }
       }
@@ -2873,16 +3440,20 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       // Handle highlight response
       if (message.type === "highlight_response" && message.requestId) {
         this.requestManager.resolve<HighlightOperationResult>(message.requestId, {
-          success: message.success ?? false, error: message.error,
-          requestId: message.requestId, timestamp: message.timestamp
+          success: message.success ?? false,
+          error: message.error,
+          requestId: message.requestId,
+          timestamp: message.timestamp,
         });
       }
 
       // Handle global action result
       if (message.type === "global_action_result" && message.requestId) {
         this.requestManager.resolve(message.requestId, {
-          success: message.success ?? false, action: message.action,
-          totalTimeMs: message.totalTimeMs ?? 0, error: message.error
+          success: message.success ?? false,
+          action: message.action,
+          totalTimeMs: message.totalTimeMs ?? 0,
+          error: message.error,
         });
       }
 
@@ -2898,12 +3469,17 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       if (message.type === "device_info_result" && message.requestId) {
         this.requestManager.resolve(message.requestId, {
           success: message.success ?? false,
-          screenWidth: message.screenWidth, screenHeight: message.screenHeight,
-          density: message.density, rotation: message.rotation,
-          sdkInt: message.sdkInt, deviceModel: message.deviceModel,
-          isEmulator: message.isEmulator, wakefulness: message.wakefulness,
+          screenWidth: message.screenWidth,
+          screenHeight: message.screenHeight,
+          density: message.density,
+          rotation: message.rotation,
+          sdkInt: message.sdkInt,
+          deviceModel: message.deviceModel,
+          isEmulator: message.isEmulator,
+          wakefulness: message.wakefulness,
           foregroundActivity: message.foregroundActivity,
-          totalTimeMs: message.totalTimeMs ?? 0, error: message.error
+          totalTimeMs: message.totalTimeMs ?? 0,
+          error: message.error,
         });
       }
 
@@ -2911,16 +3487,20 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       // Note: Android sends "preference_files" but we register with "list_preference_files"
       if (message.type === "preference_files" && message.requestId) {
         this.requestManager.resolve(message.requestId, {
-          success: message.success ?? false, files: message.files || [],
-          totalTimeMs: message.totalTimeMs ?? 0, error: message.error
+          success: message.success ?? false,
+          files: message.files || [],
+          totalTimeMs: message.totalTimeMs ?? 0,
+          error: message.error,
         });
       }
 
       // Note: Android sends "preferences" but we register with "get_preferences"
       if (message.type === "preferences" && message.requestId) {
         this.requestManager.resolve(message.requestId, {
-          success: message.success ?? false, entries: message.entries || [],
-          totalTimeMs: message.totalTimeMs ?? 0, error: message.error
+          success: message.success ?? false,
+          entries: message.entries || [],
+          totalTimeMs: message.totalTimeMs ?? 0,
+          error: message.error,
         });
       }
 
@@ -2931,51 +3511,67 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         const subscription =
           message.success && message.subscriptionId
             ? {
-              packageName: message.packageName ?? "",
-              fileName: message.fileName ?? "",
-              subscriptionId: message.subscriptionId
-            }
+                packageName: message.packageName ?? "",
+                fileName: message.fileName ?? "",
+                subscriptionId: message.subscriptionId,
+              }
             : undefined;
         this.requestManager.resolve(message.requestId, {
-          success: message.success ?? false, subscription,
-          totalTimeMs: message.totalTimeMs ?? 0, error: message.error
+          success: message.success ?? false,
+          subscription,
+          totalTimeMs: message.totalTimeMs ?? 0,
+          error: message.error,
         });
       }
 
       if (message.type === "unsubscribe_storage_result" && message.requestId) {
         this.requestManager.resolve(message.requestId, {
-          success: message.success ?? false, totalTimeMs: message.totalTimeMs ?? 0, error: message.error
+          success: message.success ?? false,
+          totalTimeMs: message.totalTimeMs ?? 0,
+          error: message.error,
         });
       }
 
       if (message.type === "get_preference_result" && message.requestId) {
         // Build entry from key/value/type fields (Android sends flat structure, not nested entry)
-        const entry = message.found && message.key ? {
-          key: message.key,
-          value: message.value,
-          type: message.type
-        } : undefined;
+        const entry =
+          message.found && message.key
+            ? {
+                key: message.key,
+                value: message.value,
+                type: message.type,
+              }
+            : undefined;
         this.requestManager.resolve(message.requestId, {
-          success: message.success ?? false, found: message.found ?? false,
-          entry, totalTimeMs: message.totalTimeMs ?? 0, error: message.error
+          success: message.success ?? false,
+          found: message.found ?? false,
+          entry,
+          totalTimeMs: message.totalTimeMs ?? 0,
+          error: message.error,
         });
       }
 
       if (message.type === "set_preference_result" && message.requestId) {
         this.requestManager.resolve(message.requestId, {
-          success: message.success ?? false, totalTimeMs: message.totalTimeMs ?? 0, error: message.error
+          success: message.success ?? false,
+          totalTimeMs: message.totalTimeMs ?? 0,
+          error: message.error,
         });
       }
 
       if (message.type === "remove_preference_result" && message.requestId) {
         this.requestManager.resolve(message.requestId, {
-          success: message.success ?? false, totalTimeMs: message.totalTimeMs ?? 0, error: message.error
+          success: message.success ?? false,
+          totalTimeMs: message.totalTimeMs ?? 0,
+          error: message.error,
         });
       }
 
       if (message.type === "clear_preferences_result" && message.requestId) {
         this.requestManager.resolve(message.requestId, {
-          success: message.success ?? false, totalTimeMs: message.totalTimeMs ?? 0, error: message.error
+          success: message.success ?? false,
+          totalTimeMs: message.totalTimeMs ?? 0,
+          error: message.error,
         });
       }
 
@@ -3004,7 +3600,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
             };
           }
 
-          logger.info(`[CTRL_PROXY] Navigation event: ${event.destination} (app: ${event.applicationId})`);
+          logger.info(
+            `[CTRL_PROXY] Navigation event: ${event.destination} (app: ${event.applicationId})`,
+          );
           // Barrier-tracked via trackExisting so graceful shutdown drains this
           // fire-and-forget write, WITHOUT wrapping it in track(): the caller keeps
           // awaiting the original promise, so the nav-event↔hierarchy-update
@@ -3016,17 +3614,23 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           void getDbWriteBarrier().trackExisting(navWrite);
           await navWrite;
 
-          if (event.applicationId && event.destination && serverConfig.isNavigationScreenshotsEnabled()) {
+          if (
+            event.applicationId &&
+            event.destination &&
+            serverConfig.isNavigationScreenshotsEnabled()
+          ) {
             NavigationScreenshotManager.getInstance()
               .captureAndStore(this.device, this.adb, event.applicationId, event.destination)
-              .then(screenshotPath => {
+              .then((screenshotPath) => {
                 if (screenshotPath) {
                   this.getNavigationGraphManager()
                     .updateNodeScreenshot(event.applicationId!, event.destination!, screenshotPath)
-                    .catch(err => logger.warn(`[CTRL_PROXY] Failed to update screenshot: ${err}`));
+                    .catch((err) =>
+                      logger.warn(`[CTRL_PROXY] Failed to update screenshot: ${err}`),
+                    );
                 }
               })
-              .catch(err => logger.debug(`[CTRL_PROXY] Screenshot capture skipped: ${err}`));
+              .catch((err) => logger.debug(`[CTRL_PROXY] Screenshot capture skipped: ${err}`));
           }
         }
       }
@@ -3091,7 +3695,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
               timestamp: message.timestamp ?? this.timer.now(),
               payload: { event },
             },
-            (event.applicationId as string) ?? null
+            (event.applicationId as string) ?? null,
           );
         }
       }
@@ -3099,12 +3703,17 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       // Handle storage_changed push event
       if (message.type === "storage_changed") {
         const storageEvent: StorageChangedEvent = {
-          packageName: message.packageName ?? "", fileName: message.fileName ?? "",
-          key: message.key ?? null, value: message.value ?? null,
-          valueType: message.valueType ?? "STRING", timestamp: message.timestamp ?? this.timer.now(),
+          packageName: message.packageName ?? "",
+          fileName: message.fileName ?? "",
+          key: message.key ?? null,
+          value: message.value ?? null,
+          valueType: message.valueType ?? "STRING",
+          timestamp: message.timestamp ?? this.timer.now(),
           sequenceNumber: message.sequenceNumber ?? 0,
         };
-        logger.debug(`[CTRL_PROXY] Storage changed: ${storageEvent.packageName}/${storageEvent.fileName} key=${storageEvent.key}`);
+        logger.debug(
+          `[CTRL_PROXY] Storage changed: ${storageEvent.packageName}/${storageEvent.fileName} key=${storageEvent.key}`,
+        );
 
         this.storage.notifyStorageChangeListeners(storageEvent);
 
@@ -3115,7 +3724,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
         // Record to telemetry timeline (fan-out owned by the ingestor, #2764).
         this.getSdkEventIngestor().recordStorageEvent(
-          storageTelemetryInputFromWire(message, storageEvent.timestamp)
+          storageTelemetryInputFromWire(message, storageEvent.timestamp),
         );
       }
     } catch (error) {
@@ -3123,9 +3732,15 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
-  private handleHierarchyUpdate(data: AccessibilityHierarchy, perfTiming?: AndroidPerfTiming[], frameContext?: string): void {
+  private handleHierarchyUpdate(
+    data: AccessibilityHierarchy,
+    perfTiming?: AndroidPerfTiming[],
+    frameContext?: string,
+  ): void {
     const now = this.timer.now();
-    logger.debug(`[CTRL_PROXY] Received hierarchy update (updatedAt: ${data.updatedAt}, receivedAt: ${now})`);
+    logger.debug(
+      `[CTRL_PROXY] Received hierarchy update (updatedAt: ${data.updatedAt}, receivedAt: ${now})`,
+    );
 
     // Mark previous cache as stale
     if (this.cachedHierarchy) {
@@ -3157,7 +3772,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       // Start screenshot backoff
       this.startScreenshotBackoff();
     } else {
-      logger.debug("[CTRL_PROXY] Suppressed hierarchy observation stream push for explicit initial-frame request");
+      logger.debug(
+        "[CTRL_PROXY] Suppressed hierarchy observation stream push for explicit initial-frame request",
+      );
     }
 
     // Track foreground package for context and start performance monitoring
@@ -3178,9 +3795,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       // Include a compact hierarchy tree (~2-5KB) with just the display properties.
       // The full hierarchy (~10-50KB with bounds/states/extras) is available via
       // the observation stream and would cause excessive traffic at 500ms intervals.
-      const compactHierarchy = data.hierarchy
-        ? { node: compactifyNode(data.hierarchy) }
-        : null;
+      const compactHierarchy = data.hierarchy ? { node: compactifyNode(data.hierarchy) } : null;
       recorder.recordLayoutEvent({
         timestamp: now,
         applicationId: data.packageName ?? null,
@@ -3225,14 +3840,21 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     return !this.sdkNavigationAppIds.has(packageName);
   }
 
-  private pushHierarchyToObservationStream(hierarchy: ViewHierarchyResult, frameContext?: string): void {
+  private pushHierarchyToObservationStream(
+    hierarchy: ViewHierarchyResult,
+    frameContext?: string,
+  ): void {
     const server = getDeviceDataStreamServer();
     if (!server) {
       return;
     }
 
     try {
-      const captureSequence = server.pushHierarchyUpdate(this.device.deviceId, hierarchy, frameContext);
+      const captureSequence = server.pushHierarchyUpdate(
+        this.device.deviceId,
+        hierarchy,
+        frameContext,
+      );
       // Record the identity the daemon assigned, so screenshot requests initiated from here on are
       // bound to it. A null return (no subscribers), a throw, or a missing server all leave the
       // geometry untracked, and the daemon then omits the identity so a control client fails closed.
@@ -3252,7 +3874,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    */
   recordInitialObservationStreamHierarchy(
     hierarchy: ViewHierarchyResult,
-    captureSequence: number | null
+    captureSequence: number | null,
   ): void {
     this.screenGeometry.clear();
     this.updateCachedScreenDimensions(hierarchy);
@@ -3287,12 +3909,16 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       // (nativeScale === 1), so a post-#4548 runner's frame is canonical pixels as-is; the binding
       // carries that declaration so a mid-flight metadata flip cannot relabel the frame.
       server.pushScreenshotUpdate(
-        this.device.deviceId, screenshotBase64, screenWidth, screenHeight, metadata,
+        this.device.deviceId,
+        screenshotBase64,
+        screenWidth,
+        screenHeight,
+        metadata,
         {
           ...screenshotBindingPushOptions(binding),
           rotation,
           ...(frameContext === undefined ? {} : { frameContext }),
-        }
+        },
       );
     } catch (error) {
       logger.debug(`[CTRL_PROXY] Failed to push screenshot to observation stream: ${error}`);
@@ -3335,7 +3961,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         bestDimensions.width,
         bestDimensions.height,
         this.reportedScaleMetadata ? COORDINATE_SPACE_PX : undefined,
-        this.reportedScaleMetadata?.nativeScale
+        this.reportedScaleMetadata?.nativeScale,
       );
     } else {
       // No usable window bounds in this hierarchy. Clearing (rather than keeping the previous
@@ -3362,7 +3988,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         (result: ScreenshotCaptureResult) => {
           if (result.data) {
             this.pushScreenshotToObservationStream(
-              result.data, result, result.captureBinding, result.frameContext, result.rotation
+              result.data,
+              result,
+              result.captureBinding,
+              result.frameContext,
+              result.rotation,
             );
           }
         },
@@ -3379,7 +4009,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         () => {
           const server = getDeviceDataStreamServer();
           return !!server && server.hasSubscriberForDevice(this.device.deviceId);
-        }
+        },
       );
     }
     return this.screenshotBackoffScheduler;
@@ -3413,8 +4043,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     try {
       this.screenshotObservationStreamSuppressions.add(requestId);
       const screenshotPromise = this.requestManager.register<ScreenshotResult>(
-        requestId, "screenshot", 3000,
-        (_id, _type, _timeout) => ({ success: false, error: CTRLPROXY_SCREENSHOT_TIMEOUT_ERROR })
+        requestId,
+        "screenshot",
+        3000,
+        (_id, _type, _timeout) => ({ success: false, error: CTRLPROXY_SCREENSHOT_TIMEOUT_ERROR }),
       );
 
       // Advance the shared rate-limit floor clock at the a11y-request boundary so a direct capture
@@ -3432,10 +4064,14 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         }
 
         this.a11yScreenshotFailures++;
-        if (this.a11yScreenshotSupported === null &&
-            this.a11yScreenshotFailures >= AndroidCtrlProxyClient.A11Y_SCREENSHOT_MAX_FAILURES) {
-          logger.info("[CTRL_PROXY] Accessibility service screenshot not supported after " +
-            `${this.a11yScreenshotFailures} consecutive failures, falling back to ADB screencap`);
+        if (
+          this.a11yScreenshotSupported === null &&
+          this.a11yScreenshotFailures >= AndroidCtrlProxyClient.A11Y_SCREENSHOT_MAX_FAILURES
+        ) {
+          logger.info(
+            "[CTRL_PROXY] Accessibility service screenshot not supported after " +
+              `${this.a11yScreenshotFailures} consecutive failures, falling back to ADB screencap`,
+          );
           this.a11yScreenshotSupported = false;
         }
         return this.captureScreenshotViaAdb(fallbackReasonForCtrlProxyFailure(result.error));
@@ -3456,7 +4092,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         ...screenshotPerformanceMetadataFrom(result),
       };
     } catch (error) {
-      this.requestManager.resolve<ScreenshotResult>(requestId, { success: false, error: `${error}` });
+      this.requestManager.resolve<ScreenshotResult>(requestId, {
+        success: false,
+        error: `${error}`,
+      });
       return this.captureScreenshotViaAdb("ctrlproxy_exception");
     } finally {
       this.screenshotObservationStreamSuppressions.delete(requestId);
@@ -3467,7 +4106,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    * Fallback screenshot capture via ADB screencap for devices that don't support
    * accessibility service screenshots (API < 30).
    */
-  private async captureScreenshotViaAdb(fallbackReason?: ScreenshotFallbackReason): Promise<ScreenshotCaptureResult> {
+  private async captureScreenshotViaAdb(
+    fallbackReason?: ScreenshotFallbackReason,
+  ): Promise<ScreenshotCaptureResult> {
     // Bind the geometry current when the ADB request begins, before its await can let a newer
     // hierarchy relabel the returned pixels.
     const captureBinding = this.screenGeometry.bind() ?? undefined;
@@ -3534,7 +4175,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         deviceId: this.device.deviceId,
         adb: this.adb,
         installedAppsStore: this.getInstalledAppsRepository(),
-        timer: this.timer
+        timer: this.timer,
       });
     }
     return this.workProfileMonitor;
@@ -3585,7 +4226,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         }
       } else {
         const isSystem = event.isSystem === true;
-        await repo.upsertInstalledApp(deviceId, event.userId, event.packageName, isSystem, eventTimestamp);
+        await repo.upsertInstalledApp(
+          deviceId,
+          event.userId,
+          event.packageName,
+          isSystem,
+          eventTimestamp,
+        );
       }
 
       // Notify work profile monitor that this user has accessibility service
@@ -3611,7 +4258,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   private async handleHandledExceptionEvent(event: HandledExceptionEvent): Promise<void> {
-    logger.info(`[CTRL_PROXY] Received handled exception: ${event.exceptionClass} from ${event.packageName}`);
+    logger.info(
+      `[CTRL_PROXY] Received handled exception: ${event.exceptionClass} from ${event.packageName}`,
+    );
     await this.getSdkEventIngestor().recordHandledException(event);
   }
 
@@ -3620,7 +4269,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   private async waitForHandshake(
-    timeoutMs: number = AndroidCtrlProxyClient.HANDSHAKE_WAIT_TIMEOUT_MS
+    timeoutMs: number = AndroidCtrlProxyClient.HANDSHAKE_WAIT_TIMEOUT_MS,
   ): Promise<void> {
     const deadline = this.timer.now() + timeoutMs;
     while (this.supportedCommands === null && this.timer.now() < deadline) {
@@ -3656,7 +4305,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   private async handleCrashEvent(event: SdkCrashPayload): Promise<void> {
-    logger.info(`[CTRL_PROXY] Received crash: ${event.exceptionClass} on thread ${event.threadName} from ${event.packageName}`);
+    logger.info(
+      `[CTRL_PROXY] Received crash: ${event.exceptionClass} on thread ${event.threadName} from ${event.packageName}`,
+    );
     await Promise.all([
       this.persistCrash(event),
       this.getSdkEventIngestor().recordCrashAnalytics(event),
@@ -3672,7 +4323,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   private async handleAnrEvent(event: SdkAnrPayload): Promise<void> {
-    logger.info(`[CTRL_PROXY] Received ANR: pid=${event.pid}, process=${event.processName}, importance=${event.importance}`);
+    logger.info(
+      `[CTRL_PROXY] Received ANR: pid=${event.pid}, process=${event.processName}, importance=${event.importance}`,
+    );
     const packageName = event.packageName ?? event.processName;
     await Promise.all([
       this.persistAnr(event),
@@ -3686,12 +4339,15 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
     for (const line of lines) {
       const trimmed = line.trim();
-      const match = trimmed.match(/^at\s+([a-zA-Z0-9$_.]+)\.([a-zA-Z0-9$_<>]+)\(([^:)]+):?(\d+)?\)$/);
+      const match = trimmed.match(
+        /^at\s+([a-zA-Z0-9$_.]+)\.([a-zA-Z0-9$_<>]+)\(([^:)]+):?(\d+)?\)$/,
+      );
       if (match) {
         const [, fullClassName, methodName, fileName, lineNumberStr] = match;
         const lineNumber = lineNumberStr ? parseInt(lineNumberStr, 10) : undefined;
 
-        const isAppCode = fullClassName.startsWith(packageName) ||
+        const isAppCode =
+          fullClassName.startsWith(packageName) ||
           fullClassName.includes(packageName.split(".").slice(0, 2).join("."));
 
         elements.push({
@@ -3717,9 +4373,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       // teardown — route through the barrier so it drains (or is skipped) before
       // closeDatabase() rather than racing the closing connection (issue #2792).
       await getInstalledAppsCacheWriteCoordinator().invalidate(this.device.deviceId, () =>
-        getDbWriteBarrier().track(() =>
-          this.getInstalledAppsRepository().markDeviceStale(this.device.deviceId)
-        ).then(() => undefined)
+        getDbWriteBarrier()
+          .track(() => this.getInstalledAppsRepository().markDeviceStale(this.device.deviceId))
+          .then(() => undefined),
       );
       logger.info(`[CTRL_PROXY] Marked installed apps cache stale (${reason})`);
     } catch (error) {
@@ -3735,11 +4391,21 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
  */
 function compactifyNode(node: AccessibilityNode): Record<string, unknown> {
   const compact: Record<string, unknown> = {};
-  if (node.className) {compact.className = node.className;}
-  if (node["resource-id"]) {compact["resource-id"] = node["resource-id"];}
-  if (node.text) {compact.text = node.text;}
-  if (node["content-desc"]) {compact["content-desc"] = node["content-desc"];}
-  if (node.scrollable === "true") {compact.scrollable = "true";}
+  if (node.className) {
+    compact.className = node.className;
+  }
+  if (node["resource-id"]) {
+    compact["resource-id"] = node["resource-id"];
+  }
+  if (node.text) {
+    compact.text = node.text;
+  }
+  if (node["content-desc"]) {
+    compact["content-desc"] = node["content-desc"];
+  }
+  if (node.scrollable === "true") {
+    compact.scrollable = "true";
+  }
 
   if (node.node) {
     const children = Array.isArray(node.node) ? node.node : [node.node];

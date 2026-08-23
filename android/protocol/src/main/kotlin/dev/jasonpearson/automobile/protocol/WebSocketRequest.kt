@@ -235,6 +235,19 @@ data class RequestAction(
   val boundsBottom: Int? = null,
 ) : WebSocketRequest()
 
+/**
+ * Activates a live [android.text.style.ClickableSpan] without degrading to a node or coordinate
+ * tap. [selector] scopes the search to a uniquely re-resolved text owner when supplied.
+ */
+@Serializable
+@SerialName("request_activate_accessibility_link")
+data class RequestActivateAccessibilityLink(
+  override val requestId: String? = null,
+  val text: String,
+  val occurrence: Int = 0,
+  val selector: NodeSelector? = null,
+) : WebSocketRequest()
+
 @Serializable
 @SerialName("request_hit_test")
 data class RequestHitTest(

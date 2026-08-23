@@ -20,7 +20,7 @@ function zodIssues(fn: () => unknown): z.core.$ZodIssue[] {
 
 function expectRejectedKey(schema: z.ZodType, input: unknown, key: string): void {
   const unrecognized = zodIssues(() => schema.parse(input)).find(
-    issue => issue.code === "unrecognized_keys"
+    (issue) => issue.code === "unrecognized_keys",
   ) as { keys?: string[] } | undefined;
   expect(unrecognized, `expected an unrecognized_keys issue for "${key}"`).toBeDefined();
   expect(unrecognized!.keys).toContain(key);
@@ -65,7 +65,7 @@ describe("tapOn schema", () => {
       tapOnSchema.parse({
         platform: "android",
         selector: { text: "Login", elementId: "com.app:id/btn_login" },
-      })
+      }),
     ).toThrow();
   });
 
@@ -74,7 +74,7 @@ describe("tapOn schema", () => {
       tapOnSchema.parse({
         platform: "ios",
         selector: { textAny: [] },
-      })
+      }),
     ).toThrow();
   });
 
@@ -82,7 +82,7 @@ describe("tapOn schema", () => {
     expect(() =>
       tapOnSchema.parse({
         platform: "android",
-      })
+      }),
     ).toThrow();
   });
 
@@ -91,7 +91,7 @@ describe("tapOn schema", () => {
       tapOnSchema.parse({
         platform: "android",
         text: "Login",
-      })
+      }),
     ).toThrow();
   });
 
@@ -110,6 +110,67 @@ describe("tapOn schema", () => {
       selector: { text: "Login" },
     });
     expect(result.sibling).toBeUndefined();
+    expect(result.subtext).toBeUndefined();
+  });
+
+  test("accepts direct semantic link activation on both platforms", () => {
+    const result = tapOnSchema.parse({
+      platform: "ios",
+      selector: { accessibilityLink: "Terms of Service" },
+      index: 1,
+    });
+    expect(result.selector).toEqual({ accessibilityLink: "Terms of Service" });
+    expect(result.index).toBe(1);
+  });
+
+  test.each([
+    ["non-tap action", { action: "focus" }],
+    ["retry", { retryIfNoChange: true }],
+    ["ensure", { ensureTap: true }],
+    ["searchUntil", { searchUntil: { duration: 500 } }],
+  ] as const)("rejects semantic links with %s", (_label, target) => {
+    expect(() =>
+      tapOnSchema.parse({
+        platform: "android",
+        ...target,
+        selector: { accessibilityLink: "Terms of Service" },
+      }),
+    ).toThrow();
+  });
+
+  test("accepts a container-scoped semantic link and defaults its occurrence", () => {
+    const result = tapOnSchema.parse({
+      platform: "android",
+      selector: { elementId: "com.app:id/legal" },
+      subtext: { text: "Terms of Service" },
+    });
+    expect(result.subtext).toEqual({ text: "Terms of Service" });
+  });
+
+  test("rejects competing semantic forms and indexed owner-scoped targets", () => {
+    expect(() =>
+      tapOnSchema.parse({
+        platform: "android",
+        selector: { accessibilityLink: "Terms of Service" },
+        subtext: { text: "Privacy Policy" },
+      }),
+    ).toThrow();
+    expect(() =>
+      tapOnSchema.parse({
+        platform: "android",
+        selector: { elementId: "com.app:id/legal" },
+        index: 1,
+        subtext: { text: "Terms of Service" },
+      }),
+    ).toThrow();
+    expect(() =>
+      tapOnSchema.parse({
+        platform: "android",
+        selector: { elementId: "com.app:id/legal" },
+        selectionStrategy: "random",
+        subtext: { text: "Terms of Service" },
+      }),
+    ).toThrow();
   });
 
   test("accepts container", () => {
@@ -150,7 +211,7 @@ describe("tapOn schema", () => {
     expectRejectedKey(
       tapOnSchema,
       { platform: "android", selector: { text: "Login" }, [key]: value },
-      key
+      key,
     );
   });
 });
@@ -204,8 +265,8 @@ describe("tapAny schema", () => {
   // path ["action"], not `unrecognized_keys`. Asserted separately.
   test("rejects the focus action as an invalid value on the action path", () => {
     const actionIssue = zodIssues(() =>
-      tapAnySchema.parse({ platform: "android", action: "focus" })
-    ).find(issue => issue.path[0] === "action");
+      tapAnySchema.parse({ platform: "android", action: "focus" }),
+    ).find((issue) => issue.path[0] === "action");
     expect(actionIssue).toBeDefined();
     expect(actionIssue!.code).toBe("invalid_value");
   });

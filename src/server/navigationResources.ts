@@ -19,8 +19,10 @@ export const NAVIGATION_RESOURCE_URIS = {
   GRAPH: "automobile:navigation/graph",
   GRAPH_WITH_APP_ID: "automobile:navigation/graph?appId={appId}",
   NODE_BY_ID: "automobile:navigation/nodes/{nodeId}",
+  NODE_BY_ID_WITH_APP_ID: "automobile:navigation/nodes/{nodeId}?appId={appId}",
   NODE_BY_SCREEN: "automobile:navigation/nodes?screen={screenName}",
   NODE_SCREENSHOT: "automobile:navigation/nodes/{nodeId}/screenshot",
+  NODE_SCREENSHOT_WITH_APP_ID: "automobile:navigation/nodes/{nodeId}/screenshot?appId={appId}",
   HISTORY: "automobile:navigation/history",
   HISTORY_WITH_CURSOR: "automobile:navigation/history?cursor={cursor}",
   HISTORY_WITH_LIMIT: "automobile:navigation/history?limit={limit}",
@@ -87,6 +89,26 @@ function attachGraphUpdateListener(provider: NavigationGraphSummaryProvider): vo
 export function setNavigationGraphProvider(provider: NavigationGraphResourceProvider | null): void {
   navigationGraphProvider = provider;
   attachGraphUpdateListener(getNavigationGraphProvider());
+}
+
+// Narrow seam over the screenshot manager: only what the screenshot resource
+// needs (resolve + read a screenshot file), so tests can scope screenshots per
+// app without touching the real file-backed singleton (#4933).
+interface NavigationScreenshotResourceProvider {
+  findExistingScreenshot(appId: string, screenName: string): Promise<string | null>;
+  readScreenshot(screenshotPath: string): Promise<Buffer | null>;
+}
+
+let navigationScreenshotProvider: NavigationScreenshotResourceProvider | null = null;
+
+function getNavigationScreenshotProvider(): NavigationScreenshotResourceProvider {
+  return navigationScreenshotProvider ?? NavigationScreenshotManager.getInstance();
+}
+
+export function setNavigationScreenshotProvider(
+  provider: NavigationScreenshotResourceProvider | null
+): void {
+  navigationScreenshotProvider = provider;
 }
 
 async function getNavigationGraphResource(appId?: string): Promise<ResourceContent> {
@@ -178,11 +200,16 @@ function buildNavigationNodeError(uri: string, error: string): ResourceContent {
   };
 }
 
-async function getNavigationNodeByIdResource(nodeId: number): Promise<ResourceContent> {
-  const uri = `automobile:navigation/nodes/${nodeId}`;
+async function getNavigationNodeByIdResource(
+  nodeId: number,
+  appId?: string
+): Promise<ResourceContent> {
+  const uri = appId
+    ? `automobile:navigation/nodes/${nodeId}?appId=${encodeURIComponent(appId)}`
+    : `automobile:navigation/nodes/${nodeId}`;
 
   try {
-    const nodeResource = await getNavigationGraphProvider().getNodeResourceById(nodeId);
+    const nodeResource = await getNavigationGraphProvider().getNodeResourceById(nodeId, appId);
     if (!nodeResource) {
       return buildNavigationNodeError(uri, `Navigation node ${nodeId} not found.`);
     }
@@ -241,12 +268,31 @@ function parseHistoryParams(params: Record<string, string>): {
   };
 }
 
-async function getNavigationNodeScreenshotResource(nodeId: number): Promise<ResourceContent> {
-  const uri = `automobile:navigation/nodes/${nodeId}/screenshot`;
+async function getNavigationNodeScreenshotResource(
+  nodeId: number,
+  appId?: string
+): Promise<ResourceContent> {
+  const uri = appId
+    ? `automobile:navigation/nodes/${nodeId}/screenshot?appId=${encodeURIComponent(appId)}`
+    : `automobile:navigation/nodes/${nodeId}/screenshot`;
 
   try {
-    // Get the node to find its screenshot path
-    const nodeResource = await getNavigationGraphProvider().getNodeResourceById(nodeId);
+    // Resolve the screenshot under the requested app, not the daemon's current
+    // foreground app: browsing a persisted app B while A (or none) is foregrounded
+    // must not return A's colliding screen or an empty result (#4933). An explicit
+    // appId short-circuits the current-app read, so offline browse never touches
+    // the foreground singleton.
+    const resolvedAppId = appId ?? NavigationGraphManager.getInstance().getCurrentAppId();
+    if (!resolvedAppId) {
+      return {
+        uri,
+        mimeType: "application/json",
+        text: JSON.stringify({ error: "No current app set." }, null, 2)
+      };
+    }
+
+    // Get the node (scoped to the resolved app) to find its screen name.
+    const nodeResource = await getNavigationGraphProvider().getNodeResourceById(nodeId, resolvedAppId);
     if (!nodeResource || !nodeResource.node) {
       return {
         uri,
@@ -255,21 +301,10 @@ async function getNavigationNodeScreenshotResource(nodeId: number): Promise<Reso
       };
     }
 
-    // Get the screenshot path from the database node
-    // The node from repository includes screenshot_path
-    const appId = NavigationGraphManager.getInstance().getCurrentAppId();
-    if (!appId) {
-      return {
-        uri,
-        mimeType: "application/json",
-        text: JSON.stringify({ error: "No current app set." }, null, 2)
-      };
-    }
-
     // Find screenshot for this screen using the screenshot manager
-    const screenshotManager = NavigationScreenshotManager.getInstance();
+    const screenshotManager = getNavigationScreenshotProvider();
     const screenshotPath = await screenshotManager.findExistingScreenshot(
-      appId,
+      resolvedAppId,
       nodeResource.node.screenName
     );
 
@@ -391,6 +426,26 @@ export function registerNavigationResources(options: {
     historyHandler
   );
 
+  // Registered before NODE_BY_ID: the base template's `([^/&]+)` node-id capture
+  // would otherwise greedily swallow a `?appId=` suffix and win the match (#4933).
+  ResourceRegistry.registerTemplate(
+    NAVIGATION_RESOURCE_URIS.NODE_BY_ID_WITH_APP_ID,
+    "Navigation Graph Node (App-Specific)",
+    "Detailed navigation graph node by node ID, resolved under a specific app ID.",
+    "application/json",
+    async params => {
+      const nodeId = Number(params.nodeId);
+      const appId = params.appId ? decodeURIComponent(params.appId).trim() : undefined;
+      if (!Number.isFinite(nodeId)) {
+        return buildNavigationNodeError(
+          `automobile:navigation/nodes/${params.nodeId}`,
+          `Invalid navigation node id: ${params.nodeId}`
+        );
+      }
+      return getNavigationNodeByIdResource(nodeId, appId);
+    }
+  );
+
   ResourceRegistry.registerTemplate(
     NAVIGATION_RESOURCE_URIS.NODE_BY_ID,
     "Navigation Graph Node",
@@ -422,6 +477,28 @@ export function registerNavigationResources(options: {
         );
       }
       return getNavigationNodeByScreenResource(screenName);
+    }
+  );
+
+  // Registered before NODE_SCREENSHOT so the app-scoped variant is matched for
+  // `.../screenshot?appId=...` URIs; resolves the screenshot under the named app
+  // instead of the daemon's current foreground app (#4933).
+  ResourceRegistry.registerTemplate(
+    NAVIGATION_RESOURCE_URIS.NODE_SCREENSHOT_WITH_APP_ID,
+    "Navigation Node Screenshot (App-Specific)",
+    "Screenshot thumbnail for a navigation graph node, resolved under a specific app ID (WebP image).",
+    "image/webp",
+    async params => {
+      const nodeId = Number(params.nodeId);
+      const appId = params.appId ? decodeURIComponent(params.appId).trim() : undefined;
+      if (!Number.isFinite(nodeId)) {
+        return {
+          uri: `automobile:navigation/nodes/${params.nodeId}/screenshot`,
+          mimeType: "application/json",
+          text: JSON.stringify({ error: `Invalid node id: ${params.nodeId}` }, null, 2)
+        };
+      }
+      return getNavigationNodeScreenshotResource(nodeId, appId);
     }
   );
 

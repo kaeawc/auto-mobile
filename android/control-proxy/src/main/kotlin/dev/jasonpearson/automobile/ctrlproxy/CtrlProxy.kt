@@ -4211,14 +4211,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
               }
             }
         }
-        if (selector == null) {
-          for (index in 0 until node.childCount) {
-            node.getChild(index)?.let { child ->
-              try {
-                visit(child)
-              } finally {
-                child.recycle()
-              }
+        for (index in 0 until node.childCount) {
+          node.getChild(index)?.let { child ->
+            try {
+              visit(child)
+            } finally {
+              child.recycle()
             }
           }
         }

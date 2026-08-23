@@ -285,6 +285,21 @@ export const tapOnSchema = withJsonSchemaOverride(
         path: value.retryIfNoChange ? ["retryIfNoChange"] : ["ensureTap"],
       });
     }
+    if (value.searchUntil) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "semantic link activation cannot use searchUntil",
+        path: ["searchUntil"],
+      });
+    }
+    if (value.subtext && value.index !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "owner-scoped semantic link activation cannot use index; use a unique owner selector",
+        path: ["index"],
+      });
+    }
   }),
   (js) => {
     compactExclusiveSelectorProperties(js, ["selector", "container"]);
@@ -304,8 +319,23 @@ export const tapOnSchema = withJsonSchemaOverride(
         sibling: { not: { const: true } },
         retryIfNoChange: { not: { const: true } },
         ensureTap: { not: { const: true } },
+        searchUntil: { not: {} },
       },
     };
+    js.allOf = [
+      {
+        not: {
+          required: ["subtext"],
+          properties: {
+            selector: { required: ["accessibilityLink"] },
+          },
+        },
+      },
+      {
+        if: { required: ["subtext"] },
+        then: { not: { required: ["index"] } },
+      },
+    ];
   },
 );
 

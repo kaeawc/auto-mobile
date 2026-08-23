@@ -9382,9 +9382,42 @@
             "not": {
               "const": true
             }
+          },
+          "searchUntil": {
+            "not": {}
           }
         }
-      }
+      },
+      "allOf": [
+        {
+          "not": {
+            "required": [
+              "subtext"
+            ],
+            "properties": {
+              "selector": {
+                "required": [
+                  "accessibilityLink"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "subtext"
+            ]
+          },
+          "then": {
+            "not": {
+              "required": [
+                "index"
+              ]
+            }
+          }
+        }
+      ]
     },
     "outputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

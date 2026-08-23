@@ -127,6 +127,7 @@ describe("tapOn schema", () => {
     ["non-tap action", { action: "focus" }],
     ["retry", { retryIfNoChange: true }],
     ["ensure", { ensureTap: true }],
+    ["searchUntil", { searchUntil: { duration: 500 } }],
   ] as const)("rejects semantic links with %s", (_label, target) => {
     expect(() =>
       tapOnSchema.parse({
@@ -144,6 +145,24 @@ describe("tapOn schema", () => {
       subtext: { text: "Terms of Service" },
     });
     expect(result.subtext).toEqual({ text: "Terms of Service" });
+  });
+
+  test("rejects competing semantic forms and indexed owner-scoped targets", () => {
+    expect(() =>
+      tapOnSchema.parse({
+        platform: "android",
+        selector: { accessibilityLink: "Terms of Service" },
+        subtext: { text: "Privacy Policy" },
+      }),
+    ).toThrow();
+    expect(() =>
+      tapOnSchema.parse({
+        platform: "android",
+        selector: { elementId: "com.app:id/legal" },
+        index: 1,
+        subtext: { text: "Terms of Service" },
+      }),
+    ).toThrow();
   });
 
   test("accepts container", () => {

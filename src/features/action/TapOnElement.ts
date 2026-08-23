@@ -303,6 +303,9 @@ export class TapOnElement extends BaseVisualChange {
     if (options.retryIfNoChange || options.ensureTap) {
       return "tapOn semantic link activation cannot retry an acknowledged link activation";
     }
+    if (options.searchUntil) {
+      return "tapOn semantic link activation cannot use searchUntil";
+    }
     const target = options.subtext?.text ?? options.accessibilityLink;
     if (!target || target.trim().length === 0) {
       return "tapOn semantic link text must be non-empty";
@@ -310,6 +313,9 @@ export class TapOnElement extends BaseVisualChange {
     const occurrence = options.subtext?.occurrence ?? options.index ?? 0;
     if (!Number.isInteger(occurrence) || occurrence < 0) {
       return "tapOn semantic link occurrence must be a non-negative integer";
+    }
+    if (options.subtext && options.index !== undefined) {
+      return "tapOn owner-scoped semantic link activation cannot use index; use a unique owner selector";
     }
     return null;
   }

@@ -138,6 +138,21 @@ describe("Tool Registration Validation (Integration Tests)", () => {
     expect(validate({ ...baseInput, platform: "ios", action: "tap" })).toBe(true);
     expect(validate({ ...baseInput, platform: "android", action: "focus" })).toBe(false);
     expect(validate({ ...baseInput, platform: "android", retryIfNoChange: true })).toBe(false);
+    expect(
+      validate({
+        ...baseInput,
+        platform: "android",
+        subtext: { text: "Privacy Policy" },
+      }),
+    ).toBe(false);
+    expect(
+      validate({
+        platform: "android",
+        selector: { elementId: "com.example:id/legal" },
+        subtext: { text: "Terms of Service" },
+        index: 1,
+      }),
+    ).toBe(false);
   });
 
   // R9 (issue #4183): a negative assertion so the compile check cannot silently

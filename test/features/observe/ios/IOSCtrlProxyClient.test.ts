@@ -10,6 +10,7 @@ import {
   WebSocketState
 } from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { DefaultRetryExecutor } from "../../../../src/utils/retry/RetryExecutor";
 import { FakeScreenshotBackoffScheduler } from "../../../../src/features/observe/ScreenshotBackoffScheduler";
 import type { DeviceConnectionLostNotifier } from "../../../../src/features/observe/DeviceConnectionLostNotifier";
 import { FakeIosSdkEventIngestor } from "../../../fakes/FakeIosSdkEventIngestor";
@@ -3131,6 +3132,142 @@ describe("IOSCtrlProxyClient", function() {
           expect(bound.width).toBe(vector.expectedPixelWidth);
           expect(bound.height).toBe(vector.expectedPixelHeight);
         });
+      }
+    });
+  });
+
+  describe("verifyServiceReady", function() {
+    // Regression pin for the iOS readiness loop (issue #5460). Behaviour under test:
+    // the two-phase probe (ensureConnected -> on false, count a failed attempt and
+    // wait; else requestHierarchySync and succeed on a truthy `hierarchy`), the
+    // maxAttempts budget, the fixed between-attempts delay, and the boolean outcome.
+    //
+    // Each test stubs `ensureConnected` and `requestHierarchySync` on a fresh
+    // instance so no WebSocket/runner is involved, and drives an auto-advancing
+    // FakeTimer so the delays resolve without wall-clock time. `getSleepHistory()`
+    // pins the exact number of between-attempts waits — this is where the one
+    // intentional behaviour change lands (RetryExecutor waits between attempts only,
+    // i.e. maxAttempts - 1 waits, dropping the old loop's wasted trailing wait after
+    // the final failed attempt).
+    interface ProbeStub {
+      connect: boolean[] | boolean;
+      hierarchy: Array<{ hierarchy: unknown } | null | Error>;
+    }
+
+    const buildClient = (timer: FakeTimer, stub: ProbeStub): IOSCtrlProxyClient => {
+      const client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        createSuccessWebSocketFactory(timer),
+        timer,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        // Retry delays must run on the SAME fake timer so the test controls them.
+        new DefaultRetryExecutor(timer)
+      );
+
+      let connectIndex = 0;
+      (client as any).ensureConnected = async (): Promise<boolean> => {
+        if (typeof stub.connect === "boolean") {
+          return stub.connect;
+        }
+        const value = stub.connect[Math.min(connectIndex, stub.connect.length - 1)]!;
+        connectIndex++;
+        return value;
+      };
+
+      let hierarchyIndex = 0;
+      (client as any).requestHierarchySync = async (): Promise<{ hierarchy: unknown } | null> => {
+        const value = stub.hierarchy[Math.min(hierarchyIndex, stub.hierarchy.length - 1)]!;
+        hierarchyIndex++;
+        if (value instanceof Error) {
+          throw value;
+        }
+        return value;
+      };
+
+      return client;
+    };
+
+    test("returns true on the first attempt when connected and hierarchy is present", async function() {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const client = buildClient(timer, { connect: true, hierarchy: [{ hierarchy: {} }] });
+      try {
+        expect(await client.verifyServiceReady(3, 1000, 5000)).toBe(true);
+        // Success on attempt 1 waits zero times.
+        expect(timer.getSleepHistory()).toEqual([]);
+      } finally {
+        await client.close();
+      }
+    });
+
+    test("two-phase probe: a failed connection consumes an attempt, then it succeeds", async function() {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      // Attempt 1 fails to connect (waits, no hierarchy request), attempt 2 connects
+      // and returns a hierarchy.
+      const client = buildClient(timer, { connect: [false, true], hierarchy: [{ hierarchy: {} }] });
+      try {
+        expect(await client.verifyServiceReady(3, 1000, 5000)).toBe(true);
+        expect(timer.getSleepHistory()).toEqual([1000]);
+      } finally {
+        await client.close();
+      }
+    });
+
+    test("retries when connected but hierarchy is null, then succeeds", async function() {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const client = buildClient(timer, { connect: true, hierarchy: [null, { hierarchy: {} }] });
+      try {
+        expect(await client.verifyServiceReady(3, 1000, 5000)).toBe(true);
+        expect(timer.getSleepHistory()).toEqual([1000]);
+      } finally {
+        await client.close();
+      }
+    });
+
+    test("treats a thrown hierarchy request as a failed attempt", async function() {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const client = buildClient(timer, {
+        connect: true,
+        hierarchy: [new Error("hierarchy request failed"), { hierarchy: {} }],
+      });
+      try {
+        expect(await client.verifyServiceReady(3, 1000, 5000)).toBe(true);
+        expect(timer.getSleepHistory()).toEqual([1000]);
+      } finally {
+        await client.close();
+      }
+    });
+
+    test("returns false after exhausting maxAttempts when hierarchy never becomes ready", async function() {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const client = buildClient(timer, { connect: true, hierarchy: [null] });
+      try {
+        expect(await client.verifyServiceReady(3, 1000, 5000)).toBe(false);
+        // Three attempts, waiting only BETWEEN attempts (RetryExecutor semantics):
+        // maxAttempts - 1 = 2 waits, no wasted trailing wait after the final failure.
+        expect(timer.getSleepHistory()).toEqual([1000, 1000]);
+      } finally {
+        await client.close();
+      }
+    });
+
+    test("returns false when the device never connects", async function() {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const client = buildClient(timer, { connect: false, hierarchy: [null] });
+      try {
+        expect(await client.verifyServiceReady(3, 1000, 5000)).toBe(false);
+        expect(timer.getSleepHistory()).toEqual([1000, 1000]);
+      } finally {
+        await client.close();
       }
     });
   });

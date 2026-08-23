@@ -27,6 +27,7 @@ import { readScreenScaleMetadata } from "../../../models/ScreenScaleMetadata";
 import { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOptions";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../../utils/SystemTimer";
+import { RetryExecutor, defaultRetryExecutor } from "../../../utils/retry/RetryExecutor";
 import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../../../utils/PortManager";
 import { requireBootedDevice } from "../../../utils/requireBootedDevice";
 import { IOSCtrlProxyManager, CtrlProxyIosManager } from "../../../utils/IOSCtrlProxyManager";
@@ -490,9 +491,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     serviceManagerFactory: ServiceManagerFactory = defaultServiceManagerFactory,
     bootedDeviceLister: BootedDeviceLister = defaultBootedDeviceLister,
     deviceConnectionLostNotifier: DeviceConnectionLostNotifier = observationStreamDeviceConnectionLostNotifier,
-    sdkEventIngestor?: IosSdkEventIngestor
+    sdkEventIngestor?: IosSdkEventIngestor,
+    retryExecutor: RetryExecutor = defaultRetryExecutor
   ) {
-    super(timer, wsFactory, { connectionResetMs: IOSCtrlProxyClient.CONNECTION_RESET_MS });
+    super(timer, wsFactory, { connectionResetMs: IOSCtrlProxyClient.CONNECTION_RESET_MS }, retryExecutor);
     this.device = device;
     this.port = port;
     this.serviceManagerFactory = serviceManagerFactory;
@@ -705,7 +707,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     serviceManagerFactory: ServiceManagerFactory = noOpServiceManagerFactory,
     bootedDeviceLister?: BootedDeviceLister,
     deviceConnectionLostNotifier?: DeviceConnectionLostNotifier,
-    sdkEventIngestor?: IosSdkEventIngestor
+    sdkEventIngestor?: IosSdkEventIngestor,
+    retryExecutor?: RetryExecutor
   ): IOSCtrlProxyClient {
     // Default test lister always reports the device as booted so existing tests
     // are unaffected. Tests that verify boot-check behavior supply their own lister.
@@ -718,7 +721,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       serviceManagerFactory,
       lister,
       deviceConnectionLostNotifier,
-      sdkEventIngestor
+      sdkEventIngestor,
+      retryExecutor
     );
   }
 
@@ -2107,25 +2111,35 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     delayMs: number = 1000,
     timeoutMs: number = 5000
   ): Promise<boolean> {
-    for (let i = 0; i < maxAttempts; i++) {
-      if (!await this.ensureConnected()) {
-        await this.timer.sleep(delayMs);
-        continue;
-      }
+    // Sits on the shared RetryExecutor (issue #5460), matching how
+    // DeviceServiceClient.waitForConnection and AndroidCtrlProxyClient.verifyServiceReady
+    // already retry service-readiness. The two-phase probe is preserved: a failed
+    // connection throws to consume an attempt without a hierarchy request, and a
+    // connected-but-empty/failed hierarchy throws to retry. Any throw becomes a
+    // retryable attempt with a fixed `delayMs` wait between attempts — so the loop
+    // waits maxAttempts - 1 times, not once per attempt as the previous hand-rolled
+    // loop did (it slept even after the final failed attempt; that trailing wait was
+    // pure wasted latency on the error path).
+    const result = await this.retryExecutor.execute(
+      async () => {
+        if (!await this.ensureConnected()) {
+          throw new Error("CtrlProxy WebSocket not connected");
+        }
 
-      // Try to get hierarchy to verify service is working
-      try {
-        const result = await this.requestHierarchySync(undefined, false, undefined, timeoutMs);
-        if (result?.hierarchy) {
+        const hierarchyResult = await this.requestHierarchySync(undefined, false, undefined, timeoutMs);
+        if (hierarchyResult?.hierarchy) {
           return true;
         }
-      } catch {
-        // Continue retrying
-      }
 
-      await this.timer.sleep(delayMs);
-    }
-    return false;
+        throw new Error("CtrlProxy returned no hierarchy");
+      },
+      {
+        maxAttempts,
+        delays: delayMs,
+      }
+    );
+
+    return result.value ?? false;
   }
 
   // ===========================================================================

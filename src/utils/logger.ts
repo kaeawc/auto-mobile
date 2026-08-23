@@ -304,19 +304,26 @@ const safeStringify = (obj: any): string => {
     return String(obj);
   }
 
-  return JSON.stringify(obj, (_key, value) => {
-    if (typeof value === "object" && value !== null) {
-      // Filter sensitive environment-like keys
-      const filtered: any = {};
-      for (const [k, v] of Object.entries(value)) {
-        if (!SENSITIVE_ENV_KEYS.has(k.toUpperCase())) {
-          filtered[k] = v;
+  try {
+    return JSON.stringify(obj, (_key, value) => {
+      if (typeof value === "object" && value !== null) {
+        // Filter sensitive environment-like keys
+        const filtered: any = {};
+        for (const [k, v] of Object.entries(value)) {
+          if (!SENSITIVE_ENV_KEYS.has(k.toUpperCase())) {
+            filtered[k] = v;
+          }
         }
+        return filtered;
       }
-      return filtered;
-    }
-    return value;
-  });
+      return value;
+    });
+  } catch (error) {
+    // Circular and otherwise unserializable diagnostic values are expected at
+    // a logging boundary; report them and keep the primary record valid.
+    reportLogFailure(error);
+    return "[unserializable]";
+  }
 };
 
 // Function to sanitize log message to prevent log injection
@@ -352,6 +359,23 @@ const formatLogRecord = (level: string, message: string, args: any[]): string =>
   return `${timestamp} [${level}] ${boundedMessage}`;
 };
 
+const reportLogFailure = (error: unknown): void => {
+  const message = sanitizeMessage(String(error));
+  if (logFormat === "json") {
+    process.stderr.write(
+      `${JSON.stringify({
+        timestamp: new Date().toISOString(),
+        level: "error",
+        component: ownLogPrefix,
+        event: "log.write_failed",
+        message,
+      })}\n`,
+    );
+    return;
+  }
+  console.error("Failed to write log:", error);
+};
+
 const writeToLogFile = async (level: string, message: string, args: any[]) => {
   try {
     const safeLogMessage = formatLogRecord(level, message, args).replace(/[\r\n\t]/g, " ");
@@ -379,7 +403,7 @@ const writeToLogFile = async (level: string, message: string, args: any[]) => {
       process.stdout.write(`${safeLogMessage}\n`);
     }
   } catch (err) {
-    console.error("Failed to write log:", err);
+    reportLogFailure(err);
   }
 };
 
@@ -428,7 +452,7 @@ export const logger: Logger = {
     if (currentLogLevel <= LogLevel.DEBUG) {
       trackWrite(
         writeToLogFile("DEBUG", message, args).catch((err) => {
-          console.error("Failed to write debug log:", err);
+          reportLogFailure(err);
         }),
       );
     }
@@ -441,7 +465,7 @@ export const logger: Logger = {
     if (currentLogLevel <= LogLevel.INFO) {
       trackWrite(
         writeToLogFile("INFO", message, args).catch((err) => {
-          console.error("Failed to write info log:", err);
+          reportLogFailure(err);
         }),
       );
     }
@@ -454,7 +478,7 @@ export const logger: Logger = {
     if (currentLogLevel <= LogLevel.WARN) {
       trackWrite(
         writeToLogFile("WARN", message, args).catch((err) => {
-          console.error("Failed to write warn log:", err);
+          reportLogFailure(err);
         }),
       );
     }
@@ -467,7 +491,7 @@ export const logger: Logger = {
     if (currentLogLevel <= LogLevel.ERROR) {
       trackWrite(
         writeToLogFile("ERROR", message, args).catch((err) => {
-          console.error("Failed to write error log:", err);
+          reportLogFailure(err);
         }),
       );
     }

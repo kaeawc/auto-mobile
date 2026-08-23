@@ -2,7 +2,7 @@ import { performance } from "node:perf_hooks";
 import fs from "node:fs";
 import path from "node:path";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "./workingDirectory";
-import { resolveAutomobileLogFormat } from "./logger";
+import { logger, resolveAutomobileLogFormat } from "./logger";
 
 const STARTUP_BENCHMARK_PREFIX = "STARTUP_BENCHMARK";
 
@@ -141,11 +141,11 @@ export class StartupBenchmark {
     const payload = JSON.stringify(report);
 
     this.writeReport(payload);
-    process.stderr.write(
-      resolveAutomobileLogFormat() === "json"
-        ? `${payload}\n`
-        : `${STARTUP_BENCHMARK_PREFIX} ${payload}\n`,
-    );
+    if (resolveAutomobileLogFormat() === "json") {
+      logger.info(payload);
+      return;
+    }
+    process.stderr.write(`${STARTUP_BENCHMARK_PREFIX} ${payload}\n`);
   }
 
   private persistCheckpoint(): void {

@@ -561,6 +561,16 @@ class WebSocketServer(
     return synchronized(connections) { connections.size }
   }
 
+  /**
+   * Monotonic count of connections ever accepted since the server started — a per-connection
+   * "session epoch". Unlike [getConnectionCount] (the live count, which returns to 1 after a
+   * disconnect + reconnect and so cannot distinguish a continuous client from a reconnected one),
+   * this strictly increases on every new connection and never decreases. Observers use it as a
+   * session-generation marker to discard state accumulated under a previous connection after any
+   * disconnect, including one that happens with no intervening activity (issue #5470).
+   */
+  fun connectionEpoch(): Int = connectionCount.get()
+
   /** Suspends until a client has completed the WebSocket handshake. */
   suspend fun awaitFirstClientConnection() {
     firstClientConnection.await()

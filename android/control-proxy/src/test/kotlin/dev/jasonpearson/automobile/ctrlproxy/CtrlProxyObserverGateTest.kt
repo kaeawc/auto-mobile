@@ -155,28 +155,59 @@ class CtrlProxyObserverGateTest {
   }
 
   /**
-   * Bug 2: pending scroll deltas accumulated before the last client left must be discarded across a
-   * zero-observer gap, so the first post-reconnect scroll starts clean instead of adding onto stale
-   * state and broadcasting a bogus combined delta. A still-connected client's in-flight
-   * accumulation must be preserved untouched.
+   * Bug 2: a still-connected client's in-flight scroll accumulation must never be dropped — while
+   * the connection epoch is unchanged, successive samples add together as before.
    */
   @Test
-  fun `pending scroll deltas are discarded across a zero-observer gap`() {
-    val accumulated =
-      PendingScrollState(deltaX = 40, deltaY = -120, packageName = "com.example.app")
+  fun `pending scroll accumulates within a single connection session`() {
+    val epoch = 7
+    var pending = PendingScroll.NONE
+    pending =
+      accumulatePendingScroll(pending, deltaX = 10, deltaY = -5, packageName = "com.a", epoch)
+    pending =
+      accumulatePendingScroll(pending, deltaX = 4, deltaY = -1, packageName = "com.a", epoch)
 
-    // Last client gone: discard so the next scroll starts from zero.
-    assertEquals(
-      PendingScrollState.EMPTY,
-      pendingScrollAcrossGate(accumulated, connectionCount = 0),
-    )
-    assertEquals(
-      PendingScrollState.EMPTY,
-      pendingScrollAcrossGate(accumulated, connectionCount = -1),
-    )
+    assertEquals("deltas combine within a session", 14, pending.deltaX)
+    assertEquals(-6, pending.deltaY)
+    assertEquals("com.a", pending.packageName)
+    assertEquals(epoch, pending.sessionEpoch)
+  }
 
-    // Still observed: preserve the in-flight accumulation exactly, dropping nothing.
-    assertEquals(accumulated, pendingScrollAcrossGate(accumulated, connectionCount = 1))
-    assertEquals(accumulated, pendingScrollAcrossGate(accumulated, connectionCount = 3))
+  /**
+   * Bug 2 (event-free gap): pending deltas accumulated under one connection session must NOT
+   * combine with the first scroll of a NEW session. The discard is keyed on the monotonic
+   * connection epoch, which advances on the reconnect regardless of whether any accessibility event
+   * fired during the gap — so simulating "accumulate under epoch 7, then the next sample arrives
+   * under epoch 8" models a disconnect+reconnect with no intervening event.
+   */
+  @Test
+  fun `pending scroll deltas do not combine across a connection session change`() {
+    // Session 7: an in-flight scroll accumulates but has not yet been flushed/broadcast.
+    val stale =
+      accumulatePendingScroll(
+        PendingScroll.NONE,
+        deltaX = 40,
+        deltaY = -120,
+        packageName = "com.old.session",
+        currentEpoch = 7,
+      )
+    assertEquals(40, stale.deltaX)
+
+    // The only client disconnects and a new one connects with NO event in between: the epoch has
+    // advanced to 8 by the time the first post-reconnect scroll sample arrives.
+    val firstAfterReconnect =
+      accumulatePendingScroll(
+        stale,
+        deltaX = 3,
+        deltaY = 9,
+        packageName = "com.new.session",
+        currentEpoch = 8,
+      )
+
+    // Must start clean from the new sample, NOT 40 + 3 / -120 + 9.
+    assertEquals("stale deltaX must be discarded, not combined", 3, firstAfterReconnect.deltaX)
+    assertEquals("stale deltaY must be discarded, not combined", 9, firstAfterReconnect.deltaY)
+    assertEquals("com.new.session", firstAfterReconnect.packageName)
+    assertEquals(8, firstAfterReconnect.sessionEpoch)
   }
 }

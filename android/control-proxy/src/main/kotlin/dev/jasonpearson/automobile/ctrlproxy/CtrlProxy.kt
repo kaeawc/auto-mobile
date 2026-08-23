@@ -265,32 +265,52 @@ internal fun accessibilityEventWorkFor(
   }
 
 /**
- * Debounced-scroll accumulation state ([CtrlProxy.pendingScrollDeltaX] / `Y` / package name)
- * modeled as an immutable value so the "discard across an observer gap" decision is unit-testable.
+ * Debounced-scroll accumulation ([CtrlProxy.pendingScrollDeltaX] / `Y` / package name) tagged with
+ * the [WebSocketServer.connectionEpoch] it was accumulated under, modeled as an immutable value so
+ * the cross-session discard is unit-testable.
  */
-internal data class PendingScrollState(
+internal data class PendingScroll(
   val deltaX: Int,
   val deltaY: Int,
   val packageName: String?,
+  val sessionEpoch: Int,
 ) {
   companion object {
-    val EMPTY = PendingScrollState(deltaX = 0, deltaY = 0, packageName = null)
+    /** No accumulation yet, under no session. */
+    val NONE = PendingScroll(deltaX = 0, deltaY = 0, packageName = null, sessionEpoch = 0)
   }
 }
 
 /**
- * The pending-scroll state to keep after applying the observer gate (issue #5470 review). Scroll
- * deltas accumulate across the ~300ms scroll debounce; if the last client disconnects mid-window
- * the gate skips every subsequent scroll, so those deltas would otherwise linger and the first
- * post-reconnect scroll would ADD onto them and broadcast a bogus combined value. With no observer
- * we therefore discard the accumulation ([PendingScrollState.EMPTY]); with an observer the
- * in-flight accumulation is preserved untouched so a still-connected client's scroll is never
- * dropped.
+ * Fold one scroll sample into the pending accumulation, FIRST discarding any accumulation that
+ * belongs to a prior connection session (issue #5470 review — the event-free-gap hole in the
+ * earlier fix). Scroll deltas accumulate across the ~300ms scroll debounce; if a client disconnects
+ * and a new one connects before the next scroll — even with no accessibility event in between — the
+ * previous session's deltas must NOT combine with the new session's first scroll and broadcast a
+ * bogus combined value.
+ *
+ * [currentEpoch] is [WebSocketServer.connectionEpoch], which strictly increases on every new
+ * connection. When it differs from the accumulation's tagged [PendingScroll.sessionEpoch] a
+ * disconnect+reconnect happened since the last sample, so we start from [PendingScroll.NONE] before
+ * adding this sample; when it matches (a still-connected client) the in-flight accumulation is
+ * preserved and nothing is dropped. The check runs at sample time, so it is correct regardless of
+ * whether any event fired during the gap.
  */
-internal fun pendingScrollAcrossGate(
-  current: PendingScrollState,
-  connectionCount: Int,
-): PendingScrollState = if (connectionCount > 0) current else PendingScrollState.EMPTY
+internal fun accumulatePendingScroll(
+  current: PendingScroll,
+  deltaX: Int,
+  deltaY: Int,
+  packageName: String?,
+  currentEpoch: Int,
+): PendingScroll {
+  val base = if (current.sessionEpoch == currentEpoch) current else PendingScroll.NONE
+  return PendingScroll(
+    deltaX = base.deltaX + deltaX,
+    deltaY = base.deltaY + deltaY,
+    packageName = packageName,
+    sessionEpoch = currentEpoch,
+  )
+}
 
 internal fun navigationEventResponse(event: TimestampedNavigationEvent): NavigationEventResponse =
   NavigationEventResponse(
@@ -697,6 +717,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   @Volatile private var pendingScrollDeltaX: Int = 0
   @Volatile private var pendingScrollDeltaY: Int = 0
   private var pendingScrollPackageName: String? = null
+
+  // The WebSocketServer.connectionEpoch the pending scroll deltas were accumulated under. A change
+  // means a disconnect+reconnect happened since the last sample (issue #5470 review); the next
+  // scroll discards the stale accumulation instead of combining across sessions.
+  @Volatile private var pendingScrollSessionEpoch: Int = 0
 
   private data class ScreenshotCapturePayload(
     val base64Image: String,
@@ -2230,26 +2255,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val connectionCount =
         if (::webSocketServer.isInitialized) webSocketServer.getConnectionCount() else 0
 
-      // With no observer, discard any scroll deltas accumulated before the last client left so the
-      // first post-reconnect scroll starts clean rather than broadcasting a bogus combined delta
-      // (issue #5470 review). Only touches state when unobserved, so a still-connected client's
-      // in-flight scroll is never dropped; see pendingScrollAcrossGate.
-      if (connectionCount <= 0) {
-        val gated =
-          pendingScrollAcrossGate(
-            PendingScrollState(pendingScrollDeltaX, pendingScrollDeltaY, pendingScrollPackageName),
-            connectionCount,
-          )
-        pendingScrollDeltaX = gated.deltaX
-        pendingScrollDeltaY = gated.deltaY
-        pendingScrollPackageName = gated.packageName
-      }
-
       // "Is anyone observing?" gate (issue #5470). Both the interaction/scroll recording below and
       // the debounced hierarchy refresh further down are PUSH work only a connected client
-      // consumes,
-      // so with zero connections we skip them — before touching event.source, allocating,
-      // extracting, or hashing. The frameContext token above still advanced. The pull path
+      // consumes, so with zero connections we skip them — before touching event.source, allocating,
+      // extracting, or hashing. The frameContext token above still advanced. Stale cross-session
+      // scroll deltas are discarded at scroll-accumulation time via accumulatePendingScroll (keyed
+      // on the connection epoch), so no observer-gap cleanup is needed here. The pull path
       // (request_hierarchy) does not go through here and stays functional with zero observers.
       val work = accessibilityEventWorkFor(event.eventType, connectionCount)
 
@@ -2414,12 +2425,32 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    */
   private fun recordDebouncedScroll(event: AccessibilityEvent) {
     val now = System.currentTimeMillis()
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-      pendingScrollDeltaX += event.scrollDeltaX
-      pendingScrollDeltaY += event.scrollDeltaY
-    }
-    // Store package name — don't hold the event reference (Android recycles it)
-    pendingScrollPackageName = event.packageName?.toString()
+    // Only observed events reach here (the onAccessibilityEvent gate), so connectionEpoch reflects
+    // the current session. Fold this sample in through accumulatePendingScroll, which discards any
+    // accumulation tagged with a prior session first — closing the event-free-gap hole where a
+    // disconnect+reconnect between samples would otherwise let stale deltas combine with the first
+    // post-reconnect scroll (issue #5470 review). Store extracted fields, not the event reference
+    // (Android recycles it).
+    val sampleDeltaX = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) event.scrollDeltaX else 0
+    val sampleDeltaY = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) event.scrollDeltaY else 0
+    val currentEpoch = if (::webSocketServer.isInitialized) webSocketServer.connectionEpoch() else 0
+    val accumulated =
+      accumulatePendingScroll(
+        PendingScroll(
+          pendingScrollDeltaX,
+          pendingScrollDeltaY,
+          pendingScrollPackageName,
+          pendingScrollSessionEpoch,
+        ),
+        sampleDeltaX,
+        sampleDeltaY,
+        event.packageName?.toString(),
+        currentEpoch,
+      )
+    pendingScrollDeltaX = accumulated.deltaX
+    pendingScrollDeltaY = accumulated.deltaY
+    pendingScrollPackageName = accumulated.packageName
+    pendingScrollSessionEpoch = accumulated.sessionEpoch
 
     if (now - lastScrollBroadcastMs >= scrollDebounceMs) {
       lastScrollBroadcastMs = now

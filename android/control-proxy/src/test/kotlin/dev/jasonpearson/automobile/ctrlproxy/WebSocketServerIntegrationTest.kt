@@ -197,6 +197,51 @@ class WebSocketServerIntegrationTest {
   }
 
   @Test
+  fun `connectionEpoch increments across a disconnect and reconnect`() = runBlocking {
+    // The scroll-staleness fix (issue #5470) keys "is this the same connection session" on the
+    // monotonic connectionEpoch. getConnectionCount() returns to 1 after a reconnect and so cannot
+    // distinguish sessions; connectionEpoch must strictly increase so a reconnect is detectable
+    // even
+    // when no accessibility event fired in the gap.
+    server.start()
+    assertEquals("epoch starts at 0 before any connection", 0, server.connectionEpoch())
+
+    val client1 = HttpClient(CIO) { install(WebSockets) }
+    client1.use { c ->
+      c.webSocket(
+        method = HttpMethod.Get,
+        host = "localhost",
+        port = getServerPort(),
+        path = "/ws",
+      ) {
+        waitFor { server.getConnectionCount() == 1 }
+      }
+    }
+    waitFor { server.getConnectionCount() == 0 }
+    val epochAfterFirst = server.connectionEpoch()
+    assertEquals("epoch advances on the first connection", 1, epochAfterFirst)
+
+    // Reconnect: live count returns to 1, but the epoch must be strictly greater than before.
+    val client2 = HttpClient(CIO) { install(WebSockets) }
+    client2.use { c ->
+      c.webSocket(
+        method = HttpMethod.Get,
+        host = "localhost",
+        port = getServerPort(),
+        path = "/ws",
+      ) {
+        waitFor { server.getConnectionCount() == 1 }
+        assertEquals("live count cannot distinguish the reconnect", 1, server.getConnectionCount())
+        assertTrue(
+          "epoch must strictly increase on reconnect (was $epochAfterFirst, now ${server.connectionEpoch()})",
+          server.connectionEpoch() > epochAfterFirst,
+        )
+      }
+    }
+    waitFor { server.getConnectionCount() == 0 }
+  }
+
+  @Test
   fun `server broadcasts messages to connected client`() = runBlocking {
     // Given
     server.start()

@@ -1095,12 +1095,25 @@ export class DevicePool {
       return;
     }
     try {
-      const incident = await this.emulatorLossIncidentStore.get(incidentId);
-      const settlement = this.buildEmulatorLossRecoverySettlement(incident, outcome);
-      await this.emulatorLossIncidentStore.completeRecovery(incidentId, outcome, settlement);
-      if (!incident?.session) {
-        this.settleEmulatorLossIncident(incidentId);
-      }
+      await this.retryExecutor.executeOrThrow(
+        async () => {
+          const incident = await this.emulatorLossIncidentStore.get(incidentId);
+          const settlement = this.buildEmulatorLossRecoverySettlement(incident, outcome);
+          await this.emulatorLossIncidentStore.completeRecovery(incidentId, outcome, settlement);
+          if (!incident?.session) {
+            this.settleEmulatorLossIncident(incidentId);
+          }
+        },
+        {
+          delays: 0,
+          onRetry: (error, attempt) => {
+            logger.warn(
+              `[DevicePool] Retrying emulator-loss incident ${incidentId} finalization after attempt ${attempt}: ${error}`,
+              error,
+            );
+          },
+        },
+      );
     } catch (error) {
       logger.warn(
         `[DevicePool] Failed to finalize emulator-loss incident ${incidentId}: ${error}`,

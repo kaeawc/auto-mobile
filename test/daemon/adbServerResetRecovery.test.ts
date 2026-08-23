@@ -4,6 +4,8 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import {
   InMemoryEmulatorLossIncidentStore,
   type EmulatorLossIncidentStore,
+  type EmulatorLossRecoverySettlement,
+  type EmulatorRecoveryOutcome,
 } from "../../src/daemon/emulatorLossIncident";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
@@ -1520,11 +1522,28 @@ describe("ADB server reset session recovery", () => {
   });
 
   test("retries transient terminal release persistence before unquarantining", async () => {
+    class TransientCompletionFailureStore extends InMemoryEmulatorLossIncidentStore {
+      completeAttempts = 0;
+
+      override async completeRecovery(
+        incidentId: string,
+        outcome: EmulatorRecoveryOutcome,
+        settlement?: EmulatorLossRecoverySettlement,
+      ): Promise<void> {
+        this.completeAttempts += 1;
+        if (this.completeAttempts === 1) {
+          throw new Error("transient incident completion failure");
+        }
+        await super.completeRecovery(incidentId, outcome, settlement);
+      }
+    }
+
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const persistence = new FakeDeviceSessionPersistence();
     const sessionManager = new SessionManager(timer, persistence);
     const manager = new FakeDeviceManager();
+    const incidentStore = new TransientCompletionFailureStore(timer);
     let releaseAttempts = 0;
     const reboot: AndroidDeviceReboot = {
       run: async (_target, attempt) => {
@@ -1558,6 +1577,8 @@ describe("ADB server reset session recovery", () => {
       undefined,
       reboot,
       { onLoss: true, maxAttempts: 1 },
+      undefined,
+      incidentStore,
     );
     const original: BootedDevice = {
       platform: "android",
@@ -1592,6 +1613,7 @@ describe("ADB server reset session recovery", () => {
         ),
       ).resolves.toBe("released");
       expect(releaseAttempts).toBe(2);
+      expect(incidentStore.completeAttempts).toBe(2);
       expect(sessionManager.getSession("session-1")).toBeNull();
       expect(pool.isSessionRecoveryInFlight("session-1")).toBe(false);
       await expect(pool.waitForEmulatorLossIncident(incidentId!)).resolves.toMatchObject({

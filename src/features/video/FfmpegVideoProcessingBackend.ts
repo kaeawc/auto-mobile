@@ -11,6 +11,10 @@ import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClie
 import { SimCtlClient, type SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { logger } from "../../utils/logger";
 import {
+  defaultRecordingCodecProbe,
+  type RecordingCodecProbe,
+} from "./recordingCodec";
+import {
   DefaultFfmpegClient,
   type FfmpegClient,
   type FfmpegProcess,
@@ -360,6 +364,9 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     // Injectable so hardware-accel detection can be tested for every OS branch on
     // any CI host, rather than only the branch matching the runner's platform.
     private readonly platformProvider: () => NodeJS.Platform = platform,
+    // Injectable so the codec label can be asserted from synthetic files without
+    // producing real recordings (#4965).
+    private readonly codecProbe: RecordingCodecProbe = defaultRecordingCodecProbe,
   ) {}
 
   async start(config: VideoCaptureConfig): Promise<RecordingHandle> {
@@ -412,7 +419,10 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     }
 
     const sizeBytes = await getFileSize(handle.outputPath);
-    const codec = "h264";
+    // Report what was actually produced. The iOS `-c copy` fast path preserves
+    // the simctl source (HEVC on modern hardware), while the re-encode branches
+    // emit H.264 — a single constant mislabeled the common case (#4965).
+    const codec = await this.codecProbe.codec(handle.outputPath);
 
     this.logProcessWarnings("capture", backendHandle.captureTracker);
     if (backendHandle.ffmpegTracker) {

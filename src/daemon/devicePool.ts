@@ -1,5 +1,4 @@
 import type { ChildProcess } from "child_process";
-import { randomUUID } from "node:crypto";
 import { logger } from "../utils/logger";
 import {
   SessionManager,
@@ -14,6 +13,7 @@ import {
   waitForDeviceReadyOrCancel,
 } from "../utils/deviceUtils";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
+import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
 import type { InstalledAppsStore } from "../db/installedAppsRepository";
 import { InstalledAppsRepository } from "../db/installedAppsRepository";
 import { RetryExecutor, defaultRetryExecutor } from "../utils/retry/RetryExecutor";
@@ -282,6 +282,7 @@ export class DevicePool {
   private sessionManager: SessionManager;
   private assignmentMutex = new Mutex();
   private timer: Timer;
+  private readonly idGenerator: IdGenerator;
   private lastUsedAtMarker = 0;
   private lastReleasedDeviceId: string | null = null;
   private readonly mcpSessionAutolockMap: Map<string, string> = new Map();
@@ -390,10 +391,12 @@ export class DevicePool {
     onDeviceRemoved?: DeviceRemovedListener,
     emulatorLossIncidentStore: EmulatorLossIncidentStore = new InMemoryEmulatorLossIncidentStore(timer),
     cancelDeviceSessionExecutions?: DeviceSessionExecutionCanceller,
+    idGenerator: IdGenerator = defaultIdGenerator,
   ) {
     this.sessionManager = sessionManager;
     this.daemonSessionId = daemonSessionId;
     this.timer = timer;
+    this.idGenerator = idGenerator;
     this.installedAppsRepository = installedAppsRepository ?? new InstalledAppsRepository();
     this.deviceManager = deviceManager;
     this.retryExecutor = retryExecutor;
@@ -405,7 +408,7 @@ export class DevicePool {
     this.emulatorLossIncidentStore = emulatorLossIncidentStore;
     // Resolve recovery policy once so retries and status agree even if the
     // process environment changes after construction.
-    this.recoveryPolicy = { ...(recoveryPolicy ?? getDeviceRecoveryPolicy()) };
+    this.recoveryPolicy = this.resolveRecoveryPolicy(recoveryPolicy);
     this.androidDeviceReboot =
       androidDeviceReboot ?? new BoundedAndroidDeviceReboot(timer, this.recoveryPolicy.maxAttempts);
     this.releaseSessionForDisconnectedDevice =
@@ -425,6 +428,15 @@ export class DevicePool {
         this.clearReleasedAutolockState(sessionId, deviceId);
       }
     });
+  }
+
+  /**
+   * Resolve the effective recovery policy once at construction. Extracted from the
+   * constructor body so the injected-primitive parameters (timer, idGenerator, …)
+   * do not push the constructor over the complexity gate.
+   */
+  private resolveRecoveryPolicy(recoveryPolicy?: DeviceRecoveryPolicy): DeviceRecoveryPolicy {
+    return { ...(recoveryPolicy ?? getDeviceRecoveryPolicy()) };
   }
 
   /**
@@ -4394,7 +4406,7 @@ export class DevicePool {
     readinessReservationOwners?: ReadonlySet<symbol>,
     verifiedAndroidAvdIdentity?: DeviceInfo,
   ): Promise<string> {
-    const sessionId = randomUUID();
+    const sessionId = this.idGenerator.next();
     const androidAvdIdentity = verifiedAndroidAvdIdentity ?? sourceImage;
 
     // Ensure device is in the pool (it may have been freshly booted)

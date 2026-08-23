@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
+import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { SessionManager, type KeepScreenAwakeRestorer } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -293,6 +294,34 @@ describe("DevicePool autolock", () => {
       expect(session).not.toBeNull();
       expect(session!.assignedDevice).toBe("emulator-5554");
       expect(session!.expiresAt).toBe(timer.now() + 60_000);
+    });
+
+    it("mints the autolock session id from the injected IdGenerator", async () => {
+      const deterministicPool = new DevicePool(
+        sessionManager,
+        "daemon-session-1",
+        timer,
+        undefined,
+        fakeDeviceUtils,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        new CountingIdGenerator("autolock"),
+      );
+      fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+      await deterministicPool.initializeWithDevices([androidDevice]);
+
+      const sessionId = await deterministicPool.autolockDevice("emulator-5554", "android");
+
+      expect(sessionId).toBe("autolock-1");
+      expect(deterministicPool.getDevice("emulator-5554")?.autolockSessionId).toBe("autolock-1");
     });
 
     it("rejects autolock for a stale idle iOS simulator", async () => {

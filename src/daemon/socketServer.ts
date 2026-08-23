@@ -1,5 +1,4 @@
 import { createServer, Server as NetServer, Socket } from "node:net";
-import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import { existsSync, statSync } from "node:fs";
 import path from "node:path";
@@ -48,6 +47,7 @@ import { getCurrentBuildIdentity } from "./buildIdentity";
 import { DaemonState } from "./daemonState";
 import { DaemonStateAccess, handleDaemonRequest } from "./daemonRequestHandlers";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
+import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
 import type { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
 import type { FeatureFlagKey } from "../features/featureFlags/FeatureFlagDefinitions";
 import {
@@ -261,6 +261,7 @@ export class UnixSocketServer {
   private activeMcpClientForwardCounts: Map<string, number> = new Map();
   private mcpClientIdleTimers: Map<string, NodeJS.Timeout> = new Map();
   private timer: Timer;
+  private readonly idGenerator: IdGenerator;
   private featureFlagService: FeatureFlagService | null;
   private readonly handshakeEnforced: boolean;
   private readonly daemonIdentity: DaemonSelfIdentity;
@@ -328,11 +329,13 @@ export class UnixSocketServer {
       enforce?: boolean;
       sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled" | "setEnabled">;
     } = {},
+    idGenerator: IdGenerator = defaultIdGenerator,
   ) {
     this.socketPath = socketPath;
     this.mcpEndpoint = mcpEndpoint;
     this.daemonState = daemonState;
     this.timer = timer;
+    this.idGenerator = idGenerator;
     this.featureFlagService = featureFlagService;
     this.handshakeEnforced = handshakeConfig.enforce ?? DAEMON_HANDSHAKE_ENABLED;
     this.sessionToolSelectionService = handshakeConfig.sessionToolSelectionService;
@@ -406,7 +409,7 @@ export class UnixSocketServer {
    * Handle a new client connection
    */
   private handleConnection(socket: Socket): void {
-    const sessionId = randomUUID();
+    const sessionId = this.idGenerator.next();
     const session: SessionContext = {
       sessionId,
       createdAt: this.timer.now(),

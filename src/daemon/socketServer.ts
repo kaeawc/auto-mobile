@@ -1671,18 +1671,46 @@ export class UnixSocketServer {
     ) {
       return request;
     }
+    return this.pinEstablishedDeviceControlRecoveryRequest(
+      request,
+      identity,
+      args as Record<string, unknown>,
+    );
+  }
+
+  private pinEstablishedDeviceControlRecoveryRequest(
+    request: DaemonRequest,
+    identity: DeviceControlTransportIdentity,
+    originalArguments: Record<string, unknown>,
+  ): DaemonRequest {
+    if (identity.deviceLabelResolved === true) {
+      const pinnedArguments: Record<string, unknown> = {
+        ...originalArguments,
+        deviceId: identity.deviceId,
+      };
+      // Preserve the base session's authorization scope while replacing the
+      // mutable label selector with the captured physical target.
+      delete pinnedArguments.device;
+      return {
+        ...request,
+        params: {
+          ...request.params,
+          arguments: pinnedArguments,
+        },
+      };
+    }
     if (this.hasStableExplicitDeviceControlTarget(request, identity)) {
       // deviceId is already immutable; retaining the original routing session also
       // preserves its tool-selection grant alongside the target device's grant.
       return request;
     }
     const pinnedArguments: Record<string, unknown> = {
-      ...(args as Record<string, unknown>),
+      ...originalArguments,
       ...(identity.sessionUuid
         ? { sessionUuid: identity.sessionUuid }
         : { deviceId: identity.deviceId }),
     };
-    // A label can be remapped while reconnecting; replay the captured target instead.
+    // Pin implicit/autolocked recovery to the captured target.
     delete pinnedArguments.device;
     if (identity.sessionUuid) {
       delete pinnedArguments.deviceId;
@@ -1719,6 +1747,7 @@ export class UnixSocketServer {
       !replayAfterResponse
       || !input.identity.sessionUuid
       || input.route.sessionUuid === input.identity.sessionUuid
+      || input.identity.deviceLabelResolved === true
       || this.hasStableExplicitDeviceControlTarget(input.request, input.identity)
     ) {
       return input.route;

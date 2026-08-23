@@ -850,10 +850,12 @@ describe("UnixSocketServer MCP session reconnect", () => {
     await replayStarted;
 
     expect(clientsCreated).toBe(2);
-    expect(clientBindings).toEqual(["session-a", "session-b"]);
-    expect(replayedArguments).toMatchObject({ sessionUuid: "session-b" });
+    expect(clientBindings).toEqual(["session-a", "session-a"]);
+    expect(replayedArguments).toMatchObject({
+      sessionUuid: "session-a",
+      deviceId: "emulator-5556",
+    });
     expect(replayedArguments).not.toHaveProperty("device");
-    expect(replayedArguments).not.toHaveProperty("deviceId");
     expect((server as any).mcpClients.size).toBe(1);
 
     fakeTimer.advanceTime(5 * 60 * 1000);
@@ -869,8 +871,8 @@ describe("UnixSocketServer MCP session reconnect", () => {
     fakeTimer.advanceTime(5 * 60 * 1000);
     await Promise.resolve();
 
-    expect(closeCalls).toBe(2);
-    expect((server as any).mcpClients.size).toBe(0);
+    expect(closeCalls).toBe(1);
+    expect((server as any).mcpClients.size).toBe(1);
   });
 
   test("preserves an unresolved device label when replaying observe", async () => {

@@ -2485,9 +2485,60 @@ describe("DaemonMcpProxy", () => {
           toolName: "observe",
           sessionUuid: "session-a",
           sessionValid: false,
+          deviceSessionValid: false,
           phase: "connect",
           retryable: true,
           reconnectAttempted: true,
+          replayAttempted: false,
+        },
+      );
+      const fakeClient = new FakeDaemonClient({
+        onCallTool: () => {
+          callCount++;
+          if (callCount === 1) {
+            throw transportError;
+          }
+        },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await expect(
+          proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" }),
+        ).rejects.toBe(transportError);
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        expect(fakeClient.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "observe", params: { deviceId: "device-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("an invalid response session does not refresh the replay lease", async () => {
+      let callCount = 0;
+      const transportError = new DeviceControlTransportError(
+        "Device-control transport closed while handling observe",
+        {
+          code: "device_control_transport_failure",
+          transport: "daemon_loopback_http",
+          toolName: "observe",
+          deviceId: "device-a",
+          deviceSessionUuid: "device-epoch-a",
+          sessionUuid: "session-a",
+          sessionValid: false,
+          deviceSessionValid: true,
+          phase: "response",
+          retryable: false,
+          reconnectAttempted: false,
           replayAttempted: false,
         },
       );
@@ -2535,6 +2586,7 @@ describe("DaemonMcpProxy", () => {
           deviceSessionUuid: "device-epoch-a",
           sessionUuid: "session-a",
           sessionValid: true,
+          deviceSessionValid: true,
           phase: "response",
           retryable: true,
           reconnectAttempted: true,

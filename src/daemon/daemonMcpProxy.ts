@@ -1145,8 +1145,11 @@ export class DaemonMcpProxy {
     return message.includes("Unknown tool:");
   }
 
-  private isPreDispatchDeviceControlTransportError(error: unknown): boolean {
-    return error instanceof DeviceControlTransportError && error.failure.phase === "connect";
+  private shouldSkipLeaseRefreshForDeviceControlTransportError(error: unknown): boolean {
+    return (
+      error instanceof DeviceControlTransportError
+      && (error.failure.phase === "connect" || !error.failure.sessionValid)
+    );
   }
 
   private async resetConnection(): Promise<void> {
@@ -1564,8 +1567,9 @@ export class DaemonMcpProxy {
   //     it untouched so a pre-handler plan rejection does not strand the binding.
   //   - a recoverable error (DaemonUnavailableError transport/connect failure,
   //     "Session not found", or an unknown-tool build-skew), or a device-control
-  //     connect-phase failure, never reached the handler with a live session, so
-  //     the lease must be allowed to expire.
+  //     connect-phase failure never reached the handler with a live session; a
+  //     response failure with sessionValid=false confirms the session is stale.
+  //     Neither may refresh or establish the replay lease.
   private refreshReplayLeaseAfterAdmittedFailure(
     name: string,
     forwardedArgs: Record<string, unknown>,
@@ -1576,7 +1580,7 @@ export class DaemonMcpProxy {
       name === "executePlan" ||
       name === SET_TOOL_ENABLED_TOOL_NAME ||
       this.isRecoverableDaemonSessionError(error) ||
-      this.isPreDispatchDeviceControlTransportError(error)
+      this.shouldSkipLeaseRefreshForDeviceControlTransportError(error)
     ) {
       return;
     }

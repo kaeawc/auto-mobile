@@ -15,7 +15,6 @@ import dev.jasonpearson.automobile.ctrlproxy.models.TraversalOrderResult
 import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import dev.jasonpearson.automobile.ctrlproxy.models.WindowInfo
-import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
 
@@ -1029,7 +1028,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     apiLevel: Int = Build.VERSION.SDK_INT,
   ): List<SemanticLink>? {
     if (apiLevel < Build.VERSION_CODES.O || text !is Spanned) return null
-    val occurrences = mutableMapOf<String, Int>()
+    val priorLinkTexts = mutableListOf<String>()
     val links =
       text
         .getSpans(0, text.length, ClickableSpan::class.java)
@@ -1040,11 +1039,10 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
           if (start < 0 || end <= start || end > text.length) return@mapNotNull null
           val visibleText = text.subSequence(start, end).toString()
           if (visibleText.isBlank()) return@mapNotNull null
-          // Activation matches span text case-insensitively, so discovery must
-          // use the same equivalence relation for occurrence numbering.
-          val occurrenceKey = visibleText.lowercase(Locale.ROOT)
-          val occurrence = occurrences[occurrenceKey] ?: 0
-          occurrences[occurrenceKey] = occurrence + 1
+          // Activation uses String.equals(ignoreCase = true); count prior links
+          // with that exact equivalence rather than an approximate lowercase key.
+          val occurrence = priorLinkTexts.count { it.equals(visibleText, ignoreCase = true) }
+          priorLinkTexts += visibleText
           SemanticLink(visibleText, occurrence, start, end)
         }
     return links.ifEmpty { null }

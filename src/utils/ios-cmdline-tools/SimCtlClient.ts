@@ -1,12 +1,15 @@
 import { errorMessage } from "../describeUnknownError";
-import { ChildProcess, execFile, type SpawnOptions } from "child_process";
-import { promisify } from "util";
+import { ChildProcess, type SpawnOptions } from "child_process";
 import { promises as fsPromises } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { logger } from "../logger";
-import { createExecResult } from "../execResult";
-import { DefaultHostCommandExecutor, type HostProcessExecutor } from "../HostCommandExecutor";
+import { runExecSeam } from "../ExecSeam";
+import {
+  DefaultHostCommandExecutor,
+  execFileAsync as sharedExecFileAsync,
+  type HostProcessExecutor,
+} from "../HostCommandExecutor";
 import { ExecResult, ActionableError, DeviceInfo, BootedDevice, ScreenSize } from "../../models";
 import { defaultTimer, Timer } from "../SystemTimer";
 import { createGlobalPerformanceTracker } from "../PerformanceTracker";
@@ -283,30 +286,31 @@ export interface SimCtl {
   ): Promise<{ success: boolean; error?: string }>;
 }
 
-// Enhance the standard execAsync result to implement the ExecResult interface
+// Route the execFile leg through the shared exec seam (issue #5459) so the
+// option mapping and the Buffer→string / trim / includes coercion live in one
+// place and this client no longer imports `child_process` for its exec path.
+//
+// `preserveError: true` keeps the raw execFile rejection intact: the seam's
+// default `wrapCommandError` path returns a fresh Error copying only `.name`,
+// but CoreSimulator-405 boot recovery (issue #3938 / #4092) branches on the
+// original error's `.code`/`.stderr` via `isAlreadyBootedCoreSimulator405`.
+//
+// The AbortSignal is forwarded so that when a caller's timeout aborts, Node kills
+// the child process (SIGTERM) instead of leaving it booting orphaned (issue
+// #3938) — without this a timed-out `bootstatus -b` keeps booting the simulator
+// in the background after the tool has already reported failure.
 const execAsync = async (
   file: string,
   args: string[],
   maxBuffer?: number,
   signal?: AbortSignal,
 ): Promise<ExecResult> => {
-  // Pass the AbortSignal to execFile so that when a caller's timeout aborts, Node
-  // kills the child process (SIGTERM) instead of leaving it running orphaned
-  // (issue #3938). Without this a timed-out `bootstatus -b` keeps booting the
-  // simulator in the background after the tool has already reported failure.
-  const options: Parameters<typeof execFile>[2] =
-    maxBuffer && signal
-      ? { maxBuffer, signal }
-      : maxBuffer
-        ? { maxBuffer }
-        : signal
-          ? { signal }
-          : undefined;
-  const result = await promisify(execFile)(file, args, options);
-
-  const stdout = typeof result.stdout === "string" ? result.stdout : result.stdout.toString();
-  const stderr = typeof result.stderr === "string" ? result.stderr : result.stderr.toString();
-  return createExecResult(stdout, stderr);
+  return runExecSeam(
+    execOptions => sharedExecFileAsync(file, args, execOptions),
+    { maxBuffer, signal },
+    { command: file, args },
+    { preserveError: true },
+  );
 };
 
 // Route the default long-lived spawn through the shared host-process seam so the

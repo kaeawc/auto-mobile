@@ -28,7 +28,12 @@ export type ExecFileAsync = (
   options?: ExecSeamOptions
 ) => Promise<RawExecOutput>;
 
-const execFileAsync: ExecFileAsync = async (
+/**
+ * Shared `execFile` leaf for the host-command seam. Exported so argv-first
+ * clients (e.g. `SimCtlClient`) can run their exec leg through {@link runExecSeam}
+ * without importing `child_process` themselves (issue #5459).
+ */
+export const execFileAsync: ExecFileAsync = async (
   file: string,
   args: string[],
   options?: ExecSeamOptions

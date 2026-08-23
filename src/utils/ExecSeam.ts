@@ -31,6 +31,19 @@ export interface ExecRequestOptions {
   signal?: AbortSignal;
 }
 
+/** Behavior toggles for {@link runExecSeam} that do not map to node exec options. */
+export interface ExecSeamBehavior {
+  /**
+   * When true, a thrown exec error propagates unchanged instead of being run
+   * through {@link wrapCommandError}. `wrapCommandError` returns a fresh `Error`
+   * that copies only `.name`, dropping the raw `.code`/`.stderr`; SimCtlClient's
+   * CoreSimulator-405 boot recovery (issue #3938 / #4092) reads exactly those
+   * fields, so that client opts into raw-error propagation while still sharing
+   * the seam's option mapping and {@link createExecResult} coercion.
+   */
+  preserveError?: boolean;
+}
+
 /**
  * Shared exec runner: maps request options to node exec option names, invokes
  * the executor's exec seam (shell string vs. file+argv, supplied by the
@@ -42,7 +55,8 @@ export interface ExecRequestOptions {
 export async function runExecSeam(
   invoke: (options: ExecSeamOptions) => Promise<RawExecOutput>,
   options: ExecRequestOptions,
-  errorContext: CommandErrorFormatOptions
+  errorContext: CommandErrorFormatOptions,
+  behavior: ExecSeamBehavior = {}
 ): Promise<ExecResult> {
   try {
     const { stdout, stderr } = await invoke({
@@ -53,6 +67,9 @@ export async function runExecSeam(
     });
     return createExecResult(stdout, stderr);
   } catch (error) {
+    if (behavior.preserveError) {
+      throw error;
+    }
     throw wrapCommandError(error, errorContext);
   }
 }

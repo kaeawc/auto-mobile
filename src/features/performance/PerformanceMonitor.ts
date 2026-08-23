@@ -1080,36 +1080,60 @@ export class PerformanceMonitor {
   }
 
   /**
+   * Resolve the host `ps aux` columns for a simulator app process, scoped to a
+   * single simulator.
+   *
+   * iOS Simulator apps run as ordinary macOS processes whose command line is the
+   * app binary under `.../CoreSimulator/Devices/<UDID>/data/...`, so the device
+   * UDID is always present in the process line. Matching on the bundle id alone
+   * (the previous behavior) picked the *first* process on the host, so when the
+   * same bundle runs on two booted simulators both device-keyed snapshots
+   * received the first match's metrics (#5109). Requiring both the device's
+   * UDID (`device.deviceId`) and the bundle id in the same line scopes the match
+   * to this simulator. For a single simulator this is behavior-identical — the
+   * one matching line already contains its own UDID.
+   *
+   * Returns the whitespace-split `ps aux` columns of the matching line, or null
+   * when no process for this device+bundle is found. Caches the resolved PID.
+   */
+  private async resolveIOSProcessColumns(device: MonitoredDevice): Promise<string[] | null> {
+    // Run ps on the HOST (not inside simulator) to find the app process.
+    const { stdout } = await this.execFileAsync("ps", ["aux"]);
+
+    const lines = stdout.split("\n");
+    for (const line of lines) {
+      // Scope to this simulator: the command line carries both the device UDID
+      // (in the CoreSimulator data-container path) and the bundle id.
+      if (line.includes(device.deviceId) && line.includes(device.packageName)) {
+        // ps aux format: USER PID %CPU %MEM VSZ RSS TTY STAT START TIME COMMAND
+        const parts = line.trim().split(/\s+/);
+        const pid = parseInt(parts[1], 10);
+        if (!isNaN(pid) && pid > 0) {
+          device.cachedPid = pid;
+        }
+        return parts;
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * Collect CPU usage for an iOS app.
-   * iOS Simulator apps run as macOS processes, so we use `ps` on the host.
-   * Searches for the process by bundle ID in the command line.
+   * iOS Simulator apps run as macOS processes, so we use `ps` on the host,
+   * scoped to this simulator's UDID (see resolveIOSProcessColumns).
    */
   private async collectIOSCpuMetrics(device: MonitoredDevice): Promise<number | null> {
     try {
-      // Run ps on the HOST (not inside simulator) to find the app process
-      // iOS simulator apps run as macOS processes
-      const { stdout } = await this.execFileAsync("ps", ["aux"]);
-
-      // Find the line with our bundle ID
-      // The process command line contains the bundle ID for iOS apps
-      const lines = stdout.split("\n");
-      for (const line of lines) {
-        if (line.includes(device.packageName)) {
-          // ps aux format: USER PID %CPU %MEM VSZ RSS TTY STAT START TIME COMMAND
-          const parts = line.trim().split(/\s+/);
-          const cpuPercent = parseFloat(parts[2]);
-          if (!isNaN(cpuPercent)) {
-            // Cache the PID while we're at it
-            const pid = parseInt(parts[1], 10);
-            if (!isNaN(pid) && pid > 0) {
-              device.cachedPid = pid;
-            }
-            return Math.min(cpuPercent, 100); // Cap at 100%
-          }
-        }
+      const parts = await this.resolveIOSProcessColumns(device);
+      if (!parts) {
+        return null;
       }
-
-      return null;
+      const cpuPercent = parseFloat(parts[2]);
+      if (isNaN(cpuPercent)) {
+        return null;
+      }
+      return Math.min(cpuPercent, 100); // Cap at 100%
     } catch (error) {
       logger.debug(`[PerformanceMonitor] iOS CPU metrics failed for ${device.deviceId}: ${error}`);
       return null;
@@ -1118,34 +1142,22 @@ export class PerformanceMonitor {
 
   /**
    * Collect memory usage for an iOS app.
-   * iOS Simulator apps run as macOS processes, so we use `ps` on the host.
+   * iOS Simulator apps run as macOS processes, so we use `ps` on the host,
+   * scoped to this simulator's UDID (see resolveIOSProcessColumns).
    * Returns RSS (Resident Set Size) in megabytes.
    */
   private async collectIOSMemoryMetrics(device: MonitoredDevice): Promise<number | null> {
     try {
-      // Run ps on the HOST (not inside simulator) to find the app process
-      const { stdout } = await this.execFileAsync("ps", ["aux"]);
-
-      // Find the line with our bundle ID
-      const lines = stdout.split("\n");
-      for (const line of lines) {
-        if (line.includes(device.packageName)) {
-          // ps aux format: USER PID %CPU %MEM VSZ RSS TTY STAT START TIME COMMAND
-          const parts = line.trim().split(/\s+/);
-          // RSS is in KB on macOS
-          const rssKb = parseInt(parts[5], 10);
-          if (!isNaN(rssKb)) {
-            // Cache the PID while we're at it
-            const pid = parseInt(parts[1], 10);
-            if (!isNaN(pid) && pid > 0) {
-              device.cachedPid = pid;
-            }
-            return rssKb / 1024; // Convert to MB
-          }
-        }
+      const parts = await this.resolveIOSProcessColumns(device);
+      if (!parts) {
+        return null;
       }
-
-      return null;
+      // RSS is in KB on macOS.
+      const rssKb = parseInt(parts[5], 10);
+      if (isNaN(rssKb)) {
+        return null;
+      }
+      return rssKb / 1024; // Convert to MB
     } catch (error) {
       logger.debug(
         `[PerformanceMonitor] iOS memory metrics failed for ${device.deviceId}: ${error}`,

@@ -11,8 +11,16 @@ import org.junit.Test
  * Structural regression guard for issue #4577.
  *
  * CtrlProxy is an AccessibilityService and cannot be constructed in a fast unit test. This source
- * test instead verifies that every stale-frame rejection routes through a closed action set, and
- * that the dispatch remains exhaustive without a silent fallback branch.
+ * test instead verifies that every stale-frame rejection routes through a closed action set with an
+ * explicit correlated response per action.
+ *
+ * The compile-time no-silent-timeout guarantee comes from the Kotlin compiler: at this module's
+ * language version a non-exhaustive `when` over [StaleFrameContextAction] is a compile error
+ * (statement or expression form alike), so a future action added without a branch cannot compile.
+ * The one way to defeat that in source is a catch-all `else ->` branch, which would let the `when`
+ * compile with a missing action and reopen the silent-timeout window — so this test asserts the
+ * dispatch stays free of `else ->`, keeps a branch for every action, and preserves each action's
+ * correlated response envelope.
  */
 class StaleFrameContextRejectionWiringTest {
 
@@ -49,11 +57,16 @@ class StaleFrameContextRejectionWiringTest {
   fun `stale frame rejection accepts a typed action and dispatches every action`() {
     val source = KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource())
     val signature = rejectionSignature(source)
-    val body = rejectionBody(source)
+    val body = dispatchBody(source)
 
     assertTrue(
       "rejectStaleFrameContext must accept StaleFrameContextAction rather than a raw String",
       "action: StaleFrameContextAction" in signature,
+    )
+    assertTrue(
+      "rejectStaleFrameContext must delegate to the exhaustive dispatcher",
+      Regex("""broadcastStaleFrameRejection\(\s*requestId\s*,\s*action\s*,\s*error\s*\)""")
+        .containsMatchIn(rejectionBody(source)),
     )
     assertFalse(
       "the typed dispatch must stay exhaustive rather than silently ignoring a future action",
@@ -97,6 +110,22 @@ class StaleFrameContextRejectionWiringTest {
     val bodyOpen = source.indexOf('{', start)
     assertTrue("rejectStaleFrameContext body not found in CtrlProxy.kt", bodyOpen >= 0)
     return source.substring(bodyOpen, KotlinSourceScan.matchBrace(source, bodyOpen))
+  }
+
+  /** The `{ ... }` of the `when (action)` inside `broadcastStaleFrameRejection`. */
+  private fun dispatchBody(source: String): String {
+    val whenStart = dispatchWhenIndex(source)
+    val braceOpen = source.indexOf('{', whenStart)
+    assertTrue("broadcastStaleFrameRejection when body not found", braceOpen >= 0)
+    return source.substring(braceOpen, KotlinSourceScan.matchBrace(source, braceOpen))
+  }
+
+  private fun dispatchWhenIndex(source: String): Int {
+    val start = source.indexOf("fun broadcastStaleFrameRejection(")
+    assertTrue("broadcastStaleFrameRejection not found in CtrlProxy.kt", start >= 0)
+    val whenStart = source.indexOf("when (action)", start)
+    assertTrue("broadcastStaleFrameRejection when(action) not found", whenStart >= 0)
+    return whenStart
   }
 
   private fun routedActions(body: String): Set<String> =

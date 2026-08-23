@@ -528,6 +528,11 @@ export class SessionManager {
     devicePool: SessionDeviceAssigner | undefined,
     platform: Platform | undefined,
   ): Promise<Session> {
+    const persistedTerminalRelease = await this.getPersistedTerminalRelease(sessionId);
+    if (persistedTerminalRelease) {
+      this.terminalReleaseSnapshots.set(sessionId, persistedTerminalRelease);
+      throw new TerminalSessionError(sessionId, persistedTerminalRelease);
+    }
     logger.info(`[SessionManager] Creating new session ${sessionId}, calling devicePool.assignDeviceToSession()`);
 
     // Need to create new session - assign device from pool
@@ -881,6 +886,9 @@ export class SessionManager {
         },
       };
 
+      if (releaseSnapshot.terminal) {
+        await this.persistSessionRelease(releaseSnapshot);
+      }
       if (!this.removeSession(sessionId, session)) {
         if (pendingCleanup.length > 0) {
           this.trackPendingDeviceCleanup(deviceId, pendingCleanup);
@@ -907,19 +915,8 @@ export class SessionManager {
           logger.warn(`Session release callback failed for ${sessionId}: ${error}`);
         }
       }
-      try {
-        const terminalStatus = EXPIRY_RELEASE_REASONS.has(releaseReason)
-          ? "expired"
-          : "released";
-        await this.deviceSessionRepository.markReleased(sessionId, terminalStatus, this.timer.now(), releaseReason);
-      } catch (error) {
-        logger.warn(`[SessionManager] Failed to mark session released (${releaseReason}): ${error}`);
-        if (releaseSnapshot.terminal) {
-          throw toActionableError(
-            error,
-            `Failed to persist terminal release for session ${sessionId}`,
-          );
-        }
+      if (!releaseSnapshot.terminal) {
+        await this.persistSessionRelease(releaseSnapshot);
       }
       logger.info(
         pendingCleanup.length > 0
@@ -929,6 +926,30 @@ export class SessionManager {
       return deviceId;
     } finally {
       this.releasingSessions.delete(session);
+    }
+  }
+
+  private async persistSessionRelease(snapshot: SessionReleaseSnapshot): Promise<void> {
+    try {
+      const terminalStatus = EXPIRY_RELEASE_REASONS.has(snapshot.releaseReason)
+        ? "expired"
+        : "released";
+      await this.deviceSessionRepository.markReleased(
+        snapshot.sessionId,
+        terminalStatus,
+        snapshot.releasedAtMs,
+        snapshot.releaseReason,
+      );
+    } catch (error) {
+      logger.warn(
+        `[SessionManager] Failed to mark session released (${snapshot.releaseReason}): ${error}`,
+      );
+      if (snapshot.terminal) {
+        throw toActionableError(
+          error,
+          `Failed to persist terminal release for session ${snapshot.sessionId}`,
+        );
+      }
     }
   }
 

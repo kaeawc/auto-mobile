@@ -102,7 +102,7 @@ describe("Daemon session-release signal wiring", () => {
     }
   });
 
-  test("terminal persistence failure still releases the device pool assignment", async () => {
+  test("does not publish a terminal release before persistence succeeds", async () => {
     const db = await createTestDatabase();
     const repository = new DeviceSessionRepository(db);
     const daemon = new Daemon({}, undefined, undefined, repository);
@@ -111,6 +111,10 @@ describe("Daemon session-release signal wiring", () => {
     const internals = daemon as unknown as DaemonSessionReleaseInternals;
     const sessionId = "terminal-persistence-failure";
     const deviceId = "physical-device";
+    const emitted: string[] = [];
+    const unsubscribe = SessionReleaseBroadcaster.subscribe((releasedSessionId) => {
+      emitted.push(releasedSessionId);
+    });
     const markReleasedSpy = spyOn(repository, "markReleased")
       .mockRejectedValue(new Error("database unavailable"));
 
@@ -127,12 +131,23 @@ describe("Daemon session-release signal wiring", () => {
         deviceLossCancellationReason(deviceId, "incident-1"),
       )).rejects.toThrow("Failed to persist terminal release");
 
-      expect(sessionManager.getSession(sessionId)).toBeNull();
+      expect(sessionManager.getSession(sessionId)?.assignedDevice).toBe(deviceId);
       expect(devicePool.getDevice(deviceId)).toMatchObject({
-        sessionId: null,
-        status: "idle",
+        sessionId,
+        status: "busy",
       });
+      expect(emitted).toEqual([]);
+
+      markReleasedSpy.mockResolvedValue(undefined);
+      await internals.cancelAndReleaseSession(
+        sessionId,
+        deviceLossCancellationReason(deviceId, "incident-1"),
+      );
+      expect(sessionManager.getSession(sessionId)).toBeNull();
+      expect(devicePool.getDevice(deviceId)).toMatchObject({ sessionId: null, status: "idle" });
+      expect(emitted).toEqual([sessionId]);
     } finally {
+      unsubscribe();
       markReleasedSpy.mockRestore();
       sessionManager.stopCleanupTimer();
       await db.destroy();

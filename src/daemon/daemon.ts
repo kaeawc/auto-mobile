@@ -171,6 +171,7 @@ const SSE_KEEPALIVE_INTERVAL_MS = 30_000;
 // writes are best-effort: if the bound elapses, shutdown proceeds anyway.
 const DB_WRITE_DRAIN_TIMEOUT_MS = 1_000;
 const SESSION_RELEASE_DRAIN_TIMEOUT_MS = 5_000;
+const DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS = 1_000;
 
 // Ceiling on awaiting an in-flight cold-start migration before closing the DB on
 // shutdown (issue #3044). A SIGTERM arriving mid-startup-migration would otherwise
@@ -398,7 +399,7 @@ export class Daemon {
       recoveryConfiguration.policy,
       (deviceId) => this.deviceSessionRegistry.onDeviceDisconnected(deviceId),
       new EmulatorLossIncidentRepository(this.timer, this.idGenerator),
-      (sessionId, reason) => executionTracker.cancelDeviceSessionExecutions(sessionId, reason),
+      (sessionId, reason) => this.cancelAndDrainDeviceSessionExecutions(sessionId, reason),
       this.idGenerator,
     );
     // Initialize singleton for daemon state access
@@ -1966,23 +1967,14 @@ export class Daemon {
     expectedSession?: Session,
   ): Promise<void> {
     const cancelled = await executionTracker.cancelSessionUuidExecutions(sessionId, releaseReason);
-    let deviceId: string | null;
-    try {
-      deviceId = expectedSession
-        ? await this.sessionManager.releaseSessionIfOwned(
-            sessionId,
-            expectedSession,
-            expectedSession.assignedDevice,
-            releaseReason,
-          )
-        : await this.sessionManager.releaseSession(sessionId, releaseReason, allowExpired);
-    } catch (error) {
-      const terminalRelease = this.sessionManager.getTerminalReleaseSnapshot(sessionId);
-      if (terminalRelease) {
-        await this.devicePool.releaseDevice(terminalRelease.deviceId, sessionId);
-      }
-      throw error;
-    }
+    const deviceId = expectedSession
+      ? await this.sessionManager.releaseSessionIfOwned(
+          sessionId,
+          expectedSession,
+          expectedSession.assignedDevice,
+          releaseReason,
+        )
+      : await this.sessionManager.releaseSession(sessionId, releaseReason, allowExpired);
     if (deviceId) {
       await this.devicePool.releaseDevice(deviceId, sessionId);
     }
@@ -1990,6 +1982,27 @@ export class Daemon {
       `Cancelled session ${sessionId} (${cancelled} executions) and released device ${deviceId ?? "unknown"} ` +
         `(reason=${releaseReason})`,
     );
+  }
+
+  private async cancelAndDrainDeviceSessionExecutions(
+    sessionId: string,
+    reason: string,
+  ): Promise<number> {
+    const cancelled = await executionTracker.cancelDeviceSessionExecutions(sessionId, reason);
+    if (cancelled === 0) {
+      return 0;
+    }
+    const drained = await executionTracker.waitForDeviceSessionExecutionsToEnd(
+      sessionId,
+      DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS,
+    );
+    if (!drained) {
+      logger.warn(
+        `[Daemon] Timed out after ${DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS}ms draining ` +
+          `cancelled executions for device session ${sessionId}`,
+      );
+    }
+    return cancelled;
   }
 
   /**

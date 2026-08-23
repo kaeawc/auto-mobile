@@ -1559,10 +1559,17 @@ describe("SessionManager", () => {
           "device-disconnected:emulator-5554;incident=emulator-loss-1",
         ),
       ).rejects.toThrow("Failed to persist terminal release");
-      expect(manager.getSession("lost-session")).toBeNull();
+      expect(manager.getSession("lost-session")?.assignedDevice).toBe("emulator-5554");
+      expect(manager.getSessionForDevice("emulator-5554")).toBe("lost-session");
+
+      persistence.failure = null;
       await expect(
-        manager.createSession("lost-session", "emulator-5560", "android"),
-      ).rejects.toThrow("terminal");
+        manager.releaseSession(
+          "lost-session",
+          "device-disconnected:emulator-5554;incident=emulator-loss-1",
+        ),
+      ).resolves.toBe("emulator-5554");
+      expect(manager.getSession("lost-session")).toBeNull();
     } finally {
       manager.stopCleanupTimer();
     }
@@ -1601,10 +1608,18 @@ describe("SessionManager", () => {
       async markReleased() {},
     };
     const restarted = new SessionManager(fakeTimer, persistence);
+    const assignedSessionIds: string[] = [];
+    const devicePool: SessionDeviceAssigner = {
+      async assignDeviceToSession(sessionId: string): Promise<string> {
+        assignedSessionIds.push(sessionId);
+        return "emulator-5560";
+      },
+    };
     try {
       await expect(
-        restarted.createSession("lost-session", "emulator-5560", "android"),
+        restarted.getOrCreateSession("lost-session", devicePool, "android"),
       ).rejects.toThrow("terminal");
+      expect(assignedSessionIds).toEqual([]);
       expect(upsertCount).toBe(0);
     } finally {
       restarted.stopCleanupTimer();

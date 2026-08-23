@@ -185,6 +185,7 @@ interface McpForwardRoute {
 
 interface DeviceControlTransportIdentity {
   sessionUuid?: string;
+  routingSessionUuid?: string;
   deviceId?: string;
   deviceSessionUuid?: string;
   deviceLabelResolved?: boolean;
@@ -1379,10 +1380,20 @@ export class UnixSocketServer {
       context.route.sessionUuid,
       context.socketSessionId,
     );
+    const routingSessionUuid =
+      args && typeof args === "object" && !Array.isArray(args)
+        ? this.getSessionUuid(args as Record<string, unknown>) ?? context.route.sessionUuid
+        : context.route.sessionUuid;
     const deviceId = this.resolveDeviceControlDeviceId(args, sessionUuid);
     const deviceSessionUuid = this.resolveDeviceControlSessionUuid(deviceId);
     const deviceLabelResolved = this.getDeviceControlLabelResolution(args);
-    return { sessionUuid, deviceId, deviceSessionUuid, deviceLabelResolved };
+    return {
+      sessionUuid,
+      routingSessionUuid,
+      deviceId,
+      deviceSessionUuid,
+      deviceLabelResolved,
+    };
   }
 
   private getDeviceControlLabelResolution(args: unknown): boolean | undefined {
@@ -1489,14 +1500,50 @@ export class UnixSocketServer {
   }
 
   private isDeviceControlSessionValid(identity: DeviceControlTransportIdentity): boolean {
-    if (!this.daemonState.isInitialized() || !identity.sessionUuid) {
+    if (
+      !this.daemonState.isInitialized()
+      || (!identity.sessionUuid && !identity.routingSessionUuid)
+    ) {
       return false;
+    }
+    return (
+      this.isDeviceControlTargetOwnerValid(identity)
+      && this.isDeviceControlRoutingSessionValid(identity)
+    );
+  }
+
+  private isDeviceControlTargetOwnerValid(
+    identity: DeviceControlTransportIdentity,
+  ): boolean {
+    if (!identity.sessionUuid) {
+      return true;
     }
     try {
       const session = this.daemonState.getSessionManager().getSession(identity.sessionUuid);
       return Boolean(session && (!identity.deviceId || session.assignedDevice === identity.deviceId));
     } catch (error) {
-      logger.debug(`Unable to validate device-control daemon session: ${error}`);
+      logger.debug(`Unable to validate device-control target owner: ${error}`);
+      return false;
+    }
+  }
+
+  private isDeviceControlRoutingSessionValid(
+    identity: DeviceControlTransportIdentity,
+  ): boolean {
+    if (
+      !identity.routingSessionUuid
+      || identity.routingSessionUuid === identity.sessionUuid
+    ) {
+      return true;
+    }
+    try {
+      return Boolean(
+        this.daemonState
+          .getSessionManager()
+          .getSession(identity.routingSessionUuid),
+      );
+    } catch (error) {
+      logger.debug(`Unable to validate device-control routing session: ${error}`);
       return false;
     }
   }
@@ -1526,8 +1573,10 @@ export class UnixSocketServer {
   private isDeviceControlTransportIdentityValid(
     identity: DeviceControlTransportIdentity,
   ): boolean {
+    const hasSessionIdentity =
+      Boolean(identity.sessionUuid || identity.routingSessionUuid);
     const sessionValid =
-      !identity.sessionUuid || this.isDeviceControlSessionValid(identity);
+      !hasSessionIdentity || this.isDeviceControlSessionValid(identity);
     return sessionValid && this.isDeviceControlDeviceSessionValid(identity);
   }
 
@@ -1564,8 +1613,10 @@ export class UnixSocketServer {
     const toolName = deviceControlToolName(input.request);
     const sessionValid = this.isDeviceControlSessionValid(input.identity);
     const deviceSessionValid = this.isDeviceControlDeviceSessionValid(input.identity);
+    const hasSessionIdentity =
+      Boolean(input.identity.sessionUuid || input.identity.routingSessionUuid);
     const identityValid =
-      (!input.identity.sessionUuid || sessionValid) && deviceSessionValid;
+      (!hasSessionIdentity || sessionValid) && deviceSessionValid;
     const identityEstablished =
       this.hasEstablishedDeviceControlTransportIdentity(input.identity);
     const retryable =
@@ -1581,6 +1632,9 @@ export class UnixSocketServer {
         ? { deviceSessionUuid: input.identity.deviceSessionUuid }
         : {}),
       ...(input.identity.sessionUuid ? { sessionUuid: input.identity.sessionUuid } : {}),
+      ...(input.identity.routingSessionUuid
+        ? { routingSessionUuid: input.identity.routingSessionUuid }
+        : {}),
       sessionValid,
       deviceSessionValid,
       phase: input.phase,
@@ -1654,6 +1708,8 @@ export class UnixSocketServer {
     const refreshedIdentity = this.getDeviceControlTransportIdentity(context);
     return {
       sessionUuid: identity.sessionUuid ?? refreshedIdentity.sessionUuid,
+      routingSessionUuid:
+        identity.routingSessionUuid ?? refreshedIdentity.routingSessionUuid,
       deviceId: identity.deviceId ?? refreshedIdentity.deviceId,
       deviceSessionUuid:
         identity.deviceSessionUuid ?? refreshedIdentity.deviceSessionUuid,

@@ -28,6 +28,7 @@ describe("proxy server device-control transport errors", () => {
       deviceId: "emulator-5554",
       deviceSessionUuid: "device-epoch-a",
       sessionUuid: "session-a",
+      routingSessionUuid: "session-a",
       sessionValid: true,
       deviceSessionValid: true,
       phase: "response",

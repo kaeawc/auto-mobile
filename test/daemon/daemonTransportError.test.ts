@@ -115,6 +115,7 @@ describe("DaemonClient device-control transport response", () => {
         deviceId: "emulator-5554",
         deviceSessionUuid: "device-epoch-a",
         sessionUuid: "session-a",
+        routingSessionUuid: "session-a",
         sessionValid: true,
         deviceSessionValid: true,
         phase: "response" as const,

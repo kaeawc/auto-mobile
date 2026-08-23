@@ -602,6 +602,7 @@ describe("UnixSocketServer MCP session reconnect", () => {
       deviceId: "emulator-5554",
       deviceSessionUuid: "device-epoch-a",
       sessionUuid: "session-a",
+      routingSessionUuid: "session-a",
       sessionValid: true,
       deviceSessionValid: true,
       phase: "response",
@@ -981,6 +982,44 @@ describe("UnixSocketServer MCP session reconnect", () => {
     expect(replayedArguments).toMatchObject({
       sessionUuid: "session-a",
       deviceId: "emulator-5556",
+    });
+  });
+
+  test("fences explicit-device recovery on the caller routing session", async () => {
+    let clientsCreated = 0;
+    let callsDispatched = 0;
+
+    server.mcpClientFactory = async () => {
+      clientsCreated++;
+      return createFakeMcpClient({
+        callTool: async () => {
+          callsDispatched++;
+          sessionIsValid = false;
+          throw socketClosedError();
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: {
+        sessionUuid: "session-a",
+        deviceId: "emulator-5556",
+      },
+    });
+
+    expect(response.success).toBe(false);
+    expect(clientsCreated).toBe(1);
+    expect(callsDispatched).toBe(1);
+    expect(response.transportFailure).toMatchObject({
+      deviceId: "emulator-5556",
+      deviceSessionUuid: "device-epoch-b",
+      sessionUuid: "session-b",
+      routingSessionUuid: "session-a",
+      sessionValid: false,
+      deviceSessionValid: true,
+      reconnectAttempted: false,
+      replayAttempted: false,
     });
   });
 

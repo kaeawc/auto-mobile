@@ -13,6 +13,7 @@ export interface DeviceControlTransportFailure {
   deviceId?: string;
   deviceSessionUuid?: string;
   sessionUuid?: string;
+  routingSessionUuid?: string;
   /** Whether the captured daemon session still exists and retains its device assignment. */
   sessionValid: boolean;
   /** Whether the captured device epoch is still current for the target device. */
@@ -52,11 +53,11 @@ function sanitizeTransportFailureIdentity(
   record: Record<string, unknown>,
 ): Pick<
   DeviceControlTransportFailure,
-  "deviceId" | "deviceSessionUuid" | "sessionUuid"
+  "deviceId" | "deviceSessionUuid" | "sessionUuid" | "routingSessionUuid"
 > | undefined {
   const identity: Pick<
     DeviceControlTransportFailure,
-    "deviceId" | "deviceSessionUuid" | "sessionUuid"
+    "deviceId" | "deviceSessionUuid" | "sessionUuid" | "routingSessionUuid"
   > = {};
   if (record.deviceId !== undefined) {
     if (typeof record.deviceId !== "string") {
@@ -75,6 +76,12 @@ function sanitizeTransportFailureIdentity(
       return undefined;
     }
     identity.sessionUuid = record.sessionUuid;
+  }
+  if (record.routingSessionUuid !== undefined) {
+    if (typeof record.routingSessionUuid !== "string") {
+      return undefined;
+    }
+    identity.routingSessionUuid = record.routingSessionUuid;
   }
   return identity;
 }

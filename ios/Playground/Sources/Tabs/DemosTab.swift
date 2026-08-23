@@ -123,6 +123,26 @@ struct DemosTab: View {
                             icon: "dial.medium.fill"
                         )
                     }
+
+                    NavigationLink {
+                        SwiftUISemanticLinksDemo()
+                    } label: {
+                        DemoRow(
+                            title: "Semantic Links (SwiftUI)",
+                            description: "AttributedString inline accessibility links",
+                            icon: "link"
+                        )
+                    }
+
+                    NavigationLink {
+                        UIKitSemanticLinksDemo()
+                    } label: {
+                        DemoRow(
+                            title: "Semantic Links (UIKit)",
+                            description: "UITextView inline accessibility links",
+                            icon: "link.circle"
+                        )
+                    }
                 }
 
                 Section("View Hierarchy") {

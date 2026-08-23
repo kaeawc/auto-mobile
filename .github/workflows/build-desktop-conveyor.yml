@@ -179,6 +179,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: automobile-desktop-conveyor
-          path: android/output
+          # Conveyor writes `make site` output to ./output relative to the CWD (the repo root the
+          # action runs from), not the -f config's directory.
+          path: output
           if-no-files-found: error
           retention-days: 7

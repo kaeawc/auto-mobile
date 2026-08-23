@@ -408,9 +408,11 @@ export class NavigationRetention {
    * evictable rows remain (active rows are excluded relationally, so a scope can
    * be irreducible below its active set).
    *
-   * Perf note: each batch does an ordered scan of the observation tables. A
-   * `(build_key_id, last_seen_at)` index would turn this into an index range scan;
-   * deferred as a small follow-up migration (issue #5309).
+   * Perf note: each batch reads the oldest rows `ORDER BY last_seen_at, id`
+   * across build keys. The `(last_seen_at, id)` index from
+   * 2026_08_22_002_navigation_observation_eviction_index.ts (issue #5309) serves
+   * that ordering directly, so the batch is an index range scan rather than a
+   * scan + temp-B-tree sort.
    */
   private async evictOldest(
     trx: Kysely<Database>,

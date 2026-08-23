@@ -42,6 +42,7 @@ import dev.jasonpearson.automobile.sdk.os.AutoMobileOsEvents
 import dev.jasonpearson.automobile.sdk.persistence.EventPersistence
 import dev.jasonpearson.automobile.sdk.persistence.FileEventPersistence
 import dev.jasonpearson.automobile.sdk.session.SessionTracker
+import dev.jasonpearson.automobile.sdk.storage.DataStoreInspector
 import dev.jasonpearson.automobile.sdk.storage.SharedPreferencesInspector
 import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
@@ -529,6 +530,10 @@ object AutoMobileSDK {
         Handler(Looper.getMainLooper()).post(teardown)
       }
     }
+
+    // Clear application-provided DataStore adapters so shutdown does not retain host references
+    // (issue #5192).
+    DataStoreInspector.reset()
 
     sessionTracker?.shutdown()
     sessionTracker = null

@@ -29,6 +29,7 @@ describe("proxy server device-control transport errors", () => {
       deviceSessionUuid: "device-epoch-a",
       sessionUuid: "session-a",
       sessionValid: true,
+      deviceSessionValid: true,
       phase: "response",
       retryable: false,
       reconnectAttempted: true,

@@ -1487,7 +1487,20 @@ export class UnixSocketServer {
     return Boolean(identity.deviceId && identity.deviceSessionUuid);
   }
 
-  private isDeviceControlTransportIdentityValid(
+  private isDeviceControlSessionValid(identity: DeviceControlTransportIdentity): boolean {
+    if (!this.daemonState.isInitialized() || !identity.sessionUuid) {
+      return false;
+    }
+    try {
+      const session = this.daemonState.getSessionManager().getSession(identity.sessionUuid);
+      return Boolean(session && (!identity.deviceId || session.assignedDevice === identity.deviceId));
+    } catch (error) {
+      logger.debug(`Unable to validate device-control daemon session: ${error}`);
+      return false;
+    }
+  }
+
+  private isDeviceControlDeviceSessionValid(
     identity: DeviceControlTransportIdentity,
   ): boolean {
     if (
@@ -1498,21 +1511,23 @@ export class UnixSocketServer {
       return false;
     }
     try {
-      if (identity.sessionUuid) {
-        const session = this.daemonState.getSessionManager().getSession(identity.sessionUuid);
-        if (!session || session.assignedDevice !== identity.deviceId) {
-          return false;
-        }
-      }
       const liveDeviceSession = this.daemonState
         .getDeviceSessionRegistry()
         .list()
         .find(record => record.deviceId === identity.deviceId);
       return liveDeviceSession?.deviceSessionUuid === identity.deviceSessionUuid;
     } catch (error) {
-      logger.debug(`Unable to validate device-control transport identity: ${error}`);
+      logger.debug(`Unable to validate device-control device epoch: ${error}`);
       return false;
     }
+  }
+
+  private isDeviceControlTransportIdentityValid(
+    identity: DeviceControlTransportIdentity,
+  ): boolean {
+    const sessionValid =
+      !identity.sessionUuid || this.isDeviceControlSessionValid(identity);
+    return sessionValid && this.isDeviceControlDeviceSessionValid(identity);
   }
 
   private isDeviceControlRecoveryIdentityValid(
@@ -1546,13 +1561,16 @@ export class UnixSocketServer {
     recoveryExhausted: boolean;
   }): DeviceControlTransportError {
     const toolName = deviceControlToolName(input.request);
-    const sessionValid = this.isDeviceControlTransportIdentityValid(input.identity);
+    const sessionValid = this.isDeviceControlSessionValid(input.identity);
+    const deviceSessionValid = this.isDeviceControlDeviceSessionValid(input.identity);
+    const identityValid =
+      (!input.identity.sessionUuid || sessionValid) && deviceSessionValid;
     const identityEstablished =
       this.hasEstablishedDeviceControlTransportIdentity(input.identity);
     const retryable =
       input.phase === "connect"
-        ? !identityEstablished || sessionValid
-        : sessionValid && isReplaySafeAfterResponseClosure(input.request);
+        ? !identityEstablished || identityValid
+        : identityValid && isReplaySafeAfterResponseClosure(input.request);
     const failure: DeviceControlTransportFailure = {
       code: DEVICE_CONTROL_TRANSPORT_FAILURE_CODE,
       transport: "daemon_loopback_http",
@@ -1563,6 +1581,7 @@ export class UnixSocketServer {
         : {}),
       ...(input.identity.sessionUuid ? { sessionUuid: input.identity.sessionUuid } : {}),
       sessionValid,
+      deviceSessionValid,
       phase: input.phase,
       retryable,
       reconnectAttempted: input.reconnectAttempted,

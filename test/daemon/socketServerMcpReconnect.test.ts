@@ -449,6 +449,7 @@ describe("UnixSocketServer MCP session reconnect", () => {
       deviceSessionUuid: "device-epoch-a",
       sessionUuid: "session-a",
       sessionValid: true,
+      deviceSessionValid: true,
       phase: "response",
       retryable: true,
       reconnectAttempted: true,
@@ -598,6 +599,7 @@ describe("UnixSocketServer MCP session reconnect", () => {
       deviceSessionUuid: "device-epoch-a",
       sessionUuid: "session-a",
       sessionValid: true,
+      deviceSessionValid: true,
       phase: "response",
       retryable: false,
       reconnectAttempted: true,
@@ -689,6 +691,7 @@ describe("UnixSocketServer MCP session reconnect", () => {
       deviceSessionUuid: "device-epoch-a",
       sessionUuid: "session-a",
       sessionValid: false,
+      deviceSessionValid: true,
       phase: "response",
       retryable: false,
       reconnectAttempted: false,
@@ -724,7 +727,8 @@ describe("UnixSocketServer MCP session reconnect", () => {
       deviceId: "emulator-5554",
       deviceSessionUuid: "device-epoch-a",
       sessionUuid: "session-a",
-      sessionValid: false,
+      sessionValid: true,
+      deviceSessionValid: false,
       reconnectAttempted: false,
       replayAttempted: false,
     });
@@ -758,7 +762,8 @@ describe("UnixSocketServer MCP session reconnect", () => {
     expect(clientsCreated).toBe(2);
     expect(callsDispatched).toBe(2);
     expect(response.transportFailure).toMatchObject({
-      sessionValid: false,
+      sessionValid: true,
+      deviceSessionValid: false,
       phase: "response",
       retryable: false,
       reconnectAttempted: true,

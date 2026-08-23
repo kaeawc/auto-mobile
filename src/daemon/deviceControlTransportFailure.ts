@@ -13,8 +13,10 @@ export interface DeviceControlTransportFailure {
   deviceId?: string;
   deviceSessionUuid?: string;
   sessionUuid?: string;
-  /** True only while the daemon session assignment and captured device epoch remain valid. */
+  /** Whether the captured daemon session still exists and retains its device assignment. */
   sessionValid: boolean;
+  /** Whether the captured device epoch is still current for the target device. */
+  deviceSessionValid: boolean;
   phase: DeviceControlTransportPhase;
   retryable: boolean;
   reconnectAttempted: boolean;
@@ -81,6 +83,7 @@ function hasTransportFailureState(
   record: Record<string, unknown>,
 ): record is Record<string, unknown> & {
   sessionValid: boolean;
+  deviceSessionValid: boolean;
   phase: DeviceControlTransportPhase;
   retryable: boolean;
   reconnectAttempted: boolean;
@@ -88,6 +91,7 @@ function hasTransportFailureState(
 } {
   return (
     typeof record.sessionValid === "boolean"
+    && typeof record.deviceSessionValid === "boolean"
     && (record.phase === "connect" || record.phase === "response")
     && typeof record.retryable === "boolean"
     && typeof record.reconnectAttempted === "boolean"
@@ -116,6 +120,7 @@ export function sanitizeDeviceControlTransportFailure(
     toolName: record.toolName,
     ...identity,
     sessionValid: record.sessionValid,
+    deviceSessionValid: record.deviceSessionValid,
     phase: record.phase,
     retryable: record.retryable,
     reconnectAttempted: record.reconnectAttempted,

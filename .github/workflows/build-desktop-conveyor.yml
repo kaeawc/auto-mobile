@@ -159,14 +159,15 @@ jobs:
           # config with -f; Conveyor treats the config file's directory (android/) as the project
           # root, so its `./gradlew` include and relative asset paths resolve there. A signed run uses
           # ci.conveyor.conf (Developer ID + notarization over the base); the default self-signs.
-          extra_flags: ${{ inputs.signed && '-f android/ci.conveyor.conf' || '-f android/conveyor.conf' }}
+          # Publish adds the copy-to destination as a -K override so the key is absent (not blank) on
+          # non-publish runs. Signed runs layer ci.conveyor.conf (Developer ID + notarization).
+          extra_flags: >-
+            ${{ inputs.signed && '-f android/ci.conveyor.conf --passphrase env:CONVEYOR_MAC_CERTIFICATE_PASSWORD' || '-f android/conveyor.conf' }}${{ inputs.publish && ' -Kapp.site.copy-to=github:kaeawc/auto-mobile' || '' }}
           signing_key: ${{ secrets.CONVEYOR_SIGNING_KEY }}
           agree_to_license: 1
         env:
           CONVEYOR_APP_VERSION: ${{ inputs.version }}
-          # In publish mode, set conveyor.conf's env-gated site.copy-to to this repo's GitHub Releases
-          # and hand Conveyor the token to attach the Sparkle/apt assets. Unset otherwise -> no push.
-          CONVEYOR_SITE_COPY_TO: ${{ inputs.publish && 'github:kaeawc/auto-mobile' || '' }}
+          # Publishing to GitHub Releases needs the token; unset otherwise so no push can happen.
           GITHUB_TOKEN: ${{ inputs.publish && secrets.GITHUB_TOKEN || '' }}
           # The cert password reaches Conveyor as CONVEYOR_MAC_CERTIFICATE_PASSWORD via GITHUB_ENV
           # from the prepare step above (matching ci.conveyor.conf). The notary issuer/key ids are
@@ -178,6 +179,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: automobile-desktop-conveyor
-          path: android/output
+          # Conveyor writes `make site` output to ./output relative to the CWD (the repo root the
+          # action runs from), not the -f config's directory.
+          path: output
           if-no-files-found: error
           retention-days: 7

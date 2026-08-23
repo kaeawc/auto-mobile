@@ -1,5 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.workspace
 
+import dev.jasonpearson.automobile.desktop.core.navigation.NavigationScreenshotLoaderRegistry
+import dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestScope
@@ -7,6 +9,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -77,6 +80,20 @@ class WorkspaceViewModelTest {
     vm.onAction(WorkspaceAction.ObserveDevice(column("a")))
     vm.onAction(WorkspaceAction.CloseDevice("a"))
     assertTrue(vm.state.value is WorkspaceUiState.Empty)
+  }
+
+  @Test
+  fun `closing a column releases its navigation screenshot loader`() = testScope.runTest {
+    val registry = NavigationScreenshotLoaderRegistry()
+    val vm = WorkspaceViewModel(this, screenshotLoaderRegistry = registry)
+    vm.onAction(WorkspaceAction.ObserveDevice(column("a")))
+    // Simulate the Navigation facet having created a per-device loader for the pane.
+    registry.forDevice("a") { FakeAutoMobileClient() }
+    assertNotNull("precondition: loader exists for the open device", registry.peek("a"))
+
+    vm.onAction(WorkspaceAction.CloseDevice("a"))
+
+    assertNull("closing the device must release its screenshot loader (#5087)", registry.peek("a"))
   }
 
   @Test

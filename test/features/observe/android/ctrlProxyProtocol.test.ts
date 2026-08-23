@@ -272,6 +272,20 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
         '{"type":"request_activate_accessibility_link","requestId":"link-1","text":"Terms of Service","occurrence":1,"selector":{"resourceId":"com.example:id/legal"}}',
     },
     {
+      builder: "requestActivateAccessibilityLink",
+      name: "semantic link activation carries a Compose test-tag owner selector",
+      actual: serializeCtrlProxyRequest(
+        ctrlProxyRequests.requestActivateAccessibilityLink({
+          requestId: "link-2",
+          text: "Privacy Policy",
+          occurrence: 0,
+          selector: { testTag: "legal-copy" },
+        }),
+      ),
+      expected:
+        '{"type":"request_activate_accessibility_link","requestId":"link-2","text":"Privacy Policy","occurrence":0,"selector":{"testTag":"legal-copy"}}',
+    },
+    {
       builder: "requestClipboard",
       name: "text included for copy",
       actual: serializeCtrlProxyRequest(

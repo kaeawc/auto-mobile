@@ -5,7 +5,7 @@
  * shared state and functionality from the main CtrlProxyClient.
  */
 
-import type { ViewHierarchyWindowInfo } from "../../../models";
+import type { SemanticLink, ViewHierarchyWindowInfo } from "../../../models";
 import type { ObservationInsets } from "../../../models/ObservationInsets";
 import type { CtrlProxyReconnectStatus } from "../../../models/CtrlProxyReconnectStatus";
 import type { HighlightOperationResult } from "../../../models";
@@ -54,6 +54,8 @@ export interface CtrlProxyNode {
   checked?: string;
   selected?: string;
   longClickable?: string;
+  semanticLinks?: SemanticLink[];
+  "semantic-links"?: SemanticLink[];
   testTag?: string;
   role?: string;
   stateDescription?: string;

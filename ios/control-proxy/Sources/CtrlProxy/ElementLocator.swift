@@ -1101,6 +1101,9 @@ public class ElementLocator: ElementLocating {
                 checked: isChecked ? "true" : nil,
                 selected: isSelected ? "true" : nil,
                 longClickable: nil, // Don't include - same as clickable on iOS
+                semanticLinks: snapshot.elementType == .link
+                    ? label.map { [SemanticLink(text: $0, occurrence: 0)] }
+                    : nil,
                 testTag: nil, // Don't duplicate - identifier is in resourceId
                 role: mapRole(snapshot.elementType),
                 stateDescription: nil,
@@ -1649,6 +1652,7 @@ public class ElementLocator: ElementLocating {
             checked: element.checked,
             selected: element.selected,
             longClickable: element.longClickable,
+            semanticLinks: element.semanticLinks,
             testTag: element.testTag,
             role: element.role,
             stateDescription: element.stateDescription,

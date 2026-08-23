@@ -525,6 +525,7 @@ public enum HierarchyMerger {
             checked: element.checked,
             selected: element.selected,
             longClickable: element.longClickable,
+            semanticLinks: element.semanticLinks,
             testTag: element.testTag,
             role: element.role,
             stateDescription: element.stateDescription,

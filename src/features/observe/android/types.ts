@@ -9,6 +9,7 @@ import type {
   BootedDevice,
   ContentHiddenRegion,
   RecompositionNodeInfo,
+  SemanticLink,
   ViewHierarchyWindowInfo
 } from "../../../models";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -73,6 +74,7 @@ export interface AccessibilityNode {
   checked?: string;
   selected?: string;
   "long-clickable"?: string;
+  "semantic-links"?: SemanticLink[];
   occlusionState?: string;
   occludedBy?: string;
   occludedByViewId?: string;

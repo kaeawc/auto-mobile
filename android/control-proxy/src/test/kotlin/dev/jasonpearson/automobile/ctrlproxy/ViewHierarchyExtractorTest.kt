@@ -1,8 +1,12 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
 import android.graphics.Rect
+import android.text.SpannableString
+import android.text.style.ClickableSpan
+import android.view.View
 import android.view.accessibility.AccessibilityWindowInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds
+import dev.jasonpearson.automobile.ctrlproxy.models.SemanticLink
 import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
@@ -166,6 +170,51 @@ class ViewHierarchyExtractorTest {
 
     assertFalse(element.isClickable)
     assertTrue(element.isEnabled) // Should default to true
+  }
+
+  @Test
+  fun `semantic links preserve visible text ranges and per-text occurrences`() {
+    val text = SpannableString("Read Terms, Privacy, and Terms")
+    val firstTerms = object : ClickableSpan() { override fun onClick(widget: View) = Unit }
+    val privacy = object : ClickableSpan() { override fun onClick(widget: View) = Unit }
+    val secondTerms = object : ClickableSpan() { override fun onClick(widget: View) = Unit }
+    text.setSpan(firstTerms, 5, 10, 0)
+    text.setSpan(privacy, 12, 19, 0)
+    text.setSpan(secondTerms, 25, 30, 0)
+
+    assertEquals(
+      listOf(
+        SemanticLink("Terms", 0, 5, 10),
+        SemanticLink("Privacy", 0, 12, 19),
+        SemanticLink("Terms", 1, 25, 30),
+      ),
+      extractor.semanticLinksFromText(text, apiLevel = 26),
+    )
+  }
+
+  @Test
+  fun `semantic links stay absent below API 26 and for plain text`() {
+    val spanned = SpannableString("Terms")
+    spanned.setSpan(object : ClickableSpan() { override fun onClick(widget: View) = Unit }, 0, 5, 0)
+
+    assertNull(extractor.semanticLinksFromText(spanned, apiLevel = 25))
+    assertNull(extractor.semanticLinksFromText("Terms", apiLevel = 35))
+  }
+
+  @Test
+  fun `semantic link metadata stays omitted unless an element contains links`() {
+    val verboseJson = Json { encodeDefaults = true }
+
+    assertFalse(
+      verboseJson.encodeToString(UIElementInfo.serializer(), UIElementInfo(text = "Plain text"))
+        .contains("semantic-links")
+    )
+    assertTrue(
+      verboseJson.encodeToString(
+        UIElementInfo.serializer(),
+        UIElementInfo(semanticLinks = listOf(SemanticLink("Terms", 0, 0, 5))),
+      ).contains("semantic-links")
+    )
   }
 
   @Test

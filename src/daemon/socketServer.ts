@@ -1609,7 +1609,7 @@ export class UnixSocketServer {
     const args = request.method === "tools/call" ? request.params?.arguments : undefined;
     if (
       phase !== "response"
-      || !identity.sessionUuid
+      || !identity.deviceId
       || !args
       || typeof args !== "object"
       || Array.isArray(args)
@@ -1618,10 +1618,15 @@ export class UnixSocketServer {
     }
     const pinnedArguments: Record<string, unknown> = {
       ...(args as Record<string, unknown>),
-      sessionUuid: identity.sessionUuid,
+      ...(identity.sessionUuid
+        ? { sessionUuid: identity.sessionUuid }
+        : { deviceId: identity.deviceId }),
     };
-    // A label can be remapped while reconnecting; replay the captured session instead.
+    // A label can be remapped while reconnecting; replay the captured target instead.
     delete pinnedArguments.device;
+    if (identity.sessionUuid) {
+      delete pinnedArguments.deviceId;
+    }
     return {
       ...request,
       params: {
@@ -1629,6 +1634,37 @@ export class UnixSocketServer {
         arguments: pinnedArguments,
       },
     };
+  }
+
+  private getDeviceControlRecoveryRoute(
+    input: DeviceControlTransportRecoveryContext,
+    replayAfterResponse: boolean,
+  ): McpForwardRoute {
+    if (
+      !replayAfterResponse
+      || !input.identity.sessionUuid
+      || input.route.sessionUuid === input.identity.sessionUuid
+    ) {
+      return input.route;
+    }
+    return this.sessionScopedForwardRoute(
+      input.socketSessionId,
+      input.identity.sessionUuid,
+      input.route.executionKey,
+      input.route.toolSelectionProfileUuid,
+    );
+  }
+
+  private scheduleDistinctRecoveryRouteIdleClose(
+    originalRoute: McpForwardRoute,
+    recoveryRoute: McpForwardRoute,
+  ): void {
+    if (
+      recoveryRoute.clientKey !== originalRoute.clientKey
+      && this.mcpClients.has(recoveryRoute.clientKey)
+    ) {
+      this.scheduleMcpClientIdleClose(recoveryRoute.clientKey);
+    }
   }
 
   private async reconnectDeviceControlTransport(
@@ -1686,10 +1722,13 @@ export class UnixSocketServer {
       });
     }
 
-    const freshClient = await this.reconnectDeviceControlTransport(input);
+    const recoveryRoute = this.getDeviceControlRecoveryRoute(input, replayAfterResponse);
+    const recoveryInput = { ...input, route: recoveryRoute };
+    const freshClient = await this.reconnectDeviceControlTransport(recoveryInput);
 
     const retryRemainingMs = this.remainingMcpForwardBudget(input);
     if (retryRemainingMs <= 0) {
+      this.scheduleDistinctRecoveryRouteIdleClose(input.route, recoveryRoute);
       throw this.deviceControlTransportError({
         request: input.request,
         identity: input.identity,
@@ -1700,7 +1739,7 @@ export class UnixSocketServer {
       });
     }
     if (!this.isDeviceControlRecoveryIdentityValid(input.identity, input.phase)) {
-      await this.resetMcpClient(input.route.clientKey, "detach");
+      await this.resetMcpClient(recoveryRoute.clientKey, "detach");
       throw this.deviceControlTransportError({
         request: input.request,
         identity: input.identity,
@@ -1734,7 +1773,7 @@ export class UnixSocketServer {
         input.socketSessionId,
       );
       if (!this.isDeviceControlReplayResultIdentityValid(input.identity)) {
-        await this.resetMcpClient(input.route.clientKey, "detach");
+        await this.resetMcpClient(recoveryRoute.clientKey, "detach");
         throw this.deviceControlTransportError({
           request: input.request,
           identity: input.identity,
@@ -1749,7 +1788,7 @@ export class UnixSocketServer {
       if (!isUnexpectedSocketClosure(error)) {
         throw error;
       }
-      await this.resetMcpClient(input.route.clientKey, "detach");
+      await this.resetMcpClient(recoveryRoute.clientKey, "detach");
       const failureIdentity = this.getDeviceControlRecoveryFailureIdentity(
         input,
         input.identity,
@@ -1762,6 +1801,8 @@ export class UnixSocketServer {
         replayAttempted: replayAfterResponse,
         recoveryExhausted: true,
       });
+    } finally {
+      this.scheduleDistinctRecoveryRouteIdleClose(input.route, recoveryRoute);
     }
   }
 

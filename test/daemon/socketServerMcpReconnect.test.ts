@@ -10,6 +10,7 @@ import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { SOCKET_REQUEST_DEADLINE_MS, sendSocketRequest } from "./helpers/socketRequest";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { SessionToolBinding } from "../../src/server/SessionToolBinding";
 import type { DaemonResponse } from "../../src/daemon/types";
 
 /**
@@ -747,9 +748,20 @@ describe("UnixSocketServer MCP session reconnect", () => {
 
   test("pins a device-label target before replaying observe", async () => {
     let clientsCreated = 0;
+    let closeCalls = 0;
     let replayedArguments: Record<string, unknown> | undefined;
+    const clientBindings: Array<string | undefined> = [];
+    let signalReplayStarted = () => {};
+    const replayStarted = new Promise<void>(resolve => {
+      signalReplayStarted = resolve;
+    });
+    let finishReplay = () => {};
+    const replayResult = new Promise<unknown>(resolve => {
+      finishReplay = () => resolve({ content: [{ type: "text", text: "observed" }] });
+    });
 
-    server.mcpClientFactory = async () => {
+    server.mcpClientFactory = async boundSessionUuid => {
+      clientBindings.push(boundSessionUuid);
       const clientIndex = ++clientsCreated;
       return createFakeMcpClient({
         callTool: async (...args: unknown[]) => {
@@ -759,20 +771,47 @@ describe("UnixSocketServer MCP session reconnect", () => {
           }
           const [toolCall] = args as [{ arguments: Record<string, unknown> }];
           replayedArguments = toolCall.arguments;
-          return { content: [{ type: "text", text: "observed" }] };
+          new SessionToolBinding(boundSessionUuid).effectiveSessionUuid(
+            "replay-mcp-session",
+            replayedArguments,
+          );
+          signalReplayStarted();
+          return replayResult;
+        },
+        close: async () => {
+          closeCalls++;
         },
       });
     };
 
-    const response = await sendRequest(socketPath, "tools/call", {
+    const responsePromise = sendRequest(socketPath, "tools/call", {
       name: "observe",
       arguments: { sessionUuid: "session-a", device: "B" },
     });
+    await replayStarted;
 
-    expect(response.success).toBe(true);
     expect(clientsCreated).toBe(2);
+    expect(clientBindings).toEqual(["session-a", "session-b"]);
     expect(replayedArguments).toMatchObject({ sessionUuid: "session-b" });
     expect(replayedArguments).not.toHaveProperty("device");
+    expect(replayedArguments).not.toHaveProperty("deviceId");
+    expect((server as any).mcpClients.size).toBe(1);
+
+    fakeTimer.advanceTime(5 * 60 * 1000);
+    await Promise.resolve();
+
+    expect(closeCalls).toBe(1);
+    expect((server as any).mcpClients.size).toBe(1);
+
+    finishReplay();
+    const response = await responsePromise;
+    expect(response.success).toBe(true);
+
+    fakeTimer.advanceTime(5 * 60 * 1000);
+    await Promise.resolve();
+
+    expect(closeCalls).toBe(2);
+    expect((server as any).mcpClients.size).toBe(0);
   });
 
   test("recovers observe for an implicit autolock session", async () => {

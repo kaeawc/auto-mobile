@@ -94,6 +94,35 @@ class DataStoreInspectorProviderTest {
   }
 
   @Test
+  fun `getDataStore serializes string-set and byte-array values for the wire`() {
+    DataStoreInspector.registerAdapter(
+      "prefs",
+      FakeDataStoreAdapter().apply {
+        setStore(
+          "typed",
+          linkedMapOf("tags" to setOf("a", "b"), "blob" to byteArrayOf(1, 2, 3)),
+        )
+      },
+    )
+
+    val response =
+      successResult(
+        provider.call(
+          "getDataStore",
+          null,
+          bundleOf("adapterName" to "prefs", "storeName" to "typed"),
+        )
+      )
+
+    val byKey = (response as StorageResponse.Preferences).entries.associateBy { it.key }
+    assertEquals("STRING_SET", byKey.getValue("tags").type)
+    assertEquals("[\"a\",\"b\"]", byKey.getValue("tags").value)
+    assertEquals("BYTE_ARRAY", byKey.getValue("blob").type)
+    // android.util.Base64.NO_WRAP encoding of {1,2,3}.
+    assertEquals("AQID", byKey.getValue("blob").value)
+  }
+
+  @Test
   fun `getDataStore applies the boundary redaction policy`() {
     DataStoreInspector.registerAdapter(
       "prefs",

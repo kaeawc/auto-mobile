@@ -72,6 +72,25 @@ class DataStoreInspectorTest {
     assertEquals(1, byName.getValue("flags").entryCount)
   }
 
+  // AC2 — a store that vanishes between listing and read is omitted, not fatal to the listing.
+  @Test
+  fun `describeStores omits a store that disappears mid-listing`() = runTest {
+    val adapter =
+      object : DataStoreAdapter {
+        override suspend fun storeNames() = listOf("present", "vanished")
+
+        override suspend fun read(storeName: String): List<DataStoreEntry> =
+          if (storeName == "present") listOf(DataStoreEntry("k", "v", DataStoreValueType.STRING))
+          else throw DataStoreAdapterError.StoreNotFound(storeName)
+      }
+    DataStoreInspector.registerAdapter("prefs", adapter)
+
+    val described = DataStoreInspector.describeStores("prefs")
+
+    assertEquals(listOf("present"), described.map { it.name })
+    assertEquals(1, described.single().entryCount)
+  }
+
   // AC2/AC3 — structured reads of stores, keys, values, and value types.
   @Test
   fun `reads structured entries covering all supported value types`() = runTest {

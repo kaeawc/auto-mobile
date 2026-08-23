@@ -56,9 +56,16 @@ object DataStoreInspector {
   suspend fun describeStores(adapterName: String): List<DataStoreDescriptor> {
     val adapter = resolve(adapterName)
     val names = runAdapterRead { adapter.storeNames() }
-    return names.map { name ->
-      val entries = runAdapterRead { adapter.read(name) }
-      DataStoreDescriptor(name = name, entryCount = entries.size)
+    return names.mapNotNull { name ->
+      try {
+        val entries = runAdapterRead { adapter.read(name) }
+        DataStoreDescriptor(name = name, entryCount = entries.size)
+      } catch (_: DataStoreAdapterError.StoreNotFound) {
+        // A store removed between storeNames() and its read() is simply omitted from the
+        // listing rather than failing the whole call (issue #5192). Other read failures still
+        // propagate so a genuinely broken adapter is not silently hidden.
+        null
+      }
     }
   }
 

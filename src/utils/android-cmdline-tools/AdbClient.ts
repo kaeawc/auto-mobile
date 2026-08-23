@@ -1,9 +1,13 @@
 import { errorMessage } from "../describeUnknownError";
 import { execFile, type ChildProcess, type SpawnOptions } from "child_process";
-import { promisify } from "util";
 import { logger } from "../logger";
 import { createExecResult } from "../execResult";
-import { DefaultHostCommandExecutor, type HostProcessExecutor } from "../HostCommandExecutor";
+import { runExecSeam } from "../ExecSeam";
+import {
+  DefaultHostCommandExecutor,
+  execFileAsync as sharedExecFileAsync,
+  type HostProcessExecutor,
+} from "../HostCommandExecutor";
 import { BootedDevice, ExecResult, AndroidUser, DeviceLockState } from "../../models";
 import {
   AndroidToolsDetectionAbortError,
@@ -106,7 +110,15 @@ export function resetAdbDeviceListCache(): void {
   deviceListCache = null;
 }
 
-// Enhance the standard execFileAsync result to implement the ExecResult interface
+// Route the execFile leg through the shared exec seam (issue #5459) so the option
+// mapping and the Buffer→string / trim / toString / includes coercion live in one
+// place and this wrapper no longer reaches for `child_process` on its exec path.
+//
+// `preserveError: true` keeps the raw execFile rejection intact. This wrapper
+// historically awaited `promisify(execFile)` directly and never ran the error
+// through `wrapCommandError`, so callers (path detection, the fallback exec seam)
+// still observe node's original error with its `.code`/`.stderr` fields — the
+// seam's default wrap would drop those.
 const execFileAsync: ExecFileAsync = async (
   file: string,
   args: string[],
@@ -117,12 +129,12 @@ const execFileAsync: ExecFileAsync = async (
     console.warn(`[DEBUG_ADB_EXEC] Real execFileAsync called: ${file} ${args.join(" ")}`);
     console.warn(`[DEBUG_ADB_EXEC] Stack trace:`, new Error().stack);
   }
-  const options = maxBuffer ? { maxBuffer } : undefined;
-  const result = await promisify(execFile)(file, args, options);
-
-  // Coerce to the canonical ExecResult (Buffer→string plus the trim/toString/
-  // includes helpers) via the shared factory rather than re-inlining it here.
-  return createExecResult(result.stdout, result.stderr);
+  return runExecSeam(
+    (execOptions) => sharedExecFileAsync(file, args, execOptions),
+    { maxBuffer },
+    { command: file, args },
+    { preserveError: true },
+  );
 };
 
 export class AdbClient implements AdbExecutor {

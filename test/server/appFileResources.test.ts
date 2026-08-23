@@ -1,10 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { registerAppFileResources } from "../../src/server/appFileResources";
-import {
-  resetAppFileServiceForTesting,
-  setAppFileServiceForTesting,
-  type AppFileService,
-} from "../../src/server/appFileService";
+import type { AppFileService } from "../../src/server/appFileService";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 
 describe("App file resources", () => {
@@ -39,16 +35,14 @@ describe("App file resources", () => {
 
   beforeEach(() => {
     ResourceRegistry.clearResources();
-    setAppFileServiceForTesting(fakeService);
   });
 
   afterEach(() => {
     ResourceRegistry.clearResources();
-    resetAppFileServiceForTesting();
   });
 
   test("registers list and read resource templates", () => {
-    registerAppFileResources();
+    registerAppFileResources(fakeService);
 
     const templates = ResourceRegistry.getTemplateDefinitions();
     expect(templates.map(template => template.uriTemplate)).toContain(
@@ -60,7 +54,7 @@ describe("App file resources", () => {
   });
 
   test("lists app container files as JSON with resource URIs", async () => {
-    registerAppFileResources();
+    registerAppFileResources(fakeService);
 
     const match = ResourceRegistry.matchTemplate(
       "automobile:devices/device%201/apps/com.example.app/files/documents"
@@ -84,7 +78,7 @@ describe("App file resources", () => {
   });
 
   test("reads binary app files as lossless MCP blobs", async () => {
-    registerAppFileResources();
+    registerAppFileResources(fakeService);
 
     const match = ResourceRegistry.matchTemplate(
       "automobile:devices/device%201/apps/com.example.app/files/documents/fixtures/onboarding/welcome%20image.png"
@@ -101,7 +95,7 @@ describe("App file resources", () => {
   });
 
   test("reads UTF-8 app files as MCP text content", async () => {
-    setAppFileServiceForTesting({
+    registerAppFileResources({
       ...fakeService,
       readFile: async request => ({
         deviceId: request.deviceId,
@@ -114,7 +108,6 @@ describe("App file resources", () => {
         text: "{\"enabled\":true}\n",
       }),
     });
-    registerAppFileResources();
 
     const match = ResourceRegistry.matchTemplate(
       "automobile:devices/emulator-5554/apps/com.example.app/files/externalFiles/config/settings.json"

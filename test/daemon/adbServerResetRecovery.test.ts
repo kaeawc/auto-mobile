@@ -110,6 +110,110 @@ describe("ADB server reset session recovery", () => {
     }
   });
 
+  test("reserves a booted replacement until the preserved session is rebound", async () => {
+    class ReplacementSerialDeviceManager extends FakeDeviceManager {
+      override async startDevice(device: DeviceInfo): Promise<ChildProcess> {
+        this.startedDevices.push(device);
+        this.bootedDevices = [{
+          name: device.name,
+          platform: "android",
+          deviceId: "emulator-5560",
+        }];
+        return { pid: 0 } as ChildProcess;
+      }
+
+      override async killDevice(): Promise<void> {
+        this.bootedDevices = [];
+      }
+
+      override async waitForDeviceReady(device: DeviceInfo): Promise<BootedDevice> {
+        return {
+          name: device.name,
+          platform: "android",
+          deviceId: "emulator-5560",
+        };
+      }
+    }
+
+    class BlockingSessionTrackingRepository extends FakeInstalledAppsRepository {
+      private blockNextWrite = false;
+      readonly writeStarted = Promise.withResolvers<void>();
+      readonly releaseWrite = Promise.withResolvers<void>();
+
+      blockNextSessionTrackingWrite(): void {
+        this.blockNextWrite = true;
+      }
+
+      override async setSessionTracking(
+        daemonSessionId: string,
+        deviceId: string,
+        deviceSessionStart: number,
+      ): Promise<void> {
+        if (this.blockNextWrite) {
+          this.blockNextWrite = false;
+          this.writeStarted.resolve();
+          await this.releaseWrite.promise;
+        }
+        await super.setSessionTracking(daemonSessionId, deviceId, deviceSessionStart);
+      }
+    }
+
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const manager = new ReplacementSerialDeviceManager();
+    const apps = new BlockingSessionTrackingRepository();
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      apps,
+      manager,
+      new DefaultRetryExecutor(timer),
+    );
+    const original: BootedDevice = {
+      platform: "android",
+      name: "Pixel_8_API_35",
+      deviceId: "emulator-5554",
+    };
+    const image: DeviceInfo = {
+      name: original.name,
+      platform: "android",
+      isRunning: true,
+      source: "local",
+    };
+    manager.bootedDevices = [original];
+    await pool.addDevice(original, image);
+    await pool.bindOrReuseDeviceSession("session-1", original.deviceId, "android", image);
+    const captured = pool.getDevice(original.deviceId)!;
+    apps.blockNextSessionTrackingWrite();
+
+    try {
+      const recovery = pool.recoverSessionBoundAndroidDeviceAfterAdbServerReset(
+        original.deviceId,
+        captured,
+      );
+      await apps.writeStarted.promise;
+
+      expect(pool.getDevice("emulator-5560")).toMatchObject({
+        status: "idle",
+        sessionId: null,
+      });
+      expect(pool.getIdleDevices().map(device => device.id)).not.toContain("emulator-5560");
+      expect(pool.getAvailableDeviceCount()).toBe(0);
+
+      apps.releaseWrite.resolve();
+      await expect(recovery).resolves.toBe(true);
+      expect(pool.getDevice("emulator-5560")).toMatchObject({
+        status: "busy",
+        sessionId: "session-1",
+      });
+      expect(sessionManager.getSession("session-1")?.assignedDevice).toBe("emulator-5560");
+    } finally {
+      apps.releaseWrite.resolve();
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
   test("refuses to rebind when the original AVD identity was never recorded", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -923,6 +1027,109 @@ describe("ADB server reset session recovery", () => {
       expect(killCount).toBe(1);
       await pool.releaseAdbServerResetCohortReservations(detached.devices);
     } finally {
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
+  test("keeps active sessions quarantined when idle cohort process stop fails", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const manager = new FakeDeviceManager();
+    const incidents = new InMemoryEmulatorLossIncidentStore(timer);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      incidents,
+    );
+    const active: BootedDevice = {
+      platform: "android",
+      name: "Pixel_8_API_35",
+      deviceId: "emulator-5554",
+    };
+    const idle: BootedDevice = {
+      platform: "android",
+      name: "Pixel_7_API_34",
+      deviceId: "emulator-5556",
+    };
+    const activeImage: DeviceInfo = {
+      name: active.name,
+      platform: "android",
+      isRunning: true,
+      source: "local",
+    };
+    const idleImage: DeviceInfo = {
+      name: idle.name,
+      platform: "android",
+      isRunning: true,
+      source: "local",
+    };
+    const activeProcess = {
+      pid: 123,
+      kill: () => true,
+      once: () => activeProcess,
+    } as ChildProcess;
+    const failingIdleProcess = {
+      pid: 456,
+      kill: () => {
+        throw new Error("idle emulator stop failed");
+      },
+      once: () => failingIdleProcess,
+    } as ChildProcess;
+    manager.bootedDevices = [active, idle];
+    await pool.addDevice(active, activeImage);
+    await pool.addDevice(idle, idleImage);
+    await pool.bindOrReuseDeviceSession(
+      "session-1",
+      active.deviceId,
+      "android",
+      activeImage,
+      activeProcess,
+      active,
+    );
+    await pool.bindOrReuseDeviceSession(
+      "idle-seed",
+      idle.deviceId,
+      "android",
+      idleImage,
+      failingIdleProcess,
+      idle,
+    );
+    await sessionManager.releaseSession("idle-seed");
+    await pool.releaseDevice(idle.deviceId, "idle-seed");
+
+    try {
+      await expect(
+        pool.detachAdbServerResetCohort([
+          pool.getDevice(active.deviceId)!,
+          pool.getDevice(idle.deviceId)!,
+        ]),
+      ).rejects.toThrow("idle emulator stop failed");
+
+      expect(pool.isSessionRecoveryInFlight("session-1")).toBe(true);
+      expect(() => pool.assertSessionReadyForAutomation("session-1")).toThrow(
+        /device-disconnected:emulator-5554/,
+      );
+      expect(sessionManager.getSession("session-1")?.assignedDevice).toBe(active.deviceId);
+      await expect(incidents.list()).resolves.toMatchObject([
+        {
+          deviceId: active.deviceId,
+          recovery: { outcome: "exhausted" },
+          session: { sessionUuid: "session-1", state: "recovering" },
+        },
+      ]);
+    } finally {
+      await sessionManager.releaseSession("session-1", "explicit-release");
       sessionManager.stopCleanupTimer();
     }
   });

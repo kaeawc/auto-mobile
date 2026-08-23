@@ -350,6 +350,7 @@ export class DevicePool {
     SessionPreservingRecovery
   >();
   private readonly recoveringAndroidDeviceIds: Set<string> = new Set();
+  private readonly androidRecoveryHandoffOwners = new Map<string, symbol>();
   private readonly startedDeviceProcesses: Map<string, ChildProcess> = new Map();
   private readonly startedDeviceProcessOutput: Map<string, EmulatorProcessOutputTail> = new Map();
   private readonly emulatorLossIncidentStore: EmulatorLossIncidentStore;
@@ -2603,17 +2604,35 @@ export class DevicePool {
       );
       await this.stopTrackedIdleAdbResetCohortProcesses(cohort);
     } catch (error) {
-      for (const { sessionId } of capturedTargets) {
+      await this.settleFailedAdbResetCohortPreparation(cohort, capturedTargets);
+      throw error;
+    }
+  }
+
+  private async settleFailedAdbResetCohortPreparation(
+    cohort: readonly PooledDevice[],
+    capturedTargets: readonly { sessionId: string; deviceId: string }[],
+  ): Promise<void> {
+    const activeSessionIds = new Set<string>();
+    for (const { sessionId, deviceId } of capturedTargets) {
+      const session = this.sessionManager.getSession(sessionId);
+      if (session?.assignedDevice === deviceId && session.platform === "android") {
+        activeSessionIds.add(sessionId);
+      } else {
         this.adbServerResetQuarantinedSessions.delete(sessionId);
         this.recoveringSessionLosses.delete(sessionId);
       }
-      for (const device of cohort) {
-        if (device.adbServerResetIncidentId) {
-          await this.completeEmulatorLossRecovery(device.adbServerResetIncidentId, "not-attempted");
-          this.settleEmulatorLossIncident(device.adbServerResetIncidentId);
-        }
+    }
+    for (const device of cohort) {
+      if (device.adbServerResetIncidentId) {
+        await this.completeEmulatorLossRecovery(
+          device.adbServerResetIncidentId,
+          device.sessionId && activeSessionIds.has(device.sessionId)
+            ? "exhausted"
+            : "not-attempted",
+        );
+        this.settleEmulatorLossIncident(device.adbServerResetIncidentId);
       }
-      throw error;
     }
   }
 
@@ -2936,6 +2955,7 @@ export class DevicePool {
         let childProcess: ChildProcess | null = null;
         let ready: BootedDevice | undefined;
         let readinessCompleted = false;
+        let handoffOwner: symbol | undefined;
         const stopCancelledRecovery = async (deviceToRemove?: BootedDevice): Promise<void> => {
           intentionallyStopped = true;
           if (deviceToRemove) {
@@ -2960,6 +2980,8 @@ export class DevicePool {
           readinessCompleted = true;
           recoveryDeviceIds.add(ready.deviceId);
           this.recoveringAndroidDeviceIds.add(ready.deviceId);
+          handoffOwner = Symbol("android-recovery-handoff");
+          this.androidRecoveryHandoffOwners.set(ready.deviceId, handoffOwner);
           if (this.consumeAndroidRecoveryCancellation(device, recoveryDeviceIds)) {
             await stopCancelledRecovery();
             return;
@@ -2978,6 +3000,7 @@ export class DevicePool {
             recoveryImage,
             childProcess,
             preservedAutolockSessionId,
+            handoffOwner,
           );
           await this.recordEmulatorLossRecoveryAttempt(incidentId, {
             attempt,
@@ -2993,6 +3016,14 @@ export class DevicePool {
             outcome: "failed",
           });
           throw error;
+        } finally {
+          if (
+            handoffOwner !== undefined &&
+            ready !== undefined &&
+            this.androidRecoveryHandoffOwners.get(ready.deviceId) === handoffOwner
+          ) {
+            this.androidRecoveryHandoffOwners.delete(ready.deviceId);
+          }
         }
       });
       if (intentionallyStopped) {
@@ -3151,6 +3182,7 @@ export class DevicePool {
     recoveryImage: DeviceInfo,
     childProcess: ChildProcess | null,
     preservedAutolockSessionId: string | undefined,
+    handoffOwner: symbol | undefined,
   ): Promise<void> {
     if (!preservedSessionId) {
       await this.trackStartedDeviceProcess(ready, childProcess);
@@ -3173,7 +3205,7 @@ export class DevicePool {
       childProcess,
       ready,
       true,
-      undefined,
+      handoffOwner ? new Set([handoffOwner]) : undefined,
       undefined,
       previousDeviceId,
     );
@@ -3860,6 +3892,9 @@ export class DevicePool {
       return;
     }
     if (this.hasReadinessNameReservation(device, readinessReservationOwners)) {
+      throw new ActionableError(unavailableMessage);
+    }
+    if (this.isAndroidRecoveryHandoffReserved(device.id, readinessReservationOwners)) {
       throw new ActionableError(unavailableMessage);
     }
 
@@ -4675,8 +4710,17 @@ export class DevicePool {
     return (
       this.isReservedForReadiness(device.id) ||
       this.hasReadinessNameReservation(device) ||
+      this.isAndroidRecoveryHandoffReserved(device.id) ||
       this.isReservedForShutdown(device)
     );
+  }
+
+  private isAndroidRecoveryHandoffReserved(
+    deviceId: string,
+    allowedOwners?: ReadonlySet<symbol>,
+  ): boolean {
+    const owner = this.androidRecoveryHandoffOwners.get(deviceId);
+    return owner !== undefined && !allowedOwners?.has(owner);
   }
 
   private assertNotReservedForShutdown(device: PooledDevice, unavailableMessage: string): void {

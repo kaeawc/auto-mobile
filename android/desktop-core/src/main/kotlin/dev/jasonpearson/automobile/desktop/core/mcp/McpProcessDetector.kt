@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.mcp
 
+import dev.jasonpearson.automobile.desktop.core.daemon.DaemonSocketPaths
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
@@ -88,20 +89,33 @@ class SystemProcessRunner : ProcessRunner {
   }
 }
 
-/** Checks whether daemon socket files exist in /tmp. */
+/** Checks whether daemon socket files exist. */
 interface SocketFileChecker {
   fun findDaemonSocketFiles(): List<String>
 }
 
-class RealSocketFileChecker : SocketFileChecker {
+/**
+ * Discovers daemon socket files by scanning the default `/tmp` location AND honoring the
+ * `AUTOMOBILE_DAEMON_SOCKET_PATH` / `AUTO_MOBILE_DAEMON_SOCKET_PATH` overrides that the daemon
+ * itself resolves through [DaemonSocketPaths.socketPath]. A daemon started with a socket outside
+ * the default `/tmp/auto-mobile-daemon-*` path would otherwise be invisible to detection, so the
+ * diagnostics health sheet reports "Not Connected" for a daemon that is actually up (issue #4848).
+ */
+class RealSocketFileChecker(
+  private val defaultSocketDir: File = File("/tmp"),
+  private val configuredSocketPath: () -> String = { DaemonSocketPaths.socketPath() },
+) : SocketFileChecker {
   override fun findDaemonSocketFiles(): List<String> {
-    val tmpDir = File("/tmp")
-    if (!tmpDir.isDirectory) return emptyList()
-    return tmpDir
-      .listFiles { f ->
-        f.name.startsWith("auto-mobile-daemon") && f.name.endsWith(".sock")
-      }
-      ?.map { it.absolutePath } ?: emptyList()
+    // LinkedHashSet: preserve scan order while de-duplicating an override that sits under /tmp.
+    val results = LinkedHashSet<String>()
+    if (defaultSocketDir.isDirectory) {
+      defaultSocketDir
+        .listFiles { f -> f.name.startsWith("auto-mobile-daemon") && f.name.endsWith(".sock") }
+        ?.forEach { results.add(it.absolutePath) }
+    }
+    val overrideSocket = File(configuredSocketPath())
+    if (overrideSocket.exists()) results.add(overrideSocket.absolutePath)
+    return results.toList()
   }
 }
 
@@ -110,6 +124,7 @@ class RealMcpProcessDetector(
   private val timeProvider: TimeProvider = SystemTimeProvider,
   private val processRunner: ProcessRunner = SystemProcessRunner(),
   private val socketFileChecker: SocketFileChecker = RealSocketFileChecker(),
+  private val configuredSocketPath: () -> String = { DaemonSocketPaths.socketPath() },
 ) : McpProcessDetector {
 
   override fun detectProcesses(): List<McpProcess> {
@@ -246,11 +261,19 @@ class RealMcpProcessDetector(
     val lines =
       processRunner.runAndReadLines(listOf("lsof", "-p", pid.toString(), "-a", "-U")) ?: return null
 
+    // Match the default /tmp daemon sockets and the configured override path (issue #4848), so a
+    // daemon listening on an AUTOMOBILE_DAEMON_SOCKET_PATH override is recognized here rather than
+    // only falling through to the first-socket fallback in detectProcesses().
+    val overridePath = configuredSocketPath()
     return lines
-      .filter { it.contains("/tmp/auto-mobile-daemon") && it.contains(".sock") }
       .mapNotNull { line ->
-        val parts = line.trim().split(Regex("\\s+"))
-        parts.lastOrNull()?.takeIf { it.startsWith("/tmp/auto-mobile-daemon") }
+        val candidate = line.trim().split(Regex("\\s+")).lastOrNull() ?: return@mapNotNull null
+        when {
+          candidate.startsWith("/tmp/auto-mobile-daemon") && candidate.endsWith(".sock") ->
+            candidate
+          candidate == overridePath -> candidate
+          else -> null
+        }
       }
       .firstOrNull()
   }

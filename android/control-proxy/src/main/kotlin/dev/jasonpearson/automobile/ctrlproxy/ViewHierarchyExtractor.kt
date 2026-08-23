@@ -14,13 +14,6 @@ import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import dev.jasonpearson.automobile.ctrlproxy.models.WindowInfo
 import kotlin.math.max
 import kotlin.math.min
-import kotlinx.serialization.builtins.ListSerializer
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.serializer
 
 /**
  * Component responsible for parsing AccessibilityNodeInfo trees and converting them into
@@ -52,8 +45,6 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
         "android.widget.TextView",
       )
   }
-
-  private val json = Json { ignoreUnknownKeys = true }
 
   /**
    * Extracts view hierarchy from the active window.
@@ -122,10 +113,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
         detectNotificationPermissionDialog(it, rootNode.packageName?.toString())
       }
 
-      val unifiedHierarchy = processedElement?.let {
-        val nodeElement = encodeChildrenToNodeElement(listOf(it))
-        nodeElement?.let { root -> UIElementInfo(node = root) }
-      }
+      val unifiedHierarchy = processedElement?.let { UIElementInfo(children = listOf(it)) }
 
       // Find the accessibility-focused element in the unified hierarchy
       val accessibilityFocusedElement = unifiedHierarchy?.let {
@@ -134,10 +122,11 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
 
       ViewHierarchy(
         packageName = rootNode.packageName?.toString(),
-        hierarchy = unifiedHierarchy,
+        hierarchy = unifiedHierarchy?.let { WireNodeCodec.materialize(it) },
         intentChooserDetected = intentChooserDetected,
         notificationPermissionDetected = notificationPermissionDetected,
-        accessibilityFocusedElement = accessibilityFocusedElement,
+        accessibilityFocusedElement =
+          accessibilityFocusedElement?.let { WireNodeCodec.materialize(it) },
         contentHiddenRegions = contentHiddenRegions?.takeIf { it.isNotEmpty() },
         truncationReasons = budget.truncationReasons().ifEmpty { null },
       )
@@ -423,8 +412,8 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       windowEntries
         .sortedWith(compareBy<WindowEntry> { it.windowLayer }.thenBy { it.windowId })
         .map { it.hierarchy }
-    val windowRootsElement = encodeChildrenToNodeElement(sortedWindowRoots)
-    val unifiedHierarchy = windowRootsElement?.let { UIElementInfo(node = it) }
+    val unifiedHierarchy =
+      if (sortedWindowRoots.isEmpty()) null else UIElementInfo(children = sortedWindowRoots)
 
     val accessibilityFocusedElement = unifiedHierarchy?.let { findAccessibilityFocusedElement(it) }
 
@@ -444,11 +433,12 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
 
     return ViewHierarchy(
       packageName = mainPackageName,
-      hierarchy = unifiedHierarchy,
+      hierarchy = unifiedHierarchy?.let { WireNodeCodec.materialize(it) },
       windows = windowInfos.takeIf { it.isNotEmpty() },
       intentChooserDetected = intentChooserDetected,
       notificationPermissionDetected = notificationPermissionDetected,
-      accessibilityFocusedElement = accessibilityFocusedElement,
+      accessibilityFocusedElement =
+        accessibilityFocusedElement?.let { WireNodeCodec.materialize(it) },
       ctrlProxyIncomplete = if (ctrlProxyIncomplete) true else null,
       contentHiddenRegions = detectContentHiddenRegions(contentHiddenRegionRoots, screenDimensions),
       truncationReasons = budget.truncationReasons().ifEmpty { null },
@@ -493,7 +483,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
 
     fun visit(node: UIElementInfo, isComposeDescendant: Boolean) {
       val nodeIsComposeView = node.className?.contains("ComposeView") == true
-      val children = extractChildrenFromNode(node.node)
+      val children = visibleChildren(node)
 
       if (isComposeDescendant && isLikelyComposeInteropHiddenBoundary(node, children, screenArea)) {
         val bounds = node.bounds ?: return
@@ -616,7 +606,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       return true
     }
 
-    for (child in extractChildrenFromNode(element.node)) {
+    for (child in visibleChildren(element)) {
       if (detectIntentChooserIndicators(child)) {
         return true
       }
@@ -659,7 +649,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
         return
       }
 
-      for (child in extractChildrenFromNode(node.node)) {
+      for (child in visibleChildren(node)) {
         visit(child)
         if (hasNotificationText && hasPermissionButtons) {
           return
@@ -927,14 +917,6 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
           }
       }
 
-      // Create the child node structure
-      val nodeElement =
-        when {
-          children.isEmpty() -> null
-          children.size == 1 -> json.encodeToJsonElement(serializer<UIElementInfo>(), children[0])
-          else -> json.encodeToJsonElement(ListSerializer(serializer<UIElementInfo>()), children)
-        }
-
       val className =
         if (node.className.isNullOrBlank() || GENERIC_CLASS_NAMES.contains(node.className)) {
           null
@@ -999,7 +981,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
           checked = if (node.isChecked) "true" else null,
           selected = if (node.isSelected) "true" else null,
           longClickable = if (node.isLongClickable) "true" else null,
-          node = nodeElement,
+          children = children,
           stateDescription = stateDescription,
           testTag = testTag,
           uniqueId = apiGatedFields.uniqueId,
@@ -1060,8 +1042,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     }
 
     // Recursively check children
-    val children = extractChildrenFromNode(element.node)
-    for (child in children) {
+    for (child in element.children) {
       val focusedInChild = findAccessibilityFocusedElement(child)
       if (focusedInChild != null) {
         return focusedInChild
@@ -1071,45 +1052,15 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     return null
   }
 
-  /** Extract children from node JsonElement */
-  private fun extractChildrenFromNode(nodeElement: JsonElement?): List<UIElementInfo> {
-    if (nodeElement == null) return emptyList()
-
-    return try {
-      val children =
-        when {
-          nodeElement is JsonObject -> {
-            val child = json.decodeFromJsonElement(serializer<UIElementInfo>(), nodeElement)
-            listOf(child)
-          }
-
-          nodeElement is JsonArray -> {
-            nodeElement.jsonArray.mapNotNull { childJson ->
-              try {
-                json.decodeFromJsonElement(serializer<UIElementInfo>(), childJson)
-              } catch (e: Exception) {
-                null
-              }
-            }
-          }
-
-          else -> emptyList()
-        }
-
-      // Apply filter criteria to maintain consistency with extractNodeInfo behavior
-      children.filter { child ->
-        // If the child has its own children, keep it regardless of filter criteria
-        // Otherwise, apply the filter criteria
-        if (child.node != null) {
-          true
-        } else {
-          meetsFilterCriteria(child)
-        }
-      }
-    } catch (e: Exception) {
-      emptyList()
+  /**
+   * Typed children of [element], applying the same visibility filter the old JsonElement decoder
+   * did: keep a child if it has its own descendants, otherwise only if it meets filter criteria.
+   * Walks the in-memory [UIElementInfo.children] with zero (de)serialization (issue #5471).
+   */
+  internal fun visibleChildren(element: UIElementInfo): List<UIElementInfo> =
+    element.children.filter { child ->
+      child.children.isNotEmpty() || meetsFilterCriteria(child)
     }
-  }
 
   /**
    * Resolve the accessibility state description for a node.
@@ -1245,32 +1196,6 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       !element.paneTitle.isNullOrBlank()
   }
 
-  private fun decodeOptimizedChildren(nodeElement: JsonElement): List<UIElementInfo>? {
-    return when {
-      nodeElement is JsonObject -> {
-        try {
-          listOf(json.decodeFromJsonElement(serializer<UIElementInfo>(), nodeElement))
-        } catch (e: Exception) {
-          null
-        }
-      }
-      nodeElement is JsonArray -> {
-        val children = mutableListOf<UIElementInfo>()
-        for (childJson in nodeElement.jsonArray) {
-          val child =
-            try {
-              json.decodeFromJsonElement(serializer<UIElementInfo>(), childJson)
-            } catch (e: Exception) {
-              return null
-            }
-          children.add(child)
-        }
-        children
-      }
-      else -> null
-    }
-  }
-
   private fun wrapOptimizedElements(elements: List<UIElementInfo>): UIElementInfo? {
     if (elements.isEmpty()) {
       return null
@@ -1278,9 +1203,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     if (elements.size == 1) {
       return elements[0]
     }
-
-    val nodeElement = encodeChildrenToNodeElement(elements) ?: return null
-    return UIElementInfo(node = nodeElement)
+    return UIElementInfo(children = elements)
   }
 
   /**
@@ -1290,6 +1213,9 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
    * 3. Preserving text-bearing children of interactive elements (e.g., Tab labels)
    *
    * This significantly reduces hierarchy size for complex UIs like YouTube.
+   *
+   * Walks the typed [UIElementInfo.children] list directly — no per-stage JSON decode/re-encode
+   * (issue #5471).
    */
   private fun optimizeHierarchy(element: UIElementInfo): List<UIElementInfo> {
     // Check if this element is a bounds-only wrapper (has no useful properties)
@@ -1304,37 +1230,14 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
         element.selected == "true" ||
         element.longClickable == "true"
 
-    // Debug logging
-    val elementDesc = buildString {
-      append("text=${element.text?.take(20)}, ")
-      append("resId=${element.resourceId?.substringAfterLast('.')?.take(15)}, ")
-      append("clickable=${element.clickable}, focusable=${element.focusable}, ")
-      append("bounds=${element.bounds}, ")
-      append("hasNode=${element.node != null}")
-    }
-    Log.d(
-      TAG,
-      "[OPT] Element: $elementDesc, boundsOnly=$isBoundsOnlyWrapper, interactive=$isInteractive",
-    )
-
-    // Now recursively optimize children
-    val optimizedNode = element.node?.let { optimizeNode(it) }
+    // Recursively optimize children on the typed tree.
+    val optimizedChildren = element.children.flatMap { optimizeHierarchy(it) }
 
     // Only promote children (flatten hierarchy) if this is a bounds-only wrapper AND not
     // interactive
     if (isBoundsOnlyWrapper && !isInteractive) {
-      if (optimizedNode == null) {
-        Log.d(TAG, "[OPT] -> FILTER OUT (bounds-only, no children)")
-        return emptyList()
-      }
-
-      val optimizedChildren = decodeOptimizedChildren(optimizedNode)
-      if (optimizedChildren == null) {
-        Log.d(TAG, "[OPT] -> KEEP AS-IS (couldn't decode children)")
-        return listOf(element.copy(node = optimizedNode))
-      }
       if (optimizedChildren.isEmpty()) {
-        Log.d(TAG, "[OPT] -> FILTER OUT (bounds-only, empty children)")
+        Log.d(TAG, "[OPT] -> FILTER OUT (bounds-only, no children)")
         return emptyList()
       }
       Log.d(TAG, "[OPT] -> PROMOTE ${optimizedChildren.size} children")
@@ -1342,67 +1245,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     }
 
     Log.d(TAG, "[OPT] -> KEEP (meets criteria or interactive)")
-    return listOf(element.copy(node = optimizedNode))
-  }
-
-  /** Check if a node or its children have text content */
-  private fun hasTextInNode(nodeElement: JsonElement?): Boolean {
-    if (nodeElement == null) return false
-
-    return when (nodeElement) {
-      is JsonObject -> {
-        try {
-          val element = json.decodeFromJsonElement(serializer<UIElementInfo>(), nodeElement)
-          !element.text.isNullOrBlank() || hasTextInNode(element.node)
-        } catch (e: Exception) {
-          false
-        }
-      }
-      is JsonArray -> {
-        nodeElement.jsonArray.any { hasTextInNode(it) }
-      }
-      else -> false
-    }
-  }
-
-  /** Recursively optimize node children (handles both single element and array). */
-  private fun optimizeNode(nodeElement: JsonElement): JsonElement? {
-    fun optimizeChild(childJson: JsonElement): List<JsonElement> {
-      return try {
-        val child = json.decodeFromJsonElement(serializer<UIElementInfo>(), childJson)
-        val optimizedChildren = optimizeHierarchy(child)
-        optimizedChildren.map { json.encodeToJsonElement(serializer<UIElementInfo>(), it) }
-      } catch (e: Exception) {
-        listOf(childJson)
-      }
-    }
-
-    return when {
-      nodeElement is JsonObject -> {
-        val optimizedChildren = optimizeChild(nodeElement)
-        Log.d(TAG, "[OPT-NODE] JsonObject: 1 child -> ${optimizedChildren.size} optimized")
-        when {
-          optimizedChildren.isEmpty() -> null
-          optimizedChildren.size == 1 -> optimizedChildren[0]
-          else -> JsonArray(optimizedChildren)
-        }
-      }
-      nodeElement is JsonArray -> {
-        val inputCount = nodeElement.jsonArray.size
-        val optimizedChildren =
-          nodeElement.jsonArray.flatMap { childJson -> optimizeChild(childJson) }
-        Log.d(
-          TAG,
-          "[OPT-NODE] JsonArray: $inputCount children -> ${optimizedChildren.size} optimized",
-        )
-        when {
-          optimizedChildren.isEmpty() -> null
-          optimizedChildren.size == 1 -> optimizedChildren[0]
-          else -> JsonArray(optimizedChildren)
-        }
-      }
-      else -> nodeElement
-    }
+    return listOf(element.copy(children = optimizedChildren))
   }
 
   private data class WindowEntry(
@@ -1670,7 +1513,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
   ): Int {
     val start = orderCounter.value++
     var end = start
-    val children = decodeChildrenFromNode(element.node)
+    val children = element.children
 
     for ((index, child) in children.withIndex()) {
       val childPath = if (path.isBlank()) index.toString() else "$path.$index"
@@ -1722,13 +1565,11 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       )
     }
 
-    val children = decodeChildrenFromNode(element.node)
-    val filteredChildren = children.mapIndexedNotNull { index, child ->
-      val childPath = if (path.isBlank()) index.toString() else "$path.$index"
-      filterOccludedHierarchy(child, occlusionInfo, windowKey, childPath, isRoot = false)
-    }
-
-    val filteredNodeElement = encodeChildrenToNodeElement(filteredChildren)
+    val filteredChildren =
+      element.children.mapIndexedNotNull { index, child ->
+        val childPath = if (path.isBlank()) index.toString() else "$path.$index"
+        filterOccludedHierarchy(child, occlusionInfo, windowKey, childPath, isRoot = false)
+      }
 
     if (occlusionState == "hidden" && !isRoot) {
       if (element.text == "Tap" || element.text == "Discover") {
@@ -1737,48 +1578,13 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       return null
     }
 
-    val nodeToUse = filteredNodeElement
-
     return element.copy(
       viewId = resolveViewIdForOcclusionNode(element, windowKey, path),
-      node = nodeToUse,
+      children = filteredChildren,
       occlusionState = occlusionState,
       occludedBy = info?.occludedBy,
       occludedByViewId = info?.occludedByViewId,
     )
-  }
-
-  private fun decodeChildrenFromNode(nodeElement: JsonElement?): List<UIElementInfo> {
-    if (nodeElement == null) return emptyList()
-
-    return try {
-      when {
-        nodeElement is JsonObject -> {
-          val child = json.decodeFromJsonElement(serializer<UIElementInfo>(), nodeElement)
-          listOf(child)
-        }
-        nodeElement is JsonArray -> {
-          nodeElement.jsonArray.mapNotNull { childJson ->
-            try {
-              json.decodeFromJsonElement(serializer<UIElementInfo>(), childJson)
-            } catch (e: Exception) {
-              null
-            }
-          }
-        }
-        else -> emptyList()
-      }
-    } catch (e: Exception) {
-      emptyList()
-    }
-  }
-
-  private fun encodeChildrenToNodeElement(children: List<UIElementInfo>): JsonElement? {
-    return when {
-      children.isEmpty() -> null
-      children.size == 1 -> json.encodeToJsonElement(serializer<UIElementInfo>(), children[0])
-      else -> json.encodeToJsonElement(ListSerializer(serializer<UIElementInfo>()), children)
-    }
   }
 
   private fun intersectBounds(bounds: ElementBounds, other: ElementBounds): ElementBounds? {

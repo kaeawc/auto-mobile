@@ -2,10 +2,6 @@ package dev.jasonpearson.automobile.ctrlproxy
 
 import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 
 /**
  * Computes a structural hash of the view hierarchy that ignores bounds.
@@ -73,79 +69,11 @@ object StructuralHasher {
     // - accessible (z-index percentage may fluctuate)
     // - textSize/textColor (unlikely to change during animation, but not structural)
 
-    // Recursively hash children in node
-    element.node?.let { node -> hash = 31 * hash + computeNodeHash(node) }
+    // Recursively hash the typed children (issue #5471: no JSON decode needed).
+    for (child in element.children) {
+      hash = 31 * hash + computeElementHash(child)
+    }
 
     return hash
-  }
-
-  /** Compute hash for JsonElement children (can be array, object, or primitive). */
-  private fun computeNodeHash(node: JsonElement): Int {
-    return when (node) {
-      is JsonArray -> {
-        var hash = 17
-        node.forEach { child -> hash = 31 * hash + computeNodeHash(child) }
-        hash
-      }
-      is JsonObject -> computeJsonObjectHash(node)
-      is JsonPrimitive -> node.content.hashCode()
-    }
-  }
-
-  /**
-   * Compute hash for a JsonObject representing a UIElementInfo node. Mirrors computeElementHash but
-   * works with raw JSON.
-   */
-  private fun computeJsonObjectHash(obj: JsonObject): Int {
-    var hash = 17
-
-    // Text content fields
-    hash = 31 * hash + getJsonStringHash(obj, "text")
-    hash = 31 * hash + getJsonStringHash(obj, "content-desc")
-    hash = 31 * hash + getJsonStringHash(obj, "resource-id")
-    hash = 31 * hash + getJsonStringHash(obj, "className")
-    hash = 31 * hash + getJsonStringHash(obj, "hint-text")
-    hash = 31 * hash + getJsonStringHash(obj, "error-message")
-    hash = 31 * hash + getJsonStringHash(obj, "state-description")
-    hash = 31 * hash + getJsonStringHash(obj, "pane-title")
-    hash = 31 * hash + getJsonStringHash(obj, "test-tag")
-    hash = 31 * hash + getJsonStringHash(obj, "role")
-
-    // Boolean state flags
-    hash = 31 * hash + getJsonStringHash(obj, "clickable")
-    hash = 31 * hash + getJsonStringHash(obj, "focusable")
-    hash = 31 * hash + getJsonStringHash(obj, "scrollable")
-    hash = 31 * hash + getJsonStringHash(obj, "checkable")
-    hash = 31 * hash + getJsonStringHash(obj, "checked")
-    hash = 31 * hash + getJsonStringHash(obj, "selected")
-    hash = 31 * hash + getJsonStringHash(obj, "enabled")
-    hash = 31 * hash + getJsonStringHash(obj, "focused")
-    hash = 31 * hash + getJsonStringHash(obj, "long-clickable")
-    hash = 31 * hash + getJsonStringHash(obj, "password")
-
-    // Other semantic fields
-    hash = 31 * hash + getJsonStringHash(obj, "live-region")
-    hash = 31 * hash + getJsonStringHash(obj, "collection-info")
-    hash = 31 * hash + getJsonStringHash(obj, "collection-item-info")
-    hash = 31 * hash + getJsonStringHash(obj, "range-info")
-    hash = 31 * hash + getJsonStringHash(obj, "input-type")
-    hash = 31 * hash + getJsonStringHash(obj, "fragment")
-
-    // NOTE: Intentionally EXCLUDING "bounds"
-
-    // Recursively hash children
-    obj["node"]?.let { childNode -> hash = 31 * hash + computeNodeHash(childNode) }
-
-    return hash
-  }
-
-  /** Safely get hash of a string field from JsonObject. */
-  private fun getJsonStringHash(obj: JsonObject, key: String): Int {
-    val element = obj[key] ?: return 0
-    return if (element is JsonPrimitive) {
-      element.content.hashCode()
-    } else {
-      element.toString().hashCode()
-    }
   }
 }

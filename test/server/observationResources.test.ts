@@ -284,7 +284,7 @@ describe("session screenshot resources", () => {
     expect(receivedSignal).toBe(controller.signal);
   });
 
-  test("rejects a fresh capture when the session no longer owns its device", async () => {
+  test("reports SESSION_OWNERSHIP_LOST when the session loses its device mid-capture", async () => {
     let reads = 0;
     setSessionScreenshotResourceDependencies({
       resolveActiveSession: () => {
@@ -302,7 +302,93 @@ describe("session screenshot resources", () => {
     );
 
     expect(content.mimeType).toBe("application/json");
-    expect(JSON.parse(content.text!).error).toContain("No active device session found");
+    const body = JSON.parse(content.text!);
+    expect(body.code).toBe("SESSION_OWNERSHIP_LOST");
+    expect(body.retry).toBe("NEW_SESSION");
+    expect(body.sessionUuid).toBe(sessionUuid);
+    expect(body.error).toContain("ownership");
+  });
+
+  test("reports SESSION_NOT_ACTIVE when no session owns the device", async () => {
+    setSessionScreenshotResourceDependencies({
+      resolveActiveSession: () => undefined,
+      createScreenshotService: () => createTrackedScreenshot({ success: true, path: "/tmp/fresh.png" }),
+    });
+
+    const content = await readTemplate(
+      "automobile:device-session/session-123/screenshot",
+    );
+
+    expect(content.mimeType).toBe("application/json");
+    const body = JSON.parse(content.text!);
+    expect(body.code).toBe("SESSION_NOT_ACTIVE");
+    expect(body.retry).toBe("NEW_SESSION");
+    expect(body.sessionUuid).toBe(sessionUuid);
+    // Backward compatibility: callers reading only `error` still get a message.
+    expect(body.error).toContain("No active device session found");
+  });
+
+  test("reports SESSION_UNAUTHORIZED for a read outside the bound session", async () => {
+    setSessionScreenshotResourceDependencies({
+      resolveActiveSession: () => activeSession(),
+      createScreenshotService: () => createTrackedScreenshot({ success: true, path: "/tmp/fresh.png" }),
+    });
+
+    const content = await readTemplate(
+      "automobile:device-session/session-123/screenshot",
+      { sessionUuid: "session-other" },
+    );
+
+    expect(content.mimeType).toBe("application/json");
+    const body = JSON.parse(content.text!);
+    expect(body.code).toBe("SESSION_UNAUTHORIZED");
+    expect(body.retry).toBe("STOP");
+    expect(body.error).toContain("bound device session");
+  });
+
+  test("reports SCREENSHOT_CAPTURE_FAILED and preserves the underlying reason", async () => {
+    setSessionScreenshotResourceDependencies({
+      resolveActiveSession: () => activeSession(),
+      createScreenshotService: () => createTrackedScreenshot({
+        success: false,
+        error: "screencap timed out",
+      }),
+    });
+
+    const content = await readTemplate(
+      "automobile:device-session/session-123/screenshot",
+    );
+
+    expect(content.mimeType).toBe("application/json");
+    const body = JSON.parse(content.text!);
+    expect(body.code).toBe("SCREENSHOT_CAPTURE_FAILED");
+    expect(body.retry).toBe("RETRY_CAPTURE");
+    expect(body.sessionUuid).toBe(sessionUuid);
+    // The capture reason is preserved rather than reduced to a MIME mismatch.
+    expect(body.reason).toBe("screencap timed out");
+  });
+
+  test("reports SCREENSHOT_CAPTURE_FAILED when reading the captured file throws", async () => {
+    setSessionScreenshotResourceDependencies({
+      resolveActiveSession: () => activeSession(),
+      createScreenshotService: () => createTrackedScreenshot({ success: true, path: "/tmp/fresh.png" }),
+    });
+    setScreenshotFileSystem({
+      stat: async () => ({ isFile: () => true }),
+      readFile: async () => {
+        throw new Error("disk read failed");
+      },
+    });
+
+    const content = await readTemplate(
+      "automobile:device-session/session-123/screenshot",
+    );
+
+    expect(content.mimeType).toBe("application/json");
+    const body = JSON.parse(content.text!);
+    expect(body.code).toBe("SCREENSHOT_CAPTURE_FAILED");
+    expect(body.retry).toBe("RETRY_CAPTURE");
+    expect(body.reason).toContain("disk read failed");
   });
 
   test("replaces an older direct session for the same device", () => {

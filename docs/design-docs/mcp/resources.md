@@ -171,6 +171,22 @@ Captures and returns a fresh PNG for the active session. A fresh request queues
 behind an in-flight screenshot for the same device, then takes its own tracked
 capture so session cleanup can cancel it safely.
 
+A read that cannot return a PNG returns an `application/json` body with a stable,
+machine-readable failure code and a retry classification instead of only a
+content-type mismatch, so a caller can tell a released session, lost ownership,
+and a capture failure apart:
+
+| `code` | Meaning | `retry` |
+| --- | --- | --- |
+| `SESSION_UNAUTHORIZED` | Read attempted outside the resource's bound session | `STOP` |
+| `SESSION_NOT_ACTIVE` | No active session owns the device (released/unknown) | `NEW_SESSION` |
+| `SESSION_OWNERSHIP_LOST` | The session lost the device during capture | `NEW_SESSION` |
+| `SCREENSHOT_CAPTURE_FAILED` | Capture ran but produced no PNG | `RETRY_CAPTURE` |
+
+The body also carries the `sessionUuid`, a human-readable `error`, and — when one
+is available — the underlying capture or session `reason`. The `retry` values are
+`RETRY_CAPTURE`, `NEW_SESSION`, `RECOVER_DEVICE`, and `STOP`.
+
 ### Installed Apps
 
 **URI**: `automobile:apps`

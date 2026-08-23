@@ -227,6 +227,69 @@ function unauthorizedSessionResourceError(uri: string): ResourceContent {
   };
 }
 
+// Stable, machine-readable failure codes for the fresh session screenshot
+// resource. The successful read is an `image/png` blob; every failure is a typed
+// `application/json` body carrying one of these codes so a caller can tell a
+// released session, lost ownership, and a capture failure apart rather than only
+// seeing a MIME mismatch. Codes are part of the resource contract — do not
+// rename or repurpose them.
+export type FreshScreenshotFailureCode =
+  | "SESSION_UNAUTHORIZED"
+  | "SESSION_NOT_ACTIVE"
+  | "SESSION_OWNERSHIP_LOST"
+  | "SCREENSHOT_CAPTURE_FAILED";
+
+// Retry classification tells the caller how to recover: retry the capture,
+// establish a new session, recover the device, or stop.
+export type FreshScreenshotRetry =
+  | "RETRY_CAPTURE"
+  | "NEW_SESSION"
+  | "RECOVER_DEVICE"
+  | "STOP";
+
+// Derived deterministically from the code so the classification stays stable.
+const FRESH_SCREENSHOT_RETRY: Record<FreshScreenshotFailureCode, FreshScreenshotRetry> = {
+  SESSION_UNAUTHORIZED: "STOP",
+  SESSION_NOT_ACTIVE: "NEW_SESSION",
+  SESSION_OWNERSHIP_LOST: "NEW_SESSION",
+  SCREENSHOT_CAPTURE_FAILED: "RETRY_CAPTURE",
+};
+
+export interface FreshScreenshotFailureBody {
+  // Human-readable summary, preserved for backward compatibility with callers
+  // that only read `error`.
+  error: string;
+  code: FreshScreenshotFailureCode;
+  retry: FreshScreenshotRetry;
+  sessionUuid: string;
+  // The underlying capture or session reason, when one is available, so callers
+  // keep the real cause instead of only a content-type mismatch.
+  reason?: string;
+}
+
+function freshScreenshotFailure(
+  uri: string,
+  sessionUuid: string,
+  code: FreshScreenshotFailureCode,
+  message: string,
+  reason?: string,
+): ResourceContent {
+  const body: FreshScreenshotFailureBody = {
+    error: message,
+    code,
+    retry: FRESH_SCREENSHOT_RETRY[code],
+    sessionUuid,
+  };
+  if (reason !== undefined && reason !== "") {
+    body.reason = reason;
+  }
+  return {
+    uri,
+    mimeType: "application/json",
+    text: JSON.stringify(body, null, 2),
+  };
+}
+
 function isAuthorizedSessionResource(
   context: ResourceReadContext,
   sessionUuid: string,
@@ -347,11 +410,21 @@ async function getFreshSessionScreenshot(
   const { sessionUuid } = params;
   const uri = `automobile:device-session/${sessionUuid}/screenshot`;
   if (!isAuthorizedSessionResource(context, sessionUuid)) {
-    return unauthorizedSessionResourceError(uri);
+    return freshScreenshotFailure(
+      uri,
+      sessionUuid,
+      "SESSION_UNAUTHORIZED",
+      "This resource can only be read by its bound device session.",
+    );
   }
   const activeSession = sessionScreenshotResourceDependencies.resolveActiveSession(sessionUuid);
   if (!activeSession) {
-    return sessionResourceError(uri, sessionUuid);
+    return freshScreenshotFailure(
+      uri,
+      sessionUuid,
+      "SESSION_NOT_ACTIVE",
+      `No active device session found for sessionUuid ${sessionUuid}.`,
+    );
   }
 
   try {
@@ -368,16 +441,21 @@ async function getFreshSessionScreenshot(
 
     const currentSession = sessionScreenshotResourceDependencies.resolveActiveSession(sessionUuid);
     if (currentSession?.device.deviceId !== activeSession.device.deviceId) {
-      return sessionResourceError(uri, sessionUuid);
+      return freshScreenshotFailure(
+        uri,
+        sessionUuid,
+        "SESSION_OWNERSHIP_LOST",
+        `Device ownership for sessionUuid ${sessionUuid} changed during capture.`,
+      );
     }
     if (!result.success || !result.path) {
-      return {
+      return freshScreenshotFailure(
         uri,
-        mimeType: "application/json",
-        text: JSON.stringify({
-          error: result.error || "Failed to capture a fresh screenshot.",
-        }, null, 2),
-      };
+        sessionUuid,
+        "SCREENSHOT_CAPTURE_FAILED",
+        "Failed to capture a fresh screenshot.",
+        result.error,
+      );
     }
 
     const imageBuffer = await screenshotFileSystem.readFile(result.path);
@@ -388,13 +466,13 @@ async function getFreshSessionScreenshot(
     };
   } catch (error) {
     logger.error(`[ObservationResources] Failed to capture fresh screenshot for session ${sessionUuid}: ${error}`);
-    return {
+    return freshScreenshotFailure(
       uri,
-      mimeType: "application/json",
-      text: JSON.stringify({
-        error: `Failed to capture fresh screenshot for sessionUuid ${sessionUuid}: ${error}`,
-      }, null, 2),
-    };
+      sessionUuid,
+      "SCREENSHOT_CAPTURE_FAILED",
+      `Failed to capture fresh screenshot for sessionUuid ${sessionUuid}.`,
+      `${error}`,
+    );
   }
 }
 

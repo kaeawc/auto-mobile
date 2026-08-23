@@ -3852,7 +3852,10 @@ export class UnixSocketServer {
         return await mcpClient.listResourceTemplates();
       }
       case "ide/getNavigationGraph": {
-        const args = request.params ?? {};
+        const args = {
+          ...(request.params ?? {}),
+          [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: timeoutMs,
+        };
         return await mcpClient.callTool(
           { name: "getNavigationGraph", arguments: args },
           undefined,

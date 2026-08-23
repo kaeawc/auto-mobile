@@ -297,6 +297,38 @@ describe("UnixSocketServer MCP forward serialization", () => {
     expect(inFlight).toBe(0);
   });
 
+  test("forwards the socket timeout budget to IDE navigation graph calls", async () => {
+    let forwardedCall: unknown;
+    server.mcpClientFactory = async () => ({
+      listTools: async () => ({ tools: [] }),
+      callTool: async (request) => {
+        forwardedCall = request;
+        return { content: [] };
+      },
+      listResources: async () => ({ resources: [] }),
+      readResource: async () => ({ contents: [] }),
+      listResourceTemplates: async () => ({ resourceTemplates: [] }),
+      close: async () => {},
+    });
+
+    const response = await sendRequest(socketPath, {
+      id: randomUUID(),
+      type: "mcp_request",
+      method: "ide/getNavigationGraph",
+      params: { deviceId: "device-1" },
+      timeoutMs: 7_500,
+    });
+
+    expect(response.success).toBe(true);
+    expect(forwardedCall).toEqual({
+      name: "getNavigationGraph",
+      arguments: {
+        deviceId: "device-1",
+        [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: 7_500,
+      },
+    });
+  });
+
   test("binds a generated selection profile to the socket and reuses it for discovery", async () => {
     const clients: FakeMcpClient[] = [];
     server.mcpClientFactory = async () => {

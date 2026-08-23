@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.ctrlproxy.models
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 import kotlinx.serialization.json.JsonElement
 
 /**
@@ -61,8 +62,18 @@ data class UIElementInfo(
   val occludedByViewId: String? = null, // Stable view-id of the occluding view
   val recomposition: RecompositionEntry? = null,
 
-  // Use JsonElement to allow flexible structure matching test expectations
+  // Wire projection of the child subtree (issue #5471). This is the ONLY serialized
+  // representation of children: `null` (leaf), a JSON object (single child), or a JSON array
+  // (multiple children), matching the format existing desktop/MCP/TS consumers parse.
+  //
+  // During extraction this stays null — the pipeline (optimize, detectors, occlusion, focus
+  // search, hashing) walks the typed [children] list below with zero (de)serialization. `node`
+  // is materialized from [children] exactly once, at the wire boundary (see WireNodeCodec).
   val node: JsonElement? = null,
+
+  // Typed, in-memory child list. Not serialized (see [node] for the wire form). Every intermediate
+  // extraction pass operates on this list so a snapshot never re-encodes/re-decodes subtrees.
+  @Transient val children: List<UIElementInfo> = emptyList(),
 ) {
   /** Helper properties for boolean checks (for backwards compatibility) */
   val isClickable: Boolean
@@ -97,12 +108,4 @@ data class UIElementInfo(
 
   val isLongClickable: Boolean
     get() = longClickable == "true"
-
-  /**
-   * Legacy children property for backwards compatibility Note: In the new format, children are
-   * stored in the 'node' property
-   */
-  @Deprecated("Use node property instead", ReplaceWith("emptyList()"))
-  val children: List<UIElementInfo>
-    get() = emptyList()
 }

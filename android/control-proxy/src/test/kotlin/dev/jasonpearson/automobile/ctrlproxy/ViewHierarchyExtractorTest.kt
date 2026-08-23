@@ -5,7 +5,6 @@ import android.view.accessibility.AccessibilityWindowInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds
 import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import kotlinx.coroutines.test.runTest
-import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -80,10 +79,8 @@ class ViewHierarchyExtractorTest {
     val elementWithContent = UIElementInfo(text = "Some text", clickable = "false")
 
     val children = listOf(emptyElement, interactiveElement, elementWithContent)
-    val childrenJson =
-      json.encodeToJsonElement(ListSerializer(UIElementInfo.serializer()), children)
 
-    val rootElement = UIElementInfo(className = "android.widget.LinearLayout", node = childrenJson)
+    val rootElement = UIElementInfo(className = "android.widget.LinearLayout", children = children)
 
     // Extract children from filtered hierarchy
     val filteredChildren = extractor.extractChildrenFromHierarchy(rootElement)
@@ -174,8 +171,7 @@ class ViewHierarchyExtractorTest {
   @Test
   fun `detectIntentChooserIndicators returns true for text indicator`() {
     val child = UIElementInfo(text = "Choose an app")
-    val childJson = json.encodeToJsonElement(UIElementInfo.serializer(), child)
-    val root = UIElementInfo(className = "android.widget.LinearLayout", node = childJson)
+    val root = UIElementInfo(className = "android.widget.LinearLayout", children = listOf(child))
 
     assertTrue(extractor.detectIntentChooserIndicatorsForTest(root))
   }
@@ -184,8 +180,7 @@ class ViewHierarchyExtractorTest {
   fun `detectIntentChooserIndicators returns true for resource id indicator`() {
     val child =
       UIElementInfo(resourceId = "android:id/button_once", className = "android.widget.Button")
-    val childJson = json.encodeToJsonElement(UIElementInfo.serializer(), child)
-    val root = UIElementInfo(className = "android.widget.LinearLayout", node = childJson)
+    val root = UIElementInfo(className = "android.widget.LinearLayout", children = listOf(child))
 
     assertTrue(extractor.detectIntentChooserIndicatorsForTest(root))
   }
@@ -193,8 +188,7 @@ class ViewHierarchyExtractorTest {
   @Test
   fun `detectIntentChooserIndicators returns false when no indicators present`() {
     val child = UIElementInfo(text = "Normal content", className = "android.widget.TextView")
-    val childJson = json.encodeToJsonElement(UIElementInfo.serializer(), child)
-    val root = UIElementInfo(className = "android.widget.LinearLayout", node = childJson)
+    val root = UIElementInfo(className = "android.widget.LinearLayout", children = listOf(child))
 
     assertFalse(extractor.detectIntentChooserIndicatorsForTest(root))
   }
@@ -204,12 +198,11 @@ class ViewHierarchyExtractorTest {
     val title = UIElementInfo(text = "Allow Example to send notifications?")
     val allowButton =
       UIElementInfo(resourceId = "com.android.permissioncontroller:id/permission_allow_button")
-    val childrenJson =
-      json.encodeToJsonElement(
-        ListSerializer(UIElementInfo.serializer()),
-        listOf(title, allowButton),
+    val root =
+      UIElementInfo(
+        className = "android.widget.LinearLayout",
+        children = listOf(title, allowButton),
       )
-    val root = UIElementInfo(className = "android.widget.LinearLayout", node = childrenJson)
 
     assertTrue(
       extractor.detectNotificationPermissionDialogForTest(
@@ -224,12 +217,11 @@ class ViewHierarchyExtractorTest {
     val title = UIElementInfo(text = "Allow Example to send notifications?")
     val allowButton =
       UIElementInfo(resourceId = "com.android.permissioncontroller:id/permission_allow_button")
-    val childrenJson =
-      json.encodeToJsonElement(
-        ListSerializer(UIElementInfo.serializer()),
-        listOf(title, allowButton),
+    val root =
+      UIElementInfo(
+        className = "android.widget.LinearLayout",
+        children = listOf(title, allowButton),
       )
-    val root = UIElementInfo(className = "android.widget.LinearLayout", node = childrenJson)
 
     assertFalse(
       extractor.detectNotificationPermissionDialogForTest(
@@ -244,10 +236,8 @@ class ViewHierarchyExtractorTest {
     val plainElement = UIElementInfo()
 
     val children = listOf(plainElement)
-    val childrenJson =
-      json.encodeToJsonElement(ListSerializer(UIElementInfo.serializer()), children)
 
-    val rootElement = UIElementInfo(node = childrenJson)
+    val rootElement = UIElementInfo(children = children)
     val filteredChildren = extractor.extractChildrenFromHierarchy(rootElement)
 
     // Should keep all elements with semantic properties but not the plain element
@@ -278,10 +268,8 @@ class ViewHierarchyExtractorTest {
         elementWithActions,
         elementWithRange,
       )
-    val childrenJson =
-      json.encodeToJsonElement(ListSerializer(UIElementInfo.serializer()), children)
 
-    val rootElement = UIElementInfo(node = childrenJson)
+    val rootElement = UIElementInfo(children = children)
     val filteredChildren = extractor.extractChildrenFromHierarchy(rootElement)
 
     // Should keep all elements with semantic properties but not the plain element
@@ -406,8 +394,7 @@ class ViewHierarchyExtractorTest {
   @Test
   fun `visibility audit field does not filter otherwise retained nodes`() = runTest {
     val element = UIElementInfo(text = "Compose row", visibleToUser = false)
-    val node = json.encodeToJsonElement(UIElementInfo.serializer(), element)
-    val root = UIElementInfo(node = node)
+    val root = UIElementInfo(children = listOf(element))
 
     val retained = extractor.extractChildrenFromHierarchy(root)
 
@@ -1610,21 +1597,42 @@ class ViewHierarchyExtractorTest {
     return method.invoke(this, path) as String
   }
 
-  // Helper method to extract children from hierarchy (this would be made public in the actual
-  // extractor for testing)
+  // Helper method to read the visible typed children of a hierarchy node (issue #5471).
   private fun ViewHierarchyExtractor.extractChildrenFromHierarchy(
     element: UIElementInfo
+  ): List<UIElementInfo> = this.visibleChildren(element)
+
+  @Suppress("UNCHECKED_CAST")
+  private fun ViewHierarchyExtractor.optimizeHierarchyForTest(
+    element: UIElementInfo
   ): List<UIElementInfo> {
-    return this.javaClass
-      .getDeclaredMethod(
-        "extractChildrenFromNode",
-        kotlinx.serialization.json.JsonElement::class.java,
-      )
-      .let { method ->
-        method.isAccessible = true
-        @Suppress("UNCHECKED_CAST")
-        method.invoke(this, element.node) as List<UIElementInfo>
-      }
+    val method = this.javaClass.getDeclaredMethod("optimizeHierarchy", UIElementInfo::class.java)
+    method.isAccessible = true
+    return method.invoke(this, element) as List<UIElementInfo>
+  }
+
+  // Issue #5471: the optimize pass walks typed children and performs ZERO serialization, so every
+  // element it returns still has a null `node` (the wire projection is built only at the boundary).
+  @Test
+  fun `optimize pass performs no intermediate serialization`() {
+    val leaf = UIElementInfo(text = "leaf", clickable = "true")
+    val interactiveParent = UIElementInfo(text = "row", clickable = "true", children = listOf(leaf))
+    val boundsOnlyWrapper =
+      UIElementInfo(bounds = ElementBounds(0, 0, 100, 100), children = listOf(interactiveParent))
+
+    val optimized = extractor.optimizeHierarchyForTest(boundsOnlyWrapper)
+
+    fun assertNoNode(element: UIElementInfo) {
+      assertNull("pipeline must not materialize node before the wire boundary", element.node)
+      element.children.forEach(::assertNoNode)
+    }
+    optimized.forEach(::assertNoNode)
+
+    // The bounds-only wrapper is promoted away; its interactive child (with its typed leaf)
+    // remains.
+    assertEquals(1, optimized.size)
+    assertEquals("row", optimized.single().text)
+    assertEquals("leaf", optimized.single().children.single().text)
   }
 
   private fun elementWithBounds(
@@ -1637,12 +1645,6 @@ class ViewHierarchyExtractorTest {
     actions: List<String>? = null,
     children: List<UIElementInfo> = emptyList(),
   ): UIElementInfo {
-    val node =
-      when {
-        children.isEmpty() -> null
-        children.size == 1 -> json.encodeToJsonElement(UIElementInfo.serializer(), children[0])
-        else -> json.encodeToJsonElement(ListSerializer(UIElementInfo.serializer()), children)
-      }
     return UIElementInfo(
       resourceId = resourceId,
       viewId = viewId,
@@ -1651,7 +1653,7 @@ class ViewHierarchyExtractorTest {
       text = text,
       contentDesc = contentDesc,
       actions = actions,
-      node = node,
+      children = children,
     )
   }
 
@@ -1679,7 +1681,7 @@ class ViewHierarchyExtractorTest {
     if (element.resourceId == resourceId) {
       return element
     }
-    for (child in extractor.extractChildrenFromHierarchy(element)) {
+    for (child in element.children) {
       val found = findElementByResourceId(child, resourceId)
       if (found != null) {
         return found

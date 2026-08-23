@@ -990,8 +990,13 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
           perf.endOperation("externalProcessCheck");
           if (externalProcess || defaultPortIsHealthyForDevice) {
             const externalPort = externalProcess?.port ?? IOSCtrlProxyManager.DEFAULT_PORT;
-            logger.info(
-              `[IOSCtrlProxy] External CtrlProxy process detected on port ${externalPort}, skipping spawn`
+            // Warn (not info): the daemon is about to serve calls through a runner
+            // it did NOT launch (#5561). On a shared host this may be a stale or
+            // foreign runner — surfacing it loudly stops results from being
+            // misattributed to a local build that never ran.
+            logger.warn(
+              `[IOSCtrlProxy] Reusing an external CtrlProxy runner this daemon did not launch ` +
+              `(port ${externalPort}); skipping spawn. Verify it is the runner you intend to test.`
             );
             if (externalPort !== this.servicePort) {
               this.adoptServicePort(externalPort);

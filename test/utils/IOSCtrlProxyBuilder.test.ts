@@ -844,6 +844,102 @@ describe("IOSCtrlProxyBuilder", function() {
         .rejects.toThrow("runner binary SHA256 mismatch (pre-launch)");
     });
 
+    test("local-build mode trusts the freshly built runner even when its SHA differs from the release-pinned checksum (#5561)", async function() {
+      const derivedDataPath = path.join(tempDir, "DerivedData");
+      const cacheDir = path.join(tempDir, "cache");
+      const downloader = new FakeIOSCtrlProxyBundleDownloader();
+      downloader.checksum = "expected-checksum";
+      downloader.runnerChecksum = "c".repeat(64);
+
+      IOSCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+      // Release-pinned checksum the local build can never match.
+      IOSCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("a".repeat(64), "xctest");
+      IOSCtrlProxyBuilder.setUseLocalBuildForTesting(true);
+      const builder = IOSCtrlProxyBuilder.getInstance(
+        { derivedDataPath, bundleCacheDir: cacheDir },
+        { downloader }
+      );
+
+      // Post-extract must not reject on the release-pinned mismatch; it derives
+      // and pins the local runner's hash instead.
+      expect((await builder.build("simulator")).success).toBe(true);
+
+      // Pre-launch re-verifies against the derived hash — unchanged, so it passes.
+      await builder.verifyRunnerBinaryBeforeLaunch("simulator");
+    });
+
+    test("local-build mode still fails closed if the runner binary changes after post-extract (TOCTOU) (#5561)", async function() {
+      const derivedDataPath = path.join(tempDir, "DerivedData");
+      const cacheDir = path.join(tempDir, "cache");
+      const downloader = new FakeIOSCtrlProxyBundleDownloader();
+      downloader.checksum = "expected-checksum";
+      downloader.runnerChecksum = "c".repeat(64);
+
+      IOSCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+      IOSCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("a".repeat(64), "xctest");
+      IOSCtrlProxyBuilder.setUseLocalBuildForTesting(true);
+      const builder = IOSCtrlProxyBuilder.getInstance(
+        { derivedDataPath, bundleCacheDir: cacheDir },
+        { downloader }
+      );
+
+      expect((await builder.build("simulator")).success).toBe(true);
+
+      // Swap the on-disk binary after it was pinned at post-extract.
+      downloader.runnerChecksum = "d".repeat(64);
+
+      await expect(builder.verifyRunnerBinaryBeforeLaunch("simulator"))
+        .rejects.toThrow("SHA256 changed");
+    });
+
+    test("local-build mode re-derives the pin on an in-process rebuild (#5561)", async function() {
+      const derivedDataPath = path.join(tempDir, "DerivedData");
+      const cacheDir = path.join(tempDir, "cache");
+      const downloader = new FakeIOSCtrlProxyBundleDownloader();
+      downloader.checksum = "expected-checksum";
+      downloader.runnerChecksum = "c".repeat(64);
+
+      IOSCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+      IOSCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("a".repeat(64), "xctest");
+      IOSCtrlProxyBuilder.setUseLocalBuildForTesting(true);
+      const builder = IOSCtrlProxyBuilder.getInstance(
+        { derivedDataPath, bundleCacheDir: cacheDir },
+        { downloader }
+      );
+
+      expect((await builder.build("simulator")).success).toBe(true);
+
+      // A legitimate rebuild produces a different local binary. The re-extract must
+      // drop the stale pin so this is NOT rejected as a TOCTOU swap.
+      downloader.runnerChecksum = "d".repeat(64);
+      expect((await builder.build("simulator")).success).toBe(true);
+      await builder.verifyRunnerBinaryBeforeLaunch("simulator");
+    });
+
+    test("explicit RUNNER_SHA256 override still wins over local-build mode (#5561)", async function() {
+      const derivedDataPath = path.join(tempDir, "DerivedData");
+      const cacheDir = path.join(tempDir, "cache");
+      const downloader = new FakeIOSCtrlProxyBundleDownloader();
+      downloader.checksum = "expected-checksum";
+      downloader.runnerChecksum = "f".repeat(64);
+
+      // Local-build mode is on, but an explicit SHA override is also set: the
+      // explicit value must remain enforced (mismatch => hard refusal).
+      process.env[IOS_CTRL_PROXY_RUNNER_SHA256_ENV] = "e".repeat(64);
+      process.env[IOS_CTRL_PROXY_RUNNER_SHA256_TARGET_ENV] = "xctest";
+      IOSCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+      IOSCtrlProxyBuilder.setExpectedRunnerChecksumForTesting(null);
+      IOSCtrlProxyBuilder.setUseLocalBuildForTesting(true);
+      const builder = IOSCtrlProxyBuilder.getInstance(
+        { derivedDataPath, bundleCacheDir: cacheDir },
+        { downloader }
+      );
+
+      const result = await builder.build("simulator");
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("runner binary SHA256 mismatch");
+    });
+
     test("refuses to reuse a derived-data directory owned by another uid (#4759)", async function() {
       if (process.platform === "win32" || typeof process.getuid !== "function") {
         // st_uid/getuid are POSIX-only; ownership refusal no-ops on win32.

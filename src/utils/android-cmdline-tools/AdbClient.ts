@@ -45,7 +45,7 @@ type SpawnFn = (file: string, args: string[], options?: SpawnOptions) => ChildPr
 // client no longer reaches for `child_process.spawn` directly (issue #5459). The
 // executor's `spawn` is a plain passthrough, so this is behavior-identical; all
 // of AdbClient's own timeout/abort/process-tracking orchestration is unchanged.
-const hostProcessExecutor: HostProcessExecutor = new DefaultHostCommandExecutor();
+export const adbHostProcessExecutor: HostProcessExecutor = new DefaultHostCommandExecutor();
 
 /**
  * Thrown when an adb command exceeds the caller-supplied `timeoutMs` budget, as
@@ -206,7 +206,7 @@ export class AdbClient implements AdbExecutor {
     } else {
       this.execAsync = execAsyncFn ? this.wrapExecAsync(execAsyncFn) : execFileAsync;
     }
-    this.spawnFn = spawnFn || ((file, args, options) => hostProcessExecutor.spawn(file, args, options));
+    this.spawnFn = spawnFn || ((file, args, options) => adbHostProcessExecutor.spawn(file, args, options));
     this.retryExecutor = retryExecutor;
     this.timer = timer;
     // Initialize with fallback, will be updated lazily
@@ -913,7 +913,7 @@ export class AdbClient implements AdbExecutor {
       let settled = false;
       let pendingTerminationError: Error | undefined;
       let terminationTimeoutId: NodeJS.Timeout | undefined;
-      const { child, result } = hostProcessExecutor.executeCommandWithChild(
+      const { child, result } = adbHostProcessExecutor.executeCommandWithChild(
         file,
         args,
         maxBuffer ? { maxBuffer } : undefined,
@@ -935,7 +935,7 @@ export class AdbClient implements AdbExecutor {
         }
         settled = true;
         cleanup();
-        reject(error);
+        reject(pendingTerminationError ?? error);
       });
 
       this.activeProcesses.add(child);

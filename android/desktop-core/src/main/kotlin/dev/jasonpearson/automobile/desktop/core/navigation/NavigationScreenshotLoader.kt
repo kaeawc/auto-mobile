@@ -84,6 +84,16 @@ class NavigationScreenshotLoaderRegistry {
 
   /** The loader already created for [deviceId], or null if none — lets a test assert wiring. */
   internal fun peek(deviceId: String): NavigationScreenshotLoader? = byDevice[deviceId]
+
+  /**
+   * Release the loader (and its LRU thumbnail cache) held for [deviceId], called when the device
+   * leaves the workspace entirely. Without this, every distinct deviceId ever shown a Navigation
+   * facet would retain its loader — up to 100MB of decoded thumbnails each — for the whole app
+   * session (#5087). A no-op if no loader exists for [deviceId].
+   */
+  fun forget(deviceId: String) {
+    byDevice.remove(deviceId)?.clearCache()
+  }
 }
 
 /**

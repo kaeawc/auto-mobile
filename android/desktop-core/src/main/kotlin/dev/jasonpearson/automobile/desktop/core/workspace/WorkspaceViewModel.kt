@@ -1,6 +1,8 @@
 package dev.jasonpearson.automobile.desktop.core.workspace
 
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
+import dev.jasonpearson.automobile.desktop.core.navigation.DefaultNavigationScreenshotLoaderRegistry
+import dev.jasonpearson.automobile.desktop.core.navigation.NavigationScreenshotLoaderRegistry
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -77,6 +79,8 @@ sealed interface WorkspaceEffect {
 class WorkspaceViewModel(
   private val scope: CoroutineScope,
   private val controlExecutor: EmulatorControlExecutor = NoOpEmulatorControlExecutor,
+  private val screenshotLoaderRegistry: NavigationScreenshotLoaderRegistry =
+    DefaultNavigationScreenshotLoaderRegistry,
 ) {
   private val _state = MutableStateFlow<WorkspaceUiState>(WorkspaceUiState.Empty)
   val state: StateFlow<WorkspaceUiState> = _state.asStateFlow()
@@ -182,6 +186,10 @@ class WorkspaceViewModel(
   }
 
   private fun close(deviceId: String) {
+    // The device is leaving the workspace: release its navigation screenshot loader so the
+    // session-scoped registry doesn't retain a per-device thumbnail cache for every device ever
+    // shown (#5087).
+    screenshotLoaderRegistry.forget(deviceId)
     _state.update { current ->
       val content = current as? WorkspaceUiState.Content ?: return@update current
       val remaining = content.columns.filterNot { it.deviceId == deviceId }

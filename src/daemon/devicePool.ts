@@ -5662,6 +5662,45 @@ export class DevicePool {
         `Session '${sessionId}' is recovering from a process-wide ADB reset. Retry after device recovery completes.`,
       );
     }
+    // Reject admission for a session whose device is being killed. Without this,
+    // a session already bound to the device passes the gate during the killDevice
+    // window and re-creates a fresh auto-reconnecting AndroidCtrlProxyClient via
+    // getInstance, recreating the transport hold the teardown just removed. The
+    // shutdown reservation blocks new *allocation* but not an already-bound
+    // session; execution cancellation only happens later in retirement, so this
+    // is the gate that closes that window (see #5494, follow-up to #5452/#5491).
+    const assignedDeviceId = this.sessionManager.getSession(sessionId)?.assignedDevice;
+    if (assignedDeviceId && this.isDeviceUnderShutdown(assignedDeviceId)) {
+      throw new ActionableError(
+        `Session '${sessionId}' is bound to device '${assignedDeviceId}', which is shutting down. ` +
+          `Retry after the device is released or reassigned.`,
+      );
+    }
+  }
+
+  /**
+   * Whether the currently-bound incarnation of a device is being killed: either
+   * held under an active shutdown reservation, or carrying an intentional-shutdown
+   * marker that applies to the current incarnation. Incarnation-gated (mirroring
+   * {@link applyIntentionalShutdownOnDisconnect}) so a same-serial replacement,
+   * whose own marker/reservation lifecycle is independent, is not blocked by a
+   * stale marker left behind by a device that is already gone.
+   */
+  private isDeviceUnderShutdown(deviceId: string): boolean {
+    const device = this.devices.get(deviceId);
+    const reservation = this.shutdownReservations.get(deviceId);
+    if (reservation !== undefined && (device === undefined || reservation === device)) {
+      return true;
+    }
+    const markerIncarnation = this.intentionalShutdowns.get(deviceId);
+    if (markerIncarnation === undefined) {
+      return false;
+    }
+    return (
+      device === undefined ||
+      markerIncarnation === INCARNATION_ANY ||
+      markerIncarnation === device.incarnation
+    );
   }
 
   /**

@@ -844,17 +844,12 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // Delegate Context Factories
   // ===========================================================================
 
-  private createDelegateContext(): DelegateContext {
+  protected override extraDelegateContextFields(): Partial<DelegateContext> {
     return {
-      getWebSocket: () => this.ws,
-      requestManager: this.requestManager,
-      timer: this.timer,
-      ensureConnected: perf => this.ensureConnected(perf),
       getReconnectStatus: () => this.getReconnectStatus(),
       isCommandSupported: messageType => this.isCommandSupported(messageType),
       getSupportedCommands: () => this.getSupportedCommands(),
       unsupportedCommandError: messageType => this.buildUnsupportedCommandError(messageType),
-      cancelScreenshotBackoff: () => this.cancelScreenshotBackoff(),
     };
   }
 
@@ -874,87 +869,99 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // ===========================================================================
 
   private get gestures(): CtrlProxyGestures {
-    if (!this._gestures) {
-      this._gestures = new CtrlProxyGestures(this.createDelegateContext());
-    }
-    return this._gestures;
+    return this.lazyDelegate(
+      () => this._gestures,
+      value => { this._gestures = value; },
+      () => new CtrlProxyGestures(this.createDelegateContext())
+    );
   }
 
   private get text(): CtrlProxyText {
-    if (!this._text) {
-      this._text = new CtrlProxyText(this.createDelegateContext());
-    }
-    return this._text;
+    return this.lazyDelegate(
+      () => this._text,
+      value => { this._text = value; },
+      () => new CtrlProxyText(this.createDelegateContext())
+    );
   }
 
   private get hierarchy(): CtrlProxyHierarchyDelegate {
-    if (!this._hierarchy) {
-      this._hierarchy = new CtrlProxyHierarchyDelegate(this.createHierarchyDelegateContext());
-    }
-    return this._hierarchy;
+    return this.lazyDelegate(
+      () => this._hierarchy,
+      value => { this._hierarchy = value; },
+      () => new CtrlProxyHierarchyDelegate(this.createHierarchyDelegateContext())
+    );
   }
 
   private get screenshot(): CtrlProxyScreenshot {
-    if (!this._screenshot) {
-      this._screenshot = new CtrlProxyScreenshot(this.createDelegateContext());
-    }
-    return this._screenshot;
+    return this.lazyDelegate(
+      () => this._screenshot,
+      value => { this._screenshot = value; },
+      () => new CtrlProxyScreenshot(this.createDelegateContext())
+    );
   }
 
   private get navigation(): CtrlProxyNavigation {
-    if (!this._navigation) {
-      this._navigation = new CtrlProxyNavigation(this.createDelegateContext());
-    }
-    return this._navigation;
+    return this.lazyDelegate(
+      () => this._navigation,
+      value => { this._navigation = value; },
+      () => new CtrlProxyNavigation(this.createDelegateContext())
+    );
   }
 
   private get clipboard(): CtrlProxyClipboard {
-    if (!this._clipboard) {
-      this._clipboard = new CtrlProxyClipboard(this.createDelegateContext());
-    }
-    return this._clipboard;
+    return this.lazyDelegate(
+      () => this._clipboard,
+      value => { this._clipboard = value; },
+      () => new CtrlProxyClipboard(this.createDelegateContext())
+    );
   }
 
   private get voiceOver(): CtrlProxyVoiceOver {
-    if (!this._voiceOver) {
-      this._voiceOver = new CtrlProxyVoiceOver(this.createDelegateContext());
-    }
-    return this._voiceOver;
+    return this.lazyDelegate(
+      () => this._voiceOver,
+      value => { this._voiceOver = value; },
+      () => new CtrlProxyVoiceOver(this.createDelegateContext())
+    );
   }
 
   private get storage(): CtrlProxyStorage {
-    if (!this._storage) {
-      this._storage = new CtrlProxyStorage(this.createDelegateContext());
-    }
-    return this._storage;
+    return this.lazyDelegate(
+      () => this._storage,
+      value => { this._storage = value; },
+      () => new CtrlProxyStorage(this.createDelegateContext())
+    );
   }
 
   private get keyboard(): CtrlProxyKeyboard {
-    if (!this._keyboard) {
-      this._keyboard = new CtrlProxyKeyboard(this.createDelegateContext());
-    }
-    return this._keyboard;
+    return this.lazyDelegate(
+      () => this._keyboard,
+      value => { this._keyboard = value; },
+      () => new CtrlProxyKeyboard(this.createDelegateContext())
+    );
   }
 
   private get highlights(): CtrlProxyHighlights {
-    if (!this._highlights) {
-      this._highlights = new CtrlProxyHighlights(this.createDelegateContext());
-    }
-    return this._highlights;
+    return this.lazyDelegate(
+      () => this._highlights,
+      value => { this._highlights = value; },
+      () => new CtrlProxyHighlights(this.createDelegateContext())
+    );
   }
 
   private get database(): CtrlProxyDatabase {
-    if (!this._database) {
-      this._database = new CtrlProxyDatabase(this.createDelegateContext());
-    }
-    return this._database;
+    return this.lazyDelegate(
+      () => this._database,
+      value => { this._database = value; },
+      () => new CtrlProxyDatabase(this.createDelegateContext())
+    );
   }
 
   private get permissions(): CtrlProxyPermissions {
-    if (!this._permissions) {
-      this._permissions = new CtrlProxyPermissions(this.createDelegateContext());
-    }
-    return this._permissions;
+    return this.lazyDelegate(
+      () => this._permissions,
+      value => { this._permissions = value; },
+      () => new CtrlProxyPermissions(this.createDelegateContext())
+    );
   }
 
   // ===========================================================================

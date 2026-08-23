@@ -81,9 +81,33 @@ of the interrupted tool's output schema:
   "code": "device_lost",
   "deviceId": "emulator-5554",
   "sessionUuid": "device-session-1",
-  "reason": "confirmed-unavailable"
+  "incidentId": "incident-1",
+  "reason": "confirmed-unavailable",
+  "detectionPath": "adb-server-reset",
+  "avdName": "Pixel_8_API_35",
+  "replacementDeviceId": "emulator-5560",
+  "sessionState": "active",
+  "heartbeat": {
+    "lastHeartbeatMs": 1720000000000,
+    "hasReceivedHeartbeat": true,
+    "timeoutMs": 10000
+  },
+  "recovery": {
+    "status": "recovered",
+    "attempts": 1
+  },
+  "retry": {
+    "sameSession": true,
+    "requiresNewSession": false
+  }
 }
 ```
+
+Only `code`, `deviceId`, and `reason` are always present. The other fields are
+included when session and incident data are available. `recovery.status` is
+`pending` while bounded recovery is running, `recovered` only after the same
+verified AVD is rebound, and `exhausted` or `not-attempted` when the client must
+inspect `retry.requiresNewSession` before continuing.
 
 ## Session Heartbeats
 

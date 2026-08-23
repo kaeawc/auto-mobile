@@ -131,8 +131,10 @@ export class LaunchApp extends BaseVisualChange {
    */
   private async extractLauncherActivities(
     packageName: string,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
+    signal?: AbortSignal,
   ): Promise<string[]> {
+    this.assertLaunchNotAborted(signal);
     logger.info("extractLauncherActivities");
     const activities: string[] = [];
 
@@ -142,6 +144,7 @@ export class LaunchApp extends BaseVisualChange {
       const result = perf
         ? await perf.track("a11yLaunchIntent", () => a11y.requestLaunchIntent(packageName, 3000))
         : await a11y.requestLaunchIntent(packageName, 3000);
+      this.assertLaunchNotAborted(signal);
       if (result.success && result.componentName) {
         // componentName is "package/.Activity" or "package/com.foo.Activity"
         const slash = result.componentName.indexOf("/");
@@ -156,6 +159,7 @@ export class LaunchApp extends BaseVisualChange {
         }
       }
     } catch (error) {
+      this.assertLaunchNotAborted(signal);
       logger.debug(`[LaunchApp] a11y launch intent failed, falling back to ADB: ${error}`);
     }
 
@@ -173,11 +177,21 @@ export class LaunchApp extends BaseVisualChange {
       ];
 
       for (let i = 0; i < approaches.length; i++) {
+        this.assertLaunchNotAborted(signal);
         try {
           logger.info(`[LaunchApp] Trying approach ${i + 1}: ${approaches[i]}`);
           const result = perf
-            ? await perf.track(`activityApproach_${i + 1}`, () => this.adb.executeCommand(approaches[i]))
-            : await this.adb.executeCommand(approaches[i]);
+            ? await perf.track(`activityApproach_${i + 1}`, () =>
+                this.adb.executeCommand(approaches[i], undefined, undefined, undefined, signal)
+              )
+            : await this.adb.executeCommand(
+                approaches[i],
+                undefined,
+                undefined,
+                undefined,
+                signal,
+              );
+          this.assertLaunchNotAborted(signal);
           logger.info(`[LaunchApp] Approach ${i + 1} result: ${result.stdout.length} chars of output`);
 
           if (result.stdout.trim()) {
@@ -219,17 +233,34 @@ export class LaunchApp extends BaseVisualChange {
             }
           }
         } catch (error) {
+          this.assertLaunchNotAborted(signal);
           logger.warn(`[LaunchApp] Approach ${i + 1} failed:`, error);
         }
       }
 
       // If no activities found, try a simpler approach
       if (activities.length === 0) {
+        this.assertLaunchNotAborted(signal);
         logger.info(`[LaunchApp] No activities found, trying fallback approach`);
         try {
           const simpleResult = perf
-            ? await perf.track("activityFallback", () => this.adb.executeCommand(`shell pm dump ${packageName}`))
-            : await this.adb.executeCommand(`shell pm dump ${packageName}`);
+            ? await perf.track("activityFallback", () =>
+                this.adb.executeCommand(
+                  `shell pm dump ${packageName}`,
+                  undefined,
+                  undefined,
+                  undefined,
+                  signal,
+                )
+              )
+            : await this.adb.executeCommand(
+                `shell pm dump ${packageName}`,
+                undefined,
+                undefined,
+                undefined,
+                signal,
+              );
+          this.assertLaunchNotAborted(signal);
           const lines = simpleResult.stdout.split("\n");
 
           for (const line of lines) {
@@ -248,11 +279,13 @@ export class LaunchApp extends BaseVisualChange {
             }
           }
         } catch (error) {
+          this.assertLaunchNotAborted(signal);
           logger.warn(`[LaunchApp] Fallback approach failed:`, error);
         }
       }
 
     } catch (error) {
+      this.assertLaunchNotAborted(signal);
       logger.warn(`[LaunchApp] Failed to extract launcher activities for ${packageName}:`, error);
     }
 
@@ -773,6 +806,7 @@ export class LaunchApp extends BaseVisualChange {
           activityName,
           targetUserId,
           perf,
+          signal,
         );
         signal?.throwIfAborted();
         const foregroundReady = await this.waitForAppForeground(
@@ -1095,12 +1129,18 @@ export class LaunchApp extends BaseVisualChange {
   /**
    * Perform the actual app launch with timing
    */
+  private assertLaunchNotAborted(signal?: AbortSignal): void {
+    signal?.throwIfAborted();
+  }
+
   private async performLaunch(
     packageName: string,
     activityName: string | undefined,
     userId: number,
-    perf: PerformanceTracker
+    perf: PerformanceTracker,
+    signal?: AbortSignal,
   ): Promise<{ success: boolean; packageName: string; activityName?: string; userId: number }> {
+    this.assertLaunchNotAborted(signal);
     let targetActivity = activityName;
 
     // Try am start with intent first (alternative to monkey)
@@ -1112,6 +1152,7 @@ export class LaunchApp extends BaseVisualChange {
           const intentCmd = `shell am start --user ${userId} -a android.intent.action.MAIN -c android.intent.category.LAUNCHER ${packageName}`;
           logger.info(`[LaunchApp] Intent command: ${intentCmd}`);
           const result = await this.adb.executeCommand(intentCmd);
+          this.assertLaunchNotAborted(signal);
           // am start may report launch errors on stderr while still returning exit code 0.
           if (result.stdout && !result.stdout.includes("Error") && !result.stderr.includes("Error")) {
             logger.info(`[LaunchApp] Intent launch completed successfully`);
@@ -1120,10 +1161,12 @@ export class LaunchApp extends BaseVisualChange {
           logger.info(`[LaunchApp] Intent launch returned error: ${result.stdout}${result.stderr}`);
           return { success: false };
         } catch (error) {
+          this.assertLaunchNotAborted(signal);
           logger.info(`[LaunchApp] Intent launch failed: ${error}, falling back to monkey`);
           return { success: false };
         }
       });
+      this.assertLaunchNotAborted(signal);
 
       if (intentResult.success) {
         perf.end();
@@ -1144,13 +1187,16 @@ export class LaunchApp extends BaseVisualChange {
           const monkeyCmd = `shell monkey -p ${packageName} --user ${userId} 1`;
           logger.info(`[LaunchApp] Monkey command: ${monkeyCmd}`);
           await this.adb.executeCommand(monkeyCmd);
+          this.assertLaunchNotAborted(signal);
           logger.info(`[LaunchApp] Monkey launch completed successfully`);
           return { success: true };
         } catch (error) {
+          this.assertLaunchNotAborted(signal);
           logger.info(`[LaunchApp] Monkey launch failed: ${error}, falling back to activity discovery`);
           return { success: false };
         }
       });
+      this.assertLaunchNotAborted(signal);
 
       if (monkeyResult.success) {
         perf.end();
@@ -1167,8 +1213,9 @@ export class LaunchApp extends BaseVisualChange {
     if (!targetActivity) {
       const launcherActivities = await perf.track("extractLauncherActivities", async () => {
         logger.info(`[LaunchApp] No activity specified, extracting launcher activities`);
-        return this.extractLauncherActivities(packageName, perf);
+        return this.extractLauncherActivities(packageName, perf, signal);
       });
+      this.assertLaunchNotAborted(signal);
 
       if (launcherActivities.length > 0) {
         targetActivity = launcherActivities[0];
@@ -1187,17 +1234,21 @@ export class LaunchApp extends BaseVisualChange {
           ];
 
           for (const pattern of commonPatterns) {
+            this.assertLaunchNotAborted(signal);
             try {
               logger.info(`[LaunchApp] Trying common pattern: ${pattern}`);
               await this.adb.executeCommand(`shell am start --user ${userId} -n ${packageName}/${pattern}`);
+              this.assertLaunchNotAborted(signal);
               logger.info(`[LaunchApp] Successfully launched with pattern: ${pattern}`);
               return { success: true, pattern };
             } catch (error) {
+              this.assertLaunchNotAborted(signal);
               logger.info(`[LaunchApp] Pattern ${pattern} failed: ${error}`);
             }
           }
           return { success: false, pattern: null };
         });
+        this.assertLaunchNotAborted(signal);
 
         if (patternResult.success && patternResult.pattern) {
           perf.end();
@@ -1218,6 +1269,7 @@ export class LaunchApp extends BaseVisualChange {
         const launchCmd = `shell am start --user ${userId} -n ${packageName}/${targetActivity}`;
         logger.info(`[LaunchApp] Launch command: ${launchCmd}`);
         await this.adb.executeCommand(launchCmd);
+        this.assertLaunchNotAborted(signal);
         logger.info(`[LaunchApp] Launch command completed successfully`);
       });
     } else {
@@ -1228,8 +1280,10 @@ export class LaunchApp extends BaseVisualChange {
           const launcherCmd = `shell am start --user ${userId} -a android.intent.action.MAIN -c android.intent.category.LAUNCHER ${packageName}`;
           logger.info(`[LaunchApp] Launcher intent command: ${launcherCmd}`);
           await this.adb.executeCommand(launcherCmd);
+          this.assertLaunchNotAborted(signal);
           logger.info(`[LaunchApp] Launcher intent completed successfully`);
         } catch (error) {
+          this.assertLaunchNotAborted(signal);
           logger.error(`[LaunchApp] Launcher intent failed: ${error}`);
           throw new ActionableError("No launcher activity found and launcher intent failed");
         }

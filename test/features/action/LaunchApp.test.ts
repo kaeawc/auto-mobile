@@ -15,6 +15,7 @@ import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeDeviceAppLauncher } from "../../fakes/FakeDeviceAppLauncher";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
+import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { IOSCtrlProxyManager } from "../../../src/utils/IOSCtrlProxyManager";
 import { DeviceLostError } from "../../../src/server/deviceLossOutcome";
 
@@ -129,6 +130,82 @@ describe("LaunchApp", () => {
       ),
     ).rejects.toBe(deviceLoss);
     expect(hasStartedAppLaunch()).toBe(false);
+  });
+
+  test("does not run fallback launch commands after device loss during intent launch", async () => {
+    const controller = new AbortController();
+    const deviceLoss = new DeviceLostError(
+      device.deviceId,
+      `device-disconnected:${device.deviceId}`,
+    );
+    const originalExecuteCommand = fakeAdb.executeCommand.bind(fakeAdb);
+    const executeSpy = spyOn(fakeAdb, "executeCommand").mockImplementation(
+      async (command, timeoutMs, maxBuffer, noRetry, signal) => {
+        if (
+          command.includes("android.intent.action.MAIN") &&
+          command.includes("android.intent.category.LAUNCHER")
+        ) {
+          controller.abort(deviceLoss);
+          throw new Error("ADB transport disconnected");
+        }
+        return await originalExecuteCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+      },
+    );
+
+    try {
+      await expect(
+        launchApp.execute(
+          packageName,
+          false,
+          false,
+          undefined,
+          undefined,
+          undefined,
+          controller.signal,
+        ),
+      ).rejects.toBe(deviceLoss);
+      expect(fakeAdb.wasCommandExecuted(`shell monkey -p ${packageName}`)).toBe(false);
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
+  test("does not run ADB activity probes after device loss during launcher discovery", async () => {
+    const controller = new AbortController();
+    const deviceLoss = new DeviceLostError(
+      device.deviceId,
+      `device-disconnected:${device.deviceId}`,
+    );
+    fakeAdb.setCommandResponse(
+      "android.intent.category.LAUNCHER",
+      { stdout: "Error: launcher intent unavailable", stderr: "" },
+    );
+    fakeAdb.setCommandError(`shell monkey -p ${packageName}`, new Error("monkey unavailable"));
+    const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+      async requestLaunchIntent() {
+        controller.abort(deviceLoss);
+        throw new Error("CtrlProxy disconnected");
+      },
+    } as unknown as AndroidCtrlProxyClient);
+
+    try {
+      await expect(
+        launchApp.execute(
+          packageName,
+          false,
+          false,
+          undefined,
+          undefined,
+          undefined,
+          controller.signal,
+        ),
+      ).rejects.toBe(deviceLoss);
+      expect(fakeAdb.getExecutedCommands().some(command =>
+        command.includes("shell pm dump") || command.includes("query-activities")
+      )).toBe(false);
+    } finally {
+      getInstanceSpy.mockRestore();
+    }
   });
 
   test("aborts and unsubscribes while waiting for an iOS hierarchy race", async () => {

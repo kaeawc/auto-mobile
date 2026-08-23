@@ -214,6 +214,164 @@ describe("ADB server reset session recovery", () => {
     }
   });
 
+  test("does not rebind a recreated session that reuses the captured UUID", async () => {
+    class BlockingReadyDeviceManager extends FakeDeviceManager {
+      readonly readinessStarted = Promise.withResolvers<void>();
+      readonly releaseReadiness = Promise.withResolvers<void>();
+
+      override async startDevice(device: DeviceInfo): Promise<ChildProcess> {
+        this.startedDevices.push(device);
+        this.bootedDevices = [{
+          name: device.name,
+          platform: "android",
+          deviceId: "emulator-5560",
+        }];
+        return { pid: 0 } as ChildProcess;
+      }
+
+      override async killDevice(): Promise<void> {
+        this.bootedDevices = [];
+      }
+
+      override async waitForDeviceReady(device: DeviceInfo): Promise<BootedDevice> {
+        this.readinessStarted.resolve();
+        await this.releaseReadiness.promise;
+        return {
+          name: device.name,
+          platform: "android",
+          deviceId: "emulator-5560",
+        };
+      }
+    }
+
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const manager = new BlockingReadyDeviceManager();
+    const reboot: AndroidDeviceReboot = {
+      run: async (_target, attempt) => {
+        await attempt();
+      },
+    };
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      reboot,
+    );
+    const original: BootedDevice = {
+      platform: "android",
+      name: "Pixel_8_API_35",
+      deviceId: "emulator-5554",
+    };
+    const image: DeviceInfo = {
+      name: original.name,
+      platform: "android",
+      isRunning: true,
+      source: "local",
+    };
+    manager.bootedDevices = [original];
+    await pool.addDevice(original, image);
+    const capturedSession = await sessionManager.createSession(
+      "session-1",
+      original.deviceId,
+      "android",
+    );
+    await pool.bindOrReuseDeviceSession("session-1", original.deviceId, "android", image);
+    const capturedDevice = pool.getDevice(original.deviceId)!;
+
+    try {
+      const recovery = pool.recoverSessionBoundAndroidDeviceAfterAdbServerReset(
+        original.deviceId,
+        capturedDevice,
+      );
+      await manager.readinessStarted.promise;
+
+      await sessionManager.releaseSession("session-1", "explicit-release");
+      const replacementSession = await sessionManager.createSession(
+        "session-1",
+        original.deviceId,
+        "android",
+      );
+      expect(replacementSession).not.toBe(capturedSession);
+
+      manager.releaseReadiness.resolve();
+      await expect(recovery).resolves.toBe(false);
+      expect(sessionManager.getSession("session-1")).toBe(replacementSession);
+      expect(replacementSession.assignedDevice).toBe(original.deviceId);
+      expect(pool.getDevice("emulator-5560")).toMatchObject({
+        sessionId: null,
+        status: "idle",
+      });
+    } finally {
+      manager.releaseReadiness.resolve();
+      await sessionManager.releaseSession("session-1", "explicit-release");
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
+  test("retains captured session identity between cohort detachment and recovery", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const manager = new FakeDeviceManager();
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+    );
+    const original: BootedDevice = {
+      platform: "android",
+      name: "Pixel_8_API_35",
+      deviceId: "emulator-5554",
+    };
+    const image: DeviceInfo = {
+      name: original.name,
+      platform: "android",
+      isRunning: true,
+      source: "local",
+    };
+    manager.bootedDevices = [original];
+    await pool.addDevice(original, image);
+    await pool.bindOrReuseDeviceSession("session-1", original.deviceId, "android", image);
+    const capturedSession = sessionManager.getSession("session-1")!;
+    const detached = await pool.detachAdbServerResetCohort([
+      pool.getDevice(original.deviceId)!,
+    ]);
+
+    try {
+      await sessionManager.releaseSession("session-1", "explicit-release");
+      const replacementSession = await sessionManager.createSession(
+        "session-1",
+        original.deviceId,
+        "android",
+      );
+      expect(replacementSession).not.toBe(capturedSession);
+
+      await expect(
+        pool.recoverSessionBoundAndroidDeviceAfterAdbServerReset(
+          original.deviceId,
+          detached.devices[0],
+        ),
+      ).resolves.toBe(false);
+      expect(manager.startedDevices).toHaveLength(0);
+      expect(sessionManager.getSession("session-1")).toBe(replacementSession);
+      expect(replacementSession.assignedDevice).toBe(original.deviceId);
+    } finally {
+      await pool.releaseAdbServerResetCohortReservations(detached.devices);
+      await sessionManager.releaseSession("session-1", "explicit-release");
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
   test("refuses to rebind when the original AVD identity was never recorded", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -1361,11 +1519,13 @@ describe("ADB server reset session recovery", () => {
     }
   });
 
-  test("keeps a preserved session quarantined when terminal release persistence fails", async () => {
+  test("retries transient terminal release persistence before unquarantining", async () => {
     const timer = new FakeTimer();
+    timer.enableAutoAdvance();
     const persistence = new FakeDeviceSessionPersistence();
     const sessionManager = new SessionManager(timer, persistence);
     const manager = new FakeDeviceManager();
+    let releaseAttempts = 0;
     const reboot: AndroidDeviceReboot = {
       run: async (_target, attempt) => {
         try {
@@ -1386,7 +1546,14 @@ describe("ADB server reset session recovery", () => {
       undefined,
       undefined,
       async (sessionId, _deviceId, releaseReason) => {
-        await sessionManager.releaseSession(sessionId, releaseReason);
+        releaseAttempts += 1;
+        try {
+          await sessionManager.releaseSession(sessionId, releaseReason);
+        } finally {
+          if (releaseAttempts === 1) {
+            persistence.failure = null;
+          }
+        }
       },
       undefined,
       reboot,
@@ -1423,28 +1590,13 @@ describe("ADB server reset session recovery", () => {
           incidentId,
           captured,
         ),
-      ).rejects.toThrow("persist release failed");
-      expect(sessionManager.getSession("session-1")).toBeDefined();
-      await expect(
-        pool.recoverSessionBoundAndroidDeviceAfterLoss(
-          original.deviceId,
-          undefined,
-          captured,
-        ),
-      ).resolves.toBe("deferred");
-      await expect(pool.waitForEmulatorLossIncident(incidentId!)).resolves.toMatchObject({
-        session: { state: "recovering" },
-        recovery: { outcome: "exhausted" },
-      });
-
-      persistence.failure = null;
-      await sessionManager.releaseSession("session-1", "heartbeat-timeout");
-      for (let attempt = 0; attempt < 10 && pool.isSessionRecoveryInFlight("session-1"); attempt++) {
-        await Promise.resolve();
-      }
+      ).resolves.toBe("released");
+      expect(releaseAttempts).toBe(2);
+      expect(sessionManager.getSession("session-1")).toBeNull();
       expect(pool.isSessionRecoveryInFlight("session-1")).toBe(false);
       await expect(pool.waitForEmulatorLossIncident(incidentId!)).resolves.toMatchObject({
         session: { state: "released" },
+        recovery: { outcome: "exhausted" },
       });
     } finally {
       sessionManager.stopCleanupTimer();

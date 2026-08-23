@@ -119,6 +119,8 @@ export interface PooledDevice {
   androidImage?: DeviceInfo;
   /** Session captured before a process-wide ADB reset detaches this connection. */
   adbServerResetSessionId?: string;
+  /** Exact session incarnation captured with adbServerResetSessionId. */
+  adbServerResetSession?: Session;
   /** Incident opened before reset cancellation so active calls receive correlation. */
   adbServerResetIncidentId?: string;
   /** Autolock owner captured before a process-wide ADB reset detaches this connection. */
@@ -2342,7 +2344,7 @@ export class DevicePool {
   ): Promise<void> {
     const sessionId = session.sessionId;
     if (this.isPreservedSessionCurrent(session, device.id)) {
-      await this.releaseSessionForDisconnectedDevice(
+      await this.releaseDisconnectedRecoverySessionWithRetry(
         sessionId,
         device.id,
         deviceLossCancellationReason(device.id, incidentId),
@@ -2426,16 +2428,17 @@ export class DevicePool {
     try {
       const recovered = await this.rebootDisconnectedAndroidDevice(device, incidentId, {
         preserveSessionId: session.sessionId,
+        preserveSession: session,
         bypassRecoveryPolicy: true,
       });
       if (!recovered) {
-        await this.releasePreservedAdbResetSessionIfDetached(device, session.sessionId, incidentId);
+        await this.releasePreservedAdbResetSessionIfDetached(device, session, incidentId);
         await this.refreshEmulatorLossRecoverySettlement(incidentId, "exhausted");
       }
       return recovered ? "recovered" : "released";
     } catch (error) {
       try {
-        await this.releasePreservedAdbResetSessionIfDetached(device, session.sessionId, incidentId);
+        await this.releasePreservedAdbResetSessionIfDetached(device, session, incidentId);
         await this.refreshEmulatorLossRecoverySettlement(incidentId, "exhausted");
       } catch (releaseError) {
         this.failedTerminalRecoveryReleases.add(session.sessionId);
@@ -2489,6 +2492,11 @@ export class DevicePool {
   }
 
   private getAdbResetRecoverySession(device: PooledDevice): Session | undefined {
+    if (device.adbServerResetSession) {
+      return this.isPreservedSessionCurrent(device.adbServerResetSession, device.id)
+        ? device.adbServerResetSession
+        : undefined;
+    }
     const sessionId =
       device.adbServerResetSessionId ??
       device.sessionId ??
@@ -2565,9 +2573,10 @@ export class DevicePool {
   ): Promise<void> {
     const capturedTargets = this.getAdbServerResetCohortSessionTargets(cohort);
     const capturedSessionIds = new Set(capturedTargets.map(({ sessionId }) => sessionId));
-    for (const { sessionId, deviceId } of capturedTargets) {
+    for (const { sessionId, deviceId, session, pooledDevice } of capturedTargets) {
       this.adbServerResetQuarantinedSessions.add(sessionId);
       this.recoveringSessionLosses.set(sessionId, { deviceId });
+      pooledDevice.adbServerResetSession = session;
     }
     try {
       for (const device of cohort) {
@@ -2654,8 +2663,17 @@ export class DevicePool {
 
   private getAdbServerResetCohortSessionTargets(
     cohort: readonly PooledDevice[],
-  ): Array<{ sessionId: string; deviceId: string; incidentId?: string }> {
-    const sessionTargets = new Map<string, { deviceId: string; incidentId?: string }>();
+  ): Array<{
+    sessionId: string;
+    deviceId: string;
+    session: Session;
+    pooledDevice: PooledDevice;
+    incidentId?: string;
+  }> {
+    const sessionTargets = new Map<
+      string,
+      { deviceId: string; session: Session; pooledDevice: PooledDevice; incidentId?: string }
+    >();
     for (const device of cohort) {
       if (
         this.devices.get(device.id) !== device ||
@@ -2668,6 +2686,8 @@ export class DevicePool {
       if (session?.assignedDevice === device.id && session.platform === "android") {
         sessionTargets.set(device.sessionId, {
           deviceId: device.id,
+          session,
+          pooledDevice: device,
           ...(device.adbServerResetIncidentId
             ? { incidentId: device.adbServerResetIncidentId }
             : {}),
@@ -2867,19 +2887,35 @@ export class DevicePool {
 
   private async releasePreservedAdbResetSessionIfDetached(
     device: PooledDevice,
-    sessionId: string,
+    session: Session,
     incidentId: string | undefined,
   ): Promise<void> {
-    if (
-      this.devices.get(device.id) === device ||
-      this.sessionManager.getSession(sessionId)?.assignedDevice !== device.id
-    ) {
+    if (this.devices.get(device.id) === device || !this.isPreservedSessionCurrent(session, device.id)) {
       return;
     }
-    await this.releaseSessionForDisconnectedDevice(
-      sessionId,
+    await this.releaseDisconnectedRecoverySessionWithRetry(
+      session.sessionId,
       device.id,
       deviceLossCancellationReason(device.id, incidentId),
+    );
+  }
+
+  private async releaseDisconnectedRecoverySessionWithRetry(
+    sessionId: string,
+    deviceId: string,
+    releaseReason: string,
+  ): Promise<void> {
+    await this.retryExecutor.executeOrThrow(
+      async () =>
+        await this.releaseSessionForDisconnectedDevice(sessionId, deviceId, releaseReason),
+      {
+        onRetry: (error, attempt, delay) => {
+          logger.warn(
+            `[DevicePool] Retrying terminal release for session ${sessionId} after attempt ${attempt} failed; delay=${delay}ms: ${error}`,
+            error,
+          );
+        },
+      },
     );
   }
 

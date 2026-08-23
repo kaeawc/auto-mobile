@@ -1,7 +1,6 @@
 import { errorMessage } from "../describeUnknownError";
-import { execFile, type ChildProcess, type SpawnOptions } from "child_process";
+import { type ChildProcess, type SpawnOptions } from "child_process";
 import { logger } from "../logger";
-import { createExecResult } from "../execResult";
 import { runExecSeam } from "../ExecSeam";
 import {
   DefaultHostCommandExecutor,
@@ -28,7 +27,6 @@ import { OPERATION_CANCELLED_MESSAGE } from "../constants";
 import { RetryExecutor, defaultRetryExecutor } from "../retry/RetryExecutor";
 import { TTLCache } from "../cache/Cache";
 import { Timer, defaultTimer } from "../SystemTimer";
-import { wrapCommandError } from "../CommandError";
 import { isAdbMissingDeviceError, notifyAdbMissingDevice } from "./AdbDeviceHealth";
 import { DefaultSystemDetection, type SystemDetection } from "../system/SystemDetection";
 
@@ -915,8 +913,12 @@ export class AdbClient implements AdbExecutor {
       let settled = false;
       let pendingTerminationError: Error | undefined;
       let terminationTimeoutId: NodeJS.Timeout | undefined;
-      const options = maxBuffer ? { maxBuffer } : undefined;
-      const child = execFile(file, args, options, (error, stdout, stderr) => {
+      const { child, result } = hostProcessExecutor.executeCommandWithChild(
+        file,
+        args,
+        maxBuffer ? { maxBuffer } : undefined,
+      );
+      result.then((execResult) => {
         if (settled) {
           return;
         }
@@ -926,18 +928,14 @@ export class AdbClient implements AdbExecutor {
           reject(pendingTerminationError);
           return;
         }
-        if (error) {
-          reject(
-            wrapCommandError(error, {
-              command: file,
-              args,
-              stdout,
-              stderr,
-            }),
-          );
+        resolve(execResult);
+      }).catch((error: unknown) => {
+        if (settled) {
           return;
         }
-        resolve(createExecResult(stdout, stderr));
+        settled = true;
+        cleanup();
+        reject(error);
       });
 
       this.activeProcesses.add(child);

@@ -197,6 +197,11 @@ interface McpForwardRecoveryContext {
   forwardStartMs: number;
 }
 
+interface DeviceControlTransportRecoveryContext extends McpForwardRecoveryContext {
+  phase: DeviceControlTransportPhase;
+  identity: DeviceControlTransportIdentity;
+}
+
 const isNonBlankSessionUuid = (value: unknown): value is string =>
   typeof value === "string" && value.trim().length > 0;
 
@@ -1278,10 +1283,13 @@ export class UnixSocketServer {
         return this.retryExpiredMcpSession(context, identity);
       }
       if (this.isDeviceControlSocketClosure(context.request, error)) {
+        const recoveryIdentity = this.hasEstablishedDeviceControlTransportIdentity(identity)
+          ? identity
+          : this.getDeviceControlTransportIdentity(context);
         return this.recoverDeviceControlTransport({
           ...context,
           phase: "response",
-          identity,
+          identity: recoveryIdentity,
         });
       }
       throw error;
@@ -1438,6 +1446,12 @@ export class UnixSocketServer {
     }
   }
 
+  private hasEstablishedDeviceControlTransportIdentity(
+    identity: DeviceControlTransportIdentity,
+  ): boolean {
+    return Boolean(identity.deviceId && identity.deviceSessionUuid);
+  }
+
   private isDeviceControlTransportIdentityValid(
     identity: DeviceControlTransportIdentity,
   ): boolean {
@@ -1466,6 +1480,28 @@ export class UnixSocketServer {
     }
   }
 
+  private isDeviceControlRecoveryIdentityValid(
+    identity: DeviceControlTransportIdentity,
+    phase: DeviceControlTransportPhase,
+  ): boolean {
+    if (
+      phase === "connect"
+      && !this.hasEstablishedDeviceControlTransportIdentity(identity)
+    ) {
+      return true;
+    }
+    return this.isDeviceControlTransportIdentityValid(identity);
+  }
+
+  private isDeviceControlReplayResultIdentityValid(
+    identity: DeviceControlTransportIdentity,
+  ): boolean {
+    return (
+      !this.hasEstablishedDeviceControlTransportIdentity(identity)
+      || this.isDeviceControlTransportIdentityValid(identity)
+    );
+  }
+
   private deviceControlTransportError(input: {
     request: DaemonRequest;
     identity: DeviceControlTransportIdentity;
@@ -1476,12 +1512,12 @@ export class UnixSocketServer {
   }): DeviceControlTransportError {
     const toolName = deviceControlToolName(input.request);
     const sessionValid = this.isDeviceControlTransportIdentityValid(input.identity);
+    const identityEstablished =
+      this.hasEstablishedDeviceControlTransportIdentity(input.identity);
     const retryable =
-      sessionValid
-      && (
-        input.phase === "connect"
-        || isReplaySafeAfterResponseClosure(input.request)
-      );
+      input.phase === "connect"
+        ? !identityEstablished || sessionValid
+        : sessionValid && isReplaySafeAfterResponseClosure(input.request);
     const failure: DeviceControlTransportFailure = {
       code: DEVICE_CONTROL_TRANSPORT_FAILURE_CODE,
       transport: "daemon_loopback_http",
@@ -1546,17 +1582,53 @@ export class UnixSocketServer {
     }
   }
 
-  private async recoverDeviceControlTransport(input: {
-    request: DaemonRequest;
-    route: McpForwardRoute;
-    socketSessionId: string;
-    remainingTimeoutMs: number;
-    forwardStartMs: number;
-    phase: DeviceControlTransportPhase;
-    identity: DeviceControlTransportIdentity;
-  }): Promise<unknown> {
+  private isDeviceControlReconnectExhaustion(
+    request: DaemonRequest,
+    error: unknown,
+  ): boolean {
+    return (
+      error instanceof McpClientReconnectDeadlineError
+      || this.isDeviceControlSocketClosure(request, error)
+    );
+  }
+
+  private getDeviceControlRecoveryFailureIdentity(
+    context: McpForwardRecoveryContext,
+    identity: DeviceControlTransportIdentity,
+  ): DeviceControlTransportIdentity {
+    return this.hasEstablishedDeviceControlTransportIdentity(identity)
+      ? identity
+      : this.getDeviceControlTransportIdentity(context);
+  }
+
+  private async reconnectDeviceControlTransport(
+    input: DeviceControlTransportRecoveryContext,
+  ): Promise<Client> {
+    try {
+      return await this.reconnectMcpClientWithinDeadline(input);
+    } catch (error) {
+      if (!this.isDeviceControlReconnectExhaustion(input.request, error)) {
+        throw error;
+      }
+      logger.warn(
+        `[McpForward] device-control transport reconnect failed for ${deviceControlToolName(input.request)}`,
+      );
+      throw this.deviceControlTransportError({
+        request: input.request,
+        identity: input.identity,
+        phase: input.phase,
+        reconnectAttempted: true,
+        replayAttempted: false,
+        recoveryExhausted: true,
+      });
+    }
+  }
+
+  private async recoverDeviceControlTransport(
+    input: DeviceControlTransportRecoveryContext,
+  ): Promise<unknown> {
     await this.resetMcpClient(input.route.clientKey, "detach");
-    if (!this.isDeviceControlTransportIdentityValid(input.identity)) {
+    if (!this.isDeviceControlRecoveryIdentityValid(input.identity, input.phase)) {
       throw this.deviceControlTransportError({
         request: input.request,
         identity: input.identity,
@@ -1584,22 +1656,7 @@ export class UnixSocketServer {
       });
     }
 
-    let freshClient: Client;
-    try {
-      freshClient = await this.reconnectMcpClientWithinDeadline(input);
-    } catch {
-      logger.warn(
-        `[McpForward] device-control transport reconnect failed for ${deviceControlToolName(input.request)}`,
-      );
-      throw this.deviceControlTransportError({
-        request: input.request,
-        identity: input.identity,
-        phase: input.phase,
-        reconnectAttempted: true,
-        replayAttempted: false,
-        recoveryExhausted: true,
-      });
-    }
+    const freshClient = await this.reconnectDeviceControlTransport(input);
 
     const retryRemainingMs = this.remainingMcpForwardBudget(input);
     if (retryRemainingMs <= 0) {
@@ -1612,7 +1669,7 @@ export class UnixSocketServer {
         recoveryExhausted: true,
       });
     }
-    if (!this.isDeviceControlTransportIdentityValid(input.identity)) {
+    if (!this.isDeviceControlRecoveryIdentityValid(input.identity, input.phase)) {
       await this.resetMcpClient(input.route.clientKey, "detach");
       throw this.deviceControlTransportError({
         request: input.request,
@@ -1641,7 +1698,7 @@ export class UnixSocketServer {
         retryRemainingMs,
         input.socketSessionId,
       );
-      if (!this.isDeviceControlTransportIdentityValid(input.identity)) {
+      if (!this.isDeviceControlReplayResultIdentityValid(input.identity)) {
         await this.resetMcpClient(input.route.clientKey, "detach");
         throw this.deviceControlTransportError({
           request: input.request,
@@ -1658,9 +1715,13 @@ export class UnixSocketServer {
         throw error;
       }
       await this.resetMcpClient(input.route.clientKey, "detach");
+      const failureIdentity = this.getDeviceControlRecoveryFailureIdentity(
+        input,
+        input.identity,
+      );
       throw this.deviceControlTransportError({
         request: input.request,
-        identity: input.identity,
+        identity: failureIdentity,
         phase: "response",
         reconnectAttempted: true,
         replayAttempted: replayAfterResponse,

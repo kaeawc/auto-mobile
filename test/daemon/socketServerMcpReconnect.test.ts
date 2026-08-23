@@ -326,6 +326,55 @@ describe("UnixSocketServer MCP session reconnect", () => {
     expect(callsDispatched).toBe(1);
   });
 
+  test("reconnects a sessionless call after a socket closure before request dispatch", async () => {
+    let clientsCreated = 0;
+    let callsDispatched = 0;
+
+    server.mcpClientFactory = async () => {
+      clientsCreated++;
+      if (clientsCreated === 1) {
+        throw socketClosedError();
+      }
+      return createFakeMcpClient({
+        callTool: async () => {
+          callsDispatched++;
+          return { content: [{ type: "text", text: "observed" }] };
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: { platform: "android" },
+    });
+
+    expect(response.success).toBe(true);
+    expect(clientsCreated).toBe(2);
+    expect(callsDispatched).toBe(1);
+  });
+
+  test("preserves an unrelated failure while reconnecting before request dispatch", async () => {
+    let clientsCreated = 0;
+
+    server.mcpClientFactory = async () => {
+      clientsCreated++;
+      if (clientsCreated === 1) {
+        throw socketClosedError();
+      }
+      throw new Error("MCP configuration rejected");
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: { sessionUuid: "session-a" },
+    });
+
+    expect(response.success).toBe(false);
+    expect(clientsCreated).toBe(2);
+    expect(response.error).toContain("MCP configuration rejected");
+    expect(response.transportFailure).toBeUndefined();
+  });
+
   test("classifies a closure during the existing session-expiry replay", async () => {
     let clientsCreated = 0;
     let callsDispatched = 0;
@@ -383,6 +432,34 @@ describe("UnixSocketServer MCP session reconnect", () => {
     const response = await sendRequest(socketPath, "tools/call", {
       name: "observe",
       arguments: { sessionUuid: "session-a" },
+    });
+
+    expect(response.success).toBe(true);
+    expect(clientsCreated).toBe(2);
+    expect(callsDispatched).toBe(2);
+  });
+
+  test("refreshes first-use autolock identity before replaying observe", async () => {
+    let clientsCreated = 0;
+    let callsDispatched = 0;
+
+    server.mcpClientFactory = async () => {
+      const clientIndex = ++clientsCreated;
+      return createFakeMcpClient({
+        callTool: async () => {
+          callsDispatched++;
+          if (clientIndex === 1) {
+            autolockSessionUuid = "session-a";
+            throw socketClosedError();
+          }
+          return { content: [{ type: "text", text: "observed" }] };
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: { platform: "android" },
     });
 
     expect(response.success).toBe(true);

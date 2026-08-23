@@ -1217,11 +1217,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   /**
-   * Test-only accessor for the currently bound session (or null when unbound).
-   * Lets isolation tests pin the routing invariant that `bindSession` is
-   * last-writer-wins and that an unbound client has no session.
+   * Returns the session currently receiving this device's navigation events,
+   * or null when the client is unbound.
    */
-  public getBoundSessionIdForTesting(): string | null {
+  public getBoundSessionId(): string | null {
     return this.boundSessionId;
   }
 

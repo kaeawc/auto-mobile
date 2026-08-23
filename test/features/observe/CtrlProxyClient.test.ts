@@ -1490,20 +1490,20 @@ describe("AndroidCtrlProxyClient", function() {
 
       try {
         testClient.bindSession("session-A");
-        expect(testClient.getBoundSessionIdForTesting()).toBe("session-A");
+        expect(testClient.getBoundSessionId()).toBe("session-A");
         const detectorBoundToA = testClient.getHierarchyNavigationDetector();
 
         testClient.releaseSessionBinding("session-A");
 
         // Binding cleared and the cached detector dropped (recreated on next access),
         // so post-release events route to the unattributed global manager, not A's.
-        expect(testClient.getBoundSessionIdForTesting()).toBeNull();
+        expect(testClient.getBoundSessionId()).toBeNull();
         expect(testClient.getHierarchyNavigationDetector()).not.toBe(detectorBoundToA);
 
         // A non-matching release is a no-op once a new session has bound.
         testClient.bindSession("session-B");
         testClient.releaseSessionBinding("session-A");
-        expect(testClient.getBoundSessionIdForTesting()).toBe("session-B");
+        expect(testClient.getBoundSessionId()).toBe("session-B");
       } finally {
         await testClient.close();
         await navHarness.dispose();
@@ -3607,23 +3607,23 @@ describe("AndroidCtrlProxyClient", function() {
     // one session's navigation state into another's.
     test("is unbound (null) until a session is bound", function() {
       // The per-test client from beforeEach is created without a session bound.
-      expect(accessibilityServiceClient.getBoundSessionIdForTesting()).toBeNull();
+      expect(accessibilityServiceClient.getBoundSessionId()).toBeNull();
     });
 
     test("is last-writer-wins: the most recently bound session is the active one", function() {
       accessibilityServiceClient.bindSession("session-A");
-      expect(accessibilityServiceClient.getBoundSessionIdForTesting()).toBe("session-A");
+      expect(accessibilityServiceClient.getBoundSessionId()).toBe("session-A");
 
       // Rebinding (e.g. the device is reassigned to a new session) switches the
       // active session; the previous binding does not linger.
       accessibilityServiceClient.bindSession("session-B");
-      expect(accessibilityServiceClient.getBoundSessionIdForTesting()).toBe("session-B");
+      expect(accessibilityServiceClient.getBoundSessionId()).toBe("session-B");
     });
 
     test("re-binding the same session is idempotent", function() {
       accessibilityServiceClient.bindSession("session-A");
       accessibilityServiceClient.bindSession("session-A");
-      expect(accessibilityServiceClient.getBoundSessionIdForTesting()).toBe("session-A");
+      expect(accessibilityServiceClient.getBoundSessionId()).toBe("session-A");
     });
   });
 

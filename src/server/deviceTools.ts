@@ -662,6 +662,11 @@ interface ShutdownDeadlineContext {
   retainReservationUntil?: (operation: Promise<unknown>, releaseAfterFailure?: boolean) => void;
 }
 
+interface AndroidObserverShutdownState {
+  hadActiveObserver: boolean;
+  boundSessionId: string | null;
+}
+
 function shouldPropagateShutdownPreparationError(
   error: unknown,
   requestAbortSignal: AbortSignal | undefined,
@@ -773,12 +778,15 @@ async function stopAndroidCtrlProxyBeforeShutdown(
   context: ShutdownDeadlineContext,
   perf: ReturnType<typeof createPerformanceTracker>,
   stopAndroidObservers: (device: BootedDevice) => Promise<void>,
-): Promise<boolean> {
+): Promise<AndroidObserverShutdownState> {
   if (context.device.platform !== "android") {
-    return false;
+    return { hadActiveObserver: false, boundSessionId: null };
   }
-  const hadActiveObserver =
-    AndroidCtrlProxyClient.getExistingInstance(context.device.deviceId) !== null;
+  const activeObserver = AndroidCtrlProxyClient.getExistingInstance(context.device.deviceId);
+  const observerState: AndroidObserverShutdownState = {
+    hadActiveObserver: activeObserver !== null,
+    boundSessionId: activeObserver?.getBoundSessionId() ?? null,
+  };
   let stop: Promise<void> | undefined;
   perf.startOperation("stopAndroidCtrlProxy");
   try {
@@ -805,7 +813,7 @@ async function stopAndroidCtrlProxyBeforeShutdown(
   } finally {
     perf.endOperation("stopAndroidCtrlProxy");
   }
-  return hadActiveObserver;
+  return observerState;
 }
 
 function shutdownTimeoutError(
@@ -855,7 +863,7 @@ function shouldRestoreAndroidObserverAfterCommandFailure(
 async function restoreAndroidObserverAfterCommandFailure(
   deviceManager: PlatformDeviceManager,
   device: BootedDevice,
-  hadActiveObserver: boolean,
+  observerState: AndroidObserverShutdownState,
   error: unknown,
   timer: Timer,
   shutdownDeadlineMs: number,
@@ -863,7 +871,7 @@ async function restoreAndroidObserverAfterCommandFailure(
   timeoutMs: number,
 ): Promise<void> {
   if (
-    !hadActiveObserver ||
+    !observerState.hadActiveObserver ||
     !shouldRestoreAndroidObserverAfterCommandFailure(device, error, requestAbortSignal)
   ) {
     return;
@@ -889,7 +897,19 @@ async function restoreAndroidObserverAfterCommandFailure(
       isSameBootedDeviceIdentity(device, survivingDevice)
     ) {
       const observer = AndroidCtrlProxyClient.getInstance(survivingDevice);
-      if (!await observer.ensureConnected()) {
+      if (observerState.boundSessionId !== null) {
+        observer.bindSession(observerState.boundSessionId);
+      }
+      const connected = await runWithinShutdownDeadline(
+        device,
+        timer,
+        shutdownDeadlineMs,
+        "Android observer reconnect did not complete",
+        requestAbortSignal,
+        async () => await observer.ensureConnected(),
+        timeoutMs,
+      );
+      if (!connected) {
         logger.warn(
           `[DeviceTools] Failed to reconnect Android observer after kill failure for ${device.deviceId}`,
         );
@@ -1501,7 +1521,7 @@ async function killProcessAndRetireOwnership(
   requestAbortSignal: AbortSignal | undefined,
   devicePool: DevicePool | undefined,
   expectedPooledDevice: PooledDevice | null,
-  hadActiveAndroidObserver: boolean,
+  androidObserverState: AndroidObserverShutdownState,
   shutdownDeadlineMs: number,
   retainReservationUntil: (
     retirement: Promise<void>,
@@ -1541,7 +1561,7 @@ async function killProcessAndRetireOwnership(
     await restoreAndroidObserverAfterCommandFailure(
       deviceManager,
       device,
-      hadActiveAndroidObserver,
+      androidObserverState,
       error,
       dependencies.timer,
       shutdownDeadlineMs,
@@ -1674,7 +1694,7 @@ async function shutdownDevice(
       };
       await stopVideoRecordingsBeforeShutdown(shutdownContext, perf);
       await stopIosCtrlProxyBeforeShutdown(shutdownContext, perf);
-      const hadActiveAndroidObserver = await stopAndroidCtrlProxyBeforeShutdown(
+      const androidObserverState = await stopAndroidCtrlProxyBeforeShutdown(
         shutdownContext,
         perf,
         dependencies.stopAndroidObservers,
@@ -1687,7 +1707,7 @@ async function shutdownDevice(
         requestAbortSignal,
         devicePool,
         expectedPooledDevice,
-        hadActiveAndroidObserver,
+        androidObserverState,
         shutdownDeadlineMs,
         (retirement, releaseReservationAfterFailure) => {
           retainShutdownUntil(retirement, releaseReservationAfterFailure);

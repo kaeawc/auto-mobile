@@ -54,7 +54,8 @@ internal object WireNodeCodec {
     }
 
   private fun buildElementJson(element: UIElementInfo): JsonObject {
-    // Encode this node's own fields only (compact, node absent because it is null here), then splice
+    // Encode this node's own fields only (compact, node absent because it is null here), then
+    // splice
     // in the recursively-built child JSON under "node" so it stays the last key, matching the
     // declaration-order emission the wire has always produced.
     val scalars = compactJson.encodeToJsonElement(elementSerializer, element) as JsonObject

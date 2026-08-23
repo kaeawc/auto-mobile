@@ -24,6 +24,10 @@ on:
         required: false
         type: boolean
         default: false
+      # No `publish` input here on purpose: publishing to GitHub Releases is only reachable via
+      # workflow_call from release.yml, which binds the version to the validated release tag. A manual
+      # dispatch is always artifacts-only, so it can never push wrong-commit or wrong-version packages
+      # to a public release (#5227, PR-C4).
   workflow_call:
     inputs:
       version:
@@ -31,6 +35,10 @@ on:
         required: true
         type: string
       signed:
+        required: false
+        type: boolean
+        default: false
+      publish:
         required: false
         type: boolean
         default: false
@@ -50,7 +58,9 @@ on:
         required: false
 
 permissions:
-  contents: read
+  # `contents: write` is needed only for publish mode (make copied-site → GitHub Releases). The
+  # default artifacts-only run does not push anything; the elevated scope is unused there.
+  contents: write
 
 jobs:
   conveyor:
@@ -66,10 +76,12 @@ jobs:
           lfs: true
           persist-credentials: false
 
-      - name: "Validate version"
+      - name: "Validate inputs"
         shell: bash
         env:
           VERSION: ${{ inputs.version }}
+          PUBLISH: ${{ inputs.publish }}
+          SIGNED: ${{ inputs.signed }}
         run: |
           set -euo pipefail
           if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
@@ -79,6 +91,20 @@ jobs:
           major="${VERSION%%.*}"
           if [[ "$major" -lt 1 ]]; then
             echo "Conveyor requires a macOS major version >= 1; got $VERSION" >&2
+            exit 1
+          fi
+          # Refuse to publish self-signed packages: publish uses the base config (sign = false), whose
+          # unsigned macOS bundles would fail Gatekeeper for everyone who downloads the release.
+          # Signing (ci.conveyor.conf) is mandatory when pushing to a public GitHub Release.
+          if [[ "$PUBLISH" == "true" && "$SIGNED" != "true" ]]; then
+            echo "::error::publish=true requires signed=true — refusing to publish unsigned macOS packages" >&2
+            exit 1
+          fi
+          # Conveyor has no prerelease/build-metadata field, so publishing a qualified version would
+          # push copied-site to the wrong (base) version. release.yml rejects such tags up front; guard
+          # the workflow_call publish path here too (defense in depth).
+          if [[ "$PUBLISH" == "true" && ( "$VERSION" == *-* || "$VERSION" == *+* ) ]]; then
+            echo "::error::publish=true does not support prerelease/build-metadata versions: $VERSION" >&2
             exit 1
           fi
 
@@ -121,10 +147,14 @@ jobs:
           echo "::add-mask::${MACOS_DEVELOPER_ID_CERT_PASSWORD}"
           echo "CONVEYOR_MAC_CERTIFICATE_PASSWORD=${MACOS_DEVELOPER_ID_CERT_PASSWORD}" >> "$GITHUB_ENV"
 
-      - name: "Run Conveyor (make site)"
-        uses: hydraulic-software/conveyor/actions/build@v22.0
+      - name: "Run Conveyor"
+        # Pinned to the v22.0 commit: this third-party action receives contents: write on the publish
+        # path, so pin to an immutable SHA rather than the mutable tag (supply-chain hardening).
+        uses: hydraulic-software/conveyor/actions/build@9e90ce7c2a4356c99d68c63f41e4bc497da279c8 # v22.0
         with:
-          command: make site
+          # publish -> `make copied-site` pushes the site to app.site.copy-to (GitHub Releases);
+          # otherwise `make site` writes to ./output only (artifacts-only).
+          command: ${{ inputs.publish && 'make copied-site' || 'make site' }}
           # The action runs from the repo root and has no working-dir input, so point Conveyor at the
           # config with -f; Conveyor treats the config file's directory (android/) as the project
           # root, so its `./gradlew` include and relative asset paths resolve there. A signed run uses
@@ -134,6 +164,10 @@ jobs:
           agree_to_license: 1
         env:
           CONVEYOR_APP_VERSION: ${{ inputs.version }}
+          # In publish mode, set conveyor.conf's env-gated site.copy-to to this repo's GitHub Releases
+          # and hand Conveyor the token to attach the Sparkle/apt assets. Unset otherwise -> no push.
+          CONVEYOR_SITE_COPY_TO: ${{ inputs.publish && 'github:kaeawc/auto-mobile' || '' }}
+          GITHUB_TOKEN: ${{ inputs.publish && secrets.GITHUB_TOKEN || '' }}
           # The cert password reaches Conveyor as CONVEYOR_MAC_CERTIFICATE_PASSWORD via GITHUB_ENV
           # from the prepare step above (matching ci.conveyor.conf). The notary issuer/key ids are
           # read directly under their own names by ci.conveyor.conf.

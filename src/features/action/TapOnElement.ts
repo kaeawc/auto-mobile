@@ -1746,12 +1746,12 @@ export class TapOnElement extends BaseVisualChange {
     let screenReaderNavigation: ScreenReaderNavigationResult | undefined;
 
     if (options?.relativePosition) {
-      const preciseResult = action === "tap"
+      const preciseResult = action === "tap" || action === "doubleTap"
         ? await this.talkBackStrategy.executePreciseTap(x, y, driver)
         : await this.talkBackStrategy.executeCoordinateFallback(
           x,
           y,
-          action as "doubleTap" | "longPress",
+          "longPress",
           durationMs,
           driver
         );

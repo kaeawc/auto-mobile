@@ -604,6 +604,24 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
       expect(executeAndroidTapWithCoordinates).not.toHaveBeenCalled();
     });
 
+    test("precise doubleTap focuses the requested coordinate before activating it", async () => {
+      const element = makeElement();
+
+      await (tapOnElement as any).executeAndroidTapWithAccessibility(
+        "doubleTap",
+        80,
+        40,
+        element,
+        500,
+        { relativePosition: { x: 0.8, y: 0.4 } },
+        undefined
+      );
+
+      expect(fakeTalkBackStrategy.preciseTapCalls).toEqual([{ x: 80, y: 40 }]);
+      expect(fakeTalkBackStrategy.fallbackCalls).toHaveLength(0);
+      expect(executeAndroidTapWithCoordinates).not.toHaveBeenCalled();
+    });
+
     test("precise tap retries only the missing second activation tap", async () => {
       fakeTalkBackStrategy.setPreciseTapResult({
         success: false,

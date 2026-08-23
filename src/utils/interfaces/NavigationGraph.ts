@@ -333,7 +333,12 @@ export interface NavigationGraphSummaryProvider {
  * Provider interface for navigation graph node resources.
  */
 export interface NavigationGraphNodeResourceProvider {
-  getNodeResourceById(nodeId: number): Promise<NavigationGraphNodeResource | null>;
+  // When appId is provided the node is resolved under that app instead of the
+  // daemon's current foreground app, so a persisted node can be read while a
+  // different app (or none) is foregrounded (offline browse, #4933). Node ids are
+  // globally unique, but the underlying lookup is app-scoped, so the app must be
+  // named to resolve a node that does not belong to the current app.
+  getNodeResourceById(nodeId: number, appId?: string): Promise<NavigationGraphNodeResource | null>;
   getNodeResourceByScreen(screenName: string): Promise<NavigationGraphNodeResource | null>;
 }
 

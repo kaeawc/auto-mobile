@@ -395,25 +395,33 @@ export class FakeNavigationGraphManager implements NavigationGraph, NavigationGr
     }
   }
 
-  private buildNodeResource(node: NavigationNode, nodeId: number): NavigationGraphNodeResource {
+  private buildNodeResource(
+    node: NavigationNode,
+    nodeId: number,
+    appId: string
+  ): NavigationGraphNodeResource {
     const detail: NavigationGraphNodeDetail = {
       id: nodeId,
       ...node
     };
 
     return {
-      appId: this.currentAppId,
+      appId,
       node: detail,
-      isCurrentScreen: this.currentScreen === node.screenName,
+      isCurrentScreen: appId === this.currentAppId && this.currentScreen === node.screenName,
       edgesFrom: this.edges.filter(edge => edge.from === node.screenName),
       edgesTo: this.edges.filter(edge => edge.to === node.screenName),
     };
   }
 
-  async getNodeResourceById(nodeId: number): Promise<NavigationGraphNodeResource | null> {
-    this.trackCall("getNodeResourceById", [nodeId]);
+  async getNodeResourceById(
+    nodeId: number,
+    appId?: string
+  ): Promise<NavigationGraphNodeResource | null> {
+    this.trackCall("getNodeResourceById", [nodeId, appId]);
 
-    if (!this.currentAppId) {
+    const resolvedAppId = appId ?? this.currentAppId;
+    if (!resolvedAppId) {
       return null;
     }
 
@@ -430,7 +438,7 @@ export class FakeNavigationGraphManager implements NavigationGraph, NavigationGr
       return null;
     }
 
-    return this.buildNodeResource(node, nodeId);
+    return this.buildNodeResource(node, nodeId, resolvedAppId);
   }
 
   async getNodeResourceByScreen(screenName: string): Promise<NavigationGraphNodeResource | null> {
@@ -448,6 +456,6 @@ export class FakeNavigationGraphManager implements NavigationGraph, NavigationGr
     const nodeId = this.nodeSummaryIds.get(screenName) ?? this.nextNodeId++;
     this.nodeSummaryIds.set(screenName, nodeId);
 
-    return this.buildNodeResource(node, nodeId);
+    return this.buildNodeResource(node, nodeId, this.currentAppId);
   }
 }

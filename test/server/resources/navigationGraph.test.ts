@@ -5,7 +5,8 @@ import {
   NavigationGraphResourceContent,
   NavigationNodeResourceContent,
   NavigationAppsResourceContent,
-  setNavigationGraphProvider
+  setNavigationGraphProvider,
+  setNavigationScreenshotProvider
 } from "../../../src/server/navigationResources";
 import { FakeNavigationGraphManager } from "../../fakes/FakeNavigationGraphManager";
 import { z } from "zod/v4";
@@ -26,6 +27,7 @@ describe("MCP Navigation Graph Resource", () => {
 
   afterEach(() => {
     setNavigationGraphProvider(null);
+    setNavigationScreenshotProvider(null);
   });
 
   afterAll(async () => {
@@ -335,5 +337,157 @@ describe("MCP Navigation Graph Resource", () => {
     expect(nodeResource.isCurrentScreen).toBe(false);
     expect(nodeResource.edgesFrom).toHaveLength(0);
     expect(nodeResource.edgesTo).toHaveLength(1);
+  });
+
+  test("should include app-specific node + screenshot templates in list", async () => {
+    const { client } = fixture.getContext();
+
+    const listResourceTemplatesResponseSchema = z.object({
+      resourceTemplates: z.array(z.object({
+        uriTemplate: z.string(),
+        name: z.string().optional(),
+        description: z.string().optional(),
+        mimeType: z.string().optional()
+      }))
+    });
+
+    const result = await client.request({
+      method: "resources/templates/list",
+      params: {}
+    }, listResourceTemplatesResponseSchema);
+
+    const nodeByIdAppTemplate = result.resourceTemplates.find(
+      (t: any) => t.uriTemplate === NAVIGATION_RESOURCE_URIS.NODE_BY_ID_WITH_APP_ID
+    );
+    const screenshotAppTemplate = result.resourceTemplates.find(
+      (t: any) => t.uriTemplate === NAVIGATION_RESOURCE_URIS.NODE_SCREENSHOT_WITH_APP_ID
+    );
+
+    expect(nodeByIdAppTemplate).toBeDefined();
+    expect(screenshotAppTemplate).toBeDefined();
+  });
+
+  test("node-by-id ?appId= resolves under the requested app, not the current app", async () => {
+    // Foreground app is A; the node is browsed under app B (offline browse, #4933).
+    fakeGraph.setCurrentAppId("com.example.a");
+    fakeGraph.setCurrentScreenValue("Home");
+    fakeGraph.addNode({
+      screenName: "Home",
+      firstSeenAt: 100,
+      lastSeenAt: 200,
+      visitCount: 2
+    });
+
+    const { client } = fixture.getContext();
+    const readResourceResponseSchema = z.object({
+      contents: z.array(z.object({
+        uri: z.string(),
+        mimeType: z.string().optional(),
+        text: z.string().optional()
+      }))
+    });
+
+    const result = await client.request({
+      method: "resources/read",
+      params: { uri: "automobile:navigation/nodes/1?appId=com.example.b" }
+    }, readResourceResponseSchema);
+
+    const content = result.contents[0];
+    expect(content.uri).toBe("automobile:navigation/nodes/1?appId=com.example.b");
+
+    const nodeResource: NavigationNodeResourceContent = JSON.parse(content.text!);
+    expect(nodeResource.appId).toBe("com.example.b");
+    expect(nodeResource.node.screenName).toBe("Home");
+    // Reading under a non-foreground app is never the current screen.
+    expect(nodeResource.isCurrentScreen).toBe(false);
+  });
+
+  test("screenshot ?appId= resolves under the requested app, not a colliding current app", async () => {
+    // Foreground app A also has a "Home" screen; browsing app B must not leak A's.
+    fakeGraph.setCurrentAppId("com.example.a");
+    fakeGraph.setCurrentScreenValue("Home");
+    fakeGraph.addNode({
+      screenName: "Home",
+      firstSeenAt: 100,
+      lastSeenAt: 200,
+      visitCount: 1
+    });
+
+    // App-scoped screenshot store: content is keyed by (appId, screenName).
+    setNavigationScreenshotProvider({
+      async findExistingScreenshot(appId: string, screenName: string) {
+        return `/screens/${appId}/${screenName}.webp`;
+      },
+      async readScreenshot(screenshotPath: string) {
+        return Buffer.from(`bytes:${screenshotPath}`);
+      }
+    });
+
+    const { client } = fixture.getContext();
+    const readResourceResponseSchema = z.object({
+      contents: z.array(z.object({
+        uri: z.string(),
+        mimeType: z.string().optional(),
+        blob: z.string().optional(),
+        text: z.string().optional()
+      }))
+    });
+
+    const result = await client.request({
+      method: "resources/read",
+      params: { uri: "automobile:navigation/nodes/1/screenshot?appId=com.example.b" }
+    }, readResourceResponseSchema);
+
+    const content = result.contents[0];
+    expect(content.uri).toBe("automobile:navigation/nodes/1/screenshot?appId=com.example.b");
+    expect(content.mimeType).toBe("image/webp");
+    expect(content.blob).toBeDefined();
+
+    const decoded = Buffer.from(content.blob!, "base64").toString("utf8");
+    // Resolved from app B's store, not the foreground app A's colliding screen.
+    expect(decoded).toBe("bytes:/screens/com.example.b/Home.webp");
+    expect(decoded).not.toContain("com.example.a");
+  });
+
+  test("screenshot ?appId= reports not-found without leaking the current app's screenshot", async () => {
+    fakeGraph.setCurrentAppId("com.example.a");
+    fakeGraph.setCurrentScreenValue("Home");
+    fakeGraph.addNode({
+      screenName: "Home",
+      firstSeenAt: 100,
+      lastSeenAt: 200,
+      visitCount: 1
+    });
+
+    // App B has no screenshot for this screen.
+    setNavigationScreenshotProvider({
+      async findExistingScreenshot(appId: string) {
+        return appId === "com.example.a" ? "/screens/com.example.a/Home.webp" : null;
+      },
+      async readScreenshot(screenshotPath: string) {
+        return Buffer.from(`bytes:${screenshotPath}`);
+      }
+    });
+
+    const { client } = fixture.getContext();
+    const readResourceResponseSchema = z.object({
+      contents: z.array(z.object({
+        uri: z.string(),
+        mimeType: z.string().optional(),
+        blob: z.string().optional(),
+        text: z.string().optional()
+      }))
+    });
+
+    const result = await client.request({
+      method: "resources/read",
+      params: { uri: "automobile:navigation/nodes/1/screenshot?appId=com.example.b" }
+    }, readResourceResponseSchema);
+
+    const content = result.contents[0];
+    expect(content.blob).toBeUndefined();
+    expect(content.mimeType).toBe("application/json");
+    const payload = JSON.parse(content.text!);
+    expect(payload.error).toContain("No screenshot available");
   });
 });

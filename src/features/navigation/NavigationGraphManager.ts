@@ -79,7 +79,7 @@ export interface NavigationGraphService extends NavigationGraph, NavigationGraph
   // Graph queries
   getKnownScreens(): Promise<string[]>;
   getNode(screenName: string): Promise<NavigationNode | undefined>;
-  getNodeResourceById(nodeId: number): Promise<NavigationGraphNodeResource | null>;
+  getNodeResourceById(nodeId: number, appId?: string): Promise<NavigationGraphNodeResource | null>;
   getNodeResourceByScreen(screenName: string): Promise<NavigationGraphNodeResource | null>;
   getEdgesFrom(screenName: string): Promise<NavigationEdge[]>;
   getEdgesTo(screenName: string): Promise<NavigationEdge[]>;
@@ -1448,12 +1448,13 @@ export class NavigationGraphManager implements NavigationGraphService {
   }
 
   private async buildNodeResource(
-    dbNode: DBNavigationNode
+    dbNode: DBNavigationNode,
+    appId: string
   ): Promise<NavigationGraphNodeResource> {
     const [node, dbEdgesFrom, dbEdgesTo] = await Promise.all([
       this.buildNodeDetail(dbNode),
-      this.repository.getEdgesFrom(this.currentAppId!, dbNode.screen_name),
-      this.repository.getEdgesTo(this.currentAppId!, dbNode.screen_name),
+      this.repository.getEdgesFrom(appId, dbNode.screen_name),
+      this.repository.getEdgesTo(appId, dbNode.screen_name),
     ]);
 
     const [edgesFrom, edgesTo] = await Promise.all([
@@ -1462,9 +1463,11 @@ export class NavigationGraphManager implements NavigationGraphService {
     ]);
 
     return {
-      appId: this.currentAppId,
+      appId,
       node,
-      isCurrentScreen: this.currentScreen === dbNode.screen_name,
+      // Only the current app's current screen is "current"; a node read under an
+      // explicit app that is not foregrounded is never the current screen (#4933).
+      isCurrentScreen: appId === this.currentAppId && this.currentScreen === dbNode.screen_name,
       edgesFrom,
       edgesTo,
     };
@@ -1504,17 +1507,23 @@ export class NavigationGraphManager implements NavigationGraphService {
   /**
    * Get a node resource by node ID.
    */
-  public async getNodeResourceById(nodeId: number): Promise<NavigationGraphNodeResource | null> {
-    if (!this.currentAppId) {
+  public async getNodeResourceById(
+    nodeId: number,
+    appId?: string
+  ): Promise<NavigationGraphNodeResource | null> {
+    // Prefer an explicit app so a persisted node can be read while a different
+    // app (or none) is foregrounded; fall back to the current app (#4933).
+    const resolvedAppId = appId ?? this.currentAppId;
+    if (!resolvedAppId) {
       return null;
     }
 
-    const dbNode = await this.repository.getNodeById(this.currentAppId, nodeId);
+    const dbNode = await this.repository.getNodeById(resolvedAppId, nodeId);
     if (!dbNode) {
       return null;
     }
 
-    return this.buildNodeResource(dbNode);
+    return this.buildNodeResource(dbNode, resolvedAppId);
   }
 
   /**
@@ -1532,7 +1541,7 @@ export class NavigationGraphManager implements NavigationGraphService {
       return null;
     }
 
-    return this.buildNodeResource(dbNode);
+    return this.buildNodeResource(dbNode, this.currentAppId);
   }
 
   /**

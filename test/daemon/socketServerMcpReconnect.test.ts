@@ -49,6 +49,7 @@ function createFakeDaemonState(
   resolveDeviceEpochUuid: () => string | undefined,
   resolveSecondaryDeviceEpochUuid: () => string | undefined,
   resolveAutolockSession: () => string | undefined,
+  resolveDeviceLabelSession: () => string | undefined,
 ) {
   const session = {
     sessionId: "session-a",
@@ -95,8 +96,12 @@ function createFakeDaemonState(
           : deviceId === secondarySession.assignedDevice
             ? secondarySession.sessionId
             : null,
-      getDeviceLabels: (sessionId: string) =>
-        sessionId === session.sessionId ? { B: secondarySession.sessionId } : undefined,
+      getDeviceLabels: (sessionId: string) => {
+        const labeledSession = resolveDeviceLabelSession();
+        return sessionId === session.sessionId && labeledSession
+          ? { B: labeledSession }
+          : undefined;
+      },
       releaseSession: async () => null,
     }),
     getDevicePool: () => ({
@@ -202,6 +207,7 @@ describe("UnixSocketServer MCP session reconnect", () => {
   let deviceEpochUuid: string | undefined;
   let secondaryDeviceEpochUuid: string | undefined;
   let autolockSessionUuid: string | undefined;
+  let deviceLabelSessionUuid: string | undefined;
 
   beforeEach(async () => {
     socketPath = join(tmpdir(), `mcp-rc-${randomUUID()}.sock`);
@@ -211,6 +217,7 @@ describe("UnixSocketServer MCP session reconnect", () => {
     deviceEpochUuid = "device-epoch-a";
     secondaryDeviceEpochUuid = "device-epoch-b";
     autolockSessionUuid = undefined;
+    deviceLabelSessionUuid = "session-b";
     server = new UnixSocketServer(
       socketPath,
       "http://localhost:0/mcp",
@@ -220,6 +227,7 @@ describe("UnixSocketServer MCP session reconnect", () => {
         () => deviceEpochUuid,
         () => secondaryDeviceEpochUuid,
         () => autolockSessionUuid,
+        () => deviceLabelSessionUuid,
       ),
       fakeTimer,
     );
@@ -735,6 +743,36 @@ describe("UnixSocketServer MCP session reconnect", () => {
       reconnectAttempted: false,
       replayAttempted: false,
     });
+  });
+
+  test("pins a device-label target before replaying observe", async () => {
+    let clientsCreated = 0;
+    let replayedArguments: Record<string, unknown> | undefined;
+
+    server.mcpClientFactory = async () => {
+      const clientIndex = ++clientsCreated;
+      return createFakeMcpClient({
+        callTool: async (...args: unknown[]) => {
+          if (clientIndex === 1) {
+            deviceLabelSessionUuid = "session-a";
+            throw socketClosedError();
+          }
+          const [toolCall] = args as [{ arguments: Record<string, unknown> }];
+          replayedArguments = toolCall.arguments;
+          return { content: [{ type: "text", text: "observed" }] };
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: { sessionUuid: "session-a", device: "B" },
+    });
+
+    expect(response.success).toBe(true);
+    expect(clientsCreated).toBe(2);
+    expect(replayedArguments).toMatchObject({ sessionUuid: "session-b" });
+    expect(replayedArguments).not.toHaveProperty("device");
   });
 
   test("recovers observe for an implicit autolock session", async () => {

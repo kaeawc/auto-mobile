@@ -1601,6 +1601,36 @@ export class UnixSocketServer {
       : this.getDeviceControlTransportIdentity(context);
   }
 
+  private pinDeviceControlRecoveryRequest(
+    request: DaemonRequest,
+    identity: DeviceControlTransportIdentity,
+    phase: DeviceControlTransportPhase,
+  ): DaemonRequest {
+    const args = request.method === "tools/call" ? request.params?.arguments : undefined;
+    if (
+      phase !== "response"
+      || !identity.sessionUuid
+      || !args
+      || typeof args !== "object"
+      || Array.isArray(args)
+    ) {
+      return request;
+    }
+    const pinnedArguments: Record<string, unknown> = {
+      ...(args as Record<string, unknown>),
+      sessionUuid: identity.sessionUuid,
+    };
+    // A label can be remapped while reconnecting; replay the captured session instead.
+    delete pinnedArguments.device;
+    return {
+      ...request,
+      params: {
+        ...request.params,
+        arguments: pinnedArguments,
+      },
+    };
+  }
+
   private async reconnectDeviceControlTransport(
     input: DeviceControlTransportRecoveryContext,
   ): Promise<Client> {
@@ -1692,9 +1722,14 @@ export class UnixSocketServer {
     }
 
     try {
+      const recoveryRequest = this.pinDeviceControlRecoveryRequest(
+        input.request,
+        input.identity,
+        input.phase,
+      );
       const response = await this.handleIdeRequest(
         freshClient,
-        input.request,
+        recoveryRequest,
         retryRemainingMs,
         input.socketSessionId,
       );

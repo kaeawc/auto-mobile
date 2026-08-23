@@ -40,6 +40,10 @@ data class HomeDestination(
 
 @Serializable data object DemoTapTargetsDestination : AppDestination
 
+@Serializable data object DemoXmlSemanticLinksDestination : AppDestination
+
+@Serializable data object DemoComposeSemanticLinksDestination : AppDestination
+
 @Serializable data object DemoBugReproDestination : AppDestination
 
 @Serializable data object DemoHandledExceptionDestination : AppDestination

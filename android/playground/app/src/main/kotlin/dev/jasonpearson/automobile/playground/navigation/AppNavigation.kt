@@ -19,6 +19,7 @@ import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.*
 import androidx.navigation3.ui.NavDisplay
 import dev.jasonpearson.automobile.demos.BugReproScreen
+import dev.jasonpearson.automobile.demos.ComposeSemanticLinksDemoScreen
 import dev.jasonpearson.automobile.demos.ContrastDemoScreen
 import dev.jasonpearson.automobile.demos.DemoIndexScreen
 import dev.jasonpearson.automobile.demos.HandledExceptionDemoScreen
@@ -30,6 +31,7 @@ import dev.jasonpearson.automobile.demos.TapTargetsDemoScreen
 import dev.jasonpearson.automobile.demos.UxFlowDetailsScreen
 import dev.jasonpearson.automobile.demos.UxFlowStartScreen
 import dev.jasonpearson.automobile.demos.UxFlowSummaryScreen
+import dev.jasonpearson.automobile.demos.XmlSemanticLinksDemoScreen
 import dev.jasonpearson.automobile.design.system.demo.DesignSystemDemoScreen
 import dev.jasonpearson.automobile.home.HomeScreen
 import dev.jasonpearson.automobile.login.ui.LoginScreen
@@ -149,6 +151,8 @@ fun determineStartDestinationWithDeepLink(
           is DemoPerformanceDetailDestination,
           is DemoContrastDestination,
           is DemoTapTargetsDestination,
+          is DemoXmlSemanticLinksDestination,
+          is DemoComposeSemanticLinksDestination,
           is DemoBugReproDestination,
           is DemoHandledExceptionDestination,
           is DemoNetworkTestDestination,
@@ -285,6 +289,8 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
             is DemoPerformanceDetailDestination,
             is DemoContrastDestination,
             is DemoTapTargetsDestination,
+            is DemoXmlSemanticLinksDestination,
+            is DemoComposeSemanticLinksDestination,
             is DemoBugReproDestination,
             is DemoHandledExceptionDestination,
             is DemoNetworkTestDestination,
@@ -579,6 +585,10 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
               onNavigateToPerformanceList = { backStack.add(DemoPerformanceListDestination) },
               onNavigateToContrast = { backStack.add(DemoContrastDestination) },
               onNavigateToTapTargets = { backStack.add(DemoTapTargetsDestination) },
+              onNavigateToXmlSemanticLinks = { backStack.add(DemoXmlSemanticLinksDestination) },
+              onNavigateToComposeSemanticLinks = {
+                backStack.add(DemoComposeSemanticLinksDestination)
+              },
               onNavigateToBugRepro = { backStack.add(DemoBugReproDestination) },
               onNavigateToHandledException = {
                 backStack.add(DemoHandledExceptionDestination)
@@ -714,6 +724,30 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
           }
           Box(modifier = Modifier.destinationSemanticModifier<DemoTapTargetsDestination>()) {
             TapTargetsDemoScreen(onNavigateBack = { backStack.removeLastOrNull() })
+          }
+        }
+
+        entry<DemoXmlSemanticLinksDestination> { destination ->
+          Navigation3Adapter.TrackNavigation(destination)
+          LaunchedEffect(Unit) {
+            Log.d(TAG, "Navigated to XmlSemanticLinksDemoScreen")
+            analyticsTracker.trackScreenView("XmlSemanticLinksDemoScreen")
+          }
+          Box(modifier = Modifier.destinationSemanticModifier<DemoXmlSemanticLinksDestination>()) {
+            XmlSemanticLinksDemoScreen(onNavigateBack = { backStack.removeLastOrNull() })
+          }
+        }
+
+        entry<DemoComposeSemanticLinksDestination> { destination ->
+          Navigation3Adapter.TrackNavigation(destination)
+          LaunchedEffect(Unit) {
+            Log.d(TAG, "Navigated to ComposeSemanticLinksDemoScreen")
+            analyticsTracker.trackScreenView("ComposeSemanticLinksDemoScreen")
+          }
+          Box(
+            modifier = Modifier.destinationSemanticModifier<DemoComposeSemanticLinksDestination>()
+          ) {
+            ComposeSemanticLinksDemoScreen(onNavigateBack = { backStack.removeLastOrNull() })
           }
         }
 

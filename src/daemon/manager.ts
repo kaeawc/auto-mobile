@@ -4,7 +4,7 @@ import { open, readFile, rm, unlink } from "node:fs/promises";
 import { existsSync, openSync, closeSync } from "node:fs";
 import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
-import { logger } from "../utils/logger";
+import { isStructuredLoggingEnabled, logger, resolveAutomobileLogSink } from "../utils/logger";
 import { resolveDaemonInstallSpecifier } from "../constants/release";
 import {
   INCOMPLETE_EXTRACTION_CODE,
@@ -78,6 +78,10 @@ export type { DaemonLaunchCommand, DaemonProcessSpawner } from "./DaemonLauncher
  * All daemon lifecycle messages must go to stderr (or the file logger).
  */
 function stderrLog(message: string): void {
+  if (isStructuredLoggingEnabled()) {
+    logger.info(message);
+    return;
+  }
   process.stderr.write(message + "\n");
 }
 
@@ -643,7 +647,14 @@ export class DaemonManager implements DaemonManagerLike {
             spawnOptions: {
               detached: true,
               cwd: resolveStableDaemonWorkingDirectory(),
-              stdio: ["ignore", logFd, logFd],
+              stdio: [
+                "ignore",
+                logFd,
+                resolveAutomobileLogSink(childEnv) === "stderr" ||
+                resolveAutomobileLogSink(childEnv) === "both"
+                  ? "inherit"
+                  : logFd,
+              ],
               env: childEnv,
             },
             timeoutMs: DAEMON_STARTUP_TIMEOUT_MS,

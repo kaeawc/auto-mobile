@@ -2,6 +2,7 @@ import { performance } from "node:perf_hooks";
 import fs from "node:fs";
 import path from "node:path";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "./workingDirectory";
+import { resolveAutomobileLogFormat } from "./logger";
 
 const STARTUP_BENCHMARK_PREFIX = "STARTUP_BENCHMARK";
 
@@ -20,7 +21,7 @@ interface StartupBenchmarkReport {
 
 export function isStartupBenchmarkEnabled(
   args: readonly string[],
-  environment: Readonly<Record<string, string | undefined>>
+  environment: Readonly<Record<string, string | undefined>>,
 ): boolean {
   if (args.includes("--startup-benchmark")) {
     return true;
@@ -31,8 +32,10 @@ export function isStartupBenchmarkEnabled(
     environment.AUTO_MOBILE_STARTUP_BENCHMARK ??
     ""
   ).toLowerCase();
-  return args.includes("--daemon-mode") &&
-    (envEnabled === "1" || envEnabled === "true" || envEnabled === "yes");
+  return (
+    args.includes("--daemon-mode") &&
+    (envEnabled === "1" || envEnabled === "true" || envEnabled === "yes")
+  );
 }
 
 const enabled = isStartupBenchmarkEnabled(process.argv, process.env);
@@ -42,8 +45,7 @@ const outputPath =
   process.env.AUTO_MOBILE_STARTUP_BENCHMARK_OUTPUT;
 
 const label =
-  process.env.AUTOMOBILE_STARTUP_BENCHMARK_LABEL ??
-  process.env.AUTO_MOBILE_STARTUP_BENCHMARK_LABEL;
+  process.env.AUTOMOBILE_STARTUP_BENCHMARK_LABEL ?? process.env.AUTO_MOBILE_STARTUP_BENCHMARK_LABEL;
 
 export interface StartupBenchmarkOptions {
   outputPath?: string;
@@ -139,7 +141,11 @@ export class StartupBenchmark {
     const payload = JSON.stringify(report);
 
     this.writeReport(payload);
-    process.stderr.write(`${STARTUP_BENCHMARK_PREFIX} ${payload}\n`);
+    process.stderr.write(
+      resolveAutomobileLogFormat() === "json"
+        ? `${payload}\n`
+        : `${STARTUP_BENCHMARK_PREFIX} ${payload}\n`,
+    );
   }
 
   private persistCheckpoint(): void {
@@ -155,7 +161,7 @@ export class StartupBenchmark {
   private createReport(
     type: string,
     state: StartupBenchmarkReport["state"],
-    meta: Record<string, unknown> = {}
+    meta: Record<string, unknown> = {},
   ): StartupBenchmarkReport {
     const marks = Object.fromEntries(this.marks.entries());
     const phases = Object.fromEntries(this.phases.entries());

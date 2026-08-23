@@ -58,6 +58,7 @@ export * from "./Point";
 export * from "./Platform";
 export * from "./PressButtonResult";
 export * from "./RecentAppsResult";
+export * from "./ResetIosSimulatorKeychainResult";
 export * from "./RotateResult";
 export * from "./RotationCheckResult";
 export * from "./ScreenSize";

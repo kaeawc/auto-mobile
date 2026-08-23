@@ -8030,6 +8030,42 @@
     }
   },
   {
+    "name": "resetIosSimulatorKeychain",
+    "description": "iOS simulator only: erase EVERY app's Keychain on the selected UDID; requires confirm:true.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "confirm": {
+          "description": "Required. Must be true to proceed. Erases the Keychain for EVERY app on the target simulator.",
+          "type": "boolean"
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": [
+        "confirm"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "rotate",
     "description": "Rotate device orientation",
     "inputSchema": {

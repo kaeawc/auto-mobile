@@ -6,6 +6,7 @@ import { TerminateApp } from "../features/action/TerminateApp";
 import { InstallApp } from "../features/action/InstallApp";
 import { UninstallApp } from "../features/action/UninstallApp";
 import { AppPermissions } from "../features/action/AppPermissions";
+import { ResetIosSimulatorKeychain } from "../features/action/ResetIosSimulatorKeychain";
 import {
   createJSONToolResponse,
   DefaultToolResponseFormatter,
@@ -202,6 +203,16 @@ export const getAppPermissionsSchema = withAppIdAliases(
   ),
 );
 
+export const resetIosSimulatorKeychainSchema = addDeviceTargetingToSchema(
+  z.object({
+    confirm: z
+      .boolean()
+      .describe(
+        "Required. Must be true to proceed. Erases the Keychain for EVERY app on the target simulator.",
+      ),
+  }),
+);
+
 export const listAppsSchema = z.object({}).passthrough();
 
 // Export interfaces for type safety
@@ -227,6 +238,8 @@ export interface UninstallAppArgs {
 export type SetAppPermissionsArgs = z.infer<typeof setAppPermissionsSchema>;
 
 export type GetAppPermissionsArgs = z.infer<typeof getAppPermissionsSchema>;
+
+export type ResetIosSimulatorKeychainArgs = z.infer<typeof resetIosSimulatorKeychainSchema>;
 
 // Register tools
 export function registerAppTools() {
@@ -428,6 +441,16 @@ export function registerAppTools() {
     });
   };
 
+  const resetIosSimulatorKeychainHandler = async (
+    device: BootedDevice,
+    args: ResetIosSimulatorKeychainArgs,
+  ) => {
+    const action = new ResetIosSimulatorKeychain(device);
+    const result = await action.execute({ confirm: args.confirm });
+
+    return createJSONToolResponse({ ...result });
+  };
+
   // Register with the tool registry
   ToolRegistry.registerDeviceAware(
     "launchApp",
@@ -474,6 +497,14 @@ export function registerAppTools() {
     "Read app permission state",
     getAppPermissionsSchema,
     getAppPermissionsHandler,
+    { defaultEnabled: false },
+  );
+
+  ToolRegistry.registerDeviceAware(
+    "resetIosSimulatorKeychain",
+    "iOS simulator only: erase EVERY app's Keychain on the selected UDID; requires confirm:true.",
+    resetIosSimulatorKeychainSchema,
+    resetIosSimulatorKeychainHandler,
     { defaultEnabled: false },
   );
 

@@ -565,25 +565,32 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     const execAsync = async (): Promise<ExecResult> => createExecResult("");
     const client = new AndroidEmulatorClient(execAsync, null, fakeTimer, fakeFactory);
     skipEmulatorPathDetection(client);
-    const readiness = client.waitForEmulatorReady("Pixel_9_Pro", 60_000, fakeChild);
+    const controller = new AbortController();
+    const readiness = client.waitForEmulatorReady(
+      "Pixel_9_Pro",
+      60_000,
+      fakeChild,
+      undefined,
+      controller.signal,
+    );
     let rejection: Error | undefined;
     void readiness.catch(error => {
       rejection = error instanceof Error ? error : new Error(String(error));
     });
 
     try {
-      for (let attempt = 0; attempt < 10 && fakeTimer.getSleepCallCount() < 2; attempt += 1) {
+      for (let attempt = 0; attempt < 10 && fakeTimer.getPendingTimeoutCount() < 2; attempt += 1) {
         await new Promise<void>(resolve => setImmediate(resolve));
       }
 
       fakeChild.emit("exit", 1);
-      expect(fakeTimer.getSleepHistory()[1]).toBeLessThanOrEqual(500);
+      expect(fakeTimer.getPendingTimeouts()[1]).toBeLessThanOrEqual(500);
       await fakeTimer.advanceTimeAsync(500);
       await new Promise<void>(resolve => setImmediate(resolve));
 
       expect(rejection?.message).toContain("exited with code 1");
     } finally {
-      fakeTimer.resolveAll();
+      controller.abort(new Error("test cleanup"));
       await readiness.catch(() => undefined);
       if (previousPollingInterval === undefined) {
         delete process.env.EMULATOR_POLLING_INTERVAL_MS;

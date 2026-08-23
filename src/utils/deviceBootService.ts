@@ -420,10 +420,12 @@ export class DeviceBootService {
         if (attempts > 1) {
           return this.bootImageOnce(recoveryTarget, context, progress, false);
         }
-        const ready = await this.runPhase(context, "waiting for a running device", () =>
+        const ready = await this.runPhase(context, "waiting for a running device", (signal) =>
           this.dependencies.deviceManager.waitForDeviceReady(
             { ...device, isRunning: true },
             this.remaining(context.deadlineMs, "waiting for a running device"),
+            undefined,
+            signal,
           ),
         );
         return { device: { ...device, ...ready }, source: "booted", provisioned: false };
@@ -575,7 +577,13 @@ export class DeviceBootService {
             externalSignal.removeEventListener("abort", rejectForAbort);
         })
       : undefined;
-    const operationPromise = runWithAbortSignal(signal, () => operation(signal));
+    let operationFailureRecorded = false;
+    let operationFailure: unknown;
+    const operationPromise = runWithAbortSignal(signal, () => operation(signal)).catch((error) => {
+      operationFailureRecorded = true;
+      operationFailure = error;
+      throw error;
+    });
     void operationPromise.catch(() => {});
     try {
       return await Promise.race([
@@ -601,8 +609,11 @@ export class DeviceBootService {
       this.throwExternalAbortReason(externalSignal, phase);
       cancellation.throwIfCancelled();
       if (controller.signal.aborted) {
-        throw new ActionableError(
-          `startDevice timeout exhausted while ${phase}; remainingBudgetMs=0`,
+        throw this.phaseTimeoutFailure(
+          controller,
+          operationFailureRecorded,
+          operationFailure,
+          phase,
         );
       }
       throw error;
@@ -613,6 +624,20 @@ export class DeviceBootService {
       cancellation.dispose();
       removeExternalAbortListener?.();
     }
+  }
+
+  private phaseTimeoutFailure(
+    controller: AbortController,
+    operationFailureRecorded: boolean,
+    operationFailure: unknown,
+    phase: string,
+  ): unknown {
+    if (operationFailureRecorded && operationFailure !== controller.signal.reason) {
+      return operationFailure;
+    }
+    return new ActionableError(
+      `startDevice timeout exhausted while ${phase}; remainingBudgetMs=0`,
+    );
   }
 
   private throwExternalAbortReason(signal: AbortSignal | undefined, phase: string): void {

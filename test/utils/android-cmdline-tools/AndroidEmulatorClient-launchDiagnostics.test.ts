@@ -347,7 +347,7 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
 
   test("keeps a post-validation duplicate-AVD exit nonfatal", async () => {
     const child = createChild();
-    const { client, timer, accelChecks } = createClient(child, () => {
+    const { client, accelChecks } = createClient(child, () => {
       child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
     });
     const launchedChild = await client.startEmulator(avdName);
@@ -357,7 +357,14 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
     );
     child.emit("exit", 1, null);
     child.emit("close", 1, null);
-    const readiness = client.waitForEmulatorReady(avdName, 60_000, launchedChild);
+    const controller = new AbortController();
+    const readiness = client.waitForEmulatorReady(
+      avdName,
+      60_000,
+      launchedChild,
+      undefined,
+      controller.signal,
+    );
     let rejection: Error | undefined;
     void readiness.catch((error) => {
       rejection = error instanceof Error ? error : new Error(String(error));
@@ -368,10 +375,7 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
       expect(rejection).toBeUndefined();
       expect(accelChecks()).toBe(0);
     } finally {
-      timer.setCurrentTime(60_000);
-      timer.resolveAll();
-      await new Promise<void>((resolve) => setImmediate(resolve));
-      timer.resolveAll();
+      controller.abort(new Error("test cleanup"));
       await readiness.catch(() => undefined);
     }
   });
@@ -477,7 +481,7 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
       client.waitForEmulatorReady(avdName, 60_000, launchedChild),
     );
 
-    for (let turn = 0; turn < 10 && timer.getSleepCallCount() < 2; turn += 1) {
+    for (let turn = 0; turn < 10 && timer.getPendingTimeoutCount() < 2; turn += 1) {
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
     child.emit("exit", 1, null);
@@ -499,14 +503,21 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
       child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
     });
     const launchedChild = await client.startEmulator(avdName);
-    const readiness = client.waitForEmulatorReady(avdName, 60_000, launchedChild);
+    const controller = new AbortController();
+    const readiness = client.waitForEmulatorReady(
+      avdName,
+      60_000,
+      launchedChild,
+      undefined,
+      controller.signal,
+    );
     let rejection: Error | undefined;
     void readiness.catch((error) => {
       rejection = error instanceof Error ? error : new Error(String(error));
     });
 
     try {
-      for (let turn = 0; turn < 10 && timer.getSleepCallCount() < 2; turn += 1) {
+      for (let turn = 0; turn < 10 && timer.getPendingTimeoutCount() < 2; turn += 1) {
         await new Promise<void>((resolve) => setImmediate(resolve));
       }
       child.stderr!.emit(
@@ -525,10 +536,7 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
 
       expect(rejection).toBeUndefined();
     } finally {
-      timer.setCurrentTime(60_000);
-      timer.resolveAll();
-      await new Promise<void>((resolve) => setImmediate(resolve));
-      timer.resolveAll();
+      controller.abort(new Error("test cleanup"));
       await readiness.catch(() => undefined);
     }
   });
@@ -545,7 +553,7 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
     const readiness = client.waitForEmulatorReady(avdName, 60_000, launchedChild);
     const readinessError = expectRejection(readiness);
 
-    for (let turn = 0; turn < 10 && timer.getSleepCallCount() < 2; turn += 1) {
+    for (let turn = 0; turn < 10 && timer.getPendingTimeoutCount() < 2; turn += 1) {
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
     child.emit("exit", 1, null);

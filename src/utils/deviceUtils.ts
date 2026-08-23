@@ -18,6 +18,8 @@ import {
 
 export { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "./deviceTimeouts";
 
+const READINESS_ABORT_SETTLEMENT_TURNS = 8;
+
 export type DeviceDiscoveryErrorCode = "unavailable" | "failed";
 
 export interface DeviceDiscoveryError {
@@ -155,6 +157,28 @@ export interface PlatformDeviceManager {
   ): Promise<BootedDevice>;
 }
 
+interface ReadinessSettlement {
+  settled: boolean;
+  failure?: unknown;
+}
+
+async function readinessFailureAfterTimeout(
+  controller: AbortController,
+  settlement: ReadinessSettlement,
+  fallback: unknown,
+): Promise<unknown> {
+  if (!controller.signal.aborted) {
+    return fallback;
+  }
+  for (let turn = 0; turn < READINESS_ABORT_SETTLEMENT_TURNS && !settlement.settled; turn += 1) {
+    await Promise.resolve();
+  }
+  if (settlement.settled && settlement.failure !== undefined) {
+    return settlement.failure;
+  }
+  return fallback;
+}
+
 /**
  * Wait for a freshly-started device to become ready, actively cancelling the
  * boot if readiness fails (issue #3952).
@@ -197,10 +221,22 @@ export async function waitForDeviceReadyOrCancel(
   const readinessSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
   let timeoutHandle: NodeJS.Timeout | undefined;
   let abortListener: (() => void) | undefined;
+  const settlement: ReadinessSettlement = { settled: false };
+  let readinessPromise!: Promise<BootedDevice>;
 
   try {
-    const readinessPromise = runWithAbortSignal(readinessSignal, () =>
+    readinessPromise = runWithAbortSignal(readinessSignal, () =>
       deviceManager.waitForDeviceReady(device, timeoutMs, handle, readinessSignal),
+    ).then(
+      (ready) => {
+        settlement.settled = true;
+        return ready;
+      },
+      (error) => {
+        settlement.settled = true;
+        settlement.failure = error;
+        throw error;
+      },
     );
     // The deadline race below can settle first when a device manager ignores
     // cancellation. Keep a late device-manager rejection from becoming unhandled.
@@ -220,15 +256,20 @@ export async function waitForDeviceReadyOrCancel(
     }, timeoutMs);
     return await Promise.race([readinessPromise, abortPromise]);
   } catch (error) {
+    const failure = await readinessFailureAfterTimeout(
+      controller,
+      settlement,
+      error,
+    );
     if (handle) {
       logger.warn(
         `[startDevice] readiness failed for ${device.deviceId ?? device.name}; ` +
-          `cancelling boot via handle.kill()`,
-        error,
+        `cancelling boot via handle.kill()`,
+        failure,
       );
       await (cancelOwnedBoot ?? (() => handle.kill()))();
     }
-    throw error;
+    throw failure;
   } finally {
     if (timeoutHandle) {
       timer.clearTimeout(timeoutHandle);

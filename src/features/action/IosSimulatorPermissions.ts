@@ -51,10 +51,7 @@ export interface IosSimulatorPrivacyClient {
   executeCommandArgs(args: string[], timeoutMs?: number): Promise<ExecResult>;
 }
 
-export {
-  type TccPermissionReader,
-  type TccPermissionRow,
-} from "../../utils/ios-cmdline-tools/SimulatorTccSqliteClient";
+export { type TccPermissionReader } from "../../utils/ios-cmdline-tools/SimulatorTccSqliteClient";
 
 /** @deprecated Inject SimulatorTccSqliteClient dependencies directly in new callers. */
 export interface SqliteCommandExecutor {

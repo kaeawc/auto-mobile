@@ -66,6 +66,106 @@
       "file": "src/db/types.ts",
       "name": "FailureGroupUpdate",
       "reason": "Kysely Updateable table type, part of the DB type API surface"
+    },
+    {
+      "file": "src/db/types.ts",
+      "name": "DeviceLock",
+      "reason": "Kysely Selectable table type, part of the DB type API surface"
+    },
+    {
+      "file": "src/db/types.ts",
+      "name": "NewDeviceLock",
+      "reason": "Kysely Insertable table type, part of the DB type API surface"
+    },
+    {
+      "file": "src/db/types.ts",
+      "name": "EmulatorLossIncidentRow",
+      "reason": "Kysely Selectable table type, part of the DB type API surface"
+    },
+    {
+      "file": "src/db/types.ts",
+      "name": "NewEmulatorLossIncidentRow",
+      "reason": "Kysely Insertable table type, part of the DB type API surface"
+    },
+    {
+      "file": "src/db/types.ts",
+      "name": "EmulatorLossIncidentRowUpdate",
+      "reason": "Kysely Updateable table type, part of the DB type API surface"
+    },
+    {
+      "file": "src/db/types.ts",
+      "name": "NavigationNodeObservation",
+      "reason": "Kysely Selectable table type, part of the DB type API surface"
+    },
+    {
+      "file": "src/db/types.ts",
+      "name": "NavigationEdgeObservation",
+      "reason": "Kysely Selectable table type, part of the DB type API surface"
+    },
+    {
+      "file": "src/cli/index.ts",
+      "name": "runCliCommand",
+      "reason": "Test-only entrypoint seam (used by test/cli/daemonOptionsThreading.test.ts)"
+    },
+    {
+      "file": "src/cli/index.ts",
+      "name": "setDaemonProxyFactoryForTesting",
+      "reason": "Test-only dependency injection seam (used by test/cli/daemonOptionsThreading.test.ts)"
+    },
+    {
+      "file": "src/cli/index.ts",
+      "name": "resetDaemonProxyFactoryForTesting",
+      "reason": "Test-only dependency injection seam (used by test/cli/daemonOptionsThreading.test.ts)"
+    },
+    {
+      "file": "src/doctor/index.ts",
+      "name": "applyClientBuildIdentity",
+      "reason": "Doctor module barrel re-export; consumers/tests import from the implementation module"
+    },
+    {
+      "file": "src/doctor/index.ts",
+      "name": "formatConsoleOutput",
+      "reason": "Doctor module barrel re-export of src/doctor/formatter.ts; consumers import the implementation directly"
+    },
+    {
+      "file": "src/doctor/index.ts",
+      "name": "formatJsonOutput",
+      "reason": "Doctor module barrel re-export of src/doctor/formatter.ts; consumers import the implementation directly"
+    },
+    {
+      "file": "src/doctor/index.ts",
+      "name": "CheckStatus",
+      "reason": "Doctor module barrel type re-export, part of the doctor API surface"
+    },
+    {
+      "file": "src/doctor/index.ts",
+      "name": "CheckSection",
+      "reason": "Doctor module barrel type re-export, part of the doctor API surface"
+    },
+    {
+      "file": "src/features/record/android/index.ts",
+      "name": "DualTrackRecorder",
+      "reason": "Barrel re-export; consumers import DualTrackRecorder from the implementation module"
+    },
+    {
+      "file": "src/features/toolSelection/SqliteSessionToolSelectionRepository.ts",
+      "name": "SqliteSessionToolSelectionRepository",
+      "reason": "Consumed by src/features/toolSelection/SessionToolSelectionService.ts (ts-prune misses the cross-module import)"
+    },
+    {
+      "file": "src/features/toolSelection/toolSelectionPolicy.ts",
+      "name": "assertToolEnabledForSession",
+      "reason": "Assertion wrapper retained as policy API surface alongside isToolEnabledForSession/isToolEnabledForAnySession"
+    },
+    {
+      "file": "src/utils/virtualDeviceLifecycleCoordinator.ts",
+      "name": "setVirtualDeviceLifecycleCoordinatorForTests",
+      "reason": "Test-only DI seam for the coordinator singleton (getX/setXForTests/resetXForTests pattern)"
+    },
+    {
+      "file": "src/utils/virtualDeviceLifecycleCoordinator.ts",
+      "name": "resetVirtualDeviceLifecycleCoordinatorForTests",
+      "reason": "Test-only DI seam for the coordinator singleton (getX/setXForTests/resetXForTests pattern)"
     }
   ]
 }

@@ -1,6 +1,5 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { relative } from "node:path";
 import ts from "typescript";
 
 const SOURCE_ROOT = "src";
@@ -14,10 +13,6 @@ export interface Violation {
   readonly line: number;
   readonly column: number;
   readonly text: string;
-}
-
-export function repositoryPath(file: string): string {
-  return relative(".", file).replaceAll("\\", "/");
 }
 
 type CommandRunner = (file: string, args: string[]) => string;

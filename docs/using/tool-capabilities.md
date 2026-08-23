@@ -74,7 +74,11 @@ expose it until its debug and embedded-SDK gates are also satisfied.
 Base and derived device-label sessions retain union semantics: a device-aware
 public call is enabled when either relevant session explicitly enables the exact
 tool. A connection-scoped disable overrides inherited defaults, while an
-explicit routing-session enable may opt the tool back in.
+explicit routing-session enable may opt the tool back in. Discovery evaluates
+each base/label route independently, so one label's disable cannot hide a tool
+that remains available through another label. A raw `deviceId` selects an
+execution target but does not borrow tool grants from an unrelated device-owning
+session.
 
 Connection selection profiles remain separate from device routing, so releasing
 an `executePlan` device session does not discard the still-open connection's

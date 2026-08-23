@@ -80,9 +80,8 @@ import {
 } from "../features/toolSelection/SessionToolSelectionService";
 import {
   assertToolEnabledForAnySession,
-  isToolEnabledForAnySession,
+  isToolEnabledForAnyRoute,
 } from "../features/toolSelection/toolSelectionPolicy";
-import { getDeviceLabelMap } from "./deviceLabelMapping";
 import { runWithToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import {
   resolveToolSelectionBaseSessionUuid,
@@ -407,17 +406,24 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     // `tools/call` gate applies (issue #4611). The call-gate accepts a
     // `{ sessionUuid: base, device: label }` call whenever a label re-enables a
     // tool the base narrowed away; filtering discovery on the base alone would
-    // then leave that tool callable but never discovered. The base's label map is
-    // a read-only lookup (no device allocation); a session with no labels collapses
-    // to the base, preserving prior single-session filtering.
+    // then leave that tool callable but never discovered. Each label remains an
+    // independent `[base, label]` route before those route results are unioned;
+    // flattening every label into one override set would let one label's explicit
+    // disable hide a tool that is still callable through a sibling. The base's
+    // label map is a read-only lookup (no device allocation); a session with no
+    // labels collapses to the base, preserving prior single-session filtering.
     //
     // The union is per-tool and DEVICE-AWARE only, mirroring the call gate: a
-    // plain (non-`requiresDevice`) tool runs under the base session regardless of
-    // any `device` argument, so its discovery must be base-only. Advertising a
-    // plain tool that only a label enables would leave it listed but rejected by
-    // the base-only call gate — a label-only grant must not surface a plain tool.
+    // plain (non-`requiresDevice`) tool ignores any `device` argument, so its
+    // discovery only evaluates the bound routing session. Advertising a plain
+    // tool that only a sibling label enables would leave it listed but rejected
+    // by the call gate — a label-only grant must not surface a plain tool.
     const labelSessionUuids = routingBaseSessionUuid
-      ? Object.values(getDeviceLabelMap(routingBaseSessionUuid) ?? {})
+      ? Array.from(
+          new Set(
+            Object.values(selectionSessionManager?.getDeviceLabels(routingBaseSessionUuid) ?? {}),
+          ),
+        )
       : [];
     return {
       tools: (
@@ -425,18 +431,17 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
           definitions.map(async (definition) => {
             const registeredTool = ToolRegistry.getTool(definition.name);
             const deviceAware = registeredTool?.requiresDevice ?? false;
-            const candidateSessions = deviceAware
-              ? [
-                  connectionProfileUuid,
-                  routingBaseSessionUuid,
-                  routingSessionUuid,
-                  ...labelSessionUuids,
-                ]
-              : [connectionProfileUuid, routingBaseSessionUuid, routingSessionUuid];
-            return (await isToolEnabledForAnySession(
+            const candidateRoutes =
+              deviceAware && labelSessionUuids.length > 0
+                ? labelSessionUuids.map((labelSessionUuid) => [
+                    routingBaseSessionUuid,
+                    labelSessionUuid,
+                  ])
+                : [[routingBaseSessionUuid, routingSessionUuid]];
+            return (await isToolEnabledForAnyRoute(
               definition.name,
               registeredTool?.defaultEnabled ?? true,
-              candidateSessions,
+              candidateRoutes,
               options.sessionToolSelectionService,
               connectionProfileUuid,
             ))
@@ -519,9 +524,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     // would let a caller borrow the label's grants for a base-disabled plain tool
     // with `{ sessionUuid: base, device: label }`. For a plain tool, enforcement
     // is base-only; only a `requiresDevice` tool actually uses the device field.
+    const rawRequestedDeviceLabel = (toolParams as Record<string, unknown>).device;
     const requestedDeviceLabel =
-      typeof (toolParams as Record<string, unknown>).device === "string"
-        ? ((toolParams as Record<string, unknown>).device as string)
+      typeof rawRequestedDeviceLabel === "string" && rawRequestedDeviceLabel.trim().length > 0
+        ? rawRequestedDeviceLabel
         : undefined;
     const selectionSessionManager =
       options.toolSelectionSessionManager ??
@@ -534,34 +540,21 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     );
     const derivedLabelSessionUuid =
       tool.requiresDevice && requestedDeviceLabel && routingBaseSessionUuid
-        ? getDeviceLabelMap(routingBaseSessionUuid)?.[requestedDeviceLabel]
+        ? selectionSessionManager?.getDeviceLabels(routingBaseSessionUuid)?.[requestedDeviceLabel]
         : undefined;
-    const requestedDeviceId =
-      typeof (toolParams as Record<string, unknown>).deviceId === "string"
-        ? ((toolParams as Record<string, unknown>).deviceId as string)
-        : undefined;
-    const deviceOwnershipSessionManager =
-      tool.requiresDevice && requestedDeviceId && DaemonState.getInstance().isInitialized()
-        ? DaemonState.getInstance().getSessionManager()
-        : undefined;
-    const owningSessionUuid =
-      deviceOwnershipSessionManager && requestedDeviceId
-        ? deviceOwnershipSessionManager.getSessionForDevice?.(requestedDeviceId)
-        : undefined;
-    const owningBaseSessionUuid = resolveToolSelectionBaseSessionUuid(
-      owningSessionUuid ?? undefined,
-      deviceOwnershipSessionManager,
-    );
+    // Tool selection follows the connection's routing profile. A raw deviceId is
+    // only an execution target and must not borrow an unrelated owning session's
+    // grants (which discovery cannot advertise). When both fields are present,
+    // ToolRegistry intentionally ignores deviceId in favor of the label.
     await assertToolEnabledForAnySession(
       name,
       tool.defaultEnabled,
       [
         connectionProfileUuid,
         routingBaseSessionUuid,
-        routingSessionUuid,
-        derivedLabelSessionUuid,
-        owningBaseSessionUuid,
-        owningSessionUuid ?? undefined,
+        ...(requestedDeviceLabel
+          ? [derivedLabelSessionUuid]
+          : [routingSessionUuid, derivedLabelSessionUuid]),
       ],
       options.sessionToolSelectionService,
       connectionProfileUuid,
@@ -610,6 +603,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
 
     const executionSessionUuid =
       derivedLabelSessionUuid ?? providedSessionUuid ?? routingSessionUuid;
+    const handlerRoutingSessionUuid =
+      tool.requiresDevice && requestedDeviceLabel && routingBaseSessionUuid
+        ? routingBaseSessionUuid
+        : routingSessionUuid;
     const executionSessionId = requestMcpSessionId ?? sessionId;
     const execution = executionTracker.startExecution(
       name,
@@ -653,7 +650,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       const result = await runWithAbortSignal(execution.abortController.signal, () =>
         runWithToolSelectionContext(
           {
-            routingSessionUuid,
+            // A bound derived session may still target a sibling label. Resolve
+            // that label from the base map; unlabeled calls retain the derived
+            // ambient session.
+            routingSessionUuid: handlerRoutingSessionUuid,
             execution: {
               executionId: execution.id,
               startTime: execution.startTime,

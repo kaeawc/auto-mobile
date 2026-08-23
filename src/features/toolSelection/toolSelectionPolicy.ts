@@ -8,25 +8,23 @@ import { SET_TOOL_ENABLED_TOOL_NAME } from "./toolSelectionControl";
 type ToolSelectionReader = Pick<SessionToolSelectionService, "isEnabled"> &
   Partial<Pick<SessionToolSelectionService, "getOverride">>;
 
-async function connectionOverrideResult(
+async function explicitOverrideResult(
   service: ToolSelectionReader,
-  connectionProfileUuid: string | undefined,
+  sessionUuids: readonly string[],
   toolName: string,
-  candidateSessions: readonly string[],
 ): Promise<boolean | undefined> {
-  if (!connectionProfileUuid || !service.getOverride) {
+  if (!service.getOverride) {
     return undefined;
   }
-  const connectionOverride = await service.getOverride(connectionProfileUuid, toolName);
-  if (connectionOverride !== false) {
-    return connectionOverride;
-  }
-  for (const sessionUuid of candidateSessions.filter((uuid) => uuid !== connectionProfileUuid)) {
-    if ((await service.getOverride(sessionUuid, toolName)) === true) {
+  let explicitlyDisabled = false;
+  for (const sessionUuid of sessionUuids) {
+    const override = await service.getOverride(sessionUuid, toolName);
+    if (override === true) {
       return true;
     }
+    explicitlyDisabled ||= override === false;
   }
-  return false;
+  return explicitlyDisabled ? false : undefined;
 }
 
 export async function isToolEnabledForSession(
@@ -86,17 +84,49 @@ export async function isToolEnabledForAnySession(
   }
 
   const service = sessionToolSelectionService ?? getSessionToolSelectionService();
-  const connectionOverride = await connectionOverrideResult(
-    service,
-    connectionProfileUuid,
-    toolName,
-    candidates,
-  );
-  if (connectionOverride !== undefined) {
-    return connectionOverride;
+  if (service.getOverride) {
+    const connectionOverride = connectionProfileUuid
+      ? await service.getOverride(connectionProfileUuid, toolName)
+      : undefined;
+    const routingOverride = await explicitOverrideResult(
+      service,
+      candidates.filter((sessionUuid) => sessionUuid !== connectionProfileUuid),
+      toolName,
+    );
+    if (connectionOverride === true || routingOverride === true) {
+      return true;
+    }
+    if (connectionOverride === false || routingOverride === false) {
+      return false;
+    }
+    return service.isEnabled(undefined, toolName, declaredDefault);
   }
   for (const sessionUuid of candidates) {
     if (await service.isEnabled(sessionUuid, toolName, declaredDefault)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export async function isToolEnabledForAnyRoute(
+  toolName: string,
+  declaredDefault: boolean,
+  routingSessionRoutes: ReadonlyArray<ReadonlyArray<string | undefined>>,
+  sessionToolSelectionService?: ToolSelectionReader,
+  connectionProfileUuid?: string,
+): Promise<boolean> {
+  const routes = routingSessionRoutes.length > 0 ? routingSessionRoutes : [[]];
+  for (const routingSessions of routes) {
+    if (
+      await isToolEnabledForAnySession(
+        toolName,
+        declaredDefault,
+        [connectionProfileUuid, ...routingSessions],
+        sessionToolSelectionService,
+        connectionProfileUuid,
+      )
+    ) {
       return true;
     }
   }

@@ -156,32 +156,33 @@ class CtrlProxyObserverGateTest {
 
   /**
    * Bug 2: a still-connected client's in-flight scroll accumulation must never be dropped — while
-   * the connection epoch is unchanged, successive samples add together as before.
+   * the observer-session generation is unchanged, successive samples add together as before.
    */
   @Test
-  fun `pending scroll accumulates within a single connection session`() {
-    val epoch = 7
+  fun `pending scroll accumulates within a single observer session`() {
+    val generation = 7
     var pending = PendingScroll.NONE
     pending =
-      accumulatePendingScroll(pending, deltaX = 10, deltaY = -5, packageName = "com.a", epoch)
+      accumulatePendingScroll(pending, deltaX = 10, deltaY = -5, packageName = "com.a", generation)
     pending =
-      accumulatePendingScroll(pending, deltaX = 4, deltaY = -1, packageName = "com.a", epoch)
+      accumulatePendingScroll(pending, deltaX = 4, deltaY = -1, packageName = "com.a", generation)
 
     assertEquals("deltas combine within a session", 14, pending.deltaX)
     assertEquals(-6, pending.deltaY)
     assertEquals("com.a", pending.packageName)
-    assertEquals(epoch, pending.sessionEpoch)
+    assertEquals(generation, pending.sessionGeneration)
   }
 
   /**
-   * Bug 2 (event-free gap): pending deltas accumulated under one connection session must NOT
-   * combine with the first scroll of a NEW session. The discard is keyed on the monotonic
-   * connection epoch, which advances on the reconnect regardless of whether any accessibility event
-   * fired during the gap — so simulating "accumulate under epoch 7, then the next sample arrives
-   * under epoch 8" models a disconnect+reconnect with no intervening event.
+   * Bug 2 (event-free gap): pending deltas accumulated under one observer session must NOT combine
+   * with the first scroll of a NEW session. The discard is keyed on the observer-session
+   * generation, which advances after the observer set empties and a new client connects —
+   * regardless of whether any accessibility event fired in the gap — so "accumulate under
+   * generation 7, next sample under generation 8" models a disconnect+reconnect with no intervening
+   * event.
    */
   @Test
-  fun `pending scroll deltas do not combine across a connection session change`() {
+  fun `pending scroll deltas do not combine across an observer session change`() {
     // Session 7: an in-flight scroll accumulates but has not yet been flushed/broadcast.
     val stale =
       accumulatePendingScroll(
@@ -189,25 +190,50 @@ class CtrlProxyObserverGateTest {
         deltaX = 40,
         deltaY = -120,
         packageName = "com.old.session",
-        currentEpoch = 7,
+        currentGeneration = 7,
       )
     assertEquals(40, stale.deltaX)
 
-    // The only client disconnects and a new one connects with NO event in between: the epoch has
-    // advanced to 8 by the time the first post-reconnect scroll sample arrives.
+    // The only client disconnects and a new one connects with NO event in between: the generation
+    // has advanced to 8 by the time the first post-reconnect scroll sample arrives.
     val firstAfterReconnect =
       accumulatePendingScroll(
         stale,
         deltaX = 3,
         deltaY = 9,
         packageName = "com.new.session",
-        currentEpoch = 8,
+        currentGeneration = 8,
       )
 
     // Must start clean from the new sample, NOT 40 + 3 / -120 + 9.
     assertEquals("stale deltaX must be discarded, not combined", 3, firstAfterReconnect.deltaX)
     assertEquals("stale deltaY must be discarded, not combined", 9, firstAfterReconnect.deltaY)
     assertEquals("com.new.session", firstAfterReconnect.packageName)
-    assertEquals(8, firstAfterReconnect.sessionEpoch)
+    assertEquals(8, firstAfterReconnect.sessionGeneration)
+  }
+
+  /**
+   * Regression (Codex on the epoch approach): a SECOND concurrent client joining while the first is
+   * still connected must NOT reset a still-accumulating scroll. Because the observer-session
+   * generation is stable for as long as any client stays connected (it advances only on the
+   * empty→non-empty edge, not on a 1→2 join), the tagged generation is unchanged and the in-flight
+   * deltas keep accumulating rather than being truncated for every client.
+   */
+  @Test
+  fun `a concurrent second client does not reset an in-flight scroll`() {
+    val generation = 5 // stable while >= 1 client stays connected, including across a 1 -> 2 join
+    var pending = PendingScroll.NONE
+    pending =
+      accumulatePendingScroll(pending, deltaX = 30, deltaY = 0, packageName = "com.a", generation)
+    // A second client connects mid-scroll — generation is unchanged (no empty->non-empty edge).
+    pending =
+      accumulatePendingScroll(pending, deltaX = 12, deltaY = 0, packageName = "com.a", generation)
+
+    assertEquals(
+      "in-flight deltas must keep accumulating across a concurrent join",
+      42,
+      pending.deltaX,
+    )
+    assertEquals(generation, pending.sessionGeneration)
   }
 }

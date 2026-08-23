@@ -197,49 +197,86 @@ class WebSocketServerIntegrationTest {
   }
 
   @Test
-  fun `connectionEpoch increments across a disconnect and reconnect`() = runBlocking {
-    // The scroll-staleness fix (issue #5470) keys "is this the same connection session" on the
-    // monotonic connectionEpoch. getConnectionCount() returns to 1 after a reconnect and so cannot
-    // distinguish sessions; connectionEpoch must strictly increase so a reconnect is detectable
-    // even
-    // when no accessibility event fired in the gap.
-    server.start()
-    assertEquals("epoch starts at 0 before any connection", 0, server.connectionEpoch())
+  fun `observerSessionGeneration is stable within a session and advances after it empties`() =
+    runBlocking {
+      // The scroll-staleness fix (issue #5470) keys "is this the same observer session" on
+      // observerSessionGeneration, which must advance ONLY on the empty->non-empty edge:
+      //  - stable while >= 1 client stays continuously connected (so a concurrent 2nd client
+      // joining
+      //    does NOT reset a still-connected client's in-flight scroll),
+      //  - advanced after the set empties and a new client connects (so a disconnect+reconnect,
+      //    including one with no intervening event, correctly clears stale scroll deltas).
+      server.start()
+      assertEquals(
+        "generation starts at 0 before any connection",
+        0,
+        server.observerSessionGeneration(),
+      )
 
-    val client1 = HttpClient(CIO) { install(WebSockets) }
-    client1.use { c ->
-      c.webSocket(
-        method = HttpMethod.Get,
-        host = "localhost",
-        port = getServerPort(),
-        path = "/ws",
-      ) {
-        waitFor { server.getConnectionCount() == 1 }
-      }
-    }
-    waitFor { server.getConnectionCount() == 0 }
-    val epochAfterFirst = server.connectionEpoch()
-    assertEquals("epoch advances on the first connection", 1, epochAfterFirst)
+      val client1 = HttpClient(CIO) { install(WebSockets) }
+      val client2 = HttpClient(CIO) { install(WebSockets) }
+      client1.use { c1 ->
+        c1.webSocket(
+          method = HttpMethod.Get,
+          host = "localhost",
+          port = getServerPort(),
+          path = "/ws",
+        ) {
+          waitFor { server.getConnectionCount() == 1 }
+          val genAfterFirst = server.observerSessionGeneration()
+          assertEquals("generation advances on the first client of a session", 1, genAfterFirst)
 
-    // Reconnect: live count returns to 1, but the epoch must be strictly greater than before.
-    val client2 = HttpClient(CIO) { install(WebSockets) }
-    client2.use { c ->
-      c.webSocket(
-        method = HttpMethod.Get,
-        host = "localhost",
-        port = getServerPort(),
-        path = "/ws",
-      ) {
-        waitFor { server.getConnectionCount() == 1 }
-        assertEquals("live count cannot distinguish the reconnect", 1, server.getConnectionCount())
-        assertTrue(
-          "epoch must strictly increase on reconnect (was $epochAfterFirst, now ${server.connectionEpoch()})",
-          server.connectionEpoch() > epochAfterFirst,
-        )
+          // A SECOND concurrent client joins (1 -> 2): the generation must NOT change.
+          client2.use { c2 ->
+            c2.webSocket(
+              method = HttpMethod.Get,
+              host = "localhost",
+              port = getServerPort(),
+              path = "/ws",
+            ) {
+              waitFor { server.getConnectionCount() == 2 }
+              assertEquals(
+                "a concurrent 2nd client must not change the generation",
+                genAfterFirst,
+                server.observerSessionGeneration(),
+              )
+            }
+          }
+          // Second client gone; first still connected — still the same session.
+          waitFor { server.getConnectionCount() == 1 }
+          assertEquals(
+            "generation is stable while a client stays connected",
+            genAfterFirst,
+            server.observerSessionGeneration(),
+          )
+        }
       }
+
+      // The set has now emptied. A new client starts a new session: generation must advance.
+      waitFor { server.getConnectionCount() == 0 }
+      val genAfterEmpty = server.observerSessionGeneration()
+      val client3 = HttpClient(CIO) { install(WebSockets) }
+      client3.use { c3 ->
+        c3.webSocket(
+          method = HttpMethod.Get,
+          host = "localhost",
+          port = getServerPort(),
+          path = "/ws",
+        ) {
+          waitFor { server.getConnectionCount() == 1 }
+          assertEquals(
+            "live count cannot distinguish the reconnect",
+            1,
+            server.getConnectionCount(),
+          )
+          assertTrue(
+            "generation must advance after the set empties (was $genAfterEmpty, now ${server.observerSessionGeneration()})",
+            server.observerSessionGeneration() > genAfterEmpty,
+          )
+        }
+      }
+      waitFor { server.getConnectionCount() == 0 }
     }
-    waitFor { server.getConnectionCount() == 0 }
-  }
 
   @Test
   fun `server broadcasts messages to connected client`() = runBlocking {

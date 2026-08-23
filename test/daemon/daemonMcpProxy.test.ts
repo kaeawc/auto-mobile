@@ -3437,4 +3437,85 @@ describe("DaemonMcpProxy", () => {
       expect(error.message).toContain("bunx @kaeawc/auto-mobile@0.0.40 --daemon restart");
     });
   });
+
+  // The per-UUID release-tracking maps (`releasedSessionEpochs`,
+  // `releasedSessionReasons`, `activeReleaseEpochReferences`) must not grow
+  // unbounded over a long-lived proxy (issue #4689, follow-up to #4655). Ordinary
+  // completion evicts each entry when its last in-flight reference drops
+  // (#5412); close() drains any residue at the close/reconnect boundary the
+  // reference counter does not cover.
+  describe("release-tracking maps stay bounded (issue #4689)", () => {
+    const releaseMapSizes = (
+      proxy: DaemonMcpProxy,
+    ): { epochs: number; reasons: number; references: number } => {
+      const internals = proxy as unknown as {
+        releasedSessionEpochs: Map<string, number>;
+        releasedSessionReasons: Map<string, string>;
+        activeReleaseEpochReferences: Map<string, number>;
+      };
+      return {
+        epochs: internals.releasedSessionEpochs.size,
+        reasons: internals.releasedSessionReasons.size,
+        references: internals.activeReleaseEpochReferences.size,
+      };
+    };
+
+    test("a completed call leaves no residual release record (reference-counted bound)", async () => {
+      // recordSessionReleased only writes an entry while an in-flight call holds a
+      // reference to the forwarded UUID, and the call's finally drops that
+      // reference and evicts the entry. Firing the release DURING the call writes
+      // the record mid-flight; by completion it must be gone.
+      const fakeClient: FakeDaemonClient = new FakeDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+        onCallTool: () => {
+          fakeClient.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, "session-a");
+        },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        expect(releaseMapSizes(proxy)).toEqual({ epochs: 0, reasons: 0, references: 0 });
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("close() prunes any residual release-tracking records", async () => {
+      const fakeClient = new FakeDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      const internals = proxy as unknown as {
+        releasedSessionEpochs: Map<string, number>;
+        releasedSessionReasons: Map<string, string>;
+        activeReleaseEpochReferences: Map<string, number>;
+      };
+      // Simulate a record that outlived its in-flight reference (e.g. a future
+      // regression in the retain/release pairing). close() must still drain it so
+      // the maps cannot accumulate across the proxy's lifetime.
+      internals.releasedSessionEpochs.set("stale-session", 7);
+      internals.releasedSessionReasons.set("stale-session", "released");
+      internals.activeReleaseEpochReferences.set("stale-session", 1);
+
+      try {
+        await proxy.close();
+        expect(releaseMapSizes(proxy)).toEqual({ epochs: 0, reasons: 0, references: 0 });
+      } finally {
+        isAvailableSpy.mockRestore();
+      }
+    });
+  });
 });

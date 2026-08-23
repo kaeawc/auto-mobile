@@ -1741,6 +1741,16 @@ export class DaemonMcpProxy {
     this.connected = false;
     this.clearBoundSessionUuid();
     this.terminalBoundSession = undefined;
+    // Drain the per-UUID release-tracking maps at the close/reconnect boundary.
+    // Ordinary completion already evicts each entry when its last in-flight
+    // reference drops (issue #4655 / #5412), so these maps are bounded by the
+    // count of concurrently in-flight calls. Clearing them on close is the
+    // backstop the reference counter does not cover — a proxy closed with calls
+    // still in flight, or reused across a reconnect, cannot retain release
+    // records across its lifetime (issue #4689).
+    this.releasedSessionEpochs.clear();
+    this.releasedSessionReasons.clear();
+    this.activeReleaseEpochReferences.clear();
     this.invalidateCache();
     logger.debug("[DaemonMcpProxy] Disconnected from daemon");
   }

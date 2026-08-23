@@ -1113,13 +1113,24 @@ export function registerInteractionTools() {
   };
 
   // Input text handler
-  const inputTextHandler = async (device: BootedDevice, args: InputTextArgs) => {
+  const inputTextHandler = async (
+    device: BootedDevice,
+    args: InputTextArgs,
+    _progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ) => {
     RecompositionTracker.getInstance().recordInteraction();
     const dismissKeyboard =
       args.dismissKeyboard ?? serverConfig.isDismissKeyboardAfterInputEnabled();
     const mode = device.platform === "android" ? args.mode : undefined;
     const inputText = new InputText(device);
-    const result = await inputText.execute(args.text, args.imeAction, dismissKeyboard, mode);
+    const result = await inputText.execute(
+      args.text,
+      args.imeAction,
+      dismissKeyboard,
+      mode,
+      signal,
+    );
     return createJSONToolResponse({
       message: `Input text`,
       observation: result.observation,

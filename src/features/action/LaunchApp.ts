@@ -275,14 +275,24 @@ export class LaunchApp extends BaseVisualChange {
     coldBoot: boolean,
     activityName?: string,
     userId?: number,
-    skipUiStability?: boolean
+    skipUiStability?: boolean,
+    signal?: AbortSignal,
   ): Promise<LaunchAppResult> {
     logger.info("execute");
+    signal?.throwIfAborted();
     switch (this.device.platform) {
       case "ios":
-        return this.executeiOS(packageName, clearAppData, coldBoot);
+        return this.executeiOS(packageName, clearAppData, coldBoot, signal);
       case "android":
-        return this.executeAndroid(packageName, clearAppData, coldBoot, activityName, userId, skipUiStability);
+        return this.executeAndroid(
+          packageName,
+          clearAppData,
+          coldBoot,
+          activityName,
+          userId,
+          skipUiStability,
+          signal,
+        );
       default:
         throw new ActionableError(`Unsupported platform: ${this.device.platform}`);
     }
@@ -305,7 +315,8 @@ export class LaunchApp extends BaseVisualChange {
   private async executeiOS(
     bundleId: string,
     clearAppData: boolean,
-    coldBoot: boolean
+    coldBoot: boolean,
+    signal?: AbortSignal,
   ): Promise<LaunchAppResult> {
     const perf = this.performanceTrackerFactory();
     perf.serial("launchApp");
@@ -447,18 +458,19 @@ export class LaunchApp extends BaseVisualChange {
           return {
             success: false,
             packageName: bundleId,
-            error: launchResult.error
+            error: launchResult.error,
           };
         }
 
+        signal?.throwIfAborted();
         await perf.track("waitForHierarchy", () =>
-          this.waitForIosHierarchyReady(60000, bundleId)
+          this.waitForIosHierarchyReady(60000, bundleId, signal),
         );
         perf.end();
         return {
           success: true,
           packageName: bundleId,
-          pid: launchResult.pid
+          pid: launchResult.pid,
         };
       },
       {
@@ -468,17 +480,26 @@ export class LaunchApp extends BaseVisualChange {
         // Use minTimestamp=0 so finalObserve returns cached hierarchy without a sync fetch.
         // iOS hierarchy timestamps (Swift Date) and TS timestamps (Date.now) are from
         // different clocks, causing minTimestamp checks to fail and force ~130ms round-trips.
-        overrideMinTimestamp: 0
-      }
+        overrideMinTimestamp: 0,
+      },
     );
 
-    return this.ensureLaunchObservationMatchesPackage(result, bundleId);
+    signal?.throwIfAborted();
+    return this.ensureLaunchObservationMatchesPackage(
+      result,
+      bundleId,
+      undefined,
+      undefined,
+      signal,
+    );
   }
 
   private async waitForIosHierarchyReady(
     timeoutMs: number = 5000,
-    expectedPackageName?: string
+    expectedPackageName?: string,
+    signal?: AbortSignal,
   ): Promise<void> {
+    signal?.throwIfAborted();
     const xcTestClient = IOSCtrlProxyClient.getInstance(this.device);
     const startTime = this.timer.now();
 
@@ -519,6 +540,7 @@ export class LaunchApp extends BaseVisualChange {
         });
 
       const winner = await Promise.race([pushPromise, syncPromise]);
+      signal?.throwIfAborted();
 
       // Cleanup
       pushUnsubscribe?.();
@@ -574,7 +596,8 @@ export class LaunchApp extends BaseVisualChange {
     coldBoot: boolean,
     activityName?: string,
     userId?: number,
-    skipUiStability?: boolean
+    skipUiStability?: boolean,
+    signal?: AbortSignal,
   ): Promise<LaunchAppResult> {
     const perf = this.performanceTrackerFactory();
     perf.serial("launchApp");
@@ -589,8 +612,9 @@ export class LaunchApp extends BaseVisualChange {
       // Check app status (installation and running)
       perf.track("checkInstalled", async () => {
         return this.installedAppsProvider.listInstalledApps();
-      })
+      }),
     ]);
+    signal?.throwIfAborted();
 
     if (targetUserResult.status === "rejected") {
       throw targetUserResult.reason;
@@ -707,21 +731,29 @@ export class LaunchApp extends BaseVisualChange {
     const launchResult = await this.observedInteraction(
       async () => {
         if (displayedMetricsCollector) {
-          displayedMetricsStartMs = await perf.track(
-            "displayedLogcatStartTime",
-            () => this.adb.getDeviceTimestampMs()
+          displayedMetricsStartMs = await perf.track("displayedLogcatStartTime", () =>
+            this.adb.getDeviceTimestampMs(),
           );
         }
-        const launchOutcome = await this.performLaunch(packageName, activityName, targetUserId, perf);
+        const launchOutcome = await this.performLaunch(
+          packageName,
+          activityName,
+          targetUserId,
+          perf,
+        );
+        signal?.throwIfAborted();
         const foregroundReady = await this.waitForAppForeground(
           packageName,
           targetUserId,
           foregroundWaitTimeoutMs,
           foregroundPollIntervalMs,
-          perf
+          perf,
+          signal,
         );
         if (!foregroundReady) {
-          logger.warn(`[LaunchApp] ${packageName} did not become the foreground app before observation; continuing to validate launch observation`);
+          logger.warn(
+            `[LaunchApp] ${packageName} did not become the foreground app before observation; continuing to validate launch observation`,
+          );
         }
         observationTimestampMs = await this.adb.getDeviceTimestampMs();
         return launchOutcome;
@@ -732,26 +764,40 @@ export class LaunchApp extends BaseVisualChange {
         skipPreviousObserve: true,
         skipUiStability: skipUiStability ?? false,
         packageName,
-        observationTimestampProvider: () => observationTimestampMs
-      }
+        observationTimestampProvider: () => observationTimestampMs,
+      },
     );
 
-    const settledLaunchResult = await this.ensureLaunchObservationMatchesPackage(launchResult, packageName);
+    signal?.throwIfAborted();
+    const settledLaunchResult = await this.ensureLaunchObservationMatchesPackage(
+      launchResult,
+      packageName,
+      undefined,
+      undefined,
+      signal,
+    );
 
-    logger.info(`[LaunchApp] TTI capture check: collector=${!!displayedMetricsCollector}, startMs=${displayedMetricsStartMs}, hasObservation=${!!settledLaunchResult?.observation}`);
-    if (displayedMetricsCollector && displayedMetricsStartMs !== null && settledLaunchResult?.observation) {
-      const displayedMetricsEndMs = await perf.track(
-        "displayedLogcatEndTime",
-        () => this.adb.getDeviceTimestampMs()
+    logger.info(
+      `[LaunchApp] TTI capture check: collector=${!!displayedMetricsCollector}, startMs=${displayedMetricsStartMs}, hasObservation=${!!settledLaunchResult?.observation}`,
+    );
+    if (
+      displayedMetricsCollector &&
+      displayedMetricsStartMs !== null &&
+      settledLaunchResult?.observation
+    ) {
+      const displayedMetricsEndMs = await perf.track("displayedLogcatEndTime", () =>
+        this.adb.getDeviceTimestampMs(),
       );
-      logger.info(`[LaunchApp] Capturing displayed metrics: startMs=${displayedMetricsStartMs}, endMs=${displayedMetricsEndMs}`);
+      logger.info(
+        `[LaunchApp] Capturing displayed metrics: startMs=${displayedMetricsStartMs}, endMs=${displayedMetricsEndMs}`,
+      );
       const displayedTimeMetrics = await displayedMetricsCollector.captureDisplayedMetrics(
         {
           packageName,
           startTimestampMs: displayedMetricsStartMs,
-          endTimestampMs: displayedMetricsEndMs
+          endTimestampMs: displayedMetricsEndMs,
         },
-        perf
+        perf,
       );
       logger.info(`[LaunchApp] Captured ${displayedTimeMetrics.length} displayed metrics`);
       settledLaunchResult.observation.displayedTimeMetrics = displayedTimeMetrics;
@@ -776,9 +822,14 @@ export class LaunchApp extends BaseVisualChange {
     result: LaunchAppResult,
     expectedPackageName: string,
     timeoutMs: number = LAUNCH_OBSERVATION_TIMEOUT_MS,
-    pollIntervalMs: number = LAUNCH_OBSERVATION_POLL_INTERVAL_MS
+    pollIntervalMs: number = LAUNCH_OBSERVATION_POLL_INTERVAL_MS,
+    signal?: AbortSignal,
   ): Promise<LaunchAppResult> {
-    if (!result.observation || this.launchObservationMatchesPackage(result.observation, expectedPackageName)) {
+    signal?.throwIfAborted();
+    if (
+      !result.observation ||
+      this.launchObservationMatchesPackage(result.observation, expectedPackageName)
+    ) {
       return result;
     }
 
@@ -790,11 +841,18 @@ export class LaunchApp extends BaseVisualChange {
     let latestObservation = result.observation;
 
     while (this.timer.now() - startTime < timeoutMs) {
-      logger.info(`[LaunchApp] Launch observation still reports previous app; re-observing for ${expectedPackageName}`);
+      signal?.throwIfAborted();
+      logger.info(
+        `[LaunchApp] Launch observation still reports previous app; re-observing for ${expectedPackageName}`,
+      );
       await this.timer.sleep(pollIntervalMs);
       latestObservation = await this.observeScreen.execute({ skipWaitForFresh: false });
+      signal?.throwIfAborted();
       if (this.launchObservationMatchesPackage(latestObservation, expectedPackageName)) {
-        result.observation = this.preserveLaunchObservationMetadata(latestObservation, result.observation);
+        result.observation = this.preserveLaunchObservationMetadata(
+          latestObservation,
+          result.observation,
+        );
         return result;
       }
     }
@@ -871,17 +929,23 @@ export class LaunchApp extends BaseVisualChange {
     userId: number,
     timeoutMs: number,
     pollIntervalMs: number,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
+    signal?: AbortSignal,
   ): Promise<boolean> {
     const waitForForeground = async (): Promise<boolean> => {
       const startTime = this.timer.now();
 
-      logger.info(`[LaunchApp] Waiting for ${packageName} to reach foreground (timeout: ${timeoutMs}ms)`);
+      logger.info(
+        `[LaunchApp] Waiting for ${packageName} to reach foreground (timeout: ${timeoutMs}ms)`,
+      );
 
       while (true) {
+        signal?.throwIfAborted();
         const isForeground = await this.checkAppForeground(packageName, perf, userId);
         if (isForeground) {
-          logger.info(`[LaunchApp] App ${packageName} reached foreground after ${this.timer.now() - startTime}ms`);
+          logger.info(
+            `[LaunchApp] App ${packageName} reached foreground after ${this.timer.now() - startTime}ms`,
+          );
           return true;
         }
 
@@ -890,9 +954,12 @@ export class LaunchApp extends BaseVisualChange {
         }
 
         await this.timer.sleep(pollIntervalMs);
+        signal?.throwIfAborted();
       }
 
-      logger.warn(`[LaunchApp] Timed out waiting for ${packageName} to reach foreground after ${timeoutMs}ms`);
+      logger.warn(
+        `[LaunchApp] Timed out waiting for ${packageName} to reach foreground after ${timeoutMs}ms`,
+      );
       return false;
     };
 

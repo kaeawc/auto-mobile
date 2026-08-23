@@ -50,7 +50,7 @@ import {
   getToolSelectionContext,
   runWithToolSelectionContext,
 } from "../features/toolSelection/toolSelectionContext";
-import { isDeviceLostError } from "./deviceLossOutcome";
+import { deviceLostErrorFromAbortSignal, isDeviceLostError } from "./deviceLossOutcome";
 import { executionTracker } from "./executionTracker";
 
 // Re-exported for backward compatibility; the implementation now lives in
@@ -1121,6 +1121,11 @@ export class ToolRegistryClass {
                   progress,
                   signal,
                 });
+              }
+
+              const deviceLoss = signal ? deviceLostErrorFromAbortSignal(signal) : undefined;
+              if (deviceLoss) {
+                throw deviceLoss;
               }
 
               const afterToolCallResult = await this.afterToolCall.handle({

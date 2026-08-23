@@ -2301,6 +2301,51 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
+    test("preserves the daemon heartbeat snapshot on a terminal binding error", async () => {
+      const fakeClient = new FakeDaemonClient({
+        daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        initialSessionUuid: "session-a",
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.listTools();
+        fakeClient.emitNotification(
+          SESSION_RELEASED_NOTIFICATION_METHOD,
+          "session-a",
+          "heartbeat-timeout",
+          {
+            sessionId: "session-a",
+            deviceId: "emulator-5554",
+            releaseReason: "heartbeat-timeout",
+            releasedAtMs: 20_000,
+            terminal: true,
+            heartbeat: {
+              lastHeartbeatMs: 9_000,
+              hasReceivedHeartbeat: true,
+              timeoutMs: 10_000,
+              ageMs: 11_000,
+            },
+          },
+        );
+
+        const error: any = await proxy.listTools().catch((caught) => caught);
+        expect(error.release).toMatchObject({
+          deviceId: "emulator-5554",
+          releaseReason: "heartbeat-timeout",
+          heartbeat: { ageMs: 11_000, timeoutMs: 10_000 },
+        });
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
     test("a released signal for a different session leaves the binding intact", async () => {
       const fakeClient = new FakeDaemonClient({
         toolResult: { content: [{ type: "text", text: "ok" }] },

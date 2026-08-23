@@ -16,6 +16,7 @@ import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeDeviceAppLauncher } from "../../fakes/FakeDeviceAppLauncher";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { IOSCtrlProxyManager } from "../../../src/utils/IOSCtrlProxyManager";
+import { DeviceLostError } from "../../../src/server/deviceLossOutcome";
 
 describe("LaunchApp", () => {
   let device: BootedDevice;
@@ -79,6 +80,43 @@ describe("LaunchApp", () => {
     expect(result.observation).toBeDefined();
     expect(fakeObserveScreen.getExecuteCallCount()).toBeGreaterThan(0);
     expect(fakeAwaitIdle.wasMethodCalled("initializeUiStabilityTracking")).toBe(true);
+  });
+
+  test("stops launch when device loss cancels the operation during preflight", async () => {
+    const controller = new AbortController();
+    const deviceLoss = new DeviceLostError(
+      device.deviceId,
+      `device-disconnected:${device.deviceId}`,
+    );
+    const cancellableLaunch = new LaunchApp(device, fakeAdb as unknown as any, null, fakeTimer, {
+      targetUserDetector: {
+        async detectTargetUserId() {
+          return 0;
+        },
+      },
+      installedAppsProvider: {
+        async listInstalledApps() {
+          controller.abort(deviceLoss);
+          return [packageName];
+        },
+      },
+    });
+    (cancellableLaunch as any).awaitIdle = fakeAwaitIdle;
+    (cancellableLaunch as any).observeScreen = fakeObserveScreen;
+    (cancellableLaunch as any).window = fakeWindow;
+
+    await expect(
+      cancellableLaunch.execute(
+        packageName,
+        false,
+        false,
+        undefined,
+        undefined,
+        undefined,
+        controller.signal,
+      ),
+    ).rejects.toBe(deviceLoss);
+    expect(hasStartedAppLaunch()).toBe(false);
   });
 
   test("launches an Android app whose launcher activity is not MainActivity with the package resolver", async () => {

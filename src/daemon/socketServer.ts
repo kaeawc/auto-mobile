@@ -424,10 +424,12 @@ export class UnixSocketServer {
     // replay-TTL guess. Subscribed here (not in the daemon) for the same
     // recovery-rewire reason as list-changed; close() unsubscribes symmetrically.
     this.sessionReleaseUnsubscribe?.();
-    this.sessionReleaseUnsubscribe = SessionReleaseBroadcaster.subscribe((sessionId, reason) => {
-      this.clearBoundMcpClientsForReleasedSession(sessionId);
-      this.broadcastSessionReleased(sessionId, reason);
-    });
+    this.sessionReleaseUnsubscribe = SessionReleaseBroadcaster.subscribe(
+      (sessionId, reason, snapshot) => {
+        this.clearBoundMcpClientsForReleasedSession(sessionId);
+        this.broadcastSessionReleased(sessionId, reason, snapshot);
+      },
+    );
 
     return new Promise((resolve, reject) => {
       this.server!.listen(this.socketPath, () => {
@@ -564,12 +566,17 @@ export class UnixSocketServer {
    * {@link broadcastListChanged}. Note `sessionId` here is the socket-client id,
    * distinct from the released daemon session carried in the frame.
    */
-  private broadcastSessionReleased(releasedSessionId: string, reason?: string): void {
+  private broadcastSessionReleased(
+    releasedSessionId: string,
+    reason?: string,
+    release?: DaemonNotification["release"],
+  ): void {
     const notification: DaemonNotification = {
       type: "daemon_notification",
       method: SESSION_RELEASED_NOTIFICATION_METHOD,
       sessionId: releasedSessionId,
       ...(reason !== undefined ? { reason } : {}),
+      ...(release !== undefined ? { release } : {}),
     };
     for (const sessionId of this.notificationSubscribers) {
       const socket = this.clientSockets.get(sessionId);

@@ -9,7 +9,13 @@ import { runWithAbortSignal } from "../utils/AbortContext";
 import { createDefaultPlanExecutionLock, type PlanExecutionLock } from "./PlanExecutionLock";
 import { SessionToolBinding } from "./SessionToolBinding";
 import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
-import { deviceLostErrorFromAbortSignal, deviceLossOutcomeFromError } from "./deviceLossOutcome";
+import { TerminalSessionError } from "../daemon/sessionManager";
+import {
+  deviceLostErrorFromAbortSignal,
+  deviceLossOutcomeFromError,
+  enrichDeviceLossOutcome,
+  type DeviceLossOutcome,
+} from "./deviceLossOutcome";
 
 // Import the tool registry
 import { ToolRegistry, toolHasOutputSchema } from "./toolRegistry";
@@ -106,6 +112,26 @@ export interface McpServerOptions {
 const INTERNAL_MCP_SESSION_PARAM = "__mcpSessionId";
 const INTERNAL_EXECUTION_ID_PARAM = "__executionId";
 const INTERNAL_EXECUTION_START_TIME_PARAM = "__executionStartTime";
+
+async function resolveDeviceLossOutcome(deviceLoss: DeviceLossOutcome): Promise<DeviceLossOutcome> {
+  const daemonState = DaemonState.getInstance();
+  if (!deviceLoss.incidentId || !daemonState.isInitialized()) {
+    return deviceLoss;
+  }
+  try {
+    const incident = await daemonState
+      .getDevicePool()
+      .waitForEmulatorLossIncident(deviceLoss.incidentId);
+    return enrichDeviceLossOutcome(deviceLoss, incident);
+  } catch (incidentError) {
+    logger.warn(
+      `[MCP] Failed to resolve device-loss incident ${deviceLoss.incidentId}: ${incidentError}`,
+      incidentError,
+    );
+    return deviceLoss;
+  }
+}
+
 function extractInternalMcpSessionId(params: unknown): string | undefined {
   if (!params || typeof params !== "object" || Array.isArray(params)) {
     return undefined;
@@ -700,6 +726,21 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       }
       return stripToolResultStructuredContent(result, omissionReason);
     } catch (error) {
+      if (error instanceof TerminalSessionError) {
+        const sessionOwnershipLost = {
+          error: {
+            code: "session_ownership_lost",
+            message: `Session ownership lost for ${error.sessionUuid}: ${error.release.releaseReason}`,
+            sessionUuid: error.sessionUuid,
+            reason: error.release.releaseReason,
+            release: error.release,
+          },
+        };
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(sessionOwnershipLost) }],
+          isError: true,
+        };
+      }
       const deviceLoss =
         deviceLossOutcomeFromError(error, executionSessionUuid) ??
         deviceLossOutcomeFromError(
@@ -707,8 +748,9 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
           executionSessionUuid,
         );
       if (deviceLoss) {
+        const outcome = await resolveDeviceLossOutcome(deviceLoss);
         return {
-          content: [{ type: "text" as const, text: JSON.stringify(deviceLoss) }],
+          content: [{ type: "text" as const, text: JSON.stringify(outcome) }],
           isError: true,
         };
       }

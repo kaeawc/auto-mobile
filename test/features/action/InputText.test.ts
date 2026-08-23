@@ -5,12 +5,20 @@ import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
+import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { InputTextMode } from "../../../src/features/action/InputText";
-import type { ObserveScreen, ObserveScreenExecuteOptions } from "../../../src/features/observe/interfaces/ObserveScreen";
+import type {
+  ObserveScreen,
+  ObserveScreenExecuteOptions,
+} from "../../../src/features/observe/interfaces/ObserveScreen";
 import type { BootedDevice, ExecResult, ObserveResult } from "../../../src/models";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
-import { AdbClient, AdbCommandTimeoutError } from "../../../src/utils/android-cmdline-tools/AdbClient";
+import {
+  AdbClient,
+  AdbCommandTimeoutError,
+} from "../../../src/utils/android-cmdline-tools/AdbClient";
+import { DeviceLostError } from "../../../src/server/deviceLossOutcome";
 
 interface TestInputText {
   executeAndroidTextInput: (
@@ -122,6 +130,29 @@ describe("InputText", () => {
     expect(capturedFactory).toBeDefined();
     expect(typeof (capturedFactory as AdbClientFactory).create).toBe("function");
     expect(capturedFactory).toBe(factory as unknown as AdbClientFactory);
+  });
+
+  test("does not turn device-loss cancellation into a success:false input result", async () => {
+    const controller = new AbortController();
+    const deviceLoss = new DeviceLostError(
+      androidDevice.deviceId,
+      `device-disconnected:${androidDevice.deviceId}`,
+    );
+    stubAndroidSetText(async () => {
+      controller.abort(deviceLoss);
+      return { success: false, error: "disconnected", totalTimeMs: 1 };
+    });
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const inputText = new InputText(androidDevice, new FakeAdbClientFactory(), undefined, timer);
+    const observe = new FakeObserveScreen();
+    observe.setObserveResult(observeResultWithFocusedText(""));
+    (inputText as any).observeScreen = observe;
+    (inputText as any).awaitIdle = new FakeAwaitIdle();
+
+    await expect(
+      inputText.execute("hello", undefined, false, undefined, controller.signal),
+    ).rejects.toBe(deviceLoss);
   });
 
   test("eventLast sets prefix with a11y and sends final ASCII key event", async () => {

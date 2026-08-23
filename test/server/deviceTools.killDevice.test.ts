@@ -322,6 +322,9 @@ class AlreadyStoppedKillDeviceManager extends FailingKillDeviceManager {
 }
 
 class FakeDeviceSessionRepository extends DeviceSessionRepository {
+  override async getSession(): Promise<undefined> {
+    return undefined;
+  }
   override async upsertActiveSession(): Promise<void> {}
   override async markReleased(): Promise<void> {}
   override async recordActivity(): Promise<void> {}

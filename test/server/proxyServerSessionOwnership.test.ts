@@ -45,6 +45,19 @@ describe("proxy server session ownership errors", () => {
         SESSION_RELEASED_NOTIFICATION_METHOD,
         "session-123",
         "heartbeat-timeout",
+        {
+          sessionId: "session-123",
+          deviceId: "emulator-5554",
+          releaseReason: "heartbeat-timeout",
+          releasedAtMs: 20_000,
+          terminal: true,
+          heartbeat: {
+            lastHeartbeatMs: 9_000,
+            hasReceivedHeartbeat: true,
+            timeoutMs: 10_000,
+            ageMs: 11_000,
+          },
+        },
       );
 
       const result = await client.callTool({
@@ -62,6 +75,19 @@ describe("proxy server session ownership errors", () => {
                 message: "Session ownership lost for session-123: heartbeat-timeout",
                 sessionUuid: "session-123",
                 reason: "heartbeat-timeout",
+                release: {
+                  sessionId: "session-123",
+                  deviceId: "emulator-5554",
+                  releaseReason: "heartbeat-timeout",
+                  releasedAtMs: 20_000,
+                  terminal: true,
+                  heartbeat: {
+                    lastHeartbeatMs: 9_000,
+                    hasReceivedHeartbeat: true,
+                    timeoutMs: 10_000,
+                    ageMs: 11_000,
+                  },
+                },
               },
             }),
           },

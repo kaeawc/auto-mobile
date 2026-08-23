@@ -39,10 +39,14 @@ import { runWithAbortSignal } from "../utils/AbortContext";
 import { AndroidCommandOutputStreamRedactor } from "../utils/android-cmdline-tools/redactAndroidCommandOutput";
 import { boundedEmulatorOutputTail } from "../utils/android-cmdline-tools/AndroidEmulatorClient";
 import {
+  DeviceLostError,
   deviceLossCancellationReason,
   InMemoryEmulatorLossIncidentStore,
   type EmulatorLossDetectionPath,
+  type EmulatorLossIncident,
   type EmulatorLossIncidentStore,
+  type EmulatorLossRecoverySettlement,
+  type EmulatorLossSessionSnapshot,
 } from "./emulatorLossIncident";
 
 export type { DeviceAllocationCriteria, DeviceAllocationRequest } from "./DeviceCriteriaMatcher";
@@ -67,6 +71,15 @@ export class DevicePoolError extends Error {
 export type DeviceStatus = "idle" | "busy" | "error";
 type AndroidRediscoveryVerification = "rediscovered" | "not-rediscovered" | "unknown";
 export type CurrentDisconnectStatus = "current" | "recovered" | "unknown";
+export type SessionPreservingRecoveryResult =
+  | "not-attempted"
+  | "deferred"
+  | "recovered"
+  | "released";
+interface SessionPreservingRecovery {
+  promise: Promise<SessionPreservingRecoveryResult>;
+  incidentId?: string;
+}
 export type DeviceRecoveryIneligibilityReason =
   | "disabled"
   | "not-automobile-owned"
@@ -102,6 +115,8 @@ export interface PooledDevice {
   androidImage?: DeviceInfo;
   /** Session captured before a process-wide ADB reset detaches this connection. */
   adbServerResetSessionId?: string;
+  /** Incident opened before reset cancellation so active calls receive correlation. */
+  adbServerResetIncidentId?: string;
   /** Autolock owner captured before a process-wide ADB reset detaches this connection. */
   adbServerResetAutolockSessionId?: string;
   /**
@@ -318,10 +333,20 @@ export class DevicePool {
   private readonly androidStartupLeases: Map<symbol, AndroidStartupLeaseRequest> = new Map();
   /** Sessions whose old serial may be reused before their reset cohort settles. */
   private readonly adbServerResetQuarantinedSessions: Set<string> = new Set();
+  private readonly recoveringSessionLosses = new Map<
+    string,
+    { deviceId: string; incidentId?: string }
+  >();
+  private readonly sessionPreservingRecoveries = new Map<
+    string,
+    SessionPreservingRecovery
+  >();
   private readonly recoveringAndroidDeviceIds: Set<string> = new Set();
   private readonly startedDeviceProcesses: Map<string, ChildProcess> = new Map();
   private readonly startedDeviceProcessOutput: Map<string, EmulatorProcessOutputTail> = new Map();
   private readonly emulatorLossIncidentStore: EmulatorLossIncidentStore;
+  private readonly emulatorLossRecoverySettlements = new Map<string, Promise<void>>();
+  private readonly emulatorLossRecoveryResolvers = new Map<string, () => void>();
   /** Latest refresh request; older discovery snapshots must not overwrite it. */
   private refreshGeneration = 0;
   private readonly readinessReservationCounts: Map<string, number> = new Map();
@@ -848,25 +873,31 @@ export class DevicePool {
   ): Promise<void> {
     const device = this.devices.get(deviceId);
     if (!this.matchesExpectedDisconnectedDevice(device, expectedDevice)) {
+      await this.finishEmulatorLossIncident(incidentId, "not-attempted");
       return;
     }
     if (await this.shouldDeferDisconnectCleanup(deviceId, device, mayBeStaleSignal)) {
+      await this.finishEmulatorLossIncident(incidentId, "not-attempted");
       return;
     }
     if (!this.matchesExpectedDisconnectedDevice(this.devices.get(deviceId), expectedDevice)) {
+      await this.finishEmulatorLossIncident(incidentId, "not-attempted");
       return;
     }
     if (!device) {
+      await this.finishEmulatorLossIncident(incidentId, "not-attempted");
       return;
     }
     if (device.sessionId) {
       await this.removeDevice(deviceId, true, device);
+      await this.finishEmulatorLossIncident(incidentId, "not-attempted");
       return;
     }
     const rediscovery = mayBeStaleSignal
       ? await this.wasRebootedAndroidDeviceRediscovered(device)
       : "not-rediscovered";
     if (!this.canContinueDisconnectCleanup(device, rediscovery)) {
+      await this.finishEmulatorLossIncident(incidentId, "not-attempted");
       return;
     }
     const recordedIncidentId = incidentId ?? await this.recordEmulatorLossIncident(
@@ -885,6 +916,7 @@ export class DevicePool {
     this.suppressAutoStartForDevice(device);
     await this.completeRecoveryIfNotAttempted(recordedIncidentId, recoveryWasAttempted);
     await this.removeDevice(deviceId, true, device);
+    this.settleEmulatorLossIncident(recordedIncidentId);
   }
 
   private matchesExpectedDisconnectedDevice(
@@ -937,8 +969,12 @@ export class DevicePool {
         ...(processExit ? { processExit } : {}),
         ...(outputTail ? { outputTail } : {}),
         ...(lastAdbState ? { lastAdbState } : {}),
+        ...this.captureEmulatorLossSessionFields(device),
         recoveryPolicy: this.getRecoveryPolicy(),
       });
+      const settlement = Promise.withResolvers<void>();
+      this.emulatorLossRecoverySettlements.set(incident.id, settlement.promise);
+      this.emulatorLossRecoveryResolvers.set(incident.id, settlement.resolve);
       return incident.id;
     } catch (error) {
       logger.warn(
@@ -947,6 +983,32 @@ export class DevicePool {
       );
       return undefined;
     }
+  }
+
+  private captureEmulatorLossSession(
+    device: PooledDevice,
+  ): EmulatorLossSessionSnapshot | undefined {
+    const sessionId =
+      device.sessionId ??
+      device.adbServerResetSessionId ??
+      this.sessionManager.getSessionForDevice(device.id);
+    const session = sessionId ? this.sessionManager.getSession(sessionId) : null;
+    return session
+      ? {
+          sessionUuid: session.sessionId,
+          state: "recovering",
+          lastHeartbeatMs: session.lastHeartbeat,
+          hasReceivedHeartbeat: session.hasReceivedHeartbeat,
+          heartbeatTimeoutMs: session.heartbeatTimeoutMs,
+        }
+      : undefined;
+  }
+
+  private captureEmulatorLossSessionFields(device: PooledDevice): {
+    session?: EmulatorLossSessionSnapshot;
+  } {
+    const session = this.captureEmulatorLossSession(device);
+    return session ? { session } : {};
   }
 
   private async completeRecoveryIfNotAttempted(
@@ -983,13 +1045,78 @@ export class DevicePool {
       return;
     }
     try {
-      await this.emulatorLossIncidentStore.completeRecovery(incidentId, outcome);
+      const incident = await this.emulatorLossIncidentStore.get(incidentId);
+      const settlement = this.buildEmulatorLossRecoverySettlement(incident, outcome);
+      await this.emulatorLossIncidentStore.completeRecovery(incidentId, outcome, settlement);
+      if (!incident?.session) {
+        this.settleEmulatorLossIncident(incidentId);
+      }
     } catch (error) {
       logger.warn(
         `[DevicePool] Failed to finalize emulator-loss incident ${incidentId}: ${error}`,
         error,
       );
     }
+  }
+
+  private buildEmulatorLossRecoverySettlement(
+    incident: EmulatorLossIncident | undefined,
+    outcome: "recovered" | "exhausted" | "not-attempted",
+  ): EmulatorLossRecoverySettlement {
+    if (!incident?.session) {
+      return {};
+    }
+    const session = this.sessionManager.getSession(incident.session.sessionUuid);
+    return {
+      ...(session && session.assignedDevice !== incident.deviceId
+        ? { replacementDeviceId: session.assignedDevice }
+        : {}),
+      sessionState: session
+        ? outcome === "recovered" || outcome === "not-attempted"
+          ? "active"
+          : "recovering"
+        : "released",
+    };
+  }
+
+  async waitForEmulatorLossIncident(
+    incidentId: string,
+    timeoutMs: number = 1_000,
+  ): Promise<Awaited<ReturnType<EmulatorLossIncidentStore["get"]>>> {
+    const settlement = this.emulatorLossRecoverySettlements.get(incidentId);
+    if (settlement) {
+      let timeoutHandle: NodeJS.Timeout | undefined;
+      try {
+        await Promise.race([
+          settlement,
+          new Promise<void>((resolve) => {
+            timeoutHandle = this.timer.setTimeout(resolve, timeoutMs);
+          }),
+        ]);
+      } finally {
+        if (timeoutHandle !== undefined) {
+          this.timer.clearTimeout(timeoutHandle);
+        }
+      }
+    }
+    return await this.emulatorLossIncidentStore.get(incidentId);
+  }
+
+  private settleEmulatorLossIncident(incidentId: string | undefined): void {
+    if (!incidentId) {
+      return;
+    }
+    this.emulatorLossRecoveryResolvers.get(incidentId)?.();
+    this.emulatorLossRecoveryResolvers.delete(incidentId);
+    this.emulatorLossRecoverySettlements.delete(incidentId);
+  }
+
+  async finishEmulatorLossIncident(
+    incidentId: string | undefined,
+    outcome: "recovered" | "exhausted" | "not-attempted",
+  ): Promise<void> {
+    await this.completeEmulatorLossRecovery(incidentId, outcome);
+    this.settleEmulatorLossIncident(incidentId);
   }
 
   private async wasRebootedAndroidDeviceRediscovered(
@@ -1868,16 +1995,25 @@ export class DevicePool {
       return;
     }
     logger.warn(`Evicting device ${device.id} from pool: ${reason}`);
-    const correlatedIncidentId = incidentId ?? (
-      recoverAndroidEmulator
+    const correlatedIncidentId =
+      incidentId ??
+      (recoverAndroidEmulator
         ? await this.recordEmulatorLossIncident(
-          device.id,
-          "device-discovery-miss",
-          undefined,
-          "absent",
-        )
-        : undefined
-    );
+            device.id,
+            "device-discovery-miss",
+            undefined,
+            "absent",
+          )
+        : undefined);
+    if (
+      await this.tryPreserveSessionForMissingDevice(
+        device,
+        recoverAndroidEmulator,
+        correlatedIncidentId,
+      )
+    ) {
+      return;
+    }
     if (device.sessionId) {
       await this.releaseSessionForDisconnectedDevice(
         device.sessionId,
@@ -1899,6 +2035,21 @@ export class DevicePool {
     }
     await this.completeEmulatorLossRecovery(correlatedIncidentId, "not-attempted");
     await this.removeDevice(device.id, true, device);
+    this.settleEmulatorLossIncident(correlatedIncidentId);
+  }
+
+  private async tryPreserveSessionForMissingDevice(
+    device: PooledDevice,
+    recoverAndroidEmulator: boolean,
+    incidentId: string | undefined,
+  ): Promise<boolean> {
+    if (!device.sessionId || !recoverAndroidEmulator) {
+      return false;
+    }
+    return (
+      (await this.recoverSessionBoundAndroidDeviceAfterLoss(device.id, incidentId, device)) !==
+      "not-attempted"
+    );
   }
 
   private shouldRebootDisconnectedAndroidDevice(
@@ -1910,6 +2061,172 @@ export class DevicePool {
       this.isAutoMobileOwnedAndroidVirtualDevice(device) &&
       !this.recoveringAndroidImages.has(device.avdName)
     );
+  }
+
+  /**
+   * Preserve a live Android session while its AutoMobile-owned AVD is restarted.
+   * The old connection stays authoritative until the replacement is verified by
+   * the recorded AVD name; failed recovery releases the captured session rather
+   * than allowing it to allocate an unrelated device.
+   */
+  async recoverSessionBoundAndroidDeviceAfterLoss(
+    deviceId: string,
+    incidentId?: string,
+    expectedDevice?: PooledDevice,
+  ): Promise<SessionPreservingRecoveryResult> {
+    const candidateSessionId =
+      expectedDevice?.sessionId ??
+      expectedDevice?.adbServerResetSessionId ??
+      this.sessionManager.getSessionForDevice(deviceId);
+    if (candidateSessionId) {
+      const inFlight = this.sessionPreservingRecoveries.get(candidateSessionId);
+      if (inFlight) {
+        return await this.joinSessionPreservingRecovery(inFlight, incidentId);
+      }
+      if (this.adbServerResetQuarantinedSessions.has(candidateSessionId)) {
+        await this.finishEmulatorLossIncident(incidentId, "not-attempted");
+        return "deferred";
+      }
+    }
+    const target = this.getSessionPreservingRecoveryTarget(deviceId, expectedDevice);
+    if (!target) {
+      return "not-attempted";
+    }
+    const { device, sessionId } = target;
+    const recovery = this.performSessionPreservingRecovery(device, sessionId, incidentId);
+    const entry = { promise: recovery, ...(incidentId ? { incidentId } : {}) };
+    this.sessionPreservingRecoveries.set(sessionId, entry);
+    try {
+      return await recovery;
+    } finally {
+      if (this.sessionPreservingRecoveries.get(sessionId) === entry) {
+        this.sessionPreservingRecoveries.delete(sessionId);
+      }
+    }
+  }
+
+  private async performSessionPreservingRecovery(
+    device: PooledDevice,
+    sessionId: string,
+    incidentId: string | undefined,
+  ): Promise<SessionPreservingRecoveryResult> {
+    this.adbServerResetQuarantinedSessions.add(sessionId);
+    this.recoveringSessionLosses.set(sessionId, { deviceId: device.id, incidentId });
+    device.adbServerResetSessionId = sessionId;
+    device.adbServerResetAutolockSessionId = device.autolockSessionId;
+    try {
+      await this.cancelDeviceSessionExecutions(
+        sessionId,
+        deviceLossCancellationReason(device.id, incidentId),
+      );
+      const recovered = await this.rebootDisconnectedAndroidDevice(device, incidentId, {
+        preserveSessionId: sessionId,
+      });
+      if (recovered) {
+        return "recovered";
+      }
+      await this.releasePreservedSessionAfterRecoveryFailure(device, sessionId, incidentId);
+      return "released";
+    } catch (error) {
+      try {
+        await this.releasePreservedSessionAfterRecoveryFailure(device, sessionId, incidentId);
+      } catch (releaseError) {
+        logger.warn(
+          `[DevicePool] Failed to release session ${sessionId} after recovery error: ${releaseError}`,
+          releaseError,
+        );
+      }
+      logger.warn(
+        `[DevicePool] Session-preserving recovery failed for ${device.id}: ${error}`,
+        error,
+      );
+      return "released";
+    } finally {
+      this.adbServerResetQuarantinedSessions.delete(sessionId);
+      this.recoveringSessionLosses.delete(sessionId);
+      this.settleEmulatorLossIncident(incidentId);
+    }
+  }
+
+  private async joinSessionPreservingRecovery(
+    recovery: SessionPreservingRecovery,
+    incidentId: string | undefined,
+  ): Promise<SessionPreservingRecoveryResult> {
+    const result = await recovery.promise;
+    if (incidentId) {
+      const primaryIncident = recovery.incidentId
+        ? await this.emulatorLossIncidentStore.get(recovery.incidentId)
+        : undefined;
+      await this.completeEmulatorLossRecovery(
+        incidentId,
+        primaryIncident?.recovery.outcome ??
+          (result === "recovered" ? "recovered" : "exhausted"),
+      );
+      this.settleEmulatorLossIncident(incidentId);
+    }
+    return result;
+  }
+
+  async waitForSessionPreservingRecovery(
+    sessionId: string,
+    incidentId?: string,
+  ): Promise<boolean> {
+    const recovery = this.sessionPreservingRecoveries.get(sessionId);
+    if (!recovery) {
+      return false;
+    }
+    await this.joinSessionPreservingRecovery(recovery, incidentId);
+    return true;
+  }
+
+  isSessionRecoveryInFlight(sessionId: string): boolean {
+    return this.adbServerResetQuarantinedSessions.has(sessionId);
+  }
+
+  private getSessionPreservingRecoveryTarget(
+    deviceId: string,
+    expectedDevice: PooledDevice | undefined,
+  ): { device: PooledDevice; sessionId: string } | undefined {
+    const device = this.devices.get(deviceId);
+    if (
+      !device ||
+      (expectedDevice !== undefined && device !== expectedDevice) ||
+      !this.shouldRebootDisconnectedAndroidDevice(device)
+    ) {
+      return undefined;
+    }
+    const sessionId = device.sessionId ?? this.sessionManager.getSessionForDevice(device.id);
+    const session = sessionId ? this.sessionManager.getSession(sessionId) : null;
+    return sessionId && session?.assignedDevice === device.id && session.platform === "android"
+      ? { device, sessionId }
+      : undefined;
+  }
+
+  private async releasePreservedSessionAfterRecoveryFailure(
+    device: PooledDevice,
+    sessionId: string,
+    incidentId: string | undefined,
+  ): Promise<void> {
+    if (this.sessionManager.getSession(sessionId)?.assignedDevice === device.id) {
+      await this.releaseSessionForDisconnectedDevice(
+        sessionId,
+        device.id,
+        deviceLossCancellationReason(device.id, incidentId),
+      );
+    }
+    if (this.devices.get(device.id) === device) {
+      device.sessionId = null;
+      device.status = "idle";
+      this.suppressAutoStartForDevice(device);
+      await this.removeDevice(device.id, true, device);
+    }
+    if (incidentId) {
+      const incident = await this.emulatorLossIncidentStore.get(incidentId);
+      await this.completeEmulatorLossRecovery(
+        incidentId,
+        incident?.recovery.outcome ?? "exhausted",
+      );
+    }
   }
 
   /**
@@ -1932,12 +2249,42 @@ export class DevicePool {
       return false;
     }
 
-    const incidentId = await this.recordEmulatorLossIncident(
-      device.id,
-      "adb-server-reset",
-      undefined,
-      "absent",
-    );
+    const inFlight = this.sessionPreservingRecoveries.get(session.sessionId);
+    if (inFlight) {
+      return (await this.joinSessionPreservingRecovery(inFlight, undefined)) === "recovered";
+    }
+    const entry = {} as SessionPreservingRecovery;
+    const recovery = this.startAdbResetSessionRecovery(device, session, entry);
+    entry.promise = recovery;
+    this.sessionPreservingRecoveries.set(session.sessionId, entry);
+    try {
+      return (await recovery) === "recovered";
+    } finally {
+      if (this.sessionPreservingRecoveries.get(session.sessionId) === entry) {
+        this.sessionPreservingRecoveries.delete(session.sessionId);
+      }
+    }
+  }
+
+  private async startAdbResetSessionRecovery(
+    device: PooledDevice,
+    session: Session,
+    entry: SessionPreservingRecovery,
+  ): Promise<SessionPreservingRecoveryResult> {
+    const incidentId =
+      device.adbServerResetIncidentId ??
+      (await this.recordEmulatorLossIncident(device.id, "adb-server-reset", undefined, "absent"));
+    if (incidentId) {
+      entry.incidentId = incidentId;
+    }
+    return await this.performAdbResetSessionRecovery(device, session, incidentId);
+  }
+
+  private async performAdbResetSessionRecovery(
+    device: PooledDevice,
+    session: Session,
+    incidentId: string | undefined,
+  ): Promise<SessionPreservingRecoveryResult> {
     try {
       const recovered = await this.rebootDisconnectedAndroidDevice(device, incidentId, {
         preserveSessionId: session.sessionId,
@@ -1946,7 +2293,7 @@ export class DevicePool {
       if (!recovered) {
         await this.releasePreservedAdbResetSessionIfDetached(device, session.sessionId, incidentId);
       }
-      return recovered;
+      return recovered ? "recovered" : "released";
     } catch (error) {
       try {
         await this.releasePreservedAdbResetSessionIfDetached(device, session.sessionId, incidentId);
@@ -1957,7 +2304,9 @@ export class DevicePool {
         );
       }
       logger.warn(`[DevicePool] ADB-reset recovery failed for ${device.id}: ${error}`, error);
-      return false;
+      return "released";
+    } finally {
+      this.settleEmulatorLossIncident(incidentId);
     }
   }
 
@@ -2034,6 +2383,7 @@ export class DevicePool {
             session.platform !== "android"
           ) {
             this.adbServerResetQuarantinedSessions.delete(device.sessionId);
+            this.recoveringSessionLosses.delete(device.sessionId);
             continue;
           }
           device.adbServerResetSessionId = device.sessionId;
@@ -2056,32 +2406,54 @@ export class DevicePool {
   private async prepareAdbServerResetCohortDetachment(
     cohort: readonly PooledDevice[],
   ): Promise<void> {
-    const sessionIds = this.getAdbServerResetCohortSessionIds(cohort);
-    for (const sessionId of sessionIds) {
+    for (const device of cohort) {
+      if (
+        this.devices.get(device.id) === device &&
+        device.sessionId &&
+        this.sessionManager.getSession(device.sessionId)?.assignedDevice === device.id
+      ) {
+        device.adbServerResetIncidentId = await this.recordEmulatorLossIncident(
+          device.id,
+          "adb-server-reset",
+          undefined,
+          "absent",
+        );
+      }
+    }
+    const sessionTargets = this.getAdbServerResetCohortSessionTargets(cohort);
+    for (const { sessionId, deviceId, incidentId } of sessionTargets) {
       this.adbServerResetQuarantinedSessions.add(sessionId);
+      this.recoveringSessionLosses.set(sessionId, { deviceId, incidentId });
     }
     try {
       await Promise.all(
-        sessionIds.map(sessionId =>
+        sessionTargets.map(({ sessionId, deviceId, incidentId }) =>
           this.cancelDeviceSessionExecutions(
             sessionId,
-            "device-disconnected:process-wide-adb-reset",
+            deviceLossCancellationReason(deviceId, incidentId),
           ),
         ),
       );
       await this.stopTrackedIdleAdbResetCohortProcesses(cohort);
     } catch (error) {
-      for (const sessionId of sessionIds) {
+      for (const { sessionId } of sessionTargets) {
         this.adbServerResetQuarantinedSessions.delete(sessionId);
+        this.recoveringSessionLosses.delete(sessionId);
+      }
+      for (const device of cohort) {
+        if (device.adbServerResetIncidentId) {
+          await this.completeEmulatorLossRecovery(device.adbServerResetIncidentId, "not-attempted");
+          this.settleEmulatorLossIncident(device.adbServerResetIncidentId);
+        }
       }
       throw error;
     }
   }
 
-  private getAdbServerResetCohortSessionIds(
+  private getAdbServerResetCohortSessionTargets(
     cohort: readonly PooledDevice[],
-  ): string[] {
-    const sessionIds = new Set<string>();
+  ): Array<{ sessionId: string; deviceId: string; incidentId?: string }> {
+    const sessionTargets = new Map<string, { deviceId: string; incidentId?: string }>();
     for (const device of cohort) {
       if (
         this.devices.get(device.id) !== device ||
@@ -2092,10 +2464,15 @@ export class DevicePool {
       }
       const session = this.sessionManager.getSession(device.sessionId);
       if (session?.assignedDevice === device.id && session.platform === "android") {
-        sessionIds.add(device.sessionId);
+        sessionTargets.set(device.sessionId, {
+          deviceId: device.id,
+          ...(device.adbServerResetIncidentId
+            ? { incidentId: device.adbServerResetIncidentId }
+            : {}),
+        });
       }
     }
-    return [...sessionIds];
+    return Array.from(sessionTargets, ([sessionId, target]) => ({ sessionId, ...target }));
   }
 
   private async stopTrackedIdleAdbResetCohortProcesses(
@@ -2192,6 +2569,7 @@ export class DevicePool {
       for (const device of cohort) {
         if (device.adbServerResetSessionId) {
           this.adbServerResetQuarantinedSessions.delete(device.adbServerResetSessionId);
+          this.recoveringSessionLosses.delete(device.adbServerResetSessionId);
         }
         if (!device.avdName) {
           continue;
@@ -4756,6 +5134,14 @@ export class DevicePool {
 
   assertSessionReadyForAutomation(sessionId: string): void {
     if (this.adbServerResetQuarantinedSessions.has(sessionId)) {
+      const loss = this.recoveringSessionLosses.get(sessionId);
+      if (loss) {
+        throw new DeviceLostError(
+          loss.deviceId,
+          deviceLossCancellationReason(loss.deviceId, loss.incidentId),
+          loss.incidentId,
+        );
+      }
       throw new ActionableError(
         `Session '${sessionId}' is recovering from a process-wide ADB reset. Retry after device recovery completes.`,
       );

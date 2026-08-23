@@ -11,7 +11,7 @@ import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepositor
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
-import type { DeviceSessionStatus } from "../../src/db/types";
+import type { DeviceSession, DeviceSessionStatus } from "../../src/db/types";
 import type { ViewHierarchyResult } from "../../src/models/ViewHierarchyResult";
 import type { KeepScreenAwakeState } from "../../src/utils/KeepScreenAwakeManager";
 
@@ -1511,5 +1511,81 @@ describe("SessionManager", () => {
       await sessionManager.createSession("s1", "emulator-5554", "android");
       expect(sessionManager.getLastRenderedObservation("s1")).toBeUndefined();
     });
+  });
+
+  test("terminal device-loss UUID cannot silently allocate another device", async () => {
+    await sessionManager.createSession("lost-session", "emulator-5554", "android");
+    const released = Promise.withResolvers<void>();
+    let releaseSnapshot: unknown;
+    sessionManager.onSessionRelease((_sessionId, _deviceId, _reason, snapshot) => {
+      releaseSnapshot = snapshot;
+      released.resolve();
+    });
+    await sessionManager.releaseSession(
+      "lost-session",
+      "device-disconnected:emulator-5554;incident=emulator-loss-1",
+    );
+    await released.promise;
+    let assignmentCount = 0;
+    const assigner: SessionDeviceAssigner = {
+      async assignDeviceToSession() {
+        assignmentCount += 1;
+        return "emulator-5560";
+      },
+    };
+
+    await expect(
+      sessionManager.getOrCreateSession("lost-session", assigner, "android"),
+    ).rejects.toThrow("terminal");
+    expect(assignmentCount).toBe(0);
+    expect(releaseSnapshot).toMatchObject({
+      sessionId: "lost-session",
+      deviceId: "emulator-5554",
+      releaseReason: "device-disconnected:emulator-5554;incident=emulator-loss-1",
+      terminal: true,
+    });
+  });
+
+  test("terminal device-loss UUID remains fenced after manager restart", async () => {
+    const persisted: DeviceSession = {
+      session_uuid: "lost-session",
+      device_id: "emulator-5554",
+      platform: "android",
+      status: "released",
+      source: null,
+      autolock_enabled: 0,
+      mcp_session_id: null,
+      daemon_session_id: "old-daemon",
+      created_at_ms: 1,
+      last_used_at_ms: 20,
+      expires_at_ms: 30,
+      released_at_ms: 25,
+      release_reason: "device-disconnected:emulator-5554;incident=emulator-loss-1",
+      session_timeout_ms: 10,
+      heartbeat_timeout_ms: 5,
+      has_received_heartbeat: 1,
+      created_at: "2026-08-22T00:00:00.000Z",
+      updated_at: "2026-08-22T00:00:00.000Z",
+    };
+    let upsertCount = 0;
+    const persistence: DeviceSessionPersistence = {
+      async getSession() {
+        return persisted;
+      },
+      async upsertActiveSession() {
+        upsertCount += 1;
+      },
+      async recordActivity() {},
+      async markReleased() {},
+    };
+    const restarted = new SessionManager(fakeTimer, persistence);
+    try {
+      await expect(
+        restarted.createSession("lost-session", "emulator-5560", "android"),
+      ).rejects.toThrow("terminal");
+      expect(upsertCount).toBe(0);
+    } finally {
+      restarted.stopCleanupTimer();
+    }
   });
 });

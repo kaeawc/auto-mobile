@@ -6,6 +6,7 @@ import {
   type EmulatorLossIncident,
   type EmulatorLossIncidentStore,
   type EmulatorLossRecoveryAttempt,
+  type EmulatorLossRecoverySettlement,
   type EmulatorRecoveryOutcome,
   type OpenEmulatorLossIncidentInput,
 } from "../daemon/emulatorLossIncident";
@@ -70,6 +71,7 @@ export class EmulatorLossIncidentRepository implements EmulatorLossIncidentStore
       ...(input.processExit ? { processExit: { ...input.processExit } } : {}),
       ...(input.outputTail ? { outputTail: input.outputTail } : {}),
       ...(input.lastAdbState ? { lastAdbState: input.lastAdbState } : {}),
+      ...(input.session ? { session: { ...input.session } } : {}),
       recovery: {
         policy: { ...input.recoveryPolicy },
         attempts: [],
@@ -113,9 +115,17 @@ export class EmulatorLossIncidentRepository implements EmulatorLossIncidentStore
     });
   }
 
-  async completeRecovery(incidentId: string, outcome: EmulatorRecoveryOutcome): Promise<void> {
+  async completeRecovery(
+    incidentId: string,
+    outcome: EmulatorRecoveryOutcome,
+    settlement: EmulatorLossRecoverySettlement = {},
+  ): Promise<void> {
     await this.update(incidentId, (incident) => {
       incident.recovery.outcome = outcome;
+      incident.replacementDeviceId = settlement.replacementDeviceId;
+      if (incident.session && settlement.sessionState) {
+        incident.session.state = settlement.sessionState;
+      }
     });
   }
 

@@ -100,13 +100,19 @@ export class FakeDaemonClient implements DaemonClientLike {
   }
 
   /** Test hook: simulate a daemon-pushed notification frame. */
-  emitNotification(method: string, sessionId?: string, reason?: string): void {
+  emitNotification(
+    method: string,
+    sessionId?: string,
+    reason?: string,
+    release?: DaemonNotification["release"],
+  ): void {
     for (const handler of this.notificationHandlers) {
       handler({
         type: "daemon_notification",
         method,
         ...(sessionId !== undefined ? { sessionId } : {}),
         ...(reason !== undefined ? { reason } : {}),
+        ...(release !== undefined ? { release } : {}),
       });
     }
   }

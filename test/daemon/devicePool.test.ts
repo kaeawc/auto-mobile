@@ -3789,6 +3789,10 @@ describe("DevicePool", () => {
           },
         ];
         const manager = new FakeDeviceManagerWithStartedProcess(images);
+        const incidents = new InMemoryEmulatorLossIncidentStore(
+          fakeTimer,
+          new CountingIdGenerator("incident"),
+        );
         devicePool = new DevicePool(
           sessionManager,
           "test-daemon-session-id",
@@ -3796,6 +3800,14 @@ describe("DevicePool", () => {
           fakeAppsRepo,
           manager,
           new DefaultRetryExecutor(fakeTimer),
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          { onLoss: true, maxAttempts: 2 },
+          undefined,
+          incidents,
         );
 
         await devicePool.assignMultipleDevices(["session-1"], 1000, "android");
@@ -3806,8 +3818,26 @@ describe("DevicePool", () => {
 
         expect(manager.startedDevices.map((device) => device.name)).toEqual(["Pixel 8", "Pixel 8"]);
         expect(devicePool.getDevice("emulator-5554")).toBeNull();
-        expect(devicePool.getDevice("Pixel 8")?.avdName).toBe("Pixel 8");
-        expect(sessionManager.getSession("session-1")).toBeNull();
+        expect(devicePool.getDevice("Pixel 8")).toMatchObject({
+          avdName: "Pixel 8",
+          sessionId: "session-1",
+          status: "busy",
+        });
+        expect(sessionManager.getSession("session-1")?.assignedDevice).toBe("Pixel 8");
+        await expect(incidents.list()).resolves.toMatchObject([
+          {
+            deviceId: "emulator-5554",
+            replacementDeviceId: "Pixel 8",
+            session: {
+              sessionUuid: "session-1",
+              state: "active",
+            },
+            recovery: {
+              outcome: "recovered",
+              attempts: [{ attempt: 1, outcome: "succeeded" }],
+            },
+          },
+        ]);
       } finally {
         if (originalRebootOnDeath === undefined) {
           delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
@@ -3815,6 +3845,82 @@ describe("DevicePool", () => {
           process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeath;
         }
       }
+    });
+
+    test("coalesces concurrent loss signals into one session-preserving recovery", async () => {
+      const manager = new DeferredRecoveryDeviceManager();
+      const incidents = new InMemoryEmulatorLossIncidentStore(
+        fakeTimer,
+        new CountingIdGenerator("incident"),
+      );
+      const images: DeviceInfo[] = [{
+        name: "Pixel 8",
+        platform: "android",
+        isRunning: false,
+        deviceId: "emulator-5554",
+        source: "local",
+      }];
+      manager.deviceImages = images;
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        manager,
+        new DefaultRetryExecutor(fakeTimer),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { onLoss: true, maxAttempts: 1 },
+        undefined,
+        incidents,
+      );
+
+      await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
+      const disconnected = devicePool.getDevice("emulator-5554")!;
+      manager.bootedDevices = [];
+      const firstIncident = await devicePool.recordEmulatorLossIncident(
+        disconnected.id,
+        "watched-process-exit",
+      );
+      const duplicateIncident = await devicePool.recordEmulatorLossIncident(
+        disconnected.id,
+        "device-discovery-miss",
+      );
+      const first = devicePool.recoverSessionBoundAndroidDeviceAfterLoss(
+        disconnected.id,
+        firstIncident,
+        disconnected,
+      );
+      await manager.waitForRecoveryStart();
+
+      const duplicate = devicePool.recoverSessionBoundAndroidDeviceAfterLoss(
+        disconnected.id,
+        duplicateIncident,
+        disconnected,
+      );
+      expect(devicePool.isSessionRecoveryInFlight("session-1")).toBe(true);
+      expect(() => devicePool.assertSessionReadyForAutomation("session-1")).toThrow(
+        `device-disconnected:emulator-5554;incident=${firstIncident}`,
+      );
+      manager.releaseRecovery();
+
+      await expect(Promise.all([first, duplicate])).resolves.toEqual([
+        "recovered",
+        "recovered",
+      ]);
+      expect(manager.childProcesses).toHaveLength(2);
+      expect(sessionManager.getSession("session-1")?.assignedDevice).toBe("emulator-5554");
+      expect(devicePool.getDevice("emulator-5554")).toMatchObject({
+        sessionId: "session-1",
+        status: "busy",
+      });
+      await expect(incidents.get(duplicateIncident!)).resolves.toMatchObject({
+        recovery: { outcome: "recovered" },
+        session: { state: "active" },
+      });
     });
 
     test("records failed recovery spawn attempts", async () => {
@@ -3873,6 +3979,10 @@ describe("DevicePool", () => {
         ],
         outcome: "exhausted",
       });
+      expect(sessionManager.getSession("session-1")).toBeNull();
+      await expect(
+        sessionManager.getOrCreateSession("session-1", devicePool, "android"),
+      ).rejects.toThrow("terminal");
     });
 
     test("does not recover an emulator intentionally shut down by the client", async () => {
@@ -4152,10 +4262,11 @@ describe("DevicePool", () => {
         expect(manager.childProcesses).toHaveLength(2);
         manager.releaseRecovery();
         await new Promise((resolve) => setImmediate(resolve));
-        fakeTimer.resolveAll();
 
-        const assignments = await allocation;
-        expect(assignments.get("session-2")).toBe("emulator-5554");
+        await expect(fakeTimer.resolvePromise(allocation, 100)).rejects.toThrow(
+          "Timed out allocating devices",
+        );
+        expect(sessionManager.getSession("session-1")?.assignedDevice).toBe("emulator-5554");
         expect(manager.childProcesses).toHaveLength(2);
       } finally {
         manager.releaseRecovery();

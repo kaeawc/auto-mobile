@@ -369,8 +369,8 @@ export class Daemon {
     // (heartbeat / idle / plan), rather than guessing with the replay TTL. Fires
     // for every released key — base and derived `${base}:${label}` alike; the
     // proxy matches its bound (base) UUID by exact equality (issue #4610).
-    this.sessionManager.onSessionRelease((sessionId, _deviceId, releaseReason) => {
-      SessionReleaseBroadcaster.emit(sessionId, releaseReason);
+    this.sessionManager.onSessionRelease((sessionId, _deviceId, releaseReason, snapshot) => {
+      SessionReleaseBroadcaster.emit(sessionId, releaseReason, snapshot);
     });
     this.installedAppsRepository = installedAppsRepository ?? new InstalledAppsRepository();
     const recoveryConfiguration = parseDeviceRecoveryPolicy(recoveryPolicyEnvironment);
@@ -1444,12 +1444,48 @@ export class Daemon {
     const executionSessionId =
       resolveToolSelectionBaseSessionUuid(sessionId, this.sessionManager) ?? sessionId;
     return (
+      this.devicePool.isSessionRecoveryInFlight(sessionId) ||
       executionTracker.hasActiveSessionUuidExecutions(sessionId, query) ||
       executionTracker.hasActiveAutolockSessionExecutions(sessionId, query) ||
       (executionSessionId !== sessionId &&
         (executionTracker.hasActiveSessionUuidExecutions(executionSessionId, query) ||
           executionTracker.hasActiveAutolockSessionExecutions(executionSessionId, query)))
     );
+  }
+
+  private async tryRecoverCapturedDisconnectTarget(
+    deviceId: string,
+    incidentId: string | undefined,
+    pooledDevice: PooledDevice | null | undefined,
+    sessionId: string | null | undefined,
+    session: Session | null,
+    forceGeneration: number | undefined,
+  ): Promise<boolean> {
+    if (
+      sessionId &&
+      await this.devicePool.waitForSessionPreservingRecovery(sessionId, incidentId)
+    ) {
+      this.retireAdbServerResetDisconnectState(deviceId, forceGeneration);
+      return true;
+    }
+    if (sessionId && this.devicePool.isSessionRecoveryInFlight(sessionId)) {
+      await this.devicePool.finishEmulatorLossIncident(incidentId, "not-attempted");
+      this.retireAdbServerResetDisconnectState(deviceId, forceGeneration);
+      return true;
+    }
+    if (!pooledDevice || !sessionId || !session) {
+      return false;
+    }
+    const recovery = await this.devicePool.recoverSessionBoundAndroidDeviceAfterLoss(
+      deviceId,
+      incidentId,
+      pooledDevice,
+    );
+    if (recovery === "not-attempted") {
+      return false;
+    }
+    this.retireAdbServerResetDisconnectState(deviceId, forceGeneration);
+    return true;
   }
 
   private startDeviceDisconnectMonitor(): void {
@@ -1625,7 +1661,7 @@ export class Daemon {
               undefined,
               "absent",
             );
-            if (
+            const staleDisconnect =
               (await this.shouldSkipStaleDisconnectCleanup(
                 pooledDeviceAtDisconnect,
                 deviceId,
@@ -1637,8 +1673,33 @@ export class Daemon {
                 assignmentCountAtDisconnect,
                 sessionIdAtDisconnect,
                 sessionAtDisconnect,
+              );
+            if (staleDisconnect) {
+              await this.devicePool.finishEmulatorLossIncident(incidentId, "not-attempted");
+              continue;
+            }
+            if (
+              await this.tryRecoverCapturedDisconnectTarget(
+                deviceId,
+                incidentId,
+                pooledDeviceAtDisconnect,
+                sessionIdAtDisconnect,
+                sessionAtDisconnect,
+                forceGenerationAtDisconnect,
               )
             ) {
+              continue;
+            }
+            if (
+              !this.isCapturedDisconnectTargetCurrent(
+                deviceId,
+                pooledDeviceAtDisconnect,
+                assignmentCountAtDisconnect,
+                sessionIdAtDisconnect,
+                sessionAtDisconnect,
+              )
+            ) {
+              await this.devicePool.finishEmulatorLossIncident(incidentId, "not-attempted");
               continue;
             }
             if (sessionIdAtDisconnect && sessionAtDisconnect) {
@@ -1660,6 +1721,7 @@ export class Daemon {
                 assignmentCountAtDisconnect,
               )
             ) {
+              await this.devicePool.finishEmulatorLossIncident(incidentId, "not-attempted");
               continue;
             }
             await this.devicePool.removeDisconnectedDevice(

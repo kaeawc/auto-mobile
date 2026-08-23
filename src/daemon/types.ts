@@ -1,4 +1,5 @@
 import type { DeviceControlTransportFailure } from "./deviceControlTransportFailure";
+import type { SessionReleaseSnapshot } from "./sessionManager";
 
 /**
  * Request sent from CLI client to daemon
@@ -76,6 +77,8 @@ export interface DaemonNotification {
   sessionId?: string;
   /** Diagnostic release reason for `notifications/session/released`. */
   reason?: string;
+  /** Authoritative terminal state captured before SessionManager removed it. */
+  release?: SessionReleaseSnapshot;
 }
 
 /** Discriminates a daemon socket frame as a server-pushed notification. */

@@ -30,6 +30,7 @@ import { releaseVersion } from "../utils/mcpVersion";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { isExplicitPin, resolveAssetVersion, resolvePinnedVersion } from "../constants/release";
 import { SingleFlightInterval } from "./SingleFlightInterval";
+import type { SessionReleaseSnapshot } from "./sessionManager";
 import {
   type BuildIdentity,
   buildIdentitiesMatch,
@@ -172,8 +173,9 @@ export class DaemonAssetVersionMismatchError extends DaemonUnavailableError {
 export class DaemonBoundSessionExpiredError extends Error {
   readonly sessionUuid: string;
   readonly reason: string;
+  readonly release?: SessionReleaseSnapshot;
 
-  constructor(sessionUuid: string, reason: string) {
+  constructor(sessionUuid: string, reason: string, release?: SessionReleaseSnapshot) {
     super(
       `Device session ${sessionUuid} expired or was released (${reason}). ` +
         "This MCP transport cannot create a replacement session; start a new transport.",
@@ -181,6 +183,7 @@ export class DaemonBoundSessionExpiredError extends Error {
     this.name = "DaemonBoundSessionExpiredError";
     this.sessionUuid = sessionUuid;
     this.reason = reason;
+    this.release = release;
   }
 }
 
@@ -540,7 +543,9 @@ export class DaemonMcpProxy {
   // Once the daemon confirms this transport's bound session is gone, preserve
   // that terminal identity instead of clearing it and allowing the same UUID to
   // acquire another device.
-  private terminalBoundSession: { sessionUuid: string; reason: string } | undefined;
+  private terminalBoundSession:
+    | { sessionUuid: string; reason: string; release?: SessionReleaseSnapshot }
+    | undefined;
   // Startup bindings remain authoritative until the daemon signals release.
   // Replay expiration only protects bindings inferred from ordinary calls.
   private initialSessionBindingConfigured = false;
@@ -784,7 +789,11 @@ export class DaemonMcpProxy {
       releasedSessionUuid === this.boundSessionUuid ||
       releasedSessionUuid === this.terminalBoundSession?.sessionUuid
     ) {
-      this.fenceBoundSessionUuid(releasedSessionUuid, notification.reason ?? "released");
+      this.fenceBoundSessionUuid(
+        releasedSessionUuid,
+        notification.reason ?? "released",
+        notification.release,
+      );
     }
   }
 
@@ -1370,14 +1379,19 @@ export class DaemonMcpProxy {
     this.initialSessionBindingConfigured = false;
   }
 
-  private fenceBoundSessionUuid(sessionUuid: string, reason: string): void {
+  private fenceBoundSessionUuid(
+    sessionUuid: string,
+    reason: string,
+    release?: SessionReleaseSnapshot,
+  ): void {
     if (this.terminalBoundSession) {
       if (this.terminalBoundSession.sessionUuid === sessionUuid && reason !== "released") {
         this.terminalBoundSession.reason = reason;
+        this.terminalBoundSession.release = release ?? this.terminalBoundSession.release;
       }
       return;
     }
-    this.terminalBoundSession = { sessionUuid, reason };
+    this.terminalBoundSession = { sessionUuid, reason, ...(release ? { release } : {}) };
     // A terminal release changes the scope of in-flight discovery and prevents
     // its stale response from repopulating a cleared cache.
     this.discoveryEpoch += 1;
@@ -1397,7 +1411,11 @@ export class DaemonMcpProxy {
     if (!terminal) {
       throw new Error("Bound session is not terminal");
     }
-    return new DaemonBoundSessionExpiredError(terminal.sessionUuid, terminal.reason);
+    return new DaemonBoundSessionExpiredError(
+      terminal.sessionUuid,
+      terminal.reason,
+      terminal.release,
+    );
   }
 
   private startBoundSessionHeartbeat(): void {

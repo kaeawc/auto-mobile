@@ -64,7 +64,8 @@ export class InputText extends BaseVisualChange {
     text: string,
     imeAction?: ImeAction,
     dismissKeyboard: boolean = false,
-    mode?: InputTextMode
+    mode?: InputTextMode,
+    signal?: AbortSignal,
   ): Promise<SendTextResult & { method?: InputTextMode }> {
     const perf = createGlobalPerformanceTracker();
     perf.serial("inputText");
@@ -90,14 +91,16 @@ export class InputText extends BaseVisualChange {
       if (autoMode) {
         resolvedMode = autoMode;
         logger.debug(
-          "[InputText] auto-promoted a11y -> eventAll (text matched a configured event-all marker)"
+          "[InputText] auto-promoted a11y -> eventAll (text matched a configured event-all marker)",
         );
       }
     }
 
-    return this.observedInteraction(
-      async previousObserveResult => {
+    signal?.throwIfAborted();
+    const result = await this.observedInteraction(
+      async (previousObserveResult) => {
         try {
+          signal?.throwIfAborted();
           // Platform-specific text input execution
           switch (this.device.platform) {
             case "android":
@@ -121,6 +124,7 @@ export class InputText extends BaseVisualChange {
               throw new Error(`Unsupported platform: ${this.device.platform}`);
           }
         } catch (error) {
+          signal?.throwIfAborted();
           perf.end();
           const errorMsg = errorMessage(error);
           logger.warn(`[InputText] text input failed (mode=${resolvedMode}): ${errorMsg}`, error);
@@ -129,18 +133,20 @@ export class InputText extends BaseVisualChange {
             success: false,
             text,
             error: `Failed to send text input: ${errorMsg}`,
-            method: this.device.platform === "android" ? resolvedMode : "a11y"
+            method: this.device.platform === "android" ? resolvedMode : "a11y",
           };
         }
       },
       {
         changeExpected: true,
-        tolerancePercent: 0.00,
+        tolerancePercent: 0.0,
         timeoutMs: 5000,
         perf,
-        skipUiStability: true // Skip UI stability wait - a11y service already waits 100ms for tree update
-      }
+        skipUiStability: true, // Skip UI stability wait - a11y service already waits 100ms for tree update
+      },
     );
+    signal?.throwIfAborted();
+    return result;
   }
 
   /**

@@ -171,7 +171,19 @@ describe("UnixSocketServer notification broadcast", () => {
 
     // Emitted by the daemon's onSessionRelease callback in production; the socket
     // server subscribes to the broadcaster in start().
-    SessionReleaseBroadcaster.emit("session-a", "missing-first-heartbeat");
+    SessionReleaseBroadcaster.emit("session-a", "missing-first-heartbeat", {
+      sessionId: "session-a",
+      deviceId: "emulator-5554",
+      releaseReason: "missing-first-heartbeat",
+      releasedAtMs: 20_000,
+      terminal: true,
+      heartbeat: {
+        lastHeartbeatMs: 10_000,
+        hasReceivedHeartbeat: false,
+        timeoutMs: 10_000,
+        ageMs: 10_000,
+      },
+    });
     await subscriber.waitForFrames(2);
 
     expect(subscriber.frames[1]).toEqual({
@@ -179,6 +191,19 @@ describe("UnixSocketServer notification broadcast", () => {
       method: SESSION_RELEASED_NOTIFICATION_METHOD,
       sessionId: "session-a",
       reason: "missing-first-heartbeat",
+      release: {
+        sessionId: "session-a",
+        deviceId: "emulator-5554",
+        releaseReason: "missing-first-heartbeat",
+        releasedAtMs: 20_000,
+        terminal: true,
+        heartbeat: {
+          lastHeartbeatMs: 10_000,
+          hasReceivedHeartbeat: false,
+          timeoutMs: 10_000,
+          ageMs: 10_000,
+        },
+      },
     });
   });
 

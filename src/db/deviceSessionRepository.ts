@@ -29,6 +29,7 @@ export interface DeviceSessionActivityUpdate {
 
 export interface DeviceSessionPersistence {
   upsertActiveSession(record: DeviceSessionRecord): Promise<void>;
+  getSession?(sessionUuid: string): Promise<DeviceSession | undefined>;
   recordActivity(sessionUuid: string, update: DeviceSessionActivityUpdate): Promise<void>;
   markReleased(
     sessionUuid: string,

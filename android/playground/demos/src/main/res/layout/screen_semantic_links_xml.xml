@@ -1,37 +1,41 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:orientation="vertical"
-    android:padding="16dp">
+    android:layout_height="match_parent">
 
-    <TextView
-        android:id="@+id/semantic_links_xml_description"
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="This screen uses a TextView with ClickableSpan links."
-        android:textAppearance="?attr/textAppearanceBodyLarge" />
+        android:orientation="vertical"
+        android:padding="16dp">
 
-    <TextView
-        android:id="@+id/semantic_links_xml_paragraph"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:textAppearance="?attr/textAppearanceBodyLarge" />
+        <TextView
+            android:id="@+id/semantic_links_xml_description"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="This screen uses a TextView with ClickableSpan links."
+            android:textAppearance="?attr/textAppearanceBodyLarge" />
 
-    <TextView
-        android:id="@+id/semantic_links_xml_standalone"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:textAppearance="?attr/textAppearanceBodyLarge" />
+        <TextView
+            android:id="@+id/semantic_links_xml_paragraph"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:textAppearance="?attr/textAppearanceBodyLarge" />
 
-    <TextView
-        android:id="@+id/semantic_links_result"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="24dp"
-        android:text="Last activated: None"
-        android:textAppearance="?attr/textAppearanceTitleMedium" />
+        <TextView
+            android:id="@+id/semantic_links_xml_standalone"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:textAppearance="?attr/textAppearanceBodyLarge" />
 
-</LinearLayout>
+        <TextView
+            android:id="@+id/semantic_links_result"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="Last activated: None"
+            android:textAppearance="?attr/textAppearanceTitleMedium" />
+    </LinearLayout>
+</ScrollView>

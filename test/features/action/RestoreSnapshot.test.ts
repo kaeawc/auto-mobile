@@ -3,6 +3,7 @@ import { RestoreSnapshot } from "../../../src/features/action/RestoreSnapshot";
 import { BootedDevice, DeviceSnapshotManifest } from "../../../src/models";
 import { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
+import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { DeviceSnapshotStore } from "../../../src/utils/DeviceSnapshotStore";
 import { promises as fs } from "fs";
@@ -467,18 +468,6 @@ describe("RestoreSnapshot", () => {
         manifest,
         useVmSnapshot: false
       })).rejects.toThrow("Snapshot platform 'ios' does not match device platform 'android'");
-    });
-
-    it("should throw error for non-Android platform", () => {
-      const iosDevice: BootedDevice = {
-        deviceId: "ios-device",
-        name: "iPhone_14",
-        platform: "ios",
-        isEmulator: true
-      };
-
-      expect(() => new RestoreSnapshot(iosDevice, fakeAdbFactory, undefined, fakeTimer))
-        .toThrow("Snapshot restore is currently only supported for Android devices");
     });
 
     it("should handle app clear failures gracefully", async () => {
@@ -1007,5 +996,265 @@ describe("RestoreSnapshot restores settings before the slow app-data phase (#423
     expect(settingsAt).toBeGreaterThanOrEqual(0);
     expect(clearAt).toBeGreaterThanOrEqual(0);
     expect(settingsAt).toBeLessThan(clearAt);
+  });
+});
+
+describe("RestoreSnapshot (iOS)", () => {
+  let device: BootedDevice;
+  let simctl: FakeSimCtlClient;
+  let store: DeviceSnapshotStore;
+  let testBasePath: string;
+
+  beforeEach(async () => {
+    device = {
+      deviceId: "ios-device-1",
+      name: "iPhone 15",
+      platform: "ios",
+    };
+
+    simctl = new FakeSimCtlClient();
+    testBasePath = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-ios-restore-"));
+    store = new DeviceSnapshotStore(testBasePath);
+  });
+
+  afterEach(async () => {
+    try {
+      await fs.rm(testBasePath, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup errors
+    }
+  });
+
+  function makeRestore(): RestoreSnapshot {
+    return new RestoreSnapshot(device, undefined, undefined, undefined, store, simctl as any);
+  }
+
+  it("restores app data using fallback device path", async () => {
+    const snapshotName = "restore-snapshot";
+    const bundleId = "com.example.app";
+    const appDataPath = store.getAppDataPath(snapshotName, {
+      platform: "ios",
+      deviceId: device.deviceId,
+    });
+    await fs.mkdir(path.join(appDataPath, bundleId, "Documents"), { recursive: true });
+    await fs.writeFile(path.join(appDataPath, bundleId, "Documents", "data.txt"), "new-data");
+
+    const containerRoot = path.join(testBasePath, "containers", bundleId);
+    await fs.mkdir(path.join(containerRoot, "Documents"), { recursive: true });
+    await fs.writeFile(path.join(containerRoot, "Documents", "data.txt"), "old-data");
+
+    simctl.setContainerPath(bundleId, containerRoot);
+    simctl.setInstalledApps([{ bundleId }]);
+
+    const manifest: DeviceSnapshotManifest = {
+      snapshotName,
+      timestamp: new Date().toISOString(),
+      deviceId: "other-device",
+      deviceName: device.name,
+      platform: "ios",
+      snapshotType: "app_data",
+      includeAppData: true,
+      includeSettings: false,
+      appDataBackup: {
+        backupMethod: "simctl_copy",
+        backedUpPackages: [bundleId],
+      },
+    };
+
+    await makeRestore().execute({
+      snapshotName,
+      manifest,
+      useVmSnapshot: false,
+    });
+
+    const restored = await fs.readFile(
+      path.join(containerRoot, "Documents", "data.txt"),
+      "utf-8"
+    );
+    expect(restored).toBe("new-data");
+    expect(simctl.getMethodCalls("terminateApp")).toHaveLength(1);
+  });
+
+  it("throws when required app is not installed", async () => {
+    const snapshotName = "missing-app";
+    const appDataPath = store.getAppDataPath(snapshotName, {
+      platform: "ios",
+      deviceId: device.deviceId,
+    });
+    await fs.mkdir(appDataPath, { recursive: true });
+    simctl.setInstalledApps([{ bundleId: "com.example.other" }]);
+
+    const manifest: DeviceSnapshotManifest = {
+      snapshotName,
+      timestamp: new Date().toISOString(),
+      deviceId: device.deviceId,
+      deviceName: device.name,
+      platform: "ios",
+      snapshotType: "app_data",
+      includeAppData: true,
+      includeSettings: false,
+      appDataBackup: {
+        backupMethod: "simctl_copy",
+        backedUpPackages: ["com.example.missing"],
+      },
+    };
+
+    await expect(makeRestore().execute({
+      snapshotName,
+      manifest,
+      useVmSnapshot: false,
+    })).rejects.toThrow("App(s) not installed");
+  });
+
+  it("throws on major iOS version mismatch", async () => {
+    simctl.setDeviceInfo(device.deviceId, {
+      udid: device.deviceId,
+      name: device.name,
+      state: "Booted",
+      isAvailable: true,
+      runtime: "com.apple.CoreSimulator.SimRuntime.iOS-17-0",
+    });
+    simctl.setRuntimes([{
+      bundlePath: "/runtime",
+      buildversion: "A123",
+      runtimeRoot: "/runtime/root",
+      identifier: "com.apple.CoreSimulator.SimRuntime.iOS-17-0",
+      version: "17.0",
+      isAvailable: true,
+      name: "iOS 17.0",
+    }]);
+
+    const manifest: DeviceSnapshotManifest = {
+      snapshotName: "version-mismatch",
+      timestamp: new Date().toISOString(),
+      deviceId: device.deviceId,
+      deviceName: device.name,
+      platform: "ios",
+      snapshotType: "app_data",
+      includeAppData: true,
+      includeSettings: false,
+      osVersion: "iOS 16.4",
+      appDataBackup: {
+        backupMethod: "simctl_copy",
+        backedUpPackages: ["com.example.app"],
+      },
+    };
+
+    await expect(makeRestore().execute({
+      snapshotName: "version-mismatch",
+      manifest,
+      useVmSnapshot: false,
+    })).rejects.toThrow("incompatible");
+  });
+
+  it("skips restore when backup method is none", async () => {
+    const snapshotName = "no-backup";
+    const appDataPath = store.getAppDataPath(snapshotName, {
+      platform: "ios",
+      deviceId: device.deviceId,
+    });
+    await fs.mkdir(appDataPath, { recursive: true });
+
+    const manifest: DeviceSnapshotManifest = {
+      snapshotName,
+      timestamp: new Date().toISOString(),
+      deviceId: device.deviceId,
+      deviceName: device.name,
+      platform: "ios",
+      snapshotType: "app_data",
+      includeAppData: true,
+      includeSettings: false,
+      appDataBackup: {
+        backupMethod: "none",
+      },
+    };
+
+    await makeRestore().execute({
+      snapshotName,
+      manifest,
+      useVmSnapshot: false,
+    });
+
+    expect(simctl.getMethodCalls("executeCommand")).toHaveLength(0);
+    expect(simctl.getMethodCalls("executeCommandArgs")).toHaveLength(0);
+    expect(simctl.getMethodCalls("terminateApp")).toHaveLength(0);
+  });
+
+  it("restores iOS settings via per-key defaults write and simctl ui", async () => {
+    const snapshotName = "settings-restore";
+    const manifest: DeviceSnapshotManifest = {
+      snapshotName,
+      timestamp: new Date().toISOString(),
+      deviceId: device.deviceId,
+      deviceName: device.name,
+      platform: "ios",
+      snapshotType: "app_data",
+      includeAppData: false,
+      includeSettings: true,
+      iosSettings: {
+        values: { ".GlobalPreferences/AppleLocale": "nl_BE" },
+        ui: { appearance: "dark", contentSize: "large" },
+      },
+    };
+
+    await makeRestore().execute({ snapshotName, manifest, useVmSnapshot: false });
+
+    const argvCommands = simctl.getMethodCalls("executeCommandArgs").map(c => c.args);
+    expect(argvCommands).toContainEqual(
+      ["spawn", device.deviceId, "defaults", "write", ".GlobalPreferences", "AppleLocale", "nl_BE"]
+    );
+    expect(argvCommands).toContainEqual(["ui", device.deviceId, "appearance", "dark"]);
+    expect(argvCommands).toContainEqual(["ui", device.deviceId, "content_size", "large"]);
+  });
+
+  it("skips settings restore when includeSettings is false", async () => {
+    const snapshotName = "settings-skip";
+    const manifest: DeviceSnapshotManifest = {
+      snapshotName,
+      timestamp: new Date().toISOString(),
+      deviceId: device.deviceId,
+      deviceName: device.name,
+      platform: "ios",
+      snapshotType: "app_data",
+      includeAppData: false,
+      includeSettings: false,
+      iosSettings: {
+        values: { ".GlobalPreferences/AppleLocale": "nl_BE" },
+      },
+    };
+
+    await makeRestore().execute({ snapshotName, manifest, useVmSnapshot: false });
+
+    const argvCommands = simctl.getMethodCalls("executeCommandArgs").map(c => c.args as string[]);
+    expect(argvCommands.some(args => args.includes("defaults") && args.includes("write"))).toBe(false);
+  });
+
+  it("continues restoring remaining settings when one key write fails (non-fatal)", async () => {
+    const snapshotName = "settings-partial";
+    simctl.setCommandArgsError(
+      ["spawn", device.deviceId, "defaults", "write", ".GlobalPreferences", "AppleLocale", "nl_BE"],
+      new Error("write failed")
+    );
+    const manifest: DeviceSnapshotManifest = {
+      snapshotName,
+      timestamp: new Date().toISOString(),
+      deviceId: device.deviceId,
+      deviceName: device.name,
+      platform: "ios",
+      snapshotType: "app_data",
+      includeAppData: false,
+      includeSettings: true,
+      iosSettings: {
+        values: { ".GlobalPreferences/AppleLocale": "nl_BE" },
+        ui: { appearance: "light" },
+      },
+    };
+
+    // Should not throw despite the failed key write.
+    await makeRestore().execute({ snapshotName, manifest, useVmSnapshot: false });
+
+    const argvCommands = simctl.getMethodCalls("executeCommandArgs").map(c => c.args);
+    // UI restore still runs after the failed defaults write.
+    expect(argvCommands).toContainEqual(["ui", device.deviceId, "appearance", "light"]);
   });
 });

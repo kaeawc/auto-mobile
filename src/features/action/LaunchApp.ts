@@ -5,7 +5,6 @@ import { BootedDevice, ClearAppDataResult, LaunchAppResult, ObserveResult, Termi
 import { ActionableError } from "../../models";
 import { TerminateApp } from "./TerminateApp";
 import { ClearAppData } from "./ClearAppData";
-import { ClearAppDataIos } from "./ClearAppDataIos";
 import { logger } from "../../utils/logger";
 import { ListInstalledApps } from "../observe/ListInstalledApps";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
@@ -106,7 +105,7 @@ export class LaunchApp extends BaseVisualChange {
     };
     this.performanceTrackerFactory = dependencies.performanceTrackerFactory ?? createGlobalPerformanceTracker;
     this.clearAppDataFactory = dependencies.clearAppDataFactory ?? (
-      (device, simctl) => new ClearAppDataIos(device, simctl)
+      (device, simctl) => new ClearAppData(device, undefined, simctl)
     );
     this.createAndroidClearAppData = this.resolveAndroidClearAppDataFactory(dependencies.createAndroidClearAppData);
     this.createAndroidColdBoot = this.resolveAndroidColdBootFactory(dependencies.createAndroidColdBoot);

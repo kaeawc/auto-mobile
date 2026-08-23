@@ -8,12 +8,12 @@ import type {
 } from "../../features/action/RestoreSnapshot";
 
 /**
- * Captures a device-state snapshot. Implemented by `CaptureSnapshot`
- * (Android) and `CaptureSnapshotIos` (iOS).
+ * Captures a device-state snapshot. Implemented by `CaptureSnapshot`,
+ * which dispatches on device platform (Android and iOS).
  *
  * Platform-specific fields on {@link CaptureSnapshotArgs} (`appBundleIds`
  * iOS-only, `userApps` Android-only) are ignored on the platform that
- * doesn't understand them — see the concrete implementations.
+ * doesn't understand them — see the concrete implementation.
  */
 export interface SnapshotCaptureProvider {
   capture(args: CaptureSnapshotArgs): Promise<CaptureSnapshotResult>;
@@ -21,9 +21,9 @@ export interface SnapshotCaptureProvider {
 
 /**
  * Restores a previously captured snapshot. Implemented by
- * `RestoreSnapshot` (Android) and `RestoreSnapshotIos` (iOS); the
- * manifest in {@link RestoreSnapshotArgs} routes restore to the right
- * platform-specific recovery path.
+ * `RestoreSnapshot`, which dispatches on device platform (Android and
+ * iOS); the manifest in {@link RestoreSnapshotArgs} routes restore to the
+ * right platform-specific recovery path.
  */
 export interface SnapshotRestoreProvider {
   restore(args: RestoreSnapshotArgs): Promise<RestoreSnapshotResult>;

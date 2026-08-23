@@ -9,7 +9,11 @@ import {
   evaluateVmSnapshotResult,
   formatVmSnapshotExecutionError
 } from "../../utils/android-cmdline-tools/vmSnapshot";
-import { DeviceSnapshotStore } from "../../utils/DeviceSnapshotStore";
+import { DeviceSnapshotStore, SnapshotPathOptions } from "../../utils/DeviceSnapshotStore";
+import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import { getAppDataContainerPath, IOS_APP_DATA_FOLDERS, terminateAppIfRunning } from "../../utils/ios-cmdline-tools/iosAppContainer";
+import { restoreIosSettings } from "../../utils/ios-cmdline-tools/iosSettings";
+import { pathExists } from "../../utils/filesystem/DefaultFileSystem";
 import { logger } from "../../utils/logger";
 import { shellQuote } from "../../utils/shellQuote";
 import { promises as fs } from "fs";
@@ -31,8 +35,11 @@ export interface RestoreSnapshotResult {
 }
 
 /**
- * Restore device state from snapshot
- * Supports VM snapshot restoration for emulators and ADB-based restore for all devices
+ * Restore device state from snapshot, dispatching on device platform.
+ *
+ * - **Android**: VM snapshot restoration for emulators, ADB-based restore
+ *   otherwise.
+ * - **iOS**: app container restore via `simctl` (app_data snapshots only).
  */
 export class RestoreSnapshot implements SnapshotRestoreProvider {
   private device: BootedDevice;
@@ -40,23 +47,22 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
   private emulator: AndroidEmulatorClient;
   private store: DeviceSnapshotStore;
   private timer: Timer;
+  private simctl: SimCtlClient;
 
   constructor(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     emulator?: AndroidEmulatorClient,
     timer: Timer = defaultTimer,
-    store: DeviceSnapshotStore = new DeviceSnapshotStore()
+    store: DeviceSnapshotStore = new DeviceSnapshotStore(),
+    simctl?: SimCtlClient
   ) {
-    if (device.platform !== "android") {
-      throw new ActionableError("Snapshot restore is currently only supported for Android devices");
-    }
-
     this.device = device;
     this.adb = adbFactory.create(device);
     this.emulator = emulator || new AndroidEmulatorClient();
     this.store = store;
     this.timer = timer;
+    this.simctl = simctl || new SimCtlClient(device);
   }
 
   /**
@@ -71,6 +77,17 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
    * Execute snapshot restoration
    */
   async execute(args: RestoreSnapshotArgs): Promise<RestoreSnapshotResult> {
+    switch (this.device.platform) {
+      case "android":
+        return this.executeAndroid(args);
+      case "ios":
+        return this.executeIos(args);
+      default:
+        throw new ActionableError(`Snapshot restore is not supported for platform '${this.device.platform}'`);
+    }
+  }
+
+  private async executeAndroid(args: RestoreSnapshotArgs): Promise<RestoreSnapshotResult> {
     const { snapshotName, manifest, useVmSnapshot = true, vmSnapshotTimeoutMs = 30000 } = args;
 
     logger.info(`Restoring snapshot '${snapshotName}' (type: ${manifest.snapshotType}) to device ${this.device.deviceId}`);
@@ -379,6 +396,243 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
       logger.info(`Launched ${packageName}`);
     } catch (error) {
       logger.warn(`Failed to restore foreground app: ${error}`);
+    }
+  }
+
+  private async executeIos(args: RestoreSnapshotArgs): Promise<RestoreSnapshotResult> {
+    const { snapshotName, manifest } = args;
+
+    logger.info(`[iOS] Restoring snapshot '${snapshotName}' (type: ${manifest.snapshotType})`);
+
+    if (manifest.platform !== "ios") {
+      throw new ActionableError(
+        `Snapshot platform '${manifest.platform}' does not match device platform '${this.device.platform}'`
+      );
+    }
+
+    if (manifest.snapshotType !== "app_data") {
+      throw new ActionableError(
+        `Unsupported iOS snapshot type '${manifest.snapshotType}'. Re-capture using app container backups.`
+      );
+    }
+
+    await this.validateIosSnapshotCompatibility(manifest);
+
+    if (manifest.includeSettings && manifest.iosSettings) {
+      await restoreIosSettings(this.simctl, this.device.deviceId, manifest.iosSettings);
+    }
+
+    await this.restoreIosAppData(snapshotName, manifest);
+
+    logger.info(`[iOS] Snapshot '${snapshotName}' restored successfully`);
+
+    return {
+      snapshotType: manifest.snapshotType,
+      restoredAt: new Date().toISOString(),
+    };
+  }
+
+  private getIosPathOptions(deviceId?: string): SnapshotPathOptions {
+    return { platform: "ios", deviceId: deviceId ?? this.device.deviceId };
+  }
+
+  private async restoreIosAppData(
+    snapshotName: string,
+    manifest: DeviceSnapshotManifest
+  ): Promise<void> {
+    if (!manifest.includeAppData) {
+      logger.info("[iOS] Snapshot does not include app data; skipping restore");
+      return;
+    }
+
+    const appDataPath = await this.resolveIosAppDataPath(snapshotName, manifest);
+    if (!appDataPath) {
+      logger.warn(`[iOS] App data directory not found for snapshot '${snapshotName}'`);
+      return;
+    }
+
+    if (manifest.appDataBackup?.backupMethod === "none") {
+      logger.info("[iOS] Snapshot app data backup method is 'none'; skipping restore");
+      return;
+    }
+
+    const bundleIds = await this.resolveIosSnapshotBundleIds(appDataPath, manifest);
+    if (bundleIds.length === 0) {
+      logger.warn("[iOS] No app bundle IDs found to restore");
+      return;
+    }
+
+    const installedBundles = await this.getInstalledIosBundleIds();
+    if (installedBundles.size > 0) {
+      const missingBundles = bundleIds.filter(bundleId => !installedBundles.has(bundleId));
+      if (missingBundles.length > 0) {
+        throw new ActionableError(
+          `App(s) not installed on simulator: ${missingBundles.join(", ")}. Please reinstall and retry restore.`
+        );
+      }
+    } else {
+      logger.warn("[iOS] Unable to verify installed apps; proceeding with restore");
+    }
+
+    for (const bundleId of bundleIds) {
+      try {
+        await this.restoreIosBundleContainer(bundleId, appDataPath);
+      } catch (error) {
+        logger.warn(`[iOS] Failed to restore app data for ${bundleId}: ${error}`);
+      }
+    }
+  }
+
+  /**
+   * Resolve the on-disk app-data directory for an iOS snapshot, preferring the
+   * manifest's capturing device and falling back to the current device's path
+   * (snapshots are portable across simulators). Returns undefined when neither
+   * location exists.
+   */
+  private async resolveIosAppDataPath(
+    snapshotName: string,
+    manifest: DeviceSnapshotManifest
+  ): Promise<string | undefined> {
+    const manifestPath = this.store.getAppDataPath(snapshotName, this.getIosPathOptions(manifest.deviceId));
+    if (await pathExists(manifestPath)) {
+      return manifestPath;
+    }
+
+    if (!manifest.deviceId || manifest.deviceId === this.device.deviceId) {
+      return undefined;
+    }
+
+    const fallbackPath = this.store.getAppDataPath(snapshotName, this.getIosPathOptions(this.device.deviceId));
+    if (!(await pathExists(fallbackPath))) {
+      return undefined;
+    }
+
+    logger.info(
+      `[iOS] App data not found for '${manifest.deviceId}', using current device path '${this.device.deviceId}'`
+    );
+    return fallbackPath;
+  }
+
+  /**
+   * Restore a single bundle's captured data folders back into its live app
+   * container. Extracted from {@link restoreIosAppData} so the per-bundle
+   * body's folder loop does not nest under the outer bundle loop.
+   */
+  private async restoreIosBundleContainer(bundleId: string, appDataPath: string): Promise<void> {
+    await terminateAppIfRunning(this.simctl, this.device.deviceId, bundleId);
+    const containerPath = await getAppDataContainerPath(this.simctl, this.device.deviceId, bundleId);
+    if (!containerPath) {
+      return;
+    }
+
+    const snapshotBundlePath = path.join(appDataPath, bundleId);
+    for (const folder of IOS_APP_DATA_FOLDERS) {
+      const sourcePath = path.join(snapshotBundlePath, folder);
+      if (!(await pathExists(sourcePath))) {
+        continue;
+      }
+      const destinationPath = path.join(containerPath, folder);
+      await fs.rm(destinationPath, { recursive: true, force: true });
+      await fs.cp(sourcePath, destinationPath, { recursive: true });
+    }
+  }
+
+  private async validateIosSnapshotCompatibility(manifest: DeviceSnapshotManifest): Promise<void> {
+    if (!manifest.osVersion) {
+      logger.warn("[iOS] Snapshot OS version missing; skipping compatibility check");
+      return;
+    }
+
+    const deviceOsVersion = await this.getIosDeviceOsVersion();
+    if (!deviceOsVersion) {
+      logger.warn("[iOS] Unable to read simulator OS version; skipping compatibility check");
+      return;
+    }
+
+    const snapshotVersion = this.parseIosOsVersion(manifest.osVersion);
+    const targetVersion = this.parseIosOsVersion(deviceOsVersion);
+
+    if (!snapshotVersion || !targetVersion) {
+      logger.warn("[iOS] Unable to parse OS versions for compatibility check; proceeding");
+      return;
+    }
+
+    if (snapshotVersion.major !== targetVersion.major) {
+      throw new ActionableError(
+        `Snapshot iOS version '${manifest.osVersion}' is incompatible with simulator iOS '${deviceOsVersion}'. ` +
+        `Please restore on an iOS ${snapshotVersion.major}.x simulator.`
+      );
+    }
+  }
+
+  private async getIosDeviceOsVersion(): Promise<string | undefined> {
+    try {
+      const deviceInfo = await this.simctl.getDeviceInfo(this.device.deviceId);
+      if (!deviceInfo) {
+        return undefined;
+      }
+
+      let osVersion: string | undefined = deviceInfo.os_version;
+      if (!osVersion && deviceInfo.runtime) {
+        const runtimes = await this.simctl.getRuntimes();
+        const runtime = runtimes.find(entry => entry.identifier === deviceInfo.runtime);
+        osVersion = runtime?.version || runtime?.name;
+      }
+
+      return osVersion;
+    } catch (error) {
+      logger.warn(`[iOS] Failed to read simulator OS version: ${error}`);
+      return undefined;
+    }
+  }
+
+  private parseIosOsVersion(version: string): { major: number; minor?: number } | null {
+    const runtimeMatch = version.match(/iOS[-\s_]?(\d+)(?:[.\-_](\d+))?/i);
+    const match = runtimeMatch ?? version.match(/(\d+)(?:\.(\d+))?/);
+    if (!match) {
+      return null;
+    }
+
+    const major = Number(match[1]);
+    if (!Number.isFinite(major)) {
+      return null;
+    }
+
+    const minorValue = match[2];
+    const minor = minorValue !== undefined ? Number(minorValue) : undefined;
+    return Number.isFinite(minor) || minor === undefined ? { major, minor } : { major };
+  }
+
+  private async getInstalledIosBundleIds(): Promise<Set<string>> {
+    try {
+      const apps = await this.simctl.listApps(this.device.deviceId);
+      const bundleIds = apps
+        .map((app: any) => app.bundleId || app.CFBundleIdentifier)
+        .filter((value: string | undefined) => typeof value === "string" && value.length > 0);
+      return new Set(bundleIds);
+    } catch (error) {
+      logger.warn(`[iOS] Failed to list installed apps: ${error}`);
+      return new Set();
+    }
+  }
+
+  private async resolveIosSnapshotBundleIds(
+    appDataPath: string,
+    manifest: DeviceSnapshotManifest
+  ): Promise<string[]> {
+    const fromManifest = manifest.appDataBackup?.backedUpPackages;
+    if (fromManifest && fromManifest.length > 0) {
+      return fromManifest;
+    }
+
+    try {
+      const entries = await fs.readdir(appDataPath, { withFileTypes: true });
+      return entries
+        .filter(entry => entry.isDirectory())
+        .map(entry => entry.name);
+    } catch (error) {
+      logger.warn(`[iOS] Failed to read app data bundles: ${error}`);
+      return [];
     }
   }
 }

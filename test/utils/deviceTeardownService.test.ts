@@ -74,6 +74,40 @@ describe("DeviceTeardownService", () => {
     expect(destroyCalls).toBe(1);
   });
 
+  test("reports a persistence failure when ownership is lost before completion", async () => {
+    class LostCompletionStore extends FakeDeviceTeardownOperationStore {
+      override async complete(
+        ..._args: Parameters<DeviceTeardownOperationStore["complete"]>
+      ): Promise<boolean> {
+        return false;
+      }
+    }
+
+    const timer = new FakeTimer();
+    const service = createService(timer, new LostCompletionStore()).service;
+    const workflow = {
+      resolve: async () => ({ target: "target" }) as const,
+      stop: async () => "accepted" as const,
+      destroy: async () => {},
+      verify: async () => ({ status: "destroyed" }) as TestResponse,
+      conflict: () => ({ status: "failed", phase: "precondition" }) as TestResponse,
+      failure: (phase: DeviceTeardownPhase) => ({ status: "failed", phase }) as TestResponse,
+      isFailure: (response: TestResponse) => response.status === "failed",
+    };
+
+    await expect(
+      service.teardown(
+        {
+          operationId: "lost-completion",
+          fingerprint: "fingerprint",
+          identity,
+          deadlineMs: 1_000,
+        },
+        workflow,
+      ),
+    ).resolves.toEqual({ status: "failed", phase: "verification" });
+  });
+
   test("caller cancellation stops waiting without cancelling accepted teardown", async () => {
     const timer = new FakeTimer();
     const { service } = createService(timer);

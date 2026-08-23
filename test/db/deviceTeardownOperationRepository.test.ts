@@ -20,7 +20,15 @@ describe("DeviceTeardownOperationRepository", () => {
     expect(await repository.begin("operation-1", "request-a", "owner-a", 100, 1_100)).toEqual({
       status: "started",
     });
-    await repository.complete("operation-1", "request-a", "owner-a", { state: "destroyed" }, 1_200);
+    expect(
+      await repository.complete(
+        "operation-1",
+        "request-a",
+        "owner-a",
+        { state: "destroyed" },
+        1_200,
+      ),
+    ).toBe(true);
 
     const restarted = new DeviceTeardownOperationRepository(db);
     expect(await restarted.begin("operation-1", "request-a", "owner-b", 200, 1_200)).toEqual({
@@ -83,7 +91,9 @@ describe("DeviceTeardownOperationRepository", () => {
       status: "started",
     });
 
-    await repository.complete("operation-1", "request-a", "owner-a", { state: "stale" }, 1_300);
+    expect(
+      await repository.complete("operation-1", "request-a", "owner-a", { state: "stale" }, 1_300),
+    ).toBe(false);
     await repository.delete("operation-1", "request-a", "owner-a");
     expect(await repository.renew("operation-1", "request-a", "owner-a", 1_400)).toBe(false);
 

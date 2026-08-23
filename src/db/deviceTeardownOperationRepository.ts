@@ -29,7 +29,7 @@ export interface DeviceTeardownOperationStore {
     ownerToken: string,
     result: unknown,
     expiresAtMs: number,
-  ): Promise<void>;
+  ): Promise<boolean>;
   delete(operationId: string, requestFingerprint: string, ownerToken: string): Promise<void>;
 }
 
@@ -110,8 +110,8 @@ export class DeviceTeardownOperationRepository implements DeviceTeardownOperatio
     ownerToken: string,
     result: unknown,
     expiresAtMs: number,
-  ): Promise<void> {
-    await this.getDb()
+  ): Promise<boolean> {
+    const update = await this.getDb()
       .updateTable("device_teardown_operations")
       .set({
         status: "completed",
@@ -122,7 +122,8 @@ export class DeviceTeardownOperationRepository implements DeviceTeardownOperatio
       .where("operation_id", "=", operationId)
       .where("request_fingerprint", "=", requestFingerprint)
       .where("owner_token", "=", ownerToken)
-      .execute();
+      .executeTakeFirst();
+    return Number(update.numUpdatedRows) > 0;
   }
 
   async delete(operationId: string, requestFingerprint: string, ownerToken: string): Promise<void> {

@@ -193,13 +193,16 @@ export class DeviceTeardownService {
       return response;
     }
     try {
-      await operationStore.complete(
+      const completed = await operationStore.complete(
         request.operationId,
         request.fingerprint,
         ownerToken,
         response,
         this.dependencies.timer.now() + this.dependencies.resultTtlMs,
       );
+      if (!completed) {
+        throw new ActionableError("Teardown operation ownership was lost before completion");
+      }
       return response;
     } catch (error) {
       return workflow.failure(

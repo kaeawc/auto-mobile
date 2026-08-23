@@ -126,11 +126,14 @@ export class AndroidSegmentedPlanVideoSession {
    * the available identity during deletion; booted devices retain exact serial matching.
    */
   matchesDevice(device: Pick<DeviceInfo, "platform" | "name" | "deviceId">): boolean {
-    return (
-      this.device.platform === device.platform &&
-      this.device.name === device.name &&
-      (device.deviceId === undefined || this.device.deviceId === device.deviceId)
-    );
+    if (this.device.platform !== device.platform) {
+      return false;
+    }
+    // A booted target's runtime ID is its exact incarnation identity. A stopped
+    // AVD has no runtime ID, so deletion must fall back to its stable name.
+    return device.deviceId === undefined
+      ? this.device.name === device.name
+      : this.device.deviceId === device.deviceId;
   }
 
   async startFirstSegment(): Promise<ActiveVideoRecording> {

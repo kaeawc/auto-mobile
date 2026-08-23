@@ -57,12 +57,14 @@ export class FakeDeviceTeardownOperationStore implements DeviceTeardownOperation
     ownerToken: string,
     result: unknown,
     expiresAtMs: number,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const operation = this.operations.get(operationId);
     if (operation?.fingerprint === requestFingerprint && operation.ownerToken === ownerToken) {
       operation.result = result;
       operation.expiresAtMs = expiresAtMs;
+      return true;
     }
+    return false;
   }
 
   async delete(operationId: string, requestFingerprint: string, ownerToken: string): Promise<void> {

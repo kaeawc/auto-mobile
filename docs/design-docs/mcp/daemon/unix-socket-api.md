@@ -67,6 +67,7 @@ All messages are newline-delimited JSON sent over the Unix socket. Each request 
 | `success` | `boolean` | `true` on success, `false` on error |
 | `result` | `object` | Present when `success` is `true` |
 | `error` | `string` | Present when `success` is `false` |
+| `transportFailure` | `object` | Optional machine-readable device-control transport failure metadata. The allowlisted fields are `code`, `transport`, `toolName`, optional `deviceId`, optional `deviceSessionUuid`, optional target-owner `sessionUuid`, optional caller `routingSessionUuid`, `sessionValid`, `deviceSessionValid`, `phase`, `retryable`, `reconnectAttempted`, and `replayAttempted`. `sessionValid` reports whether all captured daemon-session identities remain valid; `deviceSessionValid` independently reports whether the captured device epoch is still current. Legacy clients can continue using `error`. |
 
 ---
 

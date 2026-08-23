@@ -5,10 +5,12 @@ import { existsSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { SOCKET_REQUEST_DEADLINE_MS, sendSocketRequest } from "./helpers/socketRequest";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { SessionToolBinding } from "../../src/server/SessionToolBinding";
 import type { DaemonResponse } from "../../src/daemon/types";
 
 /**
@@ -36,20 +38,114 @@ function createFakeMcpClient(overrides: Partial<FakeMcpClient> = {}): FakeMcpCli
   };
 }
 
-function createFakeDaemonState() {
+function socketClosedError(sensitiveDetail = ""): Error {
+  return new Error(
+    `The socket connection was closed unexpectedly. For more information, pass verbose: true.${sensitiveDetail}`,
+  );
+}
+
+function createFakeDaemonState(
+  sessionIsValid: () => boolean,
+  secondarySessionIsValid: () => boolean,
+  resolveDeviceEpochUuid: () => string | undefined,
+  resolveSecondaryDeviceEpochUuid: () => string | undefined,
+  resolveAutolockSession: () => string | undefined,
+  resolveDeviceLabelSession: () => string | undefined,
+  resolvePrimaryDeviceOwnerSession: () => string | undefined,
+  resolvePrimarySessionGeneration: () => number,
+) {
+  const session = {
+    sessionId: "session-a",
+    assignedDevice: "emulator-5554",
+    platform: "android" as const,
+    createdAt: 0,
+    lastUsedAt: 0,
+    expiresAt: Number.MAX_SAFE_INTEGER,
+    cacheData: {},
+    lastHeartbeat: 0,
+    sessionTimeoutMs: 60_000,
+    heartbeatTimeoutMs: 60_000,
+    heartbeatTimeoutSource: "default" as const,
+    hasReceivedHeartbeat: true,
+  };
+  const secondarySession = {
+    ...session,
+    sessionId: "session-b",
+    assignedDevice: "emulator-5556",
+  };
+  const replacementSession = {
+    ...session,
+    cacheData: {},
+  };
+  const deviceSession = {
+    deviceSessionUuid: "device-epoch-a",
+    deviceId: "emulator-5554",
+    platform: "android" as const,
+    epochStartedAt: 0,
+  };
+  const secondaryDeviceSession = {
+    ...deviceSession,
+    deviceSessionUuid: "device-epoch-b",
+    deviceId: "emulator-5556",
+  };
   return {
     isInitialized: () => true,
-    getSessionManager: () => ({ getSession: () => null, releaseSession: async () => null }),
+    getSessionManager: () => ({
+      getSession: (sessionId: string) =>
+        sessionId === session.sessionId && sessionIsValid()
+          ? resolvePrimarySessionGeneration() === 0
+            ? session
+            : replacementSession
+          : sessionId === secondarySession.sessionId && secondarySessionIsValid()
+            ? secondarySession
+            : null,
+      getSessionForDevice: (deviceId: string) =>
+        deviceId === session.assignedDevice
+          ? resolvePrimaryDeviceOwnerSession()
+          : deviceId === secondarySession.assignedDevice
+            ? secondarySession.sessionId
+            : null,
+      getDeviceLabels: (sessionId: string) => {
+        const labeledSession = resolveDeviceLabelSession();
+        return sessionId === session.sessionId && labeledSession
+          ? { B: labeledSession }
+          : undefined;
+      },
+      releaseSession: async () => null,
+    }),
     getDevicePool: () => ({
       refreshDevices: async () => 0,
       getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
       releaseDevice: async () => {},
+      resolveAutolockSessionForMcpSession: () => resolveAutolockSession(),
+    }),
+    getDeviceSessionRegistry: () => ({
+      list: () => {
+        const deviceEpochUuid = resolveDeviceEpochUuid();
+        const secondaryDeviceEpochUuid = resolveSecondaryDeviceEpochUuid();
+        return [
+          ...(deviceEpochUuid
+            ? [{ ...deviceSession, deviceSessionUuid: deviceEpochUuid }]
+            : []),
+          ...(secondaryDeviceEpochUuid
+            ? [{
+              ...secondaryDeviceSession,
+              deviceSessionUuid: secondaryDeviceEpochUuid,
+            }]
+            : []),
+        ];
+      },
     }),
   };
 }
 
-function sendRequest(socketPath: string, method: string, params: Record<string, unknown> = {}): Promise<DaemonResponse> {
-  return sendSocketRequest(socketPath, method, params);
+function sendRequest(
+  socketPath: string,
+  method: string,
+  params: Record<string, unknown> = {},
+  timeoutMs?: number,
+): Promise<DaemonResponse> {
+  return sendSocketRequest(socketPath, method, params, timeoutMs);
 }
 
 class PersistentSocketClient {
@@ -115,14 +211,39 @@ describe("UnixSocketServer MCP session reconnect", () => {
   let socketPath: string;
   let server: UnixSocketServer;
   let fakeTimer: FakeTimer;
+  let sessionIsValid: boolean;
+  let secondarySessionIsValid: boolean;
+  let deviceEpochUuid: string | undefined;
+  let secondaryDeviceEpochUuid: string | undefined;
+  let autolockSessionUuid: string | undefined;
+  let deviceLabelSessionUuid: string | undefined;
+  let primaryDeviceOwnerSessionUuid: string | undefined;
+  let primarySessionGeneration: number;
 
   beforeEach(async () => {
     socketPath = join(tmpdir(), `mcp-rc-${randomUUID()}.sock`);
     fakeTimer = new FakeTimer();
+    sessionIsValid = true;
+    secondarySessionIsValid = true;
+    deviceEpochUuid = "device-epoch-a";
+    secondaryDeviceEpochUuid = "device-epoch-b";
+    autolockSessionUuid = undefined;
+    deviceLabelSessionUuid = "session-b";
+    primaryDeviceOwnerSessionUuid = "session-a";
+    primarySessionGeneration = 0;
     server = new UnixSocketServer(
       socketPath,
       "http://localhost:0/mcp",
-      createFakeDaemonState(),
+      createFakeDaemonState(
+        () => sessionIsValid,
+        () => secondarySessionIsValid,
+        () => deviceEpochUuid,
+        () => secondaryDeviceEpochUuid,
+        () => autolockSessionUuid,
+        () => deviceLabelSessionUuid,
+        () => primaryDeviceOwnerSessionUuid,
+        () => primarySessionGeneration,
+      ),
       fakeTimer,
     );
     await server.start();
@@ -199,6 +320,931 @@ describe("UnixSocketServer MCP session reconnect", () => {
     expect(response.error).toContain("Connection refused");
     // Only one client created — no retry
     expect(clientsCreated).toBe(1);
+  });
+
+  test("reconnects launchApp after a socket closure before request dispatch", async () => {
+    let clientsCreated = 0;
+    let callsDispatched = 0;
+
+    server.mcpClientFactory = async () => {
+      clientsCreated++;
+      if (clientsCreated === 1) {
+        throw socketClosedError();
+      }
+      return createFakeMcpClient({
+        callTool: async () => {
+          callsDispatched++;
+          return { content: [{ type: "text", text: "launched" }] };
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "launchApp",
+      arguments: { sessionUuid: "session-a", appId: "dev.example" },
+    });
+
+    expect(response.success).toBe(true);
+    expect(clientsCreated).toBe(2);
+    expect(callsDispatched).toBe(1);
+  });
+
+  test("reconnects a sessionless call after a socket closure before request dispatch", async () => {
+    let clientsCreated = 0;
+    let callsDispatched = 0;
+
+    server.mcpClientFactory = async () => {
+      clientsCreated++;
+      if (clientsCreated === 1) {
+        throw socketClosedError();
+      }
+      return createFakeMcpClient({
+        callTool: async () => {
+          callsDispatched++;
+          return { content: [{ type: "text", text: "observed" }] };
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: { platform: "android" },
+    });
+
+    expect(response.success).toBe(true);
+    expect(clientsCreated).toBe(2);
+    expect(callsDispatched).toBe(1);
+  });
+
+  test("does not reconnect an unestablished device across session recreation", async () => {
+    let clientsCreated = 0;
+    deviceEpochUuid = undefined;
+
+    server.mcpClientFactory = async () => {
+      clientsCreated++;
+      primarySessionGeneration = 1;
+      throw socketClosedError();
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: { sessionUuid: "session-a" },
+    });
+
+    expect(response.success).toBe(false);
+    expect(clientsCreated).toBe(1);
+    expect(response.transportFailure).toMatchObject({
+      sessionUuid: "session-a",
+      routingSessionUuid: "session-a",
+      sessionValid: false,
+      deviceSessionValid: false,
+      phase: "connect",
+      retryable: false,
+      reconnectAttempted: false,
+      replayAttempted: false,
+    });
+  });
+
+  test("preserves an unrelated failure while reconnecting before request dispatch", async () => {
+    let clientsCreated = 0;
+
+    server.mcpClientFactory = async () => {
+      clientsCreated++;
+      if (clientsCreated === 1) {
+        throw socketClosedError();
+      }
+      throw new Error("MCP configuration rejected");
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: { sessionUuid: "session-a" },
+    });
+
+    expect(response.success).toBe(false);
+    expect(clientsCreated).toBe(2);
+    expect(response.error).toContain("MCP configuration rejected");
+    expect(response.transportFailure).toBeUndefined();
+  });
+
+  test("classifies a closure during the existing session-expiry replay", async () => {
+    let clientsCreated = 0;
+    let callsDispatched = 0;
+
+    server.mcpClientFactory = async () => {
+      const clientIndex = ++clientsCreated;
+      return createFakeMcpClient({
+        callTool: async () => {
+          callsDispatched++;
+          if (clientIndex === 1) {
+            throw new Error("Session not found");
+          }
+          throw socketClosedError(" endpoint=https://secret.invalid?token=hidden");
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: { sessionUuid: "session-a" },
+    });
+
+    expect(response.success).toBe(false);
+    expect(clientsCreated).toBe(2);
+    expect(callsDispatched).toBe(2);
+    expect(response.error).toBe("Device-control transport recovery exhausted while handling observe");
+    expect(JSON.stringify(response)).not.toContain("secret.invalid");
+    expect(response.transportFailure).toMatchObject({
+      sessionValid: true,
+      phase: "response",
+      retryable: true,
+      reconnectAttempted: true,
+      replayAttempted: true,
+    });
+    expect((server as any).mcpClients.size).toBe(0);
+  });
+
+  test("refreshes autolock identity when session-expiry replay closes", async () => {
+    let clientsCreated = 0;
+
+    server.mcpClientFactory = async () => {
+      const clientIndex = ++clientsCreated;
+      return createFakeMcpClient({
+        callTool: async () => {
+          if (clientIndex === 1) {
+            autolockSessionUuid = "session-a";
+            throw new Error("Session not found");
+          }
+          throw socketClosedError();
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: { platform: "android" },
+    });
+
+    expect(response.success).toBe(false);
+    expect(clientsCreated).toBe(2);
+    expect(response.transportFailure).toMatchObject({
+      deviceId: "emulator-5554",
+      deviceSessionUuid: "device-epoch-a",
+      sessionUuid: "session-a",
+      sessionValid: true,
+      deviceSessionValid: true,
+      phase: "response",
+      retryable: true,
+      reconnectAttempted: true,
+      replayAttempted: true,
+    });
+  });
+
+  test("reconnects and replays observe after a socket closure while handling the response", async () => {
+    let clientsCreated = 0;
+    let callsDispatched = 0;
+
+    server.mcpClientFactory = async () => {
+      const clientIndex = ++clientsCreated;
+      return createFakeMcpClient({
+        callTool: async () => {
+          callsDispatched++;
+          if (clientIndex === 1) {
+            throw socketClosedError();
+          }
+          return { content: [{ type: "text", text: "observed" }] };
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: { sessionUuid: "session-a" },
+    });
+
+    expect(response.success).toBe(true);
+    expect(clientsCreated).toBe(2);
+    expect(callsDispatched).toBe(2);
+  });
+
+  test("refreshes first-use autolock identity before replaying observe", async () => {
+    let clientsCreated = 0;
+    let callsDispatched = 0;
+
+    server.mcpClientFactory = async () => {
+      const clientIndex = ++clientsCreated;
+      return createFakeMcpClient({
+        callTool: async () => {
+          callsDispatched++;
+          if (clientIndex === 1) {
+            autolockSessionUuid = "session-a";
+            throw socketClosedError();
+          }
+          return { content: [{ type: "text", text: "observed" }] };
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: { platform: "android" },
+    });
+
+    expect(response.success).toBe(true);
+    expect(clientsCreated).toBe(2);
+    expect(callsDispatched).toBe(2);
+  });
+
+  test("reconnects without waiting for a stale client's close to settle", async () => {
+    let clientsCreated = 0;
+    let callsDispatched = 0;
+    let closeCalls = 0;
+
+    server.mcpClientFactory = async () => {
+      const clientIndex = ++clientsCreated;
+      return createFakeMcpClient({
+        callTool: async () => {
+          callsDispatched++;
+          if (clientIndex === 1) {
+            throw socketClosedError();
+          }
+          return { content: [{ type: "text", text: "observed" }] };
+        },
+        close: async () => {
+          closeCalls++;
+          if (clientIndex === 1) {
+            return new Promise<void>(() => {});
+          }
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: { sessionUuid: "session-a" },
+    });
+
+    expect(response.success).toBe(true);
+    expect(clientsCreated).toBe(2);
+    expect(callsDispatched).toBe(2);
+    expect(closeCalls).toBe(1);
+    expect((server as any).mcpClients.size).toBe(1);
+  });
+
+  test("does not evict a replacement client while resetting a failed route", async () => {
+    let replacementCloseCalls = 0;
+    const failedClient = createFakeMcpClient();
+    const replacementClient = createFakeMcpClient({
+      close: async () => {
+        replacementCloseCalls++;
+      },
+    });
+    const clientKey = "session:replacement-race";
+    const internals = server as any;
+    internals.mcpClients.set(clientKey, replacementClient);
+
+    const reset = await internals.resetMcpClientIfCurrent(clientKey, failedClient, "detach");
+
+    expect(reset).toBe(false);
+    expect(internals.mcpClients.get(clientKey)).toBe(replacementClient);
+    expect(replacementCloseCalls).toBe(0);
+  });
+
+  test("does not replay launchApp after an ambiguous response closure", async () => {
+    let clientsCreated = 0;
+    let callsDispatched = 0;
+
+    server.mcpClientFactory = async () => {
+      clientsCreated++;
+      return createFakeMcpClient({
+        callTool: async () => {
+          callsDispatched++;
+          throw socketClosedError(" endpoint=https://secret.invalid?token=hidden");
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "launchApp",
+      arguments: { sessionUuid: "session-a", appId: "dev.example" },
+    });
+
+    expect(response.success).toBe(false);
+    expect(clientsCreated).toBe(2);
+    expect(callsDispatched).toBe(1);
+    expect(response.error).toBe("Device-control transport closed while handling launchApp");
+    expect(response.error).not.toContain("secret.invalid");
+    expect(response.transportFailure).toEqual({
+      code: "device_control_transport_failure",
+      transport: "daemon_loopback_http",
+      toolName: "launchApp",
+      deviceId: "emulator-5554",
+      deviceSessionUuid: "device-epoch-a",
+      sessionUuid: "session-a",
+      routingSessionUuid: "session-a",
+      sessionValid: true,
+      deviceSessionValid: true,
+      phase: "response",
+      retryable: false,
+      reconnectAttempted: true,
+      replayAttempted: false,
+    });
+  });
+
+  test("returns a retryable structured error after observe reconnection exhaustion", async () => {
+    let clientsCreated = 0;
+    let callsDispatched = 0;
+    let closeCalls = 0;
+
+    server.mcpClientFactory = async () => {
+      const clientIndex = ++clientsCreated;
+      return createFakeMcpClient({
+        callTool: async () => {
+          callsDispatched++;
+          if (clientIndex <= 2) {
+            throw socketClosedError(" endpoint=https://secret.invalid?token=hidden");
+          }
+          return { content: [{ type: "text", text: "observed" }] };
+        },
+        close: async () => {
+          closeCalls++;
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: { sessionUuid: "session-a" },
+    });
+
+    expect(response.success).toBe(false);
+    expect(clientsCreated).toBe(2);
+    expect(callsDispatched).toBe(2);
+    expect(response.error).toBe("Device-control transport recovery exhausted while handling observe");
+    expect(JSON.stringify(response)).not.toContain("secret.invalid");
+    expect(response.transportFailure).toMatchObject({
+      code: "device_control_transport_failure",
+      toolName: "observe",
+      deviceId: "emulator-5554",
+      deviceSessionUuid: "device-epoch-a",
+      sessionUuid: "session-a",
+      sessionValid: true,
+      phase: "response",
+      retryable: true,
+      reconnectAttempted: true,
+      replayAttempted: true,
+    });
+    expect(closeCalls).toBe(2);
+    expect((server as any).mcpClients.size).toBe(0);
+
+    const nextResponse = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: { sessionUuid: "session-a" },
+    });
+    expect(nextResponse.success).toBe(true);
+    expect(clientsCreated).toBe(3);
+    expect(callsDispatched).toBe(3);
+  });
+
+  test("does not reconnect or replay after the bound device session becomes invalid", async () => {
+    let clientsCreated = 0;
+    let callsDispatched = 0;
+
+    server.mcpClientFactory = async () => {
+      clientsCreated++;
+      return createFakeMcpClient({
+        callTool: async () => {
+          callsDispatched++;
+          sessionIsValid = false;
+          throw socketClosedError();
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: { sessionUuid: "session-a" },
+    });
+
+    expect(response.success).toBe(false);
+    expect(clientsCreated).toBe(1);
+    expect(callsDispatched).toBe(1);
+    expect(response.transportFailure).toMatchObject({
+      code: "device_control_transport_failure",
+      deviceId: "emulator-5554",
+      deviceSessionUuid: "device-epoch-a",
+      sessionUuid: "session-a",
+      sessionValid: false,
+      deviceSessionValid: true,
+      phase: "response",
+      retryable: false,
+      reconnectAttempted: false,
+      replayAttempted: false,
+    });
+  });
+
+  test("refreshes newly assigned ownership before response recovery", async () => {
+    let clientsCreated = 0;
+    let callsDispatched = 0;
+    primaryDeviceOwnerSessionUuid = undefined;
+
+    server.mcpClientFactory = async () => {
+      clientsCreated++;
+      return createFakeMcpClient({
+        callTool: async () => {
+          callsDispatched++;
+          primaryDeviceOwnerSessionUuid = "session-a";
+          sessionIsValid = false;
+          throw socketClosedError();
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: {
+        sessionUuid: "session-a",
+        deviceId: "emulator-5554",
+      },
+    });
+
+    expect(response.success).toBe(false);
+    expect(clientsCreated).toBe(1);
+    expect(callsDispatched).toBe(1);
+    expect(response.transportFailure).toMatchObject({
+      deviceId: "emulator-5554",
+      deviceSessionUuid: "device-epoch-a",
+      sessionUuid: "session-a",
+      sessionValid: false,
+      deviceSessionValid: true,
+      reconnectAttempted: false,
+      replayAttempted: false,
+    });
+  });
+
+  test("does not recover across same-UUID session recreation", async () => {
+    let clientsCreated = 0;
+    let callsDispatched = 0;
+
+    server.mcpClientFactory = async () => {
+      clientsCreated++;
+      return createFakeMcpClient({
+        callTool: async () => {
+          callsDispatched++;
+          primarySessionGeneration = 1;
+          throw socketClosedError();
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: {
+        sessionUuid: "session-a",
+        deviceId: "emulator-5554",
+      },
+    });
+
+    expect(response.success).toBe(false);
+    expect(clientsCreated).toBe(1);
+    expect(callsDispatched).toBe(1);
+    expect(response.transportFailure).toMatchObject({
+      sessionUuid: "session-a",
+      routingSessionUuid: "session-a",
+      sessionValid: false,
+      deviceSessionValid: true,
+      reconnectAttempted: false,
+      replayAttempted: false,
+    });
+  });
+
+  test("does not adopt a post-release incarnation for a session captured without one", async () => {
+    // First-use observe: session-a is absent when the identity is captured, so the
+    // captured incarnation is undefined even though the UUID is known. During
+    // dispatch the session is created and recreated on the same device (a fresh
+    // incarnation). Recovery must NOT inherit that replacement incarnation for the
+    // already-captured UUID, or the request would replay and be accepted after the
+    // original caller's ownership ended (issue #5499).
+    sessionIsValid = false;
+    let clientsCreated = 0;
+    let callsDispatched = 0;
+
+    server.mcpClientFactory = async () => {
+      clientsCreated++;
+      return createFakeMcpClient({
+        callTool: async () => {
+          callsDispatched++;
+          // Session-a comes into existence as a *replacement* incarnation.
+          sessionIsValid = true;
+          primarySessionGeneration = 1;
+          throw socketClosedError();
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: {
+        sessionUuid: "session-a",
+        deviceId: "emulator-5554",
+      },
+    });
+
+    expect(response.success).toBe(false);
+    // No reconnect or replay may be attempted — recovery is rejected up front.
+    expect(clientsCreated).toBe(1);
+    expect(callsDispatched).toBe(1);
+    expect(response.transportFailure).toMatchObject({
+      sessionUuid: "session-a",
+      sessionValid: false,
+      reconnectAttempted: false,
+      replayAttempted: false,
+    });
+  });
+
+  test("does not replay when only the captured device epoch becomes invalid", async () => {
+    let clientsCreated = 0;
+    let callsDispatched = 0;
+
+    server.mcpClientFactory = async () => {
+      clientsCreated++;
+      return createFakeMcpClient({
+        callTool: async () => {
+          callsDispatched++;
+          deviceEpochUuid = "device-epoch-a-replacement";
+          throw socketClosedError();
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: { sessionUuid: "session-a" },
+    });
+
+    expect(response.success).toBe(false);
+    expect(sessionIsValid).toBe(true);
+    expect(clientsCreated).toBe(1);
+    expect(callsDispatched).toBe(1);
+    expect(response.transportFailure).toMatchObject({
+      deviceId: "emulator-5554",
+      deviceSessionUuid: "device-epoch-a",
+      sessionUuid: "session-a",
+      sessionValid: true,
+      deviceSessionValid: false,
+      reconnectAttempted: false,
+      replayAttempted: false,
+    });
+  });
+
+  test("rejects a replay result when the device epoch becomes invalid in flight", async () => {
+    let clientsCreated = 0;
+    let callsDispatched = 0;
+
+    server.mcpClientFactory = async () => {
+      const clientIndex = ++clientsCreated;
+      return createFakeMcpClient({
+        callTool: async () => {
+          callsDispatched++;
+          if (clientIndex === 1) {
+            throw socketClosedError();
+          }
+          deviceEpochUuid = "device-epoch-a-replacement";
+          return { content: [{ type: "text", text: "stale observation" }] };
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: { sessionUuid: "session-a" },
+    });
+
+    expect(response.success).toBe(false);
+    expect(sessionIsValid).toBe(true);
+    expect(clientsCreated).toBe(2);
+    expect(callsDispatched).toBe(2);
+    expect(response.transportFailure).toMatchObject({
+      sessionValid: true,
+      deviceSessionValid: false,
+      phase: "response",
+      retryable: false,
+      reconnectAttempted: true,
+      replayAttempted: true,
+    });
+    expect((server as any).mcpClients.size).toBe(0);
+  });
+
+  test("fences recovery to the device-label session and epoch", async () => {
+    let clientsCreated = 0;
+    let callsDispatched = 0;
+
+    server.mcpClientFactory = async () => {
+      clientsCreated++;
+      return createFakeMcpClient({
+        callTool: async () => {
+          callsDispatched++;
+          secondarySessionIsValid = false;
+          throw socketClosedError();
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: { sessionUuid: "session-a", device: "B" },
+    });
+
+    expect(response.success).toBe(false);
+    expect(clientsCreated).toBe(1);
+    expect(callsDispatched).toBe(1);
+    expect(response.transportFailure).toMatchObject({
+      deviceId: "emulator-5556",
+      deviceSessionUuid: "device-epoch-b",
+      sessionUuid: "session-b",
+      sessionValid: false,
+      reconnectAttempted: false,
+      replayAttempted: false,
+    });
+  });
+
+  test("pins a device-label target before replaying observe", async () => {
+    let clientsCreated = 0;
+    let closeCalls = 0;
+    let replayedArguments: Record<string, unknown> | undefined;
+    const clientBindings: Array<string | undefined> = [];
+    const clientProfiles: Array<string | undefined> = [];
+    let signalReplayStarted = () => {};
+    const replayStarted = new Promise<void>(resolve => {
+      signalReplayStarted = resolve;
+    });
+    let finishReplay = () => {};
+    const replayResult = new Promise<unknown>(resolve => {
+      finishReplay = () => resolve({ content: [{ type: "text", text: "observed" }] });
+    });
+
+    server.mcpClientFactory = async (boundSessionUuid, toolSelectionProfileUuid) => {
+      clientBindings.push(boundSessionUuid);
+      clientProfiles.push(toolSelectionProfileUuid);
+      const clientIndex = ++clientsCreated;
+      return createFakeMcpClient({
+        callTool: async (...args: unknown[]) => {
+          if (clientIndex === 1) {
+            deviceLabelSessionUuid = "session-a";
+            throw socketClosedError();
+          }
+          const [toolCall] = args as [{ arguments: Record<string, unknown> }];
+          replayedArguments = toolCall.arguments;
+          new SessionToolBinding(boundSessionUuid).effectiveSessionUuid(
+            "replay-mcp-session",
+            replayedArguments,
+          );
+          signalReplayStarted();
+          return replayResult;
+        },
+        close: async () => {
+          closeCalls++;
+        },
+      });
+    };
+
+    const responsePromise = sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: { sessionUuid: "session-a", device: "B" },
+    });
+    await replayStarted;
+
+    expect(clientsCreated).toBe(2);
+    expect(clientBindings).toEqual(["session-a", "session-b"]);
+    // The replay reuses the original route's tool-selection profile (none here);
+    // it must NOT send the routing session UUID as a profile, which would put a
+    // session UUID on the tool-selection-profile wire header (issue #5499).
+    expect(clientProfiles).toEqual([undefined, undefined]);
+    expect(replayedArguments).toMatchObject({
+      sessionUuid: "session-b",
+      deviceId: "emulator-5556",
+    });
+    expect(replayedArguments).not.toHaveProperty("device");
+    expect((server as any).mcpClients.size).toBe(1);
+
+    fakeTimer.advanceTime(5 * 60 * 1000);
+    await Promise.resolve();
+
+    expect(closeCalls).toBe(1);
+    expect((server as any).mcpClients.size).toBe(1);
+
+    finishReplay();
+    const response = await responsePromise;
+    expect(response.success).toBe(true);
+
+    fakeTimer.advanceTime(5 * 60 * 1000);
+    await Promise.resolve();
+
+    expect(closeCalls).toBe(2);
+    expect((server as any).mcpClients.size).toBe(0);
+  });
+
+  test("preserves an unresolved device label when replaying observe", async () => {
+    let clientsCreated = 0;
+    let replayedArguments: Record<string, unknown> | undefined;
+    deviceLabelSessionUuid = undefined;
+
+    server.mcpClientFactory = async () => {
+      const clientIndex = ++clientsCreated;
+      return createFakeMcpClient({
+        callTool: async (...args: unknown[]) => {
+          if (clientIndex === 1) {
+            throw socketClosedError();
+          }
+          const [toolCall] = args as [{ arguments: Record<string, unknown> }];
+          replayedArguments = toolCall.arguments;
+          return { content: [{ type: "text", text: "observed" }] };
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: { sessionUuid: "session-a", device: "unknown" },
+    });
+
+    expect(response.success).toBe(true);
+    expect(clientsCreated).toBe(2);
+    expect(replayedArguments).toMatchObject({
+      sessionUuid: "session-a",
+      device: "unknown",
+    });
+  });
+
+  test("preserves the caller session grant when replaying an explicit device target", async () => {
+    let clientsCreated = 0;
+    let replayedArguments: Record<string, unknown> | undefined;
+    const clientBindings: Array<string | undefined> = [];
+
+    server.mcpClientFactory = async boundSessionUuid => {
+      clientBindings.push(boundSessionUuid);
+      const clientIndex = ++clientsCreated;
+      return createFakeMcpClient({
+        callTool: async (...args: unknown[]) => {
+          if (clientIndex === 1) {
+            throw socketClosedError();
+          }
+          const [toolCall] = args as [{ arguments: Record<string, unknown> }];
+          replayedArguments = toolCall.arguments;
+          return { content: [{ type: "text", text: "observed" }] };
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: { sessionUuid: "session-a", deviceId: "emulator-5556" },
+    });
+
+    expect(response.success).toBe(true);
+    expect(clientsCreated).toBe(2);
+    expect(clientBindings).toEqual(["session-a", "session-a"]);
+    expect(replayedArguments).toMatchObject({
+      sessionUuid: "session-a",
+      deviceId: "emulator-5556",
+    });
+  });
+
+  test("fences explicit-device recovery on the caller routing session", async () => {
+    let clientsCreated = 0;
+    let callsDispatched = 0;
+
+    server.mcpClientFactory = async () => {
+      clientsCreated++;
+      return createFakeMcpClient({
+        callTool: async () => {
+          callsDispatched++;
+          sessionIsValid = false;
+          throw socketClosedError();
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: {
+        sessionUuid: "session-a",
+        deviceId: "emulator-5556",
+      },
+    });
+
+    expect(response.success).toBe(false);
+    expect(clientsCreated).toBe(1);
+    expect(callsDispatched).toBe(1);
+    expect(response.transportFailure).toMatchObject({
+      deviceId: "emulator-5556",
+      deviceSessionUuid: "device-epoch-b",
+      sessionUuid: "session-b",
+      routingSessionUuid: "session-a",
+      sessionValid: false,
+      deviceSessionValid: true,
+      reconnectAttempted: false,
+      replayAttempted: false,
+    });
+  });
+
+  test("recovers observe for an implicit autolock session", async () => {
+    let clientsCreated = 0;
+    let callsDispatched = 0;
+    autolockSessionUuid = "session-a";
+
+    server.mcpClientFactory = async () => {
+      const clientIndex = ++clientsCreated;
+      return createFakeMcpClient({
+        callTool: async () => {
+          callsDispatched++;
+          if (clientIndex === 1) {
+            throw socketClosedError();
+          }
+          return { content: [{ type: "text", text: "observed" }] };
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: { platform: "android" },
+    });
+
+    expect(response.success).toBe(true);
+    expect(clientsCreated).toBe(2);
+    expect(callsDispatched).toBe(2);
+  });
+
+  test("does not dispatch after reconnect consumes the remaining deadline", async () => {
+    let clientsCreated = 0;
+    let callsDispatched = 0;
+    let closeCalls = 0;
+
+    server.mcpClientFactory = async () => {
+      const clientIndex = ++clientsCreated;
+      if (clientIndex === 2) {
+        fakeTimer.advanceTime(90_001);
+      }
+      return createFakeMcpClient({
+        callTool: async () => {
+          callsDispatched++;
+          if (clientIndex === 1) {
+            throw socketClosedError();
+          }
+          return { content: [{ type: "text", text: "observed" }] };
+        },
+        close: async () => {
+          closeCalls++;
+        },
+      });
+    };
+
+    const response = await sendRequest(
+      socketPath,
+      "tools/call",
+      {
+        name: "observe",
+        arguments: { sessionUuid: "session-a" },
+      },
+      100,
+    );
+
+    expect(response.success).toBe(false);
+    expect(clientsCreated).toBe(2);
+    expect(callsDispatched).toBe(1);
+    expect(response.transportFailure).toMatchObject({
+      retryable: true,
+      reconnectAttempted: true,
+      replayAttempted: false,
+    });
+    expect(closeCalls).toBe(2);
+    expect((server as any).mcpClients.size).toBe(0);
+  });
+
+  test("does not classify an MCP application error by message text", async () => {
+    let clientsCreated = 0;
+
+    server.mcpClientFactory = async () => {
+      clientsCreated++;
+      return createFakeMcpClient({
+        callTool: async () => {
+          throw new McpError(
+            ErrorCode.InternalError,
+            "The socket connection was closed unexpectedly in the application",
+          );
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: { sessionUuid: "session-a" },
+    });
+
+    expect(response.success).toBe(false);
+    expect(clientsCreated).toBe(1);
+    expect(response.transportFailure).toBeUndefined();
   });
 
   test("subsequent requests reuse the reconnected client without creating another", async () => {
@@ -301,5 +1347,81 @@ describe("UnixSocketServer MCP session reconnect", () => {
 
     expect(closeCalls).toBe(1);
     expect((server as any).mcpClients.size).toBe(0);
+  });
+
+  test("labeled replay carries the original tool-selection profile, not the routing session (#5499)", () => {
+    const route = (server as any).getDeviceControlRecoveryRoute(
+      {
+        socketSessionId: "socket-1",
+        request: {
+          method: "tools/call",
+          params: {
+            name: "observe",
+            arguments: { sessionUuid: "session-a", device: "B" },
+          },
+        },
+        route: {
+          executionKey: "exec-1",
+          clientKey: "orig-key",
+          sessionUuid: "session-b",
+          toolSelectionProfileUuid: "profile-x",
+        },
+        remainingTimeoutMs: 1000,
+        forwardStartMs: 0,
+        phase: "response",
+        identity: {
+          sessionUuid: "session-b",
+          routingSessionUuid: "session-a",
+          deviceLabelResolved: true,
+        },
+      },
+      true,
+    );
+
+    // The recovery route must replay the generated profile from the original
+    // route, never the routing session UUID masquerading as a profile.
+    expect(route.toolSelectionProfileUuid).toBe("profile-x");
+    expect(route.clientKey).toBe(
+      "socket:socket-1:session:session-b:tool-selection:profile-x",
+    );
+    expect(route.clientKey).not.toContain("session-a");
+  });
+
+  test("a stale reconnect deadline leaves a replacement client under the same key intact (#5499)", async () => {
+    const key = "socket-1:session:session-x";
+    // Never resolve: this wait's creation stays pending and the deadline wins.
+    server.mcpClientFactory = () => new Promise<never>(() => {});
+    const internals = server as any;
+
+    const reconnectPromise = internals.reconnectMcpClientWithinDeadline({
+      route: { executionKey: "exec-1", clientKey: key },
+      remainingTimeoutMs: 1000,
+      forwardStartMs: 0,
+    });
+
+    // getMcpClient registers this wait's pending creation synchronously.
+    expect(internals.mcpClientPromises.get(key)).toBeDefined();
+
+    // A sibling wait clears that pending creation; an unrelated request then
+    // installs a replacement client under the same key.
+    internals.mcpClientPromises.delete(key);
+    let replacementClosed = false;
+    const replacement = createFakeMcpClient({
+      close: async () => {
+        replacementClosed = true;
+      },
+    });
+    internals.mcpClients.set(key, replacement);
+
+    fakeTimer.advanceTime(1000);
+    await expect(reconnectPromise).rejects.toThrow(
+      "MCP client reconnect exceeded the request deadline",
+    );
+    await Promise.resolve();
+
+    // The stale deadline reset is fenced to this wait's own (now superseded)
+    // pending creation, so the replacement survives.
+    expect(replacementClosed).toBe(false);
+    expect(internals.mcpClients.get(key)).toBe(replacement);
   });
 });

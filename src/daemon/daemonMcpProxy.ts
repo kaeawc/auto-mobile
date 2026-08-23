@@ -37,6 +37,7 @@ import {
   describeBuildIdentity,
   getCurrentBuildIdentity,
 } from "./buildIdentity";
+import { DeviceControlTransportError } from "./deviceControlTransportFailure";
 
 export type VersionMismatchReason =
   | "autoStartDisabled"
@@ -1144,6 +1145,13 @@ export class DaemonMcpProxy {
     return message.includes("Unknown tool:");
   }
 
+  private shouldSkipLeaseRefreshForDeviceControlTransportError(error: unknown): boolean {
+    return (
+      error instanceof DeviceControlTransportError
+      && (error.failure.phase === "connect" || !error.failure.sessionValid)
+    );
+  }
+
   private async resetConnection(): Promise<void> {
     const staleClient = this.client;
     this.connected = false;
@@ -1558,8 +1566,10 @@ export class DaemonMcpProxy {
   //   - executePlan owns its own binding lifecycle via the release signal; leave
   //     it untouched so a pre-handler plan rejection does not strand the binding.
   //   - a recoverable error (DaemonUnavailableError transport/connect failure,
-  //     "Session not found", or an unknown-tool build-skew) never reached the
-  //     handler with a live session, so the lease must be allowed to expire.
+  //     "Session not found", or an unknown-tool build-skew), or a device-control
+  //     connect-phase failure never reached the handler with a live session; a
+  //     response failure with sessionValid=false confirms the session is stale.
+  //     Neither may refresh or establish the replay lease.
   private refreshReplayLeaseAfterAdmittedFailure(
     name: string,
     forwardedArgs: Record<string, unknown>,
@@ -1569,7 +1579,8 @@ export class DaemonMcpProxy {
     if (
       name === "executePlan" ||
       name === SET_TOOL_ENABLED_TOOL_NAME ||
-      this.isRecoverableDaemonSessionError(error)
+      this.isRecoverableDaemonSessionError(error) ||
+      this.shouldSkipLeaseRefreshForDeviceControlTransportError(error)
     ) {
       return;
     }

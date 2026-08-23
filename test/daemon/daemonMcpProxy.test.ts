@@ -22,6 +22,7 @@ import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
+import { DeviceControlTransportError } from "../../src/daemon/deviceControlTransportFailure";
 
 const OLDER_VERSION = "0.0.1";
 const NEWER_VERSION = "9999.0.0";
@@ -2467,6 +2468,168 @@ describe("DaemonMcpProxy", () => {
         expect(fakeClient.callToolCalls).toEqual([
           { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
           { toolName: "tapOn", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("a pre-dispatch transport failure does not refresh the replay lease", async () => {
+      let callCount = 0;
+      const transportError = new DeviceControlTransportError(
+        "Device-control transport recovery exhausted while handling observe",
+        {
+          code: "device_control_transport_failure",
+          transport: "daemon_loopback_http",
+          toolName: "observe",
+          sessionUuid: "session-a",
+          sessionValid: false,
+          deviceSessionValid: false,
+          phase: "connect",
+          retryable: true,
+          reconnectAttempted: true,
+          replayAttempted: false,
+        },
+      );
+      const fakeClient = new FakeDaemonClient({
+        onCallTool: () => {
+          callCount++;
+          if (callCount === 1) {
+            throw transportError;
+          }
+        },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await expect(
+          proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" }),
+        ).rejects.toBe(transportError);
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        expect(fakeClient.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "observe", params: { deviceId: "device-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("an invalid response session does not refresh the replay lease", async () => {
+      let callCount = 0;
+      const transportError = new DeviceControlTransportError(
+        "Device-control transport closed while handling observe",
+        {
+          code: "device_control_transport_failure",
+          transport: "daemon_loopback_http",
+          toolName: "observe",
+          deviceId: "device-a",
+          deviceSessionUuid: "device-epoch-a",
+          sessionUuid: "session-a",
+          sessionValid: false,
+          deviceSessionValid: true,
+          phase: "response",
+          retryable: false,
+          reconnectAttempted: false,
+          replayAttempted: false,
+        },
+      );
+      const fakeClient = new FakeDaemonClient({
+        onCallTool: () => {
+          callCount++;
+          if (callCount === 1) {
+            throw transportError;
+          }
+        },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await expect(
+          proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" }),
+        ).rejects.toBe(transportError);
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        expect(fakeClient.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "observe", params: { deviceId: "device-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("a response-phase transport failure still refreshes an admitted replay lease", async () => {
+      const timer = new FakeTimer();
+      let callCount = 0;
+      const responseError = new DeviceControlTransportError(
+        "Device-control transport recovery exhausted while handling observe",
+        {
+          code: "device_control_transport_failure",
+          transport: "daemon_loopback_http",
+          toolName: "observe",
+          deviceId: "device-a",
+          deviceSessionUuid: "device-epoch-a",
+          sessionUuid: "session-a",
+          sessionValid: true,
+          deviceSessionValid: true,
+          phase: "response",
+          retryable: true,
+          reconnectAttempted: true,
+          replayAttempted: true,
+        },
+      );
+      const fakeClient = new FakeDaemonClient({
+        onCallTool: () => {
+          callCount++;
+          if (callCount === 2) {
+            throw responseError;
+          }
+        },
+        onCallDaemonMethod: (method) => {
+          if (method === "daemon/heartbeat") {
+            throw new Error("heartbeat disabled for lease-refresh isolation");
+          }
+        },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+        timer,
+        heartbeatIntervalMs: DAEMON_BOUND_SESSION_REPLAY_TTL_MS * 2,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        await Promise.resolve();
+        await Promise.resolve();
+        timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
+        await expect(proxy.callTool("observe", { deviceId: "device-a" })).rejects.toBe(
+          responseError,
+        );
+        timer.advanceTime(2);
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        expect(fakeClient.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+          { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "session-a" } },
         ]);
       } finally {
         isAvailableSpy.mockRestore();

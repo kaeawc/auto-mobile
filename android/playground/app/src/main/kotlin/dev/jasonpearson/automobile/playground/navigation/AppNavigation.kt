@@ -19,8 +19,8 @@ import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.*
 import androidx.navigation3.ui.NavDisplay
 import dev.jasonpearson.automobile.demos.BugReproScreen
-import dev.jasonpearson.automobile.demos.ContrastDemoScreen
 import dev.jasonpearson.automobile.demos.ComposeSemanticLinksDemoScreen
+import dev.jasonpearson.automobile.demos.ContrastDemoScreen
 import dev.jasonpearson.automobile.demos.DemoIndexScreen
 import dev.jasonpearson.automobile.demos.HandledExceptionDemoScreen
 import dev.jasonpearson.automobile.demos.NetworkTestScreen
@@ -28,10 +28,10 @@ import dev.jasonpearson.automobile.demos.PerformanceDetailScreen
 import dev.jasonpearson.automobile.demos.PerformanceListScreen
 import dev.jasonpearson.automobile.demos.StartupDemoScreen
 import dev.jasonpearson.automobile.demos.TapTargetsDemoScreen
-import dev.jasonpearson.automobile.demos.XmlSemanticLinksDemoScreen
 import dev.jasonpearson.automobile.demos.UxFlowDetailsScreen
 import dev.jasonpearson.automobile.demos.UxFlowStartScreen
 import dev.jasonpearson.automobile.demos.UxFlowSummaryScreen
+import dev.jasonpearson.automobile.demos.XmlSemanticLinksDemoScreen
 import dev.jasonpearson.automobile.design.system.demo.DesignSystemDemoScreen
 import dev.jasonpearson.automobile.home.HomeScreen
 import dev.jasonpearson.automobile.login.ui.LoginScreen

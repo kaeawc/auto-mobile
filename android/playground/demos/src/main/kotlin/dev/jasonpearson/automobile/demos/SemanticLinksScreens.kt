@@ -74,9 +74,7 @@ fun XmlSemanticLinksDemoScreen(onNavigateBack: () -> Unit) {
       }
     ) { paddingValues ->
       AndroidView(
-        modifier =
-          Modifier.fillMaxSize()
-            .padding(paddingValues),
+        modifier = Modifier.fillMaxSize().padding(paddingValues),
         factory = { context ->
           LayoutInflater.from(context)
             .inflate(R.layout.screen_semantic_links_xml, null, false)
@@ -95,10 +93,9 @@ fun ComposeSemanticLinksDemoScreen(onNavigateBack: () -> Unit) {
     composableName = "ComposeSemanticLinksDemoScreen",
   ) {
     var lastActivated by remember { mutableStateOf("None") }
-    val linkStyle =
-      remember {
-        TextLinkStyles(style = SpanStyle(textDecoration = TextDecoration.Underline))
-      }
+    val linkStyle = remember {
+      TextLinkStyles(style = SpanStyle(textDecoration = TextDecoration.Underline))
+    }
     val inlineLinks =
       remember(linkStyle) {
         buildComposeInlineLinks(linkStyle) { lastActivated = it }
@@ -165,13 +162,14 @@ fun ComposeSemanticLinksDemoScreen(onNavigateBack: () -> Unit) {
 private fun View.bindXmlSemanticLinks() {
   importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
   val textColor =
-    if (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
+    if (
+      resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
         Configuration.UI_MODE_NIGHT_YES
     ) {
       android.graphics.Color.WHITE
     } else {
       android.graphics.Color.BLACK
-  }
+    }
   findViewById<TextView>(R.id.semantic_links_xml_description).setTextColor(textColor)
   val result = findViewById<TextView>(R.id.semantic_links_result)
   result.setTextColor(textColor)
@@ -221,28 +219,26 @@ private fun createXmlStandaloneLink(onActivated: (String) -> Unit): SpannableStr
 private fun buildComposeInlineLinks(
   linkStyle: TextLinkStyles,
   onActivated: (String) -> Unit,
-): AnnotatedString =
-  buildAnnotatedString {
-    append("Read our ")
-    withLink(composeLink("terms-first", "$TermsOfService (first)", linkStyle, onActivated)) {
-      append(TermsOfService)
-    }
-    append(" before continuing, then review the ")
-    withLink(composeLink("terms-second", "$TermsOfService (second)", linkStyle, onActivated)) {
-      append(TermsOfService)
-    }
-    append(" for updates.")
+): AnnotatedString = buildAnnotatedString {
+  append("Read our ")
+  withLink(composeLink("terms-first", "$TermsOfService (first)", linkStyle, onActivated)) {
+    append(TermsOfService)
   }
+  append(" before continuing, then review the ")
+  withLink(composeLink("terms-second", "$TermsOfService (second)", linkStyle, onActivated)) {
+    append(TermsOfService)
+  }
+  append(" for updates.")
+}
 
 private fun buildComposeStandaloneLink(
   linkStyle: TextLinkStyles,
   onActivated: (String) -> Unit,
-): AnnotatedString =
-  buildAnnotatedString {
-    withLink(composeLink("privacy", PrivacyPolicy, linkStyle, onActivated)) {
-      append(PrivacyPolicy)
-    }
+): AnnotatedString = buildAnnotatedString {
+  withLink(composeLink("privacy", PrivacyPolicy, linkStyle, onActivated)) {
+    append(PrivacyPolicy)
   }
+}
 
 private fun composeLink(
   tag: String,

@@ -22,6 +22,7 @@ import {
 import { syncInstalledAppResources } from "./appResources";
 import { listActiveVideoRecordings, stopVideoRecording } from "./videoRecordingManager";
 import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
+import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 import { logger } from "../utils/logger";
 import { createPerformanceTracker } from "../utils/PerformanceTracker";
 import { getPerformanceMonitor } from "../features/performance/PerformanceMonitor";
@@ -478,7 +479,12 @@ async function defaultClearInstalledAppsForDevice(deviceId: string): Promise<voi
 }
 
 async function defaultStopAndroidObservers(device: BootedDevice): Promise<void> {
-  const { AndroidCtrlProxyClient } = await import("../features/observe/android/AndroidCtrlProxyClient");
+  // Resolve the per-device singleton through the statically-imported class rather
+  // than a runtime `import()`. On Windows the dynamic specifier resolved to a
+  // second module record with its own empty `instances` registry, so
+  // getExistingInstance returned null and the observer was never detached
+  // (issue #5452 CI failure). A static import shares one class identity with the
+  // observe feature that created the singleton, matching the iOS CtrlProxy path.
   const observer = AndroidCtrlProxyClient.getExistingInstance(device.deviceId);
   if (!observer) {
     return;

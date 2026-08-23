@@ -108,20 +108,29 @@ fun DeviceStreamView(
   val defaultQuality = if (enableDeviceControl) VideoStreamQuality.High else VideoStreamQuality.Low
   val paneFps = if (enableDeviceControl) CONTROL_PANE_FPS else MIRROR_PANE_FPS
 
-  // With settings wired, a per-device controller measures the live rate and (when auto-adjust is
-  // on)
-  // steps the preset down on a sustained drop / back up once healthy. Its choice persists so the
-  // pane re-opens at the same quality. Keyed on deviceId so switching devices starts fresh.
-  val qualityController = settings?.let { s ->
-    remember(column.deviceId) {
-      QualityController(
-        initialQuality = VideoStreamQuality.fromWire(s.streamQualityPreset) ?: defaultQuality,
-        targetFps = paneFps,
-        autoAdjustEnabled = s.streamQualityAutoAdjust,
-        onQualityChange = { s.streamQualityPreset = it.wire },
-      )
+  // Quality controls live only on the actively-driven (focused/armed) pane, never on the farm's
+  // display-only mirrors: those stay the cheap fixed Low preset with no overlay, which is what
+  // keeps
+  // dozens of concurrent panes affordable (#5217) and uncluttered. With settings wired the focused
+  // pane's per-device controller measures the live rate and (when auto-adjust is on) steps the
+  // preset down on a sustained drop / back up once healthy. Only a MANUAL pick persists (the
+  // seed for the next launch); automatic steps re-subscribe but are not written to the settings
+  // file. Keyed on deviceId so switching devices starts fresh.
+  val qualityController =
+    if (enableDeviceControl) {
+      settings?.let { s ->
+        remember(column.deviceId) {
+          QualityController(
+            initialQuality = VideoStreamQuality.fromWire(s.streamQualityPreset) ?: defaultQuality,
+            targetFps = paneFps,
+            autoAdjustEnabled = s.streamQualityAutoAdjust,
+            onManualSelection = { s.streamQualityPreset = it.wire },
+          )
+        }
+      }
+    } else {
+      null
     }
-  }
   val currentQuality =
     if (qualityController != null) qualityController.quality.collectAsState().value
     else defaultQuality
@@ -172,22 +181,32 @@ fun DeviceStreamView(
       screenRecordingSettingsLauncher = screenRecordingSettingsLauncher,
       source = source,
     )
-    // Quality overlay: only when a controller is wired, and never over the permission surface
-    // (which
-    // owns the whole pane while the relay is refused).
+    // Quality overlay: only on the focused pane (controller present) and never over the permission
+    // surface (which owns the whole pane while the relay is refused). Collapsed by default so it
+    // does
+    // not intercept a tap on the interactive control surface; the user expands it to pick a preset.
     if (qualityController != null && state !is VideoStreamState.PermissionRequired) {
       val actualFps by qualityController.actualFps.collectAsState()
       var autoAdjust by
         remember(column.deviceId) { mutableStateOf(qualityController.autoAdjustEnabled) }
+      var overlayExpanded by remember(column.deviceId) { mutableStateOf(false) }
       StreamQualityControls(
         currentQuality = currentQuality,
         actualFps = actualFps,
         targetFps = qualityController.targetFps,
         autoAdjustEnabled = autoAdjust,
-        onSelectQuality = { qualityController.selectQuality(it) },
+        expanded = overlayExpanded,
+        onToggleExpanded = { overlayExpanded = !overlayExpanded },
+        onSelectQuality = {
+          qualityController.selectQuality(it)
+          // Collapse after a pick so the panel stops covering the interactive surface.
+          overlayExpanded = false
+        },
         onToggleAutoAdjust = { enabled ->
           qualityController.autoAdjustEnabled = enabled
-          settings.streamQualityAutoAdjust = enabled
+          // Non-null whenever the controller exists (both derive from the same settings), but the
+          // `if (enableDeviceControl)` wrapper hides that from the smart-cast, so guard explicitly.
+          settings?.streamQualityAutoAdjust = enabled
           autoAdjust = enabled
         },
         modifier = Modifier.align(Alignment.TopEnd).padding(6.dp),

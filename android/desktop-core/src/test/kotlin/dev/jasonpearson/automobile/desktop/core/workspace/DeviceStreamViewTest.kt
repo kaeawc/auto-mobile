@@ -286,29 +286,49 @@ class DeviceStreamViewTest {
   }
 
   @Test
-  fun `renders the quality overlay only when settings are wired`() = runComposeUiTest {
+  fun `shows the collapsed quality overlay on the focused pane`() = runComposeUiTest {
     val source = FakeVideoStreamSource()
     setContent {
       MaterialTheme {
         DeviceStreamView(
           col(),
+          enableDeviceControl = true,
           settings = FakeSettingsProvider(streamQualityPreset = "medium"),
           sourceFactory = { _, _ -> source },
         )
       }
     }
-    onNodeWithText("Low").assertIsDisplayed()
-    onNodeWithText("Medium").assertIsDisplayed()
-    onNodeWithText("High").assertIsDisplayed()
-    onNodeWithText("Auto").assertIsDisplayed()
+    // Collapsed readout: persisted preset + live-vs-target fps (control pane targets 30fps). The
+    // selector chips stay hidden so they cannot intercept a tap on the interactive surface.
+    onNodeWithText("Medium · 0 / 30 fps").assertIsDisplayed()
+    onAllNodesWithText("Auto").assertCountEquals(0)
+  }
+
+  @Test
+  fun `no quality overlay on an unfocused pane even with settings`() = runComposeUiTest {
+    val source = FakeVideoStreamSource()
+    setContent {
+      MaterialTheme {
+        DeviceStreamView(
+          col(),
+          enableDeviceControl = false,
+          settings = FakeSettingsProvider(streamQualityPreset = "medium"),
+          sourceFactory = { _, _ -> source },
+        )
+      }
+    }
+    onAllNodesWithText("fps", substring = true).assertCountEquals(0)
   }
 
   @Test
   fun `no quality overlay without settings`() = runComposeUiTest {
     val source = FakeVideoStreamSource()
-    setContent { MaterialTheme { DeviceStreamView(col(), sourceFactory = { _, _ -> source }) } }
-    onAllNodesWithText("Medium").assertCountEquals(0)
-    onAllNodesWithText("Auto").assertCountEquals(0)
+    setContent {
+      MaterialTheme {
+        DeviceStreamView(col(), enableDeviceControl = true, sourceFactory = { _, _ -> source })
+      }
+    }
+    onAllNodesWithText("fps", substring = true).assertCountEquals(0)
   }
 
   @Test
@@ -321,6 +341,7 @@ class DeviceStreamViewTest {
         MaterialTheme {
           DeviceStreamView(
             col(),
+            enableDeviceControl = true,
             settings = settings,
             sourceFactory = { _, quality ->
               requested.add(quality)
@@ -333,6 +354,8 @@ class DeviceStreamViewTest {
       // First subscribe uses the persisted Medium preset.
       assertEquals(VideoStreamQuality.Medium, requested.first())
 
+      // Expand the collapsed overlay, then pick High.
+      onNodeWithText("Medium · 0 / 30 fps").performClick()
       onNodeWithText("High").performClick()
 
       // The choice persists for next launch and the pane re-subscribes at High.

@@ -57,14 +57,12 @@ class QualityControllerTest {
 
   @Test
   fun `does not downgrade a brief dip shorter than the hysteresis window`() {
-    var changes = 0
     val controller =
       QualityController(
         initialQuality = VideoStreamQuality.High,
         targetFps = 30,
         samplesToDowngrade = 3,
         minDwellMs = 0,
-        onQualityChange = { changes++ },
       )
     // Warm the rate up at a healthy 30fps first.
     var t = controller.feed(count = 15, intervalMs = 33)
@@ -73,7 +71,6 @@ class QualityControllerTest {
     t += 233
     controller.feed(count = 15, intervalMs = 33, startMs = t)
     assertEquals(VideoStreamQuality.High, controller.quality.value)
-    assertEquals(0, changes)
   }
 
   @Test
@@ -151,7 +148,7 @@ class QualityControllerTest {
       QualityController(
         initialQuality = VideoStreamQuality.Medium,
         targetFps = 30,
-        onQualityChange = { selected.add(it) },
+        onManualSelection = { selected.add(it) },
       )
     controller.selectQuality(VideoStreamQuality.Low)
     assertEquals(VideoStreamQuality.Low, controller.quality.value)
@@ -159,5 +156,40 @@ class QualityControllerTest {
     // Re-selecting the same quality is a no-op (no duplicate notification / churn).
     controller.selectQuality(VideoStreamQuality.Low)
     assertEquals(listOf(VideoStreamQuality.Low), selected)
+  }
+
+  @Test
+  fun `automatic changes update quality but are not persisted`() {
+    val selected = mutableListOf<VideoStreamQuality>()
+    val controller =
+      QualityController(
+        initialQuality = VideoStreamQuality.High,
+        targetFps = 30,
+        samplesToDowngrade = 3,
+        minDwellMs = 0,
+        onManualSelection = { selected.add(it) },
+      )
+    controller.feed(count = 40, intervalMs = 100) // heavy drop → auto-downgrades
+    assertEquals(VideoStreamQuality.Low, controller.quality.value)
+    // Automatic steps re-subscribe via `quality` but must not fire the persistence callback.
+    assertEquals(emptyList<VideoStreamQuality>(), selected)
+  }
+
+  @Test
+  fun `a reconnect gap right after a change does not immediately downgrade`() {
+    val controller =
+      QualityController(
+        initialQuality = VideoStreamQuality.Medium,
+        targetFps = 30,
+        // Aggressive: a single dropping sample would downgrade if the gap were counted.
+        samplesToDowngrade = 1,
+        minSamplesForDecision = 1,
+        minDwellMs = 0,
+      )
+    controller.selectQuality(VideoStreamQuality.High) // triggers a re-subscribe
+    // The first frame after the reconnect arrives a long time later; the reset window swallows it
+    // as the new seed rather than treating the whole gap as one ~0fps interval.
+    controller.onFrame(10_000)
+    assertEquals(VideoStreamQuality.High, controller.quality.value)
   }
 }

@@ -20,12 +20,16 @@ import dev.jasonpearson.automobile.desktop.core.video.VideoStreamQuality
 import kotlin.math.roundToInt
 
 /**
- * Compact quality overlay for a live-mirror pane: a Low/Medium/High selector, the
- * measured-vs-target frame rate, the current preset, and an auto-adjust toggle. It is a pure view —
- * all state and the [onSelectQuality]/[onToggleAutoAdjust] callbacks are hoisted, so the pane owns
- * the [QualityController] and persistence and this composable stays trivially testable.
+ * Compact quality overlay for a live-mirror pane. Collapsed by default it shows only a small,
+ * non-interactive readout — the current preset and the measured-vs-target frame rate — so it never
+ * intercepts a device tap on the interactive (tap-to-control) surface underneath. Clicking the
+ * readout ([onToggleExpanded]) reveals the Low/Medium/High selector and an auto-adjust toggle; a
+ * device tap can at most open this panel, never silently change quality. All state and the
+ * callbacks are hoisted, so the pane owns the [QualityController] and persistence and this view
+ * stays testable.
  *
  * @param actualFps the live rate from the controller; rendered rounded next to [targetFps].
+ * @param expanded whether the selector/toggle row is shown beneath the readout.
  */
 @Composable
 fun StreamQualityControls(
@@ -33,6 +37,8 @@ fun StreamQualityControls(
   actualFps: Float,
   targetFps: Int,
   autoAdjustEnabled: Boolean,
+  expanded: Boolean,
+  onToggleExpanded: () -> Unit,
   onSelectQuality: (VideoStreamQuality) -> Unit,
   onToggleAutoAdjust: (Boolean) -> Unit,
   modifier: Modifier = Modifier,
@@ -45,24 +51,27 @@ fun StreamQualityControls(
     verticalArrangement = Arrangement.spacedBy(4.dp),
   ) {
     Text(
-      "${actualFps.roundToInt()} / $targetFps fps",
+      "${currentQuality.name} · ${actualFps.roundToInt()} / $targetFps fps",
       fontSize = 10.sp,
       color = Color.White.copy(alpha = 0.9f),
+      modifier = Modifier.clickable(onClick = onToggleExpanded).pointerHoverIcon(PointerIcon.Hand),
     )
-    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-      VideoStreamQuality.entries.forEach { quality ->
-        val selected = quality == currentQuality
+    if (expanded) {
+      Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        VideoStreamQuality.entries.forEach { quality ->
+          val selected = quality == currentQuality
+          Chip(
+            label = quality.name,
+            accent = if (selected) SELECTED_ACCENT else UNSELECTED_ACCENT,
+            onClick = { onSelectQuality(quality) },
+          )
+        }
         Chip(
-          label = quality.name,
-          accent = if (selected) SELECTED_ACCENT else UNSELECTED_ACCENT,
-          onClick = { onSelectQuality(quality) },
+          label = "Auto",
+          accent = if (autoAdjustEnabled) SELECTED_ACCENT else UNSELECTED_ACCENT,
+          onClick = { onToggleAutoAdjust(!autoAdjustEnabled) },
         )
       }
-      Chip(
-        label = "Auto",
-        accent = if (autoAdjustEnabled) SELECTED_ACCENT else UNSELECTED_ACCENT,
-        onClick = { onToggleAutoAdjust(!autoAdjustEnabled) },
-      )
     }
   }
 }

@@ -19,7 +19,18 @@ import kotlinx.coroutines.flow.StateFlow
  * FakeTimer. The rate is an exponential moving average of the instantaneous inter-frame rate, so a
  * single late frame perturbs it briefly rather than smearing across a whole window; hysteresis
  * ([samplesToDowngrade]/[samplesToUpgrade]) plus [minDwellMs] then keep a brief dip or a flapping
- * rate from thrashing the encode.
+ * rate from thrashing the encode. Every preset change (manual or automatic) also resets the rate
+ * window, so the reconnect gap that a re-subscribe introduces re-seeds cleanly instead of being
+ * counted as one implausibly-slow frame that biases the next decision.
+ *
+ * The rate is measured over the frames the pane actually renders (the caller feeds [onFrame] from
+ * its render path), so under a UI that recomposes slower than frames decode it reflects render
+ * cadence rather than raw decode rate — an acceptable proxy at the 10–30fps targets here.
+ *
+ * [onManualSelection] fires only for an explicit [selectQuality]; automatic steps deliberately do
+ * NOT notify, so the caller persists the user's chosen preset without writing the settings file on
+ * every transient auto-adjust (and without persisting a shared-capture ratchet-to-Low the stream
+ * never actually applied).
  *
  * @property targetFps the rate the pane asked the relay for; a drop is measured relative to it.
  */
@@ -46,9 +57,11 @@ class QualityController(
   /** Minimum frame-time spacing between two automatic changes. */
   private val minDwellMs: Long = 2_000,
   /**
-   * Notified when the effective quality changes (manual or automatic), for persistence/resubscribe.
+   * Notified only for an explicit [selectQuality] (a user's manual pick), for persistence.
+   * Automatic steps update [quality] (so the pane re-subscribes and the overlay updates) but do not
+   * notify.
    */
-  private val onQualityChange: (VideoStreamQuality) -> Unit = {},
+  private val onManualSelection: (VideoStreamQuality) -> Unit = {},
 ) {
   private val _quality = MutableStateFlow(initialQuality)
   val quality: StateFlow<VideoStreamQuality> = _quality
@@ -85,13 +98,12 @@ class QualityController(
     evaluate(_actualFps.value, receivedAtMs)
   }
 
-  /** Applies an explicit user choice, resetting hysteresis so the manual pick sticks. */
+  /** Applies an explicit user choice, re-seeding the rate window so the manual pick sticks. */
   fun selectQuality(quality: VideoStreamQuality) {
     if (_quality.value == quality) return
     _quality.value = quality
-    lowStreak = 0
-    highStreak = 0
-    onQualityChange(quality)
+    resetRateWindow()
+    onManualSelection(quality)
   }
 
   private fun evaluate(fps: Float, nowMs: Long) {
@@ -125,8 +137,21 @@ class QualityController(
   private fun change(quality: VideoStreamQuality, nowMs: Long) {
     _quality.value = quality
     lastChangeAtMs = nowMs
+    resetRateWindow()
+    // Deliberately no onManualSelection here: an automatic step re-subscribes via [quality] but is
+    // not persisted (see the class doc).
+  }
+
+  /**
+   * Drops the inter-frame timing and hysteresis streaks so the next frame re-seeds the EMA. Called
+   * on every preset change because a change triggers a re-subscribe, and the first frame after that
+   * reconnection is separated from the last pre-change frame by the whole gap — counting it as a
+   * real interval would fold one implausibly-slow sample into the rate.
+   */
+  private fun resetRateWindow() {
+    lastFrameMs = null
+    samples = 0
     lowStreak = 0
     highStreak = 0
-    onQualityChange(quality)
   }
 }

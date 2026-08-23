@@ -2,7 +2,9 @@ package dev.jasonpearson.automobile.desktop.core.workspace
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
@@ -14,7 +16,7 @@ import org.junit.Test
 class StreamQualityControlsTest {
 
   @Test
-  fun `shows the actual and target frame rate`() = runComposeUiTest {
+  fun `collapsed shows the preset and frame rate but no selector`() = runComposeUiTest {
     setContent {
       MaterialTheme {
         StreamQualityControls(
@@ -22,17 +24,43 @@ class StreamQualityControlsTest {
           actualFps = 23.6f,
           targetFps = 30,
           autoAdjustEnabled = true,
+          expanded = false,
+          onToggleExpanded = {},
           onSelectQuality = {},
           onToggleAutoAdjust = {},
         )
       }
     }
-    // Actual fps is rounded; target is the pane's requested rate.
-    onNodeWithText("24 / 30 fps").assertIsDisplayed()
+    // Readout: current preset + rounded actual over target. Selector chips are hidden until
+    // expanded.
+    onNodeWithText("Medium · 24 / 30 fps").assertIsDisplayed()
+    onAllNodesWithText("Low").assertCountEquals(0)
+    onAllNodesWithText("Auto").assertCountEquals(0)
   }
 
   @Test
-  fun `offers every quality preset and reports the manual choice`() = runComposeUiTest {
+  fun `tapping the readout toggles the selector open`() = runComposeUiTest {
+    var toggled = 0
+    setContent {
+      MaterialTheme {
+        StreamQualityControls(
+          currentQuality = VideoStreamQuality.Medium,
+          actualFps = 30f,
+          targetFps = 30,
+          autoAdjustEnabled = true,
+          expanded = false,
+          onToggleExpanded = { toggled++ },
+          onSelectQuality = {},
+          onToggleAutoAdjust = {},
+        )
+      }
+    }
+    onNodeWithText("Medium · 30 / 30 fps").performClick()
+    assertEquals(1, toggled)
+  }
+
+  @Test
+  fun `expanded offers every preset and reports the manual choice`() = runComposeUiTest {
     var selected: VideoStreamQuality? = null
     setContent {
       MaterialTheme {
@@ -41,20 +69,21 @@ class StreamQualityControlsTest {
           actualFps = 30f,
           targetFps = 30,
           autoAdjustEnabled = true,
+          expanded = true,
+          onToggleExpanded = {},
           onSelectQuality = { selected = it },
           onToggleAutoAdjust = {},
         )
       }
     }
     onNodeWithText("Low").assertIsDisplayed()
-    onNodeWithText("Medium").assertIsDisplayed()
     onNodeWithText("High").assertIsDisplayed()
     onNodeWithText("High").performClick()
     assertEquals(VideoStreamQuality.High, selected)
   }
 
   @Test
-  fun `toggles automatic adjustment`() = runComposeUiTest {
+  fun `expanded toggles automatic adjustment`() = runComposeUiTest {
     var toggledTo: Boolean? = null
     setContent {
       MaterialTheme {
@@ -63,6 +92,8 @@ class StreamQualityControlsTest {
           actualFps = 10f,
           targetFps = 30,
           autoAdjustEnabled = true,
+          expanded = true,
+          onToggleExpanded = {},
           onSelectQuality = {},
           onToggleAutoAdjust = { toggledTo = it },
         )

@@ -406,6 +406,46 @@ describe("per-session exact-tool selection", () => {
     expect(resolvedSessionUuid).toBe("base-session");
   });
 
+  test("does not authorize a targeted label from the ambient sibling route", async () => {
+    const overrides = new Map<string, boolean>([
+      ["base-session:B", true],
+      ["base-session", false],
+      ["base-session:A", false],
+    ]);
+    fixture = new McpTestFixture({
+      sessionContext: { initialSessionToolBinding: "base-session:B" },
+      sessionToolSelectionService: {
+        isEnabled: async (sessionUuid, _toolName, declaredDefault) =>
+          (sessionUuid ? overrides.get(sessionUuid) : undefined) ?? declaredDefault,
+        getOverride: async (sessionUuid, _toolName) => overrides.get(sessionUuid),
+      },
+      toolSelectionSessionManager: {
+        getDeviceLabels: (sessionUuid) =>
+          sessionUuid === "base-session" ? { A: "base-session:A", B: "base-session:B" } : undefined,
+      },
+    });
+    await fixture.setup();
+
+    ToolRegistry.clearTools();
+    ToolRegistry.registerDeviceAware(
+      "observe",
+      "observe",
+      z.object({ device: z.string().optional() }),
+      async () => ({ content: [{ type: "text", text: "ran" }] }),
+      { defaultEnabled: false },
+    );
+
+    await expect(
+      fixture.client.request(
+        {
+          method: "tools/call",
+          params: { name: "observe", arguments: { device: "A" } },
+        },
+        z.any(),
+      ),
+    ).rejects.toThrow("Tool observe is disabled");
+  });
+
   test("rejects unknown, structural, and self-disable targets", async () => {
     fixture = new McpTestFixture({
       sessionToolSelectionService: {

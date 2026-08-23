@@ -549,7 +549,13 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     await assertToolEnabledForAnySession(
       name,
       tool.defaultEnabled,
-      [connectionProfileUuid, routingBaseSessionUuid, routingSessionUuid, derivedLabelSessionUuid],
+      [
+        connectionProfileUuid,
+        routingBaseSessionUuid,
+        ...(requestedDeviceLabel
+          ? [derivedLabelSessionUuid]
+          : [routingSessionUuid, derivedLabelSessionUuid]),
+      ],
       options.sessionToolSelectionService,
       connectionProfileUuid,
     );

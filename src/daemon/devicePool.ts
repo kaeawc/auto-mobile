@@ -2034,6 +2034,7 @@ export class DevicePool {
     recoverAndroidEmulator: boolean = false,
     incidentId?: string,
     incidentCaptureComplete: boolean = false,
+    recoveryPreparation?: SessionRecoveryPreparation,
   ): Promise<void> {
     if (this.isReservedForShutdown(device)) {
       // killDevice alone owns a shutdown-reserved incarnation until it either
@@ -2049,6 +2050,7 @@ export class DevicePool {
       incidentId,
       incidentCaptureComplete,
     );
+    this.finishSessionPreservingRecoveryPreparation(recoveryPreparation);
     if (
       await this.tryPreserveSessionForMissingDevice(
         device,
@@ -2270,7 +2272,19 @@ export class DevicePool {
     recovery: SessionPreservingRecovery,
     incidentId: string | undefined,
   ): Promise<SessionPreservingRecoveryResult> {
-    const result = await recovery.promise;
+    let result: SessionPreservingRecoveryResult;
+    try {
+      result = await recovery.promise;
+    } catch (error) {
+      if (incidentId) {
+        try {
+          await this.completeEmulatorLossRecovery(incidentId, "exhausted");
+        } finally {
+          this.settleEmulatorLossIncident(incidentId);
+        }
+      }
+      throw error;
+    }
     if (incidentId) {
       const primaryIncident = recovery.incidentId
         ? await this.emulatorLossIncidentStore.get(recovery.incidentId)
@@ -3394,13 +3408,13 @@ export class DevicePool {
         await this.finishEmulatorLossIncident(incidentId, "not-attempted");
         return;
       }
-      this.finishSessionPreservingRecoveryPreparation(preparation);
       await this.evictMissingPooledDevice(
         device,
         `emulator process exited after startup (code=${code ?? "null"}, signal=${signal ?? "null"})`,
         true,
         incidentId,
         true,
+        preparation,
       );
     } finally {
       this.finishSessionPreservingRecoveryPreparation(preparation);

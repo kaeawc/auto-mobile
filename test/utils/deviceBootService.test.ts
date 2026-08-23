@@ -82,6 +82,49 @@ describe("DeviceBootService", () => {
     expect(devices.getWaitForDeviceReadySignal()?.aborted).toBe(false);
   });
 
+  it("forwards the phase signal while waiting for an already-running device", async () => {
+    const devices = new FakeDeviceUtils();
+    const running: BootedDevice = {
+      name: image.name,
+      platform: "android",
+      deviceId: "emulator-5554",
+    };
+    devices.setBootedDevices("android", [running]);
+
+    await service(devices).boot({
+      platform: "android",
+      deviceId: running.deviceId,
+    });
+
+    expect(devices.getWaitForDeviceReadySignal()).toBeDefined();
+  });
+
+  it("preserves a cooperative readiness diagnostic at the boot deadline", async () => {
+    const devices = new FakeDeviceUtils();
+    const matcher = new FakeDeviceMatcher();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    devices.setDeviceImages("android", [image]);
+    matcher.setImageResult(image);
+    devices.waitForDeviceReady = async (_device, _timeoutMs, _handle, signal) => {
+      await new Promise<never>((_resolve, reject) => {
+        signal?.addEventListener(
+          "abort",
+          () => reject(new ActionableError("phase=device-discovery; summary=adb unavailable")),
+          { once: true },
+        );
+      });
+      throw new Error("unreachable");
+    };
+
+    await expect(
+      service(devices, matcher, undefined, timer).boot({
+        platform: "android",
+        timeoutMs: 100,
+      }),
+    ).rejects.toThrow("phase=device-discovery");
+  });
+
   it("bounds a pending start progress callback by the shared deadline and cancels its owned process", async () => {
     const devices = new FakeDeviceUtils();
     const matcher = new FakeDeviceMatcher();

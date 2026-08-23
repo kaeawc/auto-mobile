@@ -920,8 +920,22 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // Per-instance port allocation for multi-device support
   private localPort: number;
 
-  // Singleton instances per device
-  private static instances: Map<string, AndroidCtrlProxyClient> = new Map();
+  // Singleton instances per device.
+  //
+  // Anchored on a process-global registry rather than a plain class static. On
+  // Windows, bun evaluated this file as two distinct module records — the
+  // observe feature registered the per-device singleton in one record's map
+  // while `deviceTools`' killDevice teardown read the *other* record's (empty)
+  // map, so `getExistingInstance` returned null and the observer was never
+  // closed/evicted (issue #5452). Storing the registry on `globalThis` keeps a
+  // single map no matter how many times the module is evaluated, so every record
+  // resolves the same singletons.
+  private static get instances(): Map<string, AndroidCtrlProxyClient> {
+    const globalRegistry = globalThis as typeof globalThis & {
+      __automobileAndroidCtrlProxyInstances?: Map<string, AndroidCtrlProxyClient>;
+    };
+    return (globalRegistry.__automobileAndroidCtrlProxyInstances ??= new Map());
+  }
 
   // Session binding for multi-agent isolation
   private boundSessionId: string | null = null;

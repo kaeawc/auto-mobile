@@ -51,10 +51,15 @@ export class VoiceOverToggle {
     const client = this.clientProvider();
     const result = await client.requestSetVoiceOverEnabled(enabled);
     if (!result.success) {
+      const reason = result.error ?? "Failed to toggle VoiceOver via Settings";
+      // Log before returning so the Settings-row-not-found case leaves a trace,
+      // matching the Simulator path's logger.warn (the reason also surfaces to
+      // the client as an ActionableError).
+      logger.warn(`[VoiceOverToggle] Failed to ${enabled ? "enable" : "disable"} VoiceOver via Settings: ${reason}`);
       return {
         supported: false,
         applied: false,
-        reason: result.error ?? "Failed to toggle VoiceOver via Settings"
+        reason
       };
     }
 

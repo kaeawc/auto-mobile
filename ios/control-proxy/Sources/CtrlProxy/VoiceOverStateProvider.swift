@@ -76,6 +76,19 @@ public final class DefaultVoiceOverToggle: VoiceOverToggling {
             if let url = URL(string: Self.accessibilityDeepLink) {
                 XCUIDevice.shared.system.open(url)
             }
+            // The Accessibility root pane lists "VoiceOver" as a navigation row
+            // that pushes a sub-page; the on/off switch lives on that sub-page, not
+            // at the root. If no VoiceOver switch is present at the current level,
+            // drill into the VoiceOver row first, then match the switch on the
+            // sub-page. Guarding on the switch's presence (rather than assuming the
+            // level) keeps this working if a future iOS surfaces the switch higher.
+            if !settings.switches["VoiceOver"].firstMatch.waitForExistence(timeout: Self.switchExistenceTimeout) {
+                let voRow = settings.cells["VoiceOver"].firstMatch
+                guard voRow.waitForExistence(timeout: Self.switchExistenceTimeout) else {
+                    throw VoiceOverToggleError.switchNotFound
+                }
+                voRow.tap()
+            }
             let voSwitch = settings.switches["VoiceOver"].firstMatch
             guard voSwitch.waitForExistence(timeout: Self.switchExistenceTimeout) else {
                 throw VoiceOverToggleError.switchNotFound

@@ -17,8 +17,8 @@ This document compares iOS VoiceOver and Android TalkBack support in AutoMobile 
 | `pressButton` | ✅ Unchanged | ✅ Unchanged | Device/navigation buttons |
 | `accessibilityState` in observe | ✅ `service: "talkback"` | ✅ `service: "voiceover"` | |
 | `accessibilityFocusedElement` | ✅ Reported | ✅ With iOS SDK | Requires SDK-enriched hierarchy |
-| Programmatic enable/disable | ✅ Via ADB | ✅ Simulator only | Physical device support deferred |
-| MCP tool to toggle | ✅ `TalkBackToggle` | ✅ `VoiceOverToggle` (Simulator) | Gap — see below |
+| Programmatic enable/disable | ✅ Via ADB | ✅ Simulator + physical device | Physical uses Settings automation (English locale) |
+| MCP tool to toggle | ✅ `TalkBackToggle` | ✅ `VoiceOverToggle` (Simulator + device) | See Gap 2/3 below |
 | Three-finger swipe fallback | N/A | ✅ | VoiceOver-specific |
 | Two-finger swipe fallback | ✅ | N/A | TalkBack-specific |
 | Boomerang gesture | ✅ | ✅ | Both supported |
@@ -108,7 +108,7 @@ This document compares iOS VoiceOver and Android TalkBack support in AutoMobile 
 VoiceOver and TalkBack reach parity on the core automation behaviors: detection, tool adaptations, gesture fallbacks, and observe output. The primary gaps are:
 
 1. **Accessibility cursor tracking** (Gap 1) — most impactful for agent validation workflows
-2. **Programmatic toggle** (Gaps 2 & 3) — resolved for iOS Simulator; physical device support remains a gap
+2. **Programmatic toggle** (Gaps 2 & 3) — resolved for iOS Simulator and physical devices (physical via Settings automation, English locale)
 3. **Rotor and Magic Tap** (Gaps 4 & 5) — advanced VoiceOver interactions not tested
 4. **iOS 17+ RemoteXPC** (Gap 6) — blocks direct DTX snapshot path on modern iOS
 

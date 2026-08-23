@@ -87,6 +87,30 @@ class HierarchyWriteSerializationWiringTest {
     )
   }
 
+  @Test
+  fun `the hierarchy collector guards its body so one bad frame cannot kill the flow`() {
+    // Regression guard (Codex on #5469): serialization was hoisted into the hierarchyFlow
+    // collector,
+    // out of writeHierarchyToFile/broadcastHierarchyUpdate's own try/catch. An encode failure on
+    // one
+    // frame must not complete the collector (it is launchIn'd once and never relaunched), so the
+    // onEach body must be wrapped in try/catch.
+    val source = KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource())
+    val flowStart = source.indexOf("hierarchyDebouncer.hierarchyFlow")
+    assertTrue("hierarchyFlow collector not found in CtrlProxy.kt", flowStart >= 0)
+    val onEachOpen = source.indexOf('{', source.indexOf(".onEach", flowStart))
+    assertTrue("hierarchyFlow .onEach body not found", onEachOpen >= 0)
+    val onEachBody = source.substring(onEachOpen, KotlinSourceScan.matchBrace(source, onEachOpen))
+
+    val tryIdx = onEachBody.indexOf("try {")
+    val whenIdx = onEachBody.indexOf("when (result)")
+    assertTrue("the hierarchy collector body must open a try block", tryIdx in 0 until whenIdx)
+    assertTrue(
+      "the hierarchy collector must catch exceptions so one bad frame cannot complete the flow",
+      Regex("""catch\s*\(\s*\w+\s*:\s*Exception\s*\)""").containsMatchIn(onEachBody),
+    )
+  }
+
   private fun changedBranchBody(source: String): String {
     val marker = "is HierarchyResult.Changed ->"
     val start = source.indexOf(marker)

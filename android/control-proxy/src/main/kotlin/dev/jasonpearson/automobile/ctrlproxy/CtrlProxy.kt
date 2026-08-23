@@ -1242,51 +1242,66 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       hierarchyFlowJob =
         hierarchyDebouncer.hierarchyFlow
           .onEach { result ->
-            when (result) {
-              is HierarchyResult.Changed -> {
-                Log.d(
-                  TAG,
-                  "Hierarchy changed (hash=${result.hash}, extraction=${result.extractionTimeMs}ms)",
-                )
-                // Only serialize and persist a Changed frame that will actually broadcast. A
-                // throttled frame skips both the wire push and the flushed disk write (issue
-                // #5469) — the debug file is refreshed by the next non-throttled broadcast and
-                // force-written by every explicit hierarchy request, so no real consumer is staled.
-                if (broadcastThrottler.shouldBroadcast()) {
-                  // Serialize the tree exactly once and reuse the compact wire form for the debug
-                  // file, so a single Changed result never serializes twice (issue #5469).
-                  val serialized =
-                    perfProvider.track("serializeHierarchy") {
-                      jsonCompact.encodeToString(result.hierarchy)
-                    }
-                  writeHierarchyToFile(result.hierarchy, serialized = serialized)
-                  broadcastHierarchyUpdate(result.hierarchy, serialized = serialized)
-                } else {
-                  extractedHierarchyFrameContexts.remove(result.hierarchy)
+            // Guard the whole body: serialization was hoisted here (issue #5469) out of
+            // writeHierarchyToFile/broadcastHierarchyUpdate's own try/catch, so an encode failure
+            // on
+            // one frame (e.g. a NaN/Infinity textSizeInPx) would otherwise complete this collector
+            // —
+            // and it is never relaunched, silently losing all later unsolicited updates. Swallow so
+            // one bad frame is dropped, not the whole flow.
+            try {
+              when (result) {
+                is HierarchyResult.Changed -> {
                   Log.d(
                     TAG,
-                    "Throttled event-driven broadcast (${broadcastThrottler.timeSinceLastBroadcastMs()}ms since last)",
+                    "Hierarchy changed (hash=${result.hash}, extraction=${result.extractionTimeMs}ms)",
                   )
+                  // Only serialize and persist a Changed frame that will actually broadcast. A
+                  // throttled frame skips both the wire push and the flushed disk write (issue
+                  // #5469) — the debug file is refreshed by the next non-throttled broadcast and
+                  // force-written by every explicit hierarchy request, so no real consumer is
+                  // staled.
+                  if (broadcastThrottler.shouldBroadcast()) {
+                    // Serialize the tree exactly once and reuse the compact wire form for the debug
+                    // file, so a single Changed result never serializes twice (issue #5469).
+                    val serialized =
+                      perfProvider.track("serializeHierarchy") {
+                        jsonCompact.encodeToString(result.hierarchy)
+                      }
+                    writeHierarchyToFile(result.hierarchy, serialized = serialized)
+                    broadcastHierarchyUpdate(result.hierarchy, serialized = serialized)
+                  } else {
+                    extractedHierarchyFrameContexts.remove(result.hierarchy)
+                    Log.d(
+                      TAG,
+                      "Throttled event-driven broadcast (${broadcastThrottler.timeSinceLastBroadcastMs()}ms since last)",
+                    )
+                  }
                 }
-              }
-              is HierarchyResult.Unchanged -> {
-                Log.d(
-                  TAG,
-                  "Hierarchy unchanged (animation mode, skipped=${result.skippedEventCount})",
-                )
-                if (broadcastThrottler.shouldBroadcast()) {
-                  broadcastHierarchyUpdate(result.hierarchy)
-                } else {
-                  extractedHierarchyFrameContexts.remove(result.hierarchy)
+                is HierarchyResult.Unchanged -> {
                   Log.d(
                     TAG,
-                    "Throttled event-driven broadcast (${broadcastThrottler.timeSinceLastBroadcastMs()}ms since last)",
+                    "Hierarchy unchanged (animation mode, skipped=${result.skippedEventCount})",
                   )
+                  if (broadcastThrottler.shouldBroadcast()) {
+                    broadcastHierarchyUpdate(result.hierarchy)
+                  } else {
+                    extractedHierarchyFrameContexts.remove(result.hierarchy)
+                    Log.d(
+                      TAG,
+                      "Throttled event-driven broadcast (${broadcastThrottler.timeSinceLastBroadcastMs()}ms since last)",
+                    )
+                  }
+                }
+                is HierarchyResult.Error -> {
+                  Log.w(TAG, "Hierarchy extraction error: ${result.message}")
                 }
               }
-              is HierarchyResult.Error -> {
-                Log.w(TAG, "Hierarchy extraction error: ${result.message}")
-              }
+            } catch (e: CancellationException) {
+              // Let cooperative cancellation unwind the collector normally.
+              throw e
+            } catch (e: Exception) {
+              Log.e(TAG, "Error handling hierarchy result — dropping this frame", e)
             }
           }
           .launchIn(serviceScope)

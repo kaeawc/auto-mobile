@@ -2471,7 +2471,7 @@ describe("IOSCtrlProxyManager", function() {
         port: 8765,
         ppid: 2226,
         command: `/tmp/CtrlProxyUITests-Runner.app/PlugIns/CtrlProxyUITests.xctest/CtrlProxyUITests-Runner`,
-        environment: `AUTOMOBILE_DEVICE_ID=${testDevice.deviceId}`,
+        environment: `CTRL_PROXY_IOS_PORT=8765 AUTOMOBILE_DEVICE_ID=${testDevice.deviceId}`,
         alive: true,
       };
       const daemonXcodebuild: FakeListeningProcess = {
@@ -2517,6 +2517,7 @@ describe("IOSCtrlProxyManager", function() {
 
       await manager.start();
 
+      expect(fakeExecutor.wasCommandExecuted("ps -p 2226")).toBe(true);
       expect(fakeExecutor.wasCommandExecuted("kill -TERM -- -2225")).toBe(true);
       expect(fakeExecutor.wasCommandExecuted("kill -TERM 2226")).toBe(true);
       expect(fakeExecutor.wasCommandExecuted("kill -TERM 2227")).toBe(true);

@@ -101,4 +101,45 @@ describe("auto-mobile/no-inline-error-normalize", () => {
       fires('const m = a["b.prop:c"] instanceof Error ? a.b.c.message : String(a["b.prop:c"]);'),
     ).toBe(false);
   });
+
+  // Issue #5505, deferred edge case 3: transparent TS/chain wrappers
+  // (`error!`, `error?.message`) must be unwrapped so these spellings are not
+  // false negatives that evade the recurrence guard.
+
+  test("flags a non-null-asserted subject across all three positions", () => {
+    expect(
+      fires("const m = error! instanceof Error ? error!.message : String(error!);"),
+    ).toBe(true);
+  });
+
+  test("flags a non-null assertion appearing in only one position", () => {
+    // `error!` erases to `error` at runtime, so the reference is the same.
+    expect(
+      fires("const m = error instanceof Error ? error!.message : String(error);"),
+    ).toBe(true);
+  });
+
+  test("flags an optional-chained `.message` consequent", () => {
+    expect(
+      fires("const m = error instanceof Error ? error?.message : String(error);"),
+    ).toBe(true);
+  });
+
+  test("flags a non-null-asserted member subject (`result.error!`)", () => {
+    expect(
+      fires("const m = result.error! instanceof Error ? result.error!.message : String(result.error!);"),
+    ).toBe(true);
+  });
+
+  test("flags an optional-chained member subject (`result?.error`)", () => {
+    expect(
+      fires("const m = result?.error instanceof Error ? result?.error.message : String(result?.error);"),
+    ).toBe(true);
+  });
+
+  test("still does not flag a wrapped subject when branches reference a different var", () => {
+    expect(
+      fires("const m = a! instanceof Error ? b!.message : String(c!);"),
+    ).toBe(false);
+  });
 });

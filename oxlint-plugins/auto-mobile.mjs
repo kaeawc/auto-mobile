@@ -504,6 +504,21 @@ function identifierName(node) {
 	return node?.type === "Identifier" ? node.name : null;
 }
 
+// Strip transparent TS/chain wrappers that are erased or irrelevant to the
+// reference's runtime identity: a non-null assertion (`error!`) is a compile-time
+// TS construct, and a `ChainExpression` is just the optional-chaining envelope
+// (`error?.message`) whose `.message` read is identical to `error.message` on a
+// non-nullish error. Unwrapping here lets those spellings match the same subject
+// so the rule flags `error!.message` / `error?.message` instead of silently
+// treating them as different references (issue #5505, deferred edge case 3).
+function unwrapRef(node) {
+	let current = node;
+	while (current && (current.type === "TSNonNullExpression" || current.type === "ChainExpression")) {
+		current = current.expression;
+	}
+	return current;
+}
+
 // Structural token list for a side-effect-free reference expression: an identifier,
 // `this`, a non-computed member chain (`a.b.c`), or computed access by a literal or
 // identifier index (`a[0]`, `a["0"]`, `a[i]`). Returns null for anything whose repeated
@@ -511,7 +526,8 @@ function identifierName(node) {
 // is canonicalized to how JavaScript resolves the property key, so the *same* property
 // compares equal regardless of spelling (`.error`/`["error"]`, `[0]`/`["0"]`), while a
 // computed identifier key stays distinct (its value can differ from a same-text literal).
-function refTokens(node) {
+function refTokens(rawNode) {
+	const node = unwrapRef(rawNode);
 	if (!node) {
 		return null;
 	}
@@ -572,7 +588,7 @@ const noInlineErrorNormalizeRule = {
 				// consequent must be `<subject>.message` or `<subject>["message"]` (a
 				// computed access is only `.message` when its key is the string literal
 				// "message" — a computed identifier key like `[message]` is a different var).
-				const consequent = node.consequent;
+				const consequent = unwrapRef(node.consequent);
 				const consequentIsMessage =
 					consequent?.type === "MemberExpression" &&
 					stableRefKey(consequent.object) === subjectKey &&

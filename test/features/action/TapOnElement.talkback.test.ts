@@ -586,17 +586,36 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
       expect(fakeTalkBackStrategy.fallbackCalls[0].action).toBe("doubleTap");
     });
 
-    test("precise doubleTap retries only the missing second tap", async () => {
-      fakeTalkBackStrategy.setFallbackResult({
+    test("precise tap focuses the requested coordinate before activating it", async () => {
+      const element = makeElement();
+
+      await (tapOnElement as any).executeAndroidTapWithAccessibility(
+        "tap",
+        80,
+        40,
+        element,
+        500,
+        { relativePosition: { x: 0.8, y: 0.4 } },
+        undefined
+      );
+
+      expect(fakeTalkBackStrategy.preciseTapCalls).toEqual([{ x: 80, y: 40 }]);
+      expect(fakeTalkBackStrategy.fallbackCalls).toHaveLength(0);
+      expect(executeAndroidTapWithCoordinates).not.toHaveBeenCalled();
+    });
+
+    test("precise tap retries only the missing second activation tap", async () => {
+      fakeTalkBackStrategy.setPreciseTapResult({
         success: false,
         method: "coordinate-fallback",
         error: "Second tap failed",
+        focusCompleted: true,
         completedTaps: 1
       });
       const element = makeElement();
 
       await (tapOnElement as any).executeAndroidTapWithAccessibility(
-        "doubleTap",
+        "tap",
         50,
         50,
         element,
@@ -605,9 +624,51 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
         undefined
       );
 
-      expect(fakeTalkBackStrategy.fallbackCalls).toHaveLength(1);
+      expect(fakeTalkBackStrategy.preciseTapCalls).toEqual([{ x: 50, y: 50 }]);
       expect(executeAndroidTapWithCoordinates).toHaveBeenCalledWith(
         "tap",
+        50,
+        50,
+        500,
+        element,
+        undefined,
+        true
+      );
+    });
+
+    test("precise tap retries focus and activation when coordinate focus fails", async () => {
+      fakeTalkBackStrategy.setPreciseTapResult({
+        success: false,
+        method: "coordinate-fallback",
+        error: "Focus tap failed",
+        focusCompleted: false,
+        completedTaps: 0
+      });
+      const element = makeElement();
+
+      await (tapOnElement as any).executeAndroidTapWithAccessibility(
+        "tap",
+        50,
+        50,
+        element,
+        500,
+        { relativePosition: { x: 0.5, y: 0.5 } },
+        undefined
+      );
+
+      expect(executeAndroidTapWithCoordinates).toHaveBeenNthCalledWith(
+        1,
+        "tap",
+        50,
+        50,
+        500,
+        element,
+        undefined,
+        true
+      );
+      expect(executeAndroidTapWithCoordinates).toHaveBeenNthCalledWith(
+        2,
+        "doubleTap",
         50,
         50,
         500,

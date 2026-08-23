@@ -126,7 +126,7 @@ When TalkBack is active, Android reserves certain gestures:
 
 ### Per-Tool Adaptations
 
-**tapOn**: Use `ACTION_CLICK` on the target element instead of a coordinate-based tap. Optionally set accessibility focus first to mimic user behavior and trigger TalkBack announcement. Long press uses `ACTION_LONG_CLICK`. When Android-only `relativePosition: { x, y }` is present, bypass semantic activation and dispatch the normalized coordinate through CtrlProxy so distinct targets within one accessibility node remain addressable; the option is unsupported with `focus`.
+**tapOn**: Use `ACTION_CLICK` on the target element instead of a coordinate-based tap. Optionally set accessibility focus first to mimic user behavior and trigger TalkBack announcement. Long press uses `ACTION_LONG_CLICK`. When Android-only `relativePosition: { x, y }` is present, bypass node-level semantic activation: focus the normalized coordinate through CtrlProxy, wait outside TalkBack's double-tap window, then send the activation double-tap so distinct targets within one accessibility node remain addressable. The option is unsupported with `focus`.
 
 **swipeOn / scroll**: Three approaches in priority order:
 1. **Accessibility scroll actions** (preferred for known scrollable containers) - uses `ACTION_SCROLL_FORWARD`/`ACTION_SCROLL_BACKWARD`

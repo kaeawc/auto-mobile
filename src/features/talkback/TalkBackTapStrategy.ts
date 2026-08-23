@@ -19,6 +19,8 @@ export interface TalkBackTapResult {
   error?: string;
   /** A stable selector and advertised action rejected the semantic request. */
   semanticActionFailure?: boolean;
+  /** Whether a precise coordinate focus tap completed before activation. */
+  focusCompleted?: boolean;
   /** Number of taps completed before a coordinate double-tap failed. */
   completedTaps?: number;
   screenReaderNavigation?: ScreenReaderNavigationResult;
@@ -35,6 +37,7 @@ export interface ScreenReaderNavigationResult {
 }
 
 export type TalkBackFallbackAction = "tap" | "doubleTap" | "longPress";
+export const TALKBACK_PRECISE_FOCUS_SETTLE_MS = 500;
 
 interface TalkBackTapStrategyDependencies {
   matcher?: FocusElementMatcher;
@@ -386,7 +389,7 @@ export class TalkBackTapStrategy {
         };
       }
 
-      return { success: true, method: "coordinate-fallback" };
+      return { success: true, method: "coordinate-fallback", completedTaps: 2 };
     }
 
     // Single tap or long press
@@ -400,6 +403,41 @@ export class TalkBackTapStrategy {
     }
 
     return { success: true, method: "coordinate-fallback" };
+  }
+
+  /**
+   * Focus a coordinate through TalkBack touch exploration, then activate the
+   * resulting focused target with TalkBack's double-tap gesture.
+   */
+  async executePreciseTap(
+    x: number,
+    y: number,
+    driver: TalkBackNavigationDriver
+  ): Promise<TalkBackTapResult> {
+    const focusResult = await driver.requestTapCoordinates(x, y, 50);
+    if (!focusResult.success) {
+      return {
+        success: false,
+        method: "coordinate-fallback",
+        error: `Focus tap failed: ${focusResult.error}`,
+        focusCompleted: false,
+        completedTaps: 0
+      };
+    }
+
+    // Keep the focus tap outside TalkBack's activation double-tap window.
+    await this.timer.sleep(TALKBACK_PRECISE_FOCUS_SETTLE_MS);
+    const activationResult = await this.executeCoordinateFallback(
+      x,
+      y,
+      "doubleTap",
+      50,
+      driver
+    );
+    return {
+      ...activationResult,
+      focusCompleted: true
+    };
   }
 
   /**

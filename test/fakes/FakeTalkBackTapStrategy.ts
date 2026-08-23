@@ -11,6 +11,7 @@ type TalkBackTapStrategyContract = Pick<
   | "executeTap"
   | "executeDirectActivation"
   | "executeCoordinateFallback"
+  | "executePreciseTap"
   | "executeLongPress"
 >;
 
@@ -20,6 +21,12 @@ type TalkBackTapStrategyContract = Pick<
 export class FakeTalkBackTapStrategy implements TalkBackTapStrategyContract {
   tapResult: TalkBackTapResult = { success: true, method: "focus-navigation" };
   fallbackResult: TalkBackTapResult = { success: true, method: "coordinate-fallback" };
+  preciseTapResult: TalkBackTapResult = {
+    success: true,
+    method: "coordinate-fallback",
+    focusCompleted: true,
+    completedTaps: 2,
+  };
   longPressResult: TalkBackTapResult = { success: true, method: "accessibility-action" };
   directActivationResult: TalkBackTapResult = { success: true, method: "accessibility-action" };
 
@@ -37,6 +44,11 @@ export class FakeTalkBackTapStrategy implements TalkBackTapStrategyContract {
     y: number;
     action: TalkBackFallbackAction;
     durationMs: number;
+  }> = [];
+
+  preciseTapCalls: Array<{
+    x: number;
+    y: number;
   }> = [];
 
   longPressCalls: Array<{
@@ -65,6 +77,10 @@ export class FakeTalkBackTapStrategy implements TalkBackTapStrategyContract {
 
   setFallbackResult(result: TalkBackTapResult): void {
     this.fallbackResult = result;
+  }
+
+  setPreciseTapResult(result: TalkBackTapResult): void {
+    this.preciseTapResult = result;
   }
 
   setLongPressResult(result: TalkBackTapResult): void {
@@ -124,6 +140,15 @@ export class FakeTalkBackTapStrategy implements TalkBackTapStrategyContract {
     }
 
     return this.fallbackResult;
+  }
+
+  async executePreciseTap(
+    x: number,
+    y: number,
+    _driver: TalkBackNavigationDriver
+  ): Promise<TalkBackTapResult> {
+    this.preciseTapCalls.push({ x, y });
+    return this.preciseTapResult;
   }
 
   async executeLongPress(

@@ -45,8 +45,10 @@ import { hasAccessibilityAction, isTruthyFlag } from "../../utils/elementPropert
 import {
   requiresNodeSelector,
   stableNodeSelectorForElement,
+  TALKBACK_PRECISE_FOCUS_SETTLE_MS,
   TalkBackTapStrategy,
-  type ScreenReaderNavigationResult
+  type ScreenReaderNavigationResult,
+  type TalkBackTapResult
 } from "../talkback/TalkBackTapStrategy";
 import {
   DefaultTalkBackNavigationDriverFactory,
@@ -1693,6 +1695,44 @@ export class TapOnElement extends BaseVisualChange {
       || this.featureFlags.isEnabled("screen-reader-navigation");
   }
 
+  private async executeRemainingPreciseTalkBackInput(
+    action: string,
+    x: number,
+    y: number,
+    durationMs: number,
+    element: Element,
+    preciseResult: TalkBackTapResult,
+    signal?: AbortSignal
+  ): Promise<void> {
+    let remainingAction = action;
+    if (action === "tap") {
+      if (!preciseResult.focusCompleted) {
+        await this.executeAndroidTapWithCoordinates(
+          "tap",
+          x,
+          y,
+          durationMs,
+          element,
+          signal,
+          true
+        );
+        await this.timer.sleep(TALKBACK_PRECISE_FOCUS_SETTLE_MS);
+      }
+      remainingAction = preciseResult.completedTaps === 1 ? "tap" : "doubleTap";
+    } else if (action === "doubleTap" && preciseResult.completedTaps === 1) {
+      remainingAction = "tap";
+    }
+    await this.executeAndroidTapWithCoordinates(
+      remainingAction,
+      x,
+      y,
+      durationMs,
+      element,
+      signal,
+      true
+    );
+  }
+
   private async executeAndroidTapWithAccessibility(
     action: string,
     x: number,
@@ -1706,29 +1746,28 @@ export class TapOnElement extends BaseVisualChange {
     let screenReaderNavigation: ScreenReaderNavigationResult | undefined;
 
     if (options?.relativePosition) {
-      const preciseResult = await this.talkBackStrategy.executeCoordinateFallback(
-        x,
-        y,
-        action as "tap" | "doubleTap" | "longPress",
-        durationMs,
-        driver
-      );
+      const preciseResult = action === "tap"
+        ? await this.talkBackStrategy.executePreciseTap(x, y, driver)
+        : await this.talkBackStrategy.executeCoordinateFallback(
+          x,
+          y,
+          action as "doubleTap" | "longPress",
+          durationMs,
+          driver
+        );
       if (!preciseResult.success) {
-        const remainingAction = action === "doubleTap" && preciseResult.completedTaps === 1
-          ? "tap"
-          : action;
         logger.warn(
           `[TapOnElement] Precise TalkBack coordinate gesture failed (${preciseResult.error}), ` +
-          `falling back to ADB input at (${x}, ${y})`
+          `falling back to remaining input at (${x}, ${y})`
         );
-        await this.executeAndroidTapWithCoordinates(
-          remainingAction,
+        await this.executeRemainingPreciseTalkBackInput(
+          action,
           x,
           y,
           durationMs,
           element,
-          signal,
-          true
+          preciseResult,
+          signal
         );
       }
       return undefined;

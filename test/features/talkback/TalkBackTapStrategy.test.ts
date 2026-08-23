@@ -525,6 +525,37 @@ describe("TalkBackTapStrategy", () => {
     });
   });
 
+  describe("executePreciseTap", () => {
+    test("focuses the requested coordinate before the activation double-tap", async () => {
+      const result = await strategy.executePreciseTap(80, 40, driver);
+
+      expect(result).toMatchObject({
+        success: true,
+        method: "coordinate-fallback",
+        focusCompleted: true,
+        completedTaps: 2,
+      });
+      expect(driver.tapHistory).toEqual([
+        { x: 80, y: 40, durationMs: 50 },
+        { x: 80, y: 40, durationMs: 50 },
+        { x: 80, y: 40, durationMs: 50 },
+      ]);
+    });
+
+    test("reports when the focus tap fails before activation", async () => {
+      driver.queueTapResult({ success: false, totalTimeMs: 1, error: "focus failed" });
+
+      const result = await strategy.executePreciseTap(80, 40, driver);
+
+      expect(result).toMatchObject({
+        success: false,
+        focusCompleted: false,
+        completedTaps: 0,
+      });
+      expect(driver.getTapCount()).toBe(1);
+    });
+  });
+
   describe("executeDirectActivation", () => {
     test("activates via ACTION_CLICK when element has a resource-id", async () => {
       const element = {

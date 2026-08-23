@@ -202,6 +202,35 @@ class ViewHierarchyExtractorTest {
   }
 
   @Test
+  fun `semantic link occurrences use the same Unicode case matching as activation`() {
+    val text = SpannableString("İ i")
+    text.setSpan(
+      object : ClickableSpan() {
+        override fun onClick(widget: View) = Unit
+      },
+      0,
+      1,
+      0,
+    )
+    text.setSpan(
+      object : ClickableSpan() {
+        override fun onClick(widget: View) = Unit
+      },
+      2,
+      3,
+      0,
+    )
+
+    assertEquals(
+      listOf(
+        SemanticLink("İ", 0, 0, 1),
+        SemanticLink("i", 1, 2, 3),
+      ),
+      extractor.semanticLinksFromText(text, apiLevel = 26),
+    )
+  }
+
+  @Test
   fun `semantic links stay absent below API 26 and for plain text`() {
     val spanned = SpannableString("Terms")
     spanned.setSpan(

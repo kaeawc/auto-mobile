@@ -114,19 +114,16 @@ describe("InputText", () => {
     const inputText = new InputText(androidDevice, factory as AdbClientFactory);
 
     let capturedFactory: unknown = undefined;
-    AndroidCtrlProxyClient.getInstance = ((device: BootedDevice, adbFactory: AdbClientFactory) => {
+    AndroidCtrlProxyClient.getInstance = ((_device: BootedDevice, adbFactory: AdbClientFactory) => {
       capturedFactory = adbFactory;
-      return originalGetInstance(device, adbFactory);
+      return {
+        requestSetText: async () => ({ success: false, totalTimeMs: 0 }),
+      };
     }) as typeof AndroidCtrlProxyClient.getInstance;
 
-    try {
-      await (inputText as unknown as {
-        executeAndroidTextInput: (text: string) => Promise<unknown>;
-      }).executeAndroidTextInput("hello");
-    } catch {
-      // Ignore downstream failures — we only care that getInstance was
-      // handed a factory, not an executor.
-    }
+    await (inputText as unknown as {
+      executeAndroidTextInput: (text: string) => Promise<unknown>;
+    }).executeAndroidTextInput("hello");
 
     expect(capturedFactory).toBeDefined();
     expect(typeof (capturedFactory as AdbClientFactory).create).toBe("function");

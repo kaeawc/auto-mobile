@@ -175,13 +175,16 @@ function accumulateByIdentity(elements: ObserveElements): SkeletonAccumulator[] 
 }
 
 /**
- * Keep rule (issue #4388): a row is kept if it has ≥1 affordance, OR it carries
- * a non-empty label with no clickable ancestor (so pure-content screens stay
- * readable/assertable, while a button's inner label is suppressed in favor of
- * the tappable row).
+ * Keep rule (issue #4388): a row is kept if it has ≥1 affordance, carries
+ * semantic links, OR carries a non-empty label with no clickable ancestor.
+ * Semantic links remain independently discoverable even when the linked text is
+ * inside a generic tappable card that would otherwise suppress its text row.
  */
 function shouldKeep(acc: SkeletonAccumulator, clickableBounds: SkeletonElement["bounds"][]): boolean {
   if (acc.affordances.size > 0) {
+    return true;
+  }
+  if (acc.semanticLinks?.length) {
     return true;
   }
   if (acc.label === undefined) {

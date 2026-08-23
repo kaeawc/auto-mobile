@@ -243,6 +243,28 @@ describe("toSkeleton — acceptance criteria", () => {
       expect(skeleton[0].id).toBe("row");
       expect(skeleton[0].affordances).toEqual(["tap"]);
     });
+
+    test("linked text with a clickable ancestor remains discoverable", () => {
+      const card: Element = {
+        bounds: bounds(0, 0, 300, 80),
+        "resource-id": "card",
+        clickable: "true",
+      };
+      const linkedText: Element = {
+        bounds: bounds(20, 20, 120, 60),
+        text: "Terms of Service",
+        "test-tag": "legal-copy",
+        "semantic-links": [{ text: "Terms of Service", occurrence: 0, start: 0, end: 16 }],
+      };
+
+      const skeleton = toSkeleton(makeElements({ clickable: [card], text: [linkedText] }));
+
+      expect(skeleton).toHaveLength(2);
+      expect(skeleton.find(entry => entry.testTag === "legal-copy")).toMatchObject({
+        label: "Terms of Service",
+        semanticLinks: [{ text: "Terms of Service", occurrence: 0, start: 0, end: 16 }],
+      });
+    });
   });
 
   describe("AC6: bounds emitted as the CompactBounds tuple", () => {

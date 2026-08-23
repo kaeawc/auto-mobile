@@ -269,6 +269,16 @@ public class GesturePerformer: GesturePerforming {
         }
     }
 
+    /// Includes a scoped owner when the owner is itself a link; XCUITest's
+    /// descendants query otherwise excludes that element.
+    static func scopedLinkCandidates<Element>(
+        owner: Element,
+        ownerIsLink: Bool,
+        descendants: [Element]
+    ) -> [Element] {
+        ownerIsLink ? [owner] + descendants : descendants
+    }
+
     /// Every AutoMobile permission name that maps to a resettable iOS
     /// `XCUIProtectedResource` (Xcode 26.3 header). The `all` keyword expands to
     /// this list; the TS host list in `IosPhysicalPermissions.ts`
@@ -1106,7 +1116,12 @@ public class GesturePerformer: GesturePerforming {
                             "Semantic link owner '\(ownerResourceId)' is missing, not actionable, or ambiguous"
                         )
                     }
-                    links = owners[0].descendants(matching: .link).allElementsBoundByIndex
+                    let owner = owners[0]
+                    links = Self.scopedLinkCandidates(
+                        owner: owner,
+                        ownerIsLink: owner.elementType == .link,
+                        descendants: owner.descendants(matching: .link).allElementsBoundByIndex
+                    )
                 } else {
                     links = app.links.allElementsBoundByIndex
                 }

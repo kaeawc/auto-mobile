@@ -380,7 +380,7 @@ after the response frame is printed. A screen-control client must replace
 `android-generation-42` with the opaque `frameContext` from its paired screenshot
 and hierarchy; it is illustrative and cannot be reused for another frame.
 These `frameContext` examples require a runner that publishes the field; the
-default `0.0.61` CtrlProxy artifacts are legacy and cannot supply one.
+default `0.0.62` CtrlProxy artifacts are legacy and cannot supply one.
 
 ```bash
 export AUTOMOBILE_DAEMON_SOCKET_PATH="${AUTOMOBILE_DAEMON_SOCKET_PATH:-/tmp/auto-mobile-daemon-$(id -u).sock}"

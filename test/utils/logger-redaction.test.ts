@@ -61,6 +61,12 @@ describe("safeStringify redacts sensitive data", () => {
   test("serializes arrays as index-keyed objects (current documented behavior)", () => {
     expect(safeStringify([1, 2, 3])).toBe('{"0":1,"1":2,"2":3}');
   });
+
+  test("replaces circular values without throwing or recursing indefinitely", () => {
+    const circular: { self?: unknown } = {};
+    circular.self = circular;
+    expect(safeStringify(circular)).toBe('{"self":"[circular]"}');
+  });
 });
 
 describe("SENSITIVE_ENV_KEYS", () => {

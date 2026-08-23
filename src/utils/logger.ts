@@ -6,6 +6,19 @@ import path from "path";
 import { statAsync, renameAsync } from "./io";
 import { ensureSecureLogsDirSync } from "./tempDir";
 import { pruneLogFiles } from "./logPruner";
+import {
+  resolveAutomobileLogFormat,
+  resolveAutomobileLogSink,
+} from "./loggingConfig";
+
+export {
+  parseAutomobileLogFormat,
+  parseAutomobileLogSink,
+  resolveAutomobileLogFormat,
+  resolveAutomobileLogSink,
+  type LogFormat,
+  type LogSink,
+} from "./loggingConfig";
 
 /**
  * Interface for logger functionality
@@ -77,10 +90,14 @@ export const LogLevel = {
   INFO: 1 as const,
   WARN: 2 as const,
   ERROR: 3 as const,
-  NONE: 4 as const
+  NONE: 4 as const,
 };
 
-export type LogLevel = typeof LogLevel[keyof typeof LogLevel];
+export type LogLevel = (typeof LogLevel)[keyof typeof LogLevel];
+
+export function isStructuredLoggingEnabled(): boolean {
+  return logFormat === "json";
+}
 
 /**
  * Parse `AUTOMOBILE_LOG_LEVEL` values: debug, info, warn|warning, error, none|silent.
@@ -123,7 +140,12 @@ export function resolveProcessLogPrefix(argv: readonly string[], pid: number): s
 // DaemonManager-spawned daemon inherits the var via its `{ ...process.env }`
 // child env. Falls back to INFO when unset/unrecognized; still overridable at
 // runtime via setLogLevel.
-let currentLogLevel: LogLevel = parseAutomobileLogLevel(process.env.AUTOMOBILE_LOG_LEVEL) ?? LogLevel.INFO;
+let currentLogLevel: LogLevel =
+  parseAutomobileLogLevel(process.env.AUTOMOBILE_LOG_LEVEL ?? process.env.AUTO_MOBILE_LOG_LEVEL) ??
+  LogLevel.INFO;
+
+const logFormat = resolveAutomobileLogFormat();
+const logSink = resolveAutomobileLogSink();
 
 // Flag to control whether to also log to STDOUT (in addition to files)
 let logToStdout = false;
@@ -138,16 +160,24 @@ const trackWrite = (write: Promise<void>): void => {
   lastWrite = lastWrite.then(() => write);
 };
 
-// Create the configured log directory with owner-only permissions. This may be
-// independent of AUTOMOBILE_DATA_DIR, which continues to scope non-log state.
-const logsDir = ensureSecureLogsDirSync();
+// Create the configured log directory only when the selected sink writes files.
+// Stderr-only containers must not require a writable application-data volume.
+const logsDir = logSink === "stderr" ? undefined : ensureSecureLogsDirSync();
 
 // The daemon is single-owner, so keep its stable log name easy to document and
 // tail. Stdio/client processes remain PID-scoped because several can run in
 // parallel on the same host.
 const ownLogPrefix = resolveProcessLogPrefix(process.argv, process.pid);
-const logFilePath = path.join(logsDir, `${ownLogPrefix}.log`);
-let logStream = fs.createWriteStream(logFilePath, { flags: "a" });
+const logFilePath = logsDir ? path.join(logsDir, `${ownLogPrefix}.log`) : undefined;
+let logStream = logFilePath ? fs.createWriteStream(logFilePath, { flags: "a" }) : undefined;
+
+function fileLogPaths(): { dir: string; path: string } | undefined {
+  if (!logsDir || !logFilePath) {
+    return undefined;
+  }
+  return { dir: logsDir, path: logFilePath };
+}
+
 interface EndableLogStream {
   end(callback: () => void): void;
   once(event: "error", listener: (error: Error) => void): void;
@@ -183,43 +213,55 @@ const ABANDONED_LOG_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 // Remove old log files. Only ever deletes (a) this process's own rotated backups
 // beyond the cap, and (b) other processes' logs that are stale by mtime — never
 // another live process's current file. See logPruner.ts.
-const pruneOldLogFiles = (): Promise<void> =>
-  pruneLogFiles({
+const pruneOldLogFiles = (): Promise<void> => {
+  if (!logsDir) {
+    return Promise.resolve();
+  }
+  return pruneLogFiles({
     dir: logsDir,
     ownPrefix: ownLogPrefix,
     maxOwnFiles: MAX_LOG_FILES,
     abandonedMaxAgeMs: ABANDONED_LOG_MAX_AGE_MS,
   });
+};
 
 // Sweep logs abandoned by already-exited processes once at startup. Short-lived
 // agents exit with small logs and never reach the size-based rotation that would
 // otherwise trigger a sweep, so without this their per-PID files would accumulate
 // in the shared logs dir on a busy multi-agent host. Fire-and-forget so it never
 // delays logger initialization; the sweep itself only removes dead-owner files.
-pruneOldLogFiles().catch(() => { /* best-effort startup sweep */ });
+if (logsDir) {
+  pruneOldLogFiles().catch(() => {
+    /* best-effort startup sweep */
+  });
+}
 
 // Function to check log file size and rotate if necessary
 const checkAndRotateLog = async (): Promise<void> => {
+  const paths = fileLogPaths();
+  if (!paths || !logStream) {
+    return;
+  }
   try {
-    if (fs.existsSync(logFilePath)) {
-      const stats = await statAsync(logFilePath);
+    if (fs.existsSync(paths.path)) {
+      const stats = await statAsync(paths.path);
       if (stats.size >= MAX_LOG_SIZE) {
         // Close current stream
-        logStream.end();
+        logStream?.end();
 
         // Create backup filename with timestamp, scoped to this process's PID so
         // rotation never collides with another process's files.
         const timestamp = new Date().toISOString().replace(/:/g, "-");
-        const backupPath = path.join(logsDir, `${ownLogPrefix}-${timestamp}.log`);
+        const backupPath = path.join(paths.dir, `${ownLogPrefix}-${timestamp}.log`);
 
         // Check if file still exists right before rename to avoid race condition
-        if (fs.existsSync(logFilePath)) {
+        if (fs.existsSync(paths.path)) {
           // Rename current log file to backup
-          await renameAsync(logFilePath, backupPath);
+          await renameAsync(paths.path, backupPath);
         }
 
         // Always create a new log stream after rotation attempt
-        logStream = fs.createWriteStream(logFilePath, { flags: "a" });
+        logStream = fs.createWriteStream(paths.path, { flags: "a" });
 
         // Prune old log files to stay within the cap
         await pruneOldLogFiles();
@@ -227,10 +269,10 @@ const checkAndRotateLog = async (): Promise<void> => {
     }
   } catch (err) {
     // If rotation fails, ensure we have a valid log stream
-    if (logStream.destroyed || !logStream.writable) {
-      logStream = fs.createWriteStream(logFilePath, { flags: "a" });
+    if (logStream?.destroyed || !logStream?.writable) {
+      logStream = fs.createWriteStream(paths.path, { flags: "a" });
     }
-    console.error("Log rotation failed:", err);
+    await reportLogFailure("Log rotation failed", err);
   }
 };
 
@@ -260,19 +302,32 @@ const safeStringify = (obj: any): string => {
     return String(obj);
   }
 
-  return JSON.stringify(obj, (_key, value) => {
-    if (typeof value === "object" && value !== null) {
-      // Filter sensitive environment-like keys
-      const filtered: any = {};
-      for (const [k, v] of Object.entries(value)) {
-        if (!SENSITIVE_ENV_KEYS.has(k.toUpperCase())) {
-          filtered[k] = v;
+  const seen = new WeakSet<object>();
+  try {
+    return JSON.stringify(obj, (_key, value) => {
+      if (typeof value === "object" && value !== null) {
+        if (seen.has(value)) {
+          return "[circular]";
         }
+        seen.add(value);
+        // Filter sensitive environment-like keys
+        const filtered: any = {};
+        for (const [k, v] of Object.entries(value)) {
+          if (!SENSITIVE_ENV_KEYS.has(k.toUpperCase())) {
+            filtered[k] = v;
+          }
+        }
+        return filtered;
       }
-      return filtered;
-    }
-    return value;
-  });
+      return value;
+    });
+  } catch (error) {
+    // Circular diagnostic values are expected at a logging boundary. Preserve
+    // the primary record rather than creating a second, potentially unsinkable
+    // logging failure.
+    void error;
+    return "[unserializable]";
+  }
 };
 
 // Function to sanitize log message to prevent log injection
@@ -284,45 +339,115 @@ const sanitizeMessage = (message: string): string => {
 export { SENSITIVE_ENV_KEYS, safeStringify, sanitizeMessage };
 
 // Function to write to log file
+const formatLogRecord = (level: string, message: string, args: any[]): string => {
+  const timestamp = new Date().toISOString();
+  const sanitizedMessage = sanitizeMessage(message);
+  const argsStr =
+    args.length > 0
+      ? ` ${args.map((arg) => sanitizeMessage(typeof arg === "object" ? safeStringify(arg) : String(arg))).join(" ")}`
+      : "";
+  const fullMessage = `${sanitizedMessage}${argsStr}`;
+  const boundedMessage =
+    fullMessage.length > 1000 ? `${fullMessage.substring(0, 1000)}... (truncated)` : fullMessage;
+
+  if (logFormat === "json") {
+    return JSON.stringify({
+      timestamp,
+      level: level.toLowerCase(),
+      component: ownLogPrefix,
+      event: "log",
+      message: boundedMessage,
+    });
+  }
+
+  return `${timestamp} [${level}] ${boundedMessage}`;
+};
+
+const writeToStderr = (line: string): Promise<void> =>
+  new Promise((resolve, reject) => {
+    process.stderr.write(`${line}\n`, (error) => {
+      if (error) {
+        reject(error);
+      } else {
+        resolve();
+      }
+    });
+  });
+
+const reportLogFailure = async (context: string, error: unknown): Promise<void> => {
+  if (logSink === "file") {
+    return;
+  }
+  const message = `${context}: ${sanitizeMessage(String(error))}`;
+  const line =
+    logFormat === "json"
+      ? JSON.stringify({
+          timestamp: new Date().toISOString(),
+          level: "error",
+          component: ownLogPrefix,
+          event: "log.write_failed",
+          message,
+        })
+      : message;
+  try {
+    await writeToStderr(line);
+  } catch (error) {
+    // The configured stream is itself unavailable, so no diagnostic sink remains.
+    void error;
+  }
+};
+
+const writeToFile = async (line: string): Promise<void> => {
+  if (!logStream) {
+    return;
+  }
+  await checkAndRotateLog();
+  const stream = logStream;
+  if (!stream) {
+    return;
+  }
+  await new Promise<void>((resolve, reject) => {
+    stream.write(line + "\n", (error) => {
+      if (error) {
+        reject(error);
+      } else {
+        resolve();
+      }
+    });
+  });
+};
+
+const writeToConfiguredStderr = async (line: string): Promise<void> => {
+  if (logSink === "stderr" || logSink === "both") {
+    await writeToStderr(line);
+  }
+};
+
+const mirrorToLegacyStdout = (line: string): void => {
+  if (logToStdout && logFormat === "text") {
+    process.stdout.write(`${line}\n`);
+  }
+};
+
 const writeToLogFile = async (level: string, message: string, args: any[]) => {
   try {
-    // Check and rotate log if needed before writing
-    await checkAndRotateLog();
-
-    const timestamp = new Date().toISOString();
-    const sanitizedMessage = sanitizeMessage(message);
-    let logMessage = `${timestamp} [${level}] ${sanitizedMessage}`;
-
-    if (args.length > 0) {
-      // Handle objects by converting them to strings, filtering sensitive data
-      const argsStr = args.map(arg => {
-        if (typeof arg === "object") {
-          return sanitizeMessage(safeStringify(arg));
-        }
-        return sanitizeMessage(String(arg));
-      }).join(" ");
-      logMessage += ` ${argsStr}`;
-    }
-    if (logMessage.length > 1000) {
-      logMessage = logMessage.substring(0, 1000) + "... (truncated)";
-    }
-    const safeLogMessage = logMessage.replace(/[\r\n\t]/g, " ");
-    await new Promise<void>((resolve, reject) => {
-      logStream.write(safeLogMessage + "\n", error => {
-        if (error) {
-          reject(error);
-        } else {
-          resolve();
-        }
-      });
-    });
-
-    // Also write to STDOUT if enabled
-    if (logToStdout) {
-      process.stdout.write(`${safeLogMessage}\n`);
-    }
+    const safeLogMessage = formatLogRecord(level, message, args).replace(/[\r\n\t]/g, " ");
+    // Start both configured writes before awaiting either one. A failed file
+    // sink must not suppress the process-stream record in `both` mode.
+    await Promise.all([
+      writeToFile(safeLogMessage),
+      writeToConfiguredStderr(safeLogMessage),
+    ]);
+    mirrorToLegacyStdout(safeLogMessage);
   } catch (err) {
-    console.error("Failed to write log:", err);
+    await reportLogFailure("Failed to write log", err);
+  }
+};
+
+// In stderr-only mode there is no file stream to rotate or close.
+const closeCurrentLogStream = async (): Promise<void> => {
+  if (logStream) {
+    await closeLogStream(logStream);
   }
 };
 
@@ -346,7 +471,8 @@ export const logger: Logger = {
    * Enables logging to STDOUT in addition to log files
    */
   enableStdoutLogging(): void {
-    logToStdout = true;
+    // Structured logs must never share stdout with MCP JSON-RPC traffic.
+    logToStdout = logFormat === "text";
   },
 
   /**
@@ -361,9 +487,11 @@ export const logger: Logger = {
    */
   debug(message: string, ...args: any[]): void {
     if (currentLogLevel <= LogLevel.DEBUG) {
-      trackWrite(writeToLogFile("DEBUG", message, args).catch(err => {
-        console.error("Failed to write debug log:", err);
-      }));
+      trackWrite(
+        writeToLogFile("DEBUG", message, args).catch((err) => {
+          return reportLogFailure("Failed to write debug log", err);
+        }),
+      );
     }
   },
 
@@ -372,9 +500,11 @@ export const logger: Logger = {
    */
   info(message: string, ...args: any[]): void {
     if (currentLogLevel <= LogLevel.INFO) {
-      trackWrite(writeToLogFile("INFO", message, args).catch(err => {
-        console.error("Failed to write info log:", err);
-      }));
+      trackWrite(
+        writeToLogFile("INFO", message, args).catch((err) => {
+          return reportLogFailure("Failed to write info log", err);
+        }),
+      );
     }
   },
 
@@ -383,9 +513,11 @@ export const logger: Logger = {
    */
   warn(message: string, ...args: any[]): void {
     if (currentLogLevel <= LogLevel.WARN) {
-      trackWrite(writeToLogFile("WARN", message, args).catch(err => {
-        console.error("Failed to write warn log:", err);
-      }));
+      trackWrite(
+        writeToLogFile("WARN", message, args).catch((err) => {
+          return reportLogFailure("Failed to write warn log", err);
+        }),
+      );
     }
   },
 
@@ -394,9 +526,11 @@ export const logger: Logger = {
    */
   error(message: string, ...args: any[]): void {
     if (currentLogLevel <= LogLevel.ERROR) {
-      trackWrite(writeToLogFile("ERROR", message, args).catch(err => {
-        console.error("Failed to write error log:", err);
-      }));
+      trackWrite(
+        writeToLogFile("ERROR", message, args).catch((err) => {
+          return reportLogFailure("Failed to write error log", err);
+        }),
+      );
     }
   },
 
@@ -411,11 +545,11 @@ export const logger: Logger = {
    * Flushes queued writes and closes the log stream.
    */
   close(): void {
-    logStream.end();
+    logStream?.end();
   },
 
   async closeAfterFlush(): Promise<void> {
     await lastWrite;
-    await closeLogStream(logStream);
-  }
+    await closeCurrentLogStream();
+  },
 };

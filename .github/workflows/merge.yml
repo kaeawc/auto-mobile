@@ -674,8 +674,9 @@ jobs:
       - name: "Run Tests"
         shell: bash
         env:
-          # Force AdbClient into test mode on Windows to prevent adb daemon startup
-          AUTOMOBILE_TEST_MODE: ${{ matrix.os == 'windows-latest' && 'true' || '' }}
+          # Unit tests use injected fakes; real ADB coverage belongs to the
+          # dedicated device-integration jobs. Never start an adb daemon here.
+          AUTOMOBILE_TEST_MODE: "true"
           TURBO_TELEMETRY_DISABLED: "1"
           TURBO_NO_UPDATE_NOTIFIER: "1"
           DO_NOT_TRACK: "1"

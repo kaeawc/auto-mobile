@@ -2444,6 +2444,10 @@ export class DevicePool {
         preserveSession: session,
         bypassRecoveryPolicy: true,
       });
+      if (recovered) {
+        this.adbServerResetQuarantinedSessions.delete(session.sessionId);
+        this.recoveringSessionLosses.delete(session.sessionId);
+      }
       if (!recovered) {
         await this.releasePreservedAdbResetSessionIfDetached(device, session, incidentId);
         await this.refreshEmulatorLossRecoverySettlement(incidentId, "exhausted");

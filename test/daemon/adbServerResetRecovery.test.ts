@@ -899,6 +899,8 @@ describe("ADB server reset session recovery", () => {
           detached.devices[0],
         ),
       ).resolves.toBe(true);
+      expect(pool.isSessionRecoveryInFlight("session-0")).toBe(false);
+      expect(pool.isSessionRecoveryInFlight("session-1")).toBe(true);
       await expect(
         pool.recoverSessionBoundAndroidDeviceAfterAdbServerReset(
           originals[1].deviceId,

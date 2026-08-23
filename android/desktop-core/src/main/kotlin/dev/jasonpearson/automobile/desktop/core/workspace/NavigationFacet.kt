@@ -248,6 +248,15 @@ fun NavigationFacet(
   var state by
     remember(column.deviceId) { mutableStateOf<NavigationFacetState>(NavigationFacetState.Loading) }
 
+  // Per-screen screenshot-liveness tokens for the resolved app (#5088). Reset when the app changes
+  // (a fresh app's nodes start unversioned). Bumped for the screen the device just navigated to on
+  // a same-app refresh — the node the daemon re-captured a screenshot for — then stamped onto the
+  // pulled graph so the canvas drops that node's stale cached thumbnail and re-fetches. Read and
+  // written only from the pull effect below, which runs sequentially on the composition thread, so
+  // a plain map needs no synchronization.
+  val screenshotVersions =
+    remember(column.deviceId, streamAttempt, foregroundAppId) { mutableMapOf<String, Int>() }
+
   LaunchedEffect(
     column.deviceId,
     foregroundAppId,
@@ -307,7 +316,23 @@ fun NavigationFacet(
         ) {
           is Result.Success ->
             if (result.data.screens.isEmpty()) NavigationFacetState.Empty
-            else NavigationFacetState.Resolved(appId, result.data)
+            else {
+              // A live same-app refresh means the device just navigated; the daemon re-captured a
+              // screenshot for the destination screen under its existing stable URI. Bump that
+              // node's liveness token so the canvas invalidates its cached thumbnail (#5088). The
+              // first pull of an app (sameAppRefresh == false) carries no re-capture, so its nodes
+              // keep version 0 and load normally.
+              if (sameAppRefresh) {
+                val recaptured = currentScreen
+                if (recaptured != null) {
+                  screenshotVersions[recaptured] = (screenshotVersions[recaptured] ?: 0) + 1
+                }
+              }
+              NavigationFacetState.Resolved(
+                appId,
+                stampScreenshotVersions(result.data, screenshotVersions),
+              )
+            }
           is Result.Error ->
             NavigationFacetState.Error(result.message ?: "Failed to load navigation graph")
           // A one-shot read resolves to Success/Error; treat a stray Loading as retryable.
@@ -377,6 +402,23 @@ fun NavigationFacet(
       )
   }
 }
+
+/**
+ * Stamp each node's accumulated screenshot-liveness token (#5088) onto a freshly pulled [graph].
+ * [versions] maps screen name -> the number of re-captures observed for that node this session; a
+ * node absent from it keeps version 0. Only nodes the daemon actually re-captured therefore change
+ * key, so the canvas drops and re-fetches exactly those thumbnails rather than the whole graph.
+ * Returns [graph] unchanged when nothing has been re-captured yet (the common first-pull case).
+ */
+internal fun stampScreenshotVersions(
+  graph: NavigationGraph,
+  versions: Map<String, Int>,
+): NavigationGraph =
+  if (versions.isEmpty()) {
+    graph
+  } else {
+    graph.copy(screens = graph.screens.map { it.copy(screenshotVersion = versions[it.name] ?: 0) })
+  }
 
 /** Centered single-line note for the facet's transient (loading) or empty states. */
 @Composable

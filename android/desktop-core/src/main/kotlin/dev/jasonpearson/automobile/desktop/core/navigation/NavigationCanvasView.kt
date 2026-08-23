@@ -922,10 +922,20 @@ private fun ScreenNodeCard(
   var isLoadingScreenshot by remember { mutableStateOf(false) }
 
   // Load screenshot when available (key on screenshotLoader too, so it re-fires if loader becomes
-  // available later)
+  // available later). Also key on screenshotVersion: the daemon re-captures a node's screenshot
+  // under the SAME stable URI, so without a changing key this effect would never re-fire and the
+  // URI-keyed loader cache would keep serving the stale bitmap (#5088). The facet bumps the version
+  // for the node whose screenshot was just re-captured; a bump drops that node's cache entry and
+  // re-fetches, scoped to exactly this node (no mass refetch of the rest of the graph).
   val screenshotUri = screen.screenshotUri
-  LaunchedEffect(screenshotUri, screenshotLoader) {
+  val screenshotVersion = screen.screenshotVersion
+  LaunchedEffect(screenshotUri, screenshotVersion, screenshotLoader) {
     if (screenshotUri != null && screenshotLoader != null) {
+      // Only invalidate on an observed re-capture (version > 0); the first load of a node
+      // (version 0) is already a cache miss, so invalidating then would be a redundant no-op.
+      if (screenshotVersion > 0) {
+        screenshotLoader.invalidate(screenshotUri)
+      }
       isLoadingScreenshot = true
       screenshotBitmap =
         withContext(Dispatchers.IO) {

@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.desktop.core.workspace
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
@@ -29,6 +30,7 @@ import dev.jasonpearson.automobile.desktop.core.platform.AppVersionProvider
 import dev.jasonpearson.automobile.desktop.core.settings.FakeSettingsProvider
 import dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.update.FakeUpdateController
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.FlowCollector
@@ -1001,4 +1003,92 @@ class NavigationFacetTest {
     assertEquals("a provider swap must re-resolve the loader", 2, used.size)
     assertNotSame("the loader must come from the new provider after a swap", used[0], used[1])
   }
+
+  private fun screenWithShot(name: String, screenshotUri: String) =
+    screen(name).copy(screenshotUri = screenshotUri)
+
+  /** A [ScreenshotLoader] that records load/invalidate calls; returns no bitmap (unused here). */
+  private class RecordingScreenshotLoader : ScreenshotLoader {
+    // Cross-thread: load() runs on Dispatchers.IO, invalidate() on the composition thread.
+    val loaded = CopyOnWriteArrayList<String>()
+    val invalidated = CopyOnWriteArrayList<String>()
+
+    override suspend fun load(uri: String): ImageBitmap? {
+      loaded += uri
+      return null
+    }
+
+    override fun invalidate(uri: String) {
+      invalidated += uri
+    }
+
+    override fun clearCache() = Unit
+
+    override fun cacheSize(): Int = 0
+  }
+
+  @Test
+  fun `stampScreenshotVersions applies per-node versions and leaves others at zero`() {
+    val graph = NavigationGraph(listOf(screen("Home"), screen("Details")), emptyList())
+    val stamped = stampScreenshotVersions(graph, mapOf("Home" to 3))
+    assertEquals(3, stamped.screens.first { it.name == "Home" }.screenshotVersion)
+    assertEquals(0, stamped.screens.first { it.name == "Details" }.screenshotVersion)
+  }
+
+  @Test
+  fun `stampScreenshotVersions returns the graph unchanged when nothing was re-captured`() {
+    val graph = NavigationGraph(listOf(screen("Home")), emptyList())
+    assertSame(graph, stampScreenshotVersions(graph, emptyMap()))
+  }
+
+  @Test
+  fun `same-app refresh invalidates only the re-captured node's cached screenshot`() =
+    runComposeUiTest {
+      // #5088: the daemon re-captures a node's screenshot under its SAME stable URI, so a URI-keyed
+      // thumbnail cache would keep serving the stale bitmap. On a same-app refresh the facet bumps
+      // the just-navigated screen's liveness token, and the canvas must drop exactly that node's
+      // cache entry — never the untouched siblings'.
+      val homeUri = "automobile:navigation/nodes/home/screenshot"
+      val detailsUri = "automobile:navigation/nodes/details/screenshot"
+      val source =
+        object : NavigationDataSource {
+          override suspend fun getNavigationGraph(): Result<NavigationGraph> =
+            Result.Success(
+              NavigationGraph(
+                listOf(screenWithShot("Home", homeUri), screenWithShot("Details", detailsUri)),
+                emptyList(),
+              )
+            )
+        }
+      val loader = RecordingScreenshotLoader()
+      val fake = FakeObservationStream()
+      setContent {
+        CompositionLocalProvider(LocalAutoMobileGraph provides testGraph()) {
+          MaterialTheme {
+            NavigationFacet(
+              column = column(),
+              observationStreamFactory = { fake },
+              navigationDataSourceProvider = { source },
+              screenshotLoaderProvider = { loader },
+            )
+          }
+        }
+      }
+      waitForIdle()
+
+      // First app-A update navigating to Home: initial pull, both cards load, none invalidated
+      // (version 0 is already a cache miss).
+      fake.emitNavigation(navUpdate("com.example.app", currentScreen = "Home"))
+      waitUntil(timeoutMillis = 5_000) { loader.loaded.contains(homeUri) }
+      assertTrue("first render must not invalidate anything", loader.invalidated.isEmpty())
+
+      // Second app-A update navigating to Home again (the daemon re-captured Home's screenshot):
+      // Home's token bumps, so the canvas invalidates Home's cache entry and re-fetches.
+      fake.emitNavigation(navUpdate("com.example.app", currentScreen = "Home"))
+      waitUntil(timeoutMillis = 5_000) { loader.invalidated.contains(homeUri) }
+      assertFalse(
+        "an untouched sibling node's screenshot must not be invalidated",
+        loader.invalidated.contains(detailsUri),
+      )
+    }
 }

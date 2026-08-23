@@ -376,6 +376,35 @@ describe("UnixSocketServer MCP session reconnect", () => {
     expect(callsDispatched).toBe(1);
   });
 
+  test("does not reconnect an unestablished device across session recreation", async () => {
+    let clientsCreated = 0;
+    deviceEpochUuid = undefined;
+
+    server.mcpClientFactory = async () => {
+      clientsCreated++;
+      primarySessionGeneration = 1;
+      throw socketClosedError();
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: { sessionUuid: "session-a" },
+    });
+
+    expect(response.success).toBe(false);
+    expect(clientsCreated).toBe(1);
+    expect(response.transportFailure).toMatchObject({
+      sessionUuid: "session-a",
+      routingSessionUuid: "session-a",
+      sessionValid: false,
+      deviceSessionValid: false,
+      phase: "connect",
+      retryable: false,
+      reconnectAttempted: false,
+      replayAttempted: false,
+    });
+  });
+
   test("preserves an unrelated failure while reconnecting before request dispatch", async () => {
     let clientsCreated = 0;
 

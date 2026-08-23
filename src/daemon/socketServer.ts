@@ -1602,11 +1602,18 @@ export class UnixSocketServer {
   private isDeviceControlTransportIdentityValid(
     identity: DeviceControlTransportIdentity,
   ): boolean {
+    return (
+      this.isDeviceControlCapturedSessionIdentityValid(identity)
+      && this.isDeviceControlDeviceSessionValid(identity)
+    );
+  }
+
+  private isDeviceControlCapturedSessionIdentityValid(
+    identity: DeviceControlTransportIdentity,
+  ): boolean {
     const hasSessionIdentity =
       Boolean(identity.sessionUuid || identity.routingSessionUuid);
-    const sessionValid =
-      !hasSessionIdentity || this.isDeviceControlSessionValid(identity);
-    return sessionValid && this.isDeviceControlDeviceSessionValid(identity);
+    return !hasSessionIdentity || this.isDeviceControlSessionValid(identity);
   }
 
   private isDeviceControlRecoveryIdentityValid(
@@ -1617,7 +1624,7 @@ export class UnixSocketServer {
       phase === "connect"
       && !this.hasEstablishedDeviceControlTransportIdentity(identity)
     ) {
-      return true;
+      return this.isDeviceControlCapturedSessionIdentityValid(identity);
     }
     return this.isDeviceControlTransportIdentityValid(identity);
   }
@@ -1625,10 +1632,9 @@ export class UnixSocketServer {
   private isDeviceControlReplayResultIdentityValid(
     identity: DeviceControlTransportIdentity,
   ): boolean {
-    return (
-      !this.hasEstablishedDeviceControlTransportIdentity(identity)
-      || this.isDeviceControlTransportIdentityValid(identity)
-    );
+    return this.hasEstablishedDeviceControlTransportIdentity(identity)
+      ? this.isDeviceControlTransportIdentityValid(identity)
+      : this.isDeviceControlCapturedSessionIdentityValid(identity);
   }
 
   private deviceControlTransportError(input: {
@@ -1642,15 +1648,15 @@ export class UnixSocketServer {
     const toolName = deviceControlToolName(input.request);
     const sessionValid = this.isDeviceControlSessionValid(input.identity);
     const deviceSessionValid = this.isDeviceControlDeviceSessionValid(input.identity);
-    const hasSessionIdentity =
-      Boolean(input.identity.sessionUuid || input.identity.routingSessionUuid);
+    const capturedSessionIdentityValid =
+      this.isDeviceControlCapturedSessionIdentityValid(input.identity);
     const identityValid =
-      (!hasSessionIdentity || sessionValid) && deviceSessionValid;
+      capturedSessionIdentityValid && deviceSessionValid;
     const identityEstablished =
       this.hasEstablishedDeviceControlTransportIdentity(input.identity);
     const retryable =
       input.phase === "connect"
-        ? !identityEstablished || identityValid
+        ? capturedSessionIdentityValid && (!identityEstablished || deviceSessionValid)
         : identityValid && isReplaySafeAfterResponseClosure(input.request);
     const failure: DeviceControlTransportFailure = {
       code: DEVICE_CONTROL_TRANSPORT_FAILURE_CODE,

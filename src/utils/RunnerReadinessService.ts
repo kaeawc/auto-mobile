@@ -74,6 +74,10 @@ export interface ReadinessAndroidManager {
 export interface ReadinessIosManager {
   isInstalled(): Promise<boolean>;
   resetSetupState(): void;
+  forceRestart(options?: {
+    signal?: AbortSignal;
+    minimumHealthPollDurationMs?: number;
+  }): Promise<void>;
   start(options?: {
     signal?: AbortSignal;
     minimumHealthPollDurationMs?: number;
@@ -639,7 +643,7 @@ export class RunnerReadinessService {
       this.dependencies.awaitIosStartupMaintenance(),
     );
     const manager = this.dependencies.getIosManager(context.device);
-    const client = this.dependencies.getIosClient(context.device, manager.getServicePort());
+    let client = this.dependencies.getIosClient(context.device, manager.getServicePort());
     if (client.isConnected()) {
       const ready = await this.runPhase(context, "runner-health", 1, () =>
         client.verifyServiceReady(1, 0, this.probeTimeout(context)),
@@ -648,6 +652,19 @@ export class RunnerReadinessService {
         return;
       }
       manager.resetSetupState();
+      // A reachable CtrlProxy endpoint can still be unable to produce a
+      // hierarchy. In that state setup() would short-circuit on port health,
+      // leaving the runner wedged indefinitely. Restart the process so the
+      // next health probe uses a fresh observation stream (#5532).
+      await this.runPhase(context, "runner-setup", 1, (signal) => manager.forceRestart({
+        signal,
+        minimumHealthPollDurationMs: this.remainingForPhase(context, "runner-setup"),
+      }));
+      // Restart can reallocate the service port when its prior listener became
+      // unavailable. Do not let a stale client accept another device's runner.
+      client = this.dependencies.getIosClient(context.device, manager.getServicePort());
+      await this.waitForResponsiveClient(context, client);
+      return;
     }
 
     if (context.skipCtrlProxyDownload) {

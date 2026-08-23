@@ -83,7 +83,7 @@ export interface CtrlProxyIosManager extends ProxyManager {
   getReportedRunnerPort(): Promise<number | null>;
   setAutoRestart(enabled: boolean): void;
   isAutoRestartEnabled(): boolean;
-  forceRestart(): Promise<void>;
+  forceRestart(options?: CtrlProxyStartOptions): Promise<void>;
 }
 
 interface RemoteCtrlProxyIOSRunner {
@@ -157,6 +157,14 @@ class RemoteServicePortUnavailableError extends Error {
   constructor(host: string, port: number) {
     super(`Remote runner port ${port} is already in use on ${host}`);
     this.name = "RemoteServicePortUnavailableError";
+  }
+}
+
+/** Marks a forced-restart failure caused by its initiating caller cancelling. */
+class ForceRestartCancelledError extends Error {
+  constructor(reason: unknown) {
+    super(errorMessage(reason), { cause: reason });
+    this.name = "ForceRestartCancelledError";
   }
 }
 
@@ -240,6 +248,15 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
   // Shared process startup prevents concurrent callers from launching duplicate runners.
   private sharedStart: SharedCtrlProxyStart | null = null;
+  // A forced restart must retain lifecycle ownership through its non-interruptible
+  // stop phase, even when the readiness caller times out before it settles.
+  private forceRestartInFlight: Promise<void> | null = null;
+  // Lets ordinary starts detect that a newer forced restart began while they
+  // yielded before claiming the shared-start slot.
+  private forceRestartGeneration = 0;
+  // Joining callers may need a longer health-poll budget than the restart owner.
+  // Retain their request until the forced restart reaches shared startup.
+  private readonly forceRestartHealthPollDurationsMs = new Map<symbol, number>();
 
   // Target app bundle ID for CtrlProxy to observe (instead of SpringBoard)
   private targetBundleId: string | null = null;
@@ -822,11 +839,29 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * Start CtrlProxy
    */
   public async start(options: CtrlProxyStartOptions = {}): Promise<void> {
+    for (;;) {
+      await this.waitForForceRestart(options);
+      const expectedForceRestartGeneration = this.forceRestartGeneration;
+      if (this.forceRestartInFlight) {
+        continue;
+      }
+      return this.startAfterForceRestart(options, expectedForceRestartGeneration);
+    }
+  }
+
+  private async startAfterForceRestart(
+    options: CtrlProxyStartOptions,
+    expectedForceRestartGeneration?: number,
+  ): Promise<void> {
     if (options.signal?.aborted) {
       throw options.signal.reason ?? new Error("iOS CtrlProxy startup was aborted");
     }
 
     let sharedStart = await this.waitForNonJoinableStart(options.signal);
+    if (expectedForceRestartGeneration !== undefined &&
+      (this.forceRestartGeneration !== expectedForceRestartGeneration || this.forceRestartInFlight)) {
+      return this.start(options);
+    }
     if (sharedStart) {
       logger.info("[IOSCtrlProxy] Start already in progress, waiting for it to complete");
     } else {
@@ -1667,12 +1702,131 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   /**
    * Force restart the service (useful when client detects issues)
    */
-  public async forceRestart(): Promise<void> {
+  public async forceRestart(options: CtrlProxyStartOptions = {}): Promise<void> {
     logger.info("[IOSCtrlProxy] Force restart requested");
 
-    // Stop and restart
-    await this.stop();
-    await this.start();
+    const existingRestart = this.forceRestartInFlight;
+    if (existingRestart) {
+      const restarted = await this.waitForForceRestart(options);
+      if (restarted) {
+        return;
+      }
+      return this.forceRestart(options);
+    }
+
+    // Stop cannot be interrupted safely. Keep subsequent start/restart callers
+    // behind this barrier until teardown settles, even if the initiating
+    // readiness phase has already timed out.
+    this.forceRestartGeneration += 1;
+    const restart = (async () => {
+      try {
+        await this.stop();
+        if (options.signal?.aborted) {
+          throw new ForceRestartCancelledError(
+            options.signal.reason ?? new Error("iOS CtrlProxy restart was aborted"),
+          );
+        }
+        if (await this.checkHealthEndpointOnPortForDevice(this.servicePort, this.device.deviceId)) {
+          throw new Error(
+            "iOS CtrlProxy is still running after forced teardown; refusing to reuse a potentially unresponsive runner",
+          );
+        }
+        await this.startAfterForceRestart({
+          ...options,
+          minimumHealthPollDurationMs: this.maximumForceRestartHealthPollDurationMs(
+            options.minimumHealthPollDurationMs,
+          ),
+        });
+      } catch (error) {
+        if (options.signal?.aborted && !(error instanceof ForceRestartCancelledError)) {
+          throw new ForceRestartCancelledError(options.signal.reason ?? error);
+        }
+        throw error;
+      }
+    })();
+    this.forceRestartInFlight = restart;
+    void restart.finally(() => {
+      if (this.forceRestartInFlight === restart) {
+        this.forceRestartInFlight = null;
+        this.forceRestartHealthPollDurationsMs.clear();
+      }
+    }).catch(() => {});
+    await restart;
+  }
+
+  private async waitForForceRestart(options: CtrlProxyStartOptions): Promise<boolean> {
+    const restart = this.forceRestartInFlight;
+    if (!restart) {
+      return true;
+    }
+    const healthPollCaller = this.registerForceRestartHealthPollDuration(
+      options.minimumHealthPollDurationMs,
+    );
+    const waitForRestart = async (): Promise<boolean> => {
+      try {
+        await restart;
+        return true;
+      } catch (error) {
+        if (error instanceof ForceRestartCancelledError) {
+          // The earlier caller's deadline must not poison a later live caller.
+          return false;
+        }
+        throw error;
+      }
+    };
+    try {
+      const { signal } = options;
+      if (!signal) {
+        return await waitForRestart();
+      }
+      if (signal.aborted) {
+        throw signal.reason ?? new Error("iOS CtrlProxy startup was aborted");
+      }
+      return await new Promise<boolean>((resolve, reject) => {
+        const onAbort = () => reject(signal.reason ?? new Error("iOS CtrlProxy startup was aborted"));
+        signal.addEventListener("abort", onAbort, { once: true });
+        void waitForRestart().then(
+          (restarted) => {
+            signal.removeEventListener("abort", onAbort);
+            resolve(restarted);
+          },
+          (error) => {
+            signal.removeEventListener("abort", onAbort);
+            reject(error);
+          },
+        );
+      });
+    } finally {
+      this.removeForceRestartHealthPollDuration(healthPollCaller);
+    }
+  }
+
+  private maximumForceRestartHealthPollDurationMs(ownerDurationMs: number | undefined): number | undefined {
+    const joiningDurationMs = Math.max(0, ...this.forceRestartHealthPollDurationsMs.values());
+    const maximumDurationMs = Math.max(ownerDurationMs ?? 0, joiningDurationMs);
+    return maximumDurationMs > 0 ? maximumDurationMs : undefined;
+  }
+
+  private registerForceRestartHealthPollDuration(durationMs: number | undefined): symbol | undefined {
+    if (!durationMs || durationMs <= 0) {
+      return undefined;
+    }
+    const callerId = Symbol("CtrlProxy forced restart caller");
+    this.forceRestartHealthPollDurationsMs.set(callerId, durationMs);
+    if (this.sharedStart) {
+      this.extendHealthPollDeadline(this.sharedStart, callerId, durationMs);
+    }
+    return callerId;
+  }
+
+  private removeForceRestartHealthPollDuration(callerId: symbol | undefined): void {
+    if (!callerId) {
+      return;
+    }
+    this.forceRestartHealthPollDurationsMs.delete(callerId);
+    if (this.sharedStart) {
+      this.removeHealthPollDeadline(this.sharedStart, callerId);
+    }
   }
 
   /**

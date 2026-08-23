@@ -110,4 +110,73 @@ class CtrlProxyObserverGateTest {
       extractCalls.get(),
     )
   }
+
+  // ---------------------------------------------------------------------------
+  // Review regressions (issue #5470): the gate must skip only expensive work, not
+  // invariant-maintaining bookkeeping.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Bug 1: the frameContext staleness token must keep advancing on UI-changing events even with
+   * zero observers. [advancesFrameContext] is the pure decision the call site increments on, and it
+   * takes NO connection count — so the token advances regardless of how many clients are connected.
+   * Were it gated, a stale pre-disconnect token could survive a UI change across an observer gap
+   * and wrongly pass the reconnect staleness check.
+   */
+  @Test
+  fun `frameContext advances on UI-change events independent of observers`() {
+    // The bump set is exactly the scroll interaction plus every hierarchy-refresh type — and the
+    // decision does not consult the connection count, so it holds at zero observers.
+    assertTrue(
+      "scroll must advance frameContext",
+      advancesFrameContext(android.view.accessibility.AccessibilityEvent.TYPE_VIEW_SCROLLED),
+    )
+    for (type in refreshTypes) {
+      assertTrue("refresh type $type must advance frameContext", advancesFrameContext(type))
+    }
+    // Non-UI-changing interactions (a click/select) do not advance the token, matching the original
+    // bump sites (only scroll among interactions bumped).
+    assertFalse(
+      "a click must not advance frameContext",
+      advancesFrameContext(android.view.accessibility.AccessibilityEvent.TYPE_VIEW_CLICKED),
+    )
+    assertFalse(
+      "a select must not advance frameContext",
+      advancesFrameContext(android.view.accessibility.AccessibilityEvent.TYPE_VIEW_SELECTED),
+    )
+    // Same event types, evaluated as if unobserved: advancesFrameContext ignores observers
+    // entirely,
+    // so the token still advances (call site bumps unconditionally on these).
+    assertEquals(
+      "advancesFrameContext must match the exact refresh + scroll bump set",
+      refreshTypes.toSet() + android.view.accessibility.AccessibilityEvent.TYPE_VIEW_SCROLLED,
+      (refreshTypes + interactionTypes).filter { advancesFrameContext(it) }.toSet(),
+    )
+  }
+
+  /**
+   * Bug 2: pending scroll deltas accumulated before the last client left must be discarded across a
+   * zero-observer gap, so the first post-reconnect scroll starts clean instead of adding onto stale
+   * state and broadcasting a bogus combined delta. A still-connected client's in-flight
+   * accumulation must be preserved untouched.
+   */
+  @Test
+  fun `pending scroll deltas are discarded across a zero-observer gap`() {
+    val accumulated =
+      PendingScrollState(deltaX = 40, deltaY = -120, packageName = "com.example.app")
+
+    // Last client gone: discard so the next scroll starts from zero.
+    assertEquals(
+      PendingScrollState.EMPTY,
+      pendingScrollAcrossGate(accumulated, connectionCount = 0),
+    )
+    assertEquals(
+      PendingScrollState.EMPTY,
+      pendingScrollAcrossGate(accumulated, connectionCount = -1),
+    )
+
+    // Still observed: preserve the in-flight accumulation exactly, dropping nothing.
+    assertEquals(accumulated, pendingScrollAcrossGate(accumulated, connectionCount = 1))
+    assertEquals(accumulated, pendingScrollAcrossGate(accumulated, connectionCount = 3))
+  }
 }

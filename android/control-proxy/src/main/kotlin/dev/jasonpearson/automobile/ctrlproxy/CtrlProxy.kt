@@ -218,17 +218,31 @@ internal data class AccessibilityEventWork(
   val refreshesHierarchy: Boolean,
 ) {
   companion object {
-    /** Nothing to do — no interaction recording, no hierarchy refresh, no frameContext bump. */
+    /** Nothing to do — no interaction recording and no hierarchy refresh (the expensive work). */
     val NONE = AccessibilityEventWork(interaction = null, refreshesHierarchy = false)
   }
 }
 
 /**
+ * True when [eventType] changes the UI enough to advance the `frameContext` staleness token. This
+ * is DELIBERATELY independent of the observer count (issue #5470 review): the token must keep
+ * advancing even while nobody is connected, otherwise a token minted before the last client
+ * disconnected could still pass the daemon/runner frame-context staleness check after a reconnect
+ * even though the screen changed during the gap — aiming an input action at the wrong UI state. The
+ * set is exactly the original bump sites: the hierarchy-refresh types plus a scroll. Advancing the
+ * token is a cheap atomic increment; only the EXPENSIVE extraction/recording/broadcast is gated on
+ * an observer.
+ */
+internal fun advancesFrameContext(eventType: Int): Boolean =
+  triggersHierarchyRefresh(eventType) ||
+    interactionDispatchFor(eventType) == InteractionDispatch.SCROLL
+
+/**
  * Pure "is anyone observing" gate (issue #5470). The two biggest continuous-work paths in
  * [CtrlProxy.onAccessibilityEvent] — per-interaction accessibility-node recording and the debounced
  * full-hierarchy extraction + structural hash — are background PUSH work that only a connected
- * client ever consumes. When [connectionCount] is zero they are skipped entirely, along with the
- * `frameContext` bookkeeping that only labels pushed/broadcast frames.
+ * client ever consumes, so with zero observers they are skipped entirely. The `frameContext`
+ * staleness token is NOT gated here (see [advancesFrameContext]); it keeps advancing regardless.
  *
  * This does NOT govern the on-demand PULL path (`request_hierarchy` → `extractNowBlocking`): that
  * extracts the live accessibility tree directly and reads none of the push-path side effects
@@ -249,6 +263,34 @@ internal fun accessibilityEventWorkFor(
   } else {
     AccessibilityEventWork.NONE
   }
+
+/**
+ * Debounced-scroll accumulation state ([CtrlProxy.pendingScrollDeltaX] / `Y` / package name)
+ * modeled as an immutable value so the "discard across an observer gap" decision is unit-testable.
+ */
+internal data class PendingScrollState(
+  val deltaX: Int,
+  val deltaY: Int,
+  val packageName: String?,
+) {
+  companion object {
+    val EMPTY = PendingScrollState(deltaX = 0, deltaY = 0, packageName = null)
+  }
+}
+
+/**
+ * The pending-scroll state to keep after applying the observer gate (issue #5470 review). Scroll
+ * deltas accumulate across the ~300ms scroll debounce; if the last client disconnects mid-window
+ * the gate skips every subsequent scroll, so those deltas would otherwise linger and the first
+ * post-reconnect scroll would ADD onto them and broadcast a bogus combined value. With no observer
+ * we therefore discard the accumulation ([PendingScrollState.EMPTY]); with an observer the
+ * in-flight accumulation is preserved untouched so a still-connected client's scroll is never
+ * dropped.
+ */
+internal fun pendingScrollAcrossGate(
+  current: PendingScrollState,
+  connectionCount: Int,
+): PendingScrollState = if (connectionCount > 0) current else PendingScrollState.EMPTY
 
 internal fun navigationEventResponse(event: TimestampedNavigationEvent): NavigationEventResponse =
   NavigationEventResponse(
@@ -2176,19 +2218,40 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         lastWindowClassName = event.className?.toString()
       }
 
+      // Advance the frameContext staleness token on every UI-changing event REGARDLESS of observers
+      // (issue #5470 review). If it froze while unobserved, a token minted before the last client
+      // disconnected could still pass the daemon/runner staleness check after reconnect even though
+      // the screen changed during the gap, aiming an input action at the wrong UI state. This is a
+      // cheap atomic increment maintaining the invariant; only the expensive work below is gated.
+      if (advancesFrameContext(event.eventType)) {
+        frameContext.incrementAndGet()
+      }
+
+      val connectionCount =
+        if (::webSocketServer.isInitialized) webSocketServer.getConnectionCount() else 0
+
+      // With no observer, discard any scroll deltas accumulated before the last client left so the
+      // first post-reconnect scroll starts clean rather than broadcasting a bogus combined delta
+      // (issue #5470 review). Only touches state when unobserved, so a still-connected client's
+      // in-flight scroll is never dropped; see pendingScrollAcrossGate.
+      if (connectionCount <= 0) {
+        val gated =
+          pendingScrollAcrossGate(
+            PendingScrollState(pendingScrollDeltaX, pendingScrollDeltaY, pendingScrollPackageName),
+            connectionCount,
+          )
+        pendingScrollDeltaX = gated.deltaX
+        pendingScrollDeltaY = gated.deltaY
+        pendingScrollPackageName = gated.packageName
+      }
+
       // "Is anyone observing?" gate (issue #5470). Both the interaction/scroll recording below and
       // the debounced hierarchy refresh further down are PUSH work only a connected client
       // consumes,
-      // so with zero connections we skip them — and their frameContext bookkeeping — before
-      // touching
-      // event.source, allocating, extracting, or hashing. The pull path (request_hierarchy) does
-      // not
-      // go through here and stays functional with zero observers; see accessibilityEventWorkFor.
-      val work =
-        accessibilityEventWorkFor(
-          event.eventType,
-          if (::webSocketServer.isInitialized) webSocketServer.getConnectionCount() else 0,
-        )
+      // so with zero connections we skip them — before touching event.source, allocating,
+      // extracting, or hashing. The frameContext token above still advanced. The pull path
+      // (request_hierarchy) does not go through here and stays functional with zero observers.
+      val work = accessibilityEventWorkFor(event.eventType, connectionCount)
 
       // Broadcast interaction events for telemetry tracking. Classification is routed through the
       // shared [interactionDispatchFor] so the subscribed event-type mask (derived from the same
@@ -2218,19 +2281,17 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             recordInteractionEvent(event, "inputText")
           }
         }
-        InteractionDispatch.SCROLL -> {
-          frameContext.incrementAndGet()
-          recordDebouncedScroll(event)
-        }
+        // frameContext already advanced above (unconditionally); here we only do the gated,
+        // expensive scroll recording, which runs solely when observed.
+        InteractionDispatch.SCROLL -> recordDebouncedScroll(event)
         null -> {} // event type this service does not act on
       }
 
-      // Delegate to the smart debouncer for content/window changes (same shared classifier).
-      // The debouncer uses structural hash comparison to detect animation vs real changes. Gated on
-      // an observer (issue #5470): with no client connected, work.refreshesHierarchy is false, so
-      // neither the frameContext bump nor the extraction/hash runs.
+      // Delegate to the smart debouncer for content/window changes (same shared classifier). The
+      // debouncer uses structural hash comparison to detect animation vs real changes. Gated on an
+      // observer (issue #5470): with no client connected, work.refreshesHierarchy is false, so the
+      // extraction/hash is skipped. The frameContext token advanced unconditionally above.
       if (work.refreshesHierarchy) {
-        frameContext.incrementAndGet()
         if (::hierarchyDebouncer.isInitialized) {
           hierarchyDebouncer.onAccessibilityEvent()
         }

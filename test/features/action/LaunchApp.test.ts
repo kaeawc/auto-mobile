@@ -1074,6 +1074,48 @@ describe("LaunchApp", () => {
         cleanup();
       }
     });
+
+    test("stops an iOS clear-data launch when device loss occurs during termination", async () => {
+      fakeTimer.enableAutoAdvance();
+      const controller = new AbortController();
+      const deviceLoss = new DeviceLostError(
+        simulatorUdid,
+        `device-disconnected:${simulatorUdid}`,
+      );
+      const {
+        iosLaunchApp,
+        deviceAppLauncher,
+        simctlCalls,
+        clearCalls,
+        cleanup,
+      } = createDeviceHarness({ deviceId: simulatorUdid });
+      const simctl = (iosLaunchApp as unknown as {
+        simctl: { terminateApp(bundleId: string): Promise<void> };
+      }).simctl;
+      simctl.terminateApp = async (bundleId: string) => {
+        simctlCalls.push(`terminate:${bundleId}`);
+        controller.abort(deviceLoss);
+      };
+
+      try {
+        await expect(
+          iosLaunchApp.execute(
+            userBundleId,
+            /* clearAppData */ true,
+            /* coldBoot */ false,
+            undefined,
+            undefined,
+            undefined,
+            controller.signal,
+          ),
+        ).rejects.toBe(deviceLoss);
+        expect(clearCalls).toHaveLength(0);
+        expect(deviceAppLauncher.launchCalls).toHaveLength(0);
+        expect(simctlCalls).toEqual([`terminate:${userBundleId}`]);
+      } finally {
+        cleanup();
+      }
+    });
   });
 
   describe("iOS clearAppData", () => {

@@ -360,6 +360,7 @@ export class LaunchApp extends BaseVisualChange {
 
     const result = await this.observedInteraction(
       async () => {
+        this.assertLaunchNotAborted(signal);
         // Set bundle ID before starting CtrlProxy so it targets the app, not SpringBoard
         if (!isSystemBundleId) {
           IOSCtrlProxyManager.getInstance(this.device).setTargetBundleId(bundleId);
@@ -395,6 +396,7 @@ export class LaunchApp extends BaseVisualChange {
                 // App might not be running
               }
             });
+            this.assertLaunchNotAborted(signal);
           }
 
           // Wipe the app's data container (fastest iOS "clear data": no reinstall,
@@ -404,6 +406,7 @@ export class LaunchApp extends BaseVisualChange {
             const clearResult = await perf.track("clearAppData", () =>
               this.clearAppDataFactory(this.device, this.simctl).execute(bundleId)
             );
+            this.assertLaunchNotAborted(signal);
             if (!clearResult.success) {
               // Do NOT launch with stale data — callers request clearAppData to
               // guarantee a clean launch. Fail loudly instead of silently
@@ -435,6 +438,7 @@ export class LaunchApp extends BaseVisualChange {
               // gives cold-boot relaunch semantics (a fresh process foregrounds).
               : this.deviceAppLauncher.launchApp(this.device.deviceId, bundleId, { terminateExisting: true })
           );
+          this.assertLaunchNotAborted(signal);
         } else {
           // Warm launch. Simulator: simctl launch foregrounds a backgrounded app
           // and is faster than the CtrlProxy WebSocket round-trip (~4-5s). Device:
@@ -444,6 +448,7 @@ export class LaunchApp extends BaseVisualChange {
               ? this.simctl.launchApp(bundleId)
               : this.deviceAppLauncher.launchApp(this.device.deviceId, bundleId, { terminateExisting: true })
           );
+          this.assertLaunchNotAborted(signal);
 
           if (!launchResult.success) {
             logger.warn(`[LaunchApp] launch failed: ${launchResult.error ?? "unknown error"}`);
@@ -455,6 +460,7 @@ export class LaunchApp extends BaseVisualChange {
               const installedApps = await perf.track("checkInstalled", () =>
                 this.installedAppsProvider.listInstalledApps()
               );
+              this.assertLaunchNotAborted(signal);
               if (installedApps.length > 0 && !installedApps.includes(bundleId)) {
                 logger.info("App is not installed");
                 perf.end();

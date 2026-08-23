@@ -187,10 +187,6 @@ public final class dev.jasonpearson.automobile.sdk.FrameMetricsCollector$activit
   public void onActivityDestroyed(android.app.Activity);
 }
 Compiled from "FrameMetricsCollector.kt"
-public final class dev.jasonpearson.automobile.sdk.FrameMetricsCollector$controlReceiver$1 extends android.content.BroadcastReceiver {
-  public void onReceive(android.content.Context, android.content.Intent);
-}
-Compiled from "FrameMetricsCollector.kt"
 public final class dev.jasonpearson.automobile.sdk.FrameMetricsCollector$scheduleBroadcast$1 implements java.lang.Runnable {
   public void run();
 }
@@ -253,6 +249,18 @@ public final class dev.jasonpearson.automobile.sdk.NavigationSource extends java
   public static dev.jasonpearson.automobile.sdk.NavigationSource valueOf(java.lang.String);
   public static kotlin.enums.EnumEntries<dev.jasonpearson.automobile.sdk.NavigationSource> getEntries();
 }
+Compiled from "NetworkControlReceiverRegistrar.kt"
+public final class dev.jasonpearson.automobile.sdk.NetworkControlReceiverRegistrar$register$registeredReceiver$1 extends android.content.BroadcastReceiver {
+  public void onReceive(android.content.Context, android.content.Intent);
+}
+Compiled from "NetworkControlReceiverRegistrar.kt"
+public final class dev.jasonpearson.automobile.sdk.NetworkControlReceiverRegistrar {
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.NetworkControlReceiverRegistrar(kotlin.jvm.functions.Function2<? super android.content.Context, ? super android.content.Intent, kotlin.Unit>);
+  public final synchronized void register(android.content.Context, kotlin.jvm.functions.Function0<? extends android.content.IntentFilter>);
+  public final synchronized void unregister(android.content.Context);
+  public static final kotlin.jvm.functions.Function2 access$getOnControlBroadcast$p(dev.jasonpearson.automobile.sdk.NetworkControlReceiverRegistrar);
+}
 Compiled from "AutoMobileNotifications.kt"
 public final class dev.jasonpearson.automobile.sdk.NotificationAction {
   public static final int $stable;
@@ -306,10 +314,6 @@ final class dev.jasonpearson.automobile.sdk.RecompositionTracker$RollingAverage 
   public dev.jasonpearson.automobile.sdk.RecompositionTracker$RollingAverage(long);
   public final void record();
   public final double getAverage();
-}
-Compiled from "RecompositionTracker.kt"
-public final class dev.jasonpearson.automobile.sdk.RecompositionTracker$controlReceiver$1 extends android.content.BroadcastReceiver {
-  public void onReceive(android.content.Context, android.content.Intent);
 }
 Compiled from "RecompositionTracker.kt"
 public final class dev.jasonpearson.automobile.sdk.RecompositionTracker$scheduleBroadcast$1 implements java.lang.Runnable {
@@ -1339,10 +1343,6 @@ public interface dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore$Ru
   public abstract dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore$ErrorSimulationConfig getErrorSimulation();
 }
 Compiled from "NetworkMockRuleStore.kt"
-public final class dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore$receiver$1 extends android.content.BroadcastReceiver {
-  public void onReceive(android.content.Context, android.content.Intent);
-}
-Compiled from "NetworkMockRuleStore.kt"
 public final class dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore$ruleMatcher$1 implements dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore$RuleMatcher {
   public dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore$MatchedMockRule findMatchingRule(java.lang.String, java.lang.String, java.lang.String);
   public dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore$ErrorSimulationConfig getErrorSimulation();
@@ -1372,7 +1372,6 @@ public final class dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore 
   public dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore();
   public static final dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore access$getInstance$cp();
   public static final void access$setInstance$cp(dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore);
-  public static final kotlinx.serialization.json.Json access$getJson$p(dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore);
 }
 Compiled from "AutoMobileNetwork.kt"
 public final class dev.jasonpearson.automobile.sdk.network.NetworkRequestRecord {
@@ -1566,6 +1565,137 @@ public interface dev.jasonpearson.automobile.sdk.session.SessionTracking {
   public abstract void onForeground();
   public abstract void onBackground();
   public abstract void shutdown();
+}
+Compiled from "DataStoreAdapter.kt"
+public interface dev.jasonpearson.automobile.sdk.storage.DataStoreAdapter {
+  public abstract java.lang.Object storeNames(kotlin.coroutines.Continuation<? super java.util.List<java.lang.String>>);
+  public abstract java.lang.Object read(java.lang.String, kotlin.coroutines.Continuation<? super java.util.List<dev.jasonpearson.automobile.sdk.storage.DataStoreEntry>>);
+}
+Compiled from "DataStoreAdapterError.kt"
+public final class dev.jasonpearson.automobile.sdk.storage.DataStoreAdapterError$AdapterNotFound extends dev.jasonpearson.automobile.sdk.storage.DataStoreAdapterError {
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.storage.DataStoreAdapterError$AdapterNotFound(java.lang.String);
+}
+Compiled from "DataStoreAdapterError.kt"
+public final class dev.jasonpearson.automobile.sdk.storage.DataStoreAdapterError$ReadError extends dev.jasonpearson.automobile.sdk.storage.DataStoreAdapterError {
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.storage.DataStoreAdapterError$ReadError(java.lang.String, java.lang.Throwable);
+  public dev.jasonpearson.automobile.sdk.storage.DataStoreAdapterError$ReadError(java.lang.String, java.lang.Throwable, int, kotlin.jvm.internal.DefaultConstructorMarker);
+}
+Compiled from "DataStoreAdapterError.kt"
+public final class dev.jasonpearson.automobile.sdk.storage.DataStoreAdapterError$StoreNotFound extends dev.jasonpearson.automobile.sdk.storage.DataStoreAdapterError {
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.storage.DataStoreAdapterError$StoreNotFound(java.lang.String);
+}
+Compiled from "DataStoreAdapterError.kt"
+public final class dev.jasonpearson.automobile.sdk.storage.DataStoreAdapterError$UnsupportedValue extends dev.jasonpearson.automobile.sdk.storage.DataStoreAdapterError {
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.storage.DataStoreAdapterError$UnsupportedValue(java.lang.String, java.lang.String, java.lang.String);
+}
+Compiled from "DataStoreAdapterError.kt"
+public abstract class dev.jasonpearson.automobile.sdk.storage.DataStoreAdapterError extends java.lang.Exception {
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.storage.DataStoreAdapterError(java.lang.String, kotlin.jvm.internal.DefaultConstructorMarker);
+}
+Compiled from "DataStoreModels.kt"
+public final class dev.jasonpearson.automobile.sdk.storage.DataStoreCapabilities {
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.storage.DataStoreCapabilities(boolean, boolean, boolean, java.util.List<? extends dev.jasonpearson.automobile.sdk.storage.DataStoreValueType>);
+  public dev.jasonpearson.automobile.sdk.storage.DataStoreCapabilities(boolean, boolean, boolean, java.util.List, int, kotlin.jvm.internal.DefaultConstructorMarker);
+  public final boolean getReadSupported();
+  public final boolean getMutationSupported();
+  public final boolean getRedactionEnabled();
+  public final java.util.List<dev.jasonpearson.automobile.sdk.storage.DataStoreValueType> getSupportedValueTypes();
+  public final boolean component1();
+  public final boolean component2();
+  public final boolean component3();
+  public final java.util.List<dev.jasonpearson.automobile.sdk.storage.DataStoreValueType> component4();
+  public final dev.jasonpearson.automobile.sdk.storage.DataStoreCapabilities copy(boolean, boolean, boolean, java.util.List<? extends dev.jasonpearson.automobile.sdk.storage.DataStoreValueType>);
+  public static dev.jasonpearson.automobile.sdk.storage.DataStoreCapabilities copy$default(dev.jasonpearson.automobile.sdk.storage.DataStoreCapabilities, boolean, boolean, boolean, java.util.List, int, java.lang.Object);
+  public java.lang.String toString();
+  public int hashCode();
+  public boolean equals(java.lang.Object);
+}
+Compiled from "DataStoreModels.kt"
+public final class dev.jasonpearson.automobile.sdk.storage.DataStoreDescriptor {
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.storage.DataStoreDescriptor(java.lang.String, int);
+  public final java.lang.String getName();
+  public final int getEntryCount();
+  public final java.lang.String component1();
+  public final int component2();
+  public final dev.jasonpearson.automobile.sdk.storage.DataStoreDescriptor copy(java.lang.String, int);
+  public static dev.jasonpearson.automobile.sdk.storage.DataStoreDescriptor copy$default(dev.jasonpearson.automobile.sdk.storage.DataStoreDescriptor, java.lang.String, int, int, java.lang.Object);
+  public java.lang.String toString();
+  public int hashCode();
+  public boolean equals(java.lang.Object);
+}
+Compiled from "DataStoreModels.kt"
+public final class dev.jasonpearson.automobile.sdk.storage.DataStoreEntry {
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.storage.DataStoreEntry(java.lang.String, java.lang.Object, dev.jasonpearson.automobile.sdk.storage.DataStoreValueType);
+  public final java.lang.String getKey();
+  public final java.lang.Object getValue();
+  public final dev.jasonpearson.automobile.sdk.storage.DataStoreValueType getType();
+  public final java.lang.String component1();
+  public final java.lang.Object component2();
+  public final dev.jasonpearson.automobile.sdk.storage.DataStoreValueType component3();
+  public final dev.jasonpearson.automobile.sdk.storage.DataStoreEntry copy(java.lang.String, java.lang.Object, dev.jasonpearson.automobile.sdk.storage.DataStoreValueType);
+  public static dev.jasonpearson.automobile.sdk.storage.DataStoreEntry copy$default(dev.jasonpearson.automobile.sdk.storage.DataStoreEntry, java.lang.String, java.lang.Object, dev.jasonpearson.automobile.sdk.storage.DataStoreValueType, int, java.lang.Object);
+  public java.lang.String toString();
+  public int hashCode();
+  public boolean equals(java.lang.Object);
+}
+Compiled from "DataStoreInspector.kt"
+final class dev.jasonpearson.automobile.sdk.storage.DataStoreInspector$describeStores$1 extends kotlin.coroutines.jvm.internal.ContinuationImpl {
+  public final java.lang.Object invokeSuspend(java.lang.Object);
+}
+Compiled from "DataStoreInspector.kt"
+final class dev.jasonpearson.automobile.sdk.storage.DataStoreInspector$readStore$1 extends kotlin.coroutines.jvm.internal.ContinuationImpl {
+  public final java.lang.Object invokeSuspend(java.lang.Object);
+}
+Compiled from "DataStoreInspector.kt"
+final class dev.jasonpearson.automobile.sdk.storage.DataStoreInspector$storeNames$1 extends kotlin.coroutines.jvm.internal.ContinuationImpl {
+  public final java.lang.Object invokeSuspend(java.lang.Object);
+}
+Compiled from "DataStoreInspector.kt"
+public final class dev.jasonpearson.automobile.sdk.storage.DataStoreInspector {
+  public static final dev.jasonpearson.automobile.sdk.storage.DataStoreInspector INSTANCE;
+  public static final java.lang.String REDACTED_VALUE;
+  public static final int $stable;
+  public final void registerAdapter(java.lang.String, dev.jasonpearson.automobile.sdk.storage.DataStoreAdapter);
+  public final boolean unregisterAdapter(java.lang.String);
+  public final java.util.Set<java.lang.String> registeredAdapterNames();
+  public final void setRedactionPolicy(dev.jasonpearson.automobile.sdk.storage.DataStoreRedactionPolicy);
+  public final java.lang.Object storeNames(java.lang.String, kotlin.coroutines.Continuation<? super java.util.List<java.lang.String>>);
+  public final java.lang.Object describeStores(java.lang.String, kotlin.coroutines.Continuation<? super java.util.List<dev.jasonpearson.automobile.sdk.storage.DataStoreDescriptor>>);
+  public final java.lang.Object readStore(java.lang.String, java.lang.String, kotlin.coroutines.Continuation<? super java.util.List<dev.jasonpearson.automobile.sdk.storage.DataStoreEntry>>);
+  public final dev.jasonpearson.automobile.sdk.storage.DataStoreCapabilities capabilities();
+  public final void reset$auto_mobile_sdk();
+}
+Compiled from "DataStoreModels.kt"
+public final class dev.jasonpearson.automobile.sdk.storage.DataStoreRedactionPolicy$Companion {
+  public final dev.jasonpearson.automobile.sdk.storage.DataStoreRedactionPolicy getNONE();
+}
+Compiled from "DataStoreModels.kt"
+public interface dev.jasonpearson.automobile.sdk.storage.DataStoreRedactionPolicy {
+  public static final dev.jasonpearson.automobile.sdk.storage.DataStoreRedactionPolicy$Companion Companion;
+  public abstract boolean shouldRedact(java.lang.String, java.lang.String);
+}
+Compiled from "DataStoreModels.kt"
+public final class dev.jasonpearson.automobile.sdk.storage.DataStoreValueType extends java.lang.Enum<dev.jasonpearson.automobile.sdk.storage.DataStoreValueType> {
+  public static final dev.jasonpearson.automobile.sdk.storage.DataStoreValueType STRING;
+  public static final dev.jasonpearson.automobile.sdk.storage.DataStoreValueType INT;
+  public static final dev.jasonpearson.automobile.sdk.storage.DataStoreValueType LONG;
+  public static final dev.jasonpearson.automobile.sdk.storage.DataStoreValueType FLOAT;
+  public static final dev.jasonpearson.automobile.sdk.storage.DataStoreValueType DOUBLE;
+  public static final dev.jasonpearson.automobile.sdk.storage.DataStoreValueType BOOLEAN;
+  public static final dev.jasonpearson.automobile.sdk.storage.DataStoreValueType STRING_SET;
+  public static final dev.jasonpearson.automobile.sdk.storage.DataStoreValueType BYTE_ARRAY;
+  public static final dev.jasonpearson.automobile.sdk.storage.DataStoreValueType UNKNOWN;
+  public static dev.jasonpearson.automobile.sdk.storage.DataStoreValueType[] values();
+  public static dev.jasonpearson.automobile.sdk.storage.DataStoreValueType valueOf(java.lang.String);
+  public static kotlin.enums.EnumEntries<dev.jasonpearson.automobile.sdk.storage.DataStoreValueType> getEntries();
 }
 Compiled from "SharedPreferencesDriver.kt"
 public interface dev.jasonpearson.automobile.sdk.storage.FileSystemOperations {

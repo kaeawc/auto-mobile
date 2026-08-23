@@ -325,9 +325,22 @@ class AppDataStoreAdapter(
   override suspend fun read(storeName: String): List<DataStoreEntry> {
     val store = stores[storeName] ?: throw DataStoreAdapterError.StoreNotFound(storeName)
     return store.data.first().asMap().map { (key, value) ->
-      DataStoreEntry(key.name, value, value.toDataStoreValueType())
+      DataStoreEntry(key.name, value, valueTypeOf(value))
     }
   }
+
+  private fun valueTypeOf(value: Any?): DataStoreValueType =
+    when (value) {
+      is String -> DataStoreValueType.STRING
+      is Int -> DataStoreValueType.INT
+      is Long -> DataStoreValueType.LONG
+      is Float -> DataStoreValueType.FLOAT
+      is Double -> DataStoreValueType.DOUBLE
+      is Boolean -> DataStoreValueType.BOOLEAN
+      is Set<*> -> DataStoreValueType.STRING_SET
+      is ByteArray -> DataStoreValueType.BYTE_ARRAY
+      else -> DataStoreValueType.UNKNOWN
+    }
 }
 
 if (BuildConfig.DEBUG) {

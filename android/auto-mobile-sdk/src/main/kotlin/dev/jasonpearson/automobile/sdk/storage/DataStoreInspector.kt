@@ -79,7 +79,10 @@ object DataStoreInspector {
     val entries = runAdapterRead { adapter.read(storeName) }
     return entries.map { entry ->
       if (policy.shouldRedact(storeName, entry.key)) {
-        entry.copy(value = REDACTED_VALUE)
+        // Redact to a STRING marker rather than keeping the original type: a redacted
+        // STRING_SET/BYTE_ARRAY whose value is the marker string would otherwise serialize to
+        // null downstream and be indistinguishable from an absent value (issue #5192 review).
+        entry.copy(value = REDACTED_VALUE, type = DataStoreValueType.STRING)
       } else {
         entry
       }

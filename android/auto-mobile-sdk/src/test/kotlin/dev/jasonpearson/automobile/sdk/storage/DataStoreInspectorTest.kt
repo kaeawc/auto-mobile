@@ -213,6 +213,22 @@ class DataStoreInspectorTest {
     assertEquals("alice", byKey.getValue("user").value)
   }
 
+  // AC4 — redacting a typed value keeps the marker visible (STRING), not dropped downstream.
+  @Test
+  fun `redacting a typed value retypes it to STRING so the marker survives`() = runTest {
+    val adapter =
+      FakeDataStoreAdapter().apply {
+        setStore("auth", linkedMapOf("scopes" to setOf("read", "write")))
+      }
+    DataStoreInspector.registerAdapter("prefs", adapter)
+    DataStoreInspector.setRedactionPolicy { _, _ -> true }
+
+    val entry = DataStoreInspector.readStore("prefs", "auth").single()
+
+    assertEquals(DataStoreInspector.REDACTED_VALUE, entry.value)
+    assertEquals(DataStoreValueType.STRING, entry.type)
+  }
+
   // AC4 — read-only mode: the boundary reports mutation unsupported.
   @Test
   fun `capabilities report read-only and supported types`() {

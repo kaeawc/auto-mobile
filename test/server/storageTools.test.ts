@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { registerStorageTools } from "../../src/server/storageTools";
+import { registerStorageTools, validateTypeForPlatform } from "../../src/server/storageTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { serverConfig } from "../../src/utils/ServerConfig";
+import { ActionableError } from "../../src/models";
 
 describe("Storage Tools Registration", () => {
   beforeEach(() => {
@@ -240,6 +241,35 @@ describe("Storage Tools Registration", () => {
         platform: "android",
         appId: "com.example.app",
       })).toThrow();
+    });
+  });
+
+  // The setKeyValue MCP-tool handler runs args.type through validateTypeForPlatform
+  // before dispatch; the daemon `ide/setKeyValue` socket handler now reuses the same
+  // guard (issue #5022). These pin the shared guidance both paths depend on.
+  describe("validateTypeForPlatform (shared MCP + socket guard)", () => {
+    test("rejects an Android-only type on iOS with actionable guidance", () => {
+      expect(() => validateTypeForPlatform("ios", "STRING_SET")).toThrow(ActionableError);
+      expect(() => validateTypeForPlatform("ios", "STRING_SET")).toThrow(/STRING_SET is Android-only/);
+      expect(() => validateTypeForPlatform("ios", "LONG")).toThrow(/LONG is Android-only/);
+    });
+
+    test("rejects an iOS-only type on Android with actionable guidance", () => {
+      expect(() => validateTypeForPlatform("android", "DOUBLE")).toThrow(ActionableError);
+      expect(() => validateTypeForPlatform("android", "DOUBLE")).toThrow(/DOUBLE is iOS-only/);
+      expect(() => validateTypeForPlatform("android", "ARRAY")).toThrow(/ARRAY is iOS-only/);
+    });
+
+    test("rejects the read-only UNKNOWN type on either platform", () => {
+      expect(() => validateTypeForPlatform("android", "UNKNOWN")).toThrow(/UNKNOWN type is read-only/);
+      expect(() => validateTypeForPlatform("ios", "UNKNOWN")).toThrow(/UNKNOWN type is read-only/);
+    });
+
+    test("accepts a shared type on both platforms", () => {
+      expect(() => validateTypeForPlatform("android", "STRING")).not.toThrow();
+      expect(() => validateTypeForPlatform("ios", "STRING")).not.toThrow();
+      expect(() => validateTypeForPlatform("android", "STRING_SET")).not.toThrow();
+      expect(() => validateTypeForPlatform("ios", "DOUBLE")).not.toThrow();
     });
   });
 });

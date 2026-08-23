@@ -231,4 +231,57 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
     expect(response.success).toBe(false);
     expect(response.error).toContain("Invalid platform");
   });
+
+  // Cross-platform type guidance now enforced on the socket path, matching the
+  // MCP-tool path (issue #5022). Previously an incompatible type reached the
+  // CtrlProxy client and failed deeper with a less actionable message.
+
+  test("ide/setKeyValue rejects an Android-only type on an iOS device with actionable guidance", async () => {
+    const response = await sendRequest(socketPath, "ide/setKeyValue", {
+      platform: "ios",
+      deviceId: iosDevice.deviceId,
+      appId: "com.example.app",
+      fileName: "prefs",
+      key: "tags",
+      value: "a,b",
+      type: "STRING_SET",
+    });
+
+    expect(response.success).toBe(false);
+    expect(response.error).toContain("STRING_SET is Android-only");
+    expect(iosSetPreference).not.toHaveBeenCalled();
+  });
+
+  test("ide/setKeyValue rejects an iOS-only type on an Android device with actionable guidance", async () => {
+    const response = await sendRequest(socketPath, "ide/setKeyValue", {
+      deviceId: androidDevice.deviceId,
+      appId: "com.example.app",
+      fileName: "prefs",
+      key: "ratio",
+      value: "1.5",
+      type: "DOUBLE",
+    });
+
+    expect(response.success).toBe(false);
+    expect(response.error).toContain("DOUBLE is iOS-only");
+    expect(androidSetPreference).not.toHaveBeenCalled();
+  });
+
+  test("ide/setKeyValue with a null value skips type validation and removes on iOS", async () => {
+    // A null value is a remove, which the MCP path never type-validates; an
+    // Android-only type must not block a cross-platform clear.
+    const response = await sendRequest(socketPath, "ide/setKeyValue", {
+      platform: "ios",
+      deviceId: iosDevice.deviceId,
+      appId: "com.example.app",
+      fileName: "prefs",
+      key: "tags",
+      value: null,
+      type: "STRING_SET",
+    });
+
+    expect(response.success).toBe(true);
+    expect(iosRemovePreference).toHaveBeenCalledWith("com.example.app", "prefs", "tags");
+    expect(iosSetPreference).not.toHaveBeenCalled();
+  });
 });

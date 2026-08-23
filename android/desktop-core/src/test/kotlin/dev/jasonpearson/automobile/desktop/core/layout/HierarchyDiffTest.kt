@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.desktop.core.layout
 import dev.jasonpearson.automobile.desktop.domain.ElementBounds
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -225,5 +226,52 @@ class HierarchyDiffTest {
     // Root, then A (both from A's pre-order), then the B-only node appended last.
     assertEquals(NodeDiffStatus.OnlyInB, entries.last().status)
     assertTrue(entries.last().key.contains("Bonly:bo"))
+  }
+
+  /** A synthetic multi-window root as [parseHierarchyFromJson] emits for a 2+ window frame. */
+  private fun multiWindowRoot(vararg windows: UIElementInfo): UIElementInfo =
+    node(MULTI_WINDOW_ROOT_CLASS_NAME, "multiwindow", children = windows.toList())
+
+  @Test
+  fun `wrapped multi-window frame diffed against a single-window frame isolates the extra window`() {
+    // A carries an extra IME window, so the parser wraps it under the synthetic root; B is a plain
+    // single-window frame. The synthetic wrapper must be transparent: the shared app window matches
+    // and only the extra IME window surfaces as OnlyInA — not the whole app as OnlyInA/OnlyInB.
+    val appSubtree =
+      node(
+        "app.Window",
+        "app",
+        children = listOf(node("android.widget.TextView", "title", text = "Hi")),
+      )
+    val a = multiWindowRoot(appSubtree, node("ime.Window", "ime"))
+    val b =
+      node(
+        "app.Window",
+        "app",
+        children = listOf(node("android.widget.TextView", "title", text = "Hi")),
+      )
+
+    val diff = diffHierarchies(a, b)
+
+    assertEquals(NodeDiffStatus.Equal, statusOf(diff, "app.Window:app"))
+    assertEquals(NodeDiffStatus.Equal, statusOf(diff, "TextView:title"))
+    assertEquals(NodeDiffStatus.OnlyInA, statusOf(diff, "ime.Window:ime"))
+    assertEquals(1, diff.onlyInA)
+    assertEquals(0, diff.onlyInB)
+    // The synthetic wrapper never appears as a diff entry on either side.
+    assertNull(statusOf(diff, MULTI_WINDOW_ROOT_CLASS_NAME))
+  }
+
+  @Test
+  fun `two identical wrapped multi-window frames report no differences`() {
+    val a = multiWindowRoot(node("app.Window", "app"), node("ime.Window", "ime"))
+    val b = multiWindowRoot(node("app.Window", "app"), node("ime.Window", "ime"))
+
+    val diff = diffHierarchies(a, b)
+
+    assertFalse(diff.hasDifferences)
+    // Both windows match; the synthetic wrapper is transparent so it is not counted.
+    assertEquals(2, diff.equal)
+    assertNull(statusOf(diff, MULTI_WINDOW_ROOT_CLASS_NAME))
   }
 }

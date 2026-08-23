@@ -110,6 +110,177 @@ class HierarchyParserMultiRootTest {
   }
 
   @Test
+  fun `identically-shaped descendants in two windows do not collide in the maps`() {
+    // Both windows carry a generic child with no preferred id, sharing depth, sibling index, and
+    // bounds — the exact shape that generated a colliding element id before per-window namespacing.
+    // Each must remain independently resolvable and parented to its own window.
+    val json =
+      """
+      { "hierarchy": { "node": [
+        { "className": "app.Window", "resource-id": "app",
+          "bounds": { "left": 0, "top": 0, "right": 100, "bottom": 100 },
+          "node": { "className": "android.view.View",
+            "bounds": { "left": 0, "top": 0, "right": 100, "bottom": 100 } } },
+        { "className": "overlay.Window", "resource-id": "overlay",
+          "bounds": { "left": 0, "top": 0, "right": 100, "bottom": 100 },
+          "node": { "className": "android.view.View",
+            "bounds": { "left": 0, "top": 0, "right": 100, "bottom": 100 } } }
+      ] } }
+      """
+    val parsed = parse(json)
+    val (appWindow, overlayWindow) = parsed.root.children
+    val appChild = appWindow.children.single()
+    val overlayChild = overlayWindow.children.single()
+
+    // Distinct ids and both survive in the element map (no overwrite).
+    assertTrue(appChild.id != overlayChild.id, "the two windows' children must have distinct ids")
+    assertEquals(appChild, parsed.elementMap[appChild.id], "app window child must be indexed")
+    assertEquals(
+      overlayChild,
+      parsed.elementMap[overlayChild.id],
+      "overlay window child must be indexed",
+    )
+    // Each child's parent traversal resolves to its own window, not the other.
+    assertEquals(appWindow.id, parsed.parentMap[appChild.id])
+    assertEquals(overlayWindow.id, parsed.parentMap[overlayChild.id])
+  }
+
+  @Test
+  fun `a surviving window keeps stable ids when a preceding window disappears`() {
+    // The window namespace is derived from the window's own identity, not its array position, so a
+    // surviving window's descendant ids do not churn when an unrelated window is dropped or the
+    // extractor re-sorts windows by z-order (which would otherwise clear a valid Layout Inspector
+    // selection and mark the whole subtree as changed).
+    val app =
+      """{ "className": "app.Window", "resource-id": "app",
+           "bounds": { "left": 0, "top": 0, "right": 100, "bottom": 100 },
+           "node": { "className": "android.widget.Button", "resource-id": "submit",
+             "bounds": { "left": 10, "top": 10, "right": 90, "bottom": 40 } } }"""
+    val ime =
+      """{ "className": "ime.Window", "resource-id": "ime",
+           "bounds": { "left": 0, "top": 100, "right": 100, "bottom": 200 } }"""
+    val sysui =
+      """{ "className": "sysui.Window", "resource-id": "sysui",
+           "bounds": { "left": 0, "top": 0, "right": 100, "bottom": 20 } }"""
+
+    fun buttonId(frame: ParsedHierarchy): String =
+      frame.elementMap.keys.single { it.contains("submit") }
+
+    // Frame 1: [sysui, app, ime] — app is the middle window. Frame 2: sysui gone, still
+    // multi-window.
+    val before = parse("""{ "hierarchy": { "node": [ $sysui, $app, $ime ] } }""")
+    val after = parse("""{ "hierarchy": { "node": [ $app, $ime ] } }""")
+
+    assertEquals(
+      buttonId(before),
+      buttonId(after),
+      "the app window's descendant ids must not churn when an unrelated window disappears",
+    )
+  }
+
+  @Test
+  fun `windows with no resource-id or class keep stable ids when a preceding window disappears`() {
+    // The real wire shape: production captures (e.g. test/fixtures/observe/diff/text-input-empty
+    // .json, and scroll-before.json which is that frame with the middle window removed) have window
+    // roots with no resource-id and no class, distinguished only by their bounds. A node's id must
+    // not encode the window's frame position, or a surviving window churns when a preceding one
+    // drops. Bounds below mirror those three fixture window roots.
+    fun window(top: Int, bottom: Int, childText: String) =
+      """{ "bounds": { "left": 0, "top": $top, "right": 1080, "bottom": $bottom },
+           "node": { "text": "$childText",
+             "bounds": { "left": 10, "top": ${top + 10}, "right": 90, "bottom": ${top + 40} } } }"""
+    val topWin = window(0, 2400, "T")
+    val midWin = window(63, 2400, "M")
+    val bottomWin = window(0, 63, "B")
+
+    fun idContaining(frame: ParsedHierarchy, marker: String): String =
+      frame.elementMap.keys.single { it.contains("text:$marker") }
+
+    val before = parse("""{ "hierarchy": { "node": [ $topWin, $midWin, $bottomWin ] } }""")
+    val after = parse("""{ "hierarchy": { "node": [ $topWin, $bottomWin ] } }""")
+
+    assertEquals(
+      idContaining(before, "B"),
+      idContaining(after, "B"),
+      "the last window's ids must be stable when the middle window disappears",
+    )
+    assertEquals(
+      idContaining(before, "T"),
+      idContaining(after, "T"),
+      "the first window's ids stay stable too",
+    )
+  }
+
+  @Test
+  fun `a window keeps stable ids when the multi-window wrapper disappears`() {
+    // A 2-window frame (wrapped) becoming a 1-window frame (unwrapped) — e.g. the IME closing. IDs
+    // use window-relative depth, so the surviving window's descendant ids are identical whether the
+    // window is a wrapped multi-window child (depth offset 1) or the unwrapped single-window root
+    // (offset 0), rather than churning because of the extra wrapper level.
+    val app =
+      """{ "className": "app.Window", "resource-id": "app",
+           "bounds": { "left": 0, "top": 0, "right": 100, "bottom": 100 },
+           "node": { "className": "android.widget.Button", "resource-id": "go",
+             "bounds": { "left": 10, "top": 10, "right": 90, "bottom": 40 } } }"""
+    val ime =
+      """{ "className": "ime.Window", "resource-id": "ime",
+           "bounds": { "left": 0, "top": 100, "right": 100, "bottom": 200 } }"""
+
+    fun goId(frame: ParsedHierarchy): String = frame.elementMap.keys.single { it.contains("go@") }
+
+    val multi = parse("""{ "hierarchy": { "node": [ $app, $ime ] } }""")
+    val single = parse("""{ "hierarchy": { "node": [ $app ] } }""")
+
+    assertEquals(
+      goId(multi),
+      goId(single),
+      "the surviving window's ids must not change when the multi-window wrapper disappears",
+    )
+  }
+
+  @Test
+  fun `different-class identity-less nodes in separate windows keep distinct order-independent ids`() {
+    // Two identity-less children (no resource-id/text/content-desc) of different classes sharing
+    // depth, sibling index, and bounds. Including className in the id base keeps them distinct
+    // without an order-dependent #suffix, so a z-order flip cannot silently reassign one node's id
+    // to the other node.
+    val buttonWin =
+      """{ "className": "a.Window", "resource-id": "a",
+           "bounds": { "left": 0, "top": 0, "right": 100, "bottom": 100 },
+           "node": { "className": "android.widget.Button",
+             "bounds": { "left": 5, "top": 5, "right": 95, "bottom": 95 } } }"""
+    val imageWin =
+      """{ "className": "b.Window", "resource-id": "b",
+           "bounds": { "left": 0, "top": 0, "right": 100, "bottom": 100 },
+           "node": { "className": "android.widget.ImageView",
+             "bounds": { "left": 5, "top": 5, "right": 95, "bottom": 95 } } }"""
+
+    fun idFor(frame: ParsedHierarchy, className: String): String =
+      frame.elementMap.keys.single { it.contains("$className@") }
+
+    val forward = parse("""{ "hierarchy": { "node": [ $buttonWin, $imageWin ] } }""")
+    val flipped = parse("""{ "hierarchy": { "node": [ $imageWin, $buttonWin ] } }""")
+
+    // No collision suffix — the two nodes are distinguished by class, not traversal order.
+    assertTrue(
+      !idFor(forward, "android.widget.Button").contains("#"),
+      "distinct-class nodes must not need a collision suffix",
+    )
+    assertTrue(!idFor(forward, "android.widget.ImageView").contains("#"), "no collision suffix")
+    // A z-order flip does not move an id onto the other node.
+    assertEquals(
+      idFor(forward, "android.widget.Button"),
+      idFor(flipped, "android.widget.Button"),
+      "the Button's id must be independent of window order",
+    )
+    assertEquals(
+      idFor(forward, "android.widget.ImageView"),
+      idFor(flipped, "android.widget.ImageView"),
+      "the ImageView's id must be independent of window order",
+    )
+  }
+
+  @Test
   fun `single-window frame is returned unwrapped`() {
     val json =
       """

@@ -91,8 +91,20 @@ private fun buildMultiWindowRoot(
   elementMap: MutableMap<String, UIElementInfo>,
   parentMap: MutableMap<String, String>,
 ): UIElementInfo? {
-  val windows = rootElements.mapIndexedNotNull { index, element ->
-    parseNodeElement(element, 1, index, elementMap, parentMap)
+  // Each window is parsed at a fixed sibling index (0), not its array position, and with an ID
+  // depth
+  // offset of 1 (the windows sit at tree depth 1 under this synthetic root). A node's ID therefore
+  // depends only on its place *within its own window*: never on where the window sits in the frame,
+  // and never on the extra wrapper level — so a window's IDs are identical whether it is the
+  // unwrapped single-window root (offset 0) or a wrapped multi-window child (offset 1). A surviving
+  // window's IDs stay stable when an unrelated window is added, removed, or re-sorted, and when the
+  // wrapper itself appears/disappears (e.g. the IME opening/closing), which keeps a valid Layout
+  // Inspector selection. Uniqueness across windows is handled by collision disambiguation in
+  // parseJsonObjectNode (two windows can otherwise hold identically-shaped descendants), so only
+  // the
+  // genuinely-indistinguishable nodes take an order-dependent suffix (issue #4874 review).
+  val windows = rootElements.mapNotNull { element ->
+    parseNodeElement(element, 1, 0, elementMap, parentMap, idDepthOffset = 1)
   }
   if (windows.isEmpty()) return null
 
@@ -133,20 +145,26 @@ private fun buildMultiWindowRoot(
   return root
 }
 
-/** Parse a node JsonElement which can be either a single node or array of nodes. */
+/**
+ * Parse a node JsonElement which can be either a single node or array of nodes. [idDepthOffset] is
+ * subtracted from a node's tree depth when forming its ID, so a window's subtree gets
+ * window-relative depths regardless of whether the frame is single- or multi-window.
+ */
 private fun parseNodeElement(
   nodeElement: JsonElement,
   depth: Int,
   siblingIndex: Int,
   elementMap: MutableMap<String, UIElementInfo>,
   parentMap: MutableMap<String, String>,
+  idDepthOffset: Int = 0,
 ): UIElementInfo? {
   return when (nodeElement) {
-    is JsonObject -> parseJsonObjectNode(nodeElement, depth, siblingIndex, elementMap, parentMap)
+    is JsonObject ->
+      parseJsonObjectNode(nodeElement, depth, siblingIndex, elementMap, parentMap, idDepthOffset)
     is JsonArray -> {
       // If it's an array, parse the first element
       nodeElement.firstOrNull()?.let {
-        parseNodeElement(it, depth, siblingIndex, elementMap, parentMap)
+        parseNodeElement(it, depth, siblingIndex, elementMap, parentMap, idDepthOffset)
       }
     }
     else -> null
@@ -160,6 +178,7 @@ private fun parseJsonObjectNode(
   siblingIndex: Int,
   elementMap: MutableMap<String, UIElementInfo>,
   parentMap: MutableMap<String, String>,
+  idDepthOffset: Int = 0,
 ): UIElementInfo {
   // Check if attributes are in "$" or at root level
   val attrs = nodeObj["\$"]?.jsonObject ?: nodeObj
@@ -193,14 +212,26 @@ private fun parseJsonObjectNode(
 
   // Parse children from "node" field
   val childrenElement = nodeObj["node"]
-  val children = parseChildren(childrenElement, depth + 1, elementMap, parentMap)
+  val children = parseChildren(childrenElement, depth + 1, elementMap, parentMap, idDepthOffset)
 
-  // Generate stable ID from depth, sibling index, and bounds — no global counter
-  // so IDs remain stable when nodes are added/removed in unrelated subtrees.
+  // Generate a stable ID. It deliberately encodes no global counter and no window frame position:
+  // - depth is *window-relative* (depth - idDepthOffset), so a node keeps its ID when its window
+  //   moves between the unwrapped single-window root (offset 0) and a wrapped multi-window child
+  //   (offset 1) — e.g. as the IME opens/closes — rather than churning on the extra wrapper level.
+  // - the base prefers resource-id, then content-desc/text, then className, so two different-class
+  //   identity-less nodes get distinct IDs instead of colliding.
+  // If two nodes still generate the same ID — two windows can hold identically-shaped descendants
+  // (issue #4874) — the later one is suffixed so the element/parent maps stay one-to-one; only
+  // these
+  // genuinely-indistinguishable nodes take an order-dependent suffix.
+  val idDepth = depth - idDepthOffset
   val baseId =
-    resourceId ?: contentDesc?.let { "desc:$it" } ?: text?.take(20)?.let { "text:$it" } ?: "view"
+    resourceId ?: contentDesc?.let { "desc:$it" } ?: text?.take(20)?.let { "text:$it" } ?: className
   val id =
-    "$baseId@d${depth}s${siblingIndex}:${bounds.left},${bounds.top}-${bounds.right},${bounds.bottom}"
+    disambiguateId(
+      "$baseId@d${idDepth}s${siblingIndex}:${bounds.left},${bounds.top}-${bounds.right},${bounds.bottom}",
+      elementMap,
+    )
 
   val element =
     UIElementInfo(
@@ -289,20 +320,39 @@ private fun parseChildren(
   parentDepth: Int,
   elementMap: MutableMap<String, UIElementInfo>,
   parentMap: MutableMap<String, String>,
+  idDepthOffset: Int = 0,
 ): List<UIElementInfo> {
   if (childrenElement == null) return emptyList()
 
   return when (childrenElement) {
     is JsonArray -> {
       childrenElement.mapIndexedNotNull { index, elem ->
-        parseNodeElement(elem, parentDepth, index, elementMap, parentMap)
+        parseNodeElement(elem, parentDepth, index, elementMap, parentMap, idDepthOffset)
       }
     }
     is JsonObject -> {
-      listOfNotNull(parseJsonObjectNode(childrenElement, parentDepth, 0, elementMap, parentMap))
+      listOfNotNull(
+        parseJsonObjectNode(childrenElement, parentDepth, 0, elementMap, parentMap, idDepthOffset)
+      )
     }
     else -> emptyList()
   }
+}
+
+/**
+ * Return [base] unchanged if no node with that ID exists yet, otherwise the first free `base#N` (N
+ * starting at 2). Keeps the element/parent maps one-to-one when two nodes would otherwise share a
+ * generated ID — chiefly identically-shaped descendants in different windows of a multi-window
+ * frame (issue #4874). The vast majority of nodes never collide and keep their natural, position-
+ * independent ID.
+ */
+private fun disambiguateId(base: String, elementMap: Map<String, UIElementInfo>): String {
+  if (!elementMap.containsKey(base)) return base
+  var suffix = 2
+  while (elementMap.containsKey("$base#$suffix")) {
+    suffix++
+  }
+  return "$base#$suffix"
 }
 
 /**

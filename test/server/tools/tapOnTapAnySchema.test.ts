@@ -20,7 +20,7 @@ function zodIssues(fn: () => unknown): z.core.$ZodIssue[] {
 
 function expectRejectedKey(schema: z.ZodType, input: unknown, key: string): void {
   const unrecognized = zodIssues(() => schema.parse(input)).find(
-    issue => issue.code === "unrecognized_keys"
+    (issue) => issue.code === "unrecognized_keys",
   ) as { keys?: string[] } | undefined;
   expect(unrecognized, `expected an unrecognized_keys issue for "${key}"`).toBeDefined();
   expect(unrecognized!.keys).toContain(key);
@@ -65,7 +65,7 @@ describe("tapOn schema", () => {
       tapOnSchema.parse({
         platform: "android",
         selector: { text: "Login", elementId: "com.app:id/btn_login" },
-      })
+      }),
     ).toThrow();
   });
 
@@ -74,7 +74,7 @@ describe("tapOn schema", () => {
       tapOnSchema.parse({
         platform: "ios",
         selector: { textAny: [] },
-      })
+      }),
     ).toThrow();
   });
 
@@ -82,7 +82,7 @@ describe("tapOn schema", () => {
     expect(() =>
       tapOnSchema.parse({
         platform: "android",
-      })
+      }),
     ).toThrow();
   });
 
@@ -91,7 +91,7 @@ describe("tapOn schema", () => {
       tapOnSchema.parse({
         platform: "android",
         text: "Login",
-      })
+      }),
     ).toThrow();
   });
 
@@ -132,7 +132,7 @@ describe("tapOn schema", () => {
         ...target,
         selector: { text: "Read @mention now" },
         relativePosition: { x: 0.95, y: 0.5 },
-      })
+      }),
     ).toThrow();
   });
 
@@ -141,23 +141,21 @@ describe("tapOn schema", () => {
     ["x beyond the element", { x: 1.01, y: 0.5 }, "x", "too_big"],
     ["y above the element", { x: 0.5, y: -0.01 }, "y", "too_small"],
     ["y below the element", { x: 0.5, y: 1.01 }, "y", "too_big"],
-  ] as const)("rejects an out-of-bounds relative position: %s", (
-    _reason,
-    relativePosition,
-    coordinate,
-    expectedCode
-  ) => {
-    const issue = zodIssues(() =>
-      tapOnSchema.parse({
-        platform: "android",
-        selector: { text: "Read @mention now" },
-        relativePosition,
-      })
-    ).find(candidate => candidate.path.join(".") === `relativePosition.${coordinate}`);
+  ] as const)(
+    "rejects an out-of-bounds relative position: %s",
+    (_reason, relativePosition, coordinate, expectedCode) => {
+      const issue = zodIssues(() =>
+        tapOnSchema.parse({
+          platform: "android",
+          selector: { text: "Read @mention now" },
+          relativePosition,
+        }),
+      ).find((candidate) => candidate.path.join(".") === `relativePosition.${coordinate}`);
 
-    expect(issue).toBeDefined();
-    expect(issue!.code).toBe(expectedCode);
-  });
+      expect(issue).toBeDefined();
+      expect(issue!.code).toBe(expectedCode);
+    },
+  );
 
   test("accepts container", () => {
     const result = tapOnSchema.parse({
@@ -199,7 +197,7 @@ describe("tapOn schema", () => {
     expectRejectedKey(
       tapOnSchema,
       { platform: "android", selector: { text: "Login" }, [key]: value },
-      key
+      key,
     );
   });
 });
@@ -253,8 +251,8 @@ describe("tapAny schema", () => {
   // path ["action"], not `unrecognized_keys`. Asserted separately.
   test("rejects the focus action as an invalid value on the action path", () => {
     const actionIssue = zodIssues(() =>
-      tapAnySchema.parse({ platform: "android", action: "focus" })
-    ).find(issue => issue.path[0] === "action");
+      tapAnySchema.parse({ platform: "android", action: "focus" }),
+    ).find((issue) => issue.path[0] === "action");
     expect(actionIssue).toBeDefined();
     expect(actionIssue!.code).toBe("invalid_value");
   });

@@ -102,7 +102,7 @@ export class FakeTalkBackTapStrategy implements TalkBackTapStrategyContract {
   async executeTap(
     deviceId: string,
     element: Element,
-    _driver: TalkBackNavigationDriver
+    _driver: TalkBackNavigationDriver,
   ): Promise<TalkBackTapResult> {
     this.tapCalls.push({ deviceId, element });
 
@@ -115,7 +115,7 @@ export class FakeTalkBackTapStrategy implements TalkBackTapStrategyContract {
 
   async executeDirectActivation(
     element: Element,
-    _driver: TalkBackNavigationDriver
+    _driver: TalkBackNavigationDriver,
   ): Promise<TalkBackTapResult> {
     this.directActivationCalls.push({ element });
 
@@ -131,7 +131,7 @@ export class FakeTalkBackTapStrategy implements TalkBackTapStrategyContract {
     y: number,
     action: TalkBackFallbackAction,
     durationMs: number,
-    _driver: TalkBackNavigationDriver
+    _driver: TalkBackNavigationDriver,
   ): Promise<TalkBackTapResult> {
     this.fallbackCalls.push({ x, y, action, durationMs });
 
@@ -145,7 +145,7 @@ export class FakeTalkBackTapStrategy implements TalkBackTapStrategyContract {
   async executePreciseTap(
     x: number,
     y: number,
-    _driver: TalkBackNavigationDriver
+    _driver: TalkBackNavigationDriver,
   ): Promise<TalkBackTapResult> {
     this.preciseTapCalls.push({ x, y });
     return this.preciseTapResult;
@@ -156,7 +156,7 @@ export class FakeTalkBackTapStrategy implements TalkBackTapStrategyContract {
     y: number,
     durationMs: number,
     element: Element,
-    _driver: TalkBackNavigationDriver
+    _driver: TalkBackNavigationDriver,
   ): Promise<TalkBackTapResult> {
     this.longPressCalls.push({ x, y, durationMs, element });
 

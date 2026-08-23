@@ -204,12 +204,8 @@ describe("TapOnElement relative position", () => {
       ...SPANNABLE_TEXT_ELEMENT,
       bounds: { left: 650, top: 100, right: 700, bottom: 200 },
     };
-    const {
-      command,
-      executeAndroidTap,
-      observation,
-      searchForElement,
-    } = createHarness(refreshedElement);
+    const { command, executeAndroidTap, observation, searchForElement } =
+      createHarness(refreshedElement);
     searchForElement.mockRestore();
     const refreshedHierarchy = {
       hierarchy: { node: { text: "refreshed" } },
@@ -218,14 +214,15 @@ describe("TapOnElement relative position", () => {
     };
     spyOn(command as any, "findElementInHierarchy").mockImplementation(
       (_options: unknown, hierarchy: unknown) => ({
-        selection: hierarchy === observation.viewHierarchy
-          ? { element: null }
-          : {
-            element: refreshedElement,
-            indexInMatches: 0,
-            totalMatches: 1,
-            strategy: "first",
-          },
+        selection:
+          hierarchy === observation.viewHierarchy
+            ? { element: null }
+            : {
+                element: refreshedElement,
+                indexInMatches: 0,
+                totalMatches: 1,
+                strategy: "first",
+              },
         containerFound: true,
       }),
     );
@@ -290,14 +287,10 @@ describe("TapOnElement relative position", () => {
       },
       containerFound: true,
     });
-    resolveTapTargetElement.mockImplementation(
-      (_element: unknown, hierarchy: unknown) => ({
-        element: hierarchy === initialHierarchy
-          ? offscreenParent
-          : onscreenParent,
-        usedParent: true,
-      }),
-    );
+    resolveTapTargetElement.mockImplementation((_element: unknown, hierarchy: unknown) => ({
+      element: hierarchy === initialHierarchy ? offscreenParent : onscreenParent,
+      usedParent: true,
+    }));
     spyOn(command as any, "refreshViewHierarchy").mockResolvedValue(refreshedHierarchy);
 
     const result = await command.execute({
@@ -317,12 +310,7 @@ describe("TapOnElement relative position", () => {
       expect.anything(),
       true,
     );
-    expect(resolveTapTargetElement).toHaveBeenCalledWith(
-      child,
-      refreshedHierarchy,
-      "tap",
-      false,
-    );
+    expect(resolveTapTargetElement).toHaveBeenCalledWith(child, refreshedHierarchy, "tap", false);
   });
 
   test("hashes the stable hierarchy before checking whether to retry", async () => {
@@ -334,13 +322,12 @@ describe("TapOnElement relative position", () => {
       tapElement: SPANNABLE_TEXT_ELEMENT,
       usedParent: false,
     });
-    spyOn(command as any, "hashViewHierarchy").mockImplementation(
-      (hierarchy: unknown) => hierarchy === stableHierarchy ? "stable-hash" : "initial-hash",
+    spyOn(command as any, "hashViewHierarchy").mockImplementation((hierarchy: unknown) =>
+      hierarchy === stableHierarchy ? "stable-hash" : "initial-hash",
     );
-    const retryTapIfNoChange = spyOn(
-      command as any,
-      "retryTapIfNoChange",
-    ).mockResolvedValue(undefined);
+    const retryTapIfNoChange = spyOn(command as any, "retryTapIfNoChange").mockResolvedValue(
+      undefined,
+    );
 
     await command.execute({
       action: "tap",
@@ -508,8 +495,6 @@ describe("TapOnElement relative position", () => {
     );
 
     expect(semanticActions).toEqual([]);
-    expect(adb.getAllCommands()).toEqual([
-      "shell input touchscreen swipe 491 230 491 230 750",
-    ]);
+    expect(adb.getAllCommands()).toEqual(["shell input touchscreen swipe 491 230 491 230 750"]);
   });
 });

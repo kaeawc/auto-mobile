@@ -52,9 +52,14 @@ describe("Tool Registration Validation (Integration Tests)", () => {
 
   test("should verify critical tools from issue #745 exist in actual code", async () => {
     const interactionTools = await actualModules.interaction();
-    const criticalSchemas = ["clearTextSchema", "selectAllTextSchema", "pressButtonSchema", "systemTraySchema"];
+    const criticalSchemas = [
+      "clearTextSchema",
+      "selectAllTextSchema",
+      "pressButtonSchema",
+      "systemTraySchema",
+    ];
 
-    criticalSchemas.forEach(schemaName => {
+    criticalSchemas.forEach((schemaName) => {
       expect(interactionTools).toHaveProperty(schemaName);
       expect(interactionTools[schemaName]).toBeDefined();
     });
@@ -86,7 +91,7 @@ describe("Tool Registration Validation (Integration Tests)", () => {
 
     const content = await fs.readFile(schemaPath, "utf-8");
     const schemas = JSON.parse(content) as ToolSchemaDefinition[];
-    const observe = schemas.find(schema => schema.name === "observe");
+    const observe = schemas.find((schema) => schema.name === "observe");
 
     expect(observe?.outputSchema).toBeDefined();
     expect(() => compileJsonSchema(observe!.outputSchema)).not.toThrow();
@@ -105,9 +110,15 @@ describe("Tool Registration Validation (Integration Tests)", () => {
     expect(schemas.length).toBeGreaterThan(0);
 
     for (const schema of schemas) {
-      expect(() => compileJsonSchema(schema.inputSchema), `${schema.name} inputSchema`).not.toThrow();
+      expect(
+        () => compileJsonSchema(schema.inputSchema),
+        `${schema.name} inputSchema`,
+      ).not.toThrow();
       if (schema.outputSchema !== undefined) {
-        expect(() => compileJsonSchema(schema.outputSchema), `${schema.name} outputSchema`).not.toThrow();
+        expect(
+          () => compileJsonSchema(schema.outputSchema),
+          `${schema.name} outputSchema`,
+        ).not.toThrow();
       }
     }
   });
@@ -117,7 +128,7 @@ describe("Tool Registration Validation (Integration Tests)", () => {
     const path = await import("path");
     const schemaPath = path.join(process.cwd(), "schemas", "tool-definitions.json");
     const schemas = JSON.parse(await fs.readFile(schemaPath, "utf-8")) as ToolSchemaDefinition[];
-    const tapOn = schemas.find(schema => schema.name === "tapOn");
+    const tapOn = schemas.find((schema) => schema.name === "tapOn");
     const validate = new Ajv2020({ strict: false }).compile(tapOn!.inputSchema);
     const baseInput = {
       selector: { text: "Read @mention now" },
@@ -161,28 +172,30 @@ describe("Tool Registration Validation (Integration Tests)", () => {
 
       const schemaContent = await fs.readFile(schemaPath, "utf-8");
       const committed = JSON.parse(schemaContent) as ToolSchemaDefinition[];
-      const committedNames = new Set(committed.map(tool => tool.name));
+      const committedNames = new Set(committed.map((tool) => tool.name));
       const served = ToolRegistry.getToolDefinitions();
-      const servedNames = served.map(tool => tool.name);
+      const servedNames = served.map((tool) => tool.name);
 
       // 1. served -> committed
-      expect(servedNames.filter(name => !committedNames.has(name))).toEqual([]);
+      expect(servedNames.filter((name) => !committedNames.has(name))).toEqual([]);
 
       // 2. committed -> served (plan-only tools resolve via getToolForPlan)
       const orphanedCommitted = committed
-        .map(tool => tool.name)
-        .filter(name => ToolRegistry.getToolForPlan(name) === undefined);
+        .map((tool) => tool.name)
+        .filter((name) => ToolRegistry.getToolForPlan(name) === undefined);
       expect(orphanedCommitted).toEqual([]);
 
       // 3. body/description byte-match for every served tool
-      const committedByName = new Map(committed.map(tool => [tool.name, tool]));
+      const committedByName = new Map(committed.map((tool) => [tool.name, tool]));
       for (const liveDef of served) {
         const committedDef = committedByName.get(liveDef.name);
         expect(committedDef, `${liveDef.name} missing from committed file`).toBeDefined();
         expect(committedDef!.description).toBe(liveDef.description);
-        expect(committedDef!.inputSchema).toEqual(liveDef.inputSchema as ToolSchemaDefinition["inputSchema"]);
+        expect(committedDef!.inputSchema).toEqual(
+          liveDef.inputSchema as ToolSchemaDefinition["inputSchema"],
+        );
         expect(committedDef!.outputSchema).toEqual(
-          liveDef.outputSchema as ToolSchemaDefinition["outputSchema"]
+          liveDef.outputSchema as ToolSchemaDefinition["outputSchema"],
         );
       }
     } finally {

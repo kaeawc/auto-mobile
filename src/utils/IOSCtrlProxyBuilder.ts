@@ -73,6 +73,20 @@ export const IOS_CTRL_PROXY_RUNNER_SHA256_ENV = "AUTOMOBILE_CTRL_PROXY_IOS_RUNNE
 /** Executable represented by {@link IOS_CTRL_PROXY_RUNNER_SHA256_ENV}. */
 export const IOS_CTRL_PROXY_RUNNER_SHA256_TARGET_ENV =
   "AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256_TARGET";
+/**
+ * First-class "serve a locally built runner" switch (issue #5561). When truthy
+ * (`1`/`true`) and no explicit {@link IOS_CTRL_PROXY_RUNNER_SHA256_ENV} is set,
+ * the pre-launch integrity gate stops comparing against the release-pinned
+ * checksum — which a local build can never match — and instead DERIVES the
+ * expected hash from the freshly built runner binary at post-extract, pins it in
+ * memory, and re-verifies against that captured value before launch. The
+ * verify→execute TOCTOU protection (issue #4759) is preserved (a binary swap
+ * between post-extract and launch still fails closed); only the release-pinned
+ * baseline is relaxed. Off by default so published runs keep the pinned guard.
+ * This removes the run-fail-read-`Got:`-sha-rerun dance the manual-test flow
+ * previously required.
+ */
+export const IOS_CTRL_PROXY_USE_LOCAL_BUILD_ENV = "AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD";
 
 /**
  * Turn a codesign inspection outcome into a list of human-readable problems,
@@ -180,6 +194,8 @@ export class IOSCtrlProxyBuilder {
   private static expectedChecksumOverride: string | null = null;
   private static expectedRunnerChecksumOverride: string | null = null;
   private static expectedRunnerChecksumTargetOverride: RunnerSha256Target | null = null;
+  // Test seam for the local-build switch (#5561). null → read the env var.
+  private static useLocalBuildOverride: boolean | null = null;
   private static timer: Timer = defaultTimer;
 
   // Gate that decides whether the startup runner-bundle prefetch should run at
@@ -212,6 +228,12 @@ export class IOSCtrlProxyBuilder {
    * Hash is computed once per build and cached until next build/extraction.
    */
   private cachedAppBundleHash: Map<IOSCtrlProxyPlatform, string | null> = new Map();
+  /**
+   * Local-build-mode (#5561) derived runner SHA256, pinned per platform at
+   * post-extract so the pre-launch re-verification can still detect a binary
+   * swap even though there is no release-pinned baseline to compare against.
+   */
+  private derivedLocalRunnerSha256: Map<IOSCtrlProxyPlatform, string> = new Map();
 
   private constructor(
     config: Partial<CtrlProxyIosBuildConfig> = {},
@@ -255,6 +277,7 @@ export class IOSCtrlProxyBuilder {
     IOSCtrlProxyBuilder.expectedChecksumOverride = null;
     IOSCtrlProxyBuilder.expectedRunnerChecksumOverride = null;
     IOSCtrlProxyBuilder.expectedRunnerChecksumTargetOverride = null;
+    IOSCtrlProxyBuilder.useLocalBuildOverride = null;
     IOSCtrlProxyBuilder.timer = defaultTimer;
     IOSCtrlProxyBuilder.iosPrerequisiteDetector = new DefaultIosPrerequisiteDetector();
     IOSCtrlProxyBuilder.prefetchBuilderOverride = null;
@@ -299,6 +322,14 @@ export class IOSCtrlProxyBuilder {
   ): void {
     IOSCtrlProxyBuilder.expectedRunnerChecksumOverride = checksum;
     IOSCtrlProxyBuilder.expectedRunnerChecksumTargetOverride = target;
+  }
+
+  /**
+   * Override the {@link IOS_CTRL_PROXY_USE_LOCAL_BUILD_ENV} switch for testing
+   * (issue #5561). Null restores reading the environment variable.
+   */
+  public static setUseLocalBuildForTesting(useLocalBuild: boolean | null): void {
+    IOSCtrlProxyBuilder.useLocalBuildOverride = useLocalBuild;
   }
 
   /**
@@ -1164,6 +1195,15 @@ export class IOSCtrlProxyBuilder {
     platform: IOSCtrlProxyPlatform,
     phase: "post-extract" | "pre-launch"
   ): Promise<void> {
+    // First-class local-build mode (#5561): derive and trust the locally built
+    // runner's own hash instead of the release-pinned baseline it can never
+    // match. An explicit SHA override still wins (checked inside), so published
+    // and pinned-SHA runs keep their guard.
+    if (this.isLocalBuildMode() && !this.hasExplicitRunnerShaOverride()) {
+      await this.assertLocalRunnerBinaryHash(platform, phase);
+      return;
+    }
+
     const expectedRunnerSha256 = this.getExpectedRunnerChecksum();
     if (!expectedRunnerSha256 || expectedRunnerSha256.length === 0) {
       logger.warn(`[IOSCtrlProxyBuilder] Runner binary SHA256 verification skipped for ${platform} (no hash provided)`);
@@ -1183,6 +1223,66 @@ export class IOSCtrlProxyBuilder {
       );
     }
     logger.info(`[IOSCtrlProxyBuilder] Runner binary SHA256 verified (${phase})`, { platform, checksum });
+  }
+
+  /** Whether the {@link IOS_CTRL_PROXY_USE_LOCAL_BUILD_ENV} switch is active (#5561). */
+  private isLocalBuildMode(): boolean {
+    const override = IOSCtrlProxyBuilder.useLocalBuildOverride;
+    if (override !== null) {
+      return override;
+    }
+    return isTruthyEnvValue(process.env[IOS_CTRL_PROXY_USE_LOCAL_BUILD_ENV]);
+  }
+
+  /**
+   * Whether the operator hand-supplied a runner SHA256 via
+   * {@link IOS_CTRL_PROXY_RUNNER_SHA256_ENV}. That explicit value takes
+   * precedence over local-build mode so a pinned hash stays enforced (#5561).
+   * Note: the static test override is deliberately excluded — it stands in for
+   * the release-pinned baseline, which local-build mode is designed to relax.
+   */
+  private hasExplicitRunnerShaOverride(): boolean {
+    const environmentOverride = process.env[IOS_CTRL_PROXY_RUNNER_SHA256_ENV]?.trim();
+    return environmentOverride !== undefined && environmentOverride.length > 0;
+  }
+
+  /**
+   * Local-build-mode (#5561) runner integrity check. On the first call for a
+   * platform (post-extract) it computes and pins the freshly built runner's
+   * SHA256, warning loudly that the release-pinned guard is relaxed. Subsequent
+   * calls (pre-launch) re-hash and compare against that pinned value, so a binary
+   * swap in the verify→execute window still fails closed (issue #4759 TOCTOU
+   * protection preserved) even though there is no release baseline to match.
+   */
+  private async assertLocalRunnerBinaryHash(
+    platform: IOSCtrlProxyPlatform,
+    phase: "post-extract" | "pre-launch"
+  ): Promise<void> {
+    const runnerChecksumTarget = this.getExpectedRunnerChecksumTarget();
+    const runnerBinaryPath = await this.getRunnerBinaryPath(platform, runnerChecksumTarget);
+    if (!runnerBinaryPath) {
+      throw new ActionableError(`CtrlProxy runner binary missing for ${platform}`);
+    }
+    const { checksum } = await this.downloader.computeFileSha256(runnerBinaryPath);
+    const normalized = checksum.toLowerCase();
+    const pinned = this.derivedLocalRunnerSha256.get(platform);
+    if (pinned === undefined) {
+      this.derivedLocalRunnerSha256.set(platform, normalized);
+      logger.warn(
+        `[IOSCtrlProxyBuilder] Local-build mode (${IOS_CTRL_PROXY_USE_LOCAL_BUILD_ENV}) active for ` +
+        `${platform}: trusting the locally built runner (${phase}) with derived SHA256 ${normalized}. ` +
+        `The release-pinned integrity guard is intentionally bypassed for this run.`
+      );
+      return;
+    }
+    if (normalized !== pinned) {
+      throw new ActionableError(
+        `CtrlProxy runner binary SHA256 changed (${phase}) for ${platform} under local-build mode. ` +
+        `Pinned at post-extract: ${pinned}, Got: ${normalized}. Refusing to launch a runner whose ` +
+        `binary changed since it was verified (possible TOCTOU tampering).`
+      );
+    }
+    logger.info(`[IOSCtrlProxyBuilder] Local runner binary SHA256 re-verified (${phase})`, { platform, checksum: normalized });
   }
 
   /**

@@ -139,9 +139,50 @@ at a time to conserve context; never let two actors drive devices at once.
      CtrlProxy download/install, so install the freshly built APK on the emulator
      yourself (`adb install -r <fresh apk>`) before starting the daemon, or run the
      Android leg in a separate daemon without the flag.
+   - **Serve a locally built iOS runner (the reliable procedure).** `SKIP` +
+     `IOS_DERIVED_DATA` alone are **not** enough for iOS: they stop the released
+     runner from overwriting your build, but they do **not** make the daemon
+     launch your build — a second gate rejects it. Before launch the daemon
+     re-hashes the runner binary and refuses on any mismatch against the
+     release-pinned `runnerSha256`
+     (`assertRunnerBinaryHash()`, `src/utils/IOSCtrlProxyBuilder.ts`), and a
+     locally built runner **always** hashes differently:
+     ```
+     CtrlProxy runner binary SHA256 mismatch (pre-launch) for simulator.
+     Expected: <pinned>, Got: <your local build>. Refusing to launch ...
+     ```
+     Two supported ways past this — **prefer the first**:
+     1. **First-class local-build mode (recommended).** Set
+        `AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD=true`. The daemon then derives
+        the expected SHA from your freshly built runner, pins it, and re-verifies
+        against that pinned value before launch (so a TOCTOU swap still fails
+        closed) — no SHA to hand-copy. It logs a loud WARN that the release-pinned
+        guard is relaxed for the run. Run **without** `SKIP_CTRL_PROXY_DOWNLOAD`
+        so the builder actually runs, and point
+        `AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA=<derived-data-root>` at your build.
+     2. **Explicit pinned SHA (manual).** Set
+        `AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256=<64-hex>` (and
+        `AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256_TARGET=runner|xctest` to pick the
+        binary; defaults to the release's target). This keeps the integrity gate
+        active against *your* value. The catch is chicken-and-egg: you learn the
+        SHA only by launching once and reading the `Got:` value from the mismatch
+        error, then re-launching with it. An explicit value here **overrides**
+        local-build mode, so unset it if you want auto-derivation.
+
+     **SKIP-flag interaction:** with `AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD=true` the
+     iOS prefetch is disabled and the builder never launches a local runner — the
+     daemon just **reuses whatever runner is already live** on the port (often one
+     owned by another session's `bunx auto-mobile`), so freeing the port then
+     falls through to the launch/guard path above. For local-build mode, start
+     **without** the skip flag. If the daemon reuses a runner it did not launch it
+     now logs a loud WARN (`Reusing an external CtrlProxy runner this daemon did
+     not launch`) — treat that as a signal to confirm which runner served the call.
    - **Verify which runner actually served the call** — `grep xctestrun <daemon-log>`
      for the path, and `grep 'need download\|Downloading CtrlProxy bundle' <daemon-log>`
-     to confirm the released bundle did *not* replace your build.
+     to confirm the released bundle did *not* replace your build. Also
+     `grep 'Local-build mode' <daemon-log>` to confirm your local runner's derived
+     SHA was trusted, and `grep 'Reusing an external CtrlProxy runner' <daemon-log>`
+     to catch a stale/foreign runner silently serving.
    - `--embedded-sdk` — required for `sqlQuery`, `setPreference`/`getPreference`,
      in-app `highlight` (registration is **daemon-side**; the CLI must pass the same
      flag so the reuse check matches, else it restarts the daemon).

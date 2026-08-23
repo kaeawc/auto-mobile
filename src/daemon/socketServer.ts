@@ -1347,9 +1347,13 @@ export class UnixSocketServer {
         throw error;
       }
       await this.resetMcpClient(context.route.clientKey, "detach");
+      const failureIdentity = this.getDeviceControlRecoveryFailureIdentity(
+        context,
+        identity,
+      );
       throw this.deviceControlTransportError({
         request: context.request,
-        identity,
+        identity: failureIdentity,
         phase: "response",
         reconnectAttempted: true,
         replayAttempted: true,

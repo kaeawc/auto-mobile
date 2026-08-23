@@ -421,6 +421,41 @@ describe("UnixSocketServer MCP session reconnect", () => {
     expect((server as any).mcpClients.size).toBe(0);
   });
 
+  test("refreshes autolock identity when session-expiry replay closes", async () => {
+    let clientsCreated = 0;
+
+    server.mcpClientFactory = async () => {
+      const clientIndex = ++clientsCreated;
+      return createFakeMcpClient({
+        callTool: async () => {
+          if (clientIndex === 1) {
+            autolockSessionUuid = "session-a";
+            throw new Error("Session not found");
+          }
+          throw socketClosedError();
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: { platform: "android" },
+    });
+
+    expect(response.success).toBe(false);
+    expect(clientsCreated).toBe(2);
+    expect(response.transportFailure).toMatchObject({
+      deviceId: "emulator-5554",
+      deviceSessionUuid: "device-epoch-a",
+      sessionUuid: "session-a",
+      sessionValid: true,
+      phase: "response",
+      retryable: true,
+      reconnectAttempted: true,
+      replayAttempted: true,
+    });
+  });
+
   test("reconnects and replays observe after a socket closure while handling the response", async () => {
     let clientsCreated = 0;
     let callsDispatched = 0;

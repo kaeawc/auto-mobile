@@ -2639,6 +2639,27 @@ describe("killDevice handler", () => {
       transportId: "1",
     };
     manager.setBootedDevices("android", [device]);
+    const deviceSessionRepository = new FakeDeviceSessionRepository();
+    sessionManager = new SessionManager(timer, deviceSessionRepository);
+    const image: DeviceInfo = {
+      name: device.name,
+      platform: device.platform,
+      deviceId: device.deviceId,
+      isRunning: false,
+      source: "local",
+    };
+    manager.setDeviceImages("android", [image]);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+      deviceSessionRepository,
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.assignMultipleDevices(["session-5503"], 1_000, "android");
     setDeviceToolsDependencies({
       deviceManagerFactory: () => manager,
       notifyResourcesChanged: async () => {},
@@ -2656,7 +2677,9 @@ describe("killDevice handler", () => {
     let ensureConnectedSpy: ReturnType<typeof spyOn> | undefined;
     const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(target => {
       restoredObserver = originalGetInstance(target, new FakeAdbClientFactory());
-      ensureConnectedSpy = spyOn(restoredObserver, "ensureConnected").mockResolvedValue(true);
+      ensureConnectedSpy = spyOn(restoredObserver, "ensureConnected")
+        .mockResolvedValueOnce(false)
+        .mockResolvedValue(true);
       return restoredObserver;
     });
     try {
@@ -2669,7 +2692,7 @@ describe("killDevice handler", () => {
 
       expect(closeSpy).toHaveBeenCalledTimes(1);
       expect(getInstanceSpy).toHaveBeenCalledWith(device);
-      expect(ensureConnectedSpy).toHaveBeenCalledTimes(1);
+      expect(ensureConnectedSpy).toHaveBeenCalledTimes(2);
       const registeredObserver = AndroidCtrlProxyClient.getExistingInstance(device.deviceId);
       expect(registeredObserver).toBe(restoredObserver);
       expect(registeredObserver).not.toBe(activeObserver);
@@ -2720,6 +2743,50 @@ describe("killDevice handler", () => {
 
       await expect(result).rejects.toThrow("adb emu kill failed");
       expect(ensureConnectedSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      ensureConnectedSpy?.mockRestore();
+      getInstanceSpy.mockRestore();
+      closeSpy.mockRestore();
+    }
+  });
+
+  test.skipIf(process.platform === "win32")("does not rebind an observer to a session released during failed shutdown", async () => {
+    const timer = new FakeTimer();
+    const device: BootedDevice = {
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+      transportId: "1",
+    };
+    manager.setBootedDevices("android", [device]);
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => manager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      timer,
+    });
+    const activeObserver = AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory());
+    activeObserver.bindSession("released-session");
+    const closeSpy = spyOn(activeObserver, "close").mockResolvedValue(undefined);
+    const originalGetInstance = AndroidCtrlProxyClient.getInstance;
+    let restoredObserver: AndroidCtrlProxyClient | undefined;
+    let ensureConnectedSpy: ReturnType<typeof spyOn> | undefined;
+    const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(target => {
+      restoredObserver = originalGetInstance(target, new FakeAdbClientFactory());
+      ensureConnectedSpy = spyOn(restoredObserver, "ensureConnected").mockResolvedValue(true);
+      return restoredObserver;
+    });
+    try {
+      const tool = ToolRegistry.getTool("killDevice");
+      if (!tool) {
+        throw new Error("killDevice not registered");
+      }
+
+      await expect(tool.handler({ device })).rejects.toThrow("adb emu kill failed");
+
+      expect(ensureConnectedSpy).toHaveBeenCalledTimes(1);
+      expect(restoredObserver?.getBoundSessionId()).toBeNull();
     } finally {
       ensureConnectedSpy?.mockRestore();
       getInstanceSpy.mockRestore();

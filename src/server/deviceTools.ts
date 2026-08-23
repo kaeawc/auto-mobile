@@ -860,6 +860,20 @@ function shouldRestoreAndroidObserverAfterCommandFailure(
   );
 }
 
+function hasLiveAndroidObserverSessionBinding(
+  device: BootedDevice,
+  boundSessionId: string | null,
+): boundSessionId is string {
+  if (boundSessionId === null) {
+    return false;
+  }
+  const daemonState = DaemonState.getInstance();
+  return (
+    daemonState.isInitialized() &&
+    daemonState.getSessionManager().getSessionForDevice(device.deviceId) === boundSessionId
+  );
+}
+
 async function restoreAndroidObserverAfterCommandFailure(
   deviceManager: PlatformDeviceManager,
   device: BootedDevice,
@@ -897,18 +911,26 @@ async function restoreAndroidObserverAfterCommandFailure(
       isSameBootedDeviceIdentity(device, survivingDevice)
     ) {
       const observer = AndroidCtrlProxyClient.getInstance(survivingDevice);
-      if (observerState.boundSessionId !== null) {
+      if (hasLiveAndroidObserverSessionBinding(device, observerState.boundSessionId)) {
         observer.bindSession(observerState.boundSessionId);
       }
-      const connected = await runWithinShutdownDeadline(
-        device,
-        timer,
-        shutdownDeadlineMs,
-        "Android observer reconnect did not complete",
-        requestAbortSignal,
-        async () => await observer.ensureConnected(),
-        timeoutMs,
-      );
+      const reconnect = async (): Promise<boolean> =>
+        await runWithinShutdownDeadline(
+          device,
+          timer,
+          shutdownDeadlineMs,
+          "Android observer reconnect did not complete",
+          requestAbortSignal,
+          async () => await observer.ensureConnected(),
+          timeoutMs,
+        );
+      let connected = await reconnect();
+      if (!connected) {
+        // A failed port-forward setup has no WebSocket close event to trigger
+        // the normal automatic reconnect. Retry once while the shutdown budget
+        // is still live so existing passive subscribers regain their cadence.
+        connected = await reconnect();
+      }
       if (!connected) {
         logger.warn(
           `[DeviceTools] Failed to reconnect Android observer after kill failure for ${device.deviceId}`,

@@ -1853,6 +1853,91 @@ describe("IOSCtrlProxyManager", function() {
       expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(1);
     });
 
+    test("start() does not adopt a healthy direct runner rooted at an orphaned daemon process", async function() {
+      const orphanedRunner: FakeListeningProcess = {
+        pid: 2475,
+        port: 8790,
+        ppid: 1,
+        command: "/tmp/CtrlProxyUITests-Runner.app/PlugIns/CtrlProxyUITests.xctest/CtrlProxyUITests-Runner",
+        environment: `CTRL_PROXY_IOS_PORT=8790 AUTOMOBILE_DEVICE_ID=${testDevice.deviceId}`,
+        alive: true,
+      };
+      installListeningProcessFakes(fakeExecutor, [orphanedRunner]);
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        createFakeBuilder(),
+        fakeExecutor
+      );
+
+      fakeExecutor.setCommandResponse("pgrep -x xcodebuild", createExecResult("", ""));
+      fakeExecutor.setCommandResponse("pgrep -f 'CtrlProxy'", createExecResult("2475\n", ""));
+      fakeExecutor.setCommandHandler("curl -s", command => {
+        const port = Number(command.match(/localhost:(\d+)\/health/)?.[1]);
+        return createExecResult(
+          port === 8790
+            ? JSON.stringify({ status: "ok", deviceId: testDevice.deviceId })
+            : fakeExecutor.getSpawnedProcesses().length > 0 ? "ok" : "",
+          ""
+        );
+      });
+      fakeTimer.enableAutoAdvance();
+
+      await manager.start();
+
+      expect(manager.getServicePort()).toBe(8765);
+      expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(1);
+    });
+
+    test("start() bounds health probes for direct-runner candidates", async function() {
+      const simulatorProcess: FakeListeningProcess = {
+        pid: 2468,
+        port: 0,
+        ppid: 1,
+        command: `launchd_sim ${testDevice.deviceId}`,
+        alive: true,
+      };
+      const candidateProcesses = Array.from(
+        { length: MAX_STARTUP_ORPHAN_RUNNER_CANDIDATES + 1 },
+        (_, index): FakeListeningProcess => ({
+          pid: 2500 + index,
+          port: 8800 + index,
+          ppid: simulatorProcess.pid,
+          command: "/tmp/CtrlProxyUITests-Runner.app/PlugIns/CtrlProxyUITests.xctest/CtrlProxyUITests-Runner",
+          environment: `CTRL_PROXY_IOS_PORT=${8800 + index} AUTOMOBILE_DEVICE_ID=${testDevice.deviceId}`,
+          alive: true,
+        })
+      );
+      installListeningProcessFakes(fakeExecutor, [simulatorProcess, ...candidateProcesses]);
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        createFakeBuilder(),
+        fakeExecutor
+      );
+      let customPortHealthProbeCount = 0;
+
+      fakeExecutor.setCommandResponse("pgrep -x xcodebuild", createExecResult("", ""));
+      fakeExecutor.setCommandResponse(
+        "pgrep -f 'CtrlProxy'",
+        createExecResult(candidateProcesses.map(process => String(process.pid)).join("\n"), "")
+      );
+      fakeExecutor.setCommandHandler("curl -s", command => {
+        const port = Number(command.match(/localhost:(\d+)\/health/)?.[1]);
+        if (port >= 8800 && port <= 8800 + MAX_STARTUP_ORPHAN_RUNNER_CANDIDATES) {
+          customPortHealthProbeCount++;
+          return createExecResult("", "");
+        }
+        return createExecResult(fakeExecutor.getSpawnedProcesses().length > 0 ? "ok" : "", "");
+      });
+      fakeTimer.enableAutoAdvance();
+
+      await manager.start();
+
+      expect(customPortHealthProbeCount).toBe(MAX_STARTUP_ORPHAN_RUNNER_CANDIDATES);
+      expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(1);
+    });
+
     test("start() preserves an externally managed runner on the current port while it is still starting", async function() {
       const externalProcess: FakeListeningProcess = {
         pid: 2470,

@@ -2009,7 +2009,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * path still reaps a stale runner whose health endpoint is down.
    */
   private async findHealthyExternalDirectCtrlProxyProcess(): Promise<ExternalCtrlProxyProcess | null> {
-    for (const pid of await this.processClient.findStartupCandidatePids()) {
+    const candidatePids = await this.processClient.findStartupCandidatePids();
+    for (const pid of candidatePids.slice(0, MAX_STARTUP_ORPHAN_RUNNER_CANDIDATES)) {
       if (pid === this.xcTestProcessId) {
         continue;
       }
@@ -2027,7 +2028,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         this.processClient,
         process
       );
-      if (daemonManagedRoot.kind === "root" && daemonManagedRoot.pid !== process.pid) {
+      if (daemonManagedRoot.kind === "root") {
         continue;
       }
       if (!await this.checkHealthEndpointOnPortForDevice(port, this.device.deviceId)) {

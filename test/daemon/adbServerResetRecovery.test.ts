@@ -473,8 +473,12 @@ describe("ADB server reset session recovery", () => {
     await pool.bindOrReuseDeviceSession("session-active", device.deviceId, "android", image);
 
     try {
-      const detaching = pool.detachAdbServerResetCohort([pool.getDevice(device.deviceId)!]);
+      const captured = pool.getDevice(device.deviceId)!;
+      const detaching = pool.detachAdbServerResetCohort([captured]);
       await openStarted.promise;
+      await expect(
+        pool.recoverSessionBoundAndroidDeviceAfterLoss(device.deviceId, undefined, captured),
+      ).resolves.toBe("deferred");
       await sessionManager.releaseSession("session-active", "heartbeat-timeout");
       releaseOpen.resolve();
       const detached = await detaching;
@@ -1077,6 +1081,96 @@ describe("ADB server reset session recovery", () => {
       expect(incident).toMatchObject({
         session: { state: "released" },
         recovery: { outcome: "exhausted" },
+      });
+    } finally {
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
+  test("keeps a preserved session quarantined when terminal release persistence fails", async () => {
+    const timer = new FakeTimer();
+    const persistence = new FakeDeviceSessionPersistence();
+    const sessionManager = new SessionManager(timer, persistence);
+    const manager = new FakeDeviceManager();
+    const reboot: AndroidDeviceReboot = {
+      run: async (_target, attempt) => {
+        try {
+          await attempt();
+        } catch {
+          // Detach the old serial before forcing terminal release.
+        }
+        throw new Error("reboot runner unavailable");
+      },
+    };
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+      undefined,
+      undefined,
+      async (sessionId, _deviceId, releaseReason) => {
+        await sessionManager.releaseSession(sessionId, releaseReason);
+      },
+      undefined,
+      reboot,
+      { onLoss: true, maxAttempts: 1 },
+    );
+    const original: BootedDevice = {
+      platform: "android",
+      name: "Pixel_8_API_35",
+      deviceId: "emulator-5554",
+    };
+    const image: DeviceInfo = {
+      name: original.name,
+      platform: "android",
+      isRunning: true,
+      source: "local",
+    };
+    manager.bootedDevices = [original];
+    await pool.addDevice(original, image);
+    await pool.bindOrReuseDeviceSession("session-1", original.deviceId, "android", image);
+    const captured = pool.getDevice(original.deviceId)!;
+    const incidentId = await pool.recordEmulatorLossIncident(
+      original.deviceId,
+      "device-discovery-miss",
+    );
+    manager.startDevice = async () => {
+      throw new Error("emulator launch failed");
+    };
+    persistence.failure = "release";
+
+    try {
+      await expect(
+        pool.recoverSessionBoundAndroidDeviceAfterLoss(
+          original.deviceId,
+          incidentId,
+          captured,
+        ),
+      ).rejects.toThrow("persist release failed");
+      expect(sessionManager.getSession("session-1")).toBeDefined();
+      await expect(
+        pool.recoverSessionBoundAndroidDeviceAfterLoss(
+          original.deviceId,
+          undefined,
+          captured,
+        ),
+      ).resolves.toBe("deferred");
+      await expect(pool.waitForEmulatorLossIncident(incidentId!)).resolves.toMatchObject({
+        session: { state: "recovering" },
+        recovery: { outcome: "exhausted" },
+      });
+
+      persistence.failure = null;
+      await sessionManager.releaseSession("session-1", "heartbeat-timeout");
+      for (let attempt = 0; attempt < 10 && pool.isSessionRecoveryInFlight("session-1"); attempt++) {
+        await Promise.resolve();
+      }
+      expect(pool.isSessionRecoveryInFlight("session-1")).toBe(false);
+      await expect(pool.waitForEmulatorLossIncident(incidentId!)).resolves.toMatchObject({
+        session: { state: "released" },
       });
     } finally {
       sessionManager.stopCleanupTimer();

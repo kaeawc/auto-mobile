@@ -748,6 +748,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
           executionSessionUuid,
         );
       if (deviceLoss) {
+        // Recovery drains cancelled executions before rebooting. This handler's
+        // remaining work only enriches the response from that same recovery, so
+        // stop tracking it first to avoid making recovery wait on itself.
+        executionTracker.endExecution(execution.id);
         const outcome = await resolveDeviceLossOutcome(deviceLoss);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(outcome) }],

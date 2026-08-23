@@ -142,6 +142,7 @@ export class InputText extends BaseVisualChange {
         tolerancePercent: 0.0,
         timeoutMs: 5000,
         perf,
+        signal,
         skipUiStability: true, // Skip UI stability wait - a11y service already waits 100ms for tree update
       },
     );

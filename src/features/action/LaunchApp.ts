@@ -481,6 +481,7 @@ export class LaunchApp extends BaseVisualChange {
         // iOS hierarchy timestamps (Swift Date) and TS timestamps (Date.now) are from
         // different clocks, causing minTimestamp checks to fail and force ~130ms round-trips.
         overrideMinTimestamp: 0,
+        signal,
       },
     );
 
@@ -631,7 +632,7 @@ export class LaunchApp extends BaseVisualChange {
 
     logger.info(`executeAndroid: ${packageName}`);
 
-    const [targetUserResult, installedAppsResult] = await Promise.allSettled([
+    const preflight = Promise.allSettled([
       // Auto-detect target user if not specified
       perf.track("detectTargetUser", async () => {
         return this.targetUserDetector.detectTargetUserId(packageName, userId);
@@ -641,6 +642,10 @@ export class LaunchApp extends BaseVisualChange {
         return this.installedAppsProvider.listInstalledApps();
       }),
     ]);
+    const [targetUserResult, installedAppsResult] = await this.waitForAndroidPreflight(
+      preflight,
+      signal,
+    );
     signal?.throwIfAborted();
 
     if (targetUserResult.status === "rejected") {
@@ -733,6 +738,7 @@ export class LaunchApp extends BaseVisualChange {
           changeExpected: false,
           perf,
           packageName,
+          signal,
           skipPreviousObserve: true,
           skipUiStability: skipUiStability ?? false
         }
@@ -792,6 +798,7 @@ export class LaunchApp extends BaseVisualChange {
         skipUiStability: skipUiStability ?? false,
         packageName,
         observationTimestampProvider: () => observationTimestampMs,
+        signal,
       },
     );
 
@@ -843,6 +850,37 @@ export class LaunchApp extends BaseVisualChange {
     }
 
     return settledLaunchResult;
+  }
+
+  private async waitForAndroidPreflight<T>(
+    preflight: Promise<T>,
+    signal: AbortSignal | undefined,
+  ): Promise<T> {
+    if (!signal) {
+      return await preflight;
+    }
+    signal.throwIfAborted();
+    let abortListener: (() => void) | undefined;
+    const aborted = new Promise<never>((_resolve, reject) => {
+      abortListener = () => {
+        try {
+          signal.throwIfAborted();
+        } catch (error) {
+          reject(error);
+        }
+      };
+      signal.addEventListener("abort", abortListener, { once: true });
+      if (signal.aborted) {
+        abortListener();
+      }
+    });
+    try {
+      return await Promise.race([preflight, aborted]);
+    } finally {
+      if (abortListener) {
+        signal.removeEventListener("abort", abortListener);
+      }
+    }
   }
 
   private async ensureLaunchObservationMatchesPackage(

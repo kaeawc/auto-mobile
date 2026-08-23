@@ -1461,22 +1461,26 @@ export class Daemon {
     sessionId: string | null | undefined,
     session: Session | null,
     forceGeneration: number | undefined,
+    preparation?: ReturnType<DevicePool["prepareSessionPreservingRecovery"]>,
   ): Promise<boolean> {
-    if (
-      sessionId &&
-      await this.devicePool.waitForSessionPreservingRecovery(sessionId, incidentId)
-    ) {
-      this.retireAdbServerResetDisconnectState(deviceId, forceGeneration);
-      return true;
-    }
-    if (sessionId && this.devicePool.isSessionRecoveryInFlight(sessionId)) {
-      await this.devicePool.finishEmulatorLossIncident(incidentId, "not-attempted");
-      this.retireAdbServerResetDisconnectState(deviceId, forceGeneration);
-      return true;
+    if (!preparation) {
+      if (
+        sessionId &&
+        await this.devicePool.waitForSessionPreservingRecovery(sessionId, incidentId)
+      ) {
+        this.retireAdbServerResetDisconnectState(deviceId, forceGeneration);
+        return true;
+      }
+      if (sessionId && this.devicePool.isSessionRecoveryInFlight(sessionId)) {
+        await this.devicePool.finishEmulatorLossIncident(incidentId, "not-attempted");
+        this.retireAdbServerResetDisconnectState(deviceId, forceGeneration);
+        return true;
+      }
     }
     if (!pooledDevice || !sessionId || !session) {
       return false;
     }
+    this.devicePool.finishSessionPreservingRecoveryPreparation(preparation);
     const recovery = await this.devicePool.recoverSessionBoundAndroidDeviceAfterLoss(
       deviceId,
       incidentId,
@@ -1487,6 +1491,59 @@ export class Daemon {
     }
     this.retireAdbServerResetDisconnectState(deviceId, forceGeneration);
     return true;
+  }
+
+  private async recordAndTryRecoverCapturedDisconnect(
+    deviceId: string,
+    pooledDevice: PooledDevice | null,
+    assignmentCount: number,
+    sessionId: string | null | undefined,
+    session: Session | null,
+    forceGeneration: number | undefined,
+  ): Promise<{ incidentId: string | undefined; handled: boolean }> {
+    const preparation = this.devicePool.prepareSessionPreservingRecovery(
+      deviceId,
+      pooledDevice ?? undefined,
+    );
+    try {
+      const incidentId = await this.devicePool.recordEmulatorLossIncident(
+        deviceId,
+        this.forceDisconnectedDeviceIds.has(deviceId)
+          ? "adb-transport-failure"
+          : "device-discovery-miss",
+        undefined,
+        "absent",
+      );
+      const staleDisconnect =
+        (await this.shouldSkipStaleDisconnectCleanup(
+          pooledDevice,
+          deviceId,
+          forceGeneration,
+        )) ||
+        !this.isCapturedDisconnectTargetCurrent(
+          deviceId,
+          pooledDevice,
+          assignmentCount,
+          sessionId,
+          session,
+        );
+      if (staleDisconnect) {
+        await this.devicePool.finishEmulatorLossIncident(incidentId, "not-attempted");
+        return { incidentId, handled: true };
+      }
+      const handled = await this.tryRecoverCapturedDisconnectTarget(
+        deviceId,
+        incidentId,
+        pooledDevice,
+        sessionId,
+        session,
+        forceGeneration,
+        preparation,
+      );
+      return { incidentId, handled };
+    } finally {
+      this.devicePool.finishSessionPreservingRecoveryPreparation(preparation);
+    }
   }
 
   private startDeviceDisconnectMonitor(): void {
@@ -1654,41 +1711,15 @@ export class Daemon {
 
             // Cancel active executions and release the session so the test fails
             // fast instead of waiting for the full MCP request timeout.
-            const incidentId = await this.devicePool.recordEmulatorLossIncident(
+            const { incidentId, handled } = await this.recordAndTryRecoverCapturedDisconnect(
               deviceId,
-              this.forceDisconnectedDeviceIds.has(deviceId)
-                ? "adb-transport-failure"
-                : "device-discovery-miss",
-              undefined,
-              "absent",
+              pooledDeviceAtDisconnect,
+              assignmentCountAtDisconnect ?? 0,
+              sessionIdAtDisconnect,
+              sessionAtDisconnect,
+              forceGenerationAtDisconnect,
             );
-            const staleDisconnect =
-              (await this.shouldSkipStaleDisconnectCleanup(
-                pooledDeviceAtDisconnect,
-                deviceId,
-                forceGenerationAtDisconnect,
-              )) ||
-              !this.isCapturedDisconnectTargetCurrent(
-                deviceId,
-                pooledDeviceAtDisconnect,
-                assignmentCountAtDisconnect,
-                sessionIdAtDisconnect,
-                sessionAtDisconnect,
-              );
-            if (staleDisconnect) {
-              await this.devicePool.finishEmulatorLossIncident(incidentId, "not-attempted");
-              continue;
-            }
-            if (
-              await this.tryRecoverCapturedDisconnectTarget(
-                deviceId,
-                incidentId,
-                pooledDeviceAtDisconnect,
-                sessionIdAtDisconnect,
-                sessionAtDisconnect,
-                forceGenerationAtDisconnect,
-              )
-            ) {
+            if (handled) {
               continue;
             }
             if (

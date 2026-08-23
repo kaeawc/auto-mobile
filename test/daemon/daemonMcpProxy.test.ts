@@ -2302,6 +2302,7 @@ describe("DaemonMcpProxy", () => {
     });
 
     test("preserves the daemon heartbeat snapshot on a terminal binding error", async () => {
+      const timer = new FakeTimer();
       const fakeClient = new FakeDaemonClient({
         daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
       });
@@ -2311,6 +2312,7 @@ describe("DaemonMcpProxy", () => {
         clientFactory: () => fakeClient,
         daemonManager: matchingDaemonManager(),
         autoStartDaemon: false,
+        timer,
       });
 
       try {

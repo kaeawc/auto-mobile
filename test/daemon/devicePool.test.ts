@@ -19,7 +19,10 @@ import type { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient"
 import type { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { getAbortSignal } from "../../src/utils/AbortContext";
-import { InMemoryEmulatorLossIncidentStore } from "../../src/daemon/emulatorLossIncident";
+import {
+  InMemoryEmulatorLossIncidentStore,
+  type EmulatorLossIncidentStore,
+} from "../../src/daemon/emulatorLossIncident";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 
 async function withProcessPlatform<T>(platform: NodeJS.Platform, fn: () => Promise<T>): Promise<T> {
@@ -3845,6 +3848,95 @@ describe("DevicePool", () => {
           process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeath;
         }
       }
+    });
+
+    test("quarantines a process-exit session before incident persistence completes", async () => {
+      const images: DeviceInfo[] = [{
+        name: "Pixel 8",
+        platform: "android",
+        isRunning: false,
+        deviceId: "emulator-5554",
+        source: "local",
+      }];
+      const manager = new FakeDeviceManagerWithStartedProcess(images);
+      const backingStore = new InMemoryEmulatorLossIncidentStore(
+        fakeTimer,
+        new CountingIdGenerator("incident"),
+      );
+      const openStarted = Promise.withResolvers<void>();
+      const releaseOpen = Promise.withResolvers<void>();
+      const incidents: EmulatorLossIncidentStore = {
+        async open(input) {
+          openStarted.resolve();
+          await releaseOpen.promise;
+          return await backingStore.open(input);
+        },
+        async recordRecoveryAttempt(incidentId, attempt) {
+          await backingStore.recordRecoveryAttempt(incidentId, attempt);
+        },
+        async completeRecovery(incidentId, outcome, settlement) {
+          await backingStore.completeRecovery(incidentId, outcome, settlement);
+        },
+        async get(incidentId) {
+          return await backingStore.get(incidentId);
+        },
+        async list(limit) {
+          return await backingStore.list(limit);
+        },
+      };
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        manager,
+        new DefaultRetryExecutor(fakeTimer),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { onLoss: true, maxAttempts: 1 },
+        undefined,
+        incidents,
+      );
+
+      await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
+      manager.bootedDevices = [];
+      manager.childProcess.emit("exit", 1, null);
+      await openStarted.promise;
+
+      expect(devicePool.isSessionRecoveryInFlight("session-1")).toBe(true);
+      expect(() => devicePool.assertSessionReadyForAutomation("session-1")).toThrow(
+        "device-disconnected:emulator-5554",
+      );
+
+      await sessionManager.releaseSession("session-1", "explicit-release");
+      await devicePool.releaseDevice("emulator-5554", "session-1");
+      manager.bootedDevices = [{
+        name: "Pixel 8",
+        platform: "android",
+        deviceId: "emulator-5554",
+      }];
+      await devicePool.bindOrReuseDeviceSession(
+        "session-2",
+        "emulator-5554",
+        "android",
+        images[0],
+      );
+      releaseOpen.resolve();
+      for (let attempt = 0; attempt < 10 && (await backingStore.list()).length === 0; attempt++) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      expect(devicePool.isSessionRecoveryInFlight("session-1")).toBe(false);
+      expect(sessionManager.getSession("session-2")?.assignedDevice).toBe("emulator-5554");
+      expect(devicePool.getDevice("emulator-5554")).toMatchObject({
+        sessionId: "session-2",
+        status: "busy",
+      });
+      await expect(backingStore.list()).resolves.toMatchObject([
+        { recovery: { outcome: "not-attempted" } },
+      ]);
     });
 
     test("coalesces concurrent loss signals into one session-preserving recovery", async () => {

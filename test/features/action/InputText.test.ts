@@ -155,6 +155,25 @@ describe("InputText", () => {
     ).rejects.toBe(deviceLoss);
   });
 
+  test("forwards cancellation through post-input observation", async () => {
+    const controller = new AbortController();
+    stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const inputText = new InputText(androidDevice, new FakeAdbClientFactory(), undefined, timer);
+    const observe = new FakeObserveScreen();
+    observe.setObserveResult(observeResultWithFocusedText(""));
+    observe.enableAutoVaryHierarchy();
+    (inputText as any).observeScreen = observe;
+    (inputText as any).awaitIdle = new FakeAwaitIdle();
+
+    await inputText.execute("hello", undefined, false, undefined, controller.signal);
+
+    expect(observe.getExecuteOptions()).not.toHaveLength(0);
+    expect(observe.getExecuteOptions().every(options => options.signal === controller.signal))
+      .toBe(true);
+  });
+
   test("eventLast sets prefix with a11y and sends final ASCII key event", async () => {
     const factory = new FakeAdbClientFactory();
     const inputText = new InputText(androidDevice, factory as AdbClientFactory);

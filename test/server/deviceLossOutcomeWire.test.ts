@@ -5,6 +5,8 @@ import { ActionableError } from "../../src/models";
 import { DeviceLostError, rememberDeviceLossAbort } from "../../src/server/deviceLossOutcome";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { TerminalSessionError } from "../../src/daemon/sessionManager";
+import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
+import { executionTracker } from "../../src/server/executionTracker";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 
 describe("device loss MCP outcome", () => {
@@ -16,6 +18,7 @@ describe("device loss MCP outcome", () => {
   };
   let restorePipelineOverrides: (() => void) | undefined;
   let fixture: McpTestFixture | undefined;
+  const originalObserveExecute = RealObserveScreen.prototype.execute;
 
   afterEach(async () => {
     if (fixture) {
@@ -24,6 +27,7 @@ describe("device loss MCP outcome", () => {
     }
     restorePipelineOverrides?.();
     restorePipelineOverrides = undefined;
+    RealObserveScreen.prototype.execute = originalObserveExecute;
     ToolRegistry.unregister(toolName);
   });
 
@@ -212,6 +216,75 @@ describe("device loss MCP outcome", () => {
 
     expect(result.isError).toBe(true);
     expect(result.structuredContent).toBeUndefined();
+    expect(JSON.parse(result.content[0].text)).toMatchObject({
+      code: "device_lost",
+      deviceId: "emulator-5554",
+      sessionUuid: "device-session-a",
+    });
+  });
+
+  test("cancels an active observe and drains it before resolving device loss", async () => {
+    const observeStarted = Promise.withResolvers<void>();
+    RealObserveScreen.prototype.execute = async function(options) {
+      observeStarted.resolve();
+      return await new Promise<never>((_resolve, reject) => {
+        options?.signal?.addEventListener(
+          "abort",
+          () => reject(new Error("observe cancelled")),
+          { once: true },
+        );
+      });
+    };
+    restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
+      executionTargetResolver: {
+        async resolveExecutionTarget(input) {
+          return {
+            args: input.args,
+            baseSessionUuid: "device-session-a",
+            device,
+            internalCall: false,
+            sessionUuid: "device-session-a",
+            shouldResolveDevice: true,
+          };
+        },
+      },
+      auditRunner: {
+        async run(input) {
+          return await input.handler(input.device, input.args, input.progress, input.signal);
+        },
+      },
+      afterToolCall: {
+        async handle() {
+          throw new Error("cancelled observe should not finalize");
+        },
+      },
+      planLifecycleManager: {
+        async afterExecution() {},
+      },
+    });
+    fixture = new McpTestFixture({
+      sessionContext: {
+        sessionId: "transport-a",
+        initialSessionToolBinding: "device-session-a",
+      },
+    });
+    await fixture.setup();
+
+    const resultPromise = fixture.client.callTool({
+      name: "observe",
+      arguments: { platform: "android" },
+    });
+    await observeStarted.promise;
+    await executionTracker.cancelDeviceSessionExecutions(
+      "device-session-a",
+      "device-disconnected:emulator-5554",
+    );
+
+    await expect(
+      executionTracker.waitForDeviceSessionExecutionsToEnd("device-session-a", 100),
+    ).resolves.toBe(true);
+    const result: any = await resultPromise;
+    expect(result.isError).toBe(true);
     expect(JSON.parse(result.content[0].text)).toMatchObject({
       code: "device_lost",
       deviceId: "emulator-5554",

@@ -65,6 +65,16 @@ export function deviceLostErrorFromAbortSignal(signal: AbortSignal): DeviceLostE
     : deviceLossAbortErrors.get(signal);
 }
 
+export function throwDeviceLostFromAbortSignal(signal?: AbortSignal): void {
+  if (!signal) {
+    return;
+  }
+  const deviceLoss = deviceLostErrorFromAbortSignal(signal);
+  if (deviceLoss) {
+    throw deviceLoss;
+  }
+}
+
 export function deviceLossOutcomeFromError(
   error: unknown,
   sessionUuid?: string,

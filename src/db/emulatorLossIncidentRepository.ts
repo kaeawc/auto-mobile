@@ -122,7 +122,9 @@ export class EmulatorLossIncidentRepository implements EmulatorLossIncidentStore
   ): Promise<void> {
     await this.update(incidentId, (incident) => {
       incident.recovery.outcome = outcome;
-      incident.replacementDeviceId = settlement.replacementDeviceId;
+      if (settlement.replacementDeviceId) {
+        incident.replacementDeviceId = settlement.replacementDeviceId;
+      }
       if (incident.session && settlement.sessionState) {
         incident.session.state = settlement.sessionState;
       }

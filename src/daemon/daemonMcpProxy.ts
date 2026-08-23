@@ -1385,8 +1385,10 @@ export class DaemonMcpProxy {
     release?: SessionReleaseSnapshot,
   ): void {
     if (this.terminalBoundSession) {
-      if (this.terminalBoundSession.sessionUuid === sessionUuid && reason !== "released") {
-        this.terminalBoundSession.reason = reason;
+      if (this.terminalBoundSession.sessionUuid === sessionUuid) {
+        if (reason !== "released") {
+          this.terminalBoundSession.reason = reason;
+        }
         this.terminalBoundSession.release = release ?? this.terminalBoundSession.release;
       }
       return;

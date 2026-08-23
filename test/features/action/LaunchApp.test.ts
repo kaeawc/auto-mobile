@@ -70,15 +70,27 @@ describe("LaunchApp", () => {
   });
 
   test("returns observation when app is already in foreground", async () => {
+    const controller = new AbortController();
     fakeAdb.setForegroundApp({ packageName, userId: 0 });
     fakeAdb.setCommandResponse(`shell ps | grep ${packageName}`, { stdout: "1\n", stderr: "" });
 
-    const result = await launchApp.execute(packageName, false, false);
+    const result = await launchApp.execute(
+      packageName,
+      false,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      controller.signal,
+    );
 
     expect(result.success).toBe(true);
     expect(result.error).toBe("App is already in foreground");
     expect(result.observation).toBeDefined();
     expect(fakeObserveScreen.getExecuteCallCount()).toBeGreaterThan(0);
+    expect(
+      fakeObserveScreen.getExecuteOptions().every(options => options.signal === controller.signal),
+    ).toBe(true);
     expect(fakeAwaitIdle.wasMethodCalled("initializeUiStabilityTracking")).toBe(true);
   });
 
@@ -91,13 +103,13 @@ describe("LaunchApp", () => {
     const cancellableLaunch = new LaunchApp(device, fakeAdb as unknown as any, null, fakeTimer, {
       targetUserDetector: {
         async detectTargetUserId() {
+          controller.abort(deviceLoss);
           return 0;
         },
       },
       installedAppsProvider: {
         async listInstalledApps() {
-          controller.abort(deviceLoss);
-          return [packageName];
+          return await new Promise<never>(() => {});
         },
       },
     });

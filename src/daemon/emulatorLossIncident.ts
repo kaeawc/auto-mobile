@@ -166,7 +166,9 @@ export class InMemoryEmulatorLossIncidentStore implements EmulatorLossIncidentSt
       return;
     }
     incident.recovery.outcome = outcome;
-    incident.replacementDeviceId = settlement.replacementDeviceId;
+    if (settlement.replacementDeviceId) {
+      incident.replacementDeviceId = settlement.replacementDeviceId;
+    }
     if (incident.session && settlement.sessionState) {
       incident.session.state = settlement.sessionState;
     }

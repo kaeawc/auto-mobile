@@ -24,6 +24,7 @@ import {
   notifyInstalledAppResourceUpdated,
 } from "./appResources";
 import { logger } from "../utils/logger";
+import { isDeviceLostError } from "./deviceLossOutcome";
 
 export interface ListAppsToolDependencies {
   toolResponseFormatter: ToolResponseFormatter;
@@ -280,6 +281,9 @@ export function registerAppTools() {
         ...result,
       });
     } catch (error) {
+      if (isDeviceLostError(error)) {
+        throw error;
+      }
       throw new ActionableError(`Failed to launch app: ${error}`);
     } finally {
       if (!signal?.aborted) {

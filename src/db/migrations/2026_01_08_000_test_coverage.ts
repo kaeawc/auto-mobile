@@ -5,18 +5,16 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await db.schema
     .createTable("test_coverage_sessions")
     .ifNotExists()
-    .addColumn("id", "integer", col => col.primaryKey().autoIncrement())
-    .addColumn("session_uuid", "text", col => col.notNull().unique())
-    .addColumn("app_id", "text", col =>
-      col.notNull().references("navigation_apps.app_id").onDelete("cascade")
+    .addColumn("id", "integer", (col) => col.primaryKey().autoIncrement())
+    .addColumn("session_uuid", "text", (col) => col.notNull().unique())
+    .addColumn("app_id", "text", (col) =>
+      col.notNull().references("navigation_apps.app_id").onDelete("cascade"),
     )
-    .addColumn("start_time", "integer", col => col.notNull())
+    .addColumn("start_time", "integer", (col) => col.notNull())
     .addColumn("end_time", "integer")
-    .addColumn("total_nodes_visited", "integer", col => col.notNull().defaultTo(0))
-    .addColumn("total_edges_traversed", "integer", col => col.notNull().defaultTo(0))
-    .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo(sql`(datetime('now'))`)
-    )
+    .addColumn("total_nodes_visited", "integer", (col) => col.notNull().defaultTo(0))
+    .addColumn("total_edges_traversed", "integer", (col) => col.notNull().defaultTo(0))
+    .addColumn("created_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
     .execute();
 
   // Create index on session_uuid for fast lookups
@@ -39,19 +37,17 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await db.schema
     .createTable("test_node_coverage")
     .ifNotExists()
-    .addColumn("id", "integer", col => col.primaryKey().autoIncrement())
-    .addColumn("session_id", "integer", col =>
-      col.notNull().references("test_coverage_sessions.id").onDelete("cascade")
+    .addColumn("id", "integer", (col) => col.primaryKey().autoIncrement())
+    .addColumn("session_id", "integer", (col) =>
+      col.notNull().references("test_coverage_sessions.id").onDelete("cascade"),
     )
-    .addColumn("node_id", "integer", col =>
-      col.notNull().references("navigation_nodes.id").onDelete("cascade")
+    .addColumn("node_id", "integer", (col) =>
+      col.notNull().references("navigation_nodes.id").onDelete("cascade"),
     )
-    .addColumn("visit_count", "integer", col => col.notNull().defaultTo(1))
-    .addColumn("first_visit_time", "integer", col => col.notNull())
-    .addColumn("last_visit_time", "integer", col => col.notNull())
-    .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo(sql`(datetime('now'))`)
-    )
+    .addColumn("visit_count", "integer", (col) => col.notNull().defaultTo(1))
+    .addColumn("first_visit_time", "integer", (col) => col.notNull())
+    .addColumn("last_visit_time", "integer", (col) => col.notNull())
+    .addColumn("created_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
     .execute();
 
   // Create unique constraint on (session_id, node_id)
@@ -75,19 +71,17 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await db.schema
     .createTable("test_edge_coverage")
     .ifNotExists()
-    .addColumn("id", "integer", col => col.primaryKey().autoIncrement())
-    .addColumn("session_id", "integer", col =>
-      col.notNull().references("test_coverage_sessions.id").onDelete("cascade")
+    .addColumn("id", "integer", (col) => col.primaryKey().autoIncrement())
+    .addColumn("session_id", "integer", (col) =>
+      col.notNull().references("test_coverage_sessions.id").onDelete("cascade"),
     )
-    .addColumn("edge_id", "integer", col =>
-      col.notNull().references("navigation_edges.id").onDelete("cascade")
+    .addColumn("edge_id", "integer", (col) =>
+      col.notNull().references("navigation_edges.id").onDelete("cascade"),
     )
-    .addColumn("traversal_count", "integer", col => col.notNull().defaultTo(1))
-    .addColumn("first_traversal_time", "integer", col => col.notNull())
-    .addColumn("last_traversal_time", "integer", col => col.notNull())
-    .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo(sql`(datetime('now'))`)
-    )
+    .addColumn("traversal_count", "integer", (col) => col.notNull().defaultTo(1))
+    .addColumn("first_traversal_time", "integer", (col) => col.notNull())
+    .addColumn("last_traversal_time", "integer", (col) => col.notNull())
+    .addColumn("created_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
     .execute();
 
   // Create unique constraint on (session_id, edge_id)

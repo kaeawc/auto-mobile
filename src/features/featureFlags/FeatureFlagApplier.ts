@@ -38,9 +38,7 @@ export class DefaultFeatureFlagApplier implements FeatureFlagApplier {
         serverConfig.setMemPerfAuditMode(enabled);
         break;
       case "accessibility-audit":
-        serverConfig.setAccessibilityAuditConfig(
-          enabled ? applyAccessibilityConfig(config) : null
-        );
+        serverConfig.setAccessibilityAuditConfig(enabled ? applyAccessibilityConfig(config) : null);
         break;
       case "predictive-ui":
         serverConfig.setPredictiveUiEnabled(enabled);
@@ -80,11 +78,15 @@ const applyAccessibilityConfig = (config?: FeatureFlagConfig | null): Accessibil
       ? config.level
       : DEFAULT_ACCESSIBILITY_CONFIG.level;
   const failureMode =
-    config.failureMode === "report" || config.failureMode === "threshold" || config.failureMode === "strict"
+    config.failureMode === "report" ||
+    config.failureMode === "threshold" ||
+    config.failureMode === "strict"
       ? config.failureMode
       : DEFAULT_ACCESSIBILITY_CONFIG.failureMode;
   const minSeverity =
-    config.minSeverity === "error" || config.minSeverity === "warning" || config.minSeverity === "info"
+    config.minSeverity === "error" ||
+    config.minSeverity === "warning" ||
+    config.minSeverity === "info"
       ? config.minSeverity
       : DEFAULT_ACCESSIBILITY_CONFIG.minSeverity;
   const useBaseline =
@@ -108,9 +110,10 @@ const parseContrastConfig = (contrast?: unknown): AccessibilityAuditConfig["cont
   }
 
   const config = contrast as Record<string, unknown>;
-  const samplingPoints = config.samplingPoints === 5 || config.samplingPoints === 9 || config.samplingPoints === 13
-    ? config.samplingPoints
-    : DEFAULT_ACCESSIBILITY_CONFIG.contrast?.samplingPoints;
+  const samplingPoints =
+    config.samplingPoints === 5 || config.samplingPoints === 9 || config.samplingPoints === 13
+      ? config.samplingPoints
+      : DEFAULT_ACCESSIBILITY_CONFIG.contrast?.samplingPoints;
 
   return {
     useMultiPointSampling:

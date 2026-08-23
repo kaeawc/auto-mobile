@@ -3,17 +3,19 @@ import { registerPlanTools } from "../../src/server/planTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 
 describe("exportPlan tool", () => {
-  const mockStopTestRecording = mock(() => Promise.resolve({
-    recordingId: "rec-123",
-    startedAt: "2024-01-01T00:00:00.000Z",
-    stoppedAt: "2024-01-01T00:01:00.000Z",
-    durationMs: 60000,
-    planName: "test-plan",
-    planContent: "name: test-plan\nsteps:\n  - tool: tapOn\n    params:\n      text: Button\n",
-    stepCount: 1,
-    deviceId: "emulator-5554",
-    platform: "android",
-  }));
+  const mockStopTestRecording = mock(() =>
+    Promise.resolve({
+      recordingId: "rec-123",
+      startedAt: "2024-01-01T00:00:00.000Z",
+      stoppedAt: "2024-01-01T00:01:00.000Z",
+      durationMs: 60000,
+      planName: "test-plan",
+      planContent: "name: test-plan\nsteps:\n  - tool: tapOn\n    params:\n      text: Button\n",
+      stepCount: 1,
+      deviceId: "emulator-5554",
+      platform: "android",
+    }),
+  );
 
   const mockGetTestRecordingStatus = mock(() => ({
     recordingId: "rec-123",
@@ -90,17 +92,19 @@ describe("exportPlan tool", () => {
 
   test("respects optional planName parameter", async () => {
     const customPlanName = "my-custom-plan";
-    const mockStopWithName = mock(() => Promise.resolve({
-      recordingId: "rec-123",
-      startedAt: "2024-01-01T00:00:00.000Z",
-      stoppedAt: "2024-01-01T00:01:00.000Z",
-      durationMs: 60000,
-      planName: customPlanName,
-      planContent: `name: ${customPlanName}\nsteps:\n  - tool: tapOn\n    params:\n      text: Button\n`,
-      stepCount: 1,
-      deviceId: "emulator-5554",
-      platform: "android",
-    }));
+    const mockStopWithName = mock(() =>
+      Promise.resolve({
+        recordingId: "rec-123",
+        startedAt: "2024-01-01T00:00:00.000Z",
+        stoppedAt: "2024-01-01T00:01:00.000Z",
+        durationMs: 60000,
+        planName: customPlanName,
+        planContent: `name: ${customPlanName}\nsteps:\n  - tool: tapOn\n    params:\n      text: Button\n`,
+        stepCount: 1,
+        deviceId: "emulator-5554",
+        platform: "android",
+      }),
+    );
 
     mock.module("../../src/server/testRecordingManager", () => ({
       stopTestRecording: mockStopWithName,

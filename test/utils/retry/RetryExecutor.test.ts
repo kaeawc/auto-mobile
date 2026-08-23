@@ -45,7 +45,7 @@ describe("DefaultRetryExecutor", () => {
         async () => {
           throw new Error("Always fails");
         },
-        { maxAttempts: 3 }
+        { maxAttempts: 3 },
       );
 
       expect(result.success).toBe(false);
@@ -64,7 +64,7 @@ describe("DefaultRetryExecutor", () => {
           }
           return "done";
         },
-        { delays: 500, maxAttempts: 3 }
+        { delays: 500, maxAttempts: 3 },
       );
 
       // Wait for first attempt
@@ -95,7 +95,7 @@ describe("DefaultRetryExecutor", () => {
           }
           return "done";
         },
-        { delays, maxAttempts: 4 }
+        { delays, maxAttempts: 4 },
       );
 
       expect(result.success).toBe(true);
@@ -118,9 +118,9 @@ describe("DefaultRetryExecutor", () => {
           return "done";
         },
         {
-          delays: attempt => attempt * 100,
+          delays: (attempt) => attempt * 100,
           maxAttempts: 3,
-        }
+        },
       );
 
       expect(result.success).toBe(true);
@@ -143,7 +143,7 @@ describe("DefaultRetryExecutor", () => {
         {
           delays: exponentialBackoff({ initialDelayMs: 50, multiplier: 2, maxDelayMs: 200 }),
           maxAttempts: 4,
-        }
+        },
       );
 
       expect(result.success).toBe(true);
@@ -161,7 +161,7 @@ describe("DefaultRetryExecutor", () => {
           attempts++;
           throw new Error("Retry");
         },
-        { signal: controller.signal, delays: 100, maxAttempts: 5 }
+        { signal: controller.signal, delays: 100, maxAttempts: 5 },
       );
 
       await Promise.resolve();
@@ -186,8 +186,8 @@ describe("DefaultRetryExecutor", () => {
         },
         {
           maxAttempts: 5,
-          shouldRetry: error => !error.message.includes("Fatal"),
-        }
+          shouldRetry: (error) => !error.message.includes("Fatal"),
+        },
       );
 
       expect(result.success).toBe(false);
@@ -208,7 +208,7 @@ describe("DefaultRetryExecutor", () => {
           onRetry: (error, attempt, delay) => {
             retryInfo.push({ error, attempt, delay });
           },
-        }
+        },
       );
 
       expect(result.success).toBe(false);
@@ -222,10 +222,7 @@ describe("DefaultRetryExecutor", () => {
       timer.enableAutoAdvance();
       timer.setCurrentTime(1000);
 
-      const result = await executor.execute(
-        async () => "done",
-        { maxAttempts: 1 }
-      );
+      const result = await executor.execute(async () => "done", { maxAttempts: 1 });
 
       expect(result.totalTimeMs).toBeGreaterThanOrEqual(0);
     });
@@ -244,7 +241,7 @@ describe("DefaultRetryExecutor", () => {
           }
           return "ok";
         },
-        { maxAttempts: 2, delays: 250 }
+        { maxAttempts: 2, delays: 250 },
       );
 
       expect(result.success).toBe(true);
@@ -268,8 +265,8 @@ describe("DefaultRetryExecutor", () => {
           async () => {
             throw new Error("Failed");
           },
-          { maxAttempts: 2 }
-        )
+          { maxAttempts: 2 },
+        ),
       ).rejects.toThrow("Failed");
     });
   });

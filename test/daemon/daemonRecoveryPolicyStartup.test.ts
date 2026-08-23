@@ -37,12 +37,14 @@ describe("daemon device recovery policy startup", () => {
         onLoss: false,
         maxAttempts: 2,
       });
-      expect(warnSpy.mock.calls.map(call => call[0])).toEqual(expect.arrayContaining([
-        expect.stringContaining("Invalid AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS"),
-        expect.stringContaining("Invalid AUTOMOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS"),
-      ]));
-      expect(infoSpy.mock.calls.map(call => call[0])).toContain(
-        "[Daemon] Device recovery policy: onLoss=false, maxAttempts=2"
+      expect(warnSpy.mock.calls.map((call) => call[0])).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining("Invalid AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS"),
+          expect.stringContaining("Invalid AUTOMOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS"),
+        ]),
+      );
+      expect(infoSpy.mock.calls.map((call) => call[0])).toContain(
+        "[Daemon] Device recovery policy: onLoss=false, maxAttempts=2",
       );
     } finally {
       warnSpy.mockRestore();

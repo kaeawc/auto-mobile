@@ -124,14 +124,14 @@ function createFakeDaemonState(
         const deviceEpochUuid = resolveDeviceEpochUuid();
         const secondaryDeviceEpochUuid = resolveSecondaryDeviceEpochUuid();
         return [
-          ...(deviceEpochUuid
-            ? [{ ...deviceSession, deviceSessionUuid: deviceEpochUuid }]
-            : []),
+          ...(deviceEpochUuid ? [{ ...deviceSession, deviceSessionUuid: deviceEpochUuid }] : []),
           ...(secondaryDeviceEpochUuid
-            ? [{
-              ...secondaryDeviceSession,
-              deviceSessionUuid: secondaryDeviceEpochUuid,
-            }]
+            ? [
+                {
+                  ...secondaryDeviceSession,
+                  deviceSessionUuid: secondaryDeviceEpochUuid,
+                },
+              ]
             : []),
         ];
       },
@@ -158,7 +158,7 @@ class PersistentSocketClient {
     await new Promise<void>((resolve, reject) => {
       this.socket.connect(socketPath, resolve);
       this.socket.on("error", reject);
-      this.socket.on("data", data => {
+      this.socket.on("data", (data) => {
         this.buffer += data.toString();
         const lines = this.buffer.split("\n");
         this.buffer = lines.pop() ?? "";
@@ -193,9 +193,13 @@ class PersistentSocketClient {
       const deadline = defaultTimer.setTimeout(() => {
         this.waiters.delete(id);
         this.socket.destroy();
-        reject(new Error(`No response to ${method} within ${SOCKET_REQUEST_DEADLINE_MS}ms — bounded socket-test deadline hit`));
+        reject(
+          new Error(
+            `No response to ${method} within ${SOCKET_REQUEST_DEADLINE_MS}ms — bounded socket-test deadline hit`,
+          ),
+        );
       }, SOCKET_REQUEST_DEADLINE_MS);
-      this.waiters.set(id, response => {
+      this.waiters.set(id, (response) => {
         defaultTimer.clearTimeout(deadline);
         resolve(response);
       });
@@ -452,7 +456,9 @@ describe("UnixSocketServer MCP session reconnect", () => {
     expect(response.success).toBe(false);
     expect(clientsCreated).toBe(2);
     expect(callsDispatched).toBe(2);
-    expect(response.error).toBe("Device-control transport recovery exhausted while handling observe");
+    expect(response.error).toBe(
+      "Device-control transport recovery exhausted while handling observe",
+    );
     expect(JSON.stringify(response)).not.toContain("secret.invalid");
     expect(response.transportFailure).toMatchObject({
       sessionValid: true,
@@ -680,7 +686,9 @@ describe("UnixSocketServer MCP session reconnect", () => {
     expect(response.success).toBe(false);
     expect(clientsCreated).toBe(2);
     expect(callsDispatched).toBe(2);
-    expect(response.error).toBe("Device-control transport recovery exhausted while handling observe");
+    expect(response.error).toBe(
+      "Device-control transport recovery exhausted while handling observe",
+    );
     expect(JSON.stringify(response)).not.toContain("secret.invalid");
     expect(response.transportFailure).toMatchObject({
       code: "device_control_transport_failure",
@@ -975,11 +983,11 @@ describe("UnixSocketServer MCP session reconnect", () => {
     const clientBindings: Array<string | undefined> = [];
     const clientProfiles: Array<string | undefined> = [];
     let signalReplayStarted = () => {};
-    const replayStarted = new Promise<void>(resolve => {
+    const replayStarted = new Promise<void>((resolve) => {
       signalReplayStarted = resolve;
     });
     let finishReplay = () => {};
-    const replayResult = new Promise<unknown>(resolve => {
+    const replayResult = new Promise<unknown>((resolve) => {
       finishReplay = () => resolve({ content: [{ type: "text", text: "observed" }] });
     });
 
@@ -1081,7 +1089,7 @@ describe("UnixSocketServer MCP session reconnect", () => {
     let replayedArguments: Record<string, unknown> | undefined;
     const clientBindings: Array<string | undefined> = [];
 
-    server.mcpClientFactory = async boundSessionUuid => {
+    server.mcpClientFactory = async (boundSessionUuid) => {
       clientBindings.push(boundSessionUuid);
       const clientIndex = ++clientsCreated;
       return createFakeMcpClient({
@@ -1255,7 +1263,9 @@ describe("UnixSocketServer MCP session reconnect", () => {
       const isFailing = clientsCreated === 1;
       return createFakeMcpClient({
         listTools: async () => {
-          if (isFailing) {throw new Error("Session not found");}
+          if (isFailing) {
+            throw new Error("Session not found");
+          }
           return { tools: [] };
         },
       });
@@ -1274,7 +1284,7 @@ describe("UnixSocketServer MCP session reconnect", () => {
 
   test("replays a bound session when tools/list reconnects its MCP client", async () => {
     const clientBindings: Array<string | undefined> = [];
-    server.mcpClientFactory = async boundSessionUuid => {
+    server.mcpClientFactory = async (boundSessionUuid) => {
       clientBindings.push(boundSessionUuid);
       const isFirstClient = clientBindings.length === 1;
       return createFakeMcpClient({
@@ -1311,7 +1321,7 @@ describe("UnixSocketServer MCP session reconnect", () => {
     // otherwise the shared UNSEEDED client returns the full, unfiltered list
     // instead of the session-scoped one (issue #4610).
     const clientBindings: Array<string | undefined> = [];
-    server.mcpClientFactory = async boundSessionUuid => {
+    server.mcpClientFactory = async (boundSessionUuid) => {
       clientBindings.push(boundSessionUuid);
       return createFakeMcpClient({
         listTools: async () => ({ tools: [{ name: boundSessionUuid ?? "unbound" }] }),
@@ -1330,12 +1340,13 @@ describe("UnixSocketServer MCP session reconnect", () => {
   test("closes idle per-key MCP clients after the idle timeout", async () => {
     let closeCalls = 0;
 
-    server.mcpClientFactory = async () => createFakeMcpClient({
-      listTools: async () => ({ tools: [] }),
-      close: async () => {
-        closeCalls++;
-      },
-    });
+    server.mcpClientFactory = async () =>
+      createFakeMcpClient({
+        listTools: async () => ({ tools: [] }),
+        close: async () => {
+          closeCalls++;
+        },
+      });
 
     const response = await sendRequest(socketPath, "tools/list");
 
@@ -1381,9 +1392,7 @@ describe("UnixSocketServer MCP session reconnect", () => {
     // The recovery route must replay the generated profile from the original
     // route, never the routing session UUID masquerading as a profile.
     expect(route.toolSelectionProfileUuid).toBe("profile-x");
-    expect(route.clientKey).toBe(
-      "socket:socket-1:session:session-b:tool-selection:profile-x",
-    );
+    expect(route.clientKey).toBe("socket:socket-1:session:session-b:tool-selection:profile-x");
     expect(route.clientKey).not.toContain("session-a");
   });
 

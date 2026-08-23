@@ -24,7 +24,7 @@ export const IOS_NOTIFICATION_CENTER_CLASS_HINTS = [
   "NotificationList",
   "NotificationShortLookView",
   "NotificationLongLookView",
-  "PLPlatterView"
+  "PLPlatterView",
 ];
 
 export const SYSTEM_TRAY_RESOURCE_ID_HINTS = [
@@ -39,7 +39,7 @@ export const SYSTEM_TRAY_RESOURCE_ID_HINTS = [
   "qs_frame",
   "qs_header",
   "shade_header",
-  "expanded_status_bar"
+  "expanded_status_bar",
 ];
 
 export const SYSTEM_TRAY_CLASS_HINTS = [
@@ -48,7 +48,7 @@ export const SYSTEM_TRAY_CLASS_HINTS = [
   "NotificationStack",
   "QSPanel",
   "QuickSettings",
-  "StatusBarExpanded"
+  "StatusBarExpanded",
 ];
 
 export const getNodeProperties = (node: any): Record<string, any> | null => {
@@ -105,12 +105,13 @@ export const nodeHasSystemTrayHint = (node: any): boolean => {
   const resourceId = String(props["resource-id"] ?? props.resourceId ?? "");
   const className = String(props.className ?? props.class ?? "");
   const packageName = String(props.packageName ?? props.package ?? "");
-  const isSystemUi = packageName === SYSTEM_TRAY_PACKAGE || resourceId.includes(SYSTEM_TRAY_PACKAGE);
+  const isSystemUi =
+    packageName === SYSTEM_TRAY_PACKAGE || resourceId.includes(SYSTEM_TRAY_PACKAGE);
   if (!isSystemUi) {
     return false;
   }
-  const matchesResourceId = SYSTEM_TRAY_RESOURCE_ID_HINTS.some(hint => resourceId.includes(hint));
-  const matchesClassName = SYSTEM_TRAY_CLASS_HINTS.some(hint => className.includes(hint));
+  const matchesResourceId = SYSTEM_TRAY_RESOURCE_ID_HINTS.some((hint) => resourceId.includes(hint));
+  const matchesClassName = SYSTEM_TRAY_CLASS_HINTS.some((hint) => className.includes(hint));
   return matchesResourceId || matchesClassName;
 };
 
@@ -123,6 +124,6 @@ export const nodeHasIosNotificationCenterHint = (node: any): boolean => {
   const contentDesc = String(props["content-desc"] ?? props["ios-accessibility-label"] ?? "");
   const identifier = String(props["resource-id"] ?? props.resourceId ?? props.identifier ?? "");
   return IOS_NOTIFICATION_CENTER_CLASS_HINTS.some(
-    hint => className.includes(hint) || contentDesc.includes(hint) || identifier.includes(hint)
+    (hint) => className.includes(hint) || contentDesc.includes(hint) || identifier.includes(hint),
   );
 };

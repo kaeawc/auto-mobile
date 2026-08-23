@@ -27,7 +27,7 @@ describe("BaseVisualChange device-lock warning (#4280)", () => {
     screenSize: { width: 1080, height: 1920 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
     viewHierarchy: { node: {} },
-    ...(deviceLock ? { deviceLock } : {})
+    ...(deviceLock ? { deviceLock } : {}),
   });
 
   function createVisualChange(platform: "android" | "ios"): BaseVisualChange {
@@ -46,14 +46,20 @@ describe("BaseVisualChange device-lock warning (#4280)", () => {
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     fakeWindow = new FakeWindow();
-    fakeWindow.configureCachedActiveWindow({ appId: "com.example.app", activityName: "Main", layoutSeqSum: 1 });
+    fakeWindow.configureCachedActiveWindow({
+      appId: "com.example.app",
+      activityName: "Main",
+      layoutSeqSum: 1,
+    });
   });
 
   test("secure lock: annotates deviceLock + a PIN-oriented warning, still succeeds", async () => {
-    fakeObserveScreen.setObserveResult(observeWith({ locked: true, keyguardShowing: true, secure: true }));
+    fakeObserveScreen.setObserveResult(
+      observeWith({ locked: true, keyguardShowing: true, secure: true }),
+    );
     const result = await createVisualChange("android").observedInteraction(
       async () => ({ success: true }),
-      { changeExpected: false }
+      { changeExpected: false },
     );
 
     // The gesture still ran and reported success — recovery gestures are not blocked.
@@ -64,10 +70,12 @@ describe("BaseVisualChange device-lock warning (#4280)", () => {
   });
 
   test("swipe lock: warning points at dismissing the keyguard, not a PIN", async () => {
-    fakeObserveScreen.setObserveResult(observeWith({ locked: true, keyguardShowing: true, secure: false }));
+    fakeObserveScreen.setObserveResult(
+      observeWith({ locked: true, keyguardShowing: true, secure: false }),
+    );
     const result = await createVisualChange("android").observedInteraction(
       async () => ({ success: true }),
-      { changeExpected: false }
+      { changeExpected: false },
     );
 
     expect(result.deviceLock).toEqual({ locked: true, keyguardShowing: true, secure: false });
@@ -75,10 +83,12 @@ describe("BaseVisualChange device-lock warning (#4280)", () => {
   });
 
   test("unlocked device: no deviceLock annotation", async () => {
-    fakeObserveScreen.setObserveResult(observeWith({ locked: false, keyguardShowing: false, secure: true }));
+    fakeObserveScreen.setObserveResult(
+      observeWith({ locked: false, keyguardShowing: false, secure: true }),
+    );
     const result = await createVisualChange("android").observedInteraction(
       async () => ({ success: true }),
-      { changeExpected: false }
+      { changeExpected: false },
     );
 
     expect(result.deviceLock).toBeUndefined();
@@ -89,7 +99,7 @@ describe("BaseVisualChange device-lock warning (#4280)", () => {
     fakeObserveScreen.setObserveResult(observeWith());
     const result = await createVisualChange("android").observedInteraction(
       async () => ({ success: true }),
-      { changeExpected: false }
+      { changeExpected: false },
     );
 
     expect(result.deviceLock).toBeUndefined();
@@ -97,10 +107,12 @@ describe("BaseVisualChange device-lock warning (#4280)", () => {
   });
 
   test("iOS is never annotated even if a lock state is present", async () => {
-    fakeObserveScreen.setObserveResult(() => observeWith({ locked: true, keyguardShowing: true, secure: true }));
+    fakeObserveScreen.setObserveResult(() =>
+      observeWith({ locked: true, keyguardShowing: true, secure: true }),
+    );
     const result = await createVisualChange("ios").observedInteraction(
       async () => ({ success: true }),
-      { changeExpected: false }
+      { changeExpected: false },
     );
 
     expect(result.deviceLock).toBeUndefined();

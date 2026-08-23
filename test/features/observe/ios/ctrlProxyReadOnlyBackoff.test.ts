@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import { createIosDelegateHarness, type IosDelegateHarness } from "../../../helpers/iosDelegateHarness";
+import {
+  createIosDelegateHarness,
+  type IosDelegateHarness,
+} from "../../../helpers/iosDelegateHarness";
 import { CtrlProxyVoiceOver } from "../../../../src/features/observe/ios/CtrlProxyVoiceOver";
 import { CtrlProxyNavigation } from "../../../../src/features/observe/ios/CtrlProxyNavigation";
 import { CtrlProxyClipboard } from "../../../../src/features/observe/ios/CtrlProxyClipboard";
@@ -18,7 +21,7 @@ import { CtrlProxyPermissions } from "../../../../src/features/observe/ios/CtrlP
  * any single site to `true` and exactly that row fails.
  */
 describe("read-only iOS commands do not cancel the screenshot backoff", () => {
-  const flush = (): Promise<void> => new Promise<void>(resolve => setImmediate(resolve));
+  const flush = (): Promise<void> => new Promise<void>((resolve) => setImmediate(resolve));
 
   let h: IosDelegateHarness;
   beforeEach(() => {
@@ -31,18 +34,53 @@ describe("read-only iOS commands do not cancel the screenshot backoff", () => {
   }
 
   const rows: Row[] = [
-    { name: "get_voiceover_state", invoke: hh => new CtrlProxyVoiceOver(hh.context).requestVoiceOverState() },
-    { name: "request_action", invoke: hh => new CtrlProxyVoiceOver(hh.context).requestAction("scroll_forward") },
-    { name: "request_action (voiceover activate)", invoke: hh => new CtrlProxyVoiceOver(hh.context).requestVoiceOverActivate("Submit", "activate") },
-    { name: "request_press_home", invoke: hh => new CtrlProxyNavigation(hh.context).requestPressHome() },
-    { name: "request_press_back", invoke: hh => new CtrlProxyNavigation(hh.context).requestPressBack() },
-    { name: "request_shake", invoke: hh => new CtrlProxyNavigation(hh.context).requestShake() },
-    { name: "request_press_button", invoke: hh => new CtrlProxyNavigation(hh.context).requestPressButton("home") },
-    { name: "request_rotate", invoke: hh => new CtrlProxyNavigation(hh.context).requestRotate("portrait") },
-    { name: "request_recent_apps", invoke: hh => new CtrlProxyNavigation(hh.context).requestRecentApps() },
-    { name: "request_clipboard", invoke: hh => new CtrlProxyClipboard(hh.context).requestClipboard("get") },
-    { name: "request_screenshot", invoke: hh => new CtrlProxyScreenshot(hh.context).requestScreenshot() },
-    { name: "request_reset_permissions", invoke: hh => new CtrlProxyPermissions(hh.context).requestResetPermissions("com.app", ["camera"]) },
+    {
+      name: "get_voiceover_state",
+      invoke: (hh) => new CtrlProxyVoiceOver(hh.context).requestVoiceOverState(),
+    },
+    {
+      name: "request_action",
+      invoke: (hh) => new CtrlProxyVoiceOver(hh.context).requestAction("scroll_forward"),
+    },
+    {
+      name: "request_action (voiceover activate)",
+      invoke: (hh) =>
+        new CtrlProxyVoiceOver(hh.context).requestVoiceOverActivate("Submit", "activate"),
+    },
+    {
+      name: "request_press_home",
+      invoke: (hh) => new CtrlProxyNavigation(hh.context).requestPressHome(),
+    },
+    {
+      name: "request_press_back",
+      invoke: (hh) => new CtrlProxyNavigation(hh.context).requestPressBack(),
+    },
+    { name: "request_shake", invoke: (hh) => new CtrlProxyNavigation(hh.context).requestShake() },
+    {
+      name: "request_press_button",
+      invoke: (hh) => new CtrlProxyNavigation(hh.context).requestPressButton("home"),
+    },
+    {
+      name: "request_rotate",
+      invoke: (hh) => new CtrlProxyNavigation(hh.context).requestRotate("portrait"),
+    },
+    {
+      name: "request_recent_apps",
+      invoke: (hh) => new CtrlProxyNavigation(hh.context).requestRecentApps(),
+    },
+    {
+      name: "request_clipboard",
+      invoke: (hh) => new CtrlProxyClipboard(hh.context).requestClipboard("get"),
+    },
+    {
+      name: "request_screenshot",
+      invoke: (hh) => new CtrlProxyScreenshot(hh.context).requestScreenshot(),
+    },
+    {
+      name: "request_reset_permissions",
+      invoke: (hh) =>
+        new CtrlProxyPermissions(hh.context).requestResetPermissions("com.app", ["camera"]),
+    },
   ];
 
   for (const row of rows) {

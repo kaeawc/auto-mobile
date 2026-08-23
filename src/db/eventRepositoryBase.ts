@@ -38,7 +38,7 @@ export async function cleanupEventTable(
   db?: Kysely<Database>,
   maxRows?: number,
   checkInterval?: number,
-  inserted?: number
+  inserted?: number,
 ): Promise<void> {
   await pruneEventTableByCount(db, table, state, maxRows, checkInterval, inserted);
 }

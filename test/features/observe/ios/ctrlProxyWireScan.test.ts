@@ -11,12 +11,19 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { deriveIosSharedEmitFiles, extractImportSpecifiers, scanFile, toPosixPath } from "./ctrlProxyWireScan";
+import {
+  deriveIosSharedEmitFiles,
+  extractImportSpecifiers,
+  scanFile,
+  toPosixPath,
+} from "./ctrlProxyWireScan";
 
 const VIRTUAL = "/virtual/File.ts";
 
 function typesOf(source: string): string[] {
-  return scanFile(VIRTUAL, source).emitted.map(e => e.type).sort();
+  return scanFile(VIRTUAL, source)
+    .emitted.map((e) => e.type)
+    .sort();
 }
 
 describe("ctrlProxyWireScan.scanFile — discriminator resolution", () => {
@@ -123,13 +130,13 @@ describe("ctrlProxyWireScan.toPosixPath — separator-independence guard (issue 
   // the comparison is OS-agnostic — Windows cannot regress silently.
   test("normalizes backslash-separated paths to forward slashes", () => {
     expect(toPosixPath("C:\\repo\\src\\shared\\SharedTextDelegate.ts")).toBe(
-      "C:/repo/src/shared/SharedTextDelegate.ts"
+      "C:/repo/src/shared/SharedTextDelegate.ts",
     );
   });
 
   test("leaves already-posix paths unchanged", () => {
     expect(toPosixPath("/repo/src/shared/SharedTextDelegate.ts")).toBe(
-      "/repo/src/shared/SharedTextDelegate.ts"
+      "/repo/src/shared/SharedTextDelegate.ts",
     );
   });
 });
@@ -146,19 +153,19 @@ describe("ctrlProxyWireScan.deriveIosSharedEmitFiles — import-graph derivation
       // Entry imports a delegate directly and another indirectly through it.
       writeFileSync(
         join(iosDir, "Client.ts"),
-        `import { Text } from "../shared/SharedTextDelegate";\nimport type { T } from "../shared/types";\n`
+        `import { Text } from "../shared/SharedTextDelegate";\nimport type { T } from "../shared/types";\n`,
       );
       writeFileSync(
         join(sharedDir, "SharedTextDelegate.ts"),
-        `import { Nav } from "./SharedNavDelegate";\nexport const Text = 1;\n`
+        `import { Nav } from "./SharedNavDelegate";\nexport const Text = 1;\n`,
       );
       // A NEW shared delegate reached only transitively — must be discovered.
       writeFileSync(join(sharedDir, "SharedNavDelegate.ts"), `export const Nav = 1;\n`);
       writeFileSync(join(sharedDir, "types.ts"), `export type T = string;\n`);
       writeFileSync(join(sharedDir, "SharedTextDelegate.test.ts"), `export const t = 1;\n`);
 
-      const derived = deriveIosSharedEmitFiles(join(iosDir, "Client.ts"), sharedDir).map(f =>
-        f.slice(sharedDir.length + 1)
+      const derived = deriveIosSharedEmitFiles(join(iosDir, "Client.ts"), sharedDir).map((f) =>
+        f.slice(sharedDir.length + 1),
       );
 
       expect(derived).toEqual(["SharedNavDelegate.ts", "SharedTextDelegate.ts"]);

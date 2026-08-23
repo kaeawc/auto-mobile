@@ -18,19 +18,23 @@ export class FakeElementGeometry implements ElementGeometry {
     return true;
   }
 
-  getVisibleBounds(_element: Element, _screenWidth: number, _screenHeight: number): ElementBounds | null {
+  getVisibleBounds(
+    _element: Element,
+    _screenWidth: number,
+    _screenHeight: number,
+  ): ElementBounds | null {
     return null;
   }
 
   getSwipeWithinBounds(
     _direction: "up" | "down" | "left" | "right",
-    _bounds: ElementBounds
+    _bounds: ElementBounds,
   ): { startX: number; startY: number; endX: number; endY: number } {
     return this.swipeResult;
   }
 
   getSwipeDirectionForScroll(
-    direction: "up" | "down" | "left" | "right"
+    direction: "up" | "down" | "left" | "right",
   ): "up" | "down" | "left" | "right" {
     return direction;
   }

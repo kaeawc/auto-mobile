@@ -2,17 +2,20 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import { MemoryMetricsCollector } from "../../../src/features/memory/MemoryMetricsCollector";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 
-describe("MemoryMetricsCollector - Unit Tests", function() {
+describe("MemoryMetricsCollector - Unit Tests", function () {
   let collector: MemoryMetricsCollector;
 
-  beforeEach(function() {
+  beforeEach(function () {
     // Use FakeAdbExecutor to avoid starting real adb daemon
     const fakeAdb = new FakeAdbExecutor();
-    collector = new MemoryMetricsCollector({ deviceId: "test-device", name: "test", platform: "android" }, fakeAdb as any);
+    collector = new MemoryMetricsCollector(
+      { deviceId: "test-device", name: "test", platform: "android" },
+      fakeAdb as any,
+    );
   });
 
-  describe("parseMeminfo", function() {
-    test("should parse Java heap from meminfo output", function() {
+  describe("parseMeminfo", function () {
+    test("should parse Java heap from meminfo output", function () {
       const output = `
         Applications Memory Usage (in Kilobytes):
         Uptime: 12345678 Realtime: 23456789
@@ -33,7 +36,7 @@ describe("MemoryMetricsCollector - Unit Tests", function() {
       expect(result.totalPssMb).toBe(48.828125); // 50000 KB ≈ 48.83 MB
     });
 
-    test("should handle missing Java heap gracefully", function() {
+    test("should handle missing Java heap gracefully", function () {
       const output = `
         Native Heap:   5120
         TOTAL:        50000
@@ -46,7 +49,7 @@ describe("MemoryMetricsCollector - Unit Tests", function() {
       expect(result.totalPssMb).toBe(48.828125);
     });
 
-    test("should handle missing Native heap gracefully", function() {
+    test("should handle missing Native heap gracefully", function () {
       const output = `
         Java Heap:    10240
         TOTAL:        50000
@@ -59,7 +62,7 @@ describe("MemoryMetricsCollector - Unit Tests", function() {
       expect(result.totalPssMb).toBe(48.828125);
     });
 
-    test("should handle missing TOTAL gracefully", function() {
+    test("should handle missing TOTAL gracefully", function () {
       const output = `
         Java Heap:    10240
         Native Heap:   5120
@@ -72,7 +75,7 @@ describe("MemoryMetricsCollector - Unit Tests", function() {
       expect(result.totalPssMb).toBe(0);
     });
 
-    test("should handle alternative TOTAL PSS format", function() {
+    test("should handle alternative TOTAL PSS format", function () {
       const output = `
         Java Heap:    10240
         Native Heap:   5120
@@ -85,8 +88,8 @@ describe("MemoryMetricsCollector - Unit Tests", function() {
     });
   });
 
-  describe("parseGCEvents", function() {
-    test("should parse GC events from logcat output", function() {
+  describe("parseGCEvents", function () {
+    test("should parse GC events from logcat output", function () {
       const output = `
         I/dalvikvm: GC_FOR_ALLOC freed 1234K, 50% free 5678K/11356K, paused 123ms
         I/dalvikvm: GC_EXPLICIT freed 3456K, 40% free 7890K/13579K, paused 345ms
@@ -103,7 +106,7 @@ describe("MemoryMetricsCollector - Unit Tests", function() {
       expect(result[1].durationMs).toBe(345);
     });
 
-    test("should handle empty logcat output", function() {
+    test("should handle empty logcat output", function () {
       const output = "";
 
       const result = (collector as any).parseGCEvents(output, 0, Date.now());
@@ -111,7 +114,7 @@ describe("MemoryMetricsCollector - Unit Tests", function() {
       expect(result.length).toBe(0);
     });
 
-    test("should handle logcat output with no GC events", function() {
+    test("should handle logcat output with no GC events", function () {
       const output = `
         I/some-tag: Some other log message
         D/another-tag: Another log message
@@ -123,8 +126,8 @@ describe("MemoryMetricsCollector - Unit Tests", function() {
     });
   });
 
-  describe("parseUnreachableObjects", function() {
-    test("should parse unreachable objects from dumpsys output", function() {
+  describe("parseUnreachableObjects", function () {
+    test("should parse unreachable objects from dumpsys output", function () {
       const output = `
         Unreachable memory: 12345 bytes in 45 unreachable objects
       `;
@@ -136,7 +139,7 @@ describe("MemoryMetricsCollector - Unit Tests", function() {
       expect(result.raw).toBe(output);
     });
 
-    test("should handle missing unreachable pattern", function() {
+    test("should handle missing unreachable pattern", function () {
       const output = `
         Some other text without the specific pattern
       `;
@@ -147,7 +150,7 @@ describe("MemoryMetricsCollector - Unit Tests", function() {
       expect(result.sizeKb).toBe(0);
     });
 
-    test("should count unreachable occurrences as fallback", function() {
+    test("should count unreachable occurrences as fallback", function () {
       const output = `
         Found unreachable object A
         Found unreachable object B

@@ -25,7 +25,7 @@ const buildDeviceLabelList = (labels: string[]): string[] => {
 export const buildDeviceLabelMap = (
   labels: string[],
   baseSessionUuid: string,
-  primaryLabel?: string
+  primaryLabel?: string,
 ): DeviceLabelMap => {
   const uniqueLabels = buildDeviceLabelList(labels);
   if (uniqueLabels.length === 0) {
@@ -33,15 +33,15 @@ export const buildDeviceLabelMap = (
   }
 
   const resolvedPrimaryLabel =
-    (primaryLabel && uniqueLabels.includes(primaryLabel))
+    primaryLabel && uniqueLabels.includes(primaryLabel)
       ? primaryLabel
-      : (uniqueLabels.includes("A") ? "A" : uniqueLabels[0]);
+      : uniqueLabels.includes("A")
+        ? "A"
+        : uniqueLabels[0];
 
   const map: DeviceLabelMap = {};
   for (const label of uniqueLabels) {
-    map[label] = label === resolvedPrimaryLabel
-      ? baseSessionUuid
-      : `${baseSessionUuid}:${label}`;
+    map[label] = label === resolvedPrimaryLabel ? baseSessionUuid : `${baseSessionUuid}:${label}`;
   }
 
   return map;
@@ -79,16 +79,30 @@ export const registerDeviceLabelMap = async (
   // expiry checker uses it to keep every labeled session alive for the active
   // base-plan execution while allocation/setup crosses an idle deadline.
   sessionManager.setDeviceLabels(baseSessionUuid, deviceLabelMap);
-  await createToolExecutionContext(baseSessionUuid, sessionManager, devicePool, sessionOptions, execution);
+  await createToolExecutionContext(
+    baseSessionUuid,
+    sessionManager,
+    devicePool,
+    sessionOptions,
+    execution,
+  );
 
   const assignedSessions = new Set(Object.values(deviceLabelMap));
   assignedSessions.delete(baseSessionUuid);
 
   for (const sessionUuid of assignedSessions) {
-    await createToolExecutionContext(sessionUuid, sessionManager, devicePool, sessionOptions, execution);
+    await createToolExecutionContext(
+      sessionUuid,
+      sessionManager,
+      devicePool,
+      sessionOptions,
+      execution,
+    );
   }
 
-  logger.info(`[DeviceLabelMap] Registered labels for session ${baseSessionUuid}: ${Object.keys(deviceLabelMap).join(", ")}`);
+  logger.info(
+    `[DeviceLabelMap] Registered labels for session ${baseSessionUuid}: ${Object.keys(deviceLabelMap).join(", ")}`,
+  );
   return deviceLabelMap;
 };
 
@@ -125,7 +139,9 @@ export const releaseDeviceLabelSessions = async (baseSessionUuid: string): Promi
   }
 
   if (released.length > 0) {
-    logger.info(`[DeviceLabelMap] Released label sessions for base ${baseSessionUuid}: ${released.join(", ")}`);
+    logger.info(
+      `[DeviceLabelMap] Released label sessions for base ${baseSessionUuid}: ${released.join(", ")}`,
+    );
   }
 
   return released;

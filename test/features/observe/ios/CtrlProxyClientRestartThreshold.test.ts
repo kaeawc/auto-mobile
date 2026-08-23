@@ -1,9 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios";
 import { BootedDevice } from "../../../../src/models";
-import {
-  createInstantFailureWebSocketFactory,
-} from "../../../fakes/FakeWebSocket";
+import { createInstantFailureWebSocketFactory } from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import type { CtrlProxyIosManager } from "../../../../src/utils/IOSCtrlProxyManager";
 import { FakeIOSCtrlProxyManager } from "../../../fakes/FakeIOSCtrlProxyManager";
@@ -11,16 +9,30 @@ import { FakeIOSCtrlProxyManager } from "../../../fakes/FakeIOSCtrlProxyManager"
 function createFakeManager(): CtrlProxyIosManager & { forceRestartCount: number } {
   const manager = {
     forceRestartCount: 0,
-    async setup() { return { success: false as const, message: "test" }; },
-    async isInstalled() { return false; },
-    async isRunning() { return false; },
-    async isAvailable() { return false; },
+    async setup() {
+      return { success: false as const, message: "test" };
+    },
+    async isInstalled() {
+      return false;
+    },
+    async isRunning() {
+      return false;
+    },
+    async isAvailable() {
+      return false;
+    },
     async start() {},
     async stop() {},
-    getServicePort() { return 0; },
+    getServicePort() {
+      return 0;
+    },
     setAutoRestart() {},
-    isAutoRestartEnabled() { return false; },
-    async forceRestart() { manager.forceRestartCount++; },
+    isAutoRestartEnabled() {
+      return false;
+    },
+    async forceRestart() {
+      manager.forceRestartCount++;
+    },
   };
   return manager;
 }
@@ -63,7 +75,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
     }
 
     // Allow async restart callbacks to complete
-    await new Promise(resolve => fakeTimer.setTimeout(resolve, 10));
+    await new Promise((resolve) => fakeTimer.setTimeout(resolve, 10));
 
     // forceRestart should have been called exactly once (at failure #3)
     expect(fakeManager.forceRestartCount).toBe(1);
@@ -90,7 +102,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
     await client.ensureConnected(); // 1
     await client.ensureConnected(); // 2
     await client.ensureConnected(); // 3 → restart
-    await new Promise(resolve => fakeTimer.setTimeout(resolve, 10));
+    await new Promise((resolve) => fakeTimer.setTimeout(resolve, 10));
     expect(fakeManager.forceRestartCount).toBe(1);
 
     // Advance past cooldown to allow more attempts
@@ -99,7 +111,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
     await client.ensureConnected(); // 4
     await client.ensureConnected(); // 5
     await client.ensureConnected(); // 6 → restart again
-    await new Promise(resolve => fakeTimer.setTimeout(resolve, 10));
+    await new Promise((resolve) => fakeTimer.setTimeout(resolve, 10));
     expect(fakeManager.forceRestartCount).toBe(2);
   });
 
@@ -122,7 +134,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
     await client.ensureConnected();
     await client.ensureConnected();
 
-    await new Promise(resolve => fakeTimer.setTimeout(resolve, 10));
+    await new Promise((resolve) => fakeTimer.setTimeout(resolve, 10));
 
     expect(fakeManager.forceRestartCount).toBe(0);
   });
@@ -130,7 +142,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
   describe("triggerServiceRestart branches", () => {
     const driveFailuresPastThreshold = async (
       c: IOSCtrlProxyClient,
-      fakeTimer: FakeTimer
+      fakeTimer: FakeTimer,
     ): Promise<void> => {
       // Mirror the threshold-crossing pattern the other tests use: a batch of
       // attempts, then advance past the connection cooldown so the failure counter
@@ -143,7 +155,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
         await c.ensureConnected();
       }
       // Let the async isRunning()/forceRestart() chain settle.
-      await new Promise(resolve => fakeTimer.setTimeout(resolve, 10));
+      await new Promise((resolve) => fakeTimer.setTimeout(resolve, 10));
     };
 
     test("does not force-restart when the manager reports the runner is still running", async () => {
@@ -198,7 +210,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
       for (let i = 0; i < 6; i++) {
         await client.ensureConnected();
       }
-      await new Promise(resolve => fakeTimer.setTimeout(resolve, 10));
+      await new Promise((resolve) => fakeTimer.setTimeout(resolve, 10));
       expect(manager.getCallCount("forceRestart")).toBeGreaterThanOrEqual(2);
     });
 
@@ -259,7 +271,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
       for (let i = 0; i < 6; i++) {
         await client.ensureConnected();
       }
-      await new Promise(resolve => fakeTimer.setTimeout(resolve, 10));
+      await new Promise((resolve) => fakeTimer.setTimeout(resolve, 10));
       expect(manager.getCallCount("forceRestart")).toBeGreaterThanOrEqual(1);
     });
   });

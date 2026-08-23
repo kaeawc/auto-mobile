@@ -11,9 +11,7 @@ import type { ExecResult } from "../../../src/models";
 import type { SystemDetection } from "../../../src/utils/system/SystemDetection";
 
 const ANDROID_ENV_NAMES = ["ANDROID_HOME", "ANDROID_SDK_ROOT", "ANDROID_SDK_HOME"] as const;
-const savedAndroidEnvironment = new Map(
-  ANDROID_ENV_NAMES.map(name => [name, process.env[name]])
-);
+const savedAndroidEnvironment = new Map(ANDROID_ENV_NAMES.map((name) => [name, process.env[name]]));
 
 type AdbClientInternals = {
   isTestMode: boolean;
@@ -23,7 +21,7 @@ type AdbClientInternals = {
     args: string[],
     maxBuffer?: number,
     timeoutMs?: number,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ) => Promise<ExecResult>;
 };
 
@@ -69,18 +67,23 @@ describe.serial("AdbClient ADB-path discovery deadline", () => {
       new Promise<ExecResult>((_resolve, reject) => {
         timer.setTimeout(
           () => reject(new AdbCommandTimeoutError(`Command timed out after ${timeoutMs}ms`)),
-          timeoutMs
+          timeoutMs,
         );
       });
 
     let settled: unknown = undefined;
-    void client.execute(["shell", "true"], { timeoutMs: 20, noRetry: true })
-      .then(() => { settled = new Error("expected discovery to time out"); })
-      .catch(error => { settled = error; });
+    void client
+      .execute(["shell", "true"], { timeoutMs: 20, noRetry: true })
+      .then(() => {
+        settled = new Error("expected discovery to time out");
+      })
+      .catch((error) => {
+        settled = error;
+      });
 
     await Promise.resolve();
     timer.advanceTime(20);
-    await new Promise<void>(resolve => setImmediate(resolve));
+    await new Promise<void>((resolve) => setImmediate(resolve));
 
     expect(settled).toBeInstanceOf(AdbCommandTimeoutError);
   });
@@ -134,17 +137,18 @@ describe.serial("AdbClient ADB-path discovery deadline", () => {
       return new Promise<ExecResult>((_resolve, reject) => {
         timer.setTimeout(
           () => reject(new AdbCommandTimeoutError(`Command timed out after ${timeoutMs}ms`)),
-          timeoutMs
+          timeoutMs,
         );
       });
     };
 
     let firstFailure: unknown = undefined;
-    void client.execute(["shell", "true"], { timeoutMs: 20, noRetry: true })
-      .catch(error => { firstFailure = error; });
+    void client.execute(["shell", "true"], { timeoutMs: 20, noRetry: true }).catch((error) => {
+      firstFailure = error;
+    });
     await Promise.resolve();
     timer.advanceTime(20);
-    await new Promise<void>(resolve => setImmediate(resolve));
+    await new Promise<void>((resolve) => setImmediate(resolve));
 
     expect(firstFailure).toBeInstanceOf(AdbCommandTimeoutError);
     expect(executedCommands).not.toContain("adb shell true");
@@ -170,7 +174,9 @@ describe.serial("AdbClient ADB-path discovery deadline", () => {
         versionProbeCalls += 1;
         if (versionProbeCalls === 1) {
           return new Promise<ExecResult>((_resolve, reject) => {
-            signal?.addEventListener("abort", () => reject(new Error("probe aborted")), { once: true });
+            signal?.addEventListener("abort", () => reject(new Error("probe aborted")), {
+              once: true,
+            });
           });
         }
         return ok();
@@ -210,7 +216,9 @@ describe.serial("AdbClient ADB-path discovery deadline", () => {
       }
       if (file === "which") {
         return new Promise<ExecResult>((_resolve, reject) => {
-          signal?.addEventListener("abort", () => reject(new Error("probe aborted")), { once: true });
+          signal?.addEventListener("abort", () => reject(new Error("probe aborted")), {
+            once: true,
+          });
         });
       }
       if (args[0] === "shell") {
@@ -255,7 +263,7 @@ describe.serial("AdbClient ADB-path discovery deadline", () => {
       null,
       defaultRetryExecutor,
       timer,
-      () => stalledSystemDetection
+      () => stalledSystemDetection,
     );
     const internals = client as unknown as AdbClientInternals;
     internals.isTestMode = false;
@@ -270,12 +278,13 @@ describe.serial("AdbClient ADB-path discovery deadline", () => {
     };
 
     let settled: unknown = undefined;
-    void client.execute(["shell", "true"], { timeoutMs: 20, noRetry: true })
-      .catch(error => { settled = error; });
-    await new Promise<void>(resolve => setImmediate(resolve));
+    void client.execute(["shell", "true"], { timeoutMs: 20, noRetry: true }).catch((error) => {
+      settled = error;
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
     expect(fileProbeStarted).toBe(true);
     timer.advanceTime(20);
-    await new Promise<void>(resolve => setImmediate(resolve));
+    await new Promise<void>((resolve) => setImmediate(resolve));
 
     expect(settled).toBeInstanceOf(AdbCommandTimeoutError);
     expect(commandFiles).toEqual([]);

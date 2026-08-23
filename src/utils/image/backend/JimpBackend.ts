@@ -1,6 +1,12 @@
 import { loadJimp, type JimpImage } from "../loadJimp";
 import type { ResizeStrategy } from "jimp";
-import type { ImageBackend, ImageMetadata, ImageOperation, ImagePipeline, RawImage } from "./ImageBackend";
+import type {
+  ImageBackend,
+  ImageMetadata,
+  ImageOperation,
+  ImagePipeline,
+  RawImage,
+} from "./ImageBackend";
 
 /**
  * jimp's `ResizeStrategy.NEAREST_NEIGHBOR` value, inlined as a literal. Importing
@@ -42,7 +48,7 @@ export class JimpBackend implements ImageBackend {
 
   public async execute(source: Buffer, pipeline: ImagePipeline): Promise<Buffer> {
     const Jimp = await loadJimp();
-    let image = await Jimp.fromBuffer(source) as JimpImage;
+    let image = (await Jimp.fromBuffer(source)) as JimpImage;
     for (const operation of pipeline.operations) {
       image = this.applyOperation(image, operation);
     }
@@ -53,7 +59,7 @@ export class JimpBackend implements ImageBackend {
     }
     return (image.getBuffer as (m: string, o?: Record<string, unknown>) => Promise<Buffer>)(
       mime,
-      pipeline.encoding?.options
+      pipeline.encoding?.options,
     );
   }
 
@@ -64,7 +70,7 @@ export class JimpBackend implements ImageBackend {
       width: image.bitmap.width,
       height: image.bitmap.height,
       format: image.mime ? image.mime.replace("image/", "") : "",
-      size: source.length
+      size: source.length,
     };
   }
 
@@ -75,7 +81,7 @@ export class JimpBackend implements ImageBackend {
       width: image.bitmap.width,
       height: image.bitmap.height,
       // Copy out of the jimp-owned bitmap so callers can't mutate its internals.
-      data: Buffer.from(image.bitmap.data)
+      data: Buffer.from(image.bitmap.data),
     };
   }
 }

@@ -80,33 +80,50 @@ describe("UnixSocketServer input/gesture*", () => {
   test("forwards start, move, and end frames to the Android continued-gesture path", async () => {
     const { requestGestureStart, requestGestureMove, requestGestureEnd } = mockAndroidGestures();
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(),
+      fakeTimer,
+    );
     await server.start();
 
     // One persistent connection carries the whole drag, as the real streaming client does — so the
     // start's session stays open through the end and no orphan-cancel fires.
     const conn = await openPersistentConnection(socketPath);
-    const start = await conn.send("input/gestureStart", {
-      platform: "android",
-      deviceId: "emulator-5554",
-      gestureId: "g1",
-      x: 100.5,
-      y: 200.25,
-    }, 1234);
-    const move = await conn.send("input/gestureMove", {
-      platform: "android",
-      deviceId: "emulator-5554",
-      gestureId: "g1",
-      x: 100.5,
-      y: 400,
-    }, 1234);
-    const end = await conn.send("input/gestureEnd", {
-      platform: "android",
-      deviceId: "emulator-5554",
-      gestureId: "g1",
-      x: 100.5,
-      y: 500,
-    }, 1234);
+    const start = await conn.send(
+      "input/gestureStart",
+      {
+        platform: "android",
+        deviceId: "emulator-5554",
+        gestureId: "g1",
+        x: 100.5,
+        y: 200.25,
+      },
+      1234,
+    );
+    const move = await conn.send(
+      "input/gestureMove",
+      {
+        platform: "android",
+        deviceId: "emulator-5554",
+        gestureId: "g1",
+        x: 100.5,
+        y: 400,
+      },
+      1234,
+    );
+    const end = await conn.send(
+      "input/gestureEnd",
+      {
+        platform: "android",
+        deviceId: "emulator-5554",
+        gestureId: "g1",
+        x: 100.5,
+        y: 500,
+      },
+      1234,
+    );
     conn.close();
 
     expect(start.success).toBe(true);
@@ -124,14 +141,23 @@ describe("UnixSocketServer input/gesture*", () => {
     expect(requestGestureMove).toHaveBeenCalledWith("g1", 100.5, 400, 1234);
 
     expect(end.success).toBe(true);
-    expect(end.result).toMatchObject({ action: "input/gestureEnd", gestureId: "g1", cancel: false });
+    expect(end.result).toMatchObject({
+      action: "input/gestureEnd",
+      gestureId: "g1",
+      cancel: false,
+    });
     expect(requestGestureEnd).toHaveBeenCalledWith("g1", 100.5, 500, false, 1234);
   });
 
   test("cancels a still-open gesture when its owning socket disconnects mid-drag", async () => {
     const { requestGestureStart, requestGestureEnd } = mockAndroidGestures();
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(),
+      fakeTimer,
+    );
     await server.start();
 
     const conn = await openPersistentConnection(socketPath);
@@ -148,19 +174,38 @@ describe("UnixSocketServer input/gesture*", () => {
     // The client crashes / disconnects before sending its end: the runner has parked a continued
     // stroke with no duration ceiling, so the daemon must lift it with a cancelling end on close.
     conn.close();
-    await waitUntil(() => (requestGestureEnd as unknown as { mock: { calls: unknown[] } }).mock.calls.length > 0);
+    await waitUntil(
+      () => (requestGestureEnd as unknown as { mock: { calls: unknown[] } }).mock.calls.length > 0,
+    );
     expect(requestGestureEnd).toHaveBeenCalledWith("g9", 0, 0, true, 5000);
   });
 
   test("does not cancel a gesture that was already ended before the socket closed", async () => {
     const { requestGestureEnd } = mockAndroidGestures();
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(),
+      fakeTimer,
+    );
     await server.start();
 
     const conn = await openPersistentConnection(socketPath);
-    await conn.send("input/gestureStart", { platform: "android", deviceId: "emulator-5554", gestureId: "g10", x: 1, y: 2 });
-    await conn.send("input/gestureEnd", { platform: "android", deviceId: "emulator-5554", gestureId: "g10", x: 3, y: 4 });
+    await conn.send("input/gestureStart", {
+      platform: "android",
+      deviceId: "emulator-5554",
+      gestureId: "g10",
+      x: 1,
+      y: 2,
+    });
+    await conn.send("input/gestureEnd", {
+      platform: "android",
+      deviceId: "emulator-5554",
+      gestureId: "g10",
+      x: 3,
+      y: 4,
+    });
     conn.close();
     // Give any (incorrect) orphan-cancel a chance to run before asserting it did not.
     await Bun.sleep(30);
@@ -173,7 +218,12 @@ describe("UnixSocketServer input/gesture*", () => {
   test("carries the cancel flag through on end", async () => {
     const { requestGestureEnd } = mockAndroidGestures();
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(),
+      fakeTimer,
+    );
     await server.start();
 
     const end = await sendRequest(socketPath, "input/gestureEnd", {
@@ -192,7 +242,12 @@ describe("UnixSocketServer input/gesture*", () => {
 
   test("rejects iOS: streaming gestures are Android-only", async () => {
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(),
+      fakeTimer,
+    );
     await server.start();
 
     const response = await sendRequest(socketPath, "input/gestureStart", {
@@ -209,7 +264,12 @@ describe("UnixSocketServer input/gesture*", () => {
 
   test("rejects a missing gestureId and non-numeric coordinates", async () => {
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(),
+      fakeTimer,
+    );
     await server.start();
 
     const noId = await sendRequest(socketPath, "input/gestureStart", {
@@ -236,7 +296,7 @@ describe("UnixSocketServer input/gesture*", () => {
     const track = async () => {
       inFlight += 1;
       maxInFlight = Math.max(maxInFlight, inFlight);
-      await new Promise<void>(resolve => {
+      await new Promise<void>((resolve) => {
         fakeTimer.setTimeout(resolve, 20);
       });
       inFlight -= 1;
@@ -249,18 +309,41 @@ describe("UnixSocketServer input/gesture*", () => {
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     fakeTimer.enableAutoAdvance();
-    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(),
+      fakeTimer,
+    );
     await server.start();
 
     const conn = await openPersistentConnection(socketPath);
     const results = await Promise.all([
-      conn.send("input/gestureStart", { platform: "android", deviceId: "emulator-5554", gestureId: "g1", x: 0, y: 0 }),
-      conn.send("input/gestureMove", { platform: "android", deviceId: "emulator-5554", gestureId: "g1", x: 0, y: 10 }),
-      conn.send("input/gestureEnd", { platform: "android", deviceId: "emulator-5554", gestureId: "g1", x: 0, y: 20 }),
+      conn.send("input/gestureStart", {
+        platform: "android",
+        deviceId: "emulator-5554",
+        gestureId: "g1",
+        x: 0,
+        y: 0,
+      }),
+      conn.send("input/gestureMove", {
+        platform: "android",
+        deviceId: "emulator-5554",
+        gestureId: "g1",
+        x: 0,
+        y: 10,
+      }),
+      conn.send("input/gestureEnd", {
+        platform: "android",
+        deviceId: "emulator-5554",
+        gestureId: "g1",
+        x: 0,
+        y: 20,
+      }),
     ]);
     conn.close();
 
-    expect(results.every(r => r.success)).toBe(true);
+    expect(results.every((r) => r.success)).toBe(true);
     expect(maxInFlight).toBe(1);
     expect(inFlight).toBe(0);
   });

@@ -16,10 +16,12 @@ describe("device recovery policy", () => {
   });
 
   test("accepts only strict binary and base-ten integer values", () => {
-    expect(parseDeviceRecoveryPolicy({
-      AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS: "1",
-      AUTOMOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS: "3",
-    })).toEqual({
+    expect(
+      parseDeviceRecoveryPolicy({
+        AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS: "1",
+        AUTOMOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS: "3",
+      }),
+    ).toEqual({
       policy: {
         onLoss: true,
         maxAttempts: 3,
@@ -60,9 +62,11 @@ describe("device recovery policy", () => {
   });
 
   test("honors the legacy Android recovery setting during migration", () => {
-    expect(parseDeviceRecoveryPolicy({
-      AUTOMOBILE_ANDROID_REBOOT_ON_DEATH: "1",
-    }).policy).toEqual({
+    expect(
+      parseDeviceRecoveryPolicy({
+        AUTOMOBILE_ANDROID_REBOOT_ON_DEATH: "1",
+      }).policy,
+    ).toEqual({
       onLoss: true,
       maxAttempts: DEFAULT_DEVICE_RECOVERY_MAX_ATTEMPTS,
     });

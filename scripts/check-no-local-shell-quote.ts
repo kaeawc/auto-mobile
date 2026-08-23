@@ -14,7 +14,7 @@ interface Violation {
 }
 
 function sourceFiles(directory: string): string[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const path = join(directory, entry.name);
     if (entry.isDirectory()) {
       return sourceFiles(path);
@@ -23,7 +23,9 @@ function sourceFiles(directory: string): string[] {
   });
 }
 
-function isBannedHelperName(name: ts.DeclarationName | ts.PropertyName | undefined): name is ts.Identifier {
+function isBannedHelperName(
+  name: ts.DeclarationName | ts.PropertyName | undefined,
+): name is ts.Identifier {
   return !!name && ts.isIdentifier(name) && LOCAL_HELPER_NAMES.has(name.text);
 }
 
@@ -55,7 +57,11 @@ function isSingleQuoteEscapeCall(expression: ts.Expression): boolean {
 }
 
 function isCanonicalShellQuoteExpression(expression: ts.Expression): boolean {
-  if (!ts.isTemplateExpression(expression) || expression.head.text !== "'" || expression.templateSpans.length !== 1) {
+  if (
+    !ts.isTemplateExpression(expression) ||
+    expression.head.text !== "'" ||
+    expression.templateSpans.length !== 1
+  ) {
     return false;
   }
   const [span] = expression.templateSpans;
@@ -96,7 +102,9 @@ function localHelperName(node: ts.Node): string | null {
     return node.name.text;
   }
   if (
-    (ts.isVariableDeclaration(node) || ts.isPropertyDeclaration(node) || ts.isPropertyAssignment(node)) &&
+    (ts.isVariableDeclaration(node) ||
+      ts.isPropertyDeclaration(node) ||
+      ts.isPropertyAssignment(node)) &&
     !isBannedHelperName(node.name) &&
     isFunctionValue(node.initializer) &&
     hasLocalShellQuoteImplementation(node.initializer.body)
@@ -119,7 +127,9 @@ function findViolations(file: string): Violation[] {
   const visit = (node: ts.Node): void => {
     const name = localHelperName(node);
     if (name) {
-      const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
+      const { line, character } = sourceFile.getLineAndCharacterOfPosition(
+        node.getStart(sourceFile),
+      );
       violations.push({
         file,
         line: line + 1,
@@ -135,13 +145,15 @@ function findViolations(file: string): Violation[] {
 }
 
 const violations = sourceFiles(SOURCE_ROOT)
-  .filter(file => file !== OWNER)
+  .filter((file) => file !== OWNER)
   .flatMap(findViolations);
 
 if (violations.length > 0) {
   console.error("error: production shell quoting must use src/utils/shellQuote.ts:");
   for (const violation of violations) {
-    console.error(`${relative(SOURCE_ROOT, violation.file)}:${violation.line}:${violation.column}: ${violation.name}`);
+    console.error(
+      `${relative(SOURCE_ROOT, violation.file)}:${violation.line}:${violation.column}: ${violation.name}`,
+    );
   }
   process.exit(1);
 }

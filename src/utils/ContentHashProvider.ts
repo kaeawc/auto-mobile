@@ -23,7 +23,7 @@ export interface ContentHashProvider {
   resolveContentHash(
     device: BootedDevice,
     packageId: string,
-    versionCode: number
+    versionCode: number,
   ): Promise<string | null>;
 
   /**
@@ -60,7 +60,7 @@ export class CachingContentHashProvider implements ContentHashProvider {
   async resolveContentHash(
     device: BootedDevice,
     packageId: string,
-    versionCode: number
+    versionCode: number,
   ): Promise<string | null> {
     const key = `${device.deviceId}::${packageId}::${versionCode}`;
     const cached = this.cache.get(key);
@@ -79,7 +79,10 @@ export class CachingContentHashProvider implements ContentHashProvider {
       return hash;
     } catch (error) {
       // Best-effort: log and fall back to the default build key (never hard-fail).
-      logger.warn(`[ContentHash] Failed to hash ${packageId} on ${device.deviceId}: ${error}`, error);
+      logger.warn(
+        `[ContentHash] Failed to hash ${packageId} on ${device.deviceId}: ${error}`,
+        error,
+      );
       return null;
     }
   }
@@ -108,9 +111,9 @@ const SHA256_HEX = /^[0-9a-f]{64}$/i;
 export function extractApkDigests(sha256sumStdout: string): string[] {
   return sha256sumStdout
     .split("\n")
-    .map(line => line.trim())
-    .filter(line => line.length > 0)
-    .map(line => line.split(/\s+/)[0])
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line) => line.split(/\s+/)[0])
     .filter((digest): digest is string => Boolean(digest) && SHA256_HEX.test(digest))
     .sort();
 }
@@ -140,10 +143,10 @@ function hashDigestList(digests: string[]): string {
 export function parsePmPathOutput(stdout: string): string[] {
   return stdout
     .split("\n")
-    .map(line => line.trim())
-    .filter(line => line.startsWith("package:"))
-    .map(line => line.slice("package:".length).trim())
-    .filter(path => path.endsWith(".apk"))
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("package:"))
+    .map((line) => line.slice("package:".length).trim())
+    .filter((path) => path.endsWith(".apk"))
     .sort();
 }
 
@@ -158,7 +161,7 @@ export function parsePmPathOutput(stdout: string): string[] {
 export class AndroidApkContentHasher implements AppContentHasher {
   constructor(
     private readonly adb: AdbExecutor,
-    private readonly checksum: ChecksumCalculator = new DefaultChecksumCalculator()
+    private readonly checksum: ChecksumCalculator = new DefaultChecksumCalculator(),
   ) {}
 
   async computeHash(_device: BootedDevice, packageId: string): Promise<string> {
@@ -166,7 +169,7 @@ export class AndroidApkContentHasher implements AppContentHasher {
     if (apkPaths.length === 0) {
       throw toActionableError(
         new Error(`pm path returned no APKs for ${packageId}`),
-        `Cannot resolve APK path for ${packageId}`
+        `Cannot resolve APK path for ${packageId}`,
       );
     }
 
@@ -178,7 +181,7 @@ export class AndroidApkContentHasher implements AppContentHasher {
     // found" merged-stderr case) falls back to the pull path.
     let digests: string[] = [];
     try {
-      const script = apkPaths.map(p => `sha256sum "${p}"`).join("; ");
+      const script = apkPaths.map((p) => `sha256sum "${p}"`).join("; ");
       const onDevice = await this.adb.executeCommand(`shell sh -c '${script}'`);
       digests = extractApkDigests(onDevice.stdout ?? "");
     } catch (error) {
@@ -190,7 +193,7 @@ export class AndroidApkContentHasher implements AppContentHasher {
 
     logger.warn(
       `[ContentHash] on-device sha256sum incomplete for ${packageId} ` +
-      `(${digests.length}/${apkPaths.length} APKs); using adb pull (slow path)`
+        `(${digests.length}/${apkPaths.length} APKs); using adb pull (slow path)`,
     );
     return this.computeViaPull(apkPaths, packageId);
   }
@@ -214,7 +217,7 @@ export class AndroidApkContentHasher implements AppContentHasher {
       if (!combined) {
         throw toActionableError(
           new Error(`No valid APK digests computed for ${packageId}`),
-          `Cannot hash APKs for ${packageId}`
+          `Cannot hash APKs for ${packageId}`,
         );
       }
       return combined;
@@ -238,7 +241,7 @@ export class IosBundleContentHasher implements AppContentHasher {
     if (!bundlePath) {
       throw toActionableError(
         new Error(`No bundlePath for ${packageId}`),
-        `Cannot resolve app bundle path for ${packageId}`
+        `Cannot resolve app bundle path for ${packageId}`,
       );
     }
     return hashAppBundle(bundlePath);
@@ -256,7 +259,7 @@ export class IosBundleContentHasher implements AppContentHasher {
 export function createContentHashProvider(
   device: BootedDevice,
   adb: AdbExecutor = defaultAdbClientFactory.create(device),
-  iosSource: IosAppMetadataSource | null = null
+  iosSource: IosAppMetadataSource | null = null,
 ): ContentHashProvider {
   if (device.platform === "android") {
     return new CachingContentHashProvider(new AndroidApkContentHasher(adb));

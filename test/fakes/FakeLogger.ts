@@ -47,6 +47,6 @@ export class FakeLogger implements Logger {
 
   /** Messages emitted at the given level. */
   at(level: LoggedMessage["level"]): LoggedMessage[] {
-    return this.messages.filter(m => m.level === level);
+    return this.messages.filter((m) => m.level === level);
   }
 }

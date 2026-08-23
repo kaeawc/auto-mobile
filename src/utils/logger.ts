@@ -6,10 +6,7 @@ import path from "path";
 import { statAsync, renameAsync } from "./io";
 import { ensureSecureLogsDirSync } from "./tempDir";
 import { pruneLogFiles } from "./logPruner";
-import {
-  resolveAutomobileLogFormat,
-  resolveAutomobileLogSink,
-} from "./loggingConfig";
+import { resolveAutomobileLogFormat, resolveAutomobileLogSink } from "./loggingConfig";
 
 export {
   parseAutomobileLogFormat,
@@ -434,10 +431,7 @@ const writeToLogFile = async (level: string, message: string, args: any[]) => {
     const safeLogMessage = formatLogRecord(level, message, args).replace(/[\r\n\t]/g, " ");
     // Start both configured writes before awaiting either one. A failed file
     // sink must not suppress the process-stream record in `both` mode.
-    await Promise.all([
-      writeToFile(safeLogMessage),
-      writeToConfiguredStderr(safeLogMessage),
-    ]);
+    await Promise.all([writeToFile(safeLogMessage), writeToConfiguredStderr(safeLogMessage)]);
     mirrorToLegacyStdout(safeLogMessage);
   } catch (err) {
     await reportLogFailure("Failed to write log", err);

@@ -28,9 +28,7 @@ export interface ThresholdDescriptor<Row> {
   modeColumns?: Array<Extract<keyof Row, string>>;
 }
 
-export type WeightedThresholdResult<Row> = Partial<
-  Record<Extract<keyof Row, string>, number>
-> & {
+export type WeightedThresholdResult<Row> = Partial<Record<Extract<keyof Row, string>, number>> & {
   weight: number;
   ttl_hours: number;
 };
@@ -65,16 +63,12 @@ export class GenericThresholdManager<Row extends ThresholdRow> {
   async cleanupExpiredThresholds(
     where: Array<ThresholdWhere<Row>>,
     description: string,
-    db: Kysely<Database> = this.db
+    db: Kysely<Database> = this.db,
   ): Promise<void> {
     try {
       let query = (db as any)
         .deleteFrom(this.descriptor.tableName)
-        .where(
-          sql`datetime(created_at, '+' || ttl_hours || ' hours')`,
-          "<",
-          sql`datetime('now')`
-        );
+        .where(sql`datetime(created_at, '+' || ttl_hours || ' hours')`, "<", sql`datetime('now')`);
 
       query = this.applyWhere(query, where);
       const deleted = await query.executeTakeFirst();
@@ -82,7 +76,7 @@ export class GenericThresholdManager<Row extends ThresholdRow> {
 
       if (deletedCount > 0) {
         logger.info(
-          `[${this.descriptor.logPrefix}] Cleaned up ${deletedCount} expired thresholds for ${description}`
+          `[${this.descriptor.logPrefix}] Cleaned up ${deletedCount} expired thresholds for ${description}`,
         );
       }
     } catch (error) {
@@ -94,18 +88,14 @@ export class GenericThresholdManager<Row extends ThresholdRow> {
     where: Array<ThresholdWhere<Row>>,
     cleanupWhere: Array<ThresholdWhere<Row>>,
     cleanupDescription: string,
-    db: Kysely<Database> = this.db
+    db: Kysely<Database> = this.db,
   ): Promise<Row[]> {
     await this.cleanupExpiredThresholds(cleanupWhere, cleanupDescription, db);
 
     let query = (db as any)
       .selectFrom(this.descriptor.tableName)
       .selectAll()
-      .where(
-        sql`datetime(created_at, '+' || ttl_hours || ' hours')`,
-        ">=",
-        sql`datetime('now')`
-      );
+      .where(sql`datetime(created_at, '+' || ttl_hours || ' hours')`, ">=", sql`datetime('now')`);
 
     query = this.applyWhere(query, where);
     return await query.orderBy("created_at", "desc").execute();
@@ -122,14 +112,14 @@ export class GenericThresholdManager<Row extends ThresholdRow> {
     };
 
     for (const column of this.descriptor.modeColumns ?? []) {
-      result[column] = calculateMode(rows.map(row => Number(row[column]))) ?? 60;
+      result[column] = calculateMode(rows.map((row) => Number(row[column]))) ?? 60;
     }
 
     for (const { column, round } of this.descriptor.weightedColumns) {
       const average = calculateWeightedAverage(
         rows,
-        row => Number(row[column]),
-        row => row.weight
+        (row) => Number(row[column]),
+        (row) => row.weight,
       );
       if (average === null) {
         return null;
@@ -143,13 +133,10 @@ export class GenericThresholdManager<Row extends ThresholdRow> {
   async storeThresholds(
     values: Record<string, unknown>,
     description: string,
-    db: Kysely<Database> = this.db
+    db: Kysely<Database> = this.db,
   ): Promise<void> {
     try {
-      await (db as any)
-        .insertInto(this.descriptor.tableName)
-        .values(values)
-        .execute();
+      await (db as any).insertInto(this.descriptor.tableName).values(values).execute();
 
       logger.info(`[${this.descriptor.logPrefix}] Stored new thresholds for ${description}`);
     } catch (error) {
@@ -161,12 +148,12 @@ export class GenericThresholdManager<Row extends ThresholdRow> {
   async updateThresholdWeight(
     where: Array<ThresholdWhere<Row>>,
     passed: boolean,
-    options: UpdateThresholdWeightOptions<Row>
+    options: UpdateThresholdWeightOptions<Row>,
   ): Promise<void> {
     try {
       await this.cleanupExpiredThresholds(
         options.cleanupWhere ?? where,
-        this.describeWhere(options.cleanupWhere ?? where)
+        this.describeWhere(options.cleanupWhere ?? where),
       );
       const adjustedWeight = passed
         ? sql<number>`min(weight * ${WEIGHT_BOUNDS.successMultiplier}, ${WEIGHT_BOUNDS.max})`
@@ -175,11 +162,7 @@ export class GenericThresholdManager<Row extends ThresholdRow> {
       let latestValidThreshold = (this.db as any)
         .selectFrom(this.descriptor.tableName)
         .select("id")
-        .where(
-          sql`datetime(created_at, '+' || ttl_hours || ' hours')`,
-          ">=",
-          sql`datetime('now')`
-        )
+        .where(sql`datetime(created_at, '+' || ttl_hours || ' hours')`, ">=", sql`datetime('now')`)
         .orderBy("created_at", "desc")
         .limit(1);
 
@@ -205,11 +188,11 @@ export class GenericThresholdManager<Row extends ThresholdRow> {
   private applyWhere<Query>(query: Query, where: Array<ThresholdWhere<Row>>): Query {
     return where.reduce(
       (currentQuery, clause) => (currentQuery as any).where(clause.column, "=", clause.value),
-      query
+      query,
     );
   }
 
   private describeWhere(where: Array<ThresholdWhere<Row>>): string {
-    return where.map(clause => `${clause.column} ${clause.value}`).join(", ");
+    return where.map((clause) => `${clause.column} ${clause.value}`).join(", ");
   }
 }

@@ -66,7 +66,9 @@ export interface AndroidVideoMetrics {
 
 /** p50/p95 over the finite values only; an all-empty set yields null. */
 function percentilePair(values: Array<number | null | undefined>): PercentilePair | null {
-  const finite = values.filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  const finite = values.filter(
+    (value): value is number => typeof value === "number" && Number.isFinite(value),
+  );
   if (finite.length === 0) {
     return null;
   }
@@ -82,18 +84,18 @@ function percentilePair(values: Array<number | null | undefined>): PercentilePai
 function resolveFpsTarget(records: CaptureStageRecord[]): number | null {
   const targets = new Set(
     records
-      .map(record => record.configuredFps)
-      .filter((value): value is number => typeof value === "number" && Number.isFinite(value))
+      .map((record) => record.configuredFps)
+      .filter((value): value is number => typeof value === "number" && Number.isFinite(value)),
   );
   return targets.size === 1 ? [...targets][0] : null;
 }
 
 function firstFrameElapsedMs(record: CaptureStageRecord): number | null {
-  return record.stages.find(stage => stage.stage === FIRST_FRAME_STAGE)?.elapsedMs ?? null;
+  return record.stages.find((stage) => stage.stage === FIRST_FRAME_STAGE)?.elapsedMs ?? null;
 }
 
 function keyframeRecoveryElapsedMs(record: CaptureStageRecord): number | null {
-  return record.phases.find(phase => phase.phase === KEYFRAME_RECOVERY_PHASE)?.elapsedMs ?? null;
+  return record.phases.find((phase) => phase.phase === KEYFRAME_RECOVERY_PHASE)?.elapsedMs ?? null;
 }
 
 /**
@@ -103,17 +105,17 @@ function keyframeRecoveryElapsedMs(record: CaptureStageRecord): number | null {
  */
 export function extractAndroidVideoMetrics(
   records: CaptureStageRecord[],
-  options: { platform?: string } = {}
+  options: { platform?: string } = {},
 ): AndroidVideoMetrics {
   const platform = options.platform ?? "android";
-  const considered = records.filter(record => record.platform === platform);
+  const considered = records.filter((record) => record.platform === platform);
   return {
     sampleCount: considered.length,
     fpsTarget: resolveFpsTarget(considered),
-    encodeFps: percentilePair(considered.map(record => record.decodedFps)),
-    egressKbps: percentilePair(considered.map(record => record.egressKbps)),
+    encodeFps: percentilePair(considered.map((record) => record.decodedFps)),
+    egressKbps: percentilePair(considered.map((record) => record.egressKbps)),
     captureToFirstFrameMs: percentilePair(considered.map(firstFrameElapsedMs)),
-    captureToBrowserMs: percentilePair(considered.map(record => record.captureToBrowserMs)),
+    captureToBrowserMs: percentilePair(considered.map((record) => record.captureToBrowserMs)),
     keyframeRecoveryMs: percentilePair(considered.map(keyframeRecoveryElapsedMs)),
   };
 }
@@ -204,7 +206,7 @@ function round(value: number): number {
 /** Evaluate the encode-fps "vs. target" check that rides alongside its ratchet. */
 function evaluateTargetCheck(
   observedP50: number | null,
-  baseline: AndroidVideoBaseline
+  baseline: AndroidVideoBaseline,
 ): MetricEvaluation["targetCheck"] {
   const allowed = baseline.fpsTarget * (1 - baseline.fpsTargetTolerance);
   let status: MetricStatus;
@@ -219,7 +221,7 @@ function evaluateTargetCheck(
 function evaluateMetric(
   metric: AndroidVideoMetricKey,
   metrics: AndroidVideoMetrics,
-  baseline: AndroidVideoBaseline
+  baseline: AndroidVideoBaseline,
 ): MetricEvaluation {
   const threshold = baseline.metrics[metric];
   const observed = pick(metrics[metric], threshold.percentile);
@@ -241,7 +243,8 @@ function evaluateMetric(
     };
   }
 
-  const regressed = isRegression(observed, allowed, threshold.direction) || targetCheck?.status === "regressed";
+  const regressed =
+    isRegression(observed, allowed, threshold.direction) || targetCheck?.status === "regressed";
   const comparator = threshold.direction === "higher-is-better" ? ">=" : "<=";
   const targetSuffix =
     targetCheck && targetCheck.status !== "ok"
@@ -271,11 +274,13 @@ function evaluateMetric(
  */
 export function evaluateAndroidVideoBaseline(
   metrics: AndroidVideoMetrics,
-  baseline: AndroidVideoBaseline
+  baseline: AndroidVideoBaseline,
 ): AndroidVideoGateResult {
-  const evaluations = ANDROID_VIDEO_METRIC_KEYS.map(metric => evaluateMetric(metric, metrics, baseline));
+  const evaluations = ANDROID_VIDEO_METRIC_KEYS.map((metric) =>
+    evaluateMetric(metric, metrics, baseline),
+  );
   return {
-    passed: evaluations.every(evaluation => evaluation.status === "ok"),
+    passed: evaluations.every((evaluation) => evaluation.status === "ok"),
     sampleCount: metrics.sampleCount,
     evaluations,
   };
@@ -284,7 +289,7 @@ export function evaluateAndroidVideoBaseline(
 /** Human-readable rendering of a gate result for a CI job log. */
 export function formatAndroidVideoGateResult(result: AndroidVideoGateResult): string {
   const header = `Android video baseline gate: ${result.passed ? "PASS" : "FAIL"} (samples=${result.sampleCount})`;
-  return [header, ...result.evaluations.map(evaluation => `  ${evaluation.message}`)].join("\n");
+  return [header, ...result.evaluations.map((evaluation) => `  ${evaluation.message}`)].join("\n");
 }
 
 /** Structural check that a parsed JSON value is an {@link AndroidVideoBaseline}. */
@@ -303,7 +308,7 @@ export function isAndroidVideoBaseline(value: unknown): value is AndroidVideoBas
     return false;
   }
   const metrics = candidate.metrics as Record<string, unknown>;
-  return ANDROID_VIDEO_METRIC_KEYS.every(key => {
+  return ANDROID_VIDEO_METRIC_KEYS.every((key) => {
     const threshold = metrics[key] as Record<string, unknown> | undefined;
     return (
       typeof threshold === "object" &&

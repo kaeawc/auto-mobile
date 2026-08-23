@@ -7,7 +7,7 @@ import {
   ObserveResult,
   PinchOnOptions,
   PinchOnResult,
-  ViewHierarchyResult
+  ViewHierarchyResult,
 } from "../../models";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
@@ -21,8 +21,16 @@ import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { boundsArea, clamp } from "../../utils/bounds";
 import { buildContainerFromElement } from "../../utils/elementProperties";
 import { getScreenBounds as getScreenBoundsFromSize } from "../../utils/screenBounds";
-import { DEFAULT_VISION_CONFIG, getVisionEnrichedError, type VisionFallbackConfig, type VisionAnalyzer } from "../../vision/index";
-import { TakeScreenshotCapturer, type ScreenshotCapturer } from "../navigation/SelectionStateTracker";
+import {
+  DEFAULT_VISION_CONFIG,
+  getVisionEnrichedError,
+  type VisionFallbackConfig,
+  type VisionAnalyzer,
+} from "../../vision/index";
+import {
+  TakeScreenshotCapturer,
+  type ScreenshotCapturer,
+} from "../navigation/SelectionStateTracker";
 
 type PinchTarget = {
   bounds: Element["bounds"];
@@ -46,16 +54,13 @@ export class PinchOn extends BaseVisualChange {
   private screenshotCapturer: ScreenshotCapturer;
   private visionAnalyzer: VisionAnalyzer | undefined;
 
-  constructor(
-    device: BootedDevice,
-    adb: AdbClient | null = null,
-    deps: PinchOnDependencies = {}
-  ) {
+  constructor(device: BootedDevice, adb: AdbClient | null = null, deps: PinchOnDependencies = {}) {
     super(device, adb);
     this.finder = deps.finder ?? new DefaultElementFinder();
     this.parser = deps.parser ?? new DefaultElementParser();
     this.visionConfig = deps.visionConfig ?? DEFAULT_VISION_CONFIG;
-    this.screenshotCapturer = deps.screenshotCapturer ?? new TakeScreenshotCapturer(device, this.adbFactory);
+    this.screenshotCapturer =
+      deps.screenshotCapturer ?? new TakeScreenshotCapturer(device, this.adbFactory);
     this.visionAnalyzer = deps.visionAnalyzer;
   }
 
@@ -72,7 +77,7 @@ export class PinchOn extends BaseVisualChange {
       centerY: 0,
       targetType: "screen",
       container: options.container,
-      error
+      error,
     };
   }
 
@@ -106,12 +111,14 @@ export class PinchOn extends BaseVisualChange {
     }
 
     if (options.container) {
-      const selectorCount = [options.container.elementId, options.container.text].filter(Boolean).length;
+      const selectorCount = [options.container.elementId, options.container.text].filter(
+        Boolean,
+      ).length;
       if (selectorCount !== 1) {
         perf.end();
         return this.createErrorResult(
           "pinchOn container must specify exactly one of elementId or text",
-          options
+          options,
         );
       }
     }
@@ -123,7 +130,7 @@ export class PinchOn extends BaseVisualChange {
         perf.end();
         return this.createErrorResult(
           "pinchOn requires the AutoMobile accessibility service to be installed and enabled.",
-          options
+          options,
         );
       }
     }
@@ -151,11 +158,14 @@ export class PinchOn extends BaseVisualChange {
               rotationDegrees,
               duration,
               5000,
-              perf
+              perf,
             );
           }
 
-          return await AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory).requestPinch(
+          return await AndroidCtrlProxyClient.getInstance(
+            this.device,
+            this.adbFactory,
+          ).requestPinch(
             centerX,
             centerY,
             distanceStart,
@@ -163,7 +173,7 @@ export class PinchOn extends BaseVisualChange {
             rotationDegrees,
             duration,
             5000,
-            perf
+            perf,
           );
         },
         {
@@ -180,10 +190,10 @@ export class PinchOn extends BaseVisualChange {
               distanceStart,
               distanceEnd,
               rotationDegrees,
-              duration
-            }
-          }
-        }
+              duration,
+            },
+          },
+        },
       );
 
       perf.end();
@@ -202,7 +212,7 @@ export class PinchOn extends BaseVisualChange {
           container: target.container,
           warning: target.warning,
           observation: pinchResult.observation,
-          error: pinchResult.error
+          error: pinchResult.error,
         };
       }
 
@@ -210,9 +220,10 @@ export class PinchOn extends BaseVisualChange {
       // XCTest event-synthesis symbols are unavailable; that path zooms from the
       // screen center and ignores the requested centerX/centerY (and rotation).
       // Surface it so callers know the center was not honored (#2910).
-      const fallbackWarning = pinchResult.pinchPath === "element-anchored"
-        ? "pinchOn used the iOS public element-anchored fallback; the gesture zoomed from the screen center and did not honor the requested center/rotation."
-        : undefined;
+      const fallbackWarning =
+        pinchResult.pinchPath === "element-anchored"
+          ? "pinchOn used the iOS public element-anchored fallback; the gesture zoomed from the screen center and did not honor the requested center/rotation."
+          : undefined;
       const warning = [target.warning, fallbackWarning].filter(Boolean).join(" ") || undefined;
 
       return {
@@ -230,7 +241,7 @@ export class PinchOn extends BaseVisualChange {
         warning,
         observation: pinchResult.observation,
         a11yTotalTimeMs: pinchResult.totalTimeMs,
-        a11yGestureTimeMs: pinchResult.gestureTimeMs
+        a11yGestureTimeMs: pinchResult.gestureTimeMs,
       };
     } catch (error) {
       perf.end();
@@ -241,7 +252,7 @@ export class PinchOn extends BaseVisualChange {
         const searchCriteria = {
           text: options.container.text,
           resourceId: options.container.elementId,
-          description: "Container element for pinching"
+          description: "Container element for pinching",
         };
         const cachedObserve = await this.observeScreen.getMostRecentCachedObserveResult();
         const viewHierarchy = cachedObserve?.viewHierarchy ?? null;
@@ -252,7 +263,7 @@ export class PinchOn extends BaseVisualChange {
           this.visionConfig,
           finalErrorMessage,
           undefined,
-          this.visionAnalyzer
+          this.visionAnalyzer,
         );
       }
 
@@ -273,14 +284,17 @@ export class PinchOn extends BaseVisualChange {
     const screenBounds = this.getScreenBounds(observeResult, options.includeSystemInsets);
 
     if (options.container) {
-      const containerElement = this.findContainerElement(options.container, observeResult.viewHierarchy);
+      const containerElement = this.findContainerElement(
+        options.container,
+        observeResult.viewHierarchy,
+      );
       if (!containerElement) {
         throw new ActionableError("Container element not found for pinchOn");
       }
       return {
         bounds: containerElement.bounds,
         targetType: "container",
-        container: options.container
+        container: options.container,
       };
     }
 
@@ -294,27 +308,32 @@ export class PinchOn extends BaseVisualChange {
           container: container ?? undefined,
           warning: container
             ? undefined
-            : "Auto-targeted element lacks a usable identifier; pinching within its bounds without container metadata."
+            : "Auto-targeted element lacks a usable identifier; pinching within its bounds without container metadata.",
         };
       }
     }
 
     return {
       bounds: screenBounds,
-      targetType: "screen"
+      targetType: "screen",
     };
   }
 
   private findContainerElement(
     container: PinchOnOptions["container"],
-    viewHierarchy: ViewHierarchyResult
+    viewHierarchy: ViewHierarchyResult,
   ): Element | null {
     if (!container) {
       return null;
     }
 
     if (container.elementId) {
-      const element = this.finder.findElementByResourceId(viewHierarchy, container.elementId, undefined, true);
+      const element = this.finder.findElementByResourceId(
+        viewHierarchy,
+        container.elementId,
+        undefined,
+        true,
+      );
       if (element) {
         return element;
       }
@@ -329,7 +348,7 @@ export class PinchOn extends BaseVisualChange {
 
   private selectAutoTargetElement(
     viewHierarchy: ViewHierarchyResult,
-    screenBounds: Element["bounds"]
+    screenBounds: Element["bounds"],
   ): Element | null {
     const screenWidth = Math.max(1, screenBounds.right - screenBounds.left);
     const screenHeight = Math.max(1, screenBounds.bottom - screenBounds.top);
@@ -352,7 +371,7 @@ export class PinchOn extends BaseVisualChange {
 
     const scrollables = this.finder.findScrollableElements(viewHierarchy);
     const clickables = this.finder.findClickableElements(viewHierarchy);
-    const flattened = this.parser.flattenViewHierarchy(viewHierarchy).map(entry => entry.element);
+    const flattened = this.parser.flattenViewHierarchy(viewHierarchy).map((entry) => entry.element);
 
     for (const element of scrollables) {
       addCandidate(element);
@@ -400,7 +419,7 @@ export class PinchOn extends BaseVisualChange {
 
   private resolveDistances(
     options: PinchOnOptions,
-    bounds: Element["bounds"]
+    bounds: Element["bounds"],
   ): { distanceStart: number; distanceEnd: number; scale?: number } {
     const width = Math.max(1, bounds.right - bounds.left);
     const height = Math.max(1, bounds.bottom - bounds.top);
@@ -448,12 +467,19 @@ export class PinchOn extends BaseVisualChange {
     return { distanceStart, distanceEnd, scale };
   }
 
-  private getScreenBounds(observeResult: ObserveResult, includeSystemInsets?: boolean): Element["bounds"] {
+  private getScreenBounds(
+    observeResult: ObserveResult,
+    includeSystemInsets?: boolean,
+  ): Element["bounds"] {
     if (!observeResult.screenSize) {
       throw new ActionableError("Could not determine screen size");
     }
 
-    return getScreenBoundsFromSize(observeResult.screenSize, observeResult.systemInsets, includeSystemInsets);
+    return getScreenBoundsFromSize(
+      observeResult.screenSize,
+      observeResult.systemInsets,
+      includeSystemInsets,
+    );
   }
 
   private getCenter(bounds: Element["bounds"]): { centerX: number; centerY: number } {
@@ -480,7 +506,8 @@ export class PinchOn extends BaseVisualChange {
     const className = element["class"]?.toLowerCase() ?? "";
     const classSuggestsSheet = className.includes("bottomsheet") || className.includes("sheet");
 
-    return (scrollable && bottomAligned && shorterThanScreen) || (classSuggestsSheet && bottomAligned);
+    return (
+      (scrollable && bottomAligned && shorterThanScreen) || (classSuggestsSheet && bottomAligned)
+    );
   }
-
 }

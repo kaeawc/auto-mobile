@@ -16,13 +16,13 @@ export async function refreshAndroidViewHierarchy(
   accessibilityService: AndroidCtrlProxyClient,
   viewHierarchy: ViewHierarchy,
   timeoutMs: number,
-  signal?: AbortSignal
+  signal?: AbortSignal,
 ): Promise<ViewHierarchyResult | null> {
   const syncResult = await accessibilityService.requestHierarchySync(
     new NoOpPerformanceTracker(),
     serverConfig.isRawElementSearchEnabled(),
     signal,
-    timeoutMs
+    timeoutMs,
   );
 
   let rawHierarchy = syncResult
@@ -34,15 +34,19 @@ export async function refreshAndroidViewHierarchy(
   }
 
   if (rawHierarchy.ctrlProxyIncomplete) {
-    logger.debug("[refreshAndroidViewHierarchy] Accessibility service returned incomplete hierarchy, fetching uiautomator fallback");
+    logger.debug(
+      "[refreshAndroidViewHierarchy] Accessibility service returned incomplete hierarchy, fetching uiautomator fallback",
+    );
     try {
       const uiautomatorHierarchy = await viewHierarchy.getUiAutomatorHierarchy(
         signal,
-        !serverConfig.isRawElementSearchEnabled()
+        !serverConfig.isRawElementSearchEnabled(),
       );
       rawHierarchy = viewHierarchy.mergeHierarchies(rawHierarchy, uiautomatorHierarchy);
     } catch (fallbackErr) {
-      logger.warn(`[refreshAndroidViewHierarchy] Failed to get uiautomator fallback: ${fallbackErr}`);
+      logger.warn(
+        `[refreshAndroidViewHierarchy] Failed to get uiautomator fallback: ${fallbackErr}`,
+      );
     }
   }
 

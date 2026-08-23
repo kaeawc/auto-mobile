@@ -57,7 +57,7 @@ describe("daemonBuildIdentityStatusLines", () => {
 
     expect(lines).toContain("  Build ID: unknown");
     expect(lines).toContain("  Entry Script: unknown");
-    expect(lines.some(line => line.includes("WARNING"))).toBe(false);
+    expect(lines.some((line) => line.includes("WARNING"))).toBe(false);
   });
 
   test("warns and shows both builds when the daemon is a different build", () => {
@@ -127,7 +127,7 @@ describe("DaemonManager stop", () => {
   ): DaemonManager {
     const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
       findDaemonProcesses: () => [],
-      isProcessRunning: pid => {
+      isProcessRunning: (pid) => {
         onLivenessCheck?.();
         return livePids.has(pid);
       },
@@ -144,13 +144,16 @@ describe("DaemonManager stop", () => {
   }
 
   function writeStopPidFile(pidFilePath: string, pid: number, socketPath: string): void {
-    writeFileSync(pidFilePath, JSON.stringify({
-      pid,
-      socketPath,
-      port: 3000,
-      startedAt: 1,
-      version: "test",
-    }));
+    writeFileSync(
+      pidFilePath,
+      JSON.stringify({
+        pid,
+        socketPath,
+        port: 3000,
+        startedAt: 1,
+        version: "test",
+      }),
+    );
   }
 
   test("fails without cleanup when the daemon remains live after SIGKILL", async () => {
@@ -194,13 +197,9 @@ describe("DaemonManager stop", () => {
     timer.enableAutoAdvance();
     writeStopPidFile(pidFilePath, pid, socketPath);
     writeFileSync(socketPath, "socket");
-    const manager = createManagerForStop(
-      livePids,
-      timer,
-      pidFilePath,
-      socketPath,
-      () => { livenessChecks++; },
-    );
+    const manager = createManagerForStop(livePids, timer, pidFilePath, socketPath, () => {
+      livenessChecks++;
+    });
     const killSpy = spyOn(process, "kill").mockImplementation((_targetPid, signal) => {
       if (signal === "SIGKILL") {
         livePids.delete(pid);
@@ -237,7 +236,9 @@ describe("DaemonManager stop", () => {
     const manager = createManagerForStop(livePids, timer, pidFilePath, socketPath);
     const killSpy = spyOn(process, "kill").mockImplementation((_targetPid, signal) => {
       if (signal === "SIGKILL") {
-        timer.setTimeout(() => { livePids.delete(pid); }, 1_000);
+        timer.setTimeout(() => {
+          livePids.delete(pid);
+        }, 1_000);
       }
       return true;
     });
@@ -291,7 +292,7 @@ class FakeDaemonClient implements DaemonClientLike {
 class FakeDaemonProcessFinder implements DaemonProcessFinder, DaemonProcessLivenessChecker {
   constructor(
     private readonly records: DaemonProcessRecord[],
-    private readonly livePids: Set<number> = new Set(records.map(record => record.pid))
+    private readonly livePids: Set<number> = new Set(records.map((record) => record.pid)),
   ) {}
 
   findDaemonProcesses(): DaemonProcessRecord[] {
@@ -356,7 +357,7 @@ describe("DaemonLauncher command resolution", () => {
       version: "1.2.3",
       environment: { PATH: "/tools" },
       platform: "linux",
-      executableExists: path => path === "/tools/bunx",
+      executableExists: (path) => path === "/tools/bunx",
     }).resolveCommand();
 
     expect(launch).toEqual({
@@ -366,14 +367,14 @@ describe("DaemonLauncher command resolution", () => {
   });
 
   test("rejects unknown versions instead of falling back to latest", () => {
-    expect(() => new DaemonLauncher({
-      entryScript: null,
-      version: "unknown",
-      environment: { PATH: "/tools" },
-      executableExists: () => true,
-    }).resolveCommand()).toThrow(
-      "current package version is unknown"
-    );
+    expect(() =>
+      new DaemonLauncher({
+        entryScript: null,
+        version: "unknown",
+        environment: { PATH: "/tools" },
+        executableExists: () => true,
+      }).resolveCommand(),
+    ).toThrow("current package version is unknown");
   });
 
   test("strips a dev git-SHA stamp so the bunx specifier is an installable release", () => {
@@ -469,28 +470,31 @@ describe("Daemon manager process detection", () => {
   });
 
   test("parses daemon processes from Windows PowerShell JSON output", () => {
-    const finder = new WindowsDaemonProcessFinder(() => JSON.stringify([
-      {
-        ProcessId: 10,
-        ParentProcessId: 1,
-        CommandLine: "C:\\\\Windows\\\\System32\\\\cmd.exe /c unrelated --daemon-mode",
-      },
-      {
-        ProcessId: 20,
-        ParentProcessId: 1,
-        CommandLine: "bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode",
-      },
-      {
-        ProcessId: 21,
-        ParentProcessId: 20,
-        CommandLine: "C:\\\\Program Files\\\\nodejs\\\\node.exe C:\\\\repo\\\\auto-mobile\\\\dist\\\\src\\\\index.js --daemon-mode",
-      },
-      {
-        ProcessId: 22,
-        ParentProcessId: 1,
-        CommandLine: null,
-      },
-    ]));
+    const finder = new WindowsDaemonProcessFinder(() =>
+      JSON.stringify([
+        {
+          ProcessId: 10,
+          ParentProcessId: 1,
+          CommandLine: "C:\\\\Windows\\\\System32\\\\cmd.exe /c unrelated --daemon-mode",
+        },
+        {
+          ProcessId: 20,
+          ParentProcessId: 1,
+          CommandLine: "bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode",
+        },
+        {
+          ProcessId: 21,
+          ParentProcessId: 20,
+          CommandLine:
+            "C:\\\\Program Files\\\\nodejs\\\\node.exe C:\\\\repo\\\\auto-mobile\\\\dist\\\\src\\\\index.js --daemon-mode",
+        },
+        {
+          ProcessId: 22,
+          ParentProcessId: 1,
+          CommandLine: null,
+        },
+      ]),
+    );
 
     expect(finder.findDaemonProcesses()).toEqual([
       {
@@ -501,7 +505,8 @@ describe("Daemon manager process detection", () => {
       {
         pid: 21,
         ppid: 20,
-        command: "C:\\\\Program Files\\\\nodejs\\\\node.exe C:\\\\repo\\\\auto-mobile\\\\dist\\\\src\\\\index.js --daemon-mode",
+        command:
+          "C:\\\\Program Files\\\\nodejs\\\\node.exe C:\\\\repo\\\\auto-mobile\\\\dist\\\\src\\\\index.js --daemon-mode",
       },
     ]);
   });
@@ -529,7 +534,8 @@ describe("Daemon manager process detection", () => {
     ]);
     expect(calls).toEqual([
       {
-        command: "powershell.exe -NoProfile -NonInteractive -Command \"Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CommandLine | ConvertTo-Json -Compress\"",
+        command:
+          'powershell.exe -NoProfile -NonInteractive -Command "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CommandLine | ConvertTo-Json -Compress"',
         options: {
           encoding: "utf-8",
           maxBuffer: DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
@@ -545,7 +551,7 @@ describe("Daemon manager process detection", () => {
 
   function managerWithProcesses(
     records: DaemonProcessRecord[],
-    options: { livePids?: Set<number>; pidFilePath?: string } = {}
+    options: { livePids?: Set<number>; pidFilePath?: string } = {},
   ): DaemonManager {
     return new DaemonManager(
       undefined,
@@ -555,18 +561,21 @@ describe("Daemon manager process detection", () => {
       options.pidFilePath,
       undefined,
       new FakeDaemonProcessFinder(records, options.livePids),
-      undefined
+      undefined,
     );
   }
 
   function writeDaemonPidFile(pidFilePath: string, pid: number): void {
-    writeFileSync(pidFilePath, JSON.stringify({
-      pid,
-      socketPath: "/tmp/auto-mobile-test.sock",
-      port: 3000,
-      startedAt: 1,
-      version: "test",
-    }));
+    writeFileSync(
+      pidFilePath,
+      JSON.stringify({
+        pid,
+        socketPath: "/tmp/auto-mobile-test.sock",
+        port: 3000,
+        startedAt: 1,
+        version: "test",
+      }),
+    );
   }
 
   test("reports a shell-launched daemon once using the long-lived daemon child PID", () => {
@@ -634,28 +643,31 @@ describe("Daemon manager process detection", () => {
     const dir = mkdtempSync(join(tmpdir(), "daemon-manager-pid-file-test-"));
     const pidFilePath = join(dir, "daemon.pid");
     writeDaemonPidFile(pidFilePath, 201);
-    const manager = managerWithProcesses([
-      {
-        pid: 200,
-        ppid: 1,
-        command: `/bin/sh -c "bun /worktree-a/dist/src/index.js --daemon-mode"`,
-      },
-      {
-        pid: 201,
-        ppid: 200,
-        command: `bun /worktree-a/dist/src/index.js --daemon-mode`,
-      },
-      {
-        pid: 300,
-        ppid: 1,
-        command: `/bin/sh -c "bun /worktree-b/dist/src/index.js --daemon-mode"`,
-      },
-      {
-        pid: 301,
-        ppid: 300,
-        command: `bun /worktree-b/dist/src/index.js --daemon-mode`,
-      },
-    ], { livePids: new Set([201, 301]), pidFilePath });
+    const manager = managerWithProcesses(
+      [
+        {
+          pid: 200,
+          ppid: 1,
+          command: `/bin/sh -c "bun /worktree-a/dist/src/index.js --daemon-mode"`,
+        },
+        {
+          pid: 201,
+          ppid: 200,
+          command: `bun /worktree-a/dist/src/index.js --daemon-mode`,
+        },
+        {
+          pid: 300,
+          ppid: 1,
+          command: `/bin/sh -c "bun /worktree-b/dist/src/index.js --daemon-mode"`,
+        },
+        {
+          pid: 301,
+          ppid: 300,
+          command: `bun /worktree-b/dist/src/index.js --daemon-mode`,
+        },
+      ],
+      { livePids: new Set([201, 301]), pidFilePath },
+    );
 
     try {
       expect(manager.findOtherDaemonProcesses(201)).toEqual([301]);
@@ -668,18 +680,21 @@ describe("Daemon manager process detection", () => {
     const dir = mkdtempSync(join(tmpdir(), "daemon-manager-transient-test-"));
     const pidFilePath = join(dir, "daemon.pid");
     writeDaemonPidFile(pidFilePath, 201);
-    const manager = managerWithProcesses([
-      {
-        pid: 201,
-        ppid: 200,
-        command: `bun /worktree-a/dist/src/index.js --daemon-mode`,
-      },
-      {
-        pid: 401,
-        ppid: 1,
-        command: `bun /worktree-b/dist/src/index.js --daemon-mode`,
-      },
-    ], { livePids: new Set([201]), pidFilePath });
+    const manager = managerWithProcesses(
+      [
+        {
+          pid: 201,
+          ppid: 200,
+          command: `bun /worktree-a/dist/src/index.js --daemon-mode`,
+        },
+        {
+          pid: 401,
+          ppid: 1,
+          command: `bun /worktree-b/dist/src/index.js --daemon-mode`,
+        },
+      ],
+      { livePids: new Set([201]), pidFilePath },
+    );
 
     try {
       expect(manager.findOtherDaemonProcesses(201)).toEqual([]);
@@ -692,18 +707,21 @@ describe("Daemon manager process detection", () => {
     const dir = mkdtempSync(join(tmpdir(), "daemon-manager-liveness-test-"));
     const pidFilePath = join(dir, "daemon.pid");
     writeDaemonPidFile(pidFilePath, 401);
-    const manager = managerWithProcesses([
-      {
-        pid: 201,
-        ppid: 200,
-        command: `bun /worktree-a/dist/src/index.js --daemon-mode`,
-      },
-      {
-        pid: 401,
-        ppid: 1,
-        command: `bun /worktree-a/dist/src/index.js --daemon-mode`,
-      },
-    ], { livePids: new Set([201]), pidFilePath });
+    const manager = managerWithProcesses(
+      [
+        {
+          pid: 201,
+          ppid: 200,
+          command: `bun /worktree-a/dist/src/index.js --daemon-mode`,
+        },
+        {
+          pid: 401,
+          ppid: 1,
+          command: `bun /worktree-a/dist/src/index.js --daemon-mode`,
+        },
+      ],
+      { livePids: new Set([201]), pidFilePath },
+    );
 
     try {
       expect(manager.findOtherDaemonProcesses(201)).toEqual([]);
@@ -724,10 +742,12 @@ describe("Daemon manager process detection", () => {
         findDaemonProcesses() {
           throw new Error("spawn ENOBUFS");
         },
-      }
+      },
     );
 
-    expect(() => manager.findAllDaemonProcesses()).toThrow("Failed to inspect daemon process table: spawn ENOBUFS");
+    expect(() => manager.findAllDaemonProcesses()).toThrow(
+      "Failed to inspect daemon process table: spawn ENOBUFS",
+    );
   });
 
   test("start reuses a responsive live daemon when its PID record is unavailable", async () => {
@@ -738,24 +758,35 @@ describe("Daemon manager process detection", () => {
     fakeTimer.enableAutoAdvance();
     const killCalls: Array<{ pid: number; signal: NodeJS.Signals | number | undefined }> = [];
     let spawnCalls = 0;
-    const processFinder = new FakeDaemonProcessFinder([
-      {
-        pid: 301,
-        ppid: 1,
-        command: `bun /worktree-b/dist/src/index.js --daemon-mode`,
-      },
-    ], new Set([301]));
-    const processSpawner: DaemonProcessSpawner = {
-      spawn: (_command: string, _args: string[], _options: SpawnOptions) => ({
-        get unref() {
-          spawnCalls++;
-          return () => {};
+    const processFinder = new FakeDaemonProcessFinder(
+      [
+        {
+          pid: 301,
+          ppid: 1,
+          command: `bun /worktree-b/dist/src/index.js --daemon-mode`,
         },
-        once() { return this; },
-        off() { return this; },
-      }) as ChildProcess,
+      ],
+      new Set([301]),
+    );
+    const processSpawner: DaemonProcessSpawner = {
+      spawn: (_command: string, _args: string[], _options: SpawnOptions) =>
+        ({
+          get unref() {
+            spawnCalls++;
+            return () => {};
+          },
+          once() {
+            return this;
+          },
+          off() {
+            return this;
+          },
+        }) as ChildProcess,
     };
-    const killSpy = spyOn(process, "kill").mockImplementation(((pid: number, signal?: NodeJS.Signals | number) => {
+    const killSpy = spyOn(process, "kill").mockImplementation(((
+      pid: number,
+      signal?: NodeJS.Signals | number,
+    ) => {
       if (pid === 301) {
         killCalls.push({ pid, signal });
       }
@@ -781,7 +812,7 @@ describe("Daemon manager process detection", () => {
         pidFilePath,
         join(dir, "daemon.sock"),
         processFinder,
-        processSpawner
+        processSpawner,
       );
 
       await manager.start();
@@ -803,11 +834,13 @@ describe("Daemon manager process detection", () => {
     const killCalls: Array<{ pid: number; signal: NodeJS.Signals | number | undefined }> = [];
     const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
       findDaemonProcesses() {
-        return [{
-          pid: 301,
-          ppid: 1,
-          command: `bun /worktree-b/dist/src/index.js --daemon-mode`,
-        }];
+        return [
+          {
+            pid: 301,
+            ppid: 1,
+            command: `bun /worktree-b/dist/src/index.js --daemon-mode`,
+          },
+        ];
       },
       isProcessRunning(pid: number) {
         return pid === 301;
@@ -818,7 +851,10 @@ describe("Daemon manager process detection", () => {
         throw new Error("should not spawn while a live daemon exists");
       },
     };
-    const killSpy = spyOn(process, "kill").mockImplementation(((pid: number, signal?: NodeJS.Signals | number) => {
+    const killSpy = spyOn(process, "kill").mockImplementation(((
+      pid: number,
+      signal?: NodeJS.Signals | number,
+    ) => {
       if (pid === 301) {
         killCalls.push({ pid, signal });
       }
@@ -858,11 +894,11 @@ describe("Daemon manager process detection", () => {
         pidFilePath,
         join(dir, "daemon.sock"),
         processFinder,
-        processSpawner
+        processSpawner,
       );
 
       await expect(manager.start()).rejects.toThrow(
-        "Refusing to terminate a live daemon during start"
+        "Refusing to terminate a live daemon during start",
       );
 
       expect(killCalls).toEqual([]);
@@ -878,12 +914,14 @@ describe("Daemon manager process detection", () => {
     const candidatePid = 451;
     const livePids = new Set([candidatePid]);
     const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
-      findDaemonProcesses: () => [{
-        pid: candidatePid,
-        ppid: 1,
-        command: "bun /other-checkout/dist/src/index.js --daemon-mode",
-      }],
-      isProcessRunning: pid => livePids.has(pid),
+      findDaemonProcesses: () => [
+        {
+          pid: candidatePid,
+          ppid: 1,
+          command: "bun /other-checkout/dist/src/index.js --daemon-mode",
+        },
+      ],
+      isProcessRunning: (pid) => livePids.has(pid),
     };
     const signaler = new FakeDaemonProcessSignaler((pid, signal) => {
       if (pid === candidatePid && signal === "SIGTERM") {
@@ -926,12 +964,13 @@ describe("Daemon manager process detection", () => {
     const candidatePids = [452, 453];
     const livePids = new Set(candidatePids);
     const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
-      findDaemonProcesses: () => candidatePids.map(pid => ({
-        pid,
-        ppid: 1,
-        command: "bun /other-checkout/dist/src/index.js --daemon-mode",
-      })),
-      isProcessRunning: pid => livePids.has(pid),
+      findDaemonProcesses: () =>
+        candidatePids.map((pid) => ({
+          pid,
+          ppid: 1,
+          command: "bun /other-checkout/dist/src/index.js --daemon-mode",
+        })),
+      isProcessRunning: (pid) => livePids.has(pid),
     };
     const signaler = new FakeDaemonProcessSignaler((pid, signal) => {
       if (signal === "SIGTERM") {
@@ -978,12 +1017,13 @@ describe("Daemon manager process detection", () => {
     const crossNamespacePid = 452;
     const livePids = new Set([recordedPid, crossNamespacePid]);
     const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
-      findDaemonProcesses: () => [recordedPid, crossNamespacePid].map(pid => ({
-        pid,
-        ppid: 1,
-        command: "bun /other-checkout/dist/src/index.js --daemon-mode",
-      })),
-      isProcessRunning: pid => livePids.has(pid),
+      findDaemonProcesses: () =>
+        [recordedPid, crossNamespacePid].map((pid) => ({
+          pid,
+          ppid: 1,
+          command: "bun /other-checkout/dist/src/index.js --daemon-mode",
+        })),
+      isProcessRunning: (pid) => livePids.has(pid),
     };
     const signaler = new FakeDaemonProcessSignaler((pid, signal) => {
       if (signal === "SIGTERM") {
@@ -1032,16 +1072,19 @@ describe("Daemon manager process detection", () => {
     const crossNamespacePid = 452;
     const livePids = new Set([recordedPid, crossNamespacePid]);
     const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
-      findDaemonProcesses: () => [recordedPid, crossNamespacePid].map(pid => ({
-        pid,
-        ppid: 1,
-        command: "bun /other-checkout/dist/src/index.js --daemon-mode",
-      })),
-      isProcessRunning: pid => livePids.has(pid),
+      findDaemonProcesses: () =>
+        [recordedPid, crossNamespacePid].map((pid) => ({
+          pid,
+          ppid: 1,
+          command: "bun /other-checkout/dist/src/index.js --daemon-mode",
+        })),
+      isProcessRunning: (pid) => livePids.has(pid),
     };
     const signaler = new FakeDaemonProcessSignaler((pid, signal) => {
       if (pid === crossNamespacePid && signal === "SIGKILL") {
-        fakeTimer.setTimeout(() => { livePids.delete(pid); }, 1_000);
+        fakeTimer.setTimeout(() => {
+          livePids.delete(pid);
+        }, 1_000);
       }
     });
     const manager = new DaemonManager(
@@ -1064,7 +1107,9 @@ describe("Daemon manager process detection", () => {
     const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
     const killSpy = spyOn(process, "kill").mockImplementation((_pid, signal) => {
       if (signal === "SIGKILL") {
-        fakeTimer.setTimeout(() => { livePids.delete(recordedPid); }, 1_000);
+        fakeTimer.setTimeout(() => {
+          livePids.delete(recordedPid);
+        }, 1_000);
       }
       return true;
     });
@@ -1094,11 +1139,12 @@ describe("Daemon manager process detection", () => {
     const recordedPid = 451;
     const crossNamespacePid = 452;
     const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
-      findDaemonProcesses: () => [recordedPid, crossNamespacePid].map(pid => ({
-        pid,
-        ppid: 1,
-        command: "bun /other-checkout/dist/src/index.js --daemon-mode",
-      })),
+      findDaemonProcesses: () =>
+        [recordedPid, crossNamespacePid].map((pid) => ({
+          pid,
+          ppid: 1,
+          command: "bun /other-checkout/dist/src/index.js --daemon-mode",
+        })),
       isProcessRunning: () => true,
     };
     const signaler = new FakeDaemonProcessSignaler(() => {
@@ -1129,12 +1175,16 @@ describe("Daemon manager process detection", () => {
     const restart = manager.restart();
     let restartSettled = false;
     void restart.then(
-      () => { restartSettled = true; },
-      () => { restartSettled = true; },
+      () => {
+        restartSettled = true;
+      },
+      () => {
+        restartSettled = true;
+      },
     );
 
     try {
-      await new Promise<void>(resolve => setImmediate(resolve));
+      await new Promise<void>((resolve) => setImmediate(resolve));
 
       expect(restartSettled).toBe(false);
       expect(recordedCleanupCompleted).toBe(false);
@@ -1155,19 +1205,22 @@ describe("Daemon manager process detection", () => {
     const slowPid = 453;
     const livePids = new Set([failingPid, slowPid]);
     const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
-      findDaemonProcesses: () => [failingPid, slowPid].map(pid => ({
-        pid,
-        ppid: 1,
-        command: "bun /other-checkout/dist/src/index.js --daemon-mode",
-      })),
-      isProcessRunning: pid => livePids.has(pid),
+      findDaemonProcesses: () =>
+        [failingPid, slowPid].map((pid) => ({
+          pid,
+          ppid: 1,
+          command: "bun /other-checkout/dist/src/index.js --daemon-mode",
+        })),
+      isProcessRunning: (pid) => livePids.has(pid),
     };
     const signaler = new FakeDaemonProcessSignaler((pid, signal) => {
       if (pid === failingPid && signal === "SIGTERM") {
         throw new Error("EPERM");
       }
       if (pid === slowPid && signal === "SIGTERM") {
-        fakeTimer.setTimeout(() => { livePids.delete(pid); }, 1_000);
+        fakeTimer.setTimeout(() => {
+          livePids.delete(pid);
+        }, 1_000);
       }
     });
     const manager = new DaemonManager(
@@ -1188,12 +1241,16 @@ describe("Daemon manager process detection", () => {
     const restart = manager.restart();
     let restartSettled = false;
     void restart.then(
-      () => { restartSettled = true; },
-      () => { restartSettled = true; },
+      () => {
+        restartSettled = true;
+      },
+      () => {
+        restartSettled = true;
+      },
     );
 
     try {
-      await new Promise<void>(resolve => setImmediate(resolve));
+      await new Promise<void>((resolve) => setImmediate(resolve));
 
       expect(restartSettled).toBe(false);
       expect(signaler.signals).toEqual([
@@ -1218,12 +1275,14 @@ describe("Daemon manager process detection", () => {
     const candidatePid = 453;
     let livenessChecks = 0;
     const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
-      findDaemonProcesses: () => [{
-        pid: candidatePid,
-        ppid: 1,
-        command: "bun /other-checkout/dist/src/index.js --daemon-mode",
-      }],
-      isProcessRunning: pid => {
+      findDaemonProcesses: () => [
+        {
+          pid: candidatePid,
+          ppid: 1,
+          command: "bun /other-checkout/dist/src/index.js --daemon-mode",
+        },
+      ],
+      isProcessRunning: (pid) => {
         if (pid !== candidatePid) {
           return false;
         }
@@ -1267,21 +1326,32 @@ describe("Daemon manager process detection", () => {
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     const killCalls: Array<{ pid: number; signal: NodeJS.Signals | number | undefined }> = [];
-    const processFinder = new FakeDaemonProcessFinder([
-      {
-        pid: 401,
-        ppid: 1,
-        command: `bun /worktree-b/dist/src/index.js --daemon-mode`,
-      },
-    ], new Set());
+    const processFinder = new FakeDaemonProcessFinder(
+      [
+        {
+          pid: 401,
+          ppid: 1,
+          command: `bun /worktree-b/dist/src/index.js --daemon-mode`,
+        },
+      ],
+      new Set(),
+    );
     const processSpawner: DaemonProcessSpawner = {
-      spawn: (_command: string, _args: string[], _options: SpawnOptions) => ({
-        unref() {},
-        once() { return this; },
-        off() { return this; },
-      }) as ChildProcess,
+      spawn: (_command: string, _args: string[], _options: SpawnOptions) =>
+        ({
+          unref() {},
+          once() {
+            return this;
+          },
+          off() {
+            return this;
+          },
+        }) as ChildProcess,
     };
-    const killSpy = spyOn(process, "kill").mockImplementation(((pid: number, signal?: NodeJS.Signals | number) => {
+    const killSpy = spyOn(process, "kill").mockImplementation(((
+      pid: number,
+      signal?: NodeJS.Signals | number,
+    ) => {
       if (pid === 401) {
         killCalls.push({ pid, signal });
       }
@@ -1307,7 +1377,7 @@ describe("Daemon manager process detection", () => {
         pidFilePath,
         join(dir, "daemon.sock"),
         processFinder,
-        processSpawner
+        processSpawner,
       );
 
       await manager.start();
@@ -1332,7 +1402,7 @@ describe("Daemon manager process detection", () => {
       "auto-mobile",
       "dist",
       "src",
-      "index.js"
+      "index.js",
     );
     const child = new FakeDaemonChildProcess();
     const processSpawner: DaemonProcessSpawner = {
@@ -1365,10 +1435,12 @@ describe("Daemon manager process detection", () => {
         new FakeDaemonProcessFinder([]),
         processSpawner,
         cleaner,
-        () => ({ command: process.execPath, args: [entryScript, "--daemon-mode"] })
+        () => ({ command: process.execPath, args: [entryScript, "--daemon-mode"] }),
       );
 
-      await expect(manager.start()).rejects.toThrow("remove the incomplete extraction directory and re-run");
+      await expect(manager.start()).rejects.toThrow(
+        "remove the incomplete extraction directory and re-run",
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -1387,7 +1459,7 @@ describe("Daemon manager process detection", () => {
       "auto-mobile",
       "dist",
       "src",
-      "index.js"
+      "index.js",
     );
     const children: FakeDaemonChildProcess[] = [];
     const spawnCalls: Array<{ command: string; args: string[] }> = [];
@@ -1428,7 +1500,7 @@ describe("Daemon manager process detection", () => {
         new FakeDaemonProcessFinder([]),
         processSpawner,
         cleaner,
-        () => ({ command: process.execPath, args: [entryScript, "--daemon-mode"] })
+        () => ({ command: process.execPath, args: [entryScript, "--daemon-mode"] }),
       );
 
       await manager.start({ port: 1234 });
@@ -1457,7 +1529,7 @@ describe("Daemon manager process detection", () => {
       "@kaeawc",
       "auto-mobile",
       "dist",
-      "src"
+      "src",
     );
     mkdirSync(packageDir, { recursive: true });
     const entryScript = join(packageDir, "index.js");
@@ -1500,7 +1572,7 @@ describe("Daemon manager process detection", () => {
         new FakeDaemonProcessFinder([]),
         processSpawner,
         undefined,
-        () => ({ command: process.execPath, args: [entryScript, "--daemon-mode"] })
+        () => ({ command: process.execPath, args: [entryScript, "--daemon-mode"] }),
       );
 
       await manager.start();
@@ -1528,7 +1600,7 @@ describe("Daemon manager process detection", () => {
       "auto-mobile",
       "dist",
       "src",
-      "index.js"
+      "index.js",
     );
     const children: FakeDaemonChildProcess[] = [];
     const processSpawner: DaemonProcessSpawner = {
@@ -1565,10 +1637,12 @@ describe("Daemon manager process detection", () => {
         new FakeDaemonProcessFinder([]),
         processSpawner,
         cleaner,
-        () => ({ command: process.execPath, args: [entryScript, "--daemon-mode"] })
+        () => ({ command: process.execPath, args: [entryScript, "--daemon-mode"] }),
       );
 
-      await expect(manager.start()).rejects.toThrow("remove the incomplete extraction directory and re-run");
+      await expect(manager.start()).rejects.toThrow(
+        "remove the incomplete extraction directory and re-run",
+      );
       expect(children).toHaveLength(2);
       expect(cleaner.entryScripts).toEqual([entryScript]);
     } finally {
@@ -1612,10 +1686,12 @@ describe("Daemon manager process detection", () => {
         new FakeDaemonProcessFinder([]),
         processSpawner,
         cleaner,
-        () => ({ command: process.execPath, args: [join(dir, "entry.js"), "--daemon-mode"] })
+        () => ({ command: process.execPath, args: [join(dir, "entry.js"), "--daemon-mode"] }),
       );
 
-      await expect(manager.start()).rejects.toThrow("Daemon subprocess exited before becoming ready (exit code 1)");
+      await expect(manager.start()).rejects.toThrow(
+        "Daemon subprocess exited before becoming ready (exit code 1)",
+      );
       expect(cleaner.entryScripts).toEqual([]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -1636,14 +1712,16 @@ describe("Daemon manager available-devices", () => {
               total: 3,
               recoveryPolicy: { onLoss: true, maxAttempts: 2 },
             },
-            devices: [{
-              deviceId: "emulator-5554",
-              platform: "android",
-              recoveryEligibility: { eligible: true, action: "restart" },
-            }],
-          })
-        }
-      ]
+            devices: [
+              {
+                deviceId: "emulator-5554",
+                platform: "android",
+                recoveryEligibility: { eligible: true, action: "restart" },
+              },
+            ],
+          }),
+        },
+      ],
     };
     const fakeClient = new FakeDaemonClient(result);
     const output: string[] = [];
@@ -1654,18 +1732,19 @@ describe("Daemon manager available-devices", () => {
     try {
       await runDaemonCommand("available-devices", [], {
         clientFactory: () => fakeClient,
-        stateProvider: () => ({
-          isInitialized: () => false,
-          getDevicePool: () => {
-            throw new Error("Device pool unavailable");
-          },
-          getSessionManager: () => {
-            throw new Error("Session manager unavailable");
-          },
-          getDeviceSessionRegistry: () => {
-            throw new Error("Device session registry unavailable");
-          }
-        } satisfies DaemonStateLike)
+        stateProvider: () =>
+          ({
+            isInitialized: () => false,
+            getDevicePool: () => {
+              throw new Error("Device pool unavailable");
+            },
+            getSessionManager: () => {
+              throw new Error("Session manager unavailable");
+            },
+            getDeviceSessionRegistry: () => {
+              throw new Error("Device session registry unavailable");
+            },
+          }) satisfies DaemonStateLike,
       });
     } finally {
       logSpy.mockRestore();
@@ -1673,18 +1752,22 @@ describe("Daemon manager available-devices", () => {
 
     expect(fakeClient.readResourceCalls).toEqual(["automobile:devices/booted"]);
     expect(fakeClient.callToolCalls).toHaveLength(0);
-    expect(output).toContain(JSON.stringify({
-      availableDevices: 2,
-      totalDevices: 3,
-      assignedDevices: 1,
-      errorDevices: 0,
-      recoveryPolicy: { onLoss: true, maxAttempts: 2 },
-      devices: [{
-        deviceId: "emulator-5554",
-        platform: "android",
-        recoveryEligibility: { eligible: true, action: "restart" },
-      }],
-    }));
+    expect(output).toContain(
+      JSON.stringify({
+        availableDevices: 2,
+        totalDevices: 3,
+        assignedDevices: 1,
+        errorDevices: 0,
+        recoveryPolicy: { onLoss: true, maxAttempts: 2 },
+        devices: [
+          {
+            deviceId: "emulator-5554",
+            platform: "android",
+            recoveryEligibility: { eligible: true, action: "restart" },
+          },
+        ],
+      }),
+    );
   });
 
   test("uses daemon state pool stats when initialized", async () => {
@@ -1696,48 +1779,56 @@ describe("Daemon manager available-devices", () => {
 
     const fakeState: DaemonStateLike = {
       isInitialized: () => true,
-      getDevicePool: () => ({
-        getStats: () => ({
-          idle: 1,
-          assigned: 2,
-          error: 1,
-          total: 4
-        }),
-        getRecoveryPolicy: () => ({ onLoss: false, maxAttempts: 2 }),
-        getAllDevices: () => [{
-          id: "physical-ios-device",
-          platform: "ios",
-        }],
-        getRecoveryEligibility: () => ({ eligible: false, reason: "unsupported-platform" }),
-      } as any),
-      getSessionManager: () => ({
-        getSession: () => null,
-        releaseSession: async () => null
-      } as any),
-      getDeviceSessionRegistry: () => new DeviceSessionRegistry()
+      getDevicePool: () =>
+        ({
+          getStats: () => ({
+            idle: 1,
+            assigned: 2,
+            error: 1,
+            total: 4,
+          }),
+          getRecoveryPolicy: () => ({ onLoss: false, maxAttempts: 2 }),
+          getAllDevices: () => [
+            {
+              id: "physical-ios-device",
+              platform: "ios",
+            },
+          ],
+          getRecoveryEligibility: () => ({ eligible: false, reason: "unsupported-platform" }),
+        }) as any,
+      getSessionManager: () =>
+        ({
+          getSession: () => null,
+          releaseSession: async () => null,
+        }) as any,
+      getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
     };
 
     try {
       await runDaemonCommand("available-devices", [], {
         clientFactory: () => fakeClient,
-        stateProvider: () => fakeState
+        stateProvider: () => fakeState,
       });
     } finally {
       logSpy.mockRestore();
     }
 
     expect(fakeClient.readResourceCalls).toHaveLength(0);
-    expect(output).toContain(JSON.stringify({
-      availableDevices: 1,
-      totalDevices: 4,
-      assignedDevices: 2,
-      errorDevices: 1,
-      recoveryPolicy: { onLoss: false, maxAttempts: 2 },
-      devices: [{
-        deviceId: "physical-ios-device",
-        platform: "ios",
-        recoveryEligibility: { eligible: false, reason: "unsupported-platform" },
-      }],
-    }));
+    expect(output).toContain(
+      JSON.stringify({
+        availableDevices: 1,
+        totalDevices: 4,
+        assignedDevices: 2,
+        errorDevices: 1,
+        recoveryPolicy: { onLoss: false, maxAttempts: 2 },
+        devices: [
+          {
+            deviceId: "physical-ios-device",
+            platform: "ios",
+            recoveryEligibility: { eligible: false, reason: "unsupported-platform" },
+          },
+        ],
+      }),
+    );
   });
 });

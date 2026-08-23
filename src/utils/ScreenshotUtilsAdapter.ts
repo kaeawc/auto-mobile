@@ -84,7 +84,7 @@ class ScreenshotUtilsAdapter implements ScreenshotUtils {
   async resizeImageIfNeeded(
     buffer: Buffer,
     targetWidth: number,
-    targetHeight: number
+    targetHeight: number,
   ): Promise<Buffer> {
     return ScreenshotUtilsImpl.resizeImageIfNeeded(buffer, targetWidth, targetHeight);
   }
@@ -101,8 +101,13 @@ class ScreenshotUtilsAdapter implements ScreenshotUtils {
     buffer1: Buffer,
     buffer2: Buffer,
     threshold?: number,
-    fastMode?: boolean
-  ): Promise<{ similarity: number; pixelDifference: number; totalPixels: number; filePath?: string }> {
+    fastMode?: boolean,
+  ): Promise<{
+    similarity: number;
+    pixelDifference: number;
+    totalPixels: number;
+    filePath?: string;
+  }> {
     return ScreenshotUtilsImpl.compareImages(buffer1, buffer2, threshold, fastMode);
   }
 
@@ -127,9 +132,14 @@ class ScreenshotUtilsAdapter implements ScreenshotUtils {
     targetBuffer: Buffer,
     screenshotPaths: string[],
     tolerancePercent?: number,
-    fastMode?: boolean
+    fastMode?: boolean,
   ): Promise<Array<{ filePath: string; similarity: number; matchFound: boolean }>> {
-    return ScreenshotUtilsImpl.batchCompareScreenshots(targetBuffer, screenshotPaths, tolerancePercent, fastMode);
+    return ScreenshotUtilsImpl.batchCompareScreenshots(
+      targetBuffer,
+      screenshotPaths,
+      tolerancePercent,
+      fastMode,
+    );
   }
 
   /**
@@ -144,9 +154,14 @@ class ScreenshotUtilsAdapter implements ScreenshotUtils {
     targetBuffer: Buffer,
     screenshotPaths: string[],
     tolerancePercent?: number,
-    fastMode?: boolean
+    fastMode?: boolean,
   ): Promise<Array<{ filePath: string; similarity: number; matchFound: boolean }>> {
-    return ScreenshotUtilsImpl.optimizedBatchCompareScreenshots(targetBuffer, screenshotPaths, tolerancePercent, fastMode);
+    return ScreenshotUtilsImpl.optimizedBatchCompareScreenshots(
+      targetBuffer,
+      screenshotPaths,
+      tolerancePercent,
+      fastMode,
+    );
   }
 
   /**
@@ -161,9 +176,14 @@ class ScreenshotUtilsAdapter implements ScreenshotUtils {
     targetBuffer: Buffer,
     cacheDir: string,
     tolerancePercent?: number,
-    maxComparisons?: number
+    maxComparisons?: number,
   ): Promise<{ filePath: string; similarity: number; matchFound: boolean }> {
-    return ScreenshotUtilsImpl.findSimilarScreenshots(targetBuffer, cacheDir, tolerancePercent, maxComparisons);
+    return ScreenshotUtilsImpl.findSimilarScreenshots(
+      targetBuffer,
+      cacheDir,
+      tolerancePercent,
+      maxComparisons,
+    );
   }
 
   /**

@@ -83,11 +83,11 @@ function headerTaskIds(raw: string): Set<number> {
 const MODERN_FORMAT_MIN_API = 30;
 
 function hasModernHeader(raw: string): boolean {
-  return raw.split("\n").some(l => /^\s*\*\s*Task\{\S+\s+#\d+\b/.test(l));
+  return raw.split("\n").some((l) => /^\s*\*\s*Task\{\S+\s+#\d+\b/.test(l));
 }
 
 function hasLegacyHeader(raw: string): boolean {
-  return raw.split("\n").some(l => /^\s*(?:Task id #\d+|\*?\s*TaskRecord\{\S+\s+#\d+)\b/.test(l));
+  return raw.split("\n").some((l) => /^\s*(?:Task id #\d+|\*?\s*TaskRecord\{\S+\s+#\d+)\b/.test(l));
 }
 
 /**
@@ -131,16 +131,16 @@ function qualify(component: string): string {
 /** All `apiNN-*.log` captures, sorted by API level for stable test ordering. */
 const captureFiles = fs.existsSync(CAPTURE_DIR)
   ? fs
-    .readdirSync(CAPTURE_DIR)
-    // Match the `apiNN-` naming, not just `.log`, so a stray non-capture file
-    // fails the coverage assertion cleanly rather than throwing on the
-    // `.match(/api(\d+)/)!` below.
-    .filter(f => /^api\d+.*\.log$/.test(f))
-    .sort((a, b) => {
-      const na = parseInt(a.match(/api(\d+)/)?.[1] ?? "0", 10);
-      const nb = parseInt(b.match(/api(\d+)/)?.[1] ?? "0", 10);
-      return na - nb;
-    })
+      .readdirSync(CAPTURE_DIR)
+      // Match the `apiNN-` naming, not just `.log`, so a stray non-capture file
+      // fails the coverage assertion cleanly rather than throwing on the
+      // `.match(/api(\d+)/)!` below.
+      .filter((f) => /^api\d+.*\.log$/.test(f))
+      .sort((a, b) => {
+        const na = parseInt(a.match(/api(\d+)/)?.[1] ?? "0", 10);
+        const nb = parseInt(b.match(/api(\d+)/)?.[1] ?? "0", 10);
+        return na - nb;
+      })
   : [];
 
 describe("GetBackStack against real captures (#4329)", () => {
@@ -150,7 +150,9 @@ describe("GetBackStack against real captures (#4329)", () => {
   });
 
   test("covers every supported API level 24..36", () => {
-    const levels = captureFiles.map(f => parseInt(f.match(/api(\d+)/)![1], 10)).sort((a, b) => a - b);
+    const levels = captureFiles
+      .map((f) => parseInt(f.match(/api(\d+)/)![1], 10))
+      .sort((a, b) => a - b);
     const expected = Array.from({ length: 36 - 24 + 1 }, (_, i) => 24 + i);
     expect(levels).toEqual(expected);
   });
@@ -158,8 +160,8 @@ describe("GetBackStack against real captures (#4329)", () => {
   test("the corpus exercises BOTH the legacy and modern header formats", () => {
     // Guards against a future edit that deletes all of one era's captures and
     // silently stops covering that parser path.
-    const anyLegacy = captureFiles.some(f => hasLegacyHeader(readCapture(f)));
-    const anyModern = captureFiles.some(f => hasModernHeader(readCapture(f)));
+    const anyLegacy = captureFiles.some((f) => hasLegacyHeader(readCapture(f)));
+    const anyModern = captureFiles.some((f) => hasModernHeader(readCapture(f)));
     expect(anyLegacy).toBe(true);
     expect(anyModern).toBe(true);
   });
@@ -200,7 +202,7 @@ describe("GetBackStack against real captures (#4329)", () => {
       test("marks at least one activity as the task root", async () => {
         const result = await parse(readCapture(file));
         expect(result.activities.length).toBeGreaterThan(0);
-        expect(result.activities.some(a => a.isTaskRoot === true)).toBe(true);
+        expect(result.activities.some((a) => a.isTaskRoot === true)).toBe(true);
       });
 
       test("never glues a brace or whitespace onto an activity component", async () => {
@@ -237,9 +239,9 @@ describe("GetBackStack against real captures (#4329)", () => {
             expect(row.rootOfTask).toBeDefined();
           }
           const result = await parse(raw);
-          expect(result.activities.map(a => ({ name: a.name, isTaskRoot: a.isTaskRoot }))).toEqual(
-            truth.map(r => ({ name: qualify(r.component), isTaskRoot: r.rootOfTask! }))
-          );
+          expect(
+            result.activities.map((a) => ({ name: a.name, isTaskRoot: a.isTaskRoot })),
+          ).toEqual(truth.map((r) => ({ name: qualify(r.component), isTaskRoot: r.rootOfTask! })));
         });
       } else {
         test("no rootOfTask printed; isTaskRoot stays index-derived (#4340)", async () => {
@@ -247,8 +249,8 @@ describe("GetBackStack against real captures (#4329)", () => {
           expect(raw).not.toContain("rootOfTask=");
           const truth = histGroundTruth(raw);
           const result = await parse(raw);
-          expect(result.activities.map(a => a.isTaskRoot)).toEqual(
-            truth.map(r => r.histIndex === 0)
+          expect(result.activities.map((a) => a.isTaskRoot)).toEqual(
+            truth.map((r) => r.histIndex === 0),
           );
         });
       }
@@ -309,10 +311,10 @@ describe("GetBackStack against real captures (#4329)", () => {
       expect(result.currentActivity?.name).toBe("com.android.contacts.activities.PeopleActivity");
       expect(result.currentTaskId).toBe(5);
       // Contacts (foreground), Settings, and the launcher -- three real tasks.
-      expect(result.tasks.map(t => t.rootActivity)).toEqual([
+      expect(result.tasks.map((t) => t.rootActivity)).toEqual([
         "com.android.contacts/.activities.PeopleActivity",
         "com.android.settings/.Settings",
-        "com.android.launcher3/.Launcher"
+        "com.android.launcher3/.Launcher",
       ]);
     });
 
@@ -330,7 +332,7 @@ describe("GetBackStack against real captures (#4329)", () => {
       test(`${file}: launcher prints as Hist #1 yet IS the task root`, async () => {
         const result = await parse(readCapture(file));
         const launcher = result.activities.find(
-          a => a.name === "com.google.android.apps.nexuslauncher.NexusLauncherActivity"
+          (a) => a.name === "com.google.android.apps.nexuslauncher.NexusLauncherActivity",
         );
         expect(launcher).toBeDefined();
         expect(launcher!.isTaskRoot).toBe(true);
@@ -340,7 +342,7 @@ describe("GetBackStack against real captures (#4329)", () => {
     test("api34: WifiSettingsActivity prints as Hist #0 yet is NOT the task root", async () => {
       const result = await parse(readCapture("api34-home-settings-secondapp.log"));
       const wifi = result.activities.find(
-        a => a.name === "com.android.settings.Settings$WifiSettingsActivity"
+        (a) => a.name === "com.android.settings.Settings$WifiSettingsActivity",
       );
       expect(wifi).toBeDefined();
       expect(wifi!.isTaskRoot).toBe(false);
@@ -354,7 +356,7 @@ describe("GetBackStack against real captures (#4329)", () => {
   describe("api34 task #9 rootActivity prefers rootOfTask=true (#4359)", () => {
     test("rootActivity names DeepLinkHomepageActivity, not the first Hist #0 Wifi row", async () => {
       const result = await parse(readCapture("api34-home-settings-secondapp.log"));
-      const task9 = result.tasks.find(t => t.id === 9);
+      const task9 = result.tasks.find((t) => t.id === 9);
       expect(task9).toBeDefined();
       expect(task9!.rootActivity).toBe("com.android.settings/.homepage.DeepLinkHomepageActivity");
       // packageName is unaffected -- both Hist #0 rows are com.android.settings.
@@ -370,37 +372,37 @@ describe("GetBackStack against real captures (#4329)", () => {
       "api24-home-settings-secondapp.log": [
         [5, "com.android.contacts/.activities.PeopleActivity"],
         [4, "com.android.settings/.Settings"],
-        [3, "com.android.launcher3/.Launcher"]
+        [3, "com.android.launcher3/.Launcher"],
       ],
       "api25-home-settings-secondapp.log": [
         [8, "com.android.contacts/.activities.PeopleActivity"],
         [7, "com.android.settings/.Settings$WifiSettingsActivity"],
         [6, "com.android.settings/.Settings"],
-        [5, "com.android.launcher3/.Launcher"]
+        [5, "com.android.launcher3/.Launcher"],
       ],
       "api26-home-settings-secondapp.log": [
         [8, "com.android.contacts/.activities.PeopleActivity"],
         [7, "com.android.settings/.Settings$WifiSettingsActivity"],
         [6, "com.android.settings/.Settings"],
-        [5, "com.google.android.apps.nexuslauncher/.NexusLauncherActivity"]
+        [5, "com.google.android.apps.nexuslauncher/.NexusLauncherActivity"],
       ],
       "api27-home-settings-secondapp.log": [
         [8, "com.android.contacts/.activities.PeopleActivity"],
         [7, "com.android.settings/.Settings$WifiSettingsActivity"],
         [6, "com.android.settings/.Settings"],
-        [5, "com.google.android.apps.nexuslauncher/.NexusLauncherActivity"]
+        [5, "com.google.android.apps.nexuslauncher/.NexusLauncherActivity"],
       ],
       "api28-home-settings-secondapp.log": [
         [8, "com.android.contacts/.activities.PeopleActivity"],
         [7, "com.android.settings/.Settings$WifiSettingsActivity"],
         [6, "com.android.settings/.Settings"],
-        [5, "com.android.launcher3/.Launcher"]
+        [5, "com.android.launcher3/.Launcher"],
       ],
       "api29-home-settings-secondapp.log": [
         [7, "com.android.contacts/.activities.PeopleActivity"],
         [6, "com.android.settings/.homepage.SettingsHomepageActivity"],
-        [5, "com.google.android.apps.nexuslauncher/.NexusLauncherActivity"]
-      ]
+        [5, "com.google.android.apps.nexuslauncher/.NexusLauncherActivity"],
+      ],
     };
 
     for (const [file, expected] of Object.entries(BASELINE)) {
@@ -410,7 +412,7 @@ describe("GetBackStack against real captures (#4329)", () => {
         expect(raw).not.toContain("rootOfTask=");
         const result = await parse(raw);
         for (const [id, rootActivity] of expected) {
-          const task = result.tasks.find(t => t.id === id);
+          const task = result.tasks.find((t) => t.id === id);
           expect(task?.rootActivity).toBe(rootActivity);
         }
       });
@@ -421,7 +423,7 @@ describe("GetBackStack against real captures (#4329)", () => {
     test("parses the modern Task{...} headers and uid-prefixed affinity", async () => {
       const result = await parse(readCapture("api34-home-settings-secondapp.log"));
 
-      const settings = result.tasks.find(t => t.packageName === "com.android.settings");
+      const settings = result.tasks.find((t) => t.packageName === "com.android.settings");
       expect(settings).toBeDefined();
       // Android 11+ prepends the uid to Task.affinity (b/35954083); observed
       // verbatim here as `A=1000:com.android.settings`.
@@ -432,7 +434,7 @@ describe("GetBackStack against real captures (#4329)", () => {
       const result = await parse(readCapture("api34-home-settings-secondapp.log"));
 
       expect(result.currentActivity?.name).toBe(
-        "com.google.android.apps.contacts.activities.OnboardingSignInActivity"
+        "com.google.android.apps.contacts.activities.OnboardingSignInActivity",
       );
       expect(result.currentTaskId).toBe(10);
     });

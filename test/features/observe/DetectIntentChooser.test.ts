@@ -2,7 +2,11 @@ import { expect, describe, test, beforeEach } from "bun:test";
 import { DetectIntentChooser } from "../../../src/features/observe/DetectIntentChooser";
 import { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 
-const testDevice: BootedDevice = { name: "test-device", platform: "android", deviceId: "emulator-5554" };
+const testDevice: BootedDevice = {
+  name: "test-device",
+  platform: "android",
+  deviceId: "emulator-5554",
+};
 import { FakeDeepLinkManager } from "../../fakes/FakeDeepLinkManager";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeWindow } from "../../fakes/FakeWindow";
@@ -23,30 +27,30 @@ describe("DetectIntentChooser", () => {
       hierarchy: {
         node: {
           $: {
-            class: "com.android.internal.app.ChooserActivity"
+            class: "com.android.internal.app.ChooserActivity",
           },
           node: [
             {
               $: {
-                text: "Choose an app"
-              }
+                text: "Choose an app",
+              },
             },
             {
               $: {
                 text: "Always",
-                class: "android.widget.Button"
-              }
+                class: "android.widget.Button",
+              },
             },
             {
               $: {
                 text: "Just once",
-                class: "android.widget.Button"
-              }
-            }
-          ]
-        }
-      }
-    }
+                class: "android.widget.Button",
+              },
+            },
+          ],
+        },
+      },
+    },
   };
 
   beforeEach(() => {
@@ -58,7 +62,11 @@ describe("DetectIntentChooser", () => {
 
     // Configure default responses
     fakeWindow.configureCachedActiveWindow(null);
-    fakeWindow.configureActiveWindow({ appId: "com.test.app", activityName: "MainActivity", layoutSeqSum: 123 });
+    fakeWindow.configureActiveWindow({
+      appId: "com.test.app",
+      activityName: "MainActivity",
+      layoutSeqSum: 123,
+    });
     fakeObserveScreen.setObserveResult(mockObserveResult);
     fakeDeepLinkManager.setDefaultIntentChooserDetected(true);
 
@@ -95,18 +103,18 @@ describe("DetectIntentChooser", () => {
           hierarchy: {
             node: {
               $: {
-                class: "android.widget.LinearLayout"
+                class: "android.widget.LinearLayout",
               },
               node: [
                 {
                   $: {
-                    text: "Normal app content"
-                  }
-                }
-              ]
-            }
-          }
-        }
+                    text: "Normal app content",
+                  },
+                },
+              ],
+            },
+          },
+        },
       };
 
       fakeObserveScreen.setObserveResult(normalObserveResult);
@@ -129,8 +137,14 @@ describe("DetectIntentChooser", () => {
 
     test("should handle observe screen failure", async () => {
       // Set failure mode for observation
-      fakeObserveScreen.setFailureMode("getMostRecentCachedObserveResult", new Error("Cannot perform action without view hierarchy"));
-      fakeObserveScreen.setFailureMode("execute", new Error("Cannot perform action without view hierarchy"));
+      fakeObserveScreen.setFailureMode(
+        "getMostRecentCachedObserveResult",
+        new Error("Cannot perform action without view hierarchy"),
+      );
+      fakeObserveScreen.setFailureMode(
+        "execute",
+        new Error("Cannot perform action without view hierarchy"),
+      );
 
       try {
         await detectIntentChooser.execute();
@@ -142,8 +156,14 @@ describe("DetectIntentChooser", () => {
 
     test("should handle observe screen returning null view hierarchy", async () => {
       // Set failure mode for observation
-      fakeObserveScreen.setFailureMode("getMostRecentCachedObserveResult", new Error("Cannot perform action without view hierarchy"));
-      fakeObserveScreen.setFailureMode("execute", new Error("Cannot perform action without view hierarchy"));
+      fakeObserveScreen.setFailureMode(
+        "getMostRecentCachedObserveResult",
+        new Error("Cannot perform action without view hierarchy"),
+      );
+      fakeObserveScreen.setFailureMode(
+        "execute",
+        new Error("Cannot perform action without view hierarchy"),
+      );
 
       try {
         await detectIntentChooser.execute();
@@ -171,37 +191,37 @@ describe("DetectIntentChooser", () => {
           hierarchy: {
             node: {
               $: {
-                class: "com.android.internal.app.ChooserActivity"
-              }
-            }
-          }
+                class: "com.android.internal.app.ChooserActivity",
+              },
+            },
+          },
         },
         {
           hierarchy: {
             node: {
               $: {
-                class: "com.android.internal.app.ResolverActivity"
-              }
-            }
-          }
+                class: "com.android.internal.app.ResolverActivity",
+              },
+            },
+          },
         },
         {
           hierarchy: {
             node: {
               $: {
-                text: "Choose an app"
-              }
-            }
-          }
+                text: "Choose an app",
+              },
+            },
+          },
         },
         {
           hierarchy: {
             node: {
               $: {
-                text: "Open with"
-              }
-            }
-          }
+                text: "Open with",
+              },
+            },
+          },
         },
         {
           hierarchy: {
@@ -210,24 +230,24 @@ describe("DetectIntentChooser", () => {
               node: [
                 {
                   $: {
-                    text: "Always"
-                  }
+                    text: "Always",
+                  },
                 },
                 {
                   $: {
-                    text: "Just once"
-                  }
-                }
-              ]
-            }
-          }
-        }
+                    text: "Just once",
+                  },
+                },
+              ],
+            },
+          },
+        },
       ];
 
       for (const viewHierarchy of testCases) {
         fakeObserveScreen.setObserveResult({
           ...mockObserveResult,
-          viewHierarchy
+          viewHierarchy,
         });
         fakeDeepLinkManager.setDefaultIntentChooserDetected(true);
 
@@ -244,35 +264,35 @@ describe("DetectIntentChooser", () => {
             node: {
               $: {
                 class: "android.widget.Button",
-                text: "Click me"
-              }
-            }
-          }
+                text: "Click me",
+              },
+            },
+          },
         },
         {
           hierarchy: {
             node: {
               $: {
-                text: "Welcome to the app"
-              }
-            }
-          }
+                text: "Welcome to the app",
+              },
+            },
+          },
         },
         {
           hierarchy: {
             node: {
               $: {
-                class: "com.example.MainActivity"
-              }
-            }
-          }
-        }
+                class: "com.example.MainActivity",
+              },
+            },
+          },
+        },
       ];
 
       for (const viewHierarchy of testCases) {
         fakeObserveScreen.setObserveResult({
           ...mockObserveResult,
-          viewHierarchy
+          viewHierarchy,
         });
         fakeDeepLinkManager.setDefaultIntentChooserDetected(false);
 

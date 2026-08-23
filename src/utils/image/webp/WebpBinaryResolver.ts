@@ -14,7 +14,8 @@ import { DefaultHostCommandExecutor, type HostProcessExecutor } from "../../Host
 import { logger } from "../../logger";
 
 const LIBWEBP_VERSION = "1.6.0";
-const WEBP_DOWNLOAD_BASE_URL = "https://storage.googleapis.com/downloads.webmproject.org/releases/webp";
+const WEBP_DOWNLOAD_BASE_URL =
+  "https://storage.googleapis.com/downloads.webmproject.org/releases/webp";
 const archiveProvisioningByPath = new Map<string, Promise<void>>();
 
 type WebpBinary = "cwebp" | "dwebp";
@@ -107,18 +108,24 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
     command: string,
     args: string[],
     input: Buffer,
-    envVar: string
+    envVar: string,
   ): Promise<Buffer> {
     const child = this.processExecutor.spawn(command, args, { stdio: ["pipe", "pipe", "pipe"] });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
 
     if (!child.stdin || !child.stdout || !child.stderr) {
-      throw new ActionableError(`${toolName} was spawned without piped stdio. Set ${envVar} to a working ${toolName} binary.`);
+      throw new ActionableError(
+        `${toolName} was spawned without piped stdio. Set ${envVar} to a working ${toolName} binary.`,
+      );
     }
 
-    child.stdout.on("data", data => stdout.push(Buffer.isBuffer(data) ? data : Buffer.from(data)));
-    child.stderr.on("data", data => stderr.push(Buffer.isBuffer(data) ? data : Buffer.from(data)));
+    child.stdout.on("data", (data) =>
+      stdout.push(Buffer.isBuffer(data) ? data : Buffer.from(data)),
+    );
+    child.stderr.on("data", (data) =>
+      stderr.push(Buffer.isBuffer(data) ? data : Buffer.from(data)),
+    );
     const completion = waitForCompletion(child, child.stdin, toolName, envVar, stderr);
     try {
       child.stdin.end(input);
@@ -136,7 +143,9 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
       if (await isExecutableFile(override, this.platform)) {
         return override;
       }
-      throw new ActionableError(`${envVar} points to '${override}', but that ${binary} binary is not executable or does not exist.`);
+      throw new ActionableError(
+        `${envVar} points to '${override}', but that ${binary} binary is not executable or does not exist.`,
+      );
     }
 
     const pathBinary = await this.findOnPath(binary);
@@ -155,7 +164,7 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
     }
 
     throw new ActionableError(
-      `Unable to resolve ${binary}. Set ${envVar}, add ${binary} to PATH, or ensure the bundled vendor/libwebp/win32-x64 copy is present.`
+      `Unable to resolve ${binary}. Set ${envVar}, add ${binary} to PATH, or ensure the bundled vendor/libwebp/win32-x64 copy is present.`,
     );
   }
 
@@ -184,8 +193,14 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
       return null;
     }
 
-    const candidate = path.join(this.projectRoot, "vendor", "libwebp", "win32-x64", `${binary}.exe`);
-    return await isExecutableFile(candidate, this.platform) ? candidate : null;
+    const candidate = path.join(
+      this.projectRoot,
+      "vendor",
+      "libwebp",
+      "win32-x64",
+      `${binary}.exe`,
+    );
+    return (await isExecutableFile(candidate, this.platform)) ? candidate : null;
   }
 
   private async findOrDownloadOffPlatformBinary(binary: WebpBinary): Promise<string | null> {
@@ -194,7 +209,12 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
       return null;
     }
 
-    const binaryPath = path.join(this.cacheDir, archive.directoryName, "bin", executableName(binary, this.platform));
+    const binaryPath = path.join(
+      this.cacheDir,
+      archive.directoryName,
+      "bin",
+      executableName(binary, this.platform),
+    );
     if (await isExecutableFile(binaryPath, this.platform)) {
       return binaryPath;
     }
@@ -206,7 +226,9 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
       return binaryPath;
     }
 
-    throw new ActionableError(`Downloaded libwebp archive did not provide ${binary} at ${binaryPath}. Set ${envVarFor(binary)} instead.`);
+    throw new ActionableError(
+      `Downloaded libwebp archive did not provide ${binary} at ${binaryPath}. Set ${envVarFor(binary)} instead.`,
+    );
   }
 
   private async provisionArchiveOnce(archive: WebpArchiveInfo): Promise<void> {
@@ -227,12 +249,18 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
   private async provisionArchive(archive: WebpArchiveInfo): Promise<void> {
     await fs.mkdir(this.cacheDir, { recursive: true });
     const archivePath = path.join(this.cacheDir, archive.archiveName);
-    await this.fileDownloader.download(`${WEBP_DOWNLOAD_BASE_URL}/${archive.archiveName}`, archivePath);
+    await this.fileDownloader.download(
+      `${WEBP_DOWNLOAD_BASE_URL}/${archive.archiveName}`,
+      archivePath,
+    );
     await this.verifyArchiveChecksum(archive, archivePath);
     await this.archiveExtractor.extractTarGz({ archivePath, destinationDir: this.cacheDir });
   }
 
-  private async verifyArchiveChecksum(archive: WebpArchiveInfo, archivePath: string): Promise<void> {
+  private async verifyArchiveChecksum(
+    archive: WebpArchiveInfo,
+    archivePath: string,
+  ): Promise<void> {
     let actualChecksum: string;
     try {
       const result = await this.checksumCalculator.computeFileSha256(archivePath);
@@ -240,7 +268,7 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
     } catch (error) {
       throw new ActionableError(
         `Unable to verify downloaded libwebp archive ${archive.archiveName}: ${errorMessage(error)}. ` +
-        "Set AUTOMOBILE_CWEBP_PATH and AUTOMOBILE_DWEBP_PATH to trusted binaries, or retry the download."
+          "Set AUTOMOBILE_CWEBP_PATH and AUTOMOBILE_DWEBP_PATH to trusted binaries, or retry the download.",
       );
     }
 
@@ -248,8 +276,8 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
     if (actualChecksum !== expectedChecksum) {
       throw new ActionableError(
         `Downloaded libwebp archive checksum verification failed for ${archive.archiveName}. ` +
-        `Expected SHA-256 ${expectedChecksum}, got ${actualChecksum}. ` +
-        "Set AUTOMOBILE_CWEBP_PATH and AUTOMOBILE_DWEBP_PATH to trusted binaries, or retry the download."
+          `Expected SHA-256 ${expectedChecksum}, got ${actualChecksum}. ` +
+          "Set AUTOMOBILE_CWEBP_PATH and AUTOMOBILE_DWEBP_PATH to trusted binaries, or retry the download.",
       );
     }
   }
@@ -267,18 +295,33 @@ function pathListDelimiter(platform: NodeJS.Platform): string {
   return platform === "win32" ? ";" : ":";
 }
 
-function archiveInfoFor(platform: NodeJS.Platform, arch: NodeJS.Architecture): WebpArchiveInfo | null {
+function archiveInfoFor(
+  platform: NodeJS.Platform,
+  arch: NodeJS.Architecture,
+): WebpArchiveInfo | null {
   if (platform === "darwin" && arch === "arm64") {
-    return archiveInfo("mac-arm64", "bc6bf84cc70f3f8574fba797d1e4a7dea4feebe9fa4be919f202413ea2b3b8f2");
+    return archiveInfo(
+      "mac-arm64",
+      "bc6bf84cc70f3f8574fba797d1e4a7dea4feebe9fa4be919f202413ea2b3b8f2",
+    );
   }
   if (platform === "darwin" && arch === "x64") {
-    return archiveInfo("mac-x86-64", "f112dd83b420ab2a4b27d46610d9827ddf4200216023281de378647ecca31c2a");
+    return archiveInfo(
+      "mac-x86-64",
+      "f112dd83b420ab2a4b27d46610d9827ddf4200216023281de378647ecca31c2a",
+    );
   }
   if (platform === "linux" && arch === "arm64") {
-    return archiveInfo("linux-aarch64", "69f5eebe203e0f3942fe37986209a1725741be19c152950a4283b376c95ec798");
+    return archiveInfo(
+      "linux-aarch64",
+      "69f5eebe203e0f3942fe37986209a1725741be19c152950a4283b376c95ec798",
+    );
   }
   if (platform === "linux" && arch === "x64") {
-    return archiveInfo("linux-x86-64", "1c5ffab71efecefa0e3c23516c3a3a1dccb45cc310ae1095c6f14ae268e38067");
+    return archiveInfo(
+      "linux-x86-64",
+      "1c5ffab71efecefa0e3c23516c3a3a1dccb45cc310ae1095c6f14ae268e38067",
+    );
   }
   return null;
 }
@@ -288,7 +331,7 @@ function archiveInfo(platformToken: string, sha256: string): WebpArchiveInfo {
   return {
     directoryName,
     archiveName: `${directoryName}.tar.gz`,
-    sha256
+    sha256,
   };
 }
 
@@ -314,20 +357,21 @@ async function isExecutableFile(filePath: string, platform: NodeJS.Platform): Pr
   }
 }
 
-
 async function waitForCompletion(
   child: ChildProcess,
   stdin: Writable,
   toolName: WebpBinary,
   envVar: string,
-  stderr: Buffer[]
+  stderr: Buffer[],
 ): Promise<void> {
   await new Promise<void>((resolve, reject) => {
-    child.once("error", error => {
+    child.once("error", (error) => {
       reject(actionableProcessError(toolName, envVar, error.message));
     });
-    stdin.once("error", error => {
-      reject(actionableProcessError(toolName, envVar, `stdin write failed: ${errorMessage(error)}`));
+    stdin.once("error", (error) => {
+      reject(
+        actionableProcessError(toolName, envVar, `stdin write failed: ${errorMessage(error)}`),
+      );
     });
     child.once("close", (code, signal) => {
       if (code === 0) {
@@ -336,24 +380,39 @@ async function waitForCompletion(
       }
       const detail = Buffer.concat(stderr).toString("utf8").trim();
       const suffix = detail ? `: ${detail}` : "";
-      reject(actionableProcessError(toolName, envVar, `exited with code ${code ?? "null"} signal ${signal ?? "null"}${suffix}`));
+      reject(
+        actionableProcessError(
+          toolName,
+          envVar,
+          `exited with code ${code ?? "null"} signal ${signal ?? "null"}${suffix}`,
+        ),
+      );
     });
   });
 }
 
-function actionableProcessError(toolName: WebpBinary, envVar: string, detail: string): ActionableError {
-  return new ActionableError(`${toolName} failed (${detail}). Set ${envVar} to a working ${toolName} binary.`);
+function actionableProcessError(
+  toolName: WebpBinary,
+  envVar: string,
+  detail: string,
+): ActionableError {
+  return new ActionableError(
+    `${toolName} failed (${detail}). Set ${envVar} to a working ${toolName} binary.`,
+  );
 }
 
 function defaultProjectRoot(): string {
   const candidates = [
     process.argv[1] ? path.resolve(path.dirname(process.argv[1]), "..") : null,
     process.argv[1] ? path.resolve(path.dirname(process.argv[1]), "..", "..") : null,
-    process.cwd()
+    process.cwd(),
   ].filter((candidate): candidate is string => candidate !== null);
 
   for (const candidate of candidates) {
-    if (existsSync(path.join(candidate, "vendor", "libwebp")) || existsSync(path.join(candidate, "package.json"))) {
+    if (
+      existsSync(path.join(candidate, "vendor", "libwebp")) ||
+      existsSync(path.join(candidate, "package.json"))
+    ) {
       return candidate;
     }
   }

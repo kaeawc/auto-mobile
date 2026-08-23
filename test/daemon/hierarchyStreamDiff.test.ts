@@ -7,7 +7,7 @@ import type { ViewHierarchyNode, ViewHierarchyResult } from "../../src/models/Vi
 
 function node(
   attrs: Record<string, unknown>,
-  children: ViewHierarchyNode[] = []
+  children: ViewHierarchyNode[] = [],
 ): ViewHierarchyNode {
   return children.length > 0 ? { $: attrs, node: children } : { $: attrs };
 }
@@ -26,7 +26,10 @@ describe("annotateHierarchyDiff", () => {
     // The on-device XML→JSON emits `node` as an array for 2+ children but a bare object for a
     // single child (and can surface an empty `{}`). This once threw "{} is not iterable" and killed
     // the whole hierarchy push — leaving the interactive pane unable to arm on some devices.
-    const singleChild = { $: { class: "Root" }, node: { $: { class: "OnlyChild" } } } as unknown as ViewHierarchyNode;
+    const singleChild = {
+      $: { class: "Root" },
+      node: { $: { class: "OnlyChild" } },
+    } as unknown as ViewHierarchyNode;
     const empty = { $: { class: "Root" }, node: {} } as unknown as ViewHierarchyNode;
 
     // Both forms must be walked without throwing (across a first frame and a diff).
@@ -39,10 +42,10 @@ describe("annotateHierarchyDiff", () => {
       hierarchy: { node: { $: { class: "Root" } } as unknown as ViewHierarchyNode },
     };
     expect(
-      annotateHierarchyDiff(childlessBaseline, { hierarchy: { node: singleChild } }).summary.added
+      annotateHierarchyDiff(childlessBaseline, { hierarchy: { node: singleChild } }).summary.added,
     ).toBe(1);
     expect(
-      annotateHierarchyDiff(childlessBaseline, { hierarchy: { node: empty } }).summary.added
+      annotateHierarchyDiff(childlessBaseline, { hierarchy: { node: empty } }).summary.added,
     ).toBe(0);
   });
 
@@ -78,8 +81,14 @@ describe("annotateHierarchyDiff", () => {
   });
 
   test("a bounds change marks the node changed", () => {
-    const previous = hierarchy({ $: { class: "Root" }, bounds: { left: 0, top: 0, right: 10, bottom: 10 } });
-    const current = hierarchy({ $: { class: "Root" }, bounds: { left: 0, top: 0, right: 20, bottom: 10 } });
+    const previous = hierarchy({
+      $: { class: "Root" },
+      bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+    });
+    const current = hierarchy({
+      $: { class: "Root" },
+      bounds: { left: 0, top: 0, right: 20, bottom: 10 },
+    });
 
     const { summary } = annotateHierarchyDiff(previous, current);
 
@@ -89,7 +98,7 @@ describe("annotateHierarchyDiff", () => {
   test("an added subtree is fully annotated and counted", () => {
     const previous = hierarchy(node({ class: "Root" }, [node({ class: "A" })]));
     const current = hierarchy(
-      node({ class: "Root" }, [node({ class: "A" }), node({ class: "B" }, [node({ class: "C" })])])
+      node({ class: "Root" }, [node({ class: "A" }), node({ class: "B" }, [node({ class: "C" })])]),
     );
 
     const { hierarchy: out, summary } = annotateHierarchyDiff(previous, current);
@@ -102,7 +111,7 @@ describe("annotateHierarchyDiff", () => {
 
   test("a removed subtree is counted but not annotated (it is gone)", () => {
     const previous = hierarchy(
-      node({ class: "Root" }, [node({ class: "A" }), node({ class: "B" }, [node({ class: "C" })])])
+      node({ class: "Root" }, [node({ class: "A" }), node({ class: "B" }, [node({ class: "C" })])]),
     );
     const current = hierarchy(node({ class: "Root" }, [node({ class: "A" })]));
 
@@ -140,7 +149,11 @@ describe("annotateHierarchyDiff", () => {
  * hierarchyStreamDiff.ts — a failing row is a finding about the stringifier.
  */
 describe("nodeSignature alias folding", () => {
-  const aliasEquivalentRows: Array<{ name: string; prev: ViewHierarchyNode; cur: ViewHierarchyNode }> = [
+  const aliasEquivalentRows: Array<{
+    name: string;
+    prev: ViewHierarchyNode;
+    cur: ViewHierarchyNode;
+  }> = [
     {
       name: "class and className are the same field",
       prev: node({ class: "android.widget.TextView" }),
@@ -185,7 +198,7 @@ describe("nodeSignature alias folding", () => {
   test("a real class change under the className spelling is still marked changed", () => {
     const { summary } = annotateHierarchyDiff(
       hierarchy(node({ className: "A" })),
-      hierarchy(node({ className: "B" }))
+      hierarchy(node({ className: "B" })),
     );
     expect(summary.changed).toBe(1);
   });

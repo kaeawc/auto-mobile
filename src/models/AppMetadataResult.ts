@@ -8,5 +8,5 @@ export interface AppMetadataResult {
   buildNumber: string;
   installPath: string;
   firstInstallTime?: string; // device-local time (Android: from dumpsys, no timezone offset)
-  lastUpdateTime?: string;   // device-local time (Android: from dumpsys, no timezone offset)
+  lastUpdateTime?: string; // device-local time (Android: from dumpsys, no timezone offset)
 }

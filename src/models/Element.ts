@@ -10,8 +10,8 @@ export interface Element {
   "content-desc"?: string;
   "resource-id"?: string;
   "view-id"?: string;
-  "class"?: string;
-  "package"?: string;
+  class?: string;
+  package?: string;
   checkable?: boolean | string;
   checked?: boolean | string;
   clickable?: boolean | string;

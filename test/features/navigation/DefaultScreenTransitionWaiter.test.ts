@@ -41,45 +41,41 @@ function stubManager(screens: Array<string | null>): {
   return { manager, pollCount: () => index };
 }
 
-describe("DefaultScreenTransitionWaiter", function() {
-  test("resolves true on the first poll when already on the target screen", async function() {
+describe("DefaultScreenTransitionWaiter", function () {
+  test("resolves true on the first poll when already on the target screen", async function () {
     const { manager, pollCount } = stubManager(["TargetScreen"]);
-    const waiter = new DefaultScreenTransitionWaiter(
-      manager,
-      500,
-      new ScriptedClock([0, 250])
-    );
+    const waiter = new DefaultScreenTransitionWaiter(manager, 500, new ScriptedClock([0, 250]));
 
     expect(await waiter.waitForScreen("TargetScreen", 1000)).toBe(true);
     expect(pollCount()).toBe(1);
   });
 
-  test("resolves true once the target screen appears on a later poll", async function() {
+  test("resolves true once the target screen appears on a later poll", async function () {
     const { manager, pollCount } = stubManager(["Splash", "Splash", "TargetScreen"]);
     const waiter = new DefaultScreenTransitionWaiter(
       manager,
       500,
-      new ScriptedClock([0, 200, 400, 600])
+      new ScriptedClock([0, 200, 400, 600]),
     );
 
     expect(await waiter.waitForScreen("TargetScreen", 1000)).toBe(true);
     expect(pollCount()).toBe(3);
   });
 
-  test("resolves false when the target screen never appears before the deadline", async function() {
+  test("resolves false when the target screen never appears before the deadline", async function () {
     const { manager, pollCount } = stubManager(["Other"]);
     // startTime=0, then deadline checks at 250/500/750/1000; 1000 is not < 1000.
     const waiter = new DefaultScreenTransitionWaiter(
       manager,
       500,
-      new ScriptedClock([0, 250, 500, 750, 1000, 1500])
+      new ScriptedClock([0, 250, 500, 750, 1000, 1500]),
     );
 
     expect(await waiter.waitForScreen("TargetScreen", 1000)).toBe(false);
     expect(pollCount()).toBe(3);
   });
 
-  test("resolves false when the screen only becomes current exactly at the deadline", async function() {
+  test("resolves false when the screen only becomes current exactly at the deadline", async function () {
     // Elapsed reaches the timeout on the very first check. A strict `< timeoutMs`
     // gate gives up without polling; the `<= timeoutMs` mutant would poll and
     // wrongly report success. So a screen that is "ready" at t == timeout is a
@@ -88,7 +84,7 @@ describe("DefaultScreenTransitionWaiter", function() {
     const waiter = new DefaultScreenTransitionWaiter(
       manager,
       500,
-      new ScriptedClock([0, 1000, 1500])
+      new ScriptedClock([0, 1000, 1500]),
     );
 
     expect(await waiter.waitForScreen("TargetScreen", 1000)).toBe(false);

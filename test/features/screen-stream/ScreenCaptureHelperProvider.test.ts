@@ -31,7 +31,7 @@ describe("ScreenCaptureHelperProvider", () => {
 
   function makeProvider(
     expectedChecksum = EXPECTED_SHA,
-    platform?: NodeJS.Platform
+    platform?: NodeJS.Platform,
   ): ScreenCaptureHelperProvider {
     return new ScreenCaptureHelperProvider({
       cacheDir,
@@ -74,7 +74,7 @@ describe("ScreenCaptureHelperProvider", () => {
       `https://releases.example/0.0.46/${SCREEN_CAPTURE_HELPER_ARCHIVE_FILENAME}`,
     ]);
     const metadata = JSON.parse(
-      await fs.readFile(path.join(cacheDir, SCREEN_CAPTURE_HELPER_METADATA_FILENAME), "utf8")
+      await fs.readFile(path.join(cacheDir, SCREEN_CAPTURE_HELPER_METADATA_FILENAME), "utf8"),
     ) as ScreenCaptureHelperMetadata;
     expect(metadata).toMatchObject({
       version: "0.0.46",
@@ -106,7 +106,7 @@ describe("ScreenCaptureHelperProvider", () => {
     const archive = new AdmZip();
     archive.addFile(
       `${SCREEN_CAPTURE_HELPER_CACHE_FILENAME}/${SCREEN_CAPTURE_HELPER_CACHE_FILENAME}`,
-      Buffer.from("signed-universal-helper")
+      Buffer.from("signed-universal-helper"),
     );
     downloader.payload = archive.toBuffer();
 
@@ -118,7 +118,9 @@ describe("ScreenCaptureHelperProvider", () => {
     checksumCalculator.checksum = "b".repeat(64);
 
     await expect(makeProvider().ensure()).rejects.toThrow(/checksum verification failed/);
-    await expect(fs.access(path.join(cacheDir, SCREEN_CAPTURE_HELPER_CACHE_FILENAME))).rejects.toThrow();
+    await expect(
+      fs.access(path.join(cacheDir, SCREEN_CAPTURE_HELPER_CACHE_FILENAME)),
+    ).rejects.toThrow();
   });
 
   test("rejects an archive without the helper executable", async () => {
@@ -126,7 +128,9 @@ describe("ScreenCaptureHelperProvider", () => {
     archive.addFile("unexpected", Buffer.from("not a helper"));
     downloader.payload = archive.toBuffer();
 
-    await expect(makeProvider().ensure()).rejects.toThrow(/must contain exactly one screen-capture-helper/);
+    await expect(makeProvider().ensure()).rejects.toThrow(
+      /must contain exactly one screen-capture-helper/,
+    );
   });
 
   test("does not download an unverifiable release asset", async () => {
@@ -138,7 +142,7 @@ describe("ScreenCaptureHelperProvider", () => {
 
   test("cancels a stalled release download at the helper-resolution deadline", async () => {
     let downloadStarted: (() => void) | null = null;
-    const started = new Promise<void>(resolve => {
+    const started = new Promise<void>((resolve) => {
       downloadStarted = resolve;
     });
     const stalled = new ScreenCaptureHelperProvider({

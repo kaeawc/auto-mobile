@@ -11,12 +11,12 @@ import { FakeWebSocket } from "../../../fakes/FakeWebSocket";
 // AndroidCtrlProxyClient, an in-flight screenshot capture must not leak a
 // signal-less ADB screencap fallback that outlives close(). The client latches
 // a `closed` flag in close() so captureScreenshotViaAdb() short-circuits.
-describe("AndroidCtrlProxyClient close() suppresses the ADB screencap fallback", function() {
+describe("AndroidCtrlProxyClient close() suppresses the ADB screencap fallback", function () {
   let fakeAdb: FakeAdbExecutor;
   let fakeTimer: FakeTimer;
   let testDevice: BootedDevice;
 
-  beforeEach(function() {
+  beforeEach(function () {
     fakeTimer = new FakeTimer();
     fakeAdb = new FakeAdbExecutor();
     fakeAdb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
@@ -32,10 +32,13 @@ describe("AndroidCtrlProxyClient close() suppresses the ADB screencap fallback",
     };
     AndroidCtrlProxyManager.resetInstances();
     AndroidCtrlProxyClient.resetInstances();
-    AndroidCtrlProxyManager.getInstance(testDevice, new FakeAdbClientFactory()).clearAvailabilityCache();
+    AndroidCtrlProxyManager.getInstance(
+      testDevice,
+      new FakeAdbClientFactory(),
+    ).clearAvailabilityCache();
   });
 
-  afterEach(async function() {
+  afterEach(async function () {
     AndroidCtrlProxyClient.resetInstances();
   });
 
@@ -43,12 +46,12 @@ describe("AndroidCtrlProxyClient close() suppresses the ADB screencap fallback",
     return AndroidCtrlProxyClient.createForTesting(
       testDevice,
       fakeAdb,
-      url => new FakeWebSocket(url, "none", 0, fakeTimer) as unknown as WebSocket,
-      fakeTimer
+      (url) => new FakeWebSocket(url, "none", 0, fakeTimer) as unknown as WebSocket,
+      fakeTimer,
     );
   }
 
-  test("issues no ADB screencap once the client is closed", async function() {
+  test("issues no ADB screencap once the client is closed", async function () {
     const client = createClient();
     // Force the a11y-unsupported branch so captureScreenshotForObservationStream()
     // routes straight to the ADB fallback, isolating the guard under test.
@@ -63,7 +66,7 @@ describe("AndroidCtrlProxyClient close() suppresses the ADB screencap fallback",
     expect(fakeAdb.wasCommandExecuted("screencap")).toBe(false);
   });
 
-  test("still falls back to ADB screencap when merely disconnected (not closed)", async function() {
+  test("still falls back to ADB screencap when merely disconnected (not closed)", async function () {
     const client = createClient();
     (client as unknown as { a11yScreenshotSupported: boolean }).a11yScreenshotSupported = false;
 

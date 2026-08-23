@@ -74,7 +74,7 @@ describe("vision result cache lifetime across tool calls", () => {
     // Real VisionFallback, real cache, real TTL — only the paid client and the
     // filesystem read behind the content fingerprint are faked.
     setSharedVisionFallbackRegistry(
-      new VisionFallbackRegistry(cfg => new VisionFallback(cfg, timer, client, checksums))
+      new VisionFallbackRegistry((cfg) => new VisionFallback(cfg, timer, client, checksums)),
     );
   });
 
@@ -84,7 +84,7 @@ describe("vision result cache lifetime across tool calls", () => {
 
   const enrich = async (
     capturer: FakeScreenshotCapturer,
-    cfg: VisionFallbackConfig
+    cfg: VisionFallbackConfig,
   ): Promise<string> =>
     getVisionEnrichedError(capturer, null, { text: "Login" }, cfg, "Element not found");
 
@@ -206,14 +206,18 @@ describe("VisionFallbackRegistry", () => {
   });
 
   test("returns the same instance for an equivalent config", () => {
-    const registry = new VisionFallbackRegistry(cfg => new VisionFallback(cfg, new FakeTimer(), new CountingVisionClient()));
+    const registry = new VisionFallbackRegistry(
+      (cfg) => new VisionFallback(cfg, new FakeTimer(), new CountingVisionClient()),
+    );
 
     expect(registry.get(config())).toBe(registry.get(config()));
     expect(registry.size).toBe(1);
   });
 
   test("bounds how many instances it retains", () => {
-    const registry = new VisionFallbackRegistry(cfg => new VisionFallback(cfg, new FakeTimer(), new CountingVisionClient()));
+    const registry = new VisionFallbackRegistry(
+      (cfg) => new VisionFallback(cfg, new FakeTimer(), new CountingVisionClient()),
+    );
 
     for (let i = 0; i < 20; i++) {
       registry.get(config({ cacheTtlMinutes: i }));

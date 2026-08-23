@@ -26,7 +26,7 @@ export class RecentApps extends BaseVisualChange {
     adb: AdbClient | null = null,
     timer: Timer = defaultTimer,
     finder: ElementFinder = new DefaultElementFinder(),
-    geometry: ElementGeometry = new DefaultElementGeometry()
+    geometry: ElementGeometry = new DefaultElementGeometry(),
   ) {
     super(device, adb, timer);
     this.pressButton = new PressButton(device, adb);
@@ -52,14 +52,13 @@ export class RecentApps extends BaseVisualChange {
           changeExpected: true,
           timeoutMs: 5000,
           progress,
-          perf
-        }
+          perf,
+        },
       );
     }
 
     return this.observedInteraction(
       async (observeResult: ObserveResult) => {
-
         const viewHierarchy = observeResult.viewHierarchy;
         if (!viewHierarchy) {
           return { success: false, method: "unknown" };
@@ -70,19 +69,15 @@ export class RecentApps extends BaseVisualChange {
         switch (navigationMethod) {
           case "gesture":
             await perf.track("gestureNavigation", () =>
-              this.executeGestureNavigation(observeResult)
+              this.executeGestureNavigation(observeResult),
             );
             return { success: true, method: "gesture" };
           case "legacy":
-            await perf.track("legacyNavigation", () =>
-              this.executeLegacyNavigation(observeResult)
-            );
+            await perf.track("legacyNavigation", () => this.executeLegacyNavigation(observeResult));
             return { success: true, method: "legacy" };
           case "hardware":
           default:
-            await perf.track("hardwareNavigation", () =>
-              this.executeHardwareNavigation()
-            );
+            await perf.track("hardwareNavigation", () => this.executeHardwareNavigation());
             return { success: true, method: "hardware" };
         }
       },
@@ -90,8 +85,8 @@ export class RecentApps extends BaseVisualChange {
         changeExpected: true,
         timeoutMs: 3000,
         progress,
-        perf
-      }
+        perf,
+      },
     );
   }
 
@@ -100,13 +95,15 @@ export class RecentApps extends BaseVisualChange {
    * @param viewHierarchy - Latest ViewHierarchyResult
    * @returns Navigation style type
    */
-  private detectNavigationStyle(viewHierarchy: ViewHierarchyResult): "gesture" | "legacy" | "hardware" {
+  private detectNavigationStyle(
+    viewHierarchy: ViewHierarchyResult,
+  ): "gesture" | "legacy" | "hardware" {
     // Look for common navigation bar elements
     const navigationBarIds = [
       "navigationBarBackground",
       "navigation_bar_frame",
       "navbar",
-      "nav_bar"
+      "nav_bar",
     ];
 
     const recentAppsButtonIds = [
@@ -114,7 +111,7 @@ export class RecentApps extends BaseVisualChange {
       "recent",
       "overview",
       "recents_button",
-      "overview_button"
+      "overview_button",
     ];
 
     // Check for legacy navigation bar with recent apps button
@@ -123,7 +120,7 @@ export class RecentApps extends BaseVisualChange {
         viewHierarchy,
         buttonId,
         { elementId: "@android:id/content" },
-        true
+        true,
       );
       if (element) {
         return "legacy";
@@ -136,7 +133,7 @@ export class RecentApps extends BaseVisualChange {
         viewHierarchy,
         navId,
         { elementId: "@android:id/content" },
-        true
+        true,
       );
       if (element) {
         return "gesture";
@@ -144,19 +141,14 @@ export class RecentApps extends BaseVisualChange {
     }
 
     // Check for common gesture navigation indicators
-    const gestureIndicators = [
-      "home_handle",
-      "navigation_handle",
-      "gesture_hint",
-      "pill"
-    ];
+    const gestureIndicators = ["home_handle", "navigation_handle", "gesture_hint", "pill"];
 
     for (const indicator of gestureIndicators) {
       const element = this.finder.findElementByResourceId(
         viewHierarchy,
         indicator,
         { elementId: "@android:id/content" },
-        true
+        true,
       );
       if (element) {
         return "gesture";
@@ -188,13 +180,11 @@ export class RecentApps extends BaseVisualChange {
     const endY = Math.floor(screenHeight * 0.5); // Swipe up to middle of screen
 
     // Execute swipe gesture with longer duration for recent apps
-    await this.adb.executeCommand(
-      `shell input swipe ${startX} ${startY} ${endX} ${endY} 500`
-    );
+    await this.adb.executeCommand(`shell input swipe ${startX} ${startY} ${endX} ${endY} 500`);
 
     return {
       success: true,
-      method: "gesture"
+      method: "gesture",
     };
   }
 
@@ -209,16 +199,15 @@ export class RecentApps extends BaseVisualChange {
       "recent",
       "overview",
       "recents_button",
-      "overview_button"
+      "overview_button",
     ];
-
 
     const viewHierarchy = observeResult.viewHierarchy;
     if (!viewHierarchy) {
       return {
         success: false,
         method: "legacy",
-        error: "View hierarchy not available"
+        error: "View hierarchy not available",
       };
     }
 
@@ -229,7 +218,7 @@ export class RecentApps extends BaseVisualChange {
         viewHierarchy,
         buttonId,
         { elementId: "@android:id/content" },
-        true
+        true,
       );
       if (element) {
         recentButton = element;
@@ -247,7 +236,7 @@ export class RecentApps extends BaseVisualChange {
 
     return {
       success: true,
-      method: "legacy"
+      method: "legacy",
     };
   }
 
@@ -279,7 +268,7 @@ export class RecentApps extends BaseVisualChange {
     return {
       success: result.success,
       method: "ios_swipe",
-      error: result.success ? undefined : result.error ?? "Failed to open iOS recent apps"
+      error: result.success ? undefined : (result.error ?? "Failed to open iOS recent apps"),
     };
   }
 }

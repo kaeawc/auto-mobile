@@ -15,11 +15,12 @@ const createExecResult = (stdout: string, stderr = ""): ExecResult => ({
 // without touching the filesystem for path detection.
 function newClientWithFakeExec(
   execAsync: (file: string, args: string[], signal?: AbortSignal) => Promise<ExecResult>,
-  timer: FakeTimer
+  timer: FakeTimer,
 ): AndroidEmulatorClient {
   const client = new AndroidEmulatorClient(execAsync, null, timer);
   (client as unknown as { emulatorPath: string }).emulatorPath = "emulator";
-  (client as unknown as { ensureEmulatorPath: () => Promise<string> }).ensureEmulatorPath = async () => "emulator";
+  (client as unknown as { ensureEmulatorPath: () => Promise<string> }).ensureEmulatorPath =
+    async () => "emulator";
   return client;
 }
 
@@ -28,7 +29,11 @@ describe("AndroidEmulatorClient executeCommand timeout", () => {
     const timer = new FakeTimer();
     let capturedSignal: AbortSignal | undefined;
     let capturedArgs: string[] | undefined;
-    const execAsync = async (_file: string, args: string[], signal?: AbortSignal): Promise<ExecResult> => {
+    const execAsync = async (
+      _file: string,
+      args: string[],
+      signal?: AbortSignal,
+    ): Promise<ExecResult> => {
       capturedSignal = signal;
       capturedArgs = args;
       // Simulate a long-running child that only settles when aborted, mirroring
@@ -52,9 +57,7 @@ describe("AndroidEmulatorClient executeCommand timeout", () => {
 
     timer.advanceTime(1234);
 
-    await expect(promise).rejects.toThrow(
-      "Command timed out after 1234ms: emulator -list-avds"
-    );
+    await expect(promise).rejects.toThrow("Command timed out after 1234ms: emulator -list-avds");
     // The timeout must abort the child rather than leave it running orphaned.
     expect(capturedSignal.aborted).toBe(true);
   });
@@ -62,7 +65,11 @@ describe("AndroidEmulatorClient executeCommand timeout", () => {
   test("does not abort when the command completes before the timeout", async () => {
     const timer = new FakeTimer();
     let capturedSignal: AbortSignal | undefined;
-    const execAsync = async (_file: string, _args: string[], signal?: AbortSignal): Promise<ExecResult> => {
+    const execAsync = async (
+      _file: string,
+      _args: string[],
+      signal?: AbortSignal,
+    ): Promise<ExecResult> => {
       capturedSignal = signal;
       return createExecResult("Pixel_9", "");
     };
@@ -80,7 +87,11 @@ describe("AndroidEmulatorClient executeCommand timeout", () => {
     let capturedFile: string | undefined;
     let capturedArgs: string[] | undefined;
     let capturedSignal: AbortSignal | undefined | "unset" = "unset";
-    const execAsync = async (file: string, args: string[], signal?: AbortSignal): Promise<ExecResult> => {
+    const execAsync = async (
+      file: string,
+      args: string[],
+      signal?: AbortSignal,
+    ): Promise<ExecResult> => {
       capturedFile = file;
       capturedArgs = args;
       capturedSignal = signal;

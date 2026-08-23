@@ -1,5 +1,8 @@
 import { ObserveResult } from "../../src/models";
-import type { ObserveScreen, ObserveScreenExecuteOptions } from "../../src/features/observe/interfaces/ObserveScreen";
+import type {
+  ObserveScreen,
+  ObserveScreenExecuteOptions,
+} from "../../src/features/observe/interfaces/ObserveScreen";
 import type { RawViewHierarchyResult } from "../../src/models/RawViewHierarchyResult";
 
 /**
@@ -84,8 +87,8 @@ export class FakeObserveScreen implements ObserveScreen {
         ...result,
         viewHierarchy: {
           ...result.viewHierarchy,
-          _fakeCallId: this.callCounter
-        }
+          _fakeCallId: this.callCounter,
+        },
       };
     }
 
@@ -123,14 +126,14 @@ export class FakeObserveScreen implements ObserveScreen {
    * Check if a method was called
    */
   wasMethodCalled(methodName: string): boolean {
-    return this.executedOperations.some(op => op.includes(methodName));
+    return this.executedOperations.some((op) => op.includes(methodName));
   }
 
   /**
    * Get call count for a specific method
    */
   getCallCount(methodName: string): number {
-    return this.executedOperations.filter(op => op.includes(methodName)).length;
+    return this.executedOperations.filter((op) => op.includes(methodName)).length;
   }
 
   /**
@@ -180,7 +183,7 @@ export class FakeObserveScreen implements ObserveScreen {
 
   /** The `minTimestamp` passed to each `execute()` call, in order. */
   getExecuteMinTimestamps(): Array<number | undefined> {
-    return this.executeOptionsHistory.map(options => options.minTimestamp);
+    return this.executeOptionsHistory.map((options) => options.minTimestamp);
   }
 
   async getMostRecentCachedObserveResult(): Promise<ObserveResult> {
@@ -204,10 +207,10 @@ export class FakeObserveScreen implements ObserveScreen {
     }
 
     result.rawViewHierarchy = {
-      json: "{\"fake\":true}",
+      json: '{"fake":true}',
       source: "accessibility-service",
       timestamp: 0,
-      device: { deviceId: "fake-device", platform: "android" }
+      device: { deviceId: "fake-device", platform: "android" },
     } as RawViewHierarchyResult;
   }
 }

@@ -6,10 +6,10 @@ import { SwipeDirection, SwipeOnOptions } from "../models";
  * the content scrolls, which is opposite to finger movement.
  */
 export const SCROLL_TO_FINGER_DIRECTION: Record<SwipeDirection, SwipeDirection> = {
-  up: "down",    // content scrolls up → finger swipes down
-  down: "up",    // content scrolls down → finger swipes up
+  up: "down", // content scrolls up → finger swipes down
+  down: "up", // content scrolls down → finger swipes up
   left: "right", // content scrolls left → finger swipes right
-  right: "left"  // content scrolls right → finger swipes left
+  right: "left", // content scrolls right → finger swipes left
 };
 
 interface ResolvedSwipeDirection {
@@ -28,7 +28,7 @@ interface ResolvedSwipeDirection {
  * - "scrollTowardsDirection": direction is content scroll direction (inverted for finger)
  */
 export const resolveSwipeDirection = (
-  options: Pick<SwipeOnOptions, "direction" | "gestureType">
+  options: Pick<SwipeOnOptions, "direction" | "gestureType">,
 ): ResolvedSwipeDirection => {
   const { direction, gestureType } = options;
 
@@ -40,19 +40,24 @@ export const resolveSwipeDirection = (
   if (!gestureType || gestureType === "swipeFingerTowardsDirection") {
     return {
       direction,
-      message: `Swiping ${direction} (finger gesture)`
+      message: `Swiping ${direction} (finger gesture)`,
     };
   }
 
   // gestureType === "scrollTowardsDirection"
   // Direction describes where content scrolls, invert for finger movement
   const fingerDirection = SCROLL_TO_FINGER_DIRECTION[direction];
-  const contentRevealed = direction === "up" ? "above" :
-    direction === "down" ? "below" :
-      direction === "left" ? "from left" : "from right";
+  const contentRevealed =
+    direction === "up"
+      ? "above"
+      : direction === "down"
+        ? "below"
+        : direction === "left"
+          ? "from left"
+          : "from right";
 
   return {
     direction: fingerDirection,
-    message: `Scrolling ${direction} to reveal content ${contentRevealed}`
+    message: `Scrolling ${direction} to reveal content ${contentRevealed}`,
   };
 };

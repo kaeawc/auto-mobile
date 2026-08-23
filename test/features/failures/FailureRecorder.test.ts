@@ -165,7 +165,7 @@ describe("FailureRecorder", () => {
       await recorder.recordToolFailure(
         makeInput({
           toolArgs: { text: "Login", timeout: 5000 },
-        })
+        }),
       );
 
       const variants = repo.last().toolCallInfo!.parameterVariants;
@@ -244,7 +244,7 @@ describe("FailureRecorder", () => {
       await recorder.recordCrash(makeInput());
 
       expect(repo.last().signature).toBe(
-        "crash:NullPointerException:com.example.app.MainActivity.onCreate"
+        "crash:NullPointerException:com.example.app.MainActivity.onCreate",
       );
     });
 
@@ -257,28 +257,24 @@ describe("FailureRecorder", () => {
     test("generates crash title with app frame details", async () => {
       await recorder.recordCrash(makeInput());
 
-      expect(repo.last().title).toBe(
-        "NullPointerException in onCreate (MainActivity.kt:42)"
-      );
+      expect(repo.last().title).toBe("NullPointerException in onCreate (MainActivity.kt:42)");
     });
 
     test("generates crash title without line number when null", async () => {
       await recorder.recordCrash(
         makeInput({
           stackTrace: [makeAppFrame({ lineNumber: null })],
-        })
+        }),
       );
 
-      expect(repo.last().title).toBe(
-        "NullPointerException in onCreate (MainActivity.kt)"
-      );
+      expect(repo.last().title).toBe("NullPointerException in onCreate (MainActivity.kt)");
     });
 
     test("uses className last segment when fileName is null", async () => {
       await recorder.recordCrash(
         makeInput({
           stackTrace: [makeAppFrame({ fileName: null })],
-        })
+        }),
       );
 
       expect(repo.last().title).toContain("MainActivity");
@@ -300,9 +296,7 @@ describe("FailureRecorder", () => {
     test("constructs message from exception type and message", async () => {
       await recorder.recordCrash(makeInput());
 
-      expect(repo.last().message).toBe(
-        "NullPointerException: Attempt to invoke on null reference"
-      );
+      expect(repo.last().message).toBe("NullPointerException: Attempt to invoke on null reference");
     });
   });
 
@@ -328,7 +322,11 @@ describe("FailureRecorder", () => {
       ["ParseException is low", "ParseException", "low"],
       ["generic exception is medium", "RuntimeException", "medium"],
       // Precedence: Fatal (critical) is checked before NullPointer (high).
-      ["FatalNullPointerException is critical (Fatal wins)", "FatalNullPointerException", "critical"],
+      [
+        "FatalNullPointerException is critical (Fatal wins)",
+        "FatalNullPointerException",
+        "critical",
+      ],
       // Case-sensitivity: matcher is exact-case, so lower-case falls through.
       ["lower-case outofmemoryerror is medium (no match)", "outofmemoryerror", "medium"],
       // Substring: OutOfMemory matches inside a wrapper name.
@@ -361,13 +359,9 @@ describe("FailureRecorder", () => {
     });
 
     test("generates ANR signature with app frame", async () => {
-      await recorder.recordAnr(
-        makeInput({ stackTrace: [makeSystemFrame(), makeAppFrame()] })
-      );
+      await recorder.recordAnr(makeInput({ stackTrace: [makeSystemFrame(), makeAppFrame()] }));
 
-      expect(repo.last().signature).toBe(
-        "anr:com.example.app.MainActivity.onCreate"
-      );
+      expect(repo.last().signature).toBe("anr:com.example.app.MainActivity.onCreate");
     });
 
     test("generates ANR signature with hash when no app frame", async () => {
@@ -391,7 +385,7 @@ describe("FailureRecorder", () => {
       await recorder.recordAnr(
         makeInput({
           stackTrace: [makeAppFrame({ className: "com.example.MyService", methodName: "doWork" })],
-        })
+        }),
       );
 
       expect(repo.last().title).toBe("ANR: MyService.doWork");
@@ -437,7 +431,7 @@ describe("FailureRecorder", () => {
       await recorder.recordNonFatal(makeInput());
 
       expect(repo.last().signature).toBe(
-        "nonfatal:IOException:com.example.app.MainActivity.onCreate"
+        "nonfatal:IOException:com.example.app.MainActivity.onCreate",
       );
     });
 
@@ -489,7 +483,11 @@ describe("FailureRecorder", () => {
       ["IOException is low", "IOException", "low"],
       ["unknown exception is low", "CustomException", "low"],
       // Substring: SecurityException matches inside a wrapper name.
-      ["AppSecurityExceptionWrapper is medium (substring match)", "AppSecurityExceptionWrapper", "medium"],
+      [
+        "AppSecurityExceptionWrapper is medium (substring match)",
+        "AppSecurityExceptionWrapper",
+        "medium",
+      ],
       // Case-sensitivity: lower-case falls through to low.
       ["lower-case securityexception is low (no match)", "securityexception", "low"],
     ];
@@ -664,8 +662,20 @@ describe("FailureRecorder", () => {
 
   describe("telemetry push", () => {
     const crashStack: StackTraceElement[] = [
-      { className: "com.example.UserRepo", methodName: "getUser", fileName: "UserRepo.kt", lineNumber: 42, isAppCode: true },
-      { className: "android.os.Handler", methodName: "dispatch", fileName: null, lineNumber: null, isAppCode: false },
+      {
+        className: "com.example.UserRepo",
+        methodName: "getUser",
+        fileName: "UserRepo.kt",
+        lineNumber: 42,
+        isAppCode: true,
+      },
+      {
+        className: "android.os.Handler",
+        methodName: "dispatch",
+        fileName: null,
+        lineNumber: null,
+        isAppCode: false,
+      },
     ];
 
     test("recordCrash pushes telemetry with stackTrace", async () => {
@@ -685,7 +695,13 @@ describe("FailureRecorder", () => {
     test("recordAnr pushes telemetry with stackTrace", async () => {
       timer.advanceTime(6000);
       const anrStack: StackTraceElement[] = [
-        { className: "com.example.Main", methodName: "run", fileName: "Main.kt", lineNumber: 10, isAppCode: true },
+        {
+          className: "com.example.Main",
+          methodName: "run",
+          fileName: "Main.kt",
+          lineNumber: 10,
+          isAppCode: true,
+        },
       ];
       await recorder.recordAnr({
         reason: "main thread blocked",

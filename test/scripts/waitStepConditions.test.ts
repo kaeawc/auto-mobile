@@ -15,8 +15,8 @@ import { loadAllJobSteps } from "../helpers/workflowSteps";
 const WORKFLOW_DIR = ".github/workflows";
 
 const workflows = readdirSync(join(import.meta.dir, "../..", WORKFLOW_DIR))
-  .filter(name => name.endsWith(".yml") || name.endsWith(".yaml"))
-  .map(name => `${WORKFLOW_DIR}/${name}`);
+  .filter((name) => name.endsWith(".yml") || name.endsWith(".yaml"))
+  .map((name) => `${WORKFLOW_DIR}/${name}`);
 
 describe("parallel-steps wait barriers", () => {
   test("there are workflows to check", () => {

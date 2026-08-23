@@ -10,15 +10,9 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn("result_json", "text")
     .addColumn("error_code", "text")
     .addColumn("error_message", "text")
-    .addColumn("creation_started", "integer", (column) =>
-      column.notNull().defaultTo(0),
-    )
-    .addColumn("created_at", "text", (column) =>
-      column.notNull().defaultTo(sql`(datetime('now'))`),
-    )
-    .addColumn("updated_at", "text", (column) =>
-      column.notNull().defaultTo(sql`(datetime('now'))`),
-    )
+    .addColumn("creation_started", "integer", (column) => column.notNull().defaultTo(0))
+    .addColumn("created_at", "text", (column) => column.notNull().defaultTo(sql`(datetime('now'))`))
+    .addColumn("updated_at", "text", (column) => column.notNull().defaultTo(sql`(datetime('now'))`))
     .execute();
 }
 

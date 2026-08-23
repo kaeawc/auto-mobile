@@ -10,12 +10,12 @@ describe("ExecuteGesture", () => {
   const androidDevice: BootedDevice = {
     deviceId: "test-device",
     platform: "android",
-    name: "Test Device"
+    name: "Test Device",
   };
   const iosDevice: BootedDevice = {
     deviceId: "ios-test-device",
     platform: "ios",
-    name: "Test iPhone"
+    name: "Test iPhone",
   };
 
   let getInstanceSpy: ReturnType<typeof spyOn> | null = null;
@@ -37,8 +37,8 @@ describe("ExecuteGesture", () => {
       requestSwipe: async () => ({
         success: true,
         totalTimeMs: 1,
-        gestureTimeMs: 1
-      })
+        gestureTimeMs: 1,
+      }),
     } as unknown as AndroidCtrlProxyClient;
 
     getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeClient);
@@ -55,36 +55,43 @@ describe("ExecuteGesture", () => {
 
   test("delegates iOS multi-finger FingerPath gestures to CtrlProxy with supplied spacing", async () => {
     const fakeClient = new FakeIOSCtrlProxy();
-    getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(fakeClient as unknown as IOSCtrlProxyClient);
+    getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+      fakeClient as unknown as IOSCtrlProxyClient,
+    );
 
     const gesture = new ExecuteGesture(iosDevice, null);
-    const result = await gesture.execute([
-      {
-        finger: 0,
-        points: [
-          { x: 100, y: 600 },
-          { x: 100, y: 200 },
-        ],
-      },
-      {
-        finger: 1,
-        points: [
-          { x: 130.5, y: 600 },
-          { x: 130.5, y: 200 },
-        ],
-      },
-    ], 450);
+    const result = await gesture.execute(
+      [
+        {
+          finger: 0,
+          points: [
+            { x: 100, y: 600 },
+            { x: 100, y: 200 },
+          ],
+        },
+        {
+          finger: 1,
+          points: [
+            { x: 130.5, y: 600 },
+            { x: 130.5, y: 200 },
+          ],
+        },
+      ],
+      450,
+    );
 
     expect(result).toEqual({ pathLength: 2, duration: 450, platform: "ios" });
-    expect(fakeClient.getMultiFingerSwipeHistory()).toEqual([{
-      x1: 100,
-      y1: 600,
-      x2: 100,
-      y2: 200,
-      fingerCount: 2,
-      duration: 450,
-      fingerSpacing: 30.5,
-    }]);
+    expect(fakeClient.getMultiFingerSwipeHistory()).toEqual([
+      {
+        x1: 100,
+        y1: 600,
+        x2: 100,
+        y2: 200,
+        fingerCount: 2,
+        duration: 450,
+        fingerSpacing: 30.5,
+      },
+    ]);
   });
 
   test("propagates failed iOS multi-finger swipe results", async () => {
@@ -94,74 +101,95 @@ describe("ExecuteGesture", () => {
       error: "XCTest private multi-touch event synthesis classes are unavailable",
       totalTimeMs: 1,
     });
-    getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(fakeClient as unknown as IOSCtrlProxyClient);
+    getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+      fakeClient as unknown as IOSCtrlProxyClient,
+    );
 
     const gesture = new ExecuteGesture(iosDevice, null);
 
-    await expect(gesture.execute([
-      {
-        finger: 0,
-        points: [
-          { x: 100, y: 600 },
-          { x: 100, y: 200 },
+    await expect(
+      gesture.execute(
+        [
+          {
+            finger: 0,
+            points: [
+              { x: 100, y: 600 },
+              { x: 100, y: 200 },
+            ],
+          },
+          {
+            finger: 1,
+            points: [
+              { x: 125, y: 600 },
+              { x: 125, y: 200 },
+            ],
+          },
         ],
-      },
-      {
-        finger: 1,
-        points: [
-          { x: 125, y: 600 },
-          { x: 125, y: 200 },
-        ],
-      },
-    ], 300)).rejects.toThrow("iOS multi-finger gesture failed: XCTest private multi-touch event synthesis classes are unavailable");
+        300,
+      ),
+    ).rejects.toThrow(
+      "iOS multi-finger gesture failed: XCTest private multi-touch event synthesis classes are unavailable",
+    );
   });
 
   test("rejects iOS multi-finger paths CtrlProxy cannot preserve", async () => {
     const fakeClient = new FakeIOSCtrlProxy();
-    getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(fakeClient as unknown as IOSCtrlProxyClient);
+    getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+      fakeClient as unknown as IOSCtrlProxyClient,
+    );
 
     const gesture = new ExecuteGesture(iosDevice, null);
 
-    await expect(gesture.execute([
-      {
-        finger: 0,
-        points: [
-          { x: 100, y: 600 },
-          { x: 100, y: 200 },
+    await expect(
+      gesture.execute(
+        [
+          {
+            finger: 0,
+            points: [
+              { x: 100, y: 600 },
+              { x: 100, y: 200 },
+            ],
+          },
+          {
+            finger: 1,
+            points: [
+              { x: 100, y: 630 },
+              { x: 100, y: 230 },
+            ],
+          },
         ],
-      },
-      {
-        finger: 1,
-        points: [
-          { x: 100, y: 630 },
-          { x: 100, y: 230 },
-        ],
-      },
-    ], 300)).rejects.toThrow("iOS multi-finger gestures only support horizontally spaced parallel swipes");
+        300,
+      ),
+    ).rejects.toThrow("iOS multi-finger gestures only support horizontally spaced parallel swipes");
     expect(fakeClient.getMultiFingerSwipeHistory()).toHaveLength(0);
   });
 
   test("rejects under-specified iOS multi-finger paths", async () => {
     const fakeClient = new FakeIOSCtrlProxy();
-    getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(fakeClient as unknown as IOSCtrlProxyClient);
+    getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+      fakeClient as unknown as IOSCtrlProxyClient,
+    );
 
     const gesture = new ExecuteGesture(iosDevice, null);
 
-    await expect(gesture.execute([
-      {
-        finger: 0,
-        points: [
-          { x: 100, y: 600 },
+    await expect(
+      gesture.execute(
+        [
+          {
+            finger: 0,
+            points: [{ x: 100, y: 600 }],
+          },
+          {
+            finger: 1,
+            points: [
+              { x: 130, y: 600 },
+              { x: 130, y: 200 },
+            ],
+          },
         ],
-      },
-      {
-        finger: 1,
-        points: [
-          { x: 130, y: 600 },
-          { x: 130, y: 200 },
-        ],
-      },
-    ], 300)).rejects.toThrow("iOS multi-finger gestures require at least two points per finger");
+        300,
+      ),
+    ).rejects.toThrow("iOS multi-finger gestures require at least two points per finger");
     expect(fakeClient.getMultiFingerSwipeHistory()).toHaveLength(0);
   });
 });

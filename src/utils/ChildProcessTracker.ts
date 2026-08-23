@@ -46,7 +46,10 @@ export interface TrackedChildProcess extends StoppableProcess {
     off(event: "data", listener: (chunk: Buffer | string) => void): unknown;
   } | null;
   once(event: "spawn", listener: () => void): unknown;
-  once(event: "exit", listener: (code: number | null, signal: NodeJS.Signals | null) => void): unknown;
+  once(
+    event: "exit",
+    listener: (code: number | null, signal: NodeJS.Signals | null) => void,
+  ): unknown;
   once(event: "error", listener: (error: Error) => void): unknown;
   off(event: "exit", listener: () => void): unknown;
   off(event: "error", listener: (error: Error) => void): unknown;
@@ -54,7 +57,7 @@ export interface TrackedChildProcess extends StoppableProcess {
 
 export function createExitTracker(
   process: TrackedChildProcess,
-  stderr: string[]
+  stderr: string[],
 ): { exitState: ProcessExitState; exitPromise: Promise<void> } {
   const exitState: ProcessExitState = {};
   let resolvePromise: () => void = () => undefined;
@@ -65,7 +68,7 @@ export function createExitTracker(
     rejectPromise = reject;
   });
 
-  process.once("error", error => {
+  process.once("error", (error) => {
     rejectPromise(error instanceof Error ? error : new Error(String(error)));
   });
 
@@ -76,7 +79,7 @@ export function createExitTracker(
     resolvePromise();
   });
 
-  process.stderr?.on("data", chunk => {
+  process.stderr?.on("data", (chunk) => {
     stderr.push(chunk.toString());
   });
 
@@ -106,7 +109,7 @@ export function trackProcess(process: TrackedChildProcess): ProcessTracker {
 export async function waitForExit(
   process: StoppableProcess,
   exitPromise: Promise<void>,
-  options: WaitForExitOptions = {}
+  options: WaitForExitOptions = {},
 ): Promise<void> {
   const timer = options.timer ?? defaultTimer;
   const timeoutMs = options.timeoutMs ?? PROCESS_EXIT_TIMEOUT_MS;
@@ -131,7 +134,7 @@ export async function waitForExit(
   }
 
   let timeoutId: NodeJS.Timeout | undefined;
-  const timeoutPromise = new Promise<void>(resolve => {
+  const timeoutPromise = new Promise<void>((resolve) => {
     timeoutId = timer.setTimeout(() => {
       if (process.exitCode === null) {
         process.kill("SIGKILL");
@@ -159,7 +162,7 @@ export async function waitForExit(
 export async function waitForSpawn(process: SpawnableProcess): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     process.once("spawn", () => resolve());
-    process.once("error", error => reject(error));
+    process.once("error", (error) => reject(error));
   });
 }
 

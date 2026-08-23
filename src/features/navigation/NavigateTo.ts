@@ -1,5 +1,8 @@
 import { BootedDevice, NavigateToResult } from "../../models";
-import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  AdbClientFactory,
+  defaultAdbClientFactory,
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
@@ -8,7 +11,7 @@ import { throwIfInternalToolFailed } from "../../server/internalToolCall";
 import {
   NavigationGraphManager,
   ToolCallInteraction,
-  type NavigationGraphService
+  type NavigationGraphService,
 } from "./NavigationGraphManager";
 import { ProgressCallback } from "../../server/toolRegistry";
 import { SmartNavigationHelper } from "./SmartNavigationHelper";
@@ -58,7 +61,7 @@ export class NavigateTo {
     navigationManager?: NavigationGraphService,
     timer: Timer = defaultTimer,
     pathOptimizer?: PathOptimizer,
-    sessionUuid?: string
+    sessionUuid?: string,
   ) {
     this.device = device;
     this.adb = adbFactory.create(device);
@@ -68,10 +71,9 @@ export class NavigateTo {
     this.sessionUuid = sessionUuid;
 
     this.uiStateSetup = uiStateSetup;
-    this.screenWaiter = screenWaiter || new DefaultScreenTransitionWaiter(
-      this.navigationManager,
-      NavigateTo.POLL_INTERVAL_MS
-    );
+    this.screenWaiter =
+      screenWaiter ||
+      new DefaultScreenTransitionWaiter(this.navigationManager, NavigateTo.POLL_INTERVAL_MS);
   }
 
   /**
@@ -79,7 +81,7 @@ export class NavigateTo {
    */
   async execute(
     options: NavigateToOptions,
-    progress?: ProgressCallback
+    progress?: ProgressCallback,
   ): Promise<NavigateToResult> {
     const perf = createGlobalPerformanceTracker();
     perf.serial("navigateTo");
@@ -87,8 +89,9 @@ export class NavigateTo {
     const startTime = this.timer.now();
     const { targetScreen } = options;
     this.sessionUuid ??= options.sessionUuid;
-    const uiStateSetup = this.uiStateSetup
-      ?? new DefaultUIStateSetup(this.device, this.adb, undefined, this.timer, this.sessionUuid);
+    const uiStateSetup =
+      this.uiStateSetup ??
+      new DefaultUIStateSetup(this.device, this.adb, undefined, this.timer, this.sessionUuid);
     this.uiStateSetup = uiStateSetup;
 
     try {
@@ -102,7 +105,7 @@ export class NavigateTo {
           error: "Cannot determine current screen. No navigation events recorded yet.",
           currentScreen: null,
           targetScreen,
-          stepsExecuted: 0
+          stepsExecuted: 0,
         };
       }
 
@@ -115,7 +118,7 @@ export class NavigateTo {
           currentScreen,
           targetScreen,
           stepsExecuted: 0,
-          durationMs: this.timer.now() - startTime
+          durationMs: this.timer.now() - startTime,
         };
       }
 
@@ -125,16 +128,14 @@ export class NavigateTo {
       const currentBackStackDepth = currentNode?.backStackDepth ?? 0;
 
       if (currentBackStackDepth > 0) {
-        const backNavResult = await (this.pathOptimizer ?? SmartNavigationHelper).shouldUseBackButton(
-          currentScreen,
-          targetScreen,
-          currentBackStackDepth
-        );
+        const backNavResult = await (
+          this.pathOptimizer ?? SmartNavigationHelper
+        ).shouldUseBackButton(currentScreen, targetScreen, currentBackStackDepth);
 
         if (backNavResult.shouldUseBack) {
           logger.info(
             `[NAVIGATE_TO] Using smart back button navigation: ` +
-            `${backNavResult.backPresses} back presses. Reason: ${backNavResult.reason}`
+              `${backNavResult.backPresses} back presses. Reason: ${backNavResult.reason}`,
           );
 
           // Execute back button presses
@@ -144,7 +145,7 @@ export class NavigateTo {
               await progress(
                 i,
                 backNavResult.backPresses,
-                `Pressing back button (${i + 1}/${backNavResult.backPresses})`
+                `Pressing back button (${i + 1}/${backNavResult.backPresses})`,
               );
             }
 
@@ -156,13 +157,16 @@ export class NavigateTo {
           }
 
           // Wait for target screen
-          const reached = await this.screenWaiter.waitForScreen(targetScreen, NavigateTo.STEP_TIMEOUT_MS);
+          const reached = await this.screenWaiter.waitForScreen(
+            targetScreen,
+            NavigateTo.STEP_TIMEOUT_MS,
+          );
 
           if (progress) {
             await progress(
               backNavResult.backPresses,
               backNavResult.backPresses,
-              reached ? `Arrived at ${targetScreen}` : `Waiting for ${targetScreen}`
+              reached ? `Arrived at ${targetScreen}` : `Waiting for ${targetScreen}`,
             );
           }
 
@@ -176,11 +180,11 @@ export class NavigateTo {
             targetScreen,
             stepsExecuted: executedPath.length,
             path: executedPath,
-            durationMs: this.timer.now() - startTime
+            durationMs: this.timer.now() - startTime,
           };
         } else {
           logger.debug(
-            `[NAVIGATE_TO] Not using back button navigation. Reason: ${backNavResult.reason}`
+            `[NAVIGATE_TO] Not using back button navigation. Reason: ${backNavResult.reason}`,
           );
         }
       }
@@ -193,12 +197,13 @@ export class NavigateTo {
         const knownScreens = await this.navigationManager.getKnownScreens();
         return {
           success: false,
-          error: `No known path from "${currentScreen}" to "${targetScreen}". ` +
+          error:
+            `No known path from "${currentScreen}" to "${targetScreen}". ` +
             `Known screens: ${knownScreens.join(", ") || "none"}`,
           currentScreen,
           targetScreen,
           stepsExecuted: 0,
-          durationMs: this.timer.now() - startTime
+          durationMs: this.timer.now() - startTime,
         };
       }
 
@@ -218,27 +223,28 @@ export class NavigateTo {
             targetScreen,
             stepsExecuted: executedPath.length,
             partialPath: executedPath,
-            durationMs: this.timer.now() - startTime
+            durationMs: this.timer.now() - startTime,
           };
         }
 
         // Report progress
         if (progress) {
-          await progress(
-            i,
-            pathResult.path.length,
-            `Navigating: ${edge.from} → ${edge.to}`
-          );
+          await progress(i, pathResult.path.length, `Navigating: ${edge.from} → ${edge.to}`);
         }
 
-        logger.info(`[NAVIGATE_TO] Step ${i + 1}/${pathResult.path.length}: ${edge.from} → ${edge.to}`);
+        logger.info(
+          `[NAVIGATE_TO] Step ${i + 1}/${pathResult.path.length}: ${edge.from} → ${edge.to}`,
+        );
 
         // Execute navigation step
         try {
           if (edge.interaction) {
             // Set up scroll position if required (must happen before UI state setup)
             if (edge.uiState?.scrollPosition) {
-              const scrollAction = await uiStateSetup.setupScrollPosition(edge.uiState.scrollPosition, options.platform);
+              const scrollAction = await uiStateSetup.setupScrollPosition(
+                edge.uiState.scrollPosition,
+                options.platform,
+              );
               if (scrollAction) {
                 executedPath.push(scrollAction);
               }
@@ -252,7 +258,9 @@ export class NavigateTo {
 
             // Replay the tool call
             await this.executeToolCall(edge.interaction);
-            executedPath.push(`${edge.interaction.toolName}(${JSON.stringify(edge.interaction.args)})`);
+            executedPath.push(
+              `${edge.interaction.toolName}(${JSON.stringify(edge.interaction.args)})`,
+            );
           } else {
             // No known interaction - try back button
             logger.info(`[NAVIGATE_TO] No known interaction for edge, using back button`);
@@ -269,7 +277,7 @@ export class NavigateTo {
             targetScreen,
             stepsExecuted: executedPath.length,
             partialPath: executedPath,
-            durationMs: this.timer.now() - startTime
+            durationMs: this.timer.now() - startTime,
           };
         }
 
@@ -286,7 +294,7 @@ export class NavigateTo {
         await progress(
           pathResult.path.length,
           pathResult.path.length,
-          `Arrived at ${targetScreen}`
+          `Arrived at ${targetScreen}`,
         );
       }
 
@@ -298,7 +306,7 @@ export class NavigateTo {
         targetScreen,
         stepsExecuted: executedPath.length,
         path: executedPath,
-        durationMs: this.timer.now() - startTime
+        durationMs: this.timer.now() - startTime,
       };
     } catch (error) {
       perf.end();
@@ -308,7 +316,7 @@ export class NavigateTo {
         currentScreen: this.navigationManager.getCurrentScreen(),
         targetScreen,
         stepsExecuted: 0,
-        durationMs: this.timer.now() - startTime
+        durationMs: this.timer.now() - startTime,
       };
     }
   }
@@ -325,15 +333,12 @@ export class NavigateTo {
     // `interaction.args` is never mutated. Under `--actions-diff-observe` this
     // replay neither diffs its observation nor advances the agent-facing diff
     // baseline. Throws ActionableError if the tool is not registered.
-    const response = await ToolRegistry.callInternal(
-      interaction.toolName,
-      {
-        ...(interaction.args as Record<string, unknown>),
-        platform: this.device.platform,
-        deviceId: this.device.deviceId,
-        ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {})
-      }
-    );
+    const response = await ToolRegistry.callInternal(interaction.toolName, {
+      ...(interaction.args as Record<string, unknown>),
+      platform: this.device.platform,
+      deviceId: this.device.deviceId,
+      ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {}),
+    });
     throwIfInternalToolFailed(response, interaction.toolName, this.device.platform);
   }
 
@@ -359,7 +364,7 @@ export class NavigateTo {
       button: "back",
       platform: this.device.platform,
       deviceId: this.device.deviceId,
-      ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {})
+      ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {}),
     });
     throwIfInternalToolFailed(response, "pressButton", this.device.platform);
     logger.debug(`[NAVIGATE_TO] Pressed back via ${this.device.platform} interaction tool`);

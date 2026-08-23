@@ -9,7 +9,7 @@ import {
   BootedDevice,
   Element,
   ObserveResult,
-  ViewHierarchyResult
+  ViewHierarchyResult,
 } from "../models";
 import type { ObserveScreenExecuteOptions } from "../features/observe/interfaces/ObserveScreen";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
@@ -47,19 +47,20 @@ export interface SystemTrayAdb {
     timeoutMs?: number,
     maxBuffer?: number,
     noRetry?: boolean,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<{ stdout: string; stderr: string }>;
   getDeviceTimestampMs(): Promise<number>;
 }
 
 export interface SystemTrayIosClient {
   requestSwipe(
-    x1: number, y1: number, x2: number, y2: number,
-    duration?: number
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    duration?: number,
   ): Promise<{ success: boolean }>;
-  requestTapCoordinates(
-    x: number, y: number
-  ): Promise<{ success: boolean }>;
+  requestTapCoordinates(x: number, y: number): Promise<{ success: boolean }>;
 }
 
 export interface SystemTrayDependencies {
@@ -75,7 +76,7 @@ export interface SystemTrayDependencies {
 
 let systemTrayDependencies: SystemTrayDependencies | null = null;
 
-const defaultIosClientFactory: (device: BootedDevice) => SystemTrayIosClient = device => {
+const defaultIosClientFactory: (device: BootedDevice) => SystemTrayIosClient = (device) => {
   const client = IOSCtrlProxyClient.getInstance(device);
   return {
     requestSwipe: async (x1, y1, x2, y2, duration) => {
@@ -85,17 +86,17 @@ const defaultIosClientFactory: (device: BootedDevice) => SystemTrayIosClient = d
     requestTapCoordinates: async (x, y) => {
       const result = await client.requestTapCoordinates(x, y);
       return { success: result.success };
-    }
+    },
   };
 };
 
 export const getSystemTrayDependencies = (): SystemTrayDependencies => {
   if (!systemTrayDependencies) {
     systemTrayDependencies = {
-      observeScreenFactory: device => new RealObserveScreen(device),
-      adbFactory: device => defaultAdbClientFactory.create(device),
+      observeScreenFactory: (device) => new RealObserveScreen(device),
+      adbFactory: (device) => defaultAdbClientFactory.create(device),
       iosClientFactory: defaultIosClientFactory,
-      timer: defaultTimer
+      timer: defaultTimer,
     };
   }
   return systemTrayDependencies;
@@ -107,7 +108,7 @@ export const setSystemTrayDependencies = (overrides: Partial<SystemTrayDependenc
     observeScreenFactory: overrides.observeScreenFactory ?? current.observeScreenFactory,
     adbFactory: overrides.adbFactory ?? current.adbFactory,
     iosClientFactory: overrides.iosClientFactory ?? current.iosClientFactory,
-    timer: overrides.timer ?? current.timer
+    timer: overrides.timer ?? current.timer,
   };
 };
 
@@ -126,13 +127,13 @@ const NOTIFICATION_ROW_RESOURCE_ID_HINTS = [
   "notification_container",
   "notification_content",
   "notification_main_column",
-  "notification_template"
+  "notification_template",
 ];
 const NOTIFICATION_ROW_CLASS_HINTS = [
   "ExpandableNotificationRow",
   "NotificationRow",
   "StatusBarNotification",
-  "NotificationContentView"
+  "NotificationContentView",
 ];
 const NOTIFICATION_ROW_RESOURCE_ID_EXCLUDES = [
   ...SYSTEM_TRAY_RESOURCE_ID_HINTS,
@@ -140,7 +141,7 @@ const NOTIFICATION_ROW_RESOURCE_ID_EXCLUDES = [
   "notification_stack_scroll",
   "notification_children_container",
   "notification_container_parent",
-  "shared_notification_container"
+  "shared_notification_container",
 ];
 const DEFAULT_SYSTEM_TRAY_AWAIT_TIMEOUT_MS = 5000;
 const SYSTEM_TRAY_POLL_INTERVAL_MS = 250;
@@ -151,7 +152,8 @@ const SYSTEM_TRAY_POLL_INTERVAL_MS = 250;
 const SYSTEM_TRAY_REEXPAND_INTERVAL_MS = 1000;
 export const SYSTEM_TRAY_CLEAR_MAX_ITERATIONS = 25;
 // Re-export shared constant so existing callers (interactionTools.ts) keep working.
-export const SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS = SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS_FROM_HINTS;
+export const SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS =
+  SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS_FROM_HINTS;
 export const EXPAND_GROUP_SETTLE_MS = 500;
 
 // ============================================================================
@@ -214,7 +216,7 @@ export const resolveSystemTrayAwaitTimeout = (awaitTimeout?: number): number => 
 
 const expandSystemTray = async (
   detector: NotificationUIDetector,
-  observation?: ObserveResult
+  observation?: ObserveResult,
 ): Promise<void> => {
   await detector.expandTray(observation);
 };
@@ -224,7 +226,7 @@ const expandSystemTray = async (
 // poll will re-observe and retry, so a single failed expand here is not fatal.
 const reexpandSystemTrayBestEffort = async (
   detector: NotificationUIDetector,
-  observation?: ObserveResult
+  observation?: ObserveResult,
 ): Promise<void> => {
   try {
     await expandSystemTray(detector, observation);
@@ -235,13 +237,16 @@ const reexpandSystemTrayBestEffort = async (
 
 const collapseSystemTray = async (
   detector: NotificationUIDetector,
-  observation?: ObserveResult
+  observation?: ObserveResult,
 ): Promise<void> => {
   await detector.collapseTray(observation);
 };
 
 const parseAppLabelFromDumpsys = (stdout: string): string | null => {
-  const lines = stdout.split("\n").map(line => line.trim()).filter(Boolean);
+  const lines = stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
   const parseLine = (line: string): string | null => {
     const match = line.match(/application-label(?:-[^:]+)?:\s*(?:'([^']+)'|"([^"]+)"|(.+))/);
     if (!match) {
@@ -272,7 +277,10 @@ const parseAppLabelFromDumpsys = (stdout: string): string | null => {
   return null;
 };
 
-export const resolveAppLabel = async (device: BootedDevice, appId: string): Promise<string | null> => {
+export const resolveAppLabel = async (
+  device: BootedDevice,
+  appId: string,
+): Promise<string | null> => {
   if (device.platform !== "android") {
     return null;
   }
@@ -294,7 +302,12 @@ export const resolveAppLabel = async (device: BootedDevice, appId: string): Prom
   try {
     const { adbFactory } = getSystemTrayDependencies();
     const adb = adbFactory(device);
-    const result = await adb.executeCommand(`shell dumpsys package ${appId}`, undefined, undefined, true);
+    const result = await adb.executeCommand(
+      `shell dumpsys package ${appId}`,
+      undefined,
+      undefined,
+      true,
+    );
     return parseAppLabelFromDumpsys(result.stdout);
   } catch (error) {
     // Both the CtrlProxy fast path and this dumpsys fallback failed (e.g. app
@@ -307,13 +320,14 @@ export const resolveAppLabel = async (device: BootedDevice, appId: string): Prom
 const createSubHierarchy = (node: any): ViewHierarchyResult => {
   return {
     hierarchy: {
-      node
-    }
+      node,
+    },
   };
 };
 
 const getNotificationCriteriaCount = (criteria: SystemTrayNotificationArgs): number => {
-  return [criteria.title, criteria.body, criteria.appId, criteria.tapActionLabel].filter(Boolean).length;
+  return [criteria.title, criteria.body, criteria.appId, criteria.tapActionLabel].filter(Boolean)
+    .length;
 };
 
 const nodeHasNotificationRowHint = (node: any): boolean => {
@@ -325,18 +339,23 @@ const nodeHasNotificationRowHint = (node: any): boolean => {
   const resourceId = String(props["resource-id"] ?? props.resourceId ?? "").toLowerCase();
   const className = String(props.className ?? props.class ?? "").toLowerCase();
   const packageName = String(props.packageName ?? props.package ?? "").toLowerCase();
-  const isSystemUi = packageName === SYSTEM_TRAY_PACKAGE || resourceId.includes(SYSTEM_TRAY_PACKAGE);
+  const isSystemUi =
+    packageName === SYSTEM_TRAY_PACKAGE || resourceId.includes(SYSTEM_TRAY_PACKAGE);
 
   if (!isSystemUi) {
     return false;
   }
 
-  if (NOTIFICATION_ROW_RESOURCE_ID_EXCLUDES.some(hint => resourceId.includes(hint))) {
+  if (NOTIFICATION_ROW_RESOURCE_ID_EXCLUDES.some((hint) => resourceId.includes(hint))) {
     return false;
   }
 
-  const matchesResourceId = NOTIFICATION_ROW_RESOURCE_ID_HINTS.some(hint => resourceId.includes(hint));
-  const matchesClassName = NOTIFICATION_ROW_CLASS_HINTS.some(hint => className.includes(hint.toLowerCase()));
+  const matchesResourceId = NOTIFICATION_ROW_RESOURCE_ID_HINTS.some((hint) =>
+    resourceId.includes(hint),
+  );
+  const matchesClassName = NOTIFICATION_ROW_CLASS_HINTS.some((hint) =>
+    className.includes(hint.toLowerCase()),
+  );
 
   return matchesResourceId || matchesClassName;
 };
@@ -387,7 +406,7 @@ const findExpandButtonInGroup = (groupNode: any): Element | null => {
         if (matchesDesc !== matchesId) {
           logger.warn(
             `[systemTray] Expand button partial match: ` +
-            `content-desc="${contentDesc}", resource-id="${resourceId}"`
+              `content-desc="${contentDesc}", resource-id="${resourceId}"`,
           );
         }
         return parser.parseNodeBounds(node) ?? null;
@@ -414,7 +433,7 @@ const findExpandButtonInGroup = (groupNode: any): Element | null => {
 
 export const expandNotificationGroup = async (
   device: BootedDevice,
-  match: SystemTrayNotificationMatch
+  match: SystemTrayNotificationMatch,
 ): Promise<boolean> => {
   const groupNode = match.candidate.groupNode;
   if (!groupNode) {
@@ -425,19 +444,21 @@ export const expandNotificationGroup = async (
   if (!expandButton) {
     throw new ActionableError(
       "Collapsed notification group detected but no expand button found. " +
-      "Cannot tap individual notifications inside a collapsed group."
+        "Cannot tap individual notifications inside a collapsed group.",
     );
   }
 
   logger.info(
     `[systemTray] Expanding collapsed notification group ` +
-    `(tap ${expandButton.bounds?.left},${expandButton.bounds?.top})`
+      `(tap ${expandButton.bounds?.left},${expandButton.bounds?.top})`,
   );
   await tapElement(device, expandButton);
   return true;
 };
 
-const collectNotificationCandidates = (viewHierarchy: ViewHierarchyResult): SystemTrayNotificationCandidate[] => {
+const collectNotificationCandidates = (
+  viewHierarchy: ViewHierarchyResult,
+): SystemTrayNotificationCandidate[] => {
   const candidates: SystemTrayNotificationCandidate[] = [];
   const parser = new DefaultElementParser();
 
@@ -488,9 +509,9 @@ const buildNormalizedSearchText = (text?: string): NormalizedSearchText | null =
 
 const buildNormalizedSearchTexts = (texts: string[]): NormalizedSearchText[] => {
   return texts
-    .map(text => text.trim())
+    .map((text) => text.trim())
     .filter(Boolean)
-    .map(text => ({ text, normalized: text.toLowerCase() }));
+    .map((text) => ({ text, normalized: text.toLowerCase() }));
 };
 
 const extractNodeTextCandidates = (node: any): string[] => {
@@ -499,24 +520,22 @@ const extractNodeTextCandidates = (node: any): string[] => {
     return [];
   }
 
-  const candidates = [
-    props.text,
-    props["content-desc"],
-    props["ios-accessibility-label"]
-  ];
+  const candidates = [props.text, props["content-desc"], props["ios-accessibility-label"]];
 
-  return candidates.filter((value): value is string => typeof value === "string" && value.length > 0);
+  return candidates.filter(
+    (value): value is string => typeof value === "string" && value.length > 0,
+  );
 };
 
 const resolveMatchForSearchText = (
   nodeTextCandidatesLower: string[],
-  searchText: NormalizedSearchText
+  searchText: NormalizedSearchText,
 ): SystemTrayTextMatch | null => {
-  if (nodeTextCandidatesLower.some(text => text === searchText.normalized)) {
+  if (nodeTextCandidatesLower.some((text) => text === searchText.normalized)) {
     return { text: searchText.text, matchType: "exact" };
   }
 
-  if (nodeTextCandidatesLower.some(text => text.includes(searchText.normalized))) {
+  if (nodeTextCandidatesLower.some((text) => text.includes(searchText.normalized))) {
     return { text: searchText.text, matchType: "partial" };
   }
 
@@ -525,16 +544,16 @@ const resolveMatchForSearchText = (
 
 const resolveMatchForSearchTexts = (
   nodeTextCandidatesLower: string[],
-  searchTexts: NormalizedSearchText[]
+  searchTexts: NormalizedSearchText[],
 ): SystemTrayTextMatch | null => {
   for (const searchText of searchTexts) {
-    if (nodeTextCandidatesLower.some(text => text === searchText.normalized)) {
+    if (nodeTextCandidatesLower.some((text) => text === searchText.normalized)) {
       return { text: searchText.text, matchType: "exact" };
     }
   }
 
   for (const searchText of searchTexts) {
-    if (nodeTextCandidatesLower.some(text => text.includes(searchText.normalized))) {
+    if (nodeTextCandidatesLower.some((text) => text.includes(searchText.normalized))) {
       return { text: searchText.text, matchType: "partial" };
     }
   }
@@ -544,7 +563,7 @@ const resolveMatchForSearchTexts = (
 
 const mergeTextMatch = (
   currentMatch: SystemTrayTextMatch | undefined,
-  nextMatch: SystemTrayTextMatch | undefined
+  nextMatch: SystemTrayTextMatch | undefined,
 ): SystemTrayTextMatch | undefined => {
   if (!nextMatch) {
     return currentMatch;
@@ -563,9 +582,12 @@ const mergeTextMatch = (
 
 const mergeMatchMaps = (
   base: SystemTrayMatchResult["matches"],
-  incoming: SystemTrayMatchResult["matches"]
+  incoming: SystemTrayMatchResult["matches"],
 ): SystemTrayMatchResult["matches"] => {
-  for (const [key, value] of Object.entries(incoming) as [SystemTrayMatchKey, SystemTrayTextMatch][]) {
+  for (const [key, value] of Object.entries(incoming) as [
+    SystemTrayMatchKey,
+    SystemTrayTextMatch,
+  ][]) {
     base[key] = mergeTextMatch(base[key], value);
   }
   return base;
@@ -574,7 +596,7 @@ const mergeMatchMaps = (
 const collectCompositeNotificationCandidates = (
   viewHierarchy: ViewHierarchyResult,
   criteria: SystemTrayNotificationArgs,
-  appMatchTexts: string[]
+  appMatchTexts: string[],
 ): SystemTrayNotificationCandidate[] => {
   const rootNodes = getHierarchyRoots(viewHierarchy);
   if (rootNodes.length === 0) {
@@ -615,7 +637,7 @@ const collectCompositeNotificationCandidates = (
       return {};
     }
 
-    const nodeTextCandidatesLower = nodeTextCandidates.map(text => text.toLowerCase());
+    const nodeTextCandidatesLower = nodeTextCandidates.map((text) => text.toLowerCase());
     const matches: SystemTrayMatchResult["matches"] = {};
 
     if (titleText) {
@@ -651,7 +673,7 @@ const collectCompositeNotificationCandidates = (
 
   const visit = (
     node: any,
-    depth: number
+    depth: number,
   ): { matches: SystemTrayMatchResult["matches"]; hasAll: boolean } => {
     if (!node) {
       return { matches: {}, hasAll: false };
@@ -677,7 +699,7 @@ const collectCompositeNotificationCandidates = (
       }
     }
 
-    const hasAll = requiredKeys.every(key => Boolean(combinedMatches[key]));
+    const hasAll = requiredKeys.every((key) => Boolean(combinedMatches[key]));
     if (hasAll && !childHasAll) {
       const element = parser.parseNodeBounds(node) ?? undefined;
       candidates.push({ node, depth, element });
@@ -696,7 +718,7 @@ const collectCompositeNotificationCandidates = (
 const findTextMatch = (
   finder: ElementFinder,
   viewHierarchy: ViewHierarchyResult,
-  text: string
+  text: string,
 ): SystemTrayTextMatch | null => {
   const exactMatch = finder.findElementByText(viewHierarchy, text, undefined, false, false);
   if (exactMatch) {
@@ -714,9 +736,9 @@ const findTextMatch = (
 const findFirstTextMatch = (
   finder: ElementFinder,
   viewHierarchy: ViewHierarchyResult,
-  texts: string[]
+  texts: string[],
 ): SystemTrayTextMatch | null => {
-  const candidates = texts.map(text => text.trim()).filter(Boolean);
+  const candidates = texts.map((text) => text.trim()).filter(Boolean);
   for (const text of candidates) {
     const exactMatch = finder.findElementByText(viewHierarchy, text, undefined, false, false);
     if (exactMatch) {
@@ -737,7 +759,7 @@ const findFirstTextMatch = (
 const findElementMatch = (
   finder: ElementFinder,
   viewHierarchy: ViewHierarchyResult,
-  text: string
+  text: string,
 ): SystemTrayElementMatch | null => {
   const exactMatch = finder.findElementByText(viewHierarchy, text, undefined, false, false);
   if (exactMatch) {
@@ -755,9 +777,9 @@ const findElementMatch = (
 const findFirstElementMatch = (
   finder: ElementFinder,
   viewHierarchy: ViewHierarchyResult,
-  texts: string[]
+  texts: string[],
 ): SystemTrayElementMatch | null => {
-  const candidates = texts.map(text => text.trim()).filter(Boolean);
+  const candidates = texts.map((text) => text.trim()).filter(Boolean);
   for (const text of candidates) {
     const exactMatch = finder.findElementByText(viewHierarchy, text, undefined, false, false);
     if (exactMatch) {
@@ -778,7 +800,7 @@ const findFirstElementMatch = (
 const buildNotificationMatch = (
   viewHierarchy: ViewHierarchyResult,
   criteria: SystemTrayNotificationArgs,
-  appMatchTexts: string[]
+  appMatchTexts: string[],
 ): SystemTrayMatchResult => {
   const finder = new DefaultElementFinder();
   const matches: SystemTrayMatchResult["matches"] = {};
@@ -823,7 +845,9 @@ const buildNotificationMatch = (
   return { matched, matches };
 };
 
-const getMatchCounts = (matches: SystemTrayMatchResult["matches"]): { exact: number; partial: number } => {
+const getMatchCounts = (
+  matches: SystemTrayMatchResult["matches"],
+): { exact: number; partial: number } => {
   const values = Object.values(matches);
   let exact = 0;
   let partial = 0;
@@ -855,54 +879,54 @@ const getCandidateTopY = (candidate: SystemTrayNotificationCandidate): number =>
 };
 
 const selectBestNotificationMatch = (
-  matches: SystemTrayNotificationMatch[]
+  matches: SystemTrayNotificationMatch[],
 ): SystemTrayNotificationMatch | null => {
   if (matches.length === 0) {
     return null;
   }
 
-  return matches
-    .slice()
-    .sort((left, right) => {
-      const leftCounts = getMatchCounts(left.match.matches);
-      const rightCounts = getMatchCounts(right.match.matches);
-      if (leftCounts.exact !== rightCounts.exact) {
-        return rightCounts.exact - leftCounts.exact;
-      }
-      if (leftCounts.partial !== rightCounts.partial) {
-        return rightCounts.partial - leftCounts.partial;
-      }
-      // Prefer topmost notification (most recent in Android shade)
-      const leftTop = getCandidateTopY(left.candidate);
-      const rightTop = getCandidateTopY(right.candidate);
-      if (leftTop !== rightTop) {
-        return leftTop - rightTop;
-      }
-      const leftArea = getCandidateArea(left.candidate);
-      const rightArea = getCandidateArea(right.candidate);
-      if (leftArea !== rightArea) {
-        return rightArea - leftArea;
-      }
-      return left.candidate.depth - right.candidate.depth;
-    })[0];
+  return matches.slice().sort((left, right) => {
+    const leftCounts = getMatchCounts(left.match.matches);
+    const rightCounts = getMatchCounts(right.match.matches);
+    if (leftCounts.exact !== rightCounts.exact) {
+      return rightCounts.exact - leftCounts.exact;
+    }
+    if (leftCounts.partial !== rightCounts.partial) {
+      return rightCounts.partial - leftCounts.partial;
+    }
+    // Prefer topmost notification (most recent in Android shade)
+    const leftTop = getCandidateTopY(left.candidate);
+    const rightTop = getCandidateTopY(right.candidate);
+    if (leftTop !== rightTop) {
+      return leftTop - rightTop;
+    }
+    const leftArea = getCandidateArea(left.candidate);
+    const rightArea = getCandidateArea(right.candidate);
+    if (leftArea !== rightArea) {
+      return rightArea - leftArea;
+    }
+    return left.candidate.depth - right.candidate.depth;
+  })[0];
 };
 
 const findNotificationMatches = (
   viewHierarchy: ViewHierarchyResult,
   criteria: SystemTrayNotificationArgs,
-  appMatchTexts: string[]
+  appMatchTexts: string[],
 ): SystemTrayNotificationMatch[] => {
   const parser = new DefaultElementParser();
   const candidates = collectNotificationCandidates(viewHierarchy);
   const criteriaCount = getNotificationCriteriaCount(criteria);
-  const matchCandidates = (candidateList: SystemTrayNotificationCandidate[]): SystemTrayNotificationMatch[] => {
+  const matchCandidates = (
+    candidateList: SystemTrayNotificationCandidate[],
+  ): SystemTrayNotificationMatch[] => {
     return candidateList
-      .map(candidate => {
+      .map((candidate) => {
         const subHierarchy = createSubHierarchy(candidate.node);
         const match = buildNotificationMatch(subHierarchy, criteria, appMatchTexts);
         return { candidate, match, subHierarchy };
       })
-      .filter(entry => entry.match.matched);
+      .filter((entry) => entry.match.matched);
   };
 
   let matches = matchCandidates(candidates);
@@ -913,14 +937,18 @@ const findNotificationMatches = (
   let fallbackCandidates: SystemTrayNotificationCandidate[] = [];
   if (criteriaCount <= 1) {
     if (candidates.length === 0) {
-      fallbackCandidates = getHierarchyRoots(viewHierarchy).map(node => ({
+      fallbackCandidates = getHierarchyRoots(viewHierarchy).map((node) => ({
         node,
         depth: 0,
-        element: parser.parseNodeBounds(node) ?? undefined
+        element: parser.parseNodeBounds(node) ?? undefined,
       }));
     }
   } else {
-    fallbackCandidates = collectCompositeNotificationCandidates(viewHierarchy, criteria, appMatchTexts);
+    fallbackCandidates = collectCompositeNotificationCandidates(
+      viewHierarchy,
+      criteria,
+      appMatchTexts,
+    );
   }
 
   if (fallbackCandidates.length === 0) {
@@ -934,7 +962,7 @@ const findNotificationMatches = (
 const findBestNotificationMatch = (
   viewHierarchy: ViewHierarchyResult,
   criteria: SystemTrayNotificationArgs,
-  appMatchTexts: string[]
+  appMatchTexts: string[],
 ): SystemTrayNotificationMatch | null => {
   const matches = findNotificationMatches(viewHierarchy, criteria, appMatchTexts);
   return selectBestNotificationMatch(matches);
@@ -944,7 +972,7 @@ const waitForSystemTrayOpen = async (
   detector: NotificationUIDetector,
   observeScreen: SystemTrayObserver,
   minTimestamp: number,
-  awaitTimeoutMs: number
+  awaitTimeoutMs: number,
 ): Promise<ObserveResult> => {
   const { timer } = getSystemTrayDependencies();
   const startTime = timer.now();
@@ -965,7 +993,7 @@ const waitForSystemTrayClosed = async (
   detector: NotificationUIDetector,
   observeScreen: SystemTrayObserver,
   minTimestamp: number,
-  awaitTimeoutMs: number
+  awaitTimeoutMs: number,
 ): Promise<ObserveResult> => {
   const { timer } = getSystemTrayDependencies();
   const startTime = timer.now();
@@ -985,7 +1013,7 @@ const waitForSystemTrayClosed = async (
 export const ensureSystemTrayOpen = async (
   device: BootedDevice,
   awaitTimeoutMs: number = DEFAULT_SYSTEM_TRAY_AWAIT_TIMEOUT_MS,
-  _progress?: ProgressCallback
+  _progress?: ProgressCallback,
 ): Promise<{
   observation?: ObserveResult;
   opened: boolean;
@@ -1009,21 +1037,21 @@ export const ensureSystemTrayOpen = async (
     detector,
     observeScreen,
     minTimestamp,
-    awaitTimeoutMs
+    awaitTimeoutMs,
   );
 
   return {
     observation: awaitedObservation ?? observation,
     opened: true,
     skipped: false,
-    minTimestamp
+    minTimestamp,
   };
 };
 
 export const ensureSystemTrayClosed = async (
   device: BootedDevice,
   awaitTimeoutMs: number = DEFAULT_SYSTEM_TRAY_AWAIT_TIMEOUT_MS,
-  _progress?: ProgressCallback
+  _progress?: ProgressCallback,
 ): Promise<{
   observation?: ObserveResult;
   closed: boolean;
@@ -1047,14 +1075,14 @@ export const ensureSystemTrayClosed = async (
     detector,
     observeScreen,
     minTimestamp,
-    awaitTimeoutMs
+    awaitTimeoutMs,
   );
 
   return {
     observation: awaitedObservation ?? observation,
     closed: true,
     skipped: false,
-    minTimestamp
+    minTimestamp,
   };
 };
 
@@ -1094,7 +1122,7 @@ type UnmatchedNotificationDiagnostics = {
 const buildUnmatchedNotificationDiagnostics = (
   viewHierarchy: ViewHierarchyResult,
   criteria: SystemTrayNotificationArgs,
-  appMatchTexts: string[]
+  appMatchTexts: string[],
 ): UnmatchedNotificationDiagnostics => {
   const candidates = collectNotificationCandidates(viewHierarchy);
   const lines: string[] = [];
@@ -1103,14 +1131,14 @@ const buildUnmatchedNotificationDiagnostics = (
     const texts = collectNotificationSubtreeTexts(candidate.node);
     lines.push(
       `  candidate#${index} depth=${candidate.depth} inGroup=${Boolean(candidate.groupNode)} ` +
-      `bounds=${JSON.stringify(candidate.element?.bounds ?? null)} texts=${JSON.stringify(texts)}`
+        `bounds=${JSON.stringify(candidate.element?.bounds ?? null)} texts=${JSON.stringify(texts)}`,
     );
   }
   const criteriaSummary = JSON.stringify({
     title: criteria.title,
     body: criteria.body,
     appId: criteria.appId,
-    tapActionLabel: criteria.tapActionLabel
+    tapActionLabel: criteria.tapActionLabel,
   });
   const info =
     `[systemTray][diag] shade open but no notification matched. ` +
@@ -1128,13 +1156,13 @@ export const waitForNotificationMatch = async (
   criteria: SystemTrayNotificationArgs,
   appMatchTexts: string[],
   awaitTimeoutMs: number,
-  progress?: ProgressCallback
+  progress?: ProgressCallback,
 ): Promise<{ observation: ObserveResult; match: SystemTrayNotificationMatch | null }> => {
   const { observeScreenFactory, timer } = getSystemTrayDependencies();
   if (awaitTimeoutMs <= 0) {
     logger.warn(
       `[systemTray] waitForNotificationMatch called with non-positive timeout ` +
-      `(${awaitTimeoutMs}ms), using minimum of ${SYSTEM_TRAY_POLL_INTERVAL_MS}ms`
+        `(${awaitTimeoutMs}ms), using minimum of ${SYSTEM_TRAY_POLL_INTERVAL_MS}ms`,
     );
     awaitTimeoutMs = SYSTEM_TRAY_POLL_INTERVAL_MS;
   }
@@ -1161,7 +1189,11 @@ export const waitForNotificationMatch = async (
       }
       // Diagnostic: log the candidate breakdown when the shade is open but nothing
       // matched, deduped so a 120s poll loop does not emit identical lines each tick.
-      const diagnostics = buildUnmatchedNotificationDiagnostics(viewHierarchy, criteria, appMatchTexts);
+      const diagnostics = buildUnmatchedNotificationDiagnostics(
+        viewHierarchy,
+        criteria,
+        appMatchTexts,
+      );
       if (diagnostics.info !== lastInfoDiagSignature) {
         lastInfoDiagSignature = diagnostics.info;
         logger.info(diagnostics.info);
@@ -1205,7 +1237,7 @@ export const waitForNotificationMatch = async (
 
 export const resolveNotificationTapElement = (
   match: SystemTrayNotificationMatch,
-  criteria: SystemTrayNotificationArgs
+  criteria: SystemTrayNotificationArgs,
 ): SystemTrayElementMatch | null => {
   const finder = new DefaultElementFinder();
   const subHierarchy = match.subHierarchy;
@@ -1237,7 +1269,7 @@ export const resolveNotificationTapElement = (
 export const resolveNotificationSwipeElement = (
   match: SystemTrayNotificationMatch,
   criteria: SystemTrayNotificationArgs,
-  appMatchTexts: string[]
+  appMatchTexts: string[],
 ): Element | null => {
   if (match.candidate.element) {
     return match.candidate.element;

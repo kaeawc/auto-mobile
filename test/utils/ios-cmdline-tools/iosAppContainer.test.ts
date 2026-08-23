@@ -58,7 +58,7 @@ describe("getAppDataContainerPath", () => {
 
   test("returns the trimmed container path and issues the exact argv", async () => {
     const { simctl, calls } = containerClient(
-      createExecResult("/Users/test/data/Containers/Data/Application/ABC\n", "")
+      createExecResult("/Users/test/data/Containers/Data/Application/ABC\n", ""),
     );
 
     const result = await getAppDataContainerPath(simctl, deviceId, bundleId);
@@ -70,7 +70,10 @@ describe("getAppDataContainerPath", () => {
   const nullRows: ReadonlyArray<{ label: string; result: ExecResult | Error }> = [
     { label: "empty stdout", result: createExecResult("", "") },
     { label: "whitespace-only stdout", result: createExecResult("   \n", "") },
-    { label: "the command throws (app not installed)", result: new Error("No such file or directory") },
+    {
+      label: "the command throws (app not installed)",
+      result: new Error("No such file or directory"),
+    },
   ];
 
   for (const { label, result } of nullRows) {

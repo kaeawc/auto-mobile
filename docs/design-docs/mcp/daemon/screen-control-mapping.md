@@ -45,11 +45,11 @@ Wiring that to `inputTap`/`inputSwipe`/`inputPressButton`/`inputTypeText`/
 
 ## Coordinate spaces
 
-| Space | Origin | Units |
-| --- | --- | --- |
-| **Viewport** | top-left of the rendered canvas | canvas pixels, before pan/zoom are removed |
-| **Frame** | top-left of the fitted device frame | frame pixels at zoom 1.0 |
-| **Device** | top-left of the device screen | same space as hierarchy `bounds` — **canonical physical pixels** |
+| Space        | Origin                              | Units                                                            |
+| ------------ | ----------------------------------- | ---------------------------------------------------------------- |
+| **Viewport** | top-left of the rendered canvas     | canvas pixels, before pan/zoom are removed                       |
+| **Frame**    | top-left of the fitted device frame | frame pixels at zoom 1.0                                         |
+| **Device**   | top-left of the device screen       | same space as hierarchy `bounds` — **canonical physical pixels** |
 
 Device coordinates share the hierarchy `bounds` coordinate system, so a mapped
 point can be handed directly to element hit-testing (inspector) or to the daemon
@@ -78,7 +78,7 @@ are already physical pixels (`nativeScale` 1), so its conversion is the identity
 > formulas are ratio-based and unit-agnostic — but a client must not compare the
 > frame's absolute dimensions against the bounds' (see
 > [Client Frame Snapshot](client-frame-snapshot.md#coordinate-space-canonical-pixels)).
-> Never infer pixels from a missing field — and never treat an *unrecognized*
+> Never infer pixels from a missing field — and never treat an _unrecognized_
 > declaration as this fallback. A space the client does not implement means a
 > daemon newer than the client, so control must fail closed on that frame; only
 > an absent field is the legacy point space.
@@ -103,12 +103,12 @@ plain scale + translate.
 
 A client builds a geometry snapshot once per rendered frame:
 
-| Field | Meaning |
-| --- | --- |
-| `frameWidthPx`, `frameHeightPx` | fitted frame size at zoom 1.0 (from fit-to-viewport) |
-| `scale` | current zoom multiplier |
-| `offsetX`, `offsetY` | current pan offset, in viewport pixels |
-| `deviceWidth`, `deviceHeight` | device coordinate-space size (root hierarchy bounds, rotation-aligned) |
+| Field                           | Meaning                                                                |
+| ------------------------------- | ---------------------------------------------------------------------- |
+| `frameWidthPx`, `frameHeightPx` | fitted frame size at zoom 1.0 (from fit-to-viewport)                   |
+| `scale`                         | current zoom multiplier                                                |
+| `offsetX`, `offsetY`            | current pan offset, in viewport pixels                                 |
+| `deviceWidth`, `deviceHeight`   | device coordinate-space size (root hierarchy bounds, rotation-aligned) |
 
 ## Viewport → device mapping
 
@@ -125,7 +125,7 @@ deviceY = round(frameY * frameToDevice)
 Notes and rules a client must reproduce:
 
 - **Width-based scale for both axes.** The single ratio `deviceWidth /
-  frameWidthPx` scales *both* x and y. This is exact because the frame is fitted
+frameWidthPx` scales _both_ x and y. This is exact because the frame is fitted
   to the device aspect ratio, so the height ratio equals the width ratio.
 - **Rounding.** `round` is round-to-nearest with halves rounding **up** (Kotlin
   `roundToInt` / `Math.round`: `0.5 -> 1`, `-0.5 -> 0`).
@@ -136,7 +136,7 @@ Notes and rules a client must reproduce:
   screen produces an out-of-range coordinate that matches no element, clearing
   the selection. A **control** client must not tap an out-of-bounds point — drop
   it, or clamp it to the last addressable pixel `(deviceWidth - 1,
-  deviceHeight - 1)` if pinning to the edge is desired. Clamping is only valid
+deviceHeight - 1)` if pinning to the edge is desired. Clamping is only valid
   when **both** device dimensions are positive: with a zero dimension
   `(deviceWidth - 1, deviceHeight - 1)` is negative and addresses no pixel, so a
   client must **drop** the point instead. The reference `DevicePoint.clampedTo`
@@ -155,20 +155,20 @@ Compose-free `DeviceDragGesturePolicy` in the `desktop-domain` module
 ### One frame for the whole drag
 
 Both endpoints are mapped through the **same** frame snapshot, pinned when the
-drag begins — the one the drag *started* on. A snapshot arriving mid-drag must
+drag begins — the one the drag _started_ on. A snapshot arriving mid-drag must
 not rescale the gesture or map its two ends through different frames. This is
 the drag-shaped case of the rule in
 [Client Frame Snapshot](client-frame-snapshot.md).
 
 ### Threshold
 
-| Rule | Value |
-| --- | --- |
-| Minimum travelled distance, frame declares `coordinateSpace: "px"` | **`24 * nativeScale` device coordinates** (physical pixels) |
-| Minimum travelled distance, legacy frame (no declaration) | **24 device coordinates** (logical points) |
-| Measurement | straight-line (Euclidean), in **device** coordinates, **after** the end is clamped |
-| Below the threshold | send **nothing** — not a swipe, and **not** a tap either |
-| Duration sent | **300 ms**, a fixed client value |
+| Rule                                                               | Value                                                                              |
+| ------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
+| Minimum travelled distance, frame declares `coordinateSpace: "px"` | **`24 * nativeScale` device coordinates** (physical pixels)                        |
+| Minimum travelled distance, legacy frame (no declaration)          | **24 device coordinates** (logical points)                                         |
+| Measurement                                                        | straight-line (Euclidean), in **device** coordinates, **after** the end is clamped |
+| Below the threshold                                                | send **nothing** — not a swipe, and **not** a tap either                           |
+| Duration sent                                                      | **300 ms**, a fixed client value                                                   |
 
 The threshold is measured in **device** coordinates, not viewport pixels, so it
 means the same thing regardless of the client's zoom level: a viewport-space
@@ -203,15 +203,15 @@ rate is unrelated to the device's. `300` is inside the daemon's accepted
 
 ### Cancellation and out-of-bounds
 
-| Situation | Behavior |
-| --- | --- |
-| Drag **cancelled** (pointer capture lost, window deactivated) | send nothing |
-| Drag **started** outside the device screen | send nothing — clamping would invent a start the user never touched |
-| Drag **ended** outside the device screen | **clamp** the end to the last addressable pixel and send |
-| Device screen has a non-positive dimension | send nothing (no addressable pixel to clamp to) |
-| Drag outside Control mode | send nothing; a drag means viewport pan |
+| Situation                                                     | Behavior                                                            |
+| ------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Drag **cancelled** (pointer capture lost, window deactivated) | send nothing                                                        |
+| Drag **started** outside the device screen                    | send nothing — clamping would invent a start the user never touched |
+| Drag **ended** outside the device screen                      | **clamp** the end to the last addressable pixel and send            |
+| Device screen has a non-positive dimension                    | send nothing (no addressable pixel to clamp to)                     |
+| Drag outside Control mode                                     | send nothing; a drag means viewport pan                             |
 
-Dragging *past* an edge is the ordinary way to scroll to the end of a list, so an
+Dragging _past_ an edge is the ordinary way to scroll to the end of a list, so an
 out-of-bounds end is clamped rather than dropped — this is the clamping option
 the [out-of-bounds rule](#viewport--device-mapping) already sanctions, and it
 yields well-formed input. Clamping happens **before** the distance check, so the
@@ -246,8 +246,8 @@ Modulo integer rounding, `deviceToViewport` and `viewportToDevice` round-trip.
 
 Keyboard, text and device-button forwarding is **client-side policy** in exactly
 the same sense as the drag rules above: `input/pressButton`, `input/typeText` and
-`input/key` faithfully execute whatever they are handed, so deciding *which
-keystrokes reach the device at all* is entirely the client's job. The reference
+`input/key` faithfully execute whatever they are handed, so deciding _which
+keystrokes reach the device at all_ is entirely the client's job. The reference
 implementation is the Compose-free `DeviceKeyboardInputPolicy` in the
 `desktop-domain` module
 ([#3351](https://github.com/kaeawc/auto-mobile/issues/3351)).
@@ -261,12 +261,12 @@ policy.
 
 Two conditions, both required:
 
-| Condition | Why |
-| --- | --- |
-| The device-screen view **holds keyboard focus** | Forwarding without it would type into the device while the user is filling in a field elsewhere in the host |
-| The view is in **Control** mode | Inspector mode produces no daemon input of any kind, which is what keeps an inspector-only embedder (the IDE plugin) unaffected |
+| Condition                                       | Why                                                                                                                             |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| The device-screen view **holds keyboard focus** | Forwarding without it would type into the device while the user is filling in a field elsewhere in the host                     |
+| The view is in **Control** mode                 | Inspector mode produces no daemon input of any kind, which is what keeps an inspector-only embedder (the IDE plugin) unaffected |
 
-Focus is the *only* place a global-capture design would be tempting; do not take
+Focus is the _only_ place a global-capture design would be tempting; do not take
 it. Use the toolkit's own focus routing — the reference client attaches its
 handler to the focusable device-screen node, so a keystroke reaches the policy
 only when that node is on the focus path, and nothing has to be re-checked. The
@@ -276,14 +276,14 @@ clicked**; the second is not optional, because once anything else takes focus
 only affordance a user has to get it back.
 
 **Beware ancestor preview handlers.** If your host resolves its own navigation
-shortcuts in a *preview*/capture-phase handler — one that runs before the focused
+shortcuts in a _preview_/capture-phase handler — one that runs before the focused
 descendant — it will consume Tab, the arrows, Enter and Escape before the device
 canvas ever sees them, and Escape is the client's only device-button binding. The
 host must stand that handler down while the device canvas holds focus — but only
 for **keystrokes the policy will actually claim**, decided per event with this
 same policy, not with a blanket "canvas is focused" flag. The blanket version
 creates a dead zone: toolkits do not rerun a preview handler while an unconsumed
-event bubbles back up, so any keystroke the canvas then *declines* (a printable
+event bubbles back up, so any keystroke the canvas then _declines_ (a printable
 character on a platform whose daemon cannot append, a shifted device key) would
 reach neither the device nor the host binding it used to trigger. The reference
 client asks `DeviceControlSession.wouldForwardKey` — the same decision the
@@ -321,7 +321,7 @@ altComposesText = printable && !meta && when {
   device.
 - **Windows:** composition is **AltGr**, but many JDKs surface it only as
   **Ctrl+Alt** (`@`, `€`, `{`, `\`) and leave the native AltGraph flag unset. The
-  Ctrl+Alt fallback is therefore retained. A *plain* Alt (no Ctrl) is a **menu
+  Ctrl+Alt fallback is therefore retained. A _plain_ Alt (no Ctrl) is a **menu
   accelerator** — `Alt+F` opens File — and AWT reports a printable `keyChar` for
   it too, so it must not count as composition.
 - **macOS:** composition is the **Option** key, which is plain **Alt** (Option+L =
@@ -376,32 +376,32 @@ out of step with the policy.
 
 Applied in this order:
 
-| Keystroke | Sends |
-| --- | --- |
-| Any chord modifier held, key not explicitly opted in | **nothing**; leave unconsumed |
-| `Escape` | one `input/pressButton` with `back` |
+| Keystroke                                                                            | Sends                                                                                                             |
+| ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| Any chord modifier held, key not explicitly opted in                                 | **nothing**; leave unconsumed                                                                                     |
+| `Escape`                                                                             | one `input/pressButton` with `back`                                                                               |
 | `Enter`, `Tab`, `Backspace`, `Delete`, `ArrowUp/Down/Left/Right` — **without Shift** | one `input/key` with `enter`, `tab`, `backspace`, `delete`, `arrow_up`, `arrow_down`, `arrow_left`, `arrow_right` |
-| Any of those keys **with Shift held** (Shift-Tab, Shift-arrow, …) | **nothing**; leave unconsumed |
-| A printable **ASCII** character (`U+0020`–`U+007E`) | one `input/typeText` with that single character, in **append** mode |
-| A printable character outside that range (`é`, `€`, CJK, emoji) | **nothing**; leave unconsumed |
-| Anything else (function keys, a modifier pressed alone, a dead key) | **nothing**; leave unconsumed |
+| Any of those keys **with Shift held** (Shift-Tab, Shift-arrow, …)                    | **nothing**; leave unconsumed                                                                                     |
+| A printable **ASCII** character (`U+0020`–`U+007E`)                                  | one `input/typeText` with that single character, in **append** mode                                               |
+| A printable character outside that range (`é`, `€`, CJK, emoji)                      | **nothing**; leave unconsumed                                                                                     |
+| Anything else (function keys, a modifier pressed alone, a dead key)                  | **nothing**; leave unconsumed                                                                                     |
 
 A key with a device meaning **wins over the character it produced**. Hosts report
 a control character for Enter, Tab and Backspace; typing those as text would put
 a literal newline in a text field instead of pressing the key.
 
 **Shifted device keys are declined, never downgraded.** `input/key` transmits no
-modifiers — its contract rejects them — so the only thing that *could* be sent
+modifiers — its contract rejects them — so the only thing that _could_ be sent
 for Shift-Tab is bare `tab`, and that is a semantically different keystroke:
 Shift-Tab moves focus **backward**, `tab` moves it forward; Shift-arrow extends a
 selection, a bare arrow abandons it. The same governing rule as characters
 applies — never deliver a different keystroke than the user pressed — so the
 stroke is left unconsumed and the host (which can honor the shifted form) keeps
-it. Shifted *characters* (`A`, `?`) are unaffected: they arrive as characters
+it. Shifted _characters_ (`A`, `?`) are unaffected: they arrive as characters
 that already encode the shift.
 
 **Text must be appended, never set.** `input/typeText`'s default Android path is
-`ACTION_SET_TEXT`, which *replaces* the focused field's contents. A client sending
+`ACTION_SET_TEXT`, which _replaces_ the focused field's contents. A client sending
 one character per keystroke through it would type `abc` as "a", then "b", then
 "c" — final value `c` — and would wipe any text already in the field on the first
 key. Pass `mode: "append"`, which routes through the platform's non-destructive
@@ -418,7 +418,7 @@ platforms and marks every per-keystroke request as append.
 type.** Append works by injecting real Android key events, and the daemon's
 character→keycode table (`src/features/action/asciiKeyEvents.ts`) covers
 `U+0020`–`U+007E` and nothing else. Forwarding a character outside that range
-would lose the keystroke *twice*: consumed at the host, then rejected by the
+would lose the keystroke _twice_: consumed at the host, then rejected by the
 device. So a non-ASCII character is declined and left unconsumed — never
 swallowed. The governing rule for a porting client is: **never consume a
 keystroke you cannot deliver.** Typing accented or non-Latin text on a device
@@ -427,13 +427,13 @@ belongs to the device's own IME, not to keystroke mirroring.
 One gap is deliberately left to the daemon rather than to the client. Uppercase
 letters and shifted symbols need `input keycombination`, which exists only on
 Android 12 (API 31) and newer, and a client cannot see the device's API level.
-Refusing every shifted character would make capitals untypable on *every* device
+Refusing every shifted character would make capitals untypable on _every_ device
 in order to protect the older ones, so those characters are forwarded; on an
 older device the daemon answers with an actionable error
 (`append cannot type "A" with Android key events`) that the client surfaces
 through its normal error path. A reported failure, not a silent loss.
 
-`Escape` is the only key bound to a device *button*, and deliberately so.
+`Escape` is the only key bound to a device _button_, and deliberately so.
 Escape→back is the mapping Android itself applies to a hardware ESC key, and
 `pressButton` works on both platforms. Every other device button — `home`,
 `recent`, `power`, `volume_up`, `volume_down`, `menu` — has no unambiguous
@@ -482,8 +482,8 @@ question as "did it reach the device"**. A keystroke the policy accepted is
 consumed even when the queue rejected it — the overload error has already been
 surfaced, and letting the key fall through to the host afterwards would type into
 the host's own UI as a consolation prize for a dropped device input. The boolean a
-client's key handler returns should therefore be read as *"should this event be
-consumed"*, not as *"was this forwarded"*.
+client's key handler returns should therefore be read as _"should this event be
+consumed"_, not as _"was this forwarded"_.
 
 ## Fit-to-viewport sizing
 
@@ -521,11 +521,11 @@ Rotation is resolved up front by comparing the screenshot's portrait/landscape
 orientation to the hierarchy root's, and rotating the screenshot to match:
 
 | Screenshot | Hierarchy bounds | Rotation applied to screenshot |
-| --- | --- | --- |
-| portrait | portrait | none (`0`) |
-| landscape | landscape | none (`0`) |
-| portrait | landscape | 90° clockwise (code `3`) |
-| landscape | portrait | 270° clockwise (code `1`) |
+| ---------- | ---------------- | ------------------------------ |
+| portrait   | portrait         | none (`0`)                     |
+| landscape  | landscape        | none (`0`)                     |
+| portrait   | landscape        | 90° clockwise (code `3`)       |
+| landscape  | portrait         | 270° clockwise (code `1`)      |
 
 Any non-positive dimension yields `0`. A 180° flip (code `2`) is never inferred
 from orientation alone. After this step, `deviceWidth`/`deviceHeight` are the
@@ -540,7 +540,7 @@ or opening a socket: scale, pan, aspect fit, rotation detection, rounding,
 out-of-bounds, round-trip, and the inspector selection/deselection path.
 
 The unit change is pinned from both ends. `DeviceControlPolicyTest` asserts that
-the *same* geometry pair is rejected under `coordinateSpace: "px"` and accepted
+the _same_ geometry pair is rejected under `coordinateSpace: "px"` and accepted
 without it, that the rotation transpose still passes in exact mode, and that a
 declaration on only one of the two messages falls back to the legacy comparison.
 `CanonicalPixelClientMigrationTest` pins the inspector side: overlay placement,
@@ -593,7 +593,7 @@ shell's real preview handler — that Escape/Enter/arrows/Tab actually survive i
 
 ## Which frame the mapping runs against
 
-This document defines the mapping. It deliberately says nothing about *which*
+This document defines the mapping. It deliberately says nothing about _which_
 frame a control client is allowed to map against, or what the client shows after
 it forwards an input — a coordinate mapped correctly through a stale frame still
 taps the wrong pixel. Those rules are specified in

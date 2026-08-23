@@ -4,7 +4,7 @@ import { sql } from "kysely";
 async function columnExists(
   db: Kysely<unknown>,
   tableName: string,
-  columnName: string
+  columnName: string,
 ): Promise<boolean> {
   const result = await sql<{ name: string }>`
     SELECT name FROM pragma_table_info(${tableName}) WHERE name = ${columnName}
@@ -16,15 +16,12 @@ async function addColumnIfNotExists(
   db: Kysely<unknown>,
   tableName: string,
   columnName: string,
-  columnType: string
+  columnType: string,
 ): Promise<void> {
   if (await columnExists(db, tableName, columnName)) {
     return;
   }
-  await db.schema
-    .alterTable(tableName)
-    .addColumn(columnName, columnType)
-    .execute();
+  await db.schema.alterTable(tableName).addColumn(columnName, columnType).execute();
 }
 
 export async function up(db: Kysely<unknown>): Promise<void> {
@@ -53,13 +50,9 @@ export async function up(db: Kysely<unknown>): Promise<void> {
 
 export async function down(db: Kysely<unknown>): Promise<void> {
   // Drop indexes first
-  await db.schema
-    .dropIndex("idx_performance_audit_results_package_timestamp")
-    .execute();
+  await db.schema.dropIndex("idx_performance_audit_results_package_timestamp").execute();
 
-  await db.schema
-    .dropIndex("idx_performance_audit_results_node_id")
-    .execute();
+  await db.schema.dropIndex("idx_performance_audit_results_node_id").execute();
 
   // SQLite doesn't support DROP COLUMN directly, so we need to recreate the table
   // For simplicity in migration rollback, we'll just drop and recreate the table
@@ -68,12 +61,12 @@ export async function down(db: Kysely<unknown>): Promise<void> {
   // Create a backup table with original schema
   await db.schema
     .createTable("performance_audit_results_backup")
-    .addColumn("id", "integer", col => col.primaryKey().autoIncrement())
-    .addColumn("device_id", "text", col => col.notNull())
-    .addColumn("session_id", "text", col => col.notNull())
-    .addColumn("package_name", "text", col => col.notNull())
-    .addColumn("timestamp", "text", col => col.notNull())
-    .addColumn("passed", "integer", col => col.notNull())
+    .addColumn("id", "integer", (col) => col.primaryKey().autoIncrement())
+    .addColumn("device_id", "text", (col) => col.notNull())
+    .addColumn("session_id", "text", (col) => col.notNull())
+    .addColumn("package_name", "text", (col) => col.notNull())
+    .addColumn("timestamp", "text", (col) => col.notNull())
+    .addColumn("passed", "integer", (col) => col.notNull())
     .addColumn("p50_ms", "real")
     .addColumn("p90_ms", "real")
     .addColumn("p95_ms", "real")
@@ -85,21 +78,21 @@ export async function down(db: Kysely<unknown>): Promise<void> {
     .addColumn("cpu_usage_percent", "real")
     .addColumn("touch_latency_ms", "real")
     .addColumn("diagnostics_json", "text")
-    .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo(sql`(datetime('now'))`)
-    )
+    .addColumn("created_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
     .execute();
 
   // Copy data to backup
   await db.executeQuery(
-    db.raw(`
+    db
+      .raw(`
       INSERT INTO performance_audit_results_backup
       SELECT id, device_id, session_id, package_name, timestamp, passed,
              p50_ms, p90_ms, p95_ms, p99_ms, jank_count, missed_vsync_count,
              slow_ui_thread_count, frame_deadline_missed_count, cpu_usage_percent,
              touch_latency_ms, diagnostics_json, created_at
       FROM performance_audit_results
-    `).compile(db)
+    `)
+      .compile(db),
   );
 
   // Drop original table
@@ -107,7 +100,9 @@ export async function down(db: Kysely<unknown>): Promise<void> {
 
   // Rename backup to original
   await db.executeQuery(
-    db.raw("ALTER TABLE performance_audit_results_backup RENAME TO performance_audit_results").compile(db)
+    db
+      .raw("ALTER TABLE performance_audit_results_backup RENAME TO performance_audit_results")
+      .compile(db),
   );
 
   // Recreate original index

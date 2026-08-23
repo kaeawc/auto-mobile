@@ -24,7 +24,7 @@ const throwingCtrlProxy = (): CtrlProxyClient =>
     get(_target, prop) {
       throw new Error(
         `FakePlatformClient.ctrlProxy was accessed (.${String(prop)}) but no CtrlProxy was injected. ` +
-        "Pass `overrides.ctrlProxy` to the FakePlatformClient constructor."
+          "Pass `overrides.ctrlProxy` to the FakePlatformClient constructor.",
       );
     },
   });
@@ -43,7 +43,7 @@ export class FakePlatformClient implements PlatformClient {
       tapStrategy: FakeTapStrategy;
       systemConfiguration: FakeSystemConfigurationAdapter;
       notificationUI: FakeNotificationUIDetector;
-    }> = {}
+    }> = {},
   ) {
     this.device =
       device ??
@@ -56,7 +56,6 @@ export class FakePlatformClient implements PlatformClient {
     this.tapStrategy = overrides.tapStrategy ?? new FakeTapStrategy();
     this.systemConfiguration =
       overrides.systemConfiguration ?? new FakeSystemConfigurationAdapter();
-    this.notificationUI =
-      overrides.notificationUI ?? new FakeNotificationUIDetector(this.device);
+    this.notificationUI = overrides.notificationUI ?? new FakeNotificationUIDetector(this.device);
   }
 }

@@ -24,15 +24,18 @@ describe("DevicePool recovery eligibility", () => {
       { onLoss: true, maxAttempts: 1 },
     );
 
-    await pool.initializeWithDevices([{
-      name: "External Pixel",
-      platform: "android",
-      deviceId: "emulator-5554",
-    }, {
-      name: "Physical iPhone",
-      platform: "ios",
-      deviceId: "physical-ios-device",
-    }]);
+    await pool.initializeWithDevices([
+      {
+        name: "External Pixel",
+        platform: "android",
+        deviceId: "emulator-5554",
+      },
+      {
+        name: "Physical iPhone",
+        platform: "ios",
+        deviceId: "physical-ios-device",
+      },
+    ]);
     await pool.addDevice(
       {
         name: "AutoMobile Pixel",

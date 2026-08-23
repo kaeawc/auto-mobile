@@ -30,9 +30,11 @@ export class SingleFlightInterval {
     options: SingleFlightIntervalOptions = {},
   ) {
     this.stopTimeoutMs = options.stopTimeoutMs ?? DEFAULT_STOP_TIMEOUT_MS;
-    this.onError = options.onError ?? (error => {
-      logger.error("[SingleFlightInterval] Background tick failed", error);
-    });
+    this.onError =
+      options.onError ??
+      ((error) => {
+        logger.error("[SingleFlightInterval] Background tick failed", error);
+      });
   }
 
   start(): void {
@@ -64,7 +66,7 @@ export class SingleFlightInterval {
     this.inFlight = inFlight;
     void inFlight.then(
       () => this.clearInFlight(inFlight),
-      error => {
+      (error) => {
         this.clearInFlight(inFlight);
         this.onError(error);
       },
@@ -88,12 +90,18 @@ export class SingleFlightInterval {
     }
 
     let timeoutHandle: NodeJS.Timeout | undefined;
-    const timeout = new Promise<boolean>(resolve => {
+    const timeout = new Promise<boolean>((resolve) => {
       timeoutHandle = this.timer.setTimeout(() => resolve(false), this.stopTimeoutMs);
     });
 
     try {
-      return await Promise.race([activeTick.then(() => true, () => true), timeout]);
+      return await Promise.race([
+        activeTick.then(
+          () => true,
+          () => true,
+        ),
+        timeout,
+      ]);
     } finally {
       if (timeoutHandle) {
         this.timer.clearTimeout(timeoutHandle);

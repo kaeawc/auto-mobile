@@ -1,7 +1,5 @@
 import { expect, describe, test, beforeEach, afterEach } from "bun:test";
-import {
-  NavigationScreenshotManager,
-} from "../../../src/features/navigation/NavigationScreenshotManager";
+import { NavigationScreenshotManager } from "../../../src/features/navigation/NavigationScreenshotManager";
 import { FileSystem } from "../../../src/utils/filesystem/DefaultFileSystem";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeLogger } from "../../fakes/FakeLogger";
@@ -244,9 +242,11 @@ describe("NavigationScreenshotManager", () => {
       const result = await manager.findExistingScreenshot("com.test.app", "HomeScreen");
 
       expect(result).toBeNull();
-      expect(fakeLogger.at("debug")).toContainEqual(expect.objectContaining({
-        message: expect.stringContaining("[NAV_SCREENSHOT] Failed to find existing screenshot"),
-      }));
+      expect(fakeLogger.at("debug")).toContainEqual(
+        expect.objectContaining({
+          message: expect.stringContaining("[NAV_SCREENSHOT] Failed to find existing screenshot"),
+        }),
+      );
     });
   });
 
@@ -272,9 +272,11 @@ describe("NavigationScreenshotManager", () => {
       const result = await manager.readScreenshot(path);
 
       expect(result).toBeNull();
-      expect(fakeLogger.at("debug")).toContainEqual(expect.objectContaining({
-        message: expect.stringContaining("[NAV_SCREENSHOT] Failed to read screenshot"),
-      }));
+      expect(fakeLogger.at("debug")).toContainEqual(
+        expect.objectContaining({
+          message: expect.stringContaining("[NAV_SCREENSHOT] Failed to read screenshot"),
+        }),
+      );
     });
   });
 

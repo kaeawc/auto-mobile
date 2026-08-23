@@ -6,9 +6,11 @@ import {
 } from "../../src/daemon/streamSocketAuth";
 import { ActionableError } from "../../src/models";
 
-function sessionManager(overrides: Partial<StreamAuthSessionManager> = {}): StreamAuthSessionManager {
+function sessionManager(
+  overrides: Partial<StreamAuthSessionManager> = {},
+): StreamAuthSessionManager {
   return {
-    getSession: sessionUuid => (sessionUuid === "live" ? {} : null),
+    getSession: (sessionUuid) => (sessionUuid === "live" ? {} : null),
     getSessionForDevice: () => null,
     getDeviceLabels: () => undefined,
     ...overrides,
@@ -17,7 +19,7 @@ function sessionManager(overrides: Partial<StreamAuthSessionManager> = {}): Stre
 
 function authenticator(
   sm: StreamAuthSessionManager | null,
-  env: NodeJS.ProcessEnv = {} as NodeJS.ProcessEnv
+  env: NodeJS.ProcessEnv = {} as NodeJS.ProcessEnv,
 ): SessionScopedStreamAuthenticator {
   return new SessionScopedStreamAuthenticator(() => sm, "test op", env);
 }
@@ -26,13 +28,13 @@ describe("SessionScopedStreamAuthenticator", () => {
   test("rejects a missing sessionUuid", () => {
     expect(() => authenticator(sessionManager()).authorize({})).toThrow(ActionableError);
     expect(() => authenticator(sessionManager()).authorize({ sessionUuid: "  " })).toThrow(
-      /authenticated daemon session/
+      /authenticated daemon session/,
     );
   });
 
   test("rejects an unknown/expired session", () => {
     expect(() => authenticator(sessionManager()).authorize({ sessionUuid: "ghost" })).toThrow(
-      /not an active daemon session/
+      /not an active daemon session/,
     );
   });
 
@@ -42,34 +44,34 @@ describe("SessionScopedStreamAuthenticator", () => {
 
   test("fails closed when the session registry is unavailable", () => {
     expect(() => authenticator(null).authorize({ sessionUuid: "live" })).toThrow(
-      /session registry is unavailable/
+      /session registry is unavailable/,
     );
   });
 
   test("permits a device that is unowned", () => {
     expect(() =>
-      authenticator(sessionManager()).authorize({ sessionUuid: "live", deviceId: "emu" })
+      authenticator(sessionManager()).authorize({ sessionUuid: "live", deviceId: "emu" }),
     ).not.toThrow();
   });
 
   test("permits a device owned by the same session", () => {
     const sm = sessionManager({ getSessionForDevice: () => "live" });
     expect(() =>
-      authenticator(sm).authorize({ sessionUuid: "live", deviceId: "emu" })
+      authenticator(sm).authorize({ sessionUuid: "live", deviceId: "emu" }),
     ).not.toThrow();
   });
 
   test("rejects a device owned by a different session", () => {
     const sm = sessionManager({ getSessionForDevice: () => "other" });
-    expect(() =>
-      authenticator(sm).authorize({ sessionUuid: "live", deviceId: "emu" })
-    ).toThrow(/different daemon session/);
+    expect(() => authenticator(sm).authorize({ sessionUuid: "live", deviceId: "emu" })).toThrow(
+      /different daemon session/,
+    );
   });
 
   test("resolves a derived device-label session to its base for the registry check", () => {
     const sm = sessionManager({
-      getSession: sessionUuid => (sessionUuid === "live" ? {} : null),
-      getDeviceLabels: sessionUuid =>
+      getSession: (sessionUuid) => (sessionUuid === "live" ? {} : null),
+      getDeviceLabels: (sessionUuid) =>
         sessionUuid === "live" ? { phone: "live:phone" } : undefined,
     });
     expect(() => authenticator(sm).authorize({ sessionUuid: "live:phone" })).not.toThrow();

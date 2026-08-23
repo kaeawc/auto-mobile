@@ -69,7 +69,9 @@ describe("extractValueImportPackages", () => {
   });
 
   test("ignores relative imports (not packages)", () => {
-    expect(extractValueImportPackages('import { EVENT_TABLES } from "../eventTables";')).toEqual([]);
+    expect(extractValueImportPackages('import { EVENT_TABLES } from "../eventTables";')).toEqual(
+      [],
+    );
   });
 
   test("de-duplicates and sorts across multiple imports", () => {
@@ -132,19 +134,19 @@ describe("findMigrationDependencyDrift detector (issue #2867)", () => {
       ["m1.ts", 'import { z } from "zod";\nimport { produce } from "immer";'],
     ]);
     const violations = findMigrationDependencyDrift(sources, ["kysely"]);
-    expect(violations.map(v => v.package)).toEqual(["immer", "zod"]);
+    expect(violations.map((v) => v.package)).toEqual(["immer", "zod"]);
   });
 });
 
 describe("real src/db/migrations directory (issue #2867 meta-test)", () => {
   test("every runtime value import is declared in MIGRATION_RUNTIME_DEPENDENCIES", () => {
     const migrationsDir = join(import.meta.dir, "..", "..", "src", "db", "migrations");
-    const filenames = readdirSync(migrationsDir).filter(name => name.endsWith(".ts"));
+    const filenames = readdirSync(migrationsDir).filter((name) => name.endsWith(".ts"));
     // Sanity: the directory actually resolved (an empty read would vacuously pass).
     expect(filenames.length).toBeGreaterThan(30);
 
     const sources = new Map(
-      filenames.map(name => [name, readFileSync(join(migrationsDir, name), "utf8")])
+      filenames.map((name) => [name, readFileSync(join(migrationsDir, name), "utf8")]),
     );
 
     // Sanity: the scan finds the known `kysely` value import somewhere, proving
@@ -158,20 +160,22 @@ describe("real src/db/migrations directory (issue #2867 meta-test)", () => {
     expect(allImported.has("kysely")).toBe(true);
 
     const violations = findMigrationDependencyDrift(sources, MIGRATION_RUNTIME_DEPENDENCIES);
-    const rendered = violations.map(v => v.message).join("\n\n");
+    const rendered = violations.map((v) => v.message).join("\n\n");
     expect(rendered).toBe("");
   });
 
   test("the allowlist has no unused entries (every listed dep is actually imported)", () => {
     const migrationsDir = join(import.meta.dir, "..", "..", "src", "db", "migrations");
-    const filenames = readdirSync(migrationsDir).filter(name => name.endsWith(".ts"));
+    const filenames = readdirSync(migrationsDir).filter((name) => name.endsWith(".ts"));
     const imported = new Set<string>();
     for (const name of filenames) {
-      for (const pkg of extractValueImportPackages(readFileSync(join(migrationsDir, name), "utf8"))) {
+      for (const pkg of extractValueImportPackages(
+        readFileSync(join(migrationsDir, name), "utf8"),
+      )) {
         imported.add(pkg);
       }
     }
-    const unused = MIGRATION_RUNTIME_DEPENDENCIES.filter(dep => !imported.has(dep));
+    const unused = MIGRATION_RUNTIME_DEPENDENCIES.filter((dep) => !imported.has(dep));
     expect(unused).toEqual([]);
   });
 });

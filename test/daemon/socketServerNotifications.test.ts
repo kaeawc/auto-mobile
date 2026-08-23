@@ -43,7 +43,7 @@ class FrameCollectingClient {
     return new Promise((resolve, reject) => {
       this.socket.connect(socketPath, resolve);
       this.socket.on("error", reject);
-      this.socket.on("data", data => {
+      this.socket.on("data", (data) => {
         this.buffer += data.toString();
         const lines = this.buffer.split("\n");
         this.buffer = lines.pop() || "";
@@ -54,13 +54,15 @@ class FrameCollectingClient {
         }
         const waiters = this.frameWaiters;
         this.frameWaiters = [];
-        waiters.forEach(waiter => waiter());
+        waiters.forEach((waiter) => waiter());
       });
     });
   }
 
   send(method: string, params: Record<string, unknown> = {}): void {
-    this.socket.write(JSON.stringify({ id: randomUUID(), type: "daemon_request", method, params }) + "\n");
+    this.socket.write(
+      JSON.stringify({ id: randomUUID(), type: "daemon_request", method, params }) + "\n",
+    );
   }
 
   /**
@@ -73,9 +75,11 @@ class FrameCollectingClient {
     while (this.frames.length < count) {
       const remaining = deadline - Date.now();
       if (remaining <= 0) {
-        throw new Error(`Received ${this.frames.length}/${count} notification frames within ${deadlineMs}ms — bounded socket-test deadline hit`);
+        throw new Error(
+          `Received ${this.frames.length}/${count} notification frames within ${deadlineMs}ms — bounded socket-test deadline hit`,
+        );
       }
-      await new Promise<void>(resolve => {
+      await new Promise<void>((resolve) => {
         this.frameWaiters.push(resolve);
         defaultTimer.setTimeout(resolve, remaining).unref();
       });
@@ -98,13 +102,13 @@ describe("UnixSocketServer notification broadcast", () => {
       socketPath,
       "http://localhost:0/mcp",
       createFakeDaemonState(),
-      new FakeTimer()
+      new FakeTimer(),
     );
     await server.start();
   });
 
   afterEach(async () => {
-    clients.splice(0).forEach(client => client.close());
+    clients.splice(0).forEach((client) => client.close());
     await server.close();
     if (existsSync(socketPath)) {
       await unlink(socketPath);
@@ -146,7 +150,7 @@ describe("UnixSocketServer notification broadcast", () => {
     });
     // A short settle window: any stray frame for the bystander would have been
     // written in the same synchronous broadcast as the subscriber's frame.
-    await new Promise(resolve => defaultTimer.setTimeout(resolve, 25));
+    await new Promise((resolve) => defaultTimer.setTimeout(resolve, 25));
     expect(bystander.frames).toEqual([]);
   });
 
@@ -216,7 +220,7 @@ describe("UnixSocketServer notification broadcast", () => {
     await server.close();
 
     expect(
-      (server as unknown as { sessionReleaseUnsubscribe: unknown }).sessionReleaseUnsubscribe
+      (server as unknown as { sessionReleaseUnsubscribe: unknown }).sessionReleaseUnsubscribe,
     ).toBeNull();
     expect(() => SessionReleaseBroadcaster.emit("session-a")).not.toThrow();
     expect(subscriber.frames).toHaveLength(1);
@@ -233,7 +237,9 @@ describe("UnixSocketServer notification broadcast", () => {
 
     // The broadcaster subscription is released on close, so emitting after
     // close must not throw and must not attempt any socket writes.
-    expect((server as unknown as { listChangedUnsubscribe: unknown }).listChangedUnsubscribe).toBeNull();
+    expect(
+      (server as unknown as { listChangedUnsubscribe: unknown }).listChangedUnsubscribe,
+    ).toBeNull();
     expect(() => ListChangedBroadcaster.emit("tools")).not.toThrow();
     expect(subscriber.frames).toHaveLength(1);
   });

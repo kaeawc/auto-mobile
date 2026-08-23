@@ -51,11 +51,13 @@ class BunPortAvailabilityChecker implements PortAvailabilityChecker {
     const servers: BunTcpServer[] = [];
     try {
       for (const hostname of ["127.0.0.1", "::1"]) {
-        servers.push(bun.listen({
-          hostname,
-          port,
-          socket: noopSocketHandler,
-        }));
+        servers.push(
+          bun.listen({
+            hostname,
+            port,
+            socket: noopSocketHandler,
+          }),
+        );
       }
       return true;
     } catch (error) {
@@ -81,7 +83,8 @@ export class PortManager {
   private static readonly DEFAULT_MAX_DEVICES = 100;
   private static readonly basePort = PortManager.resolveBasePort();
   private static readonly maxDevices = PortManager.resolveMaxDevices();
-  private static portAvailabilityChecker: PortAvailabilityChecker = new BunPortAvailabilityChecker();
+  private static portAvailabilityChecker: PortAvailabilityChecker =
+    new BunPortAvailabilityChecker();
 
   /**
    * Allocate a unique local port for a device.
@@ -99,7 +102,7 @@ export class PortManager {
     if (this.allocatedPorts.size >= this.maxDevices) {
       throw new Error(
         `No available ports for device ${deviceId}. ` +
-        `The maximum of ${this.maxDevices} simultaneous device ports is already allocated.`
+          `The maximum of ${this.maxDevices} simultaneous device ports is already allocated.`,
       );
     }
 
@@ -121,14 +124,17 @@ export class PortManager {
 
     throw new Error(
       `No available ports for device ${deviceId}. ` +
-      `No free host ports were found at or above ${this.basePort}.`
+        `No free host ports were found at or above ${this.basePort}.`,
     );
   }
 
   /**
    * Check whether a host port is currently free to bind.
    */
-  public static isPortAvailable(port: number, checker: PortAvailabilityChecker = this.portAvailabilityChecker): boolean {
+  public static isPortAvailable(
+    port: number,
+    checker: PortAvailabilityChecker = this.portAvailabilityChecker,
+  ): boolean {
     return checker.isPortAvailable(port);
   }
 
@@ -232,7 +238,9 @@ export class PortManager {
    * Override the host-port availability checker.
    * Should only be used in testing.
    */
-  public static setPortAvailabilityCheckerForTesting(checker: PortAvailabilityChecker | null): void {
+  public static setPortAvailabilityCheckerForTesting(
+    checker: PortAvailabilityChecker | null,
+  ): void {
     this.portAvailabilityChecker = checker ?? new BunPortAvailabilityChecker();
   }
 
@@ -256,36 +264,45 @@ export class PortManager {
   public static readonly DEVICE_PORT = 8765;
 
   private static resolveBasePort(): number {
-    const envValue = process.env.AUTOMOBILE_PORT_RANGE_START ?? process.env.AUTO_MOBILE_PORT_RANGE_START;
+    const envValue =
+      process.env.AUTOMOBILE_PORT_RANGE_START ?? process.env.AUTO_MOBILE_PORT_RANGE_START;
     if (!envValue) {
       return this.DEFAULT_BASE_PORT;
     }
     const parsed = Number.parseInt(envValue, 10);
     if (Number.isNaN(parsed) || parsed <= 0) {
-      logger.warn(`[PortManager] Invalid port range start '${envValue}', using default ${this.DEFAULT_BASE_PORT}`);
+      logger.warn(
+        `[PortManager] Invalid port range start '${envValue}', using default ${this.DEFAULT_BASE_PORT}`,
+      );
       return this.DEFAULT_BASE_PORT;
     }
     return parsed;
   }
 
   private static resolveMaxDevices(): number {
-    const endValue = process.env.AUTOMOBILE_PORT_RANGE_END ?? process.env.AUTO_MOBILE_PORT_RANGE_END;
+    const endValue =
+      process.env.AUTOMOBILE_PORT_RANGE_END ?? process.env.AUTO_MOBILE_PORT_RANGE_END;
     if (endValue) {
       const parsedEnd = Number.parseInt(endValue, 10);
       if (!Number.isNaN(parsedEnd) && parsedEnd >= this.basePort) {
         return parsedEnd - this.basePort + 1;
       }
-      logger.warn(`[PortManager] Invalid port range end '${endValue}', using default ${this.DEFAULT_MAX_DEVICES}`);
+      logger.warn(
+        `[PortManager] Invalid port range end '${endValue}', using default ${this.DEFAULT_MAX_DEVICES}`,
+      );
       return this.DEFAULT_MAX_DEVICES;
     }
 
-    const sizeValue = process.env.AUTOMOBILE_PORT_RANGE_SIZE ?? process.env.AUTO_MOBILE_PORT_RANGE_SIZE;
+    const sizeValue =
+      process.env.AUTOMOBILE_PORT_RANGE_SIZE ?? process.env.AUTO_MOBILE_PORT_RANGE_SIZE;
     if (!sizeValue) {
       return this.DEFAULT_MAX_DEVICES;
     }
     const parsedSize = Number.parseInt(sizeValue, 10);
     if (Number.isNaN(parsedSize) || parsedSize <= 0) {
-      logger.warn(`[PortManager] Invalid port range size '${sizeValue}', using default ${this.DEFAULT_MAX_DEVICES}`);
+      logger.warn(
+        `[PortManager] Invalid port range size '${sizeValue}', using default ${this.DEFAULT_MAX_DEVICES}`,
+      );
       return this.DEFAULT_MAX_DEVICES;
     }
     return parsedSize;

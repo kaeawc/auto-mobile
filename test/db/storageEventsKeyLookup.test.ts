@@ -70,7 +70,7 @@ async function indexColumns(db: Kysely<unknown>, name: string): Promise<string[]
   const result = await sql<{ seqno: number; name: string }>`
     SELECT seqno, name FROM pragma_index_info(${name}) ORDER BY seqno
   `.execute(db);
-  return result.rows.map(r => r.name);
+  return result.rows.map((r) => r.name);
 }
 
 /**
@@ -83,10 +83,10 @@ function lookupPlan(bunDb: BunDatabase): string[] {
     .query(
       "EXPLAIN QUERY PLAN SELECT value FROM storage_events " +
         "WHERE device_id = 'dev-1' AND file_name = 'prefs.xml' AND key = 'theme' " +
-        "ORDER BY timestamp DESC LIMIT 1"
+        "ORDER BY timestamp DESC LIMIT 1",
     )
     .all() as Array<{ detail: string }>;
-  return rows.map(r => r.detail);
+  return rows.map((r) => r.detail);
 }
 
 describe("2026_07_04_000_storage_events_key_lookup migration", () => {
@@ -109,12 +109,7 @@ describe("2026_07_04_000_storage_events_key_lookup migration", () => {
     await keyLookupUp(db);
 
     expect(await indexExists(db, INDEX)).toBe(true);
-    expect(await indexColumns(db, INDEX)).toEqual([
-      "device_id",
-      "file_name",
-      "key",
-      "timestamp",
-    ]);
+    expect(await indexColumns(db, INDEX)).toEqual(["device_id", "file_name", "key", "timestamp"]);
   });
 
   test("planner switches to the three-column prefix seek; no temp B-tree either way", async () => {
@@ -132,7 +127,7 @@ describe("2026_07_04_000_storage_events_key_lookup migration", () => {
     // the target key's rows instead of a device-wide scan.
     expect(after).toContain(INDEX);
     expect(after).toMatch(
-      new RegExp(`SEARCH .*USING INDEX ${INDEX} \\(device_id=\\? AND file_name=\\? AND key=\\?\\)`)
+      new RegExp(`SEARCH .*USING INDEX ${INDEX} \\(device_id=\\? AND file_name=\\? AND key=\\?\\)`),
     );
     // The sort stays gone (trailing timestamp column supplies the DESC order).
     expect(after).not.toContain("USE TEMP B-TREE FOR ORDER BY");
@@ -208,11 +203,6 @@ describe("2026_07_04_000_storage_events_key_lookup migration — full replay", (
 
   test("the key-lookup index exists after a fresh full migration chain", async () => {
     expect(await indexExists(db, INDEX)).toBe(true);
-    expect(await indexColumns(db, INDEX)).toEqual([
-      "device_id",
-      "file_name",
-      "key",
-      "timestamp",
-    ]);
+    expect(await indexColumns(db, INDEX)).toEqual(["device_id", "file_name", "key", "timestamp"]);
   });
 });

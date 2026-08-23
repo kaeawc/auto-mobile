@@ -26,7 +26,12 @@ Configuration is managed through a Unix socket (not MCP tools).
 ### Responses
 
 ```json
-{"id":"6","type":"appearance_response","success":true,"result":{"config":{"syncWithHost":true,"defaultMode":"auto","applyOnConnect":true}}}
+{
+  "id": "6",
+  "type": "appearance_response",
+  "success": true,
+  "result": { "config": { "syncWithHost": true, "defaultMode": "auto", "applyOnConnect": true } }
+}
 ```
 
 When a command applies an appearance change immediately, the response includes

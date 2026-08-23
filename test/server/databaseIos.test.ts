@@ -8,7 +8,7 @@ import { PlatformDeviceManagerFactory } from "../../src/utils/factories/Platform
 import { serverConfig } from "../../src/utils/ServerConfig";
 import type { BootedDevice } from "../../src/models";
 
-describe("iOS database inspection server integration", function() {
+describe("iOS database inspection server integration", function () {
   const iosDevice: BootedDevice = {
     deviceId: "ios-1",
     platform: "ios",
@@ -17,7 +17,7 @@ describe("iOS database inspection server integration", function() {
 
   let originalGetInstance: typeof IOSCtrlProxyClient.getInstance;
 
-  beforeEach(function() {
+  beforeEach(function () {
     ToolRegistry.clearTools();
     ResourceRegistry.clearResources();
     PlatformDeviceManagerFactory.reset();
@@ -26,7 +26,7 @@ describe("iOS database inspection server integration", function() {
     originalGetInstance = IOSCtrlProxyClient.getInstance;
   });
 
-  afterEach(function() {
+  afterEach(function () {
     IOSCtrlProxyClient.getInstance = originalGetInstance;
     ToolRegistry.clearTools();
     ResourceRegistry.clearResources();
@@ -35,7 +35,7 @@ describe("iOS database inspection server integration", function() {
     serverConfig.setEmbeddedSdkEnabled(false);
   });
 
-  test("sqlQuery executes SELECT on iOS through CtrlProxy and keeps Android response shape", async function() {
+  test("sqlQuery executes SELECT on iOS through CtrlProxy and keeps Android response shape", async function () {
     const executeSQLForIos = mock(async () => ({
       type: "query" as const,
       columns: ["id", "payload"],
@@ -58,7 +58,7 @@ describe("iOS database inspection server integration", function() {
     expect(executeSQLForIos).toHaveBeenCalledWith(
       "com.example.app",
       "/app/Documents/app.db",
-      "SELECT id, payload FROM notes"
+      "SELECT id, payload FROM notes",
     );
     const payload = JSON.parse(response.content[0].text);
     expect(payload).toEqual({
@@ -69,7 +69,7 @@ describe("iOS database inspection server integration", function() {
     });
   });
 
-  test("sqlQuery notifies database resources for iOS mutations", async function() {
+  test("sqlQuery notifies database resources for iOS mutations", async function () {
     const executeSQLForIos = mock(async () => ({
       type: "mutation" as const,
       rowsAffected: 1,
@@ -94,20 +94,18 @@ describe("iOS database inspection server integration", function() {
       expect(payload.type).toBe("mutation");
       expect(payload.rowsAffected).toBe(1);
       expect(notifyResourceUpdated).toHaveBeenCalledWith(
-        "automobile:devices/ios-1/databases?appId=com.example.app"
+        "automobile:devices/ios-1/databases?appId=com.example.app",
       );
       expect(notifyResourceUpdated).toHaveBeenCalledWith(
-        "automobile:devices/ios-1/databases/%2Fapp%2FDocuments%2Fapp.db/tables/notes/data?appId=com.example.app"
+        "automobile:devices/ios-1/databases/%2Fapp%2FDocuments%2Fapp.db/tables/notes/data?appId=com.example.app",
       );
     } finally {
       ResourceRegistry.notifyResourceUpdated = originalNotify;
     }
   });
 
-  test("database resources resolve iOS devices through CtrlProxy", async function() {
-    const listDatabases = mock(async () => [
-      { name: "app.db", path: "/app/Documents/app.db" },
-    ]);
+  test("database resources resolve iOS devices through CtrlProxy", async function () {
+    const listDatabases = mock(async () => [{ name: "app.db", path: "/app/Documents/app.db" }]);
     IOSCtrlProxyClient.getInstance = mock(() => ({
       listDatabasesForIos: listDatabases,
     })) as unknown as typeof IOSCtrlProxyClient.getInstance;
@@ -124,21 +122,17 @@ describe("iOS database inspection server integration", function() {
     const payload = JSON.parse(content.text!);
 
     expect(listDatabases).toHaveBeenCalledWith("com.example.app");
-    expect(payload.databases).toEqual([
-      { name: "app.db", path: "/app/Documents/app.db" },
-    ]);
+    expect(payload.databases).toEqual([{ name: "app.db", path: "/app/Documents/app.db" }]);
     expect(payload.totalCount).toBe(1);
   });
 
-  test("database resources still resolve iOS when Android discovery fails", async function() {
-    const listDatabases = mock(async () => [
-      { name: "app.db", path: "/app/Documents/app.db" },
-    ]);
+  test("database resources still resolve iOS when Android discovery fails", async function () {
+    const listDatabases = mock(async () => [{ name: "app.db", path: "/app/Documents/app.db" }]);
     IOSCtrlProxyClient.getInstance = mock(() => ({
       listDatabasesForIos: listDatabases,
     })) as unknown as typeof IOSCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance({
-      getBootedDevices: mock(async platform => {
+      getBootedDevices: mock(async (platform) => {
         if (platform === "android") {
           throw new Error("adb unavailable");
         }
@@ -153,8 +147,6 @@ describe("iOS database inspection server integration", function() {
     const payload = JSON.parse(content.text!);
 
     expect(listDatabases).toHaveBeenCalledWith("com.example.app");
-    expect(payload.databases).toEqual([
-      { name: "app.db", path: "/app/Documents/app.db" },
-    ]);
+    expect(payload.databases).toEqual([{ name: "app.db", path: "/app/Documents/app.db" }]);
   });
 });

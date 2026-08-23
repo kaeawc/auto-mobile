@@ -34,6 +34,7 @@ AutoMobile automatically detects and handles work profiles across all app manage
       class B,D decision;
       class C,E,F result;
   ```
+
 - **userId in responses**: App management tools include the `userId` field indicating which profile was used
 - **Note**: MCP tool schemas do not currently accept a `userId` override; selection is automatic
 
@@ -144,7 +145,7 @@ await launchApp({ packageName: "com.example.app" });
 
 ### Example: List Apps from All Profiles
 
-```typescript
+````typescript
 const response = await client.request({
   method: "resources/read",
   params: { uri: "automobile:apps?deviceId=emulator-5554&platform=android" }
@@ -204,7 +205,7 @@ Note: Chrome can be installed in both profiles!
 adb shell am start --user 10 com.example.app/.MainActivity
 
 # AutoMobile operations will target user 10 automatically
-```
+````
 
 ### Scenario 2: Multiple Profiles
 

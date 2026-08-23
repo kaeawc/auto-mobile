@@ -11,21 +11,19 @@ describe("cleanupDaemonChildProcesses", () => {
       stopAcceptingVideoRecordingStarts: async () => {
         calls.push("stop-recording-starts");
       },
-      listActiveVideoRecordings: async () => [
-        { recordingId: "recording-a" },
-        { recordingId: "recording-b" },
-      ] as VideoRecordingRecord[],
+      listActiveVideoRecordings: async () =>
+        [{ recordingId: "recording-a" }, { recordingId: "recording-b" }] as VideoRecordingRecord[],
       listOwnedActiveVideoRecordingIds: () => [],
-      stopVideoRecording: async recordingId => {
+      stopVideoRecording: async (recordingId) => {
         calls.push(`stop:${recordingId}`);
         if (recordingId === "recording-a") {
           throw new Error("capture process already exited");
         }
       },
-      forceStopVideoRecording: async recordingId => {
+      forceStopVideoRecording: async (recordingId) => {
         calls.push(`force-stop:${recordingId}`);
       },
-      interruptVideoRecording: async recordingId => {
+      interruptVideoRecording: async (recordingId) => {
         calls.push(`interrupt:${recordingId}`);
       },
       shutdownIOSCtrlProxies: async () => {
@@ -50,19 +48,17 @@ describe("cleanupDaemonChildProcesses", () => {
       stopAcceptingVideoRecordingStarts: async () => {
         calls.push("stop-recording-starts");
       },
-      listActiveVideoRecordings: async () => [
-        { recordingId: "recording-a" },
-        { recordingId: "recording-b" },
-      ] as VideoRecordingRecord[],
+      listActiveVideoRecordings: async () =>
+        [{ recordingId: "recording-a" }, { recordingId: "recording-b" }] as VideoRecordingRecord[],
       listOwnedActiveVideoRecordingIds: () => [],
-      stopVideoRecording: async recordingId => {
+      stopVideoRecording: async (recordingId) => {
         calls.push(`stop:${recordingId}`);
         throw new Error("stop failed");
       },
-      forceStopVideoRecording: async recordingId => {
+      forceStopVideoRecording: async (recordingId) => {
         calls.push(`force-stop:${recordingId}`);
       },
-      interruptVideoRecording: async recordingId => {
+      interruptVideoRecording: async (recordingId) => {
         calls.push(`interrupt:${recordingId}`);
         if (recordingId === "recording-a") {
           throw new Error("interrupt failed");
@@ -95,21 +91,24 @@ describe("cleanupDaemonChildProcesses", () => {
       stopAcceptingVideoRecordingStarts: async () => {
         calls.push("stop-recording-starts");
       },
-      listActiveVideoRecordings: async () => [
-        { recordingId: "hung-recording" },
-        { recordingId: "later-recording" },
-      ] as VideoRecordingRecord[],
+      listActiveVideoRecordings: async () =>
+        [
+          { recordingId: "hung-recording" },
+          { recordingId: "later-recording" },
+        ] as VideoRecordingRecord[],
       listOwnedActiveVideoRecordingIds: () => [],
-      stopVideoRecording: async recordingId => {
+      stopVideoRecording: async (recordingId) => {
         calls.push(`stop:${recordingId}`);
         if (recordingId === "hung-recording") {
-          await new Promise<void>((_resolve, reject) => { rejectStop = reject; });
+          await new Promise<void>((_resolve, reject) => {
+            rejectStop = reject;
+          });
         }
       },
-      forceStopVideoRecording: async recordingId => {
+      forceStopVideoRecording: async (recordingId) => {
         calls.push(`force-stop:${recordingId}`);
       },
-      interruptVideoRecording: async recordingId => {
+      interruptVideoRecording: async (recordingId) => {
         calls.push(`interrupt:${recordingId}`);
       },
       shutdownIOSCtrlProxies: async () => {
@@ -120,10 +119,10 @@ describe("cleanupDaemonChildProcesses", () => {
     });
 
     for (let attempt = 0; attempt < 4; attempt++) {
-      await new Promise(resolve => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
     }
     timer.advanceTime(10);
-    await new Promise(resolve => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
     expect(calls).toEqual([
       "stop-recording-starts",
       "shutdown-ios-ctrl-proxies",
@@ -150,11 +149,19 @@ describe("cleanupDaemonChildProcesses", () => {
 
     await cleanupDaemonChildProcesses({
       stopAcceptingVideoRecordingStarts: async () => {},
-      listActiveVideoRecordings: async () => { throw new Error("database closed"); },
+      listActiveVideoRecordings: async () => {
+        throw new Error("database closed");
+      },
       listOwnedActiveVideoRecordingIds: () => ["in-memory-recording"],
-      stopVideoRecording: async recordingId => { calls.push(`stop:${recordingId}`); },
-      forceStopVideoRecording: async recordingId => { calls.push(`force:${recordingId}`); },
-      interruptVideoRecording: async recordingId => { calls.push(`interrupt:${recordingId}`); },
+      stopVideoRecording: async (recordingId) => {
+        calls.push(`stop:${recordingId}`);
+      },
+      forceStopVideoRecording: async (recordingId) => {
+        calls.push(`force:${recordingId}`);
+      },
+      interruptVideoRecording: async (recordingId) => {
+        calls.push(`interrupt:${recordingId}`);
+      },
       shutdownIOSCtrlProxies: async () => {},
     });
 

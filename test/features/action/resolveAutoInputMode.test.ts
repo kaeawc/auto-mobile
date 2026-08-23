@@ -28,7 +28,9 @@ describe("resolveAutoInputMode", () => {
 
   test("supports the Slack formatting marker set", () => {
     for (const marker of ["@", "/", "#", ":", "_", "*", "~"]) {
-      expect(resolveAutoInputMode(`a${marker}b`, ["@", "/", "#", ":", "_", "*", "~"])).toBe("eventAll");
+      expect(resolveAutoInputMode(`a${marker}b`, ["@", "/", "#", ":", "_", "*", "~"])).toBe(
+        "eventAll",
+      );
     }
   });
 

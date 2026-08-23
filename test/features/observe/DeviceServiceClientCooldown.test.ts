@@ -22,7 +22,11 @@ class TestDeviceServiceClient extends DeviceServiceClient {
   constructor(
     timer: FakeTimer,
     wsFactory: (url: string) => WebSocket,
-    config: { maxConnectionAttempts?: number; connectionResetMs?: number; reconnectDelayMs?: number } = {}
+    config: {
+      maxConnectionAttempts?: number;
+      connectionResetMs?: number;
+      reconnectDelayMs?: number;
+    } = {},
   ) {
     super(timer, wsFactory, config);
   }
@@ -69,11 +73,11 @@ describe("DeviceServiceClient connection cooldown", () => {
 
   test("enforces cooldown after max connection attempts", async () => {
     const timer = new FakeTimer();
-    client = new TestDeviceServiceClient(
-      timer,
-      createInstantFailureWebSocketFactory(timer),
-      { maxConnectionAttempts: 3, connectionResetMs: 10000, reconnectDelayMs: 2000 }
-    );
+    client = new TestDeviceServiceClient(timer, createInstantFailureWebSocketFactory(timer), {
+      maxConnectionAttempts: 3,
+      connectionResetMs: 10000,
+      reconnectDelayMs: 2000,
+    });
     client.disableAutoReconnect();
 
     // Attempt 1, 2, 3 — all fail
@@ -104,11 +108,11 @@ describe("DeviceServiceClient connection cooldown", () => {
 
   test("reports remaining cooldown without incrementing attempts", async () => {
     const timer = new FakeTimer();
-    client = new TestDeviceServiceClient(
-      timer,
-      createInstantFailureWebSocketFactory(timer),
-      { maxConnectionAttempts: 3, connectionResetMs: 10000, reconnectDelayMs: 2000 }
-    );
+    client = new TestDeviceServiceClient(timer, createInstantFailureWebSocketFactory(timer), {
+      maxConnectionAttempts: 3,
+      connectionResetMs: 10000,
+      reconnectDelayMs: 2000,
+    });
     client.disableAutoReconnect();
 
     await client.ensureConnected(new NoOpPerformanceTracker());
@@ -133,11 +137,10 @@ describe("DeviceServiceClient connection cooldown", () => {
   test("resets connectionAttempts on successful connection", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    client = new TestDeviceServiceClient(
-      timer,
-      createSuccessWebSocketFactory(timer),
-      { maxConnectionAttempts: 3, connectionResetMs: 10000 }
-    );
+    client = new TestDeviceServiceClient(timer, createSuccessWebSocketFactory(timer), {
+      maxConnectionAttempts: 3,
+      connectionResetMs: 10000,
+    });
     client.disableAutoReconnect();
 
     const result = await client.ensureConnected(new NoOpPerformanceTracker());
@@ -149,11 +152,11 @@ describe("DeviceServiceClient connection cooldown", () => {
   test("connectionAttempts persists across close events", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    client = new TestDeviceServiceClient(
-      timer,
-      createInstantFailureWebSocketFactory(timer),
-      { maxConnectionAttempts: 3, connectionResetMs: 10000, reconnectDelayMs: 2000 }
-    );
+    client = new TestDeviceServiceClient(timer, createInstantFailureWebSocketFactory(timer), {
+      maxConnectionAttempts: 3,
+      connectionResetMs: 10000,
+      reconnectDelayMs: 2000,
+    });
     client.disableAutoReconnect();
 
     await client.ensureConnected(new NoOpPerformanceTracker());
@@ -171,11 +174,11 @@ describe("DeviceServiceClient connection cooldown", () => {
   test("cooldown resets after connectionResetMs elapses", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    client = new TestDeviceServiceClient(
-      timer,
-      createInstantFailureWebSocketFactory(timer),
-      { maxConnectionAttempts: 3, connectionResetMs: 10000, reconnectDelayMs: 2000 }
-    );
+    client = new TestDeviceServiceClient(timer, createInstantFailureWebSocketFactory(timer), {
+      maxConnectionAttempts: 3,
+      connectionResetMs: 10000,
+      reconnectDelayMs: 2000,
+    });
     client.disableAutoReconnect();
 
     // Exhaust all 3 attempts
@@ -201,11 +204,11 @@ describe("DeviceServiceClient connection cooldown", () => {
   test("scheduleReconnect respects cooldown after max attempts", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    client = new TestDeviceServiceClient(
-      timer,
-      createInstantFailureWebSocketFactory(timer),
-      { maxConnectionAttempts: 3, connectionResetMs: 10000, reconnectDelayMs: 2000 }
-    );
+    client = new TestDeviceServiceClient(timer, createInstantFailureWebSocketFactory(timer), {
+      maxConnectionAttempts: 3,
+      connectionResetMs: 10000,
+      reconnectDelayMs: 2000,
+    });
     // Keep auto-reconnect enabled for this test
 
     // Exhaust 3 attempts — each failure triggers scheduleReconnect → timer fires → next attempt
@@ -229,11 +232,11 @@ describe("DeviceServiceClient connection cooldown", () => {
     timer.enableAutoAdvance();
 
     // Fail first 3 attempts, succeed on 4th
-    client = new TestDeviceServiceClient(
-      timer,
-      createNthAttemptSuccessWebSocketFactory(4, timer),
-      { maxConnectionAttempts: 3, connectionResetMs: 10000, reconnectDelayMs: 2000 }
-    );
+    client = new TestDeviceServiceClient(timer, createNthAttemptSuccessWebSocketFactory(4, timer), {
+      maxConnectionAttempts: 3,
+      connectionResetMs: 10000,
+      reconnectDelayMs: 2000,
+    });
     client.disableAutoReconnect();
 
     // Attempts 1-3 fail
@@ -260,11 +263,11 @@ describe("DeviceServiceClient connection cooldown", () => {
   test("waitForConnection fails when cooldown is active", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    client = new TestDeviceServiceClient(
-      timer,
-      createInstantFailureWebSocketFactory(timer),
-      { maxConnectionAttempts: 3, connectionResetMs: 10000, reconnectDelayMs: 2000 }
-    );
+    client = new TestDeviceServiceClient(timer, createInstantFailureWebSocketFactory(timer), {
+      maxConnectionAttempts: 3,
+      connectionResetMs: 10000,
+      reconnectDelayMs: 2000,
+    });
     client.disableAutoReconnect();
 
     // Exhaust all attempts via direct ensureConnected

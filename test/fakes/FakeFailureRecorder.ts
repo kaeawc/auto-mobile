@@ -99,28 +99,28 @@ export class FakeFailureRecorder implements FailureRecorderService {
    * Get recorded tool failures only.
    */
   getToolFailures(): RecordedFailure[] {
-    return this.recordedFailures.filter(f => f.type === "tool_failure");
+    return this.recordedFailures.filter((f) => f.type === "tool_failure");
   }
 
   /**
    * Get recorded crashes only.
    */
   getCrashes(): RecordedFailure[] {
-    return this.recordedFailures.filter(f => f.type === "crash");
+    return this.recordedFailures.filter((f) => f.type === "crash");
   }
 
   /**
    * Get recorded ANRs only.
    */
   getAnrs(): RecordedFailure[] {
-    return this.recordedFailures.filter(f => f.type === "anr");
+    return this.recordedFailures.filter((f) => f.type === "anr");
   }
 
   /**
    * Get recorded non-fatals only.
    */
   getNonFatals(): RecordedFailure[] {
-    return this.recordedFailures.filter(f => f.type === "nonfatal");
+    return this.recordedFailures.filter((f) => f.type === "nonfatal");
   }
 
   /**

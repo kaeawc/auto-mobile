@@ -4,7 +4,7 @@ import {
   getStructuredField,
   getStructuredPayload,
   throwIfAborted,
-  type StructuredToolResponse
+  type StructuredToolResponse,
 } from "../../src/utils/toolUtils";
 
 // Property-based tests. See Backoff.property.test.ts for the pinned-seed rationale.
@@ -21,21 +21,22 @@ const asResponse = (sc: unknown): StructuredToolResponse<Record<string, unknown>
 describe("getStructuredPayload (property-based)", () => {
   test("returns the structuredContent object by identity, else undefined", () => {
     fc.assert(
-      fc.property(structuredContent, sc => {
+      fc.property(structuredContent, (sc) => {
         const result = getStructuredPayload(asResponse(sc));
         const isObject = sc !== null && typeof sc === "object";
         return isObject ? result === sc : result === undefined;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
   test("null or undefined responses yield undefined", () => {
     fc.assert(
-      fc.property(fc.constantFrom(null, undefined), response =>
-        getStructuredPayload(response) === undefined
+      fc.property(
+        fc.constantFrom(null, undefined),
+        (response) => getStructuredPayload(response) === undefined,
       ),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 });
@@ -46,9 +47,11 @@ describe("getStructuredField (property-based)", () => {
     fc.assert(
       fc.property(payloadObject, extraKey, (payload, key) => {
         const value = getStructuredField(asResponse(payload), key);
-        return Object.hasOwn(payload, key) ? value === (payload as Record<string, unknown>)[key] : value === undefined;
+        return Object.hasOwn(payload, key)
+          ? value === (payload as Record<string, unknown>)[key]
+          : value === undefined;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -56,10 +59,14 @@ describe("getStructuredField (property-based)", () => {
     // `toString`/`hasOwnProperty` exist on the prototype but are not own keys.
     const protoKey = fc.constantFrom("toString", "hasOwnProperty", "constructor", "valueOf");
     fc.assert(
-      fc.property(payloadObject.filter(p => Object.keys(p).length === 0), protoKey, (empty, key) => {
-        return getStructuredField(asResponse(empty), key) === undefined;
-      }),
-      RUN_OPTIONS
+      fc.property(
+        payloadObject.filter((p) => Object.keys(p).length === 0),
+        protoKey,
+        (empty, key) => {
+          return getStructuredField(asResponse(empty), key) === undefined;
+        },
+      ),
+      RUN_OPTIONS,
     );
   });
 
@@ -68,19 +75,24 @@ describe("getStructuredField (property-based)", () => {
       fc.property(structuredContent, fc.string({ maxLength: 8 }), (sc, key) => {
         const field = getStructuredField(asResponse(sc), key);
         const payload = getStructuredPayload(asResponse(sc));
-        const expected = payload && Object.hasOwn(payload, key) ? (payload as Record<string, unknown>)[key] : undefined;
+        const expected =
+          payload && Object.hasOwn(payload, key)
+            ? (payload as Record<string, unknown>)[key]
+            : undefined;
         return field === expected;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
   test("null or undefined responses yield undefined", () => {
     fc.assert(
-      fc.property(fc.constantFrom(null, undefined), fc.string({ maxLength: 8 }), (response, key) =>
-        getStructuredField(response, key) === undefined
+      fc.property(
+        fc.constantFrom(null, undefined),
+        fc.string({ maxLength: 8 }),
+        (response, key) => getStructuredField(response, key) === undefined,
       ),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 });
@@ -88,7 +100,7 @@ describe("getStructuredField (property-based)", () => {
 describe("throwIfAborted (property-based)", () => {
   test("throws exactly when the signal is already aborted", () => {
     fc.assert(
-      fc.property(fc.boolean(), aborted => {
+      fc.property(fc.boolean(), (aborted) => {
         const controller = new AbortController();
         if (aborted) {
           controller.abort();
@@ -99,17 +111,17 @@ describe("throwIfAborted (property-based)", () => {
         throwIfAborted(controller.signal);
         return true;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
   test("an undefined signal never throws", () => {
     fc.assert(
-      fc.property(fc.constant(undefined), signal => {
+      fc.property(fc.constant(undefined), (signal) => {
         throwIfAborted(signal);
         return true;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 });

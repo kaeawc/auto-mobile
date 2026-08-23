@@ -12,10 +12,10 @@ It contains **no secret values**. Every identifier is a placeholder.
 
 ## TL;DR
 
-| Platform | Is signing needed? | Recommended path | Cost | Effort |
-| --- | --- | --- | --- | --- |
-| **Windows (.msi)** | **Yes** — unsigned installers trip SmartScreen "unknown publisher" and scare users off | **Azure Trusted Signing** (a.k.a. Azure Artifact Signing) via **`jsign`** | ~$10/mo | Moderate — identity validation + service principal + one workflow step |
-| **Linux (.deb)** | **Mostly no** — `dpkg`/`apt` do not verify per-package signatures by default | **Detached GPG signature + SHA256 checksum** next to the release asset; skip `dpkg-sig` | $0 | Low |
+| Platform           | Is signing needed?                                                                     | Recommended path                                                                        | Cost    | Effort                                                                 |
+| ------------------ | -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ------- | ---------------------------------------------------------------------- |
+| **Windows (.msi)** | **Yes** — unsigned installers trip SmartScreen "unknown publisher" and scare users off | **Azure Trusted Signing** (a.k.a. Azure Artifact Signing) via **`jsign`**               | ~$10/mo | Moderate — identity validation + service principal + one workflow step |
+| **Linux (.deb)**   | **Mostly no** — `dpkg`/`apt` do not verify per-package signatures by default           | **Detached GPG signature + SHA256 checksum** next to the release asset; skip `dpkg-sig` | $0      | Low                                                                    |
 
 The single thing worth real effort is **Windows**. Linux is a checksum-and-optional-GPG
 formality unless/until we host an apt repository.
@@ -36,20 +36,20 @@ plug into a machine (useless for CI) or in a cloud HSM you authenticate to.
 
 What each platform's trust story actually is:
 
-| Concept | macOS (what you built) | Windows | Linux (.deb) |
-| --- | --- | --- | --- |
-| Signing authority | Apple Developer ID cert | Authenticode cert (OV/EV) **or** Azure Trusted Signing | Your own GPG key (self-issued) |
-| Where the key lives | `.p12` you own → CI keychain | **Cloud HSM only** (hardware mandate) | Anywhere (a GPG secret key) |
-| "Prove it to the OS" step | **Notarization** (`notarytool submit --wait`) | **No notarization** — nothing to submit | Nothing |
-| Reputation gate | Gatekeeper (binary yes/no once notarized) | **SmartScreen** — earned via install telemetry over time | none (verification is opt-in) |
-| Analog of "stapling" | staple ticket to DMG | none | none |
+| Concept                   | macOS (what you built)                        | Windows                                                  | Linux (.deb)                   |
+| ------------------------- | --------------------------------------------- | -------------------------------------------------------- | ------------------------------ |
+| Signing authority         | Apple Developer ID cert                       | Authenticode cert (OV/EV) **or** Azure Trusted Signing   | Your own GPG key (self-issued) |
+| Where the key lives       | `.p12` you own → CI keychain                  | **Cloud HSM only** (hardware mandate)                    | Anywhere (a GPG secret key)    |
+| "Prove it to the OS" step | **Notarization** (`notarytool submit --wait`) | **No notarization** — nothing to submit                  | Nothing                        |
+| Reputation gate           | Gatekeeper (binary yes/no once notarized)     | **SmartScreen** — earned via install telemetry over time | none (verification is opt-in)  |
+| Analog of "stapling"      | staple ticket to DMG                          | none                                                     | none                           |
 
 Two things to internalize:
 
 1. **There is no Windows notarization.** You sign, and that's it. There is no
    submit-and-wait API. The Apple `notarytool` step has no counterpart.
 2. **SmartScreen reputation is earned, not granted.** Even a perfectly signed
-   installer can show "Windows protected your PC" until the signing *identity*
+   installer can show "Windows protected your PC" until the signing _identity_
    accumulates enough clean installs. This is the real user-facing pain, and no
    amount of signing removes it instantly (see EV vs. Trusted Signing below).
 
@@ -61,11 +61,11 @@ Two things to internalize:
 
 An unsigned `.msi` downloaded from a GitHub release shows a yellow/blue
 SmartScreen "Windows protected your PC — unknown publisher" prompt, and the UAC
-dialog says *Publisher: Unknown*. Most non-technical users abandon at that screen.
+dialog says _Publisher: Unknown_. Most non-technical users abandon at that screen.
 Signing replaces "Unknown" with "AutoMobile" (your validated identity) and, once
 reputation builds, removes the SmartScreen interstitial.
 
-### Option A — Azure Trusted Signing / Azure Artifact Signing  ✅ recommended
+### Option A — Azure Trusted Signing / Azure Artifact Signing ✅ recommended
 
 Microsoft's cloud signing service (renamed **Azure Artifact Signing** in 2026;
 still widely called **Trusted Signing**). Certs are cloud-hosted, short-lived
@@ -81,7 +81,7 @@ still widely called **Trusted Signing**). Certs are cloud-hosted, short-lived
   real installs.
 - **Eligibility (the catch):** available to organizations/individuals in **US,
   Canada, EU, UK**. It is now **open to self-employed individuals** in GA — the
-  "3 years of verifiable business history" requirement was a *public-preview*
+  "3 years of verifiable business history" requirement was a _public-preview_
   restriction and has been dropped. You verify identity once (this is a real
   KYC-style step with lead time — plan for it). Given you sign as
   `dev.jasonpearson.*`, you'd validate as a self-employed individual.
@@ -147,14 +147,14 @@ launch) and we can revisit inner-binary signing if SmartScreen stays sticky.
 
 Analogous to the Apple eight, but Azure-shaped:
 
-| Secret | What it is |
-| --- | --- |
-| `AZURE_TENANT_ID` | AAD tenant of the Trusted Signing account |
-| `AZURE_CLIENT_ID` | service principal app id |
-| `AZURE_CLIENT_SECRET` | service principal secret (or use OIDC and drop this) |
-| `TRUSTED_SIGNING_ENDPOINT` | e.g. `https://weu.codesigning.azure.net` |
-| `TRUSTED_SIGNING_ACCOUNT` | Trusted Signing account name |
-| `TRUSTED_SIGNING_PROFILE` | certificate profile name |
+| Secret                     | What it is                                           |
+| -------------------------- | ---------------------------------------------------- |
+| `AZURE_TENANT_ID`          | AAD tenant of the Trusted Signing account            |
+| `AZURE_CLIENT_ID`          | service principal app id                             |
+| `AZURE_CLIENT_SECRET`      | service principal secret (or use OIDC and drop this) |
+| `TRUSTED_SIGNING_ENDPOINT` | e.g. `https://weu.codesigning.azure.net`             |
+| `TRUSTED_SIGNING_ACCOUNT`  | Trusted Signing account name                         |
+| `TRUSTED_SIGNING_PROFILE`  | certificate profile name                             |
 
 (Endpoint/account/profile aren't secret, but keeping them as secrets/vars matches
 the existing pattern and avoids leaking the account name.)
@@ -169,7 +169,7 @@ Linux is **not** a third code-signing platform in the Windows/macOS sense.
   embedded-signature feature (`debsig-verify`) is `no-debsig` out of the box, and
   virtually no user has configured it. Signing the `.deb` itself with `dpkg-sig`
   is therefore **cosmetic for direct downloads** — nobody's machine checks it.
-- **What Linux actually trusts is the *repository*.** `apt` verifies the GPG
+- **What Linux actually trusts is the _repository_.** `apt` verifies the GPG
   signature on the repo's `Release`/`InRelease` metadata, and the package hashes
   chain from there. That only applies if we host an **apt repository** — we don't;
   we ship the `.deb` as a direct GitHub-release download.
@@ -196,7 +196,7 @@ So for our current "download the `.deb` from the release page" model:
      ```
 3. **Skip `dpkg-sig`/`debsigs` embedded signing** — high-friction, near-zero
    real-world verification.
-4. **Defer apt-repo signing** until we actually stand up an apt repo. *That* is
+4. **Defer apt-repo signing** until we actually stand up an apt repo. _That_ is
    the point where GPG signing becomes load-bearing (signing `Release`), and it's
    a separate project from installer signing.
 
@@ -226,8 +226,8 @@ signs whenever its secrets are present):
   like the Apple secrets already are). Cross-platform jar, so it can also run on
   the Linux leg if we'd rather keep signing off the Windows runner.
 - **`linux` leg:** after `packageDeb` → the `gpg … --detach-sign` step (2 secrets)
-  + emit `.sha256`. Upload the `.asc`/`.sha256` alongside the `.deb` so they ride
-  the same artifact into `release.yml`.
+  - emit `.sha256`. Upload the `.asc`/`.sha256` alongside the `.deb` so they ride
+    the same artifact into `release.yml`.
 - **`macos` leg:** unchanged (already signed + notarized in-leg).
 
 The signed installer becomes the uploaded candidate, so `release.yml` publishes it

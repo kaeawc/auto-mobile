@@ -59,149 +59,174 @@ describe("UnixSocketServer close", () => {
     await expect(server.close()).resolves.toBeUndefined();
   });
 
-  (isWindows ? test.skip : test)("does not remove a replacement socket at the socket path", async () => {
-    await unlink(socketPath);
-    const replacementServer = await listenOnSocket(socketPath);
+  (isWindows ? test.skip : test)(
+    "does not remove a replacement socket at the socket path",
+    async () => {
+      await unlink(socketPath);
+      const replacementServer = await listenOnSocket(socketPath);
 
-    try {
+      try {
+        await server.close();
+
+        expect(existsSync(socketPath)).toBe(true);
+      } finally {
+        await closeServer(replacementServer);
+      }
+    },
+  );
+
+  (isWindows ? test.skip : test)(
+    "does not remove a successor socket bound during close",
+    async () => {
+      const listener = (server as unknown as { server: NetServer | null }).server;
+      expect(listener).not.toBeNull();
+
+      const replacementServer = createServer();
+      const originalClose = listener!.close.bind(listener);
+      listener!.close = (callback) =>
+        originalClose((error) => {
+          replacementServer.listen(socketPath, () => callback?.(error));
+        });
+
+      try {
+        await server.close();
+
+        expect(existsSync(socketPath)).toBe(true);
+      } finally {
+        await closeServer(replacementServer);
+      }
+    },
+  );
+
+  (isWindows ? test.skip : test)(
+    "destroys active clients before waiting for server shutdown",
+    async () => {
+      const client = await connectClient(socketPath);
+      const clientClosed = once(client, "close");
+      const closePromise = server.close();
+
+      try {
+        await Promise.all([closePromise, clientClosed]);
+        expect(client.destroyed).toBe(true);
+      } finally {
+        if (!client.destroyed) {
+          client.destroy();
+        }
+        await closePromise;
+      }
+    },
+    1_000,
+  );
+
+  (isWindows ? test.skip : test)(
+    "drains an in-flight request before shutdown completes",
+    async () => {
+      let releaseRefresh: () => void;
+      const refreshComplete = new Promise<number>((resolve) => {
+        releaseRefresh = () => {
+          resolve(0);
+        };
+      });
+      let signalRefreshStarted: () => void;
+      const requestStarted = new Promise<void>((resolve) => {
+        signalRefreshStarted = resolve;
+      });
+
       await server.close();
+      timer = new FakeTimer();
+      server = new UnixSocketServer(
+        socketPath,
+        "http://localhost:0/mcp",
+        createFakeDaemonState(async () => {
+          signalRefreshStarted();
+          return refreshComplete;
+        }),
+        timer,
+      );
+      await server.start();
 
-      expect(existsSync(socketPath)).toBe(true);
-    } finally {
-      await closeServer(replacementServer);
-    }
-  });
+      const client = await connectClient(socketPath);
+      const clientClosed = once(client, "close");
+      client.write(
+        `${JSON.stringify({ id: "refresh", type: "mcp_request", method: "daemon/refreshDevices" })}\n`,
+      );
+      await requestStarted;
 
-  (isWindows ? test.skip : test)("does not remove a successor socket bound during close", async () => {
-    const listener = (server as unknown as { server: NetServer | null }).server;
-    expect(listener).not.toBeNull();
+      let closeCompleted = false;
+      const closePromise = server.close().then(() => {
+        closeCompleted = true;
+      });
 
-    const replacementServer = createServer();
-    const originalClose = listener!.close.bind(listener);
-    listener!.close = callback => originalClose(error => {
-      replacementServer.listen(socketPath, () => callback?.(error));
-    });
+      try {
+        await clientClosed;
+        await Promise.resolve();
+        expect(closeCompleted).toBe(false);
 
-    try {
+        releaseRefresh();
+        await closePromise;
+      } finally {
+        releaseRefresh();
+        if (!client.destroyed) {
+          client.destroy();
+        }
+        await closePromise;
+      }
+    },
+    1_000,
+  );
+
+  (isWindows ? test.skip : test)(
+    "bounds shutdown while an in-flight request does not settle",
+    async () => {
+      let releaseRefresh: () => void;
+      const refreshComplete = new Promise<number>((resolve) => {
+        releaseRefresh = () => {
+          resolve(0);
+        };
+      });
+      let signalRefreshStarted: () => void;
+      const requestStarted = new Promise<void>((resolve) => {
+        signalRefreshStarted = resolve;
+      });
+
       await server.close();
+      timer = new FakeTimer();
+      server = new UnixSocketServer(
+        socketPath,
+        "http://localhost:0/mcp",
+        createFakeDaemonState(async () => {
+          signalRefreshStarted();
+          return refreshComplete;
+        }),
+        timer,
+      );
+      await server.start();
 
-      expect(existsSync(socketPath)).toBe(true);
-    } finally {
-      await closeServer(replacementServer);
-    }
-  });
+      const client = await connectClient(socketPath);
+      const clientClosed = once(client, "close");
+      client.write(
+        `${JSON.stringify({ id: "refresh", type: "mcp_request", method: "daemon/refreshDevices" })}\n`,
+      );
+      await requestStarted;
 
-  (isWindows ? test.skip : test)("destroys active clients before waiting for server shutdown", async () => {
-    const client = await connectClient(socketPath);
-    const clientClosed = once(client, "close");
-    const closePromise = server.close();
+      const closePromise = server.close();
+      try {
+        await clientClosed;
+        await Promise.resolve();
+        expect(timer.getPendingTimeoutCount()).toBe(1);
 
-    try {
-      await Promise.all([closePromise, clientClosed]);
-      expect(client.destroyed).toBe(true);
-    } finally {
-      if (!client.destroyed) {
-        client.destroy();
+        timer.advanceTime(1_000);
+        await closePromise;
+      } finally {
+        releaseRefresh();
+        if (!client.destroyed) {
+          client.destroy();
+        }
+        await closePromise;
       }
-      await closePromise;
-    }
-  }, 1_000);
-
-  (isWindows ? test.skip : test)("drains an in-flight request before shutdown completes", async () => {
-    let releaseRefresh: () => void;
-    const refreshComplete = new Promise<number>(resolve => {
-      releaseRefresh = () => {resolve(0);};
-    });
-    let signalRefreshStarted: () => void;
-    const requestStarted = new Promise<void>(resolve => {
-      signalRefreshStarted = resolve;
-    });
-
-    await server.close();
-    timer = new FakeTimer();
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(async () => {
-        signalRefreshStarted();
-        return refreshComplete;
-      }),
-      timer,
-    );
-    await server.start();
-
-    const client = await connectClient(socketPath);
-    const clientClosed = once(client, "close");
-    client.write(`${JSON.stringify({ id: "refresh", type: "mcp_request", method: "daemon/refreshDevices" })}\n`);
-    await requestStarted;
-
-    let closeCompleted = false;
-    const closePromise = server.close().then(() => {
-      closeCompleted = true;
-    });
-
-    try {
-      await clientClosed;
-      await Promise.resolve();
-      expect(closeCompleted).toBe(false);
-
-      releaseRefresh();
-      await closePromise;
-    } finally {
-      releaseRefresh();
-      if (!client.destroyed) {
-        client.destroy();
-      }
-      await closePromise;
-    }
-  }, 1_000);
-
-  (isWindows ? test.skip : test)("bounds shutdown while an in-flight request does not settle", async () => {
-    let releaseRefresh: () => void;
-    const refreshComplete = new Promise<number>(resolve => {
-      releaseRefresh = () => {
-        resolve(0);
-      };
-    });
-    let signalRefreshStarted: () => void;
-    const requestStarted = new Promise<void>(resolve => {
-      signalRefreshStarted = resolve;
-    });
-
-    await server.close();
-    timer = new FakeTimer();
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(async () => {
-        signalRefreshStarted();
-        return refreshComplete;
-      }),
-      timer,
-    );
-    await server.start();
-
-    const client = await connectClient(socketPath);
-    const clientClosed = once(client, "close");
-    client.write(`${JSON.stringify({ id: "refresh", type: "mcp_request", method: "daemon/refreshDevices" })}\n`);
-    await requestStarted;
-
-    const closePromise = server.close();
-    try {
-      await clientClosed;
-      await Promise.resolve();
-      expect(timer.getPendingTimeoutCount()).toBe(1);
-
-      timer.advanceTime(1_000);
-      await closePromise;
-    } finally {
-      releaseRefresh();
-      if (!client.destroyed) {
-        client.destroy();
-      }
-      await closePromise;
-    }
-  }, 1_000);
+    },
+    1_000,
+  );
 });
 
 async function connectClient(socketPath: string): Promise<Socket> {
@@ -222,7 +247,7 @@ function listenOnSocket(socketPath: string): Promise<NetServer> {
 }
 
 function closeServer(server: NetServer): Promise<void> {
-  return new Promise(resolve => {
+  return new Promise((resolve) => {
     server.close(() => resolve());
   });
 }

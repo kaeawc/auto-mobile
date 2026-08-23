@@ -2,7 +2,7 @@ import {
   DeepLinkResult,
   IntentChooserResult,
   ViewHierarchyResult,
-  BootedDevice
+  BootedDevice,
 } from "../../src/models";
 import { DeepLinkManager } from "../../src/utils/DeepLinkManager";
 
@@ -57,7 +57,7 @@ export class FakeDeepLinkManager implements DeepLinkManager {
    * @returns true if the operation was called at least once
    */
   wasMethodCalled(operationName: string): boolean {
-    return this.executedOperations.some(op => op.includes(operationName));
+    return this.executedOperations.some((op) => op.includes(operationName));
   }
 
   /**
@@ -66,7 +66,7 @@ export class FakeDeepLinkManager implements DeepLinkManager {
    * @returns Number of times the operation was called
    */
   getCallCount(operationName: string): number {
-    return this.executedOperations.filter(op => op.includes(operationName)).length;
+    return this.executedOperations.filter((op) => op.includes(operationName)).length;
   }
 
   /**
@@ -106,8 +106,8 @@ export class FakeDeepLinkManager implements DeepLinkManager {
         schemes: [],
         hosts: [],
         intentFilters: [],
-        supportedMimeTypes: []
-      }
+        supportedMimeTypes: [],
+      },
     };
   }
 
@@ -119,7 +119,7 @@ export class FakeDeepLinkManager implements DeepLinkManager {
   async handleIntentChooser(
     viewHierarchy: ViewHierarchyResult,
     preference: "always" | "just_once" | "custom" = "just_once",
-    customAppPackage?: string
+    customAppPackage?: string,
   ): Promise<IntentChooserResult> {
     const key = `${preference}:${customAppPackage || "none"}`;
     this.executedOperations.push(`handleIntentChooser:${key}`);
@@ -135,12 +135,12 @@ export class FakeDeepLinkManager implements DeepLinkManager {
         success: true,
         detected: true,
         action: preference,
-        appSelected: customAppPackage
+        appSelected: customAppPackage,
       };
     } else {
       return {
         success: true,
-        detected: false
+        detected: false,
       };
     }
   }

@@ -24,8 +24,8 @@ describe("DaemonClient stale socket recovery", () => {
 
   async function createClosedSocketFile(socketPath: string): Promise<void> {
     server = createServer();
-    await new Promise<void>(resolve => server!.listen(socketPath, resolve));
-    await new Promise<void>(resolve => server!.close(() => resolve()));
+    await new Promise<void>((resolve) => server!.listen(socketPath, resolve));
+    await new Promise<void>((resolve) => server!.close(() => resolve()));
     server = null;
   }
 
@@ -42,7 +42,7 @@ describe("DaemonClient stale socket recovery", () => {
 
   afterEach(async () => {
     if (server) {
-      await new Promise<void>(resolve => server!.close(() => resolve()));
+      await new Promise<void>((resolve) => server!.close(() => resolve()));
       server = null;
     }
     for (const dir of tempDirs) {
@@ -51,51 +51,60 @@ describe("DaemonClient stale socket recovery", () => {
     tempDirs.length = 0;
   });
 
-  (isWindows ? test.skip : test)("isAvailable removes socket and PID files when the recorded daemon PID is dead", async () => {
-    const { socketPath, pidFilePath } = createTempPaths();
-    writeFileSync(socketPath, "stale socket placeholder");
-    writePidFile(pidFilePath, socketPath);
+  (isWindows ? test.skip : test)(
+    "isAvailable removes socket and PID files when the recorded daemon PID is dead",
+    async () => {
+      const { socketPath, pidFilePath } = createTempPaths();
+      writeFileSync(socketPath, "stale socket placeholder");
+      writePidFile(pidFilePath, socketPath);
 
-    const available = await DaemonClient.isAvailable(socketPath, {
-      pidFilePath,
-      socketPaths: [socketPath],
-      isProcessRunning: () => false,
-    });
+      const available = await DaemonClient.isAvailable(socketPath, {
+        pidFilePath,
+        socketPaths: [socketPath],
+        isProcessRunning: () => false,
+      });
 
-    expect(available).toBe(false);
-    expect(existsSync(socketPath)).toBe(false);
-    expect(existsSync(pidFilePath)).toBe(false);
-  });
+      expect(available).toBe(false);
+      expect(existsSync(socketPath)).toBe(false);
+      expect(existsSync(pidFilePath)).toBe(false);
+    },
+  );
 
-  (isWindows ? test.skip : test)("isAvailable leaves files intact when the recorded daemon PID is alive", async () => {
-    const { socketPath, pidFilePath } = createTempPaths();
-    writeFileSync(socketPath, "stale socket placeholder");
-    writePidFile(pidFilePath, socketPath);
+  (isWindows ? test.skip : test)(
+    "isAvailable leaves files intact when the recorded daemon PID is alive",
+    async () => {
+      const { socketPath, pidFilePath } = createTempPaths();
+      writeFileSync(socketPath, "stale socket placeholder");
+      writePidFile(pidFilePath, socketPath);
 
-    const available = await DaemonClient.isAvailable(socketPath, {
-      pidFilePath,
-      socketPaths: [socketPath],
-      isProcessRunning: () => true,
-    });
+      const available = await DaemonClient.isAvailable(socketPath, {
+        pidFilePath,
+        socketPaths: [socketPath],
+        isProcessRunning: () => true,
+      });
 
-    expect(available).toBe(false);
-    expect(existsSync(socketPath)).toBe(true);
-    expect(existsSync(pidFilePath)).toBe(true);
-  });
+      expect(available).toBe(false);
+      expect(existsSync(socketPath)).toBe(true);
+      expect(existsSync(pidFilePath)).toBe(true);
+    },
+  );
 
-  (isWindows ? test.skip : test)("connect cleans stale files and retries after a failed socket connection", async () => {
-    const { socketPath, pidFilePath } = createTempPaths();
-    await createClosedSocketFile(socketPath);
-    writePidFile(pidFilePath, socketPath);
+  (isWindows ? test.skip : test)(
+    "connect cleans stale files and retries after a failed socket connection",
+    async () => {
+      const { socketPath, pidFilePath } = createTempPaths();
+      await createClosedSocketFile(socketPath);
+      writePidFile(pidFilePath, socketPath);
 
-    const client = new DaemonClient(socketPath, 50, undefined, {
-      pidFilePath,
-      socketPaths: [socketPath],
-      isProcessRunning: () => false,
-    });
+      const client = new DaemonClient(socketPath, 50, undefined, {
+        pidFilePath,
+        socketPaths: [socketPath],
+        isProcessRunning: () => false,
+      });
 
-    await expect(client.connect()).rejects.toThrow("Daemon socket not found");
-    expect(existsSync(socketPath)).toBe(false);
-    expect(existsSync(pidFilePath)).toBe(false);
-  });
+      await expect(client.connect()).rejects.toThrow("Daemon socket not found");
+      expect(existsSync(socketPath)).toBe(false);
+      expect(existsSync(pidFilePath)).toBe(false);
+    },
+  );
 });

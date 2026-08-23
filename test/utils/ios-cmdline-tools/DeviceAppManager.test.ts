@@ -2,7 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { promises as fs } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { DeviceAppManager, findProcessIdentifier, findRunningProcessPid, isDevicectlProcessGoneError, parseDevicectlJsonOutputPath } from "../../../src/utils/ios-cmdline-tools/DeviceAppManager";
+import {
+  DeviceAppManager,
+  findProcessIdentifier,
+  findRunningProcessPid,
+  isDevicectlProcessGoneError,
+  parseDevicectlJsonOutputPath,
+} from "../../../src/utils/ios-cmdline-tools/DeviceAppManager";
 import { isProcessAlreadyGoneError } from "../../../src/utils/ios-cmdline-tools/iosProcessErrors";
 import { hashAppBundle } from "../../../src/utils/ios-cmdline-tools/AppBundleHasher";
 import { ActionableError } from "../../../src/models/ActionableError";
@@ -31,7 +37,7 @@ const createFakeLogger = () => {
     },
     warn(message: string) {
       warnMessages.push(message);
-    }
+    },
   };
 };
 
@@ -57,9 +63,9 @@ describe("DeviceAppManager", () => {
             apps: [
               {
                 bundleIdentifier: bundleId,
-                bundleURL: "file:///private/var/containers/Bundle/Application/ABC/CtrlProxyApp.app"
-              }
-            ]
+                bundleURL: "file:///private/var/containers/Bundle/Application/ABC/CtrlProxyApp.app",
+              },
+            ],
           };
           await fs.writeFile(jsonPath, JSON.stringify(payload), "utf-8");
         }
@@ -75,22 +81,28 @@ describe("DeviceAppManager", () => {
       return {
         stdout: "",
         stderr: "",
-        toString() { return this.stdout; },
-        trim() { return this.stdout.trim(); },
-        includes(searchString: string) { return this.stdout.includes(searchString); }
+        toString() {
+          return this.stdout;
+        },
+        trim() {
+          return this.stdout.trim();
+        },
+        includes(searchString: string) {
+          return this.stdout.includes(searchString);
+        },
       };
     };
 
     const inspector = new DeviceAppManager({
       platform: () => "darwin",
       execute: (file, args) => exec([file, ...args].join(" ")),
-      readFile: async path => fs.readFile(path, "utf-8"),
-      mkdtemp: async prefix => fs.mkdtemp(prefix),
-      rm: async path => fs.rm(path, { recursive: true, force: true }),
-      readdir: async path => fs.readdir(path),
-      stat: async path => fs.stat(path),
+      readFile: async (path) => fs.readFile(path, "utf-8"),
+      mkdtemp: async (prefix) => fs.mkdtemp(prefix),
+      rm: async (path) => fs.rm(path, { recursive: true, force: true }),
+      readdir: async (path) => fs.readdir(path),
+      stat: async (path) => fs.stat(path),
       tmpdir,
-      logger: createFakeLogger()
+      logger: createFakeLogger(),
     });
 
     const hash = await inspector.getInstalledAppBundleHash("device-udid", bundleId);
@@ -107,33 +119,49 @@ describe("DeviceAppManager", () => {
         return {
           stdout: fixtureApp + "\n",
           stderr: "",
-          toString() { return this.stdout; },
-          trim() { return this.stdout.trim(); },
-          includes(searchString: string) { return this.stdout.includes(searchString); }
+          toString() {
+            return this.stdout;
+          },
+          trim() {
+            return this.stdout.trim();
+          },
+          includes(searchString: string) {
+            return this.stdout.includes(searchString);
+          },
         };
       }
       return {
         stdout: "",
         stderr: "",
-        toString() { return this.stdout; },
-        trim() { return this.stdout.trim(); },
-        includes(searchString: string) { return this.stdout.includes(searchString); }
+        toString() {
+          return this.stdout;
+        },
+        trim() {
+          return this.stdout.trim();
+        },
+        includes(searchString: string) {
+          return this.stdout.includes(searchString);
+        },
       };
     };
 
     const inspector = new DeviceAppManager({
       platform: () => "darwin",
       execute: (file, args) => exec([file, ...args].join(" ")),
-      readFile: async path => fs.readFile(path, "utf-8"),
-      mkdtemp: async prefix => fs.mkdtemp(prefix),
-      rm: async path => fs.rm(path, { recursive: true, force: true }),
-      readdir: async path => fs.readdir(path),
-      stat: async path => fs.stat(path),
+      readFile: async (path) => fs.readFile(path, "utf-8"),
+      mkdtemp: async (prefix) => fs.mkdtemp(prefix),
+      rm: async (path) => fs.rm(path, { recursive: true, force: true }),
+      readdir: async (path) => fs.readdir(path),
+      stat: async (path) => fs.stat(path),
       tmpdir,
-      logger: createFakeLogger()
+      logger: createFakeLogger(),
     });
 
-    const hash = await inspector.getInstalledAppBundleHash("AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE", bundleId, true);
+    const hash = await inspector.getInstalledAppBundleHash(
+      "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
+      bundleId,
+      true,
+    );
     expect(hash).toBe(fixtureHash);
   });
 
@@ -149,24 +177,30 @@ describe("DeviceAppManager", () => {
         return {
           stdout: "",
           stderr: "",
-          toString() { return this.stdout; },
-          trim() { return this.stdout.trim(); },
-          includes(searchString: string) { return this.stdout.includes(searchString); }
+          toString() {
+            return this.stdout;
+          },
+          trim() {
+            return this.stdout.trim();
+          },
+          includes(searchString: string) {
+            return this.stdout.includes(searchString);
+          },
         };
       },
-      readFile: async path => fs.readFile(path, "utf-8"),
-      mkdtemp: async prefix => fs.mkdtemp(prefix),
-      rm: async path => fs.rm(path, { recursive: true, force: true }),
-      readdir: async path => fs.readdir(path),
-      stat: async path => fs.stat(path),
+      readFile: async (path) => fs.readFile(path, "utf-8"),
+      mkdtemp: async (prefix) => fs.mkdtemp(prefix),
+      rm: async (path) => fs.rm(path, { recursive: true, force: true }),
+      readdir: async (path) => fs.readdir(path),
+      stat: async (path) => fs.stat(path),
       tmpdir,
-      logger: fakeLogger
+      logger: fakeLogger,
     });
 
     const hash = await inspector.getInstalledAppBundleHash(
       "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
       `${bundleId}.XCTestServiceApp`,
-      true
+      true,
     );
 
     expect(hash).toBeNull();
@@ -189,24 +223,30 @@ describe("DeviceAppManager", () => {
         return {
           stdout: "",
           stderr: "",
-          toString() { return this.stdout; },
-          trim() { return this.stdout.trim(); },
-          includes(searchString: string) { return this.stdout.includes(searchString); }
+          toString() {
+            return this.stdout;
+          },
+          trim() {
+            return this.stdout.trim();
+          },
+          includes(searchString: string) {
+            return this.stdout.includes(searchString);
+          },
         };
       },
-      readFile: async path => fs.readFile(path, "utf-8"),
-      mkdtemp: async prefix => fs.mkdtemp(prefix),
-      rm: async path => fs.rm(path, { recursive: true, force: true }),
-      readdir: async path => fs.readdir(path),
-      stat: async path => fs.stat(path),
+      readFile: async (path) => fs.readFile(path, "utf-8"),
+      mkdtemp: async (prefix) => fs.mkdtemp(prefix),
+      rm: async (path) => fs.rm(path, { recursive: true, force: true }),
+      readdir: async (path) => fs.readdir(path),
+      stat: async (path) => fs.stat(path),
       tmpdir,
-      logger: fakeLogger
+      logger: fakeLogger,
     });
 
     const hash = await inspector.getInstalledAppBundleHash(
       "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
       bundleId,
-      true
+      true,
     );
 
     expect(hash).toBeNull();
@@ -229,18 +269,24 @@ describe("DeviceAppManager", () => {
         return {
           stdout: "",
           stderr: "",
-          toString() { return this.stdout; },
-          trim() { return this.stdout.trim(); },
-          includes(searchString: string) { return this.stdout.includes(searchString); }
+          toString() {
+            return this.stdout;
+          },
+          trim() {
+            return this.stdout.trim();
+          },
+          includes(searchString: string) {
+            return this.stdout.includes(searchString);
+          },
         };
       },
-      readFile: async path => fs.readFile(path, "utf-8"),
-      mkdtemp: async prefix => fs.mkdtemp(prefix),
-      rm: async path => fs.rm(path, { recursive: true, force: true }),
-      readdir: async path => fs.readdir(path),
-      stat: async path => fs.stat(path),
+      readFile: async (path) => fs.readFile(path, "utf-8"),
+      mkdtemp: async (prefix) => fs.mkdtemp(prefix),
+      rm: async (path) => fs.rm(path, { recursive: true, force: true }),
+      readdir: async (path) => fs.readdir(path),
+      stat: async (path) => fs.stat(path),
       tmpdir,
-      logger: fakeLogger
+      logger: fakeLogger,
     });
 
     const hash = await inspector.getInstalledAppBundleHash("device-udid", bundleId);
@@ -261,32 +307,44 @@ describe("DeviceAppManager", () => {
           return {
             stdout: "/tmp/missing/ExistingApp.app\n",
             stderr: "",
-            toString() { return this.stdout; },
-            trim() { return this.stdout.trim(); },
-            includes(searchString: string) { return this.stdout.includes(searchString); }
+            toString() {
+              return this.stdout;
+            },
+            trim() {
+              return this.stdout.trim();
+            },
+            includes(searchString: string) {
+              return this.stdout.includes(searchString);
+            },
           };
         }
         return {
           stdout: "",
           stderr: "",
-          toString() { return this.stdout; },
-          trim() { return this.stdout.trim(); },
-          includes(searchString: string) { return this.stdout.includes(searchString); }
+          toString() {
+            return this.stdout;
+          },
+          trim() {
+            return this.stdout.trim();
+          },
+          includes(searchString: string) {
+            return this.stdout.includes(searchString);
+          },
         };
       },
-      readFile: async path => fs.readFile(path, "utf-8"),
-      mkdtemp: async prefix => fs.mkdtemp(prefix),
-      rm: async path => fs.rm(path, { recursive: true, force: true }),
-      readdir: async path => fs.readdir(path),
-      stat: async path => fs.stat(path),
+      readFile: async (path) => fs.readFile(path, "utf-8"),
+      mkdtemp: async (prefix) => fs.mkdtemp(prefix),
+      rm: async (path) => fs.rm(path, { recursive: true, force: true }),
+      readdir: async (path) => fs.readdir(path),
+      stat: async (path) => fs.stat(path),
       tmpdir,
-      logger: fakeLogger
+      logger: fakeLogger,
     });
 
     const hash = await inspector.getInstalledAppBundleHash(
       "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
       bundleId,
-      true
+      true,
     );
 
     expect(hash).toBeNull();
@@ -302,29 +360,35 @@ describe("DeviceAppManager", () => {
       return {
         stdout: "",
         stderr: "",
-        toString() { return this.stdout; },
-        trim() { return this.stdout.trim(); },
-        includes(searchString: string) { return this.stdout.includes(searchString); }
+        toString() {
+          return this.stdout;
+        },
+        trim() {
+          return this.stdout.trim();
+        },
+        includes(searchString: string) {
+          return this.stdout.includes(searchString);
+        },
       };
     };
 
     const inspector = new DeviceAppManager({
       platform: () => "darwin",
       execute: (file, args) => exec([file, ...args].join(" ")),
-      readFile: async path => fs.readFile(path, "utf-8"),
-      mkdtemp: async prefix => fs.mkdtemp(prefix),
-      rm: async path => fs.rm(path, { recursive: true, force: true }),
-      readdir: async path => fs.readdir(path),
-      stat: async path => fs.stat(path),
+      readFile: async (path) => fs.readFile(path, "utf-8"),
+      mkdtemp: async (prefix) => fs.mkdtemp(prefix),
+      rm: async (path) => fs.rm(path, { recursive: true, force: true }),
+      readdir: async (path) => fs.readdir(path),
+      stat: async (path) => fs.stat(path),
       tmpdir,
-      logger: createFakeLogger()
+      logger: createFakeLogger(),
     });
 
     await inspector.uninstallApp("AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE", bundleId, true);
 
-    expect(commands.some(command => command.includes("simctl uninstall"))).toBe(true);
-    expect(commands.some(command => command.includes(bundleId))).toBe(true);
-    expect(commands.every(command => !command.includes("devicectl"))).toBe(true);
+    expect(commands.some((command) => command.includes("simctl uninstall"))).toBe(true);
+    expect(commands.some((command) => command.includes(bundleId))).toBe(true);
+    expect(commands.every((command) => !command.includes("devicectl"))).toBe(true);
   });
 
   test("uninstallApp issues devicectl uninstall command", async () => {
@@ -334,28 +398,36 @@ describe("DeviceAppManager", () => {
       return {
         stdout: "",
         stderr: "",
-        toString() { return this.stdout; },
-        trim() { return this.stdout.trim(); },
-        includes(searchString: string) { return this.stdout.includes(searchString); }
+        toString() {
+          return this.stdout;
+        },
+        trim() {
+          return this.stdout.trim();
+        },
+        includes(searchString: string) {
+          return this.stdout.includes(searchString);
+        },
       };
     };
 
     const inspector = new DeviceAppManager({
       platform: () => "darwin",
       execute: (file, args) => exec([file, ...args].join(" ")),
-      readFile: async path => fs.readFile(path, "utf-8"),
-      mkdtemp: async prefix => fs.mkdtemp(prefix),
-      rm: async path => fs.rm(path, { recursive: true, force: true }),
-      readdir: async path => fs.readdir(path),
-      stat: async path => fs.stat(path),
+      readFile: async (path) => fs.readFile(path, "utf-8"),
+      mkdtemp: async (prefix) => fs.mkdtemp(prefix),
+      rm: async (path) => fs.rm(path, { recursive: true, force: true }),
+      readdir: async (path) => fs.readdir(path),
+      stat: async (path) => fs.stat(path),
       tmpdir,
-      logger: createFakeLogger()
+      logger: createFakeLogger(),
     });
 
     await inspector.uninstallApp("device-udid", bundleId);
 
-    expect(commands.some(command => command.includes("devicectl device uninstall app"))).toBe(true);
-    expect(commands.some(command => command.includes(bundleId))).toBe(true);
+    expect(commands.some((command) => command.includes("devicectl device uninstall app"))).toBe(
+      true,
+    );
+    expect(commands.some((command) => command.includes(bundleId))).toBe(true);
   });
 
   test("clearAppDataViaReinstall copies the bundle, uninstalls, then reinstalls it", async () => {
@@ -368,7 +440,14 @@ describe("DeviceAppManager", () => {
       if (command.includes("device info apps")) {
         const jsonPath = parseDevicectlJsonOutputPath(command);
         if (jsonPath) {
-          const payload = { apps: [{ bundleIdentifier: bundleId, bundleURL: "file:///private/var/containers/Bundle/Application/ABC/CtrlProxyApp.app" }] };
+          const payload = {
+            apps: [
+              {
+                bundleIdentifier: bundleId,
+                bundleURL: "file:///private/var/containers/Bundle/Application/ABC/CtrlProxyApp.app",
+              },
+            ],
+          };
           await fs.writeFile(jsonPath, JSON.stringify(payload), "utf-8");
         }
       }
@@ -383,28 +462,34 @@ describe("DeviceAppManager", () => {
       return {
         stdout: "",
         stderr: "",
-        toString() { return this.stdout; },
-        trim() { return this.stdout.trim(); },
-        includes(searchString: string) { return this.stdout.includes(searchString); }
+        toString() {
+          return this.stdout;
+        },
+        trim() {
+          return this.stdout.trim();
+        },
+        includes(searchString: string) {
+          return this.stdout.includes(searchString);
+        },
       };
     };
 
     const inspector = new DeviceAppManager({
       platform: () => "darwin",
       execute: (file, args) => exec([file, ...args].join(" ")),
-      readFile: async path => fs.readFile(path, "utf-8"),
-      mkdtemp: async prefix => fs.mkdtemp(prefix),
-      rm: async path => fs.rm(path, { recursive: true, force: true }),
-      readdir: async path => fs.readdir(path),
-      stat: async path => fs.stat(path),
+      readFile: async (path) => fs.readFile(path, "utf-8"),
+      mkdtemp: async (prefix) => fs.mkdtemp(prefix),
+      rm: async (path) => fs.rm(path, { recursive: true, force: true }),
+      readdir: async (path) => fs.readdir(path),
+      stat: async (path) => fs.stat(path),
       tmpdir,
-      logger: createFakeLogger()
+      logger: createFakeLogger(),
     });
 
     await inspector.clearAppDataViaReinstall("device-udid", bundleId);
 
-    const uninstallIdx = commands.findIndex(c => c.includes("devicectl device uninstall app"));
-    const installIdx = commands.findIndex(c => c.includes("devicectl device install app"));
+    const uninstallIdx = commands.findIndex((c) => c.includes("devicectl device uninstall app"));
+    const installIdx = commands.findIndex((c) => c.includes("devicectl device install app"));
     expect(uninstallIdx).toBeGreaterThanOrEqual(0);
     expect(installIdx).toBeGreaterThanOrEqual(0);
     // Must uninstall (wipes data) before reinstalling the copied bundle.
@@ -423,41 +508,65 @@ describe("DeviceAppManager", () => {
           throw new Error("bundle lookup failed");
         }
         return {
-          stdout: "", stderr: "",
-          toString() { return this.stdout; },
-          trim() { return this.stdout.trim(); },
-          includes(searchString: string) { return this.stdout.includes(searchString); }
+          stdout: "",
+          stderr: "",
+          toString() {
+            return this.stdout;
+          },
+          trim() {
+            return this.stdout.trim();
+          },
+          includes(searchString: string) {
+            return this.stdout.includes(searchString);
+          },
         };
       },
-      readFile: async () => { throw new Error("bundle lookup should fail before reading JSON"); },
+      readFile: async () => {
+        throw new Error("bundle lookup should fail before reading JSON");
+      },
       mkdtemp: async () => temporaryDir,
       rm: async () => {},
-      readdir: async () => { throw new Error("bundle lookup should fail before copying the app"); },
-      stat: async () => { throw new Error("bundle lookup should fail before copying the app"); },
+      readdir: async () => {
+        throw new Error("bundle lookup should fail before copying the app");
+      },
+      stat: async () => {
+        throw new Error("bundle lookup should fail before copying the app");
+      },
       tmpdir: () => "/tmp",
-      logger: createFakeLogger()
+      logger: createFakeLogger(),
     });
 
     const error = await inspector.clearAppDataViaReinstall("device-udid", bundleId).then(
       () => new Error("Expected bundle resolution failure"),
-      error => error
+      (error) => error,
     );
 
     expect(error).toBeInstanceOf(ActionableError);
     expect((error as Error).message).toContain(bundleId);
-    expect(commands).toEqual([{
-      file: "xcrun",
-      args: [
-        "devicectl", "device", "info", "apps",
-        "--device", "device-udid",
-        "--bundle-id", bundleId,
-        "--json-output", join(temporaryDir, "apps.json"),
-        "--quiet"
-      ]
-    }]);
-    expect(commands.some(({ file, args }) =>
-      file === "xcrun" && args.slice(0, 4).join(" ") === "devicectl device uninstall app"
-    )).toBe(false);
+    expect(commands).toEqual([
+      {
+        file: "xcrun",
+        args: [
+          "devicectl",
+          "device",
+          "info",
+          "apps",
+          "--device",
+          "device-udid",
+          "--bundle-id",
+          bundleId,
+          "--json-output",
+          join(temporaryDir, "apps.json"),
+          "--quiet",
+        ],
+      },
+    ]);
+    expect(
+      commands.some(
+        ({ file, args }) =>
+          file === "xcrun" && args.slice(0, 4).join(" ") === "devicectl device uninstall app",
+      ),
+    ).toBe(false);
   });
 
   test("clearAppDataViaReinstall surfaces the install error (not 'could not resolve') when reinstall fails after uninstall", async () => {
@@ -470,7 +579,14 @@ describe("DeviceAppManager", () => {
       if (command.includes("device info apps")) {
         const jsonPath = parseDevicectlJsonOutputPath(command);
         if (jsonPath) {
-          const payload = { apps: [{ bundleIdentifier: bundleId, bundleURL: "file:///private/var/containers/Bundle/Application/ABC/CtrlProxyApp.app" }] };
+          const payload = {
+            apps: [
+              {
+                bundleIdentifier: bundleId,
+                bundleURL: "file:///private/var/containers/Bundle/Application/ABC/CtrlProxyApp.app",
+              },
+            ],
+          };
           await fs.writeFile(jsonPath, JSON.stringify(payload), "utf-8");
         }
       }
@@ -489,29 +605,36 @@ describe("DeviceAppManager", () => {
       return {
         stdout: "",
         stderr: "",
-        toString() { return this.stdout; },
-        trim() { return this.stdout.trim(); },
-        includes(searchString: string) { return this.stdout.includes(searchString); }
+        toString() {
+          return this.stdout;
+        },
+        trim() {
+          return this.stdout.trim();
+        },
+        includes(searchString: string) {
+          return this.stdout.includes(searchString);
+        },
       };
     };
 
     const inspector = new DeviceAppManager({
       platform: () => "darwin",
       execute: (file, args) => exec([file, ...args].join(" ")),
-      readFile: async path => fs.readFile(path, "utf-8"),
-      mkdtemp: async prefix => fs.mkdtemp(prefix),
-      rm: async path => fs.rm(path, { recursive: true, force: true }),
-      readdir: async path => fs.readdir(path),
-      stat: async path => fs.stat(path),
+      readFile: async (path) => fs.readFile(path, "utf-8"),
+      mkdtemp: async (prefix) => fs.mkdtemp(prefix),
+      rm: async (path) => fs.rm(path, { recursive: true, force: true }),
+      readdir: async (path) => fs.readdir(path),
+      stat: async (path) => fs.stat(path),
       tmpdir,
-      logger: createFakeLogger()
+      logger: createFakeLogger(),
     });
 
     // The real install error must propagate — not be masked as "could not resolve".
-    await expect(inspector.clearAppDataViaReinstall("device-udid", bundleId))
-      .rejects.toThrow(/install failed: device locked/);
+    await expect(inspector.clearAppDataViaReinstall("device-udid", bundleId)).rejects.toThrow(
+      /install failed: device locked/,
+    );
     // The uninstall did run (app was removed), so the failure is actionable.
-    expect(commands.some(c => c.includes("device uninstall app"))).toBe(true);
+    expect(commands.some((c) => c.includes("device uninstall app"))).toBe(true);
   });
 });
 
@@ -519,9 +642,15 @@ describe("DeviceAppManager launch (devicectl)", () => {
   const makeExecResult = (stdout = "") => ({
     stdout,
     stderr: "",
-    toString() { return this.stdout; },
-    trim() { return this.stdout.trim(); },
-    includes(searchString: string) { return this.stdout.includes(searchString); }
+    toString() {
+      return this.stdout;
+    },
+    trim() {
+      return this.stdout.trim();
+    },
+    includes(searchString: string) {
+      return this.stdout.includes(searchString);
+    },
   });
 
   const createInspector = (opts: {
@@ -531,13 +660,13 @@ describe("DeviceAppManager launch (devicectl)", () => {
     return new DeviceAppManager({
       platform: () => opts.platform ?? "darwin",
       execute: (file, args) => opts.exec([file, ...args].join(" ")),
-      readFile: async path => fs.readFile(path, "utf-8"),
-      mkdtemp: async prefix => fs.mkdtemp(prefix),
-      rm: async path => fs.rm(path, { recursive: true, force: true }),
-      readdir: async path => fs.readdir(path),
-      stat: async path => fs.stat(path),
+      readFile: async (path) => fs.readFile(path, "utf-8"),
+      mkdtemp: async (prefix) => fs.mkdtemp(prefix),
+      rm: async (path) => fs.rm(path, { recursive: true, force: true }),
+      readdir: async (path) => fs.readdir(path),
+      stat: async (path) => fs.stat(path),
       tmpdir,
-      logger: createFakeLogger()
+      logger: createFakeLogger(),
     });
   };
 
@@ -548,10 +677,19 @@ describe("DeviceAppManager launch (devicectl)", () => {
       if (command.includes("device process launch")) {
         const jsonPath = parseDevicectlJsonOutputPath(command);
         if (jsonPath) {
-          await fs.writeFile(jsonPath, JSON.stringify({
-            info: { outcome: "success" },
-            result: { process: { processIdentifier: 4321, executable: "file:///CtrlProxyApp.app/CtrlProxyApp" } }
-          }), "utf-8");
+          await fs.writeFile(
+            jsonPath,
+            JSON.stringify({
+              info: { outcome: "success" },
+              result: {
+                process: {
+                  processIdentifier: 4321,
+                  executable: "file:///CtrlProxyApp.app/CtrlProxyApp",
+                },
+              },
+            }),
+            "utf-8",
+          );
         }
       }
       return makeExecResult();
@@ -562,14 +700,14 @@ describe("DeviceAppManager launch (devicectl)", () => {
 
     expect(result.success).toBe(true);
     expect(result.pid).toBe(4321);
-    const launchCommand = commands.find(c => c.includes("device process launch"))!;
+    const launchCommand = commands.find((c) => c.includes("device process launch"))!;
     expect(launchCommand).toContain("xcrun devicectl device process launch");
     expect(launchCommand).toContain("--device device-udid");
     expect(launchCommand).toContain("--terminate-existing");
     expect(launchCommand).toContain("--json-output");
     expect(launchCommand).toContain(bundleId);
     // Simulator tool must never be invoked for a physical launch.
-    expect(commands.every(c => !c.includes("simctl"))).toBe(true);
+    expect(commands.every((c) => !c.includes("simctl"))).toBe(true);
   });
 
   test("launchApp omits --terminate-existing when not requested", async () => {
@@ -579,7 +717,11 @@ describe("DeviceAppManager launch (devicectl)", () => {
       if (command.includes("device process launch")) {
         const jsonPath = parseDevicectlJsonOutputPath(command);
         if (jsonPath) {
-          await fs.writeFile(jsonPath, JSON.stringify({ result: { process: { processIdentifier: 10 } } }), "utf-8");
+          await fs.writeFile(
+            jsonPath,
+            JSON.stringify({ result: { process: { processIdentifier: 10 } } }),
+            "utf-8",
+          );
         }
       }
       return makeExecResult();
@@ -590,7 +732,7 @@ describe("DeviceAppManager launch (devicectl)", () => {
 
     expect(result.success).toBe(true);
     expect(result.pid).toBe(10);
-    const launchCommand = commands.find(c => c.includes("device process launch"))!;
+    const launchCommand = commands.find((c) => c.includes("device process launch"))!;
     expect(launchCommand).not.toContain("--terminate-existing");
   });
 
@@ -613,9 +755,13 @@ describe("DeviceAppManager launch (devicectl)", () => {
   const writeDeviceDetailsJson = async (command: string, osVersion: string) => {
     const jsonPath = parseDevicectlJsonOutputPath(command);
     if (jsonPath) {
-      await fs.writeFile(jsonPath, JSON.stringify({
-        result: { deviceProperties: { osVersionNumber: osVersion } }
-      }), "utf-8");
+      await fs.writeFile(
+        jsonPath,
+        JSON.stringify({
+          result: { deviceProperties: { osVersionNumber: osVersion } },
+        }),
+        "utf-8",
+      );
     }
   };
 
@@ -636,7 +782,7 @@ describe("DeviceAppManager launch (devicectl)", () => {
     expect(result.error).toContain("requires iOS 17+");
     expect(result.error).toContain("reports iOS 16");
     // Version gate short-circuits before the launch shell-out.
-    expect(commands.some(c => c.includes("device process launch"))).toBe(false);
+    expect(commands.some((c) => c.includes("device process launch"))).toBe(false);
   });
 
   test("launchApp proceeds when the iOS version cannot be resolved (unknown => not blocked)", async () => {
@@ -647,7 +793,11 @@ describe("DeviceAppManager launch (devicectl)", () => {
       if (command.includes("device process launch")) {
         const jsonPath = parseDevicectlJsonOutputPath(command);
         if (jsonPath) {
-          await fs.writeFile(jsonPath, JSON.stringify({ result: { process: { processIdentifier: 77 } } }), "utf-8");
+          await fs.writeFile(
+            jsonPath,
+            JSON.stringify({ result: { process: { processIdentifier: 77 } } }),
+            "utf-8",
+          );
         }
       }
       return makeExecResult();
@@ -670,7 +820,11 @@ describe("DeviceAppManager launch (devicectl)", () => {
       if (command.includes("device process launch")) {
         const jsonPath = parseDevicectlJsonOutputPath(command);
         if (jsonPath) {
-          await fs.writeFile(jsonPath, JSON.stringify({ result: { process: { processIdentifier: 88 } } }), "utf-8");
+          await fs.writeFile(
+            jsonPath,
+            JSON.stringify({ result: { process: { processIdentifier: 88 } } }),
+            "utf-8",
+          );
         }
       }
       return makeExecResult();
@@ -681,12 +835,15 @@ describe("DeviceAppManager launch (devicectl)", () => {
 
     expect(result.success).toBe(true);
     expect(result.pid).toBe(88);
-    expect(commands.some(c => c.includes("device process launch"))).toBe(true);
+    expect(commands.some((c) => c.includes("device process launch"))).toBe(true);
   });
 
   test("launchApp returns an explicit macOS error on non-darwin without shelling out", async () => {
     const commands: string[] = [];
-    const exec = async (command: string) => { commands.push(command); return makeExecResult(); };
+    const exec = async (command: string) => {
+      commands.push(command);
+      return makeExecResult();
+    };
 
     const inspector = createInspector({ platform: "linux", exec });
     const result = await inspector.launchApp("device-udid", bundleId);
@@ -711,9 +868,9 @@ describe("findRunningProcessPid", () => {
       result: {
         runningProcesses: [
           { processIdentifier: 100, executable: "/usr/libexec/other" },
-          { processIdentifier: 4321, executable: `${bundlePath}/MyApp` }
-        ]
-      }
+          { processIdentifier: 4321, executable: `${bundlePath}/MyApp` },
+        ],
+      },
     };
     expect(findRunningProcessPid(data, bundlePath)).toBe(4321);
   });
@@ -721,10 +878,8 @@ describe("findRunningProcessPid", () => {
   test("normalizes file:// executable URLs before matching", () => {
     const data = {
       result: {
-        runningProcesses: [
-          { processIdentifier: 55, executable: `file://${bundlePath}/MyApp` }
-        ]
-      }
+        runningProcesses: [{ processIdentifier: 55, executable: `file://${bundlePath}/MyApp` }],
+      },
     };
     expect(findRunningProcessPid(data, bundlePath)).toBe(55);
   });
@@ -733,9 +888,9 @@ describe("findRunningProcessPid", () => {
     const data = {
       result: {
         runningProcesses: [
-          { processIdentifier: 77, executable: { url: `file://${bundlePath}/MyApp` } }
-        ]
-      }
+          { processIdentifier: 77, executable: { url: `file://${bundlePath}/MyApp` } },
+        ],
+      },
     };
     expect(findRunningProcessPid(data, bundlePath)).toBe(77);
   });
@@ -746,7 +901,9 @@ describe("findRunningProcessPid", () => {
   });
 
   test("tolerates a stringified integer PID", () => {
-    const data = { runningProcesses: [{ processIdentifier: "88", executable: `${bundlePath}/MyApp` }] };
+    const data = {
+      runningProcesses: [{ processIdentifier: "88", executable: `${bundlePath}/MyApp` }],
+    };
     expect(findRunningProcessPid(data, bundlePath)).toBe(88);
   });
 
@@ -756,9 +913,9 @@ describe("findRunningProcessPid", () => {
       result: {
         runningProcesses: [
           { processIdentifier: 200, executable: `${bundlePath}/PlugIns/Foo.appex/Foo` },
-          { processIdentifier: 100, executable: `${bundlePath}/MyApp` }
-        ]
-      }
+          { processIdentifier: 100, executable: `${bundlePath}/MyApp` },
+        ],
+      },
     };
     expect(findRunningProcessPid(data, bundlePath)).toBe(100);
   });
@@ -767,9 +924,9 @@ describe("findRunningProcessPid", () => {
     const data = {
       result: {
         runningProcesses: [
-          { processIdentifier: 200, executable: `${bundlePath}/PlugIns/Foo.appex/Foo` }
-        ]
-      }
+          { processIdentifier: 200, executable: `${bundlePath}/PlugIns/Foo.appex/Foo` },
+        ],
+      },
     };
     expect(findRunningProcessPid(data, bundlePath)).toBeNull();
   });
@@ -780,9 +937,12 @@ describe("findRunningProcessPid", () => {
     const data = {
       result: {
         runningProcesses: [
-          { processIdentifier: 321, executable: "/var/containers/Bundle/Application/XYZ/MyApp.app/MyApp" }
-        ]
-      }
+          {
+            processIdentifier: 321,
+            executable: "/var/containers/Bundle/Application/XYZ/MyApp.app/MyApp",
+          },
+        ],
+      },
     };
     expect(findRunningProcessPid(data, bundlePath)).toBe(321);
   });
@@ -791,9 +951,12 @@ describe("findRunningProcessPid", () => {
     const data = {
       result: {
         runningProcesses: [
-          { processIdentifier: 9, executable: "/var/containers/Bundle/Application/XYZ/MyApp.app/PlugIns/Foo.appex/Foo" }
-        ]
-      }
+          {
+            processIdentifier: 9,
+            executable: "/var/containers/Bundle/Application/XYZ/MyApp.app/PlugIns/Foo.appex/Foo",
+          },
+        ],
+      },
     };
     expect(findRunningProcessPid(data, bundlePath)).toBeNull();
   });
@@ -803,9 +966,12 @@ describe("findRunningProcessPid", () => {
       result: {
         runningProcesses: [
           { processIdentifier: 1, executable: "/usr/libexec/other" },
-          { processIdentifier: 2, executable: "/private/var/containers/Bundle/Application/XYZ/Another.app/Another" }
-        ]
-      }
+          {
+            processIdentifier: 2,
+            executable: "/private/var/containers/Bundle/Application/XYZ/Another.app/Another",
+          },
+        ],
+      },
     };
     expect(findRunningProcessPid(data, bundlePath)).toBeNull();
   });
@@ -814,10 +980,8 @@ describe("findRunningProcessPid", () => {
     // MyApp.app vs MyApp.app.extension — must not be treated as inside MyApp.app.
     const data = {
       result: {
-        runningProcesses: [
-          { processIdentifier: 9, executable: `${bundlePath}.extension/Plugin` }
-        ]
-      }
+        runningProcesses: [{ processIdentifier: 9, executable: `${bundlePath}.extension/Plugin` }],
+      },
     };
     expect(findRunningProcessPid(data, bundlePath)).toBeNull();
   });
@@ -834,25 +998,32 @@ describe("DeviceAppManager terminate (devicectl)", () => {
   const makeExecResult = (stdout = "") => ({
     stdout,
     stderr: "",
-    toString() { return this.stdout; },
-    trim() { return this.stdout.trim(); },
-    includes(searchString: string) { return this.stdout.includes(searchString); }
+    toString() {
+      return this.stdout;
+    },
+    trim() {
+      return this.stdout.trim();
+    },
+    includes(searchString: string) {
+      return this.stdout.includes(searchString);
+    },
   });
 
   const createInspector = (opts: {
     platform?: NodeJS.Platform;
     exec: (command: string) => Promise<ReturnType<typeof makeExecResult>>;
-  }) => new DeviceAppManager({
-    platform: () => opts.platform ?? "darwin",
-    execute: (file, args) => opts.exec([file, ...args].join(" ")),
-    readFile: async path => fs.readFile(path, "utf-8"),
-    mkdtemp: async prefix => fs.mkdtemp(prefix),
-    rm: async path => fs.rm(path, { recursive: true, force: true }),
-    readdir: async path => fs.readdir(path),
-    stat: async path => fs.stat(path),
-    tmpdir,
-    logger: createFakeLogger()
-  });
+  }) =>
+    new DeviceAppManager({
+      platform: () => opts.platform ?? "darwin",
+      execute: (file, args) => opts.exec([file, ...args].join(" ")),
+      readFile: async (path) => fs.readFile(path, "utf-8"),
+      mkdtemp: async (prefix) => fs.mkdtemp(prefix),
+      rm: async (path) => fs.rm(path, { recursive: true, force: true }),
+      readdir: async (path) => fs.readdir(path),
+      stat: async (path) => fs.stat(path),
+      tmpdir,
+      logger: createFakeLogger(),
+    });
 
   const writeAppsJson = async (command: string, installed: boolean) => {
     const jsonPath = parseDevicectlJsonOutputPath(command);
@@ -874,9 +1045,17 @@ describe("DeviceAppManager terminate (devicectl)", () => {
       if (command.includes("device info processes")) {
         const jsonPath = parseDevicectlJsonOutputPath(command);
         if (jsonPath) {
-          await fs.writeFile(jsonPath, JSON.stringify({
-            result: { runningProcesses: [{ processIdentifier: 4321, executable: `${bundlePath}/CtrlProxyApp` }] }
-          }), "utf-8");
+          await fs.writeFile(
+            jsonPath,
+            JSON.stringify({
+              result: {
+                runningProcesses: [
+                  { processIdentifier: 4321, executable: `${bundlePath}/CtrlProxyApp` },
+                ],
+              },
+            }),
+            "utf-8",
+          );
         }
       }
       return makeExecResult();
@@ -887,7 +1066,7 @@ describe("DeviceAppManager terminate (devicectl)", () => {
 
     expect(result).toEqual({ wasInstalled: true, wasRunning: true });
     // 2882's dedicated terminate verb, not raw `process signal --signal SIGKILL`.
-    const terminateCommand = commands.find(c => c.includes("device process terminate"));
+    const terminateCommand = commands.find((c) => c.includes("device process terminate"));
     expect(terminateCommand).toBeDefined();
     expect(terminateCommand).toContain("xcrun devicectl device process terminate");
     expect(terminateCommand).toContain("--device device-udid");
@@ -895,9 +1074,9 @@ describe("DeviceAppManager terminate (devicectl)", () => {
     expect(terminateCommand).toContain("--kill");
     expect(terminateCommand).toContain("--quiet");
     // Simulator tool must never be invoked for a physical terminate.
-    expect(commands.every(c => !c.includes("simctl"))).toBe(true);
+    expect(commands.every((c) => !c.includes("simctl"))).toBe(true);
     // Must not shell out to the raw signal verb.
-    expect(commands.every(c => !c.includes("device process signal"))).toBe(true);
+    expect(commands.every((c) => !c.includes("device process signal"))).toBe(true);
   });
 
   test("reports {wasInstalled:true, wasRunning:false} and issues no terminate when not running", async () => {
@@ -910,7 +1089,11 @@ describe("DeviceAppManager terminate (devicectl)", () => {
       if (command.includes("device info processes")) {
         const jsonPath = parseDevicectlJsonOutputPath(command);
         if (jsonPath) {
-          await fs.writeFile(jsonPath, JSON.stringify({ result: { runningProcesses: [] } }), "utf-8");
+          await fs.writeFile(
+            jsonPath,
+            JSON.stringify({ result: { runningProcesses: [] } }),
+            "utf-8",
+          );
         }
       }
       return makeExecResult();
@@ -920,7 +1103,7 @@ describe("DeviceAppManager terminate (devicectl)", () => {
     const result = await inspector.terminateApp("device-udid", bundleId);
 
     expect(result).toEqual({ wasInstalled: true, wasRunning: false });
-    expect(commands.some(c => c.includes("device process terminate"))).toBe(false);
+    expect(commands.some((c) => c.includes("device process terminate"))).toBe(false);
   });
 
   test("reports {wasInstalled:false, wasRunning:false} and never queries processes when not installed", async () => {
@@ -937,16 +1120,20 @@ describe("DeviceAppManager terminate (devicectl)", () => {
     const result = await inspector.terminateApp("device-udid", bundleId);
 
     expect(result).toEqual({ wasInstalled: false, wasRunning: false });
-    expect(commands.some(c => c.includes("device info processes"))).toBe(false);
-    expect(commands.some(c => c.includes("device process terminate"))).toBe(false);
+    expect(commands.some((c) => c.includes("device info processes"))).toBe(false);
+    expect(commands.some((c) => c.includes("device process terminate"))).toBe(false);
   });
 
   const writeTerminateDetailsJson = async (command: string, osVersion: string) => {
     const jsonPath = parseDevicectlJsonOutputPath(command);
     if (jsonPath) {
-      await fs.writeFile(jsonPath, JSON.stringify({
-        result: { deviceProperties: { osVersionNumber: osVersion } }
-      }), "utf-8");
+      await fs.writeFile(
+        jsonPath,
+        JSON.stringify({
+          result: { deviceProperties: { osVersionNumber: osVersion } },
+        }),
+        "utf-8",
+      );
     }
   };
 
@@ -963,15 +1150,17 @@ describe("DeviceAppManager terminate (devicectl)", () => {
     const inspector = createInspector({ exec });
 
     const thrown = await inspector.terminateApp("device-udid", bundleId).then(
-      () => { throw new Error("expected terminateApp to reject"); },
-      (e: unknown) => e
+      () => {
+        throw new Error("expected terminateApp to reject");
+      },
+      (e: unknown) => e,
     );
     expect(thrown).toBeInstanceOf(ActionableError);
     expect((thrown as Error).message).toContain("requires iOS 17+");
     expect((thrown as Error).message).toContain("reports iOS 16");
     // Version gate short-circuits before any bundle/process resolution or terminate.
-    expect(commands.some(c => c.includes("device info apps"))).toBe(false);
-    expect(commands.some(c => c.includes("device process terminate"))).toBe(false);
+    expect(commands.some((c) => c.includes("device info apps"))).toBe(false);
+    expect(commands.some((c) => c.includes("device process terminate"))).toBe(false);
   });
 
   test("proceeds to terminate when the iOS version cannot be resolved (unknown => not blocked)", async () => {
@@ -985,9 +1174,17 @@ describe("DeviceAppManager terminate (devicectl)", () => {
       if (command.includes("device info processes")) {
         const jsonPath = parseDevicectlJsonOutputPath(command);
         if (jsonPath) {
-          await fs.writeFile(jsonPath, JSON.stringify({
-            result: { runningProcesses: [{ processIdentifier: 4321, executable: `${bundlePath}/CtrlProxyApp` }] }
-          }), "utf-8");
+          await fs.writeFile(
+            jsonPath,
+            JSON.stringify({
+              result: {
+                runningProcesses: [
+                  { processIdentifier: 4321, executable: `${bundlePath}/CtrlProxyApp` },
+                ],
+              },
+            }),
+            "utf-8",
+          );
         }
       }
       return makeExecResult();
@@ -997,17 +1194,22 @@ describe("DeviceAppManager terminate (devicectl)", () => {
     const result = await inspector.terminateApp("device-udid", bundleId);
 
     expect(result).toEqual({ wasInstalled: true, wasRunning: true });
-    expect(commands.some(c => c.includes("device process terminate"))).toBe(true);
+    expect(commands.some((c) => c.includes("device process terminate"))).toBe(true);
   });
 
   test("throws a clear macOS error on non-darwin without shelling out", async () => {
     const commands: string[] = [];
-    const exec = async (command: string) => { commands.push(command); return makeExecResult(); };
+    const exec = async (command: string) => {
+      commands.push(command);
+      return makeExecResult();
+    };
 
     const inspector = createInspector({ platform: "linux", exec });
 
     await expect(inspector.terminateApp("device-udid", bundleId)).rejects.toThrow(/macOS/);
-    await expect(inspector.terminateApp("device-udid", bundleId)).rejects.toBeInstanceOf(ActionableError);
+    await expect(inspector.terminateApp("device-udid", bundleId)).rejects.toBeInstanceOf(
+      ActionableError,
+    );
     expect(commands).toEqual([]);
   });
 
@@ -1016,35 +1218,46 @@ describe("DeviceAppManager terminate (devicectl)", () => {
   // exec rejects; the app is nonetheless effectively terminated, so we must not
   // surface a false success:false — mirroring the simulator path's shared
   // isProcessAlreadyGoneError tolerance (#3076).
-  const runningProcessesExec = (
-    commands: string[],
-    onTerminate: (command: string) => void
-  ) => async (command: string) => {
-    commands.push(command);
-    if (command.includes("device info apps")) {
-      await writeAppsJson(command, true);
-    }
-    if (command.includes("device info processes")) {
-      const jsonPath = parseDevicectlJsonOutputPath(command);
-      if (jsonPath) {
-        await fs.writeFile(jsonPath, JSON.stringify({
-          result: { runningProcesses: [{ processIdentifier: 4321, executable: `${bundlePath}/CtrlProxyApp` }] }
-        }), "utf-8");
+  const runningProcessesExec =
+    (commands: string[], onTerminate: (command: string) => void) => async (command: string) => {
+      commands.push(command);
+      if (command.includes("device info apps")) {
+        await writeAppsJson(command, true);
       }
-    }
-    if (command.includes("device process terminate")) {
-      onTerminate(command);
-    }
-    return makeExecResult();
-  };
+      if (command.includes("device info processes")) {
+        const jsonPath = parseDevicectlJsonOutputPath(command);
+        if (jsonPath) {
+          await fs.writeFile(
+            jsonPath,
+            JSON.stringify({
+              result: {
+                runningProcesses: [
+                  { processIdentifier: 4321, executable: `${bundlePath}/CtrlProxyApp` },
+                ],
+              },
+            }),
+            "utf-8",
+          );
+        }
+      }
+      if (command.includes("device process terminate")) {
+        onTerminate(command);
+      }
+      return makeExecResult();
+    };
 
   test("tolerates an already-exited PID: a devicectl 'no such process' terminate failure reports {wasInstalled:true, wasRunning:true} instead of throwing", async () => {
     const commands: string[] = [];
     // Real devicectl ESRCH text lives on stderr, not in the promisified message.
     const exec = runningProcessesExec(commands, () => {
       throw Object.assign(
-        new Error("Command failed: xcrun devicectl device process terminate --pid 4321 --kill --quiet"),
-        { stderr: "ERROR: The operation couldn’t be completed. No such process (NSPOSIXErrorDomain error 3.)" }
+        new Error(
+          "Command failed: xcrun devicectl device process terminate --pid 4321 --kill --quiet",
+        ),
+        {
+          stderr:
+            "ERROR: The operation couldn’t be completed. No such process (NSPOSIXErrorDomain error 3.)",
+        },
       );
     });
 
@@ -1053,15 +1266,17 @@ describe("DeviceAppManager terminate (devicectl)", () => {
 
     expect(result).toEqual({ wasInstalled: true, wasRunning: true });
     // The dedicated terminate verb was still attempted before the race surfaced.
-    expect(commands.some(c => c.includes("device process terminate"))).toBe(true);
+    expect(commands.some((c) => c.includes("device process terminate"))).toBe(true);
   });
 
   test("still throws when the terminate fails for an unrelated reason (device locked)", async () => {
     const commands: string[] = [];
     const exec = runningProcessesExec(commands, () => {
       throw Object.assign(
-        new Error("Command failed: xcrun devicectl device process terminate --pid 4321 --kill --quiet"),
-        { stderr: "ERROR: The device is locked. Unlock it and try again." }
+        new Error(
+          "Command failed: xcrun devicectl device process terminate --pid 4321 --kill --quiet",
+        ),
+        { stderr: "ERROR: The device is locked. Unlock it and try again." },
       );
     });
 
@@ -1071,13 +1286,15 @@ describe("DeviceAppManager terminate (devicectl)", () => {
     // to stderr, which getExecErrorText captures), so the MCP client sees the
     // actionable text rather than a bare non-enumerable stderr field.
     const thrown = await inspector.terminateApp("device-udid", bundleId).then(
-      () => { throw new Error("expected terminateApp to reject"); },
-      (error: unknown) => error
+      () => {
+        throw new Error("expected terminateApp to reject");
+      },
+      (error: unknown) => error,
     );
     expect(thrown).toBeInstanceOf(ActionableError);
     expect((thrown as Error).message).toMatch(/locked/i);
     expect((thrown as Error).message).toContain(bundleId);
-    expect(commands.some(c => c.includes("device process terminate"))).toBe(true);
+    expect(commands.some((c) => c.includes("device process terminate"))).toBe(true);
   });
 });
 
@@ -1086,26 +1303,33 @@ describe("DeviceAppManager getInstalledAppInfo (devicectl)", () => {
   const makeExecResult = (stdout = "") => ({
     stdout,
     stderr: "",
-    toString() { return this.stdout; },
-    trim() { return this.stdout.trim(); },
-    includes(searchString: string) { return this.stdout.includes(searchString); }
+    toString() {
+      return this.stdout;
+    },
+    trim() {
+      return this.stdout.trim();
+    },
+    includes(searchString: string) {
+      return this.stdout.includes(searchString);
+    },
   });
 
   const createInspector = (opts: {
     platform?: NodeJS.Platform;
     exec: (command: string) => Promise<ReturnType<typeof makeExecResult>>;
     logger?: ReturnType<typeof createFakeLogger>;
-  }) => new DeviceAppManager({
-    platform: () => opts.platform ?? "darwin",
-    execute: (file, args) => opts.exec([file, ...args].join(" ")),
-    readFile: async path => fs.readFile(path, "utf-8"),
-    mkdtemp: async prefix => fs.mkdtemp(prefix),
-    rm: async path => fs.rm(path, { recursive: true, force: true }),
-    readdir: async path => fs.readdir(path),
-    stat: async path => fs.stat(path),
-    tmpdir,
-    logger: opts.logger ?? createFakeLogger()
-  });
+  }) =>
+    new DeviceAppManager({
+      platform: () => opts.platform ?? "darwin",
+      execute: (file, args) => opts.exec([file, ...args].join(" ")),
+      readFile: async (path) => fs.readFile(path, "utf-8"),
+      mkdtemp: async (prefix) => fs.mkdtemp(prefix),
+      rm: async (path) => fs.rm(path, { recursive: true, force: true }),
+      readdir: async (path) => fs.readdir(path),
+      stat: async (path) => fs.stat(path),
+      tmpdir,
+      logger: opts.logger ?? createFakeLogger(),
+    });
 
   test("issues `device info apps --bundle-id --json-output --quiet` with exact UDID/bundle argv and returns the parsed entry", async () => {
     const commands: string[] = [];
@@ -1114,9 +1338,15 @@ describe("DeviceAppManager getInstalledAppInfo (devicectl)", () => {
       if (command.includes("device info apps")) {
         const jsonPath = parseDevicectlJsonOutputPath(command);
         if (jsonPath) {
-          await fs.writeFile(jsonPath, JSON.stringify({
-            apps: [{ bundleIdentifier: bundleId, bundleURL: `file://${bundlePath}`, version: "1.2.3" }]
-          }), "utf-8");
+          await fs.writeFile(
+            jsonPath,
+            JSON.stringify({
+              apps: [
+                { bundleIdentifier: bundleId, bundleURL: `file://${bundlePath}`, version: "1.2.3" },
+              ],
+            }),
+            "utf-8",
+          );
         }
       }
       return makeExecResult();
@@ -1128,19 +1358,22 @@ describe("DeviceAppManager getInstalledAppInfo (devicectl)", () => {
     expect(entry).not.toBeNull();
     expect(entry!.bundleIdentifier).toBe(bundleId);
     expect(entry!.version).toBe("1.2.3");
-    const infoCommand = commands.find(c => c.includes("device info apps"))!;
+    const infoCommand = commands.find((c) => c.includes("device info apps"))!;
     expect(infoCommand).toContain("xcrun devicectl device info apps");
     expect(infoCommand).toContain("--device device-udid");
     expect(infoCommand).toContain(`--bundle-id ${bundleId}`);
     expect(infoCommand).toContain("--json-output");
     expect(infoCommand).toContain("--quiet");
     // Metadata read must never touch the simulator tool.
-    expect(commands.every(c => !c.includes("simctl"))).toBe(true);
+    expect(commands.every((c) => !c.includes("simctl"))).toBe(true);
   });
 
   test("returns null (no shell-out) off macOS", async () => {
     const commands: string[] = [];
-    const exec = async (command: string) => { commands.push(command); return makeExecResult(); };
+    const exec = async (command: string) => {
+      commands.push(command);
+      return makeExecResult();
+    };
     const inspector = createInspector({ platform: "linux", exec });
 
     expect(await inspector.getInstalledAppInfo("device-udid", bundleId)).toBeNull();
@@ -1163,11 +1396,13 @@ describe("DeviceAppManager getInstalledAppInfo (devicectl)", () => {
 
   test("degrades a devicectl failure to null and warns (best-effort metadata contract)", async () => {
     const logger = createFakeLogger();
-    const exec = async () => { throw new Error("xcrun: devicectl not available"); };
+    const exec = async () => {
+      throw new Error("xcrun: devicectl not available");
+    };
     const inspector = createInspector({ exec, logger });
 
     expect(await inspector.getInstalledAppInfo("device-udid", bundleId)).toBeNull();
-    expect(logger.warnMessages.some(m => m.includes(bundleId))).toBe(true);
+    expect(logger.warnMessages.some((m) => m.includes(bundleId))).toBe(true);
   });
 
   test("cleans up the temp json dir after the query", async () => {
@@ -1176,7 +1411,11 @@ describe("DeviceAppManager getInstalledAppInfo (devicectl)", () => {
       if (command.includes("device info apps")) {
         const jsonPath = parseDevicectlJsonOutputPath(command);
         if (jsonPath) {
-          await fs.writeFile(jsonPath, JSON.stringify({ apps: [{ bundleIdentifier: bundleId }] }), "utf-8");
+          await fs.writeFile(
+            jsonPath,
+            JSON.stringify({ apps: [{ bundleIdentifier: bundleId }] }),
+            "utf-8",
+          );
         }
       }
       return makeExecResult();
@@ -1184,13 +1423,16 @@ describe("DeviceAppManager getInstalledAppInfo (devicectl)", () => {
     const inspector = new DeviceAppManager({
       platform: () => "darwin",
       execute: (file, args) => exec([file, ...args].join(" ")),
-      readFile: async path => fs.readFile(path, "utf-8"),
-      mkdtemp: async prefix => fs.mkdtemp(prefix),
-      rm: async path => { removed.push(path); await fs.rm(path, { recursive: true, force: true }); },
-      readdir: async path => fs.readdir(path),
-      stat: async path => fs.stat(path),
+      readFile: async (path) => fs.readFile(path, "utf-8"),
+      mkdtemp: async (prefix) => fs.mkdtemp(prefix),
+      rm: async (path) => {
+        removed.push(path);
+        await fs.rm(path, { recursive: true, force: true });
+      },
+      readdir: async (path) => fs.readdir(path),
+      stat: async (path) => fs.stat(path),
       tmpdir,
-      logger: createFakeLogger()
+      logger: createFakeLogger(),
     });
 
     await inspector.getInstalledAppInfo("device-udid", bundleId);
@@ -1200,7 +1442,11 @@ describe("DeviceAppManager getInstalledAppInfo (devicectl)", () => {
 
 describe("isDevicectlProcessGoneError", () => {
   test("matches ESRCH / already-exited devicectl phrasings (case-insensitive)", () => {
-    expect(isDevicectlProcessGoneError("The operation couldn’t be completed. No such process (NSPOSIXErrorDomain error 3.)")).toBe(true);
+    expect(
+      isDevicectlProcessGoneError(
+        "The operation couldn’t be completed. No such process (NSPOSIXErrorDomain error 3.)",
+      ),
+    ).toBe(true);
     expect(isDevicectlProcessGoneError("No such process")).toBe(true);
     expect(isDevicectlProcessGoneError("The process is not running")).toBe(true);
     expect(isDevicectlProcessGoneError("The process is no longer running")).toBe(true);
@@ -1226,7 +1472,11 @@ describe("isDevicectlProcessGoneError", () => {
   // a shared phrasing that isn't a devicectl-only extra would stop matching and
   // this fails.
   test("subsumes every shared already-gone phrasing", () => {
-    for (const shared of ["no such process", "found nothing to terminate", "the process is not running"]) {
+    for (const shared of [
+      "no such process",
+      "found nothing to terminate",
+      "the process is not running",
+    ]) {
       expect(isProcessAlreadyGoneError(shared)).toBe(true);
       expect(isDevicectlProcessGoneError(shared)).toBe(true);
     }
@@ -1241,7 +1491,7 @@ describe("isDevicectlProcessGoneError", () => {
       "process not running",
       "The process is not running",
       "process no longer running",
-      "The process is no longer running"
+      "The process is no longer running",
     ]) {
       expect(isDevicectlProcessGoneError(phrasing)).toBe(true);
     }

@@ -12,7 +12,8 @@ import { FakeFocusNavigationDriver } from "./FakeFocusNavigationDriver";
  */
 export class FakeTalkBackNavigationDriver
   extends FakeFocusNavigationDriver
-  implements TalkBackNavigationDriver {
+  implements TalkBackNavigationDriver
+{
   tapResult: A11yTapCoordinatesResult = { success: true, totalTimeMs: 1 };
   actionResult: A11yActionResult = { success: true, action: "click", totalTimeMs: 1 };
   nodeActionSelectorsSupported = true;
@@ -58,7 +59,7 @@ export class FakeTalkBackNavigationDriver
   async requestTapCoordinates(
     x: number,
     y: number,
-    durationMs: number
+    durationMs: number,
   ): Promise<A11yTapCoordinatesResult> {
     this.tapHistory.push({ x, y, durationMs });
 
@@ -81,7 +82,7 @@ export class FakeTalkBackNavigationDriver
 
   async requestNodeAction(
     action: string,
-    selector: AccessibilityNodeSelector
+    selector: AccessibilityNodeSelector,
   ): Promise<A11yActionResult> {
     this.actionHistory.push({ action, selector });
 

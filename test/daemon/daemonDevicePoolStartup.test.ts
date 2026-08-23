@@ -39,7 +39,6 @@ class DeferredDiscoveryDeviceManager extends FakeDeviceManager {
   releaseDiscovery(): void {
     this.release.resolve();
   }
-
 }
 
 class FakeDeviceSessionRepository extends DeviceSessionRepository {
@@ -73,10 +72,20 @@ describe("Daemon startup device discovery", () => {
     const daemon = buildDaemon(timer);
     const internals = daemon as unknown as DaemonStartupInternals;
     const manager = new DeferredDiscoveryDeviceManager();
-    const device: BootedDevice = { deviceId: "android-device-1", name: "Pixel 8", platform: "android" };
-    const lateDevice: BootedDevice = { deviceId: "android-device-2", name: "Pixel 9", platform: "android" };
+    const device: BootedDevice = {
+      deviceId: "android-device-1",
+      name: "Pixel 8",
+      platform: "android",
+    };
+    const lateDevice: BootedDevice = {
+      deviceId: "android-device-2",
+      name: "Pixel 9",
+      platform: "android",
+    };
     manager.bootedDevices = [device, lateDevice];
-    (internals.devicePool as unknown as { deviceManager: DeferredDiscoveryDeviceManager }).deviceManager = manager;
+    (
+      internals.devicePool as unknown as { deviceManager: DeferredDiscoveryDeviceManager }
+    ).deviceManager = manager;
     const refreshCompleted = Promise.withResolvers<void>();
     const originalRefresh = internals.devicePool.refreshDevices.bind(internals.devicePool);
     internals.devicePool.refreshDevices = async () => {

@@ -79,7 +79,7 @@ function normalizeDbPath(dbPath: string): string {
 /** Owners whose known DB file equals `ourDbPath` (file-scoped, unknown excluded). */
 function filterSameFile(owners: DaemonDbOwner[], ourDbPath: string): DaemonDbOwner[] {
   return owners.filter(
-    owner => owner.dbPath !== undefined && normalizeDbPath(owner.dbPath) === ourDbPath
+    (owner) => owner.dbPath !== undefined && normalizeDbPath(owner.dbPath) === ourDbPath,
   );
 }
 
@@ -115,13 +115,13 @@ export function assertDirectModeDbOwnership(deps: DirectModeGuardDeps): void {
 
   const conflicting = filterSameFile(owners, ourDbPath);
   if (conflicting.length > 0) {
-    const pids = conflicting.map(owner => owner.pid).join(", ");
+    const pids = conflicting.map((owner) => owner.pid).join(", ");
     throw new ActionableError(
       `A live AutoMobile daemon (pid ${pids}) already owns the database at ${ourDbPath}. ` +
         `Direct mode (--no-proxy/--direct) would open a second writer on the same SQLite file, ` +
         `causing SQLITE_BUSY stalls and competing migrations. Resolve this by either running ` +
         `without --no-proxy/--direct to share the daemon, stopping the daemon, or setting ` +
-        `AUTOMOBILE_DB_PATH (or AUTOMOBILE_DB_DIR) to an isolated database for this direct-mode instance.`
+        `AUTOMOBILE_DB_PATH (or AUTOMOBILE_DB_DIR) to an isolated database for this direct-mode instance.`,
     );
   }
 
@@ -132,16 +132,16 @@ export function assertDirectModeDbOwnership(deps: DirectModeGuardDeps): void {
   // (writeEarlyOwnerRecord), so it is no longer surfaced as unknown-path here.
   // The residual TOCTOU (a daemon that opens the DB immediately after this
   // check) is covered by the migration cross-process lock (#2794).
-  const unverifiable = owners.filter(owner => owner.dbPath === undefined);
+  const unverifiable = owners.filter((owner) => owner.dbPath === undefined);
   if (unverifiable.length > 0) {
-    const pids = unverifiable.map(owner => owner.pid).join(", ");
+    const pids = unverifiable.map((owner) => owner.pid).join(", ");
     throw new ActionableError(
       `Cannot safely start direct mode (--no-proxy/--direct): a live AutoMobile daemon ` +
         `(pid ${pids}) is running but its database path could not be determined ` +
         `(it may still be starting up, or is using a non-default PID file), so a collision on ` +
         `${ourDbPath} cannot be ruled out. Wait for the daemon to finish starting and retry, ` +
         `stop the daemon, or set AUTOMOBILE_DB_PATH (or AUTOMOBILE_DB_DIR) to an isolated ` +
-        `database for this direct-mode instance.`
+        `database for this direct-mode instance.`,
     );
   }
 }
@@ -156,7 +156,7 @@ export function assertDirectModeDbOwnership(deps: DirectModeGuardDeps): void {
  * `dbPath: undefined` so they never falsely match.
  */
 export function createDefaultDirectModeGuardDeps(
-  options: DefaultDirectModeGuardDepsOptions = {}
+  options: DefaultDirectModeGuardDepsOptions = {},
 ): DirectModeGuardDeps {
   const manager = options.manager ?? new DaemonManager();
   const readPidFileData = options.readPidFileData ?? readPidFileDataSync;
@@ -173,7 +173,7 @@ export function createDefaultDirectModeGuardDeps(
         logger.warn(
           `Direct-mode guard: process-table scan failed; refusing direct mode ` +
             `because same-DB daemon ownership cannot be verified. ${detail}`,
-          error
+          error,
         );
         // An indeterminate scan means we cannot rule out a live daemon on this DB
         // file. Fail CLOSED — refuse rather than risk a second writer. #2795
@@ -181,7 +181,7 @@ export function createDefaultDirectModeGuardDeps(
           `Cannot verify daemon ownership before starting direct mode ` +
             `(--no-proxy/--direct): failed to inspect the process table (${detail}). ` +
             `Retry, stop any running daemon, or set AUTOMOBILE_DB_PATH (or ` +
-            `AUTOMOBILE_DB_DIR) to an isolated database.`
+            `AUTOMOBILE_DB_DIR) to an isolated database.`,
         );
       }
 
@@ -203,7 +203,7 @@ export function createDefaultDirectModeGuardDeps(
         resolvedPids.add(pidData.pid);
       }
 
-      const unresolved = livePids.filter(pid => !resolvedPids.has(pid));
+      const unresolved = livePids.filter((pid) => !resolvedPids.has(pid));
       if (unresolved.length > 0) {
         // These live daemons don't match the default PID file — e.g. one using a
         // custom AUTOMOBILE_DAEMON_PID_FILE_PATH. (A daemon still starting up now
@@ -216,7 +216,7 @@ export function createDefaultDirectModeGuardDeps(
         logger.debug(
           `Direct-mode guard: ${unresolved.length} live daemon(s) could not be ` +
             `mapped to a DB path (starting up or non-default PID file); direct mode ` +
-            `will refuse to be safe: ${unresolved.join(", ")}`
+            `will refuse to be safe: ${unresolved.join(", ")}`,
         );
         for (const pid of unresolved) {
           owners.push({ pid, dbPath: undefined });

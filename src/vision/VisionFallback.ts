@@ -37,7 +37,7 @@ export class VisionFallback {
     config: VisionFallbackConfig,
     timer: Timer = defaultTimer,
     client?: VisionClient,
-    checksums: ChecksumCalculator = new DefaultChecksumCalculator()
+    checksums: ChecksumCalculator = new DefaultChecksumCalculator(),
   ) {
     this.config = config;
     this.timer = timer;
@@ -55,7 +55,7 @@ export class VisionFallback {
   async analyzeAndSuggest(
     screenshotPath: string,
     hierarchy: ViewHierarchyNode,
-    searchCriteria: ElementSearchCriteria
+    searchCriteria: ElementSearchCriteria,
   ): Promise<VisionFallbackResult> {
     if (!this.config.enabled) {
       throw new Error("Vision fallback is not enabled");
@@ -86,15 +86,19 @@ export class VisionFallback {
       const result = await this.claudeClient.analyzeUIElement(
         screenshotPath,
         searchCriteria,
-        hierarchy
+        hierarchy,
       );
 
       // Check if cost exceeds max
       if (result.costUsd > this.config.maxCostUsd) {
-        logger.warn(`Vision fallback cost ($${result.costUsd.toFixed(4)}) exceeds max ($${this.config.maxCostUsd})`);
+        logger.warn(
+          `Vision fallback cost ($${result.costUsd.toFixed(4)}) exceeds max ($${this.config.maxCostUsd})`,
+        );
       }
 
-      logger.debug(`Vision fallback complete: confidence=${result.confidence}, cost=$${result.costUsd.toFixed(4)}, time=${result.durationMs}ms`);
+      logger.debug(
+        `Vision fallback complete: confidence=${result.confidence}, cost=$${result.costUsd.toFixed(4)}, time=${result.durationMs}ms`,
+      );
 
       // Cache result
       if (cacheKey) {
@@ -163,7 +167,7 @@ export class VisionFallback {
 
   private async generateCacheKey(
     screenshotPath: string,
-    searchCriteria: ElementSearchCriteria
+    searchCriteria: ElementSearchCriteria,
   ): Promise<string> {
     // Sorted-key serialization: criteria written with their keys in a different
     // order are the same search, and must not cost a second paid analyzer call.
@@ -185,7 +189,9 @@ export class VisionFallback {
       // Unreadable screenshot: fall back to the path, which is unique per
       // capture. That only costs a cache miss — the paid call still happens
       // and the caller still gets a result, so this must not throw.
-      logger.debug(`Vision fallback: could not fingerprint ${screenshotPath}, using path as key: ${error}`);
+      logger.debug(
+        `Vision fallback: could not fingerprint ${screenshotPath}, using path as key: ${error}`,
+      );
       return screenshotPath;
     }
   }

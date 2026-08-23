@@ -225,14 +225,12 @@ describe("device loss MCP outcome", () => {
 
   test("cancels an active observe and drains it before resolving device loss", async () => {
     const observeStarted = Promise.withResolvers<void>();
-    RealObserveScreen.prototype.execute = async function(options) {
+    RealObserveScreen.prototype.execute = async function (options) {
       observeStarted.resolve();
       return await new Promise<never>((_resolve, reject) => {
-        options?.signal?.addEventListener(
-          "abort",
-          () => reject(new Error("observe cancelled")),
-          { once: true },
-        );
+        options?.signal?.addEventListener("abort", () => reject(new Error("observe cancelled")), {
+          once: true,
+        });
       });
     };
     restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({

@@ -13,22 +13,22 @@ describe("UIStateExtractor (iOS hierarchy)", () => {
           node: [
             {
               $: {
-                "text": "Home",
-                "selected": "true",
+                text: "Home",
+                selected: "true",
                 "resource-id": "tab.home",
-                "content-desc": "Home tab"
-              }
+                "content-desc": "Home tab",
+              },
             },
             {
               $: {
-                "text": "Settings",
-                "selected": "false",
-                "resource-id": "tab.settings"
-              }
-            }
-          ]
-        }
-      }
+                text: "Settings",
+                selected: "false",
+                "resource-id": "tab.settings",
+              },
+            },
+          ],
+        },
+      },
     };
 
     const state = new UIStateExtractor().extract(viewHierarchy);
@@ -38,7 +38,7 @@ describe("UIStateExtractor (iOS hierarchy)", () => {
     expect(state?.selectedElements[0]).toMatchObject({
       text: "Home",
       resourceId: "tab.home",
-      contentDesc: "Home tab"
+      contentDesc: "Home tab",
     });
   });
 
@@ -47,13 +47,13 @@ describe("UIStateExtractor (iOS hierarchy)", () => {
       hierarchy: {
         node: {
           $: {
-            "class": "UIAlertController",
+            class: "UIAlertController",
             "resource-id": "alert.main",
-            "text": "Alert",
-            "window-id": "7"
-          }
-        }
-      }
+            text: "Alert",
+            "window-id": "7",
+          },
+        },
+      },
     };
 
     const state = new UIStateExtractor().extract(viewHierarchy);
@@ -63,7 +63,7 @@ describe("UIStateExtractor (iOS hierarchy)", () => {
       type: "dialog",
       identifier: "alert.main",
       layer: 0,
-      windowId: 7
+      windowId: 7,
     });
   });
 
@@ -72,28 +72,30 @@ describe("UIStateExtractor (iOS hierarchy)", () => {
       hierarchy: {
         node: {
           $: {
-            "class": "UIActionSheet",
-            "resource-id": "sheet.main"
-          }
-        }
+            class: "UIActionSheet",
+            "resource-id": "sheet.main",
+          },
+        },
       },
-      windows: [{
-        id: 22,
-        type: 3,
-        hierarchy: {
-          $: {
-            "class": "UIActionSheet",
-            "resource-id": "sheet.main"
-          }
-        }
-      }]
+      windows: [
+        {
+          id: 22,
+          type: 3,
+          hierarchy: {
+            $: {
+              class: "UIActionSheet",
+              "resource-id": "sheet.main",
+            },
+          },
+        },
+      ],
     };
 
     const observation: ObserveResult = {
       updatedAt: 0,
       screenSize: { width: 0, height: 0 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-      viewHierarchy
+      viewHierarchy,
     };
 
     const state = new UIStateExtractor().extractFromObservation(observation);
@@ -104,7 +106,7 @@ describe("UIStateExtractor (iOS hierarchy)", () => {
       identifier: "sheet.main",
       layer: 0,
       windowId: 22,
-      windowType: "3"
+      windowType: "3",
     });
   });
 });
@@ -125,7 +127,7 @@ describe("UIStateExtractor.createScrollPosition", () => {
 
   test("records the finger direction verbatim for a default finger-gesture scroll", () => {
     const result = UIStateExtractor.createScrollPosition(
-      opts({ lookFor: { text: "Save" }, direction: "up" })
+      opts({ lookFor: { text: "Save" }, direction: "up" }),
     );
     expect(result?.direction).toBe("up");
     expect(result?.targetElement).toEqual({ text: "Save", resourceId: undefined });
@@ -140,14 +142,14 @@ describe("UIStateExtractor.createScrollPosition", () => {
         lookFor: { text: "Save" },
         direction: "down",
         gestureType: "scrollTowardsDirection",
-      })
+      }),
     );
     expect(result?.direction).toBe("up");
   });
 
   test("carries the requested scroll speed onto the scroll position", () => {
     const result = UIStateExtractor.createScrollPosition(
-      opts({ lookFor: { text: "Save" }, direction: "up", speed: "fast" })
+      opts({ lookFor: { text: "Save" }, direction: "up", speed: "fast" }),
     );
     expect(result?.speed).toBe("fast");
   });
@@ -158,16 +160,14 @@ describe("UIStateExtractor.createScrollPosition", () => {
         lookFor: { elementId: "id/save" },
         direction: "up",
         container: { text: "List", elementId: "id/list" },
-      })
+      }),
     );
     expect(result?.targetElement).toEqual({ text: undefined, resourceId: "id/save" });
     expect(result?.container).toEqual({ text: "List", resourceId: "id/list" });
   });
 
   test("records a target-less scroll position for an empty lookFor", () => {
-    const result = UIStateExtractor.createScrollPosition(
-      opts({ lookFor: {}, direction: "up" })
-    );
+    const result = UIStateExtractor.createScrollPosition(opts({ lookFor: {}, direction: "up" }));
     expect(result).toBeDefined();
     expect(result?.direction).toBe("up");
     expect(result?.targetElement).toEqual({ text: undefined, resourceId: undefined });

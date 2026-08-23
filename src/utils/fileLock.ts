@@ -1,4 +1,12 @@
-import { closeSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "fs";
+import {
+  closeSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "fs";
 import { dirname } from "path";
 import { isProcessRunning as defaultIsProcessRunning } from "../daemon/daemonFiles";
 import { logger } from "./logger";
@@ -132,7 +140,7 @@ export function parseLockContent(content: string): LockContent {
  */
 export function tryAcquireExclusiveLock(
   lockFilePath: string,
-  options: ExclusiveLockOptions = {}
+  options: ExclusiveLockOptions = {},
 ): boolean {
   const pid = options.pid ?? process.pid;
   const isProcessRunning = options.isProcessRunning ?? defaultIsProcessRunning;
@@ -233,7 +241,7 @@ export function tryAcquireExclusiveLock(
 export function releaseExclusiveLock(
   lockFilePath: string,
   pid: number = process.pid,
-  ownerToken?: string
+  ownerToken?: string,
 ): void {
   let content: string;
   try {
@@ -275,7 +283,7 @@ function writeExclusiveLockFile(
   lockFilePath: string,
   pid: number,
   ownerToken?: string,
-  metadata?: string
+  metadata?: string,
 ): boolean {
   try {
     mkdirSync(dirname(lockFilePath), { recursive: true });

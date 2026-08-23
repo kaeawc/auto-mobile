@@ -15,7 +15,6 @@ export interface CryptoService {
  * For all security-sensitive operations, use SHA-256 or stronger algorithms.
  */
 export class NodeCryptoService implements CryptoService {
-
   /**
    * Generate MD5 hash for cache key purposes only
    * WARNING: MD5 is cryptographically broken and should NEVER be used for:
@@ -47,6 +46,8 @@ export class NodeCryptoService implements CryptoService {
   }
 
   // Static convenience methods for backward compatibility
-  static generateCacheKey = (data: string | Buffer) => new NodeCryptoService().generateCacheKey(data);
-  static verifyChecksum = (buffer: Buffer, expectedChecksum: string) => new NodeCryptoService().verifyChecksum(buffer, expectedChecksum);
+  static generateCacheKey = (data: string | Buffer) =>
+    new NodeCryptoService().generateCacheKey(data);
+  static verifyChecksum = (buffer: Buffer, expectedChecksum: string) =>
+    new NodeCryptoService().verifyChecksum(buffer, expectedChecksum);
 }

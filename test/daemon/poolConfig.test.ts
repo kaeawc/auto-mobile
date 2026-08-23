@@ -14,7 +14,7 @@ const ENV_KEYS = [
   "AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH",
 ] as const;
 const ORIGINAL_ENV = new Map<(typeof ENV_KEYS)[number], string | undefined>(
-  ENV_KEYS.map(key => [key, process.env[key]])
+  ENV_KEYS.map((key) => [key, process.env[key]]),
 );
 
 function clearEnv(): void {
@@ -132,7 +132,7 @@ describe("DEVICE_POOL_MATCHING env parsing", () => {
   // files, so deleting a key the caller set would leak the wrong DEVICE_POOL_MATCHING
   // into a later import of poolConfig — restore, don't blanket-delete.
   const ORIGINAL_MATCHING_ENV = new Map<(typeof MATCHING_KEYS)[number], string | undefined>(
-    MATCHING_KEYS.map(key => [key, process.env[key]])
+    MATCHING_KEYS.map((key) => [key, process.env[key]]),
   );
 
   // Establish a clean baseline at the START of each row so "unset" rows are
@@ -157,20 +157,47 @@ describe("DEVICE_POOL_MATCHING env parsing", () => {
   afterEach(restoreMatchingEnv);
 
   async function importFreshMatching(): Promise<string> {
-    const mod = await import(`../../src/daemon/poolConfig.ts?matching-env=${Date.now()}-${Math.random()}`);
+    const mod = await import(
+      `../../src/daemon/poolConfig.ts?matching-env=${Date.now()}-${Math.random()}`
+    );
     return mod.DEVICE_POOL_MATCHING as string;
   }
 
-  const rows: Array<{ name: string; key?: (typeof MATCHING_KEYS)[number]; value?: string; expected: string }> = [
+  const rows: Array<{
+    name: string;
+    key?: (typeof MATCHING_KEYS)[number];
+    value?: string;
+    expected: string;
+  }> = [
     { name: "unset defaults to LATEST", value: undefined, expected: "LATEST" },
     { name: "LATEST is honored", key: MATCHING_KEYS[0], value: "LATEST", expected: "LATEST" },
     { name: "RANDOM is honored", key: MATCHING_KEYS[0], value: "RANDOM", expected: "RANDOM" },
     { name: "MINIMUM is honored", key: MATCHING_KEYS[0], value: "MINIMUM", expected: "MINIMUM" },
-    { name: "lowercase 'random' is rejected (case-sensitive) and falls back", key: MATCHING_KEYS[0], value: "random", expected: "LATEST" },
-    { name: "a padded ' RANDOM ' is rejected (no trim) and falls back", key: MATCHING_KEYS[0], value: " RANDOM ", expected: "LATEST" },
+    {
+      name: "lowercase 'random' is rejected (case-sensitive) and falls back",
+      key: MATCHING_KEYS[0],
+      value: "random",
+      expected: "LATEST",
+    },
+    {
+      name: "a padded ' RANDOM ' is rejected (no trim) and falls back",
+      key: MATCHING_KEYS[0],
+      value: " RANDOM ",
+      expected: "LATEST",
+    },
     { name: "an empty string falls back", key: MATCHING_KEYS[0], value: "", expected: "LATEST" },
-    { name: "an unknown strategy falls back", key: MATCHING_KEYS[0], value: "NEWEST", expected: "LATEST" },
-    { name: "the AUTO_MOBILE_ alias is honored", key: MATCHING_KEYS[1], value: "MINIMUM", expected: "MINIMUM" },
+    {
+      name: "an unknown strategy falls back",
+      key: MATCHING_KEYS[0],
+      value: "NEWEST",
+      expected: "LATEST",
+    },
+    {
+      name: "the AUTO_MOBILE_ alias is honored",
+      key: MATCHING_KEYS[1],
+      value: "MINIMUM",
+      expected: "MINIMUM",
+    },
   ];
 
   for (const row of rows) {

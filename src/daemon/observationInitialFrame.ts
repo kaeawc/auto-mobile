@@ -40,18 +40,18 @@ export interface ObservationStreamAndroidClient {
     timeout?: number,
     perf?: PerformanceTracker,
     skipWaitForFresh?: boolean,
-    minTimestamp?: number
+    minTimestamp?: number,
   ): Promise<AccessibilityHierarchyResponse>;
   requestHierarchySyncWithoutObservationStreamPush(
     perf?: PerformanceTracker,
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
-    timeoutMs?: number
+    timeoutMs?: number,
   ): Promise<{ hierarchy: AccessibilityHierarchy; frameContext?: string } | null>;
   convertToViewHierarchyResult(hierarchy: AccessibilityHierarchy): ViewHierarchyResult;
   recordInitialObservationStreamHierarchy(
     hierarchy: ViewHierarchyResult,
-    captureSequence: number | null
+    captureSequence: number | null,
   ): void;
   captureScreenshotForObservationStream(): Promise<ScreenshotCaptureResult>;
 }
@@ -63,20 +63,23 @@ export interface ObservationStreamIosClient {
     timeout?: number,
     perf?: PerformanceTracker,
     skipWaitForFresh?: boolean,
-    minTimestamp?: number
+    minTimestamp?: number,
   ): Promise<CtrlProxyHierarchyResponse>;
   requestHierarchySyncWithoutObservationStreamPush(
     perf?: PerformanceTracker,
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
-    timeoutMs?: number
+    timeoutMs?: number,
   ): Promise<{ hierarchy: unknown; frameContext?: string } | null>;
   convertToViewHierarchyResult(hierarchy: unknown): ViewHierarchyResult;
   recordInitialObservationStreamHierarchy(
     hierarchy: ViewHierarchyResult,
-    captureSequence: number | null
+    captureSequence: number | null,
   ): void;
-  requestScreenshotWithoutObservationStreamPush(timeoutMs?: number, perf?: PerformanceTracker): Promise<CtrlProxyScreenshotResult>;
+  requestScreenshotWithoutObservationStreamPush(
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<CtrlProxyScreenshotResult>;
 }
 
 export interface ObservationInitialFrameDependencies {
@@ -88,20 +91,20 @@ export interface ObservationInitialFrameDependencies {
 export async function pushInitialObservationFramesForSubscriber(
   requestedDeviceId: string | null,
   devices: ObservationStreamDevice[],
-  dependencies: ObservationInitialFrameDependencies
+  dependencies: ObservationInitialFrameDependencies,
 ): Promise<void> {
-  const targetDevices = devices.filter(device =>
-    requestedDeviceId === null || device.id === requestedDeviceId
+  const targetDevices = devices.filter(
+    (device) => requestedDeviceId === null || device.id === requestedDeviceId,
   );
 
-  await Promise.all(targetDevices.map(device =>
-    pushInitialObservationFrameForDevice(device, dependencies)
-  ));
+  await Promise.all(
+    targetDevices.map((device) => pushInitialObservationFrameForDevice(device, dependencies)),
+  );
 }
 
 async function pushInitialObservationFrameForDevice(
   device: ObservationStreamDevice,
-  dependencies: ObservationInitialFrameDependencies
+  dependencies: ObservationInitialFrameDependencies,
 ): Promise<void> {
   const bootedDevice: BootedDevice = {
     deviceId: device.id,
@@ -125,7 +128,7 @@ async function pushInitialObservationFrameForDevice(
 
 async function pushAndroidInitialObservationFrame(
   device: BootedDevice,
-  dependencies: ObservationInitialFrameDependencies
+  dependencies: ObservationInitialFrameDependencies,
 ): Promise<void> {
   const client = dependencies.androidClientFactory(device);
   const connected = await client.ensureConnected();
@@ -138,13 +141,19 @@ async function pushAndroidInitialObservationFrame(
 
   const initialHierarchy = await getAndroidInitialHierarchy(client);
   if (!initialHierarchy) {
-    logger.warn(`[Daemon] No hierarchy available for initial observation frame on ${device.deviceId}`);
+    logger.warn(
+      `[Daemon] No hierarchy available for initial observation frame on ${device.deviceId}`,
+    );
     return;
   }
 
   const viewHierarchy = client.convertToViewHierarchyResult(initialHierarchy.hierarchy);
   const frameContext = initialHierarchy.frameContext ?? viewHierarchy.frameContext;
-  const captureSequence = dependencies.streamServer.pushHierarchyUpdate(device.deviceId, viewHierarchy, frameContext);
+  const captureSequence = dependencies.streamServer.pushHierarchyUpdate(
+    device.deviceId,
+    viewHierarchy,
+    frameContext,
+  );
   client.recordInitialObservationStreamHierarchy(viewHierarchy, captureSequence);
 
   await pushAndroidInitialScreenshot(
@@ -153,7 +162,7 @@ async function pushAndroidInitialObservationFrame(
     dependencies.streamServer,
     viewHierarchy,
     captureSequence,
-    frameContext
+    frameContext,
   );
 }
 
@@ -163,7 +172,7 @@ async function pushAndroidInitialScreenshot(
   streamServer: Pick<DeviceDataStreamSocketServer, "pushScreenshotUpdate">,
   viewHierarchy: ViewHierarchyResult,
   captureSequence: number | null,
-  hierarchyFrameContext: string | undefined
+  hierarchyFrameContext: string | undefined,
 ): Promise<void> {
   const screenshot = await client.captureScreenshotForObservationStream();
   if (screenshot.success && screenshot.data) {
@@ -179,7 +188,7 @@ async function pushAndroidInitialScreenshot(
         ...canonicalPixelScreenshotOptions(viewHierarchy),
         rotation: screenshot.rotation,
         ...(screenshot.frameContext === undefined ? {} : { frameContext: screenshot.frameContext }),
-      }
+      },
     );
   }
 }
@@ -190,7 +199,7 @@ async function pushAndroidInitialScreenshot(
  * hierarchy. A pre-#4548 runner has no metadata, so the frame stays legacy point-space.
  */
 function canonicalPixelScreenshotOptions(
-  hierarchy: ViewHierarchyResult
+  hierarchy: ViewHierarchyResult,
 ): { coordinateSpace: typeof COORDINATE_SPACE_PX; nativeScale: number } | Record<string, never> {
   const metadata = readScreenScaleMetadata(hierarchy);
   return metadata
@@ -206,7 +215,7 @@ function canonicalPixelScreenshotOptions(
 function captureSequenceOptions(
   captureSequence: number | null,
   hierarchyFrameContext: string | undefined,
-  screenshotFrameContext: string | undefined
+  screenshotFrameContext: string | undefined,
 ): { captureSequence?: number } {
   if (
     captureSequence === null ||
@@ -220,13 +229,13 @@ function captureSequenceOptions(
 }
 
 async function getAndroidInitialHierarchy(
-  client: ObservationStreamAndroidClient
+  client: ObservationStreamAndroidClient,
 ): Promise<{ hierarchy: AccessibilityHierarchy; frameContext?: string } | null> {
   const hierarchyResponse = await client.getLatestHierarchy(
     false,
     INITIAL_FRAME_HIERARCHY_TIMEOUT_MS,
     undefined,
-    true
+    true,
   );
   if (hierarchyResponse.hierarchy && hierarchyResponse.fresh) {
     return {
@@ -239,7 +248,7 @@ async function getAndroidInitialHierarchy(
     undefined,
     false,
     undefined,
-    INITIAL_FRAME_HIERARCHY_TIMEOUT_MS
+    INITIAL_FRAME_HIERARCHY_TIMEOUT_MS,
   );
   return syncHierarchy
     ? { hierarchy: syncHierarchy.hierarchy, frameContext: syncHierarchy.frameContext }
@@ -248,7 +257,7 @@ async function getAndroidInitialHierarchy(
 
 async function pushIosInitialObservationFrame(
   device: BootedDevice,
-  dependencies: ObservationInitialFrameDependencies
+  dependencies: ObservationInitialFrameDependencies,
 ): Promise<void> {
   const client = dependencies.iosClientFactory(device);
   const connected = await client.ensureConnected();
@@ -261,16 +270,24 @@ async function pushIosInitialObservationFrame(
 
   const initialHierarchy = await getIosInitialHierarchy(client);
   if (!initialHierarchy) {
-    logger.warn(`[Daemon] No hierarchy available for initial observation frame on ${device.deviceId}`);
+    logger.warn(
+      `[Daemon] No hierarchy available for initial observation frame on ${device.deviceId}`,
+    );
     return;
   }
 
   const viewHierarchy = client.convertToViewHierarchyResult(initialHierarchy.hierarchy);
   const frameContext = initialHierarchy.frameContext ?? viewHierarchy.frameContext;
-  const captureSequence = dependencies.streamServer.pushHierarchyUpdate(device.deviceId, viewHierarchy, frameContext);
+  const captureSequence = dependencies.streamServer.pushHierarchyUpdate(
+    device.deviceId,
+    viewHierarchy,
+    frameContext,
+  );
   client.recordInitialObservationStreamHierarchy(viewHierarchy, captureSequence);
 
-  const screenshot = await client.requestScreenshotWithoutObservationStreamPush(INITIAL_FRAME_SCREENSHOT_TIMEOUT_MS);
+  const screenshot = await client.requestScreenshotWithoutObservationStreamPush(
+    INITIAL_FRAME_SCREENSHOT_TIMEOUT_MS,
+  );
   if (screenshot.success && screenshot.data) {
     const dimensions = getIosScreenshotDimensions(viewHierarchy);
     dependencies.streamServer.pushScreenshotUpdate(
@@ -284,19 +301,19 @@ async function pushIosInitialObservationFrame(
         ...canonicalPixelScreenshotOptions(viewHierarchy),
         rotation: screenshot.rotation,
         ...(screenshot.frameContext === undefined ? {} : { frameContext: screenshot.frameContext }),
-      }
+      },
     );
   }
 }
 
 async function getIosInitialHierarchy(
-  client: ObservationStreamIosClient
+  client: ObservationStreamIosClient,
 ): Promise<{ hierarchy: CtrlProxyHierarchy; frameContext?: string } | null> {
   const hierarchyResponse = await client.getLatestHierarchy(
     false,
     INITIAL_FRAME_HIERARCHY_TIMEOUT_MS,
     undefined,
-    true
+    true,
   );
   if (hierarchyResponse.hierarchy && hierarchyResponse.fresh) {
     return {
@@ -309,21 +326,30 @@ async function getIosInitialHierarchy(
     undefined,
     false,
     undefined,
-    INITIAL_FRAME_HIERARCHY_TIMEOUT_MS
+    INITIAL_FRAME_HIERARCHY_TIMEOUT_MS,
   );
   return syncHierarchy
-    ? { hierarchy: syncHierarchy.hierarchy as CtrlProxyHierarchy, frameContext: syncHierarchy.frameContext }
+    ? {
+        hierarchy: syncHierarchy.hierarchy as CtrlProxyHierarchy,
+        frameContext: syncHierarchy.frameContext,
+      }
     : null;
 }
 
-function getAndroidScreenshotDimensions(hierarchy: ViewHierarchyResult): { width: number; height: number } {
+function getAndroidScreenshotDimensions(hierarchy: ViewHierarchyResult): {
+  width: number;
+  height: number;
+} {
   return {
     width: hierarchy.screenWidth ?? ANDROID_DEFAULT_SCREEN_WIDTH,
     height: hierarchy.screenHeight ?? ANDROID_DEFAULT_SCREEN_HEIGHT,
   };
 }
 
-function getIosScreenshotDimensions(hierarchy: ViewHierarchyResult): { width: number; height: number } {
+function getIosScreenshotDimensions(hierarchy: ViewHierarchyResult): {
+  width: number;
+  height: number;
+} {
   // Canonical pixels (#4549): when the runner supplied complete scale metadata, the physical
   // screenshot pixel dimensions are the runner-reported `pixelWidth`/`pixelHeight` — the daemon no
   // longer multiplies points by a screen scale for them. A pre-#4548 runner has no metadata, so
@@ -334,7 +360,11 @@ function getIosScreenshotDimensions(hierarchy: ViewHierarchyResult): { width: nu
   }
   const scale = hierarchy.screenScale ?? 1;
   return {
-    width: hierarchy.screenWidth ? Math.round(hierarchy.screenWidth * scale) : IOS_DEFAULT_SCREEN_WIDTH,
-    height: hierarchy.screenHeight ? Math.round(hierarchy.screenHeight * scale) : IOS_DEFAULT_SCREEN_HEIGHT,
+    width: hierarchy.screenWidth
+      ? Math.round(hierarchy.screenWidth * scale)
+      : IOS_DEFAULT_SCREEN_WIDTH,
+    height: hierarchy.screenHeight
+      ? Math.round(hierarchy.screenHeight * scale)
+      : IOS_DEFAULT_SCREEN_HEIGHT,
   };
 }

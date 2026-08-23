@@ -493,7 +493,7 @@ export class UnixSocketServer {
         buffer = lines.pop() || "";
 
         const requestHandlers = lines
-          .filter(line => line.trim())
+          .filter((line) => line.trim())
           .map(async (line) => {
             let requestId = "unknown";
             try {
@@ -776,9 +776,7 @@ export class UnixSocketServer {
       return remainingTimeoutMs;
     }
     const toolName =
-      request.method === "tools/call"
-        ? (request.params?.name ?? request.method)
-        : request.method;
+      request.method === "tools/call" ? (request.params?.name ?? request.method) : request.method;
     throw new McpTimeoutError({
       toolName,
       timeoutMs: totalTimeoutMs,
@@ -1288,10 +1286,7 @@ export class UnixSocketServer {
     return false;
   }
 
-  private isDeviceControlSocketClosure(
-    request: DaemonRequest,
-    error: unknown,
-  ): boolean {
+  private isDeviceControlSocketClosure(request: DaemonRequest, error: unknown): boolean {
     return isDeviceControlTransportRequest(request) && isUnexpectedSocketClosure(error);
   }
 
@@ -1322,12 +1317,7 @@ export class UnixSocketServer {
       context.requestDeadlineMs,
       "waiting in queues and preparing the MCP client",
     );
-    return this.forwardConnectedMcpRequest(
-      context,
-      identity,
-      mcpClient,
-      forwardRemainingMs,
-    );
+    return this.forwardConnectedMcpRequest(context, identity, mcpClient, forwardRemainingMs);
   }
 
   private async forwardConnectedMcpRequest(
@@ -1349,10 +1339,7 @@ export class UnixSocketServer {
         return this.retryExpiredMcpSession(context, identity, mcpClient);
       }
       if (this.isDeviceControlSocketClosure(context.request, error)) {
-        const recoveryIdentity = this.getDeviceControlRecoveryFailureIdentity(
-          context,
-          identity,
-        );
+        const recoveryIdentity = this.getDeviceControlRecoveryFailureIdentity(context, identity);
         return this.recoverDeviceControlTransport({
           ...context,
           phase: "response",
@@ -1409,10 +1396,7 @@ export class UnixSocketServer {
         throw error;
       }
       await this.resetMcpClientIfCurrent(context.route.clientKey, freshClient, "detach");
-      const failureIdentity = this.getDeviceControlRecoveryFailureIdentity(
-        context,
-        identity,
-      );
+      const failureIdentity = this.getDeviceControlRecoveryFailureIdentity(context, identity);
       throw this.deviceControlTransportError({
         request: context.request,
         identity: failureIdentity,
@@ -1428,9 +1412,7 @@ export class UnixSocketServer {
     context: McpForwardRecoveryContext,
   ): DeviceControlTransportIdentity {
     const args =
-      context.request.method === "tools/call"
-        ? context.request.params?.arguments
-        : undefined;
+      context.request.method === "tools/call" ? context.request.params?.arguments : undefined;
     const sessionUuid = this.resolveDeviceControlIdentitySession(
       args,
       context.route.sessionUuid,
@@ -1438,7 +1420,7 @@ export class UnixSocketServer {
     );
     const routingSessionUuid =
       args && typeof args === "object" && !Array.isArray(args)
-        ? this.getSessionUuid(args as Record<string, unknown>) ?? context.route.sessionUuid
+        ? (this.getSessionUuid(args as Record<string, unknown>) ?? context.route.sessionUuid)
         : context.route.sessionUuid;
     const sessionIncarnation = this.getDeviceControlSessionIncarnation(sessionUuid);
     const routingSessionIncarnation =
@@ -1473,9 +1455,9 @@ export class UnixSocketServer {
       return false;
     }
     try {
-      const mappedSession = this.daemonState
-        .getSessionManager()
-        .getDeviceLabels(baseSessionUuid)?.[deviceLabel];
+      const mappedSession = this.daemonState.getSessionManager().getDeviceLabels(baseSessionUuid)?.[
+        deviceLabel
+      ];
       return typeof mappedSession === "string" && mappedSession.length > 0;
     } catch (error) {
       // A session-manager lookup failure cannot prove the label still maps to a
@@ -1505,10 +1487,7 @@ export class UnixSocketServer {
         return baseSessionUuid;
       }
     }
-    return (
-      routeSessionUuid
-      ?? this.resolveImplicitAutolockSession(socketSessionId, args)
-    );
+    return routeSessionUuid ?? this.resolveImplicitAutolockSession(socketSessionId, args);
   }
 
   private getSessionForDevice(deviceId: string): string | undefined {
@@ -1525,9 +1504,7 @@ export class UnixSocketServer {
     }
   }
 
-  private getDeviceControlSessionIncarnation(
-    sessionUuid: string | undefined,
-  ): object | undefined {
+  private getDeviceControlSessionIncarnation(sessionUuid: string | undefined): object | undefined {
     if (!sessionUuid || !this.daemonState.isInitialized()) {
       return undefined;
     }
@@ -1541,10 +1518,7 @@ export class UnixSocketServer {
     }
   }
 
-  private resolveDeviceControlDeviceId(
-    args: unknown,
-    sessionUuid?: string,
-  ): string | undefined {
+  private resolveDeviceControlDeviceId(args: unknown, sessionUuid?: string): string | undefined {
     if (sessionUuid) {
       const assignedDevice = this.getAssignedDeviceForSession(sessionUuid);
       if (assignedDevice) {
@@ -1568,8 +1542,7 @@ export class UnixSocketServer {
       return this.daemonState
         .getDeviceSessionRegistry()
         .list()
-        .find(record => record.deviceId === deviceId)
-        ?.deviceSessionUuid;
+        .find((record) => record.deviceId === deviceId)?.deviceSessionUuid;
     } catch (error) {
       // An unresolved device epoch is safe: device-session validation treats an
       // absent epoch as unestablished and will not admit a replay against it.
@@ -1586,29 +1559,27 @@ export class UnixSocketServer {
 
   private isDeviceControlSessionValid(identity: DeviceControlTransportIdentity): boolean {
     if (
-      !this.daemonState.isInitialized()
-      || (!identity.sessionUuid && !identity.routingSessionUuid)
+      !this.daemonState.isInitialized() ||
+      (!identity.sessionUuid && !identity.routingSessionUuid)
     ) {
       return false;
     }
     return (
-      this.isDeviceControlTargetOwnerValid(identity)
-      && this.isDeviceControlRoutingSessionValid(identity)
+      this.isDeviceControlTargetOwnerValid(identity) &&
+      this.isDeviceControlRoutingSessionValid(identity)
     );
   }
 
-  private isDeviceControlTargetOwnerValid(
-    identity: DeviceControlTransportIdentity,
-  ): boolean {
+  private isDeviceControlTargetOwnerValid(identity: DeviceControlTransportIdentity): boolean {
     if (!identity.sessionUuid) {
       return true;
     }
     try {
       const session = this.daemonState.getSessionManager().getSession(identity.sessionUuid);
       return Boolean(
-        session
-        && session === identity.sessionIncarnation
-        && (!identity.deviceId || session.assignedDevice === identity.deviceId),
+        session &&
+        session === identity.sessionIncarnation &&
+        (!identity.deviceId || session.assignedDevice === identity.deviceId),
       );
     } catch (error) {
       // Ownership must be provable to replay; a lookup failure leaves it unproven,
@@ -1618,23 +1589,13 @@ export class UnixSocketServer {
     }
   }
 
-  private isDeviceControlRoutingSessionValid(
-    identity: DeviceControlTransportIdentity,
-  ): boolean {
-    if (
-      !identity.routingSessionUuid
-      || identity.routingSessionUuid === identity.sessionUuid
-    ) {
+  private isDeviceControlRoutingSessionValid(identity: DeviceControlTransportIdentity): boolean {
+    if (!identity.routingSessionUuid || identity.routingSessionUuid === identity.sessionUuid) {
       return true;
     }
     try {
-      const session = this.daemonState
-        .getSessionManager()
-        .getSession(identity.routingSessionUuid);
-      return Boolean(
-        session
-        && session === identity.routingSessionIncarnation,
-      );
+      const session = this.daemonState.getSessionManager().getSession(identity.routingSessionUuid);
+      return Boolean(session && session === identity.routingSessionIncarnation);
     } catch (error) {
       // The routing session's grant must be provable to replay; an unverifiable
       // lookup fails closed so a superseded routing session cannot authorize it.
@@ -1643,21 +1604,15 @@ export class UnixSocketServer {
     }
   }
 
-  private isDeviceControlDeviceSessionValid(
-    identity: DeviceControlTransportIdentity,
-  ): boolean {
-    if (
-      !this.daemonState.isInitialized()
-      || !identity.deviceId
-      || !identity.deviceSessionUuid
-    ) {
+  private isDeviceControlDeviceSessionValid(identity: DeviceControlTransportIdentity): boolean {
+    if (!this.daemonState.isInitialized() || !identity.deviceId || !identity.deviceSessionUuid) {
       return false;
     }
     try {
       const liveDeviceSession = this.daemonState
         .getDeviceSessionRegistry()
         .list()
-        .find(record => record.deviceId === identity.deviceId);
+        .find((record) => record.deviceId === identity.deviceId);
       return liveDeviceSession?.deviceSessionUuid === identity.deviceSessionUuid;
     } catch (error) {
       // A device-epoch lookup failure cannot confirm the captured epoch is still
@@ -1667,20 +1622,17 @@ export class UnixSocketServer {
     }
   }
 
-  private isDeviceControlTransportIdentityValid(
-    identity: DeviceControlTransportIdentity,
-  ): boolean {
+  private isDeviceControlTransportIdentityValid(identity: DeviceControlTransportIdentity): boolean {
     return (
-      this.isDeviceControlCapturedSessionIdentityValid(identity)
-      && this.isDeviceControlDeviceSessionValid(identity)
+      this.isDeviceControlCapturedSessionIdentityValid(identity) &&
+      this.isDeviceControlDeviceSessionValid(identity)
     );
   }
 
   private isDeviceControlCapturedSessionIdentityValid(
     identity: DeviceControlTransportIdentity,
   ): boolean {
-    const hasSessionIdentity =
-      Boolean(identity.sessionUuid || identity.routingSessionUuid);
+    const hasSessionIdentity = Boolean(identity.sessionUuid || identity.routingSessionUuid);
     return !hasSessionIdentity || this.isDeviceControlSessionValid(identity);
   }
 
@@ -1688,10 +1640,7 @@ export class UnixSocketServer {
     identity: DeviceControlTransportIdentity,
     phase: DeviceControlTransportPhase,
   ): boolean {
-    if (
-      phase === "connect"
-      && !this.hasEstablishedDeviceControlTransportIdentity(identity)
-    ) {
+    if (phase === "connect" && !this.hasEstablishedDeviceControlTransportIdentity(identity)) {
       return this.isDeviceControlCapturedSessionIdentityValid(identity);
     }
     return this.isDeviceControlTransportIdentityValid(identity);
@@ -1716,12 +1665,11 @@ export class UnixSocketServer {
     const toolName = deviceControlToolName(input.request);
     const sessionValid = this.isDeviceControlSessionValid(input.identity);
     const deviceSessionValid = this.isDeviceControlDeviceSessionValid(input.identity);
-    const capturedSessionIdentityValid =
-      this.isDeviceControlCapturedSessionIdentityValid(input.identity);
-    const identityValid =
-      capturedSessionIdentityValid && deviceSessionValid;
-    const identityEstablished =
-      this.hasEstablishedDeviceControlTransportIdentity(input.identity);
+    const capturedSessionIdentityValid = this.isDeviceControlCapturedSessionIdentityValid(
+      input.identity,
+    );
+    const identityValid = capturedSessionIdentityValid && deviceSessionValid;
+    const identityEstablished = this.hasEstablishedDeviceControlTransportIdentity(input.identity);
     const retryable =
       input.phase === "connect"
         ? capturedSessionIdentityValid && (!identityEstablished || deviceSessionValid)
@@ -1800,13 +1748,10 @@ export class UnixSocketServer {
     }
   }
 
-  private isDeviceControlReconnectExhaustion(
-    request: DaemonRequest,
-    error: unknown,
-  ): boolean {
+  private isDeviceControlReconnectExhaustion(request: DaemonRequest, error: unknown): boolean {
     return (
-      error instanceof McpClientReconnectDeadlineError
-      || this.isDeviceControlSocketClosure(request, error)
+      error instanceof McpClientReconnectDeadlineError ||
+      this.isDeviceControlSocketClosure(request, error)
     );
   }
 
@@ -1831,8 +1776,7 @@ export class UnixSocketServer {
         identity.sessionUuid !== undefined
           ? identity.sessionIncarnation
           : refreshedIdentity.sessionIncarnation,
-      routingSessionUuid:
-        identity.routingSessionUuid ?? refreshedIdentity.routingSessionUuid,
+      routingSessionUuid: identity.routingSessionUuid ?? refreshedIdentity.routingSessionUuid,
       routingSessionIncarnation:
         identity.routingSessionUuid !== undefined
           ? identity.routingSessionIncarnation
@@ -1842,8 +1786,7 @@ export class UnixSocketServer {
         identity.deviceId !== undefined
           ? identity.deviceSessionUuid
           : refreshedIdentity.deviceSessionUuid,
-      deviceLabelResolved:
-        identity.deviceLabelResolved ?? refreshedIdentity.deviceLabelResolved,
+      deviceLabelResolved: identity.deviceLabelResolved ?? refreshedIdentity.deviceLabelResolved,
     };
   }
 
@@ -1854,12 +1797,12 @@ export class UnixSocketServer {
   ): DaemonRequest {
     const args = request.method === "tools/call" ? request.params?.arguments : undefined;
     if (
-      phase !== "response"
-      || !identity.deviceId
-      || identity.deviceLabelResolved === false
-      || !args
-      || typeof args !== "object"
-      || Array.isArray(args)
+      phase !== "response" ||
+      !identity.deviceId ||
+      identity.deviceLabelResolved === false ||
+      !args ||
+      typeof args !== "object" ||
+      Array.isArray(args)
     ) {
       return request;
     }
@@ -1937,9 +1880,9 @@ export class UnixSocketServer {
     replayAfterResponse: boolean,
   ): McpForwardRoute {
     if (
-      replayAfterResponse
-      && input.identity.deviceLabelResolved === true
-      && input.identity.sessionUuid
+      replayAfterResponse &&
+      input.identity.deviceLabelResolved === true &&
+      input.identity.sessionUuid
     ) {
       // Replay the original tool-selection profile verbatim. routingSessionUuid
       // is a session UUID, not a profile: feeding it here would send a bogus
@@ -1955,10 +1898,10 @@ export class UnixSocketServer {
       );
     }
     if (
-      !replayAfterResponse
-      || !input.identity.sessionUuid
-      || input.route.sessionUuid === input.identity.sessionUuid
-      || this.hasStableExplicitDeviceControlTarget(input.request, input.identity)
+      !replayAfterResponse ||
+      !input.identity.sessionUuid ||
+      input.route.sessionUuid === input.identity.sessionUuid ||
+      this.hasStableExplicitDeviceControlTarget(input.request, input.identity)
     ) {
       return input.route;
     }
@@ -1975,8 +1918,8 @@ export class UnixSocketServer {
     recoveryRoute: McpForwardRoute,
   ): void {
     if (
-      recoveryRoute.clientKey !== originalRoute.clientKey
-      && this.mcpClients.has(recoveryRoute.clientKey)
+      recoveryRoute.clientKey !== originalRoute.clientKey &&
+      this.mcpClients.has(recoveryRoute.clientKey)
     ) {
       this.scheduleMcpClientIdleClose(recoveryRoute.clientKey);
     }
@@ -2009,11 +1952,7 @@ export class UnixSocketServer {
     input: DeviceControlTransportRecoveryContext,
   ): Promise<unknown> {
     if (input.failedClient) {
-      await this.resetMcpClientIfCurrent(
-        input.route.clientKey,
-        input.failedClient,
-        "detach",
-      );
+      await this.resetMcpClientIfCurrent(input.route.clientKey, input.failedClient, "detach");
     }
     if (!this.isDeviceControlRecoveryIdentityValid(input.identity, input.phase)) {
       throw this.deviceControlTransportError({
@@ -2027,8 +1966,7 @@ export class UnixSocketServer {
     }
 
     const replayAfterResponse =
-      input.phase === "response"
-      && isReplaySafeAfterResponseClosure(input.request);
+      input.phase === "response" && isReplaySafeAfterResponseClosure(input.request);
     logger.warn(
       `[McpForward] device-control transport closed for ${deviceControlToolName(input.request)} during ${input.phase}; reconnecting once`,
     );
@@ -2110,10 +2048,7 @@ export class UnixSocketServer {
         throw error;
       }
       await this.resetMcpClientIfCurrent(recoveryRoute.clientKey, freshClient, "detach");
-      const failureIdentity = this.getDeviceControlRecoveryFailureIdentity(
-        input,
-        input.identity,
-      );
+      const failureIdentity = this.getDeviceControlRecoveryFailureIdentity(input, input.identity);
       throw this.deviceControlTransportError({
         request: input.request,
         identity: failureIdentity,
@@ -2225,10 +2160,7 @@ export class UnixSocketServer {
     return autolockSession ? this.sessionToScopeKey(autolockSession) : undefined;
   }
 
-  private resolveImplicitAutolockSession(
-    mcpSessionId: string,
-    args: unknown,
-  ): string | undefined {
+  private resolveImplicitAutolockSession(mcpSessionId: string, args: unknown): string | undefined {
     if (!this.daemonState.isInitialized()) {
       return undefined;
     }
@@ -2734,7 +2666,7 @@ export class UnixSocketServer {
     const gestureResult = await this.runTrackedKeyedDeviceInput(
       request.method,
       targetDevice,
-      async signal => {
+      async (signal) => {
         assertSocketInputNotAborted(signal);
         this.requireCurrentFrameContext(targetDevice.deviceId, args.frameContext, "input/tap");
         const queueWaitMs = this.timer.now() - queueEnterMs;
@@ -2822,7 +2754,7 @@ export class UnixSocketServer {
     const gestureResult = await this.runTrackedKeyedDeviceInput(
       request.method,
       targetDevice,
-      async signal => {
+      async (signal) => {
         assertSocketInputNotAborted(signal);
         this.requireCurrentFrameContext(targetDevice.deviceId, args.frameContext, "input/swipe");
         const queueWaitMs = this.timer.now() - queueEnterMs;
@@ -2939,7 +2871,7 @@ export class UnixSocketServer {
     const gestureResult = await this.runTrackedKeyedDeviceInput(
       method,
       targetDevice,
-      async signal => {
+      async (signal) => {
         assertSocketInputNotAborted(signal);
         const queueWaitMs = this.timer.now() - queueEnterMs;
         const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
@@ -3129,7 +3061,7 @@ export class UnixSocketServer {
     const inputResult = await this.runTrackedKeyedDeviceInput(
       request.method,
       targetDevice,
-      async signal => {
+      async (signal) => {
         assertSocketInputNotAborted(signal);
         // A same-serial emulator may reconnect while this request waits behind an
         // earlier input. Re-read its ADB transport inside the keyed callback so the
@@ -3218,7 +3150,7 @@ export class UnixSocketServer {
     const buttonResult = await this.runTrackedKeyedDeviceInput(
       request.method,
       targetDevice,
-      async signal => {
+      async (signal) => {
         assertSocketInputNotAborted(signal);
         this.requireCurrentFrameContext(
           targetDevice.deviceId,
@@ -3275,7 +3207,7 @@ export class UnixSocketServer {
     const keyResult = await this.runTrackedKeyedDeviceInput(
       request.method,
       targetDevice,
-      async signal => {
+      async (signal) => {
         assertSocketInputNotAborted(signal);
         this.requireCurrentFrameContext(targetDevice.deviceId, args.frameContext, "input/key");
         const queueWaitMs = this.timer.now() - queueEnterMs;
@@ -3863,8 +3795,8 @@ export class UnixSocketServer {
     operation: (signal?: AbortSignal) => Promise<T>,
   ): Promise<T> {
     const executionKey = `device:${targetDevice.deviceId}`;
-    return await this.runTrackedDeviceInput(toolName, targetDevice, async signal =>
-      this.runKeyedMcpForward(executionKey, () => operation(signal), executionKey)
+    return await this.runTrackedDeviceInput(toolName, targetDevice, async (signal) =>
+      this.runKeyedMcpForward(executionKey, () => operation(signal), executionKey),
     );
   }
 
@@ -4075,9 +4007,9 @@ export class UnixSocketServer {
     const clientPromise = this.mcpClientFactory(boundSessionUuid, toolSelectionProfileUuid)
       .then(async (client) => {
         if (
-          this.closing
-          || generation !== this.lifecycleGeneration
-          || this.mcpClientPromises.get(key) !== clientPromise
+          this.closing ||
+          generation !== this.lifecycleGeneration ||
+          this.mcpClientPromises.get(key) !== clientPromise
         ) {
           await client.close();
           throw new Error("MCP client creation was superseded");
@@ -4097,10 +4029,7 @@ export class UnixSocketServer {
     return clientPromise;
   }
 
-  private async resetMcpClient(
-    key: string,
-    closeMode: "wait" | "detach" = "wait",
-  ): Promise<void> {
+  private async resetMcpClient(key: string, closeMode: "wait" | "detach" = "wait"): Promise<void> {
     this.clearMcpClientIdleTimer(key);
     const existingClient = this.mcpClients.get(key);
     this.mcpClients.delete(key);
@@ -4110,7 +4039,7 @@ export class UnixSocketServer {
     }
     const close = Promise.resolve()
       .then(() => existingClient.close())
-      .catch(error => {
+      .catch((error) => {
         logger.warn(`Error closing MCP client for key ${key}:`, error);
       });
     if (closeMode === "wait") {
@@ -4147,7 +4076,7 @@ export class UnixSocketServer {
       this.mcpClientPromises.delete(key);
     }
     void connection
-      .then(client => this.resetMcpClientIfCurrent(key, client, "detach"))
+      .then((client) => this.resetMcpClientIfCurrent(key, client, "detach"))
       .catch(() => {
         // Creation was superseded or failed; nothing of ours remains to discard.
       });

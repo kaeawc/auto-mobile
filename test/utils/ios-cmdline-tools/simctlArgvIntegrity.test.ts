@@ -18,7 +18,7 @@ const TRICKY_VALUES: ReadonlyArray<{ label: string; value: string }> = [
   { label: "newline", value: "line1\nline2" },
   { label: "tab", value: "col1\tcol2" },
   { label: "carriage return", value: "a\rb" },
-  { label: "double quote", value: "say \"hi\"" },
+  { label: "double quote", value: 'say "hi"' },
   { label: "single quote", value: "it's" },
   { label: "backslash", value: "back\\slash" },
   { label: "literal backslash-n", value: "C:\\new\\tab" },
@@ -39,20 +39,21 @@ describe("simctl argv integrity (#4196)", () => {
         label: "simulator name containing a space, quote, and backslash",
         expectedArgs: [
           "create",
-          "Test \"Simulator\" \\ Name",
+          'Test "Simulator" \\ Name',
           "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
           "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
         ],
-        invoke: client => client.createSimulator(
-          "Test \"Simulator\" \\ Name",
-          "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
-          "com.apple.CoreSimulator.SimRuntime.iOS-26-0"
-        ),
+        invoke: (client) =>
+          client.createSimulator(
+            'Test "Simulator" \\ Name',
+            "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+            "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
+          ),
       },
       {
         label: "app path containing a space, quote, and backslash",
-        expectedArgs: ["install", UDID, "/tmp/Test \"App\" \\ Build.app"],
-        invoke: client => client.installApp("/tmp/Test \"App\" \\ Build.app", UDID),
+        expectedArgs: ["install", UDID, '/tmp/Test "App" \\ Build.app'],
+        invoke: (client) => client.installApp('/tmp/Test "App" \\ Build.app', UDID),
       },
     ];
 
@@ -122,10 +123,7 @@ describe("simctl argv integrity (#4196)", () => {
     for (const { label, value } of TRICKY_VALUES) {
       test(`bundle id survives ${label}`, async () => {
         const simctl = new FakeSimCtlClient();
-        simctl.setCommandArgsResult(
-          ["get_app_container", UDID, value, "data"],
-          "/tmp/container\n"
-        );
+        simctl.setCommandArgsResult(["get_app_container", UDID, value, "data"], "/tmp/container\n");
 
         const result = await getAppDataContainerPath(simctl as any, UDID, value);
 
@@ -160,12 +158,18 @@ describe("simctl argv integrity (#4196)", () => {
         });
 
         await client.executeCommandArgs([
-          "spawn", UDID, "defaults", "write", "domain", "key", value
+          "spawn",
+          UDID,
+          "defaults",
+          "write",
+          "domain",
+          "key",
+          value,
         ]);
 
-        expect(seen).toEqual([[
-          "simctl", "spawn", UDID, "defaults", "write", "domain", "key", value
-        ]]);
+        expect(seen).toEqual([
+          ["simctl", "spawn", UDID, "defaults", "write", "domain", "key", value],
+        ]);
       });
     }
 
@@ -178,9 +182,7 @@ describe("simctl argv integrity (#4196)", () => {
         return createExecResult("", "");
       });
 
-      await client.executeCommandArgs([
-        "spawn", UDID, "defaults", "write", "domain", "key", ""
-      ]);
+      await client.executeCommandArgs(["spawn", UDID, "defaults", "write", "domain", "key", ""]);
 
       // 1 (simctl) + 7 caller args = 8 entries; `write` stays the verb.
       expect(seen[0]).toHaveLength(8);
@@ -199,7 +201,7 @@ describe("simctl argv integrity (#4196)", () => {
         return createExecResult("", "");
       });
 
-      await client.executeCommand("spawn udid defaults write domain key \"\"");
+      await client.executeCommand('spawn udid defaults write domain key ""');
 
       expect(seen[0]).toEqual([
         "simctl",

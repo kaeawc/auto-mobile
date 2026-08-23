@@ -1,13 +1,13 @@
 import { ActionableError, BootedDevice } from "../../models";
 import { logger } from "../../utils/logger";
 import { defaultTimer, Timer } from "../../utils/SystemTimer";
-import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  AdbClientFactory,
+  defaultAdbClientFactory,
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { readAndroidDeviceApiLevel } from "../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
-import {
-  ANDROID_KEYCOMBINATION_MIN_API_LEVEL,
-  buildAsciiKeyEventPlan
-} from "./asciiKeyEvents";
+import { ANDROID_KEYCOMBINATION_MIN_API_LEVEL, buildAsciiKeyEventPlan } from "./asciiKeyEvents";
 
 /** How a device's keyguard is protected, as far as AutoMobile can tell/remember. */
 export type DeviceLockType = "none" | "swipe" | "pin" | "password" | "pattern";
@@ -22,7 +22,11 @@ export interface LockCredentialStore {
   /** The credential remembered for a device, or `null` if none is recorded. */
   getRecordedCredential(deviceId: string): Promise<string | null>;
   /** Remember how to unlock a device (lock type + optional credential). */
-  rememberLock(deviceId: string, lockType: DeviceLockType, credential: string | null): Promise<void>;
+  rememberLock(
+    deviceId: string,
+    lockType: DeviceLockType,
+    credential: string | null,
+  ): Promise<void>;
 }
 
 /**
@@ -90,10 +94,13 @@ export class WakeAndUnlock {
   constructor(
     device: BootedDevice,
     adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory,
-    options: WakeAndUnlockOptions = {}
+    options: WakeAndUnlockOptions = {},
   ) {
     this.device = device;
-    if (adbFactoryOrExecutor && typeof (adbFactoryOrExecutor as AdbClientFactory).create === "function") {
+    if (
+      adbFactoryOrExecutor &&
+      typeof (adbFactoryOrExecutor as AdbClientFactory).create === "function"
+    ) {
       this.adb = (adbFactoryOrExecutor as AdbClientFactory).create(device);
     } else if (adbFactoryOrExecutor) {
       this.adb = adbFactoryOrExecutor as AdbExecutor;
@@ -143,11 +150,19 @@ export class WakeAndUnlock {
         wasAsleep,
         wasLocked: false,
         unlocked: false,
-        error: "Could not read device lock state (dumpsys window policy unavailable); the device was woken but its lock status is unknown"
+        error:
+          "Could not read device lock state (dumpsys window policy unavailable); the device was woken but its lock status is unknown",
       };
     }
     if (!lock.locked) {
-      return { success: true, platform: "android", wasAsleep, wasLocked: false, secure: lock.secure, unlocked: true };
+      return {
+        success: true,
+        platform: "android",
+        wasAsleep,
+        wasLocked: false,
+        secure: lock.secure,
+        unlocked: true,
+      };
     }
 
     // wm dismiss-keyguard fully dismisses a swipe lock and raises the bouncer on
@@ -176,7 +191,7 @@ export class WakeAndUnlock {
       wasLocked: true,
       secure: false,
       unlocked: cleared,
-      error: cleared ? undefined : "Swipe keyguard did not dismiss"
+      error: cleared ? undefined : "Swipe keyguard did not dismiss",
     };
   }
 
@@ -187,7 +202,7 @@ export class WakeAndUnlock {
   private async unlockSecure(
     wasAsleep: boolean,
     pin: string | undefined,
-    secure: boolean | undefined
+    secure: boolean | undefined,
   ): Promise<WakeAndUnlockResult> {
     const recorded = pin ? null : await this.getRecordedCredential();
     const effectivePin = pin ?? recorded;
@@ -197,7 +212,7 @@ export class WakeAndUnlock {
       if (secure === true) {
         throw new ActionableError(
           "Device is secure-locked (PIN/pattern/password); provide `pin` to unlock it. " +
-          "Unlocking once with a `pin` lets AutoMobile remember it for later in this session."
+            "Unlocking once with a `pin` lets AutoMobile remember it for later in this session.",
         );
       }
       // Unknown secure status and no credential: dismiss-keyguard (already
@@ -205,10 +220,17 @@ export class WakeAndUnlock {
       const cleared = await this.pollUnlocked();
       if (cleared) {
         await this.rememberLock("swipe", null);
-        return { success: true, platform: "android", wasAsleep, wasLocked: true, secure: undefined, unlocked: true };
+        return {
+          success: true,
+          platform: "android",
+          wasAsleep,
+          wasLocked: true,
+          secure: undefined,
+          unlocked: true,
+        };
       }
       throw new ActionableError(
-        "Device is locked and its secure status could not be read; provide `pin` to unlock it if it is secure."
+        "Device is locked and its secure status could not be read; provide `pin` to unlock it if it is secure.",
       );
     }
 
@@ -240,7 +262,7 @@ export class WakeAndUnlock {
         secure,
         unlocked: false,
         usedRecordedCredential,
-        error: "Device remained locked after PIN entry (wrong credential or entry failed)"
+        error: "Device remained locked after PIN entry (wrong credential or entry failed)",
       };
     }
 
@@ -250,7 +272,15 @@ export class WakeAndUnlock {
       await this.rememberLock("pin", pin);
     }
     // A credential unlocked it, so it was in fact secure.
-    return { success: true, platform: "android", wasAsleep, wasLocked: true, secure: true, unlocked: true, usedRecordedCredential };
+    return {
+      success: true,
+      platform: "android",
+      wasAsleep,
+      wasLocked: true,
+      secure: true,
+      unlocked: true,
+      usedRecordedCredential,
+    };
   }
 
   /** Expand a credential into its key-event commands, or throw if unmappable. */
@@ -264,7 +294,7 @@ export class WakeAndUnlock {
         // Describe the offending character by position, never by value — the
         // credential must not leak into a tool-result error message.
         throw new ActionableError(
-          `wakeAndUnlock: the credential character at position ${index + 1} cannot be sent as a key event on this device`
+          `wakeAndUnlock: the credential character at position ${index + 1} cannot be sent as a key event on this device`,
         );
       }
       commands.push(...plan.commands);
@@ -285,7 +315,7 @@ export class WakeAndUnlock {
       wasAsleep: false,
       wasLocked: false,
       unlocked: result.success,
-      error: result.error
+      error: result.error,
     };
   }
 
@@ -312,7 +342,9 @@ export class WakeAndUnlock {
     try {
       return await this.credentialStore.getRecordedCredential(this.device.deviceId);
     } catch (error) {
-      logger.warn(`[WakeAndUnlock] failed to read recorded credential for ${this.device.deviceId}: ${error}`);
+      logger.warn(
+        `[WakeAndUnlock] failed to read recorded credential for ${this.device.deviceId}: ${error}`,
+      );
       return null;
     }
   }
@@ -335,7 +367,8 @@ export class WakeAndUnlock {
       return this.keyCombinationSupported;
     }
     const apiLevel = await readAndroidDeviceApiLevel(this.adb);
-    this.keyCombinationSupported = apiLevel !== null && apiLevel >= ANDROID_KEYCOMBINATION_MIN_API_LEVEL;
+    this.keyCombinationSupported =
+      apiLevel !== null && apiLevel >= ANDROID_KEYCOMBINATION_MIN_API_LEVEL;
     return this.keyCombinationSupported;
   }
 }

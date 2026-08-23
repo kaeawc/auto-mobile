@@ -56,7 +56,7 @@ export async function runExecSeam(
   invoke: (options: ExecSeamOptions) => Promise<RawExecOutput>,
   options: ExecRequestOptions,
   errorContext: CommandErrorFormatOptions,
-  behavior: ExecSeamBehavior = {}
+  behavior: ExecSeamBehavior = {},
 ): Promise<ExecResult> {
   try {
     const { stdout, stderr } = await invoke({

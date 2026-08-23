@@ -36,7 +36,7 @@ describe("ImageUtils", () => {
   describe("batchProcess", () => {
     test("should process multiple buffers", async () => {
       const buffers = [Buffer.from("data1"), Buffer.from("data2")];
-      const results = await imageUtils.batchProcess(buffers, async buffer => {
+      const results = await imageUtils.batchProcess(buffers, async (buffer) => {
         return Buffer.from(buffer.toString() + "_processed");
       });
 
@@ -45,7 +45,6 @@ describe("ImageUtils", () => {
       expect(results[1].toString()).toBe("data2_processed");
     });
   });
-
 });
 
 describe("FakeImageUtils", () => {
@@ -80,7 +79,7 @@ describe("FakeImageUtils", () => {
         width: 800,
         height: 600,
         format: "jpg",
-        size: 500000
+        size: 500000,
       };
       fakeImageUtils.setMetadataResult(customMetadata);
       const metadata = await fakeImageUtils.getMetadata(Buffer.from("test"));
@@ -214,7 +213,7 @@ describe("FakeImageUtils", () => {
       fakeImageUtils.setShouldThrowOnBatchProcess(true);
 
       try {
-        await fakeImageUtils.batchProcess([Buffer.from("test")], async b => b);
+        await fakeImageUtils.batchProcess([Buffer.from("test")], async (b) => b);
         throw new Error("Should have thrown");
       } catch (error: any) {
         expect(error.message).toBe("Simulated error in batchProcess");
@@ -244,7 +243,7 @@ describe("FakeImageUtils", () => {
 
       const results = await fakeImageUtils.batchProcess(
         [Buffer.from("input1"), Buffer.from("input2")],
-        async b => b
+        async (b) => b,
       );
 
       expect(results).toEqual([buffer1, buffer2]);
@@ -254,7 +253,7 @@ describe("FakeImageUtils", () => {
     test("should handle batch process with default transform", async () => {
       const results = await fakeImageUtils.batchProcess(
         [Buffer.from("test1"), Buffer.from("test2")],
-        async b => Buffer.from(b.toString() + "_processed")
+        async (b) => Buffer.from(b.toString() + "_processed"),
       );
 
       expect(results).toHaveLength(2);

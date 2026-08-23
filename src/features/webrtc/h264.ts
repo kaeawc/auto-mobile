@@ -90,7 +90,9 @@ export class H264AnnexBParser {
     this.buffered = this.buffered.length === 0 ? chunk : Buffer.concat([this.buffered, chunk]);
     if (this.buffered.length > this.maxBufferedBytes) {
       this.buffered = Buffer.alloc(0);
-      throw new Error(`H.264 Annex-B parser buffer exceeded ${this.maxBufferedBytes} bytes without a complete NAL.`);
+      throw new Error(
+        `H.264 Annex-B parser buffer exceeded ${this.maxBufferedBytes} bytes without a complete NAL.`,
+      );
     }
     return this.drain(false);
   }
@@ -112,7 +114,10 @@ export class H264AnnexBParser {
       return false;
     }
     const headerOffset = last.offset + last.length;
-    return headerOffset < this.buffered.length && nalUnitType(this.buffered.subarray(headerOffset)) === type;
+    return (
+      headerOffset < this.buffered.length &&
+      nalUnitType(this.buffered.subarray(headerOffset)) === type
+    );
   }
 
   private drain(final: boolean): Buffer[] {
@@ -243,7 +248,7 @@ export function packetizeNalUnit(nal: Buffer, mtu: number = DEFAULT_RTP_MTU): Bu
   // reaches here.
   if (!Number.isFinite(mtu) || mtu <= FU_A_HEADER_BYTES) {
     throw new ActionableError(
-      `RTP MTU ${mtu} is too small to fragment a ${nal.length}-byte NAL unit; it must exceed the ${FU_A_HEADER_BYTES}-byte FU-A header.`
+      `RTP MTU ${mtu} is too small to fragment a ${nal.length}-byte NAL unit; it must exceed the ${FU_A_HEADER_BYTES}-byte FU-A header.`,
     );
   }
 
@@ -274,7 +279,7 @@ export function packetizeNalUnit(nal: Buffer, mtu: number = DEFAULT_RTP_MTU): Bu
       Buffer.concat([
         Buffer.from([fuIndicator, fuHeader]),
         payload.subarray(offset, offset + fragmentSize),
-      ])
+      ]),
     );
     offset += fragmentSize;
   }
@@ -295,7 +300,7 @@ export interface RtpPayloadUnit {
  */
 export function packetizeAccessUnit(
   accessUnit: Buffer[],
-  mtu: number = DEFAULT_RTP_MTU
+  mtu: number = DEFAULT_RTP_MTU,
 ): RtpPayloadUnit[] {
   const payloads: Buffer[] = [];
   for (const nal of accessUnit) {

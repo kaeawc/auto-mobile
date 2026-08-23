@@ -34,10 +34,9 @@ export type FeatureFlagConfig = Record<string, unknown>;
  * once rode `observe-result-compact` is a permanent default), so no flag governs
  * that arm of the advertised `outputSchema` any longer.
  */
-export const TOOL_DEFINITION_AFFECTING_FLAGS: ReadonlySet<FeatureFlagKey> = new Set<FeatureFlagKey>([
-  "debug",
-  "tool-results-no-structured-content",
-]);
+export const TOOL_DEFINITION_AFFECTING_FLAGS: ReadonlySet<FeatureFlagKey> = new Set<FeatureFlagKey>(
+  ["debug", "tool-results-no-structured-content"],
+);
 
 export interface FeatureFlagDefinition {
   key: FeatureFlagKey;
@@ -100,7 +99,8 @@ export const FEATURE_FLAG_DEFINITIONS: FeatureFlagDefinition[] = [
   {
     key: "raw-element-search",
     label: "Raw element search",
-    description: "Use raw view hierarchies for element search while returning filtered observations.",
+    description:
+      "Use raw view hierarchies for element search while returning filtered observations.",
     defaultValue: false,
   },
   {
@@ -134,19 +134,22 @@ export const FEATURE_FLAG_DEFINITIONS: FeatureFlagDefinition[] = [
   {
     key: "mcp-recording",
     label: "MCP call recording",
-    description: "Enable the recordSteps tool to capture MCP tool calls as replayable YAML test plans.",
+    description:
+      "Enable the recordSteps tool to capture MCP tool calls as replayable YAML test plans.",
     defaultValue: false,
   },
   {
     key: "navigation-screenshots",
     label: "Navigation screenshots",
-    description: "Capture screenshots on navigation events to enrich the navigation graph. Disable to reduce device resource usage.",
+    description:
+      "Capture screenshots on navigation events to enrich the navigation graph. Disable to reduce device resource usage.",
     defaultValue: true,
   },
   {
     key: "observe-result-include-elements",
     label: "Observe result: include elements",
-    description: "Include the flattened elements array in observe results. It is dropped by default to reduce output size; enable this to restore it.",
+    description:
+      "Include the flattened elements array in observe results. It is dropped by default to reduce output size; enable this to restore it.",
     defaultValue: false,
   },
   {
@@ -158,7 +161,8 @@ export const FEATURE_FLAG_DEFINITIONS: FeatureFlagDefinition[] = [
   {
     key: "actions-diff-observe",
     label: "Actions: diff observe",
-    description: "Return action-aware observation diffs after non-observe tools, falling back to full observations for navigation-prone or uncertain screen changes.",
+    description:
+      "Return action-aware observation diffs after non-observe tools, falling back to full observations for navigation-prone or uncertain screen changes.",
     defaultValue: false,
   },
   {

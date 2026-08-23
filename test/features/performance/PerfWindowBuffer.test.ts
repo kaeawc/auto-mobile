@@ -174,7 +174,9 @@ describe("PerfWindowBuffer", () => {
   describe("touch latency, cpu, memory", () => {
     it("summarizes touch latency as p50/p95/latest", () => {
       const buffer = new PerfWindowBuffer();
-      [10, 20, 30, 40].forEach((v, i) => buffer.record("device-1", sample({ t: i + 1, touchLatencyMs: v })));
+      [10, 20, 30, 40].forEach((v, i) =>
+        buffer.record("device-1", sample({ t: i + 1, touchLatencyMs: v })),
+      );
       const snap = buffer.snapshot("device-1", 10, 100);
       expect(snap.touchLatencyMs!.p50).toBe(25);
       expect(snap.touchLatencyMs!.latest).toBe(40);
@@ -196,16 +198,22 @@ describe("PerfWindowBuffer", () => {
   describe("native frame-time percentiles (latest-wins)", () => {
     it("surfaces the most recent frame-bearing interval, ignoring null ticks", () => {
       const buffer = new PerfWindowBuffer();
-      buffer.record("device-1", sample({
-        t: 1,
-        frameTimePercentilesMs: { p50: 8, p90: 12, p95: 15, p99: 30 },
-      }));
+      buffer.record(
+        "device-1",
+        sample({
+          t: 1,
+          frameTimePercentilesMs: { p50: 8, p90: 12, p95: 15, p99: 30 },
+        }),
+      );
       // Later idle tick carries no native percentiles; must not clobber the last real one.
       buffer.record("device-1", sample({ t: 2, frameTimePercentilesMs: null }));
-      buffer.record("device-1", sample({
-        t: 3,
-        frameTimePercentilesMs: { p50: 9, p90: 14, p95: 18, p99: 42 },
-      }));
+      buffer.record(
+        "device-1",
+        sample({
+          t: 3,
+          frameTimePercentilesMs: { p50: 9, p90: 14, p95: 18, p99: 42 },
+        }),
+      );
 
       const snap = buffer.snapshot("device-1", 3, 100);
       expect(snap.frameTimeMs).toEqual({ p50: 9, p90: 14, p95: 18, p99: 42 });
@@ -221,20 +229,36 @@ describe("PerfWindowBuffer", () => {
   describe("memory breakdown (latest-wins)", () => {
     it("surfaces the latest in-window meminfo breakdown", () => {
       const buffer = new PerfWindowBuffer();
-      buffer.record("device-1", sample({
-        t: 1,
-        memoryBreakdownMb: {
-          javaHeap: 10, nativeHeap: 20, code: 5, stack: 1,
-          graphics: 8, privateOther: 3, system: 2,
-        },
-      }));
-      buffer.record("device-1", sample({
-        t: 2,
-        memoryBreakdownMb: {
-          javaHeap: 12, nativeHeap: 22, code: 5, stack: 1,
-          graphics: 9, privateOther: 3, system: 2,
-        },
-      }));
+      buffer.record(
+        "device-1",
+        sample({
+          t: 1,
+          memoryBreakdownMb: {
+            javaHeap: 10,
+            nativeHeap: 20,
+            code: 5,
+            stack: 1,
+            graphics: 8,
+            privateOther: 3,
+            system: 2,
+          },
+        }),
+      );
+      buffer.record(
+        "device-1",
+        sample({
+          t: 2,
+          memoryBreakdownMb: {
+            javaHeap: 12,
+            nativeHeap: 22,
+            code: 5,
+            stack: 1,
+            graphics: 9,
+            privateOther: 3,
+            system: 2,
+          },
+        }),
+      );
 
       const snap = buffer.snapshot("device-1", 2, 100);
       expect(snap.memoryBreakdownMb!.javaHeap).toBe(12);
@@ -244,13 +268,21 @@ describe("PerfWindowBuffer", () => {
 
     it("preserves null components without dropping the whole breakdown", () => {
       const buffer = new PerfWindowBuffer();
-      buffer.record("device-1", sample({
-        t: 1,
-        memoryBreakdownMb: {
-          javaHeap: 12, nativeHeap: null, code: null, stack: null,
-          graphics: null, privateOther: null, system: null,
-        },
-      }));
+      buffer.record(
+        "device-1",
+        sample({
+          t: 1,
+          memoryBreakdownMb: {
+            javaHeap: 12,
+            nativeHeap: null,
+            code: null,
+            stack: null,
+            graphics: null,
+            privateOther: null,
+            system: null,
+          },
+        }),
+      );
 
       const snap = buffer.snapshot("device-1", 1, 100);
       expect(snap.memoryBreakdownMb!.javaHeap).toBe(12);

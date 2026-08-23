@@ -91,14 +91,14 @@ export class DefaultStartupFailureTracker implements StartupFailureTracker {
 
   constructor(
     store: StartupFailureStore = new FileStartupFailureStore(),
-    windowMs: number = STARTUP_FAILURE_WINDOW_MS
+    windowMs: number = STARTUP_FAILURE_WINDOW_MS,
   ) {
     this.store = store;
     this.windowMs = windowMs;
   }
 
   recordFailure(kind: DatabaseFailureKind, now: number): number {
-    const records = this.read().filter(record => now - record.at <= this.windowMs);
+    const records = this.read().filter((record) => now - record.at <= this.windowMs);
     records.push({ at: now, kind });
 
     try {
@@ -132,7 +132,8 @@ export class DefaultStartupFailureTracker implements StartupFailureTracker {
       }
       return parsed.filter(
         (record): record is StartupFailureRecord =>
-          typeof record?.at === "number" && (record.kind === "transient" || record.kind === "permanent")
+          typeof record?.at === "number" &&
+          (record.kind === "transient" || record.kind === "permanent"),
       );
     } catch (error) {
       // A corrupt/unreadable tracker file must not itself break startup — treat

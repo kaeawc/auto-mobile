@@ -77,9 +77,10 @@ class FakeDaemonSpawner implements DaemonProcessSpawner {
 
   spawn(command: string, args: string[], options: SpawnOptions): ChildProcess {
     this.spawned.push({ command, args, options });
-    const logFd = Array.isArray(options.stdio) && typeof options.stdio[1] === "number"
-      ? options.stdio[1]
-      : undefined;
+    const logFd =
+      Array.isArray(options.stdio) && typeof options.stdio[1] === "number"
+        ? options.stdio[1]
+        : undefined;
     if (logFd !== undefined && this.logText.length > 0) {
       writeSync(logFd, this.logText);
     }
@@ -121,7 +122,7 @@ describe("DaemonManager readiness", () => {
 
   afterEach(async () => {
     await Promise.all(
-      servers.map(server => new Promise<void>(resolve => server.close(() => resolve())))
+      servers.map((server) => new Promise<void>((resolve) => server.close(() => resolve()))),
     );
     servers.length = 0;
 
@@ -150,7 +151,7 @@ describe("DaemonManager readiness", () => {
       fakeTimer,
       lockPath,
       pidPath,
-      socketPath
+      socketPath,
     );
 
     await expect(manager.waitForReady(100)).resolves.toBe(true);
@@ -180,7 +181,7 @@ describe("DaemonManager readiness", () => {
       fakeTimer,
       lockPath,
       pidPath,
-      socketPath
+      socketPath,
     );
 
     await expect(manager.waitForReady(100)).resolves.toBe(true);
@@ -207,7 +208,7 @@ describe("DaemonManager readiness", () => {
       fakeTimer,
       lockPath,
       pidPath,
-      socketPath
+      socketPath,
     );
 
     await expect(manager.waitForReady(250)).resolves.toBe(false);
@@ -243,7 +244,7 @@ describe("DaemonManager readiness", () => {
       // afterEach cleanup; closing here would unlink the inode itself.
       const server = createServer();
       servers.push(server);
-      await new Promise<void>(resolve => server.listen(socketPath, resolve));
+      await new Promise<void>((resolve) => server.listen(socketPath, resolve));
       expect(existsSync(socketPath)).toBe(true);
 
       const manager = new DaemonManager(
@@ -256,7 +257,7 @@ describe("DaemonManager readiness", () => {
         fakeTimer,
         lockPath,
         pidPath,
-        socketPath
+        socketPath,
       );
 
       await expect(manager.waitForReady(250)).resolves.toBe(false);
@@ -265,7 +266,7 @@ describe("DaemonManager readiness", () => {
       expect(clients[0].connectCallCount).toBe(1);
       expect(clients[0].closeCallCount).toBe(1);
       expect(existsSync(socketPath)).toBe(false);
-    }
+    },
   );
 
   // Regression guard for "devices not found after daemon start/restart": a LIVE
@@ -294,7 +295,7 @@ describe("DaemonManager readiness", () => {
       fakeTimer,
       lockPath,
       pidPath,
-      socketPath
+      socketPath,
     );
 
     await expect(manager.waitForReady(1000)).resolves.toBe(true);
@@ -319,7 +320,7 @@ describe("DaemonManager readiness", () => {
       fakeTimer,
       lockPath,
       pidPath,
-      socketPath
+      socketPath,
     );
 
     const ready = manager.waitForReady(10_000, controller.signal);
@@ -362,11 +363,11 @@ describe("DaemonManager readiness", () => {
       fakeTimer,
       lockPath,
       pidPath,
-      socketPath
+      socketPath,
     );
 
     const ready = manager.waitForReady(100);
-    await new Promise<void>(resolve => setImmediate(resolve));
+    await new Promise<void>((resolve) => setImmediate(resolve));
     expect(clients).toHaveLength(1);
     expect(clients[0].connectionTimeouts).toEqual([100]);
 
@@ -387,13 +388,13 @@ describe("DaemonManager readiness", () => {
       fakeTimer,
       lockPath,
       pidPath,
-      socketPath
+      socketPath,
     );
 
     try {
       await expect(manager.waitForReady(200)).resolves.toBe(false);
       expect(stderr).toHaveBeenCalledWith(
-        "Daemon readiness probe timed out after 200ms (2 polls; socket not observed)\n"
+        "Daemon readiness probe timed out after 200ms (2 polls; socket not observed)\n",
       );
     } finally {
       stderr.mockRestore();
@@ -414,7 +415,7 @@ describe("DaemonManager readiness", () => {
       lockPath,
       pidPath,
       socketPath,
-      spawner
+      spawner,
     );
     const findSpy = spyOn(manager, "findAllDaemonProcesses").mockReturnValue([]);
     const readySpy = spyOn(manager, "waitForReady").mockImplementation(async () => false);
@@ -425,7 +426,7 @@ describe("DaemonManager readiness", () => {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       expect(message).toMatch(
-        /Daemon failed to start within \d+ms[\s\S]*Logs: .*daemon-launch-\d+\.log[\s\S]*SQLiteError: database is locked/
+        /Daemon failed to start within \d+ms[\s\S]*Logs: .*daemon-launch-\d+\.log[\s\S]*SQLiteError: database is locked/,
       );
       expect(message).not.toContain("OLD_LOG_START");
       expect(spawner.process.signals).toEqual(["SIGTERM"]);
@@ -451,7 +452,7 @@ describe("DaemonManager readiness", () => {
       lockPath,
       pidPath,
       socketPath,
-      spawner
+      spawner,
     );
     let statusCalls = 0;
     const statusSpy = spyOn(manager, "status").mockImplementation(async () => {
@@ -487,7 +488,7 @@ describe("DaemonManager readiness", () => {
     fakeTimer.enableAutoAdvance();
     const spawner = new FakeDaemonSpawner();
     spawner.logText = "fatal startup error\nSQLITE_BUSY: database is locked\n";
-    spawner.onSpawn = process => process.emit("exit", 7, null);
+    spawner.onSpawn = (process) => process.emit("exit", 7, null);
 
     const manager = new DaemonManager(
       undefined,
@@ -496,16 +497,16 @@ describe("DaemonManager readiness", () => {
       lockPath,
       pidPath,
       socketPath,
-      spawner
+      spawner,
     );
     const findSpy = spyOn(manager, "findAllDaemonProcesses").mockReturnValue([]);
     const readySpy = spyOn(manager, "waitForReady").mockImplementation(
-      () => new Promise<boolean>(() => {})
+      () => new Promise<boolean>(() => {}),
     );
 
     try {
       await expect(manager.start()).rejects.toThrow(
-        /Daemon subprocess exited before becoming ready \(exit code 7\)[\s\S]*SQLITE_BUSY: database is locked/
+        /Daemon subprocess exited before becoming ready \(exit code 7\)[\s\S]*SQLITE_BUSY: database is locked/,
       );
     } finally {
       readySpy.mockRestore();
@@ -518,7 +519,7 @@ describe("DaemonManager readiness", () => {
     const fakeTimer = new FakeTimer();
     const spawner = new FakeDaemonSpawner();
     spawner.logText = "fatal startup error\nSQLITE_BUSY: database is locked\n";
-    spawner.onSpawn = process => process.emit("exit", 7, null);
+    spawner.onSpawn = (process) => process.emit("exit", 7, null);
 
     const manager = new DaemonManager(
       undefined,
@@ -527,13 +528,13 @@ describe("DaemonManager readiness", () => {
       lockPath,
       pidPath,
       socketPath,
-      spawner
+      spawner,
     );
     const findSpy = spyOn(manager, "findAllDaemonProcesses").mockReturnValue([]);
 
     try {
       await expect(manager.start()).rejects.toThrow(
-        /Daemon subprocess exited before becoming ready \(exit code 7\)[\s\S]*SQLITE_BUSY: database is locked/
+        /Daemon subprocess exited before becoming ready \(exit code 7\)[\s\S]*SQLITE_BUSY: database is locked/,
       );
       expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
     } finally {
@@ -546,7 +547,7 @@ describe("DaemonManager readiness", () => {
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     const spawner = new FakeDaemonSpawner();
-    spawner.onSpawn = process => {
+    spawner.onSpawn = (process) => {
       const error = new Error("spawn /bin/sh ENOENT");
       (error as NodeJS.ErrnoException).code = "ENOENT";
       process.emit("error", error);
@@ -559,16 +560,16 @@ describe("DaemonManager readiness", () => {
       lockPath,
       pidPath,
       socketPath,
-      spawner
+      spawner,
     );
     const findSpy = spyOn(manager, "findAllDaemonProcesses").mockReturnValue([]);
     const readySpy = spyOn(manager, "waitForReady").mockImplementation(
-      () => new Promise<boolean>(() => {})
+      () => new Promise<boolean>(() => {}),
     );
 
     try {
       await expect(manager.start()).rejects.toThrow(
-        /Daemon subprocess failed to spawn: spawn \/bin\/sh ENOENT/
+        /Daemon subprocess failed to spawn: spawn \/bin\/sh ENOENT/,
       );
     } finally {
       readySpy.mockRestore();

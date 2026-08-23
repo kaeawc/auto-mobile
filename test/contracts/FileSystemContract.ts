@@ -9,10 +9,10 @@ export interface FileSystemContractOptions {
 export const runFileSystemContract = (
   description: string,
   makeFileSystem: () => FileSystem,
-  options: FileSystemContractOptions
+  options: FileSystemContractOptions,
 ): void => {
-  describe(`FileSystem contract: ${description}`, function() {
-    test("string files round-trip and appear in readdir", async function() {
+  describe(`FileSystem contract: ${description}`, function () {
+    test("string files round-trip and appear in readdir", async function () {
       const fileSystem = makeFileSystem();
       const dir = path.join(options.root, "strings");
       const filePath = path.join(dir, "hello.txt");
@@ -26,7 +26,7 @@ export const runFileSystemContract = (
       expect(await fileSystem.readdir(dir)).toContain("hello.txt");
     });
 
-    test("buffer files round-trip and expose size in stat", async function() {
+    test("buffer files round-trip and expose size in stat", async function () {
       const fileSystem = makeFileSystem();
       const dir = path.join(options.root, "buffers");
       const filePath = path.join(dir, "bytes.bin");
@@ -39,7 +39,7 @@ export const runFileSystemContract = (
       expect((await fileSystem.stat(filePath)).size).toBe(data.length);
     });
 
-    test("unlink removes files", async function() {
+    test("unlink removes files", async function () {
       const fileSystem = makeFileSystem();
       await fileSystem.ensureDir(options.root);
       const filePath = path.join(options.root, "delete-me.txt");
@@ -50,7 +50,7 @@ export const runFileSystemContract = (
       expect(await fileSystem.pathExists(filePath)).toBe(false);
     });
 
-    test("rename moves files", async function() {
+    test("rename moves files", async function () {
       const fileSystem = makeFileSystem();
       await fileSystem.ensureDir(options.root);
       const oldPath = path.join(options.root, "old.txt");
@@ -63,7 +63,7 @@ export const runFileSystemContract = (
       expect(await fileSystem.readFile(newPath)).toBe("moved");
     });
 
-    test("remove deletes directories", async function() {
+    test("remove deletes directories", async function () {
       const fileSystem = makeFileSystem();
       const dir = path.join(options.root, "remove-dir");
 
@@ -73,7 +73,7 @@ export const runFileSystemContract = (
       expect(await fileSystem.pathExists(dir)).toBe(false);
     });
 
-    test("writeFile rejects when the target directory does not exist", async function() {
+    test("writeFile rejects when the target directory does not exist", async function () {
       const fileSystem = makeFileSystem();
       const filePath = path.join(options.root, "missing-dir", "orphan.txt");
 
@@ -81,14 +81,14 @@ export const runFileSystemContract = (
       expect(await fileSystem.pathExists(filePath)).toBe(false);
     });
 
-    test("readdir rejects a directory that does not exist", async function() {
+    test("readdir rejects a directory that does not exist", async function () {
       const fileSystem = makeFileSystem();
       const dir = path.join(options.root, "never-created");
 
       await expect(fileSystem.readdir(dir)).rejects.toThrow();
     });
 
-    test("readdir lists only direct children of the named directory", async function() {
+    test("readdir lists only direct children of the named directory", async function () {
       const fileSystem = makeFileSystem();
       const dir = path.join(options.root, "listing");
       const sibling = path.join(options.root, "listing-sibling");
@@ -106,7 +106,7 @@ export const runFileSystemContract = (
       expect(entries).toEqual(["inside.txt"]);
     });
 
-    test("remove recursively deletes a directory's children", async function() {
+    test("remove recursively deletes a directory's children", async function () {
       const fileSystem = makeFileSystem();
       const dir = path.join(options.root, "recursive");
       const child = path.join(dir, "child.txt");
@@ -120,7 +120,7 @@ export const runFileSystemContract = (
       expect(await fileSystem.pathExists(child)).toBe(false);
     });
 
-    test("stat reports byte length, not UTF-16 code-unit count", async function() {
+    test("stat reports byte length, not UTF-16 code-unit count", async function () {
       const fileSystem = makeFileSystem();
       const dir = path.join(options.root, "sizes");
       const filePath = path.join(dir, "accent.txt");
@@ -134,7 +134,7 @@ export const runFileSystemContract = (
       expect((await fileSystem.stat(filePath)).size).toBe(Buffer.byteLength(content, "utf8"));
     });
 
-    test("stat rejects a file that does not exist", async function() {
+    test("stat rejects a file that does not exist", async function () {
       const fileSystem = makeFileSystem();
       const filePath = path.join(options.root, "absent.txt");
 

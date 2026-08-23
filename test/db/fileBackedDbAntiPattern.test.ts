@@ -20,7 +20,7 @@ import {
  */
 describe("findFileBackedDbAntiPatterns detector (issue #3081)", () => {
   function rules(source: string): FileBackedDbAntiPatternRule[] {
-    return findFileBackedDbAntiPatterns("test/db/example.test.ts", source).map(v => v.rule);
+    return findFileBackedDbAntiPatterns("test/db/example.test.ts", source).map((v) => v.rule);
   }
 
   describe("1. raw-cache-busted-import", () => {
@@ -68,7 +68,7 @@ describe("findFileBackedDbAntiPatterns detector (issue #3081)", () => {
         "}",
       ].join("\n");
       const found = findFileBackedDbAntiPatterns("test/db/example.test.ts", source);
-      expect(found.map(v => v.rule)).toContain("hand-rolled-temp-dir-retry");
+      expect(found.map((v) => v.rule)).toContain("hand-rolled-temp-dir-retry");
       expect(found[0].line).toBe(1);
     });
 
@@ -156,7 +156,7 @@ describe("findFileBackedDbAntiPatterns detector (issue #3081)", () => {
         "const module = await importFreshDatabaseModule();",
       ].join("\n");
       const found = findFileBackedDbAntiPatterns("test/db/example.test.ts", source);
-      expect(found.map(v => v.rule)).toContain("unfunneled-mkdtemp");
+      expect(found.map((v) => v.rule)).toContain("unfunneled-mkdtemp");
     });
 
     test("flags a harness-using suite that hand-rolls mkdtempSync for its DB dir", () => {
@@ -179,7 +179,7 @@ describe("findFileBackedDbAntiPatterns detector (issue #3081)", () => {
     test("does NOT flag a lifecycle suite that funnels through harness.makeTempDbDir (no raw mkdtemp)", () => {
       const source = [
         'import { createFileBackedDbHarness } from "./withFileBackedDb";',
-        "const dir = await harness.makeTempDbDir(\"am-\");",
+        'const dir = await harness.makeTempDbDir("am-");',
       ].join("\n");
       expect(rules(source)).not.toContain("unfunneled-mkdtemp");
     });
@@ -229,7 +229,7 @@ describe("findFileBackedDbAntiPatterns detector (issue #3081)", () => {
         'const dir = await mkdtemp("am-");',
       ].join("\n");
       const rulesFound = findFileBackedDbAntiPatterns("test/db/freshDatabaseModule.ts", source).map(
-        v => v.rule
+        (v) => v.rule,
       );
       expect(rulesFound).not.toContain("raw-cache-busted-import");
       expect(rulesFound).toContain("unfunneled-mkdtemp");
@@ -264,9 +264,12 @@ describe("test/db is free of file-backed DB anti-patterns (issue #3081)", () => 
   // The guard does not guard itself: this detector and its fixture test embed
   // every anti-pattern as data (regexes / string fixtures) inherent to their
   // purpose, so both are excluded from the real-tree scan.
-  const GUARD_OWN_FILES = new Set(["fileBackedDbAntiPattern.ts", "fileBackedDbAntiPattern.test.ts"]);
+  const GUARD_OWN_FILES = new Set([
+    "fileBackedDbAntiPattern.ts",
+    "fileBackedDbAntiPattern.test.ts",
+  ]);
   const scanned = readdirSync(dbDir).filter(
-    name => name.endsWith(".ts") && !GUARD_OWN_FILES.has(name)
+    (name) => name.endsWith(".ts") && !GUARD_OWN_FILES.has(name),
   );
 
   test("the guard actually scans the DB tree (suites + helpers, non-empty)", () => {
@@ -279,11 +282,11 @@ describe("test/db is free of file-backed DB anti-patterns (issue #3081)", () => 
   });
 
   test("no test/db file reintroduces a hand-rolled flake-avoidance anti-pattern", () => {
-    const violations = scanned.flatMap(name =>
-      findFileBackedDbAntiPatterns(name, readFileSync(join(dbDir, name), "utf8"))
+    const violations = scanned.flatMap((name) =>
+      findFileBackedDbAntiPatterns(name, readFileSync(join(dbDir, name), "utf8")),
     );
     const rendered = violations
-      .map(v => `  - ${v.file}:${v.line} [${v.rule}] ${v.message}`)
+      .map((v) => `  - ${v.file}:${v.line} [${v.rule}] ${v.message}`)
       .join("\n");
     expect(rendered).toBe("");
   });

@@ -35,7 +35,11 @@ describe("Telephony", () => {
       await telephony.phoneCall({ action: "cancel", phoneNumber: "5551234567" });
       await telephony.phoneCall({ action: "busy", phoneNumber: "5551234567" });
 
-      expect(consoleClient.calls.map(c => c.method)).toEqual(["gsmAccept", "gsmCancel", "gsmBusy"]);
+      expect(consoleClient.calls.map((c) => c.method)).toEqual([
+        "gsmAccept",
+        "gsmCancel",
+        "gsmBusy",
+      ]);
     });
 
     test("hold action does not require a phoneNumber", async () => {
@@ -54,7 +58,11 @@ describe("Telephony", () => {
     });
 
     test("returns supported:false on iOS devices", async () => {
-      device = { deviceId: "00008101-001C711E0EE0001E", platform: "ios", name: "iPhone" } as BootedDevice;
+      device = {
+        deviceId: "00008101-001C711E0EE0001E",
+        platform: "ios",
+        name: "iPhone",
+      } as BootedDevice;
       telephony = new Telephony(device, adb, () => consoleClient);
 
       const result = await telephony.phoneCall({ action: "call", phoneNumber: "5551234567" });
@@ -88,7 +96,10 @@ describe("Telephony", () => {
     });
 
     test("surfaces emulator console failures in the result", async () => {
-      consoleClient.failNext("gsmCall", new Error("Emulator console rejected command: invalid number"));
+      consoleClient.failNext(
+        "gsmCall",
+        new Error("Emulator console rejected command: invalid number"),
+      );
 
       const result = await telephony.phoneCall({ action: "call", phoneNumber: "5551234567" });
 
@@ -100,12 +111,17 @@ describe("Telephony", () => {
 
   describe("sendSms", () => {
     test("delivers a simulated SMS via the emulator console", async () => {
-      const result = await telephony.sendSms({ phoneNumber: "+15551234567", message: "Hello, world!" });
+      const result = await telephony.sendSms({
+        phoneNumber: "+15551234567",
+        message: "Hello, world!",
+      });
 
       expect(result.success).toBe(true);
       expect(result.phoneNumber).toBe("+15551234567");
       expect(result.messageLength).toBe("Hello, world!".length);
-      expect(consoleClient.calls).toEqual([{ method: "smsSend", args: ["+15551234567", "Hello, world!"] }]);
+      expect(consoleClient.calls).toEqual([
+        { method: "smsSend", args: ["+15551234567", "Hello, world!"] },
+      ]);
     });
 
     test("returns supported:false on physical devices", async () => {
@@ -120,7 +136,10 @@ describe("Telephony", () => {
     });
 
     test("surfaces validation errors from the emulator console client", async () => {
-      consoleClient.failNext("smsSend", new Error("SMS message must not contain newline, carriage return, or NUL characters."));
+      consoleClient.failNext(
+        "smsSend",
+        new Error("SMS message must not contain newline, carriage return, or NUL characters."),
+      );
 
       const result = await telephony.sendSms({ phoneNumber: "5551234567", message: "anything" });
 
@@ -132,7 +151,7 @@ describe("Telephony", () => {
     test("uses port from the device serial when constructing the console client", async () => {
       let receivedPort = -1;
       device = { deviceId: "emulator-5560", platform: "android", name: "Pixel_5" } as BootedDevice;
-      telephony = new Telephony(device, adb, port => {
+      telephony = new Telephony(device, adb, (port) => {
         receivedPort = port;
         return consoleClient;
       });

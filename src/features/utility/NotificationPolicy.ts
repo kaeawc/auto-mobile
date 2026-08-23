@@ -1,5 +1,8 @@
 import { errorMessage } from "../../utils/describeUnknownError";
-import { defaultAdbClientFactory, type AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  defaultAdbClientFactory,
+  type AdbClientFactory,
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { BootedDevice } from "../../models";
 import { SetAndroidNotificationPolicyAccess } from "../action/SetAndroidNotificationPolicyAccess";
@@ -48,7 +51,9 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function collectPolicyAccessSection(lines: string[]): { headerIdx: number; sectionLines: string[] } | null {
+function collectPolicyAccessSection(
+  lines: string[],
+): { headerIdx: number; sectionLines: string[] } | null {
   const headerRe = /mPolicyAccess|policy\s+access/i;
   for (let i = 0; i < lines.length; i++) {
     if (!headerRe.test(lines[i])) {
@@ -88,7 +93,7 @@ function parseAndroidPolicyAccess(output: string, appId: string): NotificationPo
   const sectionText = section.sectionLines.join("\n");
   const appPattern = new RegExp(`(^|[^A-Za-z0-9_.])${escapeRegExp(appId)}([^A-Za-z0-9_.]|$)`);
   const allowed = appPattern.test(sectionText);
-  const matchLine = section.sectionLines.find(line => appPattern.test(line));
+  const matchLine = section.sectionLines.find((line) => appPattern.test(line));
   return {
     supported: true,
     allowed,
@@ -125,7 +130,8 @@ export class NotificationPolicy {
     }
 
     if (this.device.platform !== "android") {
-      const error = "iOS does not expose app notification policy access for simulators or physical devices";
+      const error =
+        "iOS does not expose app notification policy access for simulators or physical devices";
       return {
         success: false,
         appId,
@@ -142,7 +148,12 @@ export class NotificationPolicy {
 
     try {
       const adb: AdbExecutor = this.adbFactory.create(this.device);
-      const result = await adb.executeCommand("shell dumpsys notification", undefined, undefined, true);
+      const result = await adb.executeCommand(
+        "shell dumpsys notification",
+        undefined,
+        undefined,
+        true,
+      );
       const policyAccess = parseAndroidPolicyAccess(result.stdout ?? "", appId);
       return {
         success: !policyAccess.error,
@@ -169,9 +180,13 @@ export class NotificationPolicy {
     }
   }
 
-  async setPolicy(appId: string, input: SetNotificationPolicyInput): Promise<NotificationPolicyResult> {
+  async setPolicy(
+    appId: string,
+    input: SetNotificationPolicyInput,
+  ): Promise<NotificationPolicyResult> {
     if (this.device.platform !== "android") {
-      const error = "iOS does not expose app notification policy access for simulators or physical devices";
+      const error =
+        "iOS does not expose app notification policy access for simulators or physical devices";
       return {
         success: false,
         appId,
@@ -187,7 +202,10 @@ export class NotificationPolicy {
       };
     }
 
-    const result = await new SetAndroidNotificationPolicyAccess(this.device, this.adbFactory).execute(appId, {
+    const result = await new SetAndroidNotificationPolicyAccess(
+      this.device,
+      this.adbFactory,
+    ).execute(appId, {
       allowed: input.policyAccess,
     });
 

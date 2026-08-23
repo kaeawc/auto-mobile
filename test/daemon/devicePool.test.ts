@@ -1,10 +1,7 @@
 import { afterEach, describe, expect, test, beforeEach } from "bun:test";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
-import {
-  DevicePool,
-  type SessionPreservingRecoveryResult,
-} from "../../src/daemon/devicePool";
+import { DevicePool, type SessionPreservingRecoveryResult } from "../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
@@ -3964,13 +3961,15 @@ describe("DevicePool", () => {
     });
 
     test("quarantines a process-exit session before incident persistence completes", async () => {
-      const images: DeviceInfo[] = [{
-        name: "Pixel 8",
-        platform: "android",
-        isRunning: false,
-        deviceId: "emulator-5554",
-        source: "local",
-      }];
+      const images: DeviceInfo[] = [
+        {
+          name: "Pixel 8",
+          platform: "android",
+          isRunning: false,
+          deviceId: "emulator-5554",
+          source: "local",
+        },
+      ];
       const manager = new FakeDeviceManagerWithStartedProcess(images);
       const backingStore = new InMemoryEmulatorLossIncidentStore(
         fakeTimer,
@@ -4026,17 +4025,14 @@ describe("DevicePool", () => {
 
       await sessionManager.releaseSession("session-1", "explicit-release");
       await devicePool.releaseDevice("emulator-5554", "session-1");
-      manager.bootedDevices = [{
-        name: "Pixel 8",
-        platform: "android",
-        deviceId: "emulator-5554",
-      }];
-      await devicePool.bindOrReuseDeviceSession(
-        "session-2",
-        "emulator-5554",
-        "android",
-        images[0],
-      );
+      manager.bootedDevices = [
+        {
+          name: "Pixel 8",
+          platform: "android",
+          deviceId: "emulator-5554",
+        },
+      ];
+      await devicePool.bindOrReuseDeviceSession("session-2", "emulator-5554", "android", images[0]);
       releaseOpen.resolve();
       for (let attempt = 0; attempt < 10 && (await backingStore.list()).length === 0; attempt++) {
         await new Promise((resolve) => setImmediate(resolve));
@@ -4048,9 +4044,7 @@ describe("DevicePool", () => {
         status: "busy",
       });
       const recordedIncidents = await backingStore.list();
-      expect(recordedIncidents).toMatchObject([
-        { recovery: { outcome: "not-attempted" } },
-      ]);
+      expect(recordedIncidents).toMatchObject([{ recovery: { outcome: "not-attempted" } }]);
       const settlement = devicePool.waitForEmulatorLossIncident(recordedIncidents[0]!.id);
       let settlementResolved = false;
       void settlement.then(() => {
@@ -4064,13 +4058,15 @@ describe("DevicePool", () => {
     });
 
     test("keeps process-exit quarantine while eviction claims recovery", async () => {
-      const images: DeviceInfo[] = [{
-        name: "Pixel 8",
-        platform: "android",
-        isRunning: false,
-        deviceId: "emulator-5554",
-        source: "local",
-      }];
+      const images: DeviceInfo[] = [
+        {
+          name: "Pixel 8",
+          platform: "android",
+          isRunning: false,
+          deviceId: "emulator-5554",
+          source: "local",
+        },
+      ];
       const manager = new FakeDeviceManagerWithStartedProcess(images);
       const incidents = new InMemoryEmulatorLossIncidentStore(
         fakeTimer,
@@ -4111,11 +4107,7 @@ describe("DevicePool", () => {
         return args[2] as string | undefined;
       };
 
-      const eviction = internals.evictStartedDeviceAfterProcessExit(
-        "emulator-5554",
-        1,
-        null,
-      );
+      const eviction = internals.evictStartedDeviceAfterProcessExit("emulator-5554", 1, null);
       await incidentResolutionStarted.promise;
 
       expect(devicePool.isSessionRecoveryInFlight("session-1")).toBe(true);
@@ -4135,13 +4127,15 @@ describe("DevicePool", () => {
         fakeTimer,
         new CountingIdGenerator("incident"),
       );
-      const images: DeviceInfo[] = [{
-        name: "Pixel 8",
-        platform: "android",
-        isRunning: false,
-        deviceId: "emulator-5554",
-        source: "local",
-      }];
+      const images: DeviceInfo[] = [
+        {
+          name: "Pixel 8",
+          platform: "android",
+          isRunning: false,
+          deviceId: "emulator-5554",
+          source: "local",
+        },
+      ];
       manager.deviceImages = images;
       devicePool = new DevicePool(
         sessionManager,
@@ -4189,10 +4183,7 @@ describe("DevicePool", () => {
       );
       manager.releaseRecovery();
 
-      await expect(Promise.all([first, duplicate])).resolves.toEqual([
-        "recovered",
-        "recovered",
-      ]);
+      await expect(Promise.all([first, duplicate])).resolves.toEqual(["recovered", "recovered"]);
       expect(manager.childProcesses).toHaveLength(2);
       expect(sessionManager.getSession("session-1")?.assignedDevice).toBe("emulator-5554");
       expect(devicePool.getDevice("emulator-5554")).toMatchObject({
@@ -4206,13 +4197,15 @@ describe("DevicePool", () => {
     });
 
     test("settles a joining incident when shared recovery rejects", async () => {
-      const images: DeviceInfo[] = [{
-        name: "Pixel 8",
-        platform: "android",
-        isRunning: false,
-        deviceId: "emulator-5554",
-        source: "local",
-      }];
+      const images: DeviceInfo[] = [
+        {
+          name: "Pixel 8",
+          platform: "android",
+          isRunning: false,
+          deviceId: "emulator-5554",
+          source: "local",
+        },
+      ];
       const manager = new FakeDeviceManagerWithStartedProcess(images);
       const incidents = new InMemoryEmulatorLossIncidentStore(
         fakeTimer,

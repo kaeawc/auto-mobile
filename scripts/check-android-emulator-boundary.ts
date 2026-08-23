@@ -13,12 +13,7 @@ const CHILD_PROCESS_FUNCTIONS = new Set([
   "execFile",
   "execFileSync",
 ]);
-const DIRECT_CHILD_PROCESS_FUNCTIONS = new Set([
-  "spawn",
-  "spawnSync",
-  "execFile",
-  "execFileSync",
-]);
+const DIRECT_CHILD_PROCESS_FUNCTIONS = new Set(["spawn", "spawnSync", "execFile", "execFileSync"]);
 
 interface Violation {
   readonly file: string;
@@ -28,7 +23,7 @@ interface Violation {
 }
 
 function sourceFiles(directory: string): string[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const path = join(directory, entry.name);
     if (entry.isDirectory()) {
       return sourceFiles(path);
@@ -52,8 +47,7 @@ function receiverName(
   childProcessNamespaces: Set<string>,
 ): string | null {
   if (ts.isIdentifier(expression)) {
-    return processExecutors.has(expression.text) ||
-      childProcessNamespaces.has(expression.text)
+    return processExecutors.has(expression.text) || childProcessNamespaces.has(expression.text)
       ? expression.text
       : null;
   }
@@ -71,9 +65,7 @@ function isChildProcessNamespace(
   expression: ts.Expression,
   childProcessNamespaces: Set<string>,
 ): boolean {
-  return (
-    ts.isIdentifier(expression) && childProcessNamespaces.has(expression.text)
-  );
+  return ts.isIdentifier(expression) && childProcessNamespaces.has(expression.text);
 }
 
 /**
@@ -84,9 +76,7 @@ function isChildProcessNamespace(
  * `spawn` in `defaultSpawnProcess`.
  */
 function stripComments(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, " ")
-    .replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+  return source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
 }
 
 function findViolations(file: string): Violation[] {
@@ -118,16 +108,13 @@ function findViolations(file: string): Violation[] {
     CHILD_PROCESS_MODULES.has(expression.arguments[0].text);
 
   const isChildProcessFunction = (expression: ts.Expression): boolean =>
-    (ts.isIdentifier(expression) &&
-      childProcessFunctions.has(expression.text)) ||
+    (ts.isIdentifier(expression) && childProcessFunctions.has(expression.text)) ||
     (ts.isPropertyAccessExpression(expression) &&
       CHILD_PROCESS_FUNCTIONS.has(expression.name.text) &&
       isChildProcessNamespace(expression.expression, childProcessNamespaces));
 
   const record = (node: ts.CallExpression): void => {
-    const { line, character } = sourceFile.getLineAndCharacterOfPosition(
-      node.getStart(sourceFile),
-    );
+    const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
     violations.push({
       file,
       line: line + 1,
@@ -166,11 +153,7 @@ function findViolations(file: string): Violation[] {
       childProcessNamespaces.add(node.name.text);
     }
 
-    if (
-      ts.isVariableDeclaration(node) &&
-      ts.isIdentifier(node.name) &&
-      node.initializer
-    ) {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
       if (
         isChildProcessRequire(node.initializer) ||
         isChildProcessNamespace(node.initializer, childProcessNamespaces)
@@ -183,9 +166,7 @@ function findViolations(file: string): Violation[] {
     }
 
     if (
-      (ts.isVariableDeclaration(node) ||
-        ts.isParameter(node) ||
-        ts.isPropertyDeclaration(node)) &&
+      (ts.isVariableDeclaration(node) || ts.isParameter(node) || ts.isPropertyDeclaration(node)) &&
       ts.isIdentifier(node.name) &&
       isProcessExecutorType(node.type)
     ) {
@@ -205,11 +186,7 @@ function findViolations(file: string): Violation[] {
           record(node);
         } else if (
           (expression.name.text === "exec" &&
-            receiverName(
-              expression.expression,
-              processExecutors,
-              childProcessNamespaces,
-            )) ||
+            receiverName(expression.expression, processExecutors, childProcessNamespaces)) ||
           isChildProcessFunction(expression)
         ) {
           record(node);
@@ -225,13 +202,11 @@ function findViolations(file: string): Violation[] {
 }
 
 const violations = sourceFiles(SOURCE_ROOT)
-  .filter(file => file !== OWNER)
+  .filter((file) => file !== OWNER)
   .flatMap(findViolations);
 
 if (violations.length > 0) {
-  console.error(
-    "error: Android emulator execution must use AndroidEmulatorClient:",
-  );
+  console.error("error: Android emulator execution must use AndroidEmulatorClient:");
   for (const violation of violations) {
     console.error(
       `${relative(SOURCE_ROOT, violation.file)}:${violation.line}:${violation.column}: ${violation.text}`,
@@ -240,6 +215,4 @@ if (violations.length > 0) {
   process.exit(1);
 }
 
-console.log(
-  "android-emulator-boundary: no direct production emulator invocations.",
-);
+console.log("android-emulator-boundary: no direct production emulator invocations.");

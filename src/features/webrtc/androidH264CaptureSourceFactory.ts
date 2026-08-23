@@ -16,8 +16,8 @@ export interface AndroidH264CaptureSourceDeps {
 }
 
 const defaultDeps: AndroidH264CaptureSourceDeps = {
-  createPersistent: options => new PersistentEncoderH264Source(options),
-  createScreenrecord: options => new AndroidH264Source(options),
+  createPersistent: (options) => new PersistentEncoderH264Source(options),
+  createScreenrecord: (options) => new AndroidH264Source(options),
 };
 
 /**
@@ -41,9 +41,9 @@ class FallbackH264CaptureSource implements H264CaptureSource {
 
   constructor(
     buildPersistent: (onScreenrecordFallback: (error: Error) => Promise<void>) => H264CaptureSource,
-    private readonly buildScreenrecord: () => H264CaptureSource
+    private readonly buildScreenrecord: () => H264CaptureSource,
   ) {
-    this.persistent = buildPersistent(error => this.switchToScreenrecord(error));
+    this.persistent = buildPersistent((error) => this.switchToScreenrecord(error));
   }
 
   async start(): Promise<void> {
@@ -69,7 +69,7 @@ class FallbackH264CaptureSource implements H264CaptureSource {
       return;
     }
     logger.warn(
-      `[webrtc] persistent encoder unavailable, falling back to screenrecord: ${error.message}`
+      `[webrtc] persistent encoder unavailable, falling back to screenrecord: ${error.message}`,
     );
     const screenrecord = this.buildScreenrecord();
     this.active = screenrecord;
@@ -105,7 +105,7 @@ class FallbackH264CaptureSource implements H264CaptureSource {
 export function createAndroidH264CaptureSource(
   options: AndroidH264SourceOptions,
   jarPath: string | null,
-  deps: AndroidH264CaptureSourceDeps = defaultDeps
+  deps: AndroidH264CaptureSourceDeps = defaultDeps,
 ): H264CaptureSource {
   if (!jarPath) {
     if (options.audioEnabled) {
@@ -115,7 +115,7 @@ export function createAndroidH264CaptureSource(
   }
 
   const persistentOptions = (
-    onScreenrecordFallback?: (error: Error) => Promise<void>
+    onScreenrecordFallback?: (error: Error) => Promise<void>,
   ): PersistentEncoderH264SourceOptions => ({
     device: options.device,
     onData: options.onData,
@@ -141,7 +141,7 @@ export function createAndroidH264CaptureSource(
   }
 
   return new FallbackH264CaptureSource(
-    onScreenrecordFallback => deps.createPersistent(persistentOptions(onScreenrecordFallback)),
-    () => deps.createScreenrecord(options)
+    (onScreenrecordFallback) => deps.createPersistent(persistentOptions(onScreenrecordFallback)),
+    () => deps.createScreenrecord(options),
   );
 }

@@ -2,11 +2,7 @@ import { logger } from "../../utils/logger";
 import { TimingEntry } from "../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { NavigationGraphManager } from "./NavigationGraphManager";
-import {
-  ScreenFingerprint,
-  AccessibilityHierarchy,
-  FingerprintResult,
-} from "./ScreenFingerprint";
+import { ScreenFingerprint, AccessibilityHierarchy, FingerprintResult } from "./ScreenFingerprint";
 
 /**
  * Options for the hierarchy navigation detector.
@@ -37,7 +33,9 @@ type HierarchyNavigationCallback = (info: {
   timestamp: number;
 }) => void;
 
-const DEFAULT_OPTIONS: Required<Omit<HierarchyNavigationDetectorOptions, "timer">> & { timer: Timer } = {
+const DEFAULT_OPTIONS: Required<Omit<HierarchyNavigationDetectorOptions, "timer">> & {
+  timer: Timer;
+} = {
   debounceMs: 100,
   stabilityTimeoutMs: 5000,
   timer: defaultTimer,
@@ -81,7 +79,7 @@ export class HierarchyNavigationDetector {
 
   constructor(
     navigationManager: NavigationGraphManager,
-    options?: HierarchyNavigationDetectorOptions
+    options?: HierarchyNavigationDetectorOptions,
   ) {
     this.navigationManager = navigationManager;
     this.debounceMs = options?.debounceMs ?? DEFAULT_OPTIONS.debounceMs;
@@ -95,7 +93,7 @@ export class HierarchyNavigationDetector {
    */
   public onHierarchyUpdate(
     hierarchy: AccessibilityHierarchy,
-    metrics?: HierarchyNavigationUpdateMetrics
+    metrics?: HierarchyNavigationUpdateMetrics,
   ): void {
     const fingerprintStart = this.timer.now();
     // Compute fingerprint for this hierarchy
@@ -110,13 +108,17 @@ export class HierarchyNavigationDetector {
 
     logger.debug(
       `[HIERARCHY_NAV] Received hierarchy update: hash=${fingerprint.hash.substring(0, 12)}, ` +
-      `elements=${fingerprint.elementCount}, pkg=${fingerprint.packageName}`
+        `elements=${fingerprint.elementCount}, pkg=${fingerprint.packageName}`,
     );
-    if (updateMetrics.conversionMs !== undefined || updateMetrics.externalTiming || updateMetrics.source) {
+    if (
+      updateMetrics.conversionMs !== undefined ||
+      updateMetrics.externalTiming ||
+      updateMetrics.source
+    ) {
       logger.debug(
         `[HIERARCHY_NAV] Perf: source=${updateMetrics.source ?? "unknown"}, ` +
-        `convert=${updateMetrics.conversionMs ?? "n/a"}ms, ` +
-        `fingerprint=${updateMetrics.fingerprintMs ?? "n/a"}ms`
+          `convert=${updateMetrics.conversionMs ?? "n/a"}ms, ` +
+          `fingerprint=${updateMetrics.fingerprintMs ?? "n/a"}ms`,
       );
     }
 
@@ -136,7 +138,7 @@ export class HierarchyNavigationDetector {
 
     logger.debug(
       `[HIERARCHY_NAV] New pending fingerprint: ${fingerprint.hash.substring(0, 12)}, ` +
-      `starting debounce (${this.debounceMs}ms)`
+        `starting debounce (${this.debounceMs}ms)`,
     );
 
     // Start new debounce timer
@@ -165,9 +167,7 @@ export class HierarchyNavigationDetector {
     const newFingerprint = this.pendingFingerprint;
     this.pendingFingerprint = null;
 
-    logger.debug(
-      `[HIERARCHY_NAV] Fingerprint stable: ${newFingerprint.hash.substring(0, 12)}`
-    );
+    logger.debug(`[HIERARCHY_NAV] Fingerprint stable: ${newFingerprint.hash.substring(0, 12)}`);
 
     // Check if this is a navigation (different from current stable)
     if (this.currentStableFingerprint?.hash !== newFingerprint.hash) {
@@ -191,7 +191,7 @@ export class HierarchyNavigationDetector {
 
     logger.info(
       `[HIERARCHY_NAV] Stability timeout reached, forcing navigation detection: ` +
-      `${newFingerprint.hash.substring(0, 12)}`
+        `${newFingerprint.hash.substring(0, 12)}`,
     );
 
     // Check if this is a navigation
@@ -209,8 +209,8 @@ export class HierarchyNavigationDetector {
 
     logger.info(
       `[HIERARCHY_NAV] Navigation detected: ` +
-      `${fromFingerprint ? fromFingerprint.substring(0, 12) : "(initial)"} -> ` +
-      `${toFingerprint.substring(0, 12)}`
+        `${fromFingerprint ? fromFingerprint.substring(0, 12) : "(initial)"} -> ` +
+        `${toFingerprint.substring(0, 12)}`,
     );
 
     // Update fingerprint state
@@ -225,7 +225,7 @@ export class HierarchyNavigationDetector {
         timestamp: newFingerprint.timestamp,
         packageName: newFingerprint.packageName,
       })
-      .catch(error => {
+      .catch((error) => {
         logger.error(`[HIERARCHY_NAV] Failed to record navigation: ${error}`);
       });
 

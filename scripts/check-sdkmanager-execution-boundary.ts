@@ -39,38 +39,62 @@ const ITERATION_METHODS = new Set([
 ]);
 
 function functionLikeName(node: ts.Node): string | undefined {
-  if ((ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node)) &&
-    node.name && ts.isIdentifier(node.name)) {
+  if (
+    (ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node)) &&
+    node.name &&
+    ts.isIdentifier(node.name)
+  ) {
     return node.name.text;
   }
   if (ts.isFunctionExpression(node) || ts.isArrowFunction(node)) {
     const parent = node.parent;
-    if (parent && ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name)) {return parent.name.text;}
-    if (parent && ts.isPropertyAssignment(parent) && ts.isIdentifier(parent.name)) {return parent.name.text;}
+    if (parent && ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name)) {
+      return parent.name.text;
+    }
+    if (parent && ts.isPropertyAssignment(parent) && ts.isIdentifier(parent.name)) {
+      return parent.name.text;
+    }
     // `obj.run = (bin) => ...` binds the arrow to a member expression, not a variable or
     // object-literal property; key it by the property name so its call sites are found (#4368).
-    if (parent && ts.isBinaryExpression(parent) &&
+    if (
+      parent &&
+      ts.isBinaryExpression(parent) &&
       parent.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
-      ts.isPropertyAccessExpression(parent.left)) {return parent.left.name.text;}
+      ts.isPropertyAccessExpression(parent.left)
+    ) {
+      return parent.left.name.text;
+    }
   }
   return undefined;
 }
 
 function calleeName(expression: ts.Expression): string | undefined {
-  if (ts.isIdentifier(expression)) {return expression.text;}
-  if (ts.isPropertyAccessExpression(expression)) {return expression.name.text;}
+  if (ts.isIdentifier(expression)) {
+    return expression.text;
+  }
+  if (ts.isPropertyAccessExpression(expression)) {
+    return expression.name.text;
+  }
   return undefined;
 }
 
 function returnExpressions(fn: ts.FunctionLikeDeclaration): ts.Expression[] {
   const body = fn.body;
-  if (!body) {return [];}
-  if (!ts.isBlock(body)) {return [body];}
+  if (!body) {
+    return [];
+  }
+  if (!ts.isBlock(body)) {
+    return [body];
+  }
   const returns: ts.Expression[] = [];
   const walk = (node: ts.Node): void => {
     // Stop at a nested function boundary so an inner function's returns are not misattributed.
-    if (node !== fn && ts.isFunctionLike(node)) {return;}
-    if (ts.isReturnStatement(node) && node.expression) {returns.push(node.expression);}
+    if (node !== fn && ts.isFunctionLike(node)) {
+      return;
+    }
+    if (ts.isReturnStatement(node) && node.expression) {
+      returns.push(node.expression);
+    }
     ts.forEachChild(node, walk);
   };
   ts.forEachChild(body, walk);
@@ -79,7 +103,9 @@ function returnExpressions(fn: ts.FunctionLikeDeclaration): ts.Expression[] {
 
 export function directlyExecutesSdkManager(source: string): boolean {
   const lowerSource = source.toLowerCase();
-  if (!lowerSource.includes("sdk") || !lowerSource.includes("manager")) {return false;}
+  if (!lowerSource.includes("sdk") || !lowerSource.includes("manager")) {
+    return false;
+  }
 
   const sourceFile = ts.createSourceFile(
     "sdkmanager-boundary.ts",
@@ -102,7 +128,8 @@ export function directlyExecutesSdkManager(source: string): boolean {
   // Iteration-method callbacks paired with the receiver whose elements bind their parameters, e.g.
   // `["sdkmanager"].forEach(bin => spawn(bin))`. If the receiver mentions sdkmanager the fixpoint
   // taints the callback's parameters (issue #4368).
-  const iterationCallbacks: { receiver: ts.Expression; callback: ts.FunctionLikeDeclaration }[] = [];
+  const iterationCallbacks: { receiver: ts.Expression; callback: ts.FunctionLikeDeclaration }[] =
+    [];
   // Three monotonic taint sets, all filled by the fixpoint after collection: parameter names
   // that receive an sdkmanager-ish argument at some call site, function names whose return value
   // carries sdkmanager, and variable names whose (transitive) initializer carries sdkmanager.
@@ -118,13 +145,18 @@ export function directlyExecutesSdkManager(source: string): boolean {
   };
 
   const collect = (node: ts.Node): void => {
-    if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier) &&
-      ["child_process", "node:child_process"].includes(node.moduleSpecifier.text)) {
+    if (
+      ts.isImportDeclaration(node) &&
+      ts.isStringLiteral(node.moduleSpecifier) &&
+      ["child_process", "node:child_process"].includes(node.moduleSpecifier.text)
+    ) {
       const bindings = node.importClause?.namedBindings;
       if (bindings && ts.isNamedImports(bindings)) {
         for (const element of bindings.elements) {
           const importedName = element.propertyName?.text ?? element.name.text;
-          if (LAUNCHER_NAMES.has(importedName)) {launcherAliases.add(element.name.text);}
+          if (LAUNCHER_NAMES.has(importedName)) {
+            launcherAliases.add(element.name.text);
+          }
         }
       }
     }
@@ -135,9 +167,12 @@ export function directlyExecutesSdkManager(source: string): boolean {
       }
       if (ts.isObjectBindingPattern(node.name)) {
         for (const element of node.name.elements) {
-          const propertyName = element.propertyName && ts.isIdentifier(element.propertyName)
-            ? element.propertyName.text
-            : ts.isIdentifier(element.name) ? element.name.text : undefined;
+          const propertyName =
+            element.propertyName && ts.isIdentifier(element.propertyName)
+              ? element.propertyName.text
+              : ts.isIdentifier(element.name)
+                ? element.name.text
+                : undefined;
           if (propertyName && LAUNCHER_NAMES.has(propertyName) && ts.isIdentifier(element.name)) {
             launcherAliases.add(element.name.text);
           }
@@ -151,8 +186,11 @@ export function directlyExecutesSdkManager(source: string): boolean {
     }
     // `let command: string; command = ...;` carries no declaration initializer, so the
     // deferred assignment is the only place the value is visible.
-    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
-      ts.isIdentifier(node.left)) {
+    if (
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      ts.isIdentifier(node.left)
+    ) {
       bindValue(node.left.text, node.right);
     }
     // `private bin = "sdkmanager"` is a PropertyDeclaration; bind its initializer by the field
@@ -163,8 +201,11 @@ export function directlyExecutesSdkManager(source: string): boolean {
     }
     // `receiver.map(bin => ...)` binds `bin` to the receiver's elements; record the pairing so the
     // fixpoint can taint the callback parameters when the receiver mentions sdkmanager (#4368).
-    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) &&
-      ITERATION_METHODS.has(node.expression.name.text)) {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      ITERATION_METHODS.has(node.expression.name.text)
+    ) {
       const receiver = node.expression.expression;
       for (const argument of node.arguments) {
         if (ts.isArrowFunction(argument) || ts.isFunctionExpression(argument)) {
@@ -181,7 +222,9 @@ export function directlyExecutesSdkManager(source: string): boolean {
     }
     if (ts.isCallExpression(node)) {
       const name = calleeName(node.expression);
-      if (name) {callSites.push({ name, args: node.arguments });}
+      if (name) {
+        callSites.push({ name, args: node.arguments });
+      }
     }
     ts.forEachChild(node, collect);
   };
@@ -191,23 +234,36 @@ export function directlyExecutesSdkManager(source: string): boolean {
   // (`const run = promisify(exec); run(...)`) and the immediate call (`promisify(exec)(...)`)
   // have to read as launcher references.
   const isPromisifiedLauncher = (node: ts.Expression): boolean => {
-    if (!ts.isCallExpression(node) || node.arguments.length !== 1) {return false;}
+    if (!ts.isCallExpression(node) || node.arguments.length !== 1) {
+      return false;
+    }
     const callee = node.expression;
-    const name = ts.isIdentifier(callee) ? callee.text
-      : ts.isPropertyAccessExpression(callee) ? callee.name.text : undefined;
+    const name = ts.isIdentifier(callee)
+      ? callee.text
+      : ts.isPropertyAccessExpression(callee)
+        ? callee.name.text
+        : undefined;
     return name === "promisify" && isLauncherReference(node.arguments[0]);
   };
   const isLauncherReference = (node: ts.Expression): boolean => {
-    if (ts.isIdentifier(node)) {return launcherAliases.has(node.text);}
-    if (ts.isCallExpression(node)) {return isPromisifiedLauncher(node);}
+    if (ts.isIdentifier(node)) {
+      return launcherAliases.has(node.text);
+    }
+    if (ts.isCallExpression(node)) {
+      return isPromisifiedLauncher(node);
+    }
     return ts.isPropertyAccessExpression(node) && LAUNCHER_NAMES.has(node.name.text);
   };
   let aliasesChanged = true;
   while (aliasesChanged) {
     aliasesChanged = false;
     for (const declaration of declarations) {
-      if (!ts.isIdentifier(declaration.name) || !declaration.initializer ||
-        !isLauncherReference(declaration.initializer) || launcherAliases.has(declaration.name.text)) {
+      if (
+        !ts.isIdentifier(declaration.name) ||
+        !declaration.initializer ||
+        !isLauncherReference(declaration.initializer) ||
+        launcherAliases.has(declaration.name.text)
+      ) {
         continue;
       }
       launcherAliases.add(declaration.name.text);
@@ -216,12 +272,18 @@ export function directlyExecutesSdkManager(source: string): boolean {
   }
 
   const staticText = (node: ts.Expression): string | undefined => {
-    if (ts.isStringLiteralLike(node)) {return node.text;}
-    if (ts.isParenthesizedExpression(node)) {return staticText(node.expression);}
+    if (ts.isStringLiteralLike(node)) {
+      return node.text;
+    }
+    if (ts.isParenthesizedExpression(node)) {
+      return staticText(node.expression);
+    }
     // Join the static chunks of a template with a separator no identifier can contain, so
     // `sdkmanager` is only matched when it sits wholly inside one chunk.
     if (ts.isTemplateExpression(node)) {
-      return [node.head.text, ...node.templateSpans.map(span => span.literal.text)].join("\u0000");
+      return [node.head.text, ...node.templateSpans.map((span) => span.literal.text)].join(
+        "\u0000",
+      );
     }
     if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
       const left = staticText(node.left);
@@ -240,20 +302,30 @@ export function directlyExecutesSdkManager(source: string): boolean {
     }
     // `exec(`${sdkmanagerPath} --version`)` hides the tool name in the identifier, not in any
     // static chunk of the template.
-    if (ts.isIdentifier(node) && node.text.toLowerCase().includes("sdkmanager")) {return true;}
+    if (ts.isIdentifier(node) && node.text.toLowerCase().includes("sdkmanager")) {
+      return true;
+    }
     // A parameter carrying an sdkmanager-ish argument from some caller (issue #4341).
-    if (ts.isIdentifier(node) && sdkManagerParams.has(node.text)) {return true;}
+    if (ts.isIdentifier(node) && sdkManagerParams.has(node.text)) {
+      return true;
+    }
     // A variable whose initializer (transitively) carries sdkmanager — the memoized replacement
     // for a recursive walk of `initializers`.
-    if (ts.isIdentifier(node) && taintedNames.has(node.text)) {return true;}
+    if (ts.isIdentifier(node) && taintedNames.has(node.text)) {
+      return true;
+    }
     // A call to a function whose return value carries sdkmanager (issue #4341).
     if (ts.isCallExpression(node)) {
       const name = calleeName(node.expression);
-      if (name && returnsSdkManager.has(name)) {return true;}
+      if (name && returnsSdkManager.has(name)) {
+        return true;
+      }
     }
     let found = false;
-    ts.forEachChild(node, child => {
-      if (!found && mentionsSdkManager(child)) {found = true;}
+    ts.forEachChild(node, (child) => {
+      if (!found && mentionsSdkManager(child)) {
+        found = true;
+      }
     });
     return found;
   };
@@ -265,19 +337,25 @@ export function directlyExecutesSdkManager(source: string): boolean {
   while (taintChanged) {
     taintChanged = false;
     for (const [name, boundValues] of initializers) {
-      if (!taintedNames.has(name) && boundValues.some(value => mentionsSdkManager(value))) {
+      if (!taintedNames.has(name) && boundValues.some((value) => mentionsSdkManager(value))) {
         taintedNames.add(name);
         taintChanged = true;
       }
     }
     for (const { name, args } of callSites) {
       const targets = functionsByName.get(name);
-      if (!targets) {continue;}
+      if (!targets) {
+        continue;
+      }
       for (const target of targets) {
         target.parameters.forEach((parameter, index) => {
           const argument = args[index];
-          if (argument && ts.isIdentifier(parameter.name) &&
-            !sdkManagerParams.has(parameter.name.text) && mentionsSdkManager(argument)) {
+          if (
+            argument &&
+            ts.isIdentifier(parameter.name) &&
+            !sdkManagerParams.has(parameter.name.text) &&
+            mentionsSdkManager(argument)
+          ) {
             sdkManagerParams.add(parameter.name.text);
             taintChanged = true;
           }
@@ -285,13 +363,18 @@ export function directlyExecutesSdkManager(source: string): boolean {
       }
     }
     for (const [name, returns] of returnsByName) {
-      if (!returnsSdkManager.has(name) && returns.some(expression => mentionsSdkManager(expression))) {
+      if (
+        !returnsSdkManager.has(name) &&
+        returns.some((expression) => mentionsSdkManager(expression))
+      ) {
         returnsSdkManager.add(name);
         taintChanged = true;
       }
     }
     for (const { receiver, callback } of iterationCallbacks) {
-      if (!mentionsSdkManager(receiver)) {continue;}
+      if (!mentionsSdkManager(receiver)) {
+        continue;
+      }
       for (const parameter of callback.parameters) {
         if (ts.isIdentifier(parameter.name) && !sdkManagerParams.has(parameter.name.text)) {
           sdkManagerParams.add(parameter.name.text);
@@ -309,14 +392,22 @@ export function directlyExecutesSdkManager(source: string): boolean {
 
   let directExecution = false;
   const inspect = (node: ts.Node): void => {
-    if (directExecution) {return;}
-    if (ts.isCallExpression(node) && isLauncherReference(node.expression) &&
-      node.arguments.some(argument => mentionsSdkManager(argument))) {
+    if (directExecution) {
+      return;
+    }
+    if (
+      ts.isCallExpression(node) &&
+      isLauncherReference(node.expression) &&
+      node.arguments.some((argument) => mentionsSdkManager(argument))
+    ) {
       directExecution = true;
       return;
     }
-    if (ts.isTaggedTemplateExpression(node) && isShellTag(node.tag) &&
-      mentionsSdkManager(node.template)) {
+    if (
+      ts.isTaggedTemplateExpression(node) &&
+      isShellTag(node.tag) &&
+      mentionsSdkManager(node.template)
+    ) {
       directExecution = true;
       return;
     }
@@ -327,9 +418,11 @@ export function directlyExecutesSdkManager(source: string): boolean {
 }
 
 export function sourceFiles(directory: string): string[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const path = join(directory, entry.name);
-    if (entry.isDirectory()) {return sourceFiles(path);}
+    if (entry.isDirectory()) {
+      return sourceFiles(path);
+    }
     return entry.name.endsWith(".ts") ? [path] : [];
   });
 }
@@ -340,16 +433,19 @@ export function sourceFiles(directory: string): string[] {
  * the whole-tree scan stays fast enough for a bun test running under coverage instrumentation.
  */
 export async function findOffenders(root: string): Promise<string[]> {
-  const sources = await Promise.all(sourceFiles(join(root, SOURCE_ROOT)).map(async file => ({
-    // `relative` yields OS separators (backslashes on Windows), but OWNER/EXCEPTIONS are keyed
-    // with forward slashes — normalize so the owner exclusion matches and messages are portable.
-    repoPath: relative(root, file).replace(/\\/g, "/"),
-    source: await readFile(file, "utf8"),
-  })));
+  const sources = await Promise.all(
+    sourceFiles(join(root, SOURCE_ROOT)).map(async (file) => ({
+      // `relative` yields OS separators (backslashes on Windows), but OWNER/EXCEPTIONS are keyed
+      // with forward slashes — normalize so the owner exclusion matches and messages are portable.
+      repoPath: relative(root, file).replace(/\\/g, "/"),
+      source: await readFile(file, "utf8"),
+    })),
+  );
   return sources.flatMap(({ repoPath, source }) =>
     repoPath !== OWNER && !EXCEPTIONS.has(repoPath) && directlyExecutesSdkManager(source)
       ? [`${repoPath} directly executes sdkmanager; route it through ${OWNER} instead.`]
-      : []);
+      : [],
+  );
 }
 
 if (import.meta.main) {
@@ -357,13 +453,17 @@ if (import.meta.main) {
   const files = sourceFiles(join(root, SOURCE_ROOT));
   // A silently-empty scan yields zero offenders and passes green while checking nothing.
   if (files.length < 100) {
-    console.error(`error: sdkmanager-execution-boundary scanned only ${files.length} files under ${SOURCE_ROOT}; expected the full source tree.`);
+    console.error(
+      `error: sdkmanager-execution-boundary scanned only ${files.length} files under ${SOURCE_ROOT}; expected the full source tree.`,
+    );
     process.exit(1);
   }
   const offenders = await findOffenders(root);
   if (offenders.length > 0) {
     console.error(`error: sdkmanager execution must use ${OWNER}:`);
-    for (const offender of offenders) {console.error(offender);}
+    for (const offender of offenders) {
+      console.error(offender);
+    }
     process.exit(1);
   }
   console.log("sdkmanager-execution-boundary: no direct production sdkmanager invocations.");

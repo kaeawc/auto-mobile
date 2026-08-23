@@ -24,15 +24,15 @@ function depsFrom(dbPath: string, owners: DaemonDbOwner[]): DirectModeGuardDeps 
 describe("findConflictingDaemons", () => {
   test("matches a live daemon owning the same resolved DB file (EC1)", () => {
     const conflicts = findConflictingDaemons(
-      depsFrom(DEFAULT_DB, [{ pid: 4242, dbPath: DEFAULT_DB }])
+      depsFrom(DEFAULT_DB, [{ pid: 4242, dbPath: DEFAULT_DB }]),
     );
-    expect(conflicts.map(c => c.pid)).toEqual([4242]);
+    expect(conflicts.map((c) => c.pid)).toEqual([4242]);
   });
 
   test("does not match a daemon owning a different DB file (EC2, escape hatch)", () => {
     const isolated = "/home/tester/bench/isolated.db";
     const conflicts = findConflictingDaemons(
-      depsFrom(isolated, [{ pid: 4242, dbPath: DEFAULT_DB }])
+      depsFrom(isolated, [{ pid: 4242, dbPath: DEFAULT_DB }]),
     );
     expect(conflicts).toEqual([]);
   });
@@ -42,17 +42,15 @@ describe("findConflictingDaemons", () => {
     // not a same-file match here. (assertDirectModeDbOwnership separately fails
     // closed on unknown-path live daemons — see its own tests.)
     const conflicts = findConflictingDaemons(
-      depsFrom(DEFAULT_DB, [{ pid: 99, dbPath: undefined }])
+      depsFrom(DEFAULT_DB, [{ pid: 99, dbPath: undefined }]),
     );
     expect(conflicts).toEqual([]);
   });
 
   test("normalizes paths before comparison (trailing segments resolve equal)", () => {
     const messy = "/home/tester/.auto-mobile/../.auto-mobile/auto-mobile.db";
-    const conflicts = findConflictingDaemons(
-      depsFrom(DEFAULT_DB, [{ pid: 7, dbPath: messy }])
-    );
-    expect(conflicts.map(c => c.pid)).toEqual([7]);
+    const conflicts = findConflictingDaemons(depsFrom(DEFAULT_DB, [{ pid: 7, dbPath: messy }]));
+    expect(conflicts.map((c) => c.pid)).toEqual([7]);
   });
 
   test("returns empty when no owners are reported (EC4)", () => {
@@ -80,9 +78,9 @@ describe("findConflictingDaemons", () => {
       const ourDbPath = join(linkDir, "auto-mobile.db"); // symlink form (DB file absent)
 
       const conflicts = findConflictingDaemons(
-        depsFrom(ourDbPath, [{ pid: 55, dbPath: daemonDbPath }])
+        depsFrom(ourDbPath, [{ pid: 55, dbPath: daemonDbPath }]),
       );
-      expect(conflicts.map(c => c.pid)).toEqual([55]);
+      expect(conflicts.map((c) => c.pid)).toEqual([55]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -111,8 +109,8 @@ describe("assertDirectModeDbOwnership", () => {
   test("does not throw when the daemon owns a different DB path (EC2)", () => {
     expect(() =>
       assertDirectModeDbOwnership(
-        depsFrom("/home/tester/bench/isolated.db", [{ pid: 4242, dbPath: DEFAULT_DB }])
-      )
+        depsFrom("/home/tester/bench/isolated.db", [{ pid: 4242, dbPath: DEFAULT_DB }]),
+      ),
     ).not.toThrow();
   });
 
@@ -142,8 +140,8 @@ describe("assertDirectModeDbOwnership", () => {
     // daemon must not break the AUTOMOBILE_DB_PATH escape hatch.
     expect(() =>
       assertDirectModeDbOwnership(
-        depsFrom("/home/tester/bench/isolated.db", [{ pid: 4242, dbPath: DEFAULT_DB }])
-      )
+        depsFrom("/home/tester/bench/isolated.db", [{ pid: 4242, dbPath: DEFAULT_DB }]),
+      ),
     ).not.toThrow();
   });
 
@@ -154,7 +152,7 @@ describe("assertDirectModeDbOwnership", () => {
         depsFrom(DEFAULT_DB, [
           { pid: 10, dbPath: DEFAULT_DB },
           { pid: 20, dbPath: DEFAULT_DB },
-        ])
+        ]),
       );
     } catch (error) {
       thrown = error;

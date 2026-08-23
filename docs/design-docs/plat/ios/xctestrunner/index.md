@@ -43,15 +43,15 @@ runner binary is involved.
 
 ## Why not XCUITest directly?
 
-|  | AutoMobile XCTestRunner | XCUITest |
-|---|---|---|
-| **Runs as** | Unit test target | UI test target (separate process) |
-| **Build required** | Pre-built `.xctestrun` reused | Full UI test host recompile |
-| **Device needed at** | Test execution only | Build time (linking) + execution |
-| **Parallel devices** | Daemon-managed pool | One device per test bundle |
-| **AI recovery** | Optional self-healing ([details](#ai-assisted-recovery)) | Not available |
-| **Test authoring** | YAML plans or AI prompt | Swift/Objective-C code |
-| **App under test** | Any installed app | App compiled into UI test host |
+|                      | AutoMobile XCTestRunner                                  | XCUITest                          |
+| -------------------- | -------------------------------------------------------- | --------------------------------- |
+| **Runs as**          | Unit test target                                         | UI test target (separate process) |
+| **Build required**   | Pre-built `.xctestrun` reused                            | Full UI test host recompile       |
+| **Device needed at** | Test execution only                                      | Build time (linking) + execution  |
+| **Parallel devices** | Daemon-managed pool                                      | One device per test bundle        |
+| **AI recovery**      | Optional self-healing ([details](#ai-assisted-recovery)) | Not available                     |
+| **Test authoring**   | YAML plans or AI prompt                                  | Swift/Objective-C code            |
+| **App under test**   | Any installed app                                        | App compiled into UI test host    |
 
 ## Requirements
 
@@ -67,21 +67,21 @@ runner binary is involved.
 ### 1. Add the dependency
 
 === "Local path (current)"
-    ```yaml
+`yaml
     # ios/YourApp/project.yml (XcodeGen)
     packages:
       XCTestRunner:
         path: ../../libs/spm/XCTestRunner
-    ```
+    `
 
 === "Remote (once published)"
-    ```yaml
+`yaml
     # ios/YourApp/project.yml (XcodeGen)
     packages:
       XCTestRunner:
         url: https://github.com/kaeawc/auto-mobile
         from: "0.0.14"
-    ```
+    `
 
     ```swift
     // Package.swift
@@ -214,11 +214,11 @@ agent loop); the executor wiring is in `AutoMobilePlanExecutor.handleFailure`.
 
 ## Pages in this section
 
-| Page | What it covers |
-|---|---|
-| [Project Setup](project-setup.md) | SPM dependency, XcodeGen config, test target setup, running locally |
-| [Writing Tests](writing-tests.md) | `AutoMobileTestCase` properties, YAML plan reference, examples |
-| [CI Integration](ci-integration.md) | GitHub Actions, build-for-testing artifact, daemon setup |
+| Page                                | What it covers                                                      |
+| ----------------------------------- | ------------------------------------------------------------------- |
+| [Project Setup](project-setup.md)   | SPM dependency, XcodeGen config, test target setup, running locally |
+| [Writing Tests](writing-tests.md)   | `AutoMobileTestCase` properties, YAML plan reference, examples      |
+| [CI Integration](ci-integration.md) | GitHub Actions, build-for-testing artifact, daemon setup            |
 
 ## Related
 

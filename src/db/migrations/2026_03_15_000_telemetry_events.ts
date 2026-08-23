@@ -1,9 +1,6 @@
 import { type Kysely, sql } from "kysely";
 
-async function tableExists(
-  db: Kysely<unknown>,
-  tableName: string
-): Promise<boolean> {
+async function tableExists(db: Kysely<unknown>, tableName: string): Promise<boolean> {
   const result = await db
     .selectFrom("sqlite_master" as never)
     .select("name")
@@ -19,22 +16,22 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     await db.schema
       .createTable("network_events")
       .ifNotExists()
-      .addColumn("id", "integer", col => col.primaryKey().autoIncrement())
+      .addColumn("id", "integer", (col) => col.primaryKey().autoIncrement())
       .addColumn("device_id", "text")
-      .addColumn("timestamp", "integer", col => col.notNull())
+      .addColumn("timestamp", "integer", (col) => col.notNull())
       .addColumn("application_id", "text")
       .addColumn("session_id", "text")
-      .addColumn("url", "text", col => col.notNull())
-      .addColumn("method", "text", col => col.notNull())
-      .addColumn("status_code", "integer", col => col.notNull().defaultTo(0))
-      .addColumn("duration_ms", "integer", col => col.notNull().defaultTo(0))
-      .addColumn("request_body_size", "integer", col => col.defaultTo(-1))
-      .addColumn("response_body_size", "integer", col => col.defaultTo(-1))
+      .addColumn("url", "text", (col) => col.notNull())
+      .addColumn("method", "text", (col) => col.notNull())
+      .addColumn("status_code", "integer", (col) => col.notNull().defaultTo(0))
+      .addColumn("duration_ms", "integer", (col) => col.notNull().defaultTo(0))
+      .addColumn("request_body_size", "integer", (col) => col.defaultTo(-1))
+      .addColumn("response_body_size", "integer", (col) => col.defaultTo(-1))
       .addColumn("protocol", "text")
       .addColumn("host", "text")
       .addColumn("path", "text")
       .addColumn("error", "text")
-      .addColumn("created_at", "text", col => col.notNull().defaultTo(sql`(datetime('now'))`))
+      .addColumn("created_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
       .execute();
 
     await db.schema
@@ -64,16 +61,16 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     await db.schema
       .createTable("log_events")
       .ifNotExists()
-      .addColumn("id", "integer", col => col.primaryKey().autoIncrement())
+      .addColumn("id", "integer", (col) => col.primaryKey().autoIncrement())
       .addColumn("device_id", "text")
-      .addColumn("timestamp", "integer", col => col.notNull())
+      .addColumn("timestamp", "integer", (col) => col.notNull())
       .addColumn("application_id", "text")
       .addColumn("session_id", "text")
-      .addColumn("level", "integer", col => col.notNull())
-      .addColumn("tag", "text", col => col.notNull())
-      .addColumn("message", "text", col => col.notNull())
-      .addColumn("filter_name", "text", col => col.notNull())
-      .addColumn("created_at", "text", col => col.notNull().defaultTo(sql`(datetime('now'))`))
+      .addColumn("level", "integer", (col) => col.notNull())
+      .addColumn("tag", "text", (col) => col.notNull())
+      .addColumn("message", "text", (col) => col.notNull())
+      .addColumn("filter_name", "text", (col) => col.notNull())
+      .addColumn("created_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
       .execute();
 
     await db.schema
@@ -103,14 +100,14 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     await db.schema
       .createTable("custom_events")
       .ifNotExists()
-      .addColumn("id", "integer", col => col.primaryKey().autoIncrement())
+      .addColumn("id", "integer", (col) => col.primaryKey().autoIncrement())
       .addColumn("device_id", "text")
-      .addColumn("timestamp", "integer", col => col.notNull())
+      .addColumn("timestamp", "integer", (col) => col.notNull())
       .addColumn("application_id", "text")
       .addColumn("session_id", "text")
-      .addColumn("name", "text", col => col.notNull())
+      .addColumn("name", "text", (col) => col.notNull())
       .addColumn("properties_json", "text") // JSON of string key-value pairs
-      .addColumn("created_at", "text", col => col.notNull().defaultTo(sql`(datetime('now'))`))
+      .addColumn("created_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
       .execute();
 
     await db.schema
@@ -140,15 +137,15 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     await db.schema
       .createTable("os_events")
       .ifNotExists()
-      .addColumn("id", "integer", col => col.primaryKey().autoIncrement())
+      .addColumn("id", "integer", (col) => col.primaryKey().autoIncrement())
       .addColumn("device_id", "text")
-      .addColumn("timestamp", "integer", col => col.notNull())
+      .addColumn("timestamp", "integer", (col) => col.notNull())
       .addColumn("application_id", "text")
       .addColumn("session_id", "text")
-      .addColumn("category", "text", col => col.notNull()) // lifecycle, broadcast, websocket_frame
-      .addColumn("kind", "text", col => col.notNull()) // e.g., foreground, screen_on, connectivity_change
+      .addColumn("category", "text", (col) => col.notNull()) // lifecycle, broadcast, websocket_frame
+      .addColumn("kind", "text", (col) => col.notNull()) // e.g., foreground, screen_on, connectivity_change
       .addColumn("details_json", "text") // JSON of additional details
-      .addColumn("created_at", "text", col => col.notNull().defaultTo(sql`(datetime('now'))`))
+      .addColumn("created_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
       .execute();
 
     await db.schema

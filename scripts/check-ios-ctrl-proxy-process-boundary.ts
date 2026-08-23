@@ -5,9 +5,19 @@ import ts from "typescript";
 const SOURCE_ROOT = "src";
 const OWNER = "src/utils/ios/IOSCtrlProxyProcessClient.ts";
 const PROCESS_TOOLS = new Set(["ps", "pgrep", "kill", "lsof"]);
-const EXECUTION_METHODS = new Set(["exec", "execFile", "execFileSync", "executeCommand", "spawn", "spawnSync"]);
+const EXECUTION_METHODS = new Set([
+  "exec",
+  "execFile",
+  "execFileSync",
+  "executeCommand",
+  "spawn",
+  "spawnSync",
+]);
 const EXCEPTIONS = new Map<string, string>([
-  ["src/features/performance/PerformanceMonitor.ts", "Collects app metrics, not CtrlProxy lifecycle state."],
+  [
+    "src/features/performance/PerformanceMonitor.ts",
+    "Collects app metrics, not CtrlProxy lifecycle state.",
+  ],
 ]);
 
 export function repositoryPath(file: string): string {
@@ -22,7 +32,7 @@ export interface Violation {
 }
 
 function sourceFiles(directory: string): string[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const path = join(directory, entry.name);
     return entry.isDirectory() ? sourceFiles(path) : entry.name.endsWith(".ts") ? [path] : [];
   });
@@ -30,7 +40,9 @@ function sourceFiles(directory: string): string[] {
 
 function commandFromCall(node: ts.CallExpression): string | null {
   const firstArgument = node.arguments[0];
-  if (ts.isStringLiteral(firstArgument)) {return firstArgument.text;}
+  if (ts.isStringLiteral(firstArgument)) {
+    return firstArgument.text;
+  }
   if (ts.isArrayLiteralExpression(firstArgument) && ts.isStringLiteral(firstArgument.elements[0])) {
     return firstArgument.elements[0].text;
   }
@@ -49,12 +61,25 @@ function executesProcessTool(node: ts.CallExpression): boolean {
 }
 
 export function findViolationsInSource(file: string, source: string): Violation[] {
-  const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const sourceFile = ts.createSourceFile(
+    file,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
   const violations: Violation[] = [];
   const visit = (node: ts.Node): void => {
     if (ts.isCallExpression(node) && executesProcessTool(node)) {
-      const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
-      violations.push({ file, line: line + 1, column: character + 1, text: node.getText(sourceFile) });
+      const { line, character } = sourceFile.getLineAndCharacterOfPosition(
+        node.getStart(sourceFile),
+      );
+      violations.push({
+        file,
+        line: line + 1,
+        column: character + 1,
+        text: node.getText(sourceFile),
+      });
     }
     ts.forEachChild(node, visit);
   };
@@ -64,8 +89,8 @@ export function findViolationsInSource(file: string, source: string): Violation[
 
 export function findViolations(): Violation[] {
   return sourceFiles(SOURCE_ROOT)
-    .filter(file => repositoryPath(file) !== OWNER && !EXCEPTIONS.has(repositoryPath(file)))
-    .flatMap(file => findViolationsInSource(file, readFileSync(file, "utf8")));
+    .filter((file) => repositoryPath(file) !== OWNER && !EXCEPTIONS.has(repositoryPath(file)))
+    .flatMap((file) => findViolationsInSource(file, readFileSync(file, "utf8")));
 }
 
 if (import.meta.main) {

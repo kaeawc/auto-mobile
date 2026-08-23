@@ -11,7 +11,6 @@ import { logger } from "../../utils/logger";
  * (preferred) or hardware home button keyevent (fallback).
  */
 export class HomeScreen extends BaseVisualChange {
-
   constructor(device: BootedDevice, adb: AdbClient | null = null) {
     super(device, adb);
     this.device = device;
@@ -36,15 +35,15 @@ export class HomeScreen extends BaseVisualChange {
 
         return {
           success: true,
-          navigationMethod: "hardware"
+          navigationMethod: "hardware",
         };
       },
       {
         changeExpected: true,
         timeoutMs: 5000,
         progress,
-        perf
-      }
+        perf,
+      },
     );
   }
 

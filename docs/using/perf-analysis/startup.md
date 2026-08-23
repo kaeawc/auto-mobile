@@ -13,8 +13,8 @@ Make sure to read [the overview guide for performance analysis](index.md).
 > Take a snapshot of the currently running <emulator\simulator\> that capture <app-name\>. Spin up 3 different devices using that snapshot with low, standard, and high memory. Run cold and warm boot app startup tests.
 
 ??? example "See demo: Deep link startup"
-    ![App startup via deep link demo](../../img/deeplink-startup.gif)
-    *Demo: An AI agent launching a test app via deepLink to measure startup time to first frame rendered and UI stable.*
+![App startup via deep link demo](../../img/deeplink-startup.gif)
+_Demo: An AI agent launching a test app via deepLink to measure startup time to first frame rendered and UI stable._
 
 **See Also**
 

@@ -4,11 +4,7 @@
 
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { sendCommand } from "../DeviceServiceUtils";
-import type {
-  HighlightBounds,
-  HighlightOperationResult,
-  HighlightShape,
-} from "../../../models";
+import type { HighlightBounds, HighlightOperationResult, HighlightShape } from "../../../models";
 import type { DelegateContext } from "./types";
 
 export class CtrlProxyHighlights {
@@ -22,7 +18,7 @@ export class CtrlProxyHighlights {
     id: string,
     shape: HighlightShape,
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<HighlightOperationResult> {
     return sendCommand<HighlightOperationResult>(this.context, {
       idPrefix: "highlight",
@@ -39,7 +35,7 @@ export class CtrlProxyHighlights {
         success: false,
         error: "Not connected to CtrlProxy",
       }),
-      timeoutError: timeout => ({
+      timeoutError: (timeout) => ({
         success: false,
         error: `Highlight request timeout after ${timeout}ms`,
       }),
@@ -57,12 +53,14 @@ export class CtrlProxyHighlights {
         y: Math.round(bounds.y),
         width: Math.round(bounds.width),
         height: Math.round(bounds.height),
-        sourceWidth: bounds.sourceWidth === null || bounds.sourceWidth === undefined
-          ? bounds.sourceWidth
-          : Math.round(bounds.sourceWidth),
-        sourceHeight: bounds.sourceHeight === null || bounds.sourceHeight === undefined
-          ? bounds.sourceHeight
-          : Math.round(bounds.sourceHeight),
+        sourceWidth:
+          bounds.sourceWidth === null || bounds.sourceWidth === undefined
+            ? bounds.sourceWidth
+            : Math.round(bounds.sourceWidth),
+        sourceHeight:
+          bounds.sourceHeight === null || bounds.sourceHeight === undefined
+            ? bounds.sourceHeight
+            : Math.round(bounds.sourceHeight),
       };
     };
 

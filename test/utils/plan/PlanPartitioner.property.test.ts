@@ -12,28 +12,32 @@ const deviceLabelChar = fc.constantFrom("a", "b", "c", "d", "1", "2");
 const deviceLabel = fc.string({ unit: deviceLabelChar, minLength: 1, maxLength: 3 });
 const deviceLabels = fc.uniqueArray(deviceLabel, { minLength: 2, maxLength: 4 });
 
-const toolName = fc.string({ unit: fc.constantFrom("a", "o", "L", "n", "k", "1", "T", "p"), maxLength: 16 });
+const toolName = fc.string({
+  unit: fc.constantFrom("a", "o", "L", "n", "k", "1", "T", "p"),
+  maxLength: 16,
+});
 
 const UNKNOWN_DEVICE = "ZZ";
 
 // Devices + steps generated together so every step's params.device is drawn
 // from that same run's device labels (never a dangling reference).
-const planArb = deviceLabels.chain(labels =>
-  fc.array(
-    fc.record({
-      tool: toolName,
-      params: fc.record({ device: fc.constantFrom(...labels) })
-    }),
-    { minLength: 0, maxLength: 30 }
-  ).map(steps => ({ labels, steps: steps as PlanStep[] }))
+const planArb = deviceLabels.chain((labels) =>
+  fc
+    .array(
+      fc.record({
+        tool: toolName,
+        params: fc.record({ device: fc.constantFrom(...labels) }),
+      }),
+      { minLength: 0, maxLength: 30 },
+    )
+    .map((steps) => ({ labels, steps: steps as PlanStep[] })),
 );
 
 // Steps with no params.device at all — used only for the null-return cases,
 // to avoid tripping partition()'s "missing device parameter" throw path.
-const deviceFreeSteps = fc.array(
-  fc.record({ tool: toolName, params: fc.constant({}) }),
-  { maxLength: 30 }
-);
+const deviceFreeSteps = fc.array(fc.record({ tool: toolName, params: fc.constant({}) }), {
+  maxLength: 30,
+});
 
 describe("PlanPartitioner.partition (property-based)", () => {
   test("invariant preservation: timeline has exactly one entry per step", () => {
@@ -43,7 +47,7 @@ describe("PlanPartitioner.partition (property-based)", () => {
         const result = PlanPartitioner.partition(plan)!;
         return result.timeline.length === steps.length;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -58,14 +62,14 @@ describe("PlanPartitioner.partition (property-based)", () => {
           totalTracked += track.length;
         }
 
-        const everyStepInItsTrack = steps.every(step => {
+        const everyStepInItsTrack = steps.every((step) => {
           const track = result.deviceTracks.get(step.params.device);
-          return track !== undefined && track.some(tracked => tracked.step === step);
+          return track !== undefined && track.some((tracked) => tracked.step === step);
         });
 
         return totalTracked === steps.length && everyStepInItsTrack;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -75,7 +79,7 @@ describe("PlanPartitioner.partition (property-based)", () => {
         const plan: Plan = { name: "p", devices: labels, steps };
         const result = PlanPartitioner.partition(plan)!;
 
-        return labels.every(label => {
+        return labels.every((label) => {
           const track = result.deviceTracks.get(label) ?? [];
           return track.every((entry, i) => {
             if (entry.trackIndex !== i) {
@@ -85,17 +89,21 @@ describe("PlanPartitioner.partition (property-based)", () => {
           });
         });
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
   test("returns null when devices is undefined or empty", () => {
     fc.assert(
-      fc.property(fc.oneof(fc.constant(undefined), fc.constant([])), deviceFreeSteps, (devices, steps) => {
-        const plan: Plan = { name: "p", devices, steps };
-        return PlanPartitioner.partition(plan) === null;
-      }),
-      RUN_OPTIONS
+      fc.property(
+        fc.oneof(fc.constant(undefined), fc.constant([])),
+        deviceFreeSteps,
+        (devices, steps) => {
+          const plan: Plan = { name: "p", devices, steps };
+          return PlanPartitioner.partition(plan) === null;
+        },
+      ),
+      RUN_OPTIONS,
     );
   });
 
@@ -109,15 +117,15 @@ describe("PlanPartitioner.partition (property-based)", () => {
           const badIndex = seedIndex % tools.length;
           const steps: PlanStep[] = tools.map((tool, i) => ({
             tool,
-            params: { device: i === badIndex ? UNKNOWN_DEVICE : labels[i % labels.length] }
+            params: { device: i === badIndex ? UNKNOWN_DEVICE : labels[i % labels.length] },
           }));
           const plan: Plan = { name: "p", devices: labels, steps };
 
           expect(() => PlanPartitioner.partition(plan)).toThrow();
           return true;
-        }
+        },
       ),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 });

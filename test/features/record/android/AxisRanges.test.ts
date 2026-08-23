@@ -7,7 +7,9 @@ import {
 import { FakeAdbClient } from "../../../fakes/FakeAdbClient";
 
 /** Full axis+display description accepted by buildScaler. */
-function ranges(overrides: Partial<Parameters<typeof buildScaler>[0]> = {}): Parameters<typeof buildScaler>[0] {
+function ranges(
+  overrides: Partial<Parameters<typeof buildScaler>[0]> = {},
+): Parameters<typeof buildScaler>[0] {
   return {
     xMin: 0,
     xMax: 4095,

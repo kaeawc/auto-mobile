@@ -7,7 +7,11 @@ export interface RegisteredTool {
   name: string;
   description: string;
   schema: any;
-  handler: (args: any, progress?: (progress: number, total?: number, message?: string) => Promise<void>, signal?: AbortSignal) => Promise<any>;
+  handler: (
+    args: any,
+    progress?: (progress: number, total?: number, message?: string) => Promise<void>,
+    signal?: AbortSignal,
+  ) => Promise<any>;
   supportsProgress?: boolean;
   requiresDevice?: boolean;
 }
@@ -47,7 +51,7 @@ export interface ToolRegistry {
     description: string,
     schema: any,
     handler: (args: any) => Promise<any>,
-    options?: ToolRegistrationOptions
+    options?: ToolRegistrationOptions,
   ): void;
 }
 
@@ -57,25 +61,27 @@ export interface ToolRegistry {
 export class DefaultToolRegistry implements ToolRegistry {
   getTool(name: string) {
     const tool = ToolRegistryImpl.getTool(name);
-    if (!tool) {return undefined;}
+    if (!tool) {
+      return undefined;
+    }
     return {
       name: tool.name,
       description: tool.description,
       schema: tool.schema,
       handler: tool.handler,
       supportsProgress: tool.supportsProgress,
-      requiresDevice: tool.requiresDevice
+      requiresDevice: tool.requiresDevice,
     };
   }
 
   getTools() {
-    return ToolRegistryImpl.getAllTools().map(tool => ({
+    return ToolRegistryImpl.getAllTools().map((tool) => ({
       name: tool.name,
       description: tool.description,
       schema: tool.schema,
       handler: tool.handler,
       supportsProgress: tool.supportsProgress,
-      requiresDevice: tool.requiresDevice
+      requiresDevice: tool.requiresDevice,
     }));
   }
 
@@ -84,7 +90,7 @@ export class DefaultToolRegistry implements ToolRegistry {
     description: string,
     schema: any,
     handler: (args: any) => Promise<any>,
-    options?: ToolRegistrationOptions
+    options?: ToolRegistrationOptions,
   ): void {
     ToolRegistryImpl.register(name, description, schema, handler, options);
   }

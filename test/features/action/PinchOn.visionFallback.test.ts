@@ -18,14 +18,14 @@ const enabledVisionConfig: VisionFallbackConfig = {
   confidenceThreshold: "high",
   maxCostUsd: 1.0,
   cacheResults: false,
-  cacheTtlMinutes: 60
+  cacheTtlMinutes: 60,
 };
 
 describe("PinchOn vision fallback", () => {
   const device: BootedDevice = {
     deviceId: "test-device",
     platform: "android",
-    name: "Test Device"
+    name: "Test Device",
   };
 
   let fakeObserveScreen: FakeObserveScreen;
@@ -39,14 +39,14 @@ describe("PinchOn vision fallback", () => {
   const createHierarchy = (): ViewHierarchyResult => ({
     hierarchy: { node: [] },
     packageName: "com.test.app",
-    updatedAt: Date.now()
+    updatedAt: Date.now(),
   });
 
   const createObserveResult = (): ObserveResult => ({
     updatedAt: Date.now(),
     screenSize: { width: 1080, height: 1920 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    viewHierarchy: createHierarchy()
+    viewHierarchy: createHierarchy(),
   });
 
   beforeEach(() => {
@@ -60,9 +60,11 @@ describe("PinchOn vision fallback", () => {
     fakeObserveScreen.setObserveResult(() => createObserveResult());
 
     managerSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
-      isAvailable: async () => true
+      isAvailable: async () => true,
     } as any);
-    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeCtrlProxy as any);
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+      fakeCtrlProxy as any,
+    );
   });
 
   afterEach(() => {
@@ -74,7 +76,7 @@ describe("PinchOn vision fallback", () => {
     const pinchOn = new PinchOn(device, null, {
       visionConfig: enabledVisionConfig,
       screenshotCapturer: capturer,
-      visionAnalyzer: analyzer
+      visionAnalyzer: analyzer,
     });
     (pinchOn as any).observeScreen = fakeObserveScreen;
     (pinchOn as any).timer = fakeTimer;
@@ -91,18 +93,18 @@ describe("PinchOn vision fallback", () => {
       found: false,
       confidence: "high",
       navigationSteps: [
-        { action: "scroll", direction: "down", description: "Scroll to reveal the map container" }
+        { action: "scroll", direction: "down", description: "Scroll to reveal the map container" },
       ],
       costUsd: 0.002,
       durationMs: 50,
       screenshotPath: "/screenshot.png",
-      provider: "claude"
+      provider: "claude",
     });
 
     const pinchOn = createPinchOn(capturer, analyzer);
     const result = await pinchOn.execute({
       direction: "in",
-      container: { elementId: "com.app:id/missing_map" }
+      container: { elementId: "com.app:id/missing_map" },
     });
 
     expect(result.success).toBe(false);
@@ -118,18 +120,23 @@ describe("PinchOn vision fallback", () => {
       found: false,
       confidence: "medium",
       alternativeSelectors: [
-        { type: "resourceId", value: "com.app:id/map_view", confidence: 0.85, reasoning: "Map element visible" }
+        {
+          type: "resourceId",
+          value: "com.app:id/map_view",
+          confidence: 0.85,
+          reasoning: "Map element visible",
+        },
       ],
       costUsd: 0.001,
       durationMs: 30,
       screenshotPath: "/screenshot.png",
-      provider: "claude"
+      provider: "claude",
     });
 
     const pinchOn = createPinchOn(capturer, analyzer);
     const result = await pinchOn.execute({
       direction: "out",
-      container: { text: "Missing Map" }
+      container: { text: "Missing Map" },
     });
 
     expect(result.success).toBe(false);
@@ -145,7 +152,7 @@ describe("PinchOn vision fallback", () => {
     const pinchOn = new PinchOn(device, null, {
       visionConfig: { ...enabledVisionConfig, enabled: false },
       screenshotCapturer: capturer,
-      visionAnalyzer: analyzer
+      visionAnalyzer: analyzer,
     });
     (pinchOn as any).observeScreen = fakeObserveScreen;
     (pinchOn as any).timer = fakeTimer;
@@ -154,7 +161,7 @@ describe("PinchOn vision fallback", () => {
 
     const result = await pinchOn.execute({
       direction: "in",
-      container: { elementId: "com.app:id/missing" }
+      container: { elementId: "com.app:id/missing" },
     });
 
     expect(result.success).toBe(false);
@@ -188,7 +195,7 @@ describe("PinchOn vision fallback", () => {
     const pinchOn = createPinchOn(capturer, analyzer);
     await pinchOn.execute({
       direction: "in",
-      container: { elementId: "com.app:id/my_container" }
+      container: { elementId: "com.app:id/my_container" },
     });
 
     const calls = analyzer.getCalls();

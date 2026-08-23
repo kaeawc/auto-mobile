@@ -38,7 +38,7 @@ export interface DaemonHealthReportOptions {
  */
 export async function getDaemonHealthReport(
   timer: Timer = defaultTimer,
-  options: DaemonHealthReportOptions = {}
+  options: DaemonHealthReportOptions = {},
 ): Promise<DaemonHealthReport> {
   const socketPath = options.socketPath ?? SOCKET_PATH;
   const pidFilePath = options.pidFilePath ?? PID_FILE_PATH;
@@ -65,7 +65,9 @@ export async function getDaemonHealthReport(
   report.pidFileExists = existsSync(pidFilePath);
   if (!report.pidFileExists) {
     if (report.socketExists) {
-      report.recommendations.push("Socket exists but PID file missing. Daemon may be in bad state.");
+      report.recommendations.push(
+        "Socket exists but PID file missing. Daemon may be in bad state.",
+      );
     }
   } else {
     try {
@@ -87,7 +89,7 @@ export async function getDaemonHealthReport(
       } catch (error) {
         report.recommendations.push(
           `PID file references process ${pidData.pid} which is not running. ` +
-          `Daemon may have crashed. Stale PID file should be cleaned up.`
+            `Daemon may have crashed. Stale PID file should be cleaned up.`,
         );
       }
     } catch (error) {
@@ -106,18 +108,18 @@ export async function getDaemonHealthReport(
       if (!available) {
         report.recommendations.push(
           "Socket file exists, but socket is not responding. " +
-          "Daemon may be stuck or unresponsive."
+            "Daemon may be stuck or unresponsive.",
         );
       } else if (!report.daemonRunning) {
         report.daemonRunning = true;
         report.recommendations.push(
-          "Daemon socket is responsive, but PID bookkeeping is stale or missing."
+          "Daemon socket is responsive, but PID bookkeeping is stale or missing.",
         );
       }
     } catch (error) {
       report.lastError = errorMessage(error);
       report.recommendations.push(
-        "Socket connection test failed. Daemon may be unresponsive or socket may be corrupted."
+        "Socket connection test failed. Daemon may be unresponsive or socket may be corrupted.",
       );
     }
   }
@@ -127,7 +129,9 @@ export async function getDaemonHealthReport(
     if (report.daemonRunning && report.socketConnectable) {
       report.recommendations.push("Daemon is healthy and responsive.");
     } else if (!report.daemonRunning && !report.socketExists && !report.pidFileExists) {
-      report.recommendations.push(`Daemon is not running. Start it with: bunx ${resolveDaemonInstallSpecifier()} --daemon start`);
+      report.recommendations.push(
+        `Daemon is not running. Start it with: bunx ${resolveDaemonInstallSpecifier()} --daemon start`,
+      );
     }
   }
 
@@ -175,7 +179,7 @@ export function formatHealthReport(report: DaemonHealthReport): string {
   }
 
   lines.push("", "Recommendations:");
-  lines.push(...report.recommendations.map(rec => `  • ${rec}`));
+  lines.push(...report.recommendations.map((rec) => `  • ${rec}`));
 
   lines.push("", "File Locations:");
   lines.push(`  Socket: ${SOCKET_PATH}`);
@@ -203,7 +207,7 @@ export interface SocketDiagnostics {
  */
 export async function runSocketDiagnostics(
   timer: Timer = defaultTimer,
-  options: DaemonHealthReportOptions = {}
+  options: DaemonHealthReportOptions = {},
 ): Promise<SocketDiagnostics> {
   const socketPath = options.socketPath ?? SOCKET_PATH;
   const diagnostics: SocketDiagnostics = {
@@ -271,7 +275,7 @@ export function formatSocketDiagnostics(diag: SocketDiagnostics): string {
 
   if (diag.issues.length > 0) {
     lines.push("", "Issues Found:");
-    lines.push(...diag.issues.map(issue => `  ⚠ ${issue}`));
+    lines.push(...diag.issues.map((issue) => `  ⚠ ${issue}`));
   }
 
   lines.push("", "Socket Path:", `  ${SOCKET_PATH}`);

@@ -29,7 +29,10 @@ export interface ToolResponseFormatter {
       text: string;
     }>;
   };
-  createImageToolResponse(base64Data: string, mimeType: string): {
+  createImageToolResponse(
+    base64Data: string,
+    mimeType: string,
+  ): {
     content: Array<{
       type: "image";
       data: string;
@@ -57,9 +60,9 @@ export class DefaultToolResponseFormatter implements ToolResponseFormatter {
       content: [
         {
           type: "text",
-          text: stringifyToolResponse(content)
-        }
-      ]
+          text: stringifyToolResponse(content),
+        },
+      ],
     };
   }
 
@@ -69,7 +72,10 @@ export class DefaultToolResponseFormatter implements ToolResponseFormatter {
    * @param mimeType The MIME type of the image (e.g., "image/png", "image/webp")
    * @returns A properly formatted tool response object
    */
-  createImageToolResponse(base64Data: string, mimeType: string): {
+  createImageToolResponse(
+    base64Data: string,
+    mimeType: string,
+  ): {
     content: Array<{
       type: "image";
       data: string;
@@ -81,15 +87,17 @@ export class DefaultToolResponseFormatter implements ToolResponseFormatter {
         {
           type: "image",
           data: base64Data,
-          mimeType: mimeType
-        }
-      ]
+          mimeType: mimeType,
+        },
+      ],
     };
   }
 
   // Static convenience methods for backward compatibility
-  static createJSONToolResponse = (content: any) => new DefaultToolResponseFormatter().createJSONToolResponse(content);
-  static createImageToolResponse = (base64Data: string, mimeType: string) => new DefaultToolResponseFormatter().createImageToolResponse(base64Data, mimeType);
+  static createJSONToolResponse = (content: any) =>
+    new DefaultToolResponseFormatter().createJSONToolResponse(content);
+  static createImageToolResponse = (base64Data: string, mimeType: string) =>
+    new DefaultToolResponseFormatter().createImageToolResponse(base64Data, mimeType);
 }
 
 // Export convenience functions for backward compatibility
@@ -123,10 +131,10 @@ export const createStructuredToolResponse = <T>(content: T): StructuredToolRespo
     content: [
       {
         type: "text",
-        text: stringifyToolResponse(content)
-      }
+        text: stringifyToolResponse(content),
+      },
     ],
-    structuredContent: content
+    structuredContent: content,
   };
   if (content && typeof content === "object") {
     if ("success" in content) {
@@ -154,7 +162,7 @@ export const createStructuredToolResponse = <T>(content: T): StructuredToolRespo
  * @param response The tool-call envelope (or anything envelope-shaped).
  */
 export const getStructuredPayload = <T = Record<string, unknown>>(
-  response: { structuredContent?: unknown } | null | undefined
+  response: { structuredContent?: unknown } | null | undefined,
 ): T | undefined => {
   const structuredContent = response?.structuredContent;
   if (structuredContent && typeof structuredContent === "object") {
@@ -197,7 +205,7 @@ export const getStructuredPayload = <T = Record<string, unknown>>(
  */
 export const getStructuredField = <TPayload, K extends keyof TPayload & string>(
   response: StructuredToolResponse<TPayload> | null | undefined,
-  key: K
+  key: K,
 ): TPayload[K] | undefined => {
   const structuredContent = response?.structuredContent;
   if (structuredContent && typeof structuredContent === "object") {

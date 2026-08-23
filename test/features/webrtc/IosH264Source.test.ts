@@ -30,7 +30,11 @@ import {
 import { IOSSimulatorCaptureHelperPool } from "../../../src/features/screen-stream/IOSSimulatorCaptureHelperPool";
 import { WEBRTC_IOS_SIMULATOR_FPS_DEFAULT } from "../../../src/features/webrtc/webrtcStreamingConfig";
 import { ENCODED_VIDEO_CAPABILITY } from "../../../src/features/screen-stream";
-import type { CaptureTarget, DecodedEncodedVideo, DecodedFrame } from "../../../src/features/screen-stream";
+import type {
+  CaptureTarget,
+  DecodedEncodedVideo,
+  DecodedFrame,
+} from "../../../src/features/screen-stream";
 
 const IOS_DEVICE: BootedDevice = {
   deviceId: "00008140-001A2B3C0AE2401E",
@@ -91,7 +95,10 @@ class FakeFrameCaptureHelper extends EventEmitter implements IosFrameCaptureHelp
   }
 
   emitMalformed(reason: string): void {
-    this.emit("malformed", { reason, header: { width: 0, height: 0, bytesPerRow: 0, timestampMs: 0 } });
+    this.emit("malformed", {
+      reason,
+      header: { width: 0, height: 0, bytesPerRow: 0, timestampMs: 0 },
+    });
   }
 
   emitExit(code: number | null, signal: NodeJS.Signals | null = null): void {
@@ -110,7 +117,7 @@ class FakeFrameCaptureHelper extends EventEmitter implements IosFrameCaptureHelp
 function encodedRecord(
   payload: number[],
   keyframe = true,
-  presentationTimestampMs = 1
+  presentationTimestampMs = 1,
 ): DecodedEncodedVideo {
   return { keyframe, presentationTimestampMs, payload: Buffer.from(payload) };
 }
@@ -122,7 +129,7 @@ class DelayedStopFrameCaptureHelper extends FakeFrameCaptureHelper {
 
   override async stop(): Promise<null> {
     this.stopped = true;
-    await new Promise<void>(resolve => {
+    await new Promise<void>((resolve) => {
       this.resolveStop = resolve;
     });
     this.stopFinished = true;
@@ -149,12 +156,7 @@ class BackpressuredWritable extends EventEmitter {
   }
 }
 
-function frame(
-  width: number,
-  height: number,
-  fill: number,
-  bytesPerRow = width * 4
-): DecodedFrame {
+function frame(width: number, height: number, fill: number, bytesPerRow = width * 4): DecodedFrame {
   return {
     header: {
       width,
@@ -167,14 +169,11 @@ function frame(
 }
 
 function flush(): Promise<void> {
-  return new Promise(resolve => setImmediate(resolve));
+  return new Promise((resolve) => setImmediate(resolve));
 }
 
 function emitIdr(encoder: FakeChildProcess): void {
-  encoder.stdout.push(Buffer.from([
-    0, 0, 0, 1, 0x65, 0x80,
-    0, 0, 0, 1, 0x41, 0x80,
-  ]));
+  encoder.stdout.push(Buffer.from([0, 0, 0, 1, 0x65, 0x80, 0, 0, 0, 1, 0x41, 0x80]));
 }
 
 function emitTerminalIdr(encoder: FakeChildProcess): void {
@@ -184,7 +183,7 @@ function emitTerminalIdr(encoder: FakeChildProcess): void {
 async function startWithFrame(
   source: IosH264Source,
   helper: FakeFrameCaptureHelper,
-  firstFrame: DecodedFrame
+  firstFrame: DecodedFrame,
 ): Promise<void> {
   const started = source.start();
   await flush();
@@ -194,7 +193,7 @@ async function startWithFrame(
 
 function createHarness(
   device: BootedDevice = IOS_DEVICE,
-  overrides: Partial<ConstructorParameters<typeof IosH264Source>[0]> = {}
+  overrides: Partial<ConstructorParameters<typeof IosH264Source>[0]> = {},
 ) {
   const helper = new FakeFrameCaptureHelper();
   const encoder = new FakeChildProcess();
@@ -207,9 +206,9 @@ function createHarness(
     device,
     helperPath: FAKE_HELPER_PATH,
     helperPathExists: fakeHelperPathExists,
-    onData: chunk => chunks.push(chunk),
-    onError: error => errors.push(error),
-    createHelper: options => {
+    onData: (chunk) => chunks.push(chunk),
+    onError: (error) => errors.push(error),
+    createHelper: (options) => {
       helperTargets.push(options.target);
       return helper;
     },
@@ -229,7 +228,9 @@ function createHarness(
   return { source, helper, encoder, helperTargets, encoderSpawns, chunks, errors };
 }
 
-function createHarnessWithOverrides(options: Partial<ConstructorParameters<typeof IosH264Source>[0]>) {
+function createHarnessWithOverrides(
+  options: Partial<ConstructorParameters<typeof IosH264Source>[0]>,
+) {
   const helper = new FakeFrameCaptureHelper();
   const encoder = new FakeChildProcess();
   const encoderSpawns: Array<{ command: string; args: string[] }> = [];
@@ -256,7 +257,7 @@ function createHarnessWithOverrides(options: Partial<ConstructorParameters<typeo
 // single encoder the other harnesses share.
 function createRestartHarness(
   overrides: Partial<ConstructorParameters<typeof IosH264Source>[0]> = {},
-  configureEncoder?: (encoder: FakeChildProcess) => void
+  configureEncoder?: (encoder: FakeChildProcess) => void,
 ) {
   const helper = new FakeFrameCaptureHelper();
   const encoders: FakeChildProcess[] = [];
@@ -267,8 +268,8 @@ function createRestartHarness(
     device: IOS_DEVICE,
     helperPath: FAKE_HELPER_PATH,
     helperPathExists: fakeHelperPathExists,
-    onData: chunk => chunks.push(chunk),
-    onError: error => errors.push(error),
+    onData: (chunk) => chunks.push(chunk),
+    onError: (error) => errors.push(error),
     createHelper: () => helper,
     spawner: (command, args) => {
       encoderSpawns.push({ command, args });
@@ -290,7 +291,7 @@ function createRestartHarness(
 // helper/encoder and establishes new ones) is observable as additional
 // helper/encoder instances rather than re-listening on a shared emitter.
 function createReconnectHarness(
-  overrides: Partial<ConstructorParameters<typeof IosH264Source>[0]> = {}
+  overrides: Partial<ConstructorParameters<typeof IosH264Source>[0]> = {},
 ) {
   const helpers: FakeFrameCaptureHelper[] = [];
   const encoders: FakeChildProcess[] = [];
@@ -301,8 +302,8 @@ function createReconnectHarness(
     device: IOS_DEVICE,
     helperPath: FAKE_HELPER_PATH,
     helperPathExists: fakeHelperPathExists,
-    onData: chunk => chunks.push(chunk),
-    onError: error => errors.push(error),
+    onData: (chunk) => chunks.push(chunk),
+    onError: (error) => errors.push(error),
     createHelper: () => {
       const helper = new FakeFrameCaptureHelper();
       helpers.push(helper);
@@ -327,7 +328,7 @@ function createReconnectHarness(
 // window list, capturing the resolved capture target.
 function createResolverHarness(
   deviceName: string,
-  windows: Array<{ windowID: number; title: string }>
+  windows: Array<{ windowID: number; title: string }>,
 ) {
   const helper = new FakeFrameCaptureHelper();
   const encoder = new FakeChildProcess();
@@ -337,7 +338,7 @@ function createResolverHarness(
     helperPath: FAKE_HELPER_PATH,
     helperPathExists: fakeHelperPathExists,
     onData: () => {},
-    createHelper: options => {
+    createHelper: (options) => {
       helperTargets.push(options.target);
       return helper;
     },
@@ -347,7 +348,7 @@ function createResolverHarness(
       if (command === FAKE_HELPER_PATH && args.includes("--list-simulators")) {
         return {
           stdout: JSON.stringify({
-            windows: windows.map(window => ({
+            windows: windows.map((window) => ({
               ...window,
               applicationName: "Simulator",
               bundleIdentifier: "com.apple.iphonesimulator",
@@ -411,7 +412,7 @@ describe("IosH264Source", () => {
     // No scale filter at all: the frame is already even and inside the Level 4.2
     // macroblock budget, so upscaling would only cost encoder time.
     expect(encoderSpawns[0].args).not.toContain("-vf");
-    expect(encoderSpawns[0].args.some(arg => arg.startsWith("scale="))).toBe(false);
+    expect(encoderSpawns[0].args.some((arg) => arg.startsWith("scale="))).toBe(false);
   });
 
   test("downscales an oversized capture into the Level 4.2 macroblock budget", async () => {
@@ -431,7 +432,7 @@ describe("IosH264Source", () => {
     expect(width % 2).toBe(0);
     expect(height % 2).toBe(0);
     expect(h264MacroblocksPerFrame(width, height)).toBeLessThanOrEqual(
-      WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME
+      WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME,
     );
     // 16:9 in, 16:9 out (within one even-pixel rounding step).
     expect(Math.abs(width / height - 3840 / 2160)).toBeLessThan(0.02);
@@ -484,7 +485,7 @@ describe("IosH264Source", () => {
 
     const error = await source.start().then(
       () => null,
-      reason => reason as ScreenRecordingPermissionError
+      (reason) => reason as ScreenRecordingPermissionError,
     );
     expect(error).toBeInstanceOf(ScreenRecordingPermissionError);
     expect(error?.approvalTarget).toBe("AutoMobile");
@@ -519,7 +520,7 @@ describe("IosH264Source", () => {
 
     const error = await source.start().then(
       () => null,
-      reason => reason as ScreenRecordingPermissionError
+      (reason) => reason as ScreenRecordingPermissionError,
     );
     expect(error).toBeInstanceOf(ScreenRecordingPermissionError);
     expect(error?.approvalTarget).toBe("AutoMobile");
@@ -605,7 +606,7 @@ describe("IosH264Source", () => {
 
     const started = source.start().then(
       () => null,
-      error => error as Error
+      (error) => error as Error,
     );
     await flush();
     timer.advanceTime(1);
@@ -626,7 +627,7 @@ describe("IosH264Source", () => {
     const helpers: FakeFrameCaptureHelper[] = [];
     const helperTargets: CaptureTarget[] = [];
     const pool = new IOSSimulatorCaptureHelperPool({
-      createHelper: options => {
+      createHelper: (options) => {
         helperTargets.push(options.target);
         const helper = new FakeFrameCaptureHelper();
         helpers.push(helper);
@@ -651,7 +652,7 @@ describe("IosH264Source", () => {
 
     const started = source.start().then(
       () => null,
-      error => error as Error
+      (error) => error as Error,
     );
     await flush();
     timer.advanceTime(1);
@@ -679,7 +680,7 @@ describe("IosH264Source", () => {
     const helpers: FakeFrameCaptureHelper[] = [];
     const helperTargets: CaptureTarget[] = [];
     const pool = new IOSSimulatorCaptureHelperPool({
-      createHelper: options => {
+      createHelper: (options) => {
         helperTargets.push(options.target);
         const helper = new FakeFrameCaptureHelper();
         helpers.push(helper);
@@ -706,7 +707,7 @@ describe("IosH264Source", () => {
 
     const started = source.start().then(
       () => null,
-      error => error as Error
+      (error) => error as Error,
     );
     await flush();
     timer.advanceTime(1);
@@ -751,23 +752,23 @@ describe("IosH264Source", () => {
 
     const started = source.start().then(
       () => null,
-      error => error as Error
+      (error) => error as Error,
     );
     await flush();
     helpers[0].emitStderr(
-      "warn: no frames received within 10s. Grant 'Screen Recording' to your terminal/IDE."
+      "warn: no frames received within 10s. Grant 'Screen Recording' to your terminal/IDE.",
     );
     await flush();
 
     expect(helpers).toHaveLength(2);
     helpers[1].emitStderr(
-      "warn: no frames received within 10s. Grant 'Screen Recording' to your terminal/IDE."
+      "warn: no frames received within 10s. Grant 'Screen Recording' to your terminal/IDE.",
     );
 
     const error = await started;
     expect(error).toBeInstanceOf(ScreenRecordingPermissionError);
     expect(error?.message).toBe(
-      "Screen Recording permission is required to discover and observe iOS Simulator windows."
+      "Screen Recording permission is required to discover and observe iOS Simulator windows.",
     );
     expect(helpers[0].stopped).toBe(true);
     expect(helpers[1].stopped).toBe(true);
@@ -797,12 +798,12 @@ describe("IosH264Source", () => {
 
     const started = source.start().then(
       () => null,
-      error => error as Error
+      (error) => error as Error,
     );
     await flush();
     helpers[0].stopError = new Error("helper stop failed");
     helpers[0].emitStderr(
-      "warn: no frames received within 10s. Grant 'Screen Recording' to your terminal/IDE."
+      "warn: no frames received within 10s. Grant 'Screen Recording' to your terminal/IDE.",
     );
 
     try {
@@ -812,7 +813,7 @@ describe("IosH264Source", () => {
       const error = await started;
       expect(error).toBeInstanceOf(Error);
       expect(error?.message).toBe(
-        "Failed to invalidate silent iOS Simulator capture: helper stop failed"
+        "Failed to invalidate silent iOS Simulator capture: helper stop failed",
       );
     } finally {
       await source.stop();
@@ -846,7 +847,7 @@ describe("IosH264Source", () => {
 
     const started = source.start().then(
       () => null,
-      error => error as Error
+      (error) => error as Error,
     );
     await flush();
     timer.advanceTime(1);
@@ -936,7 +937,7 @@ describe("IosH264Source", () => {
     timer.advanceTime(1);
 
     await expect(started).rejects.toThrow(
-      "Failed to invalidate silent iOS Simulator capture: helper stop failed"
+      "Failed to invalidate silent iOS Simulator capture: helper stop failed",
     );
     expect(helpers).toHaveLength(1);
     await pool.shutdown();
@@ -965,21 +966,23 @@ describe("IosH264Source", () => {
 
     const started = source.start().then(
       () => null,
-      error => error as Error
+      (error) => error as Error,
     );
     await flush();
     helpers[0].emitPermission("screen-recording");
     helpers[0].emit("permissionTarget", "Custom Capture Helper");
     helpers[0].emitStderr(
-      "error: Screen Recording permission is required. Grant Screen Recording to your terminal/IDE."
+      "error: Screen Recording permission is required. Grant Screen Recording to your terminal/IDE.",
     );
 
     const error = await started;
     expect(error).toBeInstanceOf(ScreenRecordingPermissionError);
     expect(error?.message).toBe(
-      "Screen Recording permission is required to discover and observe iOS Simulator windows."
+      "Screen Recording permission is required to discover and observe iOS Simulator windows.",
     );
-    expect((error as ScreenRecordingPermissionError | null)?.approvalTarget).toBe("Custom Capture Helper");
+    expect((error as ScreenRecordingPermissionError | null)?.approvalTarget).toBe(
+      "Custom Capture Helper",
+    );
     expect(helpers).toHaveLength(1);
     expect(helpers[0].stopped).toBe(true);
     await pool.shutdown();
@@ -1006,7 +1009,7 @@ describe("IosH264Source", () => {
 
     const started = source.start().then(
       () => null,
-      error => error as Error
+      (error) => error as Error,
     );
     await flush();
     timer.advanceTime(1);
@@ -1035,7 +1038,7 @@ describe("IosH264Source", () => {
 
     const started = source.start().then(
       () => null,
-      error => error as Error
+      (error) => error as Error,
     );
     await flush();
     // The furthest stage reached wins: capture-started is later than the
@@ -1048,7 +1051,7 @@ describe("IosH264Source", () => {
     const error = await started;
     expect(error).toBeInstanceOf(Error);
     expect(error?.message).toBe(
-      "iOS screen capture did not produce a first frame (last stage: capture-started)."
+      "iOS screen capture did not produce a first frame (last stage: capture-started).",
     );
   });
 
@@ -1070,7 +1073,7 @@ describe("IosH264Source", () => {
 
     const started = source.start().then(
       () => null,
-      error => error as Error
+      (error) => error as Error,
     );
     await flush();
     helper.emitReadiness("permission-ready");
@@ -1081,7 +1084,7 @@ describe("IosH264Source", () => {
     expect(error).toBeInstanceOf(Error);
     expect(error?.message).toBe(
       "iOS screen capture did not produce a first frame (last stage: target-resolved). " +
-        "Capture never started after the window resolved (hung start); retry or restart the Simulator."
+        "Capture never started after the window resolved (hung start); retry or restart the Simulator.",
     );
   });
 
@@ -1089,7 +1092,7 @@ describe("IosH264Source", () => {
     const audio: Buffer[] = [];
     const { source, helper, helperTargets } = createHarness(IOS_SIMULATOR, {
       audioEnabled: true,
-      onAudioData: chunk => audio.push(chunk),
+      onAudioData: (chunk) => audio.push(chunk),
     });
 
     const started = source.start();
@@ -1171,7 +1174,7 @@ describe("IosH264Source", () => {
       fps: 15,
       onData: () => {},
       forceRawPipeline: true,
-      createHelper: options => {
+      createHelper: (options) => {
         helperTargets.push(options.target);
         return helper;
       },
@@ -1235,7 +1238,7 @@ describe("IosH264Source", () => {
     const rateIndex = encoderSpawns[0].args.indexOf("-b:v");
     expect(rateIndex).toBeGreaterThanOrEqual(0);
     expect(encoderSpawns[0].args[rateIndex + 1]).toBe(
-      String(defaultIosBitrateBps({ width: 750, height: 1334 }, WEBRTC_IOS_SIMULATOR_FPS_DEFAULT))
+      String(defaultIosBitrateBps({ width: 750, height: 1334 }, WEBRTC_IOS_SIMULATOR_FPS_DEFAULT)),
     );
   });
 
@@ -1248,7 +1251,7 @@ describe("IosH264Source", () => {
     const rateIndex = encoderSpawns[0].args.indexOf("-b:v");
     expect(rateIndex).toBeGreaterThanOrEqual(0);
     expect(encoderSpawns[0].args[rateIndex + 1]).toBe(
-      String(defaultIosBitrateBps(scaled, WEBRTC_IOS_SIMULATOR_FPS_DEFAULT))
+      String(defaultIosBitrateBps(scaled, WEBRTC_IOS_SIMULATOR_FPS_DEFAULT)),
     );
   });
 
@@ -1260,7 +1263,7 @@ describe("IosH264Source", () => {
     const rateIndex = encoderSpawns[0].args.indexOf("-b:v");
     expect(encoderSpawns[0].args[rateIndex + 1]).toBe("1200000");
     expect(encoderSpawns[0].args[rateIndex + 1]).not.toBe(
-      String(defaultIosBitrateBps({ width: 750, height: 1334 }, WEBRTC_IOS_SIMULATOR_FPS_DEFAULT))
+      String(defaultIosBitrateBps({ width: 750, height: 1334 }, WEBRTC_IOS_SIMULATOR_FPS_DEFAULT)),
     );
   });
 
@@ -1305,16 +1308,14 @@ describe("IosH264Source", () => {
     const padded = frame(2, 2, 0);
     padded.header.bytesPerRow = 12;
     padded.pixels = Buffer.from([
-      1, 1, 1, 1, 2, 2, 2, 2, 99, 99, 99, 99,
-      3, 3, 3, 3, 4, 4, 4, 4, 88, 88, 88, 88,
+      1, 1, 1, 1, 2, 2, 2, 2, 99, 99, 99, 99, 3, 3, 3, 3, 4, 4, 4, 4, 88, 88, 88, 88,
     ]);
 
     await startWithFrame(source, helper, padded);
 
-    expect(encoder.getStdinData()).toEqual(Buffer.from([
-      1, 1, 1, 1, 2, 2, 2, 2,
-      3, 3, 3, 3, 4, 4, 4, 4,
-    ]));
+    expect(encoder.getStdinData()).toEqual(
+      Buffer.from([1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4]),
+    );
   });
 
   test("stops helper and encoder", async () => {
@@ -1343,7 +1344,7 @@ describe("IosH264Source", () => {
 
     expect(errors[0].message).toContain("ffmpeg exited");
     expect(errors[0].message).toContain(
-      "cannot create VideoToolbox compression session\nTry a supported frame size"
+      "cannot create VideoToolbox compression session\nTry a supported frame size",
     );
   });
 
@@ -1369,7 +1370,7 @@ describe("IosH264Source", () => {
       helperPath: FAKE_HELPER_PATH,
       helperPathExists: fakeHelperPathExists,
       onData: () => {},
-      onError: error => errors.push(error),
+      onError: (error) => errors.push(error),
       createHelper: () => helper,
       spawner: () => encoder as unknown as ChildProcessWithoutNullStreams,
       commandRunner: successfulCommandRunner,
@@ -1404,7 +1405,7 @@ describe("IosH264Source", () => {
       device: IOS_DEVICE,
       helperPath: FAKE_HELPER_PATH,
       helperPathExists: fakeHelperPathExists,
-      onData: chunk => chunks.push(chunk),
+      onData: (chunk) => chunks.push(chunk),
       createHelper: () => helper,
       spawner: () => encoder as unknown as ChildProcessWithoutNullStreams,
       commandRunner: successfulCommandRunner,
@@ -1441,7 +1442,7 @@ describe("IosH264Source", () => {
     helper.emit("exit", { code: null, signal: "SIGABRT" });
 
     await expect(started).rejects.toThrow(
-      /screen-capture-helper exited \(code=null, signal=SIGABRT\); last stderr: ScreenCaptureKit failed to start capture/
+      /screen-capture-helper exited \(code=null, signal=SIGABRT\); last stderr: ScreenCaptureKit failed to start capture/,
     );
   });
 
@@ -1457,7 +1458,7 @@ describe("IosH264Source", () => {
       firstFrameTimeoutMs: 1,
       timer,
       onData: () => {},
-      onError: error => errors.push(error),
+      onError: (error) => errors.push(error),
       createHelper: () => helper,
       spawner: () => encoder as unknown as ChildProcessWithoutNullStreams,
       commandRunner: successfulCommandRunner,
@@ -1629,7 +1630,7 @@ describe("IosH264Source", () => {
     const started = source.start();
     await flush();
     helper.emitStderr(
-      "warn: no frames received within 2s. Grant 'Screen Recording' to your terminal/IDE."
+      "warn: no frames received within 2s. Grant 'Screen Recording' to your terminal/IDE.",
     );
 
     await expect(started).rejects.toThrow(/Screen Recording permission/);
@@ -1666,7 +1667,9 @@ describe("IosH264Source", () => {
       },
     });
 
-    await expect(source.start()).rejects.toThrow(/No visible iOS Simulator window matched iPhone 16/);
+    await expect(source.start()).rejects.toThrow(
+      /No visible iOS Simulator window matched iPhone 16/,
+    );
     expect(helper.started).toBe(false);
   });
 
@@ -1759,7 +1762,9 @@ describe("IosH264Source", () => {
       { windowID: 2, title: "iPhone 15" },
     ]);
 
-    await expect(source.start()).rejects.toThrow(/Multiple iOS Simulator windows matched iPhone 15/);
+    await expect(source.start()).rejects.toThrow(
+      /Multiple iOS Simulator windows matched iPhone 15/,
+    );
     expect(helper.started).toBe(false);
   });
 
@@ -1794,22 +1799,16 @@ describe("IosH264Source", () => {
 
     stdin.emit("drain");
 
-    expect(stdin.writes).toEqual([
-      Buffer.alloc(4, 0x11),
-      Buffer.alloc(4, 0x33),
-    ]);
+    expect(stdin.writes).toEqual([Buffer.alloc(4, 0x11), Buffer.alloc(4, 0x33)]);
   });
 
   test("discards a retired encoder's queued frame while replaying the last accepted frame", async () => {
     const inputs: BackpressuredWritable[] = [];
-    const { source, helper, encoders } = createRestartHarness(
-      {},
-      encoder => {
-        const input = new BackpressuredWritable();
-        encoder.stdin = input as unknown as Writable;
-        inputs.push(input);
-      }
-    );
+    const { source, helper, encoders } = createRestartHarness({}, (encoder) => {
+      const input = new BackpressuredWritable();
+      encoder.stdin = input as unknown as Writable;
+      inputs.push(input);
+    });
 
     await startWithFrame(source, helper, frame(1, 1, 0x11));
     helper.emitFrame(frame(1, 1, 0x22));
@@ -1832,7 +1831,7 @@ describe("IosH264Source", () => {
   test("reports native, helper, and encoder queue metrics through the source callback", async () => {
     const metrics: ReturnType<IosH264Source["getFrameMetrics"]>[] = [];
     const { source, helper } = createHarness(IOS_DEVICE, {
-      onFrameMetrics: value => metrics.push(value),
+      onFrameMetrics: (value) => metrics.push(value),
     });
     await startWithFrame(source, helper, frame(1, 1, 0x11));
 
@@ -1885,7 +1884,7 @@ describe("IosH264Source", () => {
       helperPath: FAKE_HELPER_PATH,
       helperPathExists: fakeHelperPathExists,
       onData: () => {},
-      onError: error => errors.push(error),
+      onError: (error) => errors.push(error),
       createHelper: () => helpers[helperIndex++],
       spawner: () => encoders[encoderIndex++] as unknown as ChildProcessWithoutNullStreams,
       commandRunner: successfulCommandRunner,
@@ -1931,7 +1930,7 @@ describe("IosH264Source", () => {
     // output is forwarded to the same onData sink.
     helper.emitFrame(frame(2, 2, 0x22));
     expect(encoders[1].getStdinData()).toEqual(
-      Buffer.concat([Buffer.alloc(32, 0x11), Buffer.alloc(16, 0x22)])
+      Buffer.concat([Buffer.alloc(32, 0x11), Buffer.alloc(16, 0x22)]),
     );
     encoders[1].stdout.push(Buffer.from([0, 0, 0, 1, 0x65]));
     await flush();
@@ -1971,12 +1970,14 @@ describe("IosH264Source", () => {
 
   test("escalates the outgoing encoder to SIGKILL when it ignores SIGTERM within the grace window", async () => {
     const timer = new FakeTimer();
-    const { source, helper, encoders } = createRestartHarness({ timer }, encoder => {
+    const { source, helper, encoders } = createRestartHarness({ timer }, (encoder) => {
       // A slow / signal-ignoring h264_videotoolbox never emits "exit" on SIGTERM.
       const signals: NodeJS.Signals[] = [];
       (encoder as unknown as { killSignals: NodeJS.Signals[] }).killSignals = signals;
       encoder.kill = (signal?: NodeJS.Signals | number): boolean => {
-        signals.push((typeof signal === "number" ? "SIGTERM" : signal ?? "SIGTERM") as NodeJS.Signals);
+        signals.push(
+          (typeof signal === "number" ? "SIGTERM" : (signal ?? "SIGTERM")) as NodeJS.Signals,
+        );
         encoder.killed = true;
         return true;
       };
@@ -2003,11 +2004,13 @@ describe("IosH264Source", () => {
 
   test("does not force-kill the outgoing encoder that exits within the grace window", async () => {
     const timer = new FakeTimer();
-    const { source, helper, encoders } = createRestartHarness({ timer }, encoder => {
+    const { source, helper, encoders } = createRestartHarness({ timer }, (encoder) => {
       const signals: NodeJS.Signals[] = [];
       (encoder as unknown as { killSignals: NodeJS.Signals[] }).killSignals = signals;
       encoder.kill = (signal?: NodeJS.Signals | number): boolean => {
-        const name = (typeof signal === "number" ? "SIGTERM" : signal ?? "SIGTERM") as NodeJS.Signals;
+        const name = (
+          typeof signal === "number" ? "SIGTERM" : (signal ?? "SIGTERM")
+        ) as NodeJS.Signals;
         signals.push(name);
         encoder.killed = true;
         if (name === "SIGTERM") {
@@ -2059,12 +2062,11 @@ describe("IosH264Source", () => {
 
     encoders[1].stdout.push(
       Buffer.from([
-        0, 0, 0, 1, 0x67, 0x42, 0xe0, 0x2a,
-        0, 0, 0, 1, 0x68, 0xce, 0x3c, 0x80,
+        0, 0, 0, 1, 0x67, 0x42, 0xe0, 0x2a, 0, 0, 0, 1, 0x68, 0xce, 0x3c, 0x80,
         // The output stream can pause immediately after the IDR, leaving it
         // un-terminated until a later frame arrives.
         0, 0, 0, 1, 0x65, 0x80,
-      ])
+      ]),
     );
     await flush();
 
@@ -2110,7 +2112,9 @@ describe("IosH264Source", () => {
   test("rejects startup when ffmpeg lacks h264_videotoolbox", async () => {
     const { source, helper } = createHarnessWithOverrides({
       commandRunner: async (_command, args) => ({
-        stdout: args.includes("-encoders") ? " V..... libx264 H.264 Encoder\n" : "ffmpeg version 7.1\n",
+        stdout: args.includes("-encoders")
+          ? " V..... libx264 H.264 Encoder\n"
+          : "ffmpeg version 7.1\n",
         stderr: "",
         exitCode: 0,
         signal: null,
@@ -2122,17 +2126,22 @@ describe("IosH264Source", () => {
   });
 
   test("requires an explicit local helper path instead of searching source or package builds", () => {
-    expect(() => resolveIosScreenCaptureHelperPath(undefined, {
-      env: {},
-      exists: () => false,
-    })).toThrow(/No executable screen-capture-helper/);
+    expect(() =>
+      resolveIosScreenCaptureHelperPath(undefined, {
+        env: {},
+        exists: () => false,
+      }),
+    ).toThrow(/No executable screen-capture-helper/);
   });
 
   test("uses an explicit local development helper path", () => {
-    const found = resolveIosScreenCaptureHelperPath("/repo/ios/screen-capture/.build/release/screen-capture-helper", {
-      env: {},
-      exists: candidate => candidate.includes(".build/release"),
-    });
+    const found = resolveIosScreenCaptureHelperPath(
+      "/repo/ios/screen-capture/.build/release/screen-capture-helper",
+      {
+        env: {},
+        exists: (candidate) => candidate.includes(".build/release"),
+      },
+    );
 
     expect(found).toBe("/repo/ios/screen-capture/.build/release/screen-capture-helper");
   });
@@ -2140,7 +2149,7 @@ describe("IosH264Source", () => {
   test("prefers the helper path environment override", () => {
     const found = resolveIosScreenCaptureHelperPath(undefined, {
       env: { [IOS_SCREEN_CAPTURE_HELPER_ENV]: "/custom/helper" },
-      exists: candidate => candidate === "/custom/helper",
+      exists: (candidate) => candidate === "/custom/helper",
     });
 
     expect(found).toBe("/custom/helper");
@@ -2149,7 +2158,7 @@ describe("IosH264Source", () => {
   test("uses legacy helper path environment alias when preferred name is unset", () => {
     const found = resolveIosScreenCaptureHelperPath(undefined, {
       env: { [IOS_SCREEN_CAPTURE_HELPER_ENV_ALIAS]: "/legacy/helper" },
-      exists: candidate => candidate === "/legacy/helper",
+      exists: (candidate) => candidate === "/legacy/helper",
     });
 
     expect(found).toBe("/legacy/helper");
@@ -2170,7 +2179,7 @@ describe("IosH264Source", () => {
         helperPathExists: fakeHelperPathExists,
         onData: () => {},
         createHelper: () => helper,
-        spawner: command => {
+        spawner: (command) => {
           commands.push(command);
           return encoder as unknown as ChildProcessWithoutNullStreams;
         },
@@ -2213,7 +2222,7 @@ describe("IosH264Source", () => {
         helperPathExists: fakeHelperPathExists,
         onData: () => {},
         createHelper: () => helper,
-        spawner: command => {
+        spawner: (command) => {
           commands.push(command);
           return encoder as unknown as ChildProcessWithoutNullStreams;
         },
@@ -2245,7 +2254,7 @@ describe("IosH264Source", () => {
 // capability and emits Annex-B records, so the source becomes a record reader with
 // no ffmpeg subprocess.
 function createEncodedHarness(
-  overrides: Partial<ConstructorParameters<typeof IosH264Source>[0]> = {}
+  overrides: Partial<ConstructorParameters<typeof IosH264Source>[0]> = {},
 ) {
   const helpers: FakeFrameCaptureHelper[] = [];
   const helperTargets: CaptureTarget[] = [];
@@ -2257,10 +2266,10 @@ function createEncodedHarness(
     device: IOS_SIMULATOR,
     helperPath: FAKE_HELPER_PATH,
     helperPathExists: fakeHelperPathExists,
-    onData: chunk => chunks.push(chunk),
-    onError: error => errors.push(error),
+    onData: (chunk) => chunks.push(chunk),
+    onError: (error) => errors.push(error),
     forceRawPipeline: false,
-    createHelper: options => {
+    createHelper: (options) => {
       helperTargets.push(options.target);
       const helper = new FakeFrameCaptureHelper();
       helpers.push(helper);
@@ -2285,7 +2294,7 @@ function createEncodedHarness(
 async function startEncoded(
   source: IosH264Source,
   helpers: FakeFrameCaptureHelper[],
-  firstRecord: DecodedEncodedVideo = encodedRecord([0, 0, 0, 1, 0x65, 0x88])
+  firstRecord: DecodedEncodedVideo = encodedRecord([0, 0, 0, 1, 0x65, 0x88]),
 ): Promise<void> {
   const started = source.start();
   await flush();
@@ -2295,7 +2304,7 @@ async function startEncoded(
 }
 
 function probedEncoders(calls: string[][]): boolean {
-  return calls.some(args => args.includes("-encoders"));
+  return calls.some((args) => args.includes("-encoders"));
 }
 
 describe("IosH264Source encoded path (#4789)", () => {
@@ -2307,7 +2316,7 @@ describe("IosH264Source encoded path (#4789)", () => {
 
     expect(encoderSpawns).toHaveLength(0);
     expect(probedEncoders(commandRunnerCalls)).toBe(false);
-    expect(chunks.map(chunk => [...chunk])).toEqual([
+    expect(chunks.map((chunk) => [...chunk])).toEqual([
       [0, 0, 0, 1, 0x65, 0x88],
       [0, 0, 0, 1, 0x41, 0x9a],
     ]);
@@ -2388,8 +2397,12 @@ describe("IosH264Source encoded path (#4789)", () => {
     helpers[1].emitFrame(frame(4, 4, 0x11));
     await started;
 
-    expect(helperTargets[0].kind === "simulator" ? helperTargets[0].encode : undefined).toBeDefined();
-    expect(helperTargets[1].kind === "simulator" ? helperTargets[1].encode : undefined).toBeUndefined();
+    expect(
+      helperTargets[0].kind === "simulator" ? helperTargets[0].encode : undefined,
+    ).toBeDefined();
+    expect(
+      helperTargets[1].kind === "simulator" ? helperTargets[1].encode : undefined,
+    ).toBeUndefined();
     // ffmpeg is spawned and probed only on the raw fallback.
     expect(encoderSpawns).toHaveLength(1);
     expect(probedEncoders(commandRunnerCalls)).toBe(true);
@@ -2408,7 +2421,9 @@ describe("IosH264Source encoded path (#4789)", () => {
 
     // Exactly one helper, built directly for the raw path with no encode settings.
     expect(helpers).toHaveLength(1);
-    expect(helperTargets[0].kind === "simulator" ? helperTargets[0].encode : undefined).toBeUndefined();
+    expect(
+      helperTargets[0].kind === "simulator" ? helperTargets[0].encode : undefined,
+    ).toBeUndefined();
     expect(encoderSpawns).toHaveLength(1);
     expect(probedEncoders(commandRunnerCalls)).toBe(true);
 
@@ -2427,7 +2442,9 @@ describe("IosH264Source encoded path (#4789)", () => {
       helpers[0].emitFrame(frame(4, 4, 0x11));
       await started;
 
-      expect(helperTargets[0].kind === "simulator" ? helperTargets[0].encode : undefined).toBeUndefined();
+      expect(
+        helperTargets[0].kind === "simulator" ? helperTargets[0].encode : undefined,
+      ).toBeUndefined();
       expect(encoderSpawns).toHaveLength(1);
       await source.stop();
     } finally {
@@ -2453,13 +2470,19 @@ describe("resolveIosEncoderScale", () => {
     expect(scale.width).toBeLessThan(1170);
     expect(scale.height).toBeLessThan(2532);
     expect(h264MacroblocksPerFrame(scale.width, scale.height)).toBeLessThanOrEqual(
-      WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME
+      WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME,
     );
   });
 
   test("rounds odd dimensions down to even without changing the other axis", () => {
-    expect(resolveIosEncoderScale({ width: 801, height: 600 })).toEqual({ width: 800, height: 600 });
-    expect(resolveIosEncoderScale({ width: 800, height: 601 })).toEqual({ width: 800, height: 600 });
+    expect(resolveIosEncoderScale({ width: 801, height: 600 })).toEqual({
+      width: 800,
+      height: 600,
+    });
+    expect(resolveIosEncoderScale({ width: 800, height: 601 })).toEqual({
+      width: 800,
+      height: 600,
+    });
   });
 
   test("never scales up, and always lands inside the macroblock budget", () => {
@@ -2482,7 +2505,7 @@ describe("resolveIosEncoderScale", () => {
       expect(scale.width % 2).toBe(0);
       expect(scale.height % 2).toBe(0);
       expect(h264MacroblocksPerFrame(scale.width, scale.height)).toBeLessThanOrEqual(
-        WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME
+        WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME,
       );
     }
   });
@@ -2497,7 +2520,7 @@ describe("resolveIosEncoderScale", () => {
   test("stays inside the budget for an extreme aspect ratio", () => {
     const scale = resolveIosEncoderScale({ width: 16_000, height: 200 })!;
     expect(h264MacroblocksPerFrame(scale.width, scale.height)).toBeLessThanOrEqual(
-      WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME
+      WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME,
     );
     expect(scale.width).toBeGreaterThan(0);
     expect(scale.height).toBeGreaterThan(0);
@@ -2509,7 +2532,7 @@ describe("defaultIosBitrateBps (#4349)", () => {
     // width * height * fps * bpp, so the target scales with the encoder's real
     // workload rather than a fixed ceiling.
     expect(defaultIosBitrateBps({ width: 1_000, height: 1_000 }, 10)).toBe(
-      Math.round(1_000 * 1_000 * 10 * IOS_WEBRTC_DEFAULT_BITS_PER_PIXEL)
+      Math.round(1_000 * 1_000 * 10 * IOS_WEBRTC_DEFAULT_BITS_PER_PIXEL),
     );
   });
 

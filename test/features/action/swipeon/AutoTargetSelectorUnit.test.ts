@@ -8,7 +8,7 @@ import type { Element, ElementBounds } from "../../../../src/models";
 describe("AutoTargetSelector", () => {
   const selector = new AutoTargetSelector();
 
-  const elementWithBounds = (bounds: ElementBounds): Element => ({ bounds } as Element);
+  const elementWithBounds = (bounds: ElementBounds): Element => ({ bounds }) as Element;
 
   describe("selectAutoTargetScrollable", () => {
     test("returns null when there are no scrollables", () => {
@@ -31,7 +31,11 @@ describe("AutoTargetSelector", () => {
       const small = elementWithBounds({ left: 0, top: 100, right: 400, bottom: 600 });
       const large = elementWithBounds({ left: 0, top: 100, right: 900, bottom: 1500 });
 
-      const result = selector.selectAutoTargetScrollable([fullScreen, small, large], screenBounds, "up");
+      const result = selector.selectAutoTargetScrollable(
+        [fullScreen, small, large],
+        screenBounds,
+        "up",
+      );
       expect(result).toBe(large);
     });
 
@@ -84,7 +88,9 @@ describe("AutoTargetSelector", () => {
     });
 
     test("prefers elementId over text", () => {
-      expect(selector.describeContainer({ elementId: "com.app:id/list", text: "List" })).toBe('elementId="com.app:id/list"');
+      expect(selector.describeContainer({ elementId: "com.app:id/list", text: "List" })).toBe(
+        'elementId="com.app:id/list"',
+      );
     });
 
     test("falls back to text when only text is present", () => {

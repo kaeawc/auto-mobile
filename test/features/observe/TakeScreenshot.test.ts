@@ -9,18 +9,18 @@ import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 
-describe("TakeScreenshot", function() {
-  describe("Unit Tests for Extracted Methods", function() {
+describe("TakeScreenshot", function () {
+  describe("Unit Tests for Extracted Methods", function () {
     let takeScreenshot: TakeScreenshot;
     let fakeAdb: FakeAdbExecutor;
     let mockDevice: BootedDevice;
 
-    beforeEach(function() {
+    beforeEach(function () {
       mockDevice = {
         name: "test-device",
         platform: "android",
         deviceId: "test-device-id",
-        source: "local"
+        source: "local",
       };
 
       // Create a simple fake ADB for unit testing
@@ -29,7 +29,7 @@ describe("TakeScreenshot", function() {
       takeScreenshot = new TakeScreenshot(mockDevice, fakeFactory);
     });
 
-    test("should generate correct screenshot path with png format", function() {
+    test("should generate correct screenshot path with png format", function () {
       const timestamp = 1234567890123;
       const options = { format: "png" as const };
 
@@ -39,7 +39,7 @@ describe("TakeScreenshot", function() {
       expect(result).toMatch(/screenshot_1234567890123_[^.]+\.png$/);
     });
 
-    test("should generate correct screenshot path with webp format", function() {
+    test("should generate correct screenshot path with webp format", function () {
       const timestamp = 1234567890456;
       const options = { format: "webp" as const };
 
@@ -49,7 +49,7 @@ describe("TakeScreenshot", function() {
       expect(result).toMatch(/screenshot_1234567890456_[^.]+\.webp$/);
     });
 
-    test("should generate different timestamps for consecutive calls", async function() {
+    test("should generate different timestamps for consecutive calls", async function () {
       const fakeTimer = new FakeTimer();
       const timestamp1 = fakeTimer.now();
       const options = { format: "png" as const };
@@ -62,7 +62,7 @@ describe("TakeScreenshot", function() {
       expect(result1).not.toBe(result2);
     });
 
-    test("uses an injected unique suffix when captures share a timestamp", function() {
+    test("uses an injected unique suffix when captures share a timestamp", function () {
       const idGenerator = new CountingIdGenerator("capture");
       const sameTime = 1234567890123;
       const screenshot = new TakeScreenshot(
@@ -80,7 +80,7 @@ describe("TakeScreenshot", function() {
       expect(first).not.toBe(second);
     });
 
-    test("should use single optimized ADB command for screenshot capture", async function() {
+    test("should use single optimized ADB command for screenshot capture", async function () {
       // Create minimal valid PNG base64 data
       const base64PngData = Buffer.from("fake-png-data").toString("base64");
 
@@ -116,8 +116,8 @@ describe("TakeScreenshot", function() {
     });
   });
 
-  describe("iOS cancellation", function() {
-    test("does not write or publish a screenshot after the request is cancelled", async function() {
+  describe("iOS cancellation", function () {
+    test("does not write or publish a screenshot after the request is cancelled", async function () {
       const iosDevice: BootedDevice = {
         name: "iPhone",
         platform: "ios",
@@ -157,5 +157,4 @@ describe("TakeScreenshot", function() {
       }
     });
   });
-
 });

@@ -7,7 +7,7 @@ const parser = new DefaultElementParser();
 
 function hierarchyWithNode(node: Record<string, unknown>): ViewHierarchyResult {
   return {
-    hierarchy: { node }
+    hierarchy: { node },
   } as unknown as ViewHierarchyResult;
 }
 
@@ -15,8 +15,8 @@ describe("androidViewHierarchyIndicatesLikelyBlockingLoading", () => {
   test("true when resource-id contains progress_bar", () => {
     const h = hierarchyWithNode({
       "resource-id": "com.app:id/progress_bar_loading",
-      "class": "android.view.View",
-      "bounds": { left: 0, top: 0, right: 10, bottom: 10 }
+      class: "android.view.View",
+      bounds: { left: 0, top: 0, right: 10, bottom: 10 },
     });
     expect(androidViewHierarchyIndicatesLikelyBlockingLoading(h, parser)).toBe(true);
   });
@@ -24,7 +24,7 @@ describe("androidViewHierarchyIndicatesLikelyBlockingLoading", () => {
   test("true for ProgressBar class", () => {
     const h = hierarchyWithNode({
       class: "android.widget.ProgressBar",
-      bounds: { left: 0, top: 0, right: 10, bottom: 10 }
+      bounds: { left: 0, top: 0, right: 10, bottom: 10 },
     });
     expect(androidViewHierarchyIndicatesLikelyBlockingLoading(h, parser)).toBe(true);
   });
@@ -32,9 +32,9 @@ describe("androidViewHierarchyIndicatesLikelyBlockingLoading", () => {
   test("false for unrelated views", () => {
     const h = hierarchyWithNode({
       "resource-id": "com.app:id/title",
-      "class": "android.widget.TextView",
-      "text": "Hello",
-      "bounds": { left: 0, top: 0, right: 10, bottom: 10 }
+      class: "android.widget.TextView",
+      text: "Hello",
+      bounds: { left: 0, top: 0, right: 10, bottom: 10 },
     });
     expect(androidViewHierarchyIndicatesLikelyBlockingLoading(h, parser)).toBe(false);
   });
@@ -48,11 +48,11 @@ describe("androidViewHierarchyIndicatesLikelyBlockingLoading", () => {
     "shimmer",
     "content_loading",
   ];
-  test.each(RESOURCE_ID_HINTS)("true when resource-id contains %s", hint => {
+  test.each(RESOURCE_ID_HINTS)("true when resource-id contains %s", (hint) => {
     const h = hierarchyWithNode({
       "resource-id": `com.app:id/${hint}`,
-      "class": "android.view.View",
-      "bounds": { left: 0, top: 0, right: 10, bottom: 10 }
+      class: "android.view.View",
+      bounds: { left: 0, top: 0, right: 10, bottom: 10 },
     });
     expect(androidViewHierarchyIndicatesLikelyBlockingLoading(h, parser)).toBe(true);
   });
@@ -64,10 +64,10 @@ describe("androidViewHierarchyIndicatesLikelyBlockingLoading", () => {
     "com.facebook.shimmer.ShimmerFrameLayout",
     "androidx.core.widget.ContentLoadingProgressBar",
   ];
-  test.each(CLASS_HINTS)("true for loading class %s", className => {
+  test.each(CLASS_HINTS)("true for loading class %s", (className) => {
     const h = hierarchyWithNode({
       class: className,
-      bounds: { left: 0, top: 0, right: 10, bottom: 10 }
+      bounds: { left: 0, top: 0, right: 10, bottom: 10 },
     });
     expect(androidViewHierarchyIndicatesLikelyBlockingLoading(h, parser)).toBe(true);
   });
@@ -75,8 +75,8 @@ describe("androidViewHierarchyIndicatesLikelyBlockingLoading", () => {
   test("hints are case-insensitive", () => {
     const h = hierarchyWithNode({
       "resource-id": "com.app:id/LOADING_INDICATOR",
-      "class": "android.view.View",
-      "bounds": { left: 0, top: 0, right: 10, bottom: 10 }
+      class: "android.view.View",
+      bounds: { left: 0, top: 0, right: 10, bottom: 10 },
     });
     expect(androidViewHierarchyIndicatesLikelyBlockingLoading(h, parser)).toBe(true);
   });
@@ -86,7 +86,7 @@ describe("androidViewHierarchyIndicatesLikelyBlockingLoading", () => {
     // "ProgressBar" but does not end with it (and matches no other hint) is false.
     const h = hierarchyWithNode({
       class: "com.app.ProgressBarWidget",
-      bounds: { left: 0, top: 0, right: 10, bottom: 10 }
+      bounds: { left: 0, top: 0, right: 10, bottom: 10 },
     });
     expect(androidViewHierarchyIndicatesLikelyBlockingLoading(h, parser)).toBe(false);
   });

@@ -1,7 +1,17 @@
 import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
 import { logger } from "../utils/logger";
-import { optionalBoolean, optionalEnum, optionalInteger, optionalString, queryParamsToRecord } from "./queryParamValidation";
-import { TestExecutionRepository, TestRun, TestRunQueryOptions } from "../db/testExecutionRepository";
+import {
+  optionalBoolean,
+  optionalEnum,
+  optionalInteger,
+  optionalString,
+  queryParamsToRecord,
+} from "./queryParamValidation";
+import {
+  TestExecutionRepository,
+  TestRun,
+  TestRunQueryOptions,
+} from "../db/testExecutionRepository";
 
 const TEST_RUN_RESOURCE_URIS = {
   BASE: "automobile:test-runs",
@@ -77,7 +87,7 @@ interface TestRunResponse {
 }
 
 export function parseTestRunParams(params: Record<string, string>): TestRunQueryArgs {
-  const unknownKeys = Object.keys(params).filter(key => !TEST_RUN_QUERY_PARAM_KEYS.has(key));
+  const unknownKeys = Object.keys(params).filter((key) => !TEST_RUN_QUERY_PARAM_KEYS.has(key));
   if (unknownKeys.length > 0) {
     throw new Error(`Unknown query parameters: ${unknownKeys.join(", ")}`);
   }
@@ -117,7 +127,9 @@ export function buildTestRunUri(options: TestRunQueryArgs): string {
     query.set("latestOnly", "true");
   }
   const queryString = query.toString();
-  return queryString ? `${TEST_RUN_RESOURCE_URIS.BASE}?${queryString}` : TEST_RUN_RESOURCE_URIS.BASE;
+  return queryString
+    ? `${TEST_RUN_RESOURCE_URIS.BASE}?${queryString}`
+    : TEST_RUN_RESOURCE_URIS.BASE;
 }
 
 export function convertToResponseEntry(run: TestRun, sampleSize: number): TestRunResponseEntry {
@@ -139,7 +151,7 @@ export function convertToResponseEntry(run: TestRun, sampleSize: number): TestRu
     errorMessage: run.errorMessage,
     videoPath: run.videoPath,
     snapshotPath: run.snapshotPath,
-    steps: run.steps.map(step => ({
+    steps: run.steps.map((step) => ({
       id: step.id,
       index: step.stepIndex,
       action: step.action,
@@ -173,7 +185,7 @@ function buildTestRunFilters(args: TestRunQueryArgs): Record<string, unknown> {
 
 export async function buildTestRunResponse(
   args: TestRunQueryArgs,
-  repository: TestExecutionRepository = new TestExecutionRepository()
+  repository: TestExecutionRepository = new TestExecutionRepository(),
 ): Promise<TestRunResponse> {
   const lookbackDays = args.lookbackDays ?? TEST_RUN_LOOKBACK_DAYS_DEFAULT;
   const limit = args.limit ?? TEST_RUN_LIMIT_DEFAULT;
@@ -203,7 +215,7 @@ export async function buildTestRunResponse(
   let filteredRuns = runs;
   if (latestOnly) {
     const seenTests = new Set<string>();
-    filteredRuns = runs.filter(run => {
+    filteredRuns = runs.filter((run) => {
       const key = `${run.testClass}::${run.testMethod}`;
       if (seenTests.has(key)) {
         return false;
@@ -215,7 +227,7 @@ export async function buildTestRunResponse(
     filteredRuns = filteredRuns.slice(0, limit);
   }
 
-  const testRuns = filteredRuns.map(run => {
+  const testRuns = filteredRuns.map((run) => {
     const key = `${run.testClass}::${run.testMethod}`;
     const sampleSize = sampleSizesMap.get(key) || 1;
     return convertToResponseEntry(run, sampleSize);
@@ -236,25 +248,26 @@ export async function buildTestRunResponse(
   };
 }
 
-async function getTestRunResource(
-  args: TestRunQueryArgs,
-  uri: string
-): Promise<ResourceContent> {
+async function getTestRunResource(args: TestRunQueryArgs, uri: string): Promise<ResourceContent> {
   try {
     const response = await buildTestRunResponse(args);
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify(response, null, 2)
+      text: JSON.stringify(response, null, 2),
     };
   } catch (error) {
     logger.error(`[TestRunResources] Failed to get test run data: ${error}`);
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify({
-        error: `Failed to retrieve test run data: ${error}`
-      }, null, 2)
+      text: JSON.stringify(
+        {
+          error: `Failed to retrieve test run data: ${error}`,
+        },
+        null,
+        2,
+      ),
     };
   }
 }
@@ -265,7 +278,7 @@ export function registerTestRunResources(): void {
     "Test Run History",
     "Individual test run history with step-level details and screens visited.",
     "application/json",
-    () => getTestRunResource({}, TEST_RUN_RESOURCE_URIS.BASE)
+    () => getTestRunResource({}, TEST_RUN_RESOURCE_URIS.BASE),
   );
 
   ResourceRegistry.registerTemplate(
@@ -273,7 +286,7 @@ export function registerTestRunResources(): void {
     "Test Run History",
     "Individual test run history with step-level details and screens visited.",
     "application/json",
-    async params => {
+    async (params) => {
       try {
         const queryParams = queryParamsToRecord(params.params ?? "");
         const options = parseTestRunParams(queryParams);
@@ -284,12 +297,16 @@ export function registerTestRunResources(): void {
         return {
           uri: TEST_RUN_RESOURCE_URIS.BASE,
           mimeType: "application/json",
-          text: JSON.stringify({
-            error: `Invalid test run query parameters: ${error}`
-          }, null, 2)
+          text: JSON.stringify(
+            {
+              error: `Invalid test run query parameters: ${error}`,
+            },
+            null,
+            2,
+          ),
         };
       }
-    }
+    },
   );
 
   logger.info("[TestRunResources] Registered test run resources");

@@ -52,7 +52,7 @@ export class GestureClassifier {
    */
   constructor(
     private readonly scaler: CoordScaler,
-    private readonly densityDp: number
+    private readonly densityDp: number,
   ) {}
 
   /** Feed one frame. Returns a completed GestureEvent or null. */
@@ -88,7 +88,9 @@ export class GestureClassifier {
     }
 
     // 3. Nothing released → nothing to emit
-    if (frame.releasedSlots.length === 0) {return null;}
+    if (frame.releasedSlots.length === 0) {
+      return null;
+    }
 
     // 4. Handle pinch completion
     if (this.inTwoFingerMode && this.pinchState) {
@@ -108,15 +110,13 @@ export class GestureClassifier {
     }
 
     // 5. Single-finger gesture: exactly 1 slot released, 0 remaining
-    if (
-      !this.inTwoFingerMode &&
-      frame.releasedSlots.length === 1 &&
-      activeCount === 0
-    ) {
+    if (!this.inTwoFingerMode && frame.releasedSlots.length === 1 && activeCount === 0) {
       const slotId = frame.releasedSlots[0];
       const contact = this.contacts.get(slotId);
       this.contacts.delete(slotId);
-      if (!contact) {return null;}
+      if (!contact) {
+        return null;
+      }
 
       const downX = this.scaler.toScreenX(contact.startX);
       const downY = this.scaler.toScreenY(contact.startY);
@@ -148,16 +148,20 @@ export class GestureClassifier {
       this.scaler.toScreenX(rawX1),
       this.scaler.toScreenY(rawY1),
       this.scaler.toScreenX(rawX2),
-      this.scaler.toScreenY(rawY2)
+      this.scaler.toScreenY(rawY2),
     );
   }
 
   private maybeEmitPinch(arrivedAt: number): GestureEvent | null {
     const pinch = this.pinchState;
-    if (!pinch || pinch.initialDist === 0) {return null;}
+    if (!pinch || pinch.initialDist === 0) {
+      return null;
+    }
 
     const scale = pinch.finalDist / pinch.initialDist;
-    if (Math.abs(scale - 1.0) < GESTURE_THRESHOLDS.PINCH_MIN_SCALE_DELTA) {return null;}
+    if (Math.abs(scale - 1.0) < GESTURE_THRESHOLDS.PINCH_MIN_SCALE_DELTA) {
+      return null;
+    }
 
     return {
       type: "pinch",
@@ -171,7 +175,7 @@ export class GestureClassifier {
     screenX: number,
     screenY: number,
     durationMs: number,
-    arrivedAt: number
+    arrivedAt: number,
   ): GestureEvent {
     if (durationMs >= GESTURE_THRESHOLDS.LONG_PRESS_MS) {
       return { type: "longPress", arrivedAt, screenX, screenY, durationMs };
@@ -183,10 +187,7 @@ export class GestureClassifier {
       const separation = dist(screenX, screenY, this.lastTap.screenX, this.lastTap.screenY);
       const slopPx = GESTURE_THRESHOLDS.DOUBLE_TAP_SLOP_DP * this.densityDp;
 
-      if (
-        timeSinceLast <= GESTURE_THRESHOLDS.DOUBLE_TAP_MS &&
-        separation <= slopPx
-      ) {
+      if (timeSinceLast <= GESTURE_THRESHOLDS.DOUBLE_TAP_MS && separation <= slopPx) {
         this.lastTap = null;
         return { type: "doubleTap", arrivedAt, screenX, screenY };
       }
@@ -202,20 +203,14 @@ export class GestureClassifier {
     upX: number,
     upY: number,
     durationMs: number,
-    arrivedAt: number
+    arrivedAt: number,
   ): GestureEvent {
     const dx = upX - downX;
     const dy = upY - downY;
     const displacement = dist(downX, downY, upX, upY);
 
     const direction: GestureEvent["direction"] =
-      Math.abs(dx) >= Math.abs(dy)
-        ? dx > 0
-          ? "right"
-          : "left"
-        : dy > 0
-          ? "down"
-          : "up";
+      Math.abs(dx) >= Math.abs(dy) ? (dx > 0 ? "right" : "left") : dy > 0 ? "down" : "up";
 
     const velocityPxPerSec = durationMs > 0 ? (displacement / durationMs) * 1000 : 0;
     const flingThreshPx = GESTURE_THRESHOLDS.FLING_MIN_DP_PER_S * this.densityDp;

@@ -1,10 +1,12 @@
 import { logger } from "./logger";
 import { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
-import type { AccessibilityDetector as IAccessibilityDetector, AccessibilityService } from "./interfaces/AccessibilityDetector";
+import type {
+  AccessibilityDetector as IAccessibilityDetector,
+  AccessibilityService,
+} from "./interfaces/AccessibilityDetector";
 import { SystemTimer, type Timer } from "./SystemTimer";
 import type { AdbExecutor } from "./android-cmdline-tools/interfaces/AdbExecutor";
 import { TTLCache } from "./cache/Cache";
-
 
 /**
  * Cached accessibility state value
@@ -45,7 +47,7 @@ export class DefaultAccessibilityDetector implements IAccessibilityDetector {
   async isAccessibilityEnabled(
     deviceId: string,
     adb: AdbExecutor,
-    featureFlags?: FeatureFlagService
+    featureFlags?: FeatureFlagService,
   ): Promise<boolean> {
     // Check feature flag override first
     const forceEnabled = featureFlags?.isEnabled("force-accessibility-mode");
@@ -57,7 +59,9 @@ export class DefaultAccessibilityDetector implements IAccessibilityDetector {
     // Check if auto-detection is disabled
     const autoDetectDisabled = featureFlags && !featureFlags.isEnabled("accessibility-auto-detect");
     if (autoDetectDisabled) {
-      logger.debug(`[AccessibilityDetector] Auto-detection disabled via feature flag for device ${deviceId}`);
+      logger.debug(
+        `[AccessibilityDetector] Auto-detection disabled via feature flag for device ${deviceId}`,
+      );
       return false;
     }
 
@@ -66,7 +70,7 @@ export class DefaultAccessibilityDetector implements IAccessibilityDetector {
 
     if (cached) {
       logger.debug(
-        `[AccessibilityDetector] Using cached result for device ${deviceId}: enabled=${cached.enabled}, service=${cached.service}`
+        `[AccessibilityDetector] Using cached result for device ${deviceId}: enabled=${cached.enabled}, service=${cached.service}`,
       );
       return cached.enabled;
     }
@@ -79,10 +83,12 @@ export class DefaultAccessibilityDetector implements IAccessibilityDetector {
 
     if (detectionTime > 50) {
       logger.warn(
-        `[AccessibilityDetector] Detection took ${detectionTime}ms (target: <50ms) for device ${deviceId}`
+        `[AccessibilityDetector] Detection took ${detectionTime}ms (target: <50ms) for device ${deviceId}`,
       );
     } else {
-      logger.debug(`[AccessibilityDetector] Detection completed in ${detectionTime}ms for device ${deviceId}`);
+      logger.debug(
+        `[AccessibilityDetector] Detection completed in ${detectionTime}ms for device ${deviceId}`,
+      );
     }
 
     // Update cache
@@ -102,7 +108,7 @@ export class DefaultAccessibilityDetector implements IAccessibilityDetector {
   async detectMethod(
     deviceId: string,
     adb: AdbExecutor,
-    featureFlags?: FeatureFlagService
+    featureFlags?: FeatureFlagService,
   ): Promise<AccessibilityService> {
     // Check feature flag override
     const forceEnabled = featureFlags?.isEnabled("force-accessibility-mode");
@@ -159,11 +165,13 @@ export class DefaultAccessibilityDetector implements IAccessibilityDetector {
    */
   private async detectAccessibilityState(
     deviceId: string,
-    adb: AdbExecutor
+    adb: AdbExecutor,
   ): Promise<{ enabled: boolean; service: AccessibilityService }> {
     try {
       // Query enabled accessibility services
-      const result = await adb.executeCommand("shell settings get secure enabled_accessibility_services");
+      const result = await adb.executeCommand(
+        "shell settings get secure enabled_accessibility_services",
+      );
 
       const output = result.stdout.trim();
 
@@ -186,15 +194,20 @@ export class DefaultAccessibilityDetector implements IAccessibilityDetector {
 
       if (isAnyServiceEnabled) {
         logger.debug(
-          `[AccessibilityDetector] Unknown accessibility service detected on device ${deviceId}: ${output}`
+          `[AccessibilityDetector] Unknown accessibility service detected on device ${deviceId}: ${output}`,
         );
         return { enabled: true, service: "unknown" };
       }
 
-      logger.debug(`[AccessibilityDetector] No accessibility services enabled on device ${deviceId}`);
+      logger.debug(
+        `[AccessibilityDetector] No accessibility services enabled on device ${deviceId}`,
+      );
       return { enabled: false, service: "unknown" };
     } catch (error) {
-      logger.error(`[AccessibilityDetector] Failed to detect accessibility state for device ${deviceId}:`, error);
+      logger.error(
+        `[AccessibilityDetector] Failed to detect accessibility state for device ${deviceId}:`,
+        error,
+      );
       // Graceful fallback: assume disabled on error
       return { enabled: false, service: "unknown" };
     }

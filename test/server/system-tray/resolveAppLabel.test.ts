@@ -86,7 +86,7 @@ describe("resolveAppLabel", () => {
         "Packages:",
         "  Package [com.example.app] (abc123):",
         "    application-label:'Example App'",
-      ].join("\n")
+      ].join("\n"),
     );
     setFakeAdb(fakeAdb);
 
@@ -137,11 +137,8 @@ describe("resolveAppLabel", () => {
     const spy = stubCtrlProxyDeclines();
     setFakeAdb(
       dumpsysAdb(
-        [
-          "application-label-en:'Localized App'",
-          "application-label:'Primary App'",
-        ].join("\n")
-      )
+        ["application-label-en:'Localized App'", "application-label:'Primary App'"].join("\n"),
+      ),
     );
 
     try {

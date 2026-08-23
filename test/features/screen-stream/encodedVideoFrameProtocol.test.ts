@@ -32,17 +32,22 @@ interface GoldenVectors {
 }
 
 const golden: GoldenVectors = JSON.parse(
-  readFileSync(new URL("../../fixtures/encoded-h264-golden-vectors.json", import.meta.url), "utf8")
+  readFileSync(new URL("../../fixtures/encoded-h264-golden-vectors.json", import.meta.url), "utf8"),
 ) as GoldenVectors;
 
 const byName = (name: string): GoldenRecord => {
-  const found = golden.records.find(r => r.name === name);
-  if (found === undefined) {throw new Error(`golden record ${name} missing`);}
+  const found = golden.records.find((r) => r.name === name);
+  if (found === undefined) {
+    throw new Error(`golden record ${name} missing`);
+  }
   return found;
 };
 
 /** Collect every callback the decoder can fire, so distinctness is provable. */
-function drain(decoder: FrameDecoder, chunk: Buffer): {
+function drain(
+  decoder: FrameDecoder,
+  chunk: Buffer,
+): {
   frames: DecodedFrame[];
   audio: DecodedAudio[];
   video: DecodedEncodedVideo[];
@@ -54,10 +59,10 @@ function drain(decoder: FrameDecoder, chunk: Buffer): {
   const malformed: MalformedFrameError[] = [];
   decoder.push(
     chunk,
-    err => malformed.push(err),
-    a => audio.push(a),
-    f => frames.push(f),
-    v => video.push(v)
+    (err) => malformed.push(err),
+    (a) => audio.push(a),
+    (f) => frames.push(f),
+    (v) => video.push(v),
   );
   return { frames, audio, video, malformed };
 }

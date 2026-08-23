@@ -17,10 +17,7 @@ export class SharedTextDelegate {
     this.context = context;
   }
 
-  async requestSetText(
-    text: string,
-    options: SetTextOptions = {}
-  ): Promise<BaseResult> {
+  async requestSetText(text: string, options: SetTextOptions = {}): Promise<BaseResult> {
     const { resourceId, timeoutMs = 5000, perf, dismissKeyboard = false, frameContext } = options;
     const params: Record<string, unknown> = { text };
     if (resourceId) {
@@ -47,7 +44,7 @@ export class SharedTextDelegate {
   async requestClearText(
     resourceId?: string,
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<BaseResult> {
     return this.requestSetText("", { resourceId, timeoutMs, perf });
   }
@@ -55,7 +52,7 @@ export class SharedTextDelegate {
   async requestImeAction(
     action: ImeAction,
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<ActionTimingResult> {
     return sendCommand<ActionTimingResult>(this.context, {
       idPrefix: "imeAction",
@@ -65,8 +62,13 @@ export class SharedTextDelegate {
       timeoutMs,
       perf,
       notConnectedError: () => ({ success: false, action, totalTimeMs: 0, error: "Not connected" }),
-      unsupportedCommandError: (_messageType, error) => ({ success: false, action, totalTimeMs: 0, error }),
-      timeoutError: timeout => ({
+      unsupportedCommandError: (_messageType, error) => ({
+        success: false,
+        action,
+        totalTimeMs: 0,
+        error,
+      }),
+      timeoutError: (timeout) => ({
         success: false,
         action,
         totalTimeMs: timeout,
@@ -75,10 +77,7 @@ export class SharedTextDelegate {
     });
   }
 
-  async requestSelectAll(
-    timeoutMs: number = 5000,
-    perf?: PerformanceTracker
-  ): Promise<BaseResult> {
+  async requestSelectAll(timeoutMs: number = 5000, perf?: PerformanceTracker): Promise<BaseResult> {
     return sendCommand<BaseResult>(this.context, {
       idPrefix: "selectAll",
       responseType: "select_all",

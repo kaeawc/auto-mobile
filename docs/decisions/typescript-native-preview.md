@@ -23,5 +23,5 @@
   and the gate warns on drift. Bumps must pair the version change with
   `bun run typecheck:update` in the same PR.
 - Usage: consumed only by `scripts/typecheck-baseline.sh` (`bunx tsgo --noEmit -p
-  tsconfig.json`) as the CI type-check gate, and transitively by
+tsconfig.json`) as the CI type-check gate, and transitively by
   `oxlint --type-aware`. See `oxlint.md`, `oxlint-tsgolint.md`.

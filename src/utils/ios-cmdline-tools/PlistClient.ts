@@ -41,46 +41,63 @@ export interface PlistClientOptions {
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 
-const defaultProcess: PlistProcess = ({ args, input, signal, maxOutputBytes }) => new Promise((resolve, reject) => {
-  if (signal?.aborted) {
-    reject(new Error("plutil execution was cancelled"));
-    return;
-  }
-  const child = spawn("plutil", args, { stdio: ["pipe", "pipe", "pipe"] });
-  const stdout: Buffer[] = [];
-  const stderr: Buffer[] = [];
-  let outputBytes = 0;
-  let settled = false;
-
-  const finish = (error?: Error): void => {
-    if (settled) {return;}
-    settled = true;
-    signal?.removeEventListener("abort", onAbort);
-    if (error) {reject(error);} else {resolve({ stdout: Buffer.concat(stdout), stderr: Buffer.concat(stderr) });}
-  };
-  const onAbort = (): void => {
-    child.kill("SIGTERM");
-    finish(new Error("plutil execution was cancelled"));
-  };
-  const collect = (destination: Buffer[]) => (chunk: Buffer): void => {
-    outputBytes += chunk.length;
-    if (outputBytes > maxOutputBytes) {
-      child.kill("SIGTERM");
-      finish(new Error(`plutil output exceeded ${maxOutputBytes} bytes`));
+const defaultProcess: PlistProcess = ({ args, input, signal, maxOutputBytes }) =>
+  new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error("plutil execution was cancelled"));
       return;
     }
-    destination.push(chunk);
-  };
+    const child = spawn("plutil", args, { stdio: ["pipe", "pipe", "pipe"] });
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    let outputBytes = 0;
+    let settled = false;
 
-  signal?.addEventListener("abort", onAbort, { once: true });
-  child.once("error", error => finish(error));
-  child.stdout?.on("data", collect(stdout));
-  child.stderr?.on("data", collect(stderr));
-  child.once("close", code => {
-    if (code === 0) {finish();} else {finish(new Error(`plutil exited with code ${code}: ${Buffer.concat(stderr).toString("utf8").trim()}`));}
+    const finish = (error?: Error): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      signal?.removeEventListener("abort", onAbort);
+      if (error) {
+        reject(error);
+      } else {
+        resolve({ stdout: Buffer.concat(stdout), stderr: Buffer.concat(stderr) });
+      }
+    };
+    const onAbort = (): void => {
+      child.kill("SIGTERM");
+      finish(new Error("plutil execution was cancelled"));
+    };
+    const collect =
+      (destination: Buffer[]) =>
+      (chunk: Buffer): void => {
+        outputBytes += chunk.length;
+        if (outputBytes > maxOutputBytes) {
+          child.kill("SIGTERM");
+          finish(new Error(`plutil output exceeded ${maxOutputBytes} bytes`));
+          return;
+        }
+        destination.push(chunk);
+      };
+
+    signal?.addEventListener("abort", onAbort, { once: true });
+    child.once("error", (error) => finish(error));
+    child.stdout?.on("data", collect(stdout));
+    child.stderr?.on("data", collect(stderr));
+    child.once("close", (code) => {
+      if (code === 0) {
+        finish();
+      } else {
+        finish(
+          new Error(
+            `plutil exited with code ${code}: ${Buffer.concat(stderr).toString("utf8").trim()}`,
+          ),
+        );
+      }
+    });
+    child.stdin?.end(input);
   });
-  child.stdin?.end(input);
-});
 
 /**
  * Typed owner for plist conversion and reads. All production code must use this
@@ -91,30 +108,43 @@ export class PlistClient implements PlistReader {
   private readonly maxOutputBytes: number;
   private readonly timer: Timer;
 
-  constructor(private readonly process: PlistProcess = defaultProcess, options: PlistClientOptions = {}) {
+  constructor(
+    private readonly process: PlistProcess = defaultProcess,
+    options: PlistClientOptions = {},
+  ) {
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.maxOutputBytes = options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
     this.timer = options.timer ?? defaultTimer;
   }
 
   async readJsonFile(path: string, options?: PlistReadOptions): Promise<unknown> {
-    return this.parseJson(await this.run(["-convert", "json", "-o", "-", "--", path], undefined, options));
+    return this.parseJson(
+      await this.run(["-convert", "json", "-o", "-", "--", path], undefined, options),
+    );
   }
 
   async readJsonBytes(bytes: Buffer, options?: PlistReadOptions): Promise<unknown> {
-    return this.parseJson(await this.run(["-convert", "json", "-o", "-", "--", "-"], bytes, options));
+    return this.parseJson(
+      await this.run(["-convert", "json", "-o", "-", "--", "-"], bytes, options),
+    );
   }
 
   async readXmlFile(path: string, options?: PlistReadOptions): Promise<string> {
-    return (await this.run(["-convert", "xml1", "-o", "-", "--", path], undefined, options)).toString("utf8");
+    return (
+      await this.run(["-convert", "xml1", "-o", "-", "--", path], undefined, options)
+    ).toString("utf8");
   }
 
   async readXmlBytes(bytes: Buffer, options?: PlistReadOptions): Promise<string> {
-    return (await this.run(["-convert", "xml1", "-o", "-", "--", "-"], bytes, options)).toString("utf8");
+    return (await this.run(["-convert", "xml1", "-o", "-", "--", "-"], bytes, options)).toString(
+      "utf8",
+    );
   }
 
   async extractRawFile(key: string, path: string, options?: PlistReadOptions): Promise<string> {
-    return (await this.run(["-extract", key, "raw", "-o", "-", "--", path], undefined, options)).toString("utf8");
+    return (
+      await this.run(["-extract", key, "raw", "-o", "-", "--", path], undefined, options)
+    ).toString("utf8");
   }
 
   async isAvailable(): Promise<boolean> {
@@ -122,19 +152,35 @@ export class PlistClient implements PlistReader {
       await this.run(["-help"]);
       return true;
     } catch (error) {
-      logger.debug(`src/utils/ios-cmdline-tools/PlistClient.ts availability check failed: ${error}`, error);
+      logger.debug(
+        `src/utils/ios-cmdline-tools/PlistClient.ts availability check failed: ${error}`,
+        error,
+      );
       return false;
     }
   }
 
-  private async run(args: string[], input?: Buffer, options: PlistReadOptions = {}): Promise<Buffer> {
+  private async run(
+    args: string[],
+    input?: Buffer,
+    options: PlistReadOptions = {},
+  ): Promise<Buffer> {
     const controller = new AbortController();
     const onAbort = (): void => controller.abort();
-    if (options.signal?.aborted) {controller.abort();} else {options.signal?.addEventListener("abort", onAbort, { once: true });}
+    if (options.signal?.aborted) {
+      controller.abort();
+    } else {
+      options.signal?.addEventListener("abort", onAbort, { once: true });
+    }
     const timeoutMs = options.timeoutMs ?? this.timeoutMs;
     let timeout: NodeJS.Timeout | undefined;
-    const command = `plutil ${args.map(arg => JSON.stringify(arg)).join(" ")}`;
-    const run = this.process({ args, input, signal: controller.signal, maxOutputBytes: this.maxOutputBytes });
+    const command = `plutil ${args.map((arg) => JSON.stringify(arg)).join(" ")}`;
+    const run = this.process({
+      args,
+      input,
+      signal: controller.signal,
+      maxOutputBytes: this.maxOutputBytes,
+    });
     run.catch(() => {});
     const timeoutPromise = new Promise<PlistProcessResult>((_, reject) => {
       timeout = this.timer.setTimeout(() => {
@@ -149,11 +195,15 @@ export class PlistClient implements PlistReader {
       }
       return result.stdout;
     } catch (error) {
-      if (error instanceof ActionableError) {throw error;}
+      if (error instanceof ActionableError) {
+        throw error;
+      }
       const detail = errorMessage(error);
       throw new ActionableError(`plutil failed (${command}): ${detail}`);
     } finally {
-      if (timeout) {this.timer.clearTimeout(timeout);}
+      if (timeout) {
+        this.timer.clearTimeout(timeout);
+      }
       options.signal?.removeEventListener("abort", onAbort);
     }
   }

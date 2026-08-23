@@ -8,7 +8,10 @@ import { BootedDevice } from "../../models";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { getTempDir, TEMP_SUBDIRS } from "../../utils/tempDir";
-import { FileSystem, DefaultFileSystem as CanonicalDefaultFileSystem } from "../../utils/filesystem/DefaultFileSystem";
+import {
+  FileSystem,
+  DefaultFileSystem as CanonicalDefaultFileSystem,
+} from "../../utils/filesystem/DefaultFileSystem";
 
 /**
  * Screenshot capture interface for dependency injection.
@@ -59,7 +62,7 @@ export class NavigationScreenshotManager {
     this.logger = options.logger ?? logger;
 
     // Ensure directory exists
-    this.fs.ensureDir(this.screenshotDir).catch(err => {
+    this.fs.ensureDir(this.screenshotDir).catch((err) => {
       this.logger.warn(`[NAV_SCREENSHOT] Failed to create screenshot directory: ${err}`);
     });
   }
@@ -84,7 +87,9 @@ export class NavigationScreenshotManager {
   /**
    * Create an instance for testing with custom options.
    */
-  public static createForTesting(options: NavigationScreenshotManagerOptions): NavigationScreenshotManager {
+  public static createForTesting(
+    options: NavigationScreenshotManagerOptions,
+  ): NavigationScreenshotManager {
     return new NavigationScreenshotManager(options);
   }
 
@@ -106,11 +111,7 @@ export class NavigationScreenshotManager {
    * Get the hash prefix for a screen (used to find existing screenshots).
    */
   private getScreenHashPrefix(appId: string, screenName: string): string {
-    return crypto
-      .createHash("md5")
-      .update(`${appId}_${screenName}`)
-      .digest("hex")
-      .substring(0, 12);
+    return crypto.createHash("md5").update(`${appId}_${screenName}`).digest("hex").substring(0, 12);
   }
 
   /**
@@ -121,7 +122,7 @@ export class NavigationScreenshotManager {
 
     try {
       const files = await this.fs.readdir(this.screenshotDir);
-      const matching = files.filter(f => f.startsWith(prefix) && f.endsWith(".webp"));
+      const matching = files.filter((f) => f.startsWith(prefix) && f.endsWith(".webp"));
 
       if (matching.length === 0) {
         return null;
@@ -137,7 +138,10 @@ export class NavigationScreenshotManager {
       return path.join(this.screenshotDir, matching[0]);
     } catch (error) {
       // Screenshot lookup is best-effort; callers can capture a fresh image when lookup fails.
-      this.logger.debug(`[NAV_SCREENSHOT] Failed to find existing screenshot: ${errorMessage(error)}`, error);
+      this.logger.debug(
+        `[NAV_SCREENSHOT] Failed to find existing screenshot: ${errorMessage(error)}`,
+        error,
+      );
       return null;
     }
   }
@@ -145,12 +149,16 @@ export class NavigationScreenshotManager {
   /**
    * Delete old screenshots for a screen (keep only the most recent).
    */
-  private async deleteOldScreenshots(appId: string, screenName: string, keepPath: string): Promise<void> {
+  private async deleteOldScreenshots(
+    appId: string,
+    screenName: string,
+    keepPath: string,
+  ): Promise<void> {
     const prefix = this.getScreenHashPrefix(appId, screenName);
 
     try {
       const files = await this.fs.readdir(this.screenshotDir);
-      const matching = files.filter(f => f.startsWith(prefix) && f.endsWith(".webp"));
+      const matching = files.filter((f) => f.startsWith(prefix) && f.endsWith(".webp"));
 
       for (const file of matching) {
         const fullPath = path.join(this.screenshotDir, file);
@@ -172,7 +180,7 @@ export class NavigationScreenshotManager {
     adb: AdbClient,
     appId: string,
     screenName: string,
-    screenshotCapture?: ScreenshotCapture
+    screenshotCapture?: ScreenshotCapture,
   ): Promise<string | null> {
     const cacheKey = `${appId}_${screenName}`;
 
@@ -184,7 +192,13 @@ export class NavigationScreenshotManager {
     }
 
     // Create the capture promise
-    const capturePromise = this.doCaptureAndStore(device, adb, appId, screenName, screenshotCapture);
+    const capturePromise = this.doCaptureAndStore(
+      device,
+      adb,
+      appId,
+      screenName,
+      screenshotCapture,
+    );
 
     // Track it
     this.pendingCaptures.set(cacheKey, capturePromise);
@@ -205,7 +219,7 @@ export class NavigationScreenshotManager {
     appId: string,
     screenName: string,
     imageBuffer: Buffer,
-    _format: string = "png"
+    _format: string = "png",
   ): Promise<string | null> {
     try {
       await this.fs.ensureDir(this.screenshotDir);
@@ -218,7 +232,9 @@ export class NavigationScreenshotManager {
       await this.fs.writeFileBuffer(finalPath, resizedBuffer);
       await this.deleteOldScreenshots(appId, screenName, finalPath);
       this.cleanupLRU().catch(() => {});
-      logger.info(`[NAV_SCREENSHOT] Stored iOS screenshot for ${screenName} (${Math.round(resizedBuffer.length / 1024)}KB)`);
+      logger.info(
+        `[NAV_SCREENSHOT] Stored iOS screenshot for ${screenName} (${Math.round(resizedBuffer.length / 1024)}KB)`,
+      );
       return finalPath;
     } catch (error) {
       logger.warn(`[NAV_SCREENSHOT] Failed to store screenshot: ${error}`);
@@ -231,7 +247,7 @@ export class NavigationScreenshotManager {
     adb: AdbClient,
     appId: string,
     screenName: string,
-    screenshotCapture?: ScreenshotCapture
+    screenshotCapture?: ScreenshotCapture,
   ): Promise<string | null> {
     const startTime = this.timer.now();
 
@@ -270,7 +286,7 @@ export class NavigationScreenshotManager {
       await this.fs.remove(result.path).catch(() => {});
 
       // 6. Run LRU cleanup in background (fire-and-forget)
-      this.cleanupLRU().catch(err => {
+      this.cleanupLRU().catch((err) => {
         logger.warn(`[NAV_SCREENSHOT] LRU cleanup failed: ${err}`);
       });
 
@@ -354,7 +370,9 @@ export class NavigationScreenshotManager {
       }
 
       if (deletedCount > 0) {
-        logger.info(`[NAV_SCREENSHOT] LRU cleanup: deleted ${deletedCount} files, freed ${Math.round((totalSize - currentSize) / 1024)}kb`);
+        logger.info(
+          `[NAV_SCREENSHOT] LRU cleanup: deleted ${deletedCount} files, freed ${Math.round((totalSize - currentSize) / 1024)}kb`,
+        );
       }
     } catch (err) {
       logger.warn(`[NAV_SCREENSHOT] LRU cleanup error: ${err}`);
@@ -380,7 +398,10 @@ export class NavigationScreenshotManager {
       return await this.fs.readFileBuffer(screenshotPath);
     } catch (error) {
       // Screenshot reads are best-effort; callers treat null as an unavailable image.
-      this.logger.debug(`[NAV_SCREENSHOT] Failed to read screenshot: ${errorMessage(error)}`, error);
+      this.logger.debug(
+        `[NAV_SCREENSHOT] Failed to read screenshot: ${errorMessage(error)}`,
+        error,
+      );
       return null;
     }
   }

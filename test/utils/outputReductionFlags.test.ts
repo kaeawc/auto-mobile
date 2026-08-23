@@ -22,14 +22,14 @@ describe("parseOutputReductionFlags", () => {
     }
   });
 
-  test("each flag flips true from its env var alone (=== \"1\")", () => {
+  test('each flag flips true from its env var alone (=== "1")', () => {
     for (const spec of OUTPUT_REDUCTION_FLAG_SPECS) {
       const flags = parseOutputReductionFlags([], { [spec.env]: "1" });
       expect(flags[spec.field]).toBe(true);
     }
   });
 
-  test("env values other than \"1\" do not enable the flag", () => {
+  test('env values other than "1" do not enable the flag', () => {
     for (const spec of OUTPUT_REDUCTION_FLAG_SPECS) {
       const flags = parseOutputReductionFlags([], { [spec.env]: "0" });
       expect(flags[spec.field]).toBe(false);

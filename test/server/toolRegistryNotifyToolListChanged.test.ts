@@ -109,7 +109,7 @@ describe("ToolRegistry.notifyToolListChanged", () => {
 
   test("emits on the ListChangedBroadcaster even with zero servers", () => {
     const kinds: string[] = [];
-    const unsubscribe = ListChangedBroadcaster.subscribe(kind => {
+    const unsubscribe = ListChangedBroadcaster.subscribe((kind) => {
       kinds.push(kind);
     });
     try {
@@ -126,10 +126,10 @@ describe("ToolRegistry session-binding release fan-out (issue #4611 Gap D)", () 
     const first: string[] = [];
     const second: string[] = [];
     const unsubscribeFirst = ToolRegistry.registerSessionBindingReleaseHandler({
-      onSessionReleased: uuid => first.push(uuid),
+      onSessionReleased: (uuid) => first.push(uuid),
     });
     const unsubscribeSecond = ToolRegistry.registerSessionBindingReleaseHandler({
-      onSessionReleased: uuid => second.push(uuid),
+      onSessionReleased: (uuid) => second.push(uuid),
     });
     try {
       ToolRegistry.notifySessionBindingReleased("session-1");
@@ -155,7 +155,7 @@ describe("ToolRegistry session-binding release fan-out (issue #4611 Gap D)", () 
       },
     });
     const unsubscribeHealthy = ToolRegistry.registerSessionBindingReleaseHandler({
-      onSessionReleased: uuid => healthy.push(uuid),
+      onSessionReleased: (uuid) => healthy.push(uuid),
     });
     try {
       expect(() => ToolRegistry.notifySessionBindingReleased("session-1")).not.toThrow();

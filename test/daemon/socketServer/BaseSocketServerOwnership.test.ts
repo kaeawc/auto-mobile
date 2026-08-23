@@ -6,7 +6,10 @@ import { unlink } from "node:fs/promises";
 import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
 import { RequestResponseSocketServer } from "../../../src/daemon/socketServer/RequestResponseSocketServer";
-import type { SocketRequest, SocketResponse } from "../../../src/daemon/socketServer/SocketServerTypes";
+import type {
+  SocketRequest,
+  SocketResponse,
+} from "../../../src/daemon/socketServer/SocketServerTypes";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 const isWindows = platform() === "win32";
@@ -36,7 +39,7 @@ function listenOnSocket(socketPath: string): Promise<NetServer> {
 }
 
 function closeServer(server: NetServer): Promise<void> {
-  return new Promise(resolve => server.close(() => resolve()));
+  return new Promise((resolve) => server.close(() => resolve()));
 }
 
 describe("BaseSocketServer close ownership", () => {
@@ -46,7 +49,9 @@ describe("BaseSocketServer close ownership", () => {
   afterEach(async () => {
     try {
       await server?.close();
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     if (existsSync(socketPath)) {
       await unlink(socketPath).catch(() => {});
     }
@@ -65,24 +70,27 @@ describe("BaseSocketServer close ownership", () => {
     expect(server.hasActiveSocketPath()).toBe(false);
   });
 
-  (isWindows ? test.skip : test)("does NOT remove a replacement socket rebound at the same path", async () => {
-    socketPath = join(tmpdir(), `base-sock-${randomUUID()}.sock`);
-    server = new TestServer(socketPath, new FakeTimer());
-    await server.start();
+  (isWindows ? test.skip : test)(
+    "does NOT remove a replacement socket rebound at the same path",
+    async () => {
+      socketPath = join(tmpdir(), `base-sock-${randomUUID()}.sock`);
+      server = new TestServer(socketPath, new FakeTimer());
+      await server.start();
 
-    // Simulate a fast restart: our socket is replaced by a successor process
-    // binding the same path before our close() runs.
-    await unlink(socketPath);
-    expect(server.hasActiveSocketPath()).toBe(false);
-    const replacement = await listenOnSocket(socketPath);
-    expect(server.hasActiveSocketPath()).toBe(false);
+      // Simulate a fast restart: our socket is replaced by a successor process
+      // binding the same path before our close() runs.
+      await unlink(socketPath);
+      expect(server.hasActiveSocketPath()).toBe(false);
+      const replacement = await listenOnSocket(socketPath);
+      expect(server.hasActiveSocketPath()).toBe(false);
 
-    try {
-      await server.close();
-      // The successor's socket must survive — otherwise live subscribers drop.
-      expect(existsSync(socketPath)).toBe(true);
-    } finally {
-      await closeServer(replacement);
-    }
-  });
+      try {
+        await server.close();
+        // The successor's socket must survive — otherwise live subscribers drop.
+        expect(existsSync(socketPath)).toBe(true);
+      } finally {
+        await closeServer(replacement);
+      }
+    },
+  );
 });

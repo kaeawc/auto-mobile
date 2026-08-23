@@ -97,7 +97,7 @@ class GatedSequencingServer extends RequestResponseSocketServer<TestRequest, Tes
 
   constructor(timer: FakeTimer) {
     super("/fake/path/seq.sock", timer, "Seq");
-    this.gate = new Promise<void>(resolve => {
+    this.gate = new Promise<void>((resolve) => {
       this.releaseGate = resolve;
     });
   }
@@ -188,11 +188,11 @@ describe("RequestResponseSocketServer", () => {
     // chaining onto the per-socket promise, so both are queued back-to-back.
     void (sequencer as any).processLine(
       seqSocket as unknown as Socket,
-      JSON.stringify({ id: "1", action: "noop" })
+      JSON.stringify({ id: "1", action: "noop" }),
     );
     void (sequencer as any).processLine(
       seqSocket as unknown as Socket,
-      JSON.stringify({ id: "2", action: "noop" })
+      JSON.stringify({ id: "2", action: "noop" }),
     );
 
     // The first handler has started and is now blocked on its gate. If the class

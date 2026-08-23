@@ -18,7 +18,7 @@ const execResult = (stdout = ""): ExecResult => ({
   stderr: "",
   toString: () => stdout,
   trim: () => stdout.trim(),
-  includes: value => stdout.includes(value),
+  includes: (value) => stdout.includes(value),
 });
 
 function createChild(): ChildProcess & EventEmitter {
@@ -53,13 +53,17 @@ function createClient(
     undefined,
     hostPortAvailabilityChecker,
   );
-  (client as unknown as { ensureEmulatorPath: () => Promise<string> }).ensureEmulatorPath = async () => "emulator";
+  (client as unknown as { ensureEmulatorPath: () => Promise<string> }).ensureEmulatorPath =
+    async () => "emulator";
   (client as unknown as { listAvds: () => Promise<DeviceInfo[]> }).listAvds = async () => [
     { name: "Pixel 9", platform: "android", isRunning: false },
   ];
   (client as unknown as { isAvdRunning: () => Promise<boolean> }).isAvdRunning = async () => false;
-  (client as unknown as { isAvdStarting: () => Promise<boolean> }).isAvdStarting = async () => false;
-  (client as unknown as { checkArchitectureCompatibility: () => Promise<{ compatible: boolean }> }).checkArchitectureCompatibility = async () => ({ compatible: true });
+  (client as unknown as { isAvdStarting: () => Promise<boolean> }).isAvdStarting = async () =>
+    false;
+  (
+    client as unknown as { checkArchitectureCompatibility: () => Promise<{ compatible: boolean }> }
+  ).checkArchitectureCompatibility = async () => ({ compatible: true });
   return client;
 }
 
@@ -111,9 +115,9 @@ describe("AndroidEmulatorClient launch contract", () => {
       const handle = await client.launchEmulator({ avdName: "Pixel 9", extraArgs });
 
       expect(handle.targetDeviceId).toBe(targetDeviceId);
-      expect(spawnedArgs.filter(argument => argument === "-port" || argument === "-ports")).toEqual([
-        extraArgs[0],
-      ]);
+      expect(
+        spawnedArgs.filter((argument) => argument === "-port" || argument === "-ports"),
+      ).toEqual([extraArgs[0]]);
       child.emit("exit", 0, null);
       AndroidEmulatorClient.resetLaunchReservationsForTesting();
     }
@@ -140,12 +144,16 @@ describe("AndroidEmulatorClient launch contract", () => {
     let secondSpawnedArgs: string[] = [];
     const firstClient = createClient((_command, args) => {
       firstSpawnedArgs = args;
-      queueMicrotask(() => firstChild.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")));
+      queueMicrotask(() =>
+        firstChild.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")),
+      );
       return firstChild;
     }, adb);
     const secondClient = createClient((_command, args) => {
       secondSpawnedArgs = args;
-      queueMicrotask(() => secondChild.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")));
+      queueMicrotask(() =>
+        secondChild.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")),
+      );
       return secondChild;
     }, adb);
 
@@ -164,9 +172,7 @@ describe("AndroidEmulatorClient launch contract", () => {
 
   test("skips an automatic port pair whose ADB endpoint is occupied outside ADB", async () => {
     const adb = new FakeAdbExecutor();
-    adb.setDevices([
-      { name: "Unknown", platform: "android", deviceId: "emulator-5562" },
-    ]);
+    adb.setDevices([{ name: "Unknown", platform: "android", deviceId: "emulator-5562" }]);
     const child = createChild();
     const checkedPorts: number[] = [];
     let spawnedArgs: string[] = [];
@@ -200,7 +206,7 @@ describe("AndroidEmulatorClient launch contract", () => {
     const spawnedArgs: string[][] = [];
     let firstPairProbeCount = 0;
     let releaseFirstPairProbes: () => void = () => {};
-    const firstPairProbes = new Promise<void>(resolve => {
+    const firstPairProbes = new Promise<void>((resolve) => {
       releaseFirstPairProbes = resolve;
     });
     const hostPortAvailabilityChecker: HostPortAvailabilityChecker = {
@@ -212,16 +218,19 @@ describe("AndroidEmulatorClient launch contract", () => {
         return true;
       },
     };
-    const createSharedClient = () => createClient(
-      (_command, args) => {
-        spawnedArgs.push(args);
-        const child = children.shift()!;
-        queueMicrotask(() => child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")));
-        return child;
-      },
-      adb,
-      hostPortAvailabilityChecker,
-    );
+    const createSharedClient = () =>
+      createClient(
+        (_command, args) => {
+          spawnedArgs.push(args);
+          const child = children.shift()!;
+          queueMicrotask(() =>
+            child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")),
+          );
+          return child;
+        },
+        adb,
+        hostPortAvailabilityChecker,
+      );
 
     const firstLaunch = createSharedClient().startEmulator("Pixel 9");
     while (firstPairProbeCount < 2) {
@@ -270,12 +279,16 @@ describe("AndroidEmulatorClient launch contract", () => {
     let secondSpawnedArgs: string[] = [];
     const firstClient = createClient((_command, args) => {
       firstSpawnedArgs = args;
-      queueMicrotask(() => firstChild.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")));
+      queueMicrotask(() =>
+        firstChild.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")),
+      );
       return firstChild;
     }, adb);
     const secondClient = createClient((_command, args) => {
       secondSpawnedArgs = args;
-      queueMicrotask(() => secondChild.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")));
+      queueMicrotask(() =>
+        secondChild.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")),
+      );
       return secondChild;
     }, adb);
 
@@ -331,7 +344,7 @@ describe("AndroidEmulatorClient launch contract", () => {
     const spawnedArgs: string[][] = [];
     const children = [firstChild, secondChild];
     let releaseSecondStateScan: (states: []) => void = () => {};
-    const secondStateScan = new Promise<[]>(resolve => {
+    const secondStateScan = new Promise<[]>((resolve) => {
       releaseSecondStateScan = resolve;
     });
     let stateScans = 0;
@@ -344,12 +357,13 @@ describe("AndroidEmulatorClient launch contract", () => {
       }
       return [];
     };
-    const createSharedClient = () => createClient((_command, args) => {
-      spawnedArgs.push(args);
-      const child = children.shift()!;
-      queueMicrotask(() => child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")));
-      return child;
-    }, adb);
+    const createSharedClient = () =>
+      createClient((_command, args) => {
+        spawnedArgs.push(args);
+        const child = children.shift()!;
+        queueMicrotask(() => child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")));
+        return child;
+      }, adb);
     const firstClient = createSharedClient();
     const secondClient = createSharedClient();
 
@@ -371,9 +385,7 @@ describe("AndroidEmulatorClient launch contract", () => {
 
   test("rejects an occupied selected port when the raw-state scan fails", async () => {
     const adb = new FakeAdbExecutor();
-    adb.setDevices([
-      { name: "Unknown", platform: "android", deviceId: "emulator-5554" },
-    ]);
+    adb.setDevices([{ name: "Unknown", platform: "android", deviceId: "emulator-5554" }]);
     adb.getDeviceStates = async () => {
       throw new Error("raw device-state scan failed");
     };
@@ -391,9 +403,7 @@ describe("AndroidEmulatorClient launch contract", () => {
 
   test("does not allocate a console port when the raw-state scan fails", async () => {
     const adb = new FakeAdbExecutor();
-    adb.setDevices([
-      { name: "Unknown", platform: "android", deviceId: "emulator-5554" },
-    ]);
+    adb.setDevices([{ name: "Unknown", platform: "android", deviceId: "emulator-5554" }]);
     adb.getDeviceStates = async () => {
       throw new Error("raw device-state scan failed");
     };
@@ -420,14 +430,16 @@ describe("AndroidEmulatorClient launch contract", () => {
       return createChild();
     });
 
-    await expect(client.launchEmulator({ avdName: "Pixel 9", signal: controller.signal })).rejects.toThrow("cancelled");
+    await expect(
+      client.launchEmulator({ avdName: "Pixel 9", signal: controller.signal }),
+    ).rejects.toThrow("cancelled");
     expect(spawns).toBe(0);
   });
 
   test("does not spawn when cancellation happens during startup validation", async () => {
     const controller = new AbortController();
     let releaseAvdLookup: (devices: DeviceInfo[]) => void = () => {};
-    const availableAvds = new Promise<DeviceInfo[]>(resolve => {
+    const availableAvds = new Promise<DeviceInfo[]>((resolve) => {
       releaseAvdLookup = resolve;
     });
     let validating = false;
@@ -455,7 +467,7 @@ describe("AndroidEmulatorClient launch contract", () => {
   test("cancels host-port reservation before spawning", async () => {
     const controller = new AbortController();
     let releaseHostProbe: () => void = () => {};
-    const hostProbe = new Promise<void>(resolve => {
+    const hostProbe = new Promise<void>((resolve) => {
       releaseHostProbe = resolve;
     });
     let hostProbeStarted = false;
@@ -490,13 +502,13 @@ describe("AndroidEmulatorClient launch contract", () => {
     const controller = new AbortController();
     const adb = new FakeAdbExecutor();
     let releaseBootedDevices: (devices: DeviceInfo[]) => void = () => {};
-    const bootedDevices = new Promise<DeviceInfo[]>(resolve => {
+    const bootedDevices = new Promise<DeviceInfo[]>((resolve) => {
       releaseBootedDevices = resolve;
     });
     let bootedDeviceSignal: AbortSignal | undefined;
     let rawStateScanStarted = false;
     let spawns = 0;
-    adb.getBootedAndroidDevices = async options => {
+    adb.getBootedAndroidDevices = async (options) => {
       bootedDeviceSignal = options?.signal;
       return bootedDevices;
     };

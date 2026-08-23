@@ -32,7 +32,7 @@ function parseBoolean(value: boolean | string | undefined, fallback: boolean): b
 function parsePositiveNumber(
   value: number | string | undefined,
   fallback: number,
-  allowFloat: boolean
+  allowFloat: boolean,
 ): number {
   if (value === undefined || value === null || value === "") {
     return fallback;
@@ -62,46 +62,45 @@ function parseUserApps(value: string | undefined, fallback: "current" | "all"): 
 }
 
 export function parseDeviceSnapshotConfig(
-  input: DeviceSnapshotConfigInput | null | undefined
+  input: DeviceSnapshotConfigInput | null | undefined,
 ): DeviceSnapshotConfig {
-  const safeInput: DeviceSnapshotConfigInput =
-    input && typeof input === "object" ? input : {};
+  const safeInput: DeviceSnapshotConfigInput = input && typeof input === "object" ? input : {};
 
   return {
     includeAppData: parseBoolean(
       safeInput.includeAppData,
-      DEFAULT_DEVICE_SNAPSHOT_CONFIG.includeAppData
+      DEFAULT_DEVICE_SNAPSHOT_CONFIG.includeAppData,
     ),
     includeSettings: parseBoolean(
       safeInput.includeSettings,
-      DEFAULT_DEVICE_SNAPSHOT_CONFIG.includeSettings
+      DEFAULT_DEVICE_SNAPSHOT_CONFIG.includeSettings,
     ),
     useVmSnapshot: parseBoolean(
       safeInput.useVmSnapshot,
-      DEFAULT_DEVICE_SNAPSHOT_CONFIG.useVmSnapshot
+      DEFAULT_DEVICE_SNAPSHOT_CONFIG.useVmSnapshot,
     ),
     strictBackupMode: parseBoolean(
       safeInput.strictBackupMode,
-      DEFAULT_DEVICE_SNAPSHOT_CONFIG.strictBackupMode
+      DEFAULT_DEVICE_SNAPSHOT_CONFIG.strictBackupMode,
     ),
     backupTimeoutMs: parsePositiveNumber(
       safeInput.backupTimeoutMs,
       DEFAULT_DEVICE_SNAPSHOT_CONFIG.backupTimeoutMs,
-      false
+      false,
     ),
     userApps: parseUserApps(
       typeof safeInput.userApps === "string" ? safeInput.userApps : undefined,
-      DEFAULT_DEVICE_SNAPSHOT_CONFIG.userApps
+      DEFAULT_DEVICE_SNAPSHOT_CONFIG.userApps,
     ),
     vmSnapshotTimeoutMs: parsePositiveNumber(
       safeInput.vmSnapshotTimeoutMs,
       DEFAULT_DEVICE_SNAPSHOT_CONFIG.vmSnapshotTimeoutMs,
-      false
+      false,
     ),
     maxArchiveSizeMb: parsePositiveNumber(
       safeInput.maxArchiveSizeMb,
       DEFAULT_DEVICE_SNAPSHOT_CONFIG.maxArchiveSizeMb,
-      true
+      true,
     ),
   };
 }

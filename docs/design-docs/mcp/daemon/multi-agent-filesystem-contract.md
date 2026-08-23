@@ -30,7 +30,7 @@ Deployment shape this document targets:
 - **1 shared AutoMobile daemon** that all clients use for device-pool
   allocation, session/lock coordination, and version reconciliation.
 - Each client **executes device tools in its own process** (direct mode). The
-  daemon brokers *which* device a client gets; it does not execute that client's
+  daemon brokers _which_ device a client gets; it does not execute that client's
   tools.
 
 > **Proxy mode is for running tests only and is never used in production.** Do
@@ -42,7 +42,7 @@ The rule that follows from the production shape:
 > caches (`screenshots`, `observe_results`, `window`, `cache`, screen-size,
 > dumpsys). These caches are therefore **multi-writer**. Most cache files are
 > keyed by `deviceId`, and the daemon hands each session a **distinct** device,
-> so file *contents* don't collide between agents. The real hazard is
+> so file _contents_ don't collide between agents. The real hazard is
 > **shared-directory cleanup**: a size/age sweep run by one process iterating the
 > whole directory can delete another process's files.
 
@@ -65,20 +65,20 @@ for historical continuity; resolve them as
 Core log paths below use `$LOG_DIR`, which resolves to
 `${AUTOMOBILE_LOG_DIR:-${AUTOMOBILE_DATA_DIR:-~/.auto-mobile}/logs}`.
 
-| Path / resource | Writers (shared base dir) | Collision risk & mitigation |
-|---|---|---|
-| `${TMPDIR}/auto-mobile/screenshots` | N (every client) | filenames are timestamp-only (not device/pid keyed). Size eviction is **age-gated** (`screenshotCacheEviction.ts`, `SCREENSHOT_MIN_EVICT_AGE_MS`) so it never deletes a peer's recent/in-flight frame. |
-| `${TMPDIR}/auto-mobile/observe_results` | N | `observe_<deviceId>_*.json`. Per-device cleanup (`clear(deviceId)`) only touches that agent's own device. `clear()` with **no** deviceId is host-wide — avoid on a shared host, or isolate TMPDIR. |
-| `${TMPDIR}/auto-mobile/window` | N | per-device hashed filename — no cross-agent content collision. |
-| `${TMPDIR}/auto-mobile/cache` (dumpsys) | N | `dumpsys-window-<deviceId>.json` — per-device. |
-| `${TMPDIR}/auto-mobile/cache/screen-size` | N | `md5(deviceId).json` — per-device, content is stable; concurrent writes are idempotent. (No longer CWD-relative.) |
-| daemon control socket / PID / lock | 1 (daemon) | discovered by clients via env — see §2. |
-| auxiliary sockets (video, snapshot, …) | 1 (daemon) | resolved from the configured/default daemon paths; clients and daemon must agree on explicit overrides. |
-| `$LOG_DIR/daemon.log` | 1 daemon | stable daemon log; rotated files are `daemon-<timestamp>.log`. |
-| `$LOG_DIR/stdio-<pid>.log` | 1 each | per-stdio-client file; pruning only trims this pid's files + sweeps stale others by mtime. |
-| `${TMPDIR}/auto-mobile/tool_logs` | N | routed through `tempDir` (honors `AUTOMOBILE_DATA_DIR`, not `TMPDIR`). |
-| `$LOG_DIR/daemon-launch-<pid>.log` | 1 per manager | daemon stdout/stderr launch capture, in the **stable** logs dir (was an ephemeral `mkdtemp(tmpdir())` — issue #2724); truncated per launch. |
-| `mkdtemp(...)` APK / prefetch dirs | per-call unique | **already safe** (random suffix). |
+| Path / resource                           | Writers (shared base dir) | Collision risk & mitigation                                                                                                                                                                            |
+| ----------------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `${TMPDIR}/auto-mobile/screenshots`       | N (every client)          | filenames are timestamp-only (not device/pid keyed). Size eviction is **age-gated** (`screenshotCacheEviction.ts`, `SCREENSHOT_MIN_EVICT_AGE_MS`) so it never deletes a peer's recent/in-flight frame. |
+| `${TMPDIR}/auto-mobile/observe_results`   | N                         | `observe_<deviceId>_*.json`. Per-device cleanup (`clear(deviceId)`) only touches that agent's own device. `clear()` with **no** deviceId is host-wide — avoid on a shared host, or isolate TMPDIR.     |
+| `${TMPDIR}/auto-mobile/window`            | N                         | per-device hashed filename — no cross-agent content collision.                                                                                                                                         |
+| `${TMPDIR}/auto-mobile/cache` (dumpsys)   | N                         | `dumpsys-window-<deviceId>.json` — per-device.                                                                                                                                                         |
+| `${TMPDIR}/auto-mobile/cache/screen-size` | N                         | `md5(deviceId).json` — per-device, content is stable; concurrent writes are idempotent. (No longer CWD-relative.)                                                                                      |
+| daemon control socket / PID / lock        | 1 (daemon)                | discovered by clients via env — see §2.                                                                                                                                                                |
+| auxiliary sockets (video, snapshot, …)    | 1 (daemon)                | resolved from the configured/default daemon paths; clients and daemon must agree on explicit overrides.                                                                                                |
+| `$LOG_DIR/daemon.log`                     | 1 daemon                  | stable daemon log; rotated files are `daemon-<timestamp>.log`.                                                                                                                                         |
+| `$LOG_DIR/stdio-<pid>.log`                | 1 each                    | per-stdio-client file; pruning only trims this pid's files + sweeps stale others by mtime.                                                                                                             |
+| `${TMPDIR}/auto-mobile/tool_logs`         | N                         | routed through `tempDir` (honors `AUTOMOBILE_DATA_DIR`, not `TMPDIR`).                                                                                                                                 |
+| `$LOG_DIR/daemon-launch-<pid>.log`        | 1 per manager             | daemon stdout/stderr launch capture, in the **stable** logs dir (was an ephemeral `mkdtemp(tmpdir())` — issue #2724); truncated per launch.                                                            |
+| `mkdtemp(...)` APK / prefetch dirs        | per-call unique           | **already safe** (random suffix).                                                                                                                                                                      |
 
 The daemon enforces exactly one daemon per host per user (single-daemon policy in
 `manager.ts` `startUnlocked`, plus per-UID socket/PID/lock paths), so daemon-owned
@@ -88,7 +88,7 @@ rows are single-writer regardless of how clients are configured.
 
 ## 2. Production env contract
 
-Set these identically for **every** client process *and* in the environment the
+Set these identically for **every** client process _and_ in the environment the
 daemon is launched from. Mismatches between a client and the daemon are the
 single biggest source of "client can't find the daemon" failures.
 
@@ -131,7 +131,7 @@ export AUTOMOBILE_LOG_LEVEL=warn           # quieter shared log in prod
   module load. Default is `/tmp/auto-mobile-daemon-<uid>.{sock,pid,lock}`. If
   you override them, override them for **both** sides. The daemon already
   propagates non-default values to the child it spawns (`manager.ts` `childEnv`),
-  but a *client* that connects must also see the same override.
+  but a _client_ that connects must also see the same override.
 
 ### Single-user requirement
 

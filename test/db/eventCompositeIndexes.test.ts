@@ -52,7 +52,7 @@ async function indexColumns(db: Kysely<unknown>, name: string): Promise<string[]
   const result = await sql<{ seqno: number; name: string }>`
     SELECT seqno, name FROM pragma_index_info(${name}) ORDER BY seqno
   `.execute(db);
-  return result.rows.map(r => r.name);
+  return result.rows.map((r) => r.name);
 }
 
 /**
@@ -63,10 +63,10 @@ async function indexColumns(db: Kysely<unknown>, name: string): Promise<string[]
 function queryPlan(bunDb: BunDatabase, table: string): string[] {
   const rows = bunDb
     .query(
-      `EXPLAIN QUERY PLAN SELECT * FROM ${table} WHERE device_id = 'dev-1' ORDER BY timestamp DESC LIMIT 100`
+      `EXPLAIN QUERY PLAN SELECT * FROM ${table} WHERE device_id = 'dev-1' ORDER BY timestamp DESC LIMIT 100`,
     )
     .all() as Array<{ detail: string }>;
-  return rows.map(r => r.detail);
+  return rows.map((r) => r.detail);
 }
 
 describe("2026_07_02_000_event_composite_indexes migration", () => {
@@ -140,7 +140,7 @@ describe("2026_07_02_000_event_composite_indexes migration", () => {
 
     expect(after).toEqual(before);
     // Sanity: correct rows in correct DESC order (dev-2 excluded).
-    expect(after.map(r => r.timestamp)).toEqual([300, 200, 100]);
+    expect(after.map((r) => r.timestamp)).toEqual([300, 200, 100]);
   });
 
   test("up is idempotent (safe to re-run, as destructive-recovery replay would)", async () => {

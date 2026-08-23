@@ -19,7 +19,7 @@ describe("docs deployment workflow", () => {
       actions: "read",
       contents: "read",
       pages: "write",
-      "id-token": "write"
+      "id-token": "write",
     });
   });
 
@@ -29,6 +29,8 @@ describe("docs deployment workflow", () => {
   });
 
   test("deploy-docs publishes only changed documentation from main", () => {
-    expect(deployDocs?.if).toBe("github.ref == 'refs/heads/main' && needs.check.outputs.changed == 'true'");
+    expect(deployDocs?.if).toBe(
+      "github.ref == 'refs/heads/main' && needs.check.outputs.changed == 'true'",
+    );
   });
 });

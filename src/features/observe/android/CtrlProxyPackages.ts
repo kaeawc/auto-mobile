@@ -30,7 +30,7 @@ export class CtrlProxyPackages {
   async requestInstalledPackages(
     includeSystem: boolean = true,
     userId?: number,
-    timeoutMs: number = 5000
+    timeoutMs: number = 5000,
   ): Promise<A11yInstalledPackagesResult> {
     const startTime = this.context.timer.now();
 
@@ -68,14 +68,14 @@ export class CtrlProxyPackages {
           packages: [],
           totalTimeMs: this.context.timer.now() - startTime,
           error: `Installed packages timeout after ${timeout}ms`,
-        })
+        }),
       );
 
       try {
         ws.send(
           serializeCtrlProxyRequest(
-            ctrlProxyRequests.requestInstalledPackages({ requestId, includeSystem, userId })
-          )
+            ctrlProxyRequests.requestInstalledPackages({ requestId, includeSystem, userId }),
+          ),
         );
       } catch (sendError) {
         // Settle the registered request rather than orphaning it (see requestPackageInfo).
@@ -83,7 +83,7 @@ export class CtrlProxyPackages {
         this.context.requestManager.resolveError(
           requestId,
           `${sendError}`,
-          this.context.timer.now() - startTime
+          this.context.timer.now() - startTime,
         );
       }
 
@@ -102,7 +102,7 @@ export class CtrlProxyPackages {
   async requestPackageInfo(
     packageName: string,
     options: PackageInfoOptions = {},
-    timeoutMs: number = 5000
+    timeoutMs: number = 5000,
   ): Promise<A11yPackageInfoResult> {
     const startTime = this.context.timer.now();
 
@@ -144,7 +144,7 @@ export class CtrlProxyPackages {
           grantedPermissions: {},
           totalTimeMs: this.context.timer.now() - startTime,
           error: `Package info timeout after ${timeout}ms`,
-        })
+        }),
       );
 
       try {
@@ -154,18 +154,20 @@ export class CtrlProxyPackages {
               requestId,
               packageName,
               includePermissions: options.includePermissions ?? true,
-            })
-          )
+            }),
+          ),
         );
       } catch (sendError) {
         // Settle the just-registered request rather than orphaning it, so the
         // always-awaited resultPromise below returns the failure instead of a later
         // cancelAll surfacing an unhandled rejection.
-        logger.warn(`[CtrlProxyPackages] package_info send failed for ${packageName}: ${sendError}`);
+        logger.warn(
+          `[CtrlProxyPackages] package_info send failed for ${packageName}: ${sendError}`,
+        );
         this.context.requestManager.resolveError(
           requestId,
           `${sendError}`,
-          this.context.timer.now() - startTime
+          this.context.timer.now() - startTime,
         );
       }
 
@@ -185,7 +187,7 @@ export class CtrlProxyPackages {
 
   async requestLaunchIntent(
     packageName: string,
-    timeoutMs: number = 5000
+    timeoutMs: number = 5000,
   ): Promise<A11yLaunchIntentResult> {
     const startTime = this.context.timer.now();
 
@@ -221,20 +223,24 @@ export class CtrlProxyPackages {
           packageName,
           totalTimeMs: this.context.timer.now() - startTime,
           error: `Launch intent timeout after ${timeout}ms`,
-        })
+        }),
       );
 
       try {
         ws.send(
-          serializeCtrlProxyRequest(ctrlProxyRequests.requestLaunchIntent({ requestId, packageName }))
+          serializeCtrlProxyRequest(
+            ctrlProxyRequests.requestLaunchIntent({ requestId, packageName }),
+          ),
         );
       } catch (sendError) {
         // Settle the registered request rather than orphaning it (see requestPackageInfo).
-        logger.warn(`[CtrlProxyPackages] launch_intent send failed for ${packageName}: ${sendError}`);
+        logger.warn(
+          `[CtrlProxyPackages] launch_intent send failed for ${packageName}: ${sendError}`,
+        );
         this.context.requestManager.resolveError(
           requestId,
           `${sendError}`,
-          this.context.timer.now() - startTime
+          this.context.timer.now() - startTime,
         );
       }
 
@@ -248,5 +254,4 @@ export class CtrlProxyPackages {
       };
     }
   }
-
 }

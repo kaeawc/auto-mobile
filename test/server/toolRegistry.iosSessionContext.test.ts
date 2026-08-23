@@ -41,14 +41,14 @@ describe("ToolRegistry iOS session context", () => {
         platform: z.enum(["ios", "android"]).optional(),
         sessionUuid: z.string().optional(),
       }),
-      async () => ({ success: true })
+      async () => ({ success: true }),
     );
 
     const tool = ToolRegistry.getTool("iosSessionRequiredTool");
     expect(tool).toBeDefined();
 
     await expect(tool!.handler({ platform: "ios" })).rejects.toThrow(
-      "Multiple iOS simulators detected. Provide sessionUuid to target a specific simulator."
+      "Multiple iOS simulators detected. Provide sessionUuid to target a specific simulator.",
     );
     expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
   });
@@ -63,7 +63,7 @@ describe("ToolRegistry iOS session context", () => {
         platform: z.enum(["ios", "android"]).optional(),
         sessionUuid: z.string().optional(),
       }),
-      async () => ({ success: true })
+      async () => ({ success: true }),
     );
 
     const tool = ToolRegistry.getTool("iosSessionAllowedTool");
@@ -85,7 +85,7 @@ describe("ToolRegistry iOS session context", () => {
         deviceId: z.string().optional(),
         sessionUuid: z.string().optional(),
       }),
-      async () => ({ success: true })
+      async () => ({ success: true }),
     );
 
     const tool = ToolRegistry.getTool("iosDeviceIdAllowedTool");
@@ -108,7 +108,7 @@ describe("ToolRegistry iOS session context", () => {
         platform: z.enum(["ios", "android"]).optional(),
         sessionUuid: z.string().optional(),
       }),
-      async () => ({ success: true })
+      async () => ({ success: true }),
     );
 
     const tool = ToolRegistry.getTool("iosActiveDeviceTool");
@@ -132,7 +132,7 @@ describe("ToolRegistry iOS session context", () => {
         platform: z.enum(["ios", "android"]).optional(),
         sessionUuid: z.string().optional(),
       }),
-      async () => ({ success: true })
+      async () => ({ success: true }),
     );
 
     const tool = ToolRegistry.getTool("iosActiveDeviceEitherPlatformTool");
@@ -141,7 +141,7 @@ describe("ToolRegistry iOS session context", () => {
     // Should still require sessionUuid because platform is not explicitly "ios"
     // ensureDeviceReady won't honor currentDevice when platform doesn't match
     await expect(tool!.handler({})).rejects.toThrow(
-      "Multiple iOS simulators detected. Provide sessionUuid to target a specific simulator."
+      "Multiple iOS simulators detected. Provide sessionUuid to target a specific simulator.",
     );
     expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
   });

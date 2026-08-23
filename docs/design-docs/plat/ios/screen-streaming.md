@@ -18,13 +18,13 @@ Research and design for real-time screen streaming from iOS devices/simulators t
 
 Unlike Android (which requires a shell-user JAR running on device), iOS devices expose their screen as a **video capture source** accessible from macOS via AVFoundation. No app or daemon needs to run on the iOS device itself.
 
-| Aspect | Android | iOS |
-|--------|---------|-----|
-| Capture location | On device (shell JAR) | On Mac (AVFoundation) |
-| Requires app on device | Yes (video server) | No |
-| Transport | ADB socket → MCP server | Direct macOS API |
-| Encoding | MediaCodec H.264 on device | Already decoded frames from macOS |
-| Decoding | bytedeco FFmpeg on desktop | Not needed (raw frames) |
+| Aspect                 | Android                    | iOS                               |
+| ---------------------- | -------------------------- | --------------------------------- |
+| Capture location       | On device (shell JAR)      | On Mac (AVFoundation)             |
+| Requires app on device | Yes (video server)         | No                                |
+| Transport              | ADB socket → MCP server    | Direct macOS API                  |
+| Encoding               | MediaCodec H.264 on device | Already decoded frames from macOS |
+| Decoding               | bytedeco FFmpeg on desktop | Not needed (raw frames)           |
 
 ## Physical iOS Devices (USB)
 
@@ -184,6 +184,7 @@ xcrun simctl io booted screenshot /path/to/screenshot.png
 #### Option A: Repeated Screenshots (Current)
 
 Poll `simctl io screenshot` at target frame rate. Simple but:
+
 - High overhead (process spawn per frame)
 - Limited to ~10-15 fps realistically
 - File I/O for each frame
@@ -195,12 +196,14 @@ xcrun simctl io booted recordVideo --codec=h264 -
 ```
 
 Pipe to ffmpeg for decoding. However:
+
 - `recordVideo` doesn't support stdout piping well
 - Designed for file output, not streaming
 
 #### Option C: SimulatorKit Framework (Private)
 
 Apple's private `SimulatorKit.framework` may have streaming APIs, but:
+
 - Undocumented
 - May break between Xcode versions
 - App Store restrictions if distributed
@@ -259,6 +262,7 @@ The Android path needs an H.264 decoder because the device encodes on-device. iO
 Since iOS provides raw frames (not H.264), use a simpler protocol:
 
 ### Frame Header (24 bytes)
+
 ```
 ┌──────────┬─────────────┬──────────┬───────────┬─────────────┬─────────────┐
 │ magic(4) │ checksum(4) │ width(4) │ height(4) │ bytesPerRow │ timestamp   │
@@ -291,6 +295,7 @@ these records.
 ## Implementation Plan
 
 ### Milestone 1: Physical Device Capture
+
 - [x] Create Swift helper for AVFoundation capture (`ios/screen-capture/`)
 - [x] Implement frame protocol + stdout streaming
 - [x] Node-side spawn manager (`src/features/screen-stream/IOSDeviceCaptureHelper.ts`)
@@ -298,6 +303,7 @@ these records.
 - [ ] Test with MCP server integration
 
 ### Milestone 2: Simulator Capture
+
 - [x] Create ScreenCaptureKit-based capture for simulator windows (`SimulatorCaptureSession`)
 - [x] Handle simulator window discovery (`SimulatorWindowDiscovery`, `--list-simulators`)
 - [x] Unified Swift CLI handles both device and simulator targets
@@ -308,6 +314,7 @@ these records.
 - [ ] Unix-socket fan-out (shared with Milestone 1 follow-up)
 
 ### Milestone 3: IDE Plugin Integration
+
 - [ ] Add raw frame receiver (simpler than the Android H.264 decode path)
 - [ ] Convert BGRA to ImageBitmap for Compose
 - [ ] Unify with Android video stream UI

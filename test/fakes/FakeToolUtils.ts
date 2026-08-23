@@ -24,9 +24,9 @@ export class FakeToolUtils implements ToolResponseFormatter {
       content: [
         {
           type: "text",
-          text: stringifyToolResponse(content)
-        }
-      ]
+          text: stringifyToolResponse(content),
+        },
+      ],
     };
   }
 
@@ -36,7 +36,10 @@ export class FakeToolUtils implements ToolResponseFormatter {
    * @param mimeType The MIME type of the image (e.g., "image/png", "image/webp")
    * @returns A properly formatted tool response object
    */
-  createImageToolResponse(base64Data: string, mimeType: string): {
+  createImageToolResponse(
+    base64Data: string,
+    mimeType: string,
+  ): {
     content: Array<{
       type: "image";
       data: string;
@@ -49,9 +52,9 @@ export class FakeToolUtils implements ToolResponseFormatter {
         {
           type: "image",
           data: base64Data,
-          mimeType: mimeType
-        }
-      ]
+          mimeType: mimeType,
+        },
+      ],
     };
   }
 

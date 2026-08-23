@@ -20,7 +20,7 @@ import {
   SendKeyEventResult,
   PressButtonResult,
   RotateResult,
-  SwipeResult
+  SwipeResult,
 } from "../../src/models";
 
 /**
@@ -48,7 +48,7 @@ export class ResultFaker {
       left,
       top,
       right: overrides.right ?? faker.number.int({ min: left, max: Math.max(left, 1080) }),
-      bottom: overrides.bottom ?? faker.number.int({ min: top, max: Math.max(top, 1920) })
+      bottom: overrides.bottom ?? faker.number.int({ min: top, max: Math.max(top, 1920) }),
     };
   }
 
@@ -60,20 +60,32 @@ export class ResultFaker {
 
     return {
       bounds,
-      "text": overrides.text ?? faker.helpers.maybe(() => faker.lorem.words({ min: 1, max: 5 })),
-      "content-desc": overrides["content-desc"] ?? faker.helpers.maybe(() => faker.lorem.sentence()),
-      "resource-id": overrides["resource-id"] ?? faker.helpers.maybe(() => `${faker.word.sample()}:id/${faker.word.sample()}_${faker.word.sample()}`),
-      "class": overrides["class"] ?? faker.helpers.arrayElement(["android.widget.TextView", "android.widget.Button", "android.widget.ImageView"]),
-      "package": overrides["package"] ?? `com.${faker.internet.domainWord()}.${faker.internet.domainWord()}`,
-      "checkable": overrides.checkable ?? faker.datatype.boolean(),
-      "checked": overrides.checked ?? faker.datatype.boolean(),
-      "clickable": overrides.clickable ?? faker.datatype.boolean(0.7),
-      "enabled": overrides.enabled ?? faker.datatype.boolean(0.9),
-      "focusable": overrides.focusable ?? faker.datatype.boolean(0.5),
-      "focused": overrides.focused ?? faker.datatype.boolean(0.2),
-      "scrollable": overrides.scrollable ?? faker.datatype.boolean(0.3),
-      "selected": overrides.selected ?? faker.datatype.boolean(0.3),
-      ...overrides
+      text: overrides.text ?? faker.helpers.maybe(() => faker.lorem.words({ min: 1, max: 5 })),
+      "content-desc":
+        overrides["content-desc"] ?? faker.helpers.maybe(() => faker.lorem.sentence()),
+      "resource-id":
+        overrides["resource-id"] ??
+        faker.helpers.maybe(
+          () => `${faker.word.sample()}:id/${faker.word.sample()}_${faker.word.sample()}`,
+        ),
+      class:
+        overrides["class"] ??
+        faker.helpers.arrayElement([
+          "android.widget.TextView",
+          "android.widget.Button",
+          "android.widget.ImageView",
+        ]),
+      package:
+        overrides["package"] ?? `com.${faker.internet.domainWord()}.${faker.internet.domainWord()}`,
+      checkable: overrides.checkable ?? faker.datatype.boolean(),
+      checked: overrides.checked ?? faker.datatype.boolean(),
+      clickable: overrides.clickable ?? faker.datatype.boolean(0.7),
+      enabled: overrides.enabled ?? faker.datatype.boolean(0.9),
+      focusable: overrides.focusable ?? faker.datatype.boolean(0.5),
+      focused: overrides.focused ?? faker.datatype.boolean(0.2),
+      scrollable: overrides.scrollable ?? faker.datatype.boolean(0.3),
+      selected: overrides.selected ?? faker.datatype.boolean(0.3),
+      ...overrides,
     };
   }
 
@@ -82,35 +94,36 @@ export class ResultFaker {
    */
   static tapOnSelectedElement(
     element: Element,
-    overrides: Partial<TapOnSelectedElement> = {}
+    overrides: Partial<TapOnSelectedElement> = {},
   ): TapOnSelectedElement {
     const bounds = element.bounds;
     const centerX = Math.floor((bounds.left + bounds.right) / 2);
     const centerY = Math.floor((bounds.top + bounds.bottom) / 2);
-    const text = typeof element.text === "string" && element.text.length > 0
-      ? element.text
-      : (typeof element["content-desc"] === "string"
-        ? element["content-desc"]
-        : (typeof element["ios-accessibility-label"] === "string"
-          ? element["ios-accessibility-label"]
-          : ""));
+    const text =
+      typeof element.text === "string" && element.text.length > 0
+        ? element.text
+        : typeof element["content-desc"] === "string"
+          ? element["content-desc"]
+          : typeof element["ios-accessibility-label"] === "string"
+            ? element["ios-accessibility-label"]
+            : "";
 
     return {
       text: overrides.text ?? text,
-      resourceId: overrides.resourceId ?? (typeof element["resource-id"] === "string"
-        ? element["resource-id"]
-        : ""),
+      resourceId:
+        overrides.resourceId ??
+        (typeof element["resource-id"] === "string" ? element["resource-id"] : ""),
       bounds: overrides.bounds ?? {
         left: bounds.left,
         top: bounds.top,
         right: bounds.right,
         bottom: bounds.bottom,
         centerX,
-        centerY
+        centerY,
       },
       indexInMatches: overrides.indexInMatches ?? 0,
       totalMatches: overrides.totalMatches ?? 1,
-      selectionStrategy: overrides.selectionStrategy ?? "first"
+      selectionStrategy: overrides.selectionStrategy ?? "first",
     };
   }
 
@@ -120,7 +133,7 @@ export class ResultFaker {
   static screenSize(overrides: Partial<ScreenSize> = {}): ScreenSize {
     return {
       width: overrides.width ?? faker.helpers.arrayElement([720, 1080, 1440]),
-      height: overrides.height ?? faker.helpers.arrayElement([1280, 1920, 2560])
+      height: overrides.height ?? faker.helpers.arrayElement([1280, 1920, 2560]),
     };
   }
 
@@ -132,7 +145,7 @@ export class ResultFaker {
       top: overrides.top ?? faker.number.int({ min: 24, max: 80 }),
       right: overrides.right ?? faker.number.int({ min: 0, max: 48 }),
       bottom: overrides.bottom ?? faker.number.int({ min: 48, max: 144 }),
-      left: overrides.left ?? faker.number.int({ min: 0, max: 48 })
+      left: overrides.left ?? faker.number.int({ min: 0, max: 48 }),
     };
   }
 
@@ -143,7 +156,7 @@ export class ResultFaker {
     return {
       x: overrides.x ?? faker.number.int({ min: 0, max: 1080 }),
       y: overrides.y ?? faker.number.int({ min: 0, max: 1920 }),
-      delay: overrides.delay ?? faker.helpers.maybe(() => faker.number.int({ min: 10, max: 500 }))
+      delay: overrides.delay ?? faker.helpers.maybe(() => faker.number.int({ min: 10, max: 500 })),
     };
   }
 
@@ -151,14 +164,16 @@ export class ResultFaker {
    * Generate fake ActiveWindowInfo
    */
   static activeWindowInfo(overrides: Partial<ActiveWindowInfo> = {}): ActiveWindowInfo {
-    const packageName = overrides.appId ?? `com.${faker.internet.domainWord()}.${faker.internet.domainWord()}`;
+    const packageName =
+      overrides.appId ?? `com.${faker.internet.domainWord()}.${faker.internet.domainWord()}`;
     const word = faker.word.sample();
     const capitalizedWord = word.charAt(0).toUpperCase() + word.slice(1);
 
     return {
       appId: packageName,
-      activityName: overrides.activityName ?? `${packageName}.activities.${capitalizedWord}Activity`,
-      layoutSeqSum: overrides.layoutSeqSum ?? faker.number.int({ min: 100, max: 10000 })
+      activityName:
+        overrides.activityName ?? `${packageName}.activities.${capitalizedWord}Activity`,
+      layoutSeqSum: overrides.layoutSeqSum ?? faker.number.int({ min: 100, max: 10000 }),
     };
   }
 
@@ -180,16 +195,18 @@ export class ResultFaker {
       systemInsets,
       viewHierarchy: overrides.viewHierarchy ?? {
         version: "1.0",
-        nodes: elements.map(e => ({ ...e, children: [] }))
+        nodes: elements.map((e) => ({ ...e, children: [] })),
       },
-      screenshotPath: overrides.screenshotPath ?? faker.helpers.maybe(() => `screenshots/screen_${updatedAt}.png`),
+      screenshotPath:
+        overrides.screenshotPath ??
+        faker.helpers.maybe(() => `screenshots/screen_${updatedAt}.png`),
       activeWindow: overrides.activeWindow ?? faker.helpers.maybe(() => this.activeWindowInfo()),
       elements: overrides.elements ?? {
-        clickable: elements.filter(e => e.clickable),
-        scrollable: elements.filter(e => e.scrollable),
-        text: elements.filter(e => e.text)
+        clickable: elements.filter((e) => e.clickable),
+        scrollable: elements.filter((e) => e.scrollable),
+        text: elements.filter((e) => e.text),
       },
-      error: overrides.error
+      error: overrides.error,
     };
   }
 
@@ -205,7 +222,7 @@ export class ResultFaker {
       x,
       y,
       observation: overrides.observation ?? this.observeResult(),
-      error: overrides.error
+      error: overrides.error,
     };
   }
 
@@ -222,7 +239,7 @@ export class ResultFaker {
       element,
       selectedElement,
       observation: overrides.observation ?? this.observeResult(),
-      error: overrides.error
+      error: overrides.error,
     };
   }
 
@@ -236,14 +253,17 @@ export class ResultFaker {
     return {
       success,
       elementFound,
-      element: elementFound ? (overrides.element ?? this.element({
-        text: faker.helpers.arrayElement(["Close", "Cancel", "X", "Exit", "No thanks"]),
-        clickable: true
-      })) : undefined,
+      element: elementFound
+        ? (overrides.element ??
+          this.element({
+            text: faker.helpers.arrayElement(["Close", "Cancel", "X", "Exit", "No thanks"]),
+            clickable: true,
+          }))
+        : undefined,
       x: elementFound ? (overrides.x ?? faker.number.int({ min: 0, max: 1080 })) : undefined,
       y: elementFound ? (overrides.y ?? faker.number.int({ min: 0, max: 1920 })) : undefined,
       observation: overrides.observation ?? this.observeResult(),
-      error: overrides.error ?? (!success ? "Failed to exit dialog" : undefined)
+      error: overrides.error ?? (!success ? "Failed to exit dialog" : undefined),
     };
   }
 
@@ -251,16 +271,19 @@ export class ResultFaker {
    * Generate fake LaunchAppResult
    */
   static launchAppResult(overrides: Partial<LaunchAppResult> = {}): LaunchAppResult {
-    const packageName = overrides.packageName ?? `com.${faker.internet.domainWord()}.${faker.internet.domainWord()}`;
+    const packageName =
+      overrides.packageName ?? `com.${faker.internet.domainWord()}.${faker.internet.domainWord()}`;
 
     return {
       success: overrides.success ?? true,
       packageName,
       activityName: overrides.activityName ?? `${packageName}.MainActivity`,
-      observation: overrides.observation ?? this.observeResult({
-        activeWindow: this.activeWindowInfo({ appId: packageName })
-      }),
-      error: overrides.error
+      observation:
+        overrides.observation ??
+        this.observeResult({
+          activeWindow: this.activeWindowInfo({ appId: packageName }),
+        }),
+      error: overrides.error,
     };
   }
 
@@ -268,7 +291,8 @@ export class ResultFaker {
    * Generate fake TerminateAppResult
    */
   static terminateAppResult(overrides: Partial<TerminateAppResult> = {}): TerminateAppResult {
-    const packageName = overrides.packageName ?? `com.${faker.internet.domainWord()}.${faker.internet.domainWord()}`;
+    const packageName =
+      overrides.packageName ?? `com.${faker.internet.domainWord()}.${faker.internet.domainWord()}`;
 
     return {
       success: overrides.success ?? true,
@@ -277,7 +301,7 @@ export class ResultFaker {
       wasRunning: overrides.wasRunning ?? faker.datatype.boolean(0.7),
       wasForeground: overrides.wasForeground ?? faker.datatype.boolean(0.5),
       observation: overrides.observation ?? this.observeResult(),
-      error: overrides.error
+      error: overrides.error,
     };
   }
 
@@ -285,13 +309,14 @@ export class ResultFaker {
    * Generate fake ClearAppDataResult
    */
   static clearAppDataResult(overrides: Partial<ClearAppDataResult> = {}): ClearAppDataResult {
-    const packageName = overrides.packageName ?? `com.${faker.internet.domainWord()}.${faker.internet.domainWord()}`;
+    const packageName =
+      overrides.packageName ?? `com.${faker.internet.domainWord()}.${faker.internet.domainWord()}`;
 
     return {
       success: overrides.success ?? true,
       packageName,
       observation: overrides.observation ?? this.observeResult(),
-      error: overrides.error
+      error: overrides.error,
     };
   }
 
@@ -301,9 +326,10 @@ export class ResultFaker {
   static installAppResult(overrides: Partial<InstallAppResult> = {}): InstallAppResult {
     return {
       success: overrides.success ?? true,
-      artifactPath: overrides.artifactPath ?? `/path/to/${faker.system.fileName({ extensionCount: 0 })}.apk`,
+      artifactPath:
+        overrides.artifactPath ?? `/path/to/${faker.system.fileName({ extensionCount: 0 })}.apk`,
       observation: overrides.observation ?? this.observeResult(),
-      error: overrides.error
+      error: overrides.error,
     };
   }
 
@@ -314,10 +340,12 @@ export class ResultFaker {
     return {
       success: overrides.success ?? true,
       url: overrides.url ?? faker.internet.url(),
-      observation: overrides.observation ?? this.observeResult({
-        activeWindow: this.activeWindowInfo({ appId: "com.android.chrome" })
-      }),
-      error: overrides.error
+      observation:
+        overrides.observation ??
+        this.observeResult({
+          activeWindow: this.activeWindowInfo({ appId: "com.android.chrome" }),
+        }),
+      error: overrides.error,
     };
   }
 
@@ -329,7 +357,7 @@ export class ResultFaker {
       success: overrides.success ?? true,
       text: overrides.text ?? faker.lorem.sentence(),
       observation: overrides.observation ?? this.observeResult(),
-      error: overrides.error
+      error: overrides.error,
     };
   }
 
@@ -341,7 +369,7 @@ export class ResultFaker {
       success: overrides.success ?? true,
       keyCode: overrides.keyCode ?? faker.number.int({ min: 0, max: 280 }),
       observation: overrides.observation ?? this.observeResult(),
-      error: overrides.error
+      error: overrides.error,
     };
   }
 
@@ -349,7 +377,9 @@ export class ResultFaker {
    * Generate fake PressButtonResult
    */
   static pressButtonResult(overrides: Partial<PressButtonResult> = {}): PressButtonResult {
-    const button = overrides.button ?? faker.helpers.arrayElement(["home", "back", "menu", "power", "volume_up", "volume_down"]);
+    const button =
+      overrides.button ??
+      faker.helpers.arrayElement(["home", "back", "menu", "power", "volume_up", "volume_down"]);
 
     // Map button names to keycodes
     const keyCodeMap: Record<string, number> = {
@@ -358,7 +388,7 @@ export class ResultFaker {
       menu: 82,
       power: 26,
       volume_up: 24,
-      volume_down: 25
+      volume_down: 25,
     };
 
     return {
@@ -366,7 +396,7 @@ export class ResultFaker {
       button,
       keyCode: overrides.keyCode ?? keyCodeMap[button] ?? 0,
       observation: overrides.observation ?? this.observeResult(),
-      error: overrides.error
+      error: overrides.error,
     };
   }
 
@@ -374,16 +404,18 @@ export class ResultFaker {
    * Generate fake RotateResult
    */
   static rotateResult(overrides: Partial<RotateResult> = {}): RotateResult {
-    const orientation = overrides.orientation ?? faker.helpers.arrayElement(["portrait", "landscape"]);
+    const orientation =
+      overrides.orientation ?? faker.helpers.arrayElement(["portrait", "landscape"]);
 
     return {
       success: overrides.success ?? true,
       orientation,
       value: overrides.value ?? (orientation === "portrait" ? 0 : 1),
-      observation: overrides.orientation === "portrait"
-        ? this.observeResult({ screenSize: { width: 1080, height: 1920 } })
-        : this.observeResult({ screenSize: { width: 1920, height: 1080 } }),
-      error: overrides.error
+      observation:
+        overrides.orientation === "portrait"
+          ? this.observeResult({ screenSize: { width: 1080, height: 1920 } })
+          : this.observeResult({ screenSize: { width: 1920, height: 1080 } }),
+      error: overrides.error,
     };
   }
 
@@ -404,9 +436,11 @@ export class ResultFaker {
       y2,
       duration: overrides.duration ?? faker.number.int({ min: 200, max: 800 }),
       path: overrides.path,
-      easing: overrides.easing ?? faker.helpers.arrayElement(["linear", "decelerate", "accelerate", "accelerateDecelerate"]),
+      easing:
+        overrides.easing ??
+        faker.helpers.arrayElement(["linear", "decelerate", "accelerate", "accelerateDecelerate"]),
       observation: overrides.observation ?? this.observeResult(),
-      error: overrides.error
+      error: overrides.error,
     };
   }
 }

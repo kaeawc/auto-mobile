@@ -78,7 +78,7 @@ describe("legacy inline TaskRecord{...} references are not task headers (#4263)"
   test("produces exactly one task, not one per inline reference", async () => {
     const result = await parse(LEGACY_REAL_CAPTURE);
 
-    expect(result.tasks.map(t => t.id)).toEqual([14418]);
+    expect(result.tasks.map((t) => t.id)).toEqual([14418]);
   });
 
   test("keeps taskAffinity on every activity in the task", async () => {
@@ -86,9 +86,9 @@ describe("legacy inline TaskRecord{...} references are not task headers (#4263)"
     // as a header it reset the affinity to undefined, so Hist #0 lost it.
     const result = await parse(LEGACY_REAL_CAPTURE);
 
-    expect(result.activities.map(a => a.taskAffinity)).toEqual([
+    expect(result.activities.map((a) => a.taskAffinity)).toEqual([
       "com.facebook.katana",
-      "com.facebook.katana"
+      "com.facebook.katana",
     ]);
   });
 
@@ -100,7 +100,7 @@ describe("legacy inline TaskRecord{...} references are not task headers (#4263)"
       affinity: "com.facebook.katana",
       packageName: "com.facebook.katana",
       rootActivity: "com.facebook.katana/.activity.ImmersiveActivity",
-      numActivities: 2
+      numActivities: 2,
     });
   });
 
@@ -118,7 +118,7 @@ describe("legacy inline TaskRecord{...} references are not task headers (#4263)"
       * Hist #0: ActivityRecord{aaa u0 com.example/.MainActivity t14418}
 `);
 
-    expect(result.tasks.map(t => t.id)).toEqual([14418]);
+    expect(result.tasks.map((t) => t.id)).toEqual([14418]);
   });
 
   test("a legacy TaskRecord header carries its own A= affinity", async () => {
@@ -139,7 +139,7 @@ describe("legacy inline TaskRecord{...} references are not task headers (#4263)"
 `);
 
     expect(result.tasks[0].rootActivity).toBe(
-      "com.google.android.apps.nexuslauncher/.NexusLauncherActivity"
+      "com.google.android.apps.nexuslauncher/.NexusLauncherActivity",
     );
     expect(result.tasks[0].packageName).toBe("com.google.android.apps.nexuslauncher");
   });
@@ -194,7 +194,7 @@ Display #0 (activities from top to bottom):
 `);
 
     expect(result.tasks[0].rootActivity).toBe(
-      "com.google.android.apps.inbox/com.google.android.apps.bigtop.activities.MainActivity"
+      "com.google.android.apps.inbox/com.google.android.apps.bigtop.activities.MainActivity",
     );
   });
 
@@ -233,7 +233,7 @@ ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)
     const result = await parse(TWO_HIST0_ROWS);
 
     expect(result.tasks[0].rootActivity).toBe(
-      "com.android.settings/.homepage.DeepLinkHomepageActivity"
+      "com.android.settings/.homepage.DeepLinkHomepageActivity",
     );
     expect(result.tasks[0].packageName).toBe("com.android.settings");
   });

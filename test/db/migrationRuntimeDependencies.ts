@@ -64,9 +64,9 @@ export function barePackageName(specifier: string): string | null {
 function hasValueMember(braceBody: string): boolean {
   return braceBody
     .split(",")
-    .map(member => member.trim())
-    .filter(member => member.length > 0)
-    .some(member => !/^type\s+/.test(member));
+    .map((member) => member.trim())
+    .filter((member) => member.length > 0)
+    .some((member) => !/^type\s+/.test(member));
 }
 
 /**
@@ -116,7 +116,7 @@ export interface MigrationDependencyDriftViolation {
  */
 export function findMigrationDependencyDrift(
   sources: ReadonlyMap<string, string>,
-  allowlist: readonly string[]
+  allowlist: readonly string[],
 ): MigrationDependencyDriftViolation[] {
   const allowed = new Set(allowlist);
   const filesByPackage = new Map<string, string[]>();

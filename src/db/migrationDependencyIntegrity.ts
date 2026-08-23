@@ -106,7 +106,7 @@ export function isMissingMigrationDependencyError(error: unknown): boolean {
  */
 export function createIncompleteExtractionError(
   missingPackage: string | null,
-  cause?: unknown
+  cause?: unknown,
 ): Error {
   const subject = missingPackage
     ? `the package '${missingPackage}' could not be resolved`

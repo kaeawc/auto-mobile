@@ -10,7 +10,7 @@ export class FakeHighlightClient implements Pick<VisualHighlightClient, "addHigh
   async addHighlight(
     id: string,
     shape: HighlightShape,
-    options: HighlightOptions
+    options: HighlightOptions,
   ): Promise<HighlightOperationResult> {
     this.addCalls.push({ id, shape, options });
     return { success: true };

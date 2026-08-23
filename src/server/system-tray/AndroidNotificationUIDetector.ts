@@ -1,4 +1,10 @@
-import { ActionableError, BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "../../models";
+import {
+  ActionableError,
+  BootedDevice,
+  Element,
+  ObserveResult,
+  ViewHierarchyResult,
+} from "../../models";
 import { DefaultElementGeometry } from "../../features/utility/ElementGeometry";
 import type { NotificationUIDetector } from "../../utils/interfaces/NotificationUIDetector";
 import {
@@ -38,7 +44,7 @@ export class AndroidNotificationUIDetector implements NotificationUIDetector {
       return false;
     }
     const rootNodes = getHierarchyRoots(viewHierarchy);
-    return rootNodes.some(root => traverseForHint(root, nodeHasSystemTrayHint));
+    return rootNodes.some((root) => traverseForHint(root, nodeHasSystemTrayHint));
   }
 
   async expandTray(_observation?: ObserveResult): Promise<void> {
@@ -71,7 +77,7 @@ export class AndroidNotificationUIDetector implements NotificationUIDetector {
     const geometry = new DefaultElementGeometry();
     const { startX, startY, endX, endY } = geometry.getSwipeWithinBounds("left", element.bounds);
     await this.deps.executeAdbCommand(
-      `shell input swipe ${Math.floor(startX)} ${Math.floor(startY)} ${Math.floor(endX)} ${Math.floor(endY)} ${SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS}`
+      `shell input swipe ${Math.floor(startX)} ${Math.floor(startY)} ${Math.floor(endX)} ${Math.floor(endY)} ${SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS}`,
     );
   }
 }

@@ -15,7 +15,9 @@ export class BufferQueue {
   length = 0;
 
   append(chunk: Buffer): void {
-    if (chunk.length === 0) {return;}
+    if (chunk.length === 0) {
+      return;
+    }
     this.chunks.push(chunk);
     this.length += chunk.length;
   }
@@ -65,7 +67,9 @@ export class BufferQueue {
   }
 
   toBuffer(): Buffer {
-    if (this.length === 0) {return Buffer.alloc(0);}
+    if (this.length === 0) {
+      return Buffer.alloc(0);
+    }
     const first = this.chunks[0];
     if (this.chunks.length === 1) {
       return first.subarray(this.headOffset);

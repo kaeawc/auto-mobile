@@ -15,7 +15,13 @@ describe("parseCliArgs schema-aware coercion (#4241)", () => {
 
   test("keeps an all-digit phone number as a string", () => {
     const { params } = parseCliArgs([
-      "sendSms", "--platform", "android", "--phoneNumber", "5551234567", "--message", "hi"
+      "sendSms",
+      "--platform",
+      "android",
+      "--phoneNumber",
+      "5551234567",
+      "--message",
+      "hi",
     ]);
 
     expect(params.phoneNumber).toBe("5551234567");
@@ -24,7 +30,13 @@ describe("parseCliArgs schema-aware coercion (#4241)", () => {
 
   test("still coerces a number-typed param to a number", () => {
     const { params } = parseCliArgs([
-      "videoRecording", "--platform", "android", "--action", "start", "--maxDuration", "240"
+      "videoRecording",
+      "--platform",
+      "android",
+      "--action",
+      "start",
+      "--maxDuration",
+      "240",
     ]);
 
     expect(params.maxDuration).toBe(240);
@@ -40,7 +52,11 @@ describe("parseCliArgs schema-aware coercion (#4241)", () => {
 
   test("still parses an object-typed param as JSON", () => {
     const { params } = parseCliArgs([
-      "tapOn", "--platform", "android", "--selector", '{"text":"Settings"}'
+      "tapOn",
+      "--platform",
+      "android",
+      "--selector",
+      '{"text":"Settings"}',
     ]);
 
     expect(params.selector).toEqual({ text: "Settings" });
@@ -48,7 +64,11 @@ describe("parseCliArgs schema-aware coercion (#4241)", () => {
 
   test("a nested string value inside an object param stays a string", () => {
     const { params } = parseCliArgs([
-      "tapOn", "--platform", "android", "--selector", '{"text":"12345"}'
+      "tapOn",
+      "--platform",
+      "android",
+      "--selector",
+      '{"text":"12345"}',
     ]);
 
     expect(params.selector).toEqual({ text: "12345" });
@@ -80,7 +100,13 @@ describe("parseCliArgs coercion for union-rooted schemas (#4241 review)", () => 
 
   test("clipboard --text keeps a numeric-looking value as a string", () => {
     const { params } = parseCliArgs([
-      "clipboard", "--platform", "android", "--action", "copy", "--text", "12345"
+      "clipboard",
+      "--platform",
+      "android",
+      "--action",
+      "copy",
+      "--text",
+      "12345",
     ]);
 
     expect(params.text).toBe("12345");
@@ -89,7 +115,13 @@ describe("parseCliArgs coercion for union-rooted schemas (#4241 review)", () => 
 
   test("deviceSnapshot --snapshotName keeps a numeric-looking value as a string", () => {
     const { params } = parseCliArgs([
-      "deviceSnapshot", "--platform", "android", "--action", "capture", "--snapshotName", "20260722"
+      "deviceSnapshot",
+      "--platform",
+      "android",
+      "--action",
+      "capture",
+      "--snapshotName",
+      "20260722",
     ]);
 
     expect(params.snapshotName).toBe("20260722");
@@ -98,7 +130,13 @@ describe("parseCliArgs coercion for union-rooted schemas (#4241 review)", () => 
 
   test("postNotification --title keeps a numeric-looking value as a string", () => {
     const { params } = parseCliArgs([
-      "postNotification", "--platform", "android", "--title", "911", "--body", "test"
+      "postNotification",
+      "--platform",
+      "android",
+      "--title",
+      "911",
+      "--body",
+      "test",
     ]);
 
     expect(params.title).toBe("911");
@@ -112,7 +150,13 @@ describe("parseCliArgs coercion sees through schema wrappers (#4241 review)", ()
 
   test("a default-wrapped enum still coerces as a string", () => {
     const { params } = parseCliArgs([
-      "tapOn", "--platform", "android", "--selector", '{"text":"x"}', "--action", "tap"
+      "tapOn",
+      "--platform",
+      "android",
+      "--selector",
+      '{"text":"x"}',
+      "--action",
+      "tap",
     ]);
 
     expect(params.action).toBe("tap");
@@ -121,7 +165,13 @@ describe("parseCliArgs coercion sees through schema wrappers (#4241 review)", ()
 
   test("a default-wrapped number still coerces as a number", () => {
     const { params } = parseCliArgs([
-      "executePlan", "--platform", "android", "--planContent", "x", "--startStep", "3"
+      "executePlan",
+      "--platform",
+      "android",
+      "--planContent",
+      "x",
+      "--startStep",
+      "3",
     ]);
 
     expect(params.startStep).toBe(3);
@@ -136,8 +186,19 @@ describe("parseCliArgs coercion sees through schema wrappers (#4241 review)", ()
     serverConfig.setEmbeddedSdkEnabled(true);
     try {
       const { params } = parseCliArgs([
-        "setKeyValue", "--platform", "android", "--appId", "com.example",
-        "--name", "prefs", "--key", "pin", "--type", "STRING", "--value", "12345"
+        "setKeyValue",
+        "--platform",
+        "android",
+        "--appId",
+        "com.example",
+        "--name",
+        "prefs",
+        "--key",
+        "pin",
+        "--type",
+        "STRING",
+        "--value",
+        "12345",
       ]);
 
       expect(params.value).toBe("12345");
@@ -172,7 +233,7 @@ describe("parseCliArgs preserves JSON-encoded scalars and rejects bad numbers (#
     [" ", "whitespace"],
     ["0x10", "hex"],
     ["[]", "array"],
-  ])("a non-JSON number token (%p, %s) is left for schema validation to reject", raw => {
+  ])("a non-JSON number token (%p, %s) is left for schema validation to reject", (raw) => {
     const { params } = parseCliArgs(["startDevice", "--platform", "ios", "--timeout-ms", raw]);
 
     expect(typeof params.timeoutMs).toBe("string");
@@ -203,8 +264,19 @@ describe("parseCliArgs preserves JSON null for nullable params (#4241 review)", 
   }
 
   const setKeyValue = (value: string) => [
-    "setKeyValue", "--platform", "android", "--appId", "com.example",
-    "--name", "prefs", "--key", "k", "--type", "STRING", "--value", value
+    "setKeyValue",
+    "--platform",
+    "android",
+    "--appId",
+    "com.example",
+    "--name",
+    "prefs",
+    "--key",
+    "k",
+    "--type",
+    "STRING",
+    "--value",
+    value,
   ];
 
   test("an explicit null reaches a nullable param as null", async () => {

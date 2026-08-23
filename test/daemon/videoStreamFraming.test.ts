@@ -109,7 +109,7 @@ describe("videoStreamFraming", () => {
 
       expect(header.readBigInt64BE(0)).toBeLessThan(0n);
       expect(BigInt.asUintN(64, header.readBigInt64BE(0)) & PACKET_FLAG_CONFIG).toBe(
-        PACKET_FLAG_CONFIG
+        PACKET_FLAG_CONFIG,
       );
     });
 

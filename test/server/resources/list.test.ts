@@ -17,24 +17,28 @@ describe("MCP Resources List", () => {
     }
   });
 
-  test("should return observation resources", async function() {
-
+  test("should return observation resources", async function () {
     const { client } = fixture.getContext();
 
     // Send resources/list request
     const listResourcesResponseSchema = z.object({
-      resources: z.array(z.object({
-        uri: z.string(),
-        name: z.string().optional(),
-        description: z.string().optional(),
-        mimeType: z.string().optional()
-      }))
+      resources: z.array(
+        z.object({
+          uri: z.string(),
+          name: z.string().optional(),
+          description: z.string().optional(),
+          mimeType: z.string().optional(),
+        }),
+      ),
     });
 
-    const result = await client.request({
-      method: "resources/list",
-      params: {}
-    }, listResourcesResponseSchema);
+    const result = await client.request(
+      {
+        method: "resources/list",
+        params: {},
+      },
+      listResourcesResponseSchema,
+    );
 
     // Verify resources list contains observation resources
     expect(typeof result).toBe("object");
@@ -43,27 +47,30 @@ describe("MCP Resources List", () => {
     expect(result.resources.length).toBeGreaterThanOrEqual(2);
 
     // Verify latest observation resource is present
-    const obsResource = result.resources.find((r: any) => r.uri === "automobile:observation/latest");
+    const obsResource = result.resources.find(
+      (r: any) => r.uri === "automobile:observation/latest",
+    );
     expect(obsResource).toBeDefined();
     expect(obsResource?.name).toBe("Latest Observation");
     expect(obsResource?.mimeType).toBe("application/json");
 
     // Verify latest screenshot resource is present
-    const screenshotResource = result.resources.find((r: any) => r.uri === "automobile:observation/latest/screenshot");
+    const screenshotResource = result.resources.find(
+      (r: any) => r.uri === "automobile:observation/latest/screenshot",
+    );
     expect(screenshotResource).toBeDefined();
     expect(screenshotResource?.name).toBe("Latest Screenshot");
     expect(screenshotResource?.mimeType).toBe("image/png");
   });
 
-  test("given a resource is registered, endpoint should return a list with that resource", async function() {
-
+  test("given a resource is registered, endpoint should return a list with that resource", async function () {
     const { client } = fixture.getContext();
 
     const testResource = {
       uri: "automobile:test/resource",
       name: "Test Resource",
       description: "A test resource for validation",
-      mimeType: "text/plain"
+      mimeType: "text/plain",
     };
 
     ResourceRegistry.register(
@@ -74,24 +81,29 @@ describe("MCP Resources List", () => {
       async () => ({
         uri: testResource.uri,
         mimeType: testResource.mimeType,
-        text: "ok"
-      })
+        text: "ok",
+      }),
     );
 
     // Send resources/list request
     const listResourcesResponseSchema = z.object({
-      resources: z.array(z.object({
-        uri: z.string(),
-        name: z.string().optional(),
-        description: z.string().optional(),
-        mimeType: z.string().optional()
-      }))
+      resources: z.array(
+        z.object({
+          uri: z.string(),
+          name: z.string().optional(),
+          description: z.string().optional(),
+          mimeType: z.string().optional(),
+        }),
+      ),
     });
 
-    const result = await client.request({
-      method: "resources/list",
-      params: {}
-    }, listResourcesResponseSchema);
+    const result = await client.request(
+      {
+        method: "resources/list",
+        params: {},
+      },
+      listResourcesResponseSchema,
+    );
 
     try {
       // Verify resources list contains the test resource

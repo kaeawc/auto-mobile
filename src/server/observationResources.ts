@@ -1,8 +1,4 @@
-import {
-  ResourceRegistry,
-  ResourceContent,
-  type ResourceReadContext,
-} from "./resourceRegistry";
+import { ResourceRegistry, ResourceContent, type ResourceReadContext } from "./resourceRegistry";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { logger } from "../utils/logger";
 import { stringifyToolResponse } from "../utils/toolUtils";
@@ -68,7 +64,7 @@ function resolveActiveSession(sessionUuid: string): ActiveSessionDevice | undefi
 
 const defaultSessionScreenshotResourceDependencies: SessionScreenshotResourceDependencies = {
   resolveActiveSession,
-  createScreenshotService: device => new TakeScreenshot(device),
+  createScreenshotService: (device) => new TakeScreenshot(device),
 };
 
 let sessionScreenshotResourceDependencies = defaultSessionScreenshotResourceDependencies;
@@ -121,9 +117,14 @@ async function getLatestObservation(): Promise<ResourceContent> {
       return {
         uri: RESOURCE_URIS.LATEST_OBSERVATION,
         mimeType: "application/json",
-        text: JSON.stringify({
-          error: "No observation available. Call the 'observe' tool first to capture screen state."
-        }, null, 2)
+        text: JSON.stringify(
+          {
+            error:
+              "No observation available. Call the 'observe' tool first to capture screen state.",
+          },
+          null,
+          2,
+        ),
       };
     }
 
@@ -131,16 +132,20 @@ async function getLatestObservation(): Promise<ResourceContent> {
     return {
       uri: RESOURCE_URIS.LATEST_OBSERVATION,
       mimeType: "application/json",
-      text: stringifyToolResponse(cachedResult)
+      text: stringifyToolResponse(cachedResult),
     };
   } catch (error) {
     logger.error(`[ObservationResources] Failed to get latest observation: ${error}`);
     return {
       uri: RESOURCE_URIS.LATEST_OBSERVATION,
       mimeType: "application/json",
-      text: JSON.stringify({
-        error: `Failed to retrieve observation: ${error}`
-      }, null, 2)
+      text: JSON.stringify(
+        {
+          error: `Failed to retrieve observation: ${error}`,
+        },
+        null,
+        2,
+      ),
     };
   }
 }
@@ -153,9 +158,14 @@ async function getLatestScreenshot(): Promise<ResourceContent> {
       return {
         uri: RESOURCE_URIS.LATEST_SCREENSHOT,
         mimeType: "application/json",
-        text: JSON.stringify({
-          error: "No observation available. Call the 'observe' tool first to capture a screenshot."
-        }, null, 2)
+        text: JSON.stringify(
+          {
+            error:
+              "No observation available. Call the 'observe' tool first to capture a screenshot.",
+          },
+          null,
+          2,
+        ),
       };
     }
 
@@ -177,9 +187,13 @@ async function getLatestScreenshot(): Promise<ResourceContent> {
       return {
         uri: RESOURCE_URIS.LATEST_SCREENSHOT,
         mimeType: "application/json",
-        text: JSON.stringify({
-          error: errorMessage
-        }, null, 2)
+        text: JSON.stringify(
+          {
+            error: errorMessage,
+          },
+          null,
+          2,
+        ),
       };
     }
 
@@ -193,16 +207,20 @@ async function getLatestScreenshot(): Promise<ResourceContent> {
     return {
       uri: RESOURCE_URIS.LATEST_SCREENSHOT,
       mimeType,
-      blob: base64Image
+      blob: base64Image,
     };
   } catch (error) {
     logger.error(`[ObservationResources] Failed to get latest screenshot: ${error}`);
     return {
       uri: RESOURCE_URIS.LATEST_SCREENSHOT,
       mimeType: "application/json",
-      text: JSON.stringify({
-        error: `Failed to retrieve screenshot: ${error}`
-      }, null, 2)
+      text: JSON.stringify(
+        {
+          error: `Failed to retrieve screenshot: ${error}`,
+        },
+        null,
+        2,
+      ),
     };
   }
 }
@@ -211,9 +229,13 @@ function sessionResourceError(uri: string, sessionUuid: string): ResourceContent
   return {
     uri,
     mimeType: "application/json",
-    text: JSON.stringify({
-      error: `No active device session found for sessionUuid ${sessionUuid}.`,
-    }, null, 2),
+    text: JSON.stringify(
+      {
+        error: `No active device session found for sessionUuid ${sessionUuid}.`,
+      },
+      null,
+      2,
+    ),
   };
 }
 
@@ -221,16 +243,17 @@ function unauthorizedSessionResourceError(uri: string): ResourceContent {
   return {
     uri,
     mimeType: "application/json",
-    text: JSON.stringify({
-      error: "This resource can only be read by its bound device session.",
-    }, null, 2),
+    text: JSON.stringify(
+      {
+        error: "This resource can only be read by its bound device session.",
+      },
+      null,
+      2,
+    ),
   };
 }
 
-function isAuthorizedSessionResource(
-  context: ResourceReadContext,
-  sessionUuid: string,
-): boolean {
+function isAuthorizedSessionResource(context: ResourceReadContext, sessionUuid: string): boolean {
   return context.sessionUuid === sessionUuid;
 }
 
@@ -257,25 +280,35 @@ async function getSessionObservation(
       return {
         uri,
         mimeType: "application/json",
-        text: JSON.stringify({
-          error: `No observation available for sessionUuid ${sessionUuid}. Call the 'observe' tool first.`
-        }, null, 2)
+        text: JSON.stringify(
+          {
+            error: `No observation available for sessionUuid ${sessionUuid}. Call the 'observe' tool first.`,
+          },
+          null,
+          2,
+        ),
       };
     }
 
     return {
       uri,
       mimeType: "application/json",
-      text: stringifyToolResponse(cachedResult)
+      text: stringifyToolResponse(cachedResult),
     };
   } catch (error) {
-    logger.error(`[ObservationResources] Failed to get observation for session ${sessionUuid}: ${error}`);
+    logger.error(
+      `[ObservationResources] Failed to get observation for session ${sessionUuid}: ${error}`,
+    );
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify({
-        error: `Failed to retrieve observation for sessionUuid ${sessionUuid}: ${error}`
-      }, null, 2)
+      text: JSON.stringify(
+        {
+          error: `Failed to retrieve observation for sessionUuid ${sessionUuid}: ${error}`,
+        },
+        null,
+        2,
+      ),
     };
   }
 }
@@ -302,9 +335,13 @@ async function getSessionScreenshot(
       return {
         uri,
         mimeType: "application/json",
-        text: JSON.stringify({
-          error: `No observation available for sessionUuid ${sessionUuid}. Call the 'observe' tool first.`
-        }, null, 2)
+        text: JSON.stringify(
+          {
+            error: `No observation available for sessionUuid ${sessionUuid}. Call the 'observe' tool first.`,
+          },
+          null,
+          2,
+        ),
       };
     }
 
@@ -317,7 +354,7 @@ async function getSessionScreenshot(
       return {
         uri,
         mimeType: "application/json",
-        text: JSON.stringify({ error: errorMessage }, null, 2)
+        text: JSON.stringify({ error: errorMessage }, null, 2),
       };
     }
 
@@ -327,13 +364,19 @@ async function getSessionScreenshot(
 
     return { uri, mimeType, blob: base64Image };
   } catch (error) {
-    logger.error(`[ObservationResources] Failed to get screenshot for session ${sessionUuid}: ${error}`);
+    logger.error(
+      `[ObservationResources] Failed to get screenshot for session ${sessionUuid}: ${error}`,
+    );
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify({
-        error: `Failed to retrieve screenshot for sessionUuid ${sessionUuid}: ${error}`
-      }, null, 2)
+      text: JSON.stringify(
+        {
+          error: `Failed to retrieve screenshot for sessionUuid ${sessionUuid}: ${error}`,
+        },
+        null,
+        2,
+      ),
     };
   }
 }
@@ -355,8 +398,9 @@ async function getFreshSessionScreenshot(
   }
 
   try {
-    const screenshotService =
-      sessionScreenshotResourceDependencies.createScreenshotService(activeSession.device);
+    const screenshotService = sessionScreenshotResourceDependencies.createScreenshotService(
+      activeSession.device,
+    );
     const { promise } = screenshotService.startTrackedCapture(
       { format: "png" },
       {
@@ -374,9 +418,13 @@ async function getFreshSessionScreenshot(
       return {
         uri,
         mimeType: "application/json",
-        text: JSON.stringify({
-          error: result.error || "Failed to capture a fresh screenshot.",
-        }, null, 2),
+        text: JSON.stringify(
+          {
+            error: result.error || "Failed to capture a fresh screenshot.",
+          },
+          null,
+          2,
+        ),
       };
     }
 
@@ -387,13 +435,19 @@ async function getFreshSessionScreenshot(
       blob: imageBuffer.toString("base64"),
     };
   } catch (error) {
-    logger.error(`[ObservationResources] Failed to capture fresh screenshot for session ${sessionUuid}: ${error}`);
+    logger.error(
+      `[ObservationResources] Failed to capture fresh screenshot for session ${sessionUuid}: ${error}`,
+    );
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify({
-        error: `Failed to capture fresh screenshot for sessionUuid ${sessionUuid}: ${error}`,
-      }, null, 2),
+      text: JSON.stringify(
+        {
+          error: `Failed to capture fresh screenshot for sessionUuid ${sessionUuid}: ${error}`,
+        },
+        null,
+        2,
+      ),
     };
   }
 }
@@ -406,7 +460,7 @@ export function registerObservationResources(): void {
     "Latest Observation",
     "The most recent screen observation including view hierarchy, elements, and metadata. Updated automatically after each observe() call.",
     "application/json",
-    getLatestObservation
+    getLatestObservation,
   );
 
   // Register latest screenshot as image blob resource (all devices)
@@ -415,7 +469,7 @@ export function registerObservationResources(): void {
     "Latest Screenshot",
     "The most recent screen capture as a PNG or WebP image. Updated automatically after each observe() call.",
     "image/png",
-    getLatestScreenshot
+    getLatestScreenshot,
   );
 
   // Register session-scoped observation template
@@ -424,7 +478,7 @@ export function registerObservationResources(): void {
     "Session Observation",
     "Cached screen observation for an active device session.",
     "application/json",
-    getSessionObservation
+    getSessionObservation,
   );
 
   // Register session-scoped cached screenshot template
@@ -433,7 +487,7 @@ export function registerObservationResources(): void {
     "Session Screenshot",
     "Cached screen capture for an active device session.",
     "image/png",
-    getSessionScreenshot
+    getSessionScreenshot,
   );
 
   // Register fresh session screenshot template
@@ -442,7 +496,7 @@ export function registerObservationResources(): void {
     "Fresh Session Screenshot",
     "Fresh PNG screen capture for an active device session. Every read captures the current screen.",
     "image/png",
-    getFreshSessionScreenshot
+    getFreshSessionScreenshot,
   );
 
   logger.info("[ObservationResources] Registered observation resources");

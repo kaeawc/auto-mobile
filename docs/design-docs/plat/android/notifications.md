@@ -85,13 +85,13 @@ Observed results:
 
 ## Notification policy (cross-platform)
 
-`getNotificationPolicy` reads notification *policy state*, but the underlying concept
+`getNotificationPolicy` reads notification _policy state_, but the underlying concept
 differs by platform:
 
-- **Android** — Do Not Disturb *policy access* (which apps may control DND), read from
+- **Android** — Do Not Disturb _policy access_ (which apps may control DND), read from
   `dumpsys notification`'s `mPolicyAccess` section. `setNotificationPolicy` can grant/revoke
   it via `cmd notification`.
-- **iOS simulators** — per-app *notification authorization* (`UNAuthorizationStatus`:
+- **iOS simulators** — per-app _notification authorization_ (`UNAuthorizationStatus`:
   notDetermined/denied/authorized/provisional/ephemeral), decoded from the BulletinBoard
   `VersionedSectionInfo.plist`. Read-only; physical devices are unsupported. See
   [simctl Integration → Notification authorization read](../ios/simctl.md#notification-authorization-read).

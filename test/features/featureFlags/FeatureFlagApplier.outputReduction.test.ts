@@ -12,8 +12,14 @@ import { serverConfig } from "../../../src/utils/ServerConfig";
  * EC4: FEATURE_FLAG_DEFINITIONS registers each key, default false.
  */
 const CASES: Array<{ key: FeatureFlagKey; read: () => boolean }> = [
-  { key: "observe-result-include-elements", read: () => serverConfig.isObserveResultIncludeElementsEnabled() },
-  { key: "tool-results-no-structured-content", read: () => serverConfig.isToolResultsNoStructuredContentEnabled() },
+  {
+    key: "observe-result-include-elements",
+    read: () => serverConfig.isObserveResultIncludeElementsEnabled(),
+  },
+  {
+    key: "tool-results-no-structured-content",
+    read: () => serverConfig.isToolResultsNoStructuredContentEnabled(),
+  },
   { key: "actions-diff-observe", read: () => serverConfig.isActionsDiffObserveEnabled() },
   { key: "actions-no-observe", read: () => serverConfig.isActionsNoObserveEnabled() },
 ];
@@ -40,7 +46,7 @@ describe("DefaultFeatureFlagApplier output-reduction flags", () => {
 describe("FEATURE_FLAG_DEFINITIONS output-reduction flags", () => {
   for (const { key } of CASES) {
     test(`registers "${key}" default off`, () => {
-      const def = FEATURE_FLAG_DEFINITIONS.find(d => d.key === key);
+      const def = FEATURE_FLAG_DEFINITIONS.find((d) => d.key === key);
       expect(def).toBeDefined();
       expect(def?.defaultValue).toBe(false);
     });

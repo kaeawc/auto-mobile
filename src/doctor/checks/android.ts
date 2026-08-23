@@ -12,7 +12,7 @@ import {
   getAndroidSdkFromEnvironment,
   getBestAndroidToolsLocation,
   getCmdlineToolsRoot,
-  isHomebrewToolsPath
+  isHomebrewToolsPath,
 } from "../../utils/android-cmdline-tools/detection";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
@@ -20,13 +20,17 @@ import { AndroidEmulatorClient } from "../../utils/android-cmdline-tools/Android
 import { readSdkManagerVersion } from "../../utils/android-cmdline-tools/SdkManagerClient";
 import { logger } from "../../utils/logger";
 import type { AndroidToolsLocation } from "../../utils/android-cmdline-tools/detection";
-import { FileAvdConfigReader, MIN_AVD_RAM_MB, type AvdConfigReader } from "../../utils/android-cmdline-tools/AvdConfigReader";
+import {
+  FileAvdConfigReader,
+  MIN_AVD_RAM_MB,
+  type AvdConfigReader,
+} from "../../utils/android-cmdline-tools/AvdConfigReader";
 import type { AdbDeviceState } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 
 const MIN_CMDLINE_TOOLS_VERSION = [9, 0] as const;
 type CmdlineToolsVersionReader = (location: AndroidToolsLocation) => Promise<string | null>;
 
-const readCmdlineToolsVersion: CmdlineToolsVersionReader = async location => {
+const readCmdlineToolsVersion: CmdlineToolsVersionReader = async (location) => {
   return readSdkManagerVersion(undefined, location);
 };
 
@@ -41,13 +45,16 @@ async function checkCmdlineToolsVersion(
         name: "Android Command Line Tools",
         status: "warn",
         message: "Could not determine cmdline-tools version.",
-        recommendation: "Install a current Android SDK Command-line Tools package that supports SDK XML v4.",
+        recommendation:
+          "Install a current Android SDK Command-line Tools package that supports SDK XML v4.",
         value: location.path,
       };
     }
-    const parts = version.split(".").map(part => Number.parseInt(part, 10) || 0);
-    const isSupported = parts[0] > MIN_CMDLINE_TOOLS_VERSION[0]
-      || (parts[0] === MIN_CMDLINE_TOOLS_VERSION[0] && (parts[1] ?? 0) >= MIN_CMDLINE_TOOLS_VERSION[1]);
+    const parts = version.split(".").map((part) => Number.parseInt(part, 10) || 0);
+    const isSupported =
+      parts[0] > MIN_CMDLINE_TOOLS_VERSION[0] ||
+      (parts[0] === MIN_CMDLINE_TOOLS_VERSION[0] &&
+        (parts[1] ?? 0) >= MIN_CMDLINE_TOOLS_VERSION[1]);
     if (!isSupported) {
       return {
         name: "Android Command Line Tools",
@@ -69,7 +76,8 @@ async function checkCmdlineToolsVersion(
       name: "Android Command Line Tools",
       status: "warn",
       message: `Could not determine cmdline-tools version: ${errorMessage(error)}`,
-      recommendation: "Install a current Android SDK Command-line Tools package that supports SDK XML v4.",
+      recommendation:
+        "Install a current Android SDK Command-line Tools package that supports SDK XML v4.",
       value: location.path,
     };
   }
@@ -104,7 +112,7 @@ function normalizePath(value: string): string {
  */
 export async function checkAndroidCommandLineTools(
   _options: DoctorOptions = {},
-  dependencies = createAndroidDoctorDependencies()
+  dependencies = createAndroidDoctorDependencies(),
 ): Promise<CheckResult> {
   const name = "Android Command Line Tools";
 
@@ -112,11 +120,14 @@ export async function checkAndroidCommandLineTools(
   try {
     locations = await dependencies.detectAndroidCommandLineTools();
   } catch (error) {
-    dependencies.logger.warn(`Failed to detect Android command line tools: ${errorMessage(error)}`, error);
+    dependencies.logger.warn(
+      `Failed to detect Android command line tools: ${errorMessage(error)}`,
+      error,
+    );
     return {
       name,
       status: "warn",
-      message: "Failed to detect Android command line tools."
+      message: "Failed to detect Android command line tools.",
     };
   }
 
@@ -126,7 +137,7 @@ export async function checkAndroidCommandLineTools(
       name,
       status: "warn",
       message: "Android command line tools not detected.",
-      recommendation: "Ensure Android command line tools are present under ANDROID_HOME."
+      recommendation: "Ensure Android command line tools are present under ANDROID_HOME.",
     };
   }
 
@@ -138,7 +149,7 @@ export async function checkAndroidCommandLineTools(
         name,
         status: "warn",
         message: "Homebrew cmdline-tools detected while system images are in ANDROID_HOME.",
-        recommendation: "Ensure Android command line tools are present under ANDROID_HOME."
+        recommendation: "Ensure Android command line tools are present under ANDROID_HOME.",
       };
     }
   }
@@ -151,7 +162,7 @@ export async function checkAndroidCommandLineTools(
     name,
     status: "pass",
     message: "Android command line tools detected.",
-    value: bestLocation.path
+    value: bestLocation.path,
   };
 }
 
@@ -174,7 +185,8 @@ async function checkAndroidHome(): Promise<CheckResult> {
     name: "ANDROID_HOME",
     status: "fail",
     message: "ANDROID_HOME or ANDROID_SDK_ROOT not set or path does not exist",
-    recommendation: "Set ANDROID_HOME to your Android SDK installation path. " +
+    recommendation:
+      "Set ANDROID_HOME to your Android SDK installation path. " +
       "Example: export ANDROID_HOME=$HOME/Library/Android/sdk",
   };
 }
@@ -190,7 +202,8 @@ export async function checkJavaHome(): Promise<CheckResult> {
       name: "JAVA_HOME",
       status: "warn",
       message: "JAVA_HOME environment variable not set",
-      recommendation: "Set JAVA_HOME to your Java installation. " +
+      recommendation:
+        "Set JAVA_HOME to your Java installation. " +
         "Example: export JAVA_HOME=$(/usr/libexec/java_home)",
     };
   }
@@ -216,7 +229,7 @@ export async function checkJavaHome(): Promise<CheckResult> {
  * Check ADB installation and get path
  */
 export async function checkAdbInstallation(
-  adbFactory: AdbClientFactory = defaultAdbClientFactory
+  adbFactory: AdbClientFactory = defaultAdbClientFactory,
 ): Promise<CheckResult> {
   try {
     const adb = adbFactory.create();
@@ -234,7 +247,8 @@ export async function checkAdbInstallation(
       name: "ADB Installation",
       status: "fail",
       message: `ADB not found: ${errorMessage(error)}`,
-      recommendation: "Install Android SDK Platform-Tools. " +
+      recommendation:
+        "Install Android SDK Platform-Tools. " +
         "Via Homebrew: brew install android-platform-tools",
     };
   }
@@ -244,7 +258,7 @@ export async function checkAdbInstallation(
  * Check ADB version
  */
 export async function checkAdbVersion(
-  adbFactory: AdbClientFactory = defaultAdbClientFactory
+  adbFactory: AdbClientFactory = defaultAdbClientFactory,
 ): Promise<CheckResult> {
   try {
     const adb = adbFactory.create();
@@ -294,7 +308,8 @@ async function checkEmulator(): Promise<CheckResult> {
         name: "Android Emulator",
         status: "warn",
         message: "Emulator not found",
-        recommendation: "Install Android Emulator via SDK Manager or Homebrew: " +
+        recommendation:
+          "Install Android Emulator via SDK Manager or Homebrew: " +
           "brew install android-emulator",
       };
     }
@@ -311,13 +326,13 @@ async function checkEmulator(): Promise<CheckResult> {
  * Check connected Android devices
  */
 export async function checkConnectedDevices(
-  adbFactory: AdbClientFactory = defaultAdbClientFactory
+  adbFactory: AdbClientFactory = defaultAdbClientFactory,
 ): Promise<CheckResult> {
   try {
     const adb = adbFactory.create();
     const devices = await adb.getBootedAndroidDevices();
     if (devices.length > 0) {
-      const deviceNames = devices.map(d => d.deviceId).join(", ");
+      const deviceNames = devices.map((d) => d.deviceId).join(", ");
       return {
         name: "Connected Devices",
         status: "pass",
@@ -327,19 +342,19 @@ export async function checkConnectedDevices(
     }
     let rawStates: AdbDeviceState[] = [];
     try {
-      rawStates = await adb.getDeviceStates?.() ?? [];
+      rawStates = (await adb.getDeviceStates?.()) ?? [];
     } catch (error) {
       logger.debug(`Could not query offline Android device states: ${errorMessage(error)}`);
     }
     const offlineDevices = rawStates.filter((state: AdbDeviceState) => state.state === "offline");
     if (offlineDevices.length > 0) {
-      const ids = offlineDevices.map(device => device.deviceId).join(", ");
+      const ids = offlineDevices.map((device) => device.deviceId).join(", ");
       return {
         name: "Connected Devices",
         status: "warn",
         message: `Android device(s) present but offline: ${ids}`,
         value: 0,
-        recommendation: offlineDevices.every(device => device.deviceId.startsWith("emulator-"))
+        recommendation: offlineDevices.every((device) => device.deviceId.startsWith("emulator-"))
           ? "Restart the emulator and verify adb access outside restrictive sandboxing."
           : "Reconnect the device, accept USB debugging authorization, or restart the adb server.",
       };
@@ -364,7 +379,10 @@ export async function checkConnectedDevices(
 
 /** Check that configured AVDs have enough guest memory for modern images. */
 export async function checkAvdMemory(
-  dependencies: Pick<AndroidDoctorDependencies, "listAvds" | "readAvdConfig"> = createAndroidDoctorDependencies(),
+  dependencies: Pick<
+    AndroidDoctorDependencies,
+    "listAvds" | "readAvdConfig"
+  > = createAndroidDoctorDependencies(),
 ): Promise<CheckResult> {
   if (!dependencies.listAvds || !dependencies.readAvdConfig) {
     return { name: "AVD Memory", status: "skip", message: "AVD memory could not be checked." };
@@ -374,31 +392,36 @@ export async function checkAvdMemory(
     const readAvdConfig = dependencies.readAvdConfig;
     const avds = await dependencies.listAvds();
     const unverifiableConfigs: string[] = [];
-    const lowMemory = (await Promise.all(avds.map(async avd => {
-      const config = await readAvdConfig.readConfig(avd.name);
-      if (!config) {
-        unverifiableConfigs.push(avd.name);
-        return null;
-      }
-      const isModernPlayImage = config.tag?.toLowerCase().includes("play")
-        && (config.apiLevel ?? 0) >= 30;
-      if (!isModernPlayImage) {
-        return null;
-      }
-      if (config.ramSizeMb === undefined) {
-        unverifiableConfigs.push(avd.name);
-        return null;
-      }
-      return isModernPlayImage && config.ramSizeMb < MIN_AVD_RAM_MB
-        ? `${avd.name} (${config.ramSizeMb} MB)`
-        : null;
-    }))).filter((name): name is string => name !== null);
+    const lowMemory = (
+      await Promise.all(
+        avds.map(async (avd) => {
+          const config = await readAvdConfig.readConfig(avd.name);
+          if (!config) {
+            unverifiableConfigs.push(avd.name);
+            return null;
+          }
+          const isModernPlayImage =
+            config.tag?.toLowerCase().includes("play") && (config.apiLevel ?? 0) >= 30;
+          if (!isModernPlayImage) {
+            return null;
+          }
+          if (config.ramSizeMb === undefined) {
+            unverifiableConfigs.push(avd.name);
+            return null;
+          }
+          return isModernPlayImage && config.ramSizeMb < MIN_AVD_RAM_MB
+            ? `${avd.name} (${config.ramSizeMb} MB)`
+            : null;
+        }),
+      )
+    ).filter((name): name is string => name !== null);
     if (unverifiableConfigs.length > 0 && lowMemory.length > 0) {
       return {
         name: "AVD Memory",
         status: "warn",
         message: `AVD(s) below the ${MIN_AVD_RAM_MB} MB minimum: ${lowMemory.join(", ")}. Could not verify: ${unverifiableConfigs.join(", ")}`,
-        recommendation: "Increase hw.ramSize in affected AVD config.ini files and ensure every AVD config can be read.",
+        recommendation:
+          "Increase hw.ramSize in affected AVD config.ini files and ensure every AVD config can be read.",
       };
     }
     if (unverifiableConfigs.length > 0) {
@@ -417,7 +440,11 @@ export async function checkAvdMemory(
         recommendation: "Increase hw.ramSize in each affected AVD config.ini and retry.",
       };
     }
-    return { name: "AVD Memory", status: "pass", message: `All applicable modern Play-image AVDs meet the ${MIN_AVD_RAM_MB} MB memory minimum.` };
+    return {
+      name: "AVD Memory",
+      status: "pass",
+      message: `All applicable modern Play-image AVDs meet the ${MIN_AVD_RAM_MB} MB memory minimum.`,
+    };
   } catch (error) {
     logger.warn(`AVD memory check failed: ${errorMessage(error)}`);
     return {
@@ -446,7 +473,7 @@ async function checkAvailableAvds(): Promise<CheckResult> {
       };
     }
 
-    const avdNames = avds.map(a => a.name).join(", ");
+    const avdNames = avds.map((a) => a.name).join(", ");
     return {
       name: "Available AVDs",
       status: "pass",

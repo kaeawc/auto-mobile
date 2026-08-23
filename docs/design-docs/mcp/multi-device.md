@@ -115,6 +115,7 @@ Semantics:
 ### Plan Validation
 
 Plans are validated at parse time:
+
 - If `devices` field is present, every step must have a `device` parameter — including `criticalSection` and `barrier` steps and each of their nested sub-steps (there is no device-agnostic exemption)
 - Device labels must be unique and non-empty strings
 - Steps cannot reference undeclared device labels
@@ -123,10 +124,12 @@ Plans are validated at parse time:
 ### Execution Model
 
 **Sequential Mode (Single Device):**
+
 - Plans without `devices` field execute sequentially as before
 - Backward compatible with all existing plans
 
 **Parallel Mode (Multi-Device):**
+
 - Plan is partitioned into device tracks based on device labels
 - Each device track executes independently in parallel
 - Steps within a device maintain their relative order
@@ -135,12 +138,14 @@ Plans are validated at parse time:
 ### Abort Strategy
 
 Configurable behavior when a device fails:
+
 - `immediate` (default): Abort all devices immediately
 - `finish-current-step`: Let other devices finish their current step before aborting
 
 ### Per-Device Timing
 
 Debug mode or failures log per-device execution timing:
+
 ```text
 [PARALLEL_EXEC]   A: SUCCESS - 5/5 steps (1234ms)
 [PARALLEL_EXEC]   B: FAILED - 3/5 steps (987ms)

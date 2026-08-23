@@ -11,19 +11,12 @@ import { IOSCtrlProxyClient } from "../observe/ios";
 export class Shake extends BaseVisualChange {
   private shakeTimer: Timer;
 
-  constructor(
-    device: BootedDevice,
-    adb: AdbClient | null = null,
-    timer: Timer = defaultTimer
-  ) {
+  constructor(device: BootedDevice, adb: AdbClient | null = null, timer: Timer = defaultTimer) {
     super(device, adb, timer);
     this.shakeTimer = timer;
   }
 
-  async execute(
-    options: ShakeOptions = {},
-    progress?: ProgressCallback
-  ): Promise<ShakeResult> {
+  async execute(options: ShakeOptions = {}, progress?: ProgressCallback): Promise<ShakeResult> {
     const perf = createGlobalPerformanceTracker();
     perf.serial("shake");
 
@@ -37,7 +30,8 @@ export class Shake extends BaseVisualChange {
           success: false,
           duration,
           intensity,
-          error: "shake is not supported on physical iOS devices: XCTest exposes no shake API for real devices."
+          error:
+            "shake is not supported on physical iOS devices: XCTest exposes no shake API for real devices.",
         };
       }
 
@@ -57,7 +51,7 @@ export class Shake extends BaseVisualChange {
             return {
               success: true,
               duration,
-              intensity
+              intensity,
             };
           } catch (error) {
             perf.end();
@@ -66,17 +60,17 @@ export class Shake extends BaseVisualChange {
               success: false,
               duration,
               intensity,
-              error: `Failed to shake device: ${error}`
+              error: `Failed to shake device: ${error}`,
             };
           }
         },
         {
           changeExpected: false,
           timeoutMs: duration + 2000,
-          tolerancePercent: 0.00,
+          tolerancePercent: 0.0,
           progress,
-          perf
-        }
+          perf,
+        },
       );
     }
 
@@ -85,7 +79,9 @@ export class Shake extends BaseVisualChange {
         try {
           // Start the shake by setting high acceleration values
           await perf.track("shakeExecution", async () => {
-            await this.adb.executeCommand(`emu sensor set acceleration ${intensity}:${intensity}:${intensity}`);
+            await this.adb.executeCommand(
+              `emu sensor set acceleration ${intensity}:${intensity}:${intensity}`,
+            );
 
             logger.info(`Started shake with intensity ${intensity} for ${duration}ms`);
 
@@ -101,7 +97,7 @@ export class Shake extends BaseVisualChange {
           return {
             success: true,
             duration,
-            intensity
+            intensity,
           };
         } catch (error) {
           perf.end();
@@ -110,17 +106,17 @@ export class Shake extends BaseVisualChange {
             success: false,
             duration,
             intensity,
-            error: `Failed to shake device: ${error}`
+            error: `Failed to shake device: ${error}`,
           };
         }
       },
       {
         changeExpected: false, // Shake typically doesn't change UI directly
         timeoutMs: duration + 2000, // Give extra time beyond shake duration
-        tolerancePercent: 0.00,
+        tolerancePercent: 0.0,
         progress,
-        perf
-      }
+        perf,
+      },
     );
   }
 }

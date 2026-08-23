@@ -7,12 +7,12 @@ import { FakeAdbClientFactory } from "../../../fakes/FakeAdbClientFactory";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeWebSocket } from "../../../fakes/FakeWebSocket";
 
-describe("AndroidCtrlProxyClient node action selector capabilities", function() {
+describe("AndroidCtrlProxyClient node action selector capabilities", function () {
   let fakeAdb: FakeAdbExecutor;
   let fakeTimer: FakeTimer;
   let testDevice: BootedDevice;
 
-  beforeEach(function() {
+  beforeEach(function () {
     fakeTimer = new FakeTimer();
     fakeAdb = new FakeAdbExecutor();
     fakeAdb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
@@ -25,37 +25,44 @@ describe("AndroidCtrlProxyClient node action selector capabilities", function() 
     };
     AndroidCtrlProxyManager.resetInstances();
     AndroidCtrlProxyClient.resetInstances();
-    AndroidCtrlProxyManager.getInstance(testDevice, new FakeAdbClientFactory()).clearAvailabilityCache();
+    AndroidCtrlProxyManager.getInstance(
+      testDevice,
+      new FakeAdbClientFactory(),
+    ).clearAvailabilityCache();
   });
 
-  afterEach(async function() {
+  afterEach(async function () {
     AndroidCtrlProxyClient.resetInstances();
   });
 
-  test("waits for the connected handshake before reading node selector support", async function() {
+  test("waits for the connected handshake before reading node selector support", async function () {
     let socket: FakeWebSocket | null = null;
     const client = AndroidCtrlProxyClient.createForTesting(
       testDevice,
       fakeAdb,
-      url => {
+      (url) => {
         socket = new FakeWebSocket(url, "none", 0, fakeTimer);
         return socket as unknown as WebSocket;
       },
-      fakeTimer
+      fakeTimer,
     );
 
     try {
       await client.ensureConnected();
       const supported = client.supportsNodeActionSelectors();
       let resolved = false;
-      void supported.then(() => { resolved = true; });
+      void supported.then(() => {
+        resolved = true;
+      });
 
       await waitForPendingSleep(fakeTimer);
       expect(resolved).toBe(false);
-      socket!.simulateMessage(JSON.stringify({
-        type: "connected",
-        supportedCommands: ["node_selector_actions"],
-      }));
+      socket!.simulateMessage(
+        JSON.stringify({
+          type: "connected",
+          supportedCommands: ["node_selector_actions"],
+        }),
+      );
       fakeTimer.resolveAll();
 
       await expect(supported).resolves.toBe(true);
@@ -70,7 +77,7 @@ async function waitForPendingSleep(timer: FakeTimer): Promise<void> {
     if (timer.getPendingSleepCount() > 0) {
       return;
     }
-    await new Promise(resolve => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
   }
   throw new Error("Expected the capability probe to wait for the connected handshake");
 }

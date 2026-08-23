@@ -16,27 +16,35 @@ describe("MCP Prompts List", () => {
     }
   });
 
-  test("given no prompts are registered, endpoint should return an empty list", async function() {
-
+  test("given no prompts are registered, endpoint should return an empty list", async function () {
     const { client } = fixture.getContext();
 
     // Send prompts/list request
     const listPromptsResponseSchema = z.object({
-      prompts: z.array(z.object({
-        name: z.string(),
-        description: z.string().optional(),
-        arguments: z.array(z.object({
+      prompts: z.array(
+        z.object({
           name: z.string(),
           description: z.string().optional(),
-          required: z.boolean().optional()
-        })).optional()
-      }))
+          arguments: z
+            .array(
+              z.object({
+                name: z.string(),
+                description: z.string().optional(),
+                required: z.boolean().optional(),
+              }),
+            )
+            .optional(),
+        }),
+      ),
     });
 
-    const result = await client.request({
-      method: "prompts/list",
-      params: {}
-    }, listPromptsResponseSchema);
+    const result = await client.request(
+      {
+        method: "prompts/list",
+        params: {},
+      },
+      listPromptsResponseSchema,
+    );
 
     // Verify empty prompts list
     expect(typeof result).toBe("object");
@@ -45,8 +53,7 @@ describe("MCP Prompts List", () => {
     expect(result.prompts).toHaveLength(0);
   });
 
-  test("given a prompt is registered, endpoint should return a list with that prompt", async function() {
-
+  test("given a prompt is registered, endpoint should return a list with that prompt", async function () {
     // For this test, we need to mock or implement a prompt registration
     // Since the current server doesn't have prompt registration functionality,
     // we'll mock the server's response handler to return a test prompt
@@ -61,41 +68,50 @@ describe("MCP Prompts List", () => {
         {
           name: "appPackage",
           description: "The package name of the app to debug",
-          required: true
+          required: true,
         },
         {
           name: "deviceId",
           description: "The device ID to debug on",
-          required: false
-        }
-      ]
+          required: false,
+        },
+      ],
     };
 
     // Mock the handler to return our test prompt on the existing server
     server.server.setRequestHandler(
       require("@modelcontextprotocol/sdk/types.js").ListPromptsRequestSchema,
       async () => ({
-        prompts: [testPrompt]
-      })
+        prompts: [testPrompt],
+      }),
     );
 
     // Send prompts/list request
     const listPromptsResponseSchema = z.object({
-      prompts: z.array(z.object({
-        name: z.string(),
-        description: z.string().optional(),
-        arguments: z.array(z.object({
+      prompts: z.array(
+        z.object({
           name: z.string(),
           description: z.string().optional(),
-          required: z.boolean().optional()
-        })).optional()
-      }))
+          arguments: z
+            .array(
+              z.object({
+                name: z.string(),
+                description: z.string().optional(),
+                required: z.boolean().optional(),
+              }),
+            )
+            .optional(),
+        }),
+      ),
     });
 
-    const result = await client.request({
-      method: "prompts/list",
-      params: {}
-    }, listPromptsResponseSchema);
+    const result = await client.request(
+      {
+        method: "prompts/list",
+        params: {},
+      },
+      listPromptsResponseSchema,
+    );
 
     // Verify prompts list contains the test prompt
     expect(typeof result).toBe("object");

@@ -13,7 +13,11 @@ import { defaultTimer } from "../utils/SystemTimer";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { type DbWriteBarrier, getDbWriteBarrier } from "./dbWriteBarrier";
 import { appendToBucket, chunkBySqliteParameterLimit } from "./sqliteBatch";
-import { createRowCapRetentionState, pruneTableByRowCap, runAmortizedRetention } from "./rowCapRetention";
+import {
+  createRowCapRetentionState,
+  pruneTableByRowCap,
+  runAmortizedRetention,
+} from "./rowCapRetention";
 import type {
   FailureType,
   FailureSeverity,
@@ -44,9 +48,9 @@ interface VisitScreenCountRow {
 
 export function mergeScreenBreakdownRows(
   failureScreens: readonly FailureScreenCountRow[],
-  visitedScreens: readonly VisitScreenCountRow[]
+  visitedScreens: readonly VisitScreenCountRow[],
 ): ScreenBreakdown[] {
-  const visitMap = new Map(visitedScreens.map(screen => [screen.screenName, screen.visitCount]));
+  const visitMap = new Map(visitedScreens.map((screen) => [screen.screenName, screen.visitCount]));
   const totalVisits = visitedScreens.reduce((sum, screen) => sum + screen.visitCount, 0);
 
   const result: ScreenBreakdown[] = [];
@@ -64,7 +68,7 @@ export function mergeScreenBreakdownRows(
   }
 
   const visitOnlyScreens = visitedScreens
-    .filter(screen => !processedScreens.has(screen.screenName))
+    .filter((screen) => !processedScreens.has(screen.screenName))
     .sort((a, b) => b.visitCount - a.visitCount || a.screenName.localeCompare(b.screenName))
     .slice(0, 5);
 
@@ -197,7 +201,7 @@ export class FailureAnalyticsRepository {
     const occurrenceId = this.idGenerator.next();
 
     try {
-      await db.transaction().execute(async trx => {
+      await db.transaction().execute(async (trx) => {
         // Atomic get-or-create keyed on signature (#2789). The daemon's single
         // connection releases its mutex across every await, so the former
         // SELECT-then-INSERT/UPDATE interleaved: two same-signature failures could
@@ -225,12 +229,12 @@ export class FailureAnalyticsRepository {
             tool_call_info_json: input.toolCallInfo ? JSON.stringify(input.toolCallInfo) : null,
             updated_at: nowIso,
           })
-          .onConflict(oc =>
-            oc.column("signature").doUpdateSet(eb => ({
+          .onConflict((oc) =>
+            oc.column("signature").doUpdateSet((eb) => ({
               last_occurrence: now,
               total_count: eb("failure_groups.total_count", "+", 1),
               updated_at: nowIso,
-            }))
+            })),
           )
           .returning("id")
           .executeTakeFirstOrThrow();
@@ -255,7 +259,9 @@ export class FailureAnalyticsRepository {
           test_execution_id: input.occurrence.testExecutionId ?? null,
           error_code: input.occurrence.errorCode ?? null,
           duration_ms: input.occurrence.durationMs ?? null,
-          tool_args_json: input.occurrence.toolArgs ? JSON.stringify(input.occurrence.toolArgs) : null,
+          tool_args_json: input.occurrence.toolArgs
+            ? JSON.stringify(input.occurrence.toolArgs)
+            : null,
         };
 
         await trx.insertInto("failure_occurrences").values(occurrence).execute();
@@ -295,7 +301,11 @@ export class FailureAnalyticsRepository {
           let mergedToolCallInfo = input.toolCallInfo;
           if (current?.tool_call_info_json) {
             const existing = JSON.parse(current.tool_call_info_json) as AggregatedToolCallInfo;
-            mergedToolCallInfo = this.mergeToolCallInfo(existing, input.toolCallInfo, input.occurrence);
+            mergedToolCallInfo = this.mergeToolCallInfo(
+              existing,
+              input.toolCallInfo,
+              input.occurrence,
+            );
           }
 
           await trx
@@ -315,7 +325,7 @@ export class FailureAnalyticsRepository {
               occurrence_id: occurrenceId,
               screen_name: screenName,
               visit_order: index,
-            })
+            }),
           );
           await trx.insertInto("failure_occurrence_screens").values(screens).execute();
         }
@@ -348,7 +358,9 @@ export class FailureAnalyticsRepository {
 
       // Run retention cleanup in background, tracked by the shutdown barrier so
       // this fire-and-forget writer is drained (or skipped) before closeDatabase().
-      this.getBarrier().track(() => this.cleanupRetention()).catch(() => {});
+      this.getBarrier()
+        .track(() => this.cleanupRetention())
+        .catch(() => {});
 
       return occurrenceId;
     } catch (error) {
@@ -365,9 +377,7 @@ export class FailureAnalyticsRepository {
     const limit = Math.max(1, query.limit ?? 100);
     const offset = Math.max(0, query.offset ?? 0);
 
-    let builder = db
-      .selectFrom("failure_groups")
-      .selectAll();
+    let builder = db.selectFrom("failure_groups").selectAll();
 
     if (query.type) {
       builder = builder.where("type", "=", query.type);
@@ -388,7 +398,7 @@ export class FailureAnalyticsRepository {
       .offset(offset)
       .execute();
 
-    const groupIds = groups.map(group => group.id);
+    const groupIds = groups.map((group) => group.id);
     if (groupIds.length === 0) {
       return [];
     }
@@ -409,7 +419,7 @@ export class FailureAnalyticsRepository {
       this.getSampleOccurrencesByGroup(groupIds, 6),
     ]);
 
-    return groups.map(group => {
+    return groups.map((group) => {
       const screenBreakdown = screenBreakdowns.get(group.id) ?? [];
       return {
         id: group.id,
@@ -478,14 +488,20 @@ export class FailureAnalyticsRepository {
     const firstBucketStart = Math.floor(startTime / bucketMs) * bucketMs;
     const lastBucketStart = Math.floor(endTime / bucketMs) * bucketMs;
 
-    for (let bucketStart = firstBucketStart; bucketStart <= lastBucketStart; bucketStart += bucketMs) {
+    for (
+      let bucketStart = firstBucketStart;
+      bucketStart <= lastBucketStart;
+      bucketStart += bucketMs
+    ) {
       buckets.set(bucketStart, { crashes: 0, anrs: 0, toolFailures: 0, nonfatals: 0 });
     }
 
     for (const row of bucketedCounts) {
       const bucketStart = Number(row.bucket) * bucketMs;
       const bucket = buckets.get(bucketStart);
-      if (!bucket) {continue;} // Should not happen, but guard against it
+      if (!bucket) {
+        continue;
+      } // Should not happen, but guard against it
       this.addTypeCount(bucket, row.type as FailureType, Number(row.count));
     }
 
@@ -517,7 +533,12 @@ export class FailureAnalyticsRepository {
       .groupBy("failure_groups.type")
       .execute();
 
-    const previousPeriodTotals: PeriodTotals = { crashes: 0, anrs: 0, toolFailures: 0, nonfatals: 0 };
+    const previousPeriodTotals: PeriodTotals = {
+      crashes: 0,
+      anrs: 0,
+      toolFailures: 0,
+      nonfatals: 0,
+    };
     for (const row of previousCounts) {
       this.addTypeCount(previousPeriodTotals, row.type as FailureType, Number(row.count));
     }
@@ -552,9 +573,7 @@ export class FailureAnalyticsRepository {
     const db = this.getDb();
     const limit = Math.min(Math.max(1, query.limit ?? 50), STREAM_LIMIT_MAX);
 
-    let builder = db
-      .selectFrom("failure_notifications")
-      .selectAll();
+    let builder = db.selectFrom("failure_notifications").selectAll();
 
     if (query.type) {
       builder = builder.where("type", "=", query.type);
@@ -570,14 +589,11 @@ export class FailureAnalyticsRepository {
     }
     if (query.sinceTimestamp !== undefined) {
       const sinceId = query.sinceId ?? 0;
-      builder = builder.where(eb =>
+      builder = builder.where((eb) =>
         eb.or([
           eb("timestamp", ">", query.sinceTimestamp!),
-          eb.and([
-            eb("timestamp", "=", query.sinceTimestamp!),
-            eb("id", ">", sinceId),
-          ]),
-        ])
+          eb.and([eb("timestamp", "=", query.sinceTimestamp!), eb("id", ">", sinceId)]),
+        ]),
       );
     }
 
@@ -587,7 +603,7 @@ export class FailureAnalyticsRepository {
       .limit(limit)
       .execute();
 
-    const notifications: FailureNotificationEntry[] = rows.map(row => ({
+    const notifications: FailureNotificationEntry[] = rows.map((row) => ({
       id: row.id,
       occurrenceId: row.occurrence_id,
       groupId: row.group_id,
@@ -611,7 +627,9 @@ export class FailureAnalyticsRepository {
    * Acknowledge notifications (mark as read)
    */
   async acknowledgeNotifications(ids: number[]): Promise<void> {
-    if (ids.length === 0) {return;}
+    if (ids.length === 0) {
+      return;
+    }
 
     const db = this.getDb();
     await db
@@ -636,10 +654,14 @@ export class FailureAnalyticsRepository {
     });
 
     const totals = {
-      crashes: groups.filter(g => g.type === "crash").reduce((sum, g) => sum + g.totalCount, 0),
-      anrs: groups.filter(g => g.type === "anr").reduce((sum, g) => sum + g.totalCount, 0),
-      toolFailures: groups.filter(g => g.type === "tool_failure").reduce((sum, g) => sum + g.totalCount, 0),
-      nonfatals: groups.filter(g => g.type === "nonfatal").reduce((sum, g) => sum + g.totalCount, 0),
+      crashes: groups.filter((g) => g.type === "crash").reduce((sum, g) => sum + g.totalCount, 0),
+      anrs: groups.filter((g) => g.type === "anr").reduce((sum, g) => sum + g.totalCount, 0),
+      toolFailures: groups
+        .filter((g) => g.type === "tool_failure")
+        .reduce((sum, g) => sum + g.totalCount, 0),
+      nonfatals: groups
+        .filter((g) => g.type === "nonfatal")
+        .reduce((sum, g) => sum + g.totalCount, 0),
     };
 
     return { groups, totals };
@@ -649,11 +671,14 @@ export class FailureAnalyticsRepository {
 
   private async getDeviceBreakdowns(groupIds: string[]): Promise<Map<string, DeviceBreakdown[]>> {
     const db = this.getDb();
-    const buckets = new Map<string, Array<{
-      deviceModel: string;
-      os: string;
-      count: number;
-    }>>();
+    const buckets = new Map<
+      string,
+      Array<{
+        deviceModel: string;
+        os: string;
+        count: number;
+      }>
+    >();
 
     for (const chunk of chunkBySqliteParameterLimit(groupIds)) {
       const rows = await sql<{
@@ -693,15 +718,23 @@ export class FailureAnalyticsRepository {
     const result = new Map<string, DeviceBreakdown[]>();
     for (const [groupId, rows] of buckets) {
       const sorted = rows
-        .sort((a, b) => b.count - a.count || a.deviceModel.localeCompare(b.deviceModel) || a.os.localeCompare(b.os))
+        .sort(
+          (a, b) =>
+            b.count - a.count ||
+            a.deviceModel.localeCompare(b.deviceModel) ||
+            a.os.localeCompare(b.os),
+        )
         .slice(0, 10);
       const total = sorted.reduce((sum, row) => sum + row.count, 0);
-      result.set(groupId, sorted.map(row => ({
-        deviceModel: row.deviceModel,
-        os: row.os,
-        count: row.count,
-        percentage: total > 0 ? (row.count / total) * 100 : 0,
-      })));
+      result.set(
+        groupId,
+        sorted.map((row) => ({
+          deviceModel: row.deviceModel,
+          os: row.os,
+          count: row.count,
+          percentage: total > 0 ? (row.count / total) * 100 : 0,
+        })),
+      );
     }
     return result;
   }
@@ -748,11 +781,14 @@ export class FailureAnalyticsRepository {
         .sort((a, b) => b.count - a.count || a.version.localeCompare(b.version))
         .slice(0, 10);
       const total = sorted.reduce((sum, row) => sum + row.count, 0);
-      result.set(groupId, sorted.map(row => ({
-        version: row.version,
-        count: row.count,
-        percentage: total > 0 ? (row.count / total) * 100 : 0,
-      })));
+      result.set(
+        groupId,
+        sorted.map((row) => ({
+          version: row.version,
+          count: row.count,
+          percentage: total > 0 ? (row.count / total) * 100 : 0,
+        })),
+      );
     }
     return result;
   }
@@ -816,14 +852,16 @@ export class FailureAnalyticsRepository {
         groupId,
         mergeScreenBreakdownRows(
           failureScreensByGroup.get(groupId) ?? [],
-          visitedScreensByGroup.get(groupId) ?? []
-        )
+          visitedScreensByGroup.get(groupId) ?? [],
+        ),
       );
     }
     return result;
   }
 
-  private async getAffectedTestsByGroup(groupIds: string[]): Promise<Map<string, Record<string, number>>> {
+  private async getAffectedTestsByGroup(
+    groupIds: string[],
+  ): Promise<Map<string, Record<string, number>>> {
     const db = this.getDb();
     const result = new Map<string, Record<string, number>>();
 
@@ -856,7 +894,7 @@ export class FailureAnalyticsRepository {
 
   private async getRecentCapturesByGroup(
     groupIds: string[],
-    limit: number
+    limit: number,
   ): Promise<Map<string, FailureCapture[]>> {
     const db = this.getDb();
     const result = new Map<string, FailureCapture[]>();
@@ -908,7 +946,7 @@ export class FailureAnalyticsRepository {
 
   private async getSampleOccurrencesByGroup(
     groupIds: string[],
-    limit: number
+    limit: number,
   ): Promise<Map<string, FailureOccurrence[]>> {
     const db = this.getDb();
     const occurrenceRows: Array<{
@@ -970,7 +1008,7 @@ export class FailureAnalyticsRepository {
       occurrenceRows.push(...rows.rows);
     }
 
-    const occurrenceIds = occurrenceRows.map(row => row.id);
+    const occurrenceIds = occurrenceRows.map((row) => row.id);
     const screensByOccurrence = new Map<string, string[]>();
     const captureByOccurrence = new Map<string, { path: string; type: "screenshot" | "video" }>();
 
@@ -1048,7 +1086,7 @@ export class FailureAnalyticsRepository {
   private mergeToolCallInfo(
     existing: AggregatedToolCallInfo,
     newInfo: AggregatedToolCallInfo | undefined,
-    occurrence: RecordFailureInput["occurrence"]
+    occurrence: RecordFailureInput["occurrence"],
   ): AggregatedToolCallInfo {
     if (!newInfo) {
       // Just update error codes from occurrence
@@ -1082,7 +1120,9 @@ export class FailureAnalyticsRepository {
         minMs: Math.min(existing.durationStats.minMs, newInfo.durationStats.minMs),
         maxMs: Math.max(existing.durationStats.maxMs, newInfo.durationStats.maxMs),
         avgMs: Math.round((existing.durationStats.avgMs + newInfo.durationStats.avgMs) / 2),
-        medianMs: Math.round((existing.durationStats.medianMs + newInfo.durationStats.medianMs) / 2),
+        medianMs: Math.round(
+          (existing.durationStats.medianMs + newInfo.durationStats.medianMs) / 2,
+        ),
         p95Ms: Math.max(existing.durationStats.p95Ms, newInfo.durationStats.p95Ms),
       };
     } else if (newInfo.durationStats) {
@@ -1110,7 +1150,10 @@ export class FailureAnalyticsRepository {
     }
   }
 
-  private formatBucketLabel(timestamp: number, aggregation: "minute" | "hour" | "day" | "week"): string {
+  private formatBucketLabel(
+    timestamp: number,
+    aggregation: "minute" | "hour" | "day" | "week",
+  ): string {
     const date = new Date(timestamp);
 
     switch (aggregation) {
@@ -1128,7 +1171,20 @@ export class FailureAnalyticsRepository {
         return `${displayHours} ${ampm}`;
       }
       case "day": {
-        const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        const months = [
+          "Jan",
+          "Feb",
+          "Mar",
+          "Apr",
+          "May",
+          "Jun",
+          "Jul",
+          "Aug",
+          "Sep",
+          "Oct",
+          "Nov",
+          "Dec",
+        ];
         return `${months[date.getMonth()]} ${date.getDate()}`;
       }
       case "week": {
@@ -1136,7 +1192,20 @@ export class FailureAnalyticsRepository {
         const day = date.getDay();
         const diff = date.getDate() - day + (day === 0 ? -6 : 1);
         const monday = new Date(date.setDate(diff));
-        const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        const months = [
+          "Jan",
+          "Feb",
+          "Mar",
+          "Apr",
+          "May",
+          "Jun",
+          "Jul",
+          "Aug",
+          "Sep",
+          "Oct",
+          "Nov",
+          "Dec",
+        ];
         return `${months[monday.getMonth()]} ${monday.getDate()}`;
       }
     }
@@ -1165,15 +1234,15 @@ export class FailureAnalyticsRepository {
       if (deleted > 0) {
         await db
           .deleteFrom("failure_groups")
-          .where(eb =>
+          .where((eb) =>
             eb.not(
               eb.exists(
                 eb
                   .selectFrom("failure_occurrences")
                   .select(sql`1`.as("one"))
-                  .whereRef("failure_occurrences.group_id", "=", "failure_groups.id")
-              )
-            )
+                  .whereRef("failure_occurrences.group_id", "=", "failure_groups.id"),
+              ),
+            ),
           )
           .execute();
       }

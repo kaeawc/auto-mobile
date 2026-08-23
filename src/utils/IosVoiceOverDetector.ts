@@ -37,7 +37,7 @@ export class DefaultIosVoiceOverDetector implements IIosVoiceOverDetector {
     deviceId: string,
     client: IOSCtrlProxy,
     featureFlags?: FeatureFlagService,
-    timeoutMs?: number
+    timeoutMs?: number,
   ): Promise<boolean> {
     // Check feature flag override first
     if (featureFlags?.isEnabled("force-accessibility-mode")) {
@@ -47,14 +47,18 @@ export class DefaultIosVoiceOverDetector implements IIosVoiceOverDetector {
 
     // Check if auto-detection is disabled
     if (featureFlags && !featureFlags.isEnabled("accessibility-auto-detect")) {
-      logger.debug(`[IosVoiceOverDetector] Auto-detection disabled via feature flag for device ${deviceId}`);
+      logger.debug(
+        `[IosVoiceOverDetector] Auto-detection disabled via feature flag for device ${deviceId}`,
+      );
       return false;
     }
 
     // Check cache
     const cached = this.cache.get(deviceId);
     if (cached !== undefined) {
-      logger.debug(`[IosVoiceOverDetector] Using cached result for device ${deviceId}: enabled=${cached}`);
+      logger.debug(
+        `[IosVoiceOverDetector] Using cached result for device ${deviceId}: enabled=${cached}`,
+      );
       return cached;
     }
 
@@ -66,10 +70,12 @@ export class DefaultIosVoiceOverDetector implements IIosVoiceOverDetector {
 
     if (detectionTime > 50) {
       logger.warn(
-        `[IosVoiceOverDetector] Detection took ${detectionTime}ms (target: <50ms) for device ${deviceId}`
+        `[IosVoiceOverDetector] Detection took ${detectionTime}ms (target: <50ms) for device ${deviceId}`,
       );
     } else {
-      logger.debug(`[IosVoiceOverDetector] Detection completed in ${detectionTime}ms for device ${deviceId}`);
+      logger.debug(
+        `[IosVoiceOverDetector] Detection completed in ${detectionTime}ms for device ${deviceId}`,
+      );
     }
 
     // Only cache on successful detection — don't persist transient connection failures
@@ -106,18 +112,25 @@ export class DefaultIosVoiceOverDetector implements IIosVoiceOverDetector {
   private async detectVoiceOverState(
     deviceId: string,
     client: IOSCtrlProxy,
-    timeoutMs?: number
+    timeoutMs?: number,
   ): Promise<boolean | null> {
     try {
       const result = await client.requestVoiceOverState(timeoutMs);
       if (!result.success) {
-        logger.warn(`[IosVoiceOverDetector] VoiceOver detection failed for ${deviceId}: ${result.error}`);
+        logger.warn(
+          `[IosVoiceOverDetector] VoiceOver detection failed for ${deviceId}: ${result.error}`,
+        );
         return null;
       }
-      logger.debug(`[IosVoiceOverDetector] VoiceOver state for device ${deviceId}: enabled=${result.enabled}`);
+      logger.debug(
+        `[IosVoiceOverDetector] VoiceOver state for device ${deviceId}: enabled=${result.enabled}`,
+      );
       return result.enabled;
     } catch (error) {
-      logger.error(`[IosVoiceOverDetector] Failed to detect VoiceOver state for device ${deviceId}:`, error);
+      logger.error(
+        `[IosVoiceOverDetector] Failed to detect VoiceOver state for device ${deviceId}:`,
+        error,
+      );
       return null;
     }
   }

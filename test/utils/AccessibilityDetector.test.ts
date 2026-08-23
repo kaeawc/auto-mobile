@@ -126,7 +126,9 @@ describe("AccessibilityDetector - Unit Tests", () => {
 
   describe("TalkBack Detection", () => {
     test("detects TalkBack when com.google.android.marvin.talkback is present", async () => {
-      fakeAdb.setResponse("com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService");
+      fakeAdb.setResponse(
+        "com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService",
+      );
 
       const enabled = await detector.isAccessibilityEnabled("device123", fakeAdb);
       expect(enabled).toBe(true);
@@ -191,7 +193,9 @@ describe("AccessibilityDetector - Unit Tests", () => {
 
   describe("Caching Behavior", () => {
     test("caches detection result for 60 seconds", async () => {
-      fakeAdb.setResponse("com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService");
+      fakeAdb.setResponse(
+        "com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService",
+      );
 
       // First call
       await detector.isAccessibilityEnabled("device123", fakeAdb);
@@ -212,7 +216,9 @@ describe("AccessibilityDetector - Unit Tests", () => {
       const manualTimer = new FakeTimer();
       const timedDetector = new DefaultAccessibilityDetector(manualTimer);
 
-      fakeAdb.setResponse("com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService");
+      fakeAdb.setResponse(
+        "com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService",
+      );
 
       // First call
       await timedDetector.isAccessibilityEnabled("device123", fakeAdb);
@@ -231,7 +237,9 @@ describe("AccessibilityDetector - Unit Tests", () => {
       const manualTimer = new FakeTimer();
       const timedDetector = new DefaultAccessibilityDetector(manualTimer);
 
-      fakeAdb.setResponse("com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService");
+      fakeAdb.setResponse(
+        "com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService",
+      );
 
       // First call
       await timedDetector.isAccessibilityEnabled("device123", fakeAdb);
@@ -246,7 +254,9 @@ describe("AccessibilityDetector - Unit Tests", () => {
     });
 
     test("invalidateCache clears cache for specific device", async () => {
-      fakeAdb.setResponse("com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService");
+      fakeAdb.setResponse(
+        "com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService",
+      );
 
       // First call
       await detector.isAccessibilityEnabled("device123", fakeAdb);
@@ -265,7 +275,9 @@ describe("AccessibilityDetector - Unit Tests", () => {
       const fakeAdb1 = new FakeAdbExecutor();
       const fakeAdb2 = new FakeAdbExecutor();
 
-      fakeAdb1.setResponse("com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService");
+      fakeAdb1.setResponse(
+        "com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService",
+      );
       fakeAdb2.setResponse("null");
 
       // Device 1: TalkBack enabled
@@ -295,7 +307,7 @@ describe("AccessibilityDetector - Unit Tests", () => {
       const enabled = await detector.isAccessibilityEnabled(
         "device123",
         fakeAdb as unknown as AdbClient,
-        fakeFeatureFlags as unknown as FeatureFlagService
+        fakeFeatureFlags as unknown as FeatureFlagService,
       );
       expect(enabled).toBe(true);
       expect(fakeAdb.getCallCount()).toBe(0);
@@ -303,7 +315,7 @@ describe("AccessibilityDetector - Unit Tests", () => {
       const service = await detector.detectMethod(
         "device123",
         fakeAdb as unknown as AdbClient,
-        fakeFeatureFlags as unknown as FeatureFlagService
+        fakeFeatureFlags as unknown as FeatureFlagService,
       );
       expect(service).toBe("talkback");
     });
@@ -316,7 +328,7 @@ describe("AccessibilityDetector - Unit Tests", () => {
       const enabled = await detector.isAccessibilityEnabled(
         "device123",
         fakeAdb as unknown as AdbClient,
-        fakeFeatureFlags as unknown as FeatureFlagService
+        fakeFeatureFlags as unknown as FeatureFlagService,
       );
       expect(enabled).toBe(false);
       expect(fakeAdb.getCallCount()).toBe(0);
@@ -324,7 +336,7 @@ describe("AccessibilityDetector - Unit Tests", () => {
       const service = await detector.detectMethod(
         "device123",
         fakeAdb as unknown as AdbClient,
-        fakeFeatureFlags as unknown as FeatureFlagService
+        fakeFeatureFlags as unknown as FeatureFlagService,
       );
       expect(service).toBe("unknown");
     });
@@ -338,7 +350,7 @@ describe("AccessibilityDetector - Unit Tests", () => {
       const enabled1 = await detector.isAccessibilityEnabled(
         "device123",
         fakeAdb as unknown as AdbClient,
-        fakeFeatureFlags as unknown as FeatureFlagService
+        fakeFeatureFlags as unknown as FeatureFlagService,
       );
       expect(enabled1).toBe(false);
       expect(fakeAdb.getCallCount()).toBe(1);
@@ -349,7 +361,7 @@ describe("AccessibilityDetector - Unit Tests", () => {
       const enabled2 = await detector.isAccessibilityEnabled(
         "device123",
         fakeAdb as unknown as AdbClient,
-        fakeFeatureFlags as unknown as FeatureFlagService
+        fakeFeatureFlags as unknown as FeatureFlagService,
       );
       expect(enabled2).toBe(true);
       // Should not call ADB again because force flag overrides
@@ -382,7 +394,9 @@ describe("AccessibilityDetector - Unit Tests", () => {
 
   describe("Performance with FakeTimer", () => {
     test("detection timing is tracked correctly", async () => {
-      fakeAdb.setResponse("com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService");
+      fakeAdb.setResponse(
+        "com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService",
+      );
 
       const startTime = fakeTimer.now();
       await detector.isAccessibilityEnabled("device123", fakeAdb);
@@ -393,7 +407,9 @@ describe("AccessibilityDetector - Unit Tests", () => {
     });
 
     test("cached detection uses no additional time", async () => {
-      fakeAdb.setResponse("com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService");
+      fakeAdb.setResponse(
+        "com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService",
+      );
 
       // First call to populate cache
       await detector.isAccessibilityEnabled("device123", fakeAdb);

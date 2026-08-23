@@ -1,10 +1,17 @@
 import { BootedDevice, Element, ObserveResult } from "../../models";
-import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  AdbClientFactory,
+  defaultAdbClientFactory,
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { logger } from "../../utils/logger";
 import { serverConfig } from "../../utils/ServerConfig";
 import { SelectedElement } from "../../utils/interfaces/NavigationGraph";
 import { TakeScreenshot } from "../observe/TakeScreenshot";
-import { SelectionDetectionContext, SelectionStateDetector, SelectionStateDetectorLike } from "./SelectionStateDetector";
+import {
+  SelectionDetectionContext,
+  SelectionStateDetector,
+  SelectionStateDetectorLike,
+} from "./SelectionStateDetector";
 import { UIStateExtractor } from "./UIStateExtractor";
 
 export interface ScreenshotCapturer {
@@ -65,8 +72,8 @@ export class SelectionStateTracker {
   constructor(options: SelectionStateTrackerOptions) {
     this.detector = options.detector ?? new SelectionStateDetector();
     this.screenshotCapturer = options.screenshotCapturer;
-    this.isUiPerfModeEnabled = options.isUiPerfModeEnabled
-      ?? (() => serverConfig.isUiPerfModeEnabled());
+    this.isUiPerfModeEnabled =
+      options.isUiPerfModeEnabled ?? (() => serverConfig.isUiPerfModeEnabled());
   }
 
   async prepare(request: SelectionCaptureRequest): Promise<SelectionCaptureState | null> {
@@ -88,7 +95,9 @@ export class SelectionStateTracker {
     }
 
     if (!this.hasIdentifier(element)) {
-      logger.debug(`[SELECTION_STATE] Skip selection capture (${action}): element lacks identifier`);
+      logger.debug(
+        `[SELECTION_STATE] Skip selection capture (${action}): element lacks identifier`,
+      );
       return null;
     }
 
@@ -99,7 +108,9 @@ export class SelectionStateTracker {
 
     const accessibilityState = new UIStateExtractor().extract(observation.viewHierarchy);
     if (accessibilityState?.selectedElements?.length) {
-      logger.info(`[SELECTION_STATE] Skip visual capture (${action}): accessibility selected state available`);
+      logger.info(
+        `[SELECTION_STATE] Skip visual capture (${action}): accessibility selected state available`,
+      );
       return null;
     }
 
@@ -111,12 +122,13 @@ export class SelectionStateTracker {
 
     return {
       beforeScreenshotPath,
-      action
+      action,
     };
   }
 
   async finalize(request: SelectionFinalizeRequest): Promise<SelectedElement[]> {
-    const { selectionState, currentObservation, previousObservation, element, action, signal } = request;
+    const { selectionState, currentObservation, previousObservation, element, action, signal } =
+      request;
     if (!selectionState || !currentObservation || !element) {
       return [];
     }
@@ -132,7 +144,7 @@ export class SelectionStateTracker {
       previousObservation,
       tappedElement: element,
       beforeScreenshotPath: selectionState.beforeScreenshotPath,
-      afterScreenshotPath
+      afterScreenshotPath,
     };
 
     return this.detector.detectSelectedElements(context);

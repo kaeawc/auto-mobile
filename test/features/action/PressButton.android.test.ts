@@ -8,7 +8,7 @@ describe("PressButton Android keycode dispatch", () => {
   const androidDevice: BootedDevice = {
     deviceId: "android-device",
     platform: "android",
-    name: "Pixel"
+    name: "Pixel",
   };
 
   let fakeAdb: FakeAdbExecutor;
@@ -82,7 +82,7 @@ describe("PressButton Android keycode dispatch", () => {
     getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
       requestGlobalAction: async () => {
         throw new Error("global action unavailable");
-      }
+      },
     } as unknown as AndroidCtrlProxyClient);
 
     const result = await press(button);
@@ -117,7 +117,11 @@ describe("PressButton Android keycode dispatch", () => {
     } as unknown as AndroidCtrlProxyClient);
 
     const pressButton = new PressButton(androidDevice, fakeAdb);
-    const result = await (pressButton as any).executeAndroidButtonPress("volume_up", 500, "epoch:3");
+    const result = await (pressButton as any).executeAndroidButtonPress(
+      "volume_up",
+      500,
+      "epoch:3",
+    );
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("Stale frame context");

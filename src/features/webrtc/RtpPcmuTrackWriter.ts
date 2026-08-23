@@ -45,7 +45,7 @@ export class RtpPcmuTrackWriter {
     // (the audio path deliberately constructs with small MTUs in tests).
     if (!Number.isFinite(this.mtu) || this.mtu <= 0) {
       throw new ActionableError(
-        `PCMU RTP MTU must be a positive number of bytes; got ${this.mtu}.`
+        `PCMU RTP MTU must be a positive number of bytes; got ${this.mtu}.`,
       );
     }
     this.sequenceNumber = (options.initialSequenceNumber ?? 0) & 0xffff;
@@ -106,5 +106,5 @@ function linear16ToMuLaw(sample: number): number {
     exponent--;
   }
   const mantissa = (magnitude >> (exponent + 3)) & 0x0f;
-  return (~(sign | (exponent << 4) | mantissa)) & 0xff;
+  return ~(sign | (exponent << 4) | mantissa) & 0xff;
 }

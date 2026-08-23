@@ -121,7 +121,10 @@ class FakeIosManager implements ReadinessIosManager {
   onSetup?: () => Promise<void>;
   onForceRestart?: (options?: { signal?: AbortSignal; minimumHealthPollDurationMs?: number }) => Promise<void>;
 
-  async start(options?: { signal?: AbortSignal; minimumHealthPollDurationMs?: number }): Promise<void> {
+  async start(options?: {
+    signal?: AbortSignal;
+    minimumHealthPollDurationMs?: number;
+  }): Promise<void> {
     this.startCalls++;
     this.startOptions = options;
     if (this.onStart) {
@@ -325,9 +328,8 @@ describe("RunnerReadinessService", () => {
   test("requires device replacement when the ANR persists after Wait", async () => {
     const androidClient = new FakeReadinessClient();
     androidClient.healthResults = [false];
-    androidClient.accessibilityHierarchies = Array.from(
-      { length: 32 },
-      () => systemUiAnrHierarchy(),
+    androidClient.accessibilityHierarchies = Array.from({ length: 32 }, () =>
+      systemUiAnrHierarchy(),
     );
     const { service } = createService({ androidClient });
 
@@ -523,13 +525,15 @@ describe("RunnerReadinessService", () => {
     androidManager.enabled = false;
     const { service } = createService({ androidManager });
 
-    await expect(service.ensureReady({
-      device: androidDevice(),
-      requestedIdentity: "platform=android",
-      totalDeadlineMs: 30_000,
-      readinessTimeoutMs: 30_000,
-      skipCtrlProxyDownload: true,
-    })).rejects.toThrow(/not installed.*downloads are disabled/);
+    await expect(
+      service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android",
+        totalDeadlineMs: 30_000,
+        readinessTimeoutMs: 30_000,
+        skipCtrlProxyDownload: true,
+      }),
+    ).rejects.toThrow(/not installed.*downloads are disabled/);
 
     expect(androidManager.setupCalls).toBe(0);
   });
@@ -561,12 +565,14 @@ describe("RunnerReadinessService", () => {
     };
     const { service } = createService({ androidManager });
 
-    const error = await service.ensureReady({
+    const error = await service
+      .ensureReady({
         device: androidDevice(),
         requestedIdentity: "platform=android",
         totalDeadlineMs: 30_000,
         readinessTimeoutMs: 30_000,
-      }).then(
+      })
+      .then(
         () => undefined,
         (reason: unknown) => reason,
       );

@@ -50,21 +50,16 @@ describe("CriticalSectionCoordinator", () => {
     const releases: Array<{ deviceId: string; releasedAt: number }> = [];
 
     // Start all devices concurrently
-    const promises = ["device-1", "device-2", "device-3"].map(
-      async (deviceId, index) => {
-        // Stagger arrivals slightly
-        await wait(index * 10);
-        arrivals.push({ deviceId, arrivedAt: fakeTimer.now() });
+    const promises = ["device-1", "device-2", "device-3"].map(async (deviceId, index) => {
+      // Stagger arrivals slightly
+      await wait(index * 10);
+      arrivals.push({ deviceId, arrivedAt: fakeTimer.now() });
 
-        const release = await coordinator.enterCriticalSection(
-          lockName,
-          deviceId
-        );
-        releases.push({ deviceId, releasedAt: fakeTimer.now() });
+      const release = await coordinator.enterCriticalSection(lockName, deviceId);
+      releases.push({ deviceId, releasedAt: fakeTimer.now() });
 
-        release();
-      }
-    );
+      release();
+    });
 
     await Promise.all(promises);
 
@@ -75,8 +70,8 @@ describe("CriticalSectionCoordinator", () => {
     expect(releases.length).toBe(3);
 
     // Verify releases happened after all arrivals
-    const lastArrival = Math.max(...arrivals.map(a => a.arrivedAt));
-    const firstRelease = Math.min(...releases.map(r => r.releasedAt));
+    const lastArrival = Math.max(...arrivals.map((a) => a.arrivedAt));
+    const firstRelease = Math.min(...releases.map((r) => r.releasedAt));
     expect(firstRelease).toBeGreaterThanOrEqual(lastArrival);
   });
 
@@ -86,8 +81,7 @@ describe("CriticalSectionCoordinator", () => {
     const deviceCount = 2;
     coordinator.registerExpectedDevices(lockName, deviceCount);
 
-    const executionLog: Array<{ deviceId: string; event: string; time: number }> =
-			[];
+    const executionLog: Array<{ deviceId: string; event: string; time: number }> = [];
 
     const deviceWork = async (deviceId: string) => {
       const release = await coordinator.enterCriticalSection(lockName, deviceId);
@@ -106,15 +100,14 @@ describe("CriticalSectionCoordinator", () => {
 
     // Find which device went first
     const firstDevice = executionLog[0].deviceId;
-    const secondDevice = executionLog.find(e => e.deviceId !== firstDevice)!
-      .deviceId;
+    const secondDevice = executionLog.find((e) => e.deviceId !== firstDevice)!.deviceId;
 
     // Verify serial execution: first device must complete before second starts
     const firstDeviceEnd = executionLog.find(
-      e => e.deviceId === firstDevice && e.event === "end"
+      (e) => e.deviceId === firstDevice && e.event === "end",
     )!;
     const secondDeviceStart = executionLog.find(
-      e => e.deviceId === secondDevice && e.event === "start"
+      (e) => e.deviceId === secondDevice && e.event === "start",
     )!;
 
     expect(secondDeviceStart.time).toBeGreaterThanOrEqual(firstDeviceEnd.time);
@@ -125,22 +118,12 @@ describe("CriticalSectionCoordinator", () => {
     coordinator.registerExpectedDevices(lockName, 3);
 
     // Only 2 devices arrive, one is missing
-    const promise1 = coordinator.enterCriticalSection(
-      lockName,
-      "device-1",
-      100
-    ); // 100ms timeout
-    const promise2 = coordinator.enterCriticalSection(
-      lockName,
-      "device-2",
-      100
-    );
+    const promise1 = coordinator.enterCriticalSection(lockName, "device-1", 100); // 100ms timeout
+    const promise2 = coordinator.enterCriticalSection(lockName, "device-2", 100);
 
     const allPromises = Promise.all([promise1, promise2]);
     fakeTimer.advanceTime(100);
-    await expect(allPromises).rejects.toThrow(
-      /Timeout waiting for critical section/
-    );
+    await expect(allPromises).rejects.toThrow(/Timeout waiting for critical section/);
   });
 
   test("timeout error reports arrived/expected count and the default 30000ms duration", async () => {
@@ -153,7 +136,7 @@ describe("CriticalSectionCoordinator", () => {
     fakeTimer.advanceTime(30000);
 
     await expect(promise).rejects.toThrow(
-      /Timeout waiting for critical section "lock-timeout-body"\. 1\/2 devices arrived after 30000ms\. Missing devices may have failed or not reached the critical section\./
+      /Timeout waiting for critical section "lock-timeout-body"\. 1\/2 devices arrived after 30000ms\. Missing devices may have failed or not reached the critical section\./,
     );
   });
 
@@ -165,9 +148,9 @@ describe("CriticalSectionCoordinator", () => {
     const promise1 = coordinator.enterCriticalSection(lockName, "device-1", 100);
 
     // Same device tries to arrive again before barrier passes
-    await expect(
-      coordinator.enterCriticalSection(lockName, "device-1", 100)
-    ).rejects.toThrow(/already arrived at barrier/);
+    await expect(coordinator.enterCriticalSection(lockName, "device-1", 100)).rejects.toThrow(
+      /already arrived at barrier/,
+    );
 
     // Clean up: advance time to trigger timeout for the waiting device
     fakeTimer.advanceTime(100);
@@ -175,9 +158,9 @@ describe("CriticalSectionCoordinator", () => {
   });
 
   test("throws error if expected device count is not registered", async () => {
-    await expect(
-      coordinator.enterCriticalSection("unregistered-lock", "device-1")
-    ).rejects.toThrow(/No expected device count registered/);
+    await expect(coordinator.enterCriticalSection("unregistered-lock", "device-1")).rejects.toThrow(
+      /No expected device count registered/,
+    );
   });
 
   test("throws error if invalid device count is registered", () => {
@@ -198,17 +181,11 @@ describe("CriticalSectionCoordinator", () => {
     // Run devices in parallel so they can pass the barrier
     await Promise.all([
       (async () => {
-        const release = await coordinator.enterCriticalSection(
-          lockName,
-          "device-1"
-        );
+        const release = await coordinator.enterCriticalSection(lockName, "device-1");
         release();
       })(),
       (async () => {
-        const release = await coordinator.enterCriticalSection(
-          lockName,
-          "device-2"
-        );
+        const release = await coordinator.enterCriticalSection(lockName, "device-2");
         release();
       })(),
     ]);
@@ -245,8 +222,8 @@ describe("CriticalSectionCoordinator", () => {
     expect(executionLog.length).toBe(8);
 
     // Verify devices from different locks could interleave
-    const lockAEvents = executionLog.filter(e => e.startsWith("lock-A"));
-    const lockBEvents = executionLog.filter(e => e.startsWith("lock-B"));
+    const lockAEvents = executionLog.filter((e) => e.startsWith("lock-A"));
+    const lockBEvents = executionLog.filter((e) => e.startsWith("lock-B"));
 
     expect(lockAEvents.length).toBe(4);
     expect(lockBEvents.length).toBe(4);
@@ -267,9 +244,9 @@ describe("CriticalSectionCoordinator", () => {
     await expect(promise).rejects.toThrow(/Timeout waiting for critical section/);
 
     // After force cleanup, lock state is gone
-    await expect(
-      coordinator.enterCriticalSection(lockName, "device-2")
-    ).rejects.toThrow(/No expected device count registered/);
+    await expect(coordinator.enterCriticalSection(lockName, "device-2")).rejects.toThrow(
+      /No expected device count registered/,
+    );
   });
 
   test("clears barrier timeout when all devices arrive", async () => {
@@ -337,10 +314,7 @@ describe("CriticalSectionCoordinator", () => {
 
     // First round
     coordinator.registerExpectedDevices(lockName, 1);
-    const release1 = await coordinator.enterCriticalSection(
-      lockName,
-      "device-1"
-    );
+    const release1 = await coordinator.enterCriticalSection(lockName, "device-1");
     release1();
 
     // Force cleanup
@@ -352,18 +326,12 @@ describe("CriticalSectionCoordinator", () => {
     const executionLog: string[] = [];
     await Promise.all([
       (async () => {
-        const release = await coordinator.enterCriticalSection(
-          lockName,
-          "device-2"
-        );
+        const release = await coordinator.enterCriticalSection(lockName, "device-2");
         executionLog.push("device-2");
         release();
       })(),
       (async () => {
-        const release = await coordinator.enterCriticalSection(
-          lockName,
-          "device-3"
-        );
+        const release = await coordinator.enterCriticalSection(lockName, "device-3");
         executionLog.push("device-3");
         release();
       })(),
@@ -382,7 +350,7 @@ describe("CriticalSectionCoordinator", () => {
   describe("cross-plan namespace isolation", () => {
     // Yield the microtask queue so any synchronous barrier resolutions settle.
     const flush = async (): Promise<void> => {
-      await new Promise<void>(resolve => setImmediate(resolve));
+      await new Promise<void>((resolve) => setImmediate(resolve));
     };
 
     test("WITHOUT a namespace, two plans reusing a lock name collide (documents the bug)", async () => {
@@ -392,12 +360,12 @@ describe("CriticalSectionCoordinator", () => {
       let aReleased = false;
       let bReleased = false;
 
-      const a1 = coordinator
-        .awaitBarrier("sync", "planA-device-1", 2, 30000)
-        .then(() => { aReleased = true; });
-      const b1 = coordinator
-        .awaitBarrier("sync", "planB-device-1", 2, 30000)
-        .then(() => { bReleased = true; });
+      const a1 = coordinator.awaitBarrier("sync", "planA-device-1", 2, 30000).then(() => {
+        aReleased = true;
+      });
+      const b1 = coordinator.awaitBarrier("sync", "planB-device-1", 2, 30000).then(() => {
+        bReleased = true;
+      });
 
       await flush();
 
@@ -417,25 +385,27 @@ describe("CriticalSectionCoordinator", () => {
       // device.
       const a1 = coordinator
         .awaitBarrier("sync", "planA-device-1", 2, 30000, "session-A")
-        .then(() => { aReleased = true; });
+        .then(() => {
+          aReleased = true;
+        });
       const b1 = coordinator
         .awaitBarrier("sync", "planB-device-1", 2, 30000, "session-B")
-        .then(() => { bReleased = true; });
+        .then(() => {
+          bReleased = true;
+        });
 
       await flush();
       expect(aReleased).toBe(false);
       expect(bReleased).toBe(false);
 
       // Plan A's second device arrives -> only plan A's barrier lifts.
-      const a2 = coordinator
-        .awaitBarrier("sync", "planA-device-2", 2, 30000, "session-A");
+      const a2 = coordinator.awaitBarrier("sync", "planA-device-2", 2, 30000, "session-A");
       await flush();
       expect(aReleased).toBe(true);
       expect(bReleased).toBe(false);
 
       // Plan B's second device arrives -> plan B's barrier lifts.
-      const b2 = coordinator
-        .awaitBarrier("sync", "planB-device-2", 2, 30000, "session-B");
+      const b2 = coordinator.awaitBarrier("sync", "planB-device-2", 2, 30000, "session-B");
       await flush();
       expect(bReleased).toBe(true);
 
@@ -448,7 +418,9 @@ describe("CriticalSectionCoordinator", () => {
       // Plan A parks one device at the barrier.
       const a1 = coordinator
         .awaitBarrier("sync", "planA-device-1", 2, 30000, "session-A")
-        .then(() => { aReleased = true; });
+        .then(() => {
+          aReleased = true;
+        });
       await flush();
 
       // Plan B (same lock name, different namespace) hits an error and force-
@@ -458,8 +430,7 @@ describe("CriticalSectionCoordinator", () => {
       expect(aReleased).toBe(false);
 
       // Plan A's second device still completes the barrier normally.
-      const a2 = coordinator
-        .awaitBarrier("sync", "planA-device-2", 2, 30000, "session-A");
+      const a2 = coordinator.awaitBarrier("sync", "planA-device-2", 2, 30000, "session-A");
       await flush();
       expect(aReleased).toBe(true);
 

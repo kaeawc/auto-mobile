@@ -38,7 +38,14 @@ function resolveOverride(env: NodeJS.ProcessEnv): string | null {
 
 /** Resolve the local Gradle build output iff it exists (dev convenience). */
 function resolveLocalBuild(cwd: string): string | null {
-  const built = path.resolve(cwd, "android", "video-server", "build", "libs", "automobile-video.jar");
+  const built = path.resolve(
+    cwd,
+    "android",
+    "video-server",
+    "build",
+    "libs",
+    "automobile-video.jar",
+  );
   return existsSync(built) ? built : null;
 }
 
@@ -50,7 +57,7 @@ function resolveLocalBuild(cwd: string): string | null {
  */
 export function resolveVideoServerJarPath(
   env: NodeJS.ProcessEnv = process.env,
-  cwd: string = process.cwd()
+  cwd: string = process.cwd(),
 ): string | null {
   return resolveOverride(env) ?? resolveLocalBuild(cwd);
 }
@@ -86,7 +93,9 @@ export interface ResolveVideoServerJarDeps {
  *   - `AUTOMOBILE_SKIP_VIDEO_SERVER_DOWNLOAD` → local-only; the provider (cache
  *     + network) is never consulted.
  */
-export async function resolveVideoServerJar(deps: ResolveVideoServerJarDeps = {}): Promise<string | null> {
+export async function resolveVideoServerJar(
+  deps: ResolveVideoServerJarDeps = {},
+): Promise<string | null> {
   const env = deps.env ?? process.env;
   const cwd = deps.cwd ?? process.cwd();
 
@@ -110,7 +119,9 @@ export async function resolveVideoServerJar(deps: ResolveVideoServerJarDeps = {}
       return downloaded;
     }
   } else {
-    logger.info("[VIDEO_JAR] AUTOMOBILE_SKIP_VIDEO_SERVER_DOWNLOAD set; resolving local sources only");
+    logger.info(
+      "[VIDEO_JAR] AUTOMOBILE_SKIP_VIDEO_SERVER_DOWNLOAD set; resolving local sources only",
+    );
   }
 
   // 4. Local Gradle build output (developer convenience).
@@ -124,10 +135,10 @@ export async function resolveVideoServerJar(deps: ResolveVideoServerJarDeps = {}
   if (requireJar) {
     throw new ActionableError(
       `${REQUIRE_VIDEO_SERVER_ENV} is set but no verifiable automobile-video.jar is available ` +
-      `(no override, no ${skip ? "" : "downloadable or "}locally-built jar). ` +
-      `Provide ${VIDEO_SERVER_JAR_ENV}, build \`:video-server:d8Dex\`, ` +
-      `pin a release whose checksum registry includes videoJarSha256, ` +
-      `or unset ${REQUIRE_VIDEO_SERVER_ENV} to allow the screenrecord fallback.`
+        `(no override, no ${skip ? "" : "downloadable or "}locally-built jar). ` +
+        `Provide ${VIDEO_SERVER_JAR_ENV}, build \`:video-server:d8Dex\`, ` +
+        `pin a release whose checksum registry includes videoJarSha256, ` +
+        `or unset ${REQUIRE_VIDEO_SERVER_ENV} to allow the screenrecord fallback.`,
     );
   }
   logger.info("[VIDEO_JAR] No verifiable jar available; degrading to screenrecord");
@@ -166,16 +177,22 @@ export async function prefetchVideoServerJar(deps: PrefetchVideoServerJarDeps = 
   // download-relevant gates from resolveVideoServerJar's precedence: an override
   // or SKIP means the download is never used, so there is nothing to warm.
   if (isTruthyEnvValue(env[SKIP_VIDEO_SERVER_DOWNLOAD_ENV])) {
-    logger.debug(`[VIDEO_JAR] ${SKIP_VIDEO_SERVER_DOWNLOAD_ENV} set; skipping background jar prefetch`);
+    logger.debug(
+      `[VIDEO_JAR] ${SKIP_VIDEO_SERVER_DOWNLOAD_ENV} set; skipping background jar prefetch`,
+    );
     return;
   }
   if (resolveOverride(env)) {
-    logger.debug("[VIDEO_JAR] Local override present; skipping background jar prefetch (download unused)");
+    logger.debug(
+      "[VIDEO_JAR] Local override present; skipping background jar prefetch (download unused)",
+    );
     return;
   }
 
   const provider = deps.provider ?? VideoServerJarProvider.getInstance();
-  logger.info("[VIDEO_JAR] Prefetching video-server jar in the background (WebRTC streaming configured)");
+  logger.info(
+    "[VIDEO_JAR] Prefetching video-server jar in the background (WebRTC streaming configured)",
+  );
   try {
     const jarPath = await provider.ensure();
     if (jarPath) {
@@ -183,9 +200,6 @@ export async function prefetchVideoServerJar(deps: PrefetchVideoServerJarDeps = 
     }
   } catch (error) {
     // Best-effort: the first stream re-resolves and surfaces any fatal error.
-    logger.warn(
-      `[VIDEO_JAR] Background jar prefetch failed: ${errorMessage(error)}`,
-      error
-    );
+    logger.warn(`[VIDEO_JAR] Background jar prefetch failed: ${errorMessage(error)}`, error);
   }
 }

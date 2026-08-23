@@ -51,7 +51,7 @@ describe("ToolCallRepository", () => {
 
     const result = await repo.listToolNamesBetween(
       "2024-01-01T00:00:00.000Z",
-      "2024-01-01T00:00:04.000Z"
+      "2024-01-01T00:00:04.000Z",
     );
     expect(result).toEqual(["tapOn", "observe"]);
   });
@@ -63,7 +63,7 @@ describe("ToolCallRepository", () => {
 
     const result = await repo.listToolNamesBetween(
       "2024-01-01T00:00:03.000Z",
-      "2024-01-01T00:00:07.000Z"
+      "2024-01-01T00:00:07.000Z",
     );
     expect(result).toEqual(["middle"]);
   });
@@ -76,7 +76,7 @@ describe("ToolCallRepository", () => {
     const result = await repo.listToolNamesBetween(
       "2024-01-01T00:00:00.000Z",
       "2024-01-01T00:00:04.000Z",
-      ["observe"]
+      ["observe"],
     );
     expect(result).toEqual(["tapOn", "inputText"]);
   });
@@ -84,7 +84,7 @@ describe("ToolCallRepository", () => {
   test("listToolNamesBetween returns empty for no matches", async () => {
     const result = await repo.listToolNamesBetween(
       "2024-01-01T00:00:00.000Z",
-      "2024-01-01T00:00:04.000Z"
+      "2024-01-01T00:00:04.000Z",
     );
     expect(result).toEqual([]);
   });
@@ -100,7 +100,7 @@ describe("ToolCallRepository", () => {
 
     const result = await repo.listToolNamesBetween(
       "2024-01-01T00:00:00.000Z",
-      "2024-01-01T00:00:10.000Z"
+      "2024-01-01T00:00:10.000Z",
     );
     expect(result).toEqual(["alpha", "beta", "gamma"]);
   });
@@ -115,7 +115,7 @@ describe("ToolCallRepository", () => {
 
     const result = await repo.listToolNamesBetween(
       "2024-01-01T00:00:00.000Z",
-      "2024-01-01T00:00:10.000Z"
+      "2024-01-01T00:00:10.000Z",
     );
     expect(result).toEqual(["first", "second", "third"]);
   });
@@ -126,7 +126,7 @@ describe("ToolCallRepository", () => {
 
     const result = await repo.listToolNamesBetween(
       "2024-01-01T00:00:00.000Z",
-      "2024-01-01T00:00:04.000Z"
+      "2024-01-01T00:00:04.000Z",
     );
     expect(result).toEqual(["atStart", "atEnd"]);
   });
@@ -138,7 +138,7 @@ describe("ToolCallRepository", () => {
     const result = await repo.listToolNamesBetween(
       "2024-01-01T00:00:00.000Z",
       "2024-01-01T00:00:04.000Z",
-      []
+      [],
     );
     expect(result).toEqual(["one", "two"]);
   });
@@ -152,7 +152,7 @@ describe("ToolCallRepository", () => {
     const result = await repo.listToolNamesBetween(
       "2024-01-01T00:00:00.000Z",
       "2024-01-01T00:00:05.000Z",
-      ["drop1", "drop2"]
+      ["drop1", "drop2"],
     );
     expect(result).toEqual(["keep1", "keep2"]);
   });

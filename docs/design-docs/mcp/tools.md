@@ -16,7 +16,7 @@ Almost all other tool calls have built-in observation via the [interaction loop]
 
 All Interactions tools — including `pinchOn`, which routes coordinate-based pinch/zoom through the runner's synthesized two-finger events — run on **Android** (physical devices and emulators) and **iOS** via the XCUITest CtrlProxy runner. iOS support is currently <kbd>📱 Simulator Only</kbd> (see the [iOS overview](../plat/ios/index.md)). `shake` is the one exception with no physical-iOS path even once physical support lands, because XCTest exposes no shake API for real devices — it returns an actionable error there.
 
-> **`pinchOn` `rotationDegrees` semantics.** `rotationDegrees` (default `0`) is how far the two-finger axis rotates *during* the pinch: the fingers start on the horizontal axis and finish on an axis rotated by `rotationDegrees`. A non-zero value therefore performs a combined **pinch + rotate**, not a pinch along a fixed rotated axis. The default `0` is a plain pinch/zoom and is unaffected. Both the Android and iOS runners deliberately share this convention so pinch results match across platforms — if you ever change it, change both runners together (see issue #2911). **Decision (#2911):** this start-horizontal / end-rotated behavior is intentional and documented rather than changed, to preserve existing cross-platform pinch results; revisit only if a concrete caller needs a pinch along a fixed rotated axis, and then only as a coordinated Android + iOS change.
+> **`pinchOn` `rotationDegrees` semantics.** `rotationDegrees` (default `0`) is how far the two-finger axis rotates _during_ the pinch: the fingers start on the horizontal axis and finish on an axis rotated by `rotationDegrees`. A non-zero value therefore performs a combined **pinch + rotate**, not a pinch along a fixed rotated axis. The default `0` is a plain pinch/zoom and is unaffected. Both the Android and iOS runners deliberately share this convention so pinch results match across platforms — if you ever change it, change both runners together (see issue #2911). **Decision (#2911):** this start-horizontal / end-rotated behavior is intentional and documented rather than changed, to preserve existing cross-platform pinch results; revisit only if a concrete caller needs a pinch along a fixed rotated axis, and then only as a coordinated Android + iOS change.
 
 #### App Management
 
@@ -78,12 +78,12 @@ Android private containers (`documents`, `cache`, and `tmp`) use `run-as {appId}
 
 iOS app files are supported for simulators through `xcrun simctl get_app_container {deviceId} {bundleId} data`. Logical containers map to the app data container as follows:
 
-| Container | iOS path |
-|-----------|----------|
-| `documents` | `Documents` |
-| `library` | `Library` |
-| `cache` | `Library/Caches` |
-| `tmp` | `tmp` |
+| Container   | iOS path         |
+| ----------- | ---------------- |
+| `documents` | `Documents`      |
+| `library`   | `Library`        |
+| `cache`     | `Library/Caches` |
+| `tmp`       | `tmp`            |
 
 Use `documents` for user-visible fixtures, `cache` for cache-like test data, and `tmp` for temporary files:
 
@@ -163,11 +163,11 @@ cat "$APP_CONTAINER/Documents/fixtures/hello.txt"
 
 #### Network & Connectivity
 
-- `setNetworkState` — Wi-Fi, cellular, and airplane mode control. ADB commands validated on API 35. <kbd>❌ Not Implemented</kbd> *(MCP tool not yet built; see [network-state.md](../plat/android/network-state.md))*
+- `setNetworkState` — Wi-Fi, cellular, and airplane mode control. ADB commands validated on API 35. <kbd>❌ Not Implemented</kbd> _(MCP tool not yet built; see [network-state.md](../plat/android/network-state.md))_
 
 #### Accessibility
 
-- `setTalkBackEnabled`, `setA11yFocus`, `announce` — TalkBack simulation and enablement. ADB commands validated. <kbd>❌ Not Implemented</kbd> *(MCP tools not yet built; see [talkback.md](../plat/android/talkback.md))*
+- `setTalkBackEnabled`, `setA11yFocus`, `announce` — TalkBack simulation and enablement. ADB commands validated. <kbd>❌ Not Implemented</kbd> _(MCP tools not yet built; see [talkback.md](../plat/android/talkback.md))_
 
 #### Daemon & Session Management
 

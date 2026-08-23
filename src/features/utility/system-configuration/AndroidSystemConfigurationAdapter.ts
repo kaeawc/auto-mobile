@@ -44,7 +44,7 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
 
   constructor(
     private readonly device: BootedDevice,
-    private readonly adb: AdbExecutor
+    private readonly adb: AdbExecutor,
   ) {}
 
   async setLocale(languageTag: string, options: BroadcastOptions): Promise<SetLocaleResult> {
@@ -52,14 +52,19 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
       return {
         success: false,
         languageTag,
-        error: "appId is required for Android locale changes. Provide the target app package so AutoMobile can choose the supported Android locale path."
+        error:
+          "appId is required for Android locale changes. Provide the target app package so AutoMobile can choose the supported Android locale path.",
       };
     }
 
     return this.setTargetAppLocale(languageTag, options.appId, options);
   }
 
-  private async setSystemLocale(languageTag: string, options: BroadcastOptions, method: string): Promise<SetLocaleResult> {
+  private async setSystemLocale(
+    languageTag: string,
+    options: BroadcastOptions,
+    method: string,
+  ): Promise<SetLocaleResult> {
     const previousLanguageTag = await this.getCurrentLocaleTag();
 
     try {
@@ -71,7 +76,7 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
         success: false,
         languageTag,
         previousLanguageTag,
-        error: `Failed to set locale: ${errorMsg}`
+        error: `Failed to set locale: ${errorMsg}`,
       };
     }
 
@@ -81,27 +86,25 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
         success: false,
         languageTag,
         previousLanguageTag,
-        error: `Read-back verification failed: expected "${languageTag}" but got "${effectiveLanguageTag ?? "null"}"`
+        error: `Read-back verification failed: expected "${languageTag}" but got "${effectiveLanguageTag ?? "null"}"`,
       };
     }
 
-    const broadcasted = options.broadcast === false
-      ? false
-      : await this.broadcastLocaleChange();
+    const broadcasted = options.broadcast === false ? false : await this.broadcastLocaleChange();
 
     return {
       success: true,
       languageTag,
       previousLanguageTag,
       method,
-      broadcasted
+      broadcasted,
     };
   }
 
   private async setTargetAppLocale(
     languageTag: string,
     appId: string,
-    options: BroadcastOptions
+    options: BroadcastOptions,
   ): Promise<SetLocaleResult> {
     const apiLevel = await readAndroidDeviceApiLevel(this.adb);
     if (apiLevel !== null && apiLevel < MIN_APP_LOCALE_API_LEVEL) {
@@ -113,7 +116,11 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
           error: rootResult.error,
         };
       }
-      return this.setSystemLocale(languageTag, options, "setprop persist.sys.locale + stop/start after adb root");
+      return this.setSystemLocale(
+        languageTag,
+        options,
+        "setprop persist.sys.locale + stop/start after adb root",
+      );
     }
 
     const targetUserId = await this.resolveTargetUserId(appId);
@@ -121,7 +128,7 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
 
     try {
       await this.adb.executeCommand(
-        `shell cmd locale set-app-locales ${shellQuote(appId)} --user ${targetUserId} --locales ${shellQuote(languageTag)}`
+        `shell cmd locale set-app-locales ${shellQuote(appId)} --user ${targetUserId} --locales ${shellQuote(languageTag)}`,
       );
     } catch (error) {
       const errorMsg = errorMessage(error);
@@ -129,7 +136,7 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
         success: false,
         languageTag,
         previousLanguageTag,
-        error: `Failed to set app locale for ${appId}: ${errorMsg}`
+        error: `Failed to set app locale for ${appId}: ${errorMsg}`,
       };
     }
 
@@ -139,20 +146,18 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
         success: false,
         languageTag,
         previousLanguageTag,
-        error: `Read-back verification failed for ${appId}: expected "${languageTag}" but got "${effectiveLanguageTag ?? "null"}"`
+        error: `Read-back verification failed for ${appId}: expected "${languageTag}" but got "${effectiveLanguageTag ?? "null"}"`,
       };
     }
 
-    const broadcasted = options.broadcast === false
-      ? false
-      : await this.broadcastLocaleChange();
+    const broadcasted = options.broadcast === false ? false : await this.broadcastLocaleChange();
 
     return {
       success: true,
       languageTag,
       previousLanguageTag,
       method: `cmd locale set-app-locales ${appId} --user ${targetUserId}`,
-      broadcasted
+      broadcasted,
     };
   }
 
@@ -163,19 +168,27 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
         return foregroundApp.userId;
       }
     } catch (error) {
-      logger.debug(`[SystemConfigurationManager] Failed to resolve foreground Android app user for ${appId}: ${error}`);
+      logger.debug(
+        `[SystemConfigurationManager] Failed to resolve foreground Android app user for ${appId}: ${error}`,
+      );
     }
 
     try {
-      const workProfile = (await this.adb.listUsers()).find(user => user.userId > 0 && user.running);
+      const workProfile = (await this.adb.listUsers()).find(
+        (user) => user.userId > 0 && user.running,
+      );
       return workProfile?.userId ?? 0;
     } catch (error) {
-      logger.debug(`[SystemConfigurationManager] Failed to list Android users for ${appId}: ${error}`);
+      logger.debug(
+        `[SystemConfigurationManager] Failed to list Android users for ${appId}: ${error}`,
+      );
       return 0;
     }
   }
 
-  private async ensureRootForLegacyLocale(apiLevel: number): Promise<{ success: true } | { success: false; error: string }> {
+  private async ensureRootForLegacyLocale(
+    apiLevel: number,
+  ): Promise<{ success: true } | { success: false; error: string }> {
     try {
       await this.adb.executeCommand("root", undefined, undefined, true);
       await this.adb.executeCommand("wait-for-device", undefined, undefined, true);
@@ -183,7 +196,7 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
       const errorMsg = errorMessage(error);
       return {
         success: false,
-        error: `Android API ${apiLevel} does not support app-scoped locale changes, so AutoMobile must use the root-backed system locale path. Failed to run adb root; the target emulator is not root-capable or does not allow root ADB. adb root error: ${errorMsg}`
+        error: `Android API ${apiLevel} does not support app-scoped locale changes, so AutoMobile must use the root-backed system locale path. Failed to run adb root; the target emulator is not root-capable or does not allow root ADB. adb root error: ${errorMsg}`,
       };
     }
 
@@ -192,14 +205,14 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
       if (!idResult.stdout.includes("uid=0(root)")) {
         return {
           success: false,
-          error: `Android API ${apiLevel} does not support app-scoped locale changes, so AutoMobile must use the root-backed system locale path. adb root completed, but ADB shell is still not root; the target emulator is not root-capable. shell id: ${idResult.stdout.trim() || "unknown"}`
+          error: `Android API ${apiLevel} does not support app-scoped locale changes, so AutoMobile must use the root-backed system locale path. adb root completed, but ADB shell is still not root; the target emulator is not root-capable. shell id: ${idResult.stdout.trim() || "unknown"}`,
         };
       }
     } catch (error) {
       const errorMsg = errorMessage(error);
       return {
         success: false,
-        error: `Android API ${apiLevel} does not support app-scoped locale changes, so AutoMobile must verify root before changing the system locale. Failed to verify root shell after adb root: ${errorMsg}`
+        error: `Android API ${apiLevel} does not support app-scoped locale changes, so AutoMobile must verify root before changing the system locale. Failed to verify root shell after adb root: ${errorMsg}`,
       };
     }
 
@@ -217,14 +230,14 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
           success: false,
           zoneId,
           previousZoneId,
-          error: `Read-back verification failed: expected "${zoneId}" but got "${effectiveZoneId ?? "null"}"`
+          error: `Read-back verification failed: expected "${zoneId}" but got "${effectiveZoneId ?? "null"}"`,
         };
       }
       return {
         success: true,
         zoneId,
         previousZoneId,
-        method: "setprop persist.sys.timezone"
+        method: "setprop persist.sys.timezone",
       };
     } catch (error) {
       const errorMsg = errorMessage(error);
@@ -232,7 +245,7 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
         success: false,
         zoneId,
         previousZoneId,
-        error: `Failed to set time zone: ${errorMsg}`
+        error: `Failed to set time zone: ${errorMsg}`,
       };
     }
   }
@@ -273,20 +286,18 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
         success: false,
         rtl,
         previousRtl,
-        error: "Failed to update RTL settings"
+        error: "Failed to update RTL settings",
       };
     }
 
-    const broadcasted = options.broadcast === false
-      ? false
-      : await this.broadcastLocaleChange();
+    const broadcasted = options.broadcast === false ? false : await this.broadcastLocaleChange();
 
     return {
       success: true,
       rtl,
       previousRtl,
       settings: appliedSettings,
-      broadcasted
+      broadcasted,
     };
   }
 
@@ -299,7 +310,7 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
       return {
         success: true,
         enabled,
-        previousFormat: normalizeTimeFormat(previousFormat)
+        previousFormat: normalizeTimeFormat(previousFormat),
       };
     } catch (error) {
       const errorMsg = errorMessage(error);
@@ -307,7 +318,7 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
         success: false,
         enabled,
         previousFormat: normalizeTimeFormat(previousFormat),
-        error: `Failed to set 24-hour format: ${errorMsg}`
+        error: `Failed to set 24-hour format: ${errorMsg}`,
       };
     }
   }
@@ -324,13 +335,13 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
           success: false,
           calendarSystem: readBack ?? calendarSystem,
           previousCalendarSystem,
-          error: `Read-back verification failed: expected "${calendarSystem}" but got "${readBack ?? "null"}"`
+          error: `Read-back verification failed: expected "${calendarSystem}" but got "${readBack ?? "null"}"`,
         };
       }
       return {
         success: true,
         calendarSystem: readBack,
-        previousCalendarSystem
+        previousCalendarSystem,
       };
     } catch (error) {
       const errorMsg = errorMessage(error);
@@ -338,7 +349,7 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
         success: false,
         calendarSystem,
         previousCalendarSystem,
-        error: `Failed to set calendar system: ${errorMsg}`
+        error: `Failed to set calendar system: ${errorMsg}`,
       };
     }
   }
@@ -349,7 +360,7 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
       return {
         success: true,
         calendarSystem: calendarType,
-        source: "settings.calendar_type"
+        source: "settings.calendar_type",
       };
     }
 
@@ -361,7 +372,7 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
           success: true,
           calendarSystem: calendarFromLocale,
           locale,
-          source: "locale"
+          source: "locale",
         };
       }
     }
@@ -370,7 +381,7 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
       success: true,
       calendarSystem: this.defaultCalendarSystem,
       locale: locale ?? null,
-      source: "default"
+      source: "default",
     };
   }
 
@@ -378,12 +389,12 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
     const locale = await this.getCurrentLocaleTag();
     const timeZone = await this.readSetting("shell getprop persist.sys.timezone");
     const timeFormat = normalizeTimeFormat(
-      await this.readSetting("shell settings get system time_12_24")
+      await this.readSetting("shell settings get system time_12_24"),
     );
     const debugForceRtl = await this.readSetting("shell settings get global debug.force_rtl");
     const forceRtl = await this.readSetting("shell settings get global force_rtl");
     const rtlSetting = parseBooleanSetting(debugForceRtl) ?? parseBooleanSetting(forceRtl);
-    const textDirection = rtlSetting === null ? null : (rtlSetting ? "rtl" : "ltr");
+    const textDirection = rtlSetting === null ? null : rtlSetting ? "rtl" : "ltr";
     const calendarResult = await this.getCalendarSystem();
 
     return {
@@ -393,7 +404,7 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
       textDirection,
       timeFormat,
       calendarSystem: calendarResult.calendarSystem ?? null,
-      error: calendarResult.error
+      error: calendarResult.error,
     };
   }
 
@@ -422,7 +433,9 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
           return normalizeSettingValue(a11yResult.found ? (a11yResult.value ?? null) : null);
         }
       } catch (error) {
-        logger.debug(`[SystemConfigurationManager] a11y settings get failed for ${namespace}/${key}: ${error}`);
+        logger.debug(
+          `[SystemConfigurationManager] a11y settings get failed for ${namespace}/${key}: ${error}`,
+        );
       }
     }
     try {
@@ -438,7 +451,9 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
   // through the accessibility service first, falling back to ADB. Any
   // other shell command is passed through to `adb.executeCommand`.
   private async runShellCommand(command: string): Promise<void> {
-    const putMatch = command.match(/^shell\s+settings\s+put\s+(system|secure|global)\s+(\S+)\s+(.+)$/);
+    const putMatch = command.match(
+      /^shell\s+settings\s+put\s+(system|secure|global)\s+(\S+)\s+(.+)$/,
+    );
     if (putMatch) {
       const namespace = putMatch[1] as SettingsNamespace;
       const key = putMatch[2];
@@ -450,7 +465,9 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
           return;
         }
       } catch (error) {
-        logger.debug(`[SystemConfigurationManager] a11y settings put failed for ${namespace}/${key}: ${error}`);
+        logger.debug(
+          `[SystemConfigurationManager] a11y settings put failed for ${namespace}/${key}: ${error}`,
+        );
       }
     }
     await this.adb.executeCommand(command);
@@ -492,11 +509,13 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
         `shell cmd locale get-app-locales ${shellQuote(appId)} --user ${userId}`,
         undefined,
         undefined,
-        true
+        true,
       );
       return this.parseAppLocalesOutput(result.stdout);
     } catch (error) {
-      logger.warn(`[SystemConfigurationManager] Failed to read Android app locale for ${appId}: ${error}`);
+      logger.warn(
+        `[SystemConfigurationManager] Failed to read Android app locale for ${appId}: ${error}`,
+      );
       return null;
     }
   }
@@ -515,7 +534,12 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
 
   private async getEffectiveLocaleTag(): Promise<string | null> {
     try {
-      const result = await this.adb.executeCommand("shell am get-config", undefined, undefined, true);
+      const result = await this.adb.executeCommand(
+        "shell am get-config",
+        undefined,
+        undefined,
+        true,
+      );
       return this.parseLocaleFromAmConfig(result.stdout);
     } catch (error) {
       logger.warn(`[SystemConfigurationManager] Failed to read effective Android locale: ${error}`);
@@ -529,7 +553,9 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
       return null;
     }
 
-    const bcp47Match = normalized.match(/(?:^|[-\s])b\+([a-z]{2,3})(?:\+([A-Za-z]{4}))?(?:\+([A-Z]{2}|\d{3}))?(?=[-\s]|$)/);
+    const bcp47Match = normalized.match(
+      /(?:^|[-\s])b\+([a-z]{2,3})(?:\+([A-Za-z]{4}))?(?:\+([A-Z]{2}|\d{3}))?(?=[-\s]|$)/,
+    );
     if (bcp47Match?.[1]) {
       return [bcp47Match[1], bcp47Match[2], bcp47Match[3]].filter(Boolean).join("-");
     }

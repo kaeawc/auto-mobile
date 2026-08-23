@@ -47,7 +47,7 @@ export interface AwaitIdle {
     packageName: string,
     timeoutMs: number,
     perf?: PerformanceTracker,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<GfxMetrics | null>;
 
   /**
@@ -64,6 +64,6 @@ export interface AwaitIdle {
     timeoutMs: number,
     initState: UiStabilityState,
     perf?: PerformanceTracker,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<GfxMetrics | null>;
 }

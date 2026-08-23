@@ -67,14 +67,14 @@ flowchart TB
 
 ## Core Components
 
-| Component | Description |
-|-----------|-------------|
-| [MCP Server](mcp/index.md) | Protocol server enabling AI agent interaction |
-| [Interaction Loop](mcp/interaction-loop.md) | Observe-act-observe cycle with idle detection |
-| [Observation](mcp/observe/index.md) | Real-time UI hierarchy and screen capture |
-| [Actions](mcp/tools.md) | Touch, swipe, input, and app management |
-| [Navigation Graph](mcp/nav/index.md) | Automatic screen flow mapping |
-| [Daemon](mcp/daemon/index.md) | Device pooling and test execution |
+| Component                                       | Description                                                            |
+| ----------------------------------------------- | ---------------------------------------------------------------------- |
+| [MCP Server](mcp/index.md)                      | Protocol server enabling AI agent interaction                          |
+| [Interaction Loop](mcp/interaction-loop.md)     | Observe-act-observe cycle with idle detection                          |
+| [Observation](mcp/observe/index.md)             | Real-time UI hierarchy and screen capture                              |
+| [Actions](mcp/tools.md)                         | Touch, swipe, input, and app management                                |
+| [Navigation Graph](mcp/nav/index.md)            | Automatic screen flow mapping                                          |
+| [Daemon](mcp/daemon/index.md)                   | Device pooling and test execution                                      |
 | [SDK Event Pipeline](mcp/sdk-event-pipeline.md) | Cross-platform event tracking, crash detection, and session management |
 
 ## Design Principles
@@ -95,20 +95,20 @@ Feature implementation status is indicated throughout these docs using chips. Se
 
 ### Android
 
-| Component | Purpose | Status |
-|-----------|---------|--------|
-| [Accessibility Service](plat/android/control-proxy.md) | Real-time view hierarchy access | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
-| [JUnitRunner](plat/android/junit-runner/index.md) | Test execution framework | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
-| [IDE Plugin](plat/android/ide-plugin/overview.md) | Android Studio integration | <kbd>✅ Implemented</kbd> |
-| [AutoMobile SDK](plat/android/auto-mobile-sdk.md) | Event tracking, crash reporting, session management, and diagnostics SDK | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
-| [Desktop App](plat/android/desktop-app.md) | Compose Desktop companion for monitoring and controlling sessions | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
-| [Work Profiles](plat/android/work-profiles.md) | Enterprise device support | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
+| Component                                              | Purpose                                                                  | Status                                         |
+| ------------------------------------------------------ | ------------------------------------------------------------------------ | ---------------------------------------------- |
+| [Accessibility Service](plat/android/control-proxy.md) | Real-time view hierarchy access                                          | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
+| [JUnitRunner](plat/android/junit-runner/index.md)      | Test execution framework                                                 | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
+| [IDE Plugin](plat/android/ide-plugin/overview.md)      | Android Studio integration                                               | <kbd>✅ Implemented</kbd>                      |
+| [AutoMobile SDK](plat/android/auto-mobile-sdk.md)      | Event tracking, crash reporting, session management, and diagnostics SDK | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
+| [Desktop App](plat/android/desktop-app.md)             | Compose Desktop companion for monitoring and controlling sessions        | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
+| [Work Profiles](plat/android/work-profiles.md)         | Enterprise device support                                                | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
 
 ### iOS
 
-| Component | Purpose | Status |
-|-----------|---------|--------|
-| [iOS Overview](plat/ios/index.md) | Architecture and status | <kbd>📱 Simulator Only</kbd> |
-| [CtrlProxy iOS](plat/ios/ctrl-proxy-ios.md) | WebSocket automation server | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
-| [XCTestRunner](plat/ios/xctestrunner/index.md) | Test execution framework | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
-| [AutoMobile SDK](plat/ios/auto-mobile-sdk.md) | Event tracking, crash reporting, session management, and diagnostics SDK | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
+| Component                                      | Purpose                                                                  | Status                                         |
+| ---------------------------------------------- | ------------------------------------------------------------------------ | ---------------------------------------------- |
+| [iOS Overview](plat/ios/index.md)              | Architecture and status                                                  | <kbd>📱 Simulator Only</kbd>                   |
+| [CtrlProxy iOS](plat/ios/ctrl-proxy-ios.md)    | WebSocket automation server                                              | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
+| [XCTestRunner](plat/ios/xctestrunner/index.md) | Test execution framework                                                 | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
+| [AutoMobile SDK](plat/ios/auto-mobile-sdk.md)  | Event tracking, crash reporting, session management, and diagnostics SDK | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |

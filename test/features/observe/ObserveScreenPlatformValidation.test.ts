@@ -20,7 +20,7 @@ describe("ObserveScreen.execute cross-platform hierarchy rejection", () => {
   const androidDevice: BootedDevice = {
     deviceId: "android-device",
     name: "Android Device",
-    platform: "android"
+    platform: "android",
   };
 
   // A fake collector that returns an iOS hierarchy (screenScale set, UIWindow
@@ -32,20 +32,28 @@ describe("ObserveScreen.execute cross-platform hierarchy rejection", () => {
         hierarchy: {
           node: {
             $: { class: "UIWindow", bounds: { left: 0, top: 0, right: 390, bottom: 844 } },
-            node: [{ $: { class: "UIButton", text: "Continue", bounds: { left: 0, top: 0, right: 200, bottom: 80 } } }]
-          }
+            node: [
+              {
+                $: {
+                  class: "UIButton",
+                  text: "Continue",
+                  bounds: { left: 0, top: 0, right: 200, bottom: 80 },
+                },
+              },
+            ],
+          },
         },
         screenScale: 3.0,
         screenWidth: 390,
         screenHeight: 844,
         wakefulness: "Awake",
-        packageName: "com.apple.springboard"
+        packageName: "com.apple.springboard",
       } as unknown as ObserveResult["viewHierarchy"];
-      result.focusedElement = { "text": "Stale iOS field" } as never;
+      result.focusedElement = { text: "Stale iOS field" } as never;
       result.intentChooserDetected = true;
     },
     collectRaw: async () => undefined,
-    extractScreenSize: () => null
+    extractScreenSize: () => null,
   });
 
   const buildScreen = (cacheStore: FakeObserveCacheStore) =>
@@ -90,19 +98,26 @@ describe("ObserveScreen.execute cross-platform hierarchy rejection", () => {
 
   test("raw-mode append is skipped when the primary hierarchy was rejected", async () => {
     let collectRawCalled = false;
-    const screen = new RealObserveScreen(androidDevice, new FakeAdbClientFactory(new FakeAdbExecutor()), {
-      hierarchyCollector: {
-        ...iosHierarchyCollector(),
-        collectRaw: async (result: ObserveResult) => {
-          collectRawCalled = true;
-          result.rawViewHierarchy = { json: "stale-ios-raw", source: "accessibility-service" } as never;
-        }
-      } as never,
-      cacheStore: new FakeObserveCacheStore(new FakeTimer()),
-      performanceAuditor: { run: async () => undefined } as never,
-      accessibilityAuditor: { run: async () => undefined } as never,
-      accessibilityStateDetector: { run: async () => undefined } as never,
-    });
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(new FakeAdbExecutor()),
+      {
+        hierarchyCollector: {
+          ...iosHierarchyCollector(),
+          collectRaw: async (result: ObserveResult) => {
+            collectRawCalled = true;
+            result.rawViewHierarchy = {
+              json: "stale-ios-raw",
+              source: "accessibility-service",
+            } as never;
+          },
+        } as never,
+        cacheStore: new FakeObserveCacheStore(new FakeTimer()),
+        performanceAuditor: { run: async () => undefined } as never,
+        accessibilityAuditor: { run: async () => undefined } as never,
+        accessibilityStateDetector: { run: async () => undefined } as never,
+      },
+    );
 
     const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
     // Mirrors the observe handler's `if (args.raw)` path.

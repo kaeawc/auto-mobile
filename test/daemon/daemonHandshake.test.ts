@@ -49,7 +49,9 @@ describe("evaluateClientHandshake", () => {
   test("accepts a matching release version even when the daemon carries a git stamp", () => {
     // The Kotlin/Swift client declares the plain release version; the source-checkout
     // daemon carries a +g<sha> dev stamp. Only the release portion must match.
-    const result = evaluateClientHandshake(daemon("0.0.40+gabcdef123"), { clientVersion: "0.0.40" });
+    const result = evaluateClientHandshake(daemon("0.0.40+gabcdef123"), {
+      clientVersion: "0.0.40",
+    });
     expect(result.ok).toBe(true);
   });
 
@@ -87,10 +89,11 @@ describe("evaluateClientHandshake", () => {
   });
 
   test("rejects a same-release client whose build id differs (build gate, TS client)", () => {
-    const result = evaluateClientHandshake(
-      daemon("0.0.40+gaaa"),
-      { clientVersion: "0.0.40+gaaa", clientBuildId: "differentbuild99", clientEntryScript: "/other/dist/index.js" }
-    );
+    const result = evaluateClientHandshake(daemon("0.0.40+gaaa"), {
+      clientVersion: "0.0.40+gaaa",
+      clientBuildId: "differentbuild99",
+      clientEntryScript: "/other/dist/index.js",
+    });
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.reason).toBe("build");
@@ -103,7 +106,11 @@ describe("evaluateClientHandshake", () => {
     // the CLI direct-DaemonClient path #2732 that a release-only compare would let through.
     const result = evaluateClientHandshake(
       daemon("0.0.40+gaaa", { entryScript: daemonBuild.entryScript, buildId: "sharedbuildid01" }),
-      { clientVersion: "0.0.40+gbbb", clientBuildId: "sharedbuildid01", clientEntryScript: daemonBuild.entryScript }
+      {
+        clientVersion: "0.0.40+gbbb",
+        clientBuildId: "sharedbuildid01",
+        clientEntryScript: daemonBuild.entryScript,
+      },
     );
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -114,7 +121,11 @@ describe("evaluateClientHandshake", () => {
   test("accepts a TS client whose build id and full version both match", () => {
     const result = evaluateClientHandshake(
       daemon("0.0.40+gaaa", { entryScript: daemonBuild.entryScript, buildId: "sharedbuildid01" }),
-      { clientVersion: "0.0.40+gaaa", clientBuildId: "sharedbuildid01", clientEntryScript: daemonBuild.entryScript }
+      {
+        clientVersion: "0.0.40+gaaa",
+        clientBuildId: "sharedbuildid01",
+        clientEntryScript: daemonBuild.entryScript,
+      },
     );
     expect(result.ok).toBe(true);
   });
@@ -129,18 +140,29 @@ describe("evaluateClientHandshake", () => {
     // The local-override JUnit runner declares its checkout's plain release AND the entry-script
     // build id, but cannot compute the daemon's git stamp. A matching build id proves it is the
     // same local build, so the plain-vs-stamped version difference must not reject it.
-    const build: BuildIdentity = { entryScript: "/local/dist/src/index.js", buildId: "localbuildid1234" };
-    const result = evaluateClientHandshake(
-      daemon("0.0.40+glocalsha", build),
-      { clientVersion: "0.0.40", clientBuildId: build.buildId, clientEntryScript: build.entryScript }
-    );
+    const build: BuildIdentity = {
+      entryScript: "/local/dist/src/index.js",
+      buildId: "localbuildid1234",
+    };
+    const result = evaluateClientHandshake(daemon("0.0.40+glocalsha", build), {
+      clientVersion: "0.0.40",
+      clientBuildId: build.buildId,
+      clientEntryScript: build.entryScript,
+    });
     expect(result.ok).toBe(true);
   });
 
   test("rejects an Android local-override client whose build id differs (real skew)", () => {
     const result = evaluateClientHandshake(
-      daemon("0.0.40+glocalsha", { entryScript: "/local/dist/src/index.js", buildId: "localbuildid1234" }),
-      { clientVersion: "0.0.40", clientBuildId: "differentlocal99", clientEntryScript: "/other/dist/src/index.js" }
+      daemon("0.0.40+glocalsha", {
+        entryScript: "/local/dist/src/index.js",
+        buildId: "localbuildid1234",
+      }),
+      {
+        clientVersion: "0.0.40",
+        clientBuildId: "differentlocal99",
+        clientEntryScript: "/other/dist/src/index.js",
+      },
     );
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -149,10 +171,11 @@ describe("evaluateClientHandshake", () => {
   });
 
   test("accepts a same-release client whose build id matches", () => {
-    const result = evaluateClientHandshake(
-      daemon("0.0.40"),
-      { clientVersion: "0.0.40", clientBuildId: daemonBuild.buildId, clientEntryScript: daemonBuild.entryScript }
-    );
+    const result = evaluateClientHandshake(daemon("0.0.40"), {
+      clientVersion: "0.0.40",
+      clientBuildId: daemonBuild.buildId,
+      clientEntryScript: daemonBuild.entryScript,
+    });
     expect(result.ok).toBe(true);
   });
 
@@ -163,7 +186,10 @@ describe("evaluateClientHandshake", () => {
   });
 
   test("accepts a build-id-only client whose id matches the daemon", () => {
-    const result = evaluateClientHandshake(daemon("0.0.40"), { clientBuildId: daemonBuild.buildId, clientEntryScript: daemonBuild.entryScript });
+    const result = evaluateClientHandshake(daemon("0.0.40"), {
+      clientBuildId: daemonBuild.buildId,
+      clientEntryScript: daemonBuild.entryScript,
+    });
     expect(result.ok).toBe(true);
   });
 });

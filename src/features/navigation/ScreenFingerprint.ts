@@ -125,7 +125,7 @@ export class ScreenFingerprint {
    */
   static compute(
     hierarchy: AccessibilityHierarchy,
-    options?: FingerprintOptions
+    options?: FingerprintOptions,
   ): FingerprintResult {
     const keyboardDetected = this.detectKeyboard(hierarchy);
     const navigationId = this.extractNavigationId(hierarchy.hierarchy);
@@ -147,18 +147,14 @@ export class ScreenFingerprint {
     }
 
     // TIER 2: Cached Navigation ID (keyboard occlusion handling)
-    if (
-      keyboardDetected &&
-      options?.cachedNavigationId &&
-      options?.cachedNavigationIdTimestamp
-    ) {
+    if (keyboardDetected && options?.cachedNavigationId && options?.cachedNavigationIdTimestamp) {
       const cacheTTL = options.cacheTTL ?? DEFAULT_CACHE_TTL;
       const cacheAge = hierarchy.updatedAt - options.cachedNavigationIdTimestamp;
 
       if (cacheAge < cacheTTL) {
         const hash = this.hashString(`nav:${options.cachedNavigationId}`);
         logger.debug(
-          `[FINGERPRINT] Using cached navigation ID (keyboard detected): ${options.cachedNavigationId}`
+          `[FINGERPRINT] Using cached navigation ID (keyboard detected): ${options.cachedNavigationId}`,
         );
 
         return {
@@ -187,7 +183,7 @@ export class ScreenFingerprint {
       : FingerprintMethod.SHALLOW_SCROLLABLE;
 
     logger.debug(
-      `[FINGERPRINT] Using ${method}: ${elementCount} elements, keyboard=${keyboardDetected}`
+      `[FINGERPRINT] Using ${method}: ${elementCount} elements, keyboard=${keyboardDetected}`,
     );
 
     return {
@@ -205,7 +201,9 @@ export class ScreenFingerprint {
    * Extract navigation resource-id from hierarchy (navigation.* pattern).
    */
   private static extractNavigationId(node: AccessibilityNode): string | null {
-    if (!node || typeof node !== "object") {return null;}
+    if (!node || typeof node !== "object") {
+      return null;
+    }
 
     if (node["resource-id"]?.startsWith("navigation.")) {
       return node["resource-id"];
@@ -216,7 +214,9 @@ export class ScreenFingerprint {
       const children = Array.isArray(node.node) ? node.node : [node.node];
       for (const child of children) {
         const result = this.extractNavigationId(child);
-        if (result) {return result;}
+        if (result) {
+          return result;
+        }
       }
     }
 
@@ -229,7 +229,9 @@ export class ScreenFingerprint {
    */
   private static detectKeyboard(hierarchy: AccessibilityHierarchy): boolean {
     function hasKeyboardElements(node: AccessibilityNode): boolean {
-      if (!node || typeof node !== "object") {return false;}
+      if (!node || typeof node !== "object") {
+        return false;
+      }
 
       // Check resource-id patterns
       if (node["resource-id"]) {
@@ -257,7 +259,9 @@ export class ScreenFingerprint {
       if (node.node) {
         const children = Array.isArray(node.node) ? node.node : [node.node];
         for (const child of children) {
-          if (hasKeyboardElements(child)) {return true;}
+          if (hasKeyboardElements(child)) {
+            return true;
+          }
         }
       }
 
@@ -272,13 +276,19 @@ export class ScreenFingerprint {
    */
   private static isEditableField(node: AccessibilityNode): boolean {
     // EditText class
-    if (node.className?.includes("EditText")) {return true;}
+    if (node.className?.includes("EditText")) {
+      return true;
+    }
 
     // Text entry mode
-    if (node["text-entry-mode"] === "true") {return true;}
+    if (node["text-entry-mode"] === "true") {
+      return true;
+    }
 
     // Editable attribute
-    if (node.editable === "true") {return true;}
+    if (node.editable === "true") {
+      return true;
+    }
 
     // Input-related resource-ids
     if (node["resource-id"]) {
@@ -300,11 +310,7 @@ export class ScreenFingerprint {
    * Check if text is dynamic (time, number, percentage).
    */
   private static isDynamicText(text: string): boolean {
-    return (
-      TIME_PATTERN.test(text) ||
-      NUMBER_PATTERN.test(text) ||
-      PERCENT_PATTERN.test(text)
-    );
+    return TIME_PATTERN.test(text) || NUMBER_PATTERN.test(text) || PERCENT_PATTERN.test(text);
   }
 
   /**
@@ -334,7 +340,9 @@ export class ScreenFingerprint {
    * - Preserve selected state
    */
   private static filterHierarchyEnhanced(node: AccessibilityNode): FilteredNode | null {
-    if (!node || typeof node !== "object") {return null;}
+    if (!node || typeof node !== "object") {
+      return null;
+    }
 
     // Skip keyboard elements (match detectKeyboard indicators)
     if (
@@ -356,10 +364,7 @@ export class ScreenFingerprint {
       filtered._scrollable = true;
 
       // Keep container identifiers (not navigation IDs)
-      if (
-        node["resource-id"] &&
-        !node["resource-id"].startsWith("navigation.")
-      ) {
+      if (node["resource-id"] && !node["resource-id"].startsWith("navigation.")) {
         filtered["resource-id"] = node["resource-id"];
       }
 
@@ -452,7 +457,9 @@ export class ScreenFingerprint {
    * Extract selected item information (text, content-desc, or resource-id).
    */
   private static extractSelectedInfo(node: AccessibilityNode): FilteredNode | null {
-    if (!node || typeof node !== "object") {return null;}
+    if (!node || typeof node !== "object") {
+      return null;
+    }
 
     const info: FilteredNode = { selected: "true" };
 
@@ -461,7 +468,9 @@ export class ScreenFingerprint {
       info.text = node.text;
     } else if (node.node) {
       const text = this.findTextInChildren(node.node);
-      if (text) {info.text = text;}
+      if (text) {
+        info.text = text;
+      }
     }
 
     // Fallback to content-desc for icon-only tabs/controls
@@ -480,22 +489,28 @@ export class ScreenFingerprint {
   /**
    * Find text in node children.
    */
-  private static findTextInChildren(
-    node: AccessibilityNode | AccessibilityNode[]
-  ): string | null {
-    if (!node || typeof node !== "object") {return null;}
+  private static findTextInChildren(node: AccessibilityNode | AccessibilityNode[]): string | null {
+    if (!node || typeof node !== "object") {
+      return null;
+    }
 
     // An array argument has no text/node fields of its own; preserve the
     // original behavior of treating it as "no text found" (it is never iterated).
-    if (Array.isArray(node)) {return null;}
+    if (Array.isArray(node)) {
+      return null;
+    }
 
-    if (node.text) {return node.text;}
+    if (node.text) {
+      return node.text;
+    }
 
     if (node.node) {
       const children = Array.isArray(node.node) ? node.node : [node.node];
       for (const child of children) {
         const text = this.findTextInChildren(child);
-        if (text) {return text;}
+        if (text) {
+          return text;
+        }
       }
     }
 
@@ -506,7 +521,9 @@ export class ScreenFingerprint {
    * Count elements in filtered hierarchy.
    */
   private static countElements(node: FilteredNode | null): number {
-    if (!node || typeof node !== "object") {return 0;}
+    if (!node || typeof node !== "object") {
+      return 0;
+    }
 
     let count = 1; // Count this node
 

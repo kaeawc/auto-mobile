@@ -26,13 +26,13 @@ Two hosts default to **headless** for that reason:
 
 AutoMobile resolves the display mode as follows (first matching row wins):
 
-| Condition | Mode |
-|-----------|------|
-| `AUTOMOBILE_EMULATOR_HEADLESS=true` | **headless** (any platform) |
-| `AUTOMOBILE_EMULATOR_HEADLESS=false` | **windowed** (forced, even on macOS or a Linux host with no display) |
-| macOS | **headless** (auto; opt back in with `AUTOMOBILE_EMULATOR_HEADLESS=false`) |
-| Linux with no `DISPLAY` and no `WAYLAND_DISPLAY` | **headless** (auto) |
-| Linux with `DISPLAY`/`WAYLAND_DISPLAY`, Windows | **windowed** |
+| Condition                                        | Mode                                                                       |
+| ------------------------------------------------ | -------------------------------------------------------------------------- |
+| `AUTOMOBILE_EMULATOR_HEADLESS=true`              | **headless** (any platform)                                                |
+| `AUTOMOBILE_EMULATOR_HEADLESS=false`             | **windowed** (forced, even on macOS or a Linux host with no display)       |
+| macOS                                            | **headless** (auto; opt back in with `AUTOMOBILE_EMULATOR_HEADLESS=false`) |
+| Linux with no `DISPLAY` and no `WAYLAND_DISPLAY` | **headless** (auto)                                                        |
+| Linux with `DISPLAY`/`WAYLAND_DISPLAY`, Windows  | **windowed**                                                               |
 
 In headless mode AutoMobile appends `-no-window -no-audio` to the `emulator`
 invocation. The chosen mode and the reason are logged at `INFO`.
@@ -45,10 +45,10 @@ actionable message instead of `code: null`, pointing you at
 
 ## Environment variables
 
-| Variable | Values | Effect |
-|----------|--------|--------|
-| `AUTOMOBILE_EMULATOR_HEADLESS` | `true` / `false` / unset | Force headless (`-no-window -no-audio`), force windowed, or auto-detect (default). |
-| `AUTOMOBILE_EMULATOR_ARGS` | JSON argv array | Extra arguments appended to the `emulator` command (e.g. `["-gpu", "swiftshader_indirect"]`). Each JSON entry is one literal argument; whitespace is never shell-split. |
+| Variable                       | Values                   | Effect                                                                                                                                                                  |
+| ------------------------------ | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AUTOMOBILE_EMULATOR_HEADLESS` | `true` / `false` / unset | Force headless (`-no-window -no-audio`), force windowed, or auto-detect (default).                                                                                      |
+| `AUTOMOBILE_EMULATOR_ARGS`     | JSON argv array          | Extra arguments appended to the `emulator` command (e.g. `["-gpu", "swiftshader_indirect"]`). Each JSON entry is one literal argument; whitespace is never shell-split. |
 
 ### Running emulators in CI
 

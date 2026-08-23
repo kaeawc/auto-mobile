@@ -43,7 +43,9 @@ function nodeSignature(node: ViewHierarchyNode): string {
   const get = (...keys: string[]): string => {
     for (const key of keys) {
       const value = attrs[key];
-      if (value !== undefined && value !== null) {return String(value);}
+      if (value !== undefined && value !== null) {
+        return String(value);
+      }
     }
     return "";
   };
@@ -127,7 +129,7 @@ function countSubtree(node: ViewHierarchyNode): number {
 function walk(
   previous: ViewHierarchyNode,
   current: ViewHierarchyNode,
-  summary: HierarchyDiffSummary
+  summary: HierarchyDiffSummary,
 ): void {
   if (nodeSignature(previous) !== nodeSignature(current)) {
     markState(current, "changed");
@@ -161,7 +163,7 @@ function walk(
  */
 export function annotateHierarchyDiff(
   previous: ViewHierarchyResult | null,
-  current: ViewHierarchyResult
+  current: ViewHierarchyResult,
 ): HierarchyDiffResult {
   const hierarchy = structuredClone(current);
   const summary: HierarchyDiffSummary = {

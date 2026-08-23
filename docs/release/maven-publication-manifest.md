@@ -6,7 +6,7 @@ Every tagged AutoMobile release uploads four Maven coordinates to Maven Central.
 Until now nothing made the exact set of uploaded files — or its size and count —
 visible before the upload happened. Maven Central's Usage Center meters
 organization-level file count and release size, so a release that quietly grows
-the artifact set is worth catching *before* it ships. This preflight produces a
+the artifact set is worth catching _before_ it ships. This preflight produces a
 deterministic manifest of exactly what a release would upload, checks it against
 an advisory budget, and records it in the release run — with no Maven Central
 credentials and no remote publish.
@@ -42,16 +42,16 @@ credentials and no remote publish.
 
 Each staged file is classified so downstream work can target a specific class:
 
-| Classifier | Meaning |
-|---|---|
-| `main-jar` / `main-aar` | Primary artifact (JVM modules ship a jar; the Android library ships an aar) |
-| `sources-jar` / `javadoc-jar` | Sources and Javadoc archives |
-| `pom` / `module` | Maven POM and Gradle Module Metadata |
-| `maven-metadata` | `maven-metadata.xml` |
-| `signature` | `.asc` PGP signature of a primary file |
-| `checksum` | `.md5/.sha1/.sha256/.sha512` of a primary file or metadata |
-| `signature-checksum` | Checksum of a `.asc` signature (the redundant set #4851 targets) |
-| `unexpected` | Anything else — a novel classifier or a stray sidecar |
+| Classifier                    | Meaning                                                                     |
+| ----------------------------- | --------------------------------------------------------------------------- |
+| `main-jar` / `main-aar`       | Primary artifact (JVM modules ship a jar; the Android library ships an aar) |
+| `sources-jar` / `javadoc-jar` | Sources and Javadoc archives                                                |
+| `pom` / `module`              | Maven POM and Gradle Module Metadata                                        |
+| `maven-metadata`              | `maven-metadata.xml`                                                        |
+| `signature`                   | `.asc` PGP signature of a primary file                                      |
+| `checksum`                    | `.md5/.sha1/.sha256/.sha512` of a primary file or metadata                  |
+| `signature-checksum`          | Checksum of a `.asc` signature (the redundant set #4851 targets)            |
+| `unexpected`                  | Anything else — a novel classifier or a stray sidecar                       |
 
 `unexpected` is how the preflight detects accidental new classifiers or sidecars:
 under `--strict` any unexpected file fails the run.
@@ -62,7 +62,7 @@ The manifest was the before/after oracle for the artifact-reduction work:
 
 - **#4851** (eliminate signature checksums) needed **no change**. The manifest
   measures the local Gradle staging repo, which does write `.asc.md5`/`.asc.sha1`
-  sidecars — but vanniktech's Central Portal upload *bundle*
+  sidecars — but vanniktech's Central Portal upload _bundle_
   (`android/build/publish/*.zip`) already omits them (it ships only `.md5`+`.sha1`
   for primaries, no signature checksums, no `sha256`/`sha512`, no metadata). So
   the checksums-of-signatures are never uploaded; the issue was closed as
@@ -85,12 +85,12 @@ Capture the manifest, make the change, re-capture, and diff.
 Measured from a local staging of all four coordinates at version `0.0.47`
 (Gradle 9.6.1 emits four checksums per file):
 
-| Coordinate | Files (unsigned) | Bytes |
-|---|---|---|
-| `auto-mobile-sdk` | 30 | ~2.19 MB |
-| `auto-mobile-protocol` | 30 | ~1.07 MB |
-| `auto-mobile-junit-runner` | 30 | ~0.47 MB |
-| `auto-mobile-test-plan-validation` | 30 | ~0.19 MB |
+| Coordinate                         | Files (unsigned) | Bytes    |
+| ---------------------------------- | ---------------- | -------- |
+| `auto-mobile-sdk`                  | 30               | ~2.19 MB |
+| `auto-mobile-protocol`             | 30               | ~1.07 MB |
+| `auto-mobile-junit-runner`         | 30               | ~0.47 MB |
+| `auto-mobile-test-plan-validation` | 30               | ~0.19 MB |
 
 Signing (enabled in release CI) adds a `.asc` plus its four checksums for each
 signed primary in the local staging, which is what brings the local count to

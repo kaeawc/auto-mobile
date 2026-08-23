@@ -10,8 +10,8 @@ export function isSubmitImeAction(action: unknown): boolean {
 }
 
 export interface ImeActionResult {
-    success: boolean;
-    action: string;
-    error?: string;
-    observation?: any;
+  success: boolean;
+  action: string;
+  error?: string;
+  observation?: any;
 }

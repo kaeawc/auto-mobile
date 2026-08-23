@@ -32,7 +32,7 @@ describe("video recordings owner-session migration", () => {
   test("recovers when the schema change already exists without migration history", async () => {
     await db.schema
       .createTable("video_recordings")
-      .addColumn("id", "integer", column => column.primaryKey())
+      .addColumn("id", "integer", (column) => column.primaryKey())
       .addColumn("owner_session_uuid", "text")
       .execute();
     await db.schema
@@ -66,7 +66,7 @@ describe("video recordings owner-session migration", () => {
   test("creates the column and index on a fresh schema", async () => {
     await db.schema
       .createTable("video_recordings")
-      .addColumn("id", "integer", column => column.primaryKey())
+      .addColumn("id", "integer", (column) => column.primaryKey())
       .execute();
 
     await runMigrations(db, { provider: provider(), env: {} });

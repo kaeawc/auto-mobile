@@ -30,28 +30,40 @@ class FakeRepository implements TelemetryRepository {
   private nextNetworkId = 1;
 
   async recordNetworkEvent(input: RecordNetworkEventInput): Promise<number> {
-    if (this.shouldThrow) {throw new Error("db error");}
+    if (this.shouldThrow) {
+      throw new Error("db error");
+    }
     this.networkEvents.push(input);
     return this.nextNetworkId++;
   }
   async recordLogEvent(input: RecordLogEventInput): Promise<void> {
-    if (this.shouldThrow) {throw new Error("db error");}
+    if (this.shouldThrow) {
+      throw new Error("db error");
+    }
     this.logEvents.push(input);
   }
   async recordOsEvent(input: RecordOsEventInput): Promise<void> {
-    if (this.shouldThrow) {throw new Error("db error");}
+    if (this.shouldThrow) {
+      throw new Error("db error");
+    }
     this.osEvents.push(input);
   }
   async recordNavigationEvent(input: RecordNavigationEventInput): Promise<void> {
-    if (this.shouldThrow) {throw new Error("db error");}
+    if (this.shouldThrow) {
+      throw new Error("db error");
+    }
     this.navigationEvents.push(input);
   }
   async recordStorageEvent(input: RecordStorageEventInput): Promise<void> {
-    if (this.shouldThrow) {throw new Error("db error");}
+    if (this.shouldThrow) {
+      throw new Error("db error");
+    }
     this.storageEvents.push(input);
   }
   async recordLayoutEvent(input: RecordLayoutEventInput): Promise<void> {
-    if (this.shouldThrow) {throw new Error("db error");}
+    if (this.shouldThrow) {
+      throw new Error("db error");
+    }
     this.layoutEvents.push(input);
   }
 }
@@ -153,7 +165,12 @@ describe("TelemetryRecorder", () => {
     recorder.setContext("emulator-5554", "s1");
 
     await recorder.recordLogEvent({
-      timestamp: 1000, applicationId: null, level: 4, tag: "t", message: "m", filterName: "f",
+      timestamp: 1000,
+      applicationId: null,
+      level: 4,
+      tag: "t",
+      message: "m",
+      filterName: "f",
     });
 
     expect(pushTarget.pushedEvents).toHaveLength(1);
@@ -192,28 +209,55 @@ describe("TelemetryRecorder", () => {
 
   it("pushes all event types to socket", async () => {
     await recorder.recordNetworkEvent({
-      timestamp: 1, applicationId: null, url: "u", method: "GET",
-      statusCode: 200, durationMs: 0, requestBodySize: 0, responseBodySize: 0,
-      protocol: null, host: null, path: null, error: null,
+      timestamp: 1,
+      applicationId: null,
+      url: "u",
+      method: "GET",
+      statusCode: 200,
+      durationMs: 0,
+      requestBodySize: 0,
+      responseBodySize: 0,
+      protocol: null,
+      host: null,
+      path: null,
+      error: null,
     });
     await recorder.recordLogEvent({
-      timestamp: 2, applicationId: null, level: 4, tag: "t", message: "m", filterName: "f",
+      timestamp: 2,
+      applicationId: null,
+      level: 4,
+      tag: "t",
+      message: "m",
+      filterName: "f",
     });
     await recorder.recordOsEvent({
-      timestamp: 3, applicationId: null, category: "c", kind: "k", details: null,
+      timestamp: 3,
+      applicationId: null,
+      category: "c",
+      kind: "k",
+      details: null,
     });
 
     expect(pushTarget.pushedEvents).toHaveLength(3);
-    expect(pushTarget.pushedEvents.map(e => e.category)).toEqual(["network", "log", "os"]);
+    expect(pushTarget.pushedEvents.map((e) => e.category)).toEqual(["network", "log", "os"]);
   });
 
   it("still pushes to socket when repository throws", async () => {
     repo.shouldThrow = true;
 
     await recorder.recordNetworkEvent({
-      timestamp: 1000, applicationId: null, url: "u", method: "GET",
-      statusCode: 200, durationMs: 0, requestBodySize: 0, responseBodySize: 0,
-      protocol: null, host: null, path: null, error: null,
+      timestamp: 1000,
+      applicationId: null,
+      url: "u",
+      method: "GET",
+      statusCode: 200,
+      durationMs: 0,
+      requestBodySize: 0,
+      responseBodySize: 0,
+      protocol: null,
+      host: null,
+      path: null,
+      error: null,
     });
 
     expect(repo.networkEvents).toHaveLength(0);
@@ -224,7 +268,12 @@ describe("TelemetryRecorder", () => {
     const recorderNoPush = new TelemetryRecorder(repo, () => null);
 
     await recorderNoPush.recordLogEvent({
-      timestamp: 1000, applicationId: null, level: 4, tag: "t", message: "m", filterName: "f",
+      timestamp: 1000,
+      applicationId: null,
+      level: 4,
+      tag: "t",
+      message: "m",
+      filterName: "f",
     });
 
     expect(repo.logEvents).toHaveLength(1);
@@ -233,12 +282,22 @@ describe("TelemetryRecorder", () => {
   it("setContext updates deviceId and sessionId for subsequent events", async () => {
     recorder.setContext("d1", "s1");
     await recorder.recordLogEvent({
-      timestamp: 1, applicationId: null, level: 4, tag: "t", message: "m", filterName: "f",
+      timestamp: 1,
+      applicationId: null,
+      level: 4,
+      tag: "t",
+      message: "m",
+      filterName: "f",
     });
 
     recorder.setContext("d2", "s2");
     await recorder.recordLogEvent({
-      timestamp: 2, applicationId: null, level: 4, tag: "t", message: "m", filterName: "f",
+      timestamp: 2,
+      applicationId: null,
+      level: 4,
+      tag: "t",
+      message: "m",
+      filterName: "f",
     });
 
     expect(repo.logEvents[0].deviceId).toBe("d1");
@@ -273,19 +332,30 @@ describe("TelemetryRecorder", () => {
     let resolveWrite: (() => void) | null = null;
     const slowRepo: TelemetryRepository = {
       ...repo,
-      recordNetworkEvent: async input => {
+      recordNetworkEvent: async (input) => {
         repo.networkEvents.push(input);
         // Block until test resolves
-        await new Promise<void>(r => { resolveWrite = r; });
+        await new Promise<void>((r) => {
+          resolveWrite = r;
+        });
       },
     };
     const slowRecorder = new TelemetryRecorder(slowRepo, () => pushTarget);
     slowRecorder.setContext("device-A", "session-A");
 
     const promise = slowRecorder.recordNetworkEvent({
-      timestamp: 1000, applicationId: null, url: "u", method: "GET",
-      statusCode: 200, durationMs: 0, requestBodySize: 0, responseBodySize: 0,
-      protocol: null, host: null, path: null, error: null,
+      timestamp: 1000,
+      applicationId: null,
+      url: "u",
+      method: "GET",
+      statusCode: 200,
+      durationMs: 0,
+      requestBodySize: 0,
+      responseBodySize: 0,
+      protocol: null,
+      host: null,
+      path: null,
+      error: null,
     });
 
     // Context changes while the write is in flight
@@ -463,7 +533,13 @@ describe("TelemetryRecorder", () => {
       screen: "HomeScreen",
       timestamp: 8000,
       stackTrace: [
-        { className: "com.example.MainActivity", methodName: "onClick", fileName: "MainActivity.kt", lineNumber: 42, isAppCode: true },
+        {
+          className: "com.example.MainActivity",
+          methodName: "onClick",
+          fileName: "MainActivity.kt",
+          lineNumber: 42,
+          isAppCode: true,
+        },
       ],
     });
 
@@ -553,10 +629,18 @@ describe("TelemetryRecorder", () => {
       osBatches: RecordOsEventInput[][] = [];
       navBatches: RecordNavigationEventInput[][] = [];
       layoutBatches: RecordLayoutEventInput[][] = [];
-      async recordLogEvents(i: RecordLogEventInput[]): Promise<void> { this.logBatches.push(i); }
-      async recordOsEvents(i: RecordOsEventInput[]): Promise<void> { this.osBatches.push(i); }
-      async recordNavigationEvents(i: RecordNavigationEventInput[]): Promise<void> { this.navBatches.push(i); }
-      async recordLayoutEvents(i: RecordLayoutEventInput[]): Promise<void> { this.layoutBatches.push(i); }
+      async recordLogEvents(i: RecordLogEventInput[]): Promise<void> {
+        this.logBatches.push(i);
+      }
+      async recordOsEvents(i: RecordOsEventInput[]): Promise<void> {
+        this.osBatches.push(i);
+      }
+      async recordNavigationEvents(i: RecordNavigationEventInput[]): Promise<void> {
+        this.navBatches.push(i);
+      }
+      async recordLayoutEvents(i: RecordLayoutEventInput[]): Promise<void> {
+        this.layoutBatches.push(i);
+      }
     }
 
     it("routes log/os/nav/layout through the buffer and coalesces into one batch per kind", async () => {
@@ -566,15 +650,35 @@ describe("TelemetryRecorder", () => {
       const bufferedRecorder = new TelemetryRecorder(repo, () => pushTarget, undefined, buffer);
       bufferedRecorder.setContext("d1", "s1");
 
-      await bufferedRecorder.recordLogEvent({ timestamp: 1, applicationId: null, level: 4, tag: "t", message: "m", filterName: "f" });
-      await bufferedRecorder.recordLogEvent({ timestamp: 2, applicationId: null, level: 4, tag: "t", message: "m", filterName: "f" });
-      await bufferedRecorder.recordOsEvent({ timestamp: 3, applicationId: null, category: "c", kind: "k", details: null });
+      await bufferedRecorder.recordLogEvent({
+        timestamp: 1,
+        applicationId: null,
+        level: 4,
+        tag: "t",
+        message: "m",
+        filterName: "f",
+      });
+      await bufferedRecorder.recordLogEvent({
+        timestamp: 2,
+        applicationId: null,
+        level: 4,
+        tag: "t",
+        message: "m",
+        filterName: "f",
+      });
+      await bufferedRecorder.recordOsEvent({
+        timestamp: 3,
+        applicationId: null,
+        category: "c",
+        kind: "k",
+        details: null,
+      });
 
       // Not written per-row, and the non-batch repo path is bypassed entirely.
       expect(batchRepo.logBatches).toHaveLength(0);
       expect(repo.logEvents).toHaveLength(0);
       // But still pushed to the socket immediately (live dashboard unaffected).
-      expect(pushTarget.pushedEvents.map(e => e.category)).toEqual(["log", "log", "os"]);
+      expect(pushTarget.pushedEvents.map((e) => e.category)).toEqual(["log", "log", "os"]);
 
       await bufferedRecorder.flushBuffer();
 
@@ -586,16 +690,33 @@ describe("TelemetryRecorder", () => {
 
     it("leaves network and storage on the per-row path even when buffering", async () => {
       const batchRepo = new FakeBatchRepo();
-      const buffer = new TelemetryEventBuffer(batchRepo, new FakeTimer(), { maxBufferedRows: 1000 });
+      const buffer = new TelemetryEventBuffer(batchRepo, new FakeTimer(), {
+        maxBufferedRows: 1000,
+      });
       const bufferedRecorder = new TelemetryRecorder(repo, () => pushTarget, undefined, buffer);
 
       await bufferedRecorder.recordNetworkEvent({
-        timestamp: 1, applicationId: null, url: "u", method: "GET",
-        statusCode: 200, durationMs: 0, requestBodySize: 0, responseBodySize: 0,
-        protocol: null, host: null, path: null, error: null,
+        timestamp: 1,
+        applicationId: null,
+        url: "u",
+        method: "GET",
+        statusCode: 200,
+        durationMs: 0,
+        requestBodySize: 0,
+        responseBodySize: 0,
+        protocol: null,
+        host: null,
+        path: null,
+        error: null,
       });
       await bufferedRecorder.recordStorageEvent({
-        timestamp: 2, applicationId: null, fileName: "p.xml", key: "k", value: "v", valueType: null, changeType: "put",
+        timestamp: 2,
+        applicationId: null,
+        fileName: "p.xml",
+        key: "k",
+        value: "v",
+        valueType: null,
+        changeType: "put",
       });
 
       // Written synchronously through the per-row repository, not the buffer.
@@ -611,37 +732,63 @@ describe("TelemetryRecorder", () => {
   describe("shutdown draining (issue #2792)", () => {
     it("skips the DB write once the barrier is draining, still pushes to socket (A5)", async () => {
       const barrier = new InMemoryDbWriteBarrier(new FakeTimer());
-      const drainingRecorder = new TelemetryRecorder(repo, () => pushTarget, () => barrier);
+      const drainingRecorder = new TelemetryRecorder(
+        repo,
+        () => pushTarget,
+        () => barrier,
+      );
       drainingRecorder.setContext("device-1", "session-1");
       barrier.beginDrain();
 
       await drainingRecorder.recordNetworkEvent({
-        timestamp: 1000, applicationId: null, url: "u", method: "GET",
-        statusCode: 200, durationMs: 0, requestBodySize: 0, responseBodySize: 0,
-        protocol: null, host: null, path: null, error: null,
+        timestamp: 1000,
+        applicationId: null,
+        url: "u",
+        method: "GET",
+        statusCode: 200,
+        durationMs: 0,
+        requestBodySize: 0,
+        responseBodySize: 0,
+        protocol: null,
+        host: null,
+        path: null,
+        error: null,
       });
       await drainingRecorder.recordLogEvent({
-        timestamp: 1000, applicationId: null, level: 3, tag: "t", message: "m", filterName: "f",
+        timestamp: 1000,
+        applicationId: null,
+        level: 3,
+        tag: "t",
+        message: "m",
+        filterName: "f",
       });
 
       // No DB write hit the closing connection.
       expect(repo.networkEvents).toHaveLength(0);
       expect(repo.logEvents).toHaveLength(0);
       // Push side is unaffected (socket teardown is handled separately).
-      expect(pushTarget.pushedEvents.map(e => e.category)).toEqual(["network", "log"]);
+      expect(pushTarget.pushedEvents.map((e) => e.category)).toEqual(["network", "log"]);
     });
 
     it("does not throw to callers when draining even if the repo would fail", async () => {
       repo.shouldThrow = true;
       const barrier = new InMemoryDbWriteBarrier(new FakeTimer());
-      const drainingRecorder = new TelemetryRecorder(repo, () => pushTarget, () => barrier);
+      const drainingRecorder = new TelemetryRecorder(
+        repo,
+        () => pushTarget,
+        () => barrier,
+      );
       barrier.beginDrain();
 
       // Would throw "db error" if the write were attempted; draining skips it.
       await expect(
         drainingRecorder.recordOsEvent({
-          timestamp: 1, applicationId: null, category: "c", kind: "k", details: null,
-        })
+          timestamp: 1,
+          applicationId: null,
+          category: "c",
+          kind: "k",
+          details: null,
+        }),
       ).resolves.toBeUndefined();
     });
 
@@ -650,15 +797,26 @@ describe("TelemetryRecorder", () => {
       let resolveWrite: (() => void) | null = null;
       const slowRepo: TelemetryRepository = {
         ...repo,
-        recordLogEvent: async input => {
+        recordLogEvent: async (input) => {
           repo.logEvents.push(input);
-          await new Promise<void>(r => { resolveWrite = r; });
+          await new Promise<void>((r) => {
+            resolveWrite = r;
+          });
         },
       };
-      const slowRecorder = new TelemetryRecorder(slowRepo, () => pushTarget, () => barrier);
+      const slowRecorder = new TelemetryRecorder(
+        slowRepo,
+        () => pushTarget,
+        () => barrier,
+      );
 
       const p = slowRecorder.recordLogEvent({
-        timestamp: 1, applicationId: null, level: 3, tag: "t", message: "m", filterName: "f",
+        timestamp: 1,
+        applicationId: null,
+        level: 3,
+        tag: "t",
+        message: "m",
+        filterName: "f",
       });
       // The in-flight write is visible to the barrier's drain set.
       expect(barrier.inFlightCount()).toBe(1);

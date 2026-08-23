@@ -55,9 +55,18 @@ describe("RealSettleObserve", () => {
     const fake = new FakeObserveScreen();
     // Transition (loading) -> settled -> settled-equal. Only the last is returned.
     fake.setObserveSequence([
-      obs({ "resource-id": "a", "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "text": "loading" }, { updatedAt: 10 }),
-      obs({ "resource-id": "a", "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "text": "done" }, { updatedAt: 20 }),
-      obs({ "resource-id": "a", "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "text": "done" }, { updatedAt: 30 }),
+      obs(
+        { "resource-id": "a", bounds: { left: 0, top: 0, right: 10, bottom: 10 }, text: "loading" },
+        { updatedAt: 10 },
+      ),
+      obs(
+        { "resource-id": "a", bounds: { left: 0, top: 0, right: 10, bottom: 10 }, text: "done" },
+        { updatedAt: 20 },
+      ),
+      obs(
+        { "resource-id": "a", bounds: { left: 0, top: 0, right: 10, bottom: 10 }, text: "done" },
+        { updatedAt: 30 },
+      ),
     ]);
 
     const settle = new RealSettleObserve(fake, timer);
@@ -78,17 +87,29 @@ describe("RealSettleObserve", () => {
     // metadata (and updatedAt). The #3053 diff ignores `extras` -> empty diff ->
     // settled. A naive JSON.stringify fingerprint would differ and never settle.
     const a = obs(
-      { "resource-id": "x", "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "text": "hi", "extras": "traversalIndex=1" },
-      { updatedAt: 10 }
+      {
+        "resource-id": "x",
+        bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+        text: "hi",
+        extras: "traversalIndex=1",
+      },
+      { updatedAt: 10 },
     );
     const b = obs(
-      { "resource-id": "x", "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "text": "hi", "extras": "traversalIndex=2" },
-      { updatedAt: 20 }
+      {
+        "resource-id": "x",
+        bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+        text: "hi",
+        extras: "traversalIndex=2",
+      },
+      { updatedAt: 20 },
     );
     fake.setObserveSequence([a, b]);
 
     // Control: a JSON.stringify comparator WOULD see these as different.
-    expect(JSON.stringify(a.viewHierarchy!.hierarchy)).not.toBe(JSON.stringify(b.viewHierarchy!.hierarchy));
+    expect(JSON.stringify(a.viewHierarchy!.hierarchy)).not.toBe(
+      JSON.stringify(b.viewHierarchy!.hierarchy),
+    );
 
     const settle = new RealSettleObserve(fake, timer);
     const result = await settle.execute({ timeoutMs: 2500, pollMs: 150 });
@@ -107,8 +128,24 @@ describe("RealSettleObserve", () => {
     // ignoring them this idle screen would report a `changed` entry every poll
     // and never settle.
     fake.setObserveSequence([
-      obs({ "resource-id": "x", "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "text": "hi", "occlusionState": "occluded" }, { updatedAt: 10 }),
-      obs({ "resource-id": "x", "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "text": "hi", "occlusionState": "visible" }, { updatedAt: 20 }),
+      obs(
+        {
+          "resource-id": "x",
+          bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+          text: "hi",
+          occlusionState: "occluded",
+        },
+        { updatedAt: 10 },
+      ),
+      obs(
+        {
+          "resource-id": "x",
+          bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+          text: "hi",
+          occlusionState: "visible",
+        },
+        { updatedAt: 20 },
+      ),
     ]);
 
     const settle = new RealSettleObserve(fake, timer);
@@ -124,17 +161,17 @@ describe("RealSettleObserve", () => {
     const fake = new FakeObserveScreen();
     // `checked` flips (a real UI change) while occlusion also churns — the
     // volatile-attr allowance must not mask the genuine change.
-    fake.setObserveResult(index =>
+    fake.setObserveResult((index) =>
       obs(
         {
           "resource-id": "cb",
-          "bounds": { left: 0, top: 0, right: 10, bottom: 10 },
-          "text": "Opt",
-          "checked": index % 2 === 0 ? "true" : "false",
-          "occlusionState": index % 2 === 0 ? "visible" : "occluded",
+          bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+          text: "Opt",
+          checked: index % 2 === 0 ? "true" : "false",
+          occlusionState: index % 2 === 0 ? "visible" : "occluded",
         },
-        { updatedAt: (index + 1) * 10 }
-      )
+        { updatedAt: (index + 1) * 10 },
+      ),
     );
 
     const settle = new RealSettleObserve(fake, timer);
@@ -148,9 +185,18 @@ describe("RealSettleObserve", () => {
     timer.enableAutoAdvance();
     const fake = new FakeObserveScreen();
     fake.setObserveSequence([
-      obs({ "resource-id": "a", "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "text": "loading" }, { updatedAt: 10 }),
-      obs({ "resource-id": "a", "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "text": "done" }, { updatedAt: 20 }),
-      obs({ "resource-id": "a", "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "text": "done" }, { updatedAt: 30 }),
+      obs(
+        { "resource-id": "a", bounds: { left: 0, top: 0, right: 10, bottom: 10 }, text: "loading" },
+        { updatedAt: 10 },
+      ),
+      obs(
+        { "resource-id": "a", bounds: { left: 0, top: 0, right: 10, bottom: 10 }, text: "done" },
+        { updatedAt: 20 },
+      ),
+      obs(
+        { "resource-id": "a", bounds: { left: 0, top: 0, right: 10, bottom: 10 }, text: "done" },
+        { updatedAt: 30 },
+      ),
     ]);
 
     const settle = new RealSettleObserve(fake, timer);
@@ -171,8 +217,15 @@ describe("RealSettleObserve", () => {
     timer.enableAutoAdvance();
     const fake = new FakeObserveScreen();
     // A spinner: every poll differs, so structural stability is never reached.
-    fake.setObserveResult(index =>
-      obs({ "resource-id": "spinner", "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "text": `frame-${index}` }, { updatedAt: (index + 1) * 10 })
+    fake.setObserveResult((index) =>
+      obs(
+        {
+          "resource-id": "spinner",
+          bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+          text: `frame-${index}`,
+        },
+        { updatedAt: (index + 1) * 10 },
+      ),
     );
 
     const settle = new RealSettleObserve(fake, timer);
@@ -181,7 +234,9 @@ describe("RealSettleObserve", () => {
     expect(result.settled).toBe(false);
     expect(result.waitMs).toBeGreaterThanOrEqual(500);
     // The last snapshot is still returned so the caller always has something.
-    expect((result.observation.viewHierarchy!.hierarchy.node as any).text).toBe(`frame-${result.polls - 1}`);
+    expect((result.observation.viewHierarchy!.hierarchy.node as any).text).toBe(
+      `frame-${result.polls - 1}`,
+    );
   });
 
   test("works on iOS-shaped observations with no gfxinfo/wakefulness signal", async () => {
@@ -189,8 +244,22 @@ describe("RealSettleObserve", () => {
     timer.enableAutoAdvance();
     const fake = new FakeObserveScreen();
     fake.setObserveSequence([
-      iosObs({ "resource-id": "safari.url", "bounds": { left: 0, top: 0, right: 100, bottom: 20 }, "text": "example.com" }, { updatedAt: 10 }),
-      iosObs({ "resource-id": "safari.url", "bounds": { left: 0, top: 0, right: 100, bottom: 20 }, "text": "example.com" }, { updatedAt: 20 }),
+      iosObs(
+        {
+          "resource-id": "safari.url",
+          bounds: { left: 0, top: 0, right: 100, bottom: 20 },
+          text: "example.com",
+        },
+        { updatedAt: 10 },
+      ),
+      iosObs(
+        {
+          "resource-id": "safari.url",
+          bounds: { left: 0, top: 0, right: 100, bottom: 20 },
+          text: "example.com",
+        },
+        { updatedAt: 20 },
+      ),
     ]);
 
     const settle = new RealSettleObserve(fake, timer);
@@ -204,8 +273,15 @@ describe("RealSettleObserve", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const fake = new FakeObserveScreen();
-    fake.setObserveResult(index =>
-      obs({ "resource-id": "a", "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "text": `f${index}` }, { updatedAt: (index + 1) * 10, wakefulness: "Asleep" })
+    fake.setObserveResult((index) =>
+      obs(
+        {
+          "resource-id": "a",
+          bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+          text: `f${index}`,
+        },
+        { updatedAt: (index + 1) * 10, wakefulness: "Asleep" },
+      ),
     );
 
     const settle = new RealSettleObserve(fake, timer);
@@ -220,16 +296,23 @@ describe("RealSettleObserve", () => {
     timer.enableAutoAdvance();
     const fake = new FakeObserveScreen();
     const controller = new AbortController();
-    fake.setObserveResult(index => {
+    fake.setObserveResult((index) => {
       if (index === 1) {
         controller.abort();
       }
-      return obs({ "resource-id": "a", "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "text": `f${index}` }, { updatedAt: (index + 1) * 10 });
+      return obs(
+        {
+          "resource-id": "a",
+          bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+          text: `f${index}`,
+        },
+        { updatedAt: (index + 1) * 10 },
+      );
     });
 
     const settle = new RealSettleObserve(fake, timer);
     await expect(
-      settle.execute({ timeoutMs: 2500, pollMs: 150, signal: controller.signal })
+      settle.execute({ timeoutMs: 2500, pollMs: 150, signal: controller.signal }),
     ).rejects.toThrow("Operation cancelled");
   });
 });

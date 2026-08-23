@@ -422,9 +422,9 @@ jobs:
         continue-on-error: true
         uses: actions/setup-java@v5
         with:
-          distribution: 'temurin'
-          java-version: '21'
-          cache: 'gradle'
+          distribution: "temurin"
+          java-version: "21"
+          cache: "gradle"
 
       - name: Setup Android SDK
         continue-on-error: true
@@ -454,12 +454,9 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
           MANIFEST_OUT: ${{ runner.temp }}/maven-publication-manifest.txt
-          ORG_GRADLE_PROJECT_signingInMemoryKey:
-            ${{ secrets.ORG_GRADLE_PROJECT_SIGNINGINMEMORYKEY }}
-          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword:
-            ${{ secrets.ORG_GRADLE_PROJECT_SIGNINGINMEMORYKEYPASSWORD }}
-          ORG_GRADLE_PROJECT_signingInMemoryKeyId:
-            ${{ secrets.ORG_GRADLE_PROJECT_SIGNINGINMEMORYKEYID }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.ORG_GRADLE_PROJECT_SIGNINGINMEMORYKEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.ORG_GRADLE_PROJECT_SIGNINGINMEMORYKEYPASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyId: ${{ secrets.ORG_GRADLE_PROJECT_SIGNINGINMEMORYKEYID }}
         run: scripts/release/maven-publication-manifest-preflight.sh
 
       - name: Upload Maven publication manifest
@@ -475,19 +472,13 @@ jobs:
         if: ${{ env.PUBLISH_TO_MAVEN == 'true' }}
         env:
           VERSION: ${{ steps.version.outputs.version }}
-          ORG_GRADLE_PROJECT_mavenCentralUsername:
-            ${{ secrets.MAVEN_USERNAME }}
-          ORG_GRADLE_PROJECT_mavenCentralPassword:
-            ${{ secrets.MAVEN_PASSWORD }}
-          ORG_GRADLE_PROJECT_signingInMemoryKey:
-            ${{ secrets.ORG_GRADLE_PROJECT_SIGNINGINMEMORYKEY }}
-          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword:
-            ${{ secrets.ORG_GRADLE_PROJECT_SIGNINGINMEMORYKEYPASSWORD }}
-          ORG_GRADLE_PROJECT_signingInMemoryKeyId:
-            ${{ secrets.ORG_GRADLE_PROJECT_SIGNINGINMEMORYKEYID }}
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.ORG_GRADLE_PROJECT_SIGNINGINMEMORYKEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.ORG_GRADLE_PROJECT_SIGNINGINMEMORYKEYPASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyId: ${{ secrets.ORG_GRADLE_PROJECT_SIGNINGINMEMORYKEYID }}
           RELEASE_KEYSTORE_PATH: keystore/release.keystore
-          RELEASE_KEYSTORE_PASSWORD:
-            ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
           RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: |
@@ -562,13 +553,13 @@ jobs:
         continue-on-error: true
         uses: endersonmenezes/free-disk-space@v3
         with:
-          remove_android: true      # ~14 GB
-          remove_dotnet: true       # ~2.7 GB
-          remove_haskell: true      # Minimal
-          remove_tool_cache: false  # Keep Node.js, need it
-          remove_swap: true         # ~4 GB
-          remove_codeql: true       # ~5.9 GB CodeQL separate
-          use_rmz: true            # 3x faster deletion
+          remove_android: true # ~14 GB
+          remove_dotnet: true # ~2.7 GB
+          remove_haskell: true # Minimal
+          remove_tool_cache: false # Keep Node.js, need it
+          remove_swap: true # ~4 GB
+          remove_codeql: true # ~5.9 GB CodeQL separate
+          use_rmz: true # 3x faster deletion
 
       - name: Clean up Docker
         continue-on-error: true

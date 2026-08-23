@@ -79,13 +79,13 @@ The `changeLocalization` MCP tool supports live locale changes on iOS simulators
 
 ### MCP tool parameters (iOS-specific)
 
-| Parameter | Description |
-|-----------|-------------|
-| `locale` | Locale tag, e.g. `ar-SA`, `ja-JP` |
-| `timeZone` | IANA zone ID, e.g. `Asia/Tokyo` |
-| `timeFormat` | `"12"` or `"24"` |
-| `calendarSystem` | e.g. `gregory`, `japanese`, `buddhist` |
-| `restartApp` | Bundle ID of an app to terminate and relaunch after the change (iOS only) |
+| Parameter        | Description                                                               |
+| ---------------- | ------------------------------------------------------------------------- |
+| `locale`         | Locale tag, e.g. `ar-SA`, `ja-JP`                                         |
+| `timeZone`       | IANA zone ID, e.g. `Asia/Tokyo`                                           |
+| `timeFormat`     | `"12"` or `"24"`                                                          |
+| `calendarSystem` | e.g. `gregory`, `japanese`, `buddhist`                                    |
+| `restartApp`     | Bundle ID of an app to terminate and relaunch after the change (iOS only) |
 
 ### Limitations
 
@@ -124,10 +124,10 @@ BiometricKit Darwin notifications inside the simulator via
 
 ### Action mapping
 
-| MCP `action` | iOS result |
-|--------------|------------|
-| `match` | post `*.match` |
-| `fail` | post `*.nomatch` |
+| MCP `action`       | iOS result                                    |
+| ------------------ | --------------------------------------------- |
+| `match`            | post `*.match`                                |
+| `fail`             | post `*.nomatch`                              |
 | `cancel` / `error` | `supported: "partial"` — no simctl equivalent |
 
 ### Limitations
@@ -200,7 +200,7 @@ hosts come from two different sources.
 
 - Simulator only. Physical-device discovery (copying the device-signed bundle off-device
   via `devicectl`) returns an explicit "not yet implemented" error.
-- iOS has no runtime intent resolver, so only *declared* schemes/domains are reported.
+- iOS has no runtime intent resolver, so only _declared_ schemes/domains are reported.
 - `supportedMimeTypes` is best-effort document-type metadata, not a routing guarantee.
 
 ## Notification authorization read
@@ -243,8 +243,8 @@ rather than throwing.
 - Read-only. `setNotificationPolicy` stays unsupported on iOS: there is no public API
   to write per-app notification authorization, and editing the BulletinBoard plist on
   disk would not take effect without restarting the daemon.
-- This is per-app *authorization status*, a different concept from Android's DND
-  *policy access* — see [Notifications](../android/notifications.md).
+- This is per-app _authorization status_, a different concept from Android's DND
+  _policy access_ — see [Notifications](../android/notifications.md).
 
 ## Device settings snapshot
 
@@ -268,7 +268,7 @@ data. (Previously iOS silently dropped settings and hard-coded the manifest to
    `iosSettings` manifest field (separate from Android's `global/secure/system` triplet,
    which does not fit `(domain, key)` exports).
 4. **Restore surgically** — on restore (gated on `manifest.includeSettings &&
-   manifest.iosSettings`, identical to Android), each value is re-applied with a per-key
+manifest.iosSettings`, identical to Android), each value is re-applied with a per-key
    `defaults write` (never a whole-domain `defaults import`, so system-managed keys are not
    clobbered), then `simctl ui appearance`/`content_size` re-apply UI state so it takes
    effect without a respawn.
@@ -347,7 +347,7 @@ fresh-process readback.
   unsupported fast-path to avoid a known-dead probe. When the version is unknown
   or expected to support the legacy path, `setDeviceState` still probes behavior:
   if the fresh-process readback reverts, the result is `capability:
-  "unsupported"` instead of a false success. On unknown runtimes, an off request
+"unsupported"` instead of a false success. On unknown runtimes, an off request
   reading back disabled is not enough to prove capability, because reclaimed
   runtimes also settle to `0`; positive enable persistence is the useful proof.
   Apple exposes no public API to read or set Focus/DND. Use an iOS 17 or earlier

@@ -11,7 +11,7 @@ diff vs `origin/main`. Few verified findings beat many plausible ones.
 
 **Never post to GitHub.** No review comments, reviews, or summaries. Report findings in the
 session. The only permitted GitHub write is resolving a review thread, under the conditions in
-*Working our own PR*.
+_Working our own PR_.
 
 Review against the author's intent and the issue the change serves, not the diff in isolation.
 Ask rather than assert when genuinely unsure — sometimes you missed something. Name what's
@@ -62,7 +62,7 @@ gh pr view <N> --json mergedAt,mergeable,mergeStateStatus,baseRefOid,headRefOid,
   consulted it.
 - **Unfinished checks with automerge armed block equally.** [#4088](https://github.com/kaeawc/auto-mobile/pull/4088) merged five seconds before
   `Swift Packages (Xcode 26.5)` concluded failure. For a merged PR, verify gates concluded
-  *before* the merge:
+  _before_ the merge:
   ```bash
   gh api repos/kaeawc/auto-mobile/commits/<headRefOid>/check-runs?per_page=100 \
     --jq '.check_runs[] | "\(.name)\t\(.conclusion)\t\(.completed_at)"'
@@ -72,17 +72,20 @@ gh pr view <N> --json mergedAt,mergeable,mergeStateStatus,baseRefOid,headRefOid,
   — rather than `baseRefOid`. `$BASE` is computed from the commit graph, so it answers the
   question that actually matters (what was this head built on top of?) without depending on
   when GitHub refreshes a metadata field, it stays correct when a branch integrates main via a
-  *merge* rather than a rebase, and it works identically in branch mode, where there is no
+  _merge_ rather than a rebase, and it works identically in branch mode, where there is no
   `baseRefOid` at all. In practice the two agree — measured on
   [#4106](https://github.com/kaeawc/auto-mobile/pull/4106) (both `abd432675`, 11 behind) and
   [#4041](https://github.com/kaeawc/auto-mobile/pull/4041) (both `333c9923e`, 15 behind) — but
   only one of them is correct by construction.
 
   Cross-check against GitHub's own count, which needs no interpretation at all:
+
   ```bash
   gh api "repos/kaeawc/auto-mobile/compare/main...<headRefOid>" --jq '.behind_by'
   ```
+
   If `$BASE` differs from `origin/main` (equivalently, `behind_by > 0`):
+
   ```bash
   # --format= suppresses commit messages, so only paths print.
   git log "$BASE"..origin/main --name-only --format= -- \
@@ -90,9 +93,11 @@ gh pr view <N> --json mergedAt,mergeable,mergeStateStatus,baseRefOid,headRefOid,
     android/build.gradle.kts android/gradle/libs.versions.toml \
     eslint.config.* scripts/typecheck-baseline.txt eslint-suppressions.json | sort -u
   ```
+
   Any hit means rebase-and-re-run, not approval. [#4016](https://github.com/kaeawc/auto-mobile/pull/4016) went green at 05:44, [#4005](https://github.com/kaeawc/auto-mobile/pull/4005) turned on the
   detekt gate at 05:48, [#4016](https://github.com/kaeawc/auto-mobile/pull/4016) auto-merged at 05:49 — reddening main. Its `Fast Validation` job
   had no `Run detekt` step at all.
+
 - **Run the tests the diff changed.** [#4070](https://github.com/kaeawc/auto-mobile/pull/4070) landed a deterministically-red assertion because a
   refactor moved argv construction and updated one of two sibling tests. Use the Step 0 `$BASE`, so uncommitted test edits are included, and guard the empty case explicitly rather
   than relying on `xargs -r` (GNU-only on older macOS and other BSDs):
@@ -101,7 +106,7 @@ gh pr view <N> --json mergedAt,mergeable,mergeStateStatus,baseRefOid,headRefOid,
   [ -n "$changed_tests" ] && bun test $changed_tests
   ```
 
-Pull the failing *job's* log, not the whole run — a finished job's log is readable while the run
+Pull the failing _job's_ log, not the whole run — a finished job's log is readable while the run
 continues (see `github-cli`).
 
 **Classify each red result before treating it as a finding**: PR-caused, pre-existing on main,
@@ -116,7 +121,7 @@ conclusions: a stale cancelled run beside a fresh green one silently parks autom
 title,body,headRefOid,files,closingIssuesReferences`, `gh pr diff <N>`, then read the changed
 files on disk and the issue it claims to close — a reviewed head can differ from what
 squash-**merged**, and a "fix" PR can merge test-only, so check `git log origin/main` for what
-actually landed. With no argument, review committed *and* uncommitted work; read changed files
+actually landed. With no argument, review committed _and_ uncommitted work; read changed files
 in full, since the hunk lies by omission.
 
 Size the diff with the Step 0 `${DIFF_ARGS[@]}`, excluding lockfiles and generated
@@ -146,7 +151,7 @@ merge and dedupe yourself.
 - Trivial diffs — version bump, comment, string with no behavioral reach — get one lens and a
   short answer.
 
-Brief each subagent with: the diff, the issue it closes, *Verification discipline* below, that
+Brief each subagent with: the diff, the issue it closes, _Verification discipline_ below, that
 lens's checklist verbatim, and this isolation rule.
 
 ### Lens subagents must not mutate the working tree
@@ -193,31 +198,31 @@ give the exact command to run, rather than mutating someone else's worktree to g
 
 ## Step 4 — Lens A: Runtime Behavior
 
-*Does the changed code do the thing, on every path a user can reach?*
+_Does the changed code do the thing, on every path a user can reach?_
 
 - **Reachability.** The most common miss here: new logic added to one converter/executor while
-  the public tool call routes through another. Trace each new function or branch *backwards* to
+  the public tool call routes through another. Trace each new function or branch _backwards_ to
   the MCP entry point and prove a user request reaches it — grep for the caller. Seen as heading
   promotion added to `CtrlProxyHierarchy.convertToViewHierarchyResult` while `observe` goes
   through `ViewHierarchy.getiOSViewHierarchy` → `convertXCTestHierarchy`, and a
   VoiceOver-unsupported result made unreachable because `lookFor` swipes divert to
   `ScrollUntilVisible`.
 - **Ordering around `await`.** Read every added `await` and ask what happens during it: a
-  listener or error handler registered *after* the first await loses early events; an await
+  listener or error handler registered _after_ the first await loses early events; an await
   inserted between a check and its `set` opens a TOCTOU window.
 - **Error and degradation paths.** Spawn failure, EOF, malformed cached metadata, download
   failure, abort mid-flight. Every `catch` must throw `ActionableError`, log-then-return a typed
-  failure, or log-at-debug-and-continue *with a comment saying why it's safe*
+  failure, or log-at-debug-and-continue _with a comment saying why it's safe_
   (`CLAUDE.md`/`AGENTS.md`). Flag silent swallows and optimistic success (`success ?? true`).
-- **Cross-layer shape contracts.** Runners emit the **raw** hierarchy; the TS layer *adds*
+- **Cross-layer shape contracts.** Runners emit the **raw** hierarchy; the TS layer _adds_
   fields. Android pushes `AccessibilityHierarchy` where `hierarchy` is already the root, unlike
   the MCP wrapper shape. Code walking one shape and receiving the other fails silently — verify
   which the actual caller passes.
 - **Overrides, injection, persistence.** Does an injected data-dir/env override survive the
   changed path, or does a default overwrite it? Per-device `getInstance(device)` singletons hold
-  instance-level caches — verify a cache fix persists *where it is read*.
+  instance-level caches — verify a cache fix persists _where it is read_.
 - **Concurrency and identity.** Two concurrent calls for one device; cleanup deleting a
-  *replacement* resource; a callback firing for a superseded encoder. Guard by identity, not
+  _replacement_ resource; a callback firing for a superseded encoder. Guard by identity, not
   presence.
 - **Process spawning.** `spawn(..., { shell: true })` concatenates `args` for the shell instead
   of preserving argv boundaries, so any dynamic value — an AVD name, a path — can carry shell
@@ -230,7 +235,7 @@ give the exact command to run, rather than mutating someone else's worktree to g
 
 ## Step 5 — Lens B: Delivery & Enforcement
 
-*Does the change ship, and does the thing enforcing it work?* A correct-looking diff here
+_Does the change ship, and does the thing enforcing it work?_ A correct-looking diff here
 routinely ships nothing.
 
 - **Runner source changed ⇒ re-cut the release artifact.** If the diff touches
@@ -239,7 +244,7 @@ routinely ships nothing.
   a re-cut is explicitly sequenced), the feature is **undeliverable** and the issue is not
   closed. Blocking. Check with the Step 2 `$BASE`, not `origin/main...HEAD`, so an uncommitted
   runner edit still trips it: `git diff --name-only "${DIFF_ARGS[@]}" | grep -E
-  '^(ios|android)/control-proxy/'`, then whether `src/constants/release.ts` is in the same diff.
+'^(ios|android)/control-proxy/'`, then whether `src/constants/release.ts` is in the same diff.
 - **New Swift file ⇒ regenerate the Xcode project.** A file under `ios/control-proxy/Sources/**`
   absent from the committed `ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj` is not
   compiled on a normal checkout. `grep -c '<NewSymbol>'` against the pbxproj returning zero means
@@ -248,7 +253,7 @@ routinely ships nothing.
   `scripts/generate-tool-definitions.ts`, whose registered `register*Tools` categories must match
   `src/server/index.ts`. Flag production tools missing from the artifact and daemon-only tools
   falsely advertised. The flattener also emits JSON-Schema `if/then` (`postNotification` requires
-  `appId` iff iOS) — verify the host *accepts* it, not just that it generates, and that `appId`
+  `appId` iff iOS) — verify the host _accepts_ it, not just that it generates, and that `appId`
   aliases (`bundleId`, `packageName`) are coerced, including nested
   `systemTray.notification.appId`.
 - **Debug-only SDK behavior must be `#if DEBUG`-gated on the enforcement path.** Network-mock
@@ -267,7 +272,7 @@ routinely ships nothing.
   - Is it **registered** in `scripts/all_fast_validate_checks.sh` via `add_check` with a
     **unique** name? Two checks sharing a name collide on `$run_dir/${name}.log`.
   - Is its file-selection predicate too wide? `check-android-emulator-boundary.ts:81` selects
-    with `/emulator/i` against the whole source *including comments*, so adding that word in a
+    with `/emulator/i` against the whole source _including comments_, so adding that word in a
     comment pulls a file into scope and flags pre-existing code.
 - **CI job wiring**, when the diff touches `.github/workflows/**`:
   - A new job absent from the required roll-up removes a merge blocker rather than adding one —
@@ -281,8 +286,8 @@ routinely ships nothing.
     GitHub expression pasted into a quoted shell string fails differently from one passed as an
     argument.
   - **A new path filter can silently un-gate a job.** When a job gains `if:
-    needs.detect-changes.outputs.<x> == 'true'`, compare the `dorny/paths-filter` globs against
-    the paths the script *it runs* treats as significant. [#4026](https://github.com/kaeawc/auto-mobile/pull/4026) gated detekt on a filter omitting
+needs.detect-changes.outputs.<x> == 'true'`, compare the `dorny/paths-filter` globs against
+    the paths the script _it runs_ treats as significant. [#4026](https://github.com/kaeawc/auto-mobile/pull/4026) gated detekt on a filter omitting
     `android/gradle/wrapper/**`, which `scripts/android/detekt_scope.sh` treats as a full-scope
     trigger — so a wrapper bump skipped detekt entirely instead of failing open.
 - **Post-merge-only workflows are invisible to PR CI**: `merge.yml`, `nightly.yml`,
@@ -347,18 +352,18 @@ Give this to every lens subagent.
    verify.
 3. **Before you call a claim refuted, check that your test could have found it.** Two questions,
    both of which have burned this repo:
-   - *Does the test discriminate?* If both the claim and its negation predict what you observed,
+   - _Does the test discriminate?_ If both the claim and its negation predict what you observed,
      you learned nothing. A sample of three PRs that were all rebased cannot distinguish
      `baseRefOid` from the merge-base, because those only diverge when a branch integrates main
      via a merge.
-   - *Does your environment match the claim's scope?* A claim about "macOS/BSD" is not tested by
+   - _Does your environment match the claim's scope?_ A claim about "macOS/BSD" is not tested by
      one macOS 15.6 laptop, and a claim about a CLI's behavior is not settled by the one version
      you happen to have. State the version or platform you tested, so the limit is visible.
 4. **Refuting costs more than accepting, so it carries the higher burden.** Wrongly rejecting a
    real finding leaves a live bug; wrongly accepting a bad one costs a small unnecessary change.
    When the evidence is thin, take the change.
 5. **A wrong mechanism does not make a wrong suggestion.** Verify the claim and evaluate the
-   recommendation *separately* — a reviewer can be wrong about why and right about what. Twice
+   recommendation _separately_ — a reviewer can be wrong about why and right about what. Twice
    this week a finding's stated mechanism was demonstrably false while its proposed change was
    the better design anyway (`xargs -r`, `baseRefOid`). If the suggestion stands on its own
    reasoning, take it and say plainly that the stated reason did not hold.
@@ -399,7 +404,7 @@ When `$ARGUMENTS` names a PR **we** authored and are actively iterating on:
 3. Triage each unresolved thread with a disposition: `fix`, `wrong reason, right change`,
    `already addressed`, `not actionable`, `duplicate`, `ambiguous`, or `out of scope`. Codex
    findings carry a `P1`/`P2` badge; P1 claims to block. Verify the mechanism before acting
-   *and* before dismissing — but keep the two judgements apart: `wrong reason, right change`
+   _and_ before dismissing — but keep the two judgements apart: `wrong reason, right change`
    exists because a false mechanism and a good suggestion arrive together often enough that
    collapsing them into `not actionable` loses real fixes. An `isOutdated` thread is a prompt to
    check whether the current head fixed the behavior, not a reason to discard it.
@@ -410,12 +415,12 @@ When `$ARGUMENTS` names a PR **we** authored and are actively iterating on:
    passed, and the fresh head still contains it — and for the latter, say which part of the
    stated reasoning did not hold, so a bad rationale does not become precedent. For `already addressed`, `not actionable`, `duplicate`, or `out of scope`,
    resolve directly. Either way the PR must be open, authored by the authenticated user
-   (`gh api user -q .login`), and the resolution must answer *that* thread. The one exception
+   (`gh api user -q .login`), and the resolution must answer _that_ thread. The one exception
    is `ambiguous` — if you could not tell whether the finding is real, leave it open and ask.
    On a merged/closed PR, treat unresolved threads as historical dispositions — don't push,
    resolve, or re-run without asking.
 5. Run the lenses as usual and report their findings to the user. Never post them. Only
-   *existing* threads get resolved.
+   _existing_ threads get resolved.
 6. Close the loop: re-run the unresolved-threads query and expect it to come back empty. Over
    one recent week, 46 of 94 codex threads here merged unresolved, several P1 — so "I read them"
    is not the bar. Anything still open at the end is a thread you genuinely could not resolve,

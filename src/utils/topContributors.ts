@@ -39,5 +39,5 @@ export function selectTopContributors<T extends WeightedContribution>(violations
   const sorted = [...violations].sort((a, b) => b.contributionWeight - a.contributionWeight);
   const cutoff = Math.min(TOP_CONTRIBUTOR_WEIGHT_THRESHOLD, sorted[0].contributionWeight);
 
-  return sorted.filter(violation => violation.contributionWeight >= cutoff);
+  return sorted.filter((violation) => violation.contributionWeight >= cutoff);
 }

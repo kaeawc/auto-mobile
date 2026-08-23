@@ -61,11 +61,7 @@ export interface ScreenshotUtils {
    * @param targetHeight Target height
    * @returns Promise with resized buffer
    */
-  resizeImageIfNeeded(
-    buffer: Buffer,
-    targetWidth: number,
-    targetHeight: number
-  ): Promise<Buffer>;
+  resizeImageIfNeeded(buffer: Buffer, targetWidth: number, targetHeight: number): Promise<Buffer>;
 
   /**
    * Compare two image buffers and return detailed comparison result
@@ -79,8 +75,13 @@ export interface ScreenshotUtils {
     buffer1: Buffer,
     buffer2: Buffer,
     threshold?: number,
-    fastMode?: boolean
-  ): Promise<{ similarity: number; pixelDifference: number; totalPixels: number; filePath?: string }>;
+    fastMode?: boolean,
+  ): Promise<{
+    similarity: number;
+    pixelDifference: number;
+    totalPixels: number;
+    filePath?: string;
+  }>;
 
   /**
    * Get all screenshot files from a directory
@@ -101,7 +102,7 @@ export interface ScreenshotUtils {
     targetBuffer: Buffer,
     screenshotPaths: string[],
     tolerancePercent?: number,
-    fastMode?: boolean
+    fastMode?: boolean,
   ): Promise<Array<{ filePath: string; similarity: number; matchFound: boolean }>>;
 
   /**
@@ -116,7 +117,7 @@ export interface ScreenshotUtils {
     targetBuffer: Buffer,
     screenshotPaths: string[],
     tolerancePercent?: number,
-    fastMode?: boolean
+    fastMode?: boolean,
   ): Promise<Array<{ filePath: string; similarity: number; matchFound: boolean }>>;
 
   /**
@@ -131,7 +132,7 @@ export interface ScreenshotUtils {
     targetBuffer: Buffer,
     cacheDir: string,
     tolerancePercent?: number,
-    maxComparisons?: number
+    maxComparisons?: number,
   ): Promise<{ filePath: string; similarity: number; matchFound: boolean }>;
 
   /**

@@ -7,8 +7,11 @@ const RUN_OPTIONS = { seed: 1_234_567, numRuns: 300 } as const;
 
 // Well-formed UTF-16 (no lone surrogates) so Buffer utf-8 round-trips exactly.
 const text = fc
-  .array(fc.integer({ min: 0, max: 0x10ffff }).filter(cp => cp < 0xd800 || cp > 0xdfff), { maxLength: 100 })
-  .map(cps => String.fromCodePoint(...cps));
+  .array(
+    fc.integer({ min: 0, max: 0x10ffff }).filter((cp) => cp < 0xd800 || cp > 0xdfff),
+    { maxLength: 100 },
+  )
+  .map((cps) => String.fromCodePoint(...cps));
 
 describe("createExecResult (property-based)", () => {
   test("string inputs pass through unchanged on stdout/stderr", () => {
@@ -17,7 +20,7 @@ describe("createExecResult (property-based)", () => {
         const result = createExecResult(out, err);
         return result.stdout === out && result.stderr === err;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -27,7 +30,7 @@ describe("createExecResult (property-based)", () => {
         const result = createExecResult(Buffer.from(out, "utf8"), Buffer.from(err, "utf8"));
         return result.stdout === out && result.stderr === err;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -37,7 +40,7 @@ describe("createExecResult (property-based)", () => {
         const result = createExecResult(out, err);
         return result.toString() === result.stdout && result.trim() === result.stdout.trim();
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -47,7 +50,7 @@ describe("createExecResult (property-based)", () => {
         const result = createExecResult(out, err);
         return result.includes(needle) === result.stdout.includes(needle);
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -58,7 +61,7 @@ describe("createExecResult (property-based)", () => {
         // Every prefix of stdout is a substring, so includes() must accept it.
         return result.includes(out.slice(0, Math.floor(out.length / 2)));
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 });

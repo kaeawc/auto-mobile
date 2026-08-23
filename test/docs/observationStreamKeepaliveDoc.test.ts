@@ -31,8 +31,8 @@ async function readKeepaliveSection(): Promise<string> {
 function parseExampleLines(section: string): Array<Record<string, unknown>> {
   return section
     .split("\n")
-    .filter(line => line.trimStart().startsWith("{"))
-    .map(line => JSON.parse(line) as Record<string, unknown>);
+    .filter((line) => line.trimStart().startsWith("{"))
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
 }
 
 class DocPinPushServer extends PushSubscriptionSocketServer<null, never> {
@@ -113,7 +113,7 @@ describe("observation stream keepalive doc (client-screen-control.md)", () => {
   test("the documented pong line, fed verbatim, refreshes liveness with no response", async () => {
     const section = await readKeepaliveSection();
     const examples = parseExampleLines(section);
-    const docPong = examples.find(example => example.command === "pong");
+    const docPong = examples.find((example) => example.command === "pong");
     expect(docPong).toEqual({ command: "pong" });
 
     const timer = new FakeTimer();
@@ -156,7 +156,9 @@ describe("observation stream keepalive doc (client-screen-control.md)", () => {
     server.triggerKeepalive();
 
     // Just short of the reap deadline the peer finally drains — no pong ever sent.
-    timer.advanceTimersByTime(DEFAULT_KEEPALIVE_CONFIG.timeoutMs - DEFAULT_KEEPALIVE_CONFIG.intervalMs - 1_000);
+    timer.advanceTimersByTime(
+      DEFAULT_KEEPALIVE_CONFIG.timeoutMs - DEFAULT_KEEPALIVE_CONFIG.intervalMs - 1_000,
+    );
     socket.emit("drain");
     expect(server.lastActivityOf(subscriptionId)).toBe(timer.now());
 

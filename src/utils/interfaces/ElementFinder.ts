@@ -8,7 +8,7 @@ export interface ElementFinder {
     container?: { elementId?: string; text?: string } | null,
     partialMatch?: boolean,
     caseSensitive?: boolean,
-    preserveTraversalOrder?: boolean
+    preserveTraversalOrder?: boolean,
   ): Element[];
 
   findElementByText(
@@ -16,7 +16,7 @@ export interface ElementFinder {
     text: string,
     container?: { elementId?: string; text?: string } | null,
     partialMatch?: boolean,
-    caseSensitive?: boolean
+    caseSensitive?: boolean,
   ): Element | null;
 
   findElementsByResourceId(
@@ -24,36 +24,36 @@ export interface ElementFinder {
     resourceId: string,
     container?: { elementId?: string; text?: string } | null,
     partialMatch?: boolean,
-    preserveTraversalOrder?: boolean
+    preserveTraversalOrder?: boolean,
   ): Element[];
 
   findElementByResourceId(
     viewHierarchy: ViewHierarchyResult,
     resourceId: string,
     container?: { elementId?: string; text?: string } | null,
-    partialMatch?: boolean
+    partialMatch?: boolean,
   ): Element | null;
 
   findElementsByTestTag(
     viewHierarchy: ViewHierarchyResult,
     testTag: string,
     container?: { elementId?: string; text?: string } | null,
-    preserveTraversalOrder?: boolean
+    preserveTraversalOrder?: boolean,
   ): Element[];
 
   findContainerNode(
     viewHierarchy: ViewHierarchyResult,
-    container: { elementId?: string; text?: string }
+    container: { elementId?: string; text?: string },
   ): ViewHierarchyNode | null;
 
   hasContainerElement(
     viewHierarchy: ViewHierarchyResult,
-    container?: { elementId?: string; text?: string }
+    container?: { elementId?: string; text?: string },
   ): boolean;
 
   findElementByIndex(
     viewHierarchy: ViewHierarchyResult,
-    index: number
+    index: number,
   ): { element: Element; text?: string } | null;
 
   findScrollableElements(viewHierarchy: ViewHierarchyResult): Element[];
@@ -72,6 +72,6 @@ export interface ElementFinder {
 
   validateElementText(
     foundElement: { element: Element; text?: string },
-    expectedText?: string
+    expectedText?: string,
   ): boolean;
 }

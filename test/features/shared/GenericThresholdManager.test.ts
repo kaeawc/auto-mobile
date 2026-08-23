@@ -21,7 +21,7 @@ function hoursAgo(hours: number): string {
 }
 
 function performanceRow(
-  overrides: Partial<NewPerformanceThresholds> = {}
+  overrides: Partial<NewPerformanceThresholds> = {},
 ): NewPerformanceThresholds {
   return {
     device_id: "device-1",
@@ -60,7 +60,7 @@ function memoryBaseline(overrides: Partial<MemoryBaseline> = {}): MemoryBaseline
   };
 }
 
-describe("GenericThresholdManager", function() {
+describe("GenericThresholdManager", function () {
   const descriptor: ThresholdDescriptor<PerformanceThresholds> = {
     tableName: "performance_thresholds",
     logPrefix: "TestThresholdManager",
@@ -71,21 +71,36 @@ describe("GenericThresholdManager", function() {
     modeColumns: ["refresh_rate"],
   };
 
-  test("calculates descriptor-driven weighted averages and modes", function() {
+  test("calculates descriptor-driven weighted averages and modes", function () {
     const manager = new GenericThresholdManager(descriptor);
     const rows = [
       {
-        ...performanceRow({ refresh_rate: 60, frame_time_threshold_ms: 10, jank_count_threshold: 1, weight: 1 }),
+        ...performanceRow({
+          refresh_rate: 60,
+          frame_time_threshold_ms: 10,
+          jank_count_threshold: 1,
+          weight: 1,
+        }),
         id: 1,
         created_at: "2026-01-01T00:00:00.000Z",
       },
       {
-        ...performanceRow({ refresh_rate: 120, frame_time_threshold_ms: 20, jank_count_threshold: 4, weight: 3 }),
+        ...performanceRow({
+          refresh_rate: 120,
+          frame_time_threshold_ms: 20,
+          jank_count_threshold: 4,
+          weight: 3,
+        }),
         id: 2,
         created_at: "2026-01-02T00:00:00.000Z",
       },
       {
-        ...performanceRow({ refresh_rate: 120, frame_time_threshold_ms: 40, jank_count_threshold: 10, weight: 0 }),
+        ...performanceRow({
+          refresh_rate: 120,
+          frame_time_threshold_ms: 40,
+          jank_count_threshold: 10,
+          weight: 0,
+        }),
         id: 3,
         created_at: "2026-01-03T00:00:00.000Z",
       },
@@ -103,53 +118,56 @@ describe("GenericThresholdManager", function() {
   });
 });
 
-describe("ThresholdManager wrappers", function() {
+describe("ThresholdManager wrappers", function () {
   let db: Kysely<Database>;
 
-  beforeEach(async function() {
+  beforeEach(async function () {
     db = await createTestDatabase();
   });
 
-  afterEach(async function() {
+  afterEach(async function () {
     await db.destroy();
   });
 
-  test("performance thresholds keep weighted averages, refresh-rate mode, and rounded jank", async function() {
+  test("performance thresholds keep weighted averages, refresh-rate mode, and rounded jank", async function () {
     const manager = new ThresholdManager(db);
-    await db.insertInto("performance_thresholds").values([
-      performanceRow({
-        refresh_rate: 60,
-        p50_threshold_ms: 10,
-        p90_threshold_ms: 20,
-        p95_threshold_ms: 30,
-        p99_threshold_ms: 40,
-        frame_time_threshold_ms: 16,
-        jank_count_threshold: 1,
-        cpu_usage_threshold_percent: 50,
-        touch_latency_threshold_ms: 100,
-        weight: 1,
-      }),
-      performanceRow({
-        session_id: "session-2",
-        refresh_rate: 120,
-        p50_threshold_ms: 30,
-        p90_threshold_ms: 60,
-        p95_threshold_ms: 90,
-        p99_threshold_ms: 120,
-        frame_time_threshold_ms: 32,
-        jank_count_threshold: 4,
-        cpu_usage_threshold_percent: 70,
-        touch_latency_threshold_ms: 140,
-        weight: 3,
-      }),
-      performanceRow({
-        session_id: "session-3",
-        refresh_rate: 120,
-        created_at: hoursAgo(48),
-        ttl_hours: 1,
-        weight: 100,
-      }),
-    ]).execute();
+    await db
+      .insertInto("performance_thresholds")
+      .values([
+        performanceRow({
+          refresh_rate: 60,
+          p50_threshold_ms: 10,
+          p90_threshold_ms: 20,
+          p95_threshold_ms: 30,
+          p99_threshold_ms: 40,
+          frame_time_threshold_ms: 16,
+          jank_count_threshold: 1,
+          cpu_usage_threshold_percent: 50,
+          touch_latency_threshold_ms: 100,
+          weight: 1,
+        }),
+        performanceRow({
+          session_id: "session-2",
+          refresh_rate: 120,
+          p50_threshold_ms: 30,
+          p90_threshold_ms: 60,
+          p95_threshold_ms: 90,
+          p99_threshold_ms: 120,
+          frame_time_threshold_ms: 32,
+          jank_count_threshold: 4,
+          cpu_usage_threshold_percent: 70,
+          touch_latency_threshold_ms: 140,
+          weight: 3,
+        }),
+        performanceRow({
+          session_id: "session-3",
+          refresh_rate: 120,
+          created_at: hoursAgo(48),
+          ttl_hours: 1,
+          weight: 100,
+        }),
+      ])
+      .execute();
 
     const thresholds = await manager.getOrCreateThresholds("device-1", {
       refreshRate: 60,
@@ -168,12 +186,15 @@ describe("ThresholdManager wrappers", function() {
     });
   });
 
-  test("performance threshold weight updates the requested session", async function() {
+  test("performance threshold weight updates the requested session", async function () {
     const manager = new ThresholdManager(db);
-    await db.insertInto("performance_thresholds").values([
-      performanceRow({ session_id: "old-session", weight: 1 }),
-      performanceRow({ session_id: "target-session", weight: 1 }),
-    ]).execute();
+    await db
+      .insertInto("performance_thresholds")
+      .values([
+        performanceRow({ session_id: "old-session", weight: 1 }),
+        performanceRow({ session_id: "target-session", weight: 1 }),
+      ])
+      .execute();
 
     await manager.updateThresholdWeight("device-1", "target-session", true);
 
@@ -188,7 +209,7 @@ describe("ThresholdManager wrappers", function() {
     ]);
   });
 
-  test("performance thresholds create capability-derived defaults and persist them", async function() {
+  test("performance thresholds create capability-derived defaults and persist them", async function () {
     const manager = new ThresholdManager(db);
     const capabilities = {
       refreshRate: 120,
@@ -218,7 +239,7 @@ describe("ThresholdManager wrappers", function() {
     });
   });
 
-  test("performance public methods store, read, average, and cleanup thresholds", async function() {
+  test("performance public methods store, read, average, and cleanup thresholds", async function () {
     const manager = new ThresholdManager(db);
     const capabilities = { refreshRate: 60, frameTimeMs: 16.67 };
     await manager.storeThresholds(
@@ -235,16 +256,19 @@ describe("ThresholdManager wrappers", function() {
         touchLatencyThresholdMs: 100,
       },
       1,
-      24
+      24,
     );
-    await db.insertInto("performance_thresholds").values(
-      performanceRow({
-        device_id: "device-1",
-        session_id: "expired-session",
-        created_at: hoursAgo(48),
-        ttl_hours: 1,
-      })
-    ).execute();
+    await db
+      .insertInto("performance_thresholds")
+      .values(
+        performanceRow({
+          device_id: "device-1",
+          session_id: "expired-session",
+          created_at: hoursAgo(48),
+          ttl_hours: 1,
+        }),
+      )
+      .execute();
 
     await manager.cleanupExpiredThresholds("device-1");
     const valid = await manager.getValidThresholds("device-1");
@@ -262,7 +286,7 @@ describe("ThresholdManager wrappers", function() {
     });
   });
 
-  test("memory thresholds stay scoped by package and use weighted averages", async function() {
+  test("memory thresholds stay scoped by package and use weighted averages", async function () {
     const manager = new MemoryThresholdManager(db);
     const rows: NewMemoryThresholds[] = [
       {
@@ -315,19 +339,19 @@ describe("ThresholdManager wrappers", function() {
     });
   });
 
-  test("memory thresholds preserve baseline and default-profile fallbacks", async function() {
+  test("memory thresholds preserve baseline and default-profile fallbacks", async function () {
     const manager = new MemoryThresholdManager(db);
 
     const adaptive = await manager.getOrCreateThresholds(
       "device-1",
       "com.example.app",
-      memoryBaseline()
+      memoryBaseline(),
     );
     const relaxed = await manager.getOrCreateThresholds(
       "device-1",
       "com.relaxed.app",
       null,
-      "relaxed"
+      "relaxed",
     );
 
     expect(adaptive).toEqual({
@@ -377,34 +401,37 @@ describe("ThresholdManager wrappers", function() {
     ]);
   });
 
-  test("memory threshold weight updates the most recent valid package threshold", async function() {
+  test("memory threshold weight updates the most recent valid package threshold", async function () {
     const manager = new MemoryThresholdManager(db);
-    await db.insertInto("memory_thresholds").values([
-      {
-        device_id: "device-1",
-        package_name: "com.example.app",
-        heap_growth_threshold_mb: 10,
-        native_heap_growth_threshold_mb: 20,
-        gc_count_threshold: 1,
-        gc_duration_threshold_ms: 100,
-        unreachable_objects_threshold: 50,
-        weight: 1,
-        ttl_hours: 24,
-        created_at: hoursAgo(2),
-      },
-      {
-        device_id: "device-1",
-        package_name: "com.example.app",
-        heap_growth_threshold_mb: 30,
-        native_heap_growth_threshold_mb: 60,
-        gc_count_threshold: 4,
-        gc_duration_threshold_ms: 300,
-        unreachable_objects_threshold: 150,
-        weight: 1,
-        created_at: new Date().toISOString(),
-        ttl_hours: 24,
-      },
-    ]).execute();
+    await db
+      .insertInto("memory_thresholds")
+      .values([
+        {
+          device_id: "device-1",
+          package_name: "com.example.app",
+          heap_growth_threshold_mb: 10,
+          native_heap_growth_threshold_mb: 20,
+          gc_count_threshold: 1,
+          gc_duration_threshold_ms: 100,
+          unreachable_objects_threshold: 50,
+          weight: 1,
+          ttl_hours: 24,
+          created_at: hoursAgo(2),
+        },
+        {
+          device_id: "device-1",
+          package_name: "com.example.app",
+          heap_growth_threshold_mb: 30,
+          native_heap_growth_threshold_mb: 60,
+          gc_count_threshold: 4,
+          gc_duration_threshold_ms: 300,
+          unreachable_objects_threshold: 150,
+          weight: 1,
+          created_at: new Date().toISOString(),
+          ttl_hours: 24,
+        },
+      ])
+      .execute();
 
     await manager.updateThresholdWeight("device-1", "com.example.app", false);
 
@@ -419,7 +446,7 @@ describe("ThresholdManager wrappers", function() {
     ]);
   });
 
-  test("memory public methods store, read, average, and cleanup package thresholds", async function() {
+  test("memory public methods store, read, average, and cleanup package thresholds", async function () {
     const manager = new MemoryThresholdManager(db);
     await manager.storeThresholds("device-1", "com.example.app", {
       heapGrowthThresholdMb: 20,
@@ -428,18 +455,21 @@ describe("ThresholdManager wrappers", function() {
       gcDurationThresholdMs: 200,
       unreachableObjectsThreshold: 100,
     });
-    await db.insertInto("memory_thresholds").values({
-      device_id: "device-1",
-      package_name: "com.example.app",
-      heap_growth_threshold_mb: 999,
-      native_heap_growth_threshold_mb: 999,
-      gc_count_threshold: 999,
-      gc_duration_threshold_ms: 999,
-      unreachable_objects_threshold: 999,
-      weight: 999,
-      ttl_hours: 1,
-      created_at: hoursAgo(48),
-    }).execute();
+    await db
+      .insertInto("memory_thresholds")
+      .values({
+        device_id: "device-1",
+        package_name: "com.example.app",
+        heap_growth_threshold_mb: 999,
+        native_heap_growth_threshold_mb: 999,
+        gc_count_threshold: 999,
+        gc_duration_threshold_ms: 999,
+        unreachable_objects_threshold: 999,
+        weight: 999,
+        ttl_hours: 1,
+        created_at: hoursAgo(48),
+      })
+      .execute();
 
     await manager.cleanupExpiredThresholds("device-1");
     const valid = await manager.getValidThresholds("device-1", "com.example.app");

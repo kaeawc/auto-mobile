@@ -1,6 +1,6 @@
 import type {
   CodesignVerificationOutcome,
-  CtrlProxyCodesignVerifier
+  CtrlProxyCodesignVerifier,
 } from "../../src/utils/ios-cmdline-tools/CtrlProxyCodesignVerifier";
 
 /**

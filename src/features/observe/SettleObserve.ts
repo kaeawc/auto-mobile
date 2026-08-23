@@ -18,10 +18,12 @@ const DEFAULT_STABLE_READS = 2;
  * actionable instability.
  */
 function isStabilityDiffEmpty(diff: ObserveDiff): boolean {
-  return diff.added.length === 0
-    && diff.removed.length === 0
-    && diff.changed.length === 0
-    && diff.fields === undefined;
+  return (
+    diff.added.length === 0 &&
+    diff.removed.length === 0 &&
+    diff.changed.length === 0 &&
+    diff.fields === undefined
+  );
 }
 
 /**
@@ -40,7 +42,7 @@ function isStabilityDiffEmpty(diff: ObserveDiff): boolean {
 export class RealSettleObserve implements SettleObserve {
   constructor(
     private readonly observeScreen: ObserveScreen,
-    private readonly timer: Timer = defaultTimer
+    private readonly timer: Timer = defaultTimer,
   ) {}
 
   async execute(options: SettleOptions = {}): Promise<SettleResult> {
@@ -60,11 +62,12 @@ export class RealSettleObserve implements SettleObserve {
           equalRun = 1;
           return equalRun >= stableReads;
         }
-        const structurallyStable = isSameObservationScreen(previous, observation)
-          && isStabilityDiffEmpty(diffObserveResult(previous, observation));
+        const structurallyStable =
+          isSameObservationScreen(previous, observation) &&
+          isStabilityDiffEmpty(diffObserveResult(previous, observation));
         equalRun = structurallyStable ? equalRun + 1 : 1;
         return equalRun >= stableReads;
-      }
+      },
     );
 
     return {

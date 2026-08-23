@@ -18,10 +18,7 @@
     },
     "platform": {
       "type": "string",
-      "enum": [
-        "android",
-        "ios"
-      ],
+      "enum": ["android", "ios"],
       "description": "Optional platform hint for plan execution"
     },
     "devices": {
@@ -140,10 +137,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": [
-            "android",
-            "ios"
-          ],
+          "enum": ["android", "ios"],
           "description": "Target platform for this device"
         },
         "simulatorType": {
@@ -203,9 +197,7 @@
                 "const": "dragAndDrop"
               }
             },
-            "required": [
-              "tool"
-            ]
+            "required": ["tool"]
           },
           "then": {
             "properties": {
@@ -238,10 +230,7 @@
               },
               "platform": {
                 "type": "string",
-                "enum": [
-                  "android",
-                  "ios"
-                ],
+                "enum": ["android", "ios"],
                 "description": "Platform"
               },
               "sessionUuid": {
@@ -257,42 +246,30 @@
               {
                 "anyOf": [
                   {
-                    "required": [
-                      "source"
-                    ]
+                    "required": ["source"]
                   },
                   {
                     "properties": {
                       "params": {
-                        "required": [
-                          "source"
-                        ]
+                        "required": ["source"]
                       }
                     },
-                    "required": [
-                      "params"
-                    ]
+                    "required": ["params"]
                   }
                 ]
               },
               {
                 "anyOf": [
                   {
-                    "required": [
-                      "target"
-                    ]
+                    "required": ["target"]
                   },
                   {
                     "properties": {
                       "params": {
-                        "required": [
-                          "target"
-                        ]
+                        "required": ["target"]
                       }
                     },
-                    "required": [
-                      "params"
-                    ]
+                    "required": ["params"]
                   }
                 ]
               }
@@ -306,9 +283,7 @@
                 "const": "highlight"
               }
             },
-            "required": [
-              "tool"
-            ]
+            "required": ["tool"]
           },
           "then": {
             "properties": {
@@ -339,18 +314,12 @@
               },
               "selectionStrategy": {
                 "type": "string",
-                "enum": [
-                  "first",
-                  "random"
-                ],
+                "enum": ["first", "random"],
                 "description": "Element selection strategy when multiple matches are found (default: first)"
               },
               "platform": {
                 "type": "string",
-                "enum": [
-                  "android",
-                  "ios"
-                ],
+                "enum": ["android", "ios"],
                 "description": "Platform"
               },
               "timeoutMs": {
@@ -370,55 +339,37 @@
               {
                 "anyOf": [
                   {
-                    "required": [
-                      "shape"
-                    ]
+                    "required": ["shape"]
                   },
                   {
-                    "required": [
-                      "id"
-                    ]
+                    "required": ["id"]
                   },
                   {
-                    "required": [
-                      "text"
-                    ]
+                    "required": ["text"]
                   },
                   {
                     "properties": {
                       "params": {
-                        "required": [
-                          "shape"
-                        ]
+                        "required": ["shape"]
                       }
                     },
-                    "required": [
-                      "params"
-                    ]
+                    "required": ["params"]
                   },
                   {
                     "properties": {
                       "params": {
-                        "required": [
-                          "id"
-                        ]
+                        "required": ["id"]
                       }
                     },
-                    "required": [
-                      "params"
-                    ]
+                    "required": ["params"]
                   },
                   {
                     "properties": {
                       "params": {
-                        "required": [
-                          "text"
-                        ]
+                        "required": ["text"]
                       }
                     },
-                    "required": [
-                      "params"
-                    ]
+                    "required": ["params"]
                   }
                 ]
               }
@@ -432,9 +383,7 @@
                 "const": "setAppPermissions"
               }
             },
-            "required": [
-              "tool"
-            ]
+            "required": ["tool"]
           },
           "then": {
             "properties": {
@@ -448,11 +397,7 @@
               },
               "action": {
                 "type": "string",
-                "enum": [
-                  "grant",
-                  "revoke",
-                  "reset"
-                ],
+                "enum": ["grant", "revoke", "reset"],
                 "description": "Permission action. Defaults to grant. Android reset requires permissions=['all'] and resets runtime permissions device-wide."
               },
               "permissions": {
@@ -479,18 +424,12 @@
               },
               "scheduleExactAlarm": {
                 "type": "string",
-                "enum": [
-                  "allow",
-                  "deny"
-                ],
+                "enum": ["allow", "deny"],
                 "description": "Android only: set UID-level SCHEDULE_EXACT_ALARM appop"
               },
               "platform": {
                 "type": "string",
-                "enum": [
-                  "android",
-                  "ios"
-                ],
+                "enum": ["android", "ios"],
                 "description": "Platform"
               },
               "sessionUuid": {
@@ -512,33 +451,19 @@
             },
             "anyOf": [
               {
-                "required": [
-                  "appId",
-                  "permissions"
-                ]
+                "required": ["appId", "permissions"]
               },
               {
-                "required": [
-                  "appId",
-                  "notificationsEnabled"
-                ]
+                "required": ["appId", "notificationsEnabled"]
               },
               {
-                "required": [
-                  "appId",
-                  "notificationPolicyAccess"
-                ]
+                "required": ["appId", "notificationPolicyAccess"]
               },
               {
-                "required": [
-                  "appId",
-                  "scheduleExactAlarm"
-                ]
+                "required": ["appId", "scheduleExactAlarm"]
               },
               {
-                "required": [
-                  "params"
-                ]
+                "required": ["params"]
               }
             ],
             "allOf": [
@@ -549,18 +474,12 @@
                       "const": "reset"
                     }
                   },
-                  "required": [
-                    "action"
-                  ]
+                  "required": ["action"]
                 },
                 "then": {
-                  "required": [
-                    "permissions"
-                  ],
+                  "required": ["permissions"],
                   "not": {
-                    "required": [
-                      "userId"
-                    ]
+                    "required": ["userId"]
                   }
                 }
               },
@@ -574,10 +493,7 @@
                       "const": "android"
                     }
                   },
-                  "required": [
-                    "action",
-                    "platform"
-                  ]
+                  "required": ["action", "platform"]
                 },
                 "then": {
                   "properties": {
@@ -602,9 +518,7 @@
                 "const": "getAppPermissions"
               }
             },
-            "required": [
-              "tool"
-            ]
+            "required": ["tool"]
           },
           "then": {
             "properties": {
@@ -627,10 +541,7 @@
               },
               "platform": {
                 "type": "string",
-                "enum": [
-                  "android",
-                  "ios"
-                ],
+                "enum": ["android", "ios"],
                 "description": "Platform"
               },
               "sessionUuid": {
@@ -652,14 +563,10 @@
             },
             "anyOf": [
               {
-                "required": [
-                  "appId"
-                ]
+                "required": ["appId"]
               },
               {
-                "required": [
-                  "params"
-                ]
+                "required": ["params"]
               }
             ]
           }
@@ -671,9 +578,7 @@
                 "const": "getNotificationPolicy"
               }
             },
-            "required": [
-              "tool"
-            ]
+            "required": ["tool"]
           },
           "then": {
             "properties": {
@@ -688,14 +593,10 @@
             },
             "anyOf": [
               {
-                "required": [
-                  "appId"
-                ]
+                "required": ["appId"]
               },
               {
-                "required": [
-                  "params"
-                ]
+                "required": ["params"]
               }
             ]
           }
@@ -707,9 +608,7 @@
                 "const": "setNotificationPolicy"
               }
             },
-            "required": [
-              "tool"
-            ]
+            "required": ["tool"]
           },
           "then": {
             "properties": {
@@ -728,15 +627,10 @@
             },
             "anyOf": [
               {
-                "required": [
-                  "appId",
-                  "policyAccess"
-                ]
+                "required": ["appId", "policyAccess"]
               },
               {
-                "required": [
-                  "params"
-                ]
+                "required": ["params"]
               }
             ]
           }
@@ -748,9 +642,7 @@
                 "const": "getDeviceState"
               }
             },
-            "required": [
-              "tool"
-            ]
+            "required": ["tool"]
           },
           "then": {
             "properties": {
@@ -762,9 +654,7 @@
                 "description": "Optional device state fields to read",
                 "items": {
                   "type": "string",
-                  "enum": [
-                    "doNotDisturb"
-                  ]
+                  "enum": ["doNotDisturb"]
                 }
               }
             }
@@ -777,9 +667,7 @@
                 "const": "setDeviceState"
               }
             },
-            "required": [
-              "tool"
-            ]
+            "required": ["tool"]
           },
           "then": {
             "properties": {
@@ -792,14 +680,10 @@
             },
             "anyOf": [
               {
-                "required": [
-                  "doNotDisturb"
-                ]
+                "required": ["doNotDisturb"]
               },
               {
-                "required": [
-                  "params"
-                ]
+                "required": ["params"]
               }
             ]
           }
@@ -824,14 +708,10 @@
       "description": "Selector for dragAndDrop elements",
       "oneOf": [
         {
-          "required": [
-            "text"
-          ]
+          "required": ["text"]
         },
         {
-          "required": [
-            "elementId"
-          ]
+          "required": ["elementId"]
         }
       ]
     },
@@ -866,10 +746,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": [
-            "android",
-            "ios"
-          ],
+          "enum": ["android", "ios"],
           "description": "Platform"
         },
         "sessionUuid": {
@@ -910,36 +787,22 @@
           "description": "Bounds height"
         },
         "sourceWidth": {
-          "type": [
-            "number",
-            "null"
-          ],
+          "type": ["number", "null"],
           "exclusiveMinimum": 0,
           "description": "Optional source width for coordinate normalization"
         },
         "sourceHeight": {
-          "type": [
-            "number",
-            "null"
-          ],
+          "type": ["number", "null"],
           "exclusiveMinimum": 0,
           "description": "Optional source height for coordinate normalization"
         }
       },
-      "required": [
-        "x",
-        "y",
-        "width",
-        "height"
-      ],
+      "required": ["x", "y", "width", "height"],
       "additionalProperties": false,
       "description": "Highlight bounds"
     },
     "highlightStyle": {
-      "type": [
-        "object",
-        "null"
-      ],
+      "type": ["object", "null"],
       "properties": {
         "strokeColor": {
           "type": "string",
@@ -971,10 +834,7 @@
       "properties": {
         "type": {
           "type": "string",
-          "enum": [
-            "box",
-            "circle"
-          ],
+          "enum": ["box", "circle"],
           "description": "Highlight shape type"
         },
         "bounds": {
@@ -984,10 +844,7 @@
           "$ref": "#/$defs/highlightStyle"
         }
       },
-      "required": [
-        "type",
-        "bounds"
-      ],
+      "required": ["type", "bounds"],
       "additionalProperties": false,
       "description": "Highlight shape definition"
     },
@@ -1009,14 +866,10 @@
       "description": "Selector for highlight elements",
       "oneOf": [
         {
-          "required": [
-            "text"
-          ]
+          "required": ["text"]
         },
         {
-          "required": [
-            "id"
-          ]
+          "required": ["id"]
         }
       ]
     },
@@ -1038,14 +891,10 @@
       "description": "Container selector to scope highlight search",
       "oneOf": [
         {
-          "required": [
-            "elementId"
-          ]
+          "required": ["elementId"]
         },
         {
-          "required": [
-            "text"
-          ]
+          "required": ["text"]
         }
       ]
     },
@@ -1076,18 +925,12 @@
         },
         "selectionStrategy": {
           "type": "string",
-          "enum": [
-            "first",
-            "random"
-          ],
+          "enum": ["first", "random"],
           "description": "Element selection strategy when multiple matches are found (default: first)"
         },
         "platform": {
           "type": "string",
-          "enum": [
-            "android",
-            "ios"
-          ],
+          "enum": ["android", "ios"],
           "description": "Platform"
         },
         "timeoutMs": {
@@ -1124,25 +967,16 @@
         },
         "mode": {
           "type": "string",
-          "enum": [
-            "off",
-            "none",
-            "priority",
-            "alarms"
-          ],
+          "enum": ["off", "none", "priority", "alarms"],
           "description": "Do Not Disturb mode"
         }
       },
       "anyOf": [
         {
-          "required": [
-            "enabled"
-          ]
+          "required": ["enabled"]
         },
         {
-          "required": [
-            "mode"
-          ]
+          "required": ["mode"]
         }
       ],
       "description": "Do Not Disturb state input"
@@ -1155,9 +989,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "enum": [
-              "doNotDisturb"
-            ]
+            "enum": ["doNotDisturb"]
           },
           "description": "Optional device state fields to read"
         }
@@ -1174,18 +1006,14 @@
       },
       "anyOf": [
         {
-          "required": [
-            "doNotDisturb"
-          ]
+          "required": ["doNotDisturb"]
         }
       ],
       "description": "Parameters for setDeviceState"
     },
     "getNotificationPolicyParams": {
       "type": "object",
-      "required": [
-        "appId"
-      ],
+      "required": ["appId"],
       "additionalProperties": true,
       "properties": {
         "appId": {
@@ -1198,10 +1026,7 @@
     },
     "setNotificationPolicyParams": {
       "type": "object",
-      "required": [
-        "appId",
-        "policyAccess"
-      ],
+      "required": ["appId", "policyAccess"],
       "additionalProperties": true,
       "properties": {
         "appId": {
@@ -1218,9 +1043,7 @@
     },
     "setAppPermissionsParams": {
       "type": "object",
-      "required": [
-        "appId"
-      ],
+      "required": ["appId"],
       "additionalProperties": true,
       "properties": {
         "appId": {
@@ -1230,11 +1053,7 @@
         },
         "action": {
           "type": "string",
-          "enum": [
-            "grant",
-            "revoke",
-            "reset"
-          ],
+          "enum": ["grant", "revoke", "reset"],
           "description": "Permission action. Defaults to grant. Android reset requires permissions=['all'] and resets runtime permissions device-wide."
         },
         "permissions": {
@@ -1261,18 +1080,12 @@
         },
         "scheduleExactAlarm": {
           "type": "string",
-          "enum": [
-            "allow",
-            "deny"
-          ],
+          "enum": ["allow", "deny"],
           "description": "Android only: set UID-level SCHEDULE_EXACT_ALARM appop"
         },
         "platform": {
           "type": "string",
-          "enum": [
-            "android",
-            "ios"
-          ],
+          "enum": ["android", "ios"],
           "description": "Platform"
         },
         "sessionUuid": {
@@ -1294,24 +1107,16 @@
       },
       "anyOf": [
         {
-          "required": [
-            "notificationsEnabled"
-          ]
+          "required": ["notificationsEnabled"]
         },
         {
-          "required": [
-            "permissions"
-          ]
+          "required": ["permissions"]
         },
         {
-          "required": [
-            "notificationPolicyAccess"
-          ]
+          "required": ["notificationPolicyAccess"]
         },
         {
-          "required": [
-            "scheduleExactAlarm"
-          ]
+          "required": ["scheduleExactAlarm"]
         }
       ],
       "allOf": [
@@ -1322,18 +1127,12 @@
                 "const": "reset"
               }
             },
-            "required": [
-              "action"
-            ]
+            "required": ["action"]
           },
           "then": {
-            "required": [
-              "permissions"
-            ],
+            "required": ["permissions"],
             "not": {
-              "required": [
-                "userId"
-              ]
+              "required": ["userId"]
             }
           }
         },
@@ -1347,10 +1146,7 @@
                 "const": "android"
               }
             },
-            "required": [
-              "action",
-              "platform"
-            ]
+            "required": ["action", "platform"]
           },
           "then": {
             "properties": {
@@ -1370,9 +1166,7 @@
     },
     "getAppPermissionsParams": {
       "type": "object",
-      "required": [
-        "appId"
-      ],
+      "required": ["appId"],
       "additionalProperties": true,
       "properties": {
         "appId": {
@@ -1391,10 +1185,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": [
-            "android",
-            "ios"
-          ],
+          "enum": ["android", "ios"],
           "description": "Platform"
         },
         "sessionUuid": {

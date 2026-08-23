@@ -1,8 +1,17 @@
 import { promises as fs } from "fs";
 import type { Dirent } from "fs";
 import * as path from "path";
-import { ActionableError, BootedDevice, DeviceSnapshotConfig, DeviceSnapshotConfigInput, DeviceSnapshotManifest } from "../models";
-import { DeviceSnapshotRepository, type DeviceSnapshotRecord } from "../db/deviceSnapshotRepository";
+import {
+  ActionableError,
+  BootedDevice,
+  DeviceSnapshotConfig,
+  DeviceSnapshotConfigInput,
+  DeviceSnapshotManifest,
+} from "../models";
+import {
+  DeviceSnapshotRepository,
+  type DeviceSnapshotRecord,
+} from "../db/deviceSnapshotRepository";
 import {
   createDeviceSnapshotConfigRepository,
   type ConfigRepository,
@@ -59,12 +68,12 @@ interface DeviceSnapshotManagerDependencies {
   createCaptureProvider: (
     device: BootedDevice,
     timer: Timer,
-    store: DeviceSnapshotStore
+    store: DeviceSnapshotStore,
   ) => SnapshotCaptureProvider;
   createRestoreProvider: (
     device: BootedDevice,
     timer: Timer,
-    store: DeviceSnapshotStore
+    store: DeviceSnapshotStore,
   ) => SnapshotRestoreProvider;
 }
 
@@ -72,7 +81,7 @@ let moduleDependencies: DeviceSnapshotManagerDependencies | null = null;
 const LEGACY_MANIFEST_FILENAME = "manifest.json";
 
 function getSnapshotPathOptions(
-  context: Pick<BootedDevice, "platform" | "deviceId">
+  context: Pick<BootedDevice, "platform" | "deviceId">,
 ): SnapshotPathOptions | undefined {
   if (context.platform === "ios") {
     return { platform: "ios", deviceId: context.deviceId };
@@ -101,7 +110,7 @@ async function getDeviceSnapshotDependencies(): Promise<DeviceSnapshotManagerDep
 }
 
 export async function setDeviceSnapshotManagerDependencies(
-  deps: Partial<DeviceSnapshotManagerDependencies>
+  deps: Partial<DeviceSnapshotManagerDependencies>,
 ): Promise<void> {
   const current = await getDeviceSnapshotDependencies();
   moduleDependencies = {
@@ -134,7 +143,7 @@ function configToInput(config: DeviceSnapshotConfig): DeviceSnapshotConfigInput 
 
 function mergeConfigInput(
   base: DeviceSnapshotConfigInput,
-  overrides: DeviceSnapshotConfigInput
+  overrides: DeviceSnapshotConfigInput,
 ): DeviceSnapshotConfigInput {
   return {
     includeAppData: overrides.includeAppData ?? base.includeAppData,
@@ -181,22 +190,24 @@ function isLegacyManifest(value: unknown): value is DeviceSnapshotManifest {
   }
 
   const manifest = value as DeviceSnapshotManifest;
-  return typeof manifest.snapshotName === "string"
-    && typeof manifest.timestamp === "string"
-    && typeof manifest.deviceId === "string"
-    && typeof manifest.deviceName === "string"
-    && (manifest.platform === "android" || manifest.platform === "ios")
-    && (manifest.snapshotType === "adb"
-      || manifest.snapshotType === "vm"
-      || manifest.snapshotType === "simctl"
-      || manifest.snapshotType === "app_data")
-    && typeof manifest.includeAppData === "boolean"
-    && typeof manifest.includeSettings === "boolean";
+  return (
+    typeof manifest.snapshotName === "string" &&
+    typeof manifest.timestamp === "string" &&
+    typeof manifest.deviceId === "string" &&
+    typeof manifest.deviceName === "string" &&
+    (manifest.platform === "android" || manifest.platform === "ios") &&
+    (manifest.snapshotType === "adb" ||
+      manifest.snapshotType === "vm" ||
+      manifest.snapshotType === "simctl" ||
+      manifest.snapshotType === "app_data") &&
+    typeof manifest.includeAppData === "boolean" &&
+    typeof manifest.includeSettings === "boolean"
+  );
 }
 
 function normalizeLegacyManifest(
   snapshotName: string,
-  manifest: DeviceSnapshotManifest
+  manifest: DeviceSnapshotManifest,
 ): DeviceSnapshotManifest {
   if (manifest.snapshotName === snapshotName) {
     return manifest;
@@ -214,11 +225,11 @@ function resolveLegacyTimestamp(timestamp: string, fallback: string): string {
 
 async function readLegacyManifest(
   snapshotName: string,
-  snapshotStore: DeviceSnapshotStore
+  snapshotStore: DeviceSnapshotStore,
 ): Promise<DeviceSnapshotManifest | null> {
   const manifestPath = path.join(
     snapshotStore.getSnapshotPath(snapshotName),
-    LEGACY_MANIFEST_FILENAME
+    LEGACY_MANIFEST_FILENAME,
   );
 
   try {
@@ -234,7 +245,7 @@ async function readLegacyManifest(
     const code = (error as NodeJS.ErrnoException).code;
     if (code !== "ENOENT") {
       logger.warn(
-        `[DeviceSnapshot] Failed to read legacy manifest for '${snapshotName}': ${error}`
+        `[DeviceSnapshot] Failed to read legacy manifest for '${snapshotName}': ${error}`,
       );
     }
     return null;
@@ -246,7 +257,7 @@ async function importLegacySnapshot(
   manifest: DeviceSnapshotManifest,
   snapshotStore: DeviceSnapshotStore,
   snapshotRepository: DeviceSnapshotRepository,
-  now: () => Date
+  now: () => Date,
 ): Promise<DeviceSnapshotRecord | null> {
   const sizeBytes = await snapshotStore.getSnapshotSizeBytes(snapshotName);
   const fallbackTimestamp = now().toISOString();
@@ -270,9 +281,7 @@ async function importLegacySnapshot(
     await snapshotRepository.insertSnapshot(record);
     return record;
   } catch (error) {
-    logger.warn(
-      `[DeviceSnapshot] Failed to import legacy snapshot '${snapshotName}': ${error}`
-    );
+    logger.warn(`[DeviceSnapshot] Failed to import legacy snapshot '${snapshotName}': ${error}`);
     return snapshotRepository.getSnapshot(snapshotName);
   }
 }
@@ -281,7 +290,7 @@ async function hydrateLegacySnapshot(
   snapshotName: string,
   snapshotStore: DeviceSnapshotStore,
   snapshotRepository: DeviceSnapshotRepository,
-  now: () => Date
+  now: () => Date,
 ): Promise<DeviceSnapshotRecord | null> {
   const manifest = await readLegacyManifest(snapshotName, snapshotStore);
   if (!manifest) {
@@ -295,7 +304,7 @@ async function importLegacySnapshotArchive(
   snapshotRepository: DeviceSnapshotRepository,
   snapshotStore: DeviceSnapshotStore,
   now: () => Date,
-  existingSnapshots: Set<string>
+  existingSnapshots: Set<string>,
 ): Promise<boolean> {
   let entries: Dirent[];
   try {
@@ -330,7 +339,7 @@ async function importLegacySnapshotArchive(
       manifest,
       snapshotStore,
       snapshotRepository,
-      now
+      now,
     );
     if (record) {
       existingSnapshots.add(snapshotName);
@@ -342,34 +351,30 @@ async function importLegacySnapshotArchive(
 }
 
 async function notifySnapshotResources(): Promise<void> {
-  await ResourceRegistry.notifyResourcesUpdated([
-    DEVICE_SNAPSHOT_RESOURCE_URIS.ARCHIVE,
-  ]);
+  await ResourceRegistry.notifyResourcesUpdated([DEVICE_SNAPSHOT_RESOURCE_URIS.ARCHIVE]);
 }
 
 async function ensureSnapshotAvailable(
   snapshotName: string,
   snapshotStore: DeviceSnapshotStore,
   snapshotRepository: DeviceSnapshotRepository,
-  pathOptions?: SnapshotPathOptions
+  pathOptions?: SnapshotPathOptions,
 ): Promise<void> {
   const existing = await snapshotRepository.getSnapshot(snapshotName);
   if (existing) {
     throw new ActionableError(
-      `Snapshot '${snapshotName}' already exists. Please choose a different name.`
+      `Snapshot '${snapshotName}' already exists. Please choose a different name.`,
     );
   }
 
   if (await snapshotStore.snapshotDirectoryExists(snapshotName, pathOptions)) {
     throw new ActionableError(
-      `Snapshot '${snapshotName}' already exists on disk. Please choose a different name.`
+      `Snapshot '${snapshotName}' already exists on disk. Please choose a different name.`,
     );
   }
 }
 
-async function deleteDeviceSnapshotRecord(
-  record: DeviceSnapshotRecord
-): Promise<boolean> {
+async function deleteDeviceSnapshotRecord(record: DeviceSnapshotRecord): Promise<boolean> {
   const { snapshotRepository, snapshotStore } = await getDeviceSnapshotDependencies();
   const pathOptions = getSnapshotPathOptions(record);
   await snapshotStore.deleteSnapshotData(record.snapshotName, pathOptions);
@@ -378,7 +383,7 @@ async function deleteDeviceSnapshotRecord(
 }
 
 async function enforceDeviceSnapshotArchiveLimit(
-  maxArchiveSizeMb: number
+  maxArchiveSizeMb: number,
 ): Promise<SnapshotArchiveEvictionResult> {
   const maxSizeBytes = Math.max(0, Math.floor(maxArchiveSizeMb * 1024 * 1024));
   const { snapshotRepository } = await getDeviceSnapshotDependencies();
@@ -386,10 +391,7 @@ async function enforceDeviceSnapshotArchiveLimit(
     orderByLastAccessed: "asc",
   });
 
-  let currentSizeBytes = snapshots.reduce(
-    (sum, snapshot) => sum + snapshot.sizeBytes,
-    0
-  );
+  let currentSizeBytes = snapshots.reduce((sum, snapshot) => sum + snapshot.sizeBytes, 0);
 
   if (maxSizeBytes === 0 || currentSizeBytes <= maxSizeBytes) {
     return {
@@ -413,15 +415,13 @@ async function enforceDeviceSnapshotArchiveLimit(
         currentSizeBytes -= snapshot.sizeBytes;
       }
     } catch (error) {
-      logger.warn(
-        `[DeviceSnapshot] Failed to evict snapshot ${snapshot.snapshotName}: ${error}`
-      );
+      logger.warn(`[DeviceSnapshot] Failed to evict snapshot ${snapshot.snapshotName}: ${error}`);
     }
   }
 
   if (currentSizeBytes > maxSizeBytes) {
     logger.warn(
-      `[DeviceSnapshot] Archive size ${currentSizeBytes} bytes still exceeds limit ${maxSizeBytes} bytes after eviction`
+      `[DeviceSnapshot] Archive size ${currentSizeBytes} bytes still exceeds limit ${maxSizeBytes} bytes after eviction`,
     );
   }
 
@@ -450,7 +450,7 @@ export async function getDeviceSnapshotConfig(): Promise<DeviceSnapshotConfig> {
 }
 
 export async function updateDeviceSnapshotConfig(
-  update: DeviceSnapshotConfigInput | null
+  update: DeviceSnapshotConfigInput | null,
 ): Promise<DeviceSnapshotConfigUpdateResult> {
   const { configRepository } = await getDeviceSnapshotDependencies();
   if (update === null) {
@@ -471,7 +471,7 @@ export async function updateDeviceSnapshotConfig(
 
 export async function captureDeviceSnapshot(
   device: BootedDevice,
-  args: DeviceSnapshotCaptureArgs
+  args: DeviceSnapshotCaptureArgs,
 ): Promise<{
   result: CaptureSnapshotResult;
   evictedSnapshotNames: string[];
@@ -534,7 +534,7 @@ export async function captureDeviceSnapshot(
 
 export async function restoreDeviceSnapshot(
   device: BootedDevice,
-  args: DeviceSnapshotRestoreArgs
+  args: DeviceSnapshotRestoreArgs,
 ): Promise<{
   result: RestoreSnapshotResult;
   manifest: DeviceSnapshotManifest;
@@ -544,12 +544,7 @@ export async function restoreDeviceSnapshot(
 
   let record = await snapshotRepository.getSnapshot(args.snapshotName);
   if (!record) {
-    record = await hydrateLegacySnapshot(
-      args.snapshotName,
-      snapshotStore,
-      snapshotRepository,
-      now
-    );
+    record = await hydrateLegacySnapshot(args.snapshotName, snapshotStore, snapshotRepository, now);
   }
   if (!record) {
     throw new ActionableError(`Snapshot '${args.snapshotName}' not found`);
@@ -583,24 +578,19 @@ export async function listDeviceSnapshots(): Promise<{
   const initialRecords = await snapshotRepository.listSnapshots({
     orderByCreatedAt: "desc",
   });
-  const existingSnapshotNames = new Set(
-    initialRecords.map(record => record.snapshotName)
-  );
+  const existingSnapshotNames = new Set(initialRecords.map((record) => record.snapshotName));
   const importedLegacy = await importLegacySnapshotArchive(
     snapshotRepository,
     snapshotStore,
     now,
-    existingSnapshotNames
+    existingSnapshotNames,
   );
   const records = importedLegacy
     ? await snapshotRepository.listSnapshots({ orderByCreatedAt: "desc" })
     : initialRecords;
 
   const snapshots = records.map(buildArchiveEntry);
-  const totalSizeBytes = records.reduce(
-    (sum, snapshot) => sum + snapshot.sizeBytes,
-    0
-  );
+  const totalSizeBytes = records.reduce((sum, snapshot) => sum + snapshot.sizeBytes, 0);
 
   return {
     snapshots,

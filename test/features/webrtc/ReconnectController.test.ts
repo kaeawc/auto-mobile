@@ -11,7 +11,7 @@ describe("ReconnectController", () => {
     const controller = new ReconnectController({
       attempt: async () => {},
       timer: new FakeTimer(),
-      onStateChange: state => states.push(state),
+      onStateChange: (state) => states.push(state),
     });
 
     await controller.start();
@@ -181,7 +181,9 @@ describe("ReconnectController", () => {
       attempt: async () => {
         attempts++;
         if (attempts === 2) {
-          await new Promise<void>(resolve => { resolveReconnect = resolve; });
+          await new Promise<void>((resolve) => {
+            resolveReconnect = resolve;
+          });
         }
       },
       timer,

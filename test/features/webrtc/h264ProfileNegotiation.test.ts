@@ -99,8 +99,12 @@ describe("H.264 cross-source profile negotiation (#4884, #4756)", () => {
     // session's source encodes; otherwise a viewer negotiates a profile it will
     // never actually receive. #4877 advertised Main for sources that stayed
     // Baseline.
-    expect(Number.parseInt(WEBRTC_H264_PROFILE_LEVEL_ID.slice(0, 2), 16)).toBe(BASELINE_PROFILE_IDC);
-    expect(Number.parseInt(WEBRTC_H264_MAIN_PROFILE_LEVEL_ID.slice(0, 2), 16)).toBe(MAIN_PROFILE_IDC);
+    expect(Number.parseInt(WEBRTC_H264_PROFILE_LEVEL_ID.slice(0, 2), 16)).toBe(
+      BASELINE_PROFILE_IDC,
+    );
+    expect(Number.parseInt(WEBRTC_H264_MAIN_PROFILE_LEVEL_ID.slice(0, 2), 16)).toBe(
+      MAIN_PROFILE_IDC,
+    );
     expect(h264ProfileLevelId("constrained-baseline")).toBe(WEBRTC_H264_PROFILE_LEVEL_ID);
     expect(h264ProfileLevelId("main")).toBe(WEBRTC_H264_MAIN_PROFILE_LEVEL_ID);
   });
@@ -155,7 +159,7 @@ describe("H.264 cross-source profile negotiation (#4884, #4756)", () => {
                 publish: async () => ({ answerSdp, resourceUrl: "https://coord/whip/s" }),
                 delete: async () => {},
               }) as unknown as WhipClient,
-          }
+          },
         );
 
         await publisher.start();

@@ -13,10 +13,7 @@ export interface EntitlementPlistReader {
 }
 
 const DEFAULT_TIMEOUT_MS = 10_000;
-const UNSIGNED_BUNDLE_MARKERS = [
-  "code object is not signed at all",
-  "is not signed",
-];
+const UNSIGNED_BUNDLE_MARKERS = ["code object is not signed at all", "is not signed"];
 
 export interface AppBundleMetadataRequest {
   readonly appBundlePath: string;
@@ -53,7 +50,7 @@ const isUnsignedBundle = (error: unknown): boolean => {
     typeof childError.stderr === "string" ? childError.stderr : "",
   ].join("\n");
   const normalized = message.toLowerCase();
-  return UNSIGNED_BUNDLE_MARKERS.some(marker => normalized.includes(marker));
+  return UNSIGNED_BUNDLE_MARKERS.some((marker) => normalized.includes(marker));
 };
 
 const cancellationError = (): ActionableError =>
@@ -102,13 +99,19 @@ export class AppBundleMetadataClient implements AppBundleMetadata {
       ["-d", "--entitlements", ":-", request.appBundlePath],
       controller.signal,
     );
-    command.catch(() => { /* consumed by the awaited command below */ });
+    command.catch(() => {
+      /* consumed by the awaited command below */
+    });
     let timeout: NodeJS.Timeout | undefined;
     try {
       const timed = new Promise<never>((_, reject) => {
         timeout = this.timer.setTimeout(() => {
           controller.abort();
-          reject(new ActionableError(`App-bundle entitlement inspection timed out after ${timeoutMs}ms.`));
+          reject(
+            new ActionableError(
+              `App-bundle entitlement inspection timed out after ${timeoutMs}ms.`,
+            ),
+          );
         }, timeoutMs);
       });
       return await Promise.race([command, timed]);
@@ -127,7 +130,9 @@ export class AppBundleMetadataClient implements AppBundleMetadata {
       }
       return parsed as PlistDictionary;
     } catch {
-      throw new ActionableError("Unable to parse app-bundle entitlements. The signed artifact returned malformed metadata.");
+      throw new ActionableError(
+        "Unable to parse app-bundle entitlements. The signed artifact returned malformed metadata.",
+      );
     }
   }
 
@@ -141,6 +146,8 @@ export class AppBundleMetadataClient implements AppBundleMetadata {
     if (error instanceof ActionableError) {
       throw error;
     }
-    throw new ActionableError("Unable to inspect app-bundle entitlements with codesign. Confirm Xcode command-line tools are installed and the artifact is accessible.");
+    throw new ActionableError(
+      "Unable to inspect app-bundle entitlements with codesign. Confirm Xcode command-line tools are installed and the artifact is accessible.",
+    );
   }
 }

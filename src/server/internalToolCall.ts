@@ -32,7 +32,7 @@ export const INTERNAL_NO_DIFF_PARAM = "__internalNoDiff";
  * shared graph state. Returning a copy keeps the caller's object untouched.
  */
 export function markInternalToolCall<T extends Record<string, unknown>>(
-  args: T
+  args: T,
 ): T & { [INTERNAL_NO_DIFF_PARAM]: true } {
   return { ...args, [INTERNAL_NO_DIFF_PARAM]: true };
 }
@@ -45,7 +45,7 @@ export function markInternalToolCall<T extends Record<string, unknown>>(
 export function throwIfInternalToolFailed(
   response: unknown,
   toolName: string,
-  platform: string
+  platform: string,
 ): void {
   if (!response || typeof response !== "object") {
     return;
@@ -57,24 +57,25 @@ export function throwIfInternalToolFailed(
     structuredContent?: unknown;
     content?: Array<{ type?: unknown; text?: unknown }>;
   };
-  const payload = envelope.structuredContent && typeof envelope.structuredContent === "object"
-    ? envelope.structuredContent as { success?: unknown; error?: unknown }
-    : (() => {
-      const textPart = envelope.content?.find(item => item.type === "text");
-      if (typeof textPart?.text !== "string") {
-        return undefined;
-      }
-      try {
-        const parsed = JSON.parse(textPart.text);
-        return parsed && typeof parsed === "object"
-          ? parsed as { success?: unknown; error?: unknown }
-          : undefined;
-      } catch (error) {
-        // Plain-text tool output has no structured failure signal to propagate.
-        logger.debug(`[internalToolCall] Could not parse ${toolName} response: ${error}`);
-        return undefined;
-      }
-    })();
+  const payload =
+    envelope.structuredContent && typeof envelope.structuredContent === "object"
+      ? (envelope.structuredContent as { success?: unknown; error?: unknown })
+      : (() => {
+          const textPart = envelope.content?.find((item) => item.type === "text");
+          if (typeof textPart?.text !== "string") {
+            return undefined;
+          }
+          try {
+            const parsed = JSON.parse(textPart.text);
+            return parsed && typeof parsed === "object"
+              ? (parsed as { success?: unknown; error?: unknown })
+              : undefined;
+          } catch (error) {
+            // Plain-text tool output has no structured failure signal to propagate.
+            logger.debug(`[internalToolCall] Could not parse ${toolName} response: ${error}`);
+            return undefined;
+          }
+        })();
 
   if (payload?.success === false || envelope.success === false) {
     const error = payload?.error ?? envelope.error ?? "unknown failure";

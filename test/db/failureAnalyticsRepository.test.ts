@@ -94,7 +94,7 @@ describe("FailureAnalyticsRepository", () => {
             type: "screenshot",
             path: "/tmp/screenshot.png",
           },
-        })
+        }),
       );
 
       const groups = await db.selectFrom("failure_groups").selectAll().execute();
@@ -121,7 +121,7 @@ describe("FailureAnalyticsRepository", () => {
             appVersion: "1.0.1",
             sessionId: "session-2",
           },
-        })
+        }),
       );
 
       const groups = await db.selectFrom("failure_groups").selectAll().execute();
@@ -146,7 +146,7 @@ describe("FailureAnalyticsRepository", () => {
             appVersion: "1.0.0",
             sessionId: "session-1",
           },
-        })
+        }),
       );
 
       const groups = await db.selectFrom("failure_groups").selectAll().execute();
@@ -161,7 +161,7 @@ describe("FailureAnalyticsRepository", () => {
             type: "screenshot",
             path: "/tmp/screenshot.png",
           },
-        })
+        }),
       );
 
       const captures = await db.selectFrom("failure_captures").selectAll().execute();
@@ -180,7 +180,7 @@ describe("FailureAnalyticsRepository", () => {
             sessionId: "session-1",
             screensVisited: ["Login", "Home", "Settings"],
           },
-        })
+        }),
       );
 
       const screens = await db
@@ -196,7 +196,10 @@ describe("FailureAnalyticsRepository", () => {
 
     test("rolls back the group count when the occurrence insert fails", async () => {
       await repo.recordFailure(makeFailureInput());
-      const originalGroup = await db.selectFrom("failure_groups").selectAll().executeTakeFirstOrThrow();
+      const originalGroup = await db
+        .selectFrom("failure_groups")
+        .selectAll()
+        .executeTakeFirstOrThrow();
       await sql`
         CREATE TEMP TRIGGER fail_failure_occurrence_insert
         BEFORE INSERT ON failure_occurrences
@@ -205,28 +208,32 @@ describe("FailureAnalyticsRepository", () => {
         END
       `.execute(db);
 
-      await expect(repo.recordFailure(
-        makeFailureInput({
-          capture: {
-            type: "screenshot",
-            path: "/tmp/failed-screenshot.png",
-          },
-          occurrence: {
-            deviceModel: "Pixel 8",
-            os: "Android 15",
-            appVersion: "2.0.0",
-            sessionId: "session-2",
-            screensVisited: ["Home", "FailureDetails"],
-          },
-        })
-      )).rejects.toThrow("forced occurrence insert failure");
+      await expect(
+        repo.recordFailure(
+          makeFailureInput({
+            capture: {
+              type: "screenshot",
+              path: "/tmp/failed-screenshot.png",
+            },
+            occurrence: {
+              deviceModel: "Pixel 8",
+              os: "Android 15",
+              appVersion: "2.0.0",
+              sessionId: "session-2",
+              screensVisited: ["Home", "FailureDetails"],
+            },
+          }),
+        ),
+      ).rejects.toThrow("forced occurrence insert failure");
 
       const groups = await db.selectFrom("failure_groups").selectAll().execute();
       expect(groups).toHaveLength(1);
       expect(groups[0]).toEqual(originalGroup);
 
       expect(await db.selectFrom("failure_occurrences").selectAll().execute()).toHaveLength(1);
-      expect(await db.selectFrom("failure_occurrence_screens").selectAll().execute()).toHaveLength(0);
+      expect(await db.selectFrom("failure_occurrence_screens").selectAll().execute()).toHaveLength(
+        0,
+      );
       expect(await db.selectFrom("failure_captures").selectAll().execute()).toHaveLength(0);
       expect(await db.selectFrom("failure_notifications").selectAll().execute()).toHaveLength(1);
     });
@@ -240,25 +247,29 @@ describe("FailureAnalyticsRepository", () => {
         END
       `.execute(db);
 
-      await expect(repo.recordFailure(
-        makeFailureInput({
-          capture: {
-            type: "screenshot",
-            path: "/tmp/failed-notification.png",
-          },
-          occurrence: {
-            deviceModel: "Pixel 8",
-            os: "Android 15",
-            appVersion: "2.0.0",
-            sessionId: "session-2",
-            screensVisited: ["Home", "FailureDetails"],
-          },
-        })
-      )).rejects.toThrow("forced notification insert failure");
+      await expect(
+        repo.recordFailure(
+          makeFailureInput({
+            capture: {
+              type: "screenshot",
+              path: "/tmp/failed-notification.png",
+            },
+            occurrence: {
+              deviceModel: "Pixel 8",
+              os: "Android 15",
+              appVersion: "2.0.0",
+              sessionId: "session-2",
+              screensVisited: ["Home", "FailureDetails"],
+            },
+          }),
+        ),
+      ).rejects.toThrow("forced notification insert failure");
 
       expect(await db.selectFrom("failure_groups").selectAll().execute()).toHaveLength(0);
       expect(await db.selectFrom("failure_occurrences").selectAll().execute()).toHaveLength(0);
-      expect(await db.selectFrom("failure_occurrence_screens").selectAll().execute()).toHaveLength(0);
+      expect(await db.selectFrom("failure_occurrence_screens").selectAll().execute()).toHaveLength(
+        0,
+      );
       expect(await db.selectFrom("failure_captures").selectAll().execute()).toHaveLength(0);
       expect(await db.selectFrom("failure_notifications").selectAll().execute()).toHaveLength(0);
     });
@@ -276,7 +287,7 @@ describe("FailureAnalyticsRepository", () => {
           title: "OtherException",
           type: "anr",
           severity: "high",
-        })
+        }),
       );
 
       const groups = await repo.getFailureGroups();
@@ -294,7 +305,7 @@ describe("FailureAnalyticsRepository", () => {
           title: "ANR in MainActivity",
           type: "anr",
           severity: "high",
-        })
+        }),
       );
 
       const crashGroups = await repo.getFailureGroups({ type: "crash" });
@@ -315,7 +326,7 @@ describe("FailureAnalyticsRepository", () => {
         makeFailureInput({
           signature: "com.example.Warning",
           severity: "low",
-        })
+        }),
       );
 
       const criticalGroups = await repo.getFailureGroups({ severity: "critical" });
@@ -333,7 +344,7 @@ describe("FailureAnalyticsRepository", () => {
             sessionId: "session-1",
             screenAtFailure: "HomeScreen",
           },
-        })
+        }),
       );
 
       const groups = await repo.getFailureGroups();
@@ -351,7 +362,11 @@ describe("FailureAnalyticsRepository", () => {
 
     test("fetches aggregated group details with a bounded query count and preserves per-group top-N", async () => {
       const instrumented = await createInstrumentedTestDatabase();
-      const instrumentedRepo = new FailureAnalyticsRepository(timer, instrumented.db, () => new FakeDbWriteBarrier());
+      const instrumentedRepo = new FailureAnalyticsRepository(
+        timer,
+        instrumented.db,
+        () => new FakeDbWriteBarrier(),
+      );
       try {
         await seedFailureGroup(instrumented.db, {
           id: "group-high-volume",
@@ -394,11 +409,11 @@ describe("FailureAnalyticsRepository", () => {
         instrumented.resetQueryCount();
         const groups = await instrumentedRepo.getFailureGroups({ limit: 2 });
 
-        expect(groups.map(group => group.id)).toEqual(["group-high-volume", "group-quiet"]);
+        expect(groups.map((group) => group.id)).toEqual(["group-high-volume", "group-quiet"]);
         expect(instrumented.queryCount()).toBeLessThanOrEqual(10);
 
         const highVolume = groups[0];
-        expect(highVolume.sampleOccurrences.map(occ => occ.id)).toEqual([
+        expect(highVolume.sampleOccurrences.map((occ) => occ.id)).toEqual([
           "high-occ-7",
           "high-occ-6",
           "high-occ-5",
@@ -406,18 +421,23 @@ describe("FailureAnalyticsRepository", () => {
           "high-occ-3",
           "high-occ-2",
         ]);
-        expect(highVolume.recentCaptures.map(capture => capture.path)).toEqual([
+        expect(highVolume.recentCaptures.map((capture) => capture.path)).toEqual([
           "/captures/high-7.png",
           "/captures/high-6.png",
           "/captures/high-5.png",
           "/captures/high-4.png",
           "/captures/high-3.png",
         ]);
-        expect(highVolume.deviceBreakdown.map(row => row.deviceModel)).toEqual(["Pixel A", "Pixel B"]);
+        expect(highVolume.deviceBreakdown.map((row) => row.deviceModel)).toEqual([
+          "Pixel A",
+          "Pixel B",
+        ]);
 
         const quiet = groups[1];
-        expect(quiet.sampleOccurrences.map(occ => occ.id)).toEqual(["quiet-occ-0"]);
-        expect(quiet.recentCaptures.map(capture => capture.path)).toEqual(["/captures/quiet.png"]);
+        expect(quiet.sampleOccurrences.map((occ) => occ.id)).toEqual(["quiet-occ-0"]);
+        expect(quiet.recentCaptures.map((capture) => capture.path)).toEqual([
+          "/captures/quiet.png",
+        ]);
       } finally {
         await instrumented.db.destroy();
       }
@@ -425,7 +445,11 @@ describe("FailureAnalyticsRepository", () => {
 
     test("chunks more than SQLite's conservative bound-parameter limit without dropping groups", async () => {
       const instrumented = await createInstrumentedTestDatabase();
-      const instrumentedRepo = new FailureAnalyticsRepository(timer, instrumented.db, () => new FakeDbWriteBarrier());
+      const instrumentedRepo = new FailureAnalyticsRepository(
+        timer,
+        instrumented.db,
+        () => new FakeDbWriteBarrier(),
+      );
       try {
         for (let i = 0; i < 1005; i++) {
           await seedFailureGroup(instrumented.db, {
@@ -456,10 +480,15 @@ describe("FailureAnalyticsRepository", () => {
         expect(groups[0].id).toBe("chunk-group-0000");
         expect(groups[1004].id).toBe("chunk-group-1004");
         for (const i of [997, 998, 999, 1000]) {
-          const group = groups.find(item => item.id === `chunk-group-${i.toString().padStart(4, "0")}`);
+          const group = groups.find(
+            (item) => item.id === `chunk-group-${i.toString().padStart(4, "0")}`,
+          );
           expect(group?.deviceBreakdown[0]).toMatchObject({ deviceModel: `Pixel ${i}`, count: 1 });
           expect(group?.versionBreakdown[0]).toMatchObject({ version: `9.${i}.0`, count: 1 });
-          expect(group?.screenBreakdown.map(screen => screen.screenName)).toEqual([`Screen ${i}`, `Launch ${i}`]);
+          expect(group?.screenBreakdown.map((screen) => screen.screenName)).toEqual([
+            `Screen ${i}`,
+            `Launch ${i}`,
+          ]);
           expect(group?.recentCaptures[0].path).toBe(`/captures/chunk-${i}.png`);
           expect(group?.sampleOccurrences[0]).toMatchObject({
             id: `chunk-occ-${i}`,
@@ -489,18 +518,26 @@ describe("FailureAnalyticsRepository", () => {
           { screenName: "E", visitCount: 6 },
           { screenName: "F", visitCount: 5 },
           { screenName: "Settings", visitCount: 3 },
-        ]
+        ],
       );
 
-      expect(rows.map(row => row.screenName)).toEqual(["Checkout", "B", "C", "D", "E", "F", "Settings"]);
-      expect(rows.find(row => row.screenName === "Checkout")).toEqual({
+      expect(rows.map((row) => row.screenName)).toEqual([
+        "Checkout",
+        "B",
+        "C",
+        "D",
+        "E",
+        "F",
+        "Settings",
+      ]);
+      expect(rows.find((row) => row.screenName === "Checkout")).toEqual({
         screenName: "Checkout",
         visitCount: 10,
         failureCount: 2,
         visitPercentage: (10 / 49) * 100,
       });
-      expect(rows.some(row => row.screenName === "A")).toBe(false);
-      expect(rows.find(row => row.screenName === "Settings")?.failureCount).toBe(1);
+      expect(rows.some((row) => row.screenName === "A")).toBe(false);
+      expect(rows.find((row) => row.screenName === "Settings")?.failureCount).toBe(1);
     });
   });
 
@@ -514,7 +551,7 @@ describe("FailureAnalyticsRepository", () => {
         makeFailureInput({
           signature: "sig-2",
           title: "Second failure",
-        })
+        }),
       );
 
       const response = await repo.getNotificationsSince({});
@@ -536,7 +573,7 @@ describe("FailureAnalyticsRepository", () => {
         makeFailureInput({
           signature: "sig-2",
           title: "Second failure",
-        })
+        }),
       );
 
       const response = await repo.getNotificationsSince({
@@ -557,7 +594,7 @@ describe("FailureAnalyticsRepository", () => {
           signature: "sig-anr",
           type: "anr",
           severity: "high",
-        })
+        }),
       );
 
       const response = await repo.getNotificationsSince({ type: "crash" });
@@ -580,7 +617,10 @@ describe("FailureAnalyticsRepository", () => {
         acknowledged: 0,
       }));
       for (let i = 0; i < rows.length; i += 100) {
-        await db.insertInto("failure_notifications").values(rows.slice(i, i + 100)).execute();
+        await db
+          .insertInto("failure_notifications")
+          .values(rows.slice(i, i + 100))
+          .execute();
       }
     };
 
@@ -636,7 +676,7 @@ describe("FailureAnalyticsRepository", () => {
         makeFailureInput({
           signature: "sig-2",
           title: "Second failure",
-        })
+        }),
       );
 
       const before = await repo.getNotificationsSince({});
@@ -648,10 +688,10 @@ describe("FailureAnalyticsRepository", () => {
       await repo.acknowledgeNotifications([before.notifications[0].id]);
 
       const after = await repo.getNotificationsSince({});
-      const acked = after.notifications.find(n => n.id === before.notifications[0].id);
+      const acked = after.notifications.find((n) => n.id === before.notifications[0].id);
       expect(acked!.acknowledged).toBe(true);
 
-      const unacked = after.notifications.find(n => n.id === before.notifications[1].id);
+      const unacked = after.notifications.find((n) => n.id === before.notifications[1].id);
       expect(unacked!.acknowledged).toBe(false);
     });
 
@@ -664,7 +704,7 @@ describe("FailureAnalyticsRepository", () => {
         makeFailureInput({
           signature: "sig-2",
           title: "Second failure",
-        })
+        }),
       );
 
       const all = await repo.getNotificationsSince({});
@@ -729,9 +769,9 @@ describe("FailureAnalyticsRepository", () => {
                 appVersion: "1.0.0",
                 sessionId: `session-${i}`,
               },
-            })
-          )
-        )
+            }),
+          ),
+        ),
       );
 
       const groups = await db.selectFrom("failure_groups").selectAll().execute();
@@ -755,9 +795,9 @@ describe("FailureAnalyticsRepository", () => {
                 appVersion: "1.0.0",
                 sessionId: `session-${i % M}`,
               },
-            })
-          )
-        )
+            }),
+          ),
+        ),
       );
 
       const groups = await db.selectFrom("failure_groups").selectAll().execute();
@@ -780,7 +820,7 @@ describe("FailureAnalyticsRepository", () => {
       const perSignature = 8;
       const signatures = ["sig-a", "sig-b", "sig-c"];
       await Promise.all(
-        signatures.flatMap(sig =>
+        signatures.flatMap((sig) =>
           Array.from({ length: perSignature }, (_unused, i) =>
             repo.recordFailure(
               makeFailureInput({
@@ -791,10 +831,10 @@ describe("FailureAnalyticsRepository", () => {
                   appVersion: "1.0.0",
                   sessionId: `session-${i}`,
                 },
-              })
-            )
-          )
-        )
+              }),
+            ),
+          ),
+        ),
       );
 
       const groups = await db
@@ -852,7 +892,9 @@ describe("FailureAnalyticsRepository", () => {
     // lossy RMW here would drop selectors/error counts below N.
     test("merges tool-call-info losslessly across CONCURRENT tool_failure occurrences", async () => {
       const N = 10;
-      await Promise.all(Array.from({ length: N }, (_unused, i) => repo.recordFailure(toolFailureInput(i))));
+      await Promise.all(
+        Array.from({ length: N }, (_unused, i) => repo.recordFailure(toolFailureInput(i))),
+      );
 
       const groups = await db.selectFrom("failure_groups").selectAll().execute();
       expect(groups).toHaveLength(1);
@@ -900,7 +942,7 @@ async function seedFailureGroup(
     title: string;
     lastOccurrence: number;
     totalCount: number;
-  }
+  },
 ): Promise<void> {
   await db
     .insertInto("failure_groups")
@@ -933,7 +975,7 @@ async function seedFailureOccurrence(
     screenAtFailure: string;
     screensVisited: string[];
     capturePath: string;
-  }
+  },
 ): Promise<void> {
   await db
     .insertInto("failure_occurrences")
@@ -957,11 +999,13 @@ async function seedFailureOccurrence(
 
   await db
     .insertInto("failure_occurrence_screens")
-    .values(input.screensVisited.map((screenName, index) => ({
-      occurrence_id: input.id,
-      screen_name: screenName,
-      visit_order: index,
-    })))
+    .values(
+      input.screensVisited.map((screenName, index) => ({
+        occurrence_id: input.id,
+        screen_name: screenName,
+        visit_order: index,
+      })),
+    )
     .execute();
 
   await db
@@ -1006,10 +1050,14 @@ describe("FailureAnalyticsRepository row-cap retention (#3436)", () => {
 
   test("pruneToRowCap trims to the cap and sweeps groups left with no occurrences", async () => {
     // Group "old" gets the two earliest occurrences; group "new" the two latest.
-    timer.setCurrentTime(1000); await repo.recordFailure(input("old"));
-    timer.setCurrentTime(2000); await repo.recordFailure(input("old"));
-    timer.setCurrentTime(3000); await repo.recordFailure(input("new"));
-    timer.setCurrentTime(4000); await repo.recordFailure(input("new"));
+    timer.setCurrentTime(1000);
+    await repo.recordFailure(input("old"));
+    timer.setCurrentTime(2000);
+    await repo.recordFailure(input("old"));
+    timer.setCurrentTime(3000);
+    await repo.recordFailure(input("new"));
+    timer.setCurrentTime(4000);
+    await repo.recordFailure(input("new"));
 
     expect(await db.selectFrom("failure_occurrences").selectAll().execute()).toHaveLength(4);
     expect(await db.selectFrom("failure_groups").selectAll().execute()).toHaveLength(2);
@@ -1022,29 +1070,34 @@ describe("FailureAnalyticsRepository row-cap retention (#3436)", () => {
       .select("timestamp")
       .orderBy("timestamp", "asc")
       .execute();
-    expect(occurrences.map(o => Number(o.timestamp))).toEqual([3000, 4000]);
+    expect(occurrences.map((o) => Number(o.timestamp))).toEqual([3000, 4000]);
 
     // "old" is now orphaned and swept; "new" still has occurrences and survives.
     const groups = await db.selectFrom("failure_groups").select("signature").execute();
-    expect(groups.map(g => g.signature)).toEqual(["new"]);
+    expect(groups.map((g) => g.signature)).toEqual(["new"]);
   });
 
   test("a group that keeps at least one occurrence is NOT swept", async () => {
-    timer.setCurrentTime(1000); await repo.recordFailure(input("keep"));
-    timer.setCurrentTime(2000); await repo.recordFailure(input("keep"));
-    timer.setCurrentTime(3000); await repo.recordFailure(input("keep"));
+    timer.setCurrentTime(1000);
+    await repo.recordFailure(input("keep"));
+    timer.setCurrentTime(2000);
+    await repo.recordFailure(input("keep"));
+    timer.setCurrentTime(3000);
+    await repo.recordFailure(input("keep"));
 
     // Cap of 2 prunes the single oldest occurrence but the group retains two.
     await (repo as any).pruneToRowCap(2);
 
     expect(await db.selectFrom("failure_occurrences").selectAll().execute()).toHaveLength(2);
     const groups = await db.selectFrom("failure_groups").select("signature").execute();
-    expect(groups.map(g => g.signature)).toEqual(["keep"]);
+    expect(groups.map((g) => g.signature)).toEqual(["keep"]);
   });
 
   test("under the cap, pruneToRowCap deletes nothing and sweeps no groups", async () => {
-    timer.setCurrentTime(1000); await repo.recordFailure(input("a"));
-    timer.setCurrentTime(2000); await repo.recordFailure(input("b"));
+    timer.setCurrentTime(1000);
+    await repo.recordFailure(input("a"));
+    timer.setCurrentTime(2000);
+    await repo.recordFailure(input("b"));
 
     await (repo as any).pruneToRowCap(10);
 
@@ -1070,7 +1123,10 @@ describe("FailureAnalyticsRepository.getTimelineData (#3439)", () => {
 
   // Records one occurrence of `type` at `ts`. Distinct signatures per type keep
   // each type in its own group; the occurrence timestamp is the timer's value.
-  async function record(type: "crash" | "anr" | "tool_failure" | "nonfatal", ts: number): Promise<void> {
+  async function record(
+    type: "crash" | "anr" | "tool_failure" | "nonfatal",
+    ts: number,
+  ): Promise<void> {
     timer.setCurrentTime(ts);
     await repo.recordFailure({
       type,

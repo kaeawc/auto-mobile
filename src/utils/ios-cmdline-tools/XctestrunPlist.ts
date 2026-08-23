@@ -22,14 +22,14 @@ export type PlistValue =
 
 interface PlistNode {
   "#name": string;
-  "_"?: string;
-  "$$"?: PlistNode[];
+  _?: string;
+  $$?: PlistNode[];
 }
 
 const plistParser = new Parser({
   explicitChildren: true,
   preserveChildrenOrder: true,
-  explicitRoot: false
+  explicitRoot: false,
 });
 
 const nodeToValue = (node: PlistNode | undefined): PlistValue => {
@@ -52,7 +52,7 @@ const nodeToValue = (node: PlistNode | undefined): PlistValue => {
       return result;
     }
     case "array":
-      return (node.$$ ?? []).map(child => nodeToValue(child));
+      return (node.$$ ?? []).map((child) => nodeToValue(child));
     case "string":
     case "data":
       return node._ ?? "";
@@ -75,16 +75,13 @@ const nodeToValue = (node: PlistNode | undefined): PlistValue => {
  * ordered `Map`s.
  */
 export const parsePlist = async (xml: string): Promise<PlistValue> => {
-  const parsed = await plistParser.parseStringPromise(xml) as PlistNode;
+  const parsed = (await plistParser.parseStringPromise(xml)) as PlistNode;
   const root = parsed["#name"] === "plist" ? parsed.$$?.[0] : parsed;
   return nodeToValue(root);
 };
 
 const escapeXml = (value: string): string =>
-  value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+  value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 const indent = (depth: number): string => "\t".repeat(depth);
 
@@ -142,12 +139,12 @@ const valueToXml = (value: PlistValue, depth: number): string => {
  */
 export const buildPlist = (value: PlistValue): string => {
   return [
-    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
-    "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">",
-    "<plist version=\"1.0\">",
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
+    '<plist version="1.0">',
     valueToXml(value, 0),
     "</plist>",
-    ""
+    "",
   ].join("\n");
 };
 
@@ -162,7 +159,7 @@ export const buildPlist = (value: PlistValue): string => {
  */
 export const injectUITestEnvironment = (
   root: Map<string, PlistValue>,
-  env: Record<string, string>
+  env: Record<string, string>,
 ): number => {
   let injected = 0;
 

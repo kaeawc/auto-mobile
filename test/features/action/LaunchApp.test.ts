@@ -34,21 +34,26 @@ describe("LaunchApp", () => {
     updatedAt: Date.now(),
     screenSize: { width: 1080, height: 1920 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-    viewHierarchy: appId ? { node: {}, packageName: appId } as any : { node: {} },
-    activeWindow: appId ? { appId, activityName: "MainActivity", layoutSeqSum: 1 } : undefined
+    viewHierarchy: appId ? ({ node: {}, packageName: appId } as any) : { node: {} },
+    activeWindow: appId ? { appId, activityName: "MainActivity", layoutSeqSum: 1 } : undefined,
   });
 
   const configureInstalledApp = () => {
     fakeAdb.setCommandResponse("shell pm list packages --user 0", {
       stdout: `package:${packageName}\n`,
-      stderr: ""
+      stderr: "",
     });
     fakeAdb.setCommandResponse("shell pm list packages -s --user 0", { stdout: "", stderr: "" });
   };
 
-  const hasStartedAppLaunch = () => fakeAdb.getExecutedCommands().some(command =>
-    command.includes("shell am start --user 0") || command.includes(`shell monkey -p ${packageName}`)
-  );
+  const hasStartedAppLaunch = () =>
+    fakeAdb
+      .getExecutedCommands()
+      .some(
+        (command) =>
+          command.includes("shell am start --user 0") ||
+          command.includes(`shell monkey -p ${packageName}`),
+      );
 
   beforeEach(() => {
     device = { name: "test-device", platform: "android", deviceId: "device-123" };
@@ -60,7 +65,11 @@ describe("LaunchApp", () => {
 
     fakeObserveScreen.setObserveResult(createObserveResult());
     fakeWindow.configureCachedActiveWindow(null);
-    fakeWindow.configureActiveWindow({ appId: packageName, activityName: "MainActivity", layoutSeqSum: 1 });
+    fakeWindow.configureActiveWindow({
+      appId: packageName,
+      activityName: "MainActivity",
+      layoutSeqSum: 1,
+    });
 
     launchApp = new LaunchApp(device, fakeAdb as unknown as any, null, fakeTimer);
     (launchApp as any).awaitIdle = fakeAwaitIdle;
@@ -90,7 +99,9 @@ describe("LaunchApp", () => {
     expect(result.observation).toBeDefined();
     expect(fakeObserveScreen.getExecuteCallCount()).toBeGreaterThan(0);
     expect(
-      fakeObserveScreen.getExecuteOptions().every(options => options.signal === controller.signal),
+      fakeObserveScreen
+        .getExecuteOptions()
+        .every((options) => options.signal === controller.signal),
     ).toBe(true);
     expect(fakeAwaitIdle.wasMethodCalled("initializeUiStabilityTracking")).toBe(true);
   });
@@ -224,10 +235,10 @@ describe("LaunchApp", () => {
       device.deviceId,
       `device-disconnected:${device.deviceId}`,
     );
-    fakeAdb.setCommandResponse(
-      "android.intent.category.LAUNCHER",
-      { stdout: "Error: launcher intent unavailable", stderr: "" },
-    );
+    fakeAdb.setCommandResponse("android.intent.category.LAUNCHER", {
+      stdout: "Error: launcher intent unavailable",
+      stderr: "",
+    });
     fakeAdb.setCommandError(`shell monkey -p ${packageName}`, new Error("monkey unavailable"));
     const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
       async requestLaunchIntent() {
@@ -248,9 +259,13 @@ describe("LaunchApp", () => {
           controller.signal,
         ),
       ).rejects.toBe(deviceLoss);
-      expect(fakeAdb.getExecutedCommands().some(command =>
-        command.includes("shell pm dump") || command.includes("query-activities")
-      )).toBe(false);
+      expect(
+        fakeAdb
+          .getExecutedCommands()
+          .some(
+            (command) => command.includes("shell pm dump") || command.includes("query-activities"),
+          ),
+      ).toBe(false);
     } finally {
       getInstanceSpy.mockRestore();
     }
@@ -284,12 +299,7 @@ describe("LaunchApp", () => {
     const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
       client as unknown as IOSCtrlProxyClient,
     );
-    const iosLaunchApp = new LaunchApp(
-      iosDevice,
-      fakeAdb as unknown as any,
-      null,
-      fakeTimer,
-    );
+    const iosLaunchApp = new LaunchApp(iosDevice, fakeAdb as unknown as any, null, fakeTimer);
 
     try {
       const wait = (
@@ -319,13 +329,16 @@ describe("LaunchApp", () => {
 
     fakeAdb.setCommandResponse("shell pm list packages --user 0", {
       stdout: `package:${settingsPackageName}\n`,
-      stderr: ""
+      stderr: "",
     });
     fakeAdb.setCommandResponse(resolverCommand, {
       stdout: "Starting: Intent { act=android.intent.action.MAIN }",
-      stderr: ""
+      stderr: "",
     });
-    fakeAdb.setCommandResponse(`shell ps | grep ${settingsPackageName}`, { stdout: "0\n", stderr: "" });
+    fakeAdb.setCommandResponse(`shell ps | grep ${settingsPackageName}`, {
+      stdout: "0\n",
+      stderr: "",
+    });
     fakeAdb.setForegroundApp({ packageName: settingsPackageName, userId: 0 });
     fakeObserveScreen.setObserveResult(createObserveResult(settingsPackageName));
 
@@ -333,8 +346,15 @@ describe("LaunchApp", () => {
 
     expect(result.success).toBe(true);
     expect(result.observation?.activeWindow?.appId).toBe(settingsPackageName);
-    expect(fakeAdb.getExecutedCommands().filter(command => command.includes("shell am start") && command.includes("android.intent.category.LAUNCHER")))
-      .toEqual([resolverCommand]);
+    expect(
+      fakeAdb
+        .getExecutedCommands()
+        .filter(
+          (command) =>
+            command.includes("shell am start") &&
+            command.includes("android.intent.category.LAUNCHER"),
+        ),
+    ).toEqual([resolverCommand]);
     expect(fakeAdb.wasCommandExecuted(`shell monkey -p ${settingsPackageName}`)).toBe(false);
   });
 
@@ -343,10 +363,14 @@ describe("LaunchApp", () => {
     fakeAdb.setForegroundApp({ packageName, userId: 0 });
     fakeAdb.setCommandResponse(`shell ps | grep ${packageName}`, { stdout: "1\n", stderr: "" });
 
-    const clearCalls: Array<{ device: BootedDevice; packageName: string; userId: number | undefined }> = [];
+    const clearCalls: Array<{
+      device: BootedDevice;
+      packageName: string;
+      userId: number | undefined;
+    }> = [];
     const coldBootCalls: Array<{ packageName: string; options: unknown }> = [];
     const lifecycleLaunchApp = new LaunchApp(device, fakeAdb as unknown as any, null, fakeTimer, {
-      createAndroidClearAppData: clearDevice => ({
+      createAndroidClearAppData: (clearDevice) => ({
         execute: async (clearPackageName: string, userId?: number) => {
           expect(hasStartedAppLaunch()).toBe(false);
           clearCalls.push({ device: clearDevice, packageName: clearPackageName, userId });
@@ -385,9 +409,13 @@ describe("LaunchApp", () => {
     fakeAdb.setForegroundApp({ packageName, userId: 0 });
     fakeAdb.setCommandResponse(`shell ps | grep ${packageName}`, { stdout: "0\n", stderr: "" });
 
-    const clearCalls: Array<{ device: BootedDevice; packageName: string; userId: number | undefined }> = [];
+    const clearCalls: Array<{
+      device: BootedDevice;
+      packageName: string;
+      userId: number | undefined;
+    }> = [];
     const lifecycleLaunchApp = new LaunchApp(device, fakeAdb as unknown as any, null, fakeTimer, {
-      createAndroidClearAppData: clearDevice => ({
+      createAndroidClearAppData: (clearDevice) => ({
         execute: async (clearPackageName: string, userId?: number) => {
           expect(hasStartedAppLaunch()).toBe(false);
           clearCalls.push({ device: clearDevice, packageName: clearPackageName, userId });
@@ -412,7 +440,8 @@ describe("LaunchApp", () => {
     fakeAdb.setCommandResponse(`shell ps | grep ${packageName}`, { stdout: "1\n", stderr: "" });
 
     const clearCalls: string[] = [];
-    const coldBootCalls: Array<{ device: BootedDevice; packageName: string; options: unknown }> = [];
+    const coldBootCalls: Array<{ device: BootedDevice; packageName: string; options: unknown }> =
+      [];
     const lifecycleLaunchApp = new LaunchApp(device, fakeAdb as unknown as any, null, fakeTimer, {
       createAndroidClearAppData: () => ({
         execute: async (clearPackageName: string) => {
@@ -420,7 +449,7 @@ describe("LaunchApp", () => {
           return { success: true, packageName: clearPackageName };
         },
       }),
-      createAndroidColdBoot: coldBootDevice => ({
+      createAndroidColdBoot: (coldBootDevice) => ({
         execute: async (coldBootPackageName: string, options?: unknown) => {
           expect(hasStartedAppLaunch()).toBe(false);
           coldBootCalls.push({ device: coldBootDevice, packageName: coldBootPackageName, options });
@@ -443,11 +472,13 @@ describe("LaunchApp", () => {
 
     expect(result.success).toBe(true);
     expect(clearCalls).toEqual([]);
-    expect(coldBootCalls).toEqual([{
-      device,
-      packageName,
-      options: { skipObservation: true, userId: 0 },
-    }]);
+    expect(coldBootCalls).toEqual([
+      {
+        device,
+        packageName,
+        options: { skipObservation: true, userId: 0 },
+      },
+    ]);
     expect(fakeAdb.wasCommandExecuted(`shell monkey -p ${packageName} --user 0 1`)).toBe(true);
   });
 
@@ -479,12 +510,14 @@ describe("LaunchApp", () => {
     const previousPackageName = "com.example.previous";
     const observations = [
       createObserveResult(previousPackageName),
-      createObserveResult(packageName)
+      createObserveResult(packageName),
     ];
 
     fakeAdb.setForegroundApp({ packageName, userId: 0 });
     fakeAdb.setCommandResponse(`shell ps | grep ${packageName}`, { stdout: "0\n", stderr: "" });
-    fakeObserveScreen.setObserveResult(() => observations.shift() ?? createObserveResult(packageName));
+    fakeObserveScreen.setObserveResult(
+      () => observations.shift() ?? createObserveResult(packageName),
+    );
 
     const result = await launchApp.execute(
       packageName,
@@ -501,7 +534,9 @@ describe("LaunchApp", () => {
     expect(result.observation?.viewHierarchy?.packageName).toBe(packageName);
     expect(fakeObserveScreen.getExecuteCallCount()).toBeGreaterThan(1);
     expect(
-      fakeObserveScreen.getExecuteOptions().every(options => options.signal === controller.signal),
+      fakeObserveScreen
+        .getExecuteOptions()
+        .every((options) => options.signal === controller.signal),
     ).toBe(true);
   });
 
@@ -517,9 +552,9 @@ describe("LaunchApp", () => {
         appId: permissionControllerPackageName,
         activityName: "GrantPermissionsActivity",
         layoutSeqSum: 1,
-        type: "notification_permission_dialog"
+        type: "notification_permission_dialog",
       },
-      notificationPermissionDetected: true
+      notificationPermissionDetected: true,
     });
 
     const result = await launchApp.execute(packageName, false, false);
@@ -542,24 +577,25 @@ describe("LaunchApp", () => {
     const result = await launchApp.execute(packageName, false, false);
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain(`Timed out waiting for launch observation to show ${packageName}`);
+    expect(result.error).toContain(
+      `Timed out waiting for launch observation to show ${packageName}`,
+    );
     expect(result.observation).toBeUndefined();
   });
 
   test("runs target user detection and install check in parallel", async () => {
-
     const targetUserDetector = new FakeTargetUserDetector(fakeTimer, {
       delayMs: 50,
-      resolvedUserId: 10
+      resolvedUserId: 10,
     });
     const installedAppsProvider = new FakeInstalledAppsProvider(fakeTimer, {
       delayMs: 50,
-      installedApps: []
+      installedApps: [],
     });
 
     const parallelLaunchApp = new LaunchApp(device, fakeAdb as unknown as any, null, fakeTimer, {
       targetUserDetector,
-      installedAppsProvider
+      installedAppsProvider,
     });
 
     const resultPromise = parallelLaunchApp.execute(packageName, false, false);
@@ -584,20 +620,19 @@ describe("LaunchApp", () => {
   });
 
   test("waits for both preflight tasks to settle when one fails", async () => {
-
     const targetUserDetector = new FakeTargetUserDetector(fakeTimer, {
       delayMs: 50,
-      resolvedUserId: 10
+      resolvedUserId: 10,
     });
     const installedAppsProvider = new FakeInstalledAppsProvider(fakeTimer, {
       delayMs: 50,
       shouldThrow: true,
-      error: new Error("check installed failed")
+      error: new Error("check installed failed"),
     });
 
     const parallelLaunchApp = new LaunchApp(device, fakeAdb as unknown as any, null, fakeTimer, {
       targetUserDetector,
-      installedAppsProvider
+      installedAppsProvider,
     });
 
     const resultPromise = parallelLaunchApp.execute(packageName, false, false);
@@ -616,22 +651,21 @@ describe("LaunchApp", () => {
   });
 
   test("records perf timing for both preflight tasks when one fails", async () => {
-
     const perfTracker = new DefaultPerformanceTracker(fakeTimer);
     const targetUserDetector = new FakeTargetUserDetector(fakeTimer, {
       delayMs: 50,
-      resolvedUserId: 10
+      resolvedUserId: 10,
     });
     const installedAppsProvider = new FakeInstalledAppsProvider(fakeTimer, {
       delayMs: 50,
       shouldThrow: true,
-      error: new Error("check installed failed")
+      error: new Error("check installed failed"),
     });
 
     const perfLaunchApp = new LaunchApp(device, fakeAdb as unknown as any, null, fakeTimer, {
       targetUserDetector,
       installedAppsProvider,
-      performanceTrackerFactory: () => perfTracker
+      performanceTrackerFactory: () => perfTracker,
     });
 
     const resultPromise = perfLaunchApp.execute(packageName, false, false);
@@ -647,37 +681,45 @@ describe("LaunchApp", () => {
     const timings = perfTracker.getTimings();
     expect(Array.isArray(timings)).toBe(true);
 
-    const launchEntry = (timings as any[]).find(entry => entry.name === "launchApp");
+    const launchEntry = (timings as any[]).find((entry) => entry.name === "launchApp");
     expect(launchEntry).toBeDefined();
-    const childNames = (launchEntry.children as any[]).map(entry => entry.name);
+    const childNames = (launchEntry.children as any[]).map((entry) => entry.name);
     expect(childNames).toContain("detectTargetUser");
     expect(childNames).toContain("checkInstalled");
   });
 
   test("launches iOS system apps even when installed list is empty", async () => {
     fakeTimer.enableAutoAdvance();
-    const iosDevice: BootedDevice = { name: "test-ios-device", platform: "ios", deviceId: "11111111-1111-1111-1111-111111111111" };
+    const iosDevice: BootedDevice = {
+      name: "test-ios-device",
+      platform: "ios",
+      deviceId: "11111111-1111-1111-1111-111111111111",
+    };
     const systemBundleId = "com.apple.Preferences";
     const fakeIOSCtrlProxy = new FakeIOSCtrlProxy();
     const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeIOSCtrlProxy as unknown as IOSCtrlProxyClient
+      fakeIOSCtrlProxy as unknown as IOSCtrlProxyClient,
     );
 
     const iosObserveResult: ObserveResult = {
       updatedAt: Date.now(),
       screenSize: { width: 1080, height: 1920 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-      viewHierarchy: { hierarchy: { node: {} }, packageName: systemBundleId } as any
+      viewHierarchy: { hierarchy: { node: {} }, packageName: systemBundleId } as any,
     };
 
     const iosFakeObserveScreen = new FakeObserveScreen();
     iosFakeObserveScreen.setObserveResult(iosObserveResult);
     const iosFakeAwaitIdle = new FakeAwaitIdle();
     const iosFakeWindow = new FakeWindow();
-    iosFakeWindow.configureCachedActiveWindow({ appId: systemBundleId, activityName: "Main", layoutSeqSum: 1 });
+    iosFakeWindow.configureCachedActiveWindow({
+      appId: systemBundleId,
+      activityName: "Main",
+      layoutSeqSum: 1,
+    });
 
     const installedAppsProvider = new FakeInstalledAppsProvider(fakeTimer, {
-      installedApps: []
+      installedApps: [],
     });
 
     const fakeSimctl = {
@@ -690,7 +732,7 @@ describe("LaunchApp", () => {
       fakeAdb as unknown as any,
       fakeSimctl as any,
       fakeTimer,
-      { installedAppsProvider }
+      { installedAppsProvider },
     );
     (iosLaunchApp as any).awaitIdle = iosFakeAwaitIdle;
     (iosLaunchApp as any).observeScreen = iosFakeObserveScreen;
@@ -711,15 +753,16 @@ describe("LaunchApp", () => {
     const userBundleId = "com.example.myapp";
     const systemBundleId = "com.apple.Preferences";
 
-    function createIOSTestHarness(opts: {
-      bundleId: string;
-      launchSuccess?: boolean;
-    }) {
-      const iosDevice: BootedDevice = { name: "test-ios", platform: "ios", deviceId: "22222222-2222-2222-2222-222222222222" };
+    function createIOSTestHarness(opts: { bundleId: string; launchSuccess?: boolean }) {
+      const iosDevice: BootedDevice = {
+        name: "test-ios",
+        platform: "ios",
+        deviceId: "22222222-2222-2222-2222-222222222222",
+      };
       const fakeCtrlProxy = new FakeIOSCtrlProxy();
 
       const ctrlProxySpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        fakeCtrlProxy as unknown as IOSCtrlProxyClient
+        fakeCtrlProxy as unknown as IOSCtrlProxyClient,
       );
 
       const targetBundleIdCalls: string[] = [];
@@ -732,39 +775,61 @@ describe("LaunchApp", () => {
         updatedAt: Date.now(),
         screenSize: { width: 1080, height: 1920 },
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-        viewHierarchy: { hierarchy: { node: {} }, packageName: opts.bundleId } as any
+        viewHierarchy: { hierarchy: { node: {} }, packageName: opts.bundleId } as any,
       });
 
       const iosWindow = new FakeWindow();
-      iosWindow.configureCachedActiveWindow({ appId: opts.bundleId, activityName: "Main", layoutSeqSum: 1 });
+      iosWindow.configureCachedActiveWindow({
+        appId: opts.bundleId,
+        activityName: "Main",
+        layoutSeqSum: 1,
+      });
 
       const installedApps = new FakeInstalledAppsProvider(fakeTimer, {
-        installedApps: [opts.bundleId]
+        installedApps: [opts.bundleId],
       });
 
       const fakeSimctl = {
-        launchApp: async () => opts.launchSuccess === false
-          ? { success: false, error: "simctl launch failed" }
-          : { success: true, pid: 123 },
+        launchApp: async () =>
+          opts.launchSuccess === false
+            ? { success: false, error: "simctl launch failed" }
+            : { success: true, pid: 123 },
         terminateApp: async () => {},
       };
 
-      const iosLaunchApp = new LaunchApp(iosDevice, fakeAdb as unknown as any, fakeSimctl as any, fakeTimer, { installedAppsProvider: installedApps });
+      const iosLaunchApp = new LaunchApp(
+        iosDevice,
+        fakeAdb as unknown as any,
+        fakeSimctl as any,
+        fakeTimer,
+        { installedAppsProvider: installedApps },
+      );
       (iosLaunchApp as any).awaitIdle = new FakeAwaitIdle();
       (iosLaunchApp as any).observeScreen = iosObserveScreen;
       (iosLaunchApp as any).window = iosWindow;
       (iosLaunchApp as any).waitForIosHierarchyReady = async () => {};
 
-      return { iosLaunchApp, targetBundleIdCalls, cleanup: () => { ctrlProxySpy.mockRestore(); managerSpy.mockRestore(); } };
+      return {
+        iosLaunchApp,
+        targetBundleIdCalls,
+        cleanup: () => {
+          ctrlProxySpy.mockRestore();
+          managerSpy.mockRestore();
+        },
+      };
     }
 
     test("sets targetBundleId BEFORE simctl launch so CtrlProxy targets the app, not SpringBoard", async () => {
       fakeTimer.enableAutoAdvance();
-      const iosDevice: BootedDevice = { name: "test-ios", platform: "ios", deviceId: "33333333-3333-3333-3333-333333333333" };
+      const iosDevice: BootedDevice = {
+        name: "test-ios",
+        platform: "ios",
+        deviceId: "33333333-3333-3333-3333-333333333333",
+      };
       const callOrder: string[] = [];
 
       const ctrlProxySpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        new FakeIOSCtrlProxy() as unknown as IOSCtrlProxyClient
+        new FakeIOSCtrlProxy() as unknown as IOSCtrlProxyClient,
       );
       const managerSpy = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
         setTargetBundleId: (id: string) => callOrder.push(`setTargetBundleId:${id}`),
@@ -786,10 +851,22 @@ describe("LaunchApp", () => {
         viewHierarchy: { hierarchy: { node: {} }, packageName: userBundleId } as any,
       });
       const iosWindow = new FakeWindow();
-      iosWindow.configureCachedActiveWindow({ appId: userBundleId, activityName: "Main", layoutSeqSum: 1 });
-      const installedApps = new FakeInstalledAppsProvider(fakeTimer, { installedApps: [userBundleId] });
+      iosWindow.configureCachedActiveWindow({
+        appId: userBundleId,
+        activityName: "Main",
+        layoutSeqSum: 1,
+      });
+      const installedApps = new FakeInstalledAppsProvider(fakeTimer, {
+        installedApps: [userBundleId],
+      });
 
-      const iosLaunchApp = new LaunchApp(iosDevice, fakeAdb as unknown as any, fakeSimctl as any, fakeTimer, { installedAppsProvider: installedApps });
+      const iosLaunchApp = new LaunchApp(
+        iosDevice,
+        fakeAdb as unknown as any,
+        fakeSimctl as any,
+        fakeTimer,
+        { installedAppsProvider: installedApps },
+      );
       (iosLaunchApp as any).awaitIdle = new FakeAwaitIdle();
       (iosLaunchApp as any).observeScreen = iosObserveScreen;
       (iosLaunchApp as any).window = iosWindow;
@@ -799,8 +876,9 @@ describe("LaunchApp", () => {
         await iosLaunchApp.execute(userBundleId, false, false);
         // setTargetBundleId must fire before launch so CtrlProxy receives the
         // bundle ID via SIMCTL_CHILD_CTRL_PROXY_IOS_BUNDLE_ID when it starts.
-        expect(callOrder.indexOf(`setTargetBundleId:${userBundleId}`))
-          .toBeLessThan(callOrder.indexOf(`simctlLaunch:${userBundleId}`));
+        expect(callOrder.indexOf(`setTargetBundleId:${userBundleId}`)).toBeLessThan(
+          callOrder.indexOf(`simctlLaunch:${userBundleId}`),
+        );
       } finally {
         ctrlProxySpy.mockRestore();
         managerSpy.mockRestore();
@@ -809,7 +887,10 @@ describe("LaunchApp", () => {
 
     test("preserves a simulator SDK identity when a warm launch only foregrounds", async () => {
       fakeTimer.enableAutoAdvance();
-      const { iosLaunchApp, cleanup } = createIOSTestHarness({ bundleId: userBundleId, launchSuccess: true });
+      const { iosLaunchApp, cleanup } = createIOSTestHarness({
+        bundleId: userBundleId,
+        launchSuccess: true,
+      });
       const clearedBundleIds: string[] = [];
       const existingClientSpy = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue({
         clearSdkScreenIdentity: (bundleId: string) => clearedBundleIds.push(bundleId),
@@ -828,7 +909,11 @@ describe("LaunchApp", () => {
 
     test("re-observes until the iOS launch observation hierarchy reports the launched bundle", async () => {
       fakeTimer.enableAutoAdvance();
-      const iosDevice: BootedDevice = { name: "test-ios", platform: "ios", deviceId: "44444444-4444-4444-4444-444444444444" };
+      const iosDevice: BootedDevice = {
+        name: "test-ios",
+        platform: "ios",
+        deviceId: "44444444-4444-4444-4444-444444444444",
+      };
       const previousBundleId = "com.apple.Maps";
       const observations = [
         {
@@ -846,7 +931,7 @@ describe("LaunchApp", () => {
       ];
 
       const ctrlProxySpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        new FakeIOSCtrlProxy() as unknown as IOSCtrlProxyClient
+        new FakeIOSCtrlProxy() as unknown as IOSCtrlProxyClient,
       );
       const managerSpy = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
         setTargetBundleId: () => {},
@@ -856,17 +941,32 @@ describe("LaunchApp", () => {
         terminateApp: async () => {},
       };
       const iosObserveScreen = new FakeObserveScreen();
-      iosObserveScreen.setObserveResult(() => observations.shift() ?? {
-        updatedAt: Date.now(),
-        screenSize: { width: 1080, height: 1920 },
-        systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-        viewHierarchy: { hierarchy: { node: {} }, packageName: userBundleId } as any,
-      });
+      iosObserveScreen.setObserveResult(
+        () =>
+          observations.shift() ?? {
+            updatedAt: Date.now(),
+            screenSize: { width: 1080, height: 1920 },
+            systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+            viewHierarchy: { hierarchy: { node: {} }, packageName: userBundleId } as any,
+          },
+      );
       const iosWindow = new FakeWindow();
-      iosWindow.configureCachedActiveWindow({ appId: userBundleId, activityName: "Main", layoutSeqSum: 1 });
-      const installedApps = new FakeInstalledAppsProvider(fakeTimer, { installedApps: [userBundleId] });
+      iosWindow.configureCachedActiveWindow({
+        appId: userBundleId,
+        activityName: "Main",
+        layoutSeqSum: 1,
+      });
+      const installedApps = new FakeInstalledAppsProvider(fakeTimer, {
+        installedApps: [userBundleId],
+      });
 
-      const iosLaunchApp = new LaunchApp(iosDevice, fakeAdb as unknown as any, fakeSimctl as any, fakeTimer, { installedAppsProvider: installedApps });
+      const iosLaunchApp = new LaunchApp(
+        iosDevice,
+        fakeAdb as unknown as any,
+        fakeSimctl as any,
+        fakeTimer,
+        { installedAppsProvider: installedApps },
+      );
       (iosLaunchApp as any).awaitIdle = new FakeAwaitIdle();
       (iosLaunchApp as any).observeScreen = iosObserveScreen;
       (iosLaunchApp as any).window = iosWindow;
@@ -945,10 +1045,14 @@ describe("LaunchApp", () => {
       launchResult?: { success: boolean; pid?: number; error?: string };
       clearResult?: { success: boolean; packageName: string; error?: string };
     }) {
-      const iosDevice: BootedDevice = { name: "test-ios", platform: "ios", deviceId: opts.deviceId };
+      const iosDevice: BootedDevice = {
+        name: "test-ios",
+        platform: "ios",
+        deviceId: opts.deviceId,
+      };
       const fakeCtrlProxy = new FakeIOSCtrlProxy();
       const ctrlProxySpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        fakeCtrlProxy as unknown as IOSCtrlProxyClient
+        fakeCtrlProxy as unknown as IOSCtrlProxyClient,
       );
       const managerSpy = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
         setTargetBundleId: () => {},
@@ -956,12 +1060,17 @@ describe("LaunchApp", () => {
 
       const simctlCalls: string[] = [];
       const fakeSimctl = {
-        launchApp: async (id: string) => { simctlCalls.push(`launch:${id}`); return { success: true, pid: 999 }; },
-        terminateApp: async (id: string) => { simctlCalls.push(`terminate:${id}`); },
+        launchApp: async (id: string) => {
+          simctlCalls.push(`launch:${id}`);
+          return { success: true, pid: 999 };
+        },
+        terminateApp: async (id: string) => {
+          simctlCalls.push(`terminate:${id}`);
+        },
       };
 
       const deviceAppLauncher = new FakeDeviceAppLauncher(
-        opts.launchResult ? { launchResult: opts.launchResult } : {}
+        opts.launchResult ? { launchResult: opts.launchResult } : {},
       );
       const clearCalls: Array<{ bundleId: string; device: BootedDevice; simctl: unknown }> = [];
       const clearAppDataFactory = (clearDevice: BootedDevice, clearSimctl: unknown) => ({
@@ -979,20 +1088,41 @@ describe("LaunchApp", () => {
         viewHierarchy: { hierarchy: { node: {} }, packageName: userBundleId } as any,
       });
       const iosWindow = new FakeWindow();
-      iosWindow.configureCachedActiveWindow({ appId: userBundleId, activityName: "Main", layoutSeqSum: 1 });
-      const installedApps = new FakeInstalledAppsProvider(fakeTimer, { installedApps: [userBundleId] });
-
-      const iosLaunchApp = new LaunchApp(iosDevice, fakeAdb as unknown as any, fakeSimctl as any, fakeTimer, {
-        installedAppsProvider: installedApps,
-        deviceAppLauncher,
-        clearAppDataFactory,
+      iosWindow.configureCachedActiveWindow({
+        appId: userBundleId,
+        activityName: "Main",
+        layoutSeqSum: 1,
       });
+      const installedApps = new FakeInstalledAppsProvider(fakeTimer, {
+        installedApps: [userBundleId],
+      });
+
+      const iosLaunchApp = new LaunchApp(
+        iosDevice,
+        fakeAdb as unknown as any,
+        fakeSimctl as any,
+        fakeTimer,
+        {
+          installedAppsProvider: installedApps,
+          deviceAppLauncher,
+          clearAppDataFactory,
+        },
+      );
       (iosLaunchApp as any).awaitIdle = new FakeAwaitIdle();
       (iosLaunchApp as any).observeScreen = iosObserveScreen;
       (iosLaunchApp as any).window = iosWindow;
       (iosLaunchApp as any).waitForIosHierarchyReady = async () => {};
 
-      return { iosLaunchApp, deviceAppLauncher, simctlCalls, clearCalls, cleanup: () => { ctrlProxySpy.mockRestore(); managerSpy.mockRestore(); } };
+      return {
+        iosLaunchApp,
+        deviceAppLauncher,
+        simctlCalls,
+        clearCalls,
+        cleanup: () => {
+          ctrlProxySpy.mockRestore();
+          managerSpy.mockRestore();
+        },
+      };
     }
 
     test("cold boot on a physical device launches via devicectl (not simctl) and propagates the PID", async () => {
@@ -1002,7 +1132,11 @@ describe("LaunchApp", () => {
         launchResult: { success: true, pid: 4321 },
       });
       try {
-        const result = await iosLaunchApp.execute(userBundleId, /* clearAppData */ false, /* coldBoot */ true);
+        const result = await iosLaunchApp.execute(
+          userBundleId,
+          /* clearAppData */ false,
+          /* coldBoot */ true,
+        );
         expect(result.success).toBe(true);
         expect(result.pid).toBe(4321);
         // Routed through devicectl with cold-boot relaunch semantics.
@@ -1021,7 +1155,9 @@ describe("LaunchApp", () => {
 
     test("cold boot on a device issues no separate terminate — --terminate-existing carries cold-boot semantics", async () => {
       fakeTimer.enableAutoAdvance();
-      const { iosLaunchApp, deviceAppLauncher, simctlCalls, cleanup } = createDeviceHarness({ deviceId: physicalUdid });
+      const { iosLaunchApp, deviceAppLauncher, simctlCalls, cleanup } = createDeviceHarness({
+        deviceId: physicalUdid,
+      });
       try {
         await iosLaunchApp.execute(userBundleId, false, true);
         // Exactly one devicectl round-trip: the launch (with --terminate-existing).
@@ -1036,9 +1172,15 @@ describe("LaunchApp", () => {
 
     test("warm launch on a physical device relaunches via devicectl --terminate-existing", async () => {
       fakeTimer.enableAutoAdvance();
-      const { iosLaunchApp, deviceAppLauncher, simctlCalls, cleanup } = createDeviceHarness({ deviceId: physicalUdid });
+      const { iosLaunchApp, deviceAppLauncher, simctlCalls, cleanup } = createDeviceHarness({
+        deviceId: physicalUdid,
+      });
       try {
-        const result = await iosLaunchApp.execute(userBundleId, /* clearAppData */ false, /* coldBoot */ false);
+        const result = await iosLaunchApp.execute(
+          userBundleId,
+          /* clearAppData */ false,
+          /* coldBoot */ false,
+        );
         expect(result.success).toBe(true);
         expect(deviceAppLauncher.launchCalls).toHaveLength(1);
         expect(deviceAppLauncher.launchCalls[0].terminateExisting).toBe(true);
@@ -1065,9 +1207,14 @@ describe("LaunchApp", () => {
 
     test("clearAppData on a physical device clears via injected transport before devicectl relaunch", async () => {
       fakeTimer.enableAutoAdvance();
-      const { iosLaunchApp, deviceAppLauncher, simctlCalls, clearCalls, cleanup } = createDeviceHarness({ deviceId: physicalUdid });
+      const { iosLaunchApp, deviceAppLauncher, simctlCalls, clearCalls, cleanup } =
+        createDeviceHarness({ deviceId: physicalUdid });
       try {
-        const result = await iosLaunchApp.execute(userBundleId, /* clearAppData */ true, /* coldBoot */ false);
+        const result = await iosLaunchApp.execute(
+          userBundleId,
+          /* clearAppData */ true,
+          /* coldBoot */ false,
+        );
         expect(result.success).toBe(true);
         expect(clearCalls).toHaveLength(1);
         expect(clearCalls[0]).toMatchObject({
@@ -1075,11 +1222,13 @@ describe("LaunchApp", () => {
           device: { deviceId: physicalUdid, platform: "ios" },
         });
         expect(clearCalls[0].simctl).toBe((iosLaunchApp as any).simctl);
-        expect(deviceAppLauncher.launchCalls).toEqual([{
-          deviceUdid: physicalUdid,
-          bundleId: userBundleId,
-          terminateExisting: true,
-        }]);
+        expect(deviceAppLauncher.launchCalls).toEqual([
+          {
+            deviceUdid: physicalUdid,
+            bundleId: userBundleId,
+            terminateExisting: true,
+          },
+        ]);
         expect(simctlCalls).toEqual([]);
       } finally {
         cleanup();
@@ -1088,12 +1237,17 @@ describe("LaunchApp", () => {
 
     test("clearAppData failure on a physical device aborts without devicectl relaunch", async () => {
       fakeTimer.enableAutoAdvance();
-      const { iosLaunchApp, deviceAppLauncher, simctlCalls, clearCalls, cleanup } = createDeviceHarness({
-        deviceId: physicalUdid,
-        clearResult: { success: false, packageName: userBundleId, error: "reinstall failed" },
-      });
+      const { iosLaunchApp, deviceAppLauncher, simctlCalls, clearCalls, cleanup } =
+        createDeviceHarness({
+          deviceId: physicalUdid,
+          clearResult: { success: false, packageName: userBundleId, error: "reinstall failed" },
+        });
       try {
-        const result = await iosLaunchApp.execute(userBundleId, /* clearAppData */ true, /* coldBoot */ false);
+        const result = await iosLaunchApp.execute(
+          userBundleId,
+          /* clearAppData */ true,
+          /* coldBoot */ false,
+        );
         expect(result.success).toBe(false);
         expect(result.error).toContain("Failed to clear app data: reinstall failed");
         expect(clearCalls).toHaveLength(1);
@@ -1111,12 +1265,14 @@ describe("LaunchApp", () => {
 
     test("a simulator UDID still routes through simctl, never devicectl (regression)", async () => {
       fakeTimer.enableAutoAdvance();
-      const { iosLaunchApp, deviceAppLauncher, simctlCalls, cleanup } = createDeviceHarness({ deviceId: simulatorUdid });
+      const { iosLaunchApp, deviceAppLauncher, simctlCalls, cleanup } = createDeviceHarness({
+        deviceId: simulatorUdid,
+      });
       try {
         const result = await iosLaunchApp.execute(userBundleId, false, true);
         expect(result.success).toBe(true);
         // Simulator path untouched: simctl used, devicectl launcher never called.
-        expect(simctlCalls.some(c => c === `launch:${userBundleId}`)).toBe(true);
+        expect(simctlCalls.some((c) => c === `launch:${userBundleId}`)).toBe(true);
         expect(deviceAppLauncher.launchCalls).toHaveLength(0);
       } finally {
         cleanup();
@@ -1126,20 +1282,14 @@ describe("LaunchApp", () => {
     test("stops an iOS clear-data launch when device loss occurs during termination", async () => {
       fakeTimer.enableAutoAdvance();
       const controller = new AbortController();
-      const deviceLoss = new DeviceLostError(
-        simulatorUdid,
-        `device-disconnected:${simulatorUdid}`,
-      );
-      const {
-        iosLaunchApp,
-        deviceAppLauncher,
-        simctlCalls,
-        clearCalls,
-        cleanup,
-      } = createDeviceHarness({ deviceId: simulatorUdid });
-      const simctl = (iosLaunchApp as unknown as {
-        simctl: { terminateApp(bundleId: string): Promise<void> };
-      }).simctl;
+      const deviceLoss = new DeviceLostError(simulatorUdid, `device-disconnected:${simulatorUdid}`);
+      const { iosLaunchApp, deviceAppLauncher, simctlCalls, clearCalls, cleanup } =
+        createDeviceHarness({ deviceId: simulatorUdid });
+      const simctl = (
+        iosLaunchApp as unknown as {
+          simctl: { terminateApp(bundleId: string): Promise<void> };
+        }
+      ).simctl;
       simctl.terminateApp = async (bundleId: string) => {
         simctlCalls.push(`terminate:${bundleId}`);
         controller.abort(deviceLoss);
@@ -1178,11 +1328,15 @@ describe("LaunchApp", () => {
     });
 
     function createClearDataHarness(bundleId: string, opts: { containerPath?: string } = {}) {
-      const iosDevice: BootedDevice = { name: "test-ios", platform: "ios", deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE" };
+      const iosDevice: BootedDevice = {
+        name: "test-ios",
+        platform: "ios",
+        deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
+      };
       const fakeCtrlProxy = new FakeIOSCtrlProxy();
 
       const ctrlProxySpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        fakeCtrlProxy as unknown as IOSCtrlProxyClient
+        fakeCtrlProxy as unknown as IOSCtrlProxyClient,
       );
       const managerSpy = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
         setTargetBundleId: () => {},
@@ -1192,17 +1346,34 @@ describe("LaunchApp", () => {
       const containerPath = opts.containerPath ?? "";
       const calls: string[] = [];
       const fakeSimctl = {
-        launchApp: async (id: string) => { calls.push(`launch:${id}`); return { success: true, pid: 123 }; },
-        terminateApp: async (id: string) => { calls.push(`terminate:${id}`); },
+        launchApp: async (id: string) => {
+          calls.push(`launch:${id}`);
+          return { success: true, pid: 123 };
+        },
+        terminateApp: async (id: string) => {
+          calls.push(`terminate:${id}`);
+        },
         executeCommand: async (command: string) => {
           calls.push(`exec:${command}`);
           const stdout = command.startsWith("get_app_container") ? containerPath : "";
-          return { stdout, stderr: "", trim: () => stdout.trim(), toString: () => stdout, includes: (s: string) => stdout.includes(s) } as any;
+          return {
+            stdout,
+            stderr: "",
+            trim: () => stdout.trim(),
+            toString: () => stdout,
+            includes: (s: string) => stdout.includes(s),
+          } as any;
         },
         executeCommandArgs: async (args: string[]) => {
           calls.push(`exec:${args.join(" ")}`);
           const stdout = args[0] === "get_app_container" ? containerPath : "";
-          return { stdout, stderr: "", trim: () => stdout.trim(), toString: () => stdout, includes: (s: string) => stdout.includes(s) } as any;
+          return {
+            stdout,
+            stderr: "",
+            trim: () => stdout.trim(),
+            toString: () => stdout,
+            includes: (s: string) => stdout.includes(s),
+          } as any;
         },
       };
 
@@ -1214,32 +1385,60 @@ describe("LaunchApp", () => {
         viewHierarchy: { hierarchy: { node: {} }, packageName: bundleId } as any,
       });
       const iosWindow = new FakeWindow();
-      iosWindow.configureCachedActiveWindow({ appId: bundleId, activityName: "Main", layoutSeqSum: 1 });
+      iosWindow.configureCachedActiveWindow({
+        appId: bundleId,
+        activityName: "Main",
+        layoutSeqSum: 1,
+      });
       const installedApps = new FakeInstalledAppsProvider(fakeTimer, { installedApps: [bundleId] });
 
-      const iosLaunchApp = new LaunchApp(iosDevice, fakeAdb as unknown as any, fakeSimctl as any, fakeTimer, { installedAppsProvider: installedApps });
+      const iosLaunchApp = new LaunchApp(
+        iosDevice,
+        fakeAdb as unknown as any,
+        fakeSimctl as any,
+        fakeTimer,
+        { installedAppsProvider: installedApps },
+      );
       (iosLaunchApp as any).awaitIdle = new FakeAwaitIdle();
       (iosLaunchApp as any).observeScreen = iosObserveScreen;
       (iosLaunchApp as any).window = iosWindow;
       (iosLaunchApp as any).waitForIosHierarchyReady = async () => {};
 
-      return { iosLaunchApp, fakeCtrlProxy, calls, cleanup: () => { ctrlProxySpy.mockRestore(); managerSpy.mockRestore(); } };
+      return {
+        iosLaunchApp,
+        fakeCtrlProxy,
+        calls,
+        cleanup: () => {
+          ctrlProxySpy.mockRestore();
+          managerSpy.mockRestore();
+        },
+      };
     }
 
     test("wipes the data container and re-wires CtrlProxy when clearAppData is true", async () => {
       fakeTimer.enableAutoAdvance();
-      const containerPath = await fsp.mkdtemp(nodePath.join(os.tmpdir(), "automobile-launch-clear-"));
+      const containerPath = await fsp.mkdtemp(
+        nodePath.join(os.tmpdir(), "automobile-launch-clear-"),
+      );
       tempDirs.push(containerPath);
-      const { iosLaunchApp, fakeCtrlProxy, calls, cleanup } = createClearDataHarness(userBundleId, { containerPath });
+      const { iosLaunchApp, fakeCtrlProxy, calls, cleanup } = createClearDataHarness(userBundleId, {
+        containerPath,
+      });
       try {
-        const result = await iosLaunchApp.execute(userBundleId, /* clearAppData */ true, /* coldBoot */ false);
+        const result = await iosLaunchApp.execute(
+          userBundleId,
+          /* clearAppData */ true,
+          /* coldBoot */ false,
+        );
         expect(result.success).toBe(true);
         // Data container resolved via get_app_container (the fast clear path)
-        expect(calls.some(c => c.startsWith("exec:get_app_container") && c.includes(userBundleId))).toBe(true);
+        expect(
+          calls.some((c) => c.startsWith("exec:get_app_container") && c.includes(userBundleId)),
+        ).toBe(true);
         // CtrlProxy cache dropped so the hierarchy re-snapshots the fresh launch
         expect(fakeCtrlProxy.clearCacheCallCount).toBeGreaterThan(0);
         // App is relaunched after the wipe
-        expect(calls.some(c => c === `launch:${userBundleId}`)).toBe(true);
+        expect(calls.some((c) => c === `launch:${userBundleId}`)).toBe(true);
       } finally {
         cleanup();
       }
@@ -1250,11 +1449,15 @@ describe("LaunchApp", () => {
       // No containerPath → get_app_container returns empty → clear fails.
       const { iosLaunchApp, calls, cleanup } = createClearDataHarness(userBundleId);
       try {
-        const result = await iosLaunchApp.execute(userBundleId, /* clearAppData */ true, /* coldBoot */ false);
+        const result = await iosLaunchApp.execute(
+          userBundleId,
+          /* clearAppData */ true,
+          /* coldBoot */ false,
+        );
         expect(result.success).toBe(false);
         expect(result.error).toContain("Failed to clear app data");
         // Must NOT launch with stale data
-        expect(calls.some(c => c === `launch:${userBundleId}`)).toBe(false);
+        expect(calls.some((c) => c === `launch:${userBundleId}`)).toBe(false);
       } finally {
         cleanup();
       }
@@ -1264,10 +1467,14 @@ describe("LaunchApp", () => {
       fakeTimer.enableAutoAdvance();
       const { iosLaunchApp, calls, cleanup } = createClearDataHarness(systemBundleId);
       try {
-        const result = await iosLaunchApp.execute(systemBundleId, /* clearAppData */ true, /* coldBoot */ false);
+        const result = await iosLaunchApp.execute(
+          systemBundleId,
+          /* clearAppData */ true,
+          /* coldBoot */ false,
+        );
         expect(result.success).toBe(true);
         // No get_app_container resolution for system bundles
-        expect(calls.some(c => c.startsWith("exec:get_app_container"))).toBe(false);
+        expect(calls.some((c) => c.startsWith("exec:get_app_container"))).toBe(false);
       } finally {
         cleanup();
       }

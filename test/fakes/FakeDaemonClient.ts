@@ -27,8 +27,14 @@ export class FakeDaemonClient implements DaemonClientLike {
   private toolResult: any;
   private resourceResult: any;
   private daemonMethodResults: Map<string, any>;
-  private readonly onCallTool?: (toolName: string, params: Record<string, any>) => void | Promise<void>;
-  private readonly onCallDaemonMethod?: (method: string, params: Record<string, any>) => void | Promise<void>;
+  private readonly onCallTool?: (
+    toolName: string,
+    params: Record<string, any>,
+  ) => void | Promise<void>;
+  private readonly onCallDaemonMethod?: (
+    method: string,
+    params: Record<string, any>,
+  ) => void | Promise<void>;
   private readonly notificationHandlers = new Set<(notification: DaemonNotification) => void>();
   subscribeToNotificationsCalls = 0;
   shouldFailConnect = false;

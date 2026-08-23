@@ -12,10 +12,10 @@ export interface ChecksumCalculatorContractFactory {
 
 export const runChecksumCalculatorContract = (
   description: string,
-  factory: ChecksumCalculatorContractFactory
+  factory: ChecksumCalculatorContractFactory,
 ): void => {
-  describe(`ChecksumCalculator contract: ${description}`, function() {
-    test("computes a SHA-256 checksum for a file", async function() {
+  describe(`ChecksumCalculator contract: ${description}`, function () {
+    test("computes a SHA-256 checksum for a file", async function () {
       const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "checksum-contract-"));
       try {
         const filePath = path.join(tempDir, "file.bin");
@@ -32,9 +32,10 @@ export const runChecksumCalculatorContract = (
       }
     });
 
-    test("rejects a missing file instead of fabricating a checksum", async function() {
-      await expect(factory.makeFailure().computeFileSha256("/missing-contract-file.bin"))
-        .rejects.toThrow();
+    test("rejects a missing file instead of fabricating a checksum", async function () {
+      await expect(
+        factory.makeFailure().computeFileSha256("/missing-contract-file.bin"),
+      ).rejects.toThrow();
     });
   });
 };

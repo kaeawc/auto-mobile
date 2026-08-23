@@ -8,9 +8,9 @@ const makeElement = (index: number, overrides: Partial<Element> = {}): Element =
     left: index * 10,
     top: index * 10,
     right: index * 10 + 5,
-    bottom: index * 10 + 5
+    bottom: index * 10 + 5,
   },
-  ...overrides
+  ...overrides,
 });
 
 describe("FocusPathCalculator", () => {
@@ -34,7 +34,7 @@ describe("FocusPathCalculator", () => {
       makeElement(4, { "resource-id": "e" }),
       makeElement(5, { "resource-id": "f" }),
       makeElement(6, { "resource-id": "g" }),
-      makeElement(7, { "resource-id": "h" })
+      makeElement(7, { "resource-id": "h" }),
     ];
     const currentFocus = orderedElements[1];
     const targetSelector: FocusElementSelector = { resourceId: "h" };
@@ -55,7 +55,7 @@ describe("FocusPathCalculator", () => {
       makeElement(1, { "resource-id": "b" }),
       makeElement(2, { "resource-id": "c" }),
       makeElement(3, { "resource-id": "d" }),
-      makeElement(4, { "resource-id": "e" })
+      makeElement(4, { "resource-id": "e" }),
     ];
     const currentFocus = orderedElements[4];
     const targetSelector: FocusElementSelector = { resourceId: "b" };
@@ -74,7 +74,7 @@ describe("FocusPathCalculator", () => {
     const orderedElements = [
       makeElement(0, { "resource-id": "a" }),
       makeElement(1, { "resource-id": "b" }),
-      makeElement(2, { "resource-id": "c" })
+      makeElement(2, { "resource-id": "c" }),
     ];
     const targetSelector: FocusElementSelector = { resourceId: "c" };
 
@@ -91,7 +91,7 @@ describe("FocusPathCalculator", () => {
     const calculator = new FocusPathCalculator();
     const orderedElements = [
       makeElement(0, { text: "Save changes" }),
-      makeElement(1, { text: "Discard" })
+      makeElement(1, { text: "Discard" }),
     ];
     const targetSelector: FocusElementSelector = { text: "Save" };
 
@@ -105,7 +105,7 @@ describe("FocusPathCalculator", () => {
     const calculator = new FocusPathCalculator();
     const orderedElements = [
       makeElement(0, { "resource-id": "a" }),
-      makeElement(1, { "resource-id": "b" })
+      makeElement(1, { "resource-id": "b" }),
     ];
     const currentFocus = makeElement(99, { "resource-id": "missing" });
     const targetSelector: FocusElementSelector = { resourceId: "b" };
@@ -121,14 +121,26 @@ describe("FocusPathCalculator", () => {
     const calculator = new FocusPathCalculator();
     // Three list items with the same resource-id but different bounds
     const orderedElements = [
-      makeElement(0, { "resource-id": "list_item", "text": "Item 1", "bounds": { left: 0, top: 0, right: 100, bottom: 50 } }),
-      makeElement(1, { "resource-id": "list_item", "text": "Item 2", "bounds": { left: 0, top: 50, right: 100, bottom: 100 } }),
-      makeElement(2, { "resource-id": "list_item", "text": "Item 3", "bounds": { left: 0, top: 100, right: 100, bottom: 150 } })
+      makeElement(0, {
+        "resource-id": "list_item",
+        text: "Item 1",
+        bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+      }),
+      makeElement(1, {
+        "resource-id": "list_item",
+        text: "Item 2",
+        bounds: { left: 0, top: 50, right: 100, bottom: 100 },
+      }),
+      makeElement(2, {
+        "resource-id": "list_item",
+        text: "Item 3",
+        bounds: { left: 0, top: 100, right: 100, bottom: 150 },
+      }),
     ];
     // Target the second item using bounds
     const targetSelector: FocusElementSelector = {
       resourceId: "list_item",
-      bounds: { left: 0, top: 50, right: 100, bottom: 100 }
+      bounds: { left: 0, top: 50, right: 100, bottom: 100 },
     };
 
     const path = calculator.calculatePath(null, targetSelector, orderedElements);
@@ -142,13 +154,21 @@ describe("FocusPathCalculator", () => {
   test("falls back to first visible match when bounds do not match any element", () => {
     const calculator = new FocusPathCalculator();
     const orderedElements = [
-      makeElement(0, { "resource-id": "list_item", "text": "Item 1", "bounds": { left: 0, top: 0, right: 100, bottom: 50 } }),
-      makeElement(1, { "resource-id": "list_item", "text": "Item 2", "bounds": { left: 0, top: 50, right: 100, bottom: 100 } })
+      makeElement(0, {
+        "resource-id": "list_item",
+        text: "Item 1",
+        bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+      }),
+      makeElement(1, {
+        "resource-id": "list_item",
+        text: "Item 2",
+        bounds: { left: 0, top: 50, right: 100, bottom: 100 },
+      }),
     ];
     // Provide bounds that don't match any element
     const targetSelector: FocusElementSelector = {
       resourceId: "list_item",
-      bounds: { left: 999, top: 999, right: 999, bottom: 999 }
+      bounds: { left: 999, top: 999, right: 999, bottom: 999 },
     };
 
     const path = calculator.calculatePath(null, targetSelector, orderedElements);

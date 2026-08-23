@@ -56,7 +56,10 @@ import { NetworkState } from "../../../../src/server/NetworkState";
 import { RequestManager } from "../../../../src/utils/RequestManager";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 
-const FIXTURE_PATH = resolve(import.meta.dir, "../../../fixtures/ios-ctrlproxy-request-snapshots.json");
+const FIXTURE_PATH = resolve(
+  import.meta.dir,
+  "../../../fixtures/ios-ctrlproxy-request-snapshots.json",
+);
 
 /**
  * `requestId` values are generated per call (`RequestManager.generateId`), so captured
@@ -83,10 +86,13 @@ function createHarness(): Harness {
   const sent: string[] = [];
   const requestManager = new RequestManager(timer);
   const context: HierarchyDelegateContext = {
-    getWebSocket: () => ({
-      send: (data: string) => { sent.push(data); },
-      readyState: 1,
-    } as any),
+    getWebSocket: () =>
+      ({
+        send: (data: string) => {
+          sent.push(data);
+        },
+        readyState: 1,
+      }) as any,
     requestManager,
     timer,
     ensureConnected: async () => true,
@@ -122,231 +128,312 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
   {
     name: "request_hierarchy",
     builder: "CtrlProxyHierarchy.requestHierarchySync (disableAllFiltering=true)",
-    invoke: h => new CtrlProxyHierarchy(h.context).requestHierarchySync(undefined, true),
+    invoke: (h) => new CtrlProxyHierarchy(h.context).requestHierarchySync(undefined, true),
     resolveWith: {},
   },
   {
     name: "request_hierarchy_if_stale",
     builder: "CtrlProxyHierarchy.requestHierarchySync (disableAllFiltering=false)",
-    invoke: h => new CtrlProxyHierarchy(h.context).requestHierarchySync(undefined, false),
+    invoke: (h) => new CtrlProxyHierarchy(h.context).requestHierarchySync(undefined, false),
     resolveWith: {},
   },
   {
     name: "request_screenshot",
     builder: "CtrlProxyScreenshot.requestScreenshot",
-    invoke: h => new CtrlProxyScreenshot(h.context).requestScreenshot(),
+    invoke: (h) => new CtrlProxyScreenshot(h.context).requestScreenshot(),
   },
   {
     name: "request_tap_coordinates",
-    builder: "SharedGestureDelegate.requestTapCoordinates (via CtrlProxyGestures, roundCoordinates=false)",
-    invoke: h => new CtrlProxyGestures(h.context).requestTapCoordinates(120.5, 240.25, 35),
+    builder:
+      "SharedGestureDelegate.requestTapCoordinates (via CtrlProxyGestures, roundCoordinates=false)",
+    invoke: (h) => new CtrlProxyGestures(h.context).requestTapCoordinates(120.5, 240.25, 35),
   },
   {
     name: "request_swipe",
     builder: "SharedGestureDelegate.requestSwipe (via CtrlProxyGestures)",
-    invoke: h => new CtrlProxyGestures(h.context).requestSwipe(10.5, 20.25, 300.75, 401.5, 275),
+    invoke: (h) => new CtrlProxyGestures(h.context).requestSwipe(10.5, 20.25, 300.75, 401.5, 275),
   },
   {
     name: "request_drag",
     builder: "SharedGestureDelegate.requestDrag (via CtrlProxyGestures)",
-    invoke: h => new CtrlProxyGestures(h.context).requestDrag(11.5, 22.25, 33.75, 44.5, 350, 900, 150, 5000),
+    invoke: (h) =>
+      new CtrlProxyGestures(h.context).requestDrag(11.5, 22.25, 33.75, 44.5, 350, 900, 150, 5000),
   },
   {
     name: "request_pinch",
     builder: "SharedGestureDelegate.requestPinch (via CtrlProxyGestures)",
-    invoke: h => new CtrlProxyGestures(h.context).requestPinch(160.5, 320.25, 80.5, 200.75, 45.5, 275),
+    invoke: (h) =>
+      new CtrlProxyGestures(h.context).requestPinch(160.5, 320.25, 80.5, 200.75, 45.5, 275),
   },
   {
     name: "request_multi_finger_swipe",
     builder: "CtrlProxyGestures.requestMultiFingerSwipe",
-    invoke: h => new CtrlProxyGestures(h.context)
-      .requestMultiFingerSwipe(15.5, 25.25, 35.75, 46.5, 3, 450, 5000, undefined, 24.5),
+    invoke: (h) =>
+      new CtrlProxyGestures(h.context).requestMultiFingerSwipe(
+        15.5,
+        25.25,
+        35.75,
+        46.5,
+        3,
+        450,
+        5000,
+        undefined,
+        24.5,
+      ),
   },
   {
     name: "request_set_text",
     builder: "SharedTextDelegate.requestSetText (via CtrlProxyText)",
-    invoke: h => new CtrlProxyText(h.context).requestSetText("hello world", { resourceId: "login_username_field" }),
+    invoke: (h) =>
+      new CtrlProxyText(h.context).requestSetText("hello world", {
+        resourceId: "login_username_field",
+      }),
   },
   {
     name: "request_append_text",
     builder: "CtrlProxyText.requestAppendText",
-    invoke: h => new CtrlProxyText(h.context).requestAppendText("a", 5000, undefined, "frame-context"),
+    invoke: (h) =>
+      new CtrlProxyText(h.context).requestAppendText("a", 5000, undefined, "frame-context"),
   },
   {
     name: "request_clear_text",
     builder: "CtrlProxyText.requestClearText",
-    invoke: h => new CtrlProxyText(h.context).requestClearText("login_username_field"),
+    invoke: (h) => new CtrlProxyText(h.context).requestClearText("login_username_field"),
   },
   {
     name: "request_ime_action",
     builder: "SharedTextDelegate.requestImeAction (via CtrlProxyText)",
-    invoke: h => new CtrlProxyText(h.context).requestImeAction("done"),
+    invoke: (h) => new CtrlProxyText(h.context).requestImeAction("done"),
   },
   {
     name: "request_select_all",
     builder: "SharedTextDelegate.requestSelectAll (via CtrlProxyText)",
-    invoke: h => new CtrlProxyText(h.context).requestSelectAll(),
+    invoke: (h) => new CtrlProxyText(h.context).requestSelectAll(),
   },
   {
     name: "request_keyboard",
     builder: "CtrlProxyKeyboard.requestKeyboard",
-    invoke: h => new CtrlProxyKeyboard(h.context).requestKeyboard("open"),
+    invoke: (h) => new CtrlProxyKeyboard(h.context).requestKeyboard("open"),
   },
   {
     name: "request_press_button",
     builder: "CtrlProxyNavigation.requestPressButton",
-    invoke: h => new CtrlProxyNavigation(h.context).requestPressButton("volume_up", 5000, undefined, "frame-context"),
+    invoke: (h) =>
+      new CtrlProxyNavigation(h.context).requestPressButton(
+        "volume_up",
+        5000,
+        undefined,
+        "frame-context",
+      ),
   },
   {
     name: "request_press_home",
     builder: "CtrlProxyNavigation.requestPressHome",
-    invoke: h => new CtrlProxyNavigation(h.context).requestPressHome(5000, undefined, "frame-context"),
+    invoke: (h) =>
+      new CtrlProxyNavigation(h.context).requestPressHome(5000, undefined, "frame-context"),
   },
   {
     name: "request_press_back",
     builder: "CtrlProxyNavigation.requestPressBack",
-    invoke: h => new CtrlProxyNavigation(h.context).requestPressBack(5000, undefined, "frame-context"),
+    invoke: (h) =>
+      new CtrlProxyNavigation(h.context).requestPressBack(5000, undefined, "frame-context"),
   },
   {
     name: "request_shake",
     builder: "CtrlProxyNavigation.requestShake",
-    invoke: h => new CtrlProxyNavigation(h.context).requestShake(),
+    invoke: (h) => new CtrlProxyNavigation(h.context).requestShake(),
   },
   {
     name: "request_recent_apps",
     builder: "CtrlProxyNavigation.requestRecentApps",
-    invoke: h => new CtrlProxyNavigation(h.context).requestRecentApps(5000, undefined, "frame-context"),
+    invoke: (h) =>
+      new CtrlProxyNavigation(h.context).requestRecentApps(5000, undefined, "frame-context"),
   },
   {
     name: "request_action",
     builder: "CtrlProxyVoiceOver.requestAction (resourceId + label lookup)",
-    invoke: h => new CtrlProxyVoiceOver(h.context).requestAction("scroll_forward", "primary_table", "Primary Table"),
+    invoke: (h) =>
+      new CtrlProxyVoiceOver(h.context).requestAction(
+        "scroll_forward",
+        "primary_table",
+        "Primary Table",
+      ),
   },
   {
     name: "request_action_voiceover_activate",
     builder: "CtrlProxyVoiceOver.requestVoiceOverActivate (label-only lookup)",
-    invoke: h => new CtrlProxyVoiceOver(h.context).requestVoiceOverActivate("Submit", "activate"),
+    invoke: (h) => new CtrlProxyVoiceOver(h.context).requestVoiceOverActivate("Submit", "activate"),
   },
   {
     name: "request_action_null_lookup",
     builder: "CtrlProxyVoiceOver.requestAction (explicit-null resourceId/label)",
-    invoke: h => new CtrlProxyVoiceOver(h.context).requestAction("scroll_backward"),
+    invoke: (h) => new CtrlProxyVoiceOver(h.context).requestAction("scroll_backward"),
   },
   {
     name: "request_launch_app",
     builder: "CtrlProxyNavigation.requestLaunchApp",
-    invoke: h => new CtrlProxyNavigation(h.context).requestLaunchApp("com.example.app", 10000, undefined, true),
+    invoke: (h) =>
+      new CtrlProxyNavigation(h.context).requestLaunchApp(
+        "com.example.app",
+        10000,
+        undefined,
+        true,
+      ),
   },
   {
     name: "request_rotate",
     builder: "CtrlProxyNavigation.requestRotate",
-    invoke: h => new CtrlProxyNavigation(h.context).requestRotate("landscape"),
+    invoke: (h) => new CtrlProxyNavigation(h.context).requestRotate("landscape"),
   },
   {
     name: "request_clipboard",
     builder: "CtrlProxyClipboard.requestClipboard",
-    invoke: h => new CtrlProxyClipboard(h.context).requestClipboard("copy", "clipboard text"),
+    invoke: (h) => new CtrlProxyClipboard(h.context).requestClipboard("copy", "clipboard text"),
   },
   {
     name: "add_highlight_box",
-    builder: "CtrlProxyHighlights.requestAddHighlight (box shape; bounds are rounded by the builder)",
-    invoke: h => new CtrlProxyHighlights(h.context).requestAddHighlight("hl-1", {
-      type: "box",
-      bounds: { x: 10.4, y: 20.6, width: 100.2, height: 50.5, sourceWidth: 390, sourceHeight: 844 },
-      style: {
-        strokeColor: "#FF0000",
-        strokeWidth: 3.5,
-        dashPattern: [4, 2],
-        smoothing: "bezier",
-        tension: 0.5,
-        capStyle: "round",
-        joinStyle: "miter",
-      },
-    }),
+    builder:
+      "CtrlProxyHighlights.requestAddHighlight (box shape; bounds are rounded by the builder)",
+    invoke: (h) =>
+      new CtrlProxyHighlights(h.context).requestAddHighlight("hl-1", {
+        type: "box",
+        bounds: {
+          x: 10.4,
+          y: 20.6,
+          width: 100.2,
+          height: 50.5,
+          sourceWidth: 390,
+          sourceHeight: 844,
+        },
+        style: {
+          strokeColor: "#FF0000",
+          strokeWidth: 3.5,
+          dashPattern: [4, 2],
+          smoothing: "bezier",
+          tension: 0.5,
+          capStyle: "round",
+          joinStyle: "miter",
+        },
+      }),
   },
   {
     name: "add_highlight_path",
     builder: "CtrlProxyHighlights.requestAddHighlight (path shape with points)",
-    invoke: h => new CtrlProxyHighlights(h.context).requestAddHighlight("hl-2", {
-      type: "path",
-      points: [{ x: 1.5, y: 2.5 }, { x: 3.5, y: 4.5 }],
-      bounds: { x: 1, y: 2, width: 10, height: 12 },
-    }),
+    invoke: (h) =>
+      new CtrlProxyHighlights(h.context).requestAddHighlight("hl-2", {
+        type: "path",
+        points: [
+          { x: 1.5, y: 2.5 },
+          { x: 3.5, y: 4.5 },
+        ],
+        bounds: { x: 1, y: 2, width: 10, height: 12 },
+      }),
   },
   {
     name: "request_reset_permissions",
     builder: "CtrlProxyPermissions.requestResetPermissions",
-    invoke: h => new CtrlProxyPermissions(h.context).requestResetPermissions("com.example.app", ["camera", "photos"]),
+    invoke: (h) =>
+      new CtrlProxyPermissions(h.context).requestResetPermissions("com.example.app", [
+        "camera",
+        "photos",
+      ]),
   },
   {
     name: "get_voiceover_state",
     builder: "CtrlProxyVoiceOver.requestVoiceOverState",
-    invoke: h => new CtrlProxyVoiceOver(h.context).requestVoiceOverState(),
+    invoke: (h) => new CtrlProxyVoiceOver(h.context).requestVoiceOverState(),
   },
   {
     name: "list_preference_files",
     builder: "CtrlProxyStorage.listPreferenceFiles",
-    invoke: h => new CtrlProxyStorage(h.context).listPreferenceFiles("unused"),
+    invoke: (h) => new CtrlProxyStorage(h.context).listPreferenceFiles("unused"),
     resolveWith: { success: true, files: [] },
   },
   {
     name: "get_preferences",
     builder: "CtrlProxyStorage.getPreferenceEntries",
-    invoke: h => new CtrlProxyStorage(h.context).getPreferenceEntries("unused", "Standard"),
+    invoke: (h) => new CtrlProxyStorage(h.context).getPreferenceEntries("unused", "Standard"),
     resolveWith: { success: true, entries: [] },
   },
   {
     name: "get_preference",
     builder: "CtrlProxyStorage.getPreference",
-    invoke: h => new CtrlProxyStorage(h.context).getPreference("unused", "Standard", "launch_count"),
+    invoke: (h) =>
+      new CtrlProxyStorage(h.context).getPreference("unused", "Standard", "launch_count"),
     resolveWith: { success: true, found: false },
   },
   {
     name: "set_preference",
     builder: "CtrlProxyStorage.setPreference",
-    invoke: h => new CtrlProxyStorage(h.context).setPreference("unused", "Standard", "launch_count", "42", "INT"),
+    invoke: (h) =>
+      new CtrlProxyStorage(h.context).setPreference(
+        "unused",
+        "Standard",
+        "launch_count",
+        "42",
+        "INT",
+      ),
     resolveWith: { success: true },
   },
   {
     name: "remove_preference",
     builder: "CtrlProxyStorage.removePreference",
-    invoke: h => new CtrlProxyStorage(h.context).removePreference("unused", "Standard", "launch_count"),
+    invoke: (h) =>
+      new CtrlProxyStorage(h.context).removePreference("unused", "Standard", "launch_count"),
     resolveWith: { success: true },
   },
   {
     name: "clear_preferences",
     builder: "CtrlProxyStorage.clearPreferenceStore",
-    invoke: h => new CtrlProxyStorage(h.context).clearPreferenceStore("unused", "Standard"),
+    invoke: (h) => new CtrlProxyStorage(h.context).clearPreferenceStore("unused", "Standard"),
     resolveWith: { success: true },
   },
   {
     name: "execute_sql",
     builder: "CtrlProxyDatabase.executeSQL",
-    invoke: h => new CtrlProxyDatabase(h.context).executeSQL("com.example.app", "/Documents/app.sqlite", "SELECT * FROM users"),
+    invoke: (h) =>
+      new CtrlProxyDatabase(h.context).executeSQL(
+        "com.example.app",
+        "/Documents/app.sqlite",
+        "SELECT * FROM users",
+      ),
     resolveWith: { success: true, totalTimeMs: 1, queryType: "query", columns: [], rows: [] },
   },
   {
     name: "list_databases",
     builder: "CtrlProxyDatabase.listDatabases",
-    invoke: h => new CtrlProxyDatabase(h.context).listDatabases("com.example.app"),
+    invoke: (h) => new CtrlProxyDatabase(h.context).listDatabases("com.example.app"),
     resolveWith: { success: true, totalTimeMs: 1, databases: [] },
   },
   {
     name: "list_tables",
     builder: "CtrlProxyDatabase.listTables",
-    invoke: h => new CtrlProxyDatabase(h.context).listTables("com.example.app", "/Documents/app.sqlite"),
+    invoke: (h) =>
+      new CtrlProxyDatabase(h.context).listTables("com.example.app", "/Documents/app.sqlite"),
     resolveWith: { success: true, totalTimeMs: 1, tables: [] },
   },
   {
     name: "get_table_data",
     builder: "CtrlProxyDatabase.getTableData",
-    invoke: h => new CtrlProxyDatabase(h.context).getTableData("com.example.app", "/Documents/app.sqlite", "users", 25, 10),
+    invoke: (h) =>
+      new CtrlProxyDatabase(h.context).getTableData(
+        "com.example.app",
+        "/Documents/app.sqlite",
+        "users",
+        25,
+        10,
+      ),
     resolveWith: { success: true, totalTimeMs: 1, columns: [], rows: [], total: 0 },
   },
   {
     name: "get_table_structure",
     builder: "CtrlProxyDatabase.getTableStructure",
-    invoke: h => new CtrlProxyDatabase(h.context).getTableStructure("com.example.app", "/Documents/app.sqlite", "users"),
+    invoke: (h) =>
+      new CtrlProxyDatabase(h.context).getTableStructure(
+        "com.example.app",
+        "/Documents/app.sqlite",
+        "users",
+      ),
     resolveWith: { success: true, totalTimeMs: 1, columns: [] },
   },
 ];
@@ -370,7 +457,7 @@ function buildNetworkMockRulesSnapshot(): Record<string, unknown> {
     remaining: 3,
     statusCode: 200,
     responseHeaders: { "X-Mocked": "true" },
-    responseBody: "{\"users\":[]}",
+    responseBody: '{"users":[]}',
     contentType: "application/json",
   });
   const rules = buildNetworkMockRules(state);
@@ -389,7 +476,10 @@ async function captureWire(spec: SnapshotSpec): Promise<Record<string, unknown>>
   }
   expect(h.sent.length).toBe(1);
   const wire = JSON.parse(h.sent[0]) as Record<string, unknown>;
-  h.requestManager.resolve(wire.requestId as string, spec.resolveWith ?? { success: true, totalTimeMs: 1 });
+  h.requestManager.resolve(
+    wire.requestId as string,
+    spec.resolveWith ?? { success: true, totalTimeMs: 1 },
+  );
   await promise;
   return wire;
 }
@@ -412,8 +502,10 @@ async function captureAllSnapshots(): Promise<Map<string, Record<string, unknown
 }
 
 function builderDoc(name: string): string {
-  return SNAPSHOT_SPECS.find(s => s.name === name)?.builder
-    ?? "IOSCtrlProxyClient.syncNetworkMockRulesToDevice (envelope transcribed; rules built by buildNetworkMockRules)";
+  return (
+    SNAPSHOT_SPECS.find((s) => s.name === name)?.builder ??
+    "IOSCtrlProxyClient.syncNetworkMockRulesToDevice (envelope transcribed; rules built by buildNetworkMockRules)"
+  );
 }
 
 function loadFixture(): FixtureFile {
@@ -440,7 +532,7 @@ describe("iOS control-proxy — request snapshot fixture matches live TS builder
     const fixture = loadFixture();
     // Same snapshot set on both sides — a spec added here without a fixture entry (or a
     // stale fixture entry with no live spec) fails before any per-field comparison.
-    expect([...captured.keys()].sort()).toEqual(fixture.snapshots.map(s => s.name).sort());
+    expect([...captured.keys()].sort()).toEqual(fixture.snapshots.map((s) => s.name).sort());
 
     for (const snapshot of fixture.snapshots) {
       // Full deep equality: a renamed, added, dropped, or re-valued field in any TS
@@ -450,7 +542,7 @@ describe("iOS control-proxy — request snapshot fixture matches live TS builder
   });
 
   test("fixture snapshot names are unique", () => {
-    const names = loadFixture().snapshots.map(s => s.name);
+    const names = loadFixture().snapshots.map((s) => s.name);
     expect(new Set(names).size).toBe(names.length);
   });
 
@@ -461,7 +553,7 @@ describe("iOS control-proxy — request snapshot fixture matches live TS builder
   });
 
   test("the acceptance-critical commands are covered", () => {
-    const covered = new Set(loadFixture().snapshots.map(s => s.wire.type as string));
+    const covered = new Set(loadFixture().snapshots.map((s) => s.wire.type as string));
     const required = [
       "request_action",
       "request_set_text",
@@ -483,6 +575,6 @@ describe("iOS control-proxy — request snapshot fixture matches live TS builder
       "get_table_data",
       "get_table_structure",
     ];
-    expect(required.filter(t => !covered.has(t))).toEqual([]);
+    expect(required.filter((t) => !covered.has(t))).toEqual([]);
   });
 });

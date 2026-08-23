@@ -1,5 +1,11 @@
-import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
-import { DefaultHostCommandExecutor, type HostCommandExecutor } from "../../utils/HostCommandExecutor";
+import {
+  AdbClientFactory,
+  defaultAdbClientFactory,
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  DefaultHostCommandExecutor,
+  type HostCommandExecutor,
+} from "../../utils/HostCommandExecutor";
 import { logger } from "../../utils/logger";
 import type { Timer } from "../../utils/SystemTimer";
 import { defaultTimer } from "../../utils/SystemTimer";
@@ -14,7 +20,7 @@ import {
   SetCalendarSystemResult,
   SetLocaleResult,
   SetTextDirectionResult,
-  SetTimeZoneResult
+  SetTimeZoneResult,
 } from "../../models";
 
 const SPRINGBOARD_POLL_INTERVAL_MS = 500;
@@ -37,7 +43,7 @@ export class SystemConfigurationManager {
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     processExecutor: HostCommandExecutor = new DefaultHostCommandExecutor(),
-    timer: Timer = defaultTimer
+    timer: Timer = defaultTimer,
   ) {
     this.device = device;
     this.processExecutor = processExecutor;
@@ -45,17 +51,20 @@ export class SystemConfigurationManager {
     this.adapter = createSystemConfigurationAdapter(
       device,
       adbFactory.create(device),
-      processExecutor
+      processExecutor,
     );
   }
 
-  async setLocale(languageTag: string, options: { broadcast?: boolean; appId?: string } = {}): Promise<SetLocaleResult> {
+  async setLocale(
+    languageTag: string,
+    options: { broadcast?: boolean; appId?: string } = {},
+  ): Promise<SetLocaleResult> {
     const trimmedTag = languageTag.trim();
     if (!trimmedTag) {
       return {
         success: false,
         languageTag,
-        error: "languageTag must be a non-empty string"
+        error: "languageTag must be a non-empty string",
       };
     }
     return this.adapter.setLocale(trimmedTag, options);
@@ -67,13 +76,16 @@ export class SystemConfigurationManager {
       return {
         success: false,
         zoneId,
-        error: "zoneId must be a non-empty string"
+        error: "zoneId must be a non-empty string",
       };
     }
     return this.adapter.setTimeZone(trimmedZone);
   }
 
-  async setTextDirection(rtl: boolean, options: { broadcast?: boolean } = {}): Promise<SetTextDirectionResult> {
+  async setTextDirection(
+    rtl: boolean,
+    options: { broadcast?: boolean } = {},
+  ): Promise<SetTextDirectionResult> {
     return this.adapter.setTextDirection(rtl, options);
   }
 
@@ -91,7 +103,7 @@ export class SystemConfigurationManager {
       return {
         success: false,
         calendarSystem,
-        error: "calendarSystem must be a non-empty string"
+        error: "calendarSystem must be a non-empty string",
       };
     }
     return this.adapter.setCalendarSystem(trimmed);
@@ -119,7 +131,12 @@ export class SystemConfigurationManager {
 
     try {
       await this.processExecutor.executeCommand("xcrun", [
-        "simctl", "spawn", this.device.deviceId, "launchctl", "stop", "com.apple.SpringBoard"
+        "simctl",
+        "spawn",
+        this.device.deviceId,
+        "launchctl",
+        "stop",
+        "com.apple.SpringBoard",
       ]);
     } catch (error) {
       logger.warn(`[SystemConfigurationManager] Failed to stop SpringBoard: ${error}`);
@@ -130,7 +147,12 @@ export class SystemConfigurationManager {
       await this.timer.sleep(SPRINGBOARD_POLL_INTERVAL_MS);
       try {
         const result = await this.processExecutor.executeCommand("xcrun", [
-          "simctl", "spawn", this.device.deviceId, "launchctl", "list", "com.apple.SpringBoard"
+          "simctl",
+          "spawn",
+          this.device.deviceId,
+          "launchctl",
+          "list",
+          "com.apple.SpringBoard",
         ]);
         if (result.stdout && result.stdout.includes("SpringBoard")) {
           return true;
@@ -151,7 +173,12 @@ export class SystemConfigurationManager {
 
     try {
       await this.processExecutor.executeCommand("xcrun", [
-        "simctl", "spawn", this.device.deviceId, "notifyutil", "-p", "com.apple.language.changed"
+        "simctl",
+        "spawn",
+        this.device.deviceId,
+        "notifyutil",
+        "-p",
+        "com.apple.language.changed",
       ]);
       return true;
     } catch (error) {
@@ -167,7 +194,7 @@ export class SystemConfigurationManager {
 
     const result: ApplyLiveChangesResult = {
       springBoardRestarted,
-      notificationPosted
+      notificationPosted,
     };
 
     if (restartAppBundleId) {
@@ -175,16 +202,30 @@ export class SystemConfigurationManager {
         logger.warn(`[SystemConfigurationManager] Invalid bundle ID: ${restartAppBundleId}`);
         result.appRestarted = false;
       } else if (!simulator) {
-        logger.warn("[SystemConfigurationManager] iOS app restart after localization is only supported on simulators");
+        logger.warn(
+          "[SystemConfigurationManager] iOS app restart after localization is only supported on simulators",
+        );
         result.appRestarted = false;
       } else {
         try {
-          await this.processExecutor.executeCommand("xcrun", ["simctl", "terminate", this.device.deviceId, restartAppBundleId]);
+          await this.processExecutor.executeCommand("xcrun", [
+            "simctl",
+            "terminate",
+            this.device.deviceId,
+            restartAppBundleId,
+          ]);
           await this.timer.sleep(SPRINGBOARD_POLL_INTERVAL_MS);
-          await this.processExecutor.executeCommand("xcrun", ["simctl", "launch", this.device.deviceId, restartAppBundleId]);
+          await this.processExecutor.executeCommand("xcrun", [
+            "simctl",
+            "launch",
+            this.device.deviceId,
+            restartAppBundleId,
+          ]);
           result.appRestarted = true;
         } catch (error) {
-          logger.warn(`[SystemConfigurationManager] Failed to restart app ${restartAppBundleId}: ${error}`);
+          logger.warn(
+            `[SystemConfigurationManager] Failed to restart app ${restartAppBundleId}: ${error}`,
+          );
           result.appRestarted = false;
         }
       }

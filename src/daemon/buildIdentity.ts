@@ -36,7 +36,7 @@ function hashEntryScript(absolutePath: string): string {
  */
 export function computeBuildIdentity(
   entryScript: string | undefined,
-  hashFile: (absolutePath: string) => string = hashEntryScript
+  hashFile: (absolutePath: string) => string = hashEntryScript,
 ): BuildIdentity {
   if (!entryScript) {
     return { entryScript: "", buildId: UNKNOWN_BUILD_ID };

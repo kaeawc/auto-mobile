@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { AndroidUserTargetResolver, type ResolvedUserTarget, type UserTargetRequest } from "../../../src/utils/android-cmdline-tools/AndroidUserTargetResolver";
+import {
+  AndroidUserTargetResolver,
+  type ResolvedUserTarget,
+  type UserTargetRequest,
+} from "../../../src/utils/android-cmdline-tools/AndroidUserTargetResolver";
 import type { AndroidUser } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 

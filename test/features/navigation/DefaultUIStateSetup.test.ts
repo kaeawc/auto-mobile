@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { DefaultUIStateSetup, type ObserveScreenLike } from "../../../src/features/navigation/DefaultUIStateSetup";
+import {
+  DefaultUIStateSetup,
+  type ObserveScreenLike,
+} from "../../../src/features/navigation/DefaultUIStateSetup";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -19,9 +22,7 @@ const device: BootedDevice = {
   platform: "android",
 };
 
-function makeSetup(
-  observeScreenProvider?: () => ObserveScreenLike
-): DefaultUIStateSetup {
+function makeSetup(observeScreenProvider?: () => ObserveScreenLike): DefaultUIStateSetup {
   const fakeAdb = new FakeAdbClient() as unknown as AdbClient;
   // Auto-advancing fake timer so the internal `sleep()` delays resolve
   // immediately — keeps these unit tests fast (<100ms) and non-flaky.
@@ -40,10 +41,13 @@ describe("DefaultUIStateSetup", () => {
     const fakeAdb = new FakeAdbClient() as unknown as AdbClient;
     const timer = new FakeTimer();
     const setup = new DefaultUIStateSetup(device, fakeAdb, undefined, timer);
-    const provider = (setup as unknown as { observeScreenProvider: () => ObserveScreenLike }).observeScreenProvider;
+    const provider = (setup as unknown as { observeScreenProvider: () => ObserveScreenLike })
+      .observeScreenProvider;
 
     let observeScreen: ObserveScreenLike | undefined;
-    expect(() => { observeScreen = provider(); }).not.toThrow();
+    expect(() => {
+      observeScreen = provider();
+    }).not.toThrow();
 
     // Assert the concrete type and its binding rather than merely "has an execute
     // method" (a bare stub would pass that). The default provider must wire the
@@ -61,7 +65,7 @@ describe("DefaultUIStateSetup", () => {
       // No viewHierarchy => getCurrentUIState returns undefined and setup proceeds
       // without taps. The point is that the provider was reached, i.e. observation
       // was not silently skipped by a construction failure.
-      return { execute: async () => ({ viewHierarchy: null } as unknown as ObserveResult) };
+      return { execute: async () => ({ viewHierarchy: null }) as unknown as ObserveResult };
     };
 
     const setup = makeSetup(provider);
@@ -79,7 +83,7 @@ describe("DefaultUIStateSetup", () => {
     let calls = 0;
     const setup = makeSetup(() => {
       calls++;
-      return { execute: async () => ({ viewHierarchy: null } as unknown as ObserveResult) };
+      return { execute: async () => ({ viewHierarchy: null }) as unknown as ObserveResult };
     });
 
     const edge = { uiState: {} } as unknown as NavigationEdge;
@@ -96,23 +100,28 @@ describe("DefaultUIStateSetup", () => {
 
     function setupWithNoSelections(): DefaultUIStateSetup {
       const setup = makeSetup();
-      (setup as unknown as {
-        getCurrentUIState: () => Promise<{ modalStack: ModalState[]; selectedElements: [] }>;
-      }).getCurrentUIState = async () => ({ modalStack: [], selectedElements: [] });
+      (
+        setup as unknown as {
+          getCurrentUIState: () => Promise<{ modalStack: ModalState[]; selectedElements: [] }>;
+        }
+      ).getCurrentUIState = async () => ({ modalStack: [], selectedElements: [] });
       return setup;
     }
 
     test("routes a missing content-description-only selection through tapOn's text selector", async () => {
       let capturedArgs: Record<string, unknown> | undefined;
-      ToolRegistry.register("tapOn", "tapOn", {}, async args => {
+      ToolRegistry.register("tapOn", "tapOn", {}, async (args) => {
         capturedArgs = args;
         return createStructuredToolResponse({ success: true });
       });
       const setup = setupWithNoSelections();
 
-      const actions = await setup.setupUIState({
-        uiState: { selectedElements: [{ contentDesc: "Open settings" }] },
-      } as NavigationEdge, "android");
+      const actions = await setup.setupUIState(
+        {
+          uiState: { selectedElements: [{ contentDesc: "Open settings" }] },
+        } as NavigationEdge,
+        "android",
+      );
 
       expect(capturedArgs?.selector).toEqual({ text: "Open settings" });
       expect(actions).toEqual(['tapOn({"contentDesc":"Open settings"})']);
@@ -120,13 +129,16 @@ describe("DefaultUIStateSetup", () => {
 
     test("does not report a selected-element tap when its internal tool response fails", async () => {
       ToolRegistry.register("tapOn", "tapOn", {}, async () =>
-        createStructuredToolResponse({ success: false, error: "element is disabled" })
+        createStructuredToolResponse({ success: false, error: "element is disabled" }),
       );
       const setup = setupWithNoSelections();
 
-      const actions = await setup.setupUIState({
-        uiState: { selectedElements: [{ text: "Settings" }] },
-      } as NavigationEdge, "android");
+      const actions = await setup.setupUIState(
+        {
+          uiState: { selectedElements: [{ text: "Settings" }] },
+        } as NavigationEdge,
+        "android",
+      );
 
       expect(actions).toEqual([]);
     });
@@ -149,17 +161,14 @@ describe("DefaultUIStateSetup", () => {
     };
 
     function registerSwipeOn(found: boolean): void {
-      ToolRegistry.register(
-        "swipeOn",
-        "swipeOn",
-        {},
-        async () => createStructuredToolResponse({
+      ToolRegistry.register("swipeOn", "swipeOn", {}, async () =>
+        createStructuredToolResponse({
           success: true,
           found,
           message: found ? "Swiped up and found element" : "Swiped up",
           observation: {},
           scrollIterations: 1,
-        })
+        }),
       );
     }
 
@@ -199,7 +208,7 @@ describe("DefaultUIStateSetup", () => {
     // the sheet as gone — the swipe branch resolves as dismissed without ever
     // reaching the back-button fallback.
     const nullObserve = (): ObserveScreenLike => ({
-      execute: async () => ({ viewHierarchy: null } as unknown as ObserveResult),
+      execute: async () => ({ viewHierarchy: null }) as unknown as ObserveResult,
     });
 
     const bottomSheet: ModalState = { type: "bottomsheet", layer: 1, windowId: 42 };
@@ -242,15 +251,16 @@ describe("DefaultUIStateSetup", () => {
     // contains "sheet" (classifyModalType) and an explicit `window-id`
     // (getWindowId). No `windows` array => collectModalStack runs on the
     // top-level hierarchy traversal.
-    const bottomSheetHierarchy = (windowId: number): ObserveResult => ({
-      viewHierarchy: {
-        hierarchy: { "class": "BottomSheetDialog", "window-id": String(windowId) },
-      },
-    } as unknown as ObserveResult);
+    const bottomSheetHierarchy = (windowId: number): ObserveResult =>
+      ({
+        viewHierarchy: {
+          hierarchy: { class: "BottomSheetDialog", "window-id": String(windowId) },
+        },
+      }) as unknown as ObserveResult;
 
     test("falls through to the back button when the swipe leaves the bottom sheet present (#3125)", async () => {
       ToolRegistry.register("swipeOn", "swipeOn", {}, async () =>
-        createStructuredToolResponse({ success: true })
+        createStructuredToolResponse({ success: true }),
       );
       ToolRegistry.register("pressButton", "pressButton", {}, async () => {
         throw new Error("Android modal recovery must not use the global tool registry");
@@ -272,7 +282,7 @@ describe("DefaultUIStateSetup", () => {
       });
 
       const ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
-        requestGlobalAction: async () => ({ success: false, error: "unavailable" })
+        requestGlobalAction: async () => ({ success: false, error: "unavailable" }),
       } as never);
       const setup = makeSetup(statefulObserve);
       let dismissed: boolean;
@@ -323,10 +333,15 @@ describe("DefaultUIStateSetup", () => {
       timer.enableAutoAdvance();
       const setup = new DefaultUIStateSetup(iosDevice, fakeAdb, nullObserve, timer);
       let backArgs: Record<string, unknown> | undefined;
-      ToolRegistry.register("pressButton", "pressButton", {}, async (args: Record<string, unknown>) => {
-        backArgs = args;
-        return createStructuredToolResponse({ success: true });
-      });
+      ToolRegistry.register(
+        "pressButton",
+        "pressButton",
+        {},
+        async (args: Record<string, unknown>) => {
+          backArgs = args;
+          return createStructuredToolResponse({ success: true });
+        },
+      );
 
       const dismissed = await (
         setup as unknown as {

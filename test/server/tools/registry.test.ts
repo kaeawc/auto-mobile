@@ -15,7 +15,7 @@ describe("MCP Tools Registry", () => {
     expect(toolDefinitions.length).toBeGreaterThan(0);
 
     // Verify we have the expected tool categories for MCP protocol
-    const toolNames = toolDefinitions.map(tool => tool.name);
+    const toolNames = toolDefinitions.map((tool) => tool.name);
 
     // Should include observe tools (core MCP functionality)
     expect(toolNames).toContain("observe");
@@ -27,7 +27,6 @@ describe("MCP Tools Registry", () => {
     expect(toolNames).toContain("launchApp");
     expect(toolNames).toContain("terminateApp");
     expect(toolNames).toContain("listApps");
-
   });
 
   test("should maintain singleton registry across server instances", () => {
@@ -39,7 +38,7 @@ describe("MCP Tools Registry", () => {
 
     // Both should reference the same registry (MCP pattern)
     expect(tools1.length).toBe(tools2.length);
-    expect(tools1.map(t => t.name).sort()).toEqual(tools2.map(t => t.name).sort());
+    expect(tools1.map((t) => t.name).sort()).toEqual(tools2.map((t) => t.name).sort());
 
     // Registry should be consistent
     expect(ToolRegistry.getAllTools().length).toBe(tools1.length);
@@ -49,7 +48,7 @@ describe("MCP Tools Registry", () => {
     const allTools = ToolRegistry.getAllTools();
 
     // Each registered tool should have an executable handler
-    allTools.forEach(tool => {
+    allTools.forEach((tool) => {
       expect(tool).toHaveProperty("handler");
       expect(typeof tool.handler).toBe("function");
 
@@ -63,7 +62,7 @@ describe("MCP Tools Registry", () => {
     const toolDefinitions = ToolRegistry.getToolDefinitions();
 
     for (const toolName of ["executePlan", "tapOn"]) {
-      const tool = toolDefinitions.find(definition => definition.name === toolName);
+      const tool = toolDefinitions.find((definition) => definition.name === toolName);
       expect(tool).toBeDefined();
       expect(tool).toHaveProperty("outputSchema");
       expect(tool!.outputSchema).toHaveProperty("type", "object");
@@ -80,7 +79,7 @@ describe("MCP Tools Registry", () => {
     test("EC-H: omits outputSchema from tool definitions when the gate is enabled", () => {
       // Baseline: outputSchema advertised when the gate is off.
       serverConfig.setToolResultsNoStructuredContentEnabled(false);
-      const withSchema = ToolRegistry.getToolDefinitions().find(t => t.name === "tapOn");
+      const withSchema = ToolRegistry.getToolDefinitions().find((t) => t.name === "tapOn");
       expect(withSchema).toHaveProperty("outputSchema");
 
       // With the gate on, the server no longer advertises structuredContent output,
@@ -100,14 +99,29 @@ describe("MCP Tools Registry", () => {
   // EXACT roster of tools that actually register, each by its real name — a
   // renamed or dropped tool reds the specific row.
   test("registers the exact expected tool in each category by real name", () => {
-    const toolNames = new Set(ToolRegistry.getToolDefinitions().map(tool => tool.name));
+    const toolNames = new Set(ToolRegistry.getToolDefinitions().map((tool) => tool.name));
 
     const expectedByCategory: Record<string, string[]> = {
       observe: ["observe"],
-      interaction: ["tapOn", "inputText", "clearText", "pressButton", "swipeOn", "dragAndDrop", "pinchOn"],
+      interaction: [
+        "tapOn",
+        "inputText",
+        "clearText",
+        "pressButton",
+        "swipeOn",
+        "dragAndDrop",
+        "pinchOn",
+      ],
       app: ["launchApp", "terminateApp", "installApp", "uninstallApp", "listApps"],
       utility: ["rotate", "setActiveDevice", "openLink", "getDeviceState", "setDeviceState"],
-      device: ["listDeviceImages", "listDevices", "getAndroid", "getApple", "killDevice", "deleteDevice"],
+      device: [
+        "listDeviceImages",
+        "listDevices",
+        "getAndroid",
+        "getApple",
+        "killDevice",
+        "deleteDevice",
+      ],
     };
 
     for (const [category, expected] of Object.entries(expectedByCategory)) {
@@ -120,6 +134,6 @@ describe("MCP Tools Registry", () => {
   // D6 backstop (issue #4181, rank 15): serverSetup.test.ts is deleted; this
   // is the surviving "did createMcpServer register the core tool" smoke.
   test("createMcpServer registers the core observe tool", () => {
-    expect(ToolRegistry.getToolDefinitions().map(t => t.name)).toContain("observe");
+    expect(ToolRegistry.getToolDefinitions().map((t) => t.name)).toContain("observe");
   });
 });

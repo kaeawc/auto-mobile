@@ -23,18 +23,20 @@ Expose visual highlight overlays (box, circle, or path) as an MCP tool for debug
 ## Examples
 
 ### Highlight element during bug report
+
 ```javascript
 await highlight({
   shape: {
     type: "box",
     bounds: { x: 100, y: 200, width: 300, height: 150 },
-    style: { strokeColor: "#FF0000", strokeWidth: 3 }
+    style: { strokeColor: "#FF0000", strokeWidth: 3 },
   },
-  platform: "ios"
+  platform: "ios",
 });
 ```
 
 ### Generate bug report with highlights
+
 ```javascript
 await bugReport({
   platform: "android",
@@ -45,32 +47,33 @@ await bugReport({
       shape: {
         type: "box",
         bounds: { x: 120, y: 280, width: 220, height: 90 },
-        style: { strokeColor: "#FF0000", strokeWidth: 6 }
-      }
-    }
+        style: { strokeColor: "#FF0000", strokeWidth: 6 },
+      },
+    },
   ],
-  includeHighlightsInScreenshot: true
+  includeHighlightsInScreenshot: true,
 });
 ```
 
 ### Multiple highlights for comparison
+
 ```javascript
 await highlight({
   shape: {
     type: "circle",
     bounds: { x: 200, y: 300, width: 50, height: 50 },
-    style: { strokeColor: "#00FF00", strokeWidth: 3 }
+    style: { strokeColor: "#00FF00", strokeWidth: 3 },
   },
-  platform: "ios"
+  platform: "ios",
 });
 
 await highlight({
   shape: {
     type: "circle",
     bounds: { x: 210, y: 310, width: 50, height: 50 },
-    style: { strokeColor: "#FF0000", strokeWidth: 3 }
+    style: { strokeColor: "#FF0000", strokeWidth: 3 },
   },
-  platform: "android"
+  platform: "android",
 });
 ```
 

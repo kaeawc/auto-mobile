@@ -89,7 +89,7 @@ describe("SocketServerRegistry", () => {
 
     it("throws for unknown server", async () => {
       await expect(registry.start("unknown")).rejects.toThrow(
-        "[SocketServerRegistry] Unknown server: unknown"
+        "[SocketServerRegistry] Unknown server: unknown",
       );
     });
   });

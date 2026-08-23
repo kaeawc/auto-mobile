@@ -108,7 +108,10 @@ export type CompactBounds = [number, number, number, number];
  * `cfg.compact`), and elements-drop (gated by `cfg.dropElements`). The input is
  * never mutated.
  */
-export function sanitizeObserveResult(obs: ObserveResult, cfg: SanitizeObserveConfig): ObserveResult {
+export function sanitizeObserveResult(
+  obs: ObserveResult,
+  cfg: SanitizeObserveConfig,
+): ObserveResult {
   // Deep-clone boundary: mutate only the copy that goes to the wire. The
   // JSON round-trip matches the repo's hierarchy-cloning convention
   // (ViewHierarchy.ts) and the wire's own JSON semantics (undefined/functions
@@ -200,7 +203,10 @@ function reduceTopLevelDebugPerfTelemetry(out: ObserveResult): void {
   if (auditMetrics.slowUiThreadCount !== null && auditMetrics.slowUiThreadCount !== undefined) {
     delete gfxMetrics.slowUiThreadCount;
   }
-  if (auditMetrics.frameDeadlineMissedCount !== null && auditMetrics.frameDeadlineMissedCount !== undefined) {
+  if (
+    auditMetrics.frameDeadlineMissedCount !== null &&
+    auditMetrics.frameDeadlineMissedCount !== undefined
+  ) {
     delete gfxMetrics.frameDeadlineMissedCount;
   }
 }
@@ -237,7 +243,7 @@ function stripPerformanceAudit(out: ObserveResult): void {
  * that runtime shape variance into one traversal path.
  */
 function toNodeArray(
-  node: ViewHierarchyNode | ViewHierarchyNode[] | undefined
+  node: ViewHierarchyNode | ViewHierarchyNode[] | undefined,
 ): ViewHierarchyNode[] {
   if (!node) {
     return [];
@@ -272,7 +278,7 @@ function collectOccludedByViewIds(nodes: ViewHierarchyNode[]): Set<string> {
 
 function trimHierarchyNodes(
   node: ViewHierarchyNode | undefined,
-  referencedOccluderViewIds: ReadonlySet<string>
+  referencedOccluderViewIds: ReadonlySet<string>,
 ): void {
   if (!node) {
     return;
@@ -282,9 +288,9 @@ function trimHierarchyNodes(
 
   // Drop view-id when it is identical to resource-id (redundant duplicate).
   if (
-    typeof attrs["view-id"] === "string"
-    && attrs["view-id"] === attrs["resource-id"]
-    && !referencedOccluderViewIds.has(attrs["view-id"])
+    typeof attrs["view-id"] === "string" &&
+    attrs["view-id"] === attrs["resource-id"] &&
+    !referencedOccluderViewIds.has(attrs["view-id"])
   ) {
     delete attrs["view-id"];
   }
@@ -354,7 +360,9 @@ function compactObserveBounds(value: unknown): void {
       continue;
     }
     if (key === "bounds" && v && typeof v === "object" && !Array.isArray(v)) {
-      obj[key] = compactBounds(v as { left?: number; top?: number; right?: number; bottom?: number });
+      obj[key] = compactBounds(
+        v as { left?: number; top?: number; right?: number; bottom?: number },
+      );
       continue;
     }
     compactObserveBounds(v);
@@ -593,7 +601,7 @@ function flattenForDiff(obs: ObserveResult): FlatObserveNode[] {
     node: ViewHierarchyNode | undefined,
     siblingIndex: number,
     parentPath: string,
-    ancestorClasses: readonly string[]
+    ancestorClasses: readonly string[],
   ): void => {
     if (!node || typeof node !== "object") {
       return;
@@ -603,10 +611,15 @@ function flattenForDiff(obs: ObserveResult): FlatObserveNode[] {
     const pathKey = parentPath === "" ? localKey : `${parentPath}${PATH_KEY_SEP}${localKey}`;
     out.push({ pathKey, key: localKey, attributes: nodeAttributes(rec), ancestorClasses });
     const className = classNameForDiff(rec);
-    const childAncestorClasses = className === "" ? ancestorClasses : [...ancestorClasses, className];
-    toNodeArray(node.node).forEach((child, index) => walk(child, index, pathKey, childAncestorClasses));
+    const childAncestorClasses =
+      className === "" ? ancestorClasses : [...ancestorClasses, className];
+    toNodeArray(node.node).forEach((child, index) =>
+      walk(child, index, pathKey, childAncestorClasses),
+    );
   };
-  toNodeArray(obs.viewHierarchy?.hierarchy?.node).forEach((root, index) => walk(root, index, "", []));
+  toNodeArray(obs.viewHierarchy?.hierarchy?.node).forEach((root, index) =>
+    walk(root, index, "", []),
+  );
   return out;
 }
 
@@ -739,7 +752,7 @@ export const DIFF_IGNORED_ATTRS: ReadonlySet<string> = new Set([
 /** Per-attribute diff of two attribute maps (union of keys). */
 function diffAttributes(
   from: Record<string, unknown>,
-  to: Record<string, unknown>
+  to: Record<string, unknown>,
 ): Record<string, { from?: unknown; to?: unknown }> {
   const changes: Record<string, { from?: unknown; to?: unknown }> = {};
   for (const key of new Set([...Object.keys(from), ...Object.keys(to)])) {
@@ -750,9 +763,10 @@ function diffAttributes(
     }
     // `bounds` is compared through `boundsKey` so an object-shaped baseline and a
     // compacted tuple next (identical geometry) are not a spurious change.
-    const equal = key === "bounds"
-      ? boundsKey(from[key]) === boundsKey(to[key])
-      : valuesEqual(from[key], to[key]);
+    const equal =
+      key === "bounds"
+        ? boundsKey(from[key]) === boundsKey(to[key])
+        : valuesEqual(from[key], to[key]);
     if (!equal) {
       changes[key] = { from: from[key], to: to[key] };
     }
@@ -850,7 +864,7 @@ function indexByContentKey(nodes: ObserveDiffNode[]): Map<string, number[]> {
 function repairByContentIdentity(
   added: DiffRepairNode[],
   removed: DiffRepairNode[],
-  changed: ObserveDiffNodeChange[]
+  changed: ObserveDiffNodeChange[],
 ): { added: DiffRepairNode[]; removed: DiffRepairNode[] } {
   const addedByKey = indexByContentKey(added);
   const removedByKey = indexByContentKey(removed);
@@ -899,15 +913,24 @@ function isIosObservation(obs: ObserveResult): boolean {
       return true;
     }
     const hierarchy = viewHierarchy.hierarchy as Record<string, unknown>;
-    if (hierarchy.type === "XCUIElementTypeApplication" || hierarchy.elementType === "application") {
+    if (
+      hierarchy.type === "XCUIElementTypeApplication" ||
+      hierarchy.elementType === "application"
+    ) {
       return true;
     }
     if (typeof hierarchy.bundleId === "string" && !viewHierarchy.hierarchy.node) {
       return true;
     }
     const roots = toNodeArray(viewHierarchy.hierarchy.node);
-    if (roots.some(root => classNameForDiff(root as unknown as Record<string, unknown>) === "XCUIApplication"
-      || classNameForDiff(root as unknown as Record<string, unknown>) === "XCUIElementTypeApplication")) {
+    if (
+      roots.some(
+        (root) =>
+          classNameForDiff(root as unknown as Record<string, unknown>) === "XCUIApplication" ||
+          classNameForDiff(root as unknown as Record<string, unknown>) ===
+            "XCUIElementTypeApplication",
+      )
+    ) {
       return true;
     }
   }
@@ -915,14 +938,20 @@ function isIosObservation(obs: ObserveResult): boolean {
   return appId.startsWith("com.apple.") || appId.endsWith(".ios");
 }
 
-function hasAndroidHierarchySignals(viewHierarchy: NonNullable<ObserveResult["viewHierarchy"]>): boolean {
-  if (viewHierarchy.density !== undefined
-    || viewHierarchy.sdkInt !== undefined
-    || viewHierarchy.foregroundActivity !== undefined) {
+function hasAndroidHierarchySignals(
+  viewHierarchy: NonNullable<ObserveResult["viewHierarchy"]>,
+): boolean {
+  if (
+    viewHierarchy.density !== undefined ||
+    viewHierarchy.sdkInt !== undefined ||
+    viewHierarchy.foregroundActivity !== undefined
+  ) {
     return true;
   }
   const roots = toNodeArray(viewHierarchy.hierarchy.node);
-  return roots.some(root => platformClassNameForDiff(root as unknown as Record<string, unknown>).startsWith("android."));
+  return roots.some((root) =>
+    platformClassNameForDiff(root as unknown as Record<string, unknown>).startsWith("android."),
+  );
 }
 
 function stringAttr(attrs: Record<string, unknown>, key: string): string {
@@ -930,7 +959,8 @@ function stringAttr(attrs: Record<string, unknown>, key: string): string {
   return typeof value === "string" ? value : "";
 }
 
-const IOS_GENERATED_VIEW_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const IOS_GENERATED_VIEW_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function iosStableId(attrs: Record<string, unknown>): string {
   const resourceId = stringAttr(attrs, "resource-id");
@@ -949,36 +979,42 @@ function iosStableId(attrs: Record<string, unknown>): string {
 }
 
 function quantizedBoundsKey(bounds: unknown): string {
-  const parts = boundsKey(bounds).split(",").map(part => Number(part));
-  if (parts.length !== 4 || parts.some(part => !Number.isFinite(part))) {
+  const parts = boundsKey(bounds)
+    .split(",")
+    .map((part) => Number(part));
+  if (parts.length !== 4 || parts.some((part) => !Number.isFinite(part))) {
     return "";
   }
-  return parts.map(part => Math.round(part / 8)).join(",");
+  return parts.map((part) => Math.round(part / 8)).join(",");
 }
 
 function isIosEditableClass(className: string): boolean {
-  return className === "XCUIElementTypeTextField"
-    || className === "XCUIElementTypeSecureTextField"
-    || className === "XCUIElementTypeTextView"
-    || className === "XCUIElementTypeSearchField"
-    || className === "UITextField"
-    || className === "UISecureTextField"
-    || className === "UITextView"
-    || className === "UISearchBar";
+  return (
+    className === "XCUIElementTypeTextField" ||
+    className === "XCUIElementTypeSecureTextField" ||
+    className === "XCUIElementTypeTextView" ||
+    className === "XCUIElementTypeSearchField" ||
+    className === "UITextField" ||
+    className === "UISecureTextField" ||
+    className === "UITextView" ||
+    className === "UISearchBar"
+  );
 }
 
 function isIosListCellClass(className: string): boolean {
-  return className === "XCUIElementTypeCell"
-    || className === "UITableViewCell"
-    || className === "UICollectionViewCell"
-    || className === "XCUIElementTypeTable"
-    || className === "XCUIElementTypeCollectionView"
-    || className === "UITableView"
-    || className === "UICollectionView";
+  return (
+    className === "XCUIElementTypeCell" ||
+    className === "UITableViewCell" ||
+    className === "UICollectionViewCell" ||
+    className === "XCUIElementTypeTable" ||
+    className === "XCUIElementTypeCollectionView" ||
+    className === "UITableView" ||
+    className === "UICollectionView"
+  );
 }
 
 function hasIosListCellAncestor(node: DiffRepairNode): boolean {
-  return node.ancestorClasses.some(className => isIosListCellClass(className));
+  return node.ancestorClasses.some((className) => isIosListCellClass(className));
 }
 
 /**
@@ -989,7 +1025,8 @@ function hasIosListCellAncestor(node: DiffRepairNode): boolean {
  * opt out because a lone reused id can describe a different logical row.
  */
 function iosStableIdentityKey(node: DiffRepairNode): string | null {
-  const className = stringAttr(node.attributes, "className") || stringAttr(node.attributes, "class");
+  const className =
+    stringAttr(node.attributes, "className") || stringAttr(node.attributes, "class");
   if (hasIosListCellAncestor(node)) {
     return null;
   }
@@ -1027,7 +1064,7 @@ function indexByIosStableKey(nodes: DiffRepairNode[]): Map<string, number[]> {
 function repairByIosStableIdentity(
   added: DiffRepairNode[],
   removed: DiffRepairNode[],
-  changed: ObserveDiffNodeChange[]
+  changed: ObserveDiffNodeChange[],
 ): { added: DiffRepairNode[]; removed: DiffRepairNode[] } {
   const addedByKey = indexByIosStableKey(added);
   const removedByKey = indexByIosStableKey(removed);
@@ -1093,9 +1130,11 @@ export function isSameObservationScreen(baseline: ObserveResult, next: ObserveRe
   }
 
   if (baselineIdentity && nextIdentity) {
-    return baselineIdentity.platform === nextIdentity.platform
-      && baselineIdentity.source === nextIdentity.source
-      && baselineIdentity.key === nextIdentity.key;
+    return (
+      baselineIdentity.platform === nextIdentity.platform &&
+      baselineIdentity.source === nextIdentity.source &&
+      baselineIdentity.key === nextIdentity.key
+    );
   }
   if ((baseline.activeWindow?.appId ?? "") !== (next.activeWindow?.appId ?? "")) {
     return false;
@@ -1122,7 +1161,7 @@ export function isSameObservationScreen(baseline: ObserveResult, next: ObserveRe
 export function diffObserveResult(
   baseline: ObserveResult,
   next: ObserveResult,
-  cfg?: DiffObserveConfig
+  cfg?: DiffObserveConfig,
 ): ObserveDiff {
   const baseByKey = groupByKey(flattenForDiff(baseline));
   const nextByKey = groupByKey(flattenForDiff(next));
@@ -1187,9 +1226,10 @@ export function diffObserveResult(
   const baseRecord = baseline as unknown as Record<string, unknown>;
   const nextRecord = next as unknown as Record<string, unknown>;
   for (const field of scalarFields) {
-    const equal = field === "layoutWarnings"
-      ? layoutWarningsEqual(baseRecord[field], nextRecord[field])
-      : valuesEqual(baseRecord[field], nextRecord[field]);
+    const equal =
+      field === "layoutWarnings"
+        ? layoutWarningsEqual(baseRecord[field], nextRecord[field])
+        : valuesEqual(baseRecord[field], nextRecord[field]);
     if (!equal) {
       fields[field] = { from: baseRecord[field], to: nextRecord[field] };
     }

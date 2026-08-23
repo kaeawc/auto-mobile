@@ -17,7 +17,7 @@ interface CompositeActionStep {
 }
 
 function usesRefs(action: CompositeAction): string[] {
-  return (action.runs?.steps ?? []).flatMap(step => step.uses ? [step.uses] : []);
+  return (action.runs?.steps ?? []).flatMap((step) => (step.uses ? [step.uses] : []));
 }
 
 function majorVersion(ref: string): number | undefined {
@@ -39,20 +39,24 @@ describe("gradle-task-run action", () => {
 
     expect(action.runs?.using).toBe("composite");
     for (const [actionName, minimumMajor] of Object.entries(minimumMajorByAction)) {
-      const matchingRefs = refs.filter(candidate => candidate.startsWith(`${actionName}@`));
+      const matchingRefs = refs.filter((candidate) => candidate.startsWith(`${actionName}@`));
       expect(matchingRefs.length).toBeGreaterThan(0);
       for (const ref of matchingRefs) {
         expect(majorVersion(ref)).toBeGreaterThanOrEqual(minimumMajor);
       }
     }
 
-    expect(refs.some(ref => ref.startsWith("pplanel/hash-calculator-action@"))).toBe(false);
+    expect(refs.some((ref) => ref.startsWith("pplanel/hash-calculator-action@"))).toBe(false);
 
-    const evalGradle = action.runs?.steps?.find(step => step.id === "eval_gradle");
-    expect(evalGradle?.run).toContain('echo "version=$(cat /tmp/gradle_version.txt)" >> "$GITHUB_OUTPUT"');
-    expect(evalGradle?.run).toContain('echo "version=${{ inputs.gradle-version }}" >> "$GITHUB_OUTPUT"');
+    const evalGradle = action.runs?.steps?.find((step) => step.id === "eval_gradle");
+    expect(evalGradle?.run).toContain(
+      'echo "version=$(cat /tmp/gradle_version.txt)" >> "$GITHUB_OUTPUT"',
+    );
+    expect(evalGradle?.run).toContain(
+      'echo "version=${{ inputs.gradle-version }}" >> "$GITHUB_OUTPUT"',
+    );
 
-    const hashGradleTasks = action.runs?.steps?.find(step => step.name === "Hash Gradle Tasks");
+    const hashGradleTasks = action.runs?.steps?.find((step) => step.name === "Hash Gradle Tasks");
     expect(hashGradleTasks?.run).toContain('echo "digest=$digest" >> "$GITHUB_OUTPUT"');
   });
 });

@@ -6,7 +6,7 @@ import {
   NavigationNodeResourceContent,
   NavigationAppsResourceContent,
   setNavigationGraphProvider,
-  setNavigationScreenshotProvider
+  setNavigationScreenshotProvider,
 } from "../../../src/server/navigationResources";
 import { FakeNavigationGraphManager } from "../../fakes/FakeNavigationGraphManager";
 import { z } from "zod/v4";
@@ -40,22 +40,25 @@ describe("MCP Navigation Graph Resource", () => {
     const { client } = fixture.getContext();
 
     const listResourcesResponseSchema = z.object({
-      resources: z.array(z.object({
-        uri: z.string(),
-        name: z.string().optional(),
-        description: z.string().optional(),
-        mimeType: z.string().optional()
-      }))
+      resources: z.array(
+        z.object({
+          uri: z.string(),
+          name: z.string().optional(),
+          description: z.string().optional(),
+          mimeType: z.string().optional(),
+        }),
+      ),
     });
 
-    const result = await client.request({
-      method: "resources/list",
-      params: {}
-    }, listResourcesResponseSchema);
-
-    const resource = result.resources.find(
-      (r: any) => r.uri === NAVIGATION_RESOURCE_URIS.GRAPH
+    const result = await client.request(
+      {
+        method: "resources/list",
+        params: {},
+      },
+      listResourcesResponseSchema,
     );
+
+    const resource = result.resources.find((r: any) => r.uri === NAVIGATION_RESOURCE_URIS.GRAPH);
 
     expect(resource).toBeDefined();
     expect(resource?.name).toBe("Navigation Graph");
@@ -69,13 +72,13 @@ describe("MCP Navigation Graph Resource", () => {
       screenName: "Home",
       firstSeenAt: 100,
       lastSeenAt: 200,
-      visitCount: 2
+      visitCount: 2,
     });
     fakeGraph.addNode({
       screenName: "Settings",
       firstSeenAt: 150,
       lastSeenAt: 250,
-      visitCount: 1
+      visitCount: 1,
     });
     fakeGraph.addEdge({
       from: "Home",
@@ -85,25 +88,30 @@ describe("MCP Navigation Graph Resource", () => {
       interaction: {
         toolName: "tapOn",
         args: {},
-        timestamp: 250
-      }
+        timestamp: 250,
+      },
     });
 
     const { client } = fixture.getContext();
     const readResourceResponseSchema = z.object({
-      contents: z.array(z.object({
-        uri: z.string(),
-        mimeType: z.string().optional(),
-        text: z.string().optional()
-      }))
+      contents: z.array(
+        z.object({
+          uri: z.string(),
+          mimeType: z.string().optional(),
+          text: z.string().optional(),
+        }),
+      ),
     });
 
-    const result = await client.request({
-      method: "resources/read",
-      params: {
-        uri: NAVIGATION_RESOURCE_URIS.GRAPH
-      }
-    }, readResourceResponseSchema);
+    const result = await client.request(
+      {
+        method: "resources/read",
+        params: {
+          uri: NAVIGATION_RESOURCE_URIS.GRAPH,
+        },
+      },
+      readResourceResponseSchema,
+    );
 
     const content = result.contents[0];
     expect(content.uri).toBe(NAVIGATION_RESOURCE_URIS.GRAPH);
@@ -123,24 +131,29 @@ describe("MCP Navigation Graph Resource", () => {
     const { client } = fixture.getContext();
 
     const listResourceTemplatesResponseSchema = z.object({
-      resourceTemplates: z.array(z.object({
-        uriTemplate: z.string(),
-        name: z.string().optional(),
-        description: z.string().optional(),
-        mimeType: z.string().optional()
-      }))
+      resourceTemplates: z.array(
+        z.object({
+          uriTemplate: z.string(),
+          name: z.string().optional(),
+          description: z.string().optional(),
+          mimeType: z.string().optional(),
+        }),
+      ),
     });
 
-    const result = await client.request({
-      method: "resources/templates/list",
-      params: {}
-    }, listResourceTemplatesResponseSchema);
+    const result = await client.request(
+      {
+        method: "resources/templates/list",
+        params: {},
+      },
+      listResourceTemplatesResponseSchema,
+    );
 
     const nodeByIdTemplate = result.resourceTemplates.find(
-      (t: any) => t.uriTemplate === NAVIGATION_RESOURCE_URIS.NODE_BY_ID
+      (t: any) => t.uriTemplate === NAVIGATION_RESOURCE_URIS.NODE_BY_ID,
     );
     const nodeByScreenTemplate = result.resourceTemplates.find(
-      (t: any) => t.uriTemplate === NAVIGATION_RESOURCE_URIS.NODE_BY_SCREEN
+      (t: any) => t.uriTemplate === NAVIGATION_RESOURCE_URIS.NODE_BY_SCREEN,
     );
 
     expect(nodeByIdTemplate).toBeDefined();
@@ -154,13 +167,13 @@ describe("MCP Navigation Graph Resource", () => {
       screenName: "Home",
       firstSeenAt: 100,
       lastSeenAt: 200,
-      visitCount: 2
+      visitCount: 2,
     });
     fakeGraph.addNode({
       screenName: "Settings",
       firstSeenAt: 150,
       lastSeenAt: 250,
-      visitCount: 1
+      visitCount: 1,
     });
     fakeGraph.addEdge({
       from: "Home",
@@ -170,25 +183,30 @@ describe("MCP Navigation Graph Resource", () => {
       interaction: {
         toolName: "tapOn",
         args: {},
-        timestamp: 250
-      }
+        timestamp: 250,
+      },
     });
 
     const { client } = fixture.getContext();
     const readResourceResponseSchema = z.object({
-      contents: z.array(z.object({
-        uri: z.string(),
-        mimeType: z.string().optional(),
-        text: z.string().optional()
-      }))
+      contents: z.array(
+        z.object({
+          uri: z.string(),
+          mimeType: z.string().optional(),
+          text: z.string().optional(),
+        }),
+      ),
     });
 
-    const result = await client.request({
-      method: "resources/read",
-      params: {
-        uri: "automobile:navigation/nodes/1"
-      }
-    }, readResourceResponseSchema);
+    const result = await client.request(
+      {
+        method: "resources/read",
+        params: {
+          uri: "automobile:navigation/nodes/1",
+        },
+      },
+      readResourceResponseSchema,
+    );
 
     const content = result.contents[0];
     expect(content.text).toBeDefined();
@@ -205,22 +223,25 @@ describe("MCP Navigation Graph Resource", () => {
     const { client } = fixture.getContext();
 
     const listResourcesResponseSchema = z.object({
-      resources: z.array(z.object({
-        uri: z.string(),
-        name: z.string().optional(),
-        description: z.string().optional(),
-        mimeType: z.string().optional()
-      }))
+      resources: z.array(
+        z.object({
+          uri: z.string(),
+          name: z.string().optional(),
+          description: z.string().optional(),
+          mimeType: z.string().optional(),
+        }),
+      ),
     });
 
-    const result = await client.request({
-      method: "resources/list",
-      params: {}
-    }, listResourcesResponseSchema);
-
-    const resource = result.resources.find(
-      (r: any) => r.uri === NAVIGATION_RESOURCE_URIS.APPS
+    const result = await client.request(
+      {
+        method: "resources/list",
+        params: {},
+      },
+      listResourcesResponseSchema,
     );
+
+    const resource = result.resources.find((r: any) => r.uri === NAVIGATION_RESOURCE_URIS.APPS);
 
     expect(resource).toBeDefined();
     expect(resource?.name).toBe("Navigation Apps");
@@ -230,24 +251,29 @@ describe("MCP Navigation Graph Resource", () => {
   test("should list apps that have a persisted navigation graph", async () => {
     fakeGraph.setAppsWithGraph([
       { appId: "com.example.b", displayName: null, lastUpdated: "2026-01-02T00:00:00.000Z" },
-      { appId: "com.example.a", displayName: null, lastUpdated: "2026-01-01T00:00:00.000Z" }
+      { appId: "com.example.a", displayName: null, lastUpdated: "2026-01-01T00:00:00.000Z" },
     ]);
 
     const { client } = fixture.getContext();
     const readResourceResponseSchema = z.object({
-      contents: z.array(z.object({
-        uri: z.string(),
-        mimeType: z.string().optional(),
-        text: z.string().optional()
-      }))
+      contents: z.array(
+        z.object({
+          uri: z.string(),
+          mimeType: z.string().optional(),
+          text: z.string().optional(),
+        }),
+      ),
     });
 
-    const result = await client.request({
-      method: "resources/read",
-      params: {
-        uri: NAVIGATION_RESOURCE_URIS.APPS
-      }
-    }, readResourceResponseSchema);
+    const result = await client.request(
+      {
+        method: "resources/read",
+        params: {
+          uri: NAVIGATION_RESOURCE_URIS.APPS,
+        },
+      },
+      readResourceResponseSchema,
+    );
 
     const content = result.contents[0];
     expect(content.uri).toBe(NAVIGATION_RESOURCE_URIS.APPS);
@@ -265,19 +291,24 @@ describe("MCP Navigation Graph Resource", () => {
   test("should return an empty list when no apps have a persisted graph", async () => {
     const { client } = fixture.getContext();
     const readResourceResponseSchema = z.object({
-      contents: z.array(z.object({
-        uri: z.string(),
-        mimeType: z.string().optional(),
-        text: z.string().optional()
-      }))
+      contents: z.array(
+        z.object({
+          uri: z.string(),
+          mimeType: z.string().optional(),
+          text: z.string().optional(),
+        }),
+      ),
     });
 
-    const result = await client.request({
-      method: "resources/read",
-      params: {
-        uri: NAVIGATION_RESOURCE_URIS.APPS
-      }
-    }, readResourceResponseSchema);
+    const result = await client.request(
+      {
+        method: "resources/read",
+        params: {
+          uri: NAVIGATION_RESOURCE_URIS.APPS,
+        },
+      },
+      readResourceResponseSchema,
+    );
 
     const content = result.contents[0];
     expect(content.text).toBeDefined();
@@ -293,13 +324,13 @@ describe("MCP Navigation Graph Resource", () => {
       screenName: "Home",
       firstSeenAt: 100,
       lastSeenAt: 200,
-      visitCount: 2
+      visitCount: 2,
     });
     fakeGraph.addNode({
       screenName: "Settings",
       firstSeenAt: 150,
       lastSeenAt: 250,
-      visitCount: 1
+      visitCount: 1,
     });
     fakeGraph.addEdge({
       from: "Home",
@@ -309,25 +340,30 @@ describe("MCP Navigation Graph Resource", () => {
       interaction: {
         toolName: "tapOn",
         args: {},
-        timestamp: 250
-      }
+        timestamp: 250,
+      },
     });
 
     const { client } = fixture.getContext();
     const readResourceResponseSchema = z.object({
-      contents: z.array(z.object({
-        uri: z.string(),
-        mimeType: z.string().optional(),
-        text: z.string().optional()
-      }))
+      contents: z.array(
+        z.object({
+          uri: z.string(),
+          mimeType: z.string().optional(),
+          text: z.string().optional(),
+        }),
+      ),
     });
 
-    const result = await client.request({
-      method: "resources/read",
-      params: {
-        uri: "automobile:navigation/nodes?screen=Settings"
-      }
-    }, readResourceResponseSchema);
+    const result = await client.request(
+      {
+        method: "resources/read",
+        params: {
+          uri: "automobile:navigation/nodes?screen=Settings",
+        },
+      },
+      readResourceResponseSchema,
+    );
 
     const content = result.contents[0];
     expect(content.text).toBeDefined();
@@ -343,24 +379,29 @@ describe("MCP Navigation Graph Resource", () => {
     const { client } = fixture.getContext();
 
     const listResourceTemplatesResponseSchema = z.object({
-      resourceTemplates: z.array(z.object({
-        uriTemplate: z.string(),
-        name: z.string().optional(),
-        description: z.string().optional(),
-        mimeType: z.string().optional()
-      }))
+      resourceTemplates: z.array(
+        z.object({
+          uriTemplate: z.string(),
+          name: z.string().optional(),
+          description: z.string().optional(),
+          mimeType: z.string().optional(),
+        }),
+      ),
     });
 
-    const result = await client.request({
-      method: "resources/templates/list",
-      params: {}
-    }, listResourceTemplatesResponseSchema);
+    const result = await client.request(
+      {
+        method: "resources/templates/list",
+        params: {},
+      },
+      listResourceTemplatesResponseSchema,
+    );
 
     const nodeByIdAppTemplate = result.resourceTemplates.find(
-      (t: any) => t.uriTemplate === NAVIGATION_RESOURCE_URIS.NODE_BY_ID_WITH_APP_ID
+      (t: any) => t.uriTemplate === NAVIGATION_RESOURCE_URIS.NODE_BY_ID_WITH_APP_ID,
     );
     const screenshotAppTemplate = result.resourceTemplates.find(
-      (t: any) => t.uriTemplate === NAVIGATION_RESOURCE_URIS.NODE_SCREENSHOT_WITH_APP_ID
+      (t: any) => t.uriTemplate === NAVIGATION_RESOURCE_URIS.NODE_SCREENSHOT_WITH_APP_ID,
     );
 
     expect(nodeByIdAppTemplate).toBeDefined();
@@ -375,22 +416,27 @@ describe("MCP Navigation Graph Resource", () => {
       screenName: "Home",
       firstSeenAt: 100,
       lastSeenAt: 200,
-      visitCount: 2
+      visitCount: 2,
     });
 
     const { client } = fixture.getContext();
     const readResourceResponseSchema = z.object({
-      contents: z.array(z.object({
-        uri: z.string(),
-        mimeType: z.string().optional(),
-        text: z.string().optional()
-      }))
+      contents: z.array(
+        z.object({
+          uri: z.string(),
+          mimeType: z.string().optional(),
+          text: z.string().optional(),
+        }),
+      ),
     });
 
-    const result = await client.request({
-      method: "resources/read",
-      params: { uri: "automobile:navigation/nodes/1?appId=com.example.b" }
-    }, readResourceResponseSchema);
+    const result = await client.request(
+      {
+        method: "resources/read",
+        params: { uri: "automobile:navigation/nodes/1?appId=com.example.b" },
+      },
+      readResourceResponseSchema,
+    );
 
     const content = result.contents[0];
     expect(content.uri).toBe("automobile:navigation/nodes/1?appId=com.example.b");
@@ -410,7 +456,7 @@ describe("MCP Navigation Graph Resource", () => {
       screenName: "Home",
       firstSeenAt: 100,
       lastSeenAt: 200,
-      visitCount: 1
+      visitCount: 1,
     });
 
     // App-scoped screenshot store: content is keyed by (appId, screenName).
@@ -420,23 +466,28 @@ describe("MCP Navigation Graph Resource", () => {
       },
       async readScreenshot(screenshotPath: string) {
         return Buffer.from(`bytes:${screenshotPath}`);
-      }
+      },
     });
 
     const { client } = fixture.getContext();
     const readResourceResponseSchema = z.object({
-      contents: z.array(z.object({
-        uri: z.string(),
-        mimeType: z.string().optional(),
-        blob: z.string().optional(),
-        text: z.string().optional()
-      }))
+      contents: z.array(
+        z.object({
+          uri: z.string(),
+          mimeType: z.string().optional(),
+          blob: z.string().optional(),
+          text: z.string().optional(),
+        }),
+      ),
     });
 
-    const result = await client.request({
-      method: "resources/read",
-      params: { uri: "automobile:navigation/nodes/1/screenshot?appId=com.example.b" }
-    }, readResourceResponseSchema);
+    const result = await client.request(
+      {
+        method: "resources/read",
+        params: { uri: "automobile:navigation/nodes/1/screenshot?appId=com.example.b" },
+      },
+      readResourceResponseSchema,
+    );
 
     const content = result.contents[0];
     expect(content.uri).toBe("automobile:navigation/nodes/1/screenshot?appId=com.example.b");
@@ -456,7 +507,7 @@ describe("MCP Navigation Graph Resource", () => {
       screenName: "Home",
       firstSeenAt: 100,
       lastSeenAt: 200,
-      visitCount: 1
+      visitCount: 1,
     });
 
     // App B has no screenshot for this screen.
@@ -466,23 +517,28 @@ describe("MCP Navigation Graph Resource", () => {
       },
       async readScreenshot(screenshotPath: string) {
         return Buffer.from(`bytes:${screenshotPath}`);
-      }
+      },
     });
 
     const { client } = fixture.getContext();
     const readResourceResponseSchema = z.object({
-      contents: z.array(z.object({
-        uri: z.string(),
-        mimeType: z.string().optional(),
-        blob: z.string().optional(),
-        text: z.string().optional()
-      }))
+      contents: z.array(
+        z.object({
+          uri: z.string(),
+          mimeType: z.string().optional(),
+          blob: z.string().optional(),
+          text: z.string().optional(),
+        }),
+      ),
     });
 
-    const result = await client.request({
-      method: "resources/read",
-      params: { uri: "automobile:navigation/nodes/1/screenshot?appId=com.example.b" }
-    }, readResourceResponseSchema);
+    const result = await client.request(
+      {
+        method: "resources/read",
+        params: { uri: "automobile:navigation/nodes/1/screenshot?appId=com.example.b" },
+      },
+      readResourceResponseSchema,
+    );
 
     const content = result.contents[0];
     expect(content.blob).toBeUndefined();

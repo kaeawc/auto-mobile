@@ -18,7 +18,9 @@ function makeDevice(overrides: Partial<BootedDevice> = {}): BootedDevice {
   } as BootedDevice;
 }
 
-function makeSettings(overrides: Partial<LocalizationSettingsResult> = {}): LocalizationSettingsResult {
+function makeSettings(
+  overrides: Partial<LocalizationSettingsResult> = {},
+): LocalizationSettingsResult {
   return {
     success: true,
     locale: "en-US",
@@ -51,7 +53,7 @@ describe("localizationResources", () => {
 
       const content = await getLocalizationResource(
         device.deviceId,
-        () => new FakeLocalizationSettingsProvider(makeSettings())
+        () => new FakeLocalizationSettingsProvider(makeSettings()),
       );
 
       const parsed = JSON.parse(content.text ?? "{}");
@@ -67,7 +69,7 @@ describe("localizationResources", () => {
 
       const content = await getLocalizationResource(
         "not-a-real-device",
-        () => new FakeLocalizationSettingsProvider(makeSettings())
+        () => new FakeLocalizationSettingsProvider(makeSettings()),
       );
 
       const parsed = JSON.parse(content.text ?? "{}");
@@ -80,7 +82,10 @@ describe("localizationResources", () => {
 
       const content = await getLocalizationResource(
         device.deviceId,
-        () => new FakeLocalizationSettingsProvider(makeSettings({ success: false, error: "adb shell failed", locale: null }))
+        () =>
+          new FakeLocalizationSettingsProvider(
+            makeSettings({ success: false, error: "adb shell failed", locale: null }),
+          ),
       );
 
       const parsed = JSON.parse(content.text ?? "{}");
@@ -99,7 +104,9 @@ describe("localizationResources", () => {
       registerLocalizationResources();
 
       const templates = ResourceRegistry.getAllTemplates();
-      const template = templates.find(t => t.uriTemplate === "automobile:devices/{deviceId}/localization");
+      const template = templates.find(
+        (t) => t.uriTemplate === "automobile:devices/{deviceId}/localization",
+      );
       expect(template).toBeDefined();
     });
   });

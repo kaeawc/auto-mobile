@@ -25,28 +25,34 @@ const bigPayload = () => ({
   viewHierarchy: {
     node: Array.from({ length: 40 }, (_, i) => ({
       "resource-id": `com.example:id/node_${i}`,
-      "text": `label ${i} with some descriptive content to add bytes`,
-      "bounds": `[0,${i * 10}][1080,${i * 10 + 48}]`,
-      "clickable": i % 2 === 0,
+      text: `label ${i} with some descriptive content to add bytes`,
+      bounds: `[0,${i * 10}][1080,${i * 10 + 48}]`,
+      clickable: i % 2 === 0,
     })),
   },
 });
 
 const schemaResult = z.object({ success: z.boolean(), value: z.string() });
 
-const permissiveCallResult = z.object({
-  content: z.array(z.object({}).passthrough()),
-  structuredContent: z.unknown().optional(),
-  success: z.boolean().optional(),
-  error: z.string().optional(),
-}).passthrough();
+const permissiveCallResult = z
+  .object({
+    content: z.array(z.object({}).passthrough()),
+    structuredContent: z.unknown().optional(),
+    success: z.boolean().optional(),
+    error: z.string().optional(),
+  })
+  .passthrough();
 
 const listResult = z.object({
-  tools: z.array(z.object({
-    name: z.string(),
-    inputSchema: z.object({}).passthrough(),
-    outputSchema: z.object({}).passthrough().optional(),
-  }).passthrough()),
+  tools: z.array(
+    z
+      .object({
+        name: z.string(),
+        inputSchema: z.object({}).passthrough(),
+        outputSchema: z.object({}).passthrough().optional(),
+      })
+      .passthrough(),
+  ),
 });
 
 describe("structuredContent gating (issue #2759)", () => {
@@ -57,9 +63,15 @@ describe("structuredContent gating (issue #2759)", () => {
       NO_SCHEMA_TOOL,
       "throwaway tool without outputSchema",
       z.object({}),
-      async () => createStructuredToolResponse(bigPayload())
+      async () => createStructuredToolResponse(bigPayload()),
     );
-    ToolRegistry.register(SCHEMA_TOOL, "throwaway tool with outputSchema", z.object({}), async () => createStructuredToolResponse({ success: true, value: "hello" }), { outputSchema: schemaResult });
+    ToolRegistry.register(
+      SCHEMA_TOOL,
+      "throwaway tool with outputSchema",
+      z.object({}),
+      async () => createStructuredToolResponse({ success: true, value: "hello" }),
+      { outputSchema: schemaResult },
+    );
 
     fixture = new McpTestFixture();
     await fixture.setup();
@@ -83,7 +95,7 @@ describe("structuredContent gating (issue #2759)", () => {
     const { client } = fixture.getContext();
     return client.request(
       { method: "tools/call", params: { name, arguments: {} } },
-      permissiveCallResult
+      permissiveCallResult,
     );
   };
 
@@ -122,8 +134,8 @@ describe("structuredContent gating (issue #2759)", () => {
 
   test("EC2/EC8: tools/list advertises outputSchema for schema tool, not for no-schema tool (flag off)", async () => {
     const result = await list();
-    const schemaTool = result.tools.find(t => t.name === SCHEMA_TOOL);
-    const noSchemaTool = result.tools.find(t => t.name === NO_SCHEMA_TOOL);
+    const schemaTool = result.tools.find((t) => t.name === SCHEMA_TOOL);
+    const noSchemaTool = result.tools.find((t) => t.name === NO_SCHEMA_TOOL);
     expect(schemaTool?.outputSchema).toBeDefined();
     expect(noSchemaTool?.outputSchema).toBeUndefined();
   });
@@ -168,7 +180,10 @@ describe("structuredContent gating (issue #2759)", () => {
     serverConfig.setToolResultsNoStructuredContentEnabled(true);
     const tool = ToolRegistry.getTool(SCHEMA_TOOL);
     const direct = await tool!.handler({}, undefined, undefined as unknown as AbortSignal);
-    expect((direct as { structuredContent?: unknown }).structuredContent).toEqual({ success: true, value: "hello" });
+    expect((direct as { structuredContent?: unknown }).structuredContent).toEqual({
+      success: true,
+      value: "hello",
+    });
   });
 
   // #2990: bounds compaction is now a permanent default, so the server always emits
@@ -178,7 +193,7 @@ describe("structuredContent gating (issue #2759)", () => {
   test("EC-C1: tapOn outputSchema always advertises the bounds tuple arm", async () => {
     const boundsHasTupleArm = async (): Promise<boolean> => {
       const result = await list();
-      const tapOn = result.tools.find(t => t.name === "tapOn");
+      const tapOn = result.tools.find((t) => t.name === "tapOn");
       // Depth-first scan for a JSON-Schema tuple (prefixItems) under tapOn's outputSchema.
       const stack: unknown[] = [tapOn?.outputSchema];
       while (stack.length) {

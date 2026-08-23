@@ -10,7 +10,7 @@ function makeResult(): ObserveResult {
   return {
     updatedAt: 0,
     screenSize: { width: 0, height: 0 },
-    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 }
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
   };
 }
 
@@ -18,7 +18,7 @@ function makeDevice(platform: "android" | "ios" = "android"): BootedDevice {
   return {
     name: "test-device",
     platform,
-    deviceId: "test-device"
+    deviceId: "test-device",
   } as BootedDevice;
 }
 
@@ -41,7 +41,7 @@ describe("HierarchyCollector", () => {
       viewHierarchy: fakeViewHierarchy,
       adb: fakeAdb,
       adbFactory: makeStubAdbFactory(fakeAdb),
-      timer: fakeTimer
+      timer: fakeTimer,
     });
   });
 
@@ -49,7 +49,7 @@ describe("HierarchyCollector", () => {
     test("populates viewHierarchy on success", async () => {
       fakeViewHierarchy.configureHierarchy({
         hierarchy: { foo: "bar" },
-        updatedAt: 12345
+        updatedAt: 12345,
       } as any);
 
       const result = makeResult();
@@ -85,7 +85,7 @@ describe("HierarchyCollector", () => {
     test("populates intentChooserDetected from hierarchy", async () => {
       fakeViewHierarchy.configureHierarchy({
         hierarchy: {},
-        intentChooserDetected: true
+        intentChooserDetected: true,
       } as any);
 
       const result = makeResult();
@@ -97,7 +97,7 @@ describe("HierarchyCollector", () => {
     test("propagates notificationPermissionDetected", async () => {
       fakeViewHierarchy.configureHierarchy({
         hierarchy: {},
-        notificationPermissionDetected: true
+        notificationPermissionDetected: true,
       } as any);
 
       const result = makeResult();
@@ -152,14 +152,14 @@ describe("HierarchyCollector", () => {
   describe("extractScreenSize", () => {
     test("parses Android object bounds format", () => {
       const size = collector.extractScreenSize({
-        hierarchy: { node: { $: { bounds: { left: 0, top: 0, right: 1080, bottom: 2400 } } } }
+        hierarchy: { node: { $: { bounds: { left: 0, top: 0, right: 1080, bottom: 2400 } } } },
       } as any);
       expect(size).toEqual({ width: 1080, height: 2400 });
     });
 
     test("parses iOS bounds object format", () => {
       const size = collector.extractScreenSize({
-        hierarchy: { bounds: { left: 0, top: 0, right: 402, bottom: 874 } }
+        hierarchy: { bounds: { left: 0, top: 0, right: 402, bottom: 874 } },
       } as any);
       expect(size).toEqual({ width: 402, height: 874 });
     });
@@ -171,7 +171,7 @@ describe("HierarchyCollector", () => {
 
     test("returns null when width or height is zero", () => {
       const size = collector.extractScreenSize({
-        hierarchy: { node: { $: { bounds: { left: 0, top: 0, right: 0, bottom: 0 } } } }
+        hierarchy: { node: { $: { bounds: { left: 0, top: 0, right: 0, bottom: 0 } } } },
       } as any);
       expect(size).toBeNull();
     });
@@ -188,7 +188,10 @@ describe("HierarchyCollector", () => {
         screenHeight: 480,
       } as any;
 
-      const result = collector.reconcileScreenDimensions(viewHierarchy, { width: 402, height: 874 });
+      const result = collector.reconcileScreenDimensions(viewHierarchy, {
+        width: 402,
+        height: 874,
+      });
 
       expect(result.screenWidth).toBe(402);
       expect(result.screenHeight).toBe(874);
@@ -197,7 +200,10 @@ describe("HierarchyCollector", () => {
     test("mutates and returns the same view hierarchy object", () => {
       const viewHierarchy = { hierarchy: {}, screenWidth: 320, screenHeight: 480 } as any;
 
-      const result = collector.reconcileScreenDimensions(viewHierarchy, { width: 402, height: 874 });
+      const result = collector.reconcileScreenDimensions(viewHierarchy, {
+        width: 402,
+        height: 874,
+      });
 
       expect(result).toBe(viewHierarchy);
       expect(viewHierarchy.screenWidth).toBe(402);
@@ -207,7 +213,10 @@ describe("HierarchyCollector", () => {
     test("populates screenWidth/screenHeight when previously absent", () => {
       const viewHierarchy = { hierarchy: {} } as any;
 
-      const result = collector.reconcileScreenDimensions(viewHierarchy, { width: 1170, height: 2532 });
+      const result = collector.reconcileScreenDimensions(viewHierarchy, {
+        width: 1170,
+        height: 2532,
+      });
 
       expect(result.screenWidth).toBe(1170);
       expect(result.screenHeight).toBe(2532);
@@ -225,18 +234,28 @@ describe("HierarchyCollector", () => {
     test("leaves screenWidth/screenHeight untouched when screenSize has non-positive dimensions", () => {
       const viewHierarchy = { hierarchy: {}, screenWidth: 320, screenHeight: 480 } as any;
 
-      const zeroWidth = collector.reconcileScreenDimensions(viewHierarchy, { width: 0, height: 874 });
+      const zeroWidth = collector.reconcileScreenDimensions(viewHierarchy, {
+        width: 0,
+        height: 874,
+      });
       expect(zeroWidth.screenWidth).toBe(320);
       expect(zeroWidth.screenHeight).toBe(480);
 
-      const zeroHeight = collector.reconcileScreenDimensions(viewHierarchy, { width: 402, height: 0 });
+      const zeroHeight = collector.reconcileScreenDimensions(viewHierarchy, {
+        width: 402,
+        height: 0,
+      });
       expect(zeroHeight.screenWidth).toBe(320);
       expect(zeroHeight.screenHeight).toBe(480);
     });
 
     test("returns the input unchanged when view hierarchy is null", () => {
-      expect(collector.reconcileScreenDimensions(null as any, { width: 402, height: 874 })).toBeNull();
-      expect(collector.reconcileScreenDimensions(undefined as any, { width: 402, height: 874 })).toBeUndefined();
+      expect(
+        collector.reconcileScreenDimensions(null as any, { width: 402, height: 874 }),
+      ).toBeNull();
+      expect(
+        collector.reconcileScreenDimensions(undefined as any, { width: 402, height: 874 }),
+      ).toBeUndefined();
     });
   });
 });

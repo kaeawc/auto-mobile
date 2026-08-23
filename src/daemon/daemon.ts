@@ -1466,7 +1466,7 @@ export class Daemon {
     if (!preparation) {
       if (
         sessionId &&
-        await this.devicePool.waitForSessionPreservingRecovery(sessionId, incidentId)
+        (await this.devicePool.waitForSessionPreservingRecovery(sessionId, incidentId))
       ) {
         this.retireAdbServerResetDisconnectState(deviceId, forceGeneration);
         return true;
@@ -1515,11 +1515,7 @@ export class Daemon {
         "absent",
       );
       const staleDisconnect =
-        (await this.shouldSkipStaleDisconnectCleanup(
-          pooledDevice,
-          deviceId,
-          forceGeneration,
-        )) ||
+        (await this.shouldSkipStaleDisconnectCleanup(pooledDevice, deviceId, forceGeneration)) ||
         !this.isCapturedDisconnectTargetCurrent(
           deviceId,
           pooledDevice,

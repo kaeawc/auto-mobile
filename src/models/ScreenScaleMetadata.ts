@@ -26,19 +26,30 @@ export interface ScreenScaleMetadata {
  * runner serializes absent optionals as JSON null, so null and undefined both mean "absent").
  * All-or-nothing: partial metadata is unusable for unit conversion, so it is never retained.
  */
-export function readScreenScaleMetadata(source: {
-  nativeScale?: number | null;
-  pixelWidth?: number | null;
-  pixelHeight?: number | null;
-} | null | undefined): ScreenScaleMetadata | null {
+export function readScreenScaleMetadata(
+  source:
+    | {
+        nativeScale?: number | null;
+        pixelWidth?: number | null;
+        pixelHeight?: number | null;
+      }
+    | null
+    | undefined,
+): ScreenScaleMetadata | null {
   if (!source) {
     return null;
   }
   const { nativeScale, pixelWidth, pixelHeight } = source;
   if (
-    typeof nativeScale !== "number" || !Number.isFinite(nativeScale) || nativeScale <= 0 ||
-    typeof pixelWidth !== "number" || !Number.isFinite(pixelWidth) || pixelWidth <= 0 ||
-    typeof pixelHeight !== "number" || !Number.isFinite(pixelHeight) || pixelHeight <= 0
+    typeof nativeScale !== "number" ||
+    !Number.isFinite(nativeScale) ||
+    nativeScale <= 0 ||
+    typeof pixelWidth !== "number" ||
+    !Number.isFinite(pixelWidth) ||
+    pixelWidth <= 0 ||
+    typeof pixelHeight !== "number" ||
+    !Number.isFinite(pixelHeight) ||
+    pixelHeight <= 0
   ) {
     return null;
   }
@@ -53,10 +64,15 @@ export function readScreenScaleMetadata(source: {
  * partial/degenerate/absent payload keeps pre-#4548 (and malformed) results byte-identical: the
  * three keys are omitted entirely rather than emitted as `undefined`.
  */
-export function screenScaleMetadataSpread(source: {
-  nativeScale?: number | null;
-  pixelWidth?: number | null;
-  pixelHeight?: number | null;
-} | null | undefined): ScreenScaleMetadata | Record<string, never> {
+export function screenScaleMetadataSpread(
+  source:
+    | {
+        nativeScale?: number | null;
+        pixelWidth?: number | null;
+        pixelHeight?: number | null;
+      }
+    | null
+    | undefined,
+): ScreenScaleMetadata | Record<string, never> {
   return readScreenScaleMetadata(source) ?? {};
 }

@@ -87,7 +87,7 @@ export const LEGACY_OBSERVE_MCP_TIMEOUT_ENV_VAR = "AUTO_MOBILE_OBSERVE_MCP_TIMEO
 function resolveEnvTimeoutFloorMs(
   primaryEnvVar: string,
   legacyEnvVar: string,
-  fallbackMs: number
+  fallbackMs: number,
 ): number {
   const raw = process.env[primaryEnvVar] ?? process.env[legacyEnvVar];
   if (!raw) {
@@ -117,13 +117,13 @@ function resolveToolTimeoutFloorMs(toolName: string | undefined): number | undef
       return resolveEnvTimeoutFloorMs(
         OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
         LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
-        DEFAULT_OPEN_LINK_MCP_TIMEOUT_MS
+        DEFAULT_OPEN_LINK_MCP_TIMEOUT_MS,
       );
     case "observe":
       return resolveEnvTimeoutFloorMs(
         OBSERVE_MCP_TIMEOUT_ENV_VAR,
         LEGACY_OBSERVE_MCP_TIMEOUT_ENV_VAR,
-        DEFAULT_OBSERVE_MCP_TIMEOUT_MS
+        DEFAULT_OBSERVE_MCP_TIMEOUT_MS,
       );
     default:
       return undefined;
@@ -132,14 +132,12 @@ function resolveToolTimeoutFloorMs(toolName: string | undefined): number | undef
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
+    ? (value as Record<string, unknown>)
     : undefined;
 }
 
 function positiveFiniteNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) && value > 0
-    ? value
-    : undefined;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
 function resolveNamedDevicePreparationBudgetMs(argumentsRecord: Record<string, unknown>): number {
@@ -148,11 +146,15 @@ function resolveNamedDevicePreparationBudgetMs(argumentsRecord: Record<string, u
   const automationReadyTimeoutMs =
     positiveFiniteNumber(argumentsRecord.automationReadyTimeoutMs) ??
     DEFAULT_RUNNER_READINESS_TIMEOUT_MS;
-  return Math.min(bootTimeoutMs + automationReadyTimeoutMs, MAX_DEVICE_READY_TIMEOUT_MS) +
-    START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS;
+  return (
+    Math.min(bootTimeoutMs + automationReadyTimeoutMs, MAX_DEVICE_READY_TIMEOUT_MS) +
+    START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS
+  );
 }
 
-function resolveLegacyStartDeviceBudgetMs(argumentsRecord: Record<string, unknown>): number | undefined {
+function resolveLegacyStartDeviceBudgetMs(
+  argumentsRecord: Record<string, unknown>,
+): number | undefined {
   const legacyTimeoutMs = asRecord(argumentsRecord.device)?.timeoutMs;
   // Match startDeviceSchema's legacy normalization: an explicit top-level value
   // wins over the nested device payload.
@@ -160,8 +162,7 @@ function resolveLegacyStartDeviceBudgetMs(argumentsRecord: Record<string, unknow
   if (timeoutMs === undefined) {
     return undefined;
   }
-  return Math.min(timeoutMs, MAX_DEVICE_READY_TIMEOUT_MS) +
-    START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS;
+  return Math.min(timeoutMs, MAX_DEVICE_READY_TIMEOUT_MS) + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS;
 }
 
 function resolveDevicePreparationToolBudgetMs(request: DaemonRequest): number | undefined {
@@ -180,17 +181,17 @@ function resolveDevicePreparationToolBudgetMs(request: DaemonRequest): number | 
       return resolveLegacyStartDeviceBudgetMs(argumentsRecord);
     case "provisionDevice": {
       const timeoutMs =
-        positiveFiniteNumber(argumentsRecord.timeoutMs) ??
-        DEFAULT_PROVISION_DEVICE_TIMEOUT_MS;
-      return Math.min(timeoutMs, MAX_DEVICE_READY_TIMEOUT_MS) +
-        START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS;
+        positiveFiniteNumber(argumentsRecord.timeoutMs) ?? DEFAULT_PROVISION_DEVICE_TIMEOUT_MS;
+      return (
+        Math.min(timeoutMs, MAX_DEVICE_READY_TIMEOUT_MS) + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS
+      );
     }
     case "deleteDevice": {
       const timeoutMs =
-        positiveFiniteNumber(argumentsRecord.timeoutMs) ??
-        DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS;
-      return Math.min(timeoutMs, MAX_DEVICE_READY_TIMEOUT_MS) +
-        START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS;
+        positiveFiniteNumber(argumentsRecord.timeoutMs) ?? DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS;
+      return (
+        Math.min(timeoutMs, MAX_DEVICE_READY_TIMEOUT_MS) + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS
+      );
     }
     default:
       return undefined;
@@ -203,9 +204,8 @@ export function resolveMcpRequestTimeoutMs(request: DaemonRequest): number {
     typeof raw === "number" && Number.isFinite(raw) && raw > 0
       ? raw
       : DEFAULT_MCP_REQUEST_TIMEOUT_MS;
-  const floor = request.method === "tools/call"
-    ? resolveToolTimeoutFloorMs(request.params?.name)
-    : undefined;
+  const floor =
+    request.method === "tools/call" ? resolveToolTimeoutFloorMs(request.params?.name) : undefined;
   const devicePreparationBudget = resolveDevicePreparationToolBudgetMs(request);
   return Math.max(base, floor ?? 0, devicePreparationBudget ?? 0);
 }

@@ -9,7 +9,7 @@ import {
   isNavigationCandidate,
   extractAllElements,
   getElementKey,
-  filterUnexhaustedElements
+  filterUnexhaustedElements,
 } from "../../../src/features/navigation/ExploreElementExtraction";
 import type { TrackedElement } from "../../../src/features/navigation/ExploreTypes";
 
@@ -22,40 +22,40 @@ describe("ExploreElementExtraction", () => {
 
   function createMockElement(overrides: Partial<Element> = {}): Element {
     return {
-      "bounds": { left: 0, top: 0, right: 100, bottom: 50 },
-      "clickable": true,
-      "enabled": true,
-      "text": "Button",
-      "class": "android.widget.Button",
+      bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+      clickable: true,
+      enabled: true,
+      text: "Button",
+      class: "android.widget.Button",
       "resource-id": "com.test:id/button",
-      ...overrides
+      ...overrides,
     } as Element;
   }
 
   function createMockViewHierarchy(nodes: any[] = [], packageName: string = "com.test.app") {
     return {
       hierarchy: {
-        node: nodes
+        node: nodes,
       },
-      packageName
+      packageName,
     };
   }
 
   function createMockNode(overrides: any = {}) {
     const defaults = {
       $: {
-        "class": "android.widget.Button",
-        "text": "Button",
+        class: "android.widget.Button",
+        text: "Button",
         "resource-id": "com.test:id/button",
-        "clickable": "true",
-        "enabled": "true",
-        "bounds": { left: 0, top: 0, right: 100, bottom: 50 }
-      }
+        clickable: "true",
+        enabled: "true",
+        bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+      },
     };
 
     return {
       $: { ...defaults.$, ...overrides },
-      bounds: { left: 0, top: 0, right: 100, bottom: 50 }
+      bounds: { left: 0, top: 0, right: 100, bottom: 50 },
     };
   }
 
@@ -63,42 +63,42 @@ describe("ExploreElementExtraction", () => {
     test("should accept clickable and enabled elements", () => {
       const element = createMockElement({
         clickable: true,
-        enabled: true
+        enabled: true,
       });
       expect(isNavigationCandidate(element)).toBe(true);
     });
 
     test("should reject non-clickable elements", () => {
       const element = createMockElement({
-        clickable: false
+        clickable: false,
       });
       expect(isNavigationCandidate(element)).toBe(false);
     });
 
     test("should reject disabled elements", () => {
       const element = createMockElement({
-        enabled: false
+        enabled: false,
       });
       expect(isNavigationCandidate(element)).toBe(false);
     });
 
     test("should reject EditText elements", () => {
       const element = createMockElement({
-        "class": "android.widget.EditText"
+        class: "android.widget.EditText",
       });
       expect(isNavigationCandidate(element)).toBe(false);
     });
 
     test("should reject Checkbox elements", () => {
       const element = createMockElement({
-        "class": "android.widget.CheckBox"
+        class: "android.widget.CheckBox",
       });
       expect(isNavigationCandidate(element)).toBe(false);
     });
 
     test("should reject elements that are too small", () => {
       const element = createMockElement({
-        bounds: { left: 0, top: 0, right: 5, bottom: 5 }
+        bounds: { left: 0, top: 0, right: 5, bottom: 5 },
       });
       expect(isNavigationCandidate(element)).toBe(false);
     });
@@ -107,14 +107,14 @@ describe("ExploreElementExtraction", () => {
       const element = {
         ...createMockElement(),
         clickable: "true" as any,
-        enabled: "true" as any
+        enabled: "true" as any,
       };
       expect(isNavigationCandidate(element)).toBe(true);
 
       const disabledElement = {
         ...createMockElement(),
         clickable: "true" as any,
-        enabled: "false" as any
+        enabled: "false" as any,
       };
       expect(isNavigationCandidate(disabledElement)).toBe(false);
     });
@@ -124,7 +124,7 @@ describe("ExploreElementExtraction", () => {
     test("should extract clickable buttons from view hierarchy", () => {
       const nodes = [
         createMockNode({ text: "Settings", clickable: "true" }),
-        createMockNode({ text: "Profile", clickable: "true" })
+        createMockNode({ text: "Profile", clickable: "true" }),
       ];
       const viewHierarchy = createMockViewHierarchy(nodes);
 
@@ -136,7 +136,7 @@ describe("ExploreElementExtraction", () => {
     test("should filter out non-clickable elements", () => {
       const nodes = [
         createMockNode({ text: "Settings", clickable: "true" }),
-        createMockNode({ text: "Label", clickable: "false" })
+        createMockNode({ text: "Label", clickable: "false" }),
       ];
       const viewHierarchy = createMockViewHierarchy(nodes);
 
@@ -149,7 +149,7 @@ describe("ExploreElementExtraction", () => {
     test("should filter out EditText elements", () => {
       const nodes = [
         createMockNode({ text: "Submit", clickable: "true" }),
-        createMockNode({ "text": "", "class": "android.widget.EditText", "clickable": "true" })
+        createMockNode({ text: "", class: "android.widget.EditText", clickable: "true" }),
       ];
       const viewHierarchy = createMockViewHierarchy(nodes);
 
@@ -161,14 +161,14 @@ describe("ExploreElementExtraction", () => {
     test("should filter out elements from different packages", () => {
       const nodes = [
         createMockNode({ text: "In-app", clickable: "true", package: "com.test.app" }),
-        createMockNode({ text: "External", clickable: "true", package: "com.other.app" })
+        createMockNode({ text: "External", clickable: "true", package: "com.other.app" }),
       ];
       const viewHierarchy = createMockViewHierarchy(nodes, "com.test.app");
 
       const elements = extractNavigationElements(viewHierarchy, elementParser);
 
       // Only the in-app element should be extracted
-      expect(elements.filter(e => e.text === "External").length).toBe(0);
+      expect(elements.filter((e) => e.text === "External").length).toBe(0);
     });
   });
 
@@ -205,8 +205,8 @@ describe("ExploreElementExtraction", () => {
       const nodes = [
         createMockNode({
           scrollable: "true",
-          bounds: { left: 0, top: 0, right: 300, bottom: 500 }
-        })
+          bounds: { left: 0, top: 0, right: 300, bottom: 500 },
+        }),
       ];
       // Manually set bounds for the test
       nodes[0].bounds = { left: 0, top: 0, right: 300, bottom: 500 };
@@ -221,8 +221,8 @@ describe("ExploreElementExtraction", () => {
       const nodes = [
         createMockNode({
           scrollable: "true",
-          bounds: { left: 0, top: 0, right: 30, bottom: 30 }
-        })
+          bounds: { left: 0, top: 0, right: 30, bottom: 30 },
+        }),
       ];
       nodes[0].bounds = { left: 0, top: 0, right: 30, bottom: 30 };
       const viewHierarchy = createMockViewHierarchy(nodes);
@@ -237,7 +237,7 @@ describe("ExploreElementExtraction", () => {
     test("should extract all elements regardless of clickability", () => {
       const nodes = [
         createMockNode({ text: "Clickable", clickable: "true" }),
-        createMockNode({ text: "NonClickable", clickable: "false" })
+        createMockNode({ text: "NonClickable", clickable: "false" }),
       ];
       const viewHierarchy = createMockViewHierarchy(nodes);
 
@@ -251,7 +251,7 @@ describe("ExploreElementExtraction", () => {
     test("should generate key from resource-id and text", () => {
       const element = createMockElement({
         "resource-id": "com.test:id/btn",
-        "text": "Click Me"
+        text: "Click Me",
       });
 
       const key = getElementKey(element);
@@ -263,11 +263,11 @@ describe("ExploreElementExtraction", () => {
     test("should generate same key for identical elements", () => {
       const element1 = createMockElement({
         "resource-id": "com.test:id/btn",
-        "text": "Click"
+        text: "Click",
       });
       const element2 = createMockElement({
         "resource-id": "com.test:id/btn",
-        "text": "Click"
+        text: "Click",
       });
 
       expect(getElementKey(element1)).toBe(getElementKey(element2));
@@ -283,7 +283,7 @@ describe("ExploreElementExtraction", () => {
     test("should return 'unknown' for elements with no identifying properties", () => {
       const element = {
         bounds: { left: 0, top: 0, right: 100, bottom: 50 },
-        clickable: true
+        clickable: true,
       } as Element;
 
       expect(getElementKey(element)).toBe("unknown");
@@ -292,9 +292,7 @@ describe("ExploreElementExtraction", () => {
 
   describe("filterUnexhaustedElements", () => {
     test("should include elements not in tracked map", () => {
-      const elements = [
-        createMockElement({ text: "New Button" })
-      ];
+      const elements = [createMockElement({ text: "New Button" })];
       const tracked = new Map<string, TrackedElement>();
 
       const filtered = filterUnexhaustedElements(elements, tracked, "Screen1");
@@ -307,7 +305,7 @@ describe("ExploreElementExtraction", () => {
       const tracked = new Map<string, TrackedElement>();
       tracked.set(getElementKey(element), {
         interactionCount: 2,
-        lastInteractionScreen: "Screen1"
+        lastInteractionScreen: "Screen1",
       });
 
       const filtered = filterUnexhaustedElements([element], tracked, "Screen2");
@@ -320,7 +318,7 @@ describe("ExploreElementExtraction", () => {
       const tracked = new Map<string, TrackedElement>();
       tracked.set(getElementKey(element), {
         interactionCount: 2,
-        lastInteractionScreen: "Screen1"
+        lastInteractionScreen: "Screen1",
       });
 
       const filtered = filterUnexhaustedElements([element], tracked, "Screen1");
@@ -333,7 +331,7 @@ describe("ExploreElementExtraction", () => {
       const tracked = new Map<string, TrackedElement>();
       tracked.set(getElementKey(element), {
         interactionCount: 1,
-        lastInteractionScreen: "Screen1"
+        lastInteractionScreen: "Screen1",
       });
 
       const filtered = filterUnexhaustedElements([element], tracked, "Screen1");

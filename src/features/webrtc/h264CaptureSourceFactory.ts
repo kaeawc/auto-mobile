@@ -11,7 +11,7 @@ import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType"
  */
 export type H264CaptureSourceFactory = (
   options: H264CaptureSourceOptions,
-  jarPath: string | null
+  jarPath: string | null,
 ) => H264CaptureSource;
 
 export const createH264CaptureSource: H264CaptureSourceFactory = (options, jarPath) => {
@@ -21,10 +21,12 @@ export const createH264CaptureSource: H264CaptureSourceFactory = (options, jarPa
   if (options.device.platform === "ios") {
     if (options.audioEnabled && !isIosSimulatorUdid(options.device.deviceId)) {
       throw new ActionableError(
-        "WebRTC playback audio capture is available only for iOS Simulator targets; public iOS APIs cannot capture playback audio from a physical device."
+        "WebRTC playback audio capture is available only for iOS Simulator targets; public iOS APIs cannot capture playback audio from a physical device.",
       );
     }
     return new IosH264Source(options);
   }
-  throw new ActionableError(`WebRTC streaming does not support ${options.device.platform} devices.`);
+  throw new ActionableError(
+    `WebRTC streaming does not support ${options.device.platform} devices.`,
+  );
 };

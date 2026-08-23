@@ -74,13 +74,13 @@ Rotation `0..3` is carved into 2 previously-unused bits of the 64-bit
 
 ### Layer 1 bit layout (`VideoStreamProtocol.kt` ↔ `VideoServerStreamParser.ts`)
 
-| Bit(s) | Meaning | Before | After |
-|--------|---------|--------|-------|
-| 63 | `CONFIG` | ✓ | ✓ |
-| 62 | `KEY_FRAME` | ✓ | ✓ |
-| 61 | `REPLAYED` | ✓ | ✓ |
-| 60–59 | `ROTATION` (config only) | *(part of PTS)* | **new** |
-| 58–0 | PTS (µs) | bits 0–60 | bits 0–58 (`PTS_MASK` narrowed) |
+| Bit(s) | Meaning                  | Before          | After                           |
+| ------ | ------------------------ | --------------- | ------------------------------- |
+| 63     | `CONFIG`                 | ✓               | ✓                               |
+| 62     | `KEY_FRAME`              | ✓               | ✓                               |
+| 61     | `REPLAYED`               | ✓               | ✓                               |
+| 60–59  | `ROTATION` (config only) | _(part of PTS)_ | **new**                         |
+| 58–0   | PTS (µs)                 | bits 0–60       | bits 0–58 (`PTS_MASK` narrowed) |
 
 `ROTATION_SHIFT = 59`, `ROTATION_MASK = 0b11 << 59`, `PTS_MASK = (1 << 59) - 1`.
 
@@ -111,13 +111,13 @@ The relay aggregates from possibly-**non-attesting** sources (screenrecord, iOS)
 so here rotation may be absent. Layer 2 has no `REPLAYED` flag, so **bit 61 is
 free** and is repurposed as a `ROTATION_PRESENT` marker:
 
-| Bit(s) | Meaning |
-|--------|---------|
-| 63 | `CONFIG` |
-| 62 | `KEY_FRAME` |
-| 61 | `ROTATION_PRESENT` (config only) |
-| 60–59 | `ROTATION` (config only) |
-| 58–0 | PTS (µs), `PTS_MASK = (1 << 59) - 1` (narrowed from bits 0–61) |
+| Bit(s) | Meaning                                                        |
+| ------ | -------------------------------------------------------------- |
+| 63     | `CONFIG`                                                       |
+| 62     | `KEY_FRAME`                                                    |
+| 61     | `ROTATION_PRESENT` (config only)                               |
+| 60–59  | `ROTATION` (config only)                                       |
+| 58–0   | PTS (µs), `PTS_MASK = (1 << 59) - 1` (narrowed from bits 0–61) |
 
 The desktop parser returns `rotation: Int? = null` unless a config packet has bit
 61 set; only then does it read bits 59–60. This cleanly encodes "unknown" (no

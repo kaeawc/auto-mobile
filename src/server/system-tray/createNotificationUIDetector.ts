@@ -3,15 +3,15 @@ import type { NotificationUIDetector } from "../../utils/interfaces/Notification
 import type {
   SystemTrayAdb,
   SystemTrayDependencies,
-  SystemTrayIosClient
+  SystemTrayIosClient,
 } from "../systemTrayHelpers";
 import {
   AndroidNotificationUIDetector,
-  type AndroidNotificationUIDetectorDeps
+  type AndroidNotificationUIDetectorDeps,
 } from "./AndroidNotificationUIDetector";
 import {
   IosNotificationUIDetector,
-  type IosNotificationUIDetectorDeps
+  type IosNotificationUIDetectorDeps,
 } from "./IosNotificationUIDetector";
 
 /**
@@ -23,7 +23,7 @@ import {
  */
 export function createNotificationUIDetector(
   device: BootedDevice,
-  getDependencies: () => SystemTrayDependencies
+  getDependencies: () => SystemTrayDependencies,
 ): NotificationUIDetector {
   if (device.platform === "ios") {
     const deps: IosNotificationUIDetectorDeps = {
@@ -31,21 +31,21 @@ export function createNotificationUIDetector(
         getIosClient(device, getDependencies).requestSwipe(x1, y1, x2, y2, duration),
       requestTapCoordinates: (x, y) =>
         getIosClient(device, getDependencies).requestTapCoordinates(x, y),
-      now: () => getDependencies().timer.now()
+      now: () => getDependencies().timer.now(),
     };
     return new IosNotificationUIDetector(device, deps);
   }
 
   const deps: AndroidNotificationUIDetectorDeps = {
-    executeAdbCommand: command => getAdb(device, getDependencies).executeCommand(command),
-    getDeviceTimestampMs: () => getAdb(device, getDependencies).getDeviceTimestampMs()
+    executeAdbCommand: (command) => getAdb(device, getDependencies).executeCommand(command),
+    getDeviceTimestampMs: () => getAdb(device, getDependencies).getDeviceTimestampMs(),
   };
   return new AndroidNotificationUIDetector(device, deps);
 }
 
 function getIosClient(
   device: BootedDevice,
-  getDependencies: () => SystemTrayDependencies
+  getDependencies: () => SystemTrayDependencies,
 ): SystemTrayIosClient {
   const { iosClientFactory } = getDependencies();
   if (!iosClientFactory) {
@@ -56,7 +56,7 @@ function getIosClient(
 
 function getAdb(
   device: BootedDevice,
-  getDependencies: () => SystemTrayDependencies
+  getDependencies: () => SystemTrayDependencies,
 ): SystemTrayAdb {
   return getDependencies().adbFactory(device);
 }

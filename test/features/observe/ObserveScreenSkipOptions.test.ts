@@ -29,7 +29,10 @@ class FakeScreenshotRecorder implements ObserveScreenshotRecorder {
   }
 }
 
-class FakeHierarchyCollector implements Pick<HierarchyCollector, "collect" | "collectRaw" | "extractScreenSize"> {
+class FakeHierarchyCollector implements Pick<
+  HierarchyCollector,
+  "collect" | "collectRaw" | "extractScreenSize"
+> {
   constructor(private foregroundActivity: string | null = "com.example/.MainActivity") {}
 
   async collect(result: ObserveResult): Promise<void> {
@@ -49,12 +52,19 @@ class FakeHierarchyCollector implements Pick<HierarchyCollector, "collect" | "co
   }
 }
 
-class FakeDeviceStateCollector implements Pick<DeviceStateCollector, "collectBackStack" | "collectWakefulness" | "collectDeviceLock" | "collectActiveWindow"> {
+class FakeDeviceStateCollector implements Pick<
+  DeviceStateCollector,
+  "collectBackStack" | "collectWakefulness" | "collectDeviceLock" | "collectActiveWindow"
+> {
   backStackCalls = 0;
   activeWindowCalls = 0;
   deviceLockCalls = 0;
 
-  async collectBackStack(result: ObserveResult, _perf: PerformanceTracker, _signal?: AbortSignal): Promise<void> {
+  async collectBackStack(
+    result: ObserveResult,
+    _perf: PerformanceTracker,
+    _signal?: AbortSignal,
+  ): Promise<void> {
     this.backStackCalls++;
     result.backStack = [{ activity: "com.example/.MainActivity", taskId: 1 }] as any;
   }
@@ -72,10 +82,12 @@ class FakeDeviceStateCollector implements Pick<DeviceStateCollector, "collectBac
     this.activeWindowCalls++;
     result.activeWindow = { appId: "com.example", activityName: ".MainActivity", layoutSeqSum: 0 };
   }
-
 }
 
-class NoOpAuditor implements Pick<PerformanceAuditor & AccessibilityAuditor & AccessibilityStateDetector, "run"> {
+class NoOpAuditor implements Pick<
+  PerformanceAuditor & AccessibilityAuditor & AccessibilityStateDetector,
+  "run"
+> {
   async run(): Promise<void> {}
 }
 
@@ -90,16 +102,23 @@ function createObserveScreen(foregroundActivity: string | null = "com.example/.M
   const fakeScreenshotRecorder = new FakeScreenshotRecorder();
   const fakeDeviceStateCollector = new FakeDeviceStateCollector();
 
-  const observeScreen = new RealObserveScreen(device, new FakeAdbClientFactory(new FakeAdbExecutor()), {
-    cacheStore: new FakeObserveCacheStore(fakeTimer),
-    screenshotStateStore: new FakeScreenshotStateStore(),
-    screenshotRecorder: fakeScreenshotRecorder,
-    hierarchyCollector: new FakeHierarchyCollector(foregroundActivity) as unknown as HierarchyCollector,
-    deviceStateCollector: fakeDeviceStateCollector as unknown as DeviceStateCollector,
-    performanceAuditor: new NoOpAuditor() as unknown as PerformanceAuditor,
-    accessibilityAuditor: new NoOpAuditor() as unknown as AccessibilityAuditor,
-    accessibilityStateDetector: new NoOpAuditor() as unknown as AccessibilityStateDetector,
-  }, fakeTimer);
+  const observeScreen = new RealObserveScreen(
+    device,
+    new FakeAdbClientFactory(new FakeAdbExecutor()),
+    {
+      cacheStore: new FakeObserveCacheStore(fakeTimer),
+      screenshotStateStore: new FakeScreenshotStateStore(),
+      screenshotRecorder: fakeScreenshotRecorder,
+      hierarchyCollector: new FakeHierarchyCollector(
+        foregroundActivity,
+      ) as unknown as HierarchyCollector,
+      deviceStateCollector: fakeDeviceStateCollector as unknown as DeviceStateCollector,
+      performanceAuditor: new NoOpAuditor() as unknown as PerformanceAuditor,
+      accessibilityAuditor: new NoOpAuditor() as unknown as AccessibilityAuditor,
+      accessibilityStateDetector: new NoOpAuditor() as unknown as AccessibilityStateDetector,
+    },
+    fakeTimer,
+  );
 
   return { observeScreen, fakeScreenshotRecorder, fakeDeviceStateCollector };
 }

@@ -189,7 +189,10 @@ export interface AndroidEmulator {
    * @param device - The device to kill
    * @returns Promise that resolves when emulator is stopped
    */
-  killDevice(device: BootedDevice, options?: { timeoutMs?: number; signal?: AbortSignal }): Promise<BootedDevice>;
+  killDevice(
+    device: BootedDevice,
+    options?: { timeoutMs?: number; signal?: AbortSignal },
+  ): Promise<BootedDevice>;
 
   /**
    * Wait for the emulator to be ready for use
@@ -278,7 +281,8 @@ export function resolveHeadlessMode(
   if (platform === "darwin") {
     return {
       headless: true,
-      reason: "macOS defaults to -no-window; the emulator's Qt/CoreAnimation window segfaults on repaint and AutoMobile streams the screen instead",
+      reason:
+        "macOS defaults to -no-window; the emulator's Qt/CoreAnimation window segfaults on repaint and AutoMobile streams the screen instead",
     };
   }
 
@@ -380,7 +384,10 @@ function parseEmulatorConsolePort(
   return consolePort;
 }
 
-function parseEmulatorAdbPort(adbPortText: string | undefined, additionalValues: readonly string[]): number {
+function parseEmulatorAdbPort(
+  adbPortText: string | undefined,
+  additionalValues: readonly string[],
+): number {
   const adbPort = Number(adbPortText);
   if (
     !adbPortText ||
@@ -389,9 +396,7 @@ function parseEmulatorAdbPort(adbPortText: string | undefined, additionalValues:
     adbPort < 1 ||
     adbPort > 65_535
   ) {
-    throw new ActionableError(
-      "Emulator -ports must specify distinct console and ADB TCP ports",
-    );
+    throw new ActionableError("Emulator -ports must specify distinct console and ADB TCP ports");
   }
   return adbPort;
 }
@@ -405,9 +410,7 @@ function parseEmulatorPortPair(argument: EmulatorConsolePortArgument): EmulatorP
 
   const adbPort = parseEmulatorAdbPort(adbPortText, additionalValues);
   if (adbPort === consolePort) {
-    throw new ActionableError(
-      "Emulator -ports must specify distinct console and ADB TCP ports",
-    );
+    throw new ActionableError("Emulator -ports must specify distinct console and ADB TCP ports");
   }
   return { consolePort, adbPort };
 }
@@ -466,9 +469,7 @@ function configuredEmulatorPorts(args: readonly string[]): EmulatorPortPair | un
       (configuredPorts.consolePort !== ports.consolePort ||
         configuredPorts.adbPort !== ports.adbPort)
     ) {
-      throw new ActionableError(
-        "Emulator arguments specify multiple different port pairs",
-      );
+      throw new ActionableError("Emulator arguments specify multiple different port pairs");
     }
     configuredPorts = ports;
   }
@@ -537,9 +538,15 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   private readonly launchTargetDeviceIds = new WeakMap<ChildProcess, string>();
   // startDevice creates a fresh client per request, so reservations must cover
   // every client in the daemon rather than one client instance.
-  private static readonly reservedLaunchDeviceIds = new Map<ChildProcess, EmulatorDeviceIdReservation>();
+  private static readonly reservedLaunchDeviceIds = new Map<
+    ChildProcess,
+    EmulatorDeviceIdReservation
+  >();
   private static readonly pendingLaunchDeviceIds = new Map<string, EmulatorDeviceIdReservation>();
-  private static readonly terminalReservedDeviceIds = new Map<string, TerminalEmulatorReservation>();
+  private static readonly terminalReservedDeviceIds = new Map<
+    string,
+    TerminalEmulatorReservation
+  >();
   private static terminalReservationGeneration = 0;
   private static hostPortAvailabilityCheckerForTesting: HostPortAvailabilityChecker | undefined;
   private readonly launchErrors = new WeakMap<ChildProcess, ActionableError>();
@@ -569,8 +576,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     avdConfigReader?: AvdConfigReader,
     platform: NodeJS.Platform = process.platform,
     hostArchitecture: string = arch(),
-    hostPortAvailabilityChecker: HostPortAvailabilityChecker =
-      AndroidEmulatorClient.hostPortAvailabilityCheckerForTesting ??
+    hostPortAvailabilityChecker: HostPortAvailabilityChecker = AndroidEmulatorClient.hostPortAvailabilityCheckerForTesting ??
       new TcpHostPortAvailabilityChecker(),
   ) {
     this.execAsync = execAsyncFn || execAsync;
@@ -1013,9 +1019,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     return null;
   }
 
-  private targetReadinessState(
-    targetState: AdbDeviceState | undefined,
-  ): TargetReadinessState {
+  private targetReadinessState(targetState: AdbDeviceState | undefined): TargetReadinessState {
     if (targetState?.state === "offline") {
       return "offline";
     }
@@ -1736,9 +1740,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       let exitCode: number | null | undefined;
       let exitSignal: NodeJS.Signals | null | undefined;
       let provisionalPostValidationExitError: ActionableError | undefined;
-      let resolvePostValidationExit:
-        | ((error: ActionableError | undefined) => void)
-        | undefined;
+      let resolvePostValidationExit: ((error: ActionableError | undefined) => void) | undefined;
       perf.startOperation("panicDetection");
 
       const appendRedactedLaunchOutput = (output: string) => {
@@ -1747,7 +1749,9 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         }
       };
       const currentLaunchOutput = () =>
-        boundedEmulatorOutputTail(launchOutput + stdoutRedactor.snapshot() + stderrRedactor.snapshot());
+        boundedEmulatorOutputTail(
+          launchOutput + stdoutRedactor.snapshot() + stderrRedactor.snapshot(),
+        );
       const flushLaunchOutput = () => {
         for (const redactor of [stdoutRedactor, stderrRedactor]) {
           const flushedOutput = redactor.flush();
@@ -1804,7 +1808,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           return;
         }
         clearExitDrainTimeout();
-      if (
+        if (
           duplicateAvdDetected ||
           output.includes("Running multiple emulators with the same AVD")
         ) {
@@ -2195,9 +2199,13 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     device: BootedDevice,
     options: { timeoutMs?: number; signal?: AbortSignal } = {},
   ): Promise<BootedDevice> {
-    const runningEmulators = await this.getBootedDevicesChecked(false, {
-      bypassDeviceListCache: true,
-    }, options.signal);
+    const runningEmulators = await this.getBootedDevicesChecked(
+      false,
+      {
+        bypassDeviceListCache: true,
+      },
+      options.signal,
+    );
     const emulator = runningEmulators.find((emu) => emu.deviceId === device.deviceId);
 
     if (!emulator || !emulator.deviceId) {
@@ -2228,9 +2236,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     if (!capture) {
       return undefined;
     }
-    const terminalReservationsAtSnapshot = new Map(
-      AndroidEmulatorClient.terminalReservedDeviceIds,
-    );
+    const terminalReservationsAtSnapshot = new Map(AndroidEmulatorClient.terminalReservedDeviceIds);
     let deviceIds: Set<string> | undefined;
     try {
       const adb = this.adbFactory.create(null);
@@ -2432,10 +2438,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     if (!preLaunchSnapshot?.isComplete) {
       return undefined;
     }
-    return this.allocateReservedEmulatorPorts(
-      preLaunchSnapshot.deviceIds,
-      signal,
-    );
+    return this.allocateReservedEmulatorPorts(preLaunchSnapshot.deviceIds, signal);
   }
 
   private async addReservedEmulatorPort(
@@ -2494,7 +2497,8 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     for (const [deviceId, reservation] of terminalReservationsAtSnapshot) {
       if (
         !deviceIds.has(deviceId) &&
-        AndroidEmulatorClient.terminalReservedDeviceIds.get(deviceId)?.generation === reservation.generation
+        AndroidEmulatorClient.terminalReservedDeviceIds.get(deviceId)?.generation ===
+          reservation.generation
       ) {
         AndroidEmulatorClient.terminalReservedDeviceIds.delete(deviceId);
       }
@@ -2613,10 +2617,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     return this.readinessDiagnostic("device-discovery", error);
   }
 
-  private markTargetNotReady(
-    tracker: OfflineTracker,
-    targetDeviceId: string | undefined,
-  ): void {
+  private markTargetNotReady(tracker: OfflineTracker, targetDeviceId: string | undefined): void {
     if (targetDeviceId) {
       tracker.state = "not-ready";
     }
@@ -2955,11 +2956,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
             // Look for emulator by name next.
             if (!emulator && !correlatedTargetDeviceId) {
-              const correlation = this.findNamedEmulator(
-                avdName,
-                childProcess,
-                runningEmulators,
-              );
+              const correlation = this.findNamedEmulator(avdName, childProcess, runningEmulators);
               emulator = correlation.emulator;
               correlationFailure = correlation.failure;
             }
@@ -3116,17 +3113,8 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           `Background polling cycle complete - sleeping ${remainingPollingDelayMs}ms before next check`,
         );
         while (polling.active && !foundDeviceId && remainingPollingDelayMs > 0) {
-          const sleepChunkMs = Math.min(
-            remainingPollingDelayMs,
-            MAX_POLLING_SLEEP_CHUNK_MS,
-          );
-          await this.waitForReadinessDelay(
-            sleepChunkMs,
-            signal,
-            polling,
-            startTime,
-            timeoutMs,
-          );
+          const sleepChunkMs = Math.min(remainingPollingDelayMs, MAX_POLLING_SLEEP_CHUNK_MS);
+          await this.waitForReadinessDelay(sleepChunkMs, signal, polling, startTime, timeoutMs);
           remainingPollingDelayMs -= sleepChunkMs;
         }
       }
@@ -3198,10 +3186,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       return bootedDevice;
     }
 
-    const correlatedTargetDeviceId = this.readinessTargetDeviceId(
-      targetDeviceId,
-      childProcess,
-    );
+    const correlatedTargetDeviceId = this.readinessTargetDeviceId(targetDeviceId, childProcess);
     const target = this.readinessTarget(correlatedTargetDeviceId, offlineTracker);
     throw this.readinessTimeoutError(
       avdName,

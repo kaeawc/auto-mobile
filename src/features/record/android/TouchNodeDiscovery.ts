@@ -15,9 +15,7 @@ export interface TouchInputNode {
  * Run `shell getevent -p` and return the first input node that reports both
  * ABS_MT_POSITION_X (0x35) and ABS_MT_POSITION_Y (0x36) with valid axis ranges.
  */
-export async function discoverTouchNode(
-  adb: AdbExecutor
-): Promise<TouchInputNode | null> {
+export async function discoverTouchNode(adb: AdbExecutor): Promise<TouchInputNode | null> {
   const { stdout } = await adb.executeCommand("shell getevent -p");
   const nodes = parseTouchNodes(stdout);
   if (nodes.length === 0) {
@@ -26,7 +24,7 @@ export async function discoverTouchNode(
   }
   if (nodes.length > 1) {
     logger.debug(
-      `[TouchNodeDiscovery] Found ${nodes.length} multitouch devices, using first: ${nodes[0].path}`
+      `[TouchNodeDiscovery] Found ${nodes.length} multitouch devices, using first: ${nodes[0].path}`,
     );
   }
   return nodes[0];
@@ -75,7 +73,9 @@ export function parseTouchNodes(output: string): TouchInputNode[] {
       continue;
     }
 
-    if (!currentPath) {continue;}
+    if (!currentPath) {
+      continue;
+    }
 
     // Device name line: `  name:     "Touchscreen"`
     const nameMatch = line.match(/^\s+name:\s+"(.+)"/);

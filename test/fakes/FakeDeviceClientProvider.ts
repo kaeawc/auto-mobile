@@ -33,14 +33,14 @@ export class FakeDeviceClientProvider implements DeviceClientProvider {
     private readonly fakeAdb: AdbExecutor,
     private readonly fakeDeviceUtils: PlatformDeviceManager,
     private readonly fakeSimctl?: SimCtlClient,
-    private readonly options: FakeDeviceClientProviderOptions = {}
+    private readonly options: FakeDeviceClientProviderOptions = {},
   ) {}
 
   private require<T>(value: T | undefined, fieldName: string): T {
     if (!value) {
       throw new Error(
         `FakeDeviceClientProvider: ${fieldName} fake not configured. ` +
-        `Pass it via constructor options.`
+          `Pass it via constructor options.`,
       );
     }
     return value;

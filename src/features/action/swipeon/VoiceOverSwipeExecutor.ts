@@ -28,7 +28,7 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
     private readonly iosClient: IOSCtrlProxy,
     private readonly iosVoiceOverDetector: IosVoiceOverDetector,
     private readonly timer: Timer,
-    private readonly featureFlags?: FeatureFlagService
+    private readonly featureFlags?: FeatureFlagService,
   ) {}
 
   /**
@@ -59,7 +59,7 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
     _containerElement: Element | null,
     gestureOptions?: GestureOptions,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    boomerang?: BoomerangConfig
+    boomerang?: BoomerangConfig,
   ): Promise<SwipeResult> {
     if (this.device.platform !== "ios") {
       if (boomerang) {
@@ -73,7 +73,7 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
     const isVoiceOverEnabled = await this.iosVoiceOverDetector.isVoiceOverEnabled(
       this.device.deviceId,
       this.iosClient,
-      this.featureFlags
+      this.featureFlags,
     );
 
     if (!isVoiceOverEnabled) {
@@ -86,16 +86,22 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
     // VoiceOver is enabled
     if (boomerang) {
       return this.voiceOverScrollFailure(
-        x1, y1, x2, y2,
+        x1,
+        y1,
+        x2,
+        y2,
         gestureOptions?.duration ?? 300,
-        "VoiceOver boomerang gestures are not supported because they require XCTest-synthesized touches, which do not reach VoiceOver"
+        "VoiceOver boomerang gestures are not supported because they require XCTest-synthesized touches, which do not reach VoiceOver",
       );
     }
 
     return this.voiceOverScrollFailure(
-      x1, y1, x2, y2,
+      x1,
+      y1,
+      x2,
+      y2,
       gestureOptions?.duration ?? 300,
-      "VoiceOver scrolling is not supported: CtrlProxy only provides XCTest-synthesized touches, which do not reach VoiceOver"
+      "VoiceOver scrolling is not supported: CtrlProxy only provides XCTest-synthesized touches, which do not reach VoiceOver",
     );
   }
 
@@ -110,7 +116,7 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
     y2: number,
     gestureOptions: GestureOptions | undefined,
     boomerang: BoomerangConfig,
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<SwipeResult> {
     const forwardDuration = gestureOptions?.duration ?? 300;
     const returnDuration = this.getReturnDuration(forwardDuration, boomerang.returnSpeed);
@@ -136,7 +142,7 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
         y1,
         x2,
         y2,
-        duration: totalDuration
+        duration: totalDuration,
       };
     }
 
@@ -146,7 +152,7 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
       y1,
       x2,
       y2,
-      duration: totalDuration
+      duration: totalDuration,
     };
   }
 
@@ -156,7 +162,7 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
     x2: number,
     y2: number,
     duration: number,
-    error: string
+    error: string,
   ): SwipeResult {
     return {
       success: false,
@@ -166,7 +172,8 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
       x2,
       y2,
       duration,
-      fallbackReason: "XCTest-synthesized touches do not reach VoiceOver; no gesture fallback is available"
+      fallbackReason:
+        "XCTest-synthesized touches do not reach VoiceOver; no gesture fallback is available",
     };
   }
 
@@ -177,7 +184,7 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
   private buildGestureOptions(base: GestureOptions | undefined, duration: number): GestureOptions {
     return {
       ...(base ?? {}),
-      duration
+      duration,
     };
   }
 }

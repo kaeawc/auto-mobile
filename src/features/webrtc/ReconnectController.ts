@@ -1,9 +1,20 @@
 import { errorMessage } from "../../utils/describeUnknownError";
-import { exponentialBackoff, normalizeBackoff, type BackoffInput, type BackoffPolicy } from "../../utils/Backoff";
+import {
+  exponentialBackoff,
+  normalizeBackoff,
+  type BackoffInput,
+  type BackoffPolicy,
+} from "../../utils/Backoff";
 import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 
-export type ReconnectState = "idle" | "connecting" | "connected" | "reconnecting" | "failed" | "stopped";
+export type ReconnectState =
+  | "idle"
+  | "connecting"
+  | "connected"
+  | "reconnecting"
+  | "failed"
+  | "stopped";
 
 export interface ReconnectControllerOptions {
   /** Establish (or re-establish) the connection. Rejects on failure. */
@@ -41,7 +52,8 @@ export class ReconnectController {
   constructor(options: ReconnectControllerOptions) {
     this.attempt = options.attempt;
     this.backoff = normalizeBackoff(
-      options.backoff ?? exponentialBackoff({ initialDelayMs: 1000, multiplier: 2, maxDelayMs: 30_000 })
+      options.backoff ??
+        exponentialBackoff({ initialDelayMs: 1000, multiplier: 2, maxDelayMs: 30_000 }),
     );
     this.maxAttempts = options.maxAttempts ?? 0;
     this.timer = options.timer ?? defaultTimer;
@@ -144,7 +156,7 @@ export class ReconnectController {
       this.drainPendingReconnect();
     } catch (error) {
       logger.warn(
-        `[WebRTC] reconnect attempt ${this.attemptsThisCycle} failed: ${errorMessage(error)}`
+        `[WebRTC] reconnect attempt ${this.attemptsThisCycle} failed: ${errorMessage(error)}`,
       );
       this.scheduleRetryOrFail();
     }

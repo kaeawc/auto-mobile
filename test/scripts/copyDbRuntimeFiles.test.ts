@@ -19,11 +19,11 @@ describe("copyDatabaseRuntimeFiles", () => {
     mkdirSync(join(root, "src", "db", "migrations"), { recursive: true });
     writeFileSync(
       join(root, "src", "db", "migrations", "2026_07_02_000_event_composite_indexes.ts"),
-      'import { EVENT_TABLES } from "../eventTables";\nexport async function up() {}\n'
+      'import { EVENT_TABLES } from "../eventTables";\nexport async function up() {}\n',
     );
     writeFileSync(
       join(root, "src", "db", "eventTables.ts"),
-      'export const EVENT_TABLES = ["network_events"] as const;\n'
+      'export const EVENT_TABLES = ["network_events"] as const;\n',
     );
     return root;
   }
@@ -32,7 +32,7 @@ describe("copyDatabaseRuntimeFiles", () => {
     const root = makeProjectRoot();
     const logs: string[] = [];
 
-    copyDatabaseRuntimeFiles({ projectRoot: root, log: message => logs.push(message) });
+    copyDatabaseRuntimeFiles({ projectRoot: root, log: (message) => logs.push(message) });
 
     const migration = join(
       root,
@@ -40,7 +40,7 @@ describe("copyDatabaseRuntimeFiles", () => {
       "src",
       "db",
       "migrations",
-      "2026_07_02_000_event_composite_indexes.ts"
+      "2026_07_02_000_event_composite_indexes.ts",
     );
     const runtimeFile = join(root, "dist", "src", "db", "eventTables.ts");
 

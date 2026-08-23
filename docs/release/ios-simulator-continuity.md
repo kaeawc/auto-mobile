@@ -5,7 +5,7 @@ Tracking issue: #5104.
 An iOS simulator appearing available after a deployment does **not** prove that
 the same simulator process, simulator identity, or CoreSimulator data survived
 the rollout. This document defines the host contract that a managed macOS worker
-must satisfy so that continuity — or a controlled replacement — is *provable*,
+must satisfy so that continuity — or a controlled replacement — is _provable_,
 and gives the repeatable validation that proves it before and after a real
 deploy. A successful `simctl list` alone is never continuity evidence.
 
@@ -20,13 +20,13 @@ deploy. A successful `simctl list` alone is never continuity evidence.
 Record the following in your internal deployment record (one row per managed
 host). The bracketed values are placeholders.
 
-| Field | Value | Notes |
-| --- | --- | --- |
-| Managed macOS host | `<host-identity>` | Hostname or stable host id of the worker. |
-| Owning team | `<team>` | Who is paged when continuity fails. |
-| Deployment trigger | `<rollout-trigger>` | What starts a rollout (CI job, orchestrator, manual). |
-| Process supervisor | `launchd` (typical) | Supervises the AutoMobile daemon, iOS control runner, and worker process. |
-| AutoMobile data root | `~/.auto-mobile` | Stable per-user base; see §3. |
+| Field                       | Value                               | Notes                                                                                     |
+| --------------------------- | ----------------------------------- | ----------------------------------------------------------------------------------------- |
+| Managed macOS host          | `<host-identity>`                   | Hostname or stable host id of the worker.                                                 |
+| Owning team                 | `<team>`                            | Who is paged when continuity fails.                                                       |
+| Deployment trigger          | `<rollout-trigger>`                 | What starts a rollout (CI job, orchestrator, manual).                                     |
+| Process supervisor          | `launchd` (typical)                 | Supervises the AutoMobile daemon, iOS control runner, and worker process.                 |
+| AutoMobile data root        | `~/.auto-mobile`                    | Stable per-user base; see §3.                                                             |
 | CoreSimulator data boundary | `~/Library/Developer/CoreSimulator` | Owned by the macOS `CoreSimulator` service, **outside** any package/temp extraction path. |
 
 The four processes in scope are the **AutoMobile daemon**, the **iOS control
@@ -64,7 +64,7 @@ managed CoreSimulator state:
 
 1. **AutoMobile's on-disk state has a stable, non-ephemeral root.**
    `resolveAutoMobileBaseDir` (`src/utils/tempDir.ts`) resolves
-   `~/.auto-mobile` (overridable via `AUTOMOBILE_DATA_DIR`) and *deliberately*
+   `~/.auto-mobile` (overridable via `AUTOMOBILE_DATA_DIR`) and _deliberately_
    does not derive the base from `TMPDIR`/`TMP`/`TEMP`, which a package runner
    such as `bunx` may point at an ephemeral extraction dir (issue #2724). A
    process replaced from a fresh extraction therefore reattaches to the same
@@ -73,7 +73,7 @@ managed CoreSimulator state:
    lives under `~/Library/Developer/CoreSimulator/Devices/<UDID>/data`, owned by
    the `CoreSimulator` service. A rollout **must not** run `simctl erase`,
    `simctl delete`, or wipe that tree as part of replacing the worker or
-   AutoMobile. Erasing a device is only permitted as the *explicit* first step of
+   AutoMobile. Erasing a device is only permitted as the _explicit_ first step of
    a declared controlled replacement of an idle device.
 
 The validation in §4 makes a violation of either invariant observable: a changed
@@ -100,19 +100,19 @@ timestamps must be strict ISO-8601 with a timezone (e.g. `2026-08-07T10:00:00Z`)
 For each managed simulator selected for validation, capture a JSON snapshot with
 these fields (all in the issue's required pre/post-deploy evidence list):
 
-| Field | Example source |
-| --- | --- |
-| `udid`, `runtimeDeviceType` | `xcrun simctl list devices --json` |
-| `hostIdentity` | `scutil --get LocalHostName` (or your stable host id) |
-| `automobileVersion` | AutoMobile package/version reported by the daemon |
-| `workerIncarnation` | worker process incarnation id (changes on replacement) |
-| `processSupervisor`, `processIds` | `launchctl` / `ps`. `processIds` **must** include positive-integer PIDs for the keys `daemon`, `runner`, and `coreSimulatorService` (`com.apple.CoreSimulator.CoreSimulatorService`); a missing role is `incomplete-evidence` |
-| `coreSimulatorDataRoot` | `~/Library/Developer/CoreSimulator/Devices/<udid>/data` |
-| `bootedSince` | boot time of the current session (used to detect a boot-session change between the before and after captures) — **required for a proven verdict**: without it a reboot cannot be ruled out, so the result is `incomplete-evidence` |
-| `lifecycleState` | `booted` / `shutdown` / … from `simctl list` |
-| `responsive` | result of a responsiveness probe against the device |
-| `reportingStatus` | `reporting` / `delayed` / `lost` from the worker/AutoMobile status |
-| `activeWork` | whether a lease, execution, or drain was present |
+| Field                             | Example source                                                                                                                                                                                                                     |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `udid`, `runtimeDeviceType`       | `xcrun simctl list devices --json`                                                                                                                                                                                                 |
+| `hostIdentity`                    | `scutil --get LocalHostName` (or your stable host id)                                                                                                                                                                              |
+| `automobileVersion`               | AutoMobile package/version reported by the daemon                                                                                                                                                                                  |
+| `workerIncarnation`               | worker process incarnation id (changes on replacement)                                                                                                                                                                             |
+| `processSupervisor`, `processIds` | `launchctl` / `ps`. `processIds` **must** include positive-integer PIDs for the keys `daemon`, `runner`, and `coreSimulatorService` (`com.apple.CoreSimulator.CoreSimulatorService`); a missing role is `incomplete-evidence`      |
+| `coreSimulatorDataRoot`           | `~/Library/Developer/CoreSimulator/Devices/<udid>/data`                                                                                                                                                                            |
+| `bootedSince`                     | boot time of the current session (used to detect a boot-session change between the before and after captures) — **required for a proven verdict**: without it a reboot cannot be ruled out, so the result is `incomplete-evidence` |
+| `lifecycleState`                  | `booted` / `shutdown` / … from `simctl list`                                                                                                                                                                                       |
+| `responsive`                      | result of a responsiveness probe against the device                                                                                                                                                                                |
+| `reportingStatus`                 | `reporting` / `delayed` / `lost` from the worker/AutoMobile status                                                                                                                                                                 |
+| `activeWork`                      | whether a lease, execution, or drain was present                                                                                                                                                                                   |
 
 Also capture a `deploy` window: `startedAt`, `completedAt`, and
 `plannedReplacement` (true only for a declared controlled replacement).
@@ -138,16 +138,16 @@ exit into the deploy so an unproven rollout fails.
 The classifier never conflates "listed" with "continuous". It reports exactly
 one verdict:
 
-| Verdict | Meaning | Proven? | Recommended state |
-| --- | --- | --- | --- |
-| `same-device-continuity` | Same UDID + data root, booted/responsive throughout, reporting restored. | yes | available |
-| `controlled-replacement` | Declared replacement; new device booted and responsive. | yes | available |
-| `boot-recovery` | Same UDID + data, but the boot session changed between the before/after captures — a reboot at any point after the pre-deploy capture (data safe, booted session did not survive). | no | maintenance |
-| `shutdown` | Same device is no longer booted and did not recover. | no | maintenance |
-| `reporting-delay` | Device continuous but worker reporting delayed/lost. | no | maintenance |
-| `orphaned-or-erased-state` | UDID, data root, or host identity changed with no declared replacement (also: a controlled replacement of a device that had active work). | no | maintenance |
-| `failed-probe` | Post-deploy state or responsiveness could not be determined. | no | maintenance |
-| `incomplete-evidence` | Required identity/context evidence missing, `bootedSince` absent, or the pre-deploy baseline was not booted+responsive — continuity of a healthy device cannot be proven. | no | maintenance |
+| Verdict                    | Meaning                                                                                                                                                                            | Proven? | Recommended state |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ----------------- |
+| `same-device-continuity`   | Same UDID + data root, booted/responsive throughout, reporting restored.                                                                                                           | yes     | available         |
+| `controlled-replacement`   | Declared replacement; new device booted and responsive.                                                                                                                            | yes     | available         |
+| `boot-recovery`            | Same UDID + data, but the boot session changed between the before/after captures — a reboot at any point after the pre-deploy capture (data safe, booted session did not survive). | no      | maintenance       |
+| `shutdown`                 | Same device is no longer booted and did not recover.                                                                                                                               | no      | maintenance       |
+| `reporting-delay`          | Device continuous but worker reporting delayed/lost.                                                                                                                               | no      | maintenance       |
+| `orphaned-or-erased-state` | UDID, data root, or host identity changed with no declared replacement (also: a controlled replacement of a device that had active work).                                          | no      | maintenance       |
+| `failed-probe`             | Post-deploy state or responsiveness could not be determined.                                                                                                                       | no      | maintenance       |
+| `incomplete-evidence`      | Required identity/context evidence missing, `bootedSince` absent, or the pre-deploy baseline was not booted+responsive — continuity of a healthy device cannot be proven.          | no      | maintenance       |
 
 The gate proves continuity, so it holds evidence to a high bar: the before/after
 pair must be from the **same managed host** (a differing `hostIdentity` reads as

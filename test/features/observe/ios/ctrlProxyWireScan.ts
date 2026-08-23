@@ -70,7 +70,13 @@ function isCommandLike(value: string): boolean {
 }
 
 function parseSourceFile(file: string, source: string): ts.SourceFile {
-  return ts.createSourceFile(file, source, ts.ScriptTarget.Latest, /* setParentNodes*/ true, ts.ScriptKind.TS);
+  return ts.createSourceFile(
+    file,
+    source,
+    ts.ScriptTarget.Latest,
+    /* setParentNodes*/ true,
+    ts.ScriptKind.TS,
+  );
 }
 
 /**
@@ -168,7 +174,7 @@ function collectConstStringBindings(sourceFile: ts.SourceFile): Map<string, stri
 function resolveDiscriminatorValues(
   expr: ts.Expression,
   constBindings: Map<string, string>,
-  paramLiterals: Map<string, Set<string>>
+  paramLiterals: Map<string, Set<string>>,
 ): string[] | null {
   if (ts.isStringLiteralLike(expr)) {
     return isCommandLike(expr.text) ? [expr.text] : [];
@@ -212,7 +218,9 @@ const SINK_DISCRIMINATOR: Record<SinkKind, string> = {
 };
 
 /** Map `const foo = { ... }` object-literal bindings so `JSON.stringify(foo)` resolves. */
-function collectObjectLiteralBindings(sourceFile: ts.SourceFile): Map<string, ts.ObjectLiteralExpression> {
+function collectObjectLiteralBindings(
+  sourceFile: ts.SourceFile,
+): Map<string, ts.ObjectLiteralExpression> {
   const bindings = new Map<string, ts.ObjectLiteralExpression>();
   const visit = (node: ts.Node): void => {
     if (
@@ -254,7 +262,9 @@ export function scanFile(file: string, source: string): FileScanResult {
     for (const prop of obj.properties) {
       if (ts.isPropertyAssignment(prop) && !ts.isComputedPropertyName(prop.name)) {
         const propKey =
-          ts.isIdentifier(prop.name) || ts.isStringLiteralLike(prop.name) ? prop.name.text : undefined;
+          ts.isIdentifier(prop.name) || ts.isStringLiteralLike(prop.name)
+            ? prop.name.text
+            : undefined;
         if (propKey === key) {
           recordDiscriminator(prop.initializer, prop);
         }
@@ -278,7 +288,9 @@ export function scanFile(file: string, source: string): FileScanResult {
   }
 
   /** Resolve a sink argument to its object literal (directly or via a const binding). */
-  const resolveSinkObject = (arg: ts.Expression | undefined): ts.ObjectLiteralExpression | undefined => {
+  const resolveSinkObject = (
+    arg: ts.Expression | undefined,
+  ): ts.ObjectLiteralExpression | undefined => {
     if (!arg) {
       return undefined;
     }

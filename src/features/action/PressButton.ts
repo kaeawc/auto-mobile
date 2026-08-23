@@ -11,19 +11,12 @@ import { isNavigationPressButton, resolveAndroidKeyCode } from "./pressButtonPol
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 
 export class PressButton extends BaseVisualChange {
-  constructor(
-    device: BootedDevice,
-    adb: AdbExecutor | null = null,
-    timer: Timer = defaultTimer
-  ) {
+  constructor(device: BootedDevice, adb: AdbExecutor | null = null, timer: Timer = defaultTimer) {
     super(device, adb, timer);
     this.device = device;
   }
 
-  async execute(
-    button: string,
-    progress?: ProgressCallback
-  ): Promise<PressButtonResult> {
+  async execute(button: string, progress?: ProgressCallback): Promise<PressButtonResult> {
     const perf = createGlobalPerformanceTracker();
     perf.serial("pressButton");
 
@@ -41,8 +34,8 @@ export class PressButton extends BaseVisualChange {
         changeExpected: isNavigationButton,
         timeoutMs: 2000,
         progress,
-        perf
-      }
+        perf,
+      },
     );
   }
 
@@ -56,7 +49,11 @@ export class PressButton extends BaseVisualChange {
    *   per-transport hard-coded defaults. When omitted, the existing defaults
    *   apply.
    */
-  async press(button: string, timeoutMs?: number, frameContext?: string): Promise<PressButtonResult> {
+  async press(
+    button: string,
+    timeoutMs?: number,
+    frameContext?: string,
+  ): Promise<PressButtonResult> {
     try {
       switch (this.device.platform) {
         case "android":
@@ -71,7 +68,7 @@ export class PressButton extends BaseVisualChange {
         success: false,
         button,
         keyCode: -1,
-        error: `Failed to press button: ${errorMessage(error)}`
+        error: `Failed to press button: ${errorMessage(error)}`,
       };
     }
   }
@@ -93,7 +90,7 @@ export class PressButton extends BaseVisualChange {
   private async executeAndroidButtonPress(
     button: string,
     timeoutMs?: number,
-    frameContext?: string
+    frameContext?: string,
   ): Promise<PressButtonResult> {
     const normalized = button.toLowerCase();
     const keyCode = resolveAndroidKeyCode(normalized);
@@ -102,7 +99,7 @@ export class PressButton extends BaseVisualChange {
         success: false,
         button,
         keyCode: -1,
-        error: `Unsupported button: ${button}`
+        error: `Unsupported button: ${button}`,
       };
     }
 
@@ -110,7 +107,13 @@ export class PressButton extends BaseVisualChange {
     // the (optional) global-action attempt and the ADB fallback so the caller's
     // timeout is not exceeded by the sum of the two per-transport defaults.
     const deadlineMs = timeoutMs !== undefined ? this.timer.now() + timeoutMs : undefined;
-    const globalActionResult = await this.tryAndroidGlobalAction(button, normalized, keyCode, deadlineMs, frameContext);
+    const globalActionResult = await this.tryAndroidGlobalAction(
+      button,
+      normalized,
+      keyCode,
+      deadlineMs,
+      frameContext,
+    );
     if (globalActionResult) {
       return globalActionResult;
     }
@@ -125,37 +128,40 @@ export class PressButton extends BaseVisualChange {
         success: false,
         button,
         keyCode: -1,
-        error: `Button press deadline exhausted before ADB keyevent for ${button}`
+        error: `Button press deadline exhausted before ADB keyevent for ${button}`,
       };
     }
 
     let validationFailure: PressButtonResult | undefined;
     try {
-      await this.adb.execute(
-        ["shell", "input", "keyevent", String(keyCode)],
-        {
-          timeoutMs: adbBudget,
-          noRetry: true,
-          beforeDispatch: frameContext === undefined
+      await this.adb.execute(["shell", "input", "keyevent", String(keyCode)], {
+        timeoutMs: adbBudget,
+        noRetry: true,
+        beforeDispatch:
+          frameContext === undefined
             ? undefined
             : async () => {
-              validationFailure = await this.validateFrameContextBeforeAdb(button, keyCode, deadlineMs, frameContext);
-              if (validationFailure) {
-                throw new Error(validationFailure.error);
-              }
-              const remainingMs = this.remainingMs(deadlineMs);
-              if (remainingMs !== undefined && remainingMs <= 0) {
-                validationFailure = {
-                  success: false,
+                validationFailure = await this.validateFrameContextBeforeAdb(
                   button,
-                  keyCode: -1,
-                  error: `Button press deadline exhausted before ADB keyevent for ${button}`
-                };
-                throw new Error(validationFailure.error);
-              }
-            },
-        }
-      );
+                  keyCode,
+                  deadlineMs,
+                  frameContext,
+                );
+                if (validationFailure) {
+                  throw new Error(validationFailure.error);
+                }
+                const remainingMs = this.remainingMs(deadlineMs);
+                if (remainingMs !== undefined && remainingMs <= 0) {
+                  validationFailure = {
+                    success: false,
+                    button,
+                    keyCode: -1,
+                    error: `Button press deadline exhausted before ADB keyevent for ${button}`,
+                  };
+                  throw new Error(validationFailure.error);
+                }
+              },
+      });
     } catch (error) {
       if (validationFailure) {
         return validationFailure;
@@ -170,7 +176,7 @@ export class PressButton extends BaseVisualChange {
     normalized: string,
     keyCode: number,
     deadlineMs: number | undefined,
-    frameContext: string | undefined
+    frameContext: string | undefined,
   ): Promise<PressButtonResult | undefined> {
     if (!PressButton.GLOBAL_ACTION_BUTTONS.has(normalized)) {
       return undefined;
@@ -179,12 +185,18 @@ export class PressButton extends BaseVisualChange {
     if (budget !== undefined && budget <= 0) {
       return undefined;
     }
-    const globalActionTimeout = budget === undefined
-      ? PressButton.GLOBAL_ACTION_TIMEOUT_MS
-      : Math.min(PressButton.GLOBAL_ACTION_TIMEOUT_MS, budget);
+    const globalActionTimeout =
+      budget === undefined
+        ? PressButton.GLOBAL_ACTION_TIMEOUT_MS
+        : Math.min(PressButton.GLOBAL_ACTION_TIMEOUT_MS, budget);
     try {
       const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
-      const result = await client.requestGlobalAction(normalized, globalActionTimeout, undefined, frameContext);
+      const result = await client.requestGlobalAction(
+        normalized,
+        globalActionTimeout,
+        undefined,
+        frameContext,
+      );
       if (result.success) {
         logger.debug(`[PRESS_BUTTON] Used accessibility service for ${button}`);
         return { success: true, button, keyCode };
@@ -192,7 +204,9 @@ export class PressButton extends BaseVisualChange {
       logger.debug(`[PRESS_BUTTON] Global action failed (${result.error}), falling back to ADB`);
     } catch (error) {
       // The validated ADB fallback remains safe when the global-action RPC fails.
-      logger.debug(`[PRESS_BUTTON] Global action threw for ${button}, falling back to ADB: ${error}`);
+      logger.debug(
+        `[PRESS_BUTTON] Global action threw for ${button}, falling back to ADB: ${error}`,
+      );
     }
     return undefined;
   }
@@ -201,7 +215,7 @@ export class PressButton extends BaseVisualChange {
     button: string,
     keyCode: number,
     deadlineMs: number | undefined,
-    frameContext: string | undefined
+    frameContext: string | undefined,
   ): Promise<PressButtonResult | undefined> {
     if (frameContext === undefined) {
       return undefined;
@@ -212,7 +226,7 @@ export class PressButton extends BaseVisualChange {
         success: false,
         button,
         keyCode: -1,
-        error: `Button press deadline exhausted before frame context validation for ${button}`
+        error: `Button press deadline exhausted before frame context validation for ${button}`,
       };
     }
 
@@ -225,7 +239,9 @@ export class PressButton extends BaseVisualChange {
       success: false,
       button,
       keyCode: -1,
-      error: validation.error ?? "Frame context is stale or unavailable; observe a fresh frame before retrying"
+      error:
+        validation.error ??
+        "Frame context is stale or unavailable; observe a fresh frame before retrying",
     };
   }
 
@@ -241,7 +257,7 @@ export class PressButton extends BaseVisualChange {
   private async executeiOSButtonPress(
     button: string,
     timeoutMs?: number,
-    frameContext?: string
+    frameContext?: string,
   ): Promise<PressButtonResult> {
     const normalizedButton = button.toLowerCase();
     if (PressButton.IOS_NAVIGATION_BUTTONS.has(normalizedButton)) {
@@ -250,7 +266,7 @@ export class PressButton extends BaseVisualChange {
         client,
         normalizedButton,
         timeoutMs,
-        frameContext
+        frameContext,
       );
 
       if (!result.success) {
@@ -258,14 +274,14 @@ export class PressButton extends BaseVisualChange {
           success: false,
           button,
           keyCode: -1,
-          error: result.error ?? `Failed to press iOS ${normalizedButton} button`
+          error: result.error ?? `Failed to press iOS ${normalizedButton} button`,
         };
       }
 
       return {
         success: true,
         button,
-        keyCode: -1
+        keyCode: -1,
       };
     }
 
@@ -275,19 +291,24 @@ export class PressButton extends BaseVisualChange {
           success: false,
           button,
           keyCode: -1,
-          error: `iOS button "${button}" is unavailable on the iOS simulator (physical device only)`
+          error: `iOS button "${button}" is unavailable on the iOS simulator (physical device only)`,
         };
       }
 
       const client = IOSCtrlProxyClient.getInstance(this.device);
-      const result = await client.requestPressButton(normalizedButton, timeoutMs, undefined, frameContext);
+      const result = await client.requestPressButton(
+        normalizedButton,
+        timeoutMs,
+        undefined,
+        frameContext,
+      );
 
       if (!result.success) {
         return {
           success: false,
           button,
           keyCode: -1,
-          error: result.error ?? `iOS hardware button "${button}" is not supported on this device`
+          error: result.error ?? `iOS hardware button "${button}" is not supported on this device`,
         };
       }
 
@@ -299,7 +320,7 @@ export class PressButton extends BaseVisualChange {
         success: false,
         button,
         keyCode: -1,
-        error: "iOS has no menu hardware button"
+        error: "iOS has no menu hardware button",
       };
     }
 
@@ -307,7 +328,7 @@ export class PressButton extends BaseVisualChange {
       success: false,
       button,
       keyCode: -1,
-      error: `Unsupported iOS button: ${button}`
+      error: `Unsupported iOS button: ${button}`,
     };
   }
 
@@ -315,7 +336,7 @@ export class PressButton extends BaseVisualChange {
     client: IOSCtrlProxyClient,
     button: string,
     timeoutMs?: number,
-    frameContext?: string
+    frameContext?: string,
   ): Promise<{ success: boolean; error?: string }> {
     switch (button) {
       case "home":

@@ -6,16 +6,16 @@ import * as path from "path";
 import crypto from "crypto";
 import os from "os";
 
-describe("DefaultChecksumCalculator", function() {
+describe("DefaultChecksumCalculator", function () {
   let tempDir: string;
 
-  afterEach(async function() {
+  afterEach(async function () {
     if (tempDir) {
       await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
     }
   });
 
-  test("should compute SHA256 of a file using node fallback", async function() {
+  test("should compute SHA256 of a file using node fallback", async function () {
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "checksum-test-"));
     const filePath = path.join(tempDir, "test-file.bin");
     const content = Buffer.from("hello world checksum test");
@@ -29,7 +29,7 @@ describe("DefaultChecksumCalculator", function() {
     expect(["sha256sum", "shasum", "node"]).toContain(result.source);
   });
 
-  test("should produce consistent checksums across calls", async function() {
+  test("should produce consistent checksums across calls", async function () {
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "checksum-test-"));
     const filePath = path.join(tempDir, "test-file.bin");
     const content = crypto.randomBytes(1024);
@@ -43,8 +43,8 @@ describe("DefaultChecksumCalculator", function() {
   });
 });
 
-describe("FakeChecksumCalculator", function() {
-  test("should return configured checksum", async function() {
+describe("FakeChecksumCalculator", function () {
+  test("should return configured checksum", async function () {
     const calculator = new FakeChecksumCalculator();
     calculator.checksum = "abc123";
     calculator.checksumSource = "sha256sum";
@@ -56,11 +56,10 @@ describe("FakeChecksumCalculator", function() {
     expect(calculator.computedFiles).toEqual(["/tmp/file.bin"]);
   });
 
-  test("should throw configured error", async function() {
+  test("should throw configured error", async function () {
     const calculator = new FakeChecksumCalculator();
     calculator.shouldThrow = new Error("checksum failed");
 
-    await expect(calculator.computeFileSha256("/tmp/file.bin"))
-      .rejects.toThrow("checksum failed");
+    await expect(calculator.computeFileSha256("/tmp/file.bin")).rejects.toThrow("checksum failed");
   });
 });

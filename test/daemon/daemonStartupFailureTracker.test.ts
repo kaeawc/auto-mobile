@@ -45,9 +45,13 @@ describe("DefaultStartupFailureTracker", () => {
   test("drops failures older than the rolling window", () => {
     const store = new InMemoryStore();
     const windowMs = 5_000;
-    expect(new DefaultStartupFailureTracker(store, windowMs).recordFailure("permanent", 1_000)).toBe(1);
+    expect(
+      new DefaultStartupFailureTracker(store, windowMs).recordFailure("permanent", 1_000),
+    ).toBe(1);
     // 10s later — the first failure has aged out of the 5s window.
-    expect(new DefaultStartupFailureTracker(store, windowMs).recordFailure("permanent", 11_000)).toBe(1);
+    expect(
+      new DefaultStartupFailureTracker(store, windowMs).recordFailure("permanent", 11_000),
+    ).toBe(1);
   });
 
   test("reset clears persisted state", () => {

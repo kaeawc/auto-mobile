@@ -1,4 +1,7 @@
-import type { AvdConfig, AvdConfigReader } from "../../src/utils/android-cmdline-tools/AvdConfigReader";
+import type {
+  AvdConfig,
+  AvdConfigReader,
+} from "../../src/utils/android-cmdline-tools/AvdConfigReader";
 
 /** Deterministic AVD config reader for tests that must not inspect host state. */
 export class FakeAvdConfigReader implements AvdConfigReader {

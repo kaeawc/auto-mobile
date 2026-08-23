@@ -1,9 +1,5 @@
 import { releaseVersion } from "../utils/mcpVersion";
-import {
-  type BuildIdentity,
-  buildIdentitiesMatch,
-  describeBuildIdentity,
-} from "./buildIdentity";
+import { type BuildIdentity, buildIdentitiesMatch, describeBuildIdentity } from "./buildIdentity";
 
 /**
  * Server-side version/build-identity handshake for the shared per-uid daemon
@@ -74,10 +70,7 @@ export function extractClientHandshake(request: {
 
 /** Whether the client declared anything to gate on. */
 export function hasClientHandshake(handshake: ClientHandshake): boolean {
-  return (
-    (handshake.clientVersion?.length ?? 0) > 0 ||
-    (handshake.clientBuildId?.length ?? 0) > 0
-  );
+  return (handshake.clientVersion?.length ?? 0) > 0 || (handshake.clientBuildId?.length ?? 0) > 0;
 }
 
 /**
@@ -101,7 +94,7 @@ export function hasClientHandshake(handshake: ClientHandshake): boolean {
  */
 export function evaluateClientHandshake(
   daemon: DaemonSelfIdentity,
-  client: ClientHandshake
+  client: ClientHandshake,
 ): HandshakeEvaluation {
   if (!hasClientHandshake(client)) {
     return { ok: true };
@@ -137,10 +130,10 @@ export function evaluateClientHandshake(
     const versionsDiffer = clientDeclaresFullVersion
       ? daemonFull.length > 0 && daemonFull !== clientVersion
       : (() => {
-        const clientBase = releaseVersion(clientVersion);
-        const daemonBase = releaseVersion(daemonFull);
-        return clientBase.length > 0 && daemonBase.length > 0 && clientBase !== daemonBase;
-      })();
+          const clientBase = releaseVersion(clientVersion);
+          const daemonBase = releaseVersion(daemonFull);
+          return clientBase.length > 0 && daemonBase.length > 0 && clientBase !== daemonBase;
+        })();
     if (versionsDiffer) {
       return {
         ok: false,

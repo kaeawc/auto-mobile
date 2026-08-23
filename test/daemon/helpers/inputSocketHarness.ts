@@ -33,7 +33,7 @@ export const iosDevice: BootedDevice = {
 
 export function createFakeDeviceManager(
   devices: BootedDevice[],
-  succeededPlatforms: Set<"android" | "ios"> = new Set(["android", "ios"])
+  succeededPlatforms: Set<"android" | "ios"> = new Set(["android", "ios"]),
 ) {
   return {
     getBootedDevicesDetailed: mock(async () => ({
@@ -43,7 +43,11 @@ export function createFakeDeviceManager(
   } as unknown as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>;
 }
 
-export function createFakeSession(sessionId: string, assignedDevice: string, platform: "android" | "ios"): Session {
+export function createFakeSession(
+  sessionId: string,
+  assignedDevice: string,
+  platform: "android" | "ios",
+): Session {
   return {
     sessionId,
     assignedDevice,
@@ -62,16 +66,15 @@ export function createFakeSession(sessionId: string, assignedDevice: string, pla
 
 export function createFakeDaemonState(
   autolockSessions: Map<string, Session> = new Map(),
-  mcpAutolockSessions: Map<string, string> = new Map()
+  mcpAutolockSessions: Map<string, string> = new Map(),
 ) {
   return {
     isInitialized: () => true,
     getSessionManager: () => ({
       getSession: (sessionId: string) => autolockSessions.get(sessionId) ?? null,
       getSessionForDevice: (deviceId: string) =>
-        Array.from(autolockSessions.values()).find(
-          session => session.assignedDevice === deviceId
-        )?.sessionId ?? null,
+        Array.from(autolockSessions.values()).find((session) => session.assignedDevice === deviceId)
+          ?.sessionId ?? null,
       getDeviceLabels: (_sessionId: string): DeviceLabelMap | undefined => undefined,
       releaseSession: async () => null,
     }),
@@ -80,7 +83,10 @@ export function createFakeDaemonState(
       getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
       releaseDevice: async () => {},
       assertSessionReadyForAutomation: () => {},
-      resolveAutolockSessionForMcpSession: (mcpSessionId: string | undefined, platform?: "android" | "ios") => {
+      resolveAutolockSessionForMcpSession: (
+        mcpSessionId: string | undefined,
+        platform?: "android" | "ios",
+      ) => {
         if (!mcpSessionId) {
           return undefined;
         }
@@ -96,7 +102,7 @@ export function sendRequest(
   socketPath: string,
   method: string,
   params: Record<string, unknown> = {},
-  timeoutMs?: number
+  timeoutMs?: number,
 ): Promise<DaemonResponse> {
   return sendSocketRequest(socketPath, method, params, timeoutMs);
 }
@@ -104,7 +110,7 @@ export function sendRequest(
 export async function sendRequestAfterConnect(
   socketPath: string,
   request: DaemonRequest,
-  onConnect: () => void
+  onConnect: () => void,
 ): Promise<DaemonResponse> {
   const { response } = await sendRawSocketRequest(socketPath, request, { onConnect });
   return response;
@@ -113,7 +119,11 @@ export async function sendRequestAfterConnect(
 /** One persistent socket connection that can send several requests before closing. */
 export interface PersistentConnection {
   /** Send one request over the held connection and resolve with its response (correlated by id). */
-  send(method: string, params?: Record<string, unknown>, timeoutMs?: number): Promise<DaemonResponse>;
+  send(
+    method: string,
+    params?: Record<string, unknown>,
+    timeoutMs?: number,
+  ): Promise<DaemonResponse>;
   /** Disconnect, modelling the client going away (a crash/timeout mid-stream). */
   close(): void;
 }
@@ -128,9 +138,12 @@ export interface PersistentConnection {
 export async function openPersistentConnection(socketPath: string): Promise<PersistentConnection> {
   const client = new Socket();
   let buffer = "";
-  const pending = new Map<string, { resolve: (response: DaemonResponse) => void; deadline: NodeJS.Timeout }>();
+  const pending = new Map<
+    string,
+    { resolve: (response: DaemonResponse) => void; deadline: NodeJS.Timeout }
+  >();
 
-  client.on("data", data => {
+  client.on("data", (data) => {
     buffer += data.toString();
     const lines = buffer.split("\n");
     buffer = lines.pop() || "";
@@ -161,10 +174,12 @@ export async function openPersistentConnection(socketPath: string): Promise<Pers
         const deadline = defaultTimer.setTimeout(() => {
           pending.delete(id);
           client.destroy();
-          reject(new Error(
-            `No response to ${method} on ${socketPath} within ${SOCKET_REQUEST_DEADLINE_MS}ms — `
-            + "bounded socket-test deadline hit (the server hung or dropped the request)"
-          ));
+          reject(
+            new Error(
+              `No response to ${method} on ${socketPath} within ${SOCKET_REQUEST_DEADLINE_MS}ms — ` +
+                "bounded socket-test deadline hit (the server hung or dropped the request)",
+            ),
+          );
         }, SOCKET_REQUEST_DEADLINE_MS);
         pending.set(id, { resolve, deadline });
         const request: DaemonRequest = {

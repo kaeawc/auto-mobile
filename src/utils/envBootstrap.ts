@@ -36,9 +36,8 @@ function ensureSystemPath(): void {
     return;
   }
 
-  process.env.PATH = current.length > 0
-    ? `${current}${sep}${additions.join(sep)}`
-    : additions.join(sep);
+  process.env.PATH =
+    current.length > 0 ? `${current}${sep}${additions.join(sep)}` : additions.join(sep);
 }
 
 function ensureAndroidHome(): void {
@@ -92,11 +91,13 @@ function systemPathCandidates(): string[] {
     const localAppData = process.env.LOCALAPPDATA;
     const sdk = localAppData ? path.join(localAppData, "Android", "Sdk") : "";
     return [
-      ...(sdk ? [
-        path.join(sdk, "platform-tools"),
-        path.join(sdk, "emulator"),
-        path.join(sdk, "cmdline-tools", "latest", "bin"),
-      ] : []),
+      ...(sdk
+        ? [
+            path.join(sdk, "platform-tools"),
+            path.join(sdk, "emulator"),
+            path.join(sdk, "cmdline-tools", "latest", "bin"),
+          ]
+        : []),
     ];
   }
 

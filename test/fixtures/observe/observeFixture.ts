@@ -63,18 +63,25 @@ export function loadIosFractionalObserve(): ObserveResult {
  */
 export const IOS_REMINDERS_NOISE_BEFORE_FIXTURE_PATH = join(
   import.meta.dir,
-  "ios-reminders-xctest-noise-before.json"
+  "ios-reminders-xctest-noise-before.json",
 );
 export const IOS_REMINDERS_NOISE_AFTER_FIXTURE_PATH = join(
   import.meta.dir,
-  "ios-reminders-xctest-noise-after.json"
+  "ios-reminders-xctest-noise-after.json",
 );
 
 /** Load the Reminders XCTest/UIKit noise before/after pair for #3317 size tests. */
-export function loadIosRemindersNoiseObservePair(): { before: ObserveResult; after: ObserveResult } {
+export function loadIosRemindersNoiseObservePair(): {
+  before: ObserveResult;
+  after: ObserveResult;
+} {
   return {
-    before: JSON.parse(readFileSync(IOS_REMINDERS_NOISE_BEFORE_FIXTURE_PATH, "utf8")) as ObserveResult,
-    after: JSON.parse(readFileSync(IOS_REMINDERS_NOISE_AFTER_FIXTURE_PATH, "utf8")) as ObserveResult,
+    before: JSON.parse(
+      readFileSync(IOS_REMINDERS_NOISE_BEFORE_FIXTURE_PATH, "utf8"),
+    ) as ObserveResult,
+    after: JSON.parse(
+      readFileSync(IOS_REMINDERS_NOISE_AFTER_FIXTURE_PATH, "utf8"),
+    ) as ObserveResult,
   };
 }
 
@@ -88,12 +95,14 @@ export function loadIosRemindersNoiseObservePair(): { before: ObserveResult; aft
  */
 export const ANDROID_RAW_TRIM_CANDIDATES_FIXTURE_PATH = join(
   import.meta.dir,
-  "android-playground-raw-trim-candidates.json"
+  "android-playground-raw-trim-candidates.json",
 );
 
 /** Load the raw Android trim-candidate fixture as a parsed `ObserveResult`. */
 export function loadAndroidRawTrimCandidatesObserve(): ObserveResult {
-  return JSON.parse(readFileSync(ANDROID_RAW_TRIM_CANDIDATES_FIXTURE_PATH, "utf8")) as ObserveResult;
+  return JSON.parse(
+    readFileSync(ANDROID_RAW_TRIM_CANDIDATES_FIXTURE_PATH, "utf8"),
+  ) as ObserveResult;
 }
 
 /**

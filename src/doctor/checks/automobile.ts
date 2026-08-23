@@ -32,7 +32,10 @@ import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbCl
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { AndroidCtrlProxyManager } from "../../utils/CtrlProxyManager";
 import { loadSharp, type SharpFactory } from "../../utils/image/loadSharp";
-import { WebpBinaryResolver, type ResolvedWebpBinaries } from "../../utils/image/webp/WebpBinaryResolver";
+import {
+  WebpBinaryResolver,
+  type ResolvedWebpBinaries,
+} from "../../utils/image/webp/WebpBinaryResolver";
 import { logger } from "../../utils/logger";
 import type { Logger } from "../../utils/logger";
 import { ActionableError } from "../../models/ActionableError";
@@ -113,7 +116,7 @@ export function checkCtrlProxyVersion(): CheckResult {
  * makes it usable without doing real image work.
  */
 export async function checkImageBackend(
-  dependencies: ImageBackendDoctorDependencies = {}
+  dependencies: ImageBackendDoctorDependencies = {},
 ): Promise<CheckResult> {
   const platform = dependencies.platform ?? process.platform;
   const hostPlatform = dependencies.hostPlatform ?? getHostPlatform();
@@ -121,7 +124,9 @@ export async function checkImageBackend(
 
   if (platform === "win32") {
     try {
-      const binaries = await (dependencies.webpBinaryResolver ?? new WebpBinaryResolver()).resolve();
+      const binaries = await (
+        dependencies.webpBinaryResolver ?? new WebpBinaryResolver()
+      ).resolve();
       return {
         name: "Image Backend",
         status: "pass",
@@ -182,7 +187,7 @@ export async function checkImageBackend(
  * Check daemon status
  */
 export async function checkDaemonStatus(
-  dependencies: DaemonStatusDependencies = {}
+  dependencies: DaemonStatusDependencies = {},
 ): Promise<CheckResult> {
   try {
     const report = await (dependencies.getDaemonHealthReport ?? getDaemonHealthReport)();
@@ -228,7 +233,7 @@ export async function checkDaemonStatus(
  * Check daemon connectivity
  */
 export async function checkDaemonConnectivity(
-  getHealthReport: () => Promise<DaemonHealthReport> = getDaemonHealthReport
+  getHealthReport: () => Promise<DaemonHealthReport> = getDaemonHealthReport,
 ): Promise<CheckResult> {
   try {
     const report = await getHealthReport();
@@ -253,7 +258,9 @@ export async function checkDaemonConnectivity(
       name: "Daemon Connectivity",
       status: "warn",
       message: "Daemon running but not responding",
-      recommendation: report.recommendations.join("; ") || `Try: bunx ${resolveDaemonInstallSpecifier()} --daemon restart`,
+      recommendation:
+        report.recommendations.join("; ") ||
+        `Try: bunx ${resolveDaemonInstallSpecifier()} --daemon restart`,
     };
   } catch (error) {
     logger.warn(`Daemon connectivity check failed: ${errorMessage(error)}`, error);
@@ -275,7 +282,7 @@ export async function checkDaemonConnectivity(
  * make that visible *before* a tool call fails — rather than after.
  */
 export async function checkDaemonBuildIdentity(
-  dependencies: DaemonBuildIdentityDependencies = {}
+  dependencies: DaemonBuildIdentityDependencies = {},
 ): Promise<CheckResult> {
   try {
     const manager = dependencies.daemonManager ?? new DaemonManager();
@@ -317,10 +324,7 @@ export async function checkDaemonBuildIdentity(
     // Diagnostic path: log the underlying error before returning a typed failure
     // so there is a trace even though the user only sees the summarized message
     // (CLAUDE.md error-handling convention #2).
-    logger.warn(
-      `Daemon build identity check failed: ${errorMessage(error)}`,
-      error
-    );
+    logger.warn(`Daemon build identity check failed: ${errorMessage(error)}`, error);
     return {
       name: "Daemon Build Identity",
       status: "warn",
@@ -334,7 +338,7 @@ export async function checkDaemonBuildIdentity(
  */
 export async function checkCtrlProxy(
   adbFactory: AdbClientFactory = defaultAdbClientFactory,
-  dependencies: CtrlProxyDoctorDependencies = {}
+  dependencies: CtrlProxyDoctorDependencies = {},
 ): Promise<CheckResult> {
   const log = dependencies.logger ?? logger;
   try {
@@ -364,7 +368,8 @@ export async function checkCtrlProxy(
         name: "CtrlProxy",
         status: "fail",
         message: `platform=${device.platform}; device=${device.deviceId}; AUTOMOBILE_VERSION=${resolvePinnedVersion()} is not in the release checksum registry`,
-        recommendation: "The pinned CtrlProxy APK cannot be integrity-verified. Pin a released version, or set AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM=1 to override.",
+        recommendation:
+          "The pinned CtrlProxy APK cannot be integrity-verified. Pin a released version, or set AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM=1 to override.",
       };
     }
 
@@ -381,7 +386,7 @@ export async function checkCtrlProxy(
       `platform=${device.platform}`,
       `device=${device.deviceId}`,
       `installed=${isInstalled}`,
-      `enabled=${isEnabled}`
+      `enabled=${isEnabled}`,
     ];
 
     if (versionResult.expectedSha256 !== undefined) {
@@ -396,11 +401,15 @@ export async function checkCtrlProxy(
     diagnostics.push(`versionStatus=${versionResult.status}`);
 
     if (versionResult.error || versionResult.upgradeError || versionResult.reinstallError) {
-      diagnostics.push(`versionError=${versionResult.error || versionResult.upgradeError || versionResult.reinstallError}`);
+      diagnostics.push(
+        `versionError=${versionResult.error || versionResult.upgradeError || versionResult.reinstallError}`,
+      );
     }
 
     const attemptedDownloadOrInstall = Boolean(
-      versionResult.attemptedDownload || versionResult.attemptedInstall || versionResult.attemptedReinstall
+      versionResult.attemptedDownload ||
+      versionResult.attemptedInstall ||
+      versionResult.attemptedReinstall,
     );
     const downloadUnavailable = Boolean(versionResult.downloadUnavailable);
     if (downloadUnavailable) {
@@ -416,7 +425,8 @@ export async function checkCtrlProxy(
         name: "CtrlProxy",
         status: "fail",
         message: diagnostics.join("; "),
-        recommendation: "CtrlProxy APK provisioning failed for an explicit AutoMobile version pin. Fix the pinned asset source, checksum, or mirror configuration and re-run doctor."
+        recommendation:
+          "CtrlProxy APK provisioning failed for an explicit AutoMobile version pin. Fix the pinned asset source, checksum, or mirror configuration and re-run doctor.",
       };
     }
 
@@ -425,7 +435,8 @@ export async function checkCtrlProxy(
         name: "CtrlProxy",
         status: "warn",
         message: diagnostics.join("; "),
-        recommendation: "Newer CtrlProxy APK unavailable while offline. Connect to the internet and re-run doctor."
+        recommendation:
+          "Newer CtrlProxy APK unavailable while offline. Connect to the internet and re-run doctor.",
       };
     }
 
@@ -434,11 +445,20 @@ export async function checkCtrlProxy(
         name: "CtrlProxy",
         status: "warn",
         message: diagnostics.join("; "),
-        recommendation: "CtrlProxy is installed and enabled, but its APK SHA differs from the expected release. Re-run doctor after the background APK refresh completes or update CtrlProxy from the latest release."
+        recommendation:
+          "CtrlProxy is installed and enabled, but its APK SHA differs from the expected release. Re-run doctor after the background APK refresh completes or update CtrlProxy from the latest release.",
       };
     }
 
-    if (isInstalled && isEnabled && (versionResult.status === "compatible" || versionResult.status === "upgraded" || versionResult.status === "installed" || versionResult.status === "reinstalled" || versionResult.status === "skipped")) {
+    if (
+      isInstalled &&
+      isEnabled &&
+      (versionResult.status === "compatible" ||
+        versionResult.status === "upgraded" ||
+        versionResult.status === "installed" ||
+        versionResult.status === "reinstalled" ||
+        versionResult.status === "skipped")
+    ) {
       return {
         name: "CtrlProxy",
         status: "pass",
@@ -500,7 +520,7 @@ export async function checkCtrlProxy(
  * Warns if work profiles exist but accessibility service is not enabled for them
  */
 export async function checkWorkProfileAccessibility(
-  adbFactory: AdbClientFactory = defaultAdbClientFactory
+  adbFactory: AdbClientFactory = defaultAdbClientFactory,
 ): Promise<CheckResult> {
   try {
     const adb = adbFactory.create();
@@ -522,7 +542,7 @@ export async function checkWorkProfileAccessibility(
     // Filter to work profiles: userId > 0, running, and flags indicate managed profile (0x30 = 48)
     // Work profiles have FLAG_MANAGED_PROFILE (0x20) in their flags
     const workProfiles = users.filter(
-      user => user.userId > 0 && user.running && (user.flags & 0x20) !== 0
+      (user) => user.userId > 0 && user.running && (user.flags & 0x20) !== 0,
     );
 
     if (workProfiles.length === 0) {
@@ -544,7 +564,7 @@ export async function checkWorkProfileAccessibility(
         `shell settings --user ${profile.userId} get secure enabled_accessibility_services`,
         undefined,
         undefined,
-        true
+        true,
       );
       const isEnabled = result.stdout.includes(AndroidCtrlProxyManager.PACKAGE);
       if (!isEnabled) {
@@ -561,7 +581,7 @@ export async function checkWorkProfileAccessibility(
     }
 
     const profileList = profilesWithoutService
-      .map(p => `${p.name} (user ${p.userId})`)
+      .map((p) => `${p.name} (user ${p.userId})`)
       .join(", ");
 
     return {
@@ -585,7 +605,7 @@ export async function checkWorkProfileAccessibility(
  */
 export async function runAutoMobileChecks(
   options: DoctorOptions = {},
-  dependencies: AutoMobileCheckDependencies = {}
+  dependencies: AutoMobileCheckDependencies = {},
 ): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
 
@@ -594,7 +614,9 @@ export async function runAutoMobileChecks(
   results.push(await (dependencies.checkImageBackend ?? (() => checkImageBackend()))());
   results.push(await (dependencies.checkDaemonStatus ?? (() => checkDaemonStatus()))());
   results.push(await (dependencies.checkDaemonConnectivity ?? (() => checkDaemonConnectivity()))());
-  results.push(await (dependencies.checkDaemonBuildIdentity ?? (() => checkDaemonBuildIdentity()))());
+  results.push(
+    await (dependencies.checkDaemonBuildIdentity ?? (() => checkDaemonBuildIdentity()))(),
+  );
 
   if (options.ios === true && options.android !== true) {
     results.push({
@@ -609,7 +631,11 @@ export async function runAutoMobileChecks(
     });
   } else {
     results.push(await (dependencies.checkCtrlProxy ?? (() => checkCtrlProxy()))());
-    results.push(await (dependencies.checkWorkProfileAccessibility ?? (() => checkWorkProfileAccessibility()))());
+    results.push(
+      await (
+        dependencies.checkWorkProfileAccessibility ?? (() => checkWorkProfileAccessibility())
+      )(),
+    );
   }
 
   return results;

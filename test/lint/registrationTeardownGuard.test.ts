@@ -78,10 +78,7 @@ describe("OS-listener registration has a matching teardown (issue #3599 class)",
     {
       lang: "kotlin",
       ext: ".kt",
-      dirs: [
-        "android/auto-mobile-sdk/src/main/kotlin",
-        "android/control-proxy/src/main/kotlin",
-      ],
+      dirs: ["android/auto-mobile-sdk/src/main/kotlin", "android/control-proxy/src/main/kotlin"],
       excludes: ["/test/", "/androidTest/"],
       pairs: [
         {
@@ -108,7 +105,7 @@ describe("OS-listener registration has a matching teardown (issue #3599 class)",
       const abs = join(absDir, entry.name);
       if (entry.isDirectory()) {
         out.push(...walk(abs, ext, excludes));
-      } else if (entry.name.endsWith(ext) && !excludes.some(x => abs.includes(x))) {
+      } else if (entry.name.endsWith(ext) && !excludes.some((x) => abs.includes(x))) {
         out.push(abs);
       }
     }
@@ -119,7 +116,7 @@ describe("OS-listener registration has a matching teardown (issue #3599 class)",
   function unbalanced(): Map<string, Set<string>> {
     const result = new Map<string, Set<string>>();
     for (const scope of SCOPES) {
-      const files = scope.dirs.flatMap(d => walk(join(ROOT, d), scope.ext, scope.excludes));
+      const files = scope.dirs.flatMap((d) => walk(join(ROOT, d), scope.ext, scope.excludes));
       for (const abs of files) {
         const source = readFileSync(abs, "utf8");
         const rel = relative(ROOT, abs);
@@ -144,7 +141,7 @@ describe("OS-listener registration has a matching teardown (issue #3599 class)",
           `${rel} registers a ${pairName} but has no matching teardown in the same file. ` +
             `Add the teardown (e.g. in shutdown()/reset()). If the registration is ` +
             `genuinely process-lifetime, or is torn down in a sibling lifecycle owner, ` +
-            `add an explicit, justified exception in this test instead.`
+            `add an explicit, justified exception in this test instead.`,
         );
       }
     }

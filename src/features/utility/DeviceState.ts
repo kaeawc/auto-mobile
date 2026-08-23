@@ -1,5 +1,8 @@
 import { errorMessage } from "../../utils/describeUnknownError";
-import { defaultAdbClientFactory, type AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  defaultAdbClientFactory,
+  type AdbClientFactory,
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { BootedDevice, ExecResult } from "../../models";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { isIosSimulatorDevice } from "../action/IosSimulatorPermissions";
@@ -12,11 +15,11 @@ import {
   IOS_NOTIFYUTIL_REGISTERED_SET_TIMEOUT_MS,
   iosNotifyutilGetCommand,
   iosNotifyutilRegisteredSetReadPostCommand,
-  parseNotifyutilState
+  parseNotifyutilState,
 } from "../../utils/ios-cmdline-tools/notifyutil";
 import {
   iosMajorVersionFromSimctlListDevices,
-  parseIosMajorVersion
+  parseIosMajorVersion,
 } from "../../utils/ios-cmdline-tools/iosVersion";
 
 export type DoNotDisturbMode = "off" | "none" | "priority" | "alarms";
@@ -88,9 +91,9 @@ const IOS_DND_INDEPENDENT_READBACK_SETTLE_MS = 500;
  * therefore simulator-only.
  */
 const IOS_PHYSICAL_DND_UNSUPPORTED_ERROR =
-  "Do Not Disturb cannot be set on a physical iOS device: iOS exposes no public API to "
-  + "enable/disable Focus or Do Not Disturb (only the read-only Focus Filter API). "
-  + "Use an iOS Simulator for DND automation, or trigger DND manually / via a Shortcuts automation on device.";
+  "Do Not Disturb cannot be set on a physical iOS device: iOS exposes no public API to " +
+  "enable/disable Focus or Do Not Disturb (only the read-only Focus Filter API). " +
+  "Use an iOS Simulator for DND automation, or trigger DND manually / via a Shortcuts automation on device.";
 
 /** Last iOS major version where the legacy binary-DND notification is expected to work. */
 const IOS_DND_LEGACY_NOTIFICATION_LAST_SUPPORTED_MAJOR = 17;
@@ -109,12 +112,12 @@ const IOS_DND_LEGACY_NOTIFICATION_LAST_SUPPORTED_MAJOR = 17;
  * independent fresh-process readback before reporting success.
  */
 const IOS18_SIM_DND_UNSUPPORTED_ERROR =
-  "Do Not Disturb cannot be reliably read or set on an iOS 18+ simulator: iOS 18 moved Do Not "
-  + "Disturb to the donotdisturbd Focus daemon, which owns the state in a private store and resets "
-  + "the legacy com.apple.donotdisturb.enabled notification — so that notification neither reflects "
-  + "nor controls the real Focus state. iOS exposes no public API to read or set Focus / Do Not "
-  + "Disturb. Use an iOS 17 or earlier simulator for binary DND automation, or set it manually / via "
-  + "a Shortcuts automation.";
+  "Do Not Disturb cannot be reliably read or set on an iOS 18+ simulator: iOS 18 moved Do Not " +
+  "Disturb to the donotdisturbd Focus daemon, which owns the state in a private store and resets " +
+  "the legacy com.apple.donotdisturb.enabled notification — so that notification neither reflects " +
+  "nor controls the real Focus state. iOS exposes no public API to read or set Focus / Do Not " +
+  "Disturb. Use an iOS 17 or earlier simulator for binary DND automation, or set it manually / via " +
+  "a Shortcuts automation.";
 
 function parseAndroidZenMode(raw: string): DoNotDisturbState {
   const value = raw.trim();
@@ -194,9 +197,9 @@ function iosDndUnsupportedReadbackResult(
   state: DoNotDisturbState,
   requestedMode: DoNotDisturbMode,
   requestedEnabled: boolean,
-  reason: string
+  reason: string,
 ): DoNotDisturbState {
-  const observed = state.enabled === undefined ? "unknown" : (state.enabled ? "enabled" : "disabled");
+  const observed = state.enabled === undefined ? "unknown" : state.enabled ? "enabled" : "disabled";
   const requested = requestedEnabled ? "enabled" : "disabled";
   return {
     ...state,
@@ -215,11 +218,12 @@ function iosDndUnsupportedReadbackResult(
  */
 function iosDndSetWarning(
   requestedMode: DoNotDisturbMode,
-  downgraded: boolean
+  downgraded: boolean,
 ): string | undefined {
   if (downgraded) {
-    const tier = `iOS DND is binary on the simulator; requested "${requestedMode}" has no per-mode/priority/alarms `
-      + "fidelity (no public Focus API)";
+    const tier =
+      `iOS DND is binary on the simulator; requested "${requestedMode}" has no per-mode/priority/alarms ` +
+      "fidelity (no public Focus API)";
     return `${tier}, so it was applied as plain DND.`;
   }
   return undefined;
@@ -249,9 +253,10 @@ export class DeviceState {
   }
 
   async getState(): Promise<DeviceStateResult> {
-    const doNotDisturb = this.device.platform === "android"
-      ? await this.getAndroidDoNotDisturb()
-      : await this.getIosDoNotDisturb();
+    const doNotDisturb =
+      this.device.platform === "android"
+        ? await this.getAndroidDoNotDisturb()
+        : await this.getIosDoNotDisturb();
 
     return {
       success: doNotDisturb.supported && !doNotDisturb.error,
@@ -286,9 +291,10 @@ export class DeviceState {
       }
     }
 
-    const doNotDisturb = this.device.platform === "android"
-      ? await this.setAndroidDoNotDisturb(input.doNotDisturb)
-      : await this.setIosDoNotDisturb(input.doNotDisturb);
+    const doNotDisturb =
+      this.device.platform === "android"
+        ? await this.setAndroidDoNotDisturb(input.doNotDisturb)
+        : await this.setIosDoNotDisturb(input.doNotDisturb);
 
     return {
       success: doNotDisturb.supported && !doNotDisturb.error && doNotDisturb.verified !== false,
@@ -311,7 +317,12 @@ export class DeviceState {
     }
     try {
       const adb = this.adbFactory.create(this.device);
-      const result = await adb.executeCommand("shell settings get global zen_mode", undefined, undefined, true);
+      const result = await adb.executeCommand(
+        "shell settings get global zen_mode",
+        undefined,
+        undefined,
+        true,
+      );
       return parseAndroidZenMode(result.stdout ?? "");
     } catch (error) {
       return {
@@ -322,11 +333,18 @@ export class DeviceState {
     }
   }
 
-  private async setAndroidDoNotDisturb(input: SetDeviceStateInput["doNotDisturb"]): Promise<DoNotDisturbState> {
+  private async setAndroidDoNotDisturb(
+    input: SetDeviceStateInput["doNotDisturb"],
+  ): Promise<DoNotDisturbState> {
     const mode = modeForInput(input);
     try {
       const adb = this.adbFactory.create(this.device);
-      const setResult = await adb.executeCommand(`shell cmd notification set_dnd ${mode}`, undefined, undefined, true);
+      const setResult = await adb.executeCommand(
+        `shell cmd notification set_dnd ${mode}`,
+        undefined,
+        undefined,
+        true,
+      );
       const stdout = setResult.stdout ?? "";
       const stderr = setResult.stderr ?? "";
       if (outputLooksLikeShellFailure(stdout, stderr)) {
@@ -345,7 +363,11 @@ export class DeviceState {
         capability: "full",
         method: "android_cmd_notification",
         verified,
-        ...(verified ? {} : { warning: `Requested DND mode ${mode}, read back ${state.mode ?? state.rawValue ?? "unknown"}` }),
+        ...(verified
+          ? {}
+          : {
+              warning: `Requested DND mode ${mode}, read back ${state.mode ?? state.rawValue ?? "unknown"}`,
+            }),
       };
     } catch (error) {
       return {
@@ -384,7 +406,7 @@ export class DeviceState {
 
     try {
       const result = await simctl.executeCommand(
-        iosNotifyutilGetCommand(this.device.deviceId, IOS_DND_NOTIFICATION)
+        iosNotifyutilGetCommand(this.device.deviceId, IOS_DND_NOTIFICATION),
       );
       return iosDndStateFromNotifyutilOutput(result.stdout ?? "");
     } catch (error) {
@@ -406,7 +428,9 @@ export class DeviceState {
    * (visionOS/tvOS/watchOS simulators) also resolve to `null` and fall through to
    * the harmless legacy path — they are not real DND targets.
    */
-  private async resolveSimulatorIosMajorVersion(simctl: IosSimulatorClient): Promise<number | null> {
+  private async resolveSimulatorIosMajorVersion(
+    simctl: IosSimulatorClient,
+  ): Promise<number | null> {
     const fromDevice = parseIosMajorVersion(this.device.iosVersion ?? this.device.osVersion);
     if (fromDevice !== null) {
       return fromDevice;
@@ -416,15 +440,17 @@ export class DeviceState {
       return iosMajorVersionFromSimctlListDevices(result.stdout ?? "", this.device.deviceId);
     } catch (error) {
       logger.warn(
-        `[DeviceState] could not resolve iOS version for ${this.device.deviceId}: `
-        + `${errorMessage(error)}`,
-        error
+        `[DeviceState] could not resolve iOS version for ${this.device.deviceId}: ` +
+          `${errorMessage(error)}`,
+        error,
       );
       return null;
     }
   }
 
-  private async setIosDoNotDisturb(input: SetDeviceStateInput["doNotDisturb"]): Promise<DoNotDisturbState> {
+  private async setIosDoNotDisturb(
+    input: SetDeviceStateInput["doNotDisturb"],
+  ): Promise<DoNotDisturbState> {
     const requestedMode = modeForInput(input);
 
     // Physical iOS devices: precise, structured "not supported and why" — there
@@ -471,8 +497,12 @@ export class DeviceState {
     try {
       const value = requestedEnabled ? "1" : "0";
       const writeResult = await simctl.executeCommand(
-        iosNotifyutilRegisteredSetReadPostCommand(this.device.deviceId, IOS_DND_NOTIFICATION, value),
-        IOS_NOTIFYUTIL_REGISTERED_SET_TIMEOUT_MS
+        iosNotifyutilRegisteredSetReadPostCommand(
+          this.device.deviceId,
+          IOS_DND_NOTIFICATION,
+          value,
+        ),
+        IOS_NOTIFYUTIL_REGISTERED_SET_TIMEOUT_MS,
       );
       const writeStderr = writeResult.stderr?.trim();
       if (writeStderr) {
@@ -488,7 +518,7 @@ export class DeviceState {
 
       await this.timer.sleep(IOS_DND_INDEPENDENT_READBACK_SETTLE_MS);
       const readbackResult = await simctl.executeCommand(
-        iosNotifyutilGetCommand(this.device.deviceId, IOS_DND_NOTIFICATION)
+        iosNotifyutilGetCommand(this.device.deviceId, IOS_DND_NOTIFICATION),
       );
       const state = iosDndStateFromNotifyutilOutput(readbackResult.stdout ?? "");
       const stateMatches = state.enabled === requestedEnabled;
@@ -497,7 +527,7 @@ export class DeviceState {
           state,
           requestedMode,
           requestedEnabled,
-          "The runtime may reset the legacy com.apple.donotdisturb.enabled notification via donotdisturbd."
+          "The runtime may reset the legacy com.apple.donotdisturb.enabled notification via donotdisturbd.",
         );
       }
       if (!requestedEnabled && !versionKnown) {
@@ -505,7 +535,7 @@ export class DeviceState {
           state,
           requestedMode,
           requestedEnabled,
-          "The simulator iOS version is unknown, and an off request reading back disabled does not prove the legacy DND notification can enable DND."
+          "The simulator iOS version is unknown, and an off request reading back disabled does not prove the legacy DND notification can enable DND.",
         );
       }
       // For priority/alarms we applied *a* DND state but NOT the requested tier,

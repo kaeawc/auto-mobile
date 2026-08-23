@@ -7,8 +7,16 @@ import { load } from "js-yaml";
 
 const COPIED_FILES = new Set(["changelog.md", "contributing.md"]);
 const EXCLUDED_FILES = new Set([
-  "ai/structure.md", "ai/platforms.md", "ai/mcp-tools.md", "ai/vision-fallback-design.md", "ai/vision-model-research.md",
-  "origin.md", "design-docs/mcp/system-design.md", "design-docs/mcp/vision-fallback.md", "design-docs/plat/android/docker.md", "using/perf-analysis.md",
+  "ai/structure.md",
+  "ai/platforms.md",
+  "ai/mcp-tools.md",
+  "ai/vision-fallback-design.md",
+  "ai/vision-model-research.md",
+  "origin.md",
+  "design-docs/mcp/system-design.md",
+  "design-docs/mcp/vision-fallback.md",
+  "design-docs/plat/android/docker.md",
+  "using/perf-analysis.md",
 ]);
 const TODO_IGNORED_FILES = new Set(["contributing.md"]);
 
@@ -45,9 +53,10 @@ async function main(): Promise<void> {
   // annotation before structurally parsing the document.
   const yaml = (await readFile(mkdocsPath, "utf8")).replace(/!!python\/name:[^\s]+/g, "");
   const parsed = load(yaml, { filename: mkdocsPath });
-  const nav = parsed && typeof parsed === "object" && !Array.isArray(parsed)
-    ? (parsed as Record<string, unknown>).nav
-    : undefined;
+  const nav =
+    parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>).nav
+      : undefined;
   if (!nav) {
     throw new Error("mkdocs.yml has no nav section");
   }
@@ -55,25 +64,47 @@ async function main(): Promise<void> {
   const navFiles = collectNavFiles(nav);
   const referenced = new Set(navFiles);
   const actual = await markdownFiles(docsDir);
-  const missing = [...referenced].filter(file => !COPIED_FILES.has(file) && !existsSync(path.join(docsDir, file)));
-  const orphaned = actual.filter(file => !COPIED_FILES.has(file) && !EXCLUDED_FILES.has(file) && !referenced.has(file));
-  const duplicates = [...new Set(navFiles.filter((file, index) => navFiles.indexOf(file) !== index))].sort();
-  const todoFiles = (await Promise.all(actual.map(async file => {
-    const content = await readFile(path.join(docsDir, file), "utf8");
-    return !EXCLUDED_FILES.has(file) && !TODO_IGNORED_FILES.has(file) && /TODO/i.test(content) ? file : undefined;
-  }))).filter((file): file is string => file !== undefined);
-  const emptyFiles = (await Promise.all(actual.map(async file => {
-    const content = await readFile(path.join(docsDir, file), "utf8");
-    return !EXCLUDED_FILES.has(file) && content.trim().length === 0 ? file : undefined;
-  }))).filter((file): file is string => file !== undefined);
+  const missing = [...referenced].filter(
+    (file) => !COPIED_FILES.has(file) && !existsSync(path.join(docsDir, file)),
+  );
+  const orphaned = actual.filter(
+    (file) => !COPIED_FILES.has(file) && !EXCLUDED_FILES.has(file) && !referenced.has(file),
+  );
+  const duplicates = [
+    ...new Set(navFiles.filter((file, index) => navFiles.indexOf(file) !== index)),
+  ].sort();
+  const todoFiles = (
+    await Promise.all(
+      actual.map(async (file) => {
+        const content = await readFile(path.join(docsDir, file), "utf8");
+        return !EXCLUDED_FILES.has(file) && !TODO_IGNORED_FILES.has(file) && /TODO/i.test(content)
+          ? file
+          : undefined;
+      }),
+    )
+  ).filter((file): file is string => file !== undefined);
+  const emptyFiles = (
+    await Promise.all(
+      actual.map(async (file) => {
+        const content = await readFile(path.join(docsDir, file), "utf8");
+        return !EXCLUDED_FILES.has(file) && content.trim().length === 0 ? file : undefined;
+      }),
+    )
+  ).filter((file): file is string => file !== undefined);
 
-  console.log(`Found ${referenced.size} files referenced in mkdocs.yml and ${actual.length} markdown files.`);
+  console.log(
+    `Found ${referenced.size} files referenced in mkdocs.yml and ${actual.length} markdown files.`,
+  );
   const failures = [
-    ["Missing", missing], ["Orphaned", orphaned], ["Duplicate nav", duplicates], ["TODO", todoFiles], ["Empty", emptyFiles],
+    ["Missing", missing],
+    ["Orphaned", orphaned],
+    ["Duplicate nav", duplicates],
+    ["TODO", todoFiles],
+    ["Empty", emptyFiles],
   ] as const;
   for (const [label, files] of failures) {
     if (files.length > 0) {
-      console.error(`${label} files:\n${files.map(file => `  - ${file}`).join("\n")}`);
+      console.error(`${label} files:\n${files.map((file) => `  - ${file}`).join("\n")}`);
     }
   }
   if (failures.some(([, files]) => files.length > 0)) {

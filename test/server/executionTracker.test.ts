@@ -4,8 +4,8 @@ import { DeviceLostError } from "../../src/server/deviceLossOutcome";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 
-describe("ExecutionTracker", function() {
-  test("uses injected id generator and timer when starting executions", function() {
+describe("ExecutionTracker", function () {
+  test("uses injected id generator and timer when starting executions", function () {
     const timer = new FakeTimer();
     timer.setCurrentTime(1234);
     const tracker = new ExecutionTracker(timer, new FakeIdGenerator(["execution-1"]));
@@ -21,13 +21,13 @@ describe("ExecutionTracker", function() {
   // (a Bun `AbortSignal.reason` observability quirk, not a logic race — the abort is dispatched
   // synchronously). We assert the tracker's own `cancelReason`, recorded synchronously at
   // cancellation, which is deterministic across runtimes, plus that the signal did abort.
-  test("records a typed device-loss reason for a device-disconnected cancel", async function() {
+  test("records a typed device-loss reason for a device-disconnected cancel", async function () {
     const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator(["execution-1"]));
     const execution = tracker.startExecution("tapOn", undefined, "session-uuid");
 
     const cancelled = await tracker.cancelSessionUuidExecutions(
       "session-uuid",
-      "device-disconnected:emulator-5554"
+      "device-disconnected:emulator-5554",
     );
 
     expect(cancelled).toBe(1);
@@ -39,13 +39,15 @@ describe("ExecutionTracker", function() {
     });
   });
 
-  test("keeps transport cancellation reasons log-only", async function() {
+  test("keeps transport cancellation reasons log-only", async function () {
     const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator(["execution-1"]));
     const execution = tracker.startExecution("tapOn", "session-id");
 
     await tracker.cancelSessionExecutions("session-id", "streamable_http_onclose");
 
-    expect(execution.abortController.signal.reason).not.toEqual(new Error("streamable_http_onclose"));
+    expect(execution.abortController.signal.reason).not.toEqual(
+      new Error("streamable_http_onclose"),
+    );
     expect(execution.cancelReason).toBeUndefined();
   });
 
@@ -54,13 +56,13 @@ describe("ExecutionTracker", function() {
   // execution from the tracker — only endExecution() tears down the session bookkeeping.
   // So the session remains "active" after a cancel, which is what lets a fresh execution
   // still observe an active session until it is explicitly ended.
-  test("cancellation aborts but leaves the session's execution active", async function() {
+  test("cancellation aborts but leaves the session's execution active", async function () {
     const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator(["execution-1"]));
     const execution = tracker.startExecution("tapOn", undefined, "session-uuid");
 
     const cancelled = await tracker.cancelSessionUuidExecutions(
       "session-uuid",
-      "device-disconnected:emulator-5554"
+      "device-disconnected:emulator-5554",
     );
 
     expect(cancelled).toBe(1);
@@ -73,11 +75,8 @@ describe("ExecutionTracker", function() {
     expect(tracker.hasActiveSessionUuidExecutions("session-uuid")).toBe(false);
   });
 
-  test("keeps the shutdown control operation alive while cancelling device work", async function() {
-    const tracker = new ExecutionTracker(
-      new FakeTimer(),
-      new FakeIdGenerator(["kill", "tap"]),
-    );
+  test("keeps the shutdown control operation alive while cancelling device work", async function () {
+    const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator(["kill", "tap"]));
     const kill = tracker.startExecution("executePlan", undefined, "session-uuid");
     const tap = tracker.startExecution("tapOn", undefined, "session-uuid");
 
@@ -92,7 +91,7 @@ describe("ExecutionTracker", function() {
     expect(tap.abortController.signal.aborted).toBe(true);
   });
 
-  test("cancels a forwarded execution when its transport session closes", async function() {
+  test("cancels a forwarded execution when its transport session closes", async function () {
     const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator(["execution-1"]));
     const execution = tracker.startExecution(
       "tapOn",
@@ -109,7 +108,7 @@ describe("ExecutionTracker", function() {
     expect(execution.abortController.signal.aborted).toBe(true);
   });
 
-  test("distinguishes executions that began before a session deadline", function() {
+  test("distinguishes executions that began before a session deadline", function () {
     const timer = new FakeTimer();
     const tracker = new ExecutionTracker(timer, new FakeIdGenerator(["before", "after"]));
     tracker.startExecution("tapOn", "session-id");
@@ -123,11 +122,8 @@ describe("ExecutionTracker", function() {
     expect(tracker.hasActiveSessionExecutions("session-id", { startedAtOrBefore: 5 })).toBe(false);
   });
 
-  test("tracks an implicit execution under its resolved autolock session", function() {
-    const tracker = new ExecutionTracker(
-      new FakeTimer(),
-      new FakeIdGenerator(["execution-1"]),
-    );
+  test("tracks an implicit execution under its resolved autolock session", function () {
+    const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator(["execution-1"]));
     const execution = tracker.startExecution("tapOn", "mcp-session");
 
     tracker.setResolvedAutolockSessionUuid(execution.id, "autolock-session");
@@ -140,7 +136,7 @@ describe("ExecutionTracker", function() {
     expect(tracker.hasActiveAutolockSessionExecutions("autolock-session")).toBe(false);
   });
 
-  test("cancels explicit and implicit work for one device session", async function() {
+  test("cancels explicit and implicit work for one device session", async function () {
     const tracker = new ExecutionTracker(
       new FakeTimer(),
       new FakeIdGenerator(["explicit", "implicit"]),
@@ -159,12 +155,9 @@ describe("ExecutionTracker", function() {
     expect(implicit.abortController.signal.aborted).toBe(true);
   });
 
-  test("waits for cancelled explicit and implicit device work to end", async function() {
+  test("waits for cancelled explicit and implicit device work to end", async function () {
     const timer = new FakeTimer();
-    const tracker = new ExecutionTracker(
-      timer,
-      new FakeIdGenerator(["explicit", "implicit"]),
-    );
+    const tracker = new ExecutionTracker(timer, new FakeIdGenerator(["explicit", "implicit"]));
     const explicit = tracker.startExecution("tapOn", "mcp-explicit", "device-session");
     const implicit = tracker.startExecution("swipeOn", "mcp-implicit");
     tracker.setResolvedAutolockSessionUuid(implicit.id, "device-session");
@@ -182,12 +175,9 @@ describe("ExecutionTracker", function() {
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
-  test("bounds the wait for signal-ignorant device work", async function() {
+  test("bounds the wait for signal-ignorant device work", async function () {
     const timer = new FakeTimer();
-    const tracker = new ExecutionTracker(
-      timer,
-      new FakeIdGenerator(["execution-1"]),
-    );
+    const tracker = new ExecutionTracker(timer, new FakeIdGenerator(["execution-1"]));
     const execution = tracker.startExecution("tapOn", undefined, "device-session");
 
     const drained = tracker.waitForDeviceSessionExecutionsToEnd("device-session", 1_000);
@@ -200,26 +190,46 @@ describe("ExecutionTracker", function() {
   // #4183 item 6 (A3): the scope fallback in hasActiveToolExecution (executionTracker.ts)
   // had no table coverage. The scope order is: explicit "global" → sessionUuid map →
   // sessionId map → global fallback when neither key is provided.
-  describe("hasActiveToolExecution scope fallback", function() {
-    const makeTracker = function(): ExecutionTracker {
+  describe("hasActiveToolExecution scope fallback", function () {
+    const makeTracker = function (): ExecutionTracker {
       const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator(["execution-1"]));
       tracker.startExecution("executePlan", "session-id", "session-uuid");
       return tracker;
     };
 
     test.each<[string, ExecutionScopeOptions, boolean]>([
-      ["global scope matches regardless of present non-matching session keys", { scope: "global", sessionId: "other-id", sessionUuid: "other-uuid" }, true],
-      ["session scope matches on sessionUuid", { scope: "session", sessionUuid: "session-uuid" }, true],
-      ["session scope misses on non-matching sessionUuid", { scope: "session", sessionUuid: "other-uuid" }, false],
-      ["session scope falls back to sessionId when no uuid", { scope: "session", sessionId: "session-id" }, true],
-      ["session scope misses on non-matching sessionId", { scope: "session", sessionId: "other-id" }, false],
+      [
+        "global scope matches regardless of present non-matching session keys",
+        { scope: "global", sessionId: "other-id", sessionUuid: "other-uuid" },
+        true,
+      ],
+      [
+        "session scope matches on sessionUuid",
+        { scope: "session", sessionUuid: "session-uuid" },
+        true,
+      ],
+      [
+        "session scope misses on non-matching sessionUuid",
+        { scope: "session", sessionUuid: "other-uuid" },
+        false,
+      ],
+      [
+        "session scope falls back to sessionId when no uuid",
+        { scope: "session", sessionId: "session-id" },
+        true,
+      ],
+      [
+        "session scope misses on non-matching sessionId",
+        { scope: "session", sessionId: "other-id" },
+        false,
+      ],
       ["session scope with neither key falls back to global", { scope: "session" }, true],
-    ])("%s", function(_name, options, expected) {
+    ])("%s", function (_name, options, expected) {
       const tracker = makeTracker();
       expect(tracker.hasActiveToolExecution("executePlan", options)).toBe(expected);
     });
 
-    test("global scope does not match a different tool name", function() {
+    test("global scope does not match a different tool name", function () {
       const tracker = makeTracker();
       expect(tracker.hasActiveToolExecution("tapOn", { scope: "global" })).toBe(false);
     });

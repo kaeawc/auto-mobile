@@ -19,8 +19,8 @@ describe("ViewHierarchy filtering", () => {
             {
               "resource-id": "com.example:id/icon_button",
               "view-id": "com.example:id/icon_button",
-              "bounds": { left: 900, top: 1700, right: 1020, bottom: 1820 },
-              "actions": ["click"],
+              bounds: { left: 900, top: 1700, right: 1020, bottom: 1820 },
+              actions: ["click"],
             },
             {
               bounds: { left: 0, top: 0, right: 10, bottom: 10 },
@@ -33,8 +33,8 @@ describe("ViewHierarchy filtering", () => {
     expect(result.hierarchy.node).toEqual({
       "resource-id": "com.example:id/icon_button",
       "view-id": "com.example:id/icon_button",
-      "bounds": { left: 900, top: 1700, right: 1020, bottom: 1820 },
-      "actions": ["click"],
+      bounds: { left: 900, top: 1700, right: 1020, bottom: 1820 },
+      actions: ["click"],
     });
   });
 
@@ -48,10 +48,10 @@ describe("ViewHierarchy filtering", () => {
             {
               "resource-id": "com.example:id/title",
               "view-id": "com.example:id/title",
-              "bounds": { left: 0, top: 100, right: 800, bottom: 180 },
-              "occlusionState": "partial",
-              "occludedBy": "unlabeled view",
-              "occludedByViewId": "stable-occluder",
+              bounds: { left: 0, top: 100, right: 800, bottom: 180 },
+              occlusionState: "partial",
+              occludedBy: "unlabeled view",
+              occludedByViewId: "stable-occluder",
             },
           ],
         },
@@ -61,10 +61,10 @@ describe("ViewHierarchy filtering", () => {
     expect(result.hierarchy.node).toEqual({
       "resource-id": "com.example:id/title",
       "view-id": "com.example:id/title",
-      "bounds": { left: 0, top: 100, right: 800, bottom: 180 },
-      "occlusionState": "partial",
-      "occludedBy": "unlabeled view",
-      "occludedByViewId": "stable-occluder",
+      bounds: { left: 0, top: 100, right: 800, bottom: 180 },
+      occlusionState: "partial",
+      occludedBy: "unlabeled view",
+      occludedByViewId: "stable-occluder",
     });
   });
 
@@ -115,10 +115,7 @@ describe("ViewHierarchy filtering", () => {
   test("keeps only surviving root children when some meet the filter criteria", () => {
     const viewHierarchy = new ViewHierarchy(device, new FakeAdbClientFactory());
     const root = {
-      node: [
-        { class: "android.widget.FrameLayout", enabled: "true" },
-        { text: "Keep me" },
-      ],
+      node: [{ class: "android.widget.FrameLayout", enabled: "true" }, { text: "Keep me" }],
     };
 
     const result = viewHierarchy.filterSingleNode(root, true);

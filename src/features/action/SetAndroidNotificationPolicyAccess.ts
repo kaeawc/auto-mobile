@@ -1,5 +1,8 @@
 import { errorMessage } from "../../utils/describeUnknownError";
-import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  AdbClientFactory,
+  defaultAdbClientFactory,
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AndroidDeviceShellToolResult, BootedDevice } from "../../models";
 import { logger } from "../../utils/logger";
@@ -7,12 +10,10 @@ import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { outputLooksLikeShellFailure } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
 import { shellQuote } from "../../utils/shellQuote";
 
-
 export interface SetAndroidNotificationPolicyAccessInput {
   /** When true, runs `cmd notification allow_dnd`; when false, `disallow_dnd` (best-effort). */
   allowed: boolean;
 }
-
 
 /**
  * Toggle notification policy access (Do Not Disturb / interruption filter) for a package via
@@ -30,7 +31,7 @@ export class SetAndroidNotificationPolicyAccess {
 
   async execute(
     packageName: string,
-    input: SetAndroidNotificationPolicyAccessInput
+    input: SetAndroidNotificationPolicyAccessInput,
   ): Promise<AndroidDeviceShellToolResult> {
     const perf = createGlobalPerformanceTracker();
     perf.serial("setAndroidNotificationPolicyAccess");
@@ -65,7 +66,7 @@ export class SetAndroidNotificationPolicyAccess {
 
         if (bad) {
           logger.warn(
-            `[SetAndroidNotificationPolicyAccess] disallow_dnd non-fatal output for ${packageName}: ${stdout}\n${stderr}`
+            `[SetAndroidNotificationPolicyAccess] disallow_dnd non-fatal output for ${packageName}: ${stdout}\n${stderr}`,
           );
         } else {
           logger.info(`[SetAndroidNotificationPolicyAccess] disallow_dnd ok for ${packageName}`);
@@ -77,10 +78,14 @@ export class SetAndroidNotificationPolicyAccess {
       perf.end();
       const message = errorMessage(cause);
       if (input.allowed) {
-        logger.warn(`[SetAndroidNotificationPolicyAccess] allow_dnd failed for ${packageName}: ${message}`);
+        logger.warn(
+          `[SetAndroidNotificationPolicyAccess] allow_dnd failed for ${packageName}: ${message}`,
+        );
         return { success: false, appId: packageName, error: message };
       }
-      logger.warn(`[SetAndroidNotificationPolicyAccess] disallow_dnd threw for ${packageName}: ${message}`);
+      logger.warn(
+        `[SetAndroidNotificationPolicyAccess] disallow_dnd threw for ${packageName}: ${message}`,
+      );
       return { success: true, appId: packageName };
     }
   }

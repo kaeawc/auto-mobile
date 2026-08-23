@@ -1,12 +1,7 @@
 import { errorMessage } from "../../utils/describeUnknownError";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
-import {
-  BootedDevice,
-  Element,
-  ObserveResult,
-  ViewHierarchyResult
-} from "../../models";
+import { BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "../../models";
 import { SetUIStateOptions, FieldSpec, ElementSelector } from "../../models/SetUIStateOptions";
 import { SetUIStateResult, FieldResult, FieldType } from "../../models/SetUIStateResult";
 import { FieldTypeDetector } from "./FieldTypeDetector";
@@ -21,9 +16,14 @@ import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
  */
 interface TapOnElementLike {
   execute(
-    options: { text?: string; elementId?: string; action: string; container?: { text?: string; elementId?: string } },
+    options: {
+      text?: string;
+      elementId?: string;
+      action: string;
+      container?: { text?: string; elementId?: string };
+    },
     progress?: ProgressCallback,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<{ success: boolean; element?: Element; observation?: ObserveResult; error?: string }>;
 }
 
@@ -31,14 +31,19 @@ interface TapOnElementLike {
  * Interface for InputText dependency
  */
 interface InputTextLike {
-  execute(text: string, imeAction?: string): Promise<{ success: boolean; text: string; observation?: ObserveResult; error?: string }>;
+  execute(
+    text: string,
+    imeAction?: string,
+  ): Promise<{ success: boolean; text: string; observation?: ObserveResult; error?: string }>;
 }
 
 /**
  * Interface for ClearText dependency
  */
 interface ClearTextLike {
-  execute(progress?: ProgressCallback): Promise<{ success: boolean; observation?: ObserveResult; error?: string }>;
+  execute(
+    progress?: ProgressCallback,
+  ): Promise<{ success: boolean; observation?: ObserveResult; error?: string }>;
 }
 
 /**
@@ -46,9 +51,19 @@ interface ClearTextLike {
  */
 interface SwipeOnLike {
   execute(
-    options: { direction: string; lookFor?: { text?: string; elementId?: string }; scrollToFind?: boolean },
-    progress?: ProgressCallback
-  ): Promise<{ success: boolean; found?: boolean; element?: Element; observation?: ObserveResult; error?: string }>;
+    options: {
+      direction: string;
+      lookFor?: { text?: string; elementId?: string };
+      scrollToFind?: boolean;
+    },
+    progress?: ProgressCallback,
+  ): Promise<{
+    success: boolean;
+    found?: boolean;
+    element?: Element;
+    observation?: ObserveResult;
+    error?: string;
+  }>;
 }
 
 /**
@@ -98,7 +113,7 @@ export class SetUIState extends BaseVisualChange {
     device: BootedDevice,
     adb: AdbClient | null = null,
     dependencies: SetUIStateDependencies = {},
-    finder: ElementFinder = new DefaultElementFinder()
+    finder: ElementFinder = new DefaultElementFinder(),
   ) {
     super(device, adb, dependencies.timer ?? defaultTimer);
     this.fieldTypeDetector = dependencies.fieldTypeDetector ?? new FieldTypeDetector();
@@ -116,7 +131,7 @@ export class SetUIState extends BaseVisualChange {
   async execute(
     options: SetUIStateOptions,
     progress?: ProgressCallback,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<SetUIStateResult> {
     const scrollDirection = options.scrollDirection ?? DEFAULT_SCROLL_DIRECTION;
 
@@ -125,7 +140,13 @@ export class SetUIState extends BaseVisualChange {
     let totalAttempts = 0;
 
     // Get initial observation
-    let lastObservation = await this.getObserveScreen().execute(undefined, undefined, false, 0, signal);
+    let lastObservation = await this.getObserveScreen().execute(
+      undefined,
+      undefined,
+      false,
+      0,
+      signal,
+    );
 
     let scrollsWithoutProgress = 0;
     let currentDirection: "up" | "down" = scrollDirection;
@@ -141,7 +162,7 @@ export class SetUIState extends BaseVisualChange {
       const visibleFields = this.findVisibleFieldsInScreenOrder(
         options.fields,
         processed,
-        lastObservation?.viewHierarchy
+        lastObservation?.viewHierarchy,
       );
 
       if (visibleFields.length > 0) {
@@ -151,12 +172,7 @@ export class SetUIState extends BaseVisualChange {
         // Each edit may change layout (keyboard, reflow, dynamic fields),
         // so we re-find visible fields from a fresh observation each iteration.
         const { fieldSpec, fieldIndex, element } = visibleFields[0];
-        const result = await this.processField(
-          fieldSpec,
-          element,
-          progress,
-          signal
-        );
+        const result = await this.processField(fieldSpec, element, progress, signal);
 
         fieldResults[fieldIndex] = result;
         processed.add(fieldIndex);
@@ -167,7 +183,13 @@ export class SetUIState extends BaseVisualChange {
 
         // Refresh observation after each success
         if (result.success) {
-          const freshObs = await this.getObserveScreen().execute(undefined, undefined, false, 0, signal);
+          const freshObs = await this.getObserveScreen().execute(
+            undefined,
+            undefined,
+            false,
+            0,
+            signal,
+          );
           if (freshObs) {
             lastObservation = freshObs;
           }
@@ -175,13 +197,16 @@ export class SetUIState extends BaseVisualChange {
 
         // Fail fast on failure
         if (!result.success) {
-          logger.warn(`[SetUIState] Field failed, stopping: ${this.describeSelector(fieldSpec.selector)}`);
+          logger.warn(
+            `[SetUIState] Field failed, stopping: ${this.describeSelector(fieldSpec.selector)}`,
+          );
           return {
             success: false,
             fields: this.collectResults(fieldResults, options.fields, processed),
             totalAttempts,
             observation: lastObservation,
-            error: result.error ?? `Failed to set field: ${this.describeSelector(fieldSpec.selector)}`
+            error:
+              result.error ?? `Failed to set field: ${this.describeSelector(fieldSpec.selector)}`,
           };
         }
       } else {
@@ -211,13 +236,16 @@ export class SetUIState extends BaseVisualChange {
         // Scroll one step without lookFor to avoid jumping past intermediate fields.
         // Using lookFor would enable scroll-until-visible mode which can skip over
         // fields that need to be processed first in screen order.
-        await this.getSwipeOn().execute(
-          { direction: currentDirection },
-          progress
-        );
+        await this.getSwipeOn().execute({ direction: currentDirection }, progress);
 
         // Re-observe after scroll
-        const freshObs = await this.getObserveScreen().execute(undefined, undefined, false, 0, signal);
+        const freshObs = await this.getObserveScreen().execute(
+          undefined,
+          undefined,
+          false,
+          0,
+          signal,
+        );
         if (freshObs) {
           lastObservation = freshObs;
         }
@@ -228,7 +256,7 @@ export class SetUIState extends BaseVisualChange {
     if (processed.size < options.fields.length) {
       const missing = options.fields
         .filter((_, i) => !processed.has(i))
-        .map(f => this.describeSelector(f.selector));
+        .map((f) => this.describeSelector(f.selector));
 
       return {
         success: false,
@@ -237,7 +265,7 @@ export class SetUIState extends BaseVisualChange {
         observation: lastObservation,
         error: budgetSpent
           ? `Fields not found within the ${Math.round(SEARCH_BUDGET_MS / 1000)}s search budget: ${missing.join(", ")}`
-          : `Fields not found after scrolling: ${missing.join(", ")}`
+          : `Fields not found after scrolling: ${missing.join(", ")}`,
       };
     }
 
@@ -245,7 +273,7 @@ export class SetUIState extends BaseVisualChange {
       success: true,
       fields: fieldResults,
       totalAttempts,
-      observation: lastObservation
+      observation: lastObservation,
     };
   }
 
@@ -255,12 +283,14 @@ export class SetUIState extends BaseVisualChange {
   private findVisibleFieldsInScreenOrder(
     fields: FieldSpec[],
     processed: Set<number>,
-    viewHierarchy?: ViewHierarchyResult
+    viewHierarchy?: ViewHierarchyResult,
   ): Array<{ fieldSpec: FieldSpec; fieldIndex: number; element: Element }> {
     const matches: Array<{ fieldSpec: FieldSpec; fieldIndex: number; element: Element }> = [];
 
     for (let i = 0; i < fields.length; i++) {
-      if (processed.has(i)) {continue;}
+      if (processed.has(i)) {
+        continue;
+      }
 
       const element = this.findElement(fields[i].selector, viewHierarchy);
       if (element) {
@@ -280,7 +310,7 @@ export class SetUIState extends BaseVisualChange {
   private collectResults(
     results: FieldResult[],
     fields: FieldSpec[],
-    processed: Set<number>
+    processed: Set<number>,
   ): FieldResult[] {
     const out: FieldResult[] = [];
     for (let i = 0; i < fields.length; i++) {
@@ -291,7 +321,7 @@ export class SetUIState extends BaseVisualChange {
           selector: fields[i].selector,
           success: false,
           attempts: 0,
-          error: `Element not found: ${this.describeSelector(fields[i].selector)}`
+          error: `Element not found: ${this.describeSelector(fields[i].selector)}`,
         });
       }
     }
@@ -305,7 +335,7 @@ export class SetUIState extends BaseVisualChange {
     fieldSpec: FieldSpec,
     initialElement: Element,
     progress?: ProgressCallback,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<FieldResult> {
     let attempts = 0;
     let lastError: string | undefined;
@@ -318,7 +348,13 @@ export class SetUIState extends BaseVisualChange {
       try {
         // On retry, re-find the element via scroll
         if (attempts > 1) {
-          const freshObs = await this.getObserveScreen().execute(undefined, undefined, false, 0, signal);
+          const freshObs = await this.getObserveScreen().execute(
+            undefined,
+            undefined,
+            false,
+            0,
+            signal,
+          );
           const found = freshObs?.viewHierarchy
             ? this.findElement(fieldSpec.selector, freshObs.viewHierarchy)
             : null;
@@ -329,7 +365,9 @@ export class SetUIState extends BaseVisualChange {
 
         // Detect field type
         fieldType = this.fieldTypeDetector.detect(element);
-        logger.info(`[SetUIState] Field type detected: ${fieldType} for ${this.describeSelector(fieldSpec.selector)}`);
+        logger.info(
+          `[SetUIState] Field type detected: ${fieldType} for ${this.describeSelector(fieldSpec.selector)}`,
+        );
 
         // Check if field already has correct value
         const alreadyCorrect = this.isFieldAlreadyCorrect(element, fieldSpec, fieldType);
@@ -341,7 +379,7 @@ export class SetUIState extends BaseVisualChange {
             attempts,
             verified: true,
             fieldType,
-            skipped: true
+            skipped: true,
           };
         }
 
@@ -351,7 +389,7 @@ export class SetUIState extends BaseVisualChange {
           fieldSpec,
           fieldType,
           progress,
-          signal
+          signal,
         );
 
         // Retrying cannot reclassify an element that is not an editable field --
@@ -373,9 +411,11 @@ export class SetUIState extends BaseVisualChange {
         // - Text-only selector on a mutable field type (typing replaces the label text
         //   used as the selector, so re-lookup by original text fails)
         let verified: boolean | undefined;
-        const hasTextOnlySelector = fieldSpec.selector.text !== undefined && fieldSpec.selector.elementId === undefined;
+        const hasTextOnlySelector =
+          fieldSpec.selector.text !== undefined && fieldSpec.selector.elementId === undefined;
         const isMutableTextField = fieldType === "text" || fieldType === "dropdown";
-        const shouldSkipVerify = this.fieldTypeDetector.isPasswordField(element) ||
+        const shouldSkipVerify =
+          this.fieldTypeDetector.isPasswordField(element) ||
           this.fieldTypeDetector.shouldSkipVerification(element, fieldType) ||
           (hasTextOnlySelector && isMutableTextField);
         if (!shouldSkipVerify) {
@@ -391,7 +431,7 @@ export class SetUIState extends BaseVisualChange {
           success: true,
           attempts,
           verified,
-          fieldType
+          fieldType,
         };
       } catch (error) {
         lastError = errorMessage(error);
@@ -404,14 +444,17 @@ export class SetUIState extends BaseVisualChange {
       success: false,
       attempts,
       error: lastError,
-      fieldType
+      fieldType,
     };
   }
 
   /**
    * Find element in view hierarchy
    */
-  private findElement(selector: ElementSelector, viewHierarchy?: ViewHierarchyResult): Element | null {
+  private findElement(
+    selector: ElementSelector,
+    viewHierarchy?: ViewHierarchyResult,
+  ): Element | null {
     if (!viewHierarchy) {
       return null;
     }
@@ -430,7 +473,11 @@ export class SetUIState extends BaseVisualChange {
   /**
    * Check if field already has the correct value
    */
-  private isFieldAlreadyCorrect(element: Element, fieldSpec: FieldSpec, fieldType: FieldType): boolean {
+  private isFieldAlreadyCorrect(
+    element: Element,
+    fieldSpec: FieldSpec,
+    fieldType: FieldType,
+  ): boolean {
     switch (fieldType) {
       case "text":
         if (fieldSpec.value !== undefined) {
@@ -467,7 +514,7 @@ export class SetUIState extends BaseVisualChange {
     fieldSpec: FieldSpec,
     fieldType: FieldType,
     progress?: ProgressCallback,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<{ success: boolean; error?: string; unclassifiable?: boolean }> {
     const tapOnElement = this.getTapOnElement();
     const inputText = this.getInputText();
@@ -488,9 +535,11 @@ export class SetUIState extends BaseVisualChange {
           const tapResult = await tapOnElement.execute(
             this.buildTapOptions(fieldSpec.selector, "tap"),
             progress,
-            signal
+            signal,
           );
-          logger.debug(`[SetUIState] text.tap done selector=${selectorDesc} success=${tapResult.success} totalMs=${Date.now() - tapStart}${tapResult.error ? ` error=${tapResult.error}` : ""}`);
+          logger.debug(
+            `[SetUIState] text.tap done selector=${selectorDesc} success=${tapResult.success} totalMs=${Date.now() - tapStart}${tapResult.error ? ` error=${tapResult.error}` : ""}`,
+          );
           if (!tapResult.success) {
             return { success: false, error: `Failed to tap on field: ${tapResult.error}` };
           }
@@ -499,7 +548,9 @@ export class SetUIState extends BaseVisualChange {
           logger.debug(`[SetUIState] text.clear selector=${selectorDesc}`);
           const clearStart = Date.now();
           const clearResult = await clearText.execute(progress);
-          logger.debug(`[SetUIState] text.clear done selector=${selectorDesc} success=${clearResult.success} totalMs=${Date.now() - clearStart}${clearResult.error ? ` error=${clearResult.error}` : ""}`);
+          logger.debug(
+            `[SetUIState] text.clear done selector=${selectorDesc} success=${clearResult.success} totalMs=${Date.now() - clearStart}${clearResult.error ? ` error=${clearResult.error}` : ""}`,
+          );
           if (!clearResult.success) {
             return { success: false, error: `Failed to clear text: ${clearResult.error}` };
           }
@@ -509,10 +560,14 @@ export class SetUIState extends BaseVisualChange {
           // (a form field value containing a configured marker, e.g. an
           // @mention, is typed via eventAll). This is by design — the feature
           // is scoped to both inputText and setUIState text fields.
-          logger.debug(`[SetUIState] text.input selector=${selectorDesc} textLength=${fieldSpec.value.length}`);
+          logger.debug(
+            `[SetUIState] text.input selector=${selectorDesc} textLength=${fieldSpec.value.length}`,
+          );
           const inputStart = Date.now();
           const inputResult = await inputText.execute(fieldSpec.value);
-          logger.debug(`[SetUIState] text.input done selector=${selectorDesc} success=${inputResult.success} totalMs=${Date.now() - inputStart}${inputResult.error ? ` error=${inputResult.error}` : ""}`);
+          logger.debug(
+            `[SetUIState] text.input done selector=${selectorDesc} success=${inputResult.success} totalMs=${Date.now() - inputStart}${inputResult.error ? ` error=${inputResult.error}` : ""}`,
+          );
           if (!inputResult.success) {
             return { success: false, error: `Failed to input text: ${inputResult.error}` };
           }
@@ -534,7 +589,7 @@ export class SetUIState extends BaseVisualChange {
             const tapResult = await tapOnElement.execute(
               this.buildTapOptions(fieldSpec.selector, "tap"),
               progress,
-              signal
+              signal,
             );
             if (!tapResult.success) {
               return { success: false, error: `Failed to tap checkbox/toggle: ${tapResult.error}` };
@@ -553,7 +608,7 @@ export class SetUIState extends BaseVisualChange {
           const openResult = await tapOnElement.execute(
             this.buildTapOptions(fieldSpec.selector, "tap"),
             progress,
-            signal
+            signal,
           );
           if (!openResult.success) {
             return { success: false, error: `Failed to open dropdown: ${openResult.error}` };
@@ -566,10 +621,13 @@ export class SetUIState extends BaseVisualChange {
           const selectResult = await tapOnElement.execute(
             { text: fieldSpec.value, action: "tap" },
             progress,
-            signal
+            signal,
           );
           if (!selectResult.success) {
-            return { success: false, error: `Failed to select dropdown value: ${selectResult.error}` };
+            return {
+              success: false,
+              error: `Failed to select dropdown value: ${selectResult.error}`,
+            };
           }
 
           return { success: true };
@@ -582,14 +640,15 @@ export class SetUIState extends BaseVisualChange {
           return {
             success: false,
             unclassifiable: true,
-            error: `Cannot set ${this.describeSelector(fieldSpec.selector)}: matched an element that is not `
-              + `an editable field (detected type "${fieldType}"). Select the input rather than its label.`
+            error:
+              `Cannot set ${this.describeSelector(fieldSpec.selector)}: matched an element that is not ` +
+              `an editable field (detected type "${fieldType}"). Select the input rather than its label.`,
           };
       }
     } catch (error) {
       return {
         success: false,
-        error: errorMessage(error)
+        error: errorMessage(error),
       };
     }
   }
@@ -600,10 +659,16 @@ export class SetUIState extends BaseVisualChange {
   private async verifyFieldValue(
     fieldSpec: FieldSpec,
     fieldType: FieldType,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<boolean> {
     // Get fresh observation
-    const observation = await this.getObserveScreen().execute(undefined, undefined, false, 0, signal);
+    const observation = await this.getObserveScreen().execute(
+      undefined,
+      undefined,
+      false,
+      0,
+      signal,
+    );
     if (!observation?.viewHierarchy) {
       return false;
     }
@@ -648,7 +713,7 @@ export class SetUIState extends BaseVisualChange {
    */
   private buildTapOptions(
     selector: ElementSelector,
-    action: string
+    action: string,
   ): { text?: string; elementId?: string; action: string } {
     if (selector.text) {
       return { text: selector.text, action };

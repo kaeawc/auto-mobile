@@ -51,13 +51,15 @@ function emergencyMessage(message: string, error: unknown | undefined): string {
 export function writeEmergencyLog(message: string, error?: unknown): void {
   const formattedMessage = emergencyMessage(message, error);
   if (resolveAutomobileLogFormat() === "json") {
-    process.stderr.write(`${JSON.stringify({
-      timestamp: new Date().toISOString(),
-      level: "error",
-      component: "process",
-      event: "log.emergency",
-      message: formattedMessage,
-    })}\n`);
+    process.stderr.write(
+      `${JSON.stringify({
+        timestamp: new Date().toISOString(),
+        level: "error",
+        component: "process",
+        event: "log.emergency",
+        message: formattedMessage,
+      })}\n`,
+    );
     return;
   }
   process.stderr.write(`${formattedMessage}\n`);

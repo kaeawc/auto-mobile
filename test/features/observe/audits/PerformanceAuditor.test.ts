@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { PerformanceAuditor } from "../../../../src/features/observe/audits/PerformanceAuditor";
 import { FakeAdbClientFactory } from "../../../fakes/FakeAdbClientFactory";
-import { NoOpPerformanceTracker, setDebugPerfEnabled } from "../../../../src/utils/PerformanceTracker";
+import {
+  NoOpPerformanceTracker,
+  setDebugPerfEnabled,
+} from "../../../../src/utils/PerformanceTracker";
 import { serverConfig } from "../../../../src/utils/ServerConfig";
 import type { BootedDevice, ObserveResult } from "../../../../src/models";
 
@@ -44,7 +47,9 @@ describe("PerformanceAuditor", () => {
       adbFactory: new FakeAdbClientFactory(),
       isEnabled: () => false,
     });
-    const result = makeResult({ activeWindow: { appId: "com.example", activityName: "Main" } as any });
+    const result = makeResult({
+      activeWindow: { appId: "com.example", activityName: "Main" } as any,
+    });
     await auditor.run(result, new NoOpPerformanceTracker());
     expect(result.performanceAudit).toBeUndefined();
     expect(result.errors).toBeUndefined();
@@ -56,7 +61,9 @@ describe("PerformanceAuditor", () => {
       device: androidDevice,
       adbFactory: factory,
     });
-    const result = makeResult({ activeWindow: { appId: "com.example", activityName: "Main" } as any });
+    const result = makeResult({
+      activeWindow: { appId: "com.example", activityName: "Main" } as any,
+    });
     await auditor.run(result, new NoOpPerformanceTracker());
     expect(result.performanceAudit).toBeUndefined();
     expect(result.errors).toBeUndefined();
@@ -71,7 +78,9 @@ describe("PerformanceAuditor", () => {
       device: androidDevice,
       adbFactory: factory,
     });
-    const result = makeResult({ activeWindow: { appId: "com.example", activityName: "Main" } as any });
+    const result = makeResult({
+      activeWindow: { appId: "com.example", activityName: "Main" } as any,
+    });
     await auditor.run(result, new NoOpPerformanceTracker());
     expect(result.performanceAudit).toBeUndefined();
     expect(result.errors).toBeUndefined();
@@ -84,7 +93,9 @@ describe("PerformanceAuditor", () => {
       adbFactory: new FakeAdbClientFactory(),
       isEnabled: () => true,
     });
-    const result = makeResult({ activeWindow: { appId: "com.example", activityName: "Main" } as any });
+    const result = makeResult({
+      activeWindow: { appId: "com.example", activityName: "Main" } as any,
+    });
     await auditor.run(result, new NoOpPerformanceTracker());
     expect(result.performanceAudit).toBeUndefined();
     expect(result.errors).toBeUndefined();
@@ -109,7 +120,9 @@ describe("PerformanceAuditor", () => {
       adbFactory: new FakeAdbClientFactory(),
       isEnabled: () => true,
     });
-    const result = makeResult({ activeWindow: { appId: "com.example", activityName: "Main" } as any });
+    const result = makeResult({
+      activeWindow: { appId: "com.example", activityName: "Main" } as any,
+    });
     await auditor.run(result, new NoOpPerformanceTracker());
     expect(result.errors).toBeUndefined();
   });
@@ -129,7 +142,9 @@ describe("PerformanceAuditor", () => {
       adbFactory: factory,
       isEnabled: () => true,
     });
-    const result = makeResult({ activeWindow: { appId: "com.example", activityName: "Main" } as any });
+    const result = makeResult({
+      activeWindow: { appId: "com.example", activityName: "Main" } as any,
+    });
     await auditor.run(result, new NoOpPerformanceTracker());
     expect(factory.wasCalledForDevice(androidDevice.deviceId)).toBe(true);
   });

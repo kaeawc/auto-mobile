@@ -22,7 +22,11 @@ describe("parseNotifyutilState", () => {
     { label: "trailing CRLF", raw: "1\r\n", expected: true },
     { label: "reads the LAST decisive line (on after off)", raw: "0\n1", expected: true },
     { label: "reads the LAST decisive line (off after on)", raw: "1\n0", expected: false },
-    { label: "skips non-decisive trailing lines", raw: "1\nregistered check complete", expected: true },
+    {
+      label: "skips non-decisive trailing lines",
+      raw: "1\nregistered check complete",
+      expected: true,
+    },
     { label: "empty input is unknown", raw: "", expected: null },
     { label: "whitespace-only input is unknown", raw: "   \n  ", expected: null },
     { label: "a digit glued to a non-space char is not decisive", raw: "x1", expected: null },
@@ -30,7 +34,11 @@ describe("parseNotifyutilState", () => {
     { label: "digit not at end of line is ignored", raw: "1 registered", expected: null },
     { label: "out-of-range digit is unknown", raw: "state 2", expected: null },
     { label: "non-numeric output is unknown", raw: "no such key", expected: null },
-    { label: "later unknown line does not erase an earlier decisive one", raw: "0\nfoo", expected: false },
+    {
+      label: "later unknown line does not erase an earlier decisive one",
+      raw: "0\nfoo",
+      expected: false,
+    },
   ];
 
   for (const { label, raw, expected } of rows) {
@@ -45,20 +53,18 @@ describe("notifyutil command builders", () => {
   const key = "com.apple.donotdisturb.state";
 
   test("iosNotifyutilGetCommand issues a spawn/get for the key", () => {
-    expect(iosNotifyutilGetCommand(deviceId, key)).toBe(
-      `spawn ${deviceId} notifyutil -g ${key}`
-    );
+    expect(iosNotifyutilGetCommand(deviceId, key)).toBe(`spawn ${deviceId} notifyutil -g ${key}`);
   });
 
   test("registered-set-read-post command sets, gets, and posts in one spawn (value 1)", () => {
     expect(iosNotifyutilRegisteredSetReadPostCommand(deviceId, key, "1")).toBe(
-      `spawn ${deviceId} notifyutil -1 ${key} -s ${key} 1 -g ${key} -p ${key}`
+      `spawn ${deviceId} notifyutil -1 ${key} -s ${key} 1 -g ${key} -p ${key}`,
     );
   });
 
   test("registered-set-read-post command carries the value 0 through unchanged", () => {
     expect(iosNotifyutilRegisteredSetReadPostCommand(deviceId, key, "0")).toBe(
-      `spawn ${deviceId} notifyutil -1 ${key} -s ${key} 0 -g ${key} -p ${key}`
+      `spawn ${deviceId} notifyutil -1 ${key} -s ${key} 0 -g ${key} -p ${key}`,
     );
   });
 

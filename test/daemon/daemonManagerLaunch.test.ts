@@ -66,15 +66,21 @@ describe("DaemonManager launch", () => {
       spawn: (_command: string, _args: string[], _options: SpawnOptions) => {
         return {
           unref() {},
-          once() { return this; },
-          off() { return this; },
+          once() {
+            return this;
+          },
+          off() {
+            return this;
+          },
         } as ChildProcess;
-      }
+      },
     };
 
     let statusCallCount = 0;
     class TestDaemonManager extends DaemonManager {
-      override findAllDaemonProcesses(): number[] { return []; }
+      override findAllDaemonProcesses(): number[] {
+        return [];
+      }
       override async status(): Promise<any> {
         statusCallCount++;
         return statusCallCount === 1
@@ -94,14 +100,14 @@ describe("DaemonManager launch", () => {
       join(stateDir, "daemon.pid"),
       join(stateDir, "daemon.sock"),
       undefined,
-      processSpawner
+      processSpawner,
     );
 
     await manager.start();
 
     const logsDir = join(dataDir, "logs");
     expect(existsSync(logsDir)).toBe(true);
-    const launchLogs = readdirSync(logsDir).filter(name => name.startsWith("daemon-launch"));
+    const launchLogs = readdirSync(logsDir).filter((name) => name.startsWith("daemon-launch"));
     expect(launchLogs.length).toBeGreaterThan(0);
   });
 
@@ -117,15 +123,21 @@ describe("DaemonManager launch", () => {
         capturedStdio = options.stdio;
         return {
           unref() {},
-          once() { return this; },
-          off() { return this; },
+          once() {
+            return this;
+          },
+          off() {
+            return this;
+          },
         } as ChildProcess;
-      }
+      },
     };
 
     let statusCallCount = 0;
     class TestDaemonManager extends DaemonManager {
-      override findAllDaemonProcesses(): number[] { return []; }
+      override findAllDaemonProcesses(): number[] {
+        return [];
+      }
       override async status(): Promise<any> {
         statusCallCount++;
         return statusCallCount === 1
@@ -145,7 +157,7 @@ describe("DaemonManager launch", () => {
       join(stateDir, "daemon.pid"),
       join(stateDir, "daemon.sock"),
       undefined,
-      processSpawner
+      processSpawner,
     );
 
     await manager.start();
@@ -166,15 +178,21 @@ describe("DaemonManager launch", () => {
         capturedOptions = options;
         return {
           unref() {},
-          once() { return this; },
-          off() { return this; },
+          once() {
+            return this;
+          },
+          off() {
+            return this;
+          },
         } as ChildProcess;
-      }
+      },
     };
 
     let statusCallCount = 0;
     class TestDaemonManager extends DaemonManager {
-      override findAllDaemonProcesses(): number[] { return []; }
+      override findAllDaemonProcesses(): number[] {
+        return [];
+      }
       override async status(): Promise<any> {
         statusCallCount++;
         return statusCallCount === 1
@@ -194,13 +212,13 @@ describe("DaemonManager launch", () => {
       join(stateDir, "daemon.pid"),
       join(stateDir, "daemon.sock"),
       undefined,
-      processSpawner
+      processSpawner,
     );
 
     await manager.start();
 
     expect(existsSync(logDir)).toBe(true);
-    expect(readdirSync(logDir).some(name => name.startsWith("daemon-launch"))).toBe(true);
+    expect(readdirSync(logDir).some((name) => name.startsWith("daemon-launch"))).toBe(true);
     expect(existsSync(join(dataDir, "logs"))).toBe(false);
     expect(capturedOptions?.env?.AUTOMOBILE_LOG_DIR).toBe(logDir);
   });
@@ -219,15 +237,21 @@ describe("DaemonManager launch", () => {
         capturedOptions = options;
         return {
           unref() {},
-          once() { return this; },
-          off() { return this; },
+          once() {
+            return this;
+          },
+          off() {
+            return this;
+          },
         } as ChildProcess;
-      }
+      },
     };
 
     let statusCallCount = 0;
     class TestDaemonManager extends DaemonManager {
-      override findAllDaemonProcesses(): number[] { return []; }
+      override findAllDaemonProcesses(): number[] {
+        return [];
+      }
       override async status(): Promise<any> {
         statusCallCount++;
         return statusCallCount === 1
@@ -247,7 +271,7 @@ describe("DaemonManager launch", () => {
       join(stateDir, "daemon.pid"),
       join(stateDir, "daemon.sock"),
       undefined,
-      processSpawner
+      processSpawner,
     );
 
     await manager.start();
@@ -271,15 +295,21 @@ describe("DaemonManager launch", () => {
         capturedEnv = options.env;
         return {
           unref() {},
-          once() { return this; },
-          off() { return this; },
+          once() {
+            return this;
+          },
+          off() {
+            return this;
+          },
         } as ChildProcess;
-      }
+      },
     };
 
     let statusCallCount = 0;
     class TestDaemonManager extends DaemonManager {
-      override findAllDaemonProcesses(): number[] { return []; }
+      override findAllDaemonProcesses(): number[] {
+        return [];
+      }
       override async status(): Promise<any> {
         statusCallCount++;
         return statusCallCount === 1
@@ -299,7 +329,7 @@ describe("DaemonManager launch", () => {
       join(stateDir, "daemon.pid"),
       join(stateDir, "daemon.sock"),
       undefined,
-      processSpawner
+      processSpawner,
     );
 
     await manager.start();
@@ -319,15 +349,21 @@ describe("DaemonManager launch", () => {
         capturedEnv = options.env;
         return {
           unref() {},
-          once() { return this; },
-          off() { return this; },
+          once() {
+            return this;
+          },
+          off() {
+            return this;
+          },
         } as ChildProcess;
-      }
+      },
     };
 
     let statusCallCount = 0;
     class TestDaemonManager extends DaemonManager {
-      override findAllDaemonProcesses(): number[] { return []; }
+      override findAllDaemonProcesses(): number[] {
+        return [];
+      }
       override async status(): Promise<any> {
         statusCallCount++;
         return statusCallCount === 1
@@ -347,7 +383,7 @@ describe("DaemonManager launch", () => {
       join(stateDir, "daemon.pid"),
       join(stateDir, "daemon.sock"),
       undefined,
-      processSpawner
+      processSpawner,
     );
 
     const toolOutputsDir = "/tmp/auto mobile artifacts";
@@ -368,15 +404,21 @@ describe("DaemonManager launch", () => {
         capturedArgs = args;
         return {
           unref() {},
-          once() { return this; },
-          off() { return this; },
+          once() {
+            return this;
+          },
+          off() {
+            return this;
+          },
         } as ChildProcess;
-      }
+      },
     };
 
     let statusCallCount = 0;
     class TestDaemonManager extends DaemonManager {
-      override findAllDaemonProcesses(): number[] { return []; }
+      override findAllDaemonProcesses(): number[] {
+        return [];
+      }
       override async status(): Promise<any> {
         statusCallCount++;
         return statusCallCount === 1
@@ -396,7 +438,7 @@ describe("DaemonManager launch", () => {
       join(stateDir, "daemon.pid"),
       join(stateDir, "daemon.sock"),
       undefined,
-      processSpawner
+      processSpawner,
     );
 
     await manager.start({ eventAllMarkers: [], eventAllMarkersCliOverride: true });
@@ -415,15 +457,21 @@ describe("DaemonManager launch", () => {
         capturedArgs = args;
         return {
           unref() {},
-          once() { return this; },
-          off() { return this; },
+          once() {
+            return this;
+          },
+          off() {
+            return this;
+          },
         } as ChildProcess;
-      }
+      },
     };
 
     let statusCallCount = 0;
     class TestDaemonManager extends DaemonManager {
-      override findAllDaemonProcesses(): number[] { return []; }
+      override findAllDaemonProcesses(): number[] {
+        return [];
+      }
       override async status(): Promise<any> {
         statusCallCount++;
         return statusCallCount === 1
@@ -443,7 +491,7 @@ describe("DaemonManager launch", () => {
       join(stateDir, "daemon.pid"),
       join(stateDir, "daemon.sock"),
       undefined,
-      processSpawner
+      processSpawner,
     );
 
     await manager.start({ eventAllMarkers: [] });
@@ -469,15 +517,21 @@ describe("DaemonManager launch", () => {
         capturedEnv = options.env;
         return {
           unref() {},
-          once() { return this; },
-          off() { return this; },
+          once() {
+            return this;
+          },
+          off() {
+            return this;
+          },
         } as ChildProcess;
-      }
+      },
     };
 
     let statusCallCount = 0;
     class TestDaemonManager extends DaemonManager {
-      override findAllDaemonProcesses(): number[] { return []; }
+      override findAllDaemonProcesses(): number[] {
+        return [];
+      }
       override async status(): Promise<any> {
         statusCallCount++;
         return statusCallCount === 1
@@ -497,7 +551,7 @@ describe("DaemonManager launch", () => {
       join(".auto-mobile", "daemon.pid"),
       join(".auto-mobile", "daemon.sock"),
       undefined,
-      processSpawner
+      processSpawner,
     );
 
     await manager.start();

@@ -100,7 +100,7 @@ Platform-specific capture sources:
 - Archive directory: `~/.auto-mobile/video-archive`.
 - Store recording metadata in SQLite (`~/.auto-mobile/auto-mobile.db`).
 - Enforce `maxArchiveSizeMb` with LRU eviction (oldest first). Eviction only
-  removes *other completed* recordings and only fires on stop or config change.
+  removes _other completed_ recordings and only fires on stop or config change.
 - Provide stable filenames (`recordingId` + timestamp).
 
 ### Time-based retention (TTL)
@@ -112,11 +112,11 @@ daemon (it only fires on stop/config-change). A periodic **TTL sweep** (issue
 timer and deletes completed/interrupted recordings whose age (relative to
 `createdAt`) exceeds the retention window.
 
-| Setting | Env var (either prefix) | Default |
-| --- | --- | --- |
-| Retention window | `AUTOMOBILE_VIDEO_RETENTION_DAYS` / `AUTO_MOBILE_VIDEO_RETENTION_DAYS` | `7` days (`0` disables the sweep) |
-| Sweep interval | `AUTOMOBILE_VIDEO_RETENTION_SWEEP_MINUTES` / `AUTO_MOBILE_VIDEO_RETENTION_SWEEP_MINUTES` | `60` minutes |
-| In-progress size-check interval | `AUTOMOBILE_VIDEO_INPROGRESS_CHECK_SECONDS` / `AUTO_MOBILE_VIDEO_INPROGRESS_CHECK_SECONDS` | `15` seconds |
+| Setting                         | Env var (either prefix)                                                                    | Default                           |
+| ------------------------------- | ------------------------------------------------------------------------------------------ | --------------------------------- |
+| Retention window                | `AUTOMOBILE_VIDEO_RETENTION_DAYS` / `AUTO_MOBILE_VIDEO_RETENTION_DAYS`                     | `7` days (`0` disables the sweep) |
+| Sweep interval                  | `AUTOMOBILE_VIDEO_RETENTION_SWEEP_MINUTES` / `AUTO_MOBILE_VIDEO_RETENTION_SWEEP_MINUTES`   | `60` minutes                      |
+| In-progress size-check interval | `AUTOMOBILE_VIDEO_INPROGRESS_CHECK_SECONDS` / `AUTO_MOBILE_VIDEO_INPROGRESS_CHECK_SECONDS` | `15` seconds                      |
 
 Invalid or negative values fall back to the defaults (a warning is logged).
 
@@ -124,7 +124,7 @@ Invalid or negative values fall back to the defaults (a warning is logged).
 
 A single long capture (iOS `simctl recordVideo` runs up to
 `IOS_MAX_DURATION_SECONDS = 3600`) is not covered by archive eviction, which only
-considers *other completed* recordings — so one uncapped recording can fill the
+considers _other completed_ recordings — so one uncapped recording can fill the
 disk (a local DoS). Each live recording is monitored against the archive cap
 (`maxArchiveSizeMb`); when its on-disk file reaches the cap the recording is
 stopped (and finalized) rather than allowed to grow unbounded.

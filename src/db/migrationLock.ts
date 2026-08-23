@@ -101,7 +101,7 @@ export class FileMigrationLock implements MigrationLock {
 
   constructor(
     private readonly lockFilePath: string,
-    options: FileMigrationLockOptions = {}
+    options: FileMigrationLockOptions = {},
   ) {
     this.timer = options.timer ?? defaultTimer;
     // Clamp to >= 1ms: a 0ms poll would hammer the filesystem as fast as the
@@ -128,7 +128,7 @@ export class FileMigrationLock implements MigrationLock {
           `Timed out after ${this.timeoutMs}ms waiting for the database migration lock ` +
             `at ${this.lockFilePath}. Another process is likely migrating this database — ` +
             `you may be sharing one DB across worktrees/instances. Point each instance at a ` +
-            `distinct database via AUTOMOBILE_DB_PATH, or stop the other opener.`
+            `distinct database via AUTOMOBILE_DB_PATH, or stop the other opener.`,
         );
       }
 
@@ -247,9 +247,7 @@ export function isInMemoryDatabaseOptInEnabled(env: NodeJS.ProcessEnv = process.
  * {@link createFileMigrationLock} for the file branch (issue #3065 nit).
  */
 export function selectMigrationLock(dbPath: string): MigrationLock {
-  return isInMemoryDatabasePath(dbPath)
-    ? new NoOpMigrationLock()
-    : createFileMigrationLock(dbPath);
+  return isInMemoryDatabasePath(dbPath) ? new NoOpMigrationLock() : createFileMigrationLock(dbPath);
 }
 
 /**
@@ -268,8 +266,5 @@ export function createFileMigrationLock(dbPath: string): MigrationLock {
   const timeoutMs = Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 
   logger.debug(`Migration lock keyed to ${lockFilePath}`);
-  return new FileMigrationLock(
-    lockFilePath,
-    timeoutMs !== undefined ? { timeoutMs } : {}
-  );
+  return new FileMigrationLock(lockFilePath, timeoutMs !== undefined ? { timeoutMs } : {});
 }

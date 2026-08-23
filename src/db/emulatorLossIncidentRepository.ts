@@ -77,32 +77,34 @@ export class EmulatorLossIncidentRepository implements EmulatorLossIncidentStore
         attempts: [],
       },
     };
-    await this.getDb().transaction().execute(async (trx) => {
-      await trx
-        .insertInto("emulator_loss_incidents")
-        .values({
-          incident_id: incident.id,
-          device_id: incident.deviceId,
-          observed_at_ms: incident.observedAtMs,
-          updated_at_ms: incident.updatedAtMs,
-          revision: 0,
-          incident_json: JSON.stringify(incident),
-        })
-        .execute();
-      const rows = await trx
-        .selectFrom("emulator_loss_incidents")
-        .select("incident_id")
-        .orderBy("observed_at_ms", "desc")
-        .orderBy("id", "desc")
-        .execute();
-      const excessIds = rows.slice(this.maxRetained).map((row) => row.incident_id);
-      if (excessIds.length > 0) {
+    await this.getDb()
+      .transaction()
+      .execute(async (trx) => {
         await trx
-          .deleteFrom("emulator_loss_incidents")
-          .where("incident_id", "in", excessIds)
+          .insertInto("emulator_loss_incidents")
+          .values({
+            incident_id: incident.id,
+            device_id: incident.deviceId,
+            observed_at_ms: incident.observedAtMs,
+            updated_at_ms: incident.updatedAtMs,
+            revision: 0,
+            incident_json: JSON.stringify(incident),
+          })
           .execute();
-      }
-    });
+        const rows = await trx
+          .selectFrom("emulator_loss_incidents")
+          .select("incident_id")
+          .orderBy("observed_at_ms", "desc")
+          .orderBy("id", "desc")
+          .execute();
+        const excessIds = rows.slice(this.maxRetained).map((row) => row.incident_id);
+        if (excessIds.length > 0) {
+          await trx
+            .deleteFrom("emulator_loss_incidents")
+            .where("incident_id", "in", excessIds)
+            .execute();
+        }
+      });
     return incident;
   }
 
@@ -191,6 +193,8 @@ export class EmulatorLossIncidentRepository implements EmulatorLossIncidentStore
         return;
       }
     }
-    throw new Error(`Could not update emulator-loss incident ${incidentId} after concurrent updates`);
+    throw new Error(
+      `Could not update emulator-loss incident ${incidentId} after concurrent updates`,
+    );
   }
 }

@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { DeviceSnapshotRepository } from "../../src/db/deviceSnapshotRepository";
-import type { DeviceSnapshotQuery, DeviceSnapshotRecord } from "../../src/db/deviceSnapshotRepository";
+import type {
+  DeviceSnapshotQuery,
+  DeviceSnapshotRecord,
+} from "../../src/db/deviceSnapshotRepository";
 import type { DeviceSnapshotManifest } from "../../src/models";
 import { createTestDatabase } from "../db/testDbHelper";
 import { FakeDeviceSnapshotRepository } from "./FakeDeviceSnapshotRepository";
@@ -44,7 +47,7 @@ describe("FakeDeviceSnapshotRepository", () => {
     await repo.insertSnapshot(
       makeRecord({
         manifest: makeManifest({ osVersion: "14" }),
-      })
+      }),
     );
     await repo.insertSnapshot(
       makeRecord({
@@ -57,7 +60,7 @@ describe("FakeDeviceSnapshotRepository", () => {
           deviceName: "Pixel_8",
           osVersion: "17",
         }),
-      })
+      }),
     );
 
     const result = await repo.getSnapshot("snap-1");
@@ -112,7 +115,7 @@ describe("FakeDeviceSnapshotRepository", () => {
       await repo.insertSnapshot(row);
     }
 
-    const names = (await repo.listSnapshots(dualOrderQuery)).map(record => record.snapshotName);
+    const names = (await repo.listSnapshots(dualOrderQuery)).map((record) => record.snapshotName);
     // last_accessed asc is primary: "b" (accessed Jan) before "a" (accessed Mar).
     // If created_at were primary (the inverted-precedence bug) it would be a,b.
     expect(names).toEqual(["b", "a"]);
@@ -128,8 +131,8 @@ describe("FakeDeviceSnapshotRepository", () => {
         await real.insertSnapshot(row);
       }
 
-      const fakeNames = (await fake.listSnapshots(dualOrderQuery)).map(r => r.snapshotName);
-      const realNames = (await real.listSnapshots(dualOrderQuery)).map(r => r.snapshotName);
+      const fakeNames = (await fake.listSnapshots(dualOrderQuery)).map((r) => r.snapshotName);
+      const realNames = (await real.listSnapshots(dualOrderQuery)).map((r) => r.snapshotName);
 
       expect(fakeNames).toEqual(realNames);
     } finally {
@@ -158,8 +161,8 @@ describe("FakeDeviceSnapshotRepository", () => {
         await real.insertSnapshot(row);
       }
 
-      const fakeNames = (await fake.listSnapshots(lastAccessedAscQuery)).map(r => r.snapshotName);
-      const realNames = (await real.listSnapshots(lastAccessedAscQuery)).map(r => r.snapshotName);
+      const fakeNames = (await fake.listSnapshots(lastAccessedAscQuery)).map((r) => r.snapshotName);
+      const realNames = (await real.listSnapshots(lastAccessedAscQuery)).map((r) => r.snapshotName);
 
       // Real SQLite orders the stored TEXT lexically: "12:00:00Z" < "13:00:00+02:00".
       expect(realNames).toEqual(["lex-first", "lex-last"]);

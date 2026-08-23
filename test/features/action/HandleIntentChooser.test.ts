@@ -2,7 +2,11 @@ import { expect, describe, test, beforeEach } from "bun:test";
 import { HandleIntentChooser } from "../../../src/features/action/HandleIntentChooser";
 import { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 
-const testDevice: BootedDevice = { name: "test-device", platform: "android", deviceId: "emulator-5554" };
+const testDevice: BootedDevice = {
+  name: "test-device",
+  platform: "android",
+  deviceId: "emulator-5554",
+};
 import { FakeDeepLinkManager } from "../../fakes/FakeDeepLinkManager";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeWindow } from "../../fakes/FakeWindow";
@@ -23,30 +27,30 @@ describe("HandleIntentChooser", () => {
       hierarchy: {
         node: {
           $: {
-            class: "com.android.internal.app.ChooserActivity"
+            class: "com.android.internal.app.ChooserActivity",
           },
           node: [
             {
               $: {
-                text: "Choose an app"
-              }
+                text: "Choose an app",
+              },
             },
             {
               $: {
                 text: "Always",
-                class: "android.widget.Button"
-              }
+                class: "android.widget.Button",
+              },
             },
             {
               $: {
                 text: "Just once",
-                class: "android.widget.Button"
-              }
-            }
-          ]
-        }
-      }
-    } as ViewHierarchyResult
+                class: "android.widget.Button",
+              },
+            },
+          ],
+        },
+      },
+    } as ViewHierarchyResult,
   };
 
   beforeEach(() => {
@@ -58,7 +62,11 @@ describe("HandleIntentChooser", () => {
 
     // Set up default fake responses
     fakeWindow.configureCachedActiveWindow(null);
-    fakeWindow.configureActiveWindow({ appId: "com.test.app", activityName: "MainActivity", layoutSeqSum: 123 });
+    fakeWindow.configureActiveWindow({
+      appId: "com.test.app",
+      activityName: "MainActivity",
+      layoutSeqSum: 123,
+    });
     fakeObserveScreen.setObserveResult(mockObserveResult);
 
     // Set default intent chooser to detected
@@ -89,7 +97,7 @@ describe("HandleIntentChooser", () => {
       fakeDeepLinkManager.setIntentChooserResponse("always:none", {
         success: true,
         detected: true,
-        action: "always"
+        action: "always",
       });
 
       const result = await handleIntentChooser.execute("always");
@@ -105,23 +113,23 @@ describe("HandleIntentChooser", () => {
         hierarchy: {
           node: {
             $: {
-              class: "com.android.internal.app.ResolverActivity"
+              class: "com.android.internal.app.ResolverActivity",
             },
             node: [
               {
                 $: {
                   text: "Just once",
-                  class: "android.widget.Button"
-                }
-              }
-            ]
-          }
-        }
+                  class: "android.widget.Button",
+                },
+              },
+            ],
+          },
+        },
       } as ViewHierarchyResult;
 
       fakeObserveScreen.setObserveResult({
         ...mockObserveResult,
-        viewHierarchy: resolverHierarchy
+        viewHierarchy: resolverHierarchy,
       });
       fakeDeepLinkManager.setDefaultIntentChooserDetected(true);
 
@@ -138,29 +146,29 @@ describe("HandleIntentChooser", () => {
         hierarchy: {
           node: {
             $: {
-              class: "com.android.internal.app.ChooserActivity"
+              class: "com.android.internal.app.ChooserActivity",
             },
             node: [
               {
                 $: {
-                  "resource-id": "com.example.customapp:id/app_icon"
-                }
-              }
-            ]
-          }
-        }
+                  "resource-id": "com.example.customapp:id/app_icon",
+                },
+              },
+            ],
+          },
+        },
       } as ViewHierarchyResult;
 
       fakeObserveScreen.setObserveResult({
         ...mockObserveResult,
-        viewHierarchy: customHierarchy
+        viewHierarchy: customHierarchy,
       });
       fakeDeepLinkManager.setDefaultIntentChooserDetected(true);
       fakeDeepLinkManager.setIntentChooserResponse("custom:com.example.customapp", {
         success: true,
         detected: true,
         action: "custom",
-        appSelected: "com.example.customapp"
+        appSelected: "com.example.customapp",
       });
 
       const result = await handleIntentChooser.execute("custom", "com.example.customapp");
@@ -199,22 +207,22 @@ describe("HandleIntentChooser", () => {
         hierarchy: {
           node: {
             $: {
-              class: "android.widget.LinearLayout"
+              class: "android.widget.LinearLayout",
             },
             node: [
               {
                 $: {
-                  text: "Normal app content"
-                }
-              }
-            ]
-          }
-        }
+                  text: "Normal app content",
+                },
+              },
+            ],
+          },
+        },
       } as ViewHierarchyResult;
 
       fakeObserveScreen.setObserveResult({
         ...mockObserveResult,
-        viewHierarchy: normalHierarchy
+        viewHierarchy: normalHierarchy,
       });
       // Set detected to false
       fakeDeepLinkManager.setDefaultIntentChooserDetected(false);
@@ -227,8 +235,14 @@ describe("HandleIntentChooser", () => {
     });
 
     test("should handle observe screen failure", async () => {
-      fakeObserveScreen.setFailureMode("getMostRecentCachedObserveResult", new Error("Cannot perform action without view hierarchy"));
-      fakeObserveScreen.setFailureMode("execute", new Error("Cannot perform action without view hierarchy"));
+      fakeObserveScreen.setFailureMode(
+        "getMostRecentCachedObserveResult",
+        new Error("Cannot perform action without view hierarchy"),
+      );
+      fakeObserveScreen.setFailureMode(
+        "execute",
+        new Error("Cannot perform action without view hierarchy"),
+      );
 
       try {
         await handleIntentChooser.execute("always");
@@ -243,7 +257,7 @@ describe("HandleIntentChooser", () => {
       fakeDeepLinkManager.setIntentChooserResponse("always:none", {
         success: false,
         detected: true,
-        error: "Handling failed"
+        error: "Handling failed",
       });
 
       const result = await handleIntentChooser.execute("always");
@@ -258,7 +272,7 @@ describe("HandleIntentChooser", () => {
       fakeDeepLinkManager.setIntentChooserResponse("always:none", {
         success: false,
         detected: true,
-        error: "Could not find target element"
+        error: "Could not find target element",
       });
 
       const result = await handleIntentChooser.execute("always");
@@ -273,7 +287,7 @@ describe("HandleIntentChooser", () => {
       fakeDeepLinkManager.setIntentChooserResponse("always:none", {
         success: false,
         detected: true,
-        error: "Target element not found"
+        error: "Target element not found",
       });
 
       const result = await handleIntentChooser.execute("always");

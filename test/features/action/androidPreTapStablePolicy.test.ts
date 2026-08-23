@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   ANDROID_PRE_TAP_STABLE_MATCHES_STRICT,
-  androidPreTapConsecutiveStableMatchesRequired
+  androidPreTapConsecutiveStableMatchesRequired,
 } from "../../../src/features/action/androidPreTapStablePolicy";
 
 describe("androidPreTapConsecutiveStableMatchesRequired", () => {
@@ -9,8 +9,8 @@ describe("androidPreTapConsecutiveStableMatchesRequired", () => {
     expect(
       androidPreTapConsecutiveStableMatchesRequired({
         elementId: "com.app:id/avatarButton",
-        action: "tap"
-      })
+        action: "tap",
+      }),
     ).toBe(1);
   });
 
@@ -18,8 +18,8 @@ describe("androidPreTapConsecutiveStableMatchesRequired", () => {
     expect(
       androidPreTapConsecutiveStableMatchesRequired({
         text: "Jane Smith",
-        action: "tap"
-      })
+        action: "tap",
+      }),
     ).toBe(1);
   });
 
@@ -28,8 +28,8 @@ describe("androidPreTapConsecutiveStableMatchesRequired", () => {
       androidPreTapConsecutiveStableMatchesRequired({
         text: "Accept Terms",
         sibling: true,
-        action: "tap"
-      })
+        action: "tap",
+      }),
     ).toBe(ANDROID_PRE_TAP_STABLE_MATCHES_STRICT);
   });
 
@@ -38,8 +38,8 @@ describe("androidPreTapConsecutiveStableMatchesRequired", () => {
       androidPreTapConsecutiveStableMatchesRequired({
         elementId: "com.app:id/label",
         sibling: true,
-        action: "tap"
-      })
+        action: "tap",
+      }),
     ).toBe(ANDROID_PRE_TAP_STABLE_MATCHES_STRICT);
   });
 
@@ -48,8 +48,8 @@ describe("androidPreTapConsecutiveStableMatchesRequired", () => {
       androidPreTapConsecutiveStableMatchesRequired({
         text: "Login",
         sibling: false,
-        action: "tap"
-      })
+        action: "tap",
+      }),
     ).toBe(1);
   });
 
@@ -72,8 +72,8 @@ describe("androidPreTapConsecutiveStableMatchesRequired", () => {
       androidPreTapConsecutiveStableMatchesRequired({
         text: "Accept Terms",
         sibling: sibling as boolean,
-        action: "tap"
-      })
+        action: "tap",
+      }),
     ).toBe(expected);
   });
 });

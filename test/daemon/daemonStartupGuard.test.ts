@@ -30,9 +30,13 @@ describe("guardDatabaseStartup", () => {
     const initializer = new FakeDatabaseInitializer();
     const tracker = new FakeStartupFailureTracker();
 
-    await guardDatabaseStartup(async () => {
-      await initializer.initialize();
-    }, tracker, timer);
+    await guardDatabaseStartup(
+      async () => {
+        await initializer.initialize();
+      },
+      tracker,
+      timer,
+    );
 
     expect(initializer.initializeCalls).toBe(1);
     // Reset must NOT happen here — only after the ENTIRE daemon startup DB path
@@ -49,11 +53,15 @@ describe("guardDatabaseStartup", () => {
     tracker.setCounts([1]);
 
     await expect(
-      guardDatabaseStartup(async () => {
-        // Simulates a migrated-but-malformed feature_flags table query failing
-        // during FeatureFlagService.initialize(), not just a migration failure.
-        throw new Error("database disk image is malformed");
-      }, tracker, timer)
+      guardDatabaseStartup(
+        async () => {
+          // Simulates a migrated-but-malformed feature_flags table query failing
+          // during FeatureFlagService.initialize(), not just a migration failure.
+          throw new Error("database disk image is malformed");
+        },
+        tracker,
+        timer,
+      ),
     ).rejects.toBeInstanceOf(ActionableError);
     expect(tracker.recorded[0]!.kind).toBe("permanent");
     expect(tracker.resetCalls).toBe(0);
@@ -66,7 +74,7 @@ describe("guardDatabaseStartup", () => {
 
     // First permanent failure: no park (allow a quick restart in case of a fluke).
     await expect(
-      handleFatalDatabaseStartupFailure(new Error("file is not a database"), tracker, timer)
+      handleFatalDatabaseStartupFailure(new Error("file is not a database"), tracker, timer),
     ).rejects.toBeInstanceOf(ActionableError);
     expect(timer.getSleepHistory()).toEqual([]);
 
@@ -76,11 +84,11 @@ describe("guardDatabaseStartup", () => {
     // a "strictly increasing" check would miss.
     tracker.setCounts([2, 3]);
     await expect(
-      handleFatalDatabaseStartupFailure(new Error("file is not a database"), tracker, timer)
+      handleFatalDatabaseStartupFailure(new Error("file is not a database"), tracker, timer),
     ).rejects.toBeInstanceOf(ActionableError);
     const afterSecond = [...timer.getSleepHistory()];
     await expect(
-      handleFatalDatabaseStartupFailure(new Error("file is not a database"), tracker, timer)
+      handleFatalDatabaseStartupFailure(new Error("file is not a database"), tracker, timer),
     ).rejects.toBeInstanceOf(ActionableError);
     const afterThird = [...timer.getSleepHistory()];
 
@@ -98,7 +106,7 @@ describe("guardDatabaseStartup", () => {
     tracker.setCounts([50]); // far past the cap tier
 
     await expect(
-      handleFatalDatabaseStartupFailure(new Error("file is not a database"), tracker, timer)
+      handleFatalDatabaseStartupFailure(new Error("file is not a database"), tracker, timer),
     ).rejects.toBeInstanceOf(ActionableError);
 
     const [delay] = timer.getSleepHistory();
@@ -120,7 +128,7 @@ describe("guardDatabaseStartup", () => {
     });
 
     await expect(
-      handleFatalDatabaseStartupFailure(new Error("file is not a database"), tracker, timer)
+      handleFatalDatabaseStartupFailure(new Error("file is not a database"), tracker, timer),
     ).rejects.toBeInstanceOf(ActionableError);
 
     expect(timer.getSleepHistory()).toEqual([1000]);
@@ -133,7 +141,11 @@ describe("guardDatabaseStartup", () => {
     tracker.setCounts([9]);
 
     await expect(
-      handleFatalDatabaseStartupFailure(new Error("SQLITE_BUSY: database is locked"), tracker, timer)
+      handleFatalDatabaseStartupFailure(
+        new Error("SQLITE_BUSY: database is locked"),
+        tracker,
+        timer,
+      ),
     ).rejects.toBeInstanceOf(ActionableError);
 
     expect(timer.getSleepHistory()).toEqual([]);
@@ -155,7 +167,7 @@ describe("guardDatabaseStartup", () => {
       await handleFatalDatabaseStartupFailure(
         createIncompleteExtractionError("kysely"),
         tracker,
-        timer
+        timer,
       );
     } catch (error) {
       thrown = error;
@@ -170,7 +182,7 @@ describe("guardDatabaseStartup", () => {
 describe("resolveDaemonStartupExitCode", () => {
   test("returns EX_TEMPFAIL (75) for an incomplete-extraction failure", () => {
     expect(resolveDaemonStartupExitCode(createIncompleteExtractionError("kysely"))).toBe(
-      INCOMPLETE_EXTRACTION_EXIT_CODE
+      INCOMPLETE_EXTRACTION_EXIT_CODE,
     );
   });
 

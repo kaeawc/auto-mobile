@@ -737,9 +737,7 @@
     "intentChooserDetected": false,
     "notificationPermissionDetected": false,
     "ctrlProxyIncomplete": null,
-    "sources": [
-      "control-proxy"
-    ],
+    "sources": ["control-proxy"],
     "screenWidth": 1080,
     "screenHeight": 2400,
     "rotation": 0,

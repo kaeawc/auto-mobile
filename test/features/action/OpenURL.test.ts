@@ -23,23 +23,39 @@ const openIos = (
   device: BootedDevice,
   simctl: FakeSimCtlClient,
   devicectl: FakeDeviceUrlLauncher,
-  url: string
+  url: string,
 ) => {
-  const openURL = new OpenURL(device, new FakeAdbExecutor() as unknown as any, simctl as any, devicectl as any);
-  return (openURL as any).executeiOSOpenURL(url) as Promise<{ success: boolean; url: string; error?: string }>;
+  const openURL = new OpenURL(
+    device,
+    new FakeAdbExecutor() as unknown as any,
+    simctl as any,
+    devicectl as any,
+  );
+  return (openURL as any).executeiOSOpenURL(url) as Promise<{
+    success: boolean;
+    url: string;
+    error?: string;
+  }>;
 };
 
 describe("OpenURL iOS routing", () => {
   const restores: Array<() => void> = [];
   afterEach(() => {
-    while (restores.length) { restores.pop()!(); }
+    while (restores.length) {
+      restores.pop()!();
+    }
   });
 
   test("(a) simulator UDID routes to `simctl openurl` and never touches devicectl", async () => {
     const simctl = new FakeSimCtlClient();
     const devicectl = new FakeDeviceUrlLauncher();
 
-    const result = await openIos(iosDevice(SIMULATOR_UDID), simctl, devicectl, "https://example.com/x");
+    const result = await openIos(
+      iosDevice(SIMULATOR_UDID),
+      simctl,
+      devicectl,
+      "https://example.com/x",
+    );
 
     expect(result).toEqual({ success: true, url: "https://example.com/x" });
     const calls = simctl.getMethodCalls("executeCommandArgs");
@@ -52,11 +68,20 @@ describe("OpenURL iOS routing", () => {
     const simctl = new FakeSimCtlClient();
     const devicectl = new FakeDeviceUrlLauncher();
 
-    const result = await openIos(iosDevice(PHYSICAL_UDID), simctl, devicectl, "https://example.com/order/123");
+    const result = await openIos(
+      iosDevice(PHYSICAL_UDID),
+      simctl,
+      devicectl,
+      "https://example.com/order/123",
+    );
 
     expect(result).toEqual({ success: true, url: "https://example.com/order/123" });
     expect(devicectl.launchCalls).toEqual([
-      { deviceUdid: PHYSICAL_UDID, bundleId: "com.apple.mobilesafari", url: "https://example.com/order/123" },
+      {
+        deviceUdid: PHYSICAL_UDID,
+        bundleId: "com.apple.mobilesafari",
+        url: "https://example.com/order/123",
+      },
     ]);
     expect(simctl.getMethodCalls("executeCommandArgs")).toHaveLength(0);
   });
@@ -64,7 +89,9 @@ describe("OpenURL iOS routing", () => {
   test("(c) physical UDID + custom scheme launches the resolved target bundle id", async () => {
     // The physical custom-scheme branch reads the target with the
     // non-constructing static, so it never spins up a CtrlProxy manager.
-    const targetSpy = spyOn(IOSCtrlProxyManager, "getExistingTargetBundleId").mockReturnValue("com.example.MyApp");
+    const targetSpy = spyOn(IOSCtrlProxyManager, "getExistingTargetBundleId").mockReturnValue(
+      "com.example.MyApp",
+    );
     restores.push(() => targetSpy.mockRestore());
 
     const simctl = new FakeSimCtlClient();
@@ -79,7 +106,9 @@ describe("OpenURL iOS routing", () => {
   });
 
   test("(c2) physical UDID + custom scheme with no target bundle falls back to Safari", async () => {
-    const targetSpy = spyOn(IOSCtrlProxyManager, "getExistingTargetBundleId").mockReturnValue(undefined);
+    const targetSpy = spyOn(IOSCtrlProxyManager, "getExistingTargetBundleId").mockReturnValue(
+      undefined,
+    );
     restores.push(() => targetSpy.mockRestore());
 
     const simctl = new FakeSimCtlClient();
@@ -94,7 +123,9 @@ describe("OpenURL iOS routing", () => {
     // Regression guard: a prior launchApp sets a cached target bundle. System
     // schemes (mailto:/tel:/sms:) must STILL go to Safari/system resolution —
     // never the app-under-test, which can't open a mailto: payload.
-    const targetSpy = spyOn(IOSCtrlProxyManager, "getExistingTargetBundleId").mockReturnValue("com.example.MyApp");
+    const targetSpy = spyOn(IOSCtrlProxyManager, "getExistingTargetBundleId").mockReturnValue(
+      "com.example.MyApp",
+    );
     restores.push(() => targetSpy.mockRestore());
 
     const simctl = new FakeSimCtlClient();
@@ -109,7 +140,9 @@ describe("OpenURL iOS routing", () => {
   });
 
   test("(c4) physical UDID + tel: routes to Safari/system resolver, not the target app", async () => {
-    const targetSpy = spyOn(IOSCtrlProxyManager, "getExistingTargetBundleId").mockReturnValue("com.example.MyApp");
+    const targetSpy = spyOn(IOSCtrlProxyManager, "getExistingTargetBundleId").mockReturnValue(
+      "com.example.MyApp",
+    );
     restores.push(() => targetSpy.mockRestore());
 
     const simctl = new FakeSimCtlClient();
@@ -125,7 +158,12 @@ describe("OpenURL iOS routing", () => {
     const devicectl = new FakeDeviceUrlLauncher();
     devicectl.setAvailable(false);
 
-    const result = await openIos(iosDevice(PHYSICAL_UDID), simctl, devicectl, "https://example.com");
+    const result = await openIos(
+      iosDevice(PHYSICAL_UDID),
+      simctl,
+      devicectl,
+      "https://example.com",
+    );
 
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/Xcode 15\+ and iOS 17\+/);
@@ -138,7 +176,12 @@ describe("OpenURL iOS routing", () => {
     const devicectl = new FakeDeviceUrlLauncher();
     devicectl.setLaunchError(new Error("device locked"));
 
-    const result = await openIos(iosDevice(PHYSICAL_UDID), simctl, devicectl, "https://example.com");
+    const result = await openIos(
+      iosDevice(PHYSICAL_UDID),
+      simctl,
+      devicectl,
+      "https://example.com",
+    );
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("device locked");
@@ -146,10 +189,18 @@ describe("OpenURL iOS routing", () => {
 
   test("(a-neg) simulator simctl failure returns { success:false, error }", async () => {
     const simctl = new FakeSimCtlClient();
-    simctl.setCommandError(`openurl ${SIMULATOR_UDID} https://example.com`, new Error("Invalid device"));
+    simctl.setCommandError(
+      `openurl ${SIMULATOR_UDID} https://example.com`,
+      new Error("Invalid device"),
+    );
     const devicectl = new FakeDeviceUrlLauncher();
 
-    const result = await openIos(iosDevice(SIMULATOR_UDID), simctl, devicectl, "https://example.com");
+    const result = await openIos(
+      iosDevice(SIMULATOR_UDID),
+      simctl,
+      devicectl,
+      "https://example.com",
+    );
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("Invalid device");
@@ -159,11 +210,15 @@ describe("OpenURL iOS routing", () => {
 describe("OpenURL package: delegation is unchanged", () => {
   const restores: Array<() => void> = [];
   afterEach(() => {
-    while (restores.length) { restores.pop()!(); }
+    while (restores.length) {
+      restores.pop()!();
+    }
   });
 
   test("(f) package: URL delegates to LaunchApp on iOS without touching simctl/devicectl", async () => {
-    const launchSpy = spyOn(LaunchApp.prototype, "execute").mockResolvedValue({ success: true } as any);
+    const launchSpy = spyOn(LaunchApp.prototype, "execute").mockResolvedValue({
+      success: true,
+    } as any);
     restores.push(() => launchSpy.mockRestore());
 
     const simctl = new FakeSimCtlClient();
@@ -172,7 +227,7 @@ describe("OpenURL package: delegation is unchanged", () => {
       iosDevice(PHYSICAL_UDID),
       new FakeAdbExecutor() as unknown as any,
       simctl as any,
-      devicectl as any
+      devicectl as any,
     );
 
     const result = await openURL.execute("package:com.example.MyApp");
@@ -190,10 +245,13 @@ describe("OpenURL Android parity (regression guard)", () => {
     const fakeAdb = new FakeAdbExecutor();
     const openURL = new OpenURL(
       { name: "pixel", platform: "android", deviceId: "emulator-5554" },
-      fakeAdb as unknown as any
+      fakeAdb as unknown as any,
     );
 
-    const result = await (openURL as any).executeAndroidOpenURL("https://example.com/x") as { success: boolean; url: string };
+    const result = (await (openURL as any).executeAndroidOpenURL("https://example.com/x")) as {
+      success: boolean;
+      url: string;
+    };
 
     expect(result).toEqual({ success: true, url: "https://example.com/x" });
     expect(fakeAdb.getExecutedArgv()).toEqual([
@@ -206,7 +264,7 @@ describe("OpenURL input validation", () => {
   const openAndroid = (url: string) =>
     new OpenURL(
       { name: "pixel", platform: "android", deviceId: "emulator-5554" },
-      new FakeAdbExecutor() as unknown as any
+      new FakeAdbExecutor() as unknown as any,
     ).execute(url);
 
   test("empty URL returns an explicit error without dispatching", async () => {
@@ -235,14 +293,17 @@ describe("OpenURL input validation", () => {
 describe("OpenURL trims the dispatched URL (issue #4166)", () => {
   const restores: Array<() => void> = [];
   afterEach(() => {
-    while (restores.length) { restores.pop()!(); }
+    while (restores.length) {
+      restores.pop()!();
+    }
   });
 
   // Run execute() without the observe/visual-change machinery: the block is the
   // platform dispatch we want to observe, and it is the only part under test.
   const stubObservedInteraction = () => {
-    const spy = spyOn(BaseVisualChange.prototype, "observedInteraction")
-      .mockImplementation(async (block: any) => block({} as any));
+    const spy = spyOn(BaseVisualChange.prototype, "observedInteraction").mockImplementation(
+      async (block: any) => block({} as any),
+    );
     restores.push(() => spy.mockRestore());
   };
 
@@ -258,76 +319,69 @@ describe("OpenURL trims the dispatched URL (issue #4166)", () => {
     ["inner whitespace is preserved", " https://example.com/a b ", "https://example.com/a b"],
   ];
 
-  test.each(whitespaceCases)(
-    "android dispatch: %s",
-    async (_label, input, expectedUrl) => {
-      stubObservedInteraction();
-      const fakeAdb = new FakeAdbExecutor();
-      const openURL = new OpenURL(
-        { name: "pixel", platform: "android", deviceId: "emulator-5554" },
-        fakeAdb as unknown as any
-      );
+  test.each(whitespaceCases)("android dispatch: %s", async (_label, input, expectedUrl) => {
+    stubObservedInteraction();
+    const fakeAdb = new FakeAdbExecutor();
+    const openURL = new OpenURL(
+      { name: "pixel", platform: "android", deviceId: "emulator-5554" },
+      fakeAdb as unknown as any,
+    );
 
-      const result = await openURL.execute(input);
+    const result = await openURL.execute(input);
 
-      expect(fakeAdb.getExecutedArgv()).toEqual([
-        ["shell", `am start -a android.intent.action.VIEW -d '${expectedUrl}'`],
-      ]);
-      expect(result).toEqual({ success: true, url: expectedUrl });
-    }
-  );
+    expect(fakeAdb.getExecutedArgv()).toEqual([
+      ["shell", `am start -a android.intent.action.VIEW -d '${expectedUrl}'`],
+    ]);
+    expect(result).toEqual({ success: true, url: expectedUrl });
+  });
 
-  test.each(whitespaceCases)(
-    "ios simulator dispatch: %s",
-    async (_label, input, expectedUrl) => {
-      stubObservedInteraction();
-      const simctl = new FakeSimCtlClient();
-      const devicectl = new FakeDeviceUrlLauncher();
-      const openURL = new OpenURL(
-        iosDevice(SIMULATOR_UDID),
-        new FakeAdbExecutor() as unknown as any,
-        simctl as any,
-        devicectl as any
-      );
+  test.each(whitespaceCases)("ios simulator dispatch: %s", async (_label, input, expectedUrl) => {
+    stubObservedInteraction();
+    const simctl = new FakeSimCtlClient();
+    const devicectl = new FakeDeviceUrlLauncher();
+    const openURL = new OpenURL(
+      iosDevice(SIMULATOR_UDID),
+      new FakeAdbExecutor() as unknown as any,
+      simctl as any,
+      devicectl as any,
+    );
 
-      const result = await openURL.execute(input);
+    const result = await openURL.execute(input);
 
-      const calls = simctl.getMethodCalls("executeCommandArgs");
-      expect(calls).toHaveLength(1);
-      expect(calls[0].args).toEqual(["openurl", SIMULATOR_UDID, expectedUrl]);
-      expect(result).toEqual({ success: true, url: expectedUrl });
-    }
-  );
+    const calls = simctl.getMethodCalls("executeCommandArgs");
+    expect(calls).toHaveLength(1);
+    expect(calls[0].args).toEqual(["openurl", SIMULATOR_UDID, expectedUrl]);
+    expect(result).toEqual({ success: true, url: expectedUrl });
+  });
 
-  test.each(whitespaceCases)(
-    "ios physical dispatch: %s",
-    async (_label, input, expectedUrl) => {
-      stubObservedInteraction();
-      const simctl = new FakeSimCtlClient();
-      const devicectl = new FakeDeviceUrlLauncher();
-      const openURL = new OpenURL(
-        iosDevice(PHYSICAL_UDID),
-        new FakeAdbExecutor() as unknown as any,
-        simctl as any,
-        devicectl as any
-      );
+  test.each(whitespaceCases)("ios physical dispatch: %s", async (_label, input, expectedUrl) => {
+    stubObservedInteraction();
+    const simctl = new FakeSimCtlClient();
+    const devicectl = new FakeDeviceUrlLauncher();
+    const openURL = new OpenURL(
+      iosDevice(PHYSICAL_UDID),
+      new FakeAdbExecutor() as unknown as any,
+      simctl as any,
+      devicectl as any,
+    );
 
-      const result = await openURL.execute(input);
+    const result = await openURL.execute(input);
 
-      expect(devicectl.launchCalls).toEqual([
-        { deviceUdid: PHYSICAL_UDID, bundleId: "com.apple.mobilesafari", url: expectedUrl },
-      ]);
-      expect(result).toEqual({ success: true, url: expectedUrl });
-    }
-  );
+    expect(devicectl.launchCalls).toEqual([
+      { deviceUdid: PHYSICAL_UDID, bundleId: "com.apple.mobilesafari", url: expectedUrl },
+    ]);
+    expect(result).toEqual({ success: true, url: expectedUrl });
+  });
 
   test("package: URL with surrounding whitespace still delegates to LaunchApp", async () => {
-    const launchSpy = spyOn(LaunchApp.prototype, "execute").mockResolvedValue({ success: true } as any);
+    const launchSpy = spyOn(LaunchApp.prototype, "execute").mockResolvedValue({
+      success: true,
+    } as any);
     restores.push(() => launchSpy.mockRestore());
 
     const openURL = new OpenURL(
       { name: "pixel", platform: "android", deviceId: "emulator-5554" },
-      new FakeAdbExecutor() as unknown as any
+      new FakeAdbExecutor() as unknown as any,
     );
 
     const result = await openURL.execute("  package:com.example.MyApp  ");

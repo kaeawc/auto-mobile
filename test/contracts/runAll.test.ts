@@ -40,18 +40,18 @@ runTimerContract("FakeTimer auto-advance", () => {
 runTimerContract("FakeTimer manual advance", () => new FakeTimer(), {
   advance: async (timer, ms) => {
     (timer as FakeTimer).advanceTime(ms);
-  }
+  },
 });
 
 const realFileSystemRoot = await fs.mkdtemp(path.join(os.tmpdir(), "automobile-fs-contract-"));
-afterAll(async function() {
+afterAll(async function () {
   await fs.rm(realFileSystemRoot, { recursive: true, force: true });
 });
 runFileSystemContract("DefaultFileSystem", () => new DefaultFileSystem(), {
-  root: realFileSystemRoot
+  root: realFileSystemRoot,
 });
 runFileSystemContract("FakeFileSystem", () => new FakeFileSystem(), {
-  root: "/fake-root"
+  root: "/fake-root",
 });
 
 runChecksumCalculatorContract("DefaultChecksumCalculator", {
@@ -59,7 +59,7 @@ runChecksumCalculatorContract("DefaultChecksumCalculator", {
   makeFailure: () => new DefaultChecksumCalculator(),
 });
 runChecksumCalculatorContract("FakeChecksumCalculator", {
-  make: expectedChecksum => {
+  make: (expectedChecksum) => {
     const calculator = new FakeChecksumCalculator();
     calculator.checksum = expectedChecksum;
     return calculator;
@@ -72,7 +72,7 @@ runChecksumCalculatorContract("FakeChecksumCalculator", {
 });
 
 runFileDownloaderContract("DefaultFileDownloader", () => new DefaultFileDownloader());
-runFileDownloaderContract("FakeFileDownloader", payload => {
+runFileDownloaderContract("FakeFileDownloader", (payload) => {
   const downloader = new FakeFileDownloader();
   downloader.payload = payload;
   return downloader;
@@ -84,7 +84,7 @@ runHostCommandExecutorContract("DefaultHostCommandExecutor", {
   make: () => new DefaultHostCommandExecutor(),
   file: process.execPath,
   args: ["-e", "process.stdout.write('contract-output')"],
-  timeoutMs: REAL_SUBPROCESS_CONTRACT_TIMEOUT_MS
+  timeoutMs: REAL_SUBPROCESS_CONTRACT_TIMEOUT_MS,
 });
 runHostCommandExecutorContract("FakeHostCommandExecutor", {
   make: () => {
@@ -92,12 +92,18 @@ runHostCommandExecutorContract("FakeHostCommandExecutor", {
     executor.setDefaultResponse({
       stdout: "contract-output",
       stderr: "",
-      toString() { return this.stdout; },
-      trim() { return this.stdout.trim(); },
-      includes(searchString: string) { return this.stdout.includes(searchString); }
+      toString() {
+        return this.stdout;
+      },
+      trim() {
+        return this.stdout.trim();
+      },
+      includes(searchString: string) {
+        return this.stdout.includes(searchString);
+      },
     });
     return executor;
   },
   file: "contract-command",
-  args: []
+  args: [],
 });

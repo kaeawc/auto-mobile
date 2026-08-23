@@ -5,11 +5,25 @@ import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
 import type { Database } from "../../src/db/types";
 import { runMigrations } from "../../src/db/migrator";
 import { logger } from "../../src/utils/logger";
-import { pruneEventTableByCount, type EventRetentionState, type EventTableName } from "../../src/db/eventRetention";
-import { recordNetworkEvent, cleanupIfNeeded as cleanupNetwork } from "../../src/db/networkEventRepository";
-import { recordLogEvent, recordLogEvents, cleanupIfNeeded as cleanupLog } from "../../src/db/logEventRepository";
+import {
+  pruneEventTableByCount,
+  type EventRetentionState,
+  type EventTableName,
+} from "../../src/db/eventRetention";
+import {
+  recordNetworkEvent,
+  cleanupIfNeeded as cleanupNetwork,
+} from "../../src/db/networkEventRepository";
+import {
+  recordLogEvent,
+  recordLogEvents,
+  cleanupIfNeeded as cleanupLog,
+} from "../../src/db/logEventRepository";
 import { recordOsEvent, recordOsEvents } from "../../src/db/osEventRepository";
-import { recordNavigationEvent, recordNavigationEvents } from "../../src/db/navigationEventRepository";
+import {
+  recordNavigationEvent,
+  recordNavigationEvents,
+} from "../../src/db/navigationEventRepository";
 import { recordLayoutEvent, recordLayoutEvents } from "../../src/db/layoutEventRepository";
 import { recordStorageEvent } from "../../src/db/storageEventRepository";
 
@@ -37,7 +51,7 @@ async function createInstrumentedTestDatabase(): Promise<{ db: Kysely<Database>;
   const sqls: string[] = [];
   const db = new Kysely<Database>({
     dialect: new BunSqliteDialect({ database: bunDb }),
-    log: event => {
+    log: (event) => {
       if (event.level === "query") {
         sqls.push(event.query.sql);
       }
@@ -56,53 +70,108 @@ interface RepoUnderTest {
 
 const REPOS: RepoUnderTest[] = [
   {
-    name: "network", table: "network_events", record: recordNetworkEvent,
-    make: ts => ({
-      deviceId: "d1", timestamp: ts, applicationId: null, sessionId: null,
-      url: "https://x/y", method: "GET", statusCode: 200, durationMs: 1,
-      requestBodySize: 0, responseBodySize: 0, protocol: null, host: null, path: null, error: null,
+    name: "network",
+    table: "network_events",
+    record: recordNetworkEvent,
+    make: (ts) => ({
+      deviceId: "d1",
+      timestamp: ts,
+      applicationId: null,
+      sessionId: null,
+      url: "https://x/y",
+      method: "GET",
+      statusCode: 200,
+      durationMs: 1,
+      requestBodySize: 0,
+      responseBodySize: 0,
+      protocol: null,
+      host: null,
+      path: null,
+      error: null,
     }),
   },
   {
-    name: "log", table: "log_events", record: recordLogEvent,
-    make: ts => ({
-      deviceId: "d1", timestamp: ts, applicationId: null, sessionId: null,
-      level: 3, tag: "T", message: "m", filterName: "f",
+    name: "log",
+    table: "log_events",
+    record: recordLogEvent,
+    make: (ts) => ({
+      deviceId: "d1",
+      timestamp: ts,
+      applicationId: null,
+      sessionId: null,
+      level: 3,
+      tag: "T",
+      message: "m",
+      filterName: "f",
     }),
   },
   {
-    name: "os", table: "os_events", record: recordOsEvent,
-    make: ts => ({
-      deviceId: "d1", timestamp: ts, applicationId: null, sessionId: null,
-      category: "lifecycle", kind: "resume", details: null,
+    name: "os",
+    table: "os_events",
+    record: recordOsEvent,
+    make: (ts) => ({
+      deviceId: "d1",
+      timestamp: ts,
+      applicationId: null,
+      sessionId: null,
+      category: "lifecycle",
+      kind: "resume",
+      details: null,
     }),
   },
   {
-    name: "navigation", table: "navigation_events", record: recordNavigationEvent,
-    make: ts => ({
-      deviceId: "d1", timestamp: ts, applicationId: null, sessionId: null,
-      destination: "Home", source: null, arguments: null, metadata: null,
+    name: "navigation",
+    table: "navigation_events",
+    record: recordNavigationEvent,
+    make: (ts) => ({
+      deviceId: "d1",
+      timestamp: ts,
+      applicationId: null,
+      sessionId: null,
+      destination: "Home",
+      source: null,
+      arguments: null,
+      metadata: null,
     }),
   },
   {
-    name: "layout", table: "layout_events", record: recordLayoutEvent,
-    make: ts => ({
-      deviceId: "d1", timestamp: ts, applicationId: null, sessionId: null,
-      subType: "recomposition", composableName: null, composableId: null,
-      recompositionCount: null, durationMs: null, likelyCause: null, detailsJson: null,
+    name: "layout",
+    table: "layout_events",
+    record: recordLayoutEvent,
+    make: (ts) => ({
+      deviceId: "d1",
+      timestamp: ts,
+      applicationId: null,
+      sessionId: null,
+      subType: "recomposition",
+      composableName: null,
+      composableId: null,
+      recompositionCount: null,
+      durationMs: null,
+      likelyCause: null,
+      detailsJson: null,
     }),
   },
   {
-    name: "storage", table: "storage_events", record: recordStorageEvent,
-    make: ts => ({
-      deviceId: "d1", timestamp: ts, applicationId: null, sessionId: null,
-      fileName: "prefs.xml", key: "k", value: "v", valueType: "string", changeType: "update",
+    name: "storage",
+    table: "storage_events",
+    record: recordStorageEvent,
+    make: (ts) => ({
+      deviceId: "d1",
+      timestamp: ts,
+      applicationId: null,
+      sessionId: null,
+      fileName: "prefs.xml",
+      key: "k",
+      value: "v",
+      valueType: "string",
+      changeType: "update",
     }),
   },
 ];
 
 const countOccurrences = (sqls: string[], needle: string): number =>
-  sqls.filter(s => s.toLowerCase().includes(needle)).length;
+  sqls.filter((s) => s.toLowerCase().includes(needle)).length;
 
 function createRetentionState(): EventRetentionState {
   return { cleanupInProgress: false, insertsSinceCleanup: 0 };
@@ -113,7 +182,7 @@ async function cleanupRepo(
   db: Kysely<Database>,
   state: EventRetentionState,
   maxRows: number,
-  checkInterval: number
+  checkInterval: number,
 ): Promise<void> {
   await pruneEventTableByCount(db, repo.table, state, maxRows, checkInterval);
 }
@@ -132,13 +201,13 @@ describe("event repository retention (#2799)", () => {
       expect(sqls).toHaveLength(0);
 
       await cleanupNetwork(db, 1000, interval);
-      expect(countOccurrences(sqls, "from \"network_events\"")).toBe(1);
-      expect(countOccurrences(sqls, "from \"log_events\"")).toBe(0);
+      expect(countOccurrences(sqls, 'from "network_events"')).toBe(1);
+      expect(countOccurrences(sqls, 'from "log_events"')).toBe(0);
 
       sqls.length = 0;
       await cleanupLog(db, 1000, interval);
-      expect(countOccurrences(sqls, "from \"network_events\"")).toBe(0);
-      expect(countOccurrences(sqls, "from \"log_events\"")).toBe(1);
+      expect(countOccurrences(sqls, 'from "network_events"')).toBe(0);
+      expect(countOccurrences(sqls, 'from "log_events"')).toBe(1);
     } finally {
       await db.destroy();
     }
@@ -146,10 +215,30 @@ describe("event repository retention (#2799)", () => {
 
   describe("batched multi-row INSERT (#3138)", () => {
     const BATCH_REPOS = [
-      { name: "log", table: "log_events" as EventTableName, record: recordLogEvents, make: REPOS[1].make },
-      { name: "os", table: "os_events" as EventTableName, record: recordOsEvents, make: REPOS[2].make },
-      { name: "navigation", table: "navigation_events" as EventTableName, record: recordNavigationEvents, make: REPOS[3].make },
-      { name: "layout", table: "layout_events" as EventTableName, record: recordLayoutEvents, make: REPOS[4].make },
+      {
+        name: "log",
+        table: "log_events" as EventTableName,
+        record: recordLogEvents,
+        make: REPOS[1].make,
+      },
+      {
+        name: "os",
+        table: "os_events" as EventTableName,
+        record: recordOsEvents,
+        make: REPOS[2].make,
+      },
+      {
+        name: "navigation",
+        table: "navigation_events" as EventTableName,
+        record: recordNavigationEvents,
+        make: REPOS[3].make,
+      },
+      {
+        name: "layout",
+        table: "layout_events" as EventTableName,
+        record: recordLayoutEvents,
+        make: REPOS[4].make,
+      },
     ];
 
     for (const repo of BATCH_REPOS) {
@@ -158,10 +247,16 @@ describe("event repository retention (#2799)", () => {
         try {
           sqls.length = 0;
           await repo.record([repo.make(1), repo.make(2), repo.make(3)], db);
-          const inserts = sqls.filter(s => s.toLowerCase().includes(`insert into "${repo.table}"`));
+          const inserts = sqls.filter((s) =>
+            s.toLowerCase().includes(`insert into "${repo.table}"`),
+          );
           expect(inserts).toHaveLength(1);
 
-          const rows = await db.selectFrom(repo.table as any).select("timestamp").orderBy("timestamp", "asc").execute();
+          const rows = await db
+            .selectFrom(repo.table as any)
+            .select("timestamp")
+            .orderBy("timestamp", "asc")
+            .execute();
           expect(rows.map((r: any) => Number(r.timestamp))).toEqual([1, 2, 3]);
         } finally {
           await db.destroy();
@@ -173,7 +268,7 @@ describe("event repository retention (#2799)", () => {
         try {
           sqls.length = 0;
           await repo.record([], db);
-          expect(sqls.filter(s => s.toLowerCase().includes("insert into"))).toHaveLength(0);
+          expect(sqls.filter((s) => s.toLowerCase().includes("insert into"))).toHaveLength(0);
         } finally {
           await db.destroy();
         }
@@ -274,7 +369,10 @@ describe("event repository retention (#2799)", () => {
           }
           await cleanupRepo(repo, db, createRetentionState(), 10, 1);
 
-          const rows = await db.selectFrom(repo.table as any).select("timestamp").execute();
+          const rows = await db
+            .selectFrom(repo.table as any)
+            .select("timestamp")
+            .execute();
           expect(rows).toHaveLength(3);
         } finally {
           await db.destroy();
@@ -308,9 +406,11 @@ describe("event repository retention (#2799)", () => {
         try {
           await db.destroy(); // force every subsequent query to throw
           // checkInterval: 1 so the scan actually runs (and then throws).
-          await expect(cleanupRepo(repo, db, createRetentionState(), 3, 1)).resolves.toBeUndefined(); // never propagates
+          await expect(
+            cleanupRepo(repo, db, createRetentionState(), 3, 1),
+          ).resolves.toBeUndefined(); // never propagates
           expect(warnSpy).toHaveBeenCalled();
-          const logged = warnSpy.mock.calls.map(c => String(c[0])).join("\n");
+          const logged = warnSpy.mock.calls.map((c) => String(c[0])).join("\n");
           expect(logged).toContain(repo.table);
         } finally {
           warnSpy.mockRestore();

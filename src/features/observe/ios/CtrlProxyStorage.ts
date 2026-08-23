@@ -39,11 +39,11 @@ export class CtrlProxyStorage {
    */
   async listPreferenceFiles(
     _packageName: string,
-    timeoutMs: number = 5000
+    timeoutMs: number = 5000,
   ): Promise<PreferenceFile[]> {
     const startTime = this.context.timer.now();
 
-    if (!await this.context.ensureConnected()) {
+    if (!(await this.context.ensureConnected())) {
       throw new Error("Failed to connect to CtrlProxy");
     }
 
@@ -55,8 +55,8 @@ export class CtrlProxyStorage {
       (_id, _type, _timeout) => ({
         success: false,
         totalTimeMs: this.context.timer.now() - startTime,
-        error: `List preference files timeout after ${timeoutMs}ms`
-      })
+        error: `List preference files timeout after ${timeoutMs}ms`,
+      }),
     );
 
     const message = JSON.stringify({
@@ -87,11 +87,11 @@ export class CtrlProxyStorage {
   async getPreferenceEntries(
     _packageName: string,
     fileName: string,
-    timeoutMs: number = 5000
+    timeoutMs: number = 5000,
   ): Promise<KeyValueEntry[]> {
     const startTime = this.context.timer.now();
 
-    if (!await this.context.ensureConnected()) {
+    if (!(await this.context.ensureConnected())) {
       throw new Error("Failed to connect to CtrlProxy");
     }
 
@@ -103,8 +103,8 @@ export class CtrlProxyStorage {
       (_id, _type, _timeout) => ({
         success: false,
         totalTimeMs: this.context.timer.now() - startTime,
-        error: `Get preferences timeout after ${timeoutMs}ms`
-      })
+        error: `Get preferences timeout after ${timeoutMs}ms`,
+      }),
     );
 
     const message = JSON.stringify({
@@ -115,7 +115,9 @@ export class CtrlProxyStorage {
 
     const ws = this.context.getWebSocket();
     ws?.send(message);
-    logger.debug(`[CTRL_PROXY_IOS] Sent get_preferences request (requestId: ${requestId}, fileName: ${fileName})`);
+    logger.debug(
+      `[CTRL_PROXY_IOS] Sent get_preferences request (requestId: ${requestId}, fileName: ${fileName})`,
+    );
 
     const result = await promise;
     if (!result.success) {
@@ -138,11 +140,11 @@ export class CtrlProxyStorage {
     _packageName: string,
     fileName: string,
     key: string,
-    timeoutMs: number = 5000
+    timeoutMs: number = 5000,
   ): Promise<KeyValueEntry | null> {
     const startTime = this.context.timer.now();
 
-    if (!await this.context.ensureConnected()) {
+    if (!(await this.context.ensureConnected())) {
       throw new Error("Failed to connect to CtrlProxy");
     }
 
@@ -155,8 +157,8 @@ export class CtrlProxyStorage {
         success: false,
         found: false,
         totalTimeMs: this.context.timer.now() - startTime,
-        error: `Get preference timeout after ${timeoutMs}ms`
-      })
+        error: `Get preference timeout after ${timeoutMs}ms`,
+      }),
     );
 
     const message = JSON.stringify({
@@ -168,7 +170,9 @@ export class CtrlProxyStorage {
 
     const ws = this.context.getWebSocket();
     ws?.send(message);
-    logger.debug(`[CTRL_PROXY_IOS] Sent get_preference request (requestId: ${requestId}, fileName: ${fileName}, key: ${key})`);
+    logger.debug(
+      `[CTRL_PROXY_IOS] Sent get_preference request (requestId: ${requestId}, fileName: ${fileName}, key: ${key})`,
+    );
 
     const result = await promise;
     if (!result.success) {
@@ -194,11 +198,11 @@ export class CtrlProxyStorage {
     key: string,
     value: string | null,
     type: KeyValueType,
-    timeoutMs: number = 5000
+    timeoutMs: number = 5000,
   ): Promise<void> {
     const startTime = this.context.timer.now();
 
-    if (!await this.context.ensureConnected()) {
+    if (!(await this.context.ensureConnected())) {
       throw new Error("Failed to connect to CtrlProxy");
     }
 
@@ -210,8 +214,8 @@ export class CtrlProxyStorage {
       (_id, _type, _timeout) => ({
         success: false,
         totalTimeMs: this.context.timer.now() - startTime,
-        error: `Set preference timeout after ${timeoutMs}ms`
-      })
+        error: `Set preference timeout after ${timeoutMs}ms`,
+      }),
     );
 
     const message = JSON.stringify({
@@ -225,7 +229,9 @@ export class CtrlProxyStorage {
 
     const ws = this.context.getWebSocket();
     ws?.send(message);
-    logger.debug(`[CTRL_PROXY_IOS] Sent set_preference request (requestId: ${requestId}, fileName: ${fileName}, key: ${key})`);
+    logger.debug(
+      `[CTRL_PROXY_IOS] Sent set_preference request (requestId: ${requestId}, fileName: ${fileName}, key: ${key})`,
+    );
 
     const result = await promise;
     if (!result.success) {
@@ -245,11 +251,11 @@ export class CtrlProxyStorage {
     _packageName: string,
     fileName: string,
     key: string,
-    timeoutMs: number = 5000
+    timeoutMs: number = 5000,
   ): Promise<void> {
     const startTime = this.context.timer.now();
 
-    if (!await this.context.ensureConnected()) {
+    if (!(await this.context.ensureConnected())) {
       throw new Error("Failed to connect to CtrlProxy");
     }
 
@@ -261,8 +267,8 @@ export class CtrlProxyStorage {
       (_id, _type, _timeout) => ({
         success: false,
         totalTimeMs: this.context.timer.now() - startTime,
-        error: `Remove preference timeout after ${timeoutMs}ms`
-      })
+        error: `Remove preference timeout after ${timeoutMs}ms`,
+      }),
     );
 
     const message = JSON.stringify({
@@ -274,7 +280,9 @@ export class CtrlProxyStorage {
 
     const ws = this.context.getWebSocket();
     ws?.send(message);
-    logger.debug(`[CTRL_PROXY_IOS] Sent remove_preference request (requestId: ${requestId}, fileName: ${fileName}, key: ${key})`);
+    logger.debug(
+      `[CTRL_PROXY_IOS] Sent remove_preference request (requestId: ${requestId}, fileName: ${fileName}, key: ${key})`,
+    );
 
     const result = await promise;
     if (!result.success) {
@@ -292,11 +300,11 @@ export class CtrlProxyStorage {
   async clearPreferenceStore(
     _packageName: string,
     fileName: string,
-    timeoutMs: number = 5000
+    timeoutMs: number = 5000,
   ): Promise<void> {
     const startTime = this.context.timer.now();
 
-    if (!await this.context.ensureConnected()) {
+    if (!(await this.context.ensureConnected())) {
       throw new Error("Failed to connect to CtrlProxy");
     }
 
@@ -308,8 +316,8 @@ export class CtrlProxyStorage {
       (_id, _type, _timeout) => ({
         success: false,
         totalTimeMs: this.context.timer.now() - startTime,
-        error: `Clear preferences timeout after ${timeoutMs}ms`
-      })
+        error: `Clear preferences timeout after ${timeoutMs}ms`,
+      }),
     );
 
     const message = JSON.stringify({
@@ -320,7 +328,9 @@ export class CtrlProxyStorage {
 
     const ws = this.context.getWebSocket();
     ws?.send(message);
-    logger.debug(`[CTRL_PROXY_IOS] Sent clear_preferences request (requestId: ${requestId}, fileName: ${fileName})`);
+    logger.debug(
+      `[CTRL_PROXY_IOS] Sent clear_preferences request (requestId: ${requestId}, fileName: ${fileName})`,
+    );
 
     const result = await promise;
     if (!result.success) {

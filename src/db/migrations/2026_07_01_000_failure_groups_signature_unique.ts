@@ -27,7 +27,7 @@ import { Kysely, sql } from "kysely";
  * `IF NOT EXISTS`.
  */
 export async function up(db: Kysely<unknown>): Promise<void> {
-  await db.transaction().execute(async trx => {
+  await db.transaction().execute(async (trx) => {
     // 1. Repoint occurrences from loser groups onto their signature's keeper —
     //    BEFORE any delete, so CASCADE cannot wipe them. A "loser" is any group
     //    that is not the keeper (earliest first_occurrence, min id tiebreak)
@@ -150,7 +150,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
 }
 
 export async function down(db: Kysely<unknown>): Promise<void> {
-  await db.transaction().execute(async trx => {
+  await db.transaction().execute(async (trx) => {
     await sql`DROP INDEX IF EXISTS idx_failure_occurrences_group_session`.execute(trx);
     await sql`DROP INDEX IF EXISTS idx_failure_groups_signature`.execute(trx);
     // Restore the original non-unique index.

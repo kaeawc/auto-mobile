@@ -28,7 +28,7 @@ export function parseBoundsString(boundsString: string): ElementBounds | null {
     left: parseInt(match[1], 10),
     top: parseInt(match[2], 10),
     right: parseInt(match[3], 10),
-    bottom: parseInt(match[4], 10)
+    bottom: parseInt(match[4], 10),
   };
 }
 
@@ -51,11 +51,7 @@ export function boundsEqual(a: ElementBounds, b: ElementBounds): boolean {
 /**
  * True when every edge of the two rects differs by at most epsilonPx (screen px).
  */
-export function boundsNearlyEqual(
-  a: ElementBounds,
-  b: ElementBounds,
-  epsilonPx: number
-): boolean {
+export function boundsNearlyEqual(a: ElementBounds, b: ElementBounds, epsilonPx: number): boolean {
   const e = Math.max(0, epsilonPx);
   return (
     Math.abs(a.left - b.left) <= e &&

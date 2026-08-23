@@ -51,8 +51,6 @@ describe("installInMemoryNavManager", () => {
     harness = undefined;
 
     // The connection is gone, so any query against it now rejects.
-    await expect(
-      db.selectFrom("navigation_nodes").selectAll().execute()
-    ).rejects.toThrow();
+    await expect(db.selectFrom("navigation_nodes").selectAll().execute()).rejects.toThrow();
   });
 });

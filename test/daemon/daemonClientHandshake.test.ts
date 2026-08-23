@@ -17,15 +17,18 @@ const isWindows = platform() === "win32";
  * Stand up a tiny Unix socket server that captures the first request line and
  * replies success, so we can assert what the DaemonClient puts on the wire.
  */
-function startCapturingServer(socketPath: string): { server: Server; firstRequest: Promise<DaemonRequest> } {
+function startCapturingServer(socketPath: string): {
+  server: Server;
+  firstRequest: Promise<DaemonRequest>;
+} {
   let resolveFirst: (req: DaemonRequest) => void;
-  const firstRequest = new Promise<DaemonRequest>(resolve => {
+  const firstRequest = new Promise<DaemonRequest>((resolve) => {
     resolveFirst = resolve;
   });
 
   const server = createServer((socket: Socket) => {
     let buffer = "";
-    socket.on("data", data => {
+    socket.on("data", (data) => {
       buffer += data.toString();
       const lines = buffer.split("\n");
       buffer = lines.pop() ?? "";
@@ -36,7 +39,8 @@ function startCapturingServer(socketPath: string): { server: Server; firstReques
         const request = JSON.parse(line) as DaemonRequest;
         resolveFirst(request);
         socket.write(
-          JSON.stringify({ id: request.id, type: "mcp_response", success: true, result: {} }) + "\n"
+          JSON.stringify({ id: request.id, type: "mcp_response", success: true, result: {} }) +
+            "\n",
         );
       }
     });
@@ -54,7 +58,7 @@ function startCapturingServer(socketPath: string): { server: Server; firstReques
   });
 
   afterEach(async () => {
-    await new Promise<void>(resolve => server.close(() => resolve()));
+    await new Promise<void>((resolve) => server.close(() => resolve()));
     if (existsSync(socketPath)) {
       await unlink(socketPath);
     }
@@ -63,12 +67,18 @@ function startCapturingServer(socketPath: string): { server: Server; firstReques
   test("attaches injected clientVersion + build identity to tool calls", async () => {
     const capture = startCapturingServer(socketPath);
     server = capture.server;
-    await new Promise<void>(resolve => server.listen(socketPath, resolve));
+    await new Promise<void>((resolve) => server.listen(socketPath, resolve));
 
-    const client = new DaemonClient(socketPath, 5000, undefined, {}, {
-      version: "0.0.40+gtest",
-      build: { entryScript: "/repo/dist/index.js", buildId: "clientbuild123" },
-    });
+    const client = new DaemonClient(
+      socketPath,
+      5000,
+      undefined,
+      {},
+      {
+        version: "0.0.40+gtest",
+        build: { entryScript: "/repo/dist/index.js", buildId: "clientbuild123" },
+      },
+    );
     await client.connect();
     await client.callTool("observe", { platform: "android" });
 
@@ -82,12 +92,18 @@ function startCapturingServer(socketPath: string): { server: Server; firstReques
   test("attaches handshake fields to daemon method calls too", async () => {
     const capture = startCapturingServer(socketPath);
     server = capture.server;
-    await new Promise<void>(resolve => server.listen(socketPath, resolve));
+    await new Promise<void>((resolve) => server.listen(socketPath, resolve));
 
-    const client = new DaemonClient(socketPath, 5000, undefined, {}, {
-      version: "0.0.40",
-      build: { entryScript: "/repo/dist/index.js", buildId: "clientbuild123" },
-    });
+    const client = new DaemonClient(
+      socketPath,
+      5000,
+      undefined,
+      {},
+      {
+        version: "0.0.40",
+        build: { entryScript: "/repo/dist/index.js", buildId: "clientbuild123" },
+      },
+    );
     await client.connect();
     await client.callDaemonMethod("daemon/availableDevices", {});
 
@@ -100,7 +116,7 @@ function startCapturingServer(socketPath: string): { server: Server; firstReques
   test("omits handshake fields when identity is null (ungated diagnostic client)", async () => {
     const capture = startCapturingServer(socketPath);
     server = capture.server;
-    await new Promise<void>(resolve => server.listen(socketPath, resolve));
+    await new Promise<void>((resolve) => server.listen(socketPath, resolve));
 
     const client = new DaemonClient(socketPath, 5000, undefined, {}, null);
     await client.connect();

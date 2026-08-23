@@ -27,7 +27,7 @@ export class FakeFocusNavigationDriver implements FocusNavigationDriver {
     if (focusedElement) {
       const focusedKey = this.getElementKey(focusedElement);
       const index = focusedKey
-        ? elements.findIndex(element => this.getElementKey(element) === focusedKey)
+        ? elements.findIndex((element) => this.getElementKey(element) === focusedKey)
         : -1;
       this.focusedIndex = index === -1 ? null : index;
     }
@@ -68,7 +68,7 @@ export class FakeFocusNavigationDriver implements FocusNavigationDriver {
       elements: this.elements,
       focusedIndex: this.focusedIndex,
       totalCount: this.elements.length,
-      totalTimeMs: 1
+      totalTimeMs: 1,
     };
   }
 
@@ -78,7 +78,7 @@ export class FakeFocusNavigationDriver implements FocusNavigationDriver {
     }
     return {
       focusedElement: this.getFocusedElement(),
-      totalTimeMs: 1
+      totalTimeMs: 1,
     };
   }
 
@@ -87,7 +87,7 @@ export class FakeFocusNavigationDriver implements FocusNavigationDriver {
     y1: number,
     x2: number,
     y2: number,
-    durationMs: number
+    durationMs: number,
   ): Promise<A11ySwipeResult> {
     this.swipeHistory.push({ x1, y1, x2, y2, duration: durationMs });
     const direction = this.getDirection(x1, x2);
@@ -119,9 +119,10 @@ export class FakeFocusNavigationDriver implements FocusNavigationDriver {
       this.focusedIndex = 0;
       return;
     }
-    const nextIndex = direction === "forward"
-      ? Math.min(this.elements.length - 1, this.focusedIndex + 1)
-      : Math.max(0, this.focusedIndex - 1);
+    const nextIndex =
+      direction === "forward"
+        ? Math.min(this.elements.length - 1, this.focusedIndex + 1)
+        : Math.max(0, this.focusedIndex - 1);
     this.focusedIndex = nextIndex;
   }
 

@@ -14,7 +14,7 @@ export class LatestFrameQueue {
     private readonly options: {
       maxFrameBytes: number;
       now: () => number;
-    }
+    },
   ) {}
 
   /**

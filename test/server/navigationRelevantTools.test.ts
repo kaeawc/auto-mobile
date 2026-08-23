@@ -7,9 +7,16 @@ describe("NAVIGATION_RELEVANT_TOOLS", () => {
   });
 
   test("contains exactly the UI-interaction tools that may cause navigation", () => {
-    expect([...NAVIGATION_RELEVANT_TOOLS].sort()).toEqual(
-      ["clearText", "dragAndDrop", "imeAction", "inputText", "pinchOn", "pressButton", "swipeOn", "tapOn"]
-    );
+    expect([...NAVIGATION_RELEVANT_TOOLS].sort()).toEqual([
+      "clearText",
+      "dragAndDrop",
+      "imeAction",
+      "inputText",
+      "pinchOn",
+      "pressButton",
+      "swipeOn",
+      "tapOn",
+    ]);
   });
 
   test("excludes app-lifecycle and observation tools", () => {

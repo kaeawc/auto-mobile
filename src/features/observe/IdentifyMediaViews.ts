@@ -5,7 +5,12 @@ import { DefaultElementParser } from "../utility/ElementParser";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 
 export type MediaType = "image" | "video" | "loading" | "mixed";
-export type FlattenedElementEntry = { element: Element; index: number; depth: number; text?: string };
+export type FlattenedElementEntry = {
+  element: Element;
+  index: number;
+  depth: number;
+  text?: string;
+};
 
 export interface MediaView {
   viewId?: string;
@@ -32,30 +37,24 @@ const androidPatterns: PatternSet = {
     /GlideImageView/i,
     /FrescoDraweeView/i,
     /DraweeView/i,
-    /PhotoView/i
+    /PhotoView/i,
   ],
-  video: [
-    /VideoView$/i,
-    /PlayerView$/i,
-    /StyledPlayerView$/i,
-    /SurfaceView$/i,
-    /TextureView$/i
-  ],
+  video: [/VideoView$/i, /PlayerView$/i, /StyledPlayerView$/i, /SurfaceView$/i, /TextureView$/i],
   loading: [
     /ProgressBar$/i,
     /CircularProgressIndicator/i,
     /LinearProgressIndicator/i,
     /ShimmerFrameLayout/i,
-    /ContentLoadingProgressBar/i
+    /ContentLoadingProgressBar/i,
   ],
-  mixed: []
+  mixed: [],
 };
 
 const iosPatterns: PatternSet = {
   image: [/^UIImageView$/i],
   video: [/AVPlayerView/i, /AVPlayerViewController/i],
   loading: [/^UIActivityIndicatorView$/i, /^UIProgressView$/i],
-  mixed: [/^WKWebView$/i]
+  mixed: [/^WKWebView$/i],
 };
 
 function matchMediaType(className: string, patterns: PatternSet): MediaType | null {
@@ -70,7 +69,9 @@ function matchMediaType(className: string, patterns: PatternSet): MediaType | nu
 }
 
 function extractSourceUrl(extras: Record<string, string> | undefined): string | undefined {
-  if (!extras) {return undefined;}
+  if (!extras) {
+    return undefined;
+  }
   for (const value of Object.values(extras)) {
     if (typeof value === "string" && /^https?:\/\//.test(value)) {
       return value;
@@ -93,13 +94,15 @@ export class IdentifyMediaViews {
   classify(
     viewHierarchy: ViewHierarchyResult,
     platform: "android" | "ios",
-    flattenedEntries?: FlattenedElementEntry[]
+    flattenedEntries?: FlattenedElementEntry[],
   ): MediaView[] {
     const patterns = platform === "ios" ? iosPatterns : androidPatterns;
-    const entries = flattenedEntries ?? this.parser.flattenViewHierarchy(viewHierarchy, {
-      includeWindows: true,
-      windowOrder: "topmost-first"
-    });
+    const entries =
+      flattenedEntries ??
+      this.parser.flattenViewHierarchy(viewHierarchy, {
+        includeWindows: true,
+        windowOrder: "topmost-first",
+      });
 
     const results: MediaView[] = [];
     const seenBounds = new Set<string>();
@@ -134,22 +137,32 @@ export class IdentifyMediaViews {
     const view: MediaView = {
       className,
       mediaType,
-      bounds: el.bounds
+      bounds: el.bounds,
     };
 
     const viewId = (el["view-id"] ?? el["viewId"]) as string | undefined;
-    if (viewId) {view.viewId = viewId;}
+    if (viewId) {
+      view.viewId = viewId;
+    }
 
     const contentDesc = (el["content-desc"] ?? el["contentDesc"]) as string | undefined;
-    if (contentDesc) {view.contentDescription = contentDesc;}
+    if (contentDesc) {
+      view.contentDescription = contentDesc;
+    }
 
     const resourceId = (el["resource-id"] ?? el["resourceId"]) as string | undefined;
-    if (resourceId) {view.resourceId = resourceId;}
+    if (resourceId) {
+      view.resourceId = resourceId;
+    }
 
     const sourceUrl = extractSourceUrl(el["extras"] as Record<string, string> | undefined);
-    if (sourceUrl) {view.sourceUrl = sourceUrl;}
+    if (sourceUrl) {
+      view.sourceUrl = sourceUrl;
+    }
 
-    if (mediaType === "loading") {view.isLoading = true;}
+    if (mediaType === "loading") {
+      view.isLoading = true;
+    }
 
     return view;
   }

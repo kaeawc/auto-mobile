@@ -29,14 +29,19 @@ function makeNal(type: number, size: number, fill = 0x5a): Buffer {
 const START = Buffer.from([0x00, 0x00, 0x00, 0x01]);
 
 function annexB(...nals: Buffer[]): Buffer {
-  return Buffer.concat(nals.flatMap(nal => [START, nal]));
+  return Buffer.concat(nals.flatMap((nal) => [START, nal]));
 }
 
 describe("RtpH264TrackWriter", () => {
   test("emits one packet per NAL, marking only the last of each access unit", () => {
     const sink = new RecordingSink();
     const timer = new FakeTimer();
-    const writer = new RtpH264TrackWriter({ sink, ssrc: 0x11223344, timer, initialSequenceNumber: 1000 });
+    const writer = new RtpH264TrackWriter({
+      sink,
+      ssrc: 0x11223344,
+      timer,
+      initialSequenceNumber: 1000,
+    });
 
     // SPS + PPS + IDR = access unit 1 (3 NALs -> 3 packets); a following
     // P-frame is access unit 2 (1 packet).
@@ -46,16 +51,11 @@ describe("RtpH264TrackWriter", () => {
 
     expect(sink.packets).toHaveLength(4);
     // Sequence numbers increment across every packet.
-    expect(sink.packets.map(packet => packet.header.sequenceNumber)).toEqual([
+    expect(sink.packets.map((packet) => packet.header.sequenceNumber)).toEqual([
       1000, 1001, 1002, 1003,
     ]);
     // Marker set only on the last packet of each access unit (IDR, then P).
-    expect(sink.packets.map(packet => packet.header.marker)).toEqual([
-      false,
-      false,
-      true,
-      true,
-    ]);
+    expect(sink.packets.map((packet) => packet.header.marker)).toEqual([false, false, true, true]);
     expect(sink.packets[0].header.ssrc).toBe(0x11223344);
     expect(writer.stats.framesWritten).toBe(2);
     expect(writer.stats.sawKeyFrame).toBe(true);
@@ -71,9 +71,9 @@ describe("RtpH264TrackWriter", () => {
     writer.flush();
 
     expect(sink.packets.length).toBeGreaterThan(1);
-    const timestamps = new Set(sink.packets.map(packet => packet.header.timestamp));
+    const timestamps = new Set(sink.packets.map((packet) => packet.header.timestamp));
     expect(timestamps.size).toBe(1);
-    const markerCount = sink.packets.filter(packet => packet.header.marker).length;
+    const markerCount = sink.packets.filter((packet) => packet.header.marker).length;
     expect(markerCount).toBe(1);
     expect(sink.packets[sink.packets.length - 1].header.marker).toBe(true);
   });
@@ -122,7 +122,7 @@ describe("RtpH264TrackWriter", () => {
     writer.writeChunk(annexB(makeNal(1, 20))); // completes the bare IDR AU
     writer.flush();
 
-    const nalTypes = sink.packets.map(packet => packet.payload[0] & 0x1f);
+    const nalTypes = sink.packets.map((packet) => packet.payload[0] & 0x1f);
     // Two IDR (type 5) frames were written; each must be preceded by SPS(7)+PPS(8).
     const idrIndices = nalTypes.flatMap((type, index) => (type === 5 ? [index] : []));
     expect(idrIndices).toHaveLength(2);
@@ -143,7 +143,7 @@ describe("RtpH264TrackWriter", () => {
     writer.writeChunk(annexB(makeNal(1, 20)));
     writer.flush();
 
-    expect(sink.packets.map(packet => packet.payload[0] & 0x1f)).toEqual([7, 8, 5, 1]);
+    expect(sink.packets.map((packet) => packet.payload[0] & 0x1f)).toEqual([7, 8, 5, 1]);
   });
 
   test("does not duplicate parameter sets an IDR access unit already carries", () => {
@@ -153,10 +153,10 @@ describe("RtpH264TrackWriter", () => {
     writer.writeChunk(annexB(makeNal(1, 20)));
     writer.flush();
 
-    const nalTypes = sink.packets.map(packet => packet.payload[0] & 0x1f);
+    const nalTypes = sink.packets.map((packet) => packet.payload[0] & 0x1f);
     // Exactly one SPS and one PPS — no injected duplicates.
-    expect(nalTypes.filter(type => type === 7)).toHaveLength(1);
-    expect(nalTypes.filter(type => type === 8)).toHaveLength(1);
+    expect(nalTypes.filter((type) => type === 7)).toHaveLength(1);
+    expect(nalTypes.filter((type) => type === 8)).toHaveLength(1);
   });
 
   test("observes an SPS before packetizing its access unit", () => {
@@ -165,7 +165,7 @@ describe("RtpH264TrackWriter", () => {
     const writer = new RtpH264TrackWriter({
       sink,
       ssrc: 1,
-      onSps: sps => observed.push(Buffer.from(sps)),
+      onSps: (sps) => observed.push(Buffer.from(sps)),
     });
     const sps = Buffer.from([0x67, 0x42, 0xe0, 0x2a]);
 

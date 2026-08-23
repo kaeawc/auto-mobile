@@ -25,18 +25,19 @@ describe("CallTool wire boundary strips structuredContent (issue #2899)", () => 
       TOOL,
       "probe tool for structuredContent strip",
       z.object({}).passthrough(),
-      async () => createStructuredToolResponse({
-        success: true,
-        marker: "probe",
-        observationDiff: { mode: "full", reason: "screen_changed" },
-      }),
+      async () =>
+        createStructuredToolResponse({
+          success: true,
+          marker: "probe",
+          observationDiff: { mode: "full", reason: "screen_changed" },
+        }),
       {
         outputSchema: z.object({
           success: z.boolean(),
           marker: z.string(),
           observationDiff: z.object({ mode: z.string(), reason: z.string() }),
         }),
-      }
+      },
     );
     fixture = new McpTestFixture();
     await fixture.setup();
@@ -109,11 +110,16 @@ describe("CallTool wire boundary debug-logs structuredContent omission (issue #2
   // stable fields instead of regex-parsing a formatted message.
   const omissionReasons = (calls: unknown[][], tool: string): string[] =>
     calls
-      .filter(args => args[0] === "[MCP] Omitted structuredContent")
-      .map(args => args[1] as { tool?: unknown; reason?: unknown } | undefined)
-      .filter((fields): fields is { tool: string; reason: string } =>
-        fields !== undefined && fields !== null && fields.tool === tool && typeof fields.reason === "string")
-      .map(fields => fields.reason);
+      .filter((args) => args[0] === "[MCP] Omitted structuredContent")
+      .map((args) => args[1] as { tool?: unknown; reason?: unknown } | undefined)
+      .filter(
+        (fields): fields is { tool: string; reason: string } =>
+          fields !== undefined &&
+          fields !== null &&
+          fields.tool === tool &&
+          typeof fields.reason === "string",
+      )
+      .map((fields) => fields.reason);
 
   beforeAll(async () => {
     ToolRegistry.register(
@@ -121,13 +127,13 @@ describe("CallTool wire boundary debug-logs structuredContent omission (issue #2
       "probe tool for omission debug log (schema)",
       z.object({}).passthrough(),
       async () => createStructuredToolResponse({ success: true, marker: "probe" }),
-      { outputSchema: z.object({ success: z.boolean(), marker: z.string() }) }
+      { outputSchema: z.object({ success: z.boolean(), marker: z.string() }) },
     );
     ToolRegistry.register(
       NOSCHEMA_TOOL,
       "probe tool for omission debug log (no schema)",
       z.object({}).passthrough(),
-      async () => createStructuredToolResponse({ success: true, marker: "probe" })
+      async () => createStructuredToolResponse({ success: true, marker: "probe" }),
     );
     // A no-schema tool whose handler returns a response that never carried a
     // `structuredContent` tree (e.g. an image/plain-text result). The omission
@@ -136,7 +142,7 @@ describe("CallTool wire boundary debug-logs structuredContent omission (issue #2
       PLAIN_TOOL,
       "probe tool with no structuredContent to drop",
       z.object({}).passthrough(),
-      async () => ({ content: [{ type: "text", text: "no structuredContent here" }] })
+      async () => ({ content: [{ type: "text", text: "no structuredContent here" }] }),
     );
     fixture = new McpTestFixture();
     await fixture.setup();
@@ -232,14 +238,19 @@ describe("CallTool wire boundary debug-logs structuredContent omission (issue #2
   // `[LEVEL] <message> {json}` line the logger composes, but deliberately
   // level-AGNOSTIC — so the suppression test also catches a regression that
   // re-emits the trace at info/warn (which would pass the INFO gate).
-  const sinkOmissionFields = (writes: unknown[][], tool: string): Array<{ level: string; tool: string; reason: string }> =>
+  const sinkOmissionFields = (
+    writes: unknown[][],
+    tool: string,
+  ): Array<{ level: string; tool: string; reason: string }> =>
     writes
-      .map(args => String(args[0] ?? ""))
-      .flatMap(chunk => chunk.split("\n"))
-      .map(line => / \[(DEBUG|INFO|WARN|ERROR)\] \[MCP\] Omitted structuredContent (\{.*\})$/.exec(line))
+      .map((args) => String(args[0] ?? ""))
+      .flatMap((chunk) => chunk.split("\n"))
+      .map((line) =>
+        / \[(DEBUG|INFO|WARN|ERROR)\] \[MCP\] Omitted structuredContent (\{.*\})$/.exec(line),
+      )
       .filter((m): m is RegExpExecArray => m !== null)
-      .map(m => ({ level: m[1], ...(JSON.parse(m[2]) as { tool: string; reason: string }) }))
-      .filter(fields => fields.tool === tool);
+      .map((m) => ({ level: m[1], ...(JSON.parse(m[2]) as { tool: string; reason: string }) }))
+      .filter((fields) => fields.tool === tool);
 
   test("real gate at INFO (default): omission trace never reaches the log sink", async () => {
     // No method spy on logger.debug here — a wholesale spy bypasses the
@@ -259,7 +270,9 @@ describe("CallTool wire boundary debug-logs structuredContent omission (issue #2
       const SENTINEL = "__sink_flush_sentinel_3215__";
       logger.info(SENTINEL);
       await logger.flush();
-      expect(stdoutSpy.mock.calls.some(args => String(args[0] ?? "").includes(SENTINEL))).toBe(true);
+      expect(stdoutSpy.mock.calls.some((args) => String(args[0] ?? "").includes(SENTINEL))).toBe(
+        true,
+      );
 
       expect(sinkOmissionFields(stdoutSpy.mock.calls, NOSCHEMA_TOOL)).toEqual([]);
     } finally {

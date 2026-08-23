@@ -24,32 +24,29 @@ describe("SwipeOn autoTarget", () => {
     timestamp: Date.now(),
     screenSize: { width: 1000, height: 2000 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    viewHierarchy
+    viewHierarchy,
   });
 
-  const createScrollableNode = (
-    bounds: ElementBounds,
-    resourceId: string
-  ) => ({
+  const createScrollableNode = (bounds: ElementBounds, resourceId: string) => ({
     $: {
       bounds,
-      "scrollable": "true",
+      scrollable: "true",
       "resource-id": resourceId,
-      "class": "androidx.recyclerview.widget.RecyclerView"
-    }
+      class: "androidx.recyclerview.widget.RecyclerView",
+    },
   });
 
   const createHierarchy = (nodes: any[]) => ({
     hierarchy: {
-      node: nodes
-    }
+      node: nodes,
+    },
   });
 
   const createSwipeOn = () => {
     const swipeOn = new SwipeOn(device, {} as any, {
       executeGesture: fakeGesture,
       observeScreen: fakeObserveScreen,
-      accessibilityDetector: fakeAccessibilityDetector
+      accessibilityDetector: fakeAccessibilityDetector,
     });
     (swipeOn as any).awaitIdle = fakeAwaitIdle;
     (swipeOn as any).window = fakeWindow;
@@ -60,7 +57,9 @@ describe("SwipeOn autoTarget", () => {
   beforeEach(() => {
     fakeAccessibilityDetector = new FakeAccessibilityDetector();
     fakeAccessibilityDetector.setTalkBackEnabled(false);
-    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({} as AndroidCtrlProxyClient);
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+      {} as AndroidCtrlProxyClient,
+    );
     fakeObserveScreen = new FakeObserveScreen();
     fakeGesture = new FakeGestureExecutor();
     fakeAwaitIdle = new FakeAwaitIdle();
@@ -77,7 +76,7 @@ describe("SwipeOn autoTarget", () => {
   test("auto-targets the largest non-fullscreen scrollable when multiple exist", async () => {
     const hierarchy = createHierarchy([
       createScrollableNode({ left: 0, top: 0, right: 1000, bottom: 2000 }, "root-scroll"),
-      createScrollableNode({ left: 0, top: 200, right: 1000, bottom: 1800 }, "list-scroll")
+      createScrollableNode({ left: 0, top: 200, right: 1000, bottom: 1800 }, "list-scroll"),
     ]);
     fakeObserveScreen.setObserveResult(createObserveResult(hierarchy));
 
@@ -92,7 +91,7 @@ describe("SwipeOn autoTarget", () => {
 
   test("auto-targets the single scrollable that matches the swipe direction", async () => {
     const hierarchy = createHierarchy([
-      createScrollableNode({ left: 0, top: 200, right: 1000, bottom: 1800 }, "list-scroll")
+      createScrollableNode({ left: 0, top: 200, right: 1000, bottom: 1800 }, "list-scroll"),
     ]);
     fakeObserveScreen.setObserveResult(createObserveResult(hierarchy));
 
@@ -106,7 +105,7 @@ describe("SwipeOn autoTarget", () => {
 
   test("falls back to screen swipe when single scrollable does not match direction", async () => {
     const hierarchy = createHierarchy([
-      createScrollableNode({ left: 0, top: 0, right: 800, bottom: 200 }, "horizontal-scroll")
+      createScrollableNode({ left: 0, top: 0, right: 800, bottom: 200 }, "horizontal-scroll"),
     ]);
     fakeObserveScreen.setObserveResult(createObserveResult(hierarchy));
 
@@ -120,7 +119,7 @@ describe("SwipeOn autoTarget", () => {
 
   test("respects autoTarget=false and performs a screen swipe", async () => {
     const hierarchy = createHierarchy([
-      createScrollableNode({ left: 0, top: 200, right: 1000, bottom: 1800 }, "list-scroll")
+      createScrollableNode({ left: 0, top: 200, right: 1000, bottom: 1800 }, "list-scroll"),
     ]);
     fakeObserveScreen.setObserveResult(createObserveResult(hierarchy));
 

@@ -2,7 +2,6 @@ import type { ObserveResult } from "../../../models";
 import type { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOptions";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 
-
 export interface ObserveScreenExecuteOptions {
   queryOptions?: ViewHierarchyQueryOptions;
   perf?: PerformanceTracker;

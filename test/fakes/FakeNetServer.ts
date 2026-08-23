@@ -32,8 +32,8 @@ export class FakeSocket extends EventEmitter implements FakeSocketContract {
    */
   getWrittenMessages<T = unknown>(): T[] {
     const allData = this.getWrittenDataString();
-    const lines = allData.split("\n").filter(line => line.trim());
-    return lines.map(line => JSON.parse(line) as T);
+    const lines = allData.split("\n").filter((line) => line.trim());
+    return lines.map((line) => JSON.parse(line) as T);
   }
 
   /**

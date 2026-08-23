@@ -16,7 +16,9 @@ async function getDefaultAppFileService(): Promise<AppFileService> {
 function createListAppFilesResource(service: AppFileServiceResolver) {
   return async (params: Record<string, string>): Promise<ResourceContent> => {
     const request = parseAppFileResourceParams(params);
-    const result = await (await service()).listFiles({
+    const result = await (
+      await service()
+    ).listFiles({
       deviceId: request.deviceId,
       appId: request.appId,
       container: request.container,
@@ -36,7 +38,9 @@ function createReadAppFileResource(service: AppFileServiceResolver) {
       throw new Error("App file resource path is required.");
     }
 
-    const result = await (await service()).readFile({
+    const result = await (
+      await service()
+    ).readFile({
       deviceId: request.deviceId,
       appId: request.appId,
       container: request.container,
@@ -61,7 +65,7 @@ export function registerAppFileResources(appFileService?: AppFileService): void 
     "App Container Files",
     "List files in a logical app container for a specific device and app.",
     "application/json",
-    createListAppFilesResource(service)
+    createListAppFilesResource(service),
   );
 
   ResourceRegistry.registerTemplate(
@@ -69,6 +73,6 @@ export function registerAppFileResources(appFileService?: AppFileService): void 
     "App Container File",
     "Read a file from a logical app container. UTF-8 content is returned as text; binary content is returned as a base64 MCP blob.",
     "application/octet-stream",
-    createReadAppFileResource(service)
+    createReadAppFileResource(service),
   );
 }

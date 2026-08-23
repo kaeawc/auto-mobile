@@ -49,7 +49,7 @@ const defaultDependencies: DaemonChildProcessCleanupDependencies = {
  * recordings or CtrlProxy/iproxy processes during the same shutdown.
  */
 export async function cleanupDaemonChildProcesses(
-  dependencies: DaemonChildProcessCleanupDependencies = defaultDependencies
+  dependencies: DaemonChildProcessCleanupDependencies = defaultDependencies,
 ): Promise<void> {
   const timer = dependencies.timer ?? defaultTimer;
   const timeoutMs = dependencies.timeoutMs ?? CHILD_PROCESS_CLEANUP_TIMEOUT_MS;
@@ -58,16 +58,14 @@ export async function cleanupDaemonChildProcesses(
     const admission = await settleWithin(
       dependencies.stopAcceptingVideoRecordingStarts(),
       timer,
-      timeoutMs
+      timeoutMs,
     );
     if (admission.status !== "fulfilled") {
-      logger.warn(`[Daemon] Failed to quiesce recording starts during shutdown: ${admission.error}`);
+      logger.warn(
+        `[Daemon] Failed to quiesce recording starts during shutdown: ${admission.error}`,
+      );
     }
-    const result = await settleWithin(
-      dependencies.listActiveVideoRecordings(),
-      timer,
-      timeoutMs
-    );
+    const result = await settleWithin(dependencies.listActiveVideoRecordings(), timer, timeoutMs);
     if (result.status === "fulfilled") {
       for (const recording of result.value) {
         recordingIds.add(recording.recordingId);
@@ -94,77 +92,79 @@ export async function cleanupDaemonChildProcesses(
   // deadline has already been consumed.
   const proxyCleanup = settleWithin(dependencies.shutdownIOSCtrlProxies(), timer, timeoutMs);
 
-  await Promise.all(Array.from(recordingIds, async recordingId => {
-    try {
-      const stop = dependencies.stopVideoRecording(recordingId);
-      const result = await settleWithin(
-        stop,
-        timer,
-        timeoutMs
-      );
-      if (result.status === "fulfilled") {
-        return;
-      }
-      logger.warn(
-        `[Daemon] Failed to stop recording ${recordingId} during shutdown: ${result.error}`
-      );
-      const forceStopped = await settleWithin(
-        dependencies.forceStopVideoRecording(recordingId),
-        timer,
-        timeoutMs
-      );
-      if (forceStopped.status !== "fulfilled") {
-        logger.warn(
-          `[Daemon] Failed to force-stop recording ${recordingId} during shutdown: ${forceStopped.error}`
-        );
-      }
-      // A timed stop can have already finalized the backend and still be
-      // persisting archive metadata. Do not race that finalization with an
-      // interruption or database closure; the outer daemon deadline remains
-      // the bounded escape hatch for a permanently wedged finalizer.
+  await Promise.all(
+    Array.from(recordingIds, async (recordingId) => {
       try {
-        await stop;
-        return;
+        const stop = dependencies.stopVideoRecording(recordingId);
+        const result = await settleWithin(stop, timer, timeoutMs);
+        if (result.status === "fulfilled") {
+          return;
+        }
+        logger.warn(
+          `[Daemon] Failed to stop recording ${recordingId} during shutdown: ${result.error}`,
+        );
+        const forceStopped = await settleWithin(
+          dependencies.forceStopVideoRecording(recordingId),
+          timer,
+          timeoutMs,
+        );
+        if (forceStopped.status !== "fulfilled") {
+          logger.warn(
+            `[Daemon] Failed to force-stop recording ${recordingId} during shutdown: ${forceStopped.error}`,
+          );
+        }
+        // A timed stop can have already finalized the backend and still be
+        // persisting archive metadata. Do not race that finalization with an
+        // interruption or database closure; the outer daemon deadline remains
+        // the bounded escape hatch for a permanently wedged finalizer.
+        try {
+          await stop;
+          return;
+        } catch (error) {
+          logger.warn(
+            `[Daemon] Recording ${recordingId} did not finish after force-stop: ${error}`,
+          );
+        }
+        const interrupted = await settleWithin(
+          dependencies.interruptVideoRecording(recordingId),
+          timer,
+          timeoutMs,
+        );
+        if (interrupted.status !== "fulfilled") {
+          logger.warn(
+            `[Daemon] Failed to interrupt recording ${recordingId} during shutdown: ${interrupted.error}`,
+          );
+        }
       } catch (error) {
-        logger.warn(
-          `[Daemon] Recording ${recordingId} did not finish after force-stop: ${error}`
-        );
+        logger.warn(`[Daemon] Unexpected recording cleanup error during shutdown: ${error}`);
       }
-      const interrupted = await settleWithin(
-        dependencies.interruptVideoRecording(recordingId),
-        timer,
-        timeoutMs
-      );
-      if (interrupted.status !== "fulfilled") {
-        logger.warn(
-          `[Daemon] Failed to interrupt recording ${recordingId} during shutdown: ${interrupted.error}`
-        );
-      }
-    } catch (error) {
-      logger.warn(`[Daemon] Unexpected recording cleanup error during shutdown: ${error}`);
-    }
-  }));
+    }),
+  );
 
   const proxies = await proxyCleanup;
   if (proxies.status !== "fulfilled") {
-    logger.warn(`[Daemon] Failed to stop iOS CtrlProxy instances during shutdown: ${proxies.error}`);
+    logger.warn(
+      `[Daemon] Failed to stop iOS CtrlProxy instances during shutdown: ${proxies.error}`,
+    );
   }
 }
 
-type Settled<T> =
-  | { status: "fulfilled"; value: T }
-  | { status: "failed"; error: unknown };
+type Settled<T> = { status: "fulfilled"; value: T } | { status: "failed"; error: unknown };
 
-async function settleWithin<T>(work: Promise<T>, timer: Timer, timeoutMs: number): Promise<Settled<T>> {
+async function settleWithin<T>(
+  work: Promise<T>,
+  timer: Timer,
+  timeoutMs: number,
+): Promise<Settled<T>> {
   let handle: NodeJS.Timeout | undefined;
   const settled: Promise<Settled<T>> = work.then(
-    value => ({ status: "fulfilled", value }),
-    error => ({ status: "failed", error })
+    (value) => ({ status: "fulfilled", value }),
+    (error) => ({ status: "failed", error }),
   );
-  const timeout = new Promise<Settled<T>>(resolve => {
+  const timeout = new Promise<Settled<T>>((resolve) => {
     handle = timer.setTimeout(
       () => resolve({ status: "failed", error: new Error(`timed out after ${timeoutMs}ms`) }),
-      timeoutMs
+      timeoutMs,
     );
   });
   try {

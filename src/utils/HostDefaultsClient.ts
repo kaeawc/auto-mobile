@@ -48,7 +48,7 @@ function defaultDependencies(): HostDefaultsClientDependencies {
 
 export class DefaultHostDefaultsClient implements HostDefaultsClient {
   constructor(
-    private readonly dependencies: HostDefaultsClientDependencies = defaultDependencies()
+    private readonly dependencies: HostDefaultsClientDependencies = defaultDependencies(),
   ) {}
 
   isSupported(): boolean {
@@ -67,7 +67,7 @@ export class DefaultHostDefaultsClient implements HostDefaultsClient {
         {
           timeoutMs: options.timeoutMs ?? DEFAULT_READ_TIMEOUT_MS,
           signal: options.signal,
-        }
+        },
       );
       const value = result.stdout.trim();
       return value.length > 0 ? value : null;

@@ -98,7 +98,7 @@ describe("PlanPartitioner", () => {
 
       // Every timeline entry is a device-tagged step (no broadcast barriers).
       expect(result.timeline).toHaveLength(3);
-      expect(result.timeline.every(e => e.type === "step")).toBe(true);
+      expect(result.timeline.every((e) => e.type === "step")).toBe(true);
     });
 
     test("throws on missing device parameter", () => {
@@ -138,7 +138,7 @@ describe("PlanPartitioner", () => {
 
       const result = PlanPartitioner.partition(plan)!;
       expect(result.timeline).toHaveLength(4);
-      expect(result.timeline.every(e => e.type === "step")).toBe(true);
+      expect(result.timeline.every((e) => e.type === "step")).toBe(true);
     });
 
     test("supports device definitions", () => {

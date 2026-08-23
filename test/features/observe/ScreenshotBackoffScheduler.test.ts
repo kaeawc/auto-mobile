@@ -62,11 +62,11 @@ describe("DefaultScreenshotBackoffScheduler", () => {
           screenshotCaptureSource: "android_ctrlproxy_a11y",
           screenshotFallback: false,
         }),
-        result => {
+        (result) => {
           emittedResults.push(result);
         },
         { intervals: [0], keepAliveIntervalMs: null },
-        fakeTimer
+        fakeTimer,
       );
 
       scheduler.startBackoffSequence();
@@ -90,7 +90,7 @@ describe("DefaultScreenshotBackoffScheduler", () => {
         captureCallback,
         emitCallback,
         undefined,
-        fakeTimer
+        fakeTimer,
       );
 
       scheduler.startBackoffSequence();
@@ -105,7 +105,7 @@ describe("DefaultScreenshotBackoffScheduler", () => {
         captureCallback,
         emitCallback,
         undefined,
-        fakeTimer
+        fakeTimer,
       );
 
       scheduler.startBackoffSequence();
@@ -122,18 +122,18 @@ describe("DefaultScreenshotBackoffScheduler", () => {
         captureCallback,
         emitCallback,
         undefined,
-        fakeTimer
+        fakeTimer,
       );
 
       scheduler.startBackoffSequence();
 
       // Advance through all intervals
-      await fakeTimer.advanceTimersByTimeAsync(0);    // t=0
-      await fakeTimer.advanceTimersByTimeAsync(100);  // t=100
-      await fakeTimer.advanceTimersByTimeAsync(200);  // t=300
-      await fakeTimer.advanceTimersByTimeAsync(200);  // t=500
-      await fakeTimer.advanceTimersByTimeAsync(300);  // t=800
-      await fakeTimer.advanceTimersByTimeAsync(500);  // t=1300
+      await fakeTimer.advanceTimersByTimeAsync(0); // t=0
+      await fakeTimer.advanceTimersByTimeAsync(100); // t=100
+      await fakeTimer.advanceTimersByTimeAsync(200); // t=300
+      await fakeTimer.advanceTimersByTimeAsync(200); // t=500
+      await fakeTimer.advanceTimersByTimeAsync(300); // t=800
+      await fakeTimer.advanceTimersByTimeAsync(500); // t=1300
 
       expect(capturedScreenshots).toHaveLength(6);
       expect(emittedScreenshots).toHaveLength(6);
@@ -146,7 +146,7 @@ describe("DefaultScreenshotBackoffScheduler", () => {
         captureCallback,
         emitCallback,
         { intervals: [0, 50, 150] },
-        fakeTimer
+        fakeTimer,
       );
 
       scheduler.startBackoffSequence();
@@ -164,7 +164,7 @@ describe("DefaultScreenshotBackoffScheduler", () => {
         captureCallback,
         emitCallback,
         { intervals: [0, 100, 200] },
-        fakeTimer
+        fakeTimer,
       );
 
       // Start first sequence
@@ -196,7 +196,7 @@ describe("DefaultScreenshotBackoffScheduler", () => {
         captureCallback,
         emitCallback,
         { intervals: [0, 100], keepAliveIntervalMs: 1000 },
-        fakeTimer
+        fakeTimer,
       );
 
       scheduler.startBackoffSequence();
@@ -222,7 +222,7 @@ describe("DefaultScreenshotBackoffScheduler", () => {
         emitCallback,
         { intervals: [0], keepAliveIntervalMs: 1000 },
         fakeTimer,
-        () => hasSubscribers
+        () => hasSubscribers,
       );
 
       scheduler.startBackoffSequence();
@@ -243,7 +243,7 @@ describe("DefaultScreenshotBackoffScheduler", () => {
         captureCallback,
         emitCallback,
         { intervals: [0], keepAliveIntervalMs: 1000 },
-        fakeTimer
+        fakeTimer,
       );
 
       scheduler.startBackoffSequence();
@@ -266,8 +266,12 @@ describe("DefaultScreenshotBackoffScheduler", () => {
       const scheduler = new DefaultScreenshotBackoffScheduler(
         captureCallback,
         emitCallback,
-        { intervals: [0], keepAliveIntervalMs: 1000, getKeepAliveIntervalMs: () => keepAliveIntervalMs },
-        fakeTimer
+        {
+          intervals: [0],
+          keepAliveIntervalMs: 1000,
+          getKeepAliveIntervalMs: () => keepAliveIntervalMs,
+        },
+        fakeTimer,
       );
 
       scheduler.startBackoffSequence();
@@ -288,7 +292,7 @@ describe("DefaultScreenshotBackoffScheduler", () => {
         captureCallback,
         emitCallback,
         { intervals: [0], getKeepAliveIntervalMs: () => keepAliveIntervalMs },
-        fakeTimer
+        fakeTimer,
       );
 
       scheduler.startBackoffSequence();
@@ -312,7 +316,7 @@ describe("DefaultScreenshotBackoffScheduler", () => {
         emitCallback,
         { intervals: [0], getKeepAliveIntervalMs: () => keepAliveIntervalMs },
         fakeTimer,
-        () => true
+        () => true,
       );
 
       expect(fakeTimer.getPendingTimeouts()).toEqual([]);
@@ -332,7 +336,7 @@ describe("DefaultScreenshotBackoffScheduler", () => {
         captureCallback,
         emitCallback,
         { intervals: [0], keepAliveIntervalMs: 3000, getKeepAliveIntervalMs: () => null },
-        fakeTimer
+        fakeTimer,
       );
 
       scheduler.startBackoffSequence();
@@ -359,7 +363,7 @@ describe("DefaultScreenshotBackoffScheduler", () => {
         captureCallback,
         emitCallback,
         { intervals: [0, 100, 200] },
-        fakeTimer
+        fakeTimer,
       );
 
       scheduler.startBackoffSequence();
@@ -381,11 +385,23 @@ describe("DefaultScreenshotBackoffScheduler", () => {
       // until the ~3s keepalive, which can outlast the post-input refresh timeout.
       const emittedResults: ScreenshotCaptureResult[] = [];
       const captures: ScreenshotCaptureResult[] = [
-        { success: true, data: "same-data", captureBinding: { captureSequence: 7, width: 1080, height: 2340 } },
+        {
+          success: true,
+          data: "same-data",
+          captureBinding: { captureSequence: 7, width: 1080, height: 2340 },
+        },
         // Same bytes, same geometry, NEW capture: a different frame as far as pairing is concerned.
-        { success: true, data: "same-data", captureBinding: { captureSequence: 8, width: 1080, height: 2340 } },
+        {
+          success: true,
+          data: "same-data",
+          captureBinding: { captureSequence: 8, width: 1080, height: 2340 },
+        },
         // Same bytes AND same capture: a genuine duplicate, still skipped.
-        { success: true, data: "same-data", captureBinding: { captureSequence: 8, width: 1080, height: 2340 } },
+        {
+          success: true,
+          data: "same-data",
+          captureBinding: { captureSequence: 8, width: 1080, height: 2340 },
+        },
       ];
       let index = 0;
 
@@ -395,7 +411,7 @@ describe("DefaultScreenshotBackoffScheduler", () => {
           emittedResults.push(result);
         },
         { intervals: [0, 100, 200] },
-        fakeTimer
+        fakeTimer,
       );
 
       scheduler.startBackoffSequence();
@@ -403,7 +419,7 @@ describe("DefaultScreenshotBackoffScheduler", () => {
       await fakeTimer.advanceTimersByTimeAsync(100);
       await fakeTimer.advanceTimersByTimeAsync(100);
 
-      expect(emittedResults.map(r => r.captureBinding?.captureSequence)).toEqual([7, 8]);
+      expect(emittedResults.map((r) => r.captureBinding?.captureSequence)).toEqual([7, 8]);
     });
 
     it("emits when screenshot metadata changes even if image bytes are unchanged", async () => {
@@ -441,11 +457,11 @@ describe("DefaultScreenshotBackoffScheduler", () => {
 
       const scheduler = new DefaultScreenshotBackoffScheduler(
         captureCallback,
-        result => {
+        (result) => {
           emittedResults.push(result);
         },
         { intervals: [0, 100, 200], keepAliveIntervalMs: null },
-        fakeTimer
+        fakeTimer,
       );
 
       scheduler.startBackoffSequence();
@@ -475,11 +491,11 @@ describe("DefaultScreenshotBackoffScheduler", () => {
       let captureIndex = 0;
       const scheduler = new DefaultScreenshotBackoffScheduler(
         async () => captures[captureIndex++]!,
-        result => {
+        (result) => {
           emittedResults.push(result);
         },
         { intervals: [0, 100], keepAliveIntervalMs: null },
-        fakeTimer
+        fakeTimer,
       );
 
       scheduler.startBackoffSequence();
@@ -503,7 +519,7 @@ describe("DefaultScreenshotBackoffScheduler", () => {
         captureCallback,
         emitCallback,
         { intervals: [0, 100, 200, 300, 400] },
-        fakeTimer
+        fakeTimer,
       );
 
       scheduler.startBackoffSequence();
@@ -535,7 +551,7 @@ describe("DefaultScreenshotBackoffScheduler", () => {
         captureCallback,
         emitCallback,
         { intervals: [0, 100, 200] },
-        fakeTimer
+        fakeTimer,
       );
 
       scheduler.startBackoffSequence();
@@ -555,7 +571,7 @@ describe("DefaultScreenshotBackoffScheduler", () => {
         captureCallback,
         emitCallback,
         { intervals: [0, 100, 200, 300] },
-        fakeTimer
+        fakeTimer,
       );
 
       scheduler.startBackoffSequence();
@@ -579,7 +595,7 @@ describe("DefaultScreenshotBackoffScheduler", () => {
         captureCallback,
         emitCallback,
         undefined,
-        fakeTimer
+        fakeTimer,
       );
 
       // Should not throw
@@ -603,7 +619,7 @@ describe("DefaultScreenshotBackoffScheduler", () => {
         captureCallback,
         emitCallback,
         { intervals: [0, 100, 200] },
-        fakeTimer
+        fakeTimer,
       );
 
       scheduler.startBackoffSequence();
@@ -629,7 +645,7 @@ describe("DefaultScreenshotBackoffScheduler", () => {
         captureCallback,
         emitCallback,
         { intervals: [0, 100, 200] },
-        fakeTimer
+        fakeTimer,
       );
 
       scheduler.startBackoffSequence();
@@ -648,7 +664,7 @@ describe("DefaultScreenshotBackoffScheduler", () => {
       // in flight. When the first capture finally resolves, its frame must be
       // discarded (the sequence id moved on) -- only sequence 2's frame emits.
       let releaseFirstCapture: () => void = () => {};
-      const firstCaptureGate = new Promise<void>(resolve => {
+      const firstCaptureGate = new Promise<void>((resolve) => {
         releaseFirstCapture = resolve;
       });
 
@@ -665,7 +681,7 @@ describe("DefaultScreenshotBackoffScheduler", () => {
         captureCallback,
         emitCallback,
         { intervals: [0] },
-        fakeTimer
+        fakeTimer,
       );
 
       scheduler.startBackoffSequence();
@@ -693,7 +709,7 @@ describe("DefaultScreenshotBackoffScheduler", () => {
         captureCallback,
         emitCallback,
         { intervals: [0] },
-        fakeTimer
+        fakeTimer,
       );
 
       // First sequence
@@ -735,7 +751,7 @@ describe("DefaultScreenshotBackoffScheduler minCaptureIntervalMs throttle", () =
         keepAliveIntervalMs: null,
         minCaptureIntervalMs: FLOOR,
       },
-      fakeTimer
+      fakeTimer,
     );
   }
 
@@ -791,7 +807,7 @@ describe("DefaultScreenshotBackoffScheduler minCaptureIntervalMs throttle", () =
       },
       () => {},
       { intervals: [0, 100, 300, 500, 800, 1300], keepAliveIntervalMs: null },
-      fakeTimer
+      fakeTimer,
     );
 
     scheduler.startBackoffSequence();
@@ -817,7 +833,7 @@ describe("DefaultScreenshotBackoffScheduler stop() vs cancelPendingCaptures()", 
       },
       () => {},
       { intervals: [0, 100], keepAliveIntervalMs: null, minCaptureIntervalMs: FLOOR },
-      fakeTimer
+      fakeTimer,
     );
   }
 
@@ -866,7 +882,7 @@ describe("DefaultScreenshotBackoffScheduler keepalive respects the floor", () =>
       },
       () => {},
       { intervals: [0], keepAliveIntervalMs: 250, minCaptureIntervalMs: FLOOR },
-      fakeTimer
+      fakeTimer,
     );
 
     scheduler.startBackoffSequence();
@@ -896,7 +912,7 @@ describe("DefaultScreenshotBackoffScheduler noteCaptureStarted() (external captu
       },
       () => {},
       { intervals: [0, 100, 300], keepAliveIntervalMs: null, minCaptureIntervalMs: FLOOR },
-      fakeTimer
+      fakeTimer,
     );
   }
 

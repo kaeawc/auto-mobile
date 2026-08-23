@@ -14,17 +14,17 @@
 
 ### Expected Reliability by Scenario
 
-These are the strategy's *design expectations*, not figures from a committed
+These are the strategy's _design expectations_, not figures from a committed
 benchmark (no such dataset exists in the repo — see the note in
 [Fingerprinting](fingerprinting.md#design-foundation)):
 
-| Scenario | Strategy | Expected reliability | Notes |
-|----------|----------|----------------------|-------|
-| SDK app, no keyboard | Navigation ID | High | Explicit navigation identifier |
-| SDK app, with keyboard | Cached Nav ID | High | Keyboard occlusion handled via cache |
-| Scrolling content | Shallow Scrollable | High | Container metadata stays stable |
-| Tab navigation | Shallow Scrollable | High | Selected state preserved |
-| Non-SDK app | Shallow Scrollable | Moderate | Depends on hierarchy distinctiveness |
+| Scenario               | Strategy           | Expected reliability | Notes                                |
+| ---------------------- | ------------------ | -------------------- | ------------------------------------ |
+| SDK app, no keyboard   | Navigation ID      | High                 | Explicit navigation identifier       |
+| SDK app, with keyboard | Cached Nav ID      | High                 | Keyboard occlusion handled via cache |
+| Scrolling content      | Shallow Scrollable | High                 | Container metadata stays stable      |
+| Tab navigation         | Shallow Scrollable | High                 | Selected state preserved             |
+| Non-SDK app            | Shallow Scrollable | Moderate             | Depends on hierarchy distinctiveness |
 
 #### Overall Design Expectations
 

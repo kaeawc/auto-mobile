@@ -3,14 +3,15 @@ import {
   DefaultCtrlProxyCodesignVerifier,
   parseTeamIdentifier,
   type CodesignExec,
-  type CodesignExecOutput
+  type CodesignExecOutput,
 } from "../../src/utils/ios-cmdline-tools/CtrlProxyCodesignVerifier";
 import * as path from "path";
 
 /** Records every invocation and replays scripted outputs keyed by the tool + first flag. */
-function scriptedExec(
-  responses: Record<string, CodesignExecOutput>
-): { exec: CodesignExec; calls: Array<{ file: string; args: readonly string[] }> } {
+function scriptedExec(responses: Record<string, CodesignExecOutput>): {
+  exec: CodesignExec;
+  calls: Array<{ file: string; args: readonly string[] }>;
+} {
   const calls: Array<{ file: string; args: readonly string[] }> = [];
   const exec: CodesignExec = async (file, args) => {
     calls.push({ file, args });
@@ -22,8 +23,8 @@ function scriptedExec(
 
 const APP = path.join("Build", "Products", "Debug-iphonesimulator", "CtrlProxyUITests-Runner.app");
 
-describe("parseTeamIdentifier", function() {
-  test("extracts the Team ID from codesign -dvv stderr", function() {
+describe("parseTeamIdentifier", function () {
+  test("extracts the Team ID from codesign -dvv stderr", function () {
     const output = [
       "Executable=/x/CtrlProxyUITests-Runner",
       "Identifier=com.example.runner",
@@ -33,14 +34,14 @@ describe("parseTeamIdentifier", function() {
     expect(parseTeamIdentifier(output)).toBe("ABCDE12345");
   });
 
-  test("returns null for an ad-hoc / unsigned bundle", function() {
+  test("returns null for an ad-hoc / unsigned bundle", function () {
     expect(parseTeamIdentifier("TeamIdentifier=not set")).toBeNull();
     expect(parseTeamIdentifier("no team here")).toBeNull();
   });
 });
 
-describe("DefaultCtrlProxyCodesignVerifier", function() {
-  test("reports verified + notarized + team id when all commands exit 0", async function() {
+describe("DefaultCtrlProxyCodesignVerifier", function () {
+  test("reports verified + notarized + team id when all commands exit 0", async function () {
     const { exec, calls } = scriptedExec({
       "codesign --verify": { code: 0, stdout: "", stderr: "" },
       "codesign -dvv": { code: 0, stdout: "", stderr: "TeamIdentifier=ABCDE12345\n" },
@@ -53,7 +54,7 @@ describe("DefaultCtrlProxyCodesignVerifier", function() {
     expect(calls[0].args).toContain(APP);
   });
 
-  test("reports verify failure with detail and non-notarized when codesign/spctl exit non-zero", async function() {
+  test("reports verify failure with detail and non-notarized when codesign/spctl exit non-zero", async function () {
     const { exec } = scriptedExec({
       "codesign --verify": { code: 1, stdout: "", stderr: "code object is not signed at all" },
       "codesign -dvv": { code: 1, stdout: "", stderr: "TeamIdentifier=not set\n" },

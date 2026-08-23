@@ -7,7 +7,10 @@ import { defaultTimer } from "../../src/utils/SystemTimer";
  * Fake ChildProcess for testing without spawning real processes
  * Simulates process lifecycle: spawn -> running -> exit
  */
-export class FakeChildProcess extends EventEmitter implements Partial<ChildProcessWithoutNullStreams> {
+export class FakeChildProcess
+  extends EventEmitter
+  implements Partial<ChildProcessWithoutNullStreams>
+{
   stdout: Readable;
   stderr: Readable;
   stdin: Writable;

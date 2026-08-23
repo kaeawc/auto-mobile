@@ -36,14 +36,14 @@ happens entirely through the daemon.
 
 ## Why not Espresso or UI Automator?
 
-| | AutoMobile JUnitRunner | Espresso / UI Automator |
-|---|---|---|
-| **Runs as** | JVM unit test | Instrumented APK on device |
-| **Build time** | No test APK compile | Full `assembleAndroidTest` pass |
-| **Device needed at** | Test execution | Build time (lint) + execution |
-| **Parallel devices** | Daemon-managed pool | One device per Gradle worker |
-| **AI recovery** | Optional self-healing | Not available |
-| **Test authoring** | YAML plans or AI prompt | Kotlin/Java code |
+|                      | AutoMobile JUnitRunner  | Espresso / UI Automator         |
+| -------------------- | ----------------------- | ------------------------------- |
+| **Runs as**          | JVM unit test           | Instrumented APK on device      |
+| **Build time**       | No test APK compile     | Full `assembleAndroidTest` pass |
+| **Device needed at** | Test execution          | Build time (lint) + execution   |
+| **Parallel devices** | Daemon-managed pool     | One device per Gradle worker    |
+| **AI recovery**      | Optional self-healing   | Not available                   |
+| **Test authoring**   | YAML plans or AI prompt | Kotlin/Java code                |
 
 ## Requirements
 
@@ -58,10 +58,10 @@ happens entirely through the daemon.
 ### 1. Add the dependency
 
 === "Version Catalog"
-    ```toml
-    # gradle/libs.versions.toml
-    [versions]
-    auto-mobile-junit-runner = "0.0.13"
+
+````toml # gradle/libs.versions.toml
+[versions]
+auto-mobile-junit-runner = "0.0.13"
 
     [libraries]
     auto-mobile-junit-runner = { module = "dev.jasonpearson.auto-mobile:auto-mobile-junit-runner", version.ref = "auto-mobile-junit-runner" }
@@ -75,12 +75,12 @@ happens entirely through the daemon.
     ```
 
 === "Direct"
-    ```kotlin
+`kotlin
     // app/build.gradle.kts
     dependencies {
         testImplementation("dev.jasonpearson.auto-mobile:auto-mobile-junit-runner:0.0.13")
     }
-    ```
+    `
 
 ### 2. Write a test
 
@@ -107,7 +107,7 @@ class AppLaunchTest {
         // AutoMobileRunner executes the YAML plan and fails the test if any step fails
     }
 }
-```
+````
 
 ### 3. Write the plan
 
@@ -149,10 +149,10 @@ step-by-step walkthrough including daemon verification and CtrlProxy pre-install
 
 ## Pages in this section
 
-| Page | What it covers |
-|---|---|
-| [Project Setup](project-setup.md) | Gradle config, version catalog, env vars, running locally |
-| [Writing Tests](writing-tests.md) | `@AutoMobileTest` parameters, YAML plan reference, examples |
+| Page                                | What it covers                                                  |
+| ----------------------------------- | --------------------------------------------------------------- |
+| [Project Setup](project-setup.md)   | Gradle config, version catalog, env vars, running locally       |
+| [Writing Tests](writing-tests.md)   | `@AutoMobileTest` parameters, YAML plan reference, examples     |
 | [CI Integration](ci-integration.md) | GitHub Actions, emulator.wtf ADB session, CtrlProxy pre-install |
 
 ## Related

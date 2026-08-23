@@ -24,7 +24,7 @@ describe("JimpBackend", () => {
       const source = await makeSourcePng(8, 8);
       const pipeline: ImagePipeline = {
         operations: [{ type: "resize", width: 4, height: 2, maintainAspectRatio: false }],
-        encoding: { mime: "image/png" }
+        encoding: { mime: "image/png" },
       };
 
       const out = await backend.execute(source, pipeline);
@@ -40,7 +40,7 @@ describe("JimpBackend", () => {
       const source = await makeSourcePng(8, 4);
       const pipeline: ImagePipeline = {
         operations: [{ type: "resize", width: 6, height: 6, maintainAspectRatio: true }],
-        encoding: { mime: "image/png" }
+        encoding: { mime: "image/png" },
       };
 
       const meta = await backend.metadata(await backend.execute(source, pipeline));
@@ -54,7 +54,7 @@ describe("JimpBackend", () => {
       const source = await makeSourcePng(8, 4);
       const pipeline: ImagePipeline = {
         operations: [{ type: "resize", width: 4, maintainAspectRatio: true }],
-        encoding: { mime: "image/png" }
+        encoding: { mime: "image/png" },
       };
 
       const meta = await backend.metadata(await backend.execute(source, pipeline));
@@ -68,7 +68,7 @@ describe("JimpBackend", () => {
       const source = await makeSourcePng(8, 8);
       const pipeline: ImagePipeline = {
         operations: [{ type: "crop", x: 1, y: 1, width: 3, height: 2 }],
-        encoding: { mime: "image/png" }
+        encoding: { mime: "image/png" },
       };
 
       const out = await backend.execute(source, pipeline);
@@ -81,7 +81,9 @@ describe("JimpBackend", () => {
       // pixel must equal the source gradient at (1,1) = rgba(16, 16, 1, 255).
       // (PNG is lossless and crop does no resampling, so bytes match exactly.)
       const cropped = await backend.rawPixels(out);
-      expect([cropped.data[0], cropped.data[1], cropped.data[2], cropped.data[3]]).toEqual([16, 16, 1, 255]);
+      expect([cropped.data[0], cropped.data[1], cropped.data[2], cropped.data[3]]).toEqual([
+        16, 16, 1, 255,
+      ]);
     });
 
     test("applies operations in recorded order (crop then resize)", async () => {
@@ -93,9 +95,9 @@ describe("JimpBackend", () => {
       const pipeline: ImagePipeline = {
         operations: [
           { type: "crop", x: 0, y: 0, width: 4, height: 4 },
-          { type: "resize", width: 2, maintainAspectRatio: true }
+          { type: "resize", width: 2, maintainAspectRatio: true },
         ],
-        encoding: { mime: "image/png" }
+        encoding: { mime: "image/png" },
       };
 
       const meta = await backend.metadata(await backend.execute(source, pipeline));
@@ -109,7 +111,7 @@ describe("JimpBackend", () => {
       const source = await makeSourcePng();
       const pipeline: ImagePipeline = {
         operations: [],
-        encoding: { mime: "image/webp", options: { quality: 60 } }
+        encoding: { mime: "image/webp", options: { quality: 60 } },
       };
 
       await expect(backend.execute(source, pipeline)).rejects.toThrow("does not encode WebP");
@@ -122,21 +124,31 @@ describe("JimpBackend", () => {
       // kernel averages neighbors, so the two must differ on at least one channel.
       const source = await makeSourcePng(4, 4);
 
-      const nearest = await backend.rawPixels(await backend.execute(source, {
-        operations: [{ type: "resize", width: 2, height: 2, maintainAspectRatio: false, mode: "nearest" }],
-        encoding: { mime: "image/png" }
-      }));
-      const dflt = await backend.rawPixels(await backend.execute(source, {
-        operations: [{ type: "resize", width: 2, height: 2, maintainAspectRatio: false }],
-        encoding: { mime: "image/png" }
-      }));
+      const nearest = await backend.rawPixels(
+        await backend.execute(source, {
+          operations: [
+            { type: "resize", width: 2, height: 2, maintainAspectRatio: false, mode: "nearest" },
+          ],
+          encoding: { mime: "image/png" },
+        }),
+      );
+      const dflt = await backend.rawPixels(
+        await backend.execute(source, {
+          operations: [{ type: "resize", width: 2, height: 2, maintainAspectRatio: false }],
+          encoding: { mime: "image/png" },
+        }),
+      );
 
       // Nearest top-left must equal the exact source top-left pixel (16-color
       // gradient at (0,0) = rgba(0,0,0,255)); the source's (1,1) is rgba(16,16,1)
       // so a 2x1-block bilinear average differs from the pure source sample.
       const src = await backend.rawPixels(source);
-      expect([nearest.data[0], nearest.data[1], nearest.data[2], nearest.data[3]])
-        .toEqual([src.data[0], src.data[1], src.data[2], src.data[3]]);
+      expect([nearest.data[0], nearest.data[1], nearest.data[2], nearest.data[3]]).toEqual([
+        src.data[0],
+        src.data[1],
+        src.data[2],
+        src.data[3],
+      ]);
       const sameAsDefault =
         nearest.data[0] === dflt.data[0] &&
         nearest.data[1] === dflt.data[1] &&
@@ -149,10 +161,14 @@ describe("JimpBackend", () => {
       const source = await makeSourcePng(8, 8);
       // maintainAspectRatio:true routes through jimp cover(); assert mode flows
       // through by producing exact target dims without throwing.
-      const meta = await backend.metadata(await backend.execute(source, {
-        operations: [{ type: "resize", width: 4, height: 4, maintainAspectRatio: true, mode: "nearest" }],
-        encoding: { mime: "image/png" }
-      }));
+      const meta = await backend.metadata(
+        await backend.execute(source, {
+          operations: [
+            { type: "resize", width: 4, height: 4, maintainAspectRatio: true, mode: "nearest" },
+          ],
+          encoding: { mime: "image/png" },
+        }),
+      );
       expect(meta.width).toBe(4);
       expect(meta.height).toBe(4);
     });

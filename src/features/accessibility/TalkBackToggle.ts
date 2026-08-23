@@ -23,7 +23,7 @@ export class TalkBackToggle {
     adb: AdbExecutor | null = null,
     private readonly detector: AccessibilityDetector = accessibilityDetector,
     private readonly timer: Timer = defaultTimer,
-    secureSettings: SecureSettingsRpc | null = null
+    secureSettings: SecureSettingsRpc | null = null,
   ) {
     this.adb = adb ?? defaultAdbClientFactory.create(device);
     this.secureSettings = secureSettings ?? new CtrlProxySecureSettingsRpc(device);
@@ -40,7 +40,7 @@ export class TalkBackToggle {
         return {
           supported: false,
           applied: false,
-          reason: "TalkBack service not installed on this device"
+          reason: "TalkBack service not installed on this device",
         };
       }
     }
@@ -54,7 +54,7 @@ export class TalkBackToggle {
       return {
         supported: true,
         applied: false,
-        currentState: enabled
+        currentState: enabled,
       };
     }
 
@@ -72,12 +72,14 @@ export class TalkBackToggle {
       }
     } catch (error) {
       const reason = errorMessage(error);
-      logger.warn(`[TalkBackToggle] Failed to ${enabled ? "enable" : "disable"} TalkBack: ${reason}`);
+      logger.warn(
+        `[TalkBackToggle] Failed to ${enabled ? "enable" : "disable"} TalkBack: ${reason}`,
+      );
       return {
         supported: true,
         applied: false,
         currentState: talkBackCurrentlyEnabled,
-        reason
+        reason,
       };
     }
 
@@ -90,7 +92,7 @@ export class TalkBackToggle {
     return {
       supported: true,
       applied: confirmedEnabled === enabled,
-      currentState: confirmedEnabled
+      currentState: confirmedEnabled,
     };
   }
 
@@ -107,7 +109,11 @@ export class TalkBackToggle {
 
   // Why: try the a11y service first to skip ADB round-trip latency; fall back to ADB
   // because Settings.Secure writes require system-app privileges that the service may lack.
-  private async writeSecureSetting(key: string, value: string, valueType: "string" | "int" = "string"): Promise<void> {
+  private async writeSecureSetting(
+    key: string,
+    value: string,
+    valueType: "string" | "int" = "string",
+  ): Promise<void> {
     try {
       const result = await this.secureSettings.put(key, value, valueType);
       if (result.success) {
@@ -184,7 +190,11 @@ export class TalkBackToggle {
     if (currentServices && currentServices !== "null") {
       for (const s of currentServices.split(":")) {
         const trimmed = s.trim();
-        if (trimmed && !trimmed.includes(TALKBACK_PACKAGE) && !trimmed.includes("TalkBackService")) {
+        if (
+          trimmed &&
+          !trimmed.includes(TALKBACK_PACKAGE) &&
+          !trimmed.includes("TalkBackService")
+        ) {
           otherServices.push(trimmed);
         }
       }
@@ -202,7 +212,7 @@ export class TalkBackToggle {
       const result = await this.adb.executeCommand(`shell pm list packages ${TALKBACK_PACKAGE}`);
       const installed = result.stdout
         .split("\n")
-        .some(line => line.trim() === `package:${TALKBACK_PACKAGE}`);
+        .some((line) => line.trim() === `package:${TALKBACK_PACKAGE}`);
 
       if (!installed) {
         logger.debug("[TalkBackToggle] TalkBack package not found");
@@ -243,26 +253,17 @@ export class TalkBackToggle {
         // Match by resource-id rather than text to support non-English locales
         const nodeMatch = /<node[^>]*resource-id="android:id\/button1"[^>]*\/?>/.exec(xml);
         if (nodeMatch) {
-          const boundsMatch = /bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/.exec(
-            nodeMatch[0]
-          );
+          const boundsMatch = /bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/.exec(nodeMatch[0]);
           if (boundsMatch) {
-            const x = Math.round(
-              (parseInt(boundsMatch[1], 10) + parseInt(boundsMatch[3], 10)) / 2
-            );
-            const y = Math.round(
-              (parseInt(boundsMatch[2], 10) + parseInt(boundsMatch[4], 10)) / 2
-            );
+            const x = Math.round((parseInt(boundsMatch[1], 10) + parseInt(boundsMatch[3], 10)) / 2);
+            const y = Math.round((parseInt(boundsMatch[2], 10) + parseInt(boundsMatch[4], 10)) / 2);
             await this.adb.executeCommand(`shell input tap ${x} ${y}`);
             logger.debug("[TalkBackToggle] Dismissed TalkBack permission dialog");
             return;
           }
         }
       } catch (error) {
-        logger.debug(
-          `[TalkBackToggle] Dialog dismissal attempt ${attempt + 1} failed:`,
-          error
-        );
+        logger.debug(`[TalkBackToggle] Dialog dismissal attempt ${attempt + 1} failed:`, error);
       }
     }
     logger.warn("[TalkBackToggle] TalkBack permission dialog not found — continuing");

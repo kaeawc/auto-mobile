@@ -31,7 +31,7 @@ describe("navigation provenance migration — file-backed lifecycle", () => {
           SELECT name FROM sqlite_master WHERE type = 'table' AND name IN
           ('navigation_build_keys','navigation_node_observations','navigation_edge_observations')
         `.execute(db);
-        const names = rows.rows.map(r => r.name).sort();
+        const names = rows.rows.map((r) => r.name).sort();
         expect(names).toEqual([
           "navigation_build_keys",
           "navigation_edge_observations",
@@ -41,6 +41,6 @@ describe("navigation provenance migration — file-backed lifecycle", () => {
         await lifecycle.close();
       }
     },
-    WINDOWS_FILE_DB_TEST_TIMEOUT_MS
+    WINDOWS_FILE_DB_TEST_TIMEOUT_MS,
   );
 });

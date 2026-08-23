@@ -48,11 +48,14 @@ interface StartedProcess {
 class CdpClient {
   private readonly socket: WebSocket;
   private nextId = 1;
-  private readonly pending = new Map<number, { resolve: (value: CdpResponse) => void; reject: (error: Error) => void }>();
+  private readonly pending = new Map<
+    number,
+    { resolve: (value: CdpResponse) => void; reject: (error: Error) => void }
+  >();
 
   private constructor(socket: WebSocket) {
     this.socket = socket;
-    socket.on("message", raw => {
+    socket.on("message", (raw) => {
       const message = JSON.parse(raw.toString()) as CdpResponse;
       if (message.id === undefined) {
         return;
@@ -104,13 +107,13 @@ function startProcess(command: string, args: string[], cwd: string): StartedProc
   const process = spawn(command, args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
   let output = "";
   let spawnError: Error | undefined;
-  process.stdout.on("data", chunk => {
+  process.stdout.on("data", (chunk) => {
     output = appendLog(output, chunk);
   });
-  process.stderr.on("data", chunk => {
+  process.stderr.on("data", (chunk) => {
     output = appendLog(output, chunk);
   });
-  process.on("error", error => {
+  process.on("error", (error) => {
     spawnError = error;
     output = appendLog(output, Buffer.from(`${error.message}\n`));
   });
@@ -120,7 +123,7 @@ function startProcess(command: string, args: string[], cwd: string): StartedProc
 async function waitFor(
   predicate: () => boolean | Promise<boolean>,
   message: string | (() => string),
-  timeoutMs: number = 15_000
+  timeoutMs: number = 15_000,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -174,7 +177,8 @@ async function waitForHttpServer(
     } catch (error) {
       if (
         error instanceof Error &&
-        (error.message.startsWith(`${name} exited before readiness`) || error.message.startsWith(`${name} failed to start`))
+        (error.message.startsWith(`${name} exited before readiness`) ||
+          error.message.startsWith(`${name} failed to start`))
       ) {
         throw error;
       }
@@ -183,15 +187,20 @@ async function waitForHttpServer(
   }, `${name} did not start:\n${logs()}`);
 }
 
-async function stopProcess(process: ChildProcessWithoutNullStreams | undefined, graceMs: number = 3_000): Promise<void> {
-  if (!process || process.pid === undefined || process.exitCode !== null || process.signalCode !== null) {
+async function stopProcess(
+  process: ChildProcessWithoutNullStreams | undefined,
+  graceMs: number = 3_000,
+): Promise<void> {
+  if (
+    !process ||
+    process.pid === undefined ||
+    process.exitCode !== null ||
+    process.signalCode !== null
+  ) {
     return;
   }
   process.kill("SIGTERM");
-  await Promise.race([
-    once(process, "exit"),
-    Bun.sleep(graceMs),
-  ]);
+  await Promise.race([once(process, "exit"), Bun.sleep(graceMs)]);
   if (process.exitCode === null && process.signalCode === null) {
     process.kill("SIGKILL");
     await once(process, "exit");
@@ -203,9 +212,10 @@ function resolveChromeBinary(): string {
   if (configured) {
     return configured;
   }
-  const candidates = process.platform === "darwin"
-    ? ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"]
-    : ["/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser"];
+  const candidates =
+    process.platform === "darwin"
+      ? ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"]
+      : ["/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser"];
   const binary = candidates.find(existsSync);
   if (!binary) {
     throw new Error("Chrome is required; install it or set AUTOMOBILE_CHROME_BINARY");
@@ -215,24 +225,30 @@ function resolveChromeBinary(): string {
 
 async function waitForChromeTarget(port: string, chrome: StartedProcess): Promise<ChromeTarget> {
   let targets: ChromeTarget[] = [];
-  await waitFor(async () => {
-    const spawnError = chrome.error();
-    if (spawnError) {
-      throw new Error(`Chrome failed to start: ${spawnError.message}`);
-    }
-    const exited = exitedProcessDescription(chrome.process);
-    if (exited) {
-      throw new Error(`Chrome exited before DevTools started (${exited}):\n${chrome.logs()}`);
-    }
-    try {
-      const response = await fetch(`http://127.0.0.1:${port}/json/list`);
-      targets = await response.json() as ChromeTarget[];
-      return targets.some(target => target.type === "page" && target.webSocketDebuggerUrl);
-    } catch {
-      return false;
-    }
-  }, () => `Chrome DevTools did not expose a page target within 30000ms:\n${chrome.logs()}`, 30_000);
-  const target = targets.find(candidate => candidate.type === "page" && candidate.webSocketDebuggerUrl);
+  await waitFor(
+    async () => {
+      const spawnError = chrome.error();
+      if (spawnError) {
+        throw new Error(`Chrome failed to start: ${spawnError.message}`);
+      }
+      const exited = exitedProcessDescription(chrome.process);
+      if (exited) {
+        throw new Error(`Chrome exited before DevTools started (${exited}):\n${chrome.logs()}`);
+      }
+      try {
+        const response = await fetch(`http://127.0.0.1:${port}/json/list`);
+        targets = (await response.json()) as ChromeTarget[];
+        return targets.some((target) => target.type === "page" && target.webSocketDebuggerUrl);
+      } catch {
+        return false;
+      }
+    },
+    () => `Chrome DevTools did not expose a page target within 30000ms:\n${chrome.logs()}`,
+    30_000,
+  );
+  const target = targets.find(
+    (candidate) => candidate.type === "page" && candidate.webSocketDebuggerUrl,
+  );
   if (!target?.webSocketDebuggerUrl) {
     throw new Error("Chrome DevTools returned no debuggable page");
   }
@@ -250,7 +266,9 @@ async function reserveLoopbackPort(): Promise<number> {
     server.close();
     throw new Error("Could not reserve a loopback port for Chrome DevTools");
   }
-  await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  await new Promise<void>((resolve, reject) =>
+    server.close((error) => (error ? reject(error) : resolve())),
+  );
   return address.port;
 }
 
@@ -266,7 +284,8 @@ async function openReader(chrome: StartedProcess, debugPort: number): Promise<Cd
   await waitFor(async () => {
     try {
       const response = await cdp.command("Runtime.evaluate", {
-        expression: 'document.readyState === "complete" && document.querySelector("video") !== null',
+        expression:
+          'document.readyState === "complete" && document.querySelector("video") !== null',
         returnByValue: true,
       });
       return response.result?.result?.value === true;
@@ -294,7 +313,11 @@ async function readDecodedVideo(cdp: CdpClient): Promise<DecodedVideo> {
       return { width: video?.videoWidth ?? 0, height: video?.videoHeight ?? 0, decodedFrames: quality?.totalVideoFrames ?? 0 };
     })()
   `;
-  const response = await cdp.command("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
+  const response = await cdp.command("Runtime.evaluate", {
+    expression,
+    awaitPromise: true,
+    returnByValue: true,
+  });
   const value = response.result?.result?.value as DecodedVideo | undefined;
   if (!value) {
     throw new Error("Chrome did not return video playback quality");
@@ -317,8 +340,13 @@ async function boundedOnce(
   let timer: NodeJS.Timeout | undefined;
   const deadline = new Promise<never>((_, reject) => {
     timer = defaultTimer.setTimeout(
-      () => reject(new Error(`${description} did not emit '${event}' within ${timeoutMs}ms — bounded real-I/O deadline hit`)),
-      timeoutMs
+      () =>
+        reject(
+          new Error(
+            `${description} did not emit '${event}' within ${timeoutMs}ms — bounded real-I/O deadline hit`,
+          ),
+        ),
+      timeoutMs,
     );
   });
   try {
@@ -350,41 +378,59 @@ test.skipIf(process.platform === "win32")("force-kills a child that ignores SIGT
   }
 });
 
-test.skipIf(process.platform === "win32")("rejects a stale listener when the server child has already exited", async () => {
-  const child = spawn("/bin/sh", ["-c", "exit 7"], {
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  try {
-    await boundedOnce(child, "exit", "immediately-exiting child");
+test.skipIf(process.platform === "win32")(
+  "rejects a stale listener when the server child has already exited",
+  async () => {
+    const child = spawn("/bin/sh", ["-c", "exit 7"], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    try {
+      await boundedOnce(child, "exit", "immediately-exiting child");
 
-    await expect(waitForHttpServer(child, () => "address already in use", "http://127.0.0.1:8889/", "MediaMTX"))
-      .rejects.toThrow("MediaMTX exited before readiness (exit code 7):\naddress already in use");
-  } finally {
-    if (child.exitCode === null && child.signalCode === null) {
-      child.kill("SIGKILL");
+      await expect(
+        waitForHttpServer(
+          child,
+          () => "address already in use",
+          "http://127.0.0.1:8889/",
+          "MediaMTX",
+        ),
+      ).rejects.toThrow("MediaMTX exited before readiness (exit code 7):\naddress already in use");
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill("SIGKILL");
+      }
     }
-  }
-});
+  },
+);
 
-test.skipIf(process.platform === "win32")("captures a child spawn error for the test body", async () => {
-  const started = startProcess(join(tmpdir(), "missing-mediamtx-test-binary"), [], tmpdir());
+test.skipIf(process.platform === "win32")(
+  "captures a child spawn error for the test body",
+  async () => {
+    const started = startProcess(join(tmpdir(), "missing-mediamtx-test-binary"), [], tmpdir());
 
-  await boundedOnce(started.process, "error", "missing-binary spawn");
+    await boundedOnce(started.process, "error", "missing-binary spawn");
 
-  expect(started.error()).toBeInstanceOf(Error);
-  await stopProcess(started.process, 1);
-  expect(started.process.pid).toBeUndefined();
-});
+    expect(started.error()).toBeInstanceOf(Error);
+    await stopProcess(started.process, 1);
+    expect(started.process.pid).toBeUndefined();
+  },
+);
 
 describeIntegration("MediaMTX WebRTC publisher integration (#4290)", () => {
   test("trickles candidates across a reconnect and Chrome decodes both WHEP sessions", async () => {
     const mediamtxBinary = process.env.AUTOMOBILE_MEDIAMTX_BINARY;
     if (!mediamtxBinary) {
-      throw new Error("AUTOMOBILE_MEDIAMTX_BINARY is required; use bun run test:integration:webrtc-mediamtx");
+      throw new Error(
+        "AUTOMOBILE_MEDIAMTX_BINARY is required; use bun run test:integration:webrtc-mediamtx",
+      );
     }
     const repoRoot = resolve(import.meta.dir, "../..");
     const tempDir = await mkdtemp(join(tmpdir(), "automobile-mediamtx-"));
-    const mediaMtx = startProcess(mediamtxBinary, [join(repoRoot, "examples/mediamtx/mediamtx.yml")], tempDir);
+    const mediaMtx = startProcess(
+      mediamtxBinary,
+      [join(repoRoot, "examples/mediamtx/mediamtx.yml")],
+      tempDir,
+    );
     let ffmpeg: ChildProcessWithoutNullStreams | undefined;
     let chrome: StartedProcess | undefined;
     let cdp: CdpClient | undefined;
@@ -397,7 +443,7 @@ describeIntegration("MediaMTX WebRTC publisher integration (#4290)", () => {
         trickleIce: true,
       },
       {
-        createWhipClient: options => {
+        createWhipClient: (options) => {
           const client = new WhipClient(options);
           const patchCandidate = client.patchCandidate.bind(client);
           client.patchCandidate = async (resourceUrl, etag, fragment, signal) => {
@@ -406,7 +452,7 @@ describeIntegration("MediaMTX WebRTC publisher integration (#4290)", () => {
           };
           return client;
         },
-      }
+      },
     );
 
     try {
@@ -425,21 +471,46 @@ describeIntegration("MediaMTX WebRTC publisher integration (#4290)", () => {
       }
       await waitFor(
         () => patchedResources.includes(initialResourceUrl),
-        "MediaMTX did not receive a trickled candidate for the initial WHIP resource"
+        "MediaMTX did not receive a trickled candidate for the initial WHIP resource",
       );
-      const ffmpegProcess = startProcess("ffmpeg", [
-        "-hide_banner", "-loglevel", "error", "-re",
-        "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=10",
-        "-an", "-c:v", "libx264", "-profile:v", "baseline", "-level:v", "3.1",
-        "-preset", "ultrafast", "-tune", "zerolatency", "-g", "10", "-keyint_min", "10",
-        "-f", "h264", "pipe:1",
-      ], tempDir);
+      const ffmpegProcess = startProcess(
+        "ffmpeg",
+        [
+          "-hide_banner",
+          "-loglevel",
+          "error",
+          "-re",
+          "-f",
+          "lavfi",
+          "-i",
+          "testsrc2=size=320x240:rate=10",
+          "-an",
+          "-c:v",
+          "libx264",
+          "-profile:v",
+          "baseline",
+          "-level:v",
+          "3.1",
+          "-preset",
+          "ultrafast",
+          "-tune",
+          "zerolatency",
+          "-g",
+          "10",
+          "-keyint_min",
+          "10",
+          "-f",
+          "h264",
+          "pipe:1",
+        ],
+        tempDir,
+      );
       ffmpeg = ffmpegProcess.process;
       let ffmpegErrors = "";
-      ffmpeg.stderr.on("data", chunk => {
+      ffmpeg.stderr.on("data", (chunk) => {
         ffmpegErrors = appendLog(ffmpegErrors, chunk);
       });
-      ffmpeg.stdout.on("data", chunk => publisher.writeH264Chunk(chunk));
+      ffmpeg.stdout.on("data", (chunk) => publisher.writeH264Chunk(chunk));
 
       await waitFor(() => {
         const spawnError = ffmpegProcess.error();
@@ -450,11 +521,19 @@ describeIntegration("MediaMTX WebRTC publisher integration (#4290)", () => {
       }, "publisher did not send synthetic H.264 frames");
       const profileDir = join(tempDir, "chrome-profile");
       const debugPort = await reserveLoopbackPort();
-      chrome = startProcess(resolveChromeBinary(), [
-        "--headless=new", "--no-first-run", "--no-default-browser-check",
-        "--autoplay-policy=no-user-gesture-required", `--remote-debugging-port=${debugPort}`,
-        `--user-data-dir=${profileDir}`, "about:blank",
-      ], tempDir);
+      chrome = startProcess(
+        resolveChromeBinary(),
+        [
+          "--headless=new",
+          "--no-first-run",
+          "--no-default-browser-check",
+          "--autoplay-policy=no-user-gesture-required",
+          `--remote-debugging-port=${debugPort}`,
+          `--user-data-dir=${profileDir}`,
+          "about:blank",
+        ],
+        tempDir,
+      );
       cdp = await openReader(chrome, debugPort);
       const decoded = await readDecodedVideo(cdp);
 
@@ -470,7 +549,11 @@ describeIntegration("MediaMTX WebRTC publisher integration (#4290)", () => {
       let reconnectedResourceUrl = "";
       await waitFor(() => {
         const resourceUrl = publisher.getDescriptor().resourceUrl;
-        if (!resourceUrl || resourceUrl === initialResourceUrl || !patchedResources.includes(resourceUrl)) {
+        if (
+          !resourceUrl ||
+          resourceUrl === initialResourceUrl ||
+          !patchedResources.includes(resourceUrl)
+        ) {
           return false;
         }
         reconnectedResourceUrl = resourceUrl;
@@ -483,11 +566,19 @@ describeIntegration("MediaMTX WebRTC publisher integration (#4290)", () => {
       await stopProcess(chrome.process);
       chrome = undefined;
       const reconnectDebugPort = await reserveLoopbackPort();
-      chrome = startProcess(resolveChromeBinary(), [
-        "--headless=new", "--no-first-run", "--no-default-browser-check",
-        "--autoplay-policy=no-user-gesture-required", `--remote-debugging-port=${reconnectDebugPort}`,
-        `--user-data-dir=${join(tempDir, "chrome-reconnect-profile")}`, "about:blank",
-      ], tempDir);
+      chrome = startProcess(
+        resolveChromeBinary(),
+        [
+          "--headless=new",
+          "--no-first-run",
+          "--no-default-browser-check",
+          "--autoplay-policy=no-user-gesture-required",
+          `--remote-debugging-port=${reconnectDebugPort}`,
+          `--user-data-dir=${join(tempDir, "chrome-reconnect-profile")}`,
+          "about:blank",
+        ],
+        tempDir,
+      );
       cdp = await openReader(chrome, reconnectDebugPort);
       const recovered = await readDecodedVideo(cdp);
       expect(recovered.width).toBe(320);

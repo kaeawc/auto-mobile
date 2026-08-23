@@ -20,7 +20,7 @@ describe("BaseVisualChange UI stability platform guard", () => {
     updatedAt: Date.now(),
     screenSize: { width: 1080, height: 1920 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-    viewHierarchy: { node: {} }
+    viewHierarchy: { node: {} },
   });
 
   function createVisualChange(platform: "android" | "ios"): BaseVisualChange {
@@ -41,16 +41,17 @@ describe("BaseVisualChange UI stability platform guard", () => {
     fakeWindow = new FakeWindow();
 
     fakeObserveScreen.setObserveResult(createObserveResult());
-    fakeWindow.configureCachedActiveWindow({ appId: packageName, activityName: "Main", layoutSeqSum: 1 });
+    fakeWindow.configureCachedActiveWindow({
+      appId: packageName,
+      activityName: "Main",
+      layoutSeqSum: 1,
+    });
   });
 
   test("runs gfxinfo UI stability tracking on Android", async () => {
     const instance = createVisualChange("android");
 
-    await instance.observedInteraction(
-      async () => ({ success: true }),
-      { changeExpected: false }
-    );
+    await instance.observedInteraction(async () => ({ success: true }), { changeExpected: false });
 
     expect(fakeAwaitIdle.wasMethodCalled("initializeUiStabilityTracking")).toBe(true);
   });
@@ -63,7 +64,7 @@ describe("BaseVisualChange UI stability platform guard", () => {
 
     const result = await instance.observedInteraction(
       async () => ({ success: false, error: "Set text timed out after 5000ms" }),
-      { changeExpected: true }
+      { changeExpected: true },
     );
 
     // The inner block explicitly failed — observedInteraction must NOT override to success
@@ -77,10 +78,9 @@ describe("BaseVisualChange UI stability platform guard", () => {
     // Factory returns distinct objects — visual change detected via reference inequality
     fakeObserveScreen.setObserveResult(() => createObserveResult());
 
-    const result = await instance.observedInteraction(
-      async () => ({ success: true }),
-      { changeExpected: true }
-    );
+    const result = await instance.observedInteraction(async () => ({ success: true }), {
+      changeExpected: true,
+    });
 
     // Inner block succeeded and hierarchies are different objects → success: true
     expect(result.success).toBe(true);
@@ -89,10 +89,7 @@ describe("BaseVisualChange UI stability platform guard", () => {
   test("skips gfxinfo UI stability tracking on iOS", async () => {
     const instance = createVisualChange("ios");
 
-    await instance.observedInteraction(
-      async () => ({ success: true }),
-      { changeExpected: false }
-    );
+    await instance.observedInteraction(async () => ({ success: true }), { changeExpected: false });
 
     expect(fakeAwaitIdle.wasMethodCalled("initializeUiStabilityTracking")).toBe(false);
     expect(fakeAwaitIdle.getWaitForUiStabilityCallCount()).toBe(0);

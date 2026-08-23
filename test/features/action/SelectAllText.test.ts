@@ -24,8 +24,10 @@ describe("SelectAllText Android", () => {
       };
     });
     const observedSpy = spyOn(
-      selectAllText as unknown as { observedInteraction: (fn: () => Promise<unknown>) => Promise<unknown> },
-      "observedInteraction"
+      selectAllText as unknown as {
+        observedInteraction: (fn: () => Promise<unknown>) => Promise<unknown>;
+      },
+      "observedInteraction",
     ).mockImplementation(async (fn: () => Promise<unknown>) => fn());
 
     await selectAllText.execute();
@@ -40,13 +42,19 @@ describe("SelectAllText Android", () => {
 });
 
 describe("SelectAllText outcomes", () => {
-  const androidDevice: BootedDevice = { name: "Android", platform: "android", deviceId: "android-1" };
+  const androidDevice: BootedDevice = {
+    name: "Android",
+    platform: "android",
+    deviceId: "android-1",
+  };
   const iosDevice: BootedDevice = { name: "iPhone", platform: "ios", deviceId: "ios-1" };
 
   const runWithoutObservation = (selectAllText: SelectAllText) => {
     const observedSpy = spyOn(
-      selectAllText as unknown as { observedInteraction: (fn: () => Promise<unknown>) => Promise<unknown> },
-      "observedInteraction"
+      selectAllText as unknown as {
+        observedInteraction: (fn: () => Promise<unknown>) => Promise<unknown>;
+      },
+      "observedInteraction",
     ).mockImplementation(async (fn: () => Promise<unknown>) => fn());
     return { promise: selectAllText.execute(), observedSpy };
   };
@@ -87,7 +95,11 @@ describe("SelectAllText outcomes", () => {
 
   test("surfaces the iOS CtrlProxy failure error verbatim", async () => {
     const selectAllText = new SelectAllText(iosDevice, new FakeAdbClientFactory(), () => ({
-      requestSelectAll: async () => ({ success: false, totalTimeMs: 3, error: "editor not first responder" }),
+      requestSelectAll: async () => ({
+        success: false,
+        totalTimeMs: 3,
+        error: "editor not first responder",
+      }),
     }));
     const { promise, observedSpy } = runWithoutObservation(selectAllText);
     const result = await promise;

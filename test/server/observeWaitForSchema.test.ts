@@ -3,7 +3,12 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "fs";
 import { DefaultElementFinder } from "../../src/features/utility/ElementFinder";
 import type { ObserveResult, ViewHierarchyResult } from "../../src/models";
-import { findWaitForElement, observeSchema, registerObserveTools, waitForObservation } from "../../src/server/observeTools";
+import {
+  findWaitForElement,
+  observeSchema,
+  registerObserveTools,
+  waitForObservation,
+} from "../../src/server/observeTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -17,7 +22,7 @@ const bounds = (left: number, top: number, right: number, bottom: number) => ({
 
 const makeHierarchy = (
   nodes: unknown[],
-  screenSize = { width: 200, height: 200 }
+  screenSize = { width: 200, height: 200 },
 ): ViewHierarchyResult => ({
   hierarchy: {
     node: {
@@ -80,7 +85,7 @@ describe("observeSchema waitFor.container", () => {
         waitFor: {
           textAny: [],
         },
-      })
+      }),
     ).toThrow();
   });
 
@@ -102,7 +107,7 @@ describe("observeSchema waitFor.container", () => {
       observeSchema.parse({
         platform: "ios",
         waitFor,
-      })
+      }),
     ).toThrow();
   });
 
@@ -114,7 +119,7 @@ describe("observeSchema waitFor.container", () => {
           elementId: "com.app:id/name",
           container: { elementId: "com.app:id/list", text: "extra" },
         },
-      })
+      }),
     ).toThrow();
   });
 });
@@ -195,7 +200,7 @@ describe("observeSchema rich waitFor predicates", () => {
         waitFor: {
           matchType: "all",
         },
-      })
+      }),
     ).toThrow();
   });
 
@@ -207,7 +212,7 @@ describe("observeSchema rich waitFor predicates", () => {
           text: "[",
           textMatch: "regex",
         },
-      })
+      }),
     ).toThrow();
   });
 });
@@ -216,8 +221,7 @@ describe("published observe waitFor input schema", () => {
   const validatePublishedObserveInput = (input: unknown) => {
     (ToolRegistry as any).tools.clear();
     registerObserveTools();
-    const observeTool = ToolRegistry.getToolDefinitions()
-      .find(tool => tool.name === "observe");
+    const observeTool = ToolRegistry.getToolDefinitions().find((tool) => tool.name === "observe");
     expect(observeTool).toBeDefined();
 
     const ajv = new Ajv2020({ strict: false, allErrors: true });
@@ -256,74 +260,86 @@ describe("published observe waitFor input schema", () => {
   test("documents textMatch as applying only to waitFor.text", () => {
     (ToolRegistry as any).tools.clear();
     registerObserveTools();
-    const observeTool = ToolRegistry.getToolDefinitions()
-      .find(tool => tool.name === "observe");
+    const observeTool = ToolRegistry.getToolDefinitions().find((tool) => tool.name === "observe");
     expect(observeTool).toBeDefined();
 
     const descriptions = collectTextMatchDescriptions(observeTool!.inputSchema);
 
     expect(descriptions.length).toBeGreaterThan(0);
-    expect(new Set(descriptions)).toEqual(new Set([
-      "How to match waitFor.text; does not affect contentDescription",
-    ]));
+    expect(new Set(descriptions)).toEqual(
+      new Set(["How to match waitFor.text; does not affect contentDescription"]),
+    );
   });
 
   test("rejects selectorless predicate DSL forms while permitting whole-screen stable", () => {
-    expect(validatePublishedObserveInput({
-      platform: "android",
-      waitFor: { for: "appear" },
-    }).valid).toBe(false);
-    expect(validatePublishedObserveInput({
-      platform: "android",
-      waitFor: { for: "stable" },
-    }).valid).toBe(true);
-    expect(validatePublishedObserveInput({
-      platform: "android",
-      waitFor: { for: "stable", container: { elementId: "scope" } },
-    }).valid).toBe(false);
+    expect(
+      validatePublishedObserveInput({
+        platform: "android",
+        waitFor: { for: "appear" },
+      }).valid,
+    ).toBe(false);
+    expect(
+      validatePublishedObserveInput({
+        platform: "android",
+        waitFor: { for: "stable" },
+      }).valid,
+    ).toBe(true);
+    expect(
+      validatePublishedObserveInput({
+        platform: "android",
+        waitFor: { for: "stable", container: { elementId: "scope" } },
+      }).valid,
+    ).toBe(false);
   });
 
   test("requires text for the advertised textEquals DSL form", () => {
-    expect(validatePublishedObserveInput({
-      platform: "android",
-      waitFor: { for: "textEquals", elementId: "counter" },
-    }).valid).toBe(false);
-    expect(validatePublishedObserveInput({
-      platform: "android",
-      waitFor: { for: "textEquals", elementId: "counter", text: "5" },
-    }).valid).toBe(true);
+    expect(
+      validatePublishedObserveInput({
+        platform: "android",
+        waitFor: { for: "textEquals", elementId: "counter" },
+      }).valid,
+    ).toBe(false);
+    expect(
+      validatePublishedObserveInput({
+        platform: "android",
+        waitFor: { for: "textEquals", elementId: "counter", text: "5" },
+      }).valid,
+    ).toBe(true);
   });
 
   test("enforces the advertised container selector shape", () => {
     for (const container of [{}, { elementId: "scope", text: "Scope" }]) {
-      expect(validatePublishedObserveInput({
-        platform: "android",
-        waitFor: { for: "appear", elementId: "target", container },
-      }).valid).toBe(false);
+      expect(
+        validatePublishedObserveInput({
+          platform: "android",
+          waitFor: { for: "appear", elementId: "target", container },
+        }).valid,
+      ).toBe(false);
     }
   });
 
   test("rejects dual timeout aliases in the advertised schema", () => {
-    expect(validatePublishedObserveInput({
-      platform: "android",
-      waitFor: { for: "appear", elementId: "target", timeout: 1000, timeoutMs: 1000 },
-    }).valid).toBe(false);
+    expect(
+      validatePublishedObserveInput({
+        platform: "android",
+        waitFor: { for: "appear", elementId: "target", timeout: 1000, timeoutMs: 1000 },
+      }).valid,
+    ).toBe(false);
   });
 
   test("committed tool definitions document textMatch as applying only to waitFor.text", () => {
-    const toolDefinitions = JSON.parse(readFileSync(
-      new URL("../../schemas/tool-definitions.json", import.meta.url),
-      "utf8"
-    )) as Array<{ name: string; inputSchema: unknown }>;
-    const observeTool = toolDefinitions.find(tool => tool.name === "observe");
+    const toolDefinitions = JSON.parse(
+      readFileSync(new URL("../../schemas/tool-definitions.json", import.meta.url), "utf8"),
+    ) as Array<{ name: string; inputSchema: unknown }>;
+    const observeTool = toolDefinitions.find((tool) => tool.name === "observe");
     expect(observeTool).toBeDefined();
 
     const descriptions = collectTextMatchDescriptions(observeTool!.inputSchema);
 
     expect(descriptions.length).toBeGreaterThan(0);
-    expect(new Set(descriptions)).toEqual(new Set([
-      "How to match waitFor.text; does not affect contentDescription",
-    ]));
+    expect(new Set(descriptions)).toEqual(
+      new Set(["How to match waitFor.text; does not affect contentDescription"]),
+    );
   });
 
   test.each([
@@ -546,11 +562,7 @@ describe("findWaitForElement textAny", () => {
       { $: { text: "Add", bounds: bounds(20, 20, 120, 70) } },
     ]);
 
-    const element = findWaitForElement(
-      finder,
-      { textAny: ["Done", "Add"] },
-      hierarchy
-    );
+    const element = findWaitForElement(finder, { textAny: ["Done", "Add"] }, hierarchy);
 
     expect(element?.text).toBe("Add");
     expect(element?.bounds).toEqual(bounds(20, 20, 120, 70));
@@ -563,11 +575,7 @@ describe("findWaitForElement textAny", () => {
       { $: { text: "Add", bounds: bounds(220, 20, 320, 70) } },
     ]);
 
-    const element = findWaitForElement(
-      finder,
-      { textAny: ["Done", "Add"] },
-      hierarchy
-    );
+    const element = findWaitForElement(finder, { textAny: ["Done", "Add"] }, hierarchy);
 
     expect(element).toBeNull();
   });
@@ -580,11 +588,7 @@ describe("findWaitForElement textAny", () => {
       { $: { text: "Add", bounds: bounds(20, 90, 120, 140) } },
     ]);
 
-    const element = findWaitForElement(
-      finder,
-      { textAny: ["Done", "Add"] },
-      hierarchy
-    );
+    const element = findWaitForElement(finder, { textAny: ["Done", "Add"] }, hierarchy);
 
     expect(element?.text).toBe("Done");
     expect(element?.bounds).toEqual(bounds(20, 20, 120, 70));
@@ -597,19 +601,19 @@ describe("findWaitForElement rich predicates", () => {
     const hierarchy = makeHierarchy([
       {
         $: {
-          "text": "Home",
+          text: "Home",
           "resource-id": "home_label",
-          "class": "android.widget.TextView",
-          "bounds": bounds(10, 10, 110, 60),
+          class: "android.widget.TextView",
+          bounds: bounds(10, 10, 110, 60),
         },
       },
       {
         $: {
-          "text": "Settings",
+          text: "Settings",
           "resource-id": "home_tab",
-          "class": "android.widget.BottomNavigationView",
+          class: "android.widget.BottomNavigationView",
           "content-desc": "Home tab",
-          "bounds": bounds(10, 80, 190, 140),
+          bounds: bounds(10, 80, 190, 140),
         },
       },
     ]);
@@ -621,7 +625,7 @@ describe("findWaitForElement rich predicates", () => {
         className: "android.widget.BottomNavigationView",
         contentDescription: "Home tab",
       } as any,
-      hierarchy
+      hierarchy,
     );
 
     expect(element?.["resource-id"]).toBe("home_tab");
@@ -644,7 +648,7 @@ describe("findWaitForElement rich predicates", () => {
       {
         className: "android.widget.BottomNavigationView",
       } as any,
-      hierarchy
+      hierarchy,
     );
 
     expect(element).toBeNull();
@@ -675,7 +679,7 @@ describe("findWaitForElement rich predicates", () => {
       {
         contentDescription: "Home tab",
       } as any,
-      hierarchy
+      hierarchy,
     );
 
     expect(element).toBeNull();
@@ -686,23 +690,23 @@ describe("findWaitForElement rich predicates", () => {
     const hierarchy = makeHierarchy([
       {
         $: {
-          "text": "Profile",
+          text: "Profile",
           "resource-id": "home_tab",
-          "bounds": bounds(10, 10, 110, 60),
+          bounds: bounds(10, 10, 110, 60),
         },
       },
       {
         $: {
-          "text": "Home",
+          text: "Home",
           "resource-id": "other_tab",
-          "bounds": bounds(10, 80, 190, 140),
+          bounds: bounds(10, 80, 190, 140),
         },
       },
       {
         $: {
-          "text": "Home",
+          text: "Home",
           "resource-id": "home_tab",
-          "bounds": bounds(10, 150, 190, 190),
+          bounds: bounds(10, 150, 190, 190),
         },
       },
     ]);
@@ -713,7 +717,7 @@ describe("findWaitForElement rich predicates", () => {
         elementId: "home_tab",
         text: "Home",
       } as any,
-      hierarchy
+      hierarchy,
     );
 
     expect(element?.bounds).toEqual(bounds(10, 150, 190, 190));
@@ -724,16 +728,16 @@ describe("findWaitForElement rich predicates", () => {
     const hierarchy = makeHierarchy([
       {
         $: {
-          "text": "Profile",
+          text: "Profile",
           "resource-id": "home_tab",
-          "bounds": bounds(10, 10, 110, 60),
+          bounds: bounds(10, 10, 110, 60),
         },
       },
       {
         $: {
-          "text": "Home",
+          text: "Home",
           "resource-id": "other_tab",
-          "bounds": bounds(10, 80, 190, 140),
+          bounds: bounds(10, 80, 190, 140),
         },
       },
     ]);
@@ -744,7 +748,7 @@ describe("findWaitForElement rich predicates", () => {
         elementId: "home_tab",
         text: "Home",
       } as any,
-      hierarchy
+      hierarchy,
     );
 
     expect(element).toBeNull();
@@ -756,15 +760,15 @@ describe("findWaitForElement rich predicates", () => {
       {
         $: {
           "resource-id": "outside_container",
-          "bounds": bounds(0, 0, 200, 80),
+          bounds: bounds(0, 0, 200, 80),
         },
         node: [
           {
             $: {
               "resource-id": "home_tab",
-              "class": "UITabBar",
+              class: "UITabBar",
               "content-desc": "Home tab",
-              "bounds": bounds(10, 10, 190, 60),
+              bounds: bounds(10, 10, 190, 60),
             },
           },
         ],
@@ -772,15 +776,15 @@ describe("findWaitForElement rich predicates", () => {
       {
         $: {
           "resource-id": "target_container",
-          "bounds": bounds(0, 90, 200, 190),
+          bounds: bounds(0, 90, 200, 190),
         },
         node: [
           {
             $: {
               "resource-id": "settings_tab",
-              "class": "UITabBar",
+              class: "UITabBar",
               "content-desc": "Settings tab",
-              "bounds": bounds(10, 110, 190, 160),
+              bounds: bounds(10, 110, 190, 160),
             },
           },
         ],
@@ -794,7 +798,7 @@ describe("findWaitForElement rich predicates", () => {
         contentDescription: "Settings tab",
         container: { elementId: "target_container" },
       } as any,
-      hierarchy
+      hierarchy,
     );
 
     expect(element?.["resource-id"]).toBe("settings_tab");
@@ -805,9 +809,9 @@ describe("findWaitForElement rich predicates", () => {
     const hierarchy = makeHierarchy([
       {
         $: {
-          "class": "UITabBar",
+          class: "UITabBar",
           "content-desc": "Home tab",
-          "bounds": bounds(10, 10, 190, 60),
+          bounds: bounds(10, 10, 190, 60),
         },
       },
     ]);
@@ -819,7 +823,7 @@ describe("findWaitForElement rich predicates", () => {
         contentDescription: "Home tab",
         container: { elementId: "missing_container" },
       } as any,
-      hierarchy
+      hierarchy,
     );
 
     expect(element).toBeNull();
@@ -831,9 +835,9 @@ describe("findWaitForElement rich predicates", () => {
       { $: { text: "Home", bounds: bounds(10, 10, 110, 60) } },
       {
         $: {
-          "class": "UITabBar",
+          class: "UITabBar",
           "resource-id": "home_tab_bar",
-          "bounds": bounds(10, 80, 190, 140),
+          bounds: bounds(10, 80, 190, 140),
         },
       },
     ]);
@@ -845,7 +849,7 @@ describe("findWaitForElement rich predicates", () => {
         className: "UITabBar",
         matchType: "all",
       } as any,
-      hierarchy
+      hierarchy,
     );
 
     expect(element).toBeNull();
@@ -856,9 +860,9 @@ describe("findWaitForElement rich predicates", () => {
     const hierarchy = makeHierarchy([
       {
         $: {
-          "class": "UITabBar",
+          class: "UITabBar",
           "resource-id": "home_tab_bar",
-          "bounds": bounds(10, 80, 190, 140),
+          bounds: bounds(10, 80, 190, 140),
         },
       },
     ]);
@@ -870,7 +874,7 @@ describe("findWaitForElement rich predicates", () => {
         className: "UITabBar",
         matchType: "any",
       } as any,
-      hierarchy
+      hierarchy,
     );
 
     expect(element?.class).toBe("UITabBar");
@@ -882,20 +886,48 @@ describe("findWaitForElement rich predicates", () => {
       { $: { text: "Welcome Home", bounds: bounds(10, 10, 180, 60) } },
     ]);
 
-    expect(findWaitForElement(finder, { text: "Home", textMatch: "contains" } as any, hierarchy)?.text).toBe("Welcome Home");
-    expect(findWaitForElement(finder, { text: "^Welcome\\s+Home$", textMatch: "regex" } as any, hierarchy)?.text).toBe("Welcome Home");
-    expect(findWaitForElement(finder, { text: "Home", textMatch: "exact" } as any, hierarchy)).toBeNull();
+    expect(
+      findWaitForElement(finder, { text: "Home", textMatch: "contains" } as any, hierarchy)?.text,
+    ).toBe("Welcome Home");
+    expect(
+      findWaitForElement(
+        finder,
+        { text: "^Welcome\\s+Home$", textMatch: "regex" } as any,
+        hierarchy,
+      )?.text,
+    ).toBe("Welcome Home");
+    expect(
+      findWaitForElement(finder, { text: "Home", textMatch: "exact" } as any, hierarchy),
+    ).toBeNull();
   });
 
   test("keeps contentDescription exact-only when textMatch is non-exact", () => {
     const finder = new DefaultElementFinder();
     const hierarchy = makeHierarchy([
-      { $: { "content-desc": "Home tab", "bounds": bounds(10, 10, 180, 60) } },
+      { $: { "content-desc": "Home tab", bounds: bounds(10, 10, 180, 60) } },
     ]);
 
-    expect(findWaitForElement(finder, { contentDescription: "Home tab", textMatch: "exact" } as any, hierarchy)?.["content-desc"]).toBe("Home tab");
-    expect(findWaitForElement(finder, { contentDescription: "Home", textMatch: "contains" } as any, hierarchy)).toBeNull();
-    expect(findWaitForElement(finder, { contentDescription: "^Home", textMatch: "regex" } as any, hierarchy)).toBeNull();
+    expect(
+      findWaitForElement(
+        finder,
+        { contentDescription: "Home tab", textMatch: "exact" } as any,
+        hierarchy,
+      )?.["content-desc"],
+    ).toBe("Home tab");
+    expect(
+      findWaitForElement(
+        finder,
+        { contentDescription: "Home", textMatch: "contains" } as any,
+        hierarchy,
+      ),
+    ).toBeNull();
+    expect(
+      findWaitForElement(
+        finder,
+        { contentDescription: "^Home", textMatch: "regex" } as any,
+        hierarchy,
+      ),
+    ).toBeNull();
   });
 
   test("matches iOS accessibility labels exposed as text for contentDescription", () => {
@@ -916,7 +948,7 @@ describe("findWaitForElement rich predicates", () => {
         contentDescription: "Home",
       } as any,
       hierarchy,
-      "ios"
+      "ios",
     );
 
     expect(element?.text).toBe("Home");
@@ -928,8 +960,8 @@ describe("findWaitForElement rich predicates", () => {
       {
         $: {
           "ios-accessibility-label": "Home",
-          "class": "XCUIElementTypeButton",
-          "bounds": bounds(10, 10, 180, 60),
+          class: "XCUIElementTypeButton",
+          bounds: bounds(10, 10, 180, 60),
         },
       },
     ]);
@@ -940,7 +972,7 @@ describe("findWaitForElement rich predicates", () => {
         contentDescription: "Home",
       } as any,
       hierarchy,
-      "ios"
+      "ios",
     );
 
     expect(element?.["ios-accessibility-label"]).toBe("Home");
@@ -964,7 +996,7 @@ describe("findWaitForElement rich predicates", () => {
         contentDescription: "Home",
       } as any,
       hierarchy,
-      "android"
+      "android",
     );
 
     expect(element).toBeNull();
@@ -975,7 +1007,7 @@ describe("waitForObservation activeWindow", () => {
   const makeObservation = (
     appId: string,
     activityName: string,
-    nodes: unknown[] = []
+    nodes: unknown[] = [],
   ): ObserveResult => ({
     updatedAt: 0,
     screenSize: { width: 200, height: 200 },
@@ -1007,7 +1039,7 @@ describe("waitForObservation activeWindow", () => {
       } as any,
       undefined,
       false,
-      timer
+      timer,
     );
 
     expect(outcome.awaitTimeout).toBe(false);
@@ -1036,7 +1068,7 @@ describe("waitForObservation activeWindow", () => {
       } as any,
       undefined,
       false,
-      timer
+      timer,
     );
 
     expect(outcome.awaitTimeout).toBe(false);
@@ -1048,7 +1080,9 @@ describe("waitForObservation activeWindow", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const observeScreen = new FakeObserveScreen();
-    observeScreen.setObserveResult(() => makeObservation("com.example.app", "com.example.app.SplashActivity"));
+    observeScreen.setObserveResult(() =>
+      makeObservation("com.example.app", "com.example.app.SplashActivity"),
+    );
 
     const outcome = await waitForObservation(
       observeScreen,
@@ -1061,7 +1095,7 @@ describe("waitForObservation activeWindow", () => {
       } as any,
       undefined,
       false,
-      timer
+      timer,
     );
 
     expect(outcome.awaitTimeout).toBe(true);
@@ -1086,7 +1120,7 @@ describe("waitForObservation activeWindow", () => {
       undefined,
       false,
       timer,
-      "ios"
+      "ios",
     );
 
     expect(outcome.awaitTimeout).toBe(false);
@@ -1103,7 +1137,7 @@ describe("waitForObservation activeWindow", () => {
           },
           timeout: 250,
         },
-      })
+      }),
     ).toThrow("activityName is Android-only; use appId/bundleId on iOS");
   });
 
@@ -1111,9 +1145,11 @@ describe("waitForObservation activeWindow", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const observeScreen = new FakeObserveScreen();
-    observeScreen.setObserveResult(() => makeObservation("com.browser", "", [
-      { $: { class: "UITabBar", bounds: bounds(10, 10, 100, 60) } },
-    ]));
+    observeScreen.setObserveResult(() =>
+      makeObservation("com.browser", "", [
+        { $: { class: "UITabBar", bounds: bounds(10, 10, 100, 60) } },
+      ]),
+    );
 
     const outcome = await waitForObservation(
       observeScreen,
@@ -1124,7 +1160,7 @@ describe("waitForObservation activeWindow", () => {
       } as any,
       undefined,
       false,
-      timer
+      timer,
     );
 
     expect(outcome.awaitTimeout).toBe(true);
@@ -1150,7 +1186,7 @@ describe("observeSchema settled", () => {
       observeSchema.safeParse({
         platform: "android",
         settled: { quietPeriodMs: 500 },
-      }).success
+      }).success,
     ).toBe(false);
   });
 
@@ -1160,7 +1196,7 @@ describe("observeSchema settled", () => {
         platform: "android",
         waitFor: { elementId: "home_tab_bar" },
         settled: { quietPeriodMs: 0 },
-      }).success
+      }).success,
     ).toBe(false);
   });
 });
@@ -1172,8 +1208,8 @@ describe("waitForObservation settled", () => {
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
     activeWindow: { appId: "com.example.app", activityName: "", layoutSeqSum: 0 },
     viewHierarchy: makeHierarchy([
-      { $: { "resource-id": "home_tab_bar", "bounds": bounds(10, 10, 100, 60) } },
-      { $: { "resource-id": markerId, "bounds": bounds(10, 80, 100, 120) } },
+      { $: { "resource-id": "home_tab_bar", bounds: bounds(10, 10, 100, 60) } },
+      { $: { "resource-id": markerId, bounds: bounds(10, 80, 100, 120) } },
     ]),
   });
 
@@ -1198,7 +1234,7 @@ describe("waitForObservation settled", () => {
       } as any,
       undefined,
       false,
-      timer
+      timer,
     );
 
     expect(outcome.awaitTimeout).toBe(false);
@@ -1228,7 +1264,7 @@ describe("waitForObservation settled", () => {
       } as any,
       undefined,
       false,
-      timer
+      timer,
     );
 
     expect(outcome.awaitTimeout).toBe(true);
@@ -1282,7 +1318,7 @@ describe("observeSchema waitFor.absent", () => {
       observeSchema.safeParse({
         platform: "android",
         waitFor: { absent: {} },
-      }).success
+      }).success,
     ).toBe(false);
   });
 });
@@ -1296,17 +1332,14 @@ describe("waitForObservation absent", () => {
     viewHierarchy: makeHierarchy(nodes),
   });
 
-  const spinner = { $: { "class": "UIActivityIndicatorView", "bounds": bounds(10, 10, 50, 50) } };
-  const list = { $: { "resource-id": "message_list", "bounds": bounds(10, 60, 190, 190) } };
+  const spinner = { $: { class: "UIActivityIndicatorView", bounds: bounds(10, 10, 50, 50) } };
+  const list = { $: { "resource-id": "message_list", bounds: bounds(10, 60, 190, 190) } };
 
   test("resolves once the absent element disappears and the positive predicate is present", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const observeScreen = new FakeObserveScreen();
-    const observations = [
-      makeObservation([spinner, list]),
-      makeObservation([list]),
-    ];
+    const observations = [makeObservation([spinner, list]), makeObservation([list])];
     observeScreen.setObserveResult(() => observations.shift() ?? observations[0]);
 
     const outcome = await waitForObservation(
@@ -1318,7 +1351,7 @@ describe("waitForObservation absent", () => {
       } as any,
       undefined,
       false,
-      timer
+      timer,
     );
 
     expect(outcome.awaitTimeout).toBe(false);
@@ -1341,7 +1374,7 @@ describe("waitForObservation absent", () => {
       } as any,
       undefined,
       false,
-      timer
+      timer,
     );
 
     expect(outcome.awaitTimeout).toBe(true);
@@ -1352,10 +1385,7 @@ describe("waitForObservation absent", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const observeScreen = new FakeObserveScreen();
-    const observations = [
-      makeObservation([spinner]),
-      makeObservation([]),
-    ];
+    const observations = [makeObservation([spinner]), makeObservation([])];
     observeScreen.setObserveResult(() => observations.shift() ?? observations[0]);
 
     const outcome = await waitForObservation(
@@ -1366,7 +1396,7 @@ describe("waitForObservation absent", () => {
       } as any,
       undefined,
       false,
-      timer
+      timer,
     );
 
     expect(outcome.awaitTimeout).toBe(false);

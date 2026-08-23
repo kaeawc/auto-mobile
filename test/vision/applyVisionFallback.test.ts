@@ -10,12 +10,12 @@ const enabledConfig: VisionFallbackConfig = {
   confidenceThreshold: "high",
   maxCostUsd: 1.0,
   cacheResults: false,
-  cacheTtlMinutes: 60
+  cacheTtlMinutes: 60,
 };
 
 const disabledConfig: VisionFallbackConfig = {
   ...enabledConfig,
-  enabled: false
+  enabled: false,
 };
 
 describe("getVisionEnrichedError", () => {
@@ -31,7 +31,7 @@ describe("getVisionEnrichedError", () => {
       disabledConfig,
       "Element not found",
       undefined,
-      analyzer
+      analyzer,
     );
 
     expect(result).toBe("Element not found");
@@ -50,7 +50,7 @@ describe("getVisionEnrichedError", () => {
       enabledConfig,
       "Element not found",
       undefined,
-      analyzer
+      analyzer,
     );
 
     expect(result).toBe("Element not found");
@@ -66,12 +66,12 @@ describe("getVisionEnrichedError", () => {
       confidence: "high",
       navigationSteps: [
         { action: "scroll", direction: "down", description: "Scroll down to reveal login button" },
-        { action: "tap", target: "Login", description: "Tap the Login button" }
+        { action: "tap", target: "Login", description: "Tap the Login button" },
       ],
       costUsd: 0.002,
       durationMs: 100,
       screenshotPath: "/screenshot.png",
-      provider: "claude"
+      provider: "claude",
     });
 
     const result = await getVisionEnrichedError(
@@ -81,7 +81,7 @@ describe("getVisionEnrichedError", () => {
       enabledConfig,
       "Element not found",
       undefined,
-      analyzer
+      analyzer,
     );
 
     expect(result).toContain("AI suggests these steps");
@@ -98,12 +98,17 @@ describe("getVisionEnrichedError", () => {
       found: false,
       confidence: "medium",
       alternativeSelectors: [
-        { type: "resourceId", value: "com.app:id/login_btn", confidence: 0.9, reasoning: "Visible login button" }
+        {
+          type: "resourceId",
+          value: "com.app:id/login_btn",
+          confidence: 0.9,
+          reasoning: "Visible login button",
+        },
       ],
       costUsd: 0.001,
       durationMs: 50,
       screenshotPath: "/screenshot.png",
-      provider: "claude"
+      provider: "claude",
     });
 
     const result = await getVisionEnrichedError(
@@ -113,7 +118,7 @@ describe("getVisionEnrichedError", () => {
       enabledConfig,
       "Element not found",
       undefined,
-      analyzer
+      analyzer,
     );
 
     expect(result).toContain("AI suggests trying");
@@ -132,7 +137,7 @@ describe("getVisionEnrichedError", () => {
       costUsd: 0.0005,
       durationMs: 30,
       screenshotPath: "/screenshot.png",
-      provider: "claude"
+      provider: "claude",
     });
 
     const result = await getVisionEnrichedError(
@@ -142,7 +147,7 @@ describe("getVisionEnrichedError", () => {
       enabledConfig,
       "Element not found",
       undefined,
-      analyzer
+      analyzer,
     );
 
     expect(result).toContain("Element not found");
@@ -156,7 +161,7 @@ describe("getVisionEnrichedError", () => {
     const analyzer: import("../../src/vision/VisionTypes").VisionAnalyzer = {
       async analyzeAndSuggest() {
         throw new Error("API error");
-      }
+      },
     };
 
     const result = await getVisionEnrichedError(
@@ -166,7 +171,7 @@ describe("getVisionEnrichedError", () => {
       enabledConfig,
       "Element not found",
       undefined,
-      analyzer
+      analyzer,
     );
 
     expect(result).toBe("Element not found");
@@ -177,7 +182,11 @@ describe("getVisionEnrichedError", () => {
     capturer.setPaths(["/my-screenshot.png"]);
     const analyzer = new FakeVisionAnalyzer();
     const hierarchy = { root: "fake" };
-    const criteria = { text: "Submit", resourceId: "com.app:id/submit", description: "Submit button" };
+    const criteria = {
+      text: "Submit",
+      resourceId: "com.app:id/submit",
+      description: "Submit button",
+    };
 
     await getVisionEnrichedError(
       capturer,
@@ -186,7 +195,7 @@ describe("getVisionEnrichedError", () => {
       enabledConfig,
       "base error",
       undefined,
-      analyzer
+      analyzer,
     );
 
     const calls = analyzer.getCalls();
@@ -206,7 +215,7 @@ describe("getVisionEnrichedError", () => {
       costUsd: 0.001,
       durationMs: 10,
       screenshotPath: "/screenshot.png",
-      provider: "claude"
+      provider: "claude",
     });
 
     const result = await getVisionEnrichedError(
@@ -216,7 +225,7 @@ describe("getVisionEnrichedError", () => {
       enabledConfig,
       "Not found error",
       undefined,
-      analyzer
+      analyzer,
     );
 
     expect(result).toContain("No clear path found.");

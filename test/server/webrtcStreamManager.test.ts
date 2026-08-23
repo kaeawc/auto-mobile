@@ -21,7 +21,11 @@ import type {
   WebRtcStreamDescriptor,
 } from "../../src/features/webrtc";
 
-const ANDROID: BootedDevice = { deviceId: "emulator-5554", platform: "android", name: "a" } as BootedDevice;
+const ANDROID: BootedDevice = {
+  deviceId: "emulator-5554",
+  platform: "android",
+  name: "a",
+} as BootedDevice;
 const IOS: BootedDevice = {
   deviceId: "4DA8AF35-C59B-43D3-A8FE-5640A7B0B8C1",
   platform: "ios",
@@ -49,7 +53,7 @@ class FakePublisher {
       onKeyFrameRequest?: () => boolean;
       onSourceFailure?: (error: Error) => void;
       onLifecycleEvent?: (event: WebRtcPublisherLifecycleEvent) => void;
-    }
+    },
   ) {
     this.onBeforeEstablish = deps.onBeforeEstablish;
     this.onConnected = deps.onConnected;
@@ -199,8 +203,14 @@ describe("webrtcStreamManager", () => {
 
   test("reuses a capture source when a second consumer starts the same device", async () => {
     const { publishers, sources } = installFakes();
-    const first = await startWebRtcStream({ device: ANDROID, overrides: { whipEndpoint: ENDPOINT } });
-    const second = await startWebRtcStream({ device: ANDROID, overrides: { whipEndpoint: ENDPOINT } });
+    const first = await startWebRtcStream({
+      device: ANDROID,
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    const second = await startWebRtcStream({
+      device: ANDROID,
+      overrides: { whipEndpoint: ENDPOINT },
+    });
 
     expect(second.streamId).toBe(first.streamId);
     expect(second.consumerCount).toBe(2);
@@ -213,14 +223,21 @@ describe("webrtcStreamManager", () => {
     let releaseJar: ((path: string | null) => void) | undefined;
     setWebRtcStreamManagerDependencies({
       idGenerator: new CountingIdGenerator("id"),
-      createPublisher: (config, deps) => new FakePublisher(config, deps) as unknown as WebRtcPublisher,
+      createPublisher: (config, deps) =>
+        new FakePublisher(config, deps) as unknown as WebRtcPublisher,
       createSource: () => new FakeSource() as unknown as AndroidH264Source,
-      resolveVideoJar: () => new Promise(resolve => { releaseJar = resolve; }),
+      resolveVideoJar: () =>
+        new Promise((resolve) => {
+          releaseJar = resolve;
+        }),
       now: () => new Date("2026-07-11T00:00:00.000Z"),
     });
 
     const first = startWebRtcStream({ device: ANDROID, overrides: { whipEndpoint: ENDPOINT } });
-    const second = await startWebRtcStream({ device: ANDROID, overrides: { whipEndpoint: ENDPOINT } });
+    const second = await startWebRtcStream({
+      device: ANDROID,
+      overrides: { whipEndpoint: ENDPOINT },
+    });
 
     releaseJar?.(null);
     const descriptor = await first;
@@ -238,7 +255,10 @@ describe("webrtcStreamManager", () => {
         return new FakePublisher(config, deps) as unknown as WebRtcPublisher;
       },
       createSource: () => new FakeSource() as unknown as AndroidH264Source,
-      resolveVideoJar: () => new Promise(resolve => { releaseJar = resolve; }),
+      resolveVideoJar: () =>
+        new Promise((resolve) => {
+          releaseJar = resolve;
+        }),
       now: () => new Date("2026-07-11T00:00:00.000Z"),
     });
 
@@ -258,10 +278,18 @@ describe("webrtcStreamManager", () => {
 
   test("rejects a duplicate explicit streamId (even on a different device)", async () => {
     installFakes();
-    const other: BootedDevice = { deviceId: "emulator-5556", platform: "android", name: "b" } as BootedDevice;
-    await startWebRtcStream({ device: ANDROID, streamId: "dup", overrides: { whipEndpoint: ENDPOINT } });
+    const other: BootedDevice = {
+      deviceId: "emulator-5556",
+      platform: "android",
+      name: "b",
+    } as BootedDevice;
+    await startWebRtcStream({
+      device: ANDROID,
+      streamId: "dup",
+      overrides: { whipEndpoint: ENDPOINT },
+    });
     await expect(
-      startWebRtcStream({ device: other, streamId: "dup", overrides: { whipEndpoint: ENDPOINT } })
+      startWebRtcStream({ device: other, streamId: "dup", overrides: { whipEndpoint: ENDPOINT } }),
     ).rejects.toThrow(/already active/);
   });
 
@@ -279,9 +307,9 @@ describe("webrtcStreamManager", () => {
 
   test("requires a configured WHIP endpoint", async () => {
     installFakes();
-    await expect(
-      startWebRtcStream({ device: ANDROID, overrides: {} })
-    ).rejects.toThrow(/WHIP endpoint/);
+    await expect(startWebRtcStream({ device: ANDROID, overrides: {} })).rejects.toThrow(
+      /WHIP endpoint/,
+    );
   });
 
   test("stop terminates publisher and source and reports stopped", async () => {
@@ -311,7 +339,10 @@ describe("webrtcStreamManager", () => {
     installFakes();
     await startWebRtcStream({ device: ANDROID, overrides: { whipEndpoint: ENDPOINT } });
     setWebRtcStreamManagerDependencies({
-      resolveVideoJar: () => new Promise(resolve => { releaseJar = resolve; }),
+      resolveVideoJar: () =>
+        new Promise((resolve) => {
+          releaseJar = resolve;
+        }),
     });
     const pending = startWebRtcStream({ device: IOS, overrides: { whipEndpoint: ENDPOINT } });
 
@@ -323,8 +354,12 @@ describe("webrtcStreamManager", () => {
   test("rejects audio startup promptly when stopped before the publisher connects", async () => {
     let releaseStart: (() => void) | undefined;
     let enteredStart: (() => void) | undefined;
-    const startEntered = new Promise<void>(resolve => { enteredStart = resolve; });
-    const allowStartToReturn = new Promise<void>(resolve => { releaseStart = resolve; });
+    const startEntered = new Promise<void>((resolve) => {
+      enteredStart = resolve;
+    });
+    const allowStartToReturn = new Promise<void>((resolve) => {
+      releaseStart = resolve;
+    });
     setWebRtcStreamManagerDependencies({
       idGenerator: new CountingIdGenerator("id"),
       createPublisher: (config, deps) => {
@@ -360,7 +395,8 @@ describe("webrtcStreamManager", () => {
     const sources: FakeSource[] = [];
     setWebRtcStreamManagerDependencies({
       idGenerator: new CountingIdGenerator("id"),
-      createPublisher: (config, deps) => new FakePublisher(config, deps) as unknown as WebRtcPublisher,
+      createPublisher: (config, deps) =>
+        new FakePublisher(config, deps) as unknown as WebRtcPublisher,
       createSource: () => {
         const source = new FakeSource();
         const originalStart = source.start.bind(source);
@@ -376,7 +412,13 @@ describe("webrtcStreamManager", () => {
     });
 
     expect(
-      (await startWebRtcStream({ device: ANDROID, streamId: "race", overrides: { whipEndpoint: ENDPOINT } })).state
+      (
+        await startWebRtcStream({
+          device: ANDROID,
+          streamId: "race",
+          overrides: { whipEndpoint: ENDPOINT },
+        })
+      ).state,
     ).toBe("stopped");
 
     expect(sources[0].started).toBe(true);
@@ -394,7 +436,7 @@ describe("webrtcStreamManager", () => {
         publishers.push(publisher);
         return publisher as unknown as WebRtcPublisher;
       },
-      createSource: options => {
+      createSource: (options) => {
         const source = new FakeSource();
         source.start = async () => {
           source.started = true;
@@ -438,7 +480,8 @@ describe("webrtcStreamManager", () => {
     const jarPaths: (string | null)[] = [];
     setWebRtcStreamManagerDependencies({
       idGenerator: new CountingIdGenerator("id"),
-      createPublisher: (config, deps) => new FakePublisher(config, deps) as unknown as WebRtcPublisher,
+      createPublisher: (config, deps) =>
+        new FakePublisher(config, deps) as unknown as WebRtcPublisher,
       createSource: (_options, jarPath) => {
         jarPaths.push(jarPath);
         return new FakeSource() as unknown as AndroidH264Source;
@@ -460,7 +503,8 @@ describe("webrtcStreamManager", () => {
     const jarPaths: (string | null)[] = [];
     setWebRtcStreamManagerDependencies({
       idGenerator: new CountingIdGenerator("id"),
-      createPublisher: (config, deps) => new FakePublisher(config, deps) as unknown as WebRtcPublisher,
+      createPublisher: (config, deps) =>
+        new FakePublisher(config, deps) as unknown as WebRtcPublisher,
       createSource: (_options, jarPath) => {
         jarPaths.push(jarPath);
         return new FakeSource() as unknown as AndroidH264Source;
@@ -469,7 +513,10 @@ describe("webrtcStreamManager", () => {
       now: () => new Date("2026-07-11T00:00:00.000Z"),
     });
 
-    const descriptor = await startWebRtcStream({ device: ANDROID, overrides: { whipEndpoint: ENDPOINT } });
+    const descriptor = await startWebRtcStream({
+      device: ANDROID,
+      overrides: { whipEndpoint: ENDPOINT },
+    });
     expect(descriptor.streamId).toBeDefined();
     expect(jarPaths).toEqual([null]);
   });
@@ -489,7 +536,10 @@ describe("webrtcStreamManager", () => {
       now: () => new Date("2026-07-11T00:00:00.000Z"),
     });
 
-    const descriptor = await startWebRtcStream({ device: ANDROID, overrides: { whipEndpoint: ENDPOINT } });
+    const descriptor = await startWebRtcStream({
+      device: ANDROID,
+      overrides: { whipEndpoint: ENDPOINT },
+    });
     expect(descriptor.failure?.message).toContain("checksum verification failed");
     expect(descriptor.fallback).toEqual({ mode: "screenshots", reason: "capture_start_failed" });
     expect(publisherCreated).toBe(1);
@@ -499,7 +549,9 @@ describe("webrtcStreamManager", () => {
   test("passes audio config to publisher/source and routes PCM audio chunks", async () => {
     const publishers: FakePublisher[] = [];
     let capturedSourceOptions:
-      | Parameters<NonNullable<Parameters<typeof setWebRtcStreamManagerDependencies>[0]["createSource"]>>[0]
+      | Parameters<
+          NonNullable<Parameters<typeof setWebRtcStreamManagerDependencies>[0]["createSource"]>
+        >[0]
       | undefined;
     let capturedJarPath: string | null | undefined;
     setWebRtcStreamManagerDependencies({
@@ -533,7 +585,9 @@ describe("webrtcStreamManager", () => {
 
   test("surfaces capture pipeline metrics on the live stream descriptor", async () => {
     let sourceOptions:
-      | Parameters<NonNullable<Parameters<typeof setWebRtcStreamManagerDependencies>[0]["createSource"]>>[0]
+      | Parameters<
+          NonNullable<Parameters<typeof setWebRtcStreamManagerDependencies>[0]["createSource"]>
+        >[0]
       | undefined;
     const metrics: H264CaptureSourceMetrics = {
       native: {
@@ -560,8 +614,9 @@ describe("webrtcStreamManager", () => {
     };
     setWebRtcStreamManagerDependencies({
       idGenerator: new CountingIdGenerator("id"),
-      createPublisher: (config, deps) => new FakePublisher(config, deps) as unknown as WebRtcPublisher,
-      createSource: options => {
+      createPublisher: (config, deps) =>
+        new FakePublisher(config, deps) as unknown as WebRtcPublisher,
+      createSource: (options) => {
         sourceOptions = options;
         return new FakeSource() as unknown as AndroidH264Source;
       },
@@ -581,12 +636,15 @@ describe("webrtcStreamManager", () => {
 
   test("threads the resolved Android fps into the capture source options", async () => {
     let capturedSourceOptions:
-      | Parameters<NonNullable<Parameters<typeof setWebRtcStreamManagerDependencies>[0]["createSource"]>>[0]
+      | Parameters<
+          NonNullable<Parameters<typeof setWebRtcStreamManagerDependencies>[0]["createSource"]>
+        >[0]
       | undefined;
     setWebRtcStreamManagerDependencies({
       idGenerator: new CountingIdGenerator("id"),
-      createPublisher: (config, deps) => new FakePublisher(config, deps) as unknown as WebRtcPublisher,
-      createSource: options => {
+      createPublisher: (config, deps) =>
+        new FakePublisher(config, deps) as unknown as WebRtcPublisher,
+      createSource: (options) => {
         capturedSourceOptions = options;
         return new FakeSource() as unknown as AndroidH264Source;
       },
@@ -605,12 +663,15 @@ describe("webrtcStreamManager", () => {
 
   test("threads the resolved iOS Simulator fps into the capture source options", async () => {
     let capturedSourceOptions:
-      | Parameters<NonNullable<Parameters<typeof setWebRtcStreamManagerDependencies>[0]["createSource"]>>[0]
+      | Parameters<
+          NonNullable<Parameters<typeof setWebRtcStreamManagerDependencies>[0]["createSource"]>
+        >[0]
       | undefined;
     setWebRtcStreamManagerDependencies({
       idGenerator: new CountingIdGenerator("id"),
-      createPublisher: (config, deps) => new FakePublisher(config, deps) as unknown as WebRtcPublisher,
-      createSource: options => {
+      createPublisher: (config, deps) =>
+        new FakePublisher(config, deps) as unknown as WebRtcPublisher,
+      createSource: (options) => {
         capturedSourceOptions = options;
         return new FakeSource() as unknown as AndroidH264Source;
       },
@@ -668,7 +729,7 @@ describe("webrtcStreamManager", () => {
     const sources: FakeSource[] = [];
     let firstStartReject: ((error: Error) => void) | undefined;
     let firstSourceStarted!: () => void;
-    const firstSourceStartedPromise = new Promise<void>(resolve => {
+    const firstSourceStartedPromise = new Promise<void>((resolve) => {
       firstSourceStarted = resolve;
     });
     let createSourceCalls = 0;
@@ -704,7 +765,7 @@ describe("webrtcStreamManager", () => {
       overrides: { whipEndpoint: ENDPOINT, audioEnabled: true },
     });
     await firstSourceStartedPromise;
-    expect(listWebRtcStreams().map(stream => stream.streamId)).toEqual(["replace-me"]);
+    expect(listWebRtcStreams().map((stream) => stream.streamId)).toEqual(["replace-me"]);
 
     await stopWebRtcStream("replace-me");
     const replacement = await startWebRtcStream({
@@ -718,7 +779,7 @@ describe("webrtcStreamManager", () => {
 
     expect(replacement.streamId).toBe("replace-me");
     expect(getWebRtcStreamDescriptor("replace-me")?.streamId).toBe("replace-me");
-    expect(listWebRtcStreams().map(stream => stream.streamId)).toEqual(["replace-me"]);
+    expect(listWebRtcStreams().map((stream) => stream.streamId)).toEqual(["replace-me"]);
     expect(publishers[1].stopped).toBe(false);
     expect(sources[1].stopped).toBe(false);
   });
@@ -727,7 +788,7 @@ describe("webrtcStreamManager", () => {
     const publishers: AsyncConnectedPublisher[] = [];
     const sources: FakeSource[] = [];
     let releaseSourceStart!: () => void;
-    const sourceStartGate = new Promise<void>(resolve => {
+    const sourceStartGate = new Promise<void>((resolve) => {
       releaseSourceStart = resolve;
     });
     setWebRtcStreamManagerDependencies({
@@ -772,10 +833,10 @@ describe("webrtcStreamManager", () => {
     const { publishers, sources } = installFakes();
     let releasePublish!: () => void;
     let publisherEntered!: () => void;
-    const publishEntered = new Promise<void>(resolve => {
+    const publishEntered = new Promise<void>((resolve) => {
       publisherEntered = resolve;
     });
-    const publishGate = new Promise<void>(resolve => {
+    const publishGate = new Promise<void>((resolve) => {
       releasePublish = resolve;
     });
     publishers.length = 0;
@@ -823,7 +884,10 @@ describe("webrtcStreamManager", () => {
       },
     });
 
-    const started = await startWebRtcStream({ device: ANDROID, overrides: { whipEndpoint: ENDPOINT } });
+    const started = await startWebRtcStream({
+      device: ANDROID,
+      overrides: { whipEndpoint: ENDPOINT },
+    });
     publishers[0].onLifecycleEvent?.("whip_answer_received");
     expect(getWebRtcStreamDescriptor(started.streamId)?.lifecycleState).toBe("capture_ready");
 
@@ -833,7 +897,10 @@ describe("webrtcStreamManager", () => {
 
   test("reports a packetization failure as a typed fallback and recreates capture on reconnect", async () => {
     const { publishers, sources } = installFakes();
-    const started = await startWebRtcStream({ device: ANDROID, overrides: { whipEndpoint: ENDPOINT } });
+    const started = await startWebRtcStream({
+      device: ANDROID,
+      overrides: { whipEndpoint: ENDPOINT },
+    });
     await flushPublisherStart();
 
     publishers[0].onSourceFailure?.(new Error("H.264 SPS profile 6400 is incompatible"));
@@ -857,7 +924,7 @@ describe("webrtcStreamManager", () => {
         publishers.push(publisher);
         return publisher as unknown as WebRtcPublisher;
       },
-      createSource: options => {
+      createSource: (options) => {
         sourceOptions.push(options);
         return new FakeSource() as unknown as AndroidH264Source;
       },
@@ -871,10 +938,7 @@ describe("webrtcStreamManager", () => {
     sourceOptions[0].onData(Buffer.from([0, 0, 0, 1, 0x67, 0x42]));
     publishers[0].onSourceFailure?.(new Error("encoder wedged"));
     await publishers[0].onBeforeEstablish?.();
-    sourceOptions[1].onData(Buffer.from([
-      0, 0, 0, 1, 0x65, 0x80,
-      0, 0, 0, 1, 0x41, 0x80,
-    ]));
+    sourceOptions[1].onData(Buffer.from([0, 0, 0, 1, 0x65, 0x80, 0, 0, 0, 1, 0x41, 0x80]));
     await publishers[0].onConnected?.();
 
     expect(publishers[0].parameterSetPrimes.at(-1)).toEqual({ sps: null, pps: null });
@@ -894,7 +958,7 @@ describe("webrtcStreamManager", () => {
         publishers.push(publisher);
         return publisher as unknown as WebRtcPublisher;
       },
-      createSource: options => {
+      createSource: (options) => {
         sourceOptions = options;
         return new FakeSource() as unknown as AndroidH264Source;
       },
@@ -905,12 +969,18 @@ describe("webrtcStreamManager", () => {
     await startWebRtcStream({ device: ANDROID, overrides: { whipEndpoint: ENDPOINT } });
     const sps = Buffer.from([0x67, 0x42, 0xe0, 0x2a]);
     const pps = Buffer.from([0x68, 0xce, 0x06, 0xe2]);
-    sourceOptions.onData(Buffer.concat([
-      Buffer.from([0, 0, 0, 1]), sps,
-      Buffer.from([0, 0, 0, 1]), pps,
-      Buffer.from([0, 0, 0, 1]), Buffer.from([0x65, 0x88]),
-      Buffer.from([0, 0, 0, 1]), Buffer.from([0x41, 0x00]),
-    ]));
+    sourceOptions.onData(
+      Buffer.concat([
+        Buffer.from([0, 0, 0, 1]),
+        sps,
+        Buffer.from([0, 0, 0, 1]),
+        pps,
+        Buffer.from([0, 0, 0, 1]),
+        Buffer.from([0x65, 0x88]),
+        Buffer.from([0, 0, 0, 1]),
+        Buffer.from([0x41, 0x00]),
+      ]),
+    );
 
     await publishers[0].onConnected?.();
     expect(publishers[0].parameterSetPrimes).toEqual([{ sps, pps }]);
@@ -933,8 +1003,16 @@ describe("webrtcStreamManager", () => {
       now: () => new Date("2026-07-24T00:00:00.000Z"),
     });
 
-    const started = await startWebRtcStream({ device: ANDROID, overrides: { whipEndpoint: ENDPOINT } });
-    const timedOut = waitForWebRtcStreamReadiness(started.streamId, "publishing", 1, started.lease?.id);
+    const started = await startWebRtcStream({
+      device: ANDROID,
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    const timedOut = waitForWebRtcStreamReadiness(
+      started.streamId,
+      "publishing",
+      1,
+      started.lease?.id,
+    );
     await Promise.resolve();
     timer.advanceTime(1);
 
@@ -960,12 +1038,15 @@ describe("webrtcStreamManager", () => {
       resolveVideoJar: async () => null,
       timer,
     });
-    const started = await startWebRtcStream({ device: ANDROID, overrides: { whipEndpoint: ENDPOINT } });
+    const started = await startWebRtcStream({
+      device: ANDROID,
+      overrides: { whipEndpoint: ENDPOINT },
+    });
     const waiting = waitForWebRtcStreamReadiness(
       started.streamId,
       "publishing",
       WEBRTC_STREAM_LEASE_TTL_MS * 2,
-      started.lease?.id
+      started.lease?.id,
     );
 
     for (let interval = 0; interval < 4; interval++) {
@@ -983,7 +1064,10 @@ describe("webrtcStreamManager", () => {
     const { publishers, sources } = installFakes();
     setWebRtcStreamManagerDependencies({ timer });
 
-    const started = await startWebRtcStream({ device: ANDROID, overrides: { whipEndpoint: ENDPOINT } });
+    const started = await startWebRtcStream({
+      device: ANDROID,
+      overrides: { whipEndpoint: ENDPOINT },
+    });
     expect(started.lease?.id).toBeDefined();
 
     timer.advanceTime(WEBRTC_STREAM_LEASE_TTL_MS - 1);
@@ -1022,8 +1106,16 @@ describe("webrtcStreamManager", () => {
       resolveVideoJar: async () => null,
       timer,
     });
-    const started = await startWebRtcStream({ device: ANDROID, overrides: { whipEndpoint: ENDPOINT } });
-    const waiting = waitForWebRtcStreamReadiness(started.streamId, "publishing", 1_000, started.lease?.id);
+    const started = await startWebRtcStream({
+      device: ANDROID,
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    const waiting = waitForWebRtcStreamReadiness(
+      started.streamId,
+      "publishing",
+      1_000,
+      started.lease?.id,
+    );
     await Promise.resolve();
     await stopWebRtcStream(started.streamId);
 
@@ -1050,15 +1142,19 @@ describe("webrtcStreamManager", () => {
     let sourceOptions!: Parameters<NonNullable<WebRtcStreamManagerDependencies["createSource"]>>[0];
     setWebRtcStreamManagerDependencies({
       idGenerator: new CountingIdGenerator("id"),
-      createPublisher: (config, deps) => new FakePublisher(config, deps) as unknown as WebRtcPublisher,
-      createSource: options => {
+      createPublisher: (config, deps) =>
+        new FakePublisher(config, deps) as unknown as WebRtcPublisher,
+      createSource: (options) => {
         sourceOptions = options;
         return new FakeSource() as unknown as AndroidH264Source;
       },
       resolveVideoJar: async () => null,
     });
 
-    const started = await startWebRtcStream({ device: ANDROID, overrides: { whipEndpoint: ENDPOINT } });
+    const started = await startWebRtcStream({
+      device: ANDROID,
+      overrides: { whipEndpoint: ENDPOINT },
+    });
     sourceOptions.onError?.(new Error("adb forward lost"));
 
     const degraded = await waitForWebRtcStreamReadiness(started.streamId, "publishing", 100);

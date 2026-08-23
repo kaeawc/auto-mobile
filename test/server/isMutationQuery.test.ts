@@ -32,7 +32,9 @@ describe("isMutationQuery", () => {
 
   test("detects CTE mutations behind a leading comment", () => {
     expect(
-      isMutationQuery("-- cte\nWITH d AS (SELECT id FROM t) DELETE FROM t WHERE id IN (SELECT id FROM d)")
+      isMutationQuery(
+        "-- cte\nWITH d AS (SELECT id FROM t) DELETE FROM t WHERE id IN (SELECT id FROM d)",
+      ),
     ).toBe(true);
   });
 

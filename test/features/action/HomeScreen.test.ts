@@ -8,7 +8,6 @@ import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 
-
 // Helper function to create mock ObserveResult
 // Each call creates a unique viewHierarchy object so change detection works
 let hierarchyCounter = 0;
@@ -16,7 +15,7 @@ const createObserveResult = (): ObserveResult => ({
   timestamp: Date.now(),
   screenSize: { width: 1080, height: 1920 },
   systemInsets: { top: 48, bottom: 120, left: 0, right: 0 },
-  viewHierarchy: { node: {}, id: hierarchyCounter++ }
+  viewHierarchy: { node: {}, id: hierarchyCounter++ },
 });
 
 describe("HomeScreen", () => {
@@ -36,7 +35,11 @@ describe("HomeScreen", () => {
 
     // Set up default fake responses
     fakeWindow.configureCachedActiveWindow(null);
-    fakeWindow.configureActiveWindow({ appId: "com.test.app", activityName: "MainActivity", layoutSeqSum: 123 });
+    fakeWindow.configureActiveWindow({
+      appId: "com.test.app",
+      activityName: "MainActivity",
+      layoutSeqSum: 123,
+    });
 
     // Set up default observe screen responses with valid viewHierarchy
     // We need to set different results to simulate screen change
@@ -45,7 +48,7 @@ describe("HomeScreen", () => {
     mockDevice = {
       name: "Test Device",
       platform: "android",
-      deviceId: "test-device"
+      deviceId: "test-device",
     };
     homeScreen = new HomeScreen(mockDevice, fakeAdb);
 
@@ -66,7 +69,7 @@ describe("HomeScreen", () => {
 
       // Verify hardware home button keyevent was executed
       const executedCommands = fakeAdb.getExecutedCommands();
-      expect(executedCommands.some(cmd => cmd.includes("shell input keyevent 3"))).toBe(true);
+      expect(executedCommands.some((cmd) => cmd.includes("shell input keyevent 3"))).toBe(true);
     });
 
     test("should work with progress callback", async () => {
@@ -97,7 +100,7 @@ describe("HomeScreen", () => {
       const iosDevice: BootedDevice = {
         name: "iPhone 15",
         platform: "ios",
-        deviceId: "ios-device"
+        deviceId: "ios-device",
       };
       const iosHomeScreen = new HomeScreen(iosDevice, fakeAdb);
       (iosHomeScreen as any).observeScreen = fakeObserveScreen;
@@ -106,7 +109,7 @@ describe("HomeScreen", () => {
 
       const fakeIOSCtrlProxy = new FakeIOSCtrlProxy();
       const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        fakeIOSCtrlProxy as any
+        fakeIOSCtrlProxy as any,
       );
 
       try {
@@ -132,7 +135,7 @@ describe("HomeScreen", () => {
       const otherDevice: BootedDevice = {
         name: "Device 2",
         platform: "android",
-        deviceId: "device-2"
+        deviceId: "device-2",
       };
       const homeScreen2 = new HomeScreen(otherDevice, fakeAdb);
 
@@ -142,7 +145,11 @@ describe("HomeScreen", () => {
       const fakeAwaitIdle2 = new FakeAwaitIdle();
 
       fakeWindow2.configureCachedActiveWindow(null);
-      fakeWindow2.configureActiveWindow({ appId: "com.test.app", activityName: "MainActivity", layoutSeqSum: 123 });
+      fakeWindow2.configureActiveWindow({
+        appId: "com.test.app",
+        activityName: "MainActivity",
+        layoutSeqSum: 123,
+      });
       fakeObserveScreen2.setObserveResult(() => createObserveResult());
 
       (homeScreen2 as any).observeScreen = fakeObserveScreen2;

@@ -62,33 +62,33 @@ interface MockClient {
 function makeListScreenObserve(): ObserveResult {
   // The list shows items 1–5. Item 15 exists but is off-screen below.
   const makeListItem = (n: number, accessibilityFocused: boolean): Element => ({
-    "bounds": { left: 0, top: 80 + (n - 1) * 100, right: 720, bottom: 160 + (n - 1) * 100 },
-    "text": `Item ${n}`,
+    bounds: { left: 0, top: 80 + (n - 1) * 100, right: 720, bottom: 160 + (n - 1) * 100 },
+    text: `Item ${n}`,
     "content-desc": `Item ${n}`,
     "resource-id": `com.example.app:id/list_item_${n}`,
-    "class": "android.widget.LinearLayout",
-    "clickable": true,
-    "focusable": true,
-    "focused": false,
+    class: "android.widget.LinearLayout",
+    clickable: true,
+    focusable: true,
+    focused: false,
     "accessibility-focused": accessibilityFocused,
-    "enabled": true,
+    enabled: true,
   });
 
   const recyclerView: Element = {
-    "bounds": { left: 0, top: 80, right: 720, bottom: 1200 },
-    "text": undefined,
+    bounds: { left: 0, top: 80, right: 720, bottom: 1200 },
+    text: undefined,
     "content-desc": undefined,
     "resource-id": "com.example.app:id/item_list",
-    "class": "androidx.recyclerview.widget.RecyclerView",
-    "clickable": false,
-    "focusable": false,
-    "focused": false,
+    class: "androidx.recyclerview.widget.RecyclerView",
+    clickable: false,
+    focusable: false,
+    focused: false,
     "accessibility-focused": false,
-    "scrollable": true,
-    "enabled": true,
+    scrollable: true,
+    enabled: true,
   };
 
-  const visibleItems = [1, 2, 3, 4, 5].map(n => makeListItem(n, n === 1));
+  const visibleItems = [1, 2, 3, 4, 5].map((n) => makeListItem(n, n === 1));
 
   // TalkBack places its cursor on Item 1 when the screen loads.
   return {
@@ -126,35 +126,35 @@ function makeAfterScrollObserve(): ObserveResult {
   // on accessibilityFocusedElement to confirm Item 15 is visible; it should
   // check observe().elements instead.
   const makeListItem = (n: number): Element => ({
-    "bounds": {
+    bounds: {
       left: 0,
       top: 80 + (n - 11) * 100,
       right: 720,
       bottom: 160 + (n - 11) * 100,
     },
-    "text": `Item ${n}`,
+    text: `Item ${n}`,
     "content-desc": `Item ${n}`,
     "resource-id": `com.example.app:id/list_item_${n}`,
-    "class": "android.widget.LinearLayout",
-    "clickable": true,
-    "focusable": true,
-    "focused": false,
+    class: "android.widget.LinearLayout",
+    clickable: true,
+    focusable: true,
+    focused: false,
     "accessibility-focused": false,
-    "enabled": true,
+    enabled: true,
   });
 
   const recyclerView: Element = {
-    "bounds": { left: 0, top: 80, right: 720, bottom: 1200 },
-    "text": undefined,
+    bounds: { left: 0, top: 80, right: 720, bottom: 1200 },
+    text: undefined,
     "content-desc": undefined,
     "resource-id": "com.example.app:id/item_list",
-    "class": "androidx.recyclerview.widget.RecyclerView",
-    "clickable": false,
-    "focusable": false,
-    "focused": false,
+    class: "androidx.recyclerview.widget.RecyclerView",
+    clickable: false,
+    focusable: false,
+    focused: false,
     "accessibility-focused": false,
-    "scrollable": true,
-    "enabled": true,
+    scrollable: true,
+    enabled: true,
   };
 
   // Item 1 is off-screen but TalkBack focus is still reported on it.
@@ -162,19 +162,19 @@ function makeAfterScrollObserve(): ObserveResult {
   // focused node persists in the accessibility tree even after it is recycled
   // out of the visible viewport.
   const offScreenItem1: Element = {
-    "bounds": { left: 0, top: -920, right: 720, bottom: -840 },
-    "text": "Item 1",
+    bounds: { left: 0, top: -920, right: 720, bottom: -840 },
+    text: "Item 1",
     "content-desc": "Item 1",
     "resource-id": "com.example.app:id/list_item_1",
-    "class": "android.widget.LinearLayout",
-    "clickable": true,
-    "focusable": true,
-    "focused": false,
+    class: "android.widget.LinearLayout",
+    clickable: true,
+    focusable: true,
+    focused: false,
     "accessibility-focused": true,
-    "enabled": true,
+    enabled: true,
   };
 
-  const visibleItems = [11, 12, 13, 14, 15].map(n => makeListItem(n));
+  const visibleItems = [11, 12, 13, 14, 15].map((n) => makeListItem(n));
 
   return {
     updatedAt: Date.now(),
@@ -204,29 +204,29 @@ function makeDetailScreenObserve(): ObserveResult {
   // After tapping Item 15, the detail screen loads.
   // TalkBack auto-focuses the first element on the new screen.
   const titleElement: Element = {
-    "bounds": { left: 32, top: 120, right: 688, bottom: 180 },
-    "text": "Item 15",
+    bounds: { left: 32, top: 120, right: 688, bottom: 180 },
+    text: "Item 15",
     "content-desc": "Item 15",
     "resource-id": "com.example.app:id/detail_title",
-    "class": "android.widget.TextView",
-    "clickable": false,
-    "focusable": true,
-    "focused": false,
+    class: "android.widget.TextView",
+    clickable: false,
+    focusable: true,
+    focused: false,
     "accessibility-focused": true,
-    "enabled": true,
+    enabled: true,
   };
 
   const descriptionElement: Element = {
-    "bounds": { left: 32, top: 200, right: 688, bottom: 320 },
-    "text": "Description for Item 15.",
+    bounds: { left: 32, top: 200, right: 688, bottom: 320 },
+    text: "Description for Item 15.",
     "content-desc": "Description for Item 15.",
     "resource-id": "com.example.app:id/detail_description",
-    "class": "android.widget.TextView",
-    "clickable": false,
-    "focusable": true,
-    "focused": false,
+    class: "android.widget.TextView",
+    clickable: false,
+    focusable: true,
+    focused: false,
     "accessibility-focused": false,
-    "enabled": true,
+    enabled: true,
   };
 
   return {
@@ -360,17 +360,17 @@ async function main(): Promise<void> {
 
   if (initialObserve.accessibilityState?.enabled) {
     console.log(
-      `\nNote: TalkBack is ACTIVE (service: ${initialObserve.accessibilityState.service}).`
+      `\nNote: TalkBack is ACTIVE (service: ${initialObserve.accessibilityState.service}).`,
     );
     console.log(
-      "      swipeOn will use ACTION_SCROLL_FORWARD internally. No change needed to this script."
+      "      swipeOn will use ACTION_SCROLL_FORWARD internally. No change needed to this script.",
     );
   }
 
   // Check whether the target is already visible.
   const targetText = "Item 15";
   const alreadyVisible = (initialObserve.elements?.clickable ?? []).some(
-    el => el.text === targetText
+    (el) => el.text === targetText,
   );
   console.log(`\nTarget "${targetText}" visible before scroll: ${alreadyVisible}`);
 
@@ -387,9 +387,7 @@ async function main(): Promise<void> {
   // -------------------------------------------------------------------------
   printStep(2, "Scroll list to find Item 15");
   console.log('Note: swipeOn direction "up" maps to ACTION_SCROLL_FORWARD under TalkBack.');
-  console.log(
-    "      A touch swipe would be intercepted by TalkBack for cursor navigation."
-  );
+  console.log("      A touch swipe would be intercepted by TalkBack for cursor navigation.");
   console.log("      lookFor causes AutoMobile to repeat the action until the target appears.");
 
   // container scopes the scroll to the RecyclerView. Use { elementId } or { text },
@@ -417,15 +415,13 @@ async function main(): Promise<void> {
   // to determine whether the scroll target is visible.
   printResult(
     "accessibilityFocusedElement after scroll (may be off-screen)",
-    afterScrollObserve.accessibilityFocusedElement
+    afterScrollObserve.accessibilityFocusedElement,
   );
 
   const focusedId = afterScrollObserve.accessibilityFocusedElement?.["resource-id"] ?? "";
   if (focusedId.includes("list_item_1")) {
     console.log("\nNote: TalkBack focus is still on Item 1 (now off-screen).");
-    console.log(
-      "      This is expected. Check elements.clickable for the target instead."
-    );
+    console.log("      This is expected. Check elements.clickable for the target instead.");
   }
 
   console.log("\nNow-visible list items (from elements.clickable):");
@@ -434,7 +430,7 @@ async function main(): Promise<void> {
   }
 
   const targetElement = (afterScrollObserve.elements?.clickable ?? []).find(
-    el => el.text === targetText
+    (el) => el.text === targetText,
   );
 
   if (!targetElement) {
@@ -466,7 +462,7 @@ async function main(): Promise<void> {
   printResult("activeWindow after tap", detailObserve.activeWindow);
   printResult(
     "accessibilityFocusedElement on detail screen",
-    detailObserve.accessibilityFocusedElement
+    detailObserve.accessibilityFocusedElement,
   );
 
   const navigated =
@@ -489,7 +485,7 @@ async function main(): Promise<void> {
   console.log("  - tapOn uses ACTION_CLICK internally (transparent to agent).");
 }
 
-main().catch(error => {
+main().catch((error) => {
   console.error("Fatal error:", error);
   process.exit(1);
 });

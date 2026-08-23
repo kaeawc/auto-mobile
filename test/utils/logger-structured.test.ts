@@ -159,13 +159,14 @@ describe("structured logging", () => {
     );
     const mod = await loggerWithEnv("json", "both", logDir);
     const stderr: string[] = [];
-    const stderrSpy = spyOn(process.stderr, "write").mockImplementation(
-      ((chunk: unknown, callback?: (error?: Error | null) => void) => {
-        stderr.push(String(chunk));
-        queueMicrotask(() => callback?.());
-        return true;
-      }) as typeof process.stderr.write,
-    );
+    const stderrSpy = spyOn(process.stderr, "write").mockImplementation(((
+      chunk: unknown,
+      callback?: (error?: Error | null) => void,
+    ) => {
+      stderr.push(String(chunk));
+      queueMicrotask(() => callback?.());
+      return true;
+    }) as typeof process.stderr.write);
 
     try {
       mod.logger.info("container-ready");
@@ -178,5 +179,4 @@ describe("structured logging", () => {
 
     expect(JSON.parse(stderr[0])).toMatchObject({ event: "log", message: "container-ready" });
   });
-
 });

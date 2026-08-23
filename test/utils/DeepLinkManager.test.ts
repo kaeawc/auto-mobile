@@ -19,7 +19,7 @@ describe("DeepLinkManager", () => {
     testDevice = {
       name: "test-device",
       platform: "android",
-      deviceId: "test-device-id"
+      deviceId: "test-device-id",
     };
 
     // Create fakes for testing
@@ -88,7 +88,7 @@ Receiver Resolver Table:
       androidx.profileinstaller.action.INSTALL_PROFILE:
         abcdef123 com.example.app/androidx.profileinstaller.ProfileInstallReceiver filter 654321
           Action: "androidx.profileinstaller.action.INSTALL_PROFILE"`,
-      stderr: ""
+      stderr: "",
     });
 
     // Create deep link manager
@@ -122,7 +122,7 @@ Receiver Resolver Table:
       const newDevice: BootedDevice = {
         name: "new-device",
         platform: "android",
-        deviceId: "new-device-id"
+        deviceId: "new-device-id",
       };
       deepLinkManager.setDeviceId(newDevice);
 
@@ -152,7 +152,7 @@ Receiver Resolver Table:
         stderr: "ADB command failed",
         toString: () => "ADB command failed",
         trim: () => "ADB command failed",
-        includes: () => true
+        includes: () => true,
       });
 
       const manager = new DeepLinkManager(testDevice, failingFake);
@@ -181,10 +181,10 @@ Receiver Resolver Table:
         hierarchy: {
           node: {
             $: {
-              class: "com.android.internal.app.ChooserActivity"
-            }
-          }
-        }
+              class: "com.android.internal.app.ChooserActivity",
+            },
+          },
+        },
       };
 
       const detected = deepLinkManager.detectIntentChooser(viewHierarchy);
@@ -196,10 +196,10 @@ Receiver Resolver Table:
         hierarchy: {
           node: {
             $: {
-              class: "com.android.internal.app.ResolverActivity"
-            }
-          }
-        }
+              class: "com.android.internal.app.ResolverActivity",
+            },
+          },
+        },
       };
 
       const detected = deepLinkManager.detectIntentChooser(viewHierarchy);
@@ -211,10 +211,10 @@ Receiver Resolver Table:
         hierarchy: {
           node: {
             $: {
-              text: "Choose an app"
-            }
-          }
-        }
+              text: "Choose an app",
+            },
+          },
+        },
       };
 
       const detected = deepLinkManager.detectIntentChooser(viewHierarchy);
@@ -229,17 +229,17 @@ Receiver Resolver Table:
             node: [
               {
                 $: {
-                  text: "Always"
-                }
+                  text: "Always",
+                },
               },
               {
                 $: {
-                  text: "Just once"
-                }
-              }
-            ]
-          }
-        }
+                  text: "Just once",
+                },
+              },
+            ],
+          },
+        },
       };
 
       const detected = deepLinkManager.detectIntentChooser(viewHierarchy);
@@ -255,18 +255,18 @@ Receiver Resolver Table:
               {
                 $: {
                   class: "android.widget.Button",
-                  text: "Click me"
-                }
+                  text: "Click me",
+                },
               },
               {
                 $: {
                   class: "android.widget.TextView",
-                  text: "Some text"
-                }
-              }
-            ]
-          }
-        }
+                  text: "Some text",
+                },
+              },
+            ],
+          },
+        },
       };
 
       const detected = deepLinkManager.detectIntentChooser(viewHierarchy);
@@ -275,7 +275,7 @@ Receiver Resolver Table:
 
     test("should handle malformed view hierarchy", () => {
       const viewHierarchy: ViewHierarchyResult = {
-        hierarchy: {}
+        hierarchy: {},
       };
 
       const detected = deepLinkManager.detectIntentChooser(viewHierarchy);
@@ -287,9 +287,9 @@ Receiver Resolver Table:
         hierarchy: {
           node: {
             $: {},
-            node: [{ $: { "resource-id": "android:id/button_once" } }]
-          }
-        }
+            node: [{ $: { "resource-id": "android:id/button_once" } }],
+          },
+        },
       };
       expect(deepLinkManager.detectIntentChooser(viewHierarchy)).toBe(true);
     });
@@ -298,9 +298,9 @@ Receiver Resolver Table:
       const viewHierarchy: ViewHierarchyResult = {
         hierarchy: {
           node: {
-            $: { "resource-id": "com.android.internal:id/resolver_list" }
-          }
-        }
+            $: { "resource-id": "com.android.internal:id/resolver_list" },
+          },
+        },
       };
       expect(deepLinkManager.detectIntentChooser(viewHierarchy)).toBe(true);
     });
@@ -309,9 +309,9 @@ Receiver Resolver Table:
       const viewHierarchy: ViewHierarchyResult = {
         hierarchy: {
           node: {
-            $: { "content-desc": "Just once" }
-          }
-        }
+            $: { "content-desc": "Just once" },
+          },
+        },
       };
       expect(deepLinkManager.detectIntentChooser(viewHierarchy)).toBe(true);
     });
@@ -320,9 +320,9 @@ Receiver Resolver Table:
       const viewHierarchy: ViewHierarchyResult = {
         hierarchy: {
           node: {
-            $: { text: "Just once please tap here" }
-          }
-        }
+            $: { text: "Just once please tap here" },
+          },
+        },
       };
       expect(deepLinkManager.detectIntentChooser(viewHierarchy)).toBe(false);
     });
@@ -333,7 +333,7 @@ Receiver Resolver Table:
       // Mock the element utils methods
       const mockButton = {
         bounds: { left: 100, top: 200, right: 300, bottom: 400 },
-        text: "Always"
+        text: "Always",
       };
 
       // Mock extractRootNodes
@@ -344,7 +344,7 @@ Receiver Resolver Table:
 
       // Mock findButtonByText method by adding it to the deep link manager
       (deepLinkManager as any).findButtonByText = (node: any, textOptions: string[]) => {
-        if (textOptions.some(option => node.text && node.text.includes(option))) {
+        if (textOptions.some((option) => node.text && node.text.includes(option))) {
           return node;
         }
         return null;
@@ -356,17 +356,19 @@ Receiver Resolver Table:
         hierarchy: {
           node: {
             $: {
-              class: "com.android.internal.app.ChooserActivity"
+              class: "com.android.internal.app.ChooserActivity",
             },
-            node: [{
-              $: {
-                text: "Always",
-                class: "android.widget.Button",
-                bounds: { left: 100, top: 200, right: 300, bottom: 400 }
-              }
-            }]
-          }
-        }
+            node: [
+              {
+                $: {
+                  text: "Always",
+                  class: "android.widget.Button",
+                  bounds: { left: 100, top: 200, right: 300, bottom: 400 },
+                },
+              },
+            ],
+          },
+        },
       };
 
       const result = await deepLinkManager.handleIntentChooser(viewHierarchy, "always");
@@ -381,29 +383,33 @@ Receiver Resolver Table:
         hierarchy: {
           node: {
             $: {
-              class: "android.widget.LinearLayout"
+              class: "android.widget.LinearLayout",
             },
-            node: [{
-              $: {
-                text: "Normal app content"
-              }
-            }]
-          }
-        }
+            node: [
+              {
+                $: {
+                  text: "Normal app content",
+                },
+              },
+            ],
+          },
+        },
       };
 
       // Reset mocks for this specific test
       (mockParser as any).extractRootNodes = () => [
         {
           $: {
-            class: "android.widget.LinearLayout"
+            class: "android.widget.LinearLayout",
           },
-          node: [{
-            $: {
-              text: "Normal app content"
-            }
-          }]
-        }
+          node: [
+            {
+              $: {
+                text: "Normal app content",
+              },
+            },
+          ],
+        },
       ];
 
       const result = await deepLinkManager.handleIntentChooser(viewHierarchy, "always");
@@ -417,17 +423,19 @@ Receiver Resolver Table:
         hierarchy: {
           node: {
             $: {
-              class: "com.android.internal.app.ChooserActivity"
+              class: "com.android.internal.app.ChooserActivity",
             },
-            node: [{
-              $: {
-                text: "Always",
-                class: "android.widget.Button",
-                bounds: { left: 100, top: 200, right: 300, bottom: 400 }
-              }
-            }]
-          }
-        }
+            node: [
+              {
+                $: {
+                  text: "Always",
+                  class: "android.widget.Button",
+                  bounds: { left: 100, top: 200, right: 300, bottom: 400 },
+                },
+              },
+            ],
+          },
+        },
       };
 
       // Create a failing fake for input tap commands
@@ -437,7 +445,7 @@ Receiver Resolver Table:
         stderr: "Input command failed",
         toString: () => "Input command failed",
         trim: () => "Input command failed",
-        includes: () => true
+        includes: () => true,
       });
 
       const manager = new DeepLinkManager(testDevice, failingFake);

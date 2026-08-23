@@ -68,7 +68,7 @@ const testExecutionRepository = new TestExecutionRepository();
 
 export async function buildTestTimingResponse(
   args: TestTimingQueryArgs,
-  repository: TestExecutionRepository = testExecutionRepository
+  repository: TestExecutionRepository = testExecutionRepository,
 ): Promise<TestTimingResponse> {
   const lookbackDays = args.lookbackDays ?? DEFAULT_TEST_TIMING_LOOKBACK_DAYS;
   const limit = args.limit ?? DEFAULT_TEST_TIMING_LIMIT;
@@ -100,37 +100,61 @@ export async function buildTestTimingResponse(
   const totalSamples = timings.reduce((total, entry) => total + entry.sampleSize, 0);
 
   const filters: Record<string, unknown> = {};
-  if (args.testClass) {filters.testClass = args.testClass;}
-  if (args.testMethod) {filters.testMethod = args.testMethod;}
-  if (args.deviceId) {filters.deviceId = args.deviceId;}
-  if (args.deviceName) {filters.deviceName = args.deviceName;}
-  if (args.devicePlatform) {filters.devicePlatform = args.devicePlatform;}
-  if (args.deviceType) {filters.deviceType = args.deviceType;}
-  if (args.appVersion) {filters.appVersion = args.appVersion;}
-  if (args.gitCommit) {filters.gitCommit = args.gitCommit;}
-  if (args.targetSdk !== undefined) {filters.targetSdk = args.targetSdk;}
-  if (args.jdkVersion) {filters.jdkVersion = args.jdkVersion;}
-  if (args.jvmTarget) {filters.jvmTarget = args.jvmTarget;}
-  if (args.gradleVersion) {filters.gradleVersion = args.gradleVersion;}
-  if (typeof args.isCi === "boolean") {filters.isCi = args.isCi;}
-  if (args.sessionUuid) {filters.sessionUuid = args.sessionUuid;}
+  if (args.testClass) {
+    filters.testClass = args.testClass;
+  }
+  if (args.testMethod) {
+    filters.testMethod = args.testMethod;
+  }
+  if (args.deviceId) {
+    filters.deviceId = args.deviceId;
+  }
+  if (args.deviceName) {
+    filters.deviceName = args.deviceName;
+  }
+  if (args.devicePlatform) {
+    filters.devicePlatform = args.devicePlatform;
+  }
+  if (args.deviceType) {
+    filters.deviceType = args.deviceType;
+  }
+  if (args.appVersion) {
+    filters.appVersion = args.appVersion;
+  }
+  if (args.gitCommit) {
+    filters.gitCommit = args.gitCommit;
+  }
+  if (args.targetSdk !== undefined) {
+    filters.targetSdk = args.targetSdk;
+  }
+  if (args.jdkVersion) {
+    filters.jdkVersion = args.jdkVersion;
+  }
+  if (args.jvmTarget) {
+    filters.jvmTarget = args.jvmTarget;
+  }
+  if (args.gradleVersion) {
+    filters.gradleVersion = args.gradleVersion;
+  }
+  if (typeof args.isCi === "boolean") {
+    filters.isCi = args.isCi;
+  }
+  if (args.sessionUuid) {
+    filters.sessionUuid = args.sessionUuid;
+  }
 
   return {
-    testTimings: timings.map(entry => ({
+    testTimings: timings.map((entry) => ({
       testClass: entry.testClass,
       testMethod: entry.testMethod,
       averageDurationMs: entry.averageDurationMs,
       sampleSize: entry.sampleSize,
       lastRunTimestampMs: entry.lastRunTimestampMs || null,
-      lastRun: entry.lastRunTimestampMs
-        ? new Date(entry.lastRunTimestampMs).toISOString()
-        : null,
-      successRate: entry.sampleSize > 0
-        ? Number((entry.passedCount / entry.sampleSize).toFixed(4))
-        : 0,
-      failureRate: entry.sampleSize > 0
-        ? Number((entry.failedCount / entry.sampleSize).toFixed(4))
-        : 0,
+      lastRun: entry.lastRunTimestampMs ? new Date(entry.lastRunTimestampMs).toISOString() : null,
+      successRate:
+        entry.sampleSize > 0 ? Number((entry.passedCount / entry.sampleSize).toFixed(4)) : 0,
+      failureRate:
+        entry.sampleSize > 0 ? Number((entry.failedCount / entry.sampleSize).toFixed(4)) : 0,
       stdDevDurationMs: entry.stdDevDurationMs,
       statusCounts: {
         passed: entry.passedCount,

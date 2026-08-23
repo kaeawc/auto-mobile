@@ -18,7 +18,10 @@ export interface AdbProcess {
   off(event: "exit", listener: (code: number | null, signal: NodeJS.Signals | null) => void): this;
   off(event: "error", listener: (error: Error) => void): this;
   off(event: "spawn", listener: () => void): this;
-  removeListener(event: "exit", listener: (code: number | null, signal: NodeJS.Signals | null) => void): this;
+  removeListener(
+    event: "exit",
+    listener: (code: number | null, signal: NodeJS.Signals | null) => void,
+  ): this;
   removeListener(event: "error", listener: (error: Error) => void): this;
 }
 
@@ -77,7 +80,7 @@ export interface AdbExecutor {
     timeoutMs?: number,
     maxBuffer?: number,
     noRetry?: boolean,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<ExecResult>;
 
   /**
@@ -103,7 +106,10 @@ export interface AdbExecutor {
   }): Promise<BootedDevice[]>;
 
   /** Return raw ADB device states, including `offline` and `unauthorized` rows. */
-  getDeviceStates?(options?: { timeoutMs?: number; signal?: AbortSignal }): Promise<AdbDeviceState[]>;
+  getDeviceStates?(options?: {
+    timeoutMs?: number;
+    signal?: AbortSignal;
+  }): Promise<AdbDeviceState[]>;
 
   /**
    * Check if the device screen is currently on

@@ -21,11 +21,11 @@ graph TD
     class C domain;
 ```
 
-| Module | Purpose | Key Contents |
-|--------|---------|--------------|
-| `desktop-domain` | Pure Kotlin data models with no framework dependencies | `NavigationModels`, `FailureModels`, `PerformanceModels`, `LayoutModels`, `StorageModels`, `TestModels` |
-| `desktop-core` | Business logic, daemon clients, data sources, ViewModels, and all Compose UI | `daemon/`, `datasource/`, `failures/`, `navigation/`, `performance/`, `layout/`, `storage/`, `telemetry/`, `test/`, `shell/`, `settings/`, `testing/` |
-| `desktop-app` | Thin entry point: window creation, Metro DI bootstrap, single-instance lock | `Main.kt`, `AutoMobileDesktopApp.kt`, `AutoMobileGraph.kt`, `AutoMobileTheme.kt` |
+| Module           | Purpose                                                                      | Key Contents                                                                                                                                          |
+| ---------------- | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `desktop-domain` | Pure Kotlin data models with no framework dependencies                       | `NavigationModels`, `FailureModels`, `PerformanceModels`, `LayoutModels`, `StorageModels`, `TestModels`                                               |
+| `desktop-core`   | Business logic, daemon clients, data sources, ViewModels, and all Compose UI | `daemon/`, `datasource/`, `failures/`, `navigation/`, `performance/`, `layout/`, `storage/`, `telemetry/`, `test/`, `shell/`, `settings/`, `testing/` |
+| `desktop-app`    | Thin entry point: window creation, Metro DI bootstrap, single-instance lock  | `Main.kt`, `AutoMobileDesktopApp.kt`, `AutoMobileGraph.kt`, `AutoMobileTheme.kt`                                                                      |
 
 ### desktop-domain
 
@@ -82,9 +82,9 @@ interface AutoMobileGraph {
 
 `ApplicationModule` contributes bindings to `AppScope`:
 
-| Binding | Provider |
-|---------|----------|
-| `AutoMobileClient` | `McpClientFactory.createPreferred(null)` -- selects the best available transport |
+| Binding            | Provider                                                                                                                                                                                                                      |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AutoMobileClient` | `McpClientFactory.createPreferred(null)` -- selects the best available transport                                                                                                                                              |
 | `SettingsProvider` | `FileSettingsProvider()` -- persists to `~/.auto-mobile/desktop-settings.properties`, so the first-run onboarding flag and theme survive restarts (`FakeSettingsProvider` remains the in-memory implementation used by tests) |
 
 Scope annotations `@SingleIn(AppScope::class)` ensure singletons live for the app lifecycle.
@@ -137,11 +137,11 @@ while migrating older clients.
 
 ### Transport Implementations
 
-| Client | Transport | Session Management | Retry |
-|--------|-----------|-------------------|-------|
-| `McpHttpClient` | HTTP POST to `/auto-mobile/streamable` | `mcp-session-id` header | `RetryPolicy` with exponential backoff, jitter, retryable error classification |
-| `McpDaemonClient` | Unix domain socket at `/tmp/auto-mobile-daemon-{uid}.sock` | Per-request connection | None (single-shot) |
-| `McpStdioClient` | stdin/stdout of a spawned child process | Persistent process | None |
+| Client            | Transport                                                  | Session Management      | Retry                                                                          |
+| ----------------- | ---------------------------------------------------------- | ----------------------- | ------------------------------------------------------------------------------ |
+| `McpHttpClient`   | HTTP POST to `/auto-mobile/streamable`                     | `mcp-session-id` header | `RetryPolicy` with exponential backoff, jitter, retryable error classification |
+| `McpDaemonClient` | Unix domain socket at `/tmp/auto-mobile-daemon-{uid}.sock` | Per-request connection  | None (single-shot)                                                             |
+| `McpStdioClient`  | stdin/stdout of a spawned child process                    | Persistent process      | None                                                                           |
 
 ### McpClientFactory
 
@@ -180,12 +180,12 @@ Detects running AutoMobile processes via `ps` and classifies their connection ty
 
 Real-time data flows over Unix domain sockets, separate from the request/response MCP channel:
 
-| Client | Socket Path | Data |
-|--------|-------------|------|
-| `ObservationStreamClient` | `~/.auto-mobile/observation-stream.sock` | Hierarchy updates, screenshot updates, navigation graph updates, performance metrics |
-| `FailuresStreamSocketClient` | Failures socket | Failure notifications, groups, timeline data |
-| `PerformanceAuditStreamSocketClient` | Performance socket | Performance audit poll results |
-| `TelemetryPushSocketClient` | Telemetry socket | Custom telemetry events |
+| Client                               | Socket Path                              | Data                                                                                 |
+| ------------------------------------ | ---------------------------------------- | ------------------------------------------------------------------------------------ |
+| `ObservationStreamClient`            | `~/.auto-mobile/observation-stream.sock` | Hierarchy updates, screenshot updates, navigation graph updates, performance metrics |
+| `FailuresStreamSocketClient`         | Failures socket                          | Failure notifications, groups, timeline data                                         |
+| `PerformanceAuditStreamSocketClient` | Performance socket                       | Performance audit poll results                                                       |
+| `TelemetryPushSocketClient`          | Telemetry socket                         | Custom telemetry events                                                              |
 
 ### ObservationStreamClient
 
@@ -209,15 +209,15 @@ Interface  -->  RealXxxDataSource (calls AutoMobileClient)
            -->  CachedXxxDataSource (wraps delegate with InMemoryCache)  [Navigation, AppList only]
 ```
 
-| DataSource | Domain | Cache TTL |
-|------------|--------|-----------|
-| `NavigationDataSource` | `NavigationGraph` | 30s (via `CachedNavigationDataSource`) |
-| `AppListDataSource` | `List<InstalledApp>` | 30s (via `CachedAppListDataSource`) |
-| `LayoutDataSource` | Layout/observation data | -- |
-| `PerformanceDataSource` | Performance metrics | -- |
-| `StorageDataSource` | Key-value files, databases | -- |
-| `TestDataSource` | Test cases and runs | -- |
-| `FailuresDataSource` | Failure groups | -- |
+| DataSource              | Domain                     | Cache TTL                              |
+| ----------------------- | -------------------------- | -------------------------------------- |
+| `NavigationDataSource`  | `NavigationGraph`          | 30s (via `CachedNavigationDataSource`) |
+| `AppListDataSource`     | `List<InstalledApp>`       | 30s (via `CachedAppListDataSource`)    |
+| `LayoutDataSource`      | Layout/observation data    | --                                     |
+| `PerformanceDataSource` | Performance metrics        | --                                     |
+| `StorageDataSource`     | Key-value files, databases | --                                     |
+| `TestDataSource`        | Test cases and runs        | --                                     |
+| `FailuresDataSource`    | Failure groups             | --                                     |
 
 ### InMemoryCache
 
@@ -256,27 +256,29 @@ Keyboard shortcuts: `Cmd+0` (left), `Cmd+Shift+0` (right), `Cmd+Shift+Y` (bottom
 
 The center content area uses a split layout. When the Navigation view is active, it fills the center. Otherwise, Telemetry is the primary center content with secondary dashboards available via bottom tabs:
 
-| Dashboard | Position | Description |
-|-----------|----------|-------------|
-| Navigation | Primary (full center) | Flow map with screen nodes and transitions, canvas view, detail panels |
-| Telemetry | Primary (center top) | Network request inspector, custom event renderer |
-| Test | Secondary (bottom tab) | Test case browser, run history, recording, plan execution |
-| Storage | Secondary (bottom tab) | SharedPreferences/database inspector, key-value editor |
-| Diagnostics | Secondary (bottom tab) | System health, daemon status, MCP process list |
-| Performance | Inspector panel | Real-time FPS/memory/CPU, anomaly detection, run comparison |
-| Layout | Inspector panel | Device screen mirror, hierarchy tree, property inspector |
-| Failures | Inspector panel | Grouped failure list, timeline chart, stack trace viewer |
+| Dashboard   | Position               | Description                                                            |
+| ----------- | ---------------------- | ---------------------------------------------------------------------- |
+| Navigation  | Primary (full center)  | Flow map with screen nodes and transitions, canvas view, detail panels |
+| Telemetry   | Primary (center top)   | Network request inspector, custom event renderer                       |
+| Test        | Secondary (bottom tab) | Test case browser, run history, recording, plan execution              |
+| Storage     | Secondary (bottom tab) | SharedPreferences/database inspector, key-value editor                 |
+| Diagnostics | Secondary (bottom tab) | System health, daemon status, MCP process list                         |
+| Performance | Inspector panel        | Real-time FPS/memory/CPU, anomaly detection, run comparison            |
+| Layout      | Inspector panel        | Device screen mirror, hierarchy tree, property inspector               |
+| Failures    | Inspector panel        | Grouped failure list, timeline chart, stack trace viewer               |
 
 ### ViewModels
 
 Navigation and Failures each have a dedicated ViewModel that manages UI state via `StateFlow` and dispatches one-shot effects via `Channel`. Other dashboards do not yet have standalone ViewModels:
 
 **NavigationViewModel**
+
 - State: `Loading | Content(graph, selectedScreenId, currentSection) | Error(message)`
 - Actions: `Refresh`, `SelectScreen`, `SelectScreenByName`, `BackToFlowMap`, `UpdateGraph`
 - Effects: `OpenSource(fileName, lineNumber)`
 
 **FailuresViewModel**
+
 - State: `Loading | Content(failureGroups, selectedFailure, filterType) | Error(message)`
 - Actions: `Refresh`, `SelectFailure`, `ClearSelection`, `FilterByType`, `SelectFailureById`, `UpdateGroups`
 - Effects: `OpenStackTrace`, `NavigateToScreen`, `NavigateToTest`
@@ -293,20 +295,20 @@ A reusable fake that records all method calls in a `calls: MutableList<String>` 
 
 Tests live under `android/desktop-core/src/test/kotlin/` and cover:
 
-| Area | Test Files | Techniques |
-|------|-----------|------------|
-| Daemon clients | `McpHttpClientCancellationTest`, `McpHttpDiscoveryTest`, `RetryPolicyTest`, `SocketConnectionStateTest` | Fake HTTP responses, port scanner mocks |
-| Data sources | `CachedAppListDataSourceTest`, `CachedNavigationDataSourceTest`, `InMemoryCacheTest`, `ResultExtensionsTest`, `RealStorageDataSourceTest` | Injectable clock, Turbine Flow testing |
-| ViewModels | `NavigationViewModelTest`, `FailuresViewModelTest` | Turbine `test {}`, fake data sources |
-| UI composables | `FailuresBadgeUiTest`, `FailuresCollapsedContentUiTest`, `ConnectionStatusIndicatorUiTest`, `StatusBarBadgeUiTest` | Compose Desktop test rule |
-| Process detection | `McpProcessDetectorTest`, `DefaultPortScannerTest` | Fake `ProcessRunner`, `SocketFileChecker`, `TimeProvider` |
-| Other | `HierarchyPerformanceTest`, `NavigationGraphLayoutTest`, `TelemetryModelsTest`, `NetworkBodyRendererTest` | -- |
+| Area              | Test Files                                                                                                                                | Techniques                                                |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| Daemon clients    | `McpHttpClientCancellationTest`, `McpHttpDiscoveryTest`, `RetryPolicyTest`, `SocketConnectionStateTest`                                   | Fake HTTP responses, port scanner mocks                   |
+| Data sources      | `CachedAppListDataSourceTest`, `CachedNavigationDataSourceTest`, `InMemoryCacheTest`, `ResultExtensionsTest`, `RealStorageDataSourceTest` | Injectable clock, Turbine Flow testing                    |
+| ViewModels        | `NavigationViewModelTest`, `FailuresViewModelTest`                                                                                        | Turbine `test {}`, fake data sources                      |
+| UI composables    | `FailuresBadgeUiTest`, `FailuresCollapsedContentUiTest`, `ConnectionStatusIndicatorUiTest`, `StatusBarBadgeUiTest`                        | Compose Desktop test rule                                 |
+| Process detection | `McpProcessDetectorTest`, `DefaultPortScannerTest`                                                                                        | Fake `ProcessRunner`, `SocketFileChecker`, `TimeProvider` |
+| Other             | `HierarchyPerformanceTest`, `NavigationGraphLayoutTest`, `TelemetryModelsTest`, `NetworkBodyRendererTest`                                 | --                                                        |
 
 All fakes and test utilities follow the interface + fake pattern mandated by the project, with injectable time/clock for deterministic behavior.
 
 ## Device Screen Control
 
-The Layout dashboard's device mirror is interactive in the desktop app: in *control mode* a click
+The Layout dashboard's device mirror is interactive in the desktop app: in _control mode_ a click
 becomes a device tap, a drag becomes a swipe, and (on Android) keystrokes forward to the focused
 field. This is milestone 28 (parent [#1099](https://github.com/kaeawc/auto-mobile/issues/1099)),
 implemented across `desktop-domain` (pure policies) and `desktop-core` (the
@@ -330,7 +332,7 @@ Client-author docs: [third-party client guide](../../mcp/daemon/client-screen-co
 
 The Layout dashboard mirror above pairs each tap with the observation screenshot it was mapped
 through (capture identity + `frameContext`). The **workspace pane** exposes a second, distinct
-control surface: the user clicks the *live H.264 video*, not the observation screenshot. That path
+control surface: the user clicks the _live H.264 video_, not the observation screenshot. That path
 deliberately **decouples input from the video frame** — a click maps only through the retained
 device geometry (width/height/rotation) and dispatches through `VideoInputDispatcher` with **no
 `frameContext`**, so the daemon can never reject a video-pane tap as stale (the "one tap works, then

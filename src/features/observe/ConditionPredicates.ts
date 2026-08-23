@@ -19,7 +19,7 @@ export interface ConditionSelector {
 function findMatch(
   finder: ElementFinder,
   viewHierarchy: ViewHierarchyResult,
-  selector: ConditionSelector
+  selector: ConditionSelector,
 ): Element | null {
   const container = selector.container ?? null;
   if (selector.elementId !== undefined) {
@@ -39,7 +39,7 @@ function findMatch(
 function findNearMatches(
   finder: ElementFinder,
   viewHierarchy: ViewHierarchyResult,
-  selector: ConditionSelector
+  selector: ConditionSelector,
 ): Element[] {
   const container = selector.container ?? null;
   if (selector.elementId !== undefined) {
@@ -92,7 +92,7 @@ export function disappear(finder: ElementFinder, selector: ConditionSelector): C
 function findAllMatches(
   finder: ElementFinder,
   viewHierarchy: ViewHierarchyResult,
-  selector: ConditionSelector
+  selector: ConditionSelector,
 ): Element[] {
   const container = selector.container ?? null;
   if (selector.elementId !== undefined) {
@@ -132,7 +132,10 @@ export function clickable(finder: ElementFinder, selector: ConditionSelector): C
       return { matched: true, matchedElement: match, candidates: [match] };
     }
     // Present-but-not-clickable → surface the element itself; absent → near matches.
-    return { matched: false, candidates: match ? [match] : findNearMatches(finder, viewHierarchy, selector) };
+    return {
+      matched: false,
+      candidates: match ? [match] : findNearMatches(finder, viewHierarchy, selector),
+    };
   };
 }
 
@@ -146,7 +149,7 @@ export function clickable(finder: ElementFinder, selector: ConditionSelector): C
 export function textEquals(
   finder: ElementFinder,
   selector: ConditionSelector,
-  expected: string
+  expected: string,
 ): ConditionPredicate {
   return (observation: ObserveResult): ConditionEvaluation => {
     const viewHierarchy = observation.viewHierarchy;
@@ -154,18 +157,34 @@ export function textEquals(
       return { matched: false, candidates: [] };
     }
     if (selector.elementId !== undefined) {
-      const located = finder.findElementByResourceId(viewHierarchy, selector.elementId, selector.container ?? null);
+      const located = finder.findElementByResourceId(
+        viewHierarchy,
+        selector.elementId,
+        selector.container ?? null,
+      );
       if (located && (located.text ?? "") === expected) {
         return { matched: true, matchedElement: located, candidates: [located] };
       }
       return { matched: false, candidates: located ? [located] : [] };
     }
     // No locator: an exact (case-sensitive) text match IS the located element.
-    const located = finder.findElementByText(viewHierarchy, expected, selector.container ?? null, false, true);
+    const located = finder.findElementByText(
+      viewHierarchy,
+      expected,
+      selector.container ?? null,
+      false,
+      true,
+    );
     if (located) {
       return { matched: true, matchedElement: located, candidates: [located] };
     }
-    return { matched: false, candidates: findNearMatches(finder, viewHierarchy, { text: expected, container: selector.container }) };
+    return {
+      matched: false,
+      candidates: findNearMatches(finder, viewHierarchy, {
+        text: expected,
+        container: selector.container,
+      }),
+    };
   };
 }
 
@@ -188,7 +207,7 @@ export interface CountStableOptions {
 export function countStable(
   finder: ElementFinder,
   selector: ConditionSelector,
-  options: CountStableOptions = {}
+  options: CountStableOptions = {},
 ): ConditionPredicate {
   const stableReads = options.stableReads ?? 2;
   let previousCount: number | undefined;

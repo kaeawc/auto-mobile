@@ -1,5 +1,8 @@
 import { errorMessage } from "./describeUnknownError";
-import { AdbClientFactory, defaultAdbClientFactory } from "./android-cmdline-tools/AdbClientFactory";
+import {
+  AdbClientFactory,
+  defaultAdbClientFactory,
+} from "./android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "./android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "./logger";
 import * as fs from "fs/promises";
@@ -12,14 +15,18 @@ import {
   isPinnedVersionKnown,
   resolveApkChecksum,
   resolveApkUrl,
-  resolvePinnedVersion
+  resolvePinnedVersion,
 } from "../constants/release";
 import AdmZip from "adm-zip";
 import crypto from "crypto";
 import os from "os";
 import { accessibilityDetector } from "./AccessibilityDetector";
 import type { AccessibilityDetector } from "./interfaces/AccessibilityDetector";
-import { NoOpPerformanceTracker, createGlobalPerformanceTracker, type PerformanceTracker } from "./PerformanceTracker";
+import {
+  NoOpPerformanceTracker,
+  createGlobalPerformanceTracker,
+  type PerformanceTracker,
+} from "./PerformanceTracker";
 import { Timer, defaultTimer } from "./SystemTimer";
 import { type FileDownloader, DefaultFileDownloader } from "./FileDownloader";
 import { type ChecksumCalculator, DefaultChecksumCalculator } from "./ChecksumCalculator";
@@ -27,7 +34,7 @@ import type { ProxyManager, ProxySetupResult } from "./interfaces/ProxyManager";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "./workingDirectory";
 import {
   type AndroidPrerequisiteDetector,
-  DefaultAndroidPrerequisiteDetector
+  DefaultAndroidPrerequisiteDetector,
 } from "./android-cmdline-tools/AndroidPrerequisiteDetector";
 
 export const MAX_STALE_PREFETCH_DIRS_PER_STARTUP = 20;
@@ -43,7 +50,9 @@ export interface CtrlProxyManager extends ProxyManager {
   isEnabledForUser(userId: number): Promise<boolean>;
   getInstalledApkSha256(): Promise<string | null>;
   isVersionCompatible(): Promise<boolean>;
-  ensureCompatibleVersion(options?: AccessibilityVersionCheckOptions): Promise<AccessibilityVersionCheckResult>;
+  ensureCompatibleVersion(
+    options?: AccessibilityVersionCheckOptions,
+  ): Promise<AccessibilityVersionCheckResult>;
   downloadApk(): Promise<string>;
   install(apkPath: string): Promise<void>;
   enable(): Promise<void>;
@@ -52,7 +61,14 @@ export interface CtrlProxyManager extends ProxyManager {
 }
 
 interface AccessibilityVersionCheckResult {
-  status: "skipped" | "not_installed" | "compatible" | "upgraded" | "installed" | "reinstalled" | "failed";
+  status:
+    | "skipped"
+    | "not_installed"
+    | "compatible"
+    | "upgraded"
+    | "installed"
+    | "reinstalled"
+    | "failed";
   expectedSha256?: string;
   installedSha256?: string | null;
   installedShaSource?: "device" | "host" | "none";
@@ -97,7 +113,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   // Static cache for service availability
   private cachedAvailability: { isAvailable: boolean; timestamp: number } | null = null;
   private static readonly AVAILABILITY_CACHE_TTL = 60 * 60 * 1000; // 1 hour
-  private cachedVersionCheck: { result: AccessibilityVersionCheckResult; timestamp: number } | null = null;
+  private cachedVersionCheck: {
+    result: AccessibilityVersionCheckResult;
+    timestamp: number;
+  } | null = null;
   private static readonly VERSION_CHECK_CACHE_TTL = 60 * 1000; // 1 minute
 
   // Static caches for individual status checks
@@ -127,10 +146,12 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   private readonly fileDownloader: FileDownloader;
   private readonly checksumCalculator: ChecksumCalculator;
   private static readonly defaultFileDownloader: FileDownloader = new DefaultFileDownloader();
-  private static readonly defaultChecksumCalculator: ChecksumCalculator = new DefaultChecksumCalculator();
+  private static readonly defaultChecksumCalculator: ChecksumCalculator =
+    new DefaultChecksumCalculator();
 
   // Gate that decides whether the startup APK prefetch should run at all (#4404).
-  private static androidPrerequisiteDetector: AndroidPrerequisiteDetector = new DefaultAndroidPrerequisiteDetector();
+  private static androidPrerequisiteDetector: AndroidPrerequisiteDetector =
+    new DefaultAndroidPrerequisiteDetector();
   // Test seam for the static prefetch's downloader; null uses defaultFileDownloader.
   private static prefetchFileDownloaderOverride: FileDownloader | null = null;
 
@@ -139,7 +160,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     adb: AdbExecutor,
     timer: Timer = defaultTimer,
     fileDownloader: FileDownloader = AndroidCtrlProxyManager.defaultFileDownloader,
-    checksumCalculator: ChecksumCalculator = AndroidCtrlProxyManager.defaultChecksumCalculator
+    checksumCalculator: ChecksumCalculator = AndroidCtrlProxyManager.defaultChecksumCalculator,
   ) {
     // home should either be process.env.HOME or bash resolution of home for current user
     const homeDir = process.env.HOME || require("os").homedir();
@@ -153,13 +174,19 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     this.checksumCalculator = checksumCalculator;
   }
 
-  public static getInstance(device: BootedDevice, adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory): AndroidCtrlProxyManager {
+  public static getInstance(
+    device: BootedDevice,
+    adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory,
+  ): AndroidCtrlProxyManager {
     requireBootedDevice(device, "AndroidCtrlProxyManager.getInstance");
     if (!AndroidCtrlProxyManager.instances.has(device.deviceId)) {
       let adb: AdbExecutor;
       let factory: AdbClientFactory;
       // Detect if the argument is a factory (has create method) or an executor
-      if (adbFactoryOrExecutor && typeof (adbFactoryOrExecutor as AdbClientFactory).create === "function") {
+      if (
+        adbFactoryOrExecutor &&
+        typeof (adbFactoryOrExecutor as AdbClientFactory).create === "function"
+      ) {
         factory = adbFactoryOrExecutor as AdbClientFactory;
         adb = factory.create(device);
       } else if (adbFactoryOrExecutor) {
@@ -172,10 +199,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         adb = factory.create(device);
       }
       AndroidCtrlProxyManager.adbFactory = factory;
-      AndroidCtrlProxyManager.instances.set(device.deviceId, new AndroidCtrlProxyManager(
-        device,
-        adb
-      ));
+      AndroidCtrlProxyManager.instances.set(
+        device.deviceId,
+        new AndroidCtrlProxyManager(device, adb),
+      );
     }
     return AndroidCtrlProxyManager.instances.get(device.deviceId)!;
   }
@@ -185,7 +212,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     adb: AdbExecutor,
     timer: Timer = defaultTimer,
     fileDownloader: FileDownloader = AndroidCtrlProxyManager.defaultFileDownloader,
-    checksumCalculator: ChecksumCalculator = AndroidCtrlProxyManager.defaultChecksumCalculator
+    checksumCalculator: ChecksumCalculator = AndroidCtrlProxyManager.defaultChecksumCalculator,
   ): AndroidCtrlProxyManager {
     requireBootedDevice(device, "AndroidCtrlProxyManager.createForTestingWithDeps");
     return new AndroidCtrlProxyManager(device, adb, timer, fileDownloader, checksumCalculator);
@@ -222,7 +249,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     AndroidCtrlProxyManager.prefetchError = null;
 
     AndroidCtrlProxyManager.prefetchPromise = AndroidCtrlProxyManager.doPrefetch()
-      .then(apkPath => {
+      .then((apkPath) => {
         const duration = defaultTimer.now() - startTime;
         if (apkPath) {
           AndroidCtrlProxyManager.prefetchedApkPath = apkPath;
@@ -230,11 +257,12 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         }
         return apkPath;
       })
-      .catch(error => {
+      .catch((error) => {
         const duration = defaultTimer.now() - startTime;
-        AndroidCtrlProxyManager.prefetchError = error instanceof Error ? error : new Error(String(error));
+        AndroidCtrlProxyManager.prefetchError =
+          error instanceof Error ? error : new Error(String(error));
         logger.warn(`[CTRL_PROXY] APK prefetch failed after ${duration}ms`, {
-          error: AndroidCtrlProxyManager.prefetchError.message
+          error: AndroidCtrlProxyManager.prefetchError.message,
         });
         AndroidCtrlProxyManager.prefetchPromise = null;
         return null;
@@ -253,7 +281,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     if (!(await AndroidCtrlProxyManager.androidPrerequisiteDetector.hasAndroidPrerequisites())) {
       logger.info(
         "[CTRL_PROXY] Prefetch skipped: Android prerequisites (adb/SDK) not detected; " +
-        "the APK is only needed for Android device work"
+          "the APK is only needed for Android device work",
       );
       return null;
     }
@@ -264,7 +292,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     if (AndroidCtrlProxyManager.isPinnedVersionUnverifiable()) {
       logger.warn(
         `[CTRL_PROXY] Prefetch skipped: AUTOMOBILE_VERSION=${resolvePinnedVersion()} is not in the ` +
-        `release checksum registry, so the APK cannot be integrity-verified`
+          `release checksum registry, so the APK cannot be integrity-verified`,
       );
       return null;
     }
@@ -276,7 +304,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       // Download the APK (URL honors AUTOMOBILE_VERSION + AUTOMOBILE_ASSET_BASE_URL)
       const apkUrl = resolveApkUrl();
       logger.info("[CTRL_PROXY] Prefetch: downloading APK", { url: apkUrl, destination: apkPath });
-      const downloader = AndroidCtrlProxyManager.prefetchFileDownloaderOverride ?? AndroidCtrlProxyManager.defaultFileDownloader;
+      const downloader =
+        AndroidCtrlProxyManager.prefetchFileDownloaderOverride ??
+        AndroidCtrlProxyManager.defaultFileDownloader;
       await downloader.download(apkUrl, apkPath);
 
       // Verify the file exists and has reasonable size
@@ -289,11 +319,15 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       AndroidCtrlProxyManager.verifyApkIntegrityStatic(apkPath);
 
       // Verify checksum if provided
-      const expectedChecksum = AndroidCtrlProxyManager.expectedChecksumOverride ?? resolveApkChecksum();
+      const expectedChecksum =
+        AndroidCtrlProxyManager.expectedChecksumOverride ?? resolveApkChecksum();
       if (expectedChecksum.length > 0) {
-        const { checksum: actualChecksum } = await AndroidCtrlProxyManager.defaultChecksumCalculator.computeFileSha256(apkPath);
+        const { checksum: actualChecksum } =
+          await AndroidCtrlProxyManager.defaultChecksumCalculator.computeFileSha256(apkPath);
         if (actualChecksum.toLowerCase() !== expectedChecksum.toLowerCase()) {
-          throw new Error(`APK checksum verification failed. Expected: ${expectedChecksum}, Got: ${actualChecksum}`);
+          throw new Error(
+            `APK checksum verification failed. Expected: ${expectedChecksum}, Got: ${actualChecksum}`,
+          );
         }
         logger.info("[CTRL_PROXY] Prefetch: checksum verified", { checksum: actualChecksum });
       }
@@ -342,12 +376,12 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       await fs.copyFile(prefetchedPath, destinationPath);
       logger.info("[CTRL_PROXY] Copied prefetched APK", {
         source: prefetchedPath,
-        destination: destinationPath
+        destination: destinationPath,
       });
       return true;
     } catch (error) {
       logger.warn("[CTRL_PROXY] Failed to copy prefetched APK", {
-        error: errorMessage(error)
+        error: errorMessage(error),
       });
       return false;
     }
@@ -367,12 +401,12 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       await fs.copyFile(AndroidCtrlProxyManager.prefetchedApkPath, destinationPath);
       logger.info("[CTRL_PROXY] Copied completed prefetched APK", {
         source: AndroidCtrlProxyManager.prefetchedApkPath,
-        destination: destinationPath
+        destination: destinationPath,
       });
       return true;
     } catch (error) {
       logger.warn("[CTRL_PROXY] Failed to copy completed prefetched APK", {
-        error: errorMessage(error)
+        error: errorMessage(error),
       });
       return false;
     }
@@ -389,7 +423,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         logger.info("[CTRL_PROXY] Cleaned up prefetched APK", { path: tempDir });
       } catch (error) {
         logger.warn("[CTRL_PROXY] Failed to clean up prefetched APK", {
-          error: errorMessage(error)
+          error: errorMessage(error),
         });
       }
       AndroidCtrlProxyManager.prefetchedApkPath = null;
@@ -418,7 +452,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    */
   public static async sweepStalePrefetchDirsOnStartup(
     tempRoot: string = os.tmpdir(),
-    timer: Timer = defaultTimer
+    timer: Timer = defaultTimer,
   ): Promise<void> {
     let entries: Dirent[];
     try {
@@ -430,7 +464,8 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     }
 
     const candidates = entries.filter(
-      entry => entry.isDirectory() && entry.name.startsWith(AndroidCtrlProxyManager.PREFETCH_DIR_PREFIX)
+      (entry) =>
+        entry.isDirectory() && entry.name.startsWith(AndroidCtrlProxyManager.PREFETCH_DIR_PREFIX),
     );
     const now = timer.now();
     const deadline = now + STALE_PREFETCH_SWEEP_DEADLINE_MS;
@@ -441,7 +476,12 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         return;
       }
       const dir = path.join(tempRoot, entry.name);
-      const result = await AndroidCtrlProxyManager.reclaimStalePrefetchDir(dir, now, deadline, timer);
+      const result = await AndroidCtrlProxyManager.reclaimStalePrefetchDir(
+        dir,
+        now,
+        deadline,
+        timer,
+      );
       if (result === "deadline_exhausted") {
         AndroidCtrlProxyManager.logPrefetchSweepDeadline();
         return;
@@ -465,7 +505,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     dir: string,
     now: number,
     deadline: number,
-    timer: Timer
+    timer: Timer,
   ): Promise<"reclaimed" | "not_stale" | "deadline_exhausted"> {
     try {
       const stats = await fs.stat(dir);
@@ -488,7 +528,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   private static logPrefetchSweepDeadline(): void {
     logger.warn(
       `[CTRL_PROXY] Prefetch sweep timed out after ${STALE_PREFETCH_SWEEP_DEADLINE_MS}ms ` +
-      `while inspecting stale prefetch directories`
+        `while inspecting stale prefetch directories`,
     );
   }
 
@@ -496,7 +536,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     if (skippedCandidateCount > 0) {
       logger.warn(
         `[CTRL_PROXY] Prefetch sweep skipped ${skippedCandidateCount} uninspected prefetch dir candidate(s) after ` +
-        `reaching the ${MAX_STALE_PREFETCH_DIRS_PER_STARTUP}-directory startup cap`
+          `reaching the ${MAX_STALE_PREFETCH_DIRS_PER_STARTUP}-directory startup cap`,
       );
     }
   }
@@ -508,7 +548,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     try {
       const zip = new AdmZip(apkPath);
       const entries = zip.getEntries();
-      const hasManifest = entries.some(entry => entry.entryName === "AndroidManifest.xml");
+      const hasManifest = entries.some((entry) => entry.entryName === "AndroidManifest.xml");
       if (!hasManifest) {
         throw new Error("AndroidManifest.xml missing");
       }
@@ -526,8 +566,11 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   }
 
   /** Override the Android-prerequisite gate for the prefetch (#4404). Null restores the default detector. */
-  public static setAndroidPrerequisiteDetectorForTesting(detector: AndroidPrerequisiteDetector | null): void {
-    AndroidCtrlProxyManager.androidPrerequisiteDetector = detector ?? new DefaultAndroidPrerequisiteDetector();
+  public static setAndroidPrerequisiteDetectorForTesting(
+    detector: AndroidPrerequisiteDetector | null,
+  ): void {
+    AndroidCtrlProxyManager.androidPrerequisiteDetector =
+      detector ?? new DefaultAndroidPrerequisiteDetector();
   }
 
   /** Override the downloader used by the static prefetch (#4404). Null restores the default. */
@@ -574,7 +617,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     if (this.cachedInstallation && this.cachedInstallation.isInstalled) {
       const cacheAge = this.timer.now() - this.cachedInstallation.timestamp;
       if (cacheAge < AndroidCtrlProxyManager.STATUS_CACHE_TTL) {
-        logger.debug(`[CTRL_PROXY] Using cached installation status (age: ${cacheAge}ms): ${this.cachedInstallation.isInstalled ? "installed" : "not installed"}`);
+        logger.debug(
+          `[CTRL_PROXY] Using cached installation status (age: ${cacheAge}ms): ${this.cachedInstallation.isInstalled ? "installed" : "not installed"}`,
+        );
         return this.cachedInstallation.isInstalled;
       } else {
         this.cachedInstallation = null;
@@ -583,16 +628,23 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
     try {
       logger.debug("[CTRL_PROXY] Checking if accessibility service is installed");
-      const result = await this.adb.executeCommand(`shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`, undefined, undefined, true);
+      const result = await this.adb.executeCommand(
+        `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
+        undefined,
+        undefined,
+        true,
+      );
       const isInstalled = result.stdout.includes(AndroidCtrlProxyManager.PACKAGE);
 
       // Cache the result
       this.cachedInstallation = {
         isInstalled,
-        timestamp: this.timer.now()
+        timestamp: this.timer.now(),
       };
 
-      logger.debug(`[CTRL_PROXY] Service installation status: ${isInstalled ? "installed" : "not installed"} (cached for ${AndroidCtrlProxyManager.STATUS_CACHE_TTL / 1000 / 60} minutes)`);
+      logger.debug(
+        `[CTRL_PROXY] Service installation status: ${isInstalled ? "installed" : "not installed"} (cached for ${AndroidCtrlProxyManager.STATUS_CACHE_TTL / 1000 / 60} minutes)`,
+      );
       return isInstalled;
     } catch (error) {
       logger.warn(`[CTRL_PROXY] Error checking installation status: ${error}`);
@@ -608,7 +660,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     if (this.cachedEnabled && this.cachedEnabled.isEnabled) {
       const cacheAge = this.timer.now() - this.cachedEnabled.timestamp;
       if (cacheAge < AndroidCtrlProxyManager.STATUS_CACHE_TTL) {
-        logger.debug(`[CTRL_PROXY] Using cached enabled status (age: ${cacheAge}ms): ${this.cachedEnabled.isEnabled ? "enabled" : "disabled"}`);
+        logger.debug(
+          `[CTRL_PROXY] Using cached enabled status (age: ${cacheAge}ms): ${this.cachedEnabled.isEnabled ? "enabled" : "disabled"}`,
+        );
         return this.cachedEnabled.isEnabled;
       } else {
         this.cachedEnabled = null;
@@ -617,16 +671,20 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
     try {
       logger.debug("[CTRL_PROXY] Checking if accessibility service is enabled");
-      const result = await this.adb.executeCommand("shell settings get secure enabled_accessibility_services");
+      const result = await this.adb.executeCommand(
+        "shell settings get secure enabled_accessibility_services",
+      );
       const isEnabled = result.stdout.includes(AndroidCtrlProxyManager.PACKAGE);
 
       // Cache the result
       this.cachedEnabled = {
         isEnabled,
-        timestamp: this.timer.now()
+        timestamp: this.timer.now(),
       };
 
-      logger.debug(`[CTRL_PROXY] Service enabled status: ${isEnabled ? "enabled" : "disabled"} (cached for ${AndroidCtrlProxyManager.STATUS_CACHE_TTL / 1000 / 60} minutes)`);
+      logger.debug(
+        `[CTRL_PROXY] Service enabled status: ${isEnabled ? "enabled" : "disabled"} (cached for ${AndroidCtrlProxyManager.STATUS_CACHE_TTL / 1000 / 60} minutes)`,
+      );
       return isEnabled;
     } catch (error) {
       logger.warn(`[CTRL_PROXY] Error checking enabled status: ${error}`);
@@ -641,9 +699,13 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   async isEnabledForUser(userId: number): Promise<boolean> {
     try {
       logger.debug(`[CTRL_PROXY] Checking if accessibility service is enabled for user ${userId}`);
-      const result = await this.adb.executeCommand(`shell settings --user ${userId} get secure enabled_accessibility_services`);
+      const result = await this.adb.executeCommand(
+        `shell settings --user ${userId} get secure enabled_accessibility_services`,
+      );
       const isEnabled = result.stdout.includes(AndroidCtrlProxyManager.PACKAGE);
-      logger.debug(`[CTRL_PROXY] Service enabled status for user ${userId}: ${isEnabled ? "enabled" : "disabled"}`);
+      logger.debug(
+        `[CTRL_PROXY] Service enabled status for user ${userId}: ${isEnabled ? "enabled" : "disabled"}`,
+      );
       return isEnabled;
     } catch (error) {
       logger.warn(`[CTRL_PROXY] Error checking enabled status for user ${userId}: ${error}`);
@@ -662,7 +724,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     if (this.cachedAvailability && this.cachedAvailability.isAvailable) {
       const cacheAge = this.timer.now() - this.cachedAvailability.timestamp;
       if (cacheAge < AndroidCtrlProxyManager.AVAILABILITY_CACHE_TTL) {
-        logger.debug(`[CTRL_PROXY] Using cached overall availability (age: ${cacheAge}ms): ${this.cachedAvailability.isAvailable}`);
+        logger.debug(
+          `[CTRL_PROXY] Using cached overall availability (age: ${cacheAge}ms): ${this.cachedAvailability.isAvailable}`,
+        );
         return this.cachedAvailability.isAvailable;
       } else {
         this.cachedAvailability = null;
@@ -673,10 +737,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
     try {
       // Check installation and enabled status in parallel for better performance
-      const [installed, enabled] = await Promise.all([
-        this.isInstalled(),
-        this.isEnabled()
-      ]);
+      const [installed, enabled] = await Promise.all([this.isInstalled(), this.isEnabled()]);
 
       const available = installed && enabled;
       const duration = this.timer.now() - startTime;
@@ -684,10 +745,12 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       // Cache the result
       this.cachedAvailability = {
         isAvailable: available,
-        timestamp: this.timer.now()
+        timestamp: this.timer.now(),
       };
 
-      logger.debug(`[CTRL_PROXY] Availability check completed in ${duration}ms - Available: ${available} (cached for ${AndroidCtrlProxyManager.AVAILABILITY_CACHE_TTL / 1000 / 60} minutes)`);
+      logger.debug(
+        `[CTRL_PROXY] Availability check completed in ${duration}ms - Available: ${available} (cached for ${AndroidCtrlProxyManager.AVAILABILITY_CACHE_TTL / 1000 / 60} minutes)`,
+      );
       return available;
     } catch (error) {
       const duration = this.timer.now() - startTime;
@@ -729,7 +792,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   /**
    * Ensure installed accessibility service version matches expected checksum.
    */
-  async ensureCompatibleVersion(options: AccessibilityVersionCheckOptions = {}): Promise<AccessibilityVersionCheckResult> {
+  async ensureCompatibleVersion(
+    options: AccessibilityVersionCheckOptions = {},
+  ): Promise<AccessibilityVersionCheckResult> {
     const perf = createGlobalPerformanceTracker();
 
     // Fail closed before any readiness shortcut (skipped/acceptedPreinstalled) can
@@ -751,11 +816,13 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     const expectedSha = this.getExpectedChecksum();
     if (expectedSha.length === 0) {
       if (options.allowDownloadWhenInstalled) {
-        logger.warn("[CTRL_PROXY] Version checksum unavailable; explicit update will install APK without checksum comparison");
+        logger.warn(
+          "[CTRL_PROXY] Version checksum unavailable; explicit update will install APK without checksum comparison",
+        );
       } else {
         return this.cacheVersionCheckResult({
           status: "skipped",
-          expectedSha256: expectedSha
+          expectedSha256: expectedSha,
         });
       }
     }
@@ -773,7 +840,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       logger.warn("[CTRL_PROXY] Skipping APK download/version check (preinstalled APK allowed)");
       return this.cacheVersionCheckResult({
         status: "skipped",
-        expectedSha256: expectedSha
+        expectedSha256: expectedSha,
       });
     }
 
@@ -797,15 +864,23 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
       if (expectedSha.length > 0 && !installedSha && installedShaResult.error) {
         logger.warn("[CTRL_PROXY] Unable to determine installed APK checksum, forcing reinstall", {
-          error: installedShaResult.error
+          error: installedShaResult.error,
         });
       }
 
-      if (expectedSha.length > 0 && installedSha && installedSha.toLowerCase() === expectedSha.toLowerCase()) {
+      if (
+        expectedSha.length > 0 &&
+        installedSha &&
+        installedSha.toLowerCase() === expectedSha.toLowerCase()
+      ) {
         return this.cacheVersionCheckResult(result);
       }
 
-      if (expectedSha.length > 0 && !options.allowDownloadWhenInstalled && !this.getApkPathOverride()) {
+      if (
+        expectedSha.length > 0 &&
+        !options.allowDownloadWhenInstalled &&
+        !this.getApkPathOverride()
+      ) {
         const prefetchedUpgradeResult = await this.tryUpgradeFromCompletedPrefetch(result, perf);
         if (prefetchedUpgradeResult) {
           return this.cacheVersionCheckResult(prefetchedUpgradeResult);
@@ -815,16 +890,19 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
           throw AndroidCtrlProxyManager.createKnownPinMismatchError(expectedSha, installedSha);
         }
 
-        logger.warn("[CTRL_PROXY] Installed APK SHA differs from expected release; accepting preinstalled CtrlProxy for nonblocking readiness", {
-          expected: expectedSha,
-          actual: installedSha
-        });
+        logger.warn(
+          "[CTRL_PROXY] Installed APK SHA differs from expected release; accepting preinstalled CtrlProxy for nonblocking readiness",
+          {
+            expected: expectedSha,
+            actual: installedSha,
+          },
+        );
         this.queueBackgroundApkRefresh();
         return this.cacheVersionCheckResult({
           ...result,
           status: "skipped",
           attemptedDownload: false,
-          acceptedPreinstalled: true
+          acceptedPreinstalled: true,
         });
       }
 
@@ -833,7 +911,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       } else {
         logger.info("[CTRL_PROXY] Installed APK SHA mismatch, attempting upgrade", {
           expected: expectedSha,
-          actual: installedSha
+          actual: installedSha,
         });
       }
     } else {
@@ -847,7 +925,13 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       apkPath = await this.downloadApk();
       perf.endOperation("downloadApk");
 
-      return await this.installDownloadedApk(apkPath, result, isInstalled, needsReinstallDueToUnknownSha, perf);
+      return await this.installDownloadedApk(
+        apkPath,
+        result,
+        isInstalled,
+        needsReinstallDueToUnknownSha,
+        perf,
+      );
     } catch (error) {
       const message = errorMessage(error);
       const downloadUnavailable = this.isNetworkError(message);
@@ -857,7 +941,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         downloadUnavailable,
         error: downloadUnavailable
           ? "Unable to download the latest accessibility service APK while offline. Connect to the internet and retry."
-          : message
+          : message,
       };
       return options.allowDownloadWhenInstalled
         ? failedResult
@@ -871,7 +955,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
   private async tryUpgradeFromCompletedPrefetch(
     result: AccessibilityVersionCheckResult,
-    perf: PerformanceTracker
+    perf: PerformanceTracker,
   ): Promise<AccessibilityVersionCheckResult | null> {
     if (!AndroidCtrlProxyManager.prefetchedApkPath) {
       return null;
@@ -886,10 +970,16 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         return null;
       }
 
-      const upgradeResult = await this.installDownloadedApk(apkPath, {
-        ...result,
-        attemptedDownload: false
-      }, true, false, perf);
+      const upgradeResult = await this.installDownloadedApk(
+        apkPath,
+        {
+          ...result,
+          attemptedDownload: false,
+        },
+        true,
+        false,
+        perf,
+      );
 
       if (upgradeResult.status !== "failed") {
         return upgradeResult;
@@ -898,25 +988,32 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       this.clearServiceAvailabilityCache();
       const stillInstalled = await this.isInstalled();
       if (!stillInstalled) {
-        logger.warn("[CTRL_PROXY] Completed prefetched APK install failed and existing CtrlProxy is no longer installed", {
-          error: upgradeResult.error || upgradeResult.upgradeError || upgradeResult.reinstallError
-        });
+        logger.warn(
+          "[CTRL_PROXY] Completed prefetched APK install failed and existing CtrlProxy is no longer installed",
+          {
+            error:
+              upgradeResult.error || upgradeResult.upgradeError || upgradeResult.reinstallError,
+          },
+        );
         return upgradeResult;
       }
 
-      logger.warn("[CTRL_PROXY] Completed prefetched APK install failed; verified existing CtrlProxy remains installed for readiness", {
-        error: upgradeResult.error || upgradeResult.upgradeError || upgradeResult.reinstallError
-      });
+      logger.warn(
+        "[CTRL_PROXY] Completed prefetched APK install failed; verified existing CtrlProxy remains installed for readiness",
+        {
+          error: upgradeResult.error || upgradeResult.upgradeError || upgradeResult.reinstallError,
+        },
+      );
       if (AndroidCtrlProxyManager.isKnownExplicitPinConfigured()) {
         throw AndroidCtrlProxyManager.createKnownPinMismatchError(
           result.expectedSha256 ?? "",
-          result.installedSha256
+          result.installedSha256,
         );
       }
       return {
         ...upgradeResult,
         status: "skipped",
-        acceptedPreinstalled: true
+        acceptedPreinstalled: true,
       };
     } finally {
       await this.cleanupApk(apkPath);
@@ -928,7 +1025,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     result: AccessibilityVersionCheckResult,
     isInstalled: boolean,
     needsReinstallDueToUnknownSha: boolean,
-    perf: PerformanceTracker
+    perf: PerformanceTracker,
   ): Promise<AccessibilityVersionCheckResult> {
     if (isInstalled && !needsReinstallDueToUnknownSha) {
       try {
@@ -940,7 +1037,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         this.clearAvailabilityCache();
         return {
           ...result,
-          status: "upgraded"
+          status: "upgraded",
         };
       } catch (upgradeError) {
         perf.endOperation("installApk");
@@ -959,11 +1056,13 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       await this.install(apkPath);
       perf.endOperation("installApk");
       await this.enable();
-      logger.info(`[CTRL_PROXY] APK ${isInstalled ? "reinstalled" : "installed"} and service enabled`);
+      logger.info(
+        `[CTRL_PROXY] APK ${isInstalled ? "reinstalled" : "installed"} and service enabled`,
+      );
       this.clearAvailabilityCache();
       return {
         ...result,
-        status: isInstalled ? "reinstalled" : "installed"
+        status: isInstalled ? "reinstalled" : "installed",
       };
     } catch (reinstallError) {
       const reinstallMessage = errorMessage(reinstallError);
@@ -972,7 +1071,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       return {
         ...result,
         status: "failed",
-        reinstallError: reinstallMessage
+        reinstallError: reinstallMessage,
       };
     }
   }
@@ -1023,23 +1122,26 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       // Perform checksum verification (only if checksum is provided)
       if (expectedChecksum.length > 0) {
         perf.startOperation("checksumVerify");
-        const { checksum: actualChecksum, source } = await this.checksumCalculator.computeFileSha256(apkPath);
+        const { checksum: actualChecksum, source } =
+          await this.checksumCalculator.computeFileSha256(apkPath);
         const normalizedActual = actualChecksum.toLowerCase();
         const normalizedExpected = expectedChecksum.toLowerCase();
 
         if (normalizedActual !== normalizedExpected) {
           logger.warn("APK checksum verification failed", {
             expected: normalizedExpected,
-            actual: normalizedActual
+            actual: normalizedActual,
           });
-          throw new Error(`APK checksum verification failed. Expected: ${normalizedExpected}, Got: ${normalizedActual}`);
+          throw new Error(
+            `APK checksum verification failed. Expected: ${normalizedExpected}, Got: ${normalizedActual}`,
+          );
         }
 
         logger.info("APK checksum verified successfully", { checksum: normalizedActual, source });
         perf.endOperation("checksumVerify");
       } else {
         logger.warn("APK checksum verification SKIPPED - no checksum provided (development mode)", {
-          apkUrl: resolveApkUrl()
+          apkUrl: resolveApkUrl(),
         });
       }
 
@@ -1051,7 +1153,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         await this.cleanupApk(apkPath);
       } catch (cleanupError) {
         // Failed-download cleanup is best-effort; the original download error still surfaces below.
-        logger.debug(`[CTRL_PROXY] Failed to clean up incomplete APK download: ${errorMessage(cleanupError)}`, cleanupError);
+        logger.debug(
+          `[CTRL_PROXY] Failed to clean up incomplete APK download: ${errorMessage(cleanupError)}`,
+          cleanupError,
+        );
       }
 
       throw new Error(`Failed to download APK: ${errorMessage(error)}`);
@@ -1062,7 +1167,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     try {
       const zip = new AdmZip(apkPath);
       const entries = zip.getEntries();
-      const hasManifest = entries.some(entry => entry.entryName === "AndroidManifest.xml");
+      const hasManifest = entries.some((entry) => entry.entryName === "AndroidManifest.xml");
       if (!hasManifest) {
         throw new Error("AndroidManifest.xml missing");
       }
@@ -1079,12 +1184,16 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     try {
       const result = await this.adb.executeCommand(
         `shell pm list packages | grep ${AndroidCtrlProxyManager.LEGACY_PACKAGE}`,
-        undefined, undefined, true
+        undefined,
+        undefined,
+        true,
       );
       if (!result.stdout.includes(AndroidCtrlProxyManager.LEGACY_PACKAGE)) {
         return;
       }
-      logger.info(`[CTRL_PROXY] Found legacy package ${AndroidCtrlProxyManager.LEGACY_PACKAGE}, uninstalling`);
+      logger.info(
+        `[CTRL_PROXY] Found legacy package ${AndroidCtrlProxyManager.LEGACY_PACKAGE}, uninstalling`,
+      );
       await this.adb.executeCommand(`shell pm uninstall ${AndroidCtrlProxyManager.LEGACY_PACKAGE}`);
       logger.info(`[CTRL_PROXY] Legacy package uninstalled`);
     } catch (error) {
@@ -1134,7 +1243,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
       // Get current enabled services
       perf.startOperation("readCurrentServices");
-      const result = await this.adb.executeCommand("shell settings get secure enabled_accessibility_services");
+      const result = await this.adb.executeCommand(
+        "shell settings get secure enabled_accessibility_services",
+      );
       perf.endOperation("readCurrentServices");
       let currentServices = result.stdout.trim();
 
@@ -1157,7 +1268,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
           : serviceComponent;
 
         // Set updated list
-        await this.adb.executeCommand(`shell settings put secure enabled_accessibility_services "${updatedServices}"`);
+        await this.adb.executeCommand(
+          `shell settings put secure enabled_accessibility_services "${updatedServices}"`,
+        );
         logger.info("Added AutoMobile service to enabled_accessibility_services");
       }
 
@@ -1165,20 +1278,31 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       await this.adb.executeCommand("shell settings put secure accessibility_enabled 1");
       perf.endOperation("writeServiceEnabled");
       logger.info("Accessibility Service enabled successfully via settings");
-
     } catch (error) {
       const errorMsg = errorMessage(error);
       const errorLower = errorMsg.toLowerCase();
 
       // Categorize error types for clearer feedback
       if (errorLower.includes("permission denied") || errorLower.includes("not permitted")) {
-        throw new Error(`Permission denied while enabling Accessibility Service. The device may require root access, device owner status, or special shell permissions. Original error: ${errorMsg}`);
-      } else if (errorLower.includes("device not found") || errorLower.includes("no devices") || errorLower.includes("offline")) {
-        throw new Error(`Device connection lost while enabling Accessibility Service. Ensure the device is connected and adb is responsive. Original error: ${errorMsg}`);
+        throw new Error(
+          `Permission denied while enabling Accessibility Service. The device may require root access, device owner status, or special shell permissions. Original error: ${errorMsg}`,
+        );
+      } else if (
+        errorLower.includes("device not found") ||
+        errorLower.includes("no devices") ||
+        errorLower.includes("offline")
+      ) {
+        throw new Error(
+          `Device connection lost while enabling Accessibility Service. Ensure the device is connected and adb is responsive. Original error: ${errorMsg}`,
+        );
       } else if (errorLower.includes("timeout") || errorLower.includes("timed out")) {
-        throw new Error(`Timeout while enabling Accessibility Service. The device may be unresponsive. Original error: ${errorMsg}`);
+        throw new Error(
+          `Timeout while enabling Accessibility Service. The device may be unresponsive. Original error: ${errorMsg}`,
+        );
       } else {
-        throw new Error(`Failed to enable Accessibility Service via settings. This may indicate an ADB communication issue or device state problem. Original error: ${errorMsg}`);
+        throw new Error(
+          `Failed to enable Accessibility Service via settings. This may indicate an ADB communication issue or device state problem. Original error: ${errorMsg}`,
+        );
       }
     } finally {
       // Issue #4192: clear in `finally` so success, early return, and a partial
@@ -1205,7 +1329,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       logger.info("Disabling Accessibility Service via settings commands");
 
       // Get current enabled services
-      const result = await this.adb.executeCommand("shell settings get secure enabled_accessibility_services");
+      const result = await this.adb.executeCommand(
+        "shell settings get secure enabled_accessibility_services",
+      );
       const currentServices = result.stdout.trim();
 
       // Handle null or empty values
@@ -1219,7 +1345,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       const serviceList = currentServices.split(":");
 
       // Remove AutoMobile service from list
-      const filteredServices = serviceList.filter(service => !service.includes(AndroidCtrlProxyManager.PACKAGE));
+      const filteredServices = serviceList.filter(
+        (service) => !service.includes(AndroidCtrlProxyManager.PACKAGE),
+      );
 
       // Check if service was in the list
       if (filteredServices.length === serviceList.length) {
@@ -1227,12 +1355,17 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       } else {
         // Set updated list
         const updatedServices = filteredServices.join(":");
-        await this.adb.executeCommand(`shell settings put secure enabled_accessibility_services "${updatedServices}"`);
+        await this.adb.executeCommand(
+          `shell settings put secure enabled_accessibility_services "${updatedServices}"`,
+        );
         logger.info("Removed AutoMobile service from enabled_accessibility_services");
 
         // Conditionally disable accessibility if no other services remain
         // Edge case: a trailing separator can yield [""]; treat it as no remaining services.
-        if (filteredServices.length === 0 || (filteredServices.length === 1 && filteredServices[0] === "")) {
+        if (
+          filteredServices.length === 0 ||
+          (filteredServices.length === 1 && filteredServices[0] === "")
+        ) {
           await this.adb.executeCommand("shell settings put secure accessibility_enabled 0");
           logger.info("Disabled accessibility globally (no other services remain)");
         }
@@ -1245,13 +1378,25 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
       // Categorize error types for clearer feedback
       if (errorLower.includes("permission denied") || errorLower.includes("not permitted")) {
-        throw new Error(`Permission denied while disabling Accessibility Service. The device may require root access, device owner status, or special shell permissions. Original error: ${errorMsg}`);
-      } else if (errorLower.includes("device not found") || errorLower.includes("no devices") || errorLower.includes("offline")) {
-        throw new Error(`Device connection lost while disabling Accessibility Service. Ensure the device is connected and adb is responsive. Original error: ${errorMsg}`);
+        throw new Error(
+          `Permission denied while disabling Accessibility Service. The device may require root access, device owner status, or special shell permissions. Original error: ${errorMsg}`,
+        );
+      } else if (
+        errorLower.includes("device not found") ||
+        errorLower.includes("no devices") ||
+        errorLower.includes("offline")
+      ) {
+        throw new Error(
+          `Device connection lost while disabling Accessibility Service. Ensure the device is connected and adb is responsive. Original error: ${errorMsg}`,
+        );
       } else if (errorLower.includes("timeout") || errorLower.includes("timed out")) {
-        throw new Error(`Timeout while disabling Accessibility Service. The device may be unresponsive. Original error: ${errorMsg}`);
+        throw new Error(
+          `Timeout while disabling Accessibility Service. The device may be unresponsive. Original error: ${errorMsg}`,
+        );
       } else {
-        throw new Error(`Failed to disable Accessibility Service via settings. This may indicate an ADB communication issue or device state problem. Original error: ${errorMsg}`);
+        throw new Error(
+          `Failed to disable Accessibility Service via settings. This may indicate an ADB communication issue or device state problem. Original error: ${errorMsg}`,
+        );
       }
     } finally {
       // Issue #4192: the disable path previously invalidated nothing, so observe
@@ -1283,10 +1428,14 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     }
 
     try {
-      logger.info(`[CTRL_PROXY] Enabling Accessibility Service via settings commands for user ${userId}`);
+      logger.info(
+        `[CTRL_PROXY] Enabling Accessibility Service via settings commands for user ${userId}`,
+      );
 
       // Get current enabled services for this user
-      const result = await this.adb.executeCommand(`shell settings --user ${userId} get secure enabled_accessibility_services`);
+      const result = await this.adb.executeCommand(
+        `shell settings --user ${userId} get secure enabled_accessibility_services`,
+      );
       let currentServices = result.stdout.trim();
 
       // Issue #384: preserve existing enabled services; settings may return "null" or empty.
@@ -1307,27 +1456,46 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
           : serviceComponent;
 
         // Set updated list
-        await this.adb.executeCommand(`shell settings --user ${userId} put secure enabled_accessibility_services "${updatedServices}"`);
-        logger.info(`[CTRL_PROXY] Added AutoMobile service to enabled_accessibility_services for user ${userId}`);
+        await this.adb.executeCommand(
+          `shell settings --user ${userId} put secure enabled_accessibility_services "${updatedServices}"`,
+        );
+        logger.info(
+          `[CTRL_PROXY] Added AutoMobile service to enabled_accessibility_services for user ${userId}`,
+        );
       }
 
       // Enable accessibility globally for this user
-      await this.adb.executeCommand(`shell settings --user ${userId} put secure accessibility_enabled 1`);
-      logger.info(`[CTRL_PROXY] Accessibility Service enabled successfully via settings for user ${userId}`);
-
+      await this.adb.executeCommand(
+        `shell settings --user ${userId} put secure accessibility_enabled 1`,
+      );
+      logger.info(
+        `[CTRL_PROXY] Accessibility Service enabled successfully via settings for user ${userId}`,
+      );
     } catch (error) {
       const errorMsg = errorMessage(error);
       const errorLower = errorMsg.toLowerCase();
 
       // Categorize error types for clearer feedback
       if (errorLower.includes("permission denied") || errorLower.includes("not permitted")) {
-        throw new Error(`Permission denied while enabling Accessibility Service for user ${userId}. The device may require root access, device owner status, or special shell permissions. Original error: ${errorMsg}`);
-      } else if (errorLower.includes("device not found") || errorLower.includes("no devices") || errorLower.includes("offline")) {
-        throw new Error(`Device connection lost while enabling Accessibility Service for user ${userId}. Ensure the device is connected and adb is responsive. Original error: ${errorMsg}`);
+        throw new Error(
+          `Permission denied while enabling Accessibility Service for user ${userId}. The device may require root access, device owner status, or special shell permissions. Original error: ${errorMsg}`,
+        );
+      } else if (
+        errorLower.includes("device not found") ||
+        errorLower.includes("no devices") ||
+        errorLower.includes("offline")
+      ) {
+        throw new Error(
+          `Device connection lost while enabling Accessibility Service for user ${userId}. Ensure the device is connected and adb is responsive. Original error: ${errorMsg}`,
+        );
       } else if (errorLower.includes("timeout") || errorLower.includes("timed out")) {
-        throw new Error(`Timeout while enabling Accessibility Service for user ${userId}. The device may be unresponsive. Original error: ${errorMsg}`);
+        throw new Error(
+          `Timeout while enabling Accessibility Service for user ${userId}. The device may be unresponsive. Original error: ${errorMsg}`,
+        );
       } else {
-        throw new Error(`Failed to enable Accessibility Service via settings for user ${userId}. This may indicate an ADB communication issue or device state problem. Original error: ${errorMsg}`);
+        throw new Error(
+          `Failed to enable Accessibility Service via settings for user ${userId}. This may indicate an ADB communication issue or device state problem. Original error: ${errorMsg}`,
+        );
       }
     } finally {
       // Issue #4192: main-user cache only (per-user caching not implemented);
@@ -1345,10 +1513,11 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       const tempDir = path.resolve(path.dirname(apkPath));
       const tempBase = path.basename(tempDir);
       const relativeTempDir = path.relative(tempRoot, tempDir);
-      const isTempDir = Boolean(relativeTempDir)
-        && !relativeTempDir.startsWith("..")
-        && !path.isAbsolute(relativeTempDir)
-        && tempBase.startsWith("auto-mobile-");
+      const isTempDir =
+        Boolean(relativeTempDir) &&
+        !relativeTempDir.startsWith("..") &&
+        !path.isAbsolute(relativeTempDir) &&
+        tempBase.startsWith("auto-mobile-");
 
       await fs.rm(apkPath, { force: true });
       if (isTempDir) {
@@ -1360,7 +1529,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     } catch (error) {
       logger.warn("Failed to clean up temporary APK file", {
         path: apkPath,
-        error: errorMessage(error)
+        error: errorMessage(error),
       });
     }
   }
@@ -1368,17 +1537,17 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   /**
    * Complete setup process for Accessibility Service
    */
-  async setup(force: boolean = false, perf: PerformanceTracker = new NoOpPerformanceTracker()): Promise<ProxySetupResult> {
+  async setup(
+    force: boolean = false,
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+  ): Promise<ProxySetupResult> {
     perf.serial("a11yServiceSetup");
     let apkPath: string | null = null;
 
     if (this.attemptedAutomatedSetup) {
       try {
         const [installed, enabled] = await perf.track("recheckStatus", async () => {
-          return Promise.all([
-            this.isInstalled(),
-            this.isEnabled()
-          ]);
+          return Promise.all([this.isInstalled(), this.isEnabled()]);
         });
         if (installed && enabled) {
           perf.end();
@@ -1400,17 +1569,26 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     }
 
     try {
-      const compatibilityResult = await perf.track("ensureCompatibleVersion", () => this.ensureCompatibleVersion());
+      const compatibilityResult = await perf.track("ensureCompatibleVersion", () =>
+        this.ensureCompatibleVersion(),
+      );
       if (compatibilityResult.status === "failed") {
         perf.end();
         return {
           success: false,
           message: "Failed to ensure compatible Accessibility Service version",
-          error: compatibilityResult.error || compatibilityResult.upgradeError || compatibilityResult.reinstallError,
+          error:
+            compatibilityResult.error ||
+            compatibilityResult.upgradeError ||
+            compatibilityResult.reinstallError,
           perfTiming: perf.getTimings(),
         };
       }
-      if (compatibilityResult.status === "upgraded" || compatibilityResult.status === "installed" || compatibilityResult.status === "reinstalled") {
+      if (
+        compatibilityResult.status === "upgraded" ||
+        compatibilityResult.status === "installed" ||
+        compatibilityResult.status === "reinstalled"
+      ) {
         perf.end();
         return {
           success: true,
@@ -1449,7 +1627,6 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         message: "Accessibility Service installed and activated successfully",
         perfTiming: perf.getTimings(),
       };
-
     } catch (error) {
       const errorMsg = errorMessage(error);
       const errorLower = errorMsg.toLowerCase();
@@ -1458,14 +1635,23 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       let message = "Failed to setup Accessibility Service";
       if (errorLower.includes("permission denied") || errorLower.includes("not permitted")) {
         message = "Failed to setup Accessibility Service due to permission error";
-      } else if (errorLower.includes("device not found") || errorLower.includes("no devices") || errorLower.includes("offline")) {
+      } else if (
+        errorLower.includes("device not found") ||
+        errorLower.includes("no devices") ||
+        errorLower.includes("offline")
+      ) {
         message = "Failed to setup Accessibility Service due to device connection issue";
       } else if (errorLower.includes("timeout") || errorLower.includes("timed out")) {
         message = "Failed to setup Accessibility Service due to timeout";
-      } else if (errorLower.includes("download") || errorLower.includes("network") || errorLower.includes("unreachable")) {
+      } else if (
+        errorLower.includes("download") ||
+        errorLower.includes("network") ||
+        errorLower.includes("unreachable")
+      ) {
         message = "Failed to setup Accessibility Service due to network/download error";
       } else if (errorLower.includes("not supported")) {
-        message = "Failed to setup Accessibility Service - settings toggle not supported on this device";
+        message =
+          "Failed to setup Accessibility Service - settings toggle not supported on this device";
       } else if (errorLower.includes("installation failed") || errorLower.includes("install")) {
         message = "Failed to setup Accessibility Service due to APK installation error";
       }
@@ -1491,7 +1677,12 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    */
   private async isEmulator(): Promise<[boolean, boolean]> {
     try {
-      const result = await this.adb.executeCommand("shell getprop ro.kernel.qemu", undefined, undefined, true);
+      const result = await this.adb.executeCommand(
+        "shell getprop ro.kernel.qemu",
+        undefined,
+        undefined,
+        true,
+      );
       const qemuProp = result.stdout.trim();
       // ro.kernel.qemu is "1" on emulators, empty or "0" on physical devices
       if (qemuProp === "1") {
@@ -1499,7 +1690,12 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       }
 
       // Fallback: check ro.product.model for common emulator strings
-      const modelResult = await this.adb.executeCommand("shell getprop ro.product.model", undefined, undefined, true);
+      const modelResult = await this.adb.executeCommand(
+        "shell getprop ro.product.model",
+        undefined,
+        undefined,
+        true,
+      );
       const model = modelResult.stdout.trim().toLowerCase();
       return [model.includes("emulator") || model.includes("sdk"), false];
     } catch (error) {
@@ -1515,7 +1711,12 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    */
   private async getApiLevel(): Promise<[number | null, boolean]> {
     try {
-      const result = await this.adb.executeCommand("shell getprop ro.build.version.sdk", undefined, undefined, true);
+      const result = await this.adb.executeCommand(
+        "shell getprop ro.build.version.sdk",
+        undefined,
+        undefined,
+        true,
+      );
       const apiLevel = parseInt(result.stdout.trim(), 10);
       return [isNaN(apiLevel) ? null : apiLevel, false];
     } catch (error) {
@@ -1561,7 +1762,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       reason = "Unable to detect device capabilities due to transient error. Retry may succeed.";
       logger.warn("[CTRL_PROXY] Detection error - not caching result", {
         emulatorDetectionError,
-        apiLevelDetectionError
+        apiLevelDetectionError,
       });
     } else if (isEmulator) {
       // Emulators generally support settings-based toggle
@@ -1570,8 +1771,11 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     } else {
       // Physical devices may require special permissions
       supportsSettingsToggle = false;
-      reason = "Physical devices may require root, device owner status, or special shell permissions for programmatic accessibility toggle";
-      logger.info("[CTRL_PROXY] Physical device detected - settings toggle may not be supported", { reason });
+      reason =
+        "Physical devices may require root, device owner status, or special shell permissions for programmatic accessibility toggle";
+      logger.info("[CTRL_PROXY] Physical device detected - settings toggle may not be supported", {
+        reason,
+      });
     }
 
     // Additional API level checks could be added here if needed
@@ -1585,7 +1789,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       supportsSettingsToggle,
       deviceType,
       apiLevel,
-      reason
+      reason,
     };
 
     // Only cache if we successfully detected capabilities without errors
@@ -1594,7 +1798,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       this.cachedToggleCapabilities = capabilities;
       logger.info("[CTRL_PROXY] Toggle capabilities detected and cached", capabilities);
     } else {
-      logger.info("[CTRL_PROXY] Toggle capabilities detected but not cached due to detection errors", capabilities);
+      logger.info(
+        "[CTRL_PROXY] Toggle capabilities detected but not cached due to detection errors",
+        capabilities,
+      );
     }
 
     return capabilities;
@@ -1606,7 +1813,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       return {
         sha256: null,
         source: "none",
-        error: "Installed APK path not found"
+        error: "Installed APK path not found",
       };
     }
 
@@ -1617,12 +1824,12 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         return {
           sha256,
           source: "device",
-          apkPath
+          apkPath,
         };
       }
     } catch (error) {
       logger.warn("[CTRL_PROXY] sha256sum unavailable or failed, falling back to host hash", {
-        error: errorMessage(error)
+        error: errorMessage(error),
       });
     }
 
@@ -1637,24 +1844,27 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       return {
         sha256,
         source: "host",
-        apkPath
+        apkPath,
       };
     } catch (error) {
       logger.warn("[CTRL_PROXY] Failed to compute installed APK hash via host fallback", {
-        error: errorMessage(error)
+        error: errorMessage(error),
       });
       return {
         sha256: null,
         source: "none",
         apkPath,
-        error: errorMessage(error)
+        error: errorMessage(error),
       };
     } finally {
       try {
         await fs.rm(tempDir, { recursive: true, force: true });
       } catch (cleanupError) {
         // Temp-dir cleanup is best-effort; checksum fallback already completed or returned.
-        logger.debug(`[CTRL_PROXY] Failed to remove temporary APK hash directory: ${errorMessage(cleanupError)}`, cleanupError);
+        logger.debug(
+          `[CTRL_PROXY] Failed to remove temporary APK hash directory: ${errorMessage(cleanupError)}`,
+          cleanupError,
+        );
       }
     }
   }
@@ -1665,12 +1875,12 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         `shell pm path ${AndroidCtrlProxyManager.PACKAGE}`,
         undefined,
         undefined,
-        true
+        true,
       );
       const line = pathResult.stdout
         .split("\n")
-        .map(entry => entry.trim())
-        .find(entry => entry.startsWith("package:"));
+        .map((entry) => entry.trim())
+        .find((entry) => entry.startsWith("package:"));
 
       if (!line) {
         return null;
@@ -1679,7 +1889,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       return line.replace("package:", "").trim() || null;
     } catch (error) {
       logger.warn("[CTRL_PROXY] Failed to resolve installed APK path", {
-        error: errorMessage(error)
+        error: errorMessage(error),
       });
       return null;
     }
@@ -1703,8 +1913,8 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     if (AndroidCtrlProxyManager.isPinnedVersionUnverifiable()) {
       throw new ActionableError(
         `AUTOMOBILE_VERSION=${resolvePinnedVersion()} is not in the AutoMobile release ` +
-        `checksum registry, so the CtrlProxy APK cannot be integrity-verified. ` +
-        `Pin a released version, or set AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM=1 to override.`
+          `checksum registry, so the CtrlProxy APK cannot be integrity-verified. ` +
+          `Pin a released version, or set AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM=1 to override.`,
       );
     }
   }
@@ -1720,14 +1930,18 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       return null;
     }
 
-    logger.debug(`[CTRL_PROXY] Using cached version check result (age: ${cacheAge}ms): ${this.cachedVersionCheck.result.status}`);
+    logger.debug(
+      `[CTRL_PROXY] Using cached version check result (age: ${cacheAge}ms): ${this.cachedVersionCheck.result.status}`,
+    );
     return { ...this.cachedVersionCheck.result };
   }
 
-  private cacheVersionCheckResult(result: AccessibilityVersionCheckResult): AccessibilityVersionCheckResult {
+  private cacheVersionCheckResult(
+    result: AccessibilityVersionCheckResult,
+  ): AccessibilityVersionCheckResult {
     this.cachedVersionCheck = {
       result: { ...result },
-      timestamp: this.timer.now()
+      timestamp: this.timer.now(),
     };
     return result;
   }
@@ -1773,9 +1987,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       return null;
     }
     const trimmed = override.trim();
-    return trimmed.length > 0
-      ? resolvePathFromDaemonLaunchWorkingDirectory(trimmed)
-      : null;
+    return trimmed.length > 0 ? resolvePathFromDaemonLaunchWorkingDirectory(trimmed) : null;
   }
 
   private shouldSkipChecksum(): boolean {
@@ -1788,7 +2000,8 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    */
   private static isChecksumSkipConfigured(): boolean {
     // @deprecated AUTO_MOBILE_ACCESSIBILITY_SERVICE_SHA_SKIP_CHECK - use AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM instead
-    const explicitSkip = process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM ??
+    const explicitSkip =
+      process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM ??
       process.env.AUTO_MOBILE_ACCESSIBILITY_SERVICE_SHA_SKIP_CHECK;
     if (explicitSkip && (explicitSkip === "1" || explicitSkip.toLowerCase() === "true")) {
       return true;
@@ -1821,12 +2034,15 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     return isExplicitPin() && isPinnedVersionKnown();
   }
 
-  private static createKnownPinMismatchError(expectedSha: string, installedSha: string | null | undefined): ActionableError {
+  private static createKnownPinMismatchError(
+    expectedSha: string,
+    installedSha: string | null | undefined,
+  ): ActionableError {
     return new ActionableError(
       `Installed CtrlProxy APK SHA differs from expected release checksum for ` +
-      `AUTOMOBILE_VERSION=${resolvePinnedVersion()}. Expected: ${expectedSha}, Got: ${installedSha ?? "unknown"}. ` +
-      `Install the pinned CtrlProxy APK, restart with a matching daemon, or set ` +
-      `AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM=1 to override.`
+        `AUTOMOBILE_VERSION=${resolvePinnedVersion()}. Expected: ${expectedSha}, Got: ${installedSha ?? "unknown"}. ` +
+        `Install the pinned CtrlProxy APK, restart with a matching daemon, or set ` +
+        `AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM=1 to override.`,
     );
   }
 

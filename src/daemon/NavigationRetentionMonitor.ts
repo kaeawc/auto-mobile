@@ -23,7 +23,7 @@ export class NavigationRetentionMonitor {
   constructor(
     private readonly retention: NavigationRetention,
     private readonly timer: Timer = defaultTimer,
-    intervalMs?: number
+    intervalMs?: number,
   ) {
     this.intervalMs = resolveNavigationRetentionIntervalMs(intervalMs);
   }
@@ -71,9 +71,7 @@ export class NavigationRetentionMonitor {
     }
     this.running = true;
     try {
-      const summary = await getDbWriteBarrier().track(() =>
-        this.retention.prune(this.timer.now())
-      );
+      const summary = await getDbWriteBarrier().track(() => this.retention.prune(this.timer.now()));
       if (summary) {
         this.lastSummary = summary;
       }

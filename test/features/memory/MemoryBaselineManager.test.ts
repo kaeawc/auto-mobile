@@ -1,27 +1,34 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Kysely } from "kysely";
 import { MemoryBaselineManager } from "../../../src/features/memory/MemoryBaselineManager";
-import type { Database as DatabaseSchema, MemoryBaseline, NewMemoryBaseline } from "../../../src/db/types";
+import type {
+  Database as DatabaseSchema,
+  MemoryBaseline,
+  NewMemoryBaseline,
+} from "../../../src/db/types";
 import type { MemoryMetrics } from "../../../src/features/memory/MemoryMetricsCollector";
 import { createTestDatabase } from "../../db/testDbHelper";
 
 /** Render a Date as SQLite's `YYYY-MM-DD HH:MM:SS` (UTC) — the format a
  * `datetime('now')` column default produces (no `T`, no `Z`, no milliseconds). */
 function toSqliteFormat(date: Date): string {
-  return date.toISOString().replace("T", " ").replace(/\.\d{3}Z$/, "");
+  return date
+    .toISOString()
+    .replace("T", " ")
+    .replace(/\.\d{3}Z$/, "");
 }
 
-describe("MemoryBaselineManager - Unit Tests", function() {
+describe("MemoryBaselineManager - Unit Tests", function () {
   let manager: MemoryBaselineManager;
 
-  beforeEach(function() {
+  beforeEach(function () {
     manager = new MemoryBaselineManager();
   });
 
   // Note: exponentialMovingAverage tests moved to MetricsUtils.test.ts
 
-  describe("calculateAnomalyMultiplier", function() {
-    test("should calculate multipliers correctly for normal growth", function() {
+  describe("calculateAnomalyMultiplier", function () {
+    test("should calculate multipliers correctly for normal growth", function () {
       const baseline: MemoryBaseline = {
         id: 1,
         device_id: "test-device",
@@ -74,7 +81,7 @@ describe("MemoryBaselineManager - Unit Tests", function() {
       expect(result.unreachableObjectsMultiplier).toBe(2.0);
     });
 
-    test("should handle zero baseline values safely", function() {
+    test("should handle zero baseline values safely", function () {
       const baseline: MemoryBaseline = {
         id: 1,
         device_id: "test-device",
@@ -128,7 +135,7 @@ describe("MemoryBaselineManager - Unit Tests", function() {
       expect(result.unreachableObjectsMultiplier).toBe(Infinity);
     });
 
-    test("should handle zero current values", function() {
+    test("should handle zero current values", function () {
       const baseline: MemoryBaseline = {
         id: 1,
         device_id: "test-device",
@@ -182,7 +189,7 @@ describe("MemoryBaselineManager - Unit Tests", function() {
       expect(result.unreachableObjectsMultiplier).toBe(0);
     });
 
-    test("should handle null unreachable objects", function() {
+    test("should handle null unreachable objects", function () {
       const baseline: MemoryBaseline = {
         id: 1,
         device_id: "test-device",
@@ -231,7 +238,7 @@ describe("MemoryBaselineManager - Unit Tests", function() {
     // Ratio table exercising the safeDivide boundaries every multiplier shares.
     // Uses `new MemoryBaselineManager()` with NO database — calculateAnomalyMultiplier
     // is pure and the lazy `db` getter is never resolved (issue #3067).
-    describe("multiplier ratios", function() {
+    describe("multiplier ratios", function () {
       const pureManager = new MemoryBaselineManager();
 
       function baselineWithJava(javaBaseline: number): MemoryBaseline {
@@ -252,7 +259,13 @@ describe("MemoryBaselineManager - Unit Tests", function() {
       }
 
       function metricsWithJava(javaCurrent: number): MemoryMetrics {
-        const snapshot = { javaHeapMb: javaCurrent, nativeHeapMb: 30, totalPssMb: 100, timestamp: 0, raw: "" };
+        const snapshot = {
+          javaHeapMb: javaCurrent,
+          nativeHeapMb: 30,
+          totalPssMb: 100,
+          timestamp: 0,
+          raw: "",
+        };
         return {
           preSnapshot: snapshot,
           postSnapshot: snapshot,
@@ -276,23 +289,26 @@ describe("MemoryBaselineManager - Unit Tests", function() {
         ["zero current over zero baseline collapses to 1.0", 0, 0, 1.0],
       ];
 
-      test.each(cases)("%s", function(_name, current, baseline, expected) {
-        const result = pureManager.calculateAnomalyMultiplier(baselineWithJava(baseline), metricsWithJava(current));
+      test.each(cases)("%s", function (_name, current, baseline, expected) {
+        const result = pureManager.calculateAnomalyMultiplier(
+          baselineWithJava(baseline),
+          metricsWithJava(current),
+        );
         expect(result.javaHeapMultiplier).toBe(expected);
       });
     });
   });
 
-  describe("updateBaseline EMA blend", function() {
+  describe("updateBaseline EMA blend", function () {
     let testDb: Kysely<DatabaseSchema>;
     let dbManager: MemoryBaselineManager;
 
-    beforeEach(async function() {
+    beforeEach(async function () {
       testDb = await createTestDatabase();
       dbManager = new MemoryBaselineManager(testDb);
     });
 
-    afterEach(async function() {
+    afterEach(async function () {
       await testDb.destroy();
     });
 
@@ -323,12 +339,12 @@ describe("MemoryBaselineManager - Unit Tests", function() {
       } as MemoryMetrics;
     }
 
-    test("stores the raw metrics as the baseline on the first observation", async function() {
+    test("stores the raw metrics as the baseline on the first observation", async function () {
       await dbManager.updateBaseline(
         "device-1",
         "com.example.app",
         "tapOn",
-        makeMetrics({ java: 100, native: 40, gcCount: 8, gcDur: 200, unreachable: 10 })
+        makeMetrics({ java: 100, native: 40, gcCount: 8, gcDur: 200, unreachable: 10 }),
       );
 
       const baseline = await dbManager.getBaseline("device-1", "com.example.app", "tapOn");
@@ -337,12 +353,12 @@ describe("MemoryBaselineManager - Unit Tests", function() {
       expect(baseline?.sample_count).toBe(1);
     });
 
-    test("blends a second observation as alpha*new + (1-alpha)*old", async function() {
+    test("blends a second observation as alpha*new + (1-alpha)*old", async function () {
       await dbManager.updateBaseline(
         "device-1",
         "com.example.app",
         "tapOn",
-        makeMetrics({ java: 100, native: 80, gcCount: 10, gcDur: 200, unreachable: 100 })
+        makeMetrics({ java: 100, native: 80, gcCount: 10, gcDur: 200, unreachable: 100 }),
       );
 
       // alpha 0.3: java = 0.3*60 + 0.7*100 = 88 (an inverted alpha would give 72).
@@ -351,7 +367,7 @@ describe("MemoryBaselineManager - Unit Tests", function() {
         "com.example.app",
         "tapOn",
         makeMetrics({ java: 60, native: 30, gcCount: 20, gcDur: 100, unreachable: 200 }),
-        0.3
+        0.3,
       );
 
       const baseline = await dbManager.getBaseline("device-1", "com.example.app", "tapOn");
@@ -361,19 +377,19 @@ describe("MemoryBaselineManager - Unit Tests", function() {
       expect(baseline?.sample_count).toBe(2);
     });
 
-    test("uses the default EMA alpha of 0.3 when none is supplied", async function() {
+    test("uses the default EMA alpha of 0.3 when none is supplied", async function () {
       await dbManager.updateBaseline(
         "device-1",
         "com.example.app",
         "tapOn",
-        makeMetrics({ java: 100, native: 80, gcCount: 10, gcDur: 200, unreachable: 100 })
+        makeMetrics({ java: 100, native: 80, gcCount: 10, gcDur: 200, unreachable: 100 }),
       );
       // No alpha argument -> DEFAULT_EMA_ALPHA (0.3): 0.3*60 + 0.7*100 = 88.
       await dbManager.updateBaseline(
         "device-1",
         "com.example.app",
         "tapOn",
-        makeMetrics({ java: 60, native: 30, gcCount: 20, gcDur: 100, unreachable: 200 })
+        makeMetrics({ java: 60, native: 30, gcCount: 20, gcDur: 100, unreachable: 200 }),
       );
 
       const baseline = await dbManager.getBaseline("device-1", "com.example.app", "tapOn");
@@ -381,16 +397,16 @@ describe("MemoryBaselineManager - Unit Tests", function() {
     });
   });
 
-  describe("cleanupStaleBaselines", function() {
+  describe("cleanupStaleBaselines", function () {
     let testDb: Kysely<DatabaseSchema>;
     let dbManager: MemoryBaselineManager;
 
-    beforeEach(async function() {
+    beforeEach(async function () {
       testDb = await createTestDatabase();
       dbManager = new MemoryBaselineManager(testDb);
     });
 
-    afterEach(async function() {
+    afterEach(async function () {
       await testDb.destroy();
     });
 
@@ -410,14 +426,11 @@ describe("MemoryBaselineManager - Unit Tests", function() {
     }
 
     async function remainingToolNames(): Promise<string[]> {
-      const rows = await testDb
-        .selectFrom("memory_baselines")
-        .select("tool_name")
-        .execute();
-      return rows.map(row => row.tool_name).sort();
+      const rows = await testDb.selectFrom("memory_baselines").select("tool_name").execute();
+      return rows.map((row) => row.tool_name).sort();
     }
 
-    test("should delete only ISO rows older than the cutoff", async function() {
+    test("should delete only ISO rows older than the cutoff", async function () {
       const daysOld = 30;
       const ancientIso = new Date("2000-01-01T00:00:00Z").toISOString();
       const recentIso = new Date().toISOString();
@@ -432,7 +445,7 @@ describe("MemoryBaselineManager - Unit Tests", function() {
       expect(await remainingToolNames()).toEqual(["recent"]);
     });
 
-    test("should not delete a SQLite-format row that is newer than the cutoff (#3157)", async function() {
+    test("should not delete a SQLite-format row that is newer than the cutoff (#3157)", async function () {
       // Regression guard for the ISO-vs-`datetime('now')` format trap (#2937's
       // sibling). If a defaulted `last_updated` writer ever lands, the column can
       // hold SQLite's `YYYY-MM-DD HH:MM:SS` form. A naive string `<` against the

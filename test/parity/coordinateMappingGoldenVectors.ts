@@ -267,7 +267,7 @@ export function parseSwiftScaleReportingTable(): ScaleReportingVector[] {
     extractNumbers(region),
     5,
     `${SCALE_REPORTING_SWIFT_TEST_PATH} (scaleReportingVectors)`,
-  ).map(row => ({
+  ).map((row) => ({
     pointWidth: row[0],
     pointHeight: row[1],
     nativeScale: row[2],
@@ -277,7 +277,7 @@ export function parseSwiftScaleReportingTable(): ScaleReportingVector[] {
 }
 
 export function parseKotlinViewportToDeviceTable(): ViewportToDeviceVector[] {
-  return parseKotlinSection("val viewportToDeviceVectors =", 12).map(row => ({
+  return parseKotlinSection("val viewportToDeviceVectors =", 12).map((row) => ({
     frameWidthPx: row[0],
     frameHeightPx: row[1],
     scale: row[2],
@@ -294,7 +294,7 @@ export function parseKotlinViewportToDeviceTable(): ViewportToDeviceVector[] {
 }
 
 export function parseKotlinDeviceToViewportTable(): DeviceToViewportVector[] {
-  return parseKotlinSection("val deviceToViewportVectors =", 11).map(row => ({
+  return parseKotlinSection("val deviceToViewportVectors =", 11).map((row) => ({
     deviceX: row[0],
     deviceY: row[1],
     frameWidthPx: row[2],
@@ -310,7 +310,7 @@ export function parseKotlinDeviceToViewportTable(): DeviceToViewportVector[] {
 }
 
 export function parseKotlinClampedToTable(): ClampedToVector[] {
-  return parseKotlinSection("val clampedToVectors =", 7).map(row => ({
+  return parseKotlinSection("val clampedToVectors =", 7).map((row) => ({
     x: row[0],
     y: row[1],
     width: row[2],
@@ -322,7 +322,7 @@ export function parseKotlinClampedToTable(): ClampedToVector[] {
 }
 
 export function parseKotlinFitToViewportTable(): FitToViewportVector[] {
-  return parseKotlinSection("val fitToViewportVectors =", 7).map(row => ({
+  return parseKotlinSection("val fitToViewportVectors =", 7).map((row) => ({
     imageWidth: row[0],
     imageHeight: row[1],
     viewportWidth: row[2],
@@ -334,7 +334,7 @@ export function parseKotlinFitToViewportTable(): FitToViewportVector[] {
 }
 
 export function parseKotlinFitScaleTable(): FitScaleVector[] {
-  return parseKotlinSection("val fitScaleVectors =", 6).map(row => ({
+  return parseKotlinSection("val fitScaleVectors =", 6).map((row) => ({
     frameWidthPx: row[0],
     frameHeightPx: row[1],
     viewportWidth: row[2],
@@ -345,7 +345,7 @@ export function parseKotlinFitScaleTable(): FitScaleVector[] {
 }
 
 export function parseKotlinScreenshotRotationTable(): ScreenshotRotationVector[] {
-  return parseKotlinSection("val screenshotRotationVectors =", 5).map(row => ({
+  return parseKotlinSection("val screenshotRotationVectors =", 5).map((row) => ({
     imageWidth: row[0],
     imageHeight: row[1],
     rootWidth: row[2],
@@ -355,7 +355,7 @@ export function parseKotlinScreenshotRotationTable(): ScreenshotRotationVector[]
 }
 
 export function parseKotlinScaleReportingTable(): ScaleReportingVector[] {
-  return parseKotlinSection("val scaleReportingVectors =", 5).map(row => ({
+  return parseKotlinSection("val scaleReportingVectors =", 5).map((row) => ({
     pointWidth: row[0],
     pointHeight: row[1],
     nativeScale: row[2],
@@ -373,25 +373,25 @@ const f = Math.fround;
 /** Fallback aspect ratio for unknown image width — mirrors `FALLBACK_ASPECT_RATIO = 2.16f`. */
 const FALLBACK_ASPECT_RATIO = f(2.16);
 
-export function referenceViewportToDevice(
-  vector: ViewportToDeviceVector,
-): { x: number; y: number; inBounds: boolean } {
+export function referenceViewportToDevice(vector: ViewportToDeviceVector): {
+  x: number;
+  y: number;
+  inBounds: boolean;
+} {
   const frameX = f(f(vector.viewportX - vector.offsetX) / vector.scale);
   const frameY = f(f(vector.viewportY - vector.offsetY) / vector.scale);
-  const frameToDevice =
-    vector.frameWidthPx > 0 ? f(vector.deviceWidth / vector.frameWidthPx) : 1;
+  const frameToDevice = vector.frameWidthPx > 0 ? f(vector.deviceWidth / vector.frameWidthPx) : 1;
   const x = Math.round(f(frameX * frameToDevice));
   const y = Math.round(f(frameY * frameToDevice));
-  const inBounds =
-    x >= 0 && x < vector.deviceWidth && y >= 0 && y < vector.deviceHeight;
+  const inBounds = x >= 0 && x < vector.deviceWidth && y >= 0 && y < vector.deviceHeight;
   return { x, y, inBounds };
 }
 
-export function referenceDeviceToViewport(
-  vector: DeviceToViewportVector,
-): { x: number; y: number } {
-  const deviceToFrame =
-    vector.deviceWidth > 0 ? f(vector.frameWidthPx / vector.deviceWidth) : 1;
+export function referenceDeviceToViewport(vector: DeviceToViewportVector): {
+  x: number;
+  y: number;
+} {
+  const deviceToFrame = vector.deviceWidth > 0 ? f(vector.frameWidthPx / vector.deviceWidth) : 1;
   const frameX = f(vector.deviceX * deviceToFrame);
   const frameY = f(vector.deviceY * deviceToFrame);
   return {
@@ -401,9 +401,11 @@ export function referenceDeviceToViewport(
 }
 
 /** Mirrors `DevicePoint.clampedTo`: pin to an addressable edge without inventing a point in an empty rect. */
-export function referenceClampedTo(
-  vector: ClampedToVector,
-): { x: number; y: number; inBounds: number } {
+export function referenceClampedTo(vector: ClampedToVector): {
+  x: number;
+  y: number;
+  inBounds: number;
+} {
   return {
     x: Math.min(Math.max(vector.x, 0), Math.max(vector.width - 1, 0)),
     y: Math.min(Math.max(vector.y, 0), Math.max(vector.height - 1, 0)),
@@ -411,9 +413,10 @@ export function referenceClampedTo(
   };
 }
 
-export function referenceFitToViewport(
-  vector: FitToViewportVector,
-): { widthPx: number; heightPx: number } {
+export function referenceFitToViewport(vector: FitToViewportVector): {
+  widthPx: number;
+  heightPx: number;
+} {
   const aspect =
     vector.imageWidth > 0 ? f(vector.imageHeight / vector.imageWidth) : FALLBACK_ASPECT_RATIO;
   const maxFrameWidth = Math.max(f(vector.viewportWidth - f(vector.padding * 2)), 1);
@@ -457,18 +460,17 @@ export function referenceGeometryPairing(vector: GeometryPairingVector): boolean
     return false;
   }
   const sameOrientation =
-    vector.measuredWidth === vector.claimedWidth &&
-    vector.measuredHeight === vector.claimedHeight;
+    vector.measuredWidth === vector.claimedWidth && vector.measuredHeight === vector.claimedHeight;
   const swappedOrientation =
-    vector.measuredWidth === vector.claimedHeight &&
-    vector.measuredHeight === vector.claimedWidth;
+    vector.measuredWidth === vector.claimedHeight && vector.measuredHeight === vector.claimedWidth;
   return sameOrientation || swappedOrientation;
 }
 
 /** Mirrors the daemon's iOS point->pixel conversion: `Math.round(points * (scale || 1))`. */
-export function referenceIosPointToPixel(
-  vector: IosPointToPixelVector,
-): { width: number; height: number } {
+export function referenceIosPointToPixel(vector: IosPointToPixelVector): {
+  width: number;
+  height: number;
+} {
   const scale = vector.scale === 0 ? 1 : vector.scale;
   return {
     width: Math.round(vector.pointWidth * scale),
@@ -482,9 +484,10 @@ export function referenceIosPointToPixel(
  * away from zero, which equals JS `Math.round` for the positive values these dimensions are. The
  * Android runner is the `nativeScale === 1` identity case (bounds are already pixels).
  */
-export function referenceScaleReporting(
-  vector: ScaleReportingVector,
-): { pixelWidth: number; pixelHeight: number } {
+export function referenceScaleReporting(vector: ScaleReportingVector): {
+  pixelWidth: number;
+  pixelHeight: number;
+} {
   return {
     pixelWidth: Math.round(vector.pointWidth * vector.nativeScale),
     pixelHeight: Math.round(vector.pointHeight * vector.nativeScale),
@@ -517,8 +520,10 @@ export function diffNumericRows<T extends Record<string, number | boolean | unde
       // zero-valued canonical input corrupted to one of those would pass a coercing comparison
       // and neuter the drift guard exactly when the fixture is broken.
       if (
-        typeof a !== "number" || !Number.isFinite(a) ||
-        typeof e !== "number" || !Number.isFinite(e)
+        typeof a !== "number" ||
+        !Number.isFinite(a) ||
+        typeof e !== "number" ||
+        !Number.isFinite(e)
       ) {
         diffs.push(
           `row ${i} field ${field}: missing or non-numeric value ` +

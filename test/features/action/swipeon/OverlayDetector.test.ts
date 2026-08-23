@@ -24,43 +24,47 @@ describe("SwipeOn container overlays", () => {
     timestamp: Date.now(),
     screenSize: { width: 1000, height: 2000 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    viewHierarchy
+    viewHierarchy,
   });
 
   const createHierarchy = (nodes: any[]) => ({
     hierarchy: {
-      node: nodes
-    }
+      node: nodes,
+    },
   });
 
   const b = (left: number, top: number, right: number, bottom: number): ElementBounds => ({
     left,
     top,
     right,
-    bottom
+    bottom,
   });
 
   const createNode = (bounds: ElementBounds, attributes: Record<string, string>) => ({
     $: {
       bounds,
-      ...attributes
-    }
+      ...attributes,
+    },
   });
 
-  const createContainerNode = (bounds: ElementBounds, resourceId: string, children: any[] = []) => ({
+  const createContainerNode = (
+    bounds: ElementBounds,
+    resourceId: string,
+    children: any[] = [],
+  ) => ({
     $: {
       bounds,
       "resource-id": resourceId,
-      "scrollable": "true"
+      scrollable: "true",
     },
-    node: children
+    node: children,
   });
 
   const createSwipeOn = () => {
     const swipeOn = new SwipeOn(device, {} as any, {
       executeGesture: fakeGesture,
       observeScreen: fakeObserveScreen,
-      accessibilityDetector: fakeAccessibilityDetector
+      accessibilityDetector: fakeAccessibilityDetector,
     });
     (swipeOn as any).awaitIdle = fakeAwaitIdle;
     (swipeOn as any).window = fakeWindow;
@@ -71,7 +75,9 @@ describe("SwipeOn container overlays", () => {
   beforeEach(() => {
     fakeAccessibilityDetector = new FakeAccessibilityDetector();
     fakeAccessibilityDetector.setTalkBackEnabled(false);
-    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({} as AndroidCtrlProxyClient);
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+      {} as AndroidCtrlProxyClient,
+    );
     fakeObserveScreen = new FakeObserveScreen();
     fakeGesture = new FakeGestureExecutor();
     fakeAwaitIdle = new FakeAwaitIdle();
@@ -89,11 +95,11 @@ describe("SwipeOn container overlays", () => {
     const containerNode = createContainerNode(b(0, 0, 1000, 2000), "map-container");
     const overlayTop = createNode(b(0, 0, 1000, 200), {
       "resource-id": "search-bar",
-      "clickable": "true"
+      clickable: "true",
     });
     const overlayCenter = createNode(b(400, 0, 600, 2000), {
       "resource-id": "overlay-strip",
-      "clickable": "true"
+      clickable: "true",
     });
 
     const hierarchy = createHierarchy([containerNode, overlayTop, overlayCenter]);
@@ -102,7 +108,7 @@ describe("SwipeOn container overlays", () => {
     const swipeOn = createSwipeOn();
     const result = await swipeOn.execute({
       direction: "down",
-      container: { elementId: "map-container" }
+      container: { elementId: "map-container" },
     });
 
     expect(result.success).toBe(true);
@@ -116,9 +122,11 @@ describe("SwipeOn container overlays", () => {
   test("ignores clickable elements inside the container subtree", async () => {
     const childOverlay = createNode(b(0, 0, 1000, 800), {
       "resource-id": "child-overlay",
-      "clickable": "true"
+      clickable: "true",
     });
-    const containerNode = createContainerNode(b(0, 0, 1000, 2000), "list-container", [childOverlay]);
+    const containerNode = createContainerNode(b(0, 0, 1000, 2000), "list-container", [
+      childOverlay,
+    ]);
 
     const hierarchy = createHierarchy([containerNode]);
     fakeObserveScreen.setObserveResult(createObserveResult(hierarchy));
@@ -126,7 +134,7 @@ describe("SwipeOn container overlays", () => {
     const swipeOn = createSwipeOn();
     const result = await swipeOn.execute({
       direction: "down",
-      container: { elementId: "list-container" }
+      container: { elementId: "list-container" },
     });
 
     expect(result.success).toBe(true);
@@ -141,11 +149,11 @@ describe("SwipeOn container overlays", () => {
     const containerNode = createContainerNode(b(0, 0, 1000, 2000), "map-container");
     const overlayLarge = createNode(b(0, 0, 1000, 400), {
       "resource-id": "large-overlay",
-      "clickable": "true"
+      clickable: "true",
     });
     const overlaySmall = createNode(b(0, 0, 1000, 200), {
       "resource-id": "small-overlay",
-      "clickable": "true"
+      clickable: "true",
     });
 
     const hierarchy = createHierarchy([containerNode, overlayLarge, overlaySmall]);
@@ -154,7 +162,7 @@ describe("SwipeOn container overlays", () => {
     const swipeOn = createSwipeOn();
     const result = await swipeOn.execute({
       direction: "down",
-      container: { elementId: "map-container" }
+      container: { elementId: "map-container" },
     });
 
     expect(result.success).toBe(true);
@@ -167,11 +175,11 @@ describe("SwipeOn container overlays", () => {
     const containerNode = createContainerNode(b(0, 0, 1000, 2000), "map-container");
     const overlayLarge = createNode(b(0, 0, 1000, 1000), {
       "resource-id": "large-overlay",
-      "clickable": "true"
+      clickable: "true",
     });
     const overlaySmall = createNode(b(0, 0, 1000, 900), {
       "resource-id": "small-overlay",
-      "clickable": "true"
+      clickable: "true",
     });
 
     const hierarchy = createHierarchy([containerNode, overlayLarge, overlaySmall]);
@@ -180,7 +188,7 @@ describe("SwipeOn container overlays", () => {
     const swipeOn = createSwipeOn();
     const result = await swipeOn.execute({
       direction: "down",
-      container: { elementId: "map-container" }
+      container: { elementId: "map-container" },
     });
 
     expect(result.success).toBe(true);
@@ -192,34 +200,37 @@ describe("SwipeOn container overlays", () => {
 
   test("handles complex scenarios like Google Maps with multiple overlays", async () => {
     // Simulate Google Maps layout with multiple overlays
-    const containerNode = createContainerNode(b(0, 0, 1080, 2400), "com.google.android.apps.maps:id/fullscreens_group");
+    const containerNode = createContainerNode(
+      b(0, 0, 1080, 2400),
+      "com.google.android.apps.maps:id/fullscreens_group",
+    );
 
     // Search bar at top
     const searchBar = createNode(b(0, 0, 1080, 226), {
       "resource-id": "com.google.android.apps.maps:id/search_omnibox_container",
-      "clickable": "true"
+      clickable: "true",
     });
 
     // Category chips below search bar
     const categoryChips = createNode(b(31, 226, 1080, 352), {
       "resource-id": "com.google.android.apps.maps:id/recycler_view",
-      "clickable": "true"
+      clickable: "true",
     });
 
     // Bottom controls
     const locationButton = createNode(b(881, 1886, 1080, 2072), {
       "resource-id": "com.google.android.apps.maps:id/mylocation_button",
-      "clickable": "true"
+      clickable: "true",
     });
 
     const streetViewThumb = createNode(b(36, 1907, 272, 2049), {
       "resource-id": "com.google.android.apps.maps:id/street_view_thumbnail",
-      "clickable": "true"
+      clickable: "true",
     });
 
     const layersButton = createNode(b(928, 378, 1080, 520), {
       "resource-id": "com.google.android.apps.maps:id/layers_fab",
-      "clickable": "true"
+      clickable: "true",
     });
 
     const hierarchy = createHierarchy([
@@ -228,14 +239,14 @@ describe("SwipeOn container overlays", () => {
       categoryChips,
       locationButton,
       streetViewThumb,
-      layersButton
+      layersButton,
     ]);
     fakeObserveScreen.setObserveResult(createObserveResult(hierarchy));
 
     const swipeOn = createSwipeOn();
     const result = await swipeOn.execute({
       direction: "down",
-      container: { elementId: "com.google.android.apps.maps:id/fullscreens_group" }
+      container: { elementId: "com.google.android.apps.maps:id/fullscreens_group" },
     });
 
     expect(result.success).toBe(true);
@@ -270,7 +281,7 @@ describe("SwipeOn container overlays", () => {
     const swipeOn = createSwipeOn();
     const result = await swipeOn.execute({
       direction: "down",
-      container: { elementId: "container-no-overlays" }
+      container: { elementId: "container-no-overlays" },
     });
 
     expect(result.success).toBe(true);
@@ -285,11 +296,11 @@ describe("SwipeOn container overlays", () => {
     const containerNode = createContainerNode(b(0, 0, 1000, 2000), "horizontal-container");
     const topOverlay = createNode(b(0, 0, 1000, 300), {
       "resource-id": "top-bar",
-      "clickable": "true"
+      clickable: "true",
     });
     const bottomOverlay = createNode(b(0, 1700, 1000, 2000), {
       "resource-id": "bottom-bar",
-      "clickable": "true"
+      clickable: "true",
     });
 
     const hierarchy = createHierarchy([containerNode, topOverlay, bottomOverlay]);
@@ -298,7 +309,7 @@ describe("SwipeOn container overlays", () => {
     const swipeOn = createSwipeOn();
     const result = await swipeOn.execute({
       direction: "left",
-      container: { elementId: "horizontal-container" }
+      container: { elementId: "horizontal-container" },
     });
 
     expect(result.success).toBe(true);
@@ -314,7 +325,7 @@ describe("SwipeOn container overlays", () => {
     const containerNode = createContainerNode(b(0, 0, 1000, 2000), "container-with-non-clickable");
     const nonClickableOverlay = createNode(b(0, 0, 1000, 500), {
       "resource-id": "non-clickable-element",
-      "clickable": "false"
+      clickable: "false",
     });
 
     const hierarchy = createHierarchy([containerNode, nonClickableOverlay]);
@@ -323,7 +334,7 @@ describe("SwipeOn container overlays", () => {
     const swipeOn = createSwipeOn();
     const result = await swipeOn.execute({
       direction: "down",
-      container: { elementId: "container-with-non-clickable" }
+      container: { elementId: "container-with-non-clickable" },
     });
 
     expect(result.success).toBe(true);
@@ -339,7 +350,7 @@ describe("SwipeOn container overlays", () => {
     const containerNode = createContainerNode(b(0, 0, 1000, 2000), "container-with-focusable");
     const focusableOverlay = createNode(b(0, 0, 1000, 300), {
       "resource-id": "focusable-element",
-      "focusable": "true"
+      focusable: "true",
     });
 
     const hierarchy = createHierarchy([containerNode, focusableOverlay]);
@@ -348,7 +359,7 @@ describe("SwipeOn container overlays", () => {
     const swipeOn = createSwipeOn();
     const result = await swipeOn.execute({
       direction: "down",
-      container: { elementId: "container-with-focusable" }
+      container: { elementId: "container-with-focusable" },
     });
 
     expect(result.success).toBe(true);
@@ -363,7 +374,7 @@ describe("SwipeOn container overlays", () => {
     // Overlay outside container bounds
     const outsideOverlay = createNode(b(0, 0, 50, 2000), {
       "resource-id": "outside-overlay",
-      "clickable": "true"
+      clickable: "true",
     });
 
     const hierarchy = createHierarchy([containerNode, outsideOverlay]);
@@ -372,7 +383,7 @@ describe("SwipeOn container overlays", () => {
     const swipeOn = createSwipeOn();
     const result = await swipeOn.execute({
       direction: "down",
-      container: { elementId: "inner-container" }
+      container: { elementId: "inner-container" },
     });
 
     expect(result.success).toBe(true);
@@ -388,7 +399,7 @@ describe("SwipeOn container overlays", () => {
     // Create overlays that cover most of the vertical space
     const overlay1 = createNode(b(0, 0, 1000, 1950), {
       "resource-id": "massive-overlay",
-      "clickable": "true"
+      clickable: "true",
     });
 
     const hierarchy = createHierarchy([containerNode, overlay1]);
@@ -397,7 +408,7 @@ describe("SwipeOn container overlays", () => {
     const swipeOn = createSwipeOn();
     const result = await swipeOn.execute({
       direction: "down",
-      container: { elementId: "mostly-blocked-container" }
+      container: { elementId: "mostly-blocked-container" },
     });
 
     expect(result.success).toBe(true);
@@ -415,7 +426,7 @@ describe("SwipeOn container overlays", () => {
     // Overlay that only partially overlaps container
     const partialOverlay = createNode(b(500, 0, 1500, 400), {
       "resource-id": "partial-overlay",
-      "clickable": "true"
+      clickable: "true",
     });
 
     const hierarchy = createHierarchy([containerNode, partialOverlay]);
@@ -424,7 +435,7 @@ describe("SwipeOn container overlays", () => {
     const swipeOn = createSwipeOn();
     const result = await swipeOn.execute({
       direction: "down",
-      container: { elementId: "container" }
+      container: { elementId: "container" },
     });
 
     expect(result.success).toBe(true);

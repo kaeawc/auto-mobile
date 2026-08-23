@@ -10,9 +10,11 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
 
-const captureSchema = z.object({
-  value: z.string().optional(),
-}).strict();
+const captureSchema = z
+  .object({
+    value: z.string().optional(),
+  })
+  .strict();
 
 async function callCaptureTool(
   fixture: McpTestFixture,
@@ -21,20 +23,28 @@ async function callCaptureTool(
 ): Promise<Record<string, unknown>> {
   let capturedArgs: Record<string, unknown> | undefined;
   ToolRegistry.clearTools();
-  ToolRegistry.register("captureMcpSession", "captureMcpSession", captureSchema, async handlerArgs => {
-    capturedArgs = handlerArgs;
-    whileHandling?.(handlerArgs);
-    return { content: [{ type: "text", text: "ok" }] };
-  });
+  ToolRegistry.register(
+    "captureMcpSession",
+    "captureMcpSession",
+    captureSchema,
+    async (handlerArgs) => {
+      capturedArgs = handlerArgs;
+      whileHandling?.(handlerArgs);
+      return { content: [{ type: "text", text: "ok" }] };
+    },
+  );
 
   const { client } = fixture.getContext();
-  await client.request({
-    method: "tools/call",
-    params: {
-      name: "captureMcpSession",
-      arguments: args,
+  await client.request(
+    {
+      method: "tools/call",
+      params: {
+        name: "captureMcpSession",
+        arguments: args,
+      },
     },
-  }, z.any());
+    z.any(),
+  );
 
   expect(capturedArgs).toBeDefined();
   return capturedArgs!;
@@ -52,7 +62,10 @@ describe("MCP session autolock routing", () => {
   });
 
   test("strips proxy-injected session keys before schema validation and passes them to handlers", async () => {
-    fixture = new McpTestFixture({ daemonMode: true, sessionContext: { sessionId: "shared-loopback-session" } });
+    fixture = new McpTestFixture({
+      daemonMode: true,
+      sessionContext: { sessionId: "shared-loopback-session" },
+    });
     await fixture.setup();
 
     const capturedArgs = await callCaptureTool(fixture, {
@@ -65,19 +78,18 @@ describe("MCP session autolock routing", () => {
   });
 
   test("tracks proxy-injected MCP sessions under their autolock key", async () => {
-    fixture = new McpTestFixture({ daemonMode: true, sessionContext: { sessionId: "shared-loopback-session" } });
+    fixture = new McpTestFixture({
+      daemonMode: true,
+      sessionContext: { sessionId: "shared-loopback-session" },
+    });
     await fixture.setup();
 
-    await callCaptureTool(
-      fixture,
-      { value: "ok", __mcpSessionId: "unix-socket-session" },
-      () => {
-        expect(executionTracker.hasActiveSessionExecutions("unix-socket-session")).toBe(true);
-        // The forwarded key drives autolock expiry, while the transport key is
-        // retained solely so its close/error handlers can cancel this execution.
-        expect(executionTracker.hasActiveSessionExecutions("shared-loopback-session")).toBe(true);
-      },
-    );
+    await callCaptureTool(fixture, { value: "ok", __mcpSessionId: "unix-socket-session" }, () => {
+      expect(executionTracker.hasActiveSessionExecutions("unix-socket-session")).toBe(true);
+      // The forwarded key drives autolock expiry, while the transport key is
+      // retained solely so its close/error handlers can cancel this execution.
+      expect(executionTracker.hasActiveSessionExecutions("shared-loopback-session")).toBe(true);
+    });
   });
 
   test("binds an implicit execution to its resolved autolock before an MCP remap", async () => {
@@ -99,28 +111,41 @@ describe("MCP session autolock routing", () => {
     const releaseHandler = Promise.withResolvers<void>();
 
     ToolRegistry.clearTools();
-    ToolRegistry.registerDeviceAware("captureAutolockOwnership", "captureAutolockOwnership", captureSchema, async () => {
-      handlerStarted.resolve();
-      await releaseHandler.promise;
-      return { content: [{ type: "text", text: "ok" }] };
-    });
+    ToolRegistry.registerDeviceAware(
+      "captureAutolockOwnership",
+      "captureAutolockOwnership",
+      captureSchema,
+      async () => {
+        handlerStarted.resolve();
+        await releaseHandler.promise;
+        return { content: [{ type: "text", text: "ok" }] };
+      },
+    );
     fixture = new McpTestFixture({ sessionContext: { sessionId: "mcp-session" } });
     await fixture.setup();
 
     const { client } = fixture.getContext();
-    const request = client.request({
-      method: "tools/call",
-      params: { name: "captureAutolockOwnership", arguments: {} },
-    }, z.any());
+    const request = client.request(
+      {
+        method: "tools/call",
+        params: { name: "captureAutolockOwnership", arguments: {} },
+      },
+      z.any(),
+    );
     await handlerStarted.promise;
 
-    const replacementSessionId = await pool.autolockDevice("emulator-5556", "android", "mcp-session");
+    const replacementSessionId = await pool.autolockDevice(
+      "emulator-5556",
+      "android",
+      "mcp-session",
+    );
     expect(executionTracker.hasActiveAutolockSessionExecutions(originalSessionId!)).toBe(true);
     expect(executionTracker.hasActiveAutolockSessionExecutions(replacementSessionId!)).toBe(false);
 
-    sessionManager.setActiveSessionExecutionChecker(sessionUuid =>
-      executionTracker.hasActiveSessionUuidExecutions(sessionUuid)
-      || executionTracker.hasActiveAutolockSessionExecutions(sessionUuid),
+    sessionManager.setActiveSessionExecutionChecker(
+      (sessionUuid) =>
+        executionTracker.hasActiveSessionUuidExecutions(sessionUuid) ||
+        executionTracker.hasActiveAutolockSessionExecutions(sessionUuid),
     );
     timer.advanceTime(60_001);
     expect(sessionManager.getSession(originalSessionId!)).not.toBeNull();
@@ -135,7 +160,10 @@ describe("MCP session autolock routing", () => {
   });
 
   test("does not use the shared daemon loopback MCP session as an implicit autolock key", async () => {
-    fixture = new McpTestFixture({ daemonMode: true, sessionContext: { sessionId: "shared-loopback-session" } });
+    fixture = new McpTestFixture({
+      daemonMode: true,
+      sessionContext: { sessionId: "shared-loopback-session" },
+    });
     await fixture.setup();
 
     const capturedArgs = await callCaptureTool(fixture, { value: "ok" });

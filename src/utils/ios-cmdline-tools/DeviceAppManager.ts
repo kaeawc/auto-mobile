@@ -23,18 +23,16 @@ interface DeviceAppManagerDependencies {
   logger: Pick<Logger, "debug" | "warn">;
 }
 
-type LaunchPreconditionResult =
-  | { ok: true }
-  | { ok: false; reason: "non-darwin" };
+type LaunchPreconditionResult = { ok: true } | { ok: false; reason: "non-darwin" };
 
 const defaultDependencies: DeviceAppManagerDependencies = {
   platform: () => process.platform,
   execute: (file, args) => new DefaultHostCommandExecutor().executeCommand(file, args),
-  readFile: async path => fs.readFile(path, "utf-8"),
-  mkdtemp: async prefix => fs.mkdtemp(prefix),
-  rm: async path => fs.rm(path, { recursive: true, force: true }),
-  readdir: async path => fs.readdir(path),
-  stat: async path => fs.stat(path),
+  readFile: async (path) => fs.readFile(path, "utf-8"),
+  mkdtemp: async (prefix) => fs.mkdtemp(prefix),
+  rm: async (path) => fs.rm(path, { recursive: true, force: true }),
+  readdir: async (path) => fs.readdir(path),
+  stat: async (path) => fs.stat(path),
   tmpdir,
   logger,
 };
@@ -72,7 +70,10 @@ const normalizeDevicePath = (rawPath: string): string => {
   return rawPath;
 };
 
-export const findBundleEntry = (data: unknown, bundleId: string): Record<string, unknown> | null => {
+export const findBundleEntry = (
+  data: unknown,
+  bundleId: string,
+): Record<string, unknown> | null => {
   if (!data || typeof data !== "object") {
     return null;
   }
@@ -87,7 +88,12 @@ export const findBundleEntry = (data: unknown, bundleId: string): Record<string,
   }
 
   const record = data as Record<string, unknown>;
-  const idValue = record.bundleIdentifier ?? record.bundleID ?? record.bundleId ?? record.CFBundleIdentifier ?? record.BUNDLE_IDENTIFIER;
+  const idValue =
+    record.bundleIdentifier ??
+    record.bundleID ??
+    record.bundleId ??
+    record.CFBundleIdentifier ??
+    record.BUNDLE_IDENTIFIER;
   if (typeof idValue === "string" && idValue === bundleId) {
     return record;
   }
@@ -109,7 +115,7 @@ const extractBundlePath = (entry: Record<string, unknown>): string | null => {
     entry.bundle_url,
     entry.bundle_path,
     entry.url,
-    entry.path
+    entry.path,
   ];
   for (const candidate of candidates) {
     if (typeof candidate === "string") {
@@ -121,7 +127,7 @@ const extractBundlePath = (entry: Record<string, unknown>): string | null => {
 
 const findAppBundleInDir = async (
   root: string,
-  deps: DeviceAppManagerDependencies
+  deps: DeviceAppManagerDependencies,
 ): Promise<string | null> => {
   const entries = await deps.readdir(root);
   for (const entry of entries) {
@@ -140,8 +146,7 @@ const findAppBundleInDir = async (
   return null;
 };
 
-const getErrorMessage = (error: unknown): string =>
-  errorMessage(error);
+const getErrorMessage = (error: unknown): string => errorMessage(error);
 
 /**
  * Full text of a failed `exec` rejection. Promisified `child_process.exec`
@@ -184,9 +189,11 @@ const getExecErrorText = (error: unknown): string => {
  */
 export const isDevicectlProcessGoneError = (message: string): boolean => {
   const normalized = message.toLowerCase();
-  return isProcessAlreadyGoneError(message)
-    || normalized.includes("nsposixerrordomain error 3")     // bare ESRCH code
-    || /process (?:is )?no longer running/.test(normalized);  // devicectl-only phrasing
+  return (
+    isProcessAlreadyGoneError(message) ||
+    normalized.includes("nsposixerrordomain error 3") || // bare ESRCH code
+    /process (?:is )?no longer running/.test(normalized)
+  ); // devicectl-only phrasing
 };
 
 /**
@@ -196,8 +203,8 @@ export const isDevicectlProcessGoneError = (message: string): boolean => {
  * search so a devicectl-version reshuffle of the envelope still yields the PID.
  */
 export const findProcessIdentifier = (data: unknown): number | undefined => {
-  const direct = (data as { result?: { process?: { processIdentifier?: unknown } } })
-    ?.result?.process?.processIdentifier;
+  const direct = (data as { result?: { process?: { processIdentifier?: unknown } } })?.result
+    ?.process?.processIdentifier;
   if (typeof direct === "number") {
     return direct;
   }
@@ -343,7 +350,7 @@ export const findRunningProcessPid = (data: unknown, bundlePath: string): number
   if (!appName) {
     return null;
   }
-  return walk(data, exe => pathBasename(exe) === appName);
+  return walk(data, (exe) => pathBasename(exe) === appName);
 };
 
 const isExpectedMissingLegacySimulatorApp = (bundleId: string, errorMessage: string): boolean =>
@@ -406,7 +413,10 @@ export class DeviceAppManager implements DeviceUrlLauncher {
       return true;
     } catch (error) {
       // `devicectl --version` fails when Xcode 15+ isn't installed; that just means physical-device URL launch is unavailable.
-      logger.debug(`src/utils/ios-cmdline-tools/DeviceAppManager.ts fallback failed: ${error}`, error);
+      logger.debug(
+        `src/utils/ios-cmdline-tools/DeviceAppManager.ts fallback failed: ${error}`,
+        error,
+      );
       return false;
     }
   }
@@ -426,11 +436,16 @@ export class DeviceAppManager implements DeviceUrlLauncher {
       throw new ActionableError("Opening URLs on a physical iOS device requires macOS");
     }
     const args = [
-      "devicectl", "device", "process", "launch",
-      "--device", deviceUdid,            // unquoted, matching the other devicectl calls
-      "--payload-url", url,
+      "devicectl",
+      "device",
+      "process",
+      "launch",
+      "--device",
+      deviceUdid, // unquoted, matching the other devicectl calls
+      "--payload-url",
+      url,
       "--terminate-existing",
-      bundleId
+      bundleId,
     ];
     try {
       await this.execute("xcrun", args);
@@ -439,7 +454,11 @@ export class DeviceAppManager implements DeviceUrlLauncher {
     }
   }
 
-  public async getInstalledAppBundleHash(deviceUdid: string, bundleId: string, isSimulator = false): Promise<string | null> {
+  public async getInstalledAppBundleHash(
+    deviceUdid: string,
+    bundleId: string,
+    isSimulator = false,
+  ): Promise<string | null> {
     if (isSimulator) {
       return this.getSimulatorAppBundleHash(deviceUdid, bundleId);
     }
@@ -447,9 +466,13 @@ export class DeviceAppManager implements DeviceUrlLauncher {
     // withInstalledAppBundle propagates callback errors; preserve this method's
     // null-on-failure contract by swallowing a hashing failure here.
     try {
-      return await this.withInstalledAppBundle(deviceUdid, bundleId, bundlePath => hashAppBundle(bundlePath));
+      return await this.withInstalledAppBundle(deviceUdid, bundleId, (bundlePath) =>
+        hashAppBundle(bundlePath),
+      );
     } catch (error) {
-      this.deps.logger.warn(`[DeviceAppManager] Failed to hash installed app bundle for ${bundleId}: ${errorMessage(error)}`);
+      this.deps.logger.warn(
+        `[DeviceAppManager] Failed to hash installed app bundle for ${bundleId}: ${errorMessage(error)}`,
+      );
       return null;
     }
   }
@@ -464,7 +487,7 @@ export class DeviceAppManager implements DeviceUrlLauncher {
    * (so a post-uninstall install failure surfaces rather than being masked).
    */
   public async clearAppDataViaReinstall(deviceUdid: string, bundleId: string): Promise<void> {
-    const done = await this.withInstalledAppBundle(deviceUdid, bundleId, async bundlePath => {
+    const done = await this.withInstalledAppBundle(deviceUdid, bundleId, async (bundlePath) => {
       await this.uninstallApp(deviceUdid, bundleId, false);
       await this.installApp(deviceUdid, bundlePath);
       return true;
@@ -486,7 +509,7 @@ export class DeviceAppManager implements DeviceUrlLauncher {
   private async withInstalledAppBundle<T>(
     deviceUdid: string,
     bundleId: string,
-    fn: (bundlePath: string) => Promise<T>
+    fn: (bundlePath: string) => Promise<T>,
   ): Promise<T | null> {
     if (this.deps.platform() !== "darwin") {
       return null;
@@ -503,10 +526,13 @@ export class DeviceAppManager implements DeviceUrlLauncher {
           "device",
           "info",
           "apps",
-          "--device", deviceUdid,
-          "--bundle-id", bundleId,
-          "--json-output", jsonPath,
-          "--quiet"
+          "--device",
+          deviceUdid,
+          "--bundle-id",
+          bundleId,
+          "--json-output",
+          jsonPath,
+          "--quiet",
         ];
         await this.execute("xcrun", infoArgs);
 
@@ -527,16 +553,21 @@ export class DeviceAppManager implements DeviceUrlLauncher {
           "device",
           "copy",
           "from",
-          "--device", deviceUdid,
-          "--source", bundlePath,
-          "--destination", copyDir,
-          "--quiet"
+          "--device",
+          deviceUdid,
+          "--source",
+          bundlePath,
+          "--destination",
+          copyDir,
+          "--quiet",
         ];
         await this.execute("xcrun", copyArgs);
 
         bundleOnDisk = await findAppBundleInDir(copyDir, this.deps);
       } catch (error) {
-        this.deps.logger.warn(`[DeviceAppManager] Failed to read installed app bundle for ${bundleId}: ${errorMessage(error)}`);
+        this.deps.logger.warn(
+          `[DeviceAppManager] Failed to read installed app bundle for ${bundleId}: ${errorMessage(error)}`,
+        );
         return null;
       }
 
@@ -553,7 +584,11 @@ export class DeviceAppManager implements DeviceUrlLauncher {
     }
   }
 
-  public async uninstallApp(deviceUdid: string, bundleId: string, isSimulator = false): Promise<void> {
+  public async uninstallApp(
+    deviceUdid: string,
+    bundleId: string,
+    isSimulator = false,
+  ): Promise<void> {
     if (isSimulator) {
       return this.uninstallSimulatorApp(deviceUdid, bundleId);
     }
@@ -566,9 +601,10 @@ export class DeviceAppManager implements DeviceUrlLauncher {
       "device",
       "uninstall",
       "app",
-      "--device", deviceUdid,
+      "--device",
+      deviceUdid,
       bundleId,
-      "--quiet"
+      "--quiet",
     ];
     try {
       await this.execute("xcrun", args);
@@ -586,9 +622,10 @@ export class DeviceAppManager implements DeviceUrlLauncher {
       "device",
       "install",
       "app",
-      "--device", deviceUdid,
+      "--device",
+      deviceUdid,
       artifactPath,
-      "--quiet"
+      "--quiet",
     ];
     try {
       await this.execute("xcrun", args);
@@ -616,7 +653,7 @@ export class DeviceAppManager implements DeviceUrlLauncher {
   public async launchApp(
     deviceUdid: string,
     bundleId: string,
-    options: { terminateExisting?: boolean } = {}
+    options: { terminateExisting?: boolean } = {},
   ): Promise<{ success: boolean; pid?: number; error?: string }> {
     const precondition = this.getLaunchPrecondition();
     if (!precondition.ok) {
@@ -631,7 +668,9 @@ export class DeviceAppManager implements DeviceUrlLauncher {
       return { success: false, error: requiresIos17Message("Launching", bundleId, major) };
     }
 
-    const tempDir = await this.deps.mkdtemp(join(this.deps.tmpdir(), "automobile-devicectl-launch-"));
+    const tempDir = await this.deps.mkdtemp(
+      join(this.deps.tmpdir(), "automobile-devicectl-launch-"),
+    );
     const jsonPath = join(tempDir, "launch.json");
     try {
       const args = [
@@ -639,11 +678,13 @@ export class DeviceAppManager implements DeviceUrlLauncher {
         "device",
         "process",
         "launch",
-        "--device", deviceUdid,
+        "--device",
+        deviceUdid,
         ...(options.terminateExisting ? ["--terminate-existing"] : []),
-        "--json-output", jsonPath,
+        "--json-output",
+        jsonPath,
         "--quiet",
-        bundleId
+        bundleId,
       ];
       await this.execute("xcrun", args);
 
@@ -682,7 +723,10 @@ export class DeviceAppManager implements DeviceUrlLauncher {
    * the devicectl terminate at the tool level and surface as a thrown devicectl
    * error).
    */
-  public async terminateApp(deviceUdid: string, bundleId: string): Promise<{ wasInstalled: boolean; wasRunning: boolean }> {
+  public async terminateApp(
+    deviceUdid: string,
+    bundleId: string,
+  ): Promise<{ wasInstalled: boolean; wasRunning: boolean }> {
     if (this.deps.platform() !== "darwin") {
       throw new ActionableError("Physical iOS device app termination requires macOS");
     }
@@ -710,10 +754,12 @@ export class DeviceAppManager implements DeviceUrlLauncher {
       "device",
       "process",
       "terminate",
-      "--device", deviceUdid,
-      "--pid", String(pid),
+      "--device",
+      deviceUdid,
+      "--pid",
+      String(pid),
       "--kill",
-      "--quiet"
+      "--quiet",
     ];
     try {
       await this.execute("xcrun", terminateArgs);
@@ -732,11 +778,11 @@ export class DeviceAppManager implements DeviceUrlLauncher {
         // of `error` keeps stderr only on a non-enumerable field the MCP client
         // never sees; a plain String(error) drops it entirely.
         throw new ActionableError(
-          `Failed to terminate ${bundleId} (PID ${pid}) on physical iOS device: ${message}`
+          `Failed to terminate ${bundleId} (PID ${pid}) on physical iOS device: ${message}`,
         );
       }
       this.deps.logger.debug(
-        `[DeviceAppManager] terminate PID ${pid} for ${bundleId} raced an exit; treating as terminated: ${message}`
+        `[DeviceAppManager] terminate PID ${pid} for ${bundleId} raced an exit; treating as terminated: ${message}`,
       );
     }
     // wasRunning:true in both the killed and raced-exit cases: we positively
@@ -754,7 +800,10 @@ export class DeviceAppManager implements DeviceUrlLauncher {
    * macOS-only (callers guard the platform). Shared core behind
    * {@link resolveInstalledBundlePathOnDevice} and {@link getInstalledAppInfo}.
    */
-  private async queryInstalledAppEntry(deviceUdid: string, bundleId: string): Promise<Record<string, unknown> | null> {
+  private async queryInstalledAppEntry(
+    deviceUdid: string,
+    bundleId: string,
+  ): Promise<Record<string, unknown> | null> {
     const tempDir = await this.deps.mkdtemp(join(this.deps.tmpdir(), "automobile-devicectl-"));
     const jsonPath = join(tempDir, "apps.json");
     try {
@@ -763,10 +812,13 @@ export class DeviceAppManager implements DeviceUrlLauncher {
         "device",
         "info",
         "apps",
-        "--device", deviceUdid,
-        "--bundle-id", bundleId,
-        "--json-output", jsonPath,
-        "--quiet"
+        "--device",
+        deviceUdid,
+        "--bundle-id",
+        bundleId,
+        "--json-output",
+        jsonPath,
+        "--quiet",
       ];
       await this.execute("xcrun", infoArgs);
 
@@ -786,14 +838,19 @@ export class DeviceAppManager implements DeviceUrlLauncher {
    * diagnostic contract of the app-metadata resource that consumes it (a lookup
    * failure degrades to "no metadata" rather than surfacing as an error).
    */
-  public async getInstalledAppInfo(deviceUdid: string, bundleId: string): Promise<Record<string, unknown> | null> {
+  public async getInstalledAppInfo(
+    deviceUdid: string,
+    bundleId: string,
+  ): Promise<Record<string, unknown> | null> {
     if (this.deps.platform() !== "darwin") {
       return null;
     }
     try {
       return await this.queryInstalledAppEntry(deviceUdid, bundleId);
     } catch (error) {
-      this.deps.logger.warn(`[DeviceAppManager] Failed to get physical device app info for ${bundleId}: ${getErrorMessage(error)}`);
+      this.deps.logger.warn(
+        `[DeviceAppManager] Failed to get physical device app info for ${bundleId}: ${getErrorMessage(error)}`,
+      );
       return null;
     }
   }
@@ -805,7 +862,10 @@ export class DeviceAppManager implements DeviceUrlLauncher {
    * JSON-read failures propagate so a broken devicectl surfaces rather than
    * masquerading as "not installed". macOS-only (callers guard the platform).
    */
-  private async resolveInstalledBundlePathOnDevice(deviceUdid: string, bundleId: string): Promise<string | null> {
+  private async resolveInstalledBundlePathOnDevice(
+    deviceUdid: string,
+    bundleId: string,
+  ): Promise<string | null> {
     const entry = await this.queryInstalledAppEntry(deviceUdid, bundleId);
     if (!entry) {
       return null;
@@ -828,9 +888,11 @@ export class DeviceAppManager implements DeviceUrlLauncher {
         "device",
         "info",
         "processes",
-        "--device", deviceUdid,
-        "--json-output", jsonPath,
-        "--quiet"
+        "--device",
+        deviceUdid,
+        "--json-output",
+        jsonPath,
+        "--quiet",
       ];
       await this.execute("xcrun", args);
 
@@ -858,9 +920,11 @@ export class DeviceAppManager implements DeviceUrlLauncher {
         "device",
         "info",
         "details",
-        "--device", deviceUdid,
-        "--json-output", jsonPath,
-        "--quiet"
+        "--device",
+        deviceUdid,
+        "--json-output",
+        jsonPath,
+        "--quiet",
       ];
       await this.execute("xcrun", args);
       const raw = await this.deps.readFile(jsonPath);
@@ -870,7 +934,7 @@ export class DeviceAppManager implements DeviceUrlLauncher {
       // possibly-supported device, so log-and-continue with an "unknown" (null)
       // version. The subsequent real devicectl call still surfaces any true error.
       this.deps.logger.debug(
-        `[DeviceAppManager] Could not resolve iOS version for ${deviceUdid}: ${getErrorMessage(error)}`
+        `[DeviceAppManager] Could not resolve iOS version for ${deviceUdid}: ${getErrorMessage(error)}`,
       );
       return null;
     } finally {
@@ -878,14 +942,23 @@ export class DeviceAppManager implements DeviceUrlLauncher {
     }
   }
 
-  private async getSimulatorAppBundleHash(deviceUdid: string, bundleId: string): Promise<string | null> {
+  private async getSimulatorAppBundleHash(
+    deviceUdid: string,
+    bundleId: string,
+  ): Promise<string | null> {
     if (this.deps.platform() !== "darwin") {
       return null;
     }
 
     let appPath: string;
     try {
-      const result = await this.execute("xcrun", ["simctl", "get_app_container", deviceUdid, bundleId, "app"]);
+      const result = await this.execute("xcrun", [
+        "simctl",
+        "get_app_container",
+        deviceUdid,
+        bundleId,
+        "app",
+      ]);
       appPath = result.trim();
     } catch (error) {
       const errorMessage = getErrorMessage(error);
@@ -905,7 +978,9 @@ export class DeviceAppManager implements DeviceUrlLauncher {
     try {
       return await hashAppBundle(appPath);
     } catch (error) {
-      this.deps.logger.warn(`[DeviceAppManager] Failed to hash simulator app bundle for ${bundleId}: ${getErrorMessage(error)}`);
+      this.deps.logger.warn(
+        `[DeviceAppManager] Failed to hash simulator app bundle for ${bundleId}: ${getErrorMessage(error)}`,
+      );
       return null;
     }
   }

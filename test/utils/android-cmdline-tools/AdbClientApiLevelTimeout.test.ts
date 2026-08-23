@@ -50,7 +50,7 @@ describe("AdbClient.getAndroidApiLevel timeout caching", () => {
         calls += 1;
         if (timeOut) {
           return Promise.reject(
-            new AdbCommandTimeoutError(`Command timed out after 5ms: adb shell ${GETPROP}`)
+            new AdbCommandTimeoutError(`Command timed out after 5ms: adb shell ${GETPROP}`),
           );
         }
         return Promise.resolve(ok("31"));

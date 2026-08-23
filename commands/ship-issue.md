@@ -167,7 +167,7 @@ For failing CI:
 Arm automerge yourself (`gh pr merge --auto`) once all of these are true:
 
 - local validation is green
-- every CI check has finished green — `--auto` waits only for *required*
+- every CI check has finished green — `--auto` waits only for _required_
   checks, so arming while an optional check is still running can merge past a
   late failure
 - there are no unresolved actionable review threads

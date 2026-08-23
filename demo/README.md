@@ -5,6 +5,7 @@ Tools and scripts for creating side-by-side demo videos showing CLI + Android em
 ## Overview
 
 This demo setup records:
+
 - **Terminal**: Claude Code interacting with AutoMobile MCP server (asciicinema)
 - **Device**: Android emulator screen during automation (AutoMobile videoRecording)
 - **Output**: Side-by-side merged video showing both simultaneously
@@ -33,6 +34,7 @@ chmod +x demo/scripts/*.sh
 ```
 
 **Process**:
+
 1. Starts AutoMobile device screen recording
 2. Records terminal with asciicinema
 3. Stops device recording
@@ -40,11 +42,13 @@ chmod +x demo/scripts/*.sh
 5. Merges videos side-by-side with ffmpeg
 
 **Pros**:
+
 - Fully automated workflow
 - Synchronized recordings
 - High quality output
 
 **Cons**:
+
 - Requires all tools installed
 - Two-step conversion for terminal (cast → gif → mp4)
 
@@ -72,10 +76,12 @@ ffmpeg -i terminal.gif -pix_fmt yuv420p terminal.mp4
 ```
 
 **Pros**:
+
 - Full control over timing
 - Can re-record either side independently
 
 **Cons**:
+
 - Manual synchronization required
 - More steps
 
@@ -95,10 +101,12 @@ ffmpeg -video_size 1920x1080 -framerate 30 -f avfoundation -i "1" terminal.mp4
 ```
 
 **Pros**:
+
 - Skip cast → gif → mp4 conversion
 - Native video quality
 
 **Cons**:
+
 - Larger file sizes
 - Platform-specific screen capture
 
@@ -124,10 +132,12 @@ ffmpeg -i demo.gif -i device.gif -filter_complex "[0][1]hstack" output.gif
 ```
 
 **Pros**:
+
 - Smaller file sizes
 - Easy to embed in docs
 
 **Cons**:
+
 - Quality loss
 - Limited frame rate
 
@@ -135,31 +145,31 @@ ffmpeg -i demo.gif -i device.gif -filter_complex "[0][1]hstack" output.gif
 
 ### Terminal Recording
 
-| Tool | Output | Pros | Cons |
-|------|--------|------|------|
-| **asciicinema** | .cast (JSON) | Editable, small size | Requires conversion |
-| **termtosvg** | .svg | Vector graphics | Limited playback |
-| **asciinema-automation** | .cast | Scriptable | Extra dependency |
-| **vhs** (Charm) | .mp4, .gif | Direct video output | Requires Go |
-| **ttyd + ffmpeg** | .mp4 | Native video | Platform-specific |
+| Tool                     | Output       | Pros                 | Cons                |
+| ------------------------ | ------------ | -------------------- | ------------------- |
+| **asciicinema**          | .cast (JSON) | Editable, small size | Requires conversion |
+| **termtosvg**            | .svg         | Vector graphics      | Limited playback    |
+| **asciinema-automation** | .cast        | Scriptable           | Extra dependency    |
+| **vhs** (Charm)          | .mp4, .gif   | Direct video output  | Requires Go         |
+| **ttyd + ffmpeg**        | .mp4         | Native video         | Platform-specific   |
 
 ### Video Conversion
 
-| Tool | Purpose | Notes |
-|------|---------|-------|
-| **agg** | cast → gif | Fast, good quality |
-| **asciicast2gif** | cast → gif | Alternative to agg |
-| **ffmpeg** | Universal converter | Swiss army knife |
-| **ImageMagick** | gif manipulation | For optimization |
+| Tool              | Purpose             | Notes              |
+| ----------------- | ------------------- | ------------------ |
+| **agg**           | cast → gif          | Fast, good quality |
+| **asciicast2gif** | cast → gif          | Alternative to agg |
+| **ffmpeg**        | Universal converter | Swiss army knife   |
+| **ImageMagick**   | gif manipulation    | For optimization   |
 
 ### Video Merging
 
-| Method | Command | Use Case |
-|--------|---------|----------|
-| **Horizontal stack** | `hstack` | Side-by-side |
-| **Vertical stack** | `vstack` | Top/bottom |
+| Method                 | Command   | Use Case         |
+| ---------------------- | --------- | ---------------- |
+| **Horizontal stack**   | `hstack`  | Side-by-side     |
+| **Vertical stack**     | `vstack`  | Top/bottom       |
 | **Picture-in-picture** | `overlay` | Device in corner |
-| **Grid layout** | `xstack` | Multiple devices |
+| **Grid layout**        | `xstack`  | Multiple devices |
 
 ## Example Layouts
 
@@ -210,6 +220,7 @@ Main orchestration script. Records both terminal and device, then merges.
 ```
 
 **Output**:
+
 - `{demo-name}.cast` - Terminal recording
 - `{demo-name}.gif` - Terminal as GIF
 - `{demo-name}-cli.mp4` - Terminal as video
@@ -221,6 +232,7 @@ Main orchestration script. Records both terminal and device, then merges.
 Simulates Claude Code interface for terminal recording.
 
 **Features**:
+
 - Animated typing
 - MCP tool call display
 - Progress indicators
@@ -237,6 +249,7 @@ Standalone video merger.
 ## Requirements
 
 ### Essential
+
 - **Bun** - Run AutoMobile
 - **ffmpeg** - Video processing
 - **asciicinema** - Terminal recording
@@ -374,6 +387,7 @@ ffmpeg -i long.mp4 -t 60 -c copy trimmed.mp4
 ## Examples
 
 See `demo/examples/` for sample outputs:
+
 - `clock-demo-final.mp4` - Full Clock app exploration
 - `timer-demo-final.mp4` - Timer interaction
 - `alarm-demo-final.mp4` - Alarm setup

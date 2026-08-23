@@ -16,7 +16,9 @@ describe("daemon state path constants", () => {
   }
 
   async function importFreshConstants() {
-    return import(`../../src/daemon/constants.ts?daemon-state-path-test=${Date.now()}-${Math.random()}`);
+    return import(
+      `../../src/daemon/constants.ts?daemon-state-path-test=${Date.now()}-${Math.random()}`
+    );
   }
 
   afterEach(() => {
@@ -41,7 +43,9 @@ describe("daemon state path constants", () => {
 
     expect(constants.SOCKET_PATH).toBe(resolve(canonicalLaunchCwd, ".auto-mobile", "daemon.sock"));
     expect(constants.PID_FILE_PATH).toBe(resolve(canonicalLaunchCwd, ".auto-mobile", "daemon.pid"));
-    expect(constants.LOCK_FILE_PATH).toBe(resolve(canonicalLaunchCwd, ".auto-mobile", "daemon.lock"));
+    expect(constants.LOCK_FILE_PATH).toBe(
+      resolve(canonicalLaunchCwd, ".auto-mobile", "daemon.lock"),
+    );
   });
 
   test("resolves relative daemon state env paths from the recorded launch cwd", async () => {

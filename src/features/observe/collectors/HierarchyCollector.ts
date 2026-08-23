@@ -36,7 +36,7 @@ export class HierarchyCollector {
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     skipWaitForFresh: boolean = false,
     minTimestamp: number = 0,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<void> {
     const { device, viewHierarchy, adb, timer } = this.opts;
     try {
@@ -45,7 +45,13 @@ export class HierarchyCollector {
       }
 
       const viewHierarchyStart = timer.now();
-      const hierarchy = await viewHierarchy.getViewHierarchy(queryOptions, perf, skipWaitForFresh, minTimestamp, signal);
+      const hierarchy = await viewHierarchy.getViewHierarchy(
+        queryOptions,
+        perf,
+        skipWaitForFresh,
+        minTimestamp,
+        signal,
+      );
       logger.debug("Accessibility service availability cached as: true");
 
       if (hierarchy) {
@@ -60,13 +66,18 @@ export class HierarchyCollector {
         const focusedElement = viewHierarchy.findFocusedElement(hierarchy);
         if (focusedElement) {
           result.focusedElement = focusedElement;
-          logger.debug(`Found focused element: ${focusedElement.text || focusedElement["resource-id"] || "no text/id"}`);
+          logger.debug(
+            `Found focused element: ${focusedElement.text || focusedElement["resource-id"] || "no text/id"}`,
+          );
         }
 
-        const accessibilityFocusedElement = viewHierarchy.findAccessibilityFocusedElement(hierarchy);
+        const accessibilityFocusedElement =
+          viewHierarchy.findAccessibilityFocusedElement(hierarchy);
         if (accessibilityFocusedElement) {
           result.accessibilityFocusedElement = accessibilityFocusedElement;
-          logger.debug(`Found accessibility-focused element: ${accessibilityFocusedElement.text || accessibilityFocusedElement["resource-id"] || accessibilityFocusedElement["content-desc"] || "no text/id/desc"}`);
+          logger.debug(
+            `Found accessibility-focused element: ${accessibilityFocusedElement.text || accessibilityFocusedElement["resource-id"] || accessibilityFocusedElement["content-desc"] || "no text/id/desc"}`,
+          );
         }
 
         // Intent chooser detection (inlined; logs but does not append a structured error on failure)
@@ -84,7 +95,9 @@ export class HierarchyCollector {
         if (hierarchy.notificationPermissionDetected !== undefined) {
           result.notificationPermissionDetected = hierarchy.notificationPermissionDetected;
           if (hierarchy.notificationPermissionDetected) {
-            logger.debug("[ObserveScreen] Notification permission dialog detected in view hierarchy");
+            logger.debug(
+              "[ObserveScreen] Notification permission dialog detected in view hierarchy",
+            );
           }
         }
       }
@@ -104,18 +117,18 @@ export class HierarchyCollector {
       if (
         errorStr.includes("null root node returned by UiTestAutomationBridge") ||
         (errorStr.includes("cat:") && errorStr.includes("No such file or directory")) ||
-        (errorStr.includes("screen appears to be off"))
+        errorStr.includes("screen appears to be off")
       ) {
         appendObserveError(result, {
           phase: "viewHierarchy",
           message: "Screen appears to be off or device is locked",
-          cause: errorStr
+          cause: errorStr,
         });
       } else {
         appendObserveError(result, {
           phase: "viewHierarchy",
           message: "Failed to retrieve view hierarchy",
-          cause: errorStr
+          cause: errorStr,
         });
       }
     }
@@ -134,7 +147,7 @@ export class HierarchyCollector {
         const syncResult = await client.requestHierarchySync(
           new NoOpPerformanceTracker(),
           true, // disableAllFiltering
-          signal
+          signal,
         );
         client.invalidateCache();
         if (syncResult?.hierarchy) {
@@ -142,7 +155,7 @@ export class HierarchyCollector {
             json: JSON.stringify(syncResult.hierarchy, null, 2),
             source: "accessibility-service",
             timestamp: timer.now(),
-            device: { deviceId: device.deviceId, platform: device.platform }
+            device: { deviceId: device.deviceId, platform: device.platform },
           };
         }
       } else {
@@ -150,7 +163,7 @@ export class HierarchyCollector {
         const hierarchyResult = await xcTestClient.requestHierarchySync(
           new NoOpPerformanceTracker(),
           true, // disableAllFiltering
-          signal
+          signal,
         );
         xcTestClient.invalidateCache();
         if (hierarchyResult?.hierarchy) {
@@ -158,7 +171,7 @@ export class HierarchyCollector {
             xcuitest: JSON.stringify(hierarchyResult.hierarchy, null, 2),
             source: "xcuitest",
             timestamp: timer.now(),
-            device: { deviceId: device.deviceId, platform: device.platform }
+            device: { deviceId: device.deviceId, platform: device.platform },
           };
         }
       }
@@ -170,7 +183,9 @@ export class HierarchyCollector {
   /**
    * Extract screen size from view hierarchy root node bounds.
    */
-  extractScreenSize(viewHierarchy: ObserveResult["viewHierarchy"]): { width: number; height: number } | null {
+  extractScreenSize(
+    viewHierarchy: ObserveResult["viewHierarchy"],
+  ): { width: number; height: number } | null {
     const rootNode = viewHierarchy?.hierarchy?.node;
     const rootBounds = parseBounds(rootNode?.bounds ?? rootNode?.$?.bounds);
     if (rootBounds) {
@@ -208,7 +223,7 @@ export class HierarchyCollector {
    */
   reconcileScreenDimensions(
     viewHierarchy: ObserveResult["viewHierarchy"],
-    screenSize: { width: number; height: number } | null
+    screenSize: { width: number; height: number } | null,
   ): ObserveResult["viewHierarchy"] {
     if (!viewHierarchy || typeof viewHierarchy === "string") {
       return viewHierarchy;

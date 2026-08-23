@@ -29,14 +29,9 @@ export class CtrlProxyHighlights {
     id: string,
     shape: HighlightShape,
     timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<HighlightOperationResult> {
-    return this.requestHighlightOperation(
-      "add_highlight",
-      { id, shape },
-      timeoutMs,
-      perf
-    );
+    return this.requestHighlightOperation("add_highlight", { id, shape }, timeoutMs, perf);
   }
 
   /**
@@ -46,17 +41,21 @@ export class CtrlProxyHighlights {
     type: "add_highlight",
     payload: { id: string; shape: HighlightShape },
     timeoutMs: number,
-    perf: PerformanceTracker
+    perf: PerformanceTracker,
   ): Promise<HighlightOperationResult> {
     const startTime = this.context.timer.now();
 
     try {
-      const connected = await perf.track("ensureConnection", () => this.context.ensureConnected(perf));
+      const connected = await perf.track("ensureConnection", () =>
+        this.context.ensureConnected(perf),
+      );
       if (!connected) {
-        logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for highlight operation");
+        logger.warn(
+          "[CTRL_PROXY] Failed to establish WebSocket connection for highlight operation",
+        );
         return {
           success: false,
-          error: "Failed to connect to accessibility service"
+          error: "Failed to connect to accessibility service",
         };
       }
 
@@ -69,8 +68,8 @@ export class CtrlProxyHighlights {
         timeoutMs,
         (_id, _type, timeout) => ({
           success: false,
-          error: `Highlight request timeout after ${timeout}ms`
-        })
+          error: `Highlight request timeout after ${timeout}ms`,
+        }),
       );
 
       await perf.track("sendRequest", async () => {
@@ -104,7 +103,7 @@ export class CtrlProxyHighlights {
       logger.warn(`[CTRL_PROXY] Highlight ${type} request failed after ${duration}ms: ${error}`);
       return {
         success: false,
-        error: `${error}`
+        error: `${error}`,
       };
     }
   }
@@ -113,7 +112,9 @@ export class CtrlProxyHighlights {
    * Normalize highlight shape bounds to integers.
    */
   private normalizeHighlightShape(shape: HighlightShape): HighlightShape {
-    const normalizeBounds = (bounds: HighlightShape["bounds"]): NormalizedHighlightBounds | undefined => {
+    const normalizeBounds = (
+      bounds: HighlightShape["bounds"],
+    ): NormalizedHighlightBounds | undefined => {
       if (!bounds) {
         return bounds;
       }
@@ -122,25 +123,27 @@ export class CtrlProxyHighlights {
         y: Math.round(bounds.y),
         width: Math.round(bounds.width),
         height: Math.round(bounds.height),
-        sourceWidth: bounds.sourceWidth === null || bounds.sourceWidth === undefined
-          ? bounds.sourceWidth
-          : Math.round(bounds.sourceWidth),
-        sourceHeight: bounds.sourceHeight === null || bounds.sourceHeight === undefined
-          ? bounds.sourceHeight
-          : Math.round(bounds.sourceHeight)
+        sourceWidth:
+          bounds.sourceWidth === null || bounds.sourceWidth === undefined
+            ? bounds.sourceWidth
+            : Math.round(bounds.sourceWidth),
+        sourceHeight:
+          bounds.sourceHeight === null || bounds.sourceHeight === undefined
+            ? bounds.sourceHeight
+            : Math.round(bounds.sourceHeight),
       };
     };
 
     if (shape.type === "path") {
       return {
         ...shape,
-        bounds: normalizeBounds(shape.bounds)
+        bounds: normalizeBounds(shape.bounds),
       };
     }
 
     return {
       ...shape,
-      bounds: normalizeBounds(shape.bounds)
+      bounds: normalizeBounds(shape.bounds),
     };
   }
 }

@@ -85,8 +85,11 @@ describe("PerceptualHasher", () => {
     test("returns 64-char binary hash for valid image", async () => {
       // Create a minimal valid PNG buffer via jimp
       const { Jimp, rgbaToInt } = await import("jimp");
-      const buffer = await new Jimp({ width: 16, height: 16, color: rgbaToInt(128, 128, 128, 255) })
-        .getBuffer("image/png");
+      const buffer = await new Jimp({
+        width: 16,
+        height: 16,
+        color: rgbaToInt(128, 128, 128, 255),
+      }).getBuffer("image/png");
 
       const hash = await PerceptualHasher.generatePerceptualHash(buffer);
       expect(hash).toHaveLength(64);
@@ -95,11 +98,17 @@ describe("PerceptualHasher", () => {
 
     test("similar images produce similar hashes", async () => {
       const { Jimp, rgbaToInt } = await import("jimp");
-      const buffer1 = await new Jimp({ width: 16, height: 16, color: rgbaToInt(100, 100, 100, 255) })
-        .getBuffer("image/png");
+      const buffer1 = await new Jimp({
+        width: 16,
+        height: 16,
+        color: rgbaToInt(100, 100, 100, 255),
+      }).getBuffer("image/png");
 
-      const buffer2 = await new Jimp({ width: 16, height: 16, color: rgbaToInt(105, 105, 105, 255) })
-        .getBuffer("image/png");
+      const buffer2 = await new Jimp({
+        width: 16,
+        height: 16,
+        color: rgbaToInt(105, 105, 105, 255),
+      }).getBuffer("image/png");
 
       const hash1 = await PerceptualHasher.generatePerceptualHash(buffer1);
       const hash2 = await PerceptualHasher.generatePerceptualHash(buffer2);

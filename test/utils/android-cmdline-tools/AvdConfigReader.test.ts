@@ -1,13 +1,13 @@
 import { afterEach, describe, it, expect } from "bun:test";
-import { parseAvdConfig, apiLevelToVersion, FileAvdConfigReader } from "../../../src/utils/android-cmdline-tools/AvdConfigReader";
+import {
+  parseAvdConfig,
+  apiLevelToVersion,
+  FileAvdConfigReader,
+} from "../../../src/utils/android-cmdline-tools/AvdConfigReader";
 
 describe("parseAvdConfig", () => {
   it("parses screen dimensions", () => {
-    const content = [
-      "hw.lcd.width=1080",
-      "hw.lcd.height=2400",
-      "hw.lcd.density=420",
-    ].join("\n");
+    const content = ["hw.lcd.width=1080", "hw.lcd.height=2400", "hw.lcd.density=420"].join("\n");
 
     const config = parseAvdConfig(content);
     expect(config.screenWidth).toBe(1080);
@@ -58,10 +58,7 @@ describe("parseAvdConfig", () => {
   });
 
   it("parses device name and tag", () => {
-    const content = [
-      "hw.device.name=pixel_6",
-      "tag.id=google_apis",
-    ].join("\n");
+    const content = ["hw.device.name=pixel_6", "tag.id=google_apis"].join("\n");
 
     const config = parseAvdConfig(content);
     expect(config.deviceName).toBe("pixel_6");
@@ -118,10 +115,7 @@ describe("parseAvdConfig", () => {
   });
 
   it("handles malformed values gracefully", () => {
-    const content = [
-      "hw.lcd.width=not_a_number",
-      "hw.lcd.height=",
-    ].join("\n");
+    const content = ["hw.lcd.width=not_a_number", "hw.lcd.height="].join("\n");
 
     const config = parseAvdConfig(content);
     expect(config.screenWidth).toBeUndefined();
@@ -199,10 +193,26 @@ describe("FileAvdConfigReader", () => {
   const previousAndroidSdkHome = process.env.ANDROID_SDK_HOME;
 
   afterEach(() => {
-    if (previousAndroidAvdHome === undefined) {delete process.env.ANDROID_AVD_HOME;} else {process.env.ANDROID_AVD_HOME = previousAndroidAvdHome;}
-    if (previousAndroidUserHome === undefined) {delete process.env.ANDROID_USER_HOME;} else {process.env.ANDROID_USER_HOME = previousAndroidUserHome;}
-    if (previousAndroidEmulatorHome === undefined) {delete process.env.ANDROID_EMULATOR_HOME;} else {process.env.ANDROID_EMULATOR_HOME = previousAndroidEmulatorHome;}
-    if (previousAndroidSdkHome === undefined) {delete process.env.ANDROID_SDK_HOME;} else {process.env.ANDROID_SDK_HOME = previousAndroidSdkHome;}
+    if (previousAndroidAvdHome === undefined) {
+      delete process.env.ANDROID_AVD_HOME;
+    } else {
+      process.env.ANDROID_AVD_HOME = previousAndroidAvdHome;
+    }
+    if (previousAndroidUserHome === undefined) {
+      delete process.env.ANDROID_USER_HOME;
+    } else {
+      process.env.ANDROID_USER_HOME = previousAndroidUserHome;
+    }
+    if (previousAndroidEmulatorHome === undefined) {
+      delete process.env.ANDROID_EMULATOR_HOME;
+    } else {
+      process.env.ANDROID_EMULATOR_HOME = previousAndroidEmulatorHome;
+    }
+    if (previousAndroidSdkHome === undefined) {
+      delete process.env.ANDROID_SDK_HOME;
+    } else {
+      process.env.ANDROID_SDK_HOME = previousAndroidSdkHome;
+    }
   });
 
   it("reads config from correct path", async () => {
@@ -234,7 +244,9 @@ describe("FileAvdConfigReader", () => {
   });
 
   it("returns null when readFile fails", async () => {
-    const readFileFn = async () => { throw new Error("Permission denied"); };
+    const readFileFn = async () => {
+      throw new Error("Permission denied");
+    };
     const existsFn = () => true;
 
     const reader = new FileAvdConfigReader(readFileFn, existsFn, "/fake/avd");
@@ -251,8 +263,11 @@ describe("FileAvdConfigReader", () => {
     const paths: string[] = [];
     const expectedConfigPath = path.join("/user-home", "avd", "Play.avd", "config.ini");
     const reader = new FileAvdConfigReader(
-      async path => { paths.push(path); return "image.sysdir.1=system-images/android-34/google_apis_playstore/arm64-v8a/"; },
-      path => path === expectedConfigPath,
+      async (path) => {
+        paths.push(path);
+        return "image.sysdir.1=system-images/android-34/google_apis_playstore/arm64-v8a/";
+      },
+      (path) => path === expectedConfigPath,
     );
 
     const config = await reader.readConfig("Play");
@@ -268,10 +283,11 @@ describe("FileAvdConfigReader", () => {
     const path = require("path");
     const expectedConfigPath = path.join("/user-home", "avd", "Play.avd", "config.ini");
     const reader = new FileAvdConfigReader(
-      async filePath => filePath === expectedConfigPath
-        ? "image.sysdir.1=system-images/android-34/google_apis_playstore/arm64-v8a/"
-        : "",
-      filePath => filePath === expectedConfigPath,
+      async (filePath) =>
+        filePath === expectedConfigPath
+          ? "image.sysdir.1=system-images/android-34/google_apis_playstore/arm64-v8a/"
+          : "",
+      (filePath) => filePath === expectedConfigPath,
     );
 
     const config = await reader.readConfig("Play");
@@ -286,13 +302,17 @@ describe("FileAvdConfigReader", () => {
     const configPath = path.join(path.resolve("custom", "avds"), "Custom.avd", "config.ini");
     const readPaths: string[] = [];
     const reader = new FileAvdConfigReader(
-      async filePath => {
+      async (filePath) => {
         readPaths.push(filePath);
-        if (filePath === registryPath) {return `path=${path.dirname(configPath)}\n`;}
-        if (filePath === configPath) {return "hw.ramSize=4096\nimage.sysdir.1=system-images/android-34/google_apis/arm64-v8a/";}
+        if (filePath === registryPath) {
+          return `path=${path.dirname(configPath)}\n`;
+        }
+        if (filePath === configPath) {
+          return "hw.ramSize=4096\nimage.sysdir.1=system-images/android-34/google_apis/arm64-v8a/";
+        }
         throw new Error(`Unexpected path: ${filePath}`);
       },
-      filePath => filePath === registryPath || filePath === configPath,
+      (filePath) => filePath === registryPath || filePath === configPath,
       avdHome,
     );
 
@@ -311,14 +331,23 @@ describe("FileAvdConfigReader", () => {
     const relocatedConfigPath = path.join(relocatedAvdHome, "Custom.avd", "config.ini");
     const readPaths: string[] = [];
     const reader = new FileAvdConfigReader(
-      async filePath => {
+      async (filePath) => {
         readPaths.push(filePath);
-        if (filePath === registryPath) {return `path=${relocatedAvdHome}/Custom.avd\n`;}
-        if (filePath === relocatedConfigPath) {return "hw.ramSize=4096\n";}
-        if (filePath === conventionalConfigPath) {return "hw.ramSize=1024\n";}
+        if (filePath === registryPath) {
+          return `path=${relocatedAvdHome}/Custom.avd\n`;
+        }
+        if (filePath === relocatedConfigPath) {
+          return "hw.ramSize=4096\n";
+        }
+        if (filePath === conventionalConfigPath) {
+          return "hw.ramSize=1024\n";
+        }
         throw new Error(`Unexpected path: ${filePath}`);
       },
-      filePath => filePath === registryPath || filePath === conventionalConfigPath || filePath === relocatedConfigPath,
+      (filePath) =>
+        filePath === registryPath ||
+        filePath === conventionalConfigPath ||
+        filePath === relocatedConfigPath,
       avdHome,
     );
 
@@ -335,13 +364,17 @@ describe("FileAvdConfigReader", () => {
     const registryPath = path.join(avdHome, "Custom.ini");
     const readPaths: string[] = [];
     const reader = new FileAvdConfigReader(
-      async filePath => {
+      async (filePath) => {
         readPaths.push(filePath);
-        if (filePath === registryPath) {return "path.rel=custom-avds/Custom.avd\n";}
-        if (filePath === configPath) {return "hw.ramSize=3072\n";}
+        if (filePath === registryPath) {
+          return "path.rel=custom-avds/Custom.avd\n";
+        }
+        if (filePath === configPath) {
+          return "hw.ramSize=3072\n";
+        }
         throw new Error(`Unexpected path: ${filePath}`);
       },
-      filePath => filePath === registryPath || filePath === configPath,
+      (filePath) => filePath === registryPath || filePath === configPath,
       avdHome,
     );
 
@@ -362,13 +395,17 @@ describe("FileAvdConfigReader", () => {
     const configPath = path.join(configHome, "avd", "Custom.avd", "config.ini");
     const readPaths: string[] = [];
     const reader = new FileAvdConfigReader(
-      async filePath => {
+      async (filePath) => {
         readPaths.push(filePath);
-        if (filePath === registryPath) {return "path=/stale/Custom.avd\npath.rel=avd/Custom.avd\n";}
-        if (filePath === configPath) {return "hw.ramSize=3072\n";}
+        if (filePath === registryPath) {
+          return "path=/stale/Custom.avd\npath.rel=avd/Custom.avd\n";
+        }
+        if (filePath === configPath) {
+          return "hw.ramSize=3072\n";
+        }
         throw new Error(`Unexpected path: ${filePath}`);
       },
-      filePath => filePath === registryPath || filePath === configPath,
+      (filePath) => filePath === registryPath || filePath === configPath,
     );
 
     const config = await reader.readConfig("Custom");
@@ -389,13 +426,17 @@ describe("FileAvdConfigReader", () => {
     const configPath = path.join(configHome, "custom-avds", "Custom.avd", "config.ini");
     const readPaths: string[] = [];
     const reader = new FileAvdConfigReader(
-      async filePath => {
+      async (filePath) => {
         readPaths.push(filePath);
-        if (filePath === registryPath) {return "path.rel=custom-avds/Custom.avd\n";}
-        if (filePath === configPath) {return "hw.ramSize=3072\n";}
+        if (filePath === registryPath) {
+          return "path.rel=custom-avds/Custom.avd\n";
+        }
+        if (filePath === configPath) {
+          return "hw.ramSize=3072\n";
+        }
         throw new Error(`Unexpected path: ${filePath}`);
       },
-      filePath => filePath === registryPath || filePath === configPath,
+      (filePath) => filePath === registryPath || filePath === configPath,
     );
 
     const config = await reader.readConfig("Custom");
@@ -408,16 +449,24 @@ describe("FileAvdConfigReader", () => {
     const path = require("path");
     const avdHome = path.resolve("fake", ".android", "avd");
     const registryPath = path.join(avdHome, "Custom.ini");
-    const configPath = path.join(path.resolve("fake", ".android", "../..", "outside"), "Custom.avd", "config.ini");
+    const configPath = path.join(
+      path.resolve("fake", ".android", "../..", "outside"),
+      "Custom.avd",
+      "config.ini",
+    );
     const readPaths: string[] = [];
     const reader = new FileAvdConfigReader(
-      async filePath => {
+      async (filePath) => {
         readPaths.push(filePath);
-        if (filePath === registryPath) {return "path.rel=../../outside/Custom.avd\n";}
-        if (filePath === configPath) {return "hw.ramSize=3072\n";}
+        if (filePath === registryPath) {
+          return "path.rel=../../outside/Custom.avd\n";
+        }
+        if (filePath === configPath) {
+          return "hw.ramSize=3072\n";
+        }
         throw new Error(`Unexpected path: ${filePath}`);
       },
-      filePath => filePath === registryPath || filePath === configPath,
+      (filePath) => filePath === registryPath || filePath === configPath,
       avdHome,
     );
 

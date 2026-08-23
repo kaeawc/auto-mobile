@@ -68,7 +68,6 @@ export interface SQLResult {
   truncated?: boolean;
 }
 
-
 /**
  * Database inspection action for Android apps.
  *
@@ -85,17 +84,14 @@ export class DatabaseInspector {
 
   constructor(
     private device: BootedDevice,
-    private adb: AdbExecutor
+    private adb: AdbExecutor,
   ) {}
 
   /**
    * List all databases in an app
    */
   async listDatabases(appId: string): Promise<DatabaseInfo[]> {
-    const response = await this.contentCall<{ databases: DatabaseInfo[] }>(
-      appId,
-      "listDatabases"
-    );
+    const response = await this.contentCall<{ databases: DatabaseInfo[] }>(appId, "listDatabases");
     return response.databases;
   }
 
@@ -103,11 +99,9 @@ export class DatabaseInspector {
    * List tables in a database
    */
   async listTables(appId: string, databasePath: string): Promise<string[]> {
-    const response = await this.contentCall<{ tables: string[] }>(
-      appId,
-      "listTables",
-      { databasePath }
-    );
+    const response = await this.contentCall<{ tables: string[] }>(appId, "listTables", {
+      databasePath,
+    });
     return response.tables;
   }
 
@@ -119,13 +113,13 @@ export class DatabaseInspector {
     databasePath: string,
     table: string,
     limit: number = 50,
-    offset: number = 0
+    offset: number = 0,
   ): Promise<TableDataResult> {
     return this.contentCall<TableDataResult>(appId, "getTableData", {
       databasePath,
       table,
       limit: limit.toString(),
-      offset: offset.toString()
+      offset: offset.toString(),
     });
   }
 
@@ -135,25 +129,21 @@ export class DatabaseInspector {
   async getTableStructure(
     appId: string,
     databasePath: string,
-    table: string
+    table: string,
   ): Promise<TableStructureResult> {
     return this.contentCall<TableStructureResult>(appId, "getTableStructure", {
       databasePath,
-      table
+      table,
     });
   }
 
   /**
    * Execute a SQL query
    */
-  async executeSQL(
-    appId: string,
-    databasePath: string,
-    query: string
-  ): Promise<SQLResult> {
+  async executeSQL(appId: string, databasePath: string, query: string): Promise<SQLResult> {
     return this.contentCall<SQLResult>(appId, "executeSQL", {
       databasePath,
-      query
+      query,
     });
   }
 
@@ -163,7 +153,7 @@ export class DatabaseInspector {
   private async contentCall<T>(
     appId: string,
     method: string,
-    extras?: Record<string, string>
+    extras?: Record<string, string>,
   ): Promise<T> {
     const uri = `content://${appId}.automobile.database`;
     let cmd = `shell content call --uri ${uri} --method ${method}`;
@@ -234,7 +224,7 @@ export class DatabaseInspector {
         if (typeof parsed.errorType === "string" || typeof parsed.error === "string") {
           return {
             errorType: typeof parsed.errorType === "string" ? parsed.errorType : "UNKNOWN",
-            error: typeof parsed.error === "string" ? parsed.error : "Unknown error"
+            error: typeof parsed.error === "string" ? parsed.error : "Unknown error",
           };
         }
       } catch (error) {
@@ -246,7 +236,7 @@ export class DatabaseInspector {
 
     return {
       errorType: this.extractBundleValue(output, "errorType") || "UNKNOWN",
-      error: this.extractBundleValue(output, "error") || output.trim() || "Unknown error"
+      error: this.extractBundleValue(output, "error") || output.trim() || "Unknown error",
     };
   }
 

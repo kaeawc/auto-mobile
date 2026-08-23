@@ -64,7 +64,7 @@ export class DualTrackRecorder {
     /** Optional override for testing — defaults to AndroidCtrlProxyClient */
     private readonly a11ySource?: A11ySource,
     /** Optional override for testing — defaults to the system timer */
-    private readonly timer: Timer = defaultTimer
+    private readonly timer: Timer = defaultTimer,
   ) {}
 
   async start(): Promise<void> {
@@ -79,9 +79,7 @@ export class DualTrackRecorder {
 
     const connected = await a11y.ensureConnected();
     if (!connected) {
-      throw new Error(
-        "[DualTrackRecorder] Unable to connect to the accessibility service."
-      );
+      throw new Error("[DualTrackRecorder] Unable to connect to the accessibility service.");
     }
 
     // Notify Kotlin service that recording is starting (enables interaction event emission)
@@ -93,12 +91,12 @@ export class DualTrackRecorder {
     const emitter = this.gestureEmitter ?? (await this.createGetEventReader());
     this.activeEmitter = emitter;
     emitter.start(
-      e => this.handleGestureEvent(e),
-      e => logger.warn(`[DualTrackRecorder] GetEventReader error: ${e.message}`)
+      (e) => this.handleGestureEvent(e),
+      (e) => logger.warn(`[DualTrackRecorder] GetEventReader error: ${e.message}`),
     );
 
-    this.unsubscribeA11y = a11y.onInteraction(
-      e => this.handleInteractionEvent(e as unknown as ReceivedInteraction)
+    this.unsubscribeA11y = a11y.onInteraction((e) =>
+      this.handleInteractionEvent(e as unknown as ReceivedInteraction),
     );
 
     logger.debug("[DualTrackRecorder] Started dual-track recording");
@@ -127,9 +125,7 @@ export class DualTrackRecorder {
     }
     this.pendingGestures = [];
 
-    logger.debug(
-      `[DualTrackRecorder] Stopped with ${this.steps.length} steps`
-    );
+    logger.debug(`[DualTrackRecorder] Stopped with ${this.steps.length} steps`);
 
     return { steps: this.steps, stepCount: this.steps.length };
   }
@@ -139,7 +135,9 @@ export class DualTrackRecorder {
   // -------------------------------------------------------------------------
 
   private handleGestureEvent(gesture: GestureEvent): void {
-    if (this.stopped) {return;}
+    if (this.stopped) {
+      return;
+    }
 
     if (gesture.type === "pressButton") {
       this.steps.push(buildPressButtonStep(gesture));
@@ -163,7 +161,9 @@ export class DualTrackRecorder {
   }
 
   private handleInteractionEvent(event: ReceivedInteraction): void {
-    if (this.stopped) {return;}
+    if (this.stopped) {
+      return;
+    }
 
     if (event.type === "windowChange") {
       // Screen navigation metadata — not a plan step
@@ -177,24 +177,28 @@ export class DualTrackRecorder {
 
     // tap / longPress / swipe — try to match a pending gesture
     const matched = this.pendingGestures.find(
-      p =>
+      (p) =>
         !p.resolved &&
         isCompatibleType(p.gesture.type, event.type) &&
         this.timer.now() - p.arrivedAt <= MERGE_WINDOW_MS &&
-        gestureHitsElement(p.gesture, event.element)
+        gestureHitsElement(p.gesture, event.element),
     );
 
     if (matched) {
       matched.resolved = true;
       const step = buildMergedStep(matched.gesture, event);
-      if (step) {this.steps.push(step);}
+      if (step) {
+        this.steps.push(step);
+      }
     } else {
       this.bufferedInteractions.push({ ...event, receivedAt: this.timer.now() });
     }
   }
 
   private resolveGesture(pending: PendingGesture): void {
-    if (pending.resolved) {return;}
+    if (pending.resolved) {
+      return;
+    }
     pending.resolved = true;
 
     // Prune stale buffered interactions using host receipt time, not device timestamp,
@@ -202,30 +206,35 @@ export class DualTrackRecorder {
     const now = this.timer.now();
     const MAX_BUFFER_AGE_MS = MERGE_WINDOW_MS * 2;
     this.bufferedInteractions = this.bufferedInteractions.filter(
-      e => now - e.receivedAt <= MAX_BUFFER_AGE_MS
+      (e) => now - e.receivedAt <= MAX_BUFFER_AGE_MS,
     );
 
     // Try to match against a buffered A11y interaction — require type + hit-test
-    const idx = this.bufferedInteractions.findIndex(e =>
-      isCompatibleType(pending.gesture.type, e.type) &&
-      gestureHitsElement(pending.gesture, e.element)
+    const idx = this.bufferedInteractions.findIndex(
+      (e) =>
+        isCompatibleType(pending.gesture.type, e.type) &&
+        gestureHitsElement(pending.gesture, e.element),
     );
 
     if (idx >= 0) {
       const event = this.bufferedInteractions.splice(idx, 1)[0];
       const step = buildMergedStep(pending.gesture, event);
-      if (step) {this.steps.push(step);}
+      if (step) {
+        this.steps.push(step);
+      }
     } else {
       logger.warn(
         `[DualTrackRecorder] No element match for ${pending.gesture.type} ` +
-          `at (${pending.gesture.screenX}, ${pending.gesture.screenY}) — step skipped`
+          `at (${pending.gesture.screenX}, ${pending.gesture.screenY}) — step skipped`,
       );
     }
   }
 
   private handleInputText(event: ReceivedInteraction): void {
     const elementKey = buildElementKey(event);
-    if (event.text === undefined) {return;}
+    if (event.text === undefined) {
+      return;
+    }
 
     // Coalesce consecutive inputText events on the same element only when the
     // previous inputText is still the most recent step (no intervening actions)
@@ -286,16 +295,17 @@ function isCompatibleType(gestureType: string, eventType: string): boolean {
   );
 }
 
-function gestureHitsElement(
-  gesture: GestureEvent,
-  element?: Partial<Element>
-): boolean {
+function gestureHitsElement(gesture: GestureEvent, element?: Partial<Element>): boolean {
   const bounds = element?.bounds;
-  if (!bounds) {return false;}
+  if (!bounds) {
+    return false;
+  }
   // Swipes use startX/startY; taps/longPress/doubleTap use screenX/screenY
   const x = gesture.screenX ?? gesture.startX;
   const y = gesture.screenY ?? gesture.startY;
-  if (x === null || x === undefined || y === null || y === undefined) {return false;}
+  if (x === null || x === undefined || y === null || y === undefined) {
+    return false;
+  }
   const PAD = 20;
   return (
     x >= bounds.left - PAD &&
@@ -306,68 +316,87 @@ function gestureHitsElement(
 }
 
 function buildSelector(
-  element?: Partial<Element>
+  element?: Partial<Element>,
 ): { elementId: string } | { text: string } | null {
-  if (!element) {return null;}
+  if (!element) {
+    return null;
+  }
   const resourceId = element["resource-id"];
-  if (resourceId) {return { elementId: resourceId };}
+  if (resourceId) {
+    return { elementId: resourceId };
+  }
   const text = element.text ?? element["content-desc"];
-  if (text) {return { text };}
+  if (text) {
+    return { text };
+  }
   return null;
 }
 
 function buildElementKey(event: ReceivedInteraction): string | null {
   const el = event.element;
-  if (!el) {return null;}
+  if (!el) {
+    return null;
+  }
   const resourceId = el["resource-id"] ?? "";
   const contentDesc = el["content-desc"] ?? "";
   const className = el["class"] ?? "";
-  if (!resourceId && !contentDesc && !className) {return null;}
+  if (!resourceId && !contentDesc && !className) {
+    return null;
+  }
   return `${resourceId}|${contentDesc}|${className}`;
 }
 
 export function resolveSwipeDirection(
   scrollDeltaX?: number,
-  scrollDeltaY?: number
+  scrollDeltaY?: number,
 ): "up" | "down" | "left" | "right" | null {
   const dx = scrollDeltaX ?? 0;
   const dy = scrollDeltaY ?? 0;
-  if (dx === 0 && dy === 0) {return null;}
-  if (Math.abs(dx) >= Math.abs(dy)) {return dx > 0 ? "left" : "right";}
+  if (dx === 0 && dy === 0) {
+    return null;
+  }
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    return dx > 0 ? "left" : "right";
+  }
   return dy > 0 ? "up" : "down";
 }
 
-function buildMergedStep(
-  gesture: GestureEvent,
-  event: ReceivedInteraction
-): PlanStep | null {
+function buildMergedStep(gesture: GestureEvent, event: ReceivedInteraction): PlanStep | null {
   const selector = buildSelector(event.element);
 
   switch (gesture.type) {
     case "tap":
-      if (!selector) {return null;}
+      if (!selector) {
+        return null;
+      }
       return { tool: "tapOn", params: { action: "tap", ...selector } };
 
     case "doubleTap":
-      if (!selector) {return null;}
+      if (!selector) {
+        return null;
+      }
       return { tool: "tapOn", params: { action: "doubleTap", ...selector } };
 
     case "longPress":
-      if (!selector) {return null;}
+      if (!selector) {
+        return null;
+      }
       return { tool: "tapOn", params: { action: "longPress", ...selector } };
 
     case "swipe": {
       const direction =
         gesture.direction ?? resolveSwipeDirection(event.scrollDeltaX, event.scrollDeltaY);
-      if (!direction) {return null;}
+      if (!direction) {
+        return null;
+      }
       const params: Record<string, unknown> = { direction };
       if (selector) {
         params.container =
-          "elementId" in selector
-            ? { elementId: selector.elementId }
-            : { text: selector.text };
+          "elementId" in selector ? { elementId: selector.elementId } : { text: selector.text };
       }
-      if (gesture.speed === "fast") {params.speed = "fast";}
+      if (gesture.speed === "fast") {
+        params.speed = "fast";
+      }
       return { tool: "swipeOn", params };
     }
 

@@ -95,16 +95,16 @@ export class FakeTimer implements Timer {
   async sleep(ms: number): Promise<void> {
     this.sleepHistory.push(ms);
     if (this.autoAdvance) {
-      return new Promise<void>(resolve => {
+      return new Promise<void>((resolve) => {
         this.enqueueAutoAdvanceTask(resolve, ms, resolve);
       });
     }
-    return new Promise<void>(resolve => {
+    return new Promise<void>((resolve) => {
       this.pendingSleeps.push({
         ms,
         resolve,
         timestamp: this.currentTime,
-        seq: this.nextEventSeq++
+        seq: this.nextEventSeq++,
       });
     });
   }
@@ -162,7 +162,7 @@ export class FakeTimer implements Timer {
       }
       this.currentTime = next.dueAt;
       next.fire();
-      await new Promise<void>(resolve => setImmediate(resolve));
+      await new Promise<void>((resolve) => setImmediate(resolve));
     }
 
     this.currentTime = target;
@@ -188,14 +188,14 @@ export class FakeTimer implements Timer {
 
     for (const sleep of this.pendingSleeps) {
       consider(sleep.timestamp + sleep.ms, sleep.seq, () => {
-        this.pendingSleeps = this.pendingSleeps.filter(candidate => candidate !== sleep);
+        this.pendingSleeps = this.pendingSleeps.filter((candidate) => candidate !== sleep);
         sleep.resolve();
       });
     }
 
     for (const timeout of this.pendingTimeouts) {
       consider(timeout.timestamp + timeout.ms, timeout.seq, () => {
-        this.pendingTimeouts = this.pendingTimeouts.filter(candidate => candidate !== timeout);
+        this.pendingTimeouts = this.pendingTimeouts.filter((candidate) => candidate !== timeout);
         timeout.callback();
       });
     }
@@ -228,14 +228,14 @@ export class FakeTimer implements Timer {
   resolveAll(): void {
     const toResolve = [...this.pendingSleeps];
     this.pendingSleeps = [];
-    toResolve.forEach(sleep => sleep.resolve());
+    toResolve.forEach((sleep) => sleep.resolve());
   }
 
   /**
    * Get all pending sleep durations.
    */
   getPendingSleeps(): number[] {
-    return this.pendingSleeps.map(s => s.ms);
+    return this.pendingSleeps.map((s) => s.ms);
   }
 
   /**
@@ -358,7 +358,7 @@ export class FakeTimer implements Timer {
       callback,
       ms,
       timestamp: this.currentTime,
-      seq: this.nextEventSeq++
+      seq: this.nextEventSeq++,
     });
     return id;
   }
@@ -367,7 +367,7 @@ export class FakeTimer implements Timer {
    * Clear a pending timeout.
    */
   clearTimeout(handle: NodeJS.Timeout): void {
-    this.pendingTimeouts = this.pendingTimeouts.filter(t => t.id !== handle);
+    this.pendingTimeouts = this.pendingTimeouts.filter((t) => t.id !== handle);
     // Also mark as cancelled for autoAdvance mode where callback is already scheduled
     this.cancelledTimeoutIds.add(handle as unknown as number);
   }
@@ -384,18 +384,25 @@ export class FakeTimer implements Timer {
     if (this.autoAdvance) {
       const period = ms > 0 ? ms : 1;
       const generation = this.autoAdvanceGeneration;
-      const scheduleNext = (): void => this.enqueueAutoAdvanceTask(() => {
-        if (generation === this.autoAdvanceGeneration && !this.cancelledIntervalIds.has(numericId)) {
-          callback();
-          if (generation === this.autoAdvanceGeneration && !this.cancelledIntervalIds.has(numericId)) {
-            scheduleNext();
-            return;
+      const scheduleNext = (): void =>
+        this.enqueueAutoAdvanceTask(() => {
+          if (
+            generation === this.autoAdvanceGeneration &&
+            !this.cancelledIntervalIds.has(numericId)
+          ) {
+            callback();
+            if (
+              generation === this.autoAdvanceGeneration &&
+              !this.cancelledIntervalIds.has(numericId)
+            ) {
+              scheduleNext();
+              return;
+            }
           }
-        }
-        if (generation === this.autoAdvanceGeneration) {
-          this.cancelledIntervalIds.delete(numericId);
-        }
-      }, period);
+          if (generation === this.autoAdvanceGeneration) {
+            this.cancelledIntervalIds.delete(numericId);
+          }
+        }, period);
       scheduleNext();
       return id;
     }
@@ -405,7 +412,7 @@ export class FakeTimer implements Timer {
       ms,
       timestamp: this.currentTime,
       lastFiredAt: this.currentTime,
-      seq: this.nextEventSeq++
+      seq: this.nextEventSeq++,
     });
     return id;
   }
@@ -414,7 +421,7 @@ export class FakeTimer implements Timer {
    * Clear a pending interval.
    */
   clearInterval(handle: NodeJS.Timeout): void {
-    this.pendingIntervals = this.pendingIntervals.filter(i => i.id !== handle);
+    this.pendingIntervals = this.pendingIntervals.filter((i) => i.id !== handle);
     this.cancelledIntervalIds.add(handle as unknown as number);
   }
 
@@ -422,14 +429,14 @@ export class FakeTimer implements Timer {
    * Get all pending timeout durations.
    */
   getPendingTimeouts(): number[] {
-    return this.pendingTimeouts.map(t => t.ms);
+    return this.pendingTimeouts.map((t) => t.ms);
   }
 
   /**
    * Get all pending interval durations.
    */
   getPendingIntervals(): number[] {
-    return this.pendingIntervals.map(i => i.ms);
+    return this.pendingIntervals.map((i) => i.ms);
   }
 
   /**
@@ -459,11 +466,11 @@ export class FakeTimer implements Timer {
     let error: unknown;
 
     promise
-      .then(value => {
+      .then((value) => {
         settled = true;
         result = value;
       })
-      .catch(err => {
+      .catch((err) => {
         settled = true;
         error = err;
       });
@@ -471,10 +478,12 @@ export class FakeTimer implements Timer {
     // Advance time until promise settles
     while (!settled) {
       this.advanceTime(stepMs);
-      await new Promise(resolve => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
     }
 
-    if (error) {throw error;}
+    if (error) {
+      throw error;
+    }
     return result as T;
   }
 
@@ -485,13 +494,13 @@ export class FakeTimer implements Timer {
   private enqueueAutoAdvanceTask(
     callback: () => void,
     ms: number,
-    resolveOnReset?: () => void
+    resolveOnReset?: () => void,
   ): void {
     this.pendingAutoAdvanceTasks.push({
       dueAt: this.currentTime + Math.max(0, ms),
       registrationOrder: this.nextAutoAdvanceTaskOrder++,
       callback,
-      resolveOnReset
+      resolveOnReset,
     });
     this.scheduleAutoAdvanceDispatch();
   }
@@ -520,7 +529,7 @@ export class FakeTimer implements Timer {
     }
 
     this.pendingAutoAdvanceTasks.sort(
-      (left, right) => left.dueAt - right.dueAt || left.registrationOrder - right.registrationOrder
+      (left, right) => left.dueAt - right.dueAt || left.registrationOrder - right.registrationOrder,
     );
     return this.pendingAutoAdvanceTasks.shift();
   }

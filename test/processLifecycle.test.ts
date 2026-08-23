@@ -13,7 +13,7 @@ class FakeProcess implements ProcessLifecycleProcess {
 
   on<K extends keyof ProcessLifecycleEventMap>(
     event: K,
-    listener: (...args: ProcessLifecycleEventMap[K]) => void
+    listener: (...args: ProcessLifecycleEventMap[K]) => void,
   ): unknown {
     const eventListeners = this.listeners.get(event) ?? [];
     eventListeners.push(listener);
@@ -49,10 +49,7 @@ type StdinEventMap = {
 class FakeStdin {
   readonly listeners = new Map<keyof StdinEventMap, Array<(...args: any[]) => void>>();
 
-  on<K extends keyof StdinEventMap>(
-    event: K,
-    listener: (...args: StdinEventMap[K]) => void
-  ): this {
+  on<K extends keyof StdinEventMap>(event: K, listener: (...args: StdinEventMap[K]) => void): this {
     const eventListeners = this.listeners.get(event) ?? [];
     eventListeners.push(listener);
     this.listeners.set(event, eventListeners);
@@ -110,9 +107,9 @@ describe("process lifecycle handlers", () => {
     let finishShutdown!: () => void;
 
     lifecycle.install();
-    lifecycle.setShutdownHandler(async signal => {
+    lifecycle.setShutdownHandler(async (signal) => {
       signals.push(signal);
-      await new Promise<void>(resolve => {
+      await new Promise<void>((resolve) => {
         finishShutdown = resolve;
       });
     });
@@ -136,9 +133,9 @@ describe("process lifecycle handlers", () => {
     let finishShutdown!: () => void;
 
     lifecycle.install();
-    lifecycle.setShutdownHandler(async signal => {
+    lifecycle.setShutdownHandler(async (signal) => {
       signals.push(signal);
-      await new Promise<void>(resolve => {
+      await new Promise<void>((resolve) => {
         finishShutdown = resolve;
       });
     });
@@ -183,9 +180,9 @@ describe("process lifecycle handlers", () => {
     let finishClosingProxy!: () => void;
 
     lifecycle.installStdinShutdownHandlers(fakeStdin);
-    lifecycle.setShutdownHandler(async reason => {
+    lifecycle.setShutdownHandler(async (reason) => {
       closedResources.push(reason);
-      await new Promise<void>(resolve => {
+      await new Promise<void>((resolve) => {
         finishClosingProxy = resolve;
       });
       closedResources.push("proxy");
@@ -261,7 +258,7 @@ describe("process lifecycle handlers", () => {
             },
           );
         },
-        () => cleanupFailed ? { exitCode: 1 } : undefined,
+        () => (cleanupFailed ? { exitCode: 1 } : undefined),
       );
 
       fakeStdin.emit("close");
@@ -312,7 +309,7 @@ describe("process lifecycle handlers", () => {
 
     lifecycle.install();
     lifecycle.setShutdownHandler(async () => {
-      await new Promise<void>(resolve => {
+      await new Promise<void>((resolve) => {
         finishShutdown = resolve;
       });
     });
@@ -357,15 +354,17 @@ describe("process lifecycle handlers", () => {
   test("attempts every cleanup operation when one fails", async () => {
     const cleaned: string[] = [];
 
-    await expect(runAllCleanupOperations([
-      () => {
-        cleaned.push("video");
-        throw new Error("video cleanup failed");
-      },
-      async () => {
-        cleaned.push("proxy");
-      },
-    ])).rejects.toThrow("One or more shutdown cleanup operations failed");
+    await expect(
+      runAllCleanupOperations([
+        () => {
+          cleaned.push("video");
+          throw new Error("video cleanup failed");
+        },
+        async () => {
+          cleaned.push("proxy");
+        },
+      ]),
+    ).rejects.toThrow("One or more shutdown cleanup operations failed");
 
     expect(cleaned).toEqual(["video", "proxy"]);
   });
@@ -390,7 +389,7 @@ describe("process lifecycle handlers", () => {
     const promise = Promise.resolve();
 
     lifecycle.install();
-    lifecycle.setFatalProcessHandler(event => {
+    lifecycle.setFatalProcessHandler((event) => {
       events.push(event.type);
     });
 

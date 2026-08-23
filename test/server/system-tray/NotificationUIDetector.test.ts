@@ -4,7 +4,12 @@ import { IosNotificationUIDetector } from "../../../src/server/system-tray/IosNo
 import { createNotificationUIDetector } from "../../../src/server/system-tray/createNotificationUIDetector";
 import { FakeNotificationUIDetector } from "../../fakes/FakeNotificationUIDetector";
 import { ActionableError } from "../../../src/models";
-import type { BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "../../../src/models";
+import type {
+  BootedDevice,
+  Element,
+  ObserveResult,
+  ViewHierarchyResult,
+} from "../../../src/models";
 import type { NotificationUIDetector } from "../../../src/utils/interfaces/NotificationUIDetector";
 import type { SystemTrayDependencies } from "../../../src/server/systemTrayHelpers";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -33,9 +38,9 @@ describe("NotificationUIDetector", () => {
       node: {
         $: {
           "resource-id": "com.android.systemui:id/notification_stack_scroller",
-          "class": "NotificationShade",
-          "packageName": "com.android.systemui",
-          "bounds": { left: 0, top: 0, right: 100, bottom: 100 },
+          class: "NotificationShade",
+          packageName: "com.android.systemui",
+          bounds: { left: 0, top: 0, right: 100, bottom: 100 },
         },
       },
     },
@@ -47,9 +52,9 @@ describe("NotificationUIDetector", () => {
       node: {
         $: {
           "resource-id": "launcher_root",
-          "class": "Launcher",
-          "packageName": "com.google.android.apps.nexuslauncher",
-          "bounds": { left: 0, top: 0, right: 100, bottom: 100 },
+          class: "Launcher",
+          packageName: "com.google.android.apps.nexuslauncher",
+          bounds: { left: 0, top: 0, right: 100, bottom: 100 },
         },
       },
     },
@@ -199,7 +204,7 @@ describe("NotificationUIDetector", () => {
     it("expands and collapses via shell cmd statusbar", async () => {
       const commands: string[] = [];
       const detector = new AndroidNotificationUIDetector(androidDevice, {
-        executeAdbCommand: async cmd => {
+        executeAdbCommand: async (cmd) => {
           commands.push(cmd);
           return { stdout: "", stderr: "" };
         },
@@ -225,7 +230,7 @@ describe("NotificationUIDetector", () => {
     it("issues shell input tap / swipe with element coordinates", async () => {
       const commands: string[] = [];
       const detector = new AndroidNotificationUIDetector(androidDevice, {
-        executeAdbCommand: async cmd => {
+        executeAdbCommand: async (cmd) => {
           commands.push(cmd);
           return { stdout: "", stderr: "" };
         },
@@ -276,7 +281,8 @@ describe("NotificationUIDetector", () => {
     });
 
     it("emits a downward swipe to open NotificationCenter", async () => {
-      const swipes: Array<{ x1: number; y1: number; x2: number; y2: number; duration?: number }> = [];
+      const swipes: Array<{ x1: number; y1: number; x2: number; y2: number; duration?: number }> =
+        [];
       const detector = new IosNotificationUIDetector(iosDevice, {
         requestSwipe: async (x1, y1, x2, y2, duration) => {
           swipes.push({ x1, y1, x2, y2, duration });
@@ -292,7 +298,8 @@ describe("NotificationUIDetector", () => {
     });
 
     it("emits an upward swipe to close NotificationCenter", async () => {
-      const swipes: Array<{ x1: number; y1: number; x2: number; y2: number; duration?: number }> = [];
+      const swipes: Array<{ x1: number; y1: number; x2: number; y2: number; duration?: number }> =
+        [];
       const detector = new IosNotificationUIDetector(iosDevice, {
         requestSwipe: async (x1, y1, x2, y2, duration) => {
           swipes.push({ x1, y1, x2, y2, duration });
@@ -345,7 +352,7 @@ describe("NotificationUIDetector", () => {
 
   describe("createNotificationUIDetector factory", () => {
     const buildDeps = (): SystemTrayDependencies => ({
-      observeScreenFactory: () => ({ execute: async () => ({} as ObserveResult) }),
+      observeScreenFactory: () => ({ execute: async () => ({}) as ObserveResult }),
       adbFactory: () => ({
         executeCommand: async () => ({ stdout: "", stderr: "" }),
         getDeviceTimestampMs: async () => 0,

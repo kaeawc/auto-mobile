@@ -41,10 +41,21 @@ import {
   type RecordedWhipRequest,
 } from "../helpers/webrtcFakes";
 
-const ANDROID: BootedDevice = { deviceId: "emulator-5554", platform: "android", name: "a" } as BootedDevice;
-const IOS: BootedDevice = { deviceId: "simulator-1", platform: "ios", name: "iPhone 16" } as BootedDevice;
+const ANDROID: BootedDevice = {
+  deviceId: "emulator-5554",
+  platform: "android",
+  name: "a",
+} as BootedDevice;
+const IOS: BootedDevice = {
+  deviceId: "simulator-1",
+  platform: "ios",
+  name: "iPhone 16",
+} as BootedDevice;
 
-function descriptor(streamId: string, state: WebRtcStreamDescriptor["state"] = "connected"): WebRtcStreamDescriptor {
+function descriptor(
+  streamId: string,
+  state: WebRtcStreamDescriptor["state"] = "connected",
+): WebRtcStreamDescriptor {
   return {
     streamId,
     state,
@@ -74,7 +85,7 @@ const allowAllAuthenticator: StreamSocketAuthenticator = { authorize: () => {} }
 class TestableServer extends WebRtcStreamSocketServer {
   constructor(
     deps: WebRtcStreamSocketServerDependencies,
-    authenticator: StreamSocketAuthenticator = allowAllAuthenticator
+    authenticator: StreamSocketAuthenticator = allowAllAuthenticator,
   ) {
     super("/fake/webrtc-stream.sock", new FakeTimer(), deps, authenticator);
   }
@@ -94,25 +105,31 @@ let started: Array<{
 }> = [];
 let stopped: string[] = [];
 
-function makeDeps(overrides: Partial<WebRtcStreamSocketServerDependencies> = {}): WebRtcStreamSocketServerDependencies {
+function makeDeps(
+  overrides: Partial<WebRtcStreamSocketServerDependencies> = {},
+): WebRtcStreamSocketServerDependencies {
   const active = new Map<string, WebRtcStreamDescriptor>();
   return {
     resolveDevice: async () => ANDROID,
-    startStream: async request => {
+    startStream: async (request) => {
       const streamId = request.streamId ?? "webrtc_generated";
-      started.push({ device: request.device, streamId: request.streamId, overrides: request.overrides });
+      started.push({
+        device: request.device,
+        streamId: request.streamId,
+        overrides: request.overrides,
+      });
       const d = descriptor(streamId);
       active.set(streamId, d);
       return d;
     },
-    stopStream: async streamId => {
+    stopStream: async (streamId) => {
       const id = streamId ?? "webrtc_generated";
       stopped.push(id);
       active.delete(id);
       return descriptor(id, "stopped");
     },
     listStreams: () => Array.from(active.values()),
-    getStream: streamId => active.get(streamId) ?? null,
+    getStream: (streamId) => active.get(streamId) ?? null,
     ...overrides,
   };
 }
@@ -149,13 +166,13 @@ describe("WebRtcStreamSocketServer", () => {
     const requestedPlatforms: string[] = [];
     const device = await resolveWebRtcStreamDevice(
       {
-        getBootedDevices: async platform => {
+        getBootedDevices: async (platform) => {
           requestedPlatforms.push(platform);
           return platform === "ios" ? [IOS] : [ANDROID];
         },
       },
       undefined,
-      "ios"
+      "ios",
     );
 
     expect(requestedPlatforms).toEqual(["ios"]);
@@ -203,7 +220,7 @@ describe("WebRtcStreamSocketServer", () => {
     await server.simulate(socket, { id: "7", action: "list" });
     const response = lastResponse(socket);
     expect(response.action).toBe("list");
-    expect(response.streams?.map(s => s.streamId).sort()).toEqual(["s1", "s2"]);
+    expect(response.streams?.map((s) => s.streamId).sort()).toEqual(["s1", "s2"]);
   });
 
   test("start forwards the iOS Simulator fps override into the streaming config", async () => {
@@ -258,7 +275,7 @@ describe("WebRtcStreamSocketServer", () => {
       whipEndpoint: "http://localhost:8000/api/v1/webrtc/whip?streamId=debug-1",
       audioEnabled: true,
     });
-    expect(listed.streams?.map(s => s.streamId)).toEqual(["debug-1"]);
+    expect(listed.streams?.map((s) => s.streamId)).toEqual(["debug-1"]);
     expect(status.stream?.streamId).toBe("debug-1");
     expect(stoppedResponse.stream?.state).toBe("stopped");
     expect(stopped).toEqual(["debug-1"]);
@@ -303,18 +320,20 @@ describe("WebRtcStreamSocketServer", () => {
   });
 
   test("start returns a typed screenshot fallback when capture preparation fails", async () => {
-    const server = new TestableServer(makeDeps({
-      startStream: async () => ({
-        ...descriptor("debug-1"),
-        lifecycleState: "degraded",
-        failure: {
-          code: "capture_start_failed",
-          message: "adb forward failed",
-          at: "2026-07-24T00:00:00.000Z",
-        },
-        fallback: { mode: "screenshots", reason: "capture_start_failed" },
+    const server = new TestableServer(
+      makeDeps({
+        startStream: async () => ({
+          ...descriptor("debug-1"),
+          lifecycleState: "degraded",
+          failure: {
+            code: "capture_start_failed",
+            message: "adb forward failed",
+            at: "2026-07-24T00:00:00.000Z",
+          },
+          fallback: { mode: "screenshots", reason: "capture_start_failed" },
+        }),
       }),
-    }));
+    );
     const socket = new FakeSocket();
 
     await server.simulate(socket, { id: "start-degraded", action: "start" });
@@ -335,7 +354,8 @@ describe("WebRtcStreamSocketServer", () => {
       createPublisher: (config, deps) =>
         new WebRtcPublisher(config, {
           ...deps,
-          createPeerConnection: () => new FakeConnectedPeerConnection() as unknown as RTCPeerConnection,
+          createPeerConnection: () =>
+            new FakeConnectedPeerConnection() as unknown as RTCPeerConnection,
           createWhipClient: (options: WhipClientOptions) =>
             new WhipClient({
               ...options,
@@ -379,13 +399,13 @@ describe("WebRtcStreamSocketServer", () => {
     const afterStop = lastResponse(socket);
 
     expect(start.success).toBe(true);
-    expect(posts.filter(request => request.method === "POST")).toEqual([
+    expect(posts.filter((request) => request.method === "POST")).toEqual([
       { method: "POST", url: "http://localhost:8000/api/v1/webrtc/whip?streamId=debug-1" },
     ]);
-    expect(posts.filter(request => request.method === "DELETE")).toEqual([
+    expect(posts.filter((request) => request.method === "DELETE")).toEqual([
       { method: "DELETE", url: "http://localhost:8000/whip/resource/debug-1" },
     ]);
-    expect(list.streams?.map(stream => stream.streamId)).toEqual(["debug-1"]);
+    expect(list.streams?.map((stream) => stream.streamId)).toEqual(["debug-1"]);
     expect(status.stream?.resourceUrl).toBe("http://localhost:8000/whip/resource/debug-1");
     expect(stop.stream?.state).toBe("stopped");
     expect(sources[0].started).toBe(true);
@@ -408,7 +428,7 @@ describe("WebRtcStreamSocketServer", () => {
         resolveDevice: async () => {
           throw new Error("No connected android devices found.");
         },
-      })
+      }),
     );
     const socket = new FakeSocket();
     await server.simulate(socket, { id: "9", action: "start" });
@@ -428,10 +448,10 @@ describe("WebRtcStreamSocketServer", () => {
 
   describe("authentication (issue #4751)", () => {
     function fakeSessionManager(
-      overrides: Partial<StreamAuthSessionManager> = {}
+      overrides: Partial<StreamAuthSessionManager> = {},
     ): StreamAuthSessionManager {
       return {
-        getSession: sessionUuid => (sessionUuid === "session-1" ? {} : null),
+        getSession: (sessionUuid) => (sessionUuid === "session-1" ? {} : null),
         getSessionForDevice: () => null,
         getDeviceLabels: () => undefined,
         ...overrides,
@@ -441,14 +461,18 @@ describe("WebRtcStreamSocketServer", () => {
     function enforcingServer(sm: StreamAuthSessionManager): TestableServer {
       return new TestableServer(
         makeDeps(),
-        new SessionScopedStreamAuthenticator(() => sm, "webrtcStream", {} as NodeJS.ProcessEnv)
+        new SessionScopedStreamAuthenticator(() => sm, "webrtcStream", {} as NodeJS.ProcessEnv),
       );
     }
 
     test("rejects a start with no sessionUuid", async () => {
       const server = enforcingServer(fakeSessionManager());
       const socket = new FakeSocket();
-      await server.simulate(socket, { id: "1", action: "start", whipEndpoint: "https://coord/whip" });
+      await server.simulate(socket, {
+        id: "1",
+        action: "start",
+        whipEndpoint: "https://coord/whip",
+      });
       const response = lastResponse(socket);
       expect(response.success).toBe(false);
       expect(response.error).toContain("authenticated daemon session");
@@ -485,7 +509,7 @@ describe("WebRtcStreamSocketServer", () => {
 
     test("rejects targeting a device owned by another session", async () => {
       const server = enforcingServer(
-        fakeSessionManager({ getSessionForDevice: () => "other-session" })
+        fakeSessionManager({ getSessionForDevice: () => "other-session" }),
       );
       const socket = new FakeSocket();
       await server.simulate(socket, {

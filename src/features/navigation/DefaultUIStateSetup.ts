@@ -37,7 +37,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
     adb: AdbClient,
     observeScreenProvider?: () => ObserveScreenLike,
     timer: Timer = defaultTimer,
-    sessionUuid?: string
+    sessionUuid?: string,
   ) {
     this.device = device;
     this.adb = adb;
@@ -46,8 +46,9 @@ export class DefaultUIStateSetup implements UIStateSetup {
     // The setup holds a resolved AdbClient (not a factory), so wrap it in a
     // trivial factory to satisfy ObserveScreen's factory-only contract (matches
     // the AndroidCtrlProxyClient.getInstance call below).
-    this.observeScreenProvider = observeScreenProvider
-      ?? (() => new RealObserveScreen(this.device, { create: () => this.adb }));
+    this.observeScreenProvider =
+      observeScreenProvider ??
+      (() => new RealObserveScreen(this.device, { create: () => this.adb }));
   }
 
   /**
@@ -77,7 +78,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
       const modalStackActions = await this.setupModalStack(
         currentState.modalStack || [],
         requiredState.modalStack,
-        platform
+        platform,
       );
       setupActions.push(...modalStackActions);
     }
@@ -85,16 +86,17 @@ export class DefaultUIStateSetup implements UIStateSetup {
     // Step 2: Handle selected elements (tabs, menu items, etc.)
     if (requiredState.selectedElements?.length) {
       // Get current state again after modal stack changes if modals were dismissed
-      const updatedState = setupActions.length > 0
-        ? await this.getCurrentUIState(platform)
-        : currentState;
+      const updatedState =
+        setupActions.length > 0 ? await this.getCurrentUIState(platform) : currentState;
 
       if (updatedState) {
-        setupActions.push(...await this.setupMissingSelections(
-          requiredState.selectedElements,
-          updatedState.selectedElements,
-          platform
-        ));
+        setupActions.push(
+          ...(await this.setupMissingSelections(
+            requiredState.selectedElements,
+            updatedState.selectedElements,
+            platform,
+          )),
+        );
       }
     }
 
@@ -111,12 +113,12 @@ export class DefaultUIStateSetup implements UIStateSetup {
    */
   async setupScrollPosition(
     scrollPosition: ScrollPosition,
-    platform: string
+    platform: string,
   ): Promise<string | null> {
     logger.info(
       `[UI_STATE_SETUP] Setting up scroll position: ` +
-      `target=${scrollPosition.targetElement.text || scrollPosition.targetElement.resourceId}, ` +
-      `direction=${scrollPosition.direction}`
+        `target=${scrollPosition.targetElement.text || scrollPosition.targetElement.resourceId}, ` +
+        `direction=${scrollPosition.direction}`,
     );
 
     try {
@@ -135,7 +137,9 @@ export class DefaultUIStateSetup implements UIStateSetup {
           ? { text: scrollPosition.targetElement.text }
           : undefined;
       if (!lookFor) {
-        logger.warn("[UI_STATE_SETUP] Scroll position target element missing text/resourceId; skipping scroll setup");
+        logger.warn(
+          "[UI_STATE_SETUP] Scroll position target element missing text/resourceId; skipping scroll setup",
+        );
         return null;
       }
 
@@ -144,14 +148,14 @@ export class DefaultUIStateSetup implements UIStateSetup {
         deviceId: this.device.deviceId,
         ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {}),
         direction: scrollPosition.direction,
-        lookFor
+        lookFor,
       };
 
       // Add container if specified
       if (scrollPosition.container) {
         swipeOnArgs.container = {
           text: scrollPosition.container.text,
-          elementId: scrollPosition.container.resourceId
+          elementId: scrollPosition.container.resourceId,
         };
       }
 
@@ -185,7 +189,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
         // Element not found after scrolling - log warning but continue
         logger.warn(
           `[UI_STATE_SETUP] Could not find target element after scrolling, ` +
-          `continuing anyway (element might still be accessible)`
+            `continuing anyway (element might still be accessible)`,
         );
         return null;
       }
@@ -222,7 +226,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
    */
   private findMissingSelections(
     required: Array<{ text?: string; resourceId?: string; contentDesc?: string }>,
-    current: Array<{ text?: string; resourceId?: string; contentDesc?: string }>
+    current: Array<{ text?: string; resourceId?: string; contentDesc?: string }>,
   ): Array<{ text?: string; resourceId?: string; contentDesc?: string }> {
     const missing: Array<{ text?: string; resourceId?: string; contentDesc?: string }> = [];
 
@@ -232,15 +236,18 @@ export class DefaultUIStateSetup implements UIStateSetup {
       }
 
       // Check if this element is already selected
-      const isSelected = current.some(curr =>
-        (req.text && curr.text === req.text) ||
-        (req.resourceId && curr.resourceId === req.resourceId) ||
-        (req.contentDesc && curr.contentDesc === req.contentDesc)
+      const isSelected = current.some(
+        (curr) =>
+          (req.text && curr.text === req.text) ||
+          (req.resourceId && curr.resourceId === req.resourceId) ||
+          (req.contentDesc && curr.contentDesc === req.contentDesc),
       );
 
       if (!isSelected) {
         missing.push(req);
-        logger.info(`[UI_STATE_SETUP] Missing selection: ${req.text || req.resourceId || req.contentDesc}`);
+        logger.info(
+          `[UI_STATE_SETUP] Missing selection: ${req.text || req.resourceId || req.contentDesc}`,
+        );
       }
     }
 
@@ -250,7 +257,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
   private async setupMissingSelections(
     required: Array<{ text?: string; resourceId?: string; contentDesc?: string }>,
     current: Array<{ text?: string; resourceId?: string; contentDesc?: string }>,
-    platform: string
+    platform: string,
   ): Promise<string[]> {
     const actions: string[] = [];
     for (const element of this.findMissingSelections(required, current)) {
@@ -266,7 +273,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
    */
   private async tapOnElement(
     element: { text?: string; resourceId?: string; contentDesc?: string },
-    platform: string
+    platform: string,
   ): Promise<boolean> {
     const tapTool = ToolRegistry.getTool("tapOn");
     if (!tapTool) {
@@ -288,7 +295,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
         action: "tap",
         platform,
         deviceId: this.device.deviceId,
-        ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {})
+        ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {}),
       };
 
       if (element.text) {
@@ -323,7 +330,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
   private async setupModalStack(
     currentStack: ModalState[],
     requiredStack: ModalState[],
-    platform: string
+    platform: string,
   ): Promise<string[]> {
     const actions: string[] = [];
 
@@ -339,7 +346,9 @@ export class DefaultUIStateSetup implements UIStateSetup {
         // Small delay for modal to dismiss
         await this.sleep(300);
       } else {
-        logger.warn(`[UI_STATE_SETUP] Failed to dismiss ${topModal.type}, stopping modal alignment`);
+        logger.warn(
+          `[UI_STATE_SETUP] Failed to dismiss ${topModal.type}, stopping modal alignment`,
+        );
         break;
       }
     }
@@ -350,7 +359,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
     if (requiredStack.length > currentStack.length) {
       logger.debug(
         `[UI_STATE_SETUP] Required modal stack has ${requiredStack.length - currentStack.length} more modal(s), ` +
-        `will be opened by navigation interaction`
+          `will be opened by navigation interaction`,
       );
     }
 
@@ -372,7 +381,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
 
         // Verify dismissal
         const currentState = await this.getCurrentUIState(platform);
-        const dismissed = !currentState?.modalStack?.some(m => m.windowId === modal.windowId);
+        const dismissed = !currentState?.modalStack?.some((m) => m.windowId === modal.windowId);
         if (dismissed) {
           logger.info(`[UI_STATE_SETUP] Dismissed ${modal.type} with back button`);
           return true;
@@ -383,19 +392,23 @@ export class DefaultUIStateSetup implements UIStateSetup {
     }
 
     // Strategy 2: Swipe down for bottom sheets
-    if (modal.type === "bottomsheet" && await this.dismissBottomSheet(modal, platform)) {
+    if (modal.type === "bottomsheet" && (await this.dismissBottomSheet(modal, platform))) {
       return true;
     }
 
     // Strategy 3: Look for close/cancel button
-    if ((modal.type === "dialog" || modal.type === "bottomsheet")
-      && await this.dismissWithCloseButton(modal, platform)) {
+    if (
+      (modal.type === "dialog" || modal.type === "bottomsheet") &&
+      (await this.dismissWithCloseButton(modal, platform))
+    ) {
       return true;
     }
 
     // Strategy 4: Tap outside (for popups and menus)
-    if ((modal.type === "popup" || modal.type === "menu" || modal.type === "overlay")
-      && await this.dismissByTappingOutside(modal, platform)) {
+    if (
+      (modal.type === "popup" || modal.type === "menu" || modal.type === "overlay") &&
+      (await this.dismissByTappingOutside(modal, platform))
+    ) {
       return true;
     }
 
@@ -405,7 +418,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
       await this.sleep(200);
 
       const currentState = await this.getCurrentUIState(platform);
-      const dismissed = !currentState?.modalStack?.some(m => m.windowId === modal.windowId);
+      const dismissed = !currentState?.modalStack?.some((m) => m.windowId === modal.windowId);
       if (dismissed) {
         logger.info(`[UI_STATE_SETUP] Dismissed ${modal.type} with back button (fallback)`);
         return true;
@@ -440,7 +453,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
           autoTarget: false,
           platform,
           deviceId: this.device.deviceId,
-          ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {})
+          ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {}),
         });
         await this.sleep(200);
         if (await this.isModalDismissed(modal, platform)) {
@@ -498,7 +511,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
 
   private async isModalDismissed(modal: ModalState, platform: string): Promise<boolean> {
     const currentState = await this.getCurrentUIState(platform);
-    return !currentState?.modalStack?.some(m => m.windowId === modal.windowId);
+    return !currentState?.modalStack?.some((m) => m.windowId === modal.windowId);
   }
 
   /**
@@ -522,7 +535,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
           action: "tap",
           platform,
           deviceId: this.device.deviceId,
-          ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {})
+          ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {}),
         });
         logger.debug(`[UI_STATE_SETUP] Tapped close button: "${text}"`);
         return true;
@@ -555,7 +568,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
       button: "back",
       platform,
       deviceId: this.device.deviceId,
-      ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {})
+      ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {}),
     });
     throwIfInternalToolFailed(response, "pressButton", platform);
     logger.debug(`[UI_STATE_SETUP] Pressed back via ${platform} interaction tool`);

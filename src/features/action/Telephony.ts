@@ -1,18 +1,16 @@
 import { errorMessage } from "../../utils/describeUnknownError";
-import {
-  BootedDevice,
-  PhoneCallAction,
-  PhoneCallResult,
-  SendSmsResult
-} from "../../models";
+import { BootedDevice, PhoneCallAction, PhoneCallResult, SendSmsResult } from "../../models";
 import {
   EmulatorConsoleClient,
   RealEmulatorConsoleClient,
   FileEmulatorConsoleAuthTokenReader,
   NetEmulatorConsoleTransport,
-  consolePortFromSerial
+  consolePortFromSerial,
 } from "../../utils/android-cmdline-tools/EmulatorConsoleClient";
-import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  AdbClientFactory,
+  defaultAdbClientFactory,
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
 
@@ -26,7 +24,7 @@ export const defaultEmulatorConsoleClientFactory: EmulatorConsoleClientFactory =
   new RealEmulatorConsoleClient(
     port,
     new NetEmulatorConsoleTransport(),
-    new FileEmulatorConsoleAuthTokenReader()
+    new FileEmulatorConsoleAuthTokenReader(),
   );
 
 export interface PhoneCallOptions {
@@ -45,9 +43,12 @@ export class Telephony {
   constructor(
     private readonly device: BootedDevice,
     adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory,
-    private readonly consoleFactory: EmulatorConsoleClientFactory = defaultEmulatorConsoleClientFactory
+    private readonly consoleFactory: EmulatorConsoleClientFactory = defaultEmulatorConsoleClientFactory,
   ) {
-    if (adbFactoryOrExecutor && typeof (adbFactoryOrExecutor as AdbClientFactory).create === "function") {
+    if (
+      adbFactoryOrExecutor &&
+      typeof (adbFactoryOrExecutor as AdbClientFactory).create === "function"
+    ) {
       this.adb = (adbFactoryOrExecutor as AdbClientFactory).create(device);
     } else if (adbFactoryOrExecutor) {
       this.adb = adbFactoryOrExecutor as AdbExecutor;
@@ -62,16 +63,18 @@ export class Telephony {
       action: options.action,
       phoneNumber: options.phoneNumber,
       supported: false,
-      error: "Emulator telephony is only supported on Android emulators"
+      error: "Emulator telephony is only supported on Android emulators",
     }));
-    if (platformError) { return platformError; }
+    if (platformError) {
+      return platformError;
+    }
 
     if (options.action !== "hold" && !options.phoneNumber) {
       return {
         success: false,
         action: options.action,
         supported: true,
-        error: `phoneNumber is required for action '${options.action}'`
+        error: `phoneNumber is required for action '${options.action}'`,
       };
     }
 
@@ -80,24 +83,36 @@ export class Telephony {
       action: options.action,
       phoneNumber: options.phoneNumber,
       supported: false,
-      error: this.unsupportedDeviceMessage()
+      error: this.unsupportedDeviceMessage(),
     }));
-    if ("error" in client) { return client.error; }
+    if ("error" in client) {
+      return client.error;
+    }
 
     try {
       switch (options.action) {
-        case "call":   await client.value.gsmCall(options.phoneNumber!);   break;
-        case "accept": await client.value.gsmAccept(options.phoneNumber!); break;
-        case "cancel": await client.value.gsmCancel(options.phoneNumber!); break;
-        case "busy":   await client.value.gsmBusy(options.phoneNumber!);   break;
-        case "hold":   await client.value.gsmHold();                       break;
+        case "call":
+          await client.value.gsmCall(options.phoneNumber!);
+          break;
+        case "accept":
+          await client.value.gsmAccept(options.phoneNumber!);
+          break;
+        case "cancel":
+          await client.value.gsmCancel(options.phoneNumber!);
+          break;
+        case "busy":
+          await client.value.gsmBusy(options.phoneNumber!);
+          break;
+        case "hold":
+          await client.value.gsmHold();
+          break;
       }
       return {
         success: true,
         action: options.action,
         phoneNumber: options.phoneNumber,
         supported: true,
-        message: this.phoneCallSuccessMessage(options)
+        message: this.phoneCallSuccessMessage(options),
       };
     } catch (error) {
       return {
@@ -105,7 +120,7 @@ export class Telephony {
         action: options.action,
         phoneNumber: options.phoneNumber,
         supported: true,
-        error: errorMessage(error)
+        error: errorMessage(error),
       };
     }
   }
@@ -116,18 +131,22 @@ export class Telephony {
       phoneNumber: options.phoneNumber,
       messageLength: options.message?.length ?? 0,
       supported: false,
-      error: "Emulator telephony is only supported on Android emulators"
+      error: "Emulator telephony is only supported on Android emulators",
     }));
-    if (platformError) { return platformError; }
+    if (platformError) {
+      return platformError;
+    }
 
     const client = await this.resolveClient<SendSmsResult>(() => ({
       success: false,
       phoneNumber: options.phoneNumber,
       messageLength: options.message?.length ?? 0,
       supported: false,
-      error: this.unsupportedDeviceMessage()
+      error: this.unsupportedDeviceMessage(),
     }));
-    if ("error" in client) { return client.error; }
+    if ("error" in client) {
+      return client.error;
+    }
 
     try {
       await client.value.smsSend(options.phoneNumber, options.message);
@@ -136,7 +155,7 @@ export class Telephony {
         phoneNumber: options.phoneNumber,
         messageLength: options.message.length,
         supported: true,
-        message: `Delivered simulated SMS from ${options.phoneNumber} (${options.message.length} chars)`
+        message: `Delivered simulated SMS from ${options.phoneNumber} (${options.message.length} chars)`,
       };
     } catch (error) {
       return {
@@ -144,7 +163,7 @@ export class Telephony {
         phoneNumber: options.phoneNumber,
         messageLength: options.message.length,
         supported: true,
-        error: errorMessage(error)
+        error: errorMessage(error),
       };
     }
   }
@@ -156,7 +175,9 @@ export class Telephony {
     return null;
   }
 
-  private async resolveClient<T>(buildError: () => T): Promise<{ value: EmulatorConsoleClient } | { error: T }> {
+  private async resolveClient<T>(
+    buildError: () => T,
+  ): Promise<{ value: EmulatorConsoleClient } | { error: T }> {
     const port = consolePortFromSerial(this.device.deviceId);
     if (port === null) {
       return { error: buildError() };
@@ -173,7 +194,9 @@ export class Telephony {
       const result = await this.adb.executeCommand("shell getprop ro.kernel.qemu");
       return result.stdout.trim() === "1";
     } catch (error) {
-      logger.warn(`Telephony: failed to probe emulator state for ${this.device.deviceId}: ${error}`);
+      logger.warn(
+        `Telephony: failed to probe emulator state for ${this.device.deviceId}: ${error}`,
+      );
       return false;
     }
   }
@@ -187,11 +210,16 @@ export class Telephony {
 
   private phoneCallSuccessMessage(options: PhoneCallOptions): string {
     switch (options.action) {
-      case "call":   return `Simulated incoming call from ${options.phoneNumber}`;
-      case "accept": return `Accepted call ${options.phoneNumber}`;
-      case "cancel": return `Cancelled call ${options.phoneNumber}`;
-      case "busy":   return `Rejected call ${options.phoneNumber} with busy signal`;
-      case "hold":   return "Put active call on hold";
+      case "call":
+        return `Simulated incoming call from ${options.phoneNumber}`;
+      case "accept":
+        return `Accepted call ${options.phoneNumber}`;
+      case "cancel":
+        return `Cancelled call ${options.phoneNumber}`;
+      case "busy":
+        return `Rejected call ${options.phoneNumber} with busy signal`;
+      case "hold":
+        return "Put active call on hold";
     }
   }
 }

@@ -6,14 +6,9 @@ import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
 import { FakeLogger } from "../fakes/FakeLogger";
 
 function registerThrowingTool(name: string): void {
-  ToolRegistry.register(
-    name,
-    "Throws for catch logging tests",
-    z.object({}),
-    async () => {
-      throw new Error(`${name} boom`);
-    }
-  );
+  ToolRegistry.register(name, "Throws for catch logging tests", z.object({}), async () => {
+    throw new Error(`${name} boom`);
+  });
 }
 
 function registerStructuredFailureTool(name: string): void {
@@ -23,17 +18,19 @@ function registerStructuredFailureTool(name: string): void {
     z.object({}),
     async () => ({
       isError: true,
-      content: [{
-        type: "text" as const,
-        text: JSON.stringify({
-          success: false,
-          error: {
-            code: "device_already_stopped",
-            message: "The device is already stopped",
-          },
-        }),
-      }],
-    })
+      content: [
+        {
+          type: "text" as const,
+          text: JSON.stringify({
+            success: false,
+            error: {
+              code: "device_already_stopped",
+              message: "The device is already stopped",
+            },
+          }),
+        },
+      ],
+    }),
   );
 }
 
@@ -54,10 +51,12 @@ describe("PlanExecutor catch logging", () => {
     const result = await executor.executePlan(plan, 0);
 
     expect(result.success).toBe(true);
-    expect(log.at("warn")).toContainEqual(expect.objectContaining({
-      message: "[PLAN_STEP_1] optional step optionalThrowingTool threw; returning skipped status",
-      args: [expect.objectContaining({ message: "optionalThrowingTool boom" })],
-    }));
+    expect(log.at("warn")).toContainEqual(
+      expect.objectContaining({
+        message: "[PLAN_STEP_1] optional step optionalThrowingTool threw; returning skipped status",
+        args: [expect.objectContaining({ message: "optionalThrowingTool boom" })],
+      }),
+    );
   });
 
   test("warns before returning a failed status from a thrown step", async () => {
@@ -72,10 +71,12 @@ describe("PlanExecutor catch logging", () => {
     const result = await executor.executePlan(plan, 0);
 
     expect(result.success).toBe(false);
-    expect(log.at("warn")).toContainEqual(expect.objectContaining({
-      message: "[PLAN_STEP_1] step requiredThrowingTool threw; returning failed status",
-      args: [expect.objectContaining({ message: "requiredThrowingTool boom" })],
-    }));
+    expect(log.at("warn")).toContainEqual(
+      expect.objectContaining({
+        message: "[PLAN_STEP_1] step requiredThrowingTool threw; returning failed status",
+        args: [expect.objectContaining({ message: "requiredThrowingTool boom" })],
+      }),
+    );
   });
 
   test("returns a failed status for a structured failure envelope", async () => {

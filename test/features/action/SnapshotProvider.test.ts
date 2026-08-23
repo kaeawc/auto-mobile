@@ -58,16 +58,16 @@ describe("SnapshotProvider interfaces", () => {
     it("propagates configured capture failure", async () => {
       provider.setCaptureShouldFail(true);
       await expect(provider.capture({ snapshotName: "boom" })).rejects.toThrow(
-        "Fake capture failure"
+        "Fake capture failure",
       );
     });
 
     it("propagates configured restore failure", async () => {
       provider.setRestoreShouldFail(true);
       const manifest = makeManifest("boom");
-      await expect(
-        provider.restore({ snapshotName: "boom", manifest })
-      ).rejects.toThrow("Fake restore failure");
+      await expect(provider.restore({ snapshotName: "boom", manifest })).rejects.toThrow(
+        "Fake restore failure",
+      );
     });
 
     it("clears recorded history on demand", async () => {
@@ -80,14 +80,32 @@ describe("SnapshotProvider interfaces", () => {
   // Compile-time conformance: each platform-specific concrete class is
   // assigned to the abstract provider type. Behavioral coverage lives in
   // the existing CaptureSnapshot{,Ios}/RestoreSnapshot{,Ios} test files.
-  const androidDevice: BootedDevice = { deviceId: "emulator-5554", name: "Pixel_5", platform: "android" };
+  const androidDevice: BootedDevice = {
+    deviceId: "emulator-5554",
+    name: "Pixel_5",
+    platform: "android",
+  };
   const iosDevice: BootedDevice = { deviceId: "ios-device-1", name: "iPhone 15", platform: "ios" };
   const fakeAdbFactory: AdbClientFactory = { create: () => new FakeAdbClient() as any };
   const store = () => new DeviceSnapshotStore("/tmp/no-op");
 
   const captureCases: ReadonlyArray<[string, () => SnapshotCaptureProvider]> = [
-    ["Android CaptureSnapshot", () => new CaptureSnapshot(androidDevice, fakeAdbFactory, undefined, new FakeTimer(), store())],
-    ["iOS CaptureSnapshot", () => new CaptureSnapshot(iosDevice, undefined, undefined, new FakeTimer(), store(), new FakeSimCtlClient())],
+    [
+      "Android CaptureSnapshot",
+      () => new CaptureSnapshot(androidDevice, fakeAdbFactory, undefined, new FakeTimer(), store()),
+    ],
+    [
+      "iOS CaptureSnapshot",
+      () =>
+        new CaptureSnapshot(
+          iosDevice,
+          undefined,
+          undefined,
+          new FakeTimer(),
+          store(),
+          new FakeSimCtlClient(),
+        ),
+    ],
   ];
   for (const [name, build] of captureCases) {
     it(`${name} satisfies SnapshotCaptureProvider`, () => {
@@ -97,8 +115,22 @@ describe("SnapshotProvider interfaces", () => {
   }
 
   const restoreCases: ReadonlyArray<[string, () => SnapshotRestoreProvider]> = [
-    ["Android RestoreSnapshot", () => new RestoreSnapshot(androidDevice, fakeAdbFactory, undefined, new FakeTimer(), store())],
-    ["iOS RestoreSnapshot", () => new RestoreSnapshot(iosDevice, undefined, undefined, new FakeTimer(), store(), new FakeSimCtlClient())],
+    [
+      "Android RestoreSnapshot",
+      () => new RestoreSnapshot(androidDevice, fakeAdbFactory, undefined, new FakeTimer(), store()),
+    ],
+    [
+      "iOS RestoreSnapshot",
+      () =>
+        new RestoreSnapshot(
+          iosDevice,
+          undefined,
+          undefined,
+          new FakeTimer(),
+          store(),
+          new FakeSimCtlClient(),
+        ),
+    ],
   ];
   for (const [name, build] of restoreCases) {
     it(`${name} satisfies SnapshotRestoreProvider`, () => {

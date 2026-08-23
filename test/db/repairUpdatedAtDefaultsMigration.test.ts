@@ -43,29 +43,31 @@ describe("2026_07_05_000_repair_updated_at_defaults migration (#2937)", () => {
           `"key" text primary key, ` +
           `"enabled" integer not null default 0, ` +
           `"created_at" text default (datetime('now')) not null, ` +
-          `"updated_at" text not null)`
+          `"updated_at" text not null)`,
       );
-      bunDb.query(`INSERT INTO feature_flags (key, updated_at) VALUES ('old', '2026-01-01T00:00:00.000Z')`).run();
+      bunDb
+        .query(
+          `INSERT INTO feature_flags (key, updated_at) VALUES ('old', '2026-01-01T00:00:00.000Z')`,
+        )
+        .run();
 
       // Precondition: omitting updated_at fails the NOT NULL constraint today.
-      expect(() =>
-        bunDb.query(`INSERT INTO feature_flags (key) VALUES ('pre')`).run()
-      ).toThrow();
+      expect(() => bunDb.query(`INSERT INTO feature_flags (key) VALUES ('pre')`).run()).toThrow();
 
       await repairUp(db);
 
       // The pre-existing row keeps its explicit value verbatim.
-      const oldRow = bunDb
-        .query(`SELECT updated_at FROM feature_flags WHERE key='old'`)
-        .get() as { updated_at: string };
+      const oldRow = bunDb.query(`SELECT updated_at FROM feature_flags WHERE key='old'`).get() as {
+        updated_at: string;
+      };
       expect(oldRow.updated_at).toBe("2026-01-01T00:00:00.000Z");
 
       // A NEW row that omits updated_at now evaluates the corrected default
       // rather than failing NOT NULL — this is the P1 fix.
       bunDb.query(`INSERT INTO feature_flags (key) VALUES ('new')`).run();
-      const newRow = bunDb
-        .query(`SELECT updated_at FROM feature_flags WHERE key='new'`)
-        .get() as { updated_at: string };
+      const newRow = bunDb.query(`SELECT updated_at FROM feature_flags WHERE key='new'`).get() as {
+        updated_at: string;
+      };
       expect(newRow.updated_at).not.toBe("datetime('now')");
       expect(newRow.updated_at).toBeTruthy();
       expect(Number.isNaN(Date.parse(newRow.updated_at))).toBe(false);
@@ -74,8 +76,8 @@ describe("2026_07_05_000_repair_updated_at_defaults migration (#2937)", () => {
       const columns = bunDb
         .query(`SELECT name, dflt_value FROM pragma_table_info('feature_flags')`)
         .all() as { name: string; dflt_value: string | null }[];
-      const updatedAt = columns.find(c => c.name === "updated_at");
-      const createdAt = columns.find(c => c.name === "created_at");
+      const updatedAt = columns.find((c) => c.name === "updated_at");
+      const createdAt = columns.find((c) => c.name === "created_at");
       expect(updatedAt?.dflt_value).toBe("datetime('now')");
       expect(updatedAt?.dflt_value).toBe(createdAt?.dflt_value);
     });
@@ -169,7 +171,7 @@ describe("2026_07_05_000_repair_updated_at_defaults migration (#2937)", () => {
       // default must be left exactly as-is.
       bunDb.exec(
         `CREATE TABLE "memory_baselines" (` +
-          `"id" integer primary key, "updated_at" text not null)`
+          `"id" integer primary key, "updated_at" text not null)`,
       );
 
       await repairUp(db);
@@ -177,7 +179,7 @@ describe("2026_07_05_000_repair_updated_at_defaults migration (#2937)", () => {
       const columns = bunDb
         .query(`SELECT name, dflt_value FROM pragma_table_info('memory_baselines')`)
         .all() as { name: string; dflt_value: string | null }[];
-      const updatedAt = columns.find(c => c.name === "updated_at");
+      const updatedAt = columns.find((c) => c.name === "updated_at");
       // Still no default — the migration only rebuilds the enumerated tables.
       expect(updatedAt?.dflt_value).toBeNull();
     });
@@ -188,12 +190,12 @@ describe("2026_07_05_000_repair_updated_at_defaults migration (#2937)", () => {
         `CREATE TABLE "navigation_apps" (` +
           `"app_id" text primary key, ` +
           `"created_at" text default (datetime('now')) not null, ` +
-          `"updated_at" text not null)`
+          `"updated_at" text not null)`,
       );
       bunDb.exec(
         `CREATE TABLE "navigation_nodes" (` +
           `"id" integer primary key, ` +
-          `"app_id" text not null references "navigation_apps" ("app_id") on delete cascade)`
+          `"app_id" text not null references "navigation_apps" ("app_id") on delete cascade)`,
       );
       bunDb.query(`INSERT INTO navigation_apps (app_id, updated_at) VALUES ('a', 'u')`).run();
       bunDb.query(`INSERT INTO navigation_nodes (id, app_id) VALUES (1, 'a')`).run();
@@ -207,7 +209,7 @@ describe("2026_07_05_000_repair_updated_at_defaults migration (#2937)", () => {
       expect(child.app_id).toBe("a");
       // FK still enforced after the rebuild: an orphan child insert must fail.
       expect(() =>
-        bunDb.query(`INSERT INTO navigation_nodes (id, app_id) VALUES (2, 'missing')`).run()
+        bunDb.query(`INSERT INTO navigation_nodes (id, app_id) VALUES (2, 'missing')`).run(),
       ).toThrow();
     });
 
@@ -222,14 +224,14 @@ describe("2026_07_05_000_repair_updated_at_defaults migration (#2937)", () => {
         `CREATE TABLE "navigation_apps" (` +
           `"app_id" text primary key, ` +
           `"created_at" text default (datetime('now')) not null, ` +
-          `"updated_at" text not null)`
+          `"updated_at" text not null)`,
       );
       bunDb.exec(
         `CREATE TABLE "prediction_transition_stats" (` +
           `"id" integer primary key autoincrement, ` +
           `"app_id" text not null references "navigation_apps" ("app_id") on delete cascade, ` +
           `"created_at" text default (datetime('now')) not null, ` +
-          `"updated_at" text not null)`
+          `"updated_at" text not null)`,
       );
       bunDb.query(`INSERT INTO navigation_apps (app_id, updated_at) VALUES ('a', 'u')`).run();
       bunDb
@@ -259,8 +261,10 @@ describe("2026_07_05_000_repair_updated_at_defaults migration (#2937)", () => {
       // FK enforcement is restored: an orphan child insert must fail.
       expect(() =>
         bunDb
-          .query(`INSERT INTO prediction_transition_stats (app_id, updated_at) VALUES ('missing', 'u')`)
-          .run()
+          .query(
+            `INSERT INTO prediction_transition_stats (app_id, updated_at) VALUES ('missing', 'u')`,
+          )
+          .run(),
       ).toThrow();
     });
 
@@ -270,7 +274,7 @@ describe("2026_07_05_000_repair_updated_at_defaults migration (#2937)", () => {
           `"id" integer primary key autoincrement, ` +
           `"device_id" text not null, ` +
           `"created_at" text default (datetime('now')) not null, ` +
-          `"updated_at" text not null)`
+          `"updated_at" text not null)`,
       );
       bunDb.query(`INSERT INTO device_configs (device_id, updated_at) VALUES ('a', 'u')`).run(); // id 1
       bunDb.query(`INSERT INTO device_configs (device_id, updated_at) VALUES ('b', 'u')`).run(); // id 2
@@ -290,15 +294,15 @@ describe("2026_07_05_000_repair_updated_at_defaults migration (#2937)", () => {
         `CREATE TABLE "feature_flags" (` +
           `"key" text primary key, ` +
           `"created_at" text default (datetime('now')) not null, ` +
-          `"updated_at" text not null)`
+          `"updated_at" text not null)`,
       );
       bunDb.query(`INSERT INTO feature_flags (key, updated_at) VALUES ('old', 'u')`).run();
 
       await repairUp(db);
       bunDb.query(`INSERT INTO feature_flags (key) VALUES ('new1')`).run();
-      const first = bunDb
-        .query(`SELECT updated_at FROM feature_flags WHERE key='new1'`)
-        .get() as { updated_at: string };
+      const first = bunDb.query(`SELECT updated_at FROM feature_flags WHERE key='new1'`).get() as {
+        updated_at: string;
+      };
 
       await repairUp(db);
       // The default survives a second pass and the pre-existing row is unchanged.
@@ -346,7 +350,7 @@ describe("2026_07_05_000_repair_updated_at_defaults migration (#2937)", () => {
       for (const table of TABLES) {
         const stripped = realCreate[table].replace(
           /("updated_at"\s+\w+)\s+default\s+\(datetime\('now'\)\)(\s+not\s+null)/i,
-          "$1$2"
+          "$1$2",
         );
         // Guard: the strip must actually have removed a default (else the test
         // would silently prove nothing).

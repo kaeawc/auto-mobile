@@ -20,7 +20,7 @@ describe("Daemon-only MCP tools", () => {
   test("registers plan tools in both modes, criticalSection only in daemon mode", () => {
     createMcpServer();
 
-    const toolNames = ToolRegistry.getToolDefinitions().map(tool => tool.name);
+    const toolNames = ToolRegistry.getToolDefinitions().map((tool) => tool.name);
     expect(toolNames).toContain("executePlan");
     expect(toolNames).not.toContain("criticalSection");
   });
@@ -28,7 +28,7 @@ describe("Daemon-only MCP tools", () => {
   test("registers criticalSection/barrier plan-only in daemon mode (hidden from discovery, usable in plans)", () => {
     createMcpServer({ daemonMode: true });
 
-    const toolNames = ToolRegistry.getToolDefinitions().map(tool => tool.name);
+    const toolNames = ToolRegistry.getToolDefinitions().map((tool) => tool.name);
     expect(toolNames).toContain("executePlan");
     // Plan-only coordination primitives are registered in daemon mode but hidden
     // from normal discovery — a single direct call would just block.
@@ -48,8 +48,10 @@ describe("Daemon-only MCP tools", () => {
     expect(ToolRegistry.getTool("setUIState")).toBeUndefined();
     expect(ToolRegistry.getToolForPlan("accessibilityFocus")).toBeUndefined();
     expect(ToolRegistry.getToolForPlan("setUIState")).toBeDefined();
-    expect(ToolRegistry.getToolDefinitions().map(tool => tool.name)).not.toContain("accessibilityFocus");
-    expect(ToolRegistry.getToolDefinitions().map(tool => tool.name)).not.toContain("setUIState");
+    expect(ToolRegistry.getToolDefinitions().map((tool) => tool.name)).not.toContain(
+      "accessibilityFocus",
+    );
+    expect(ToolRegistry.getToolDefinitions().map((tool) => tool.name)).not.toContain("setUIState");
 
     (ToolRegistry as any).tools.clear();
     setDebugModeEnabled(true);
@@ -59,8 +61,10 @@ describe("Daemon-only MCP tools", () => {
     expect(ToolRegistry.getTool("setUIState")).toBeDefined();
     expect(ToolRegistry.getToolForPlan("accessibilityFocus")).toBeDefined();
     expect(ToolRegistry.getToolForPlan("setUIState")).toBeDefined();
-    expect(ToolRegistry.getToolDefinitions().map(tool => tool.name)).toContain("accessibilityFocus");
-    expect(ToolRegistry.getToolDefinitions().map(tool => tool.name)).toContain("setUIState");
+    expect(ToolRegistry.getToolDefinitions().map((tool) => tool.name)).toContain(
+      "accessibilityFocus",
+    );
+    expect(ToolRegistry.getToolDefinitions().map((tool) => tool.name)).toContain("setUIState");
   });
 
   test("hides embedded-SDK tools unless embedded SDK mode is enabled", () => {
@@ -77,7 +81,7 @@ describe("Daemon-only MCP tools", () => {
 
     createMcpServer();
 
-    const defaultNames = ToolRegistry.getToolDefinitions().map(tool => tool.name);
+    const defaultNames = ToolRegistry.getToolDefinitions().map((tool) => tool.name);
     for (const toolName of embeddedSdkTools) {
       expect(ToolRegistry.getTool(toolName)).toBeUndefined();
       expect(defaultNames).not.toContain(toolName);
@@ -87,7 +91,7 @@ describe("Daemon-only MCP tools", () => {
     serverConfig.setEmbeddedSdkEnabled(true);
     createMcpServer();
 
-    const embeddedSdkNames = ToolRegistry.getToolDefinitions().map(tool => tool.name);
+    const embeddedSdkNames = ToolRegistry.getToolDefinitions().map((tool) => tool.name);
     for (const toolName of embeddedSdkTools) {
       expect(ToolRegistry.getTool(toolName)).toBeDefined();
       expect(embeddedSdkNames).toContain(toolName);
@@ -124,12 +128,12 @@ describe("plan-only/debug-only tools are ungated over the wire", () => {
 
   test.each(["criticalSection", "barrier", "setUIState"])(
     "%s is rejected as an unknown tool when called directly over the wire",
-    async name => {
+    async (name) => {
       const { client } = fixture.getContext();
       await expect(
-        client.request({ method: "tools/call", params: { name, arguments: {} } }, permissiveResult)
+        client.request({ method: "tools/call", params: { name, arguments: {} } }, permissiveResult),
       ).rejects.toThrow("Unknown tool");
-    }
+    },
   );
 
   test("a normally-advertised tool is NOT rejected as unknown (control)", async () => {
@@ -141,7 +145,7 @@ describe("plan-only/debug-only tools are ungated over the wire", () => {
     try {
       await client.request(
         { method: "tools/call", params: { name: "executePlan", arguments: {} } },
-        permissiveResult
+        permissiveResult,
       );
     } catch (error) {
       message = error instanceof Error ? error.message : String(error);

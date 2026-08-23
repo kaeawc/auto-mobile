@@ -45,7 +45,9 @@ class SessionReleaseBroadcasterClass {
       } catch (error) {
         // Best-effort fan-out: one broken sink must not block the others or the
         // session release that triggered the emit.
-        logger.warn(`[SessionReleaseBroadcaster] listener failed for released ${sessionId}: ${error}`);
+        logger.warn(
+          `[SessionReleaseBroadcaster] listener failed for released ${sessionId}: ${error}`,
+        );
       }
     }
   }

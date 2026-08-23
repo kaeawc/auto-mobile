@@ -27,7 +27,9 @@ export class FakeChecksumCalculator implements ChecksumCalculator {
     this.unreadable.add(filePath);
   }
 
-  public async computeFileSha256(filePath: string): Promise<{ checksum: string; source: Sha256Source }> {
+  public async computeFileSha256(
+    filePath: string,
+  ): Promise<{ checksum: string; source: Sha256Source }> {
     if (this.shouldThrow) {
       throw this.shouldThrow;
     }

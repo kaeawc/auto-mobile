@@ -15,10 +15,7 @@ import {
   FrameDecoder,
   type MalformedFrameError,
 } from "./frameProtocol";
-import {
-  LatestFrameQueue,
-  type FrameQueueMetrics,
-} from "./LatestFrameQueue";
+import { LatestFrameQueue, type FrameQueueMetrics } from "./LatestFrameQueue";
 
 export { type FrameQueueMetrics } from "./LatestFrameQueue";
 
@@ -48,7 +45,7 @@ export type CapturePermission = "screen-recording";
 export type HelperSpawner = (
   command: string,
   args: string[],
-  options: SpawnOptions
+  options: SpawnOptions,
 ) => ChildProcessWithoutNullStreams;
 
 export type HelperProcessGroupKiller = (pid: number, signal: NodeJS.Signals) => void;
@@ -181,7 +178,8 @@ export class IOSScreenCaptureHelper extends EventEmitter {
   private process: ChildProcessWithoutNullStreams | null = null;
   private readonly helperCapabilities = new Set<string>();
   private stderrBuffer = "";
-  private exitPromise: Promise<{ code: number | null; signal: NodeJS.Signals | null }> | null = null;
+  private exitPromise: Promise<{ code: number | null; signal: NodeJS.Signals | null }> | null =
+    null;
   private frameDeliveryScheduled = false;
 
   constructor(options: IosScreenCaptureHelperOptions) {
@@ -201,7 +199,7 @@ export class IOSScreenCaptureHelper extends EventEmitter {
 
   override on<E extends keyof IosScreenCaptureHelperEvents>(
     event: E,
-    listener: IosScreenCaptureHelperEvents[E]
+    listener: IosScreenCaptureHelperEvents[E],
   ): this {
     return super.on(event, listener as (...args: any[]) => void);
   }
@@ -237,14 +235,14 @@ export class IOSScreenCaptureHelper extends EventEmitter {
     this.process = proc;
     this.emitReadiness("helper-process-spawned", `pid=${proc.pid ?? "?"}`);
 
-    proc.stdout.on("data", chunk => {
+    proc.stdout.on("data", (chunk) => {
       const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       const frames = this.decoder.push(
         buf,
-        err => this.emit("malformed", err),
-        audio => this.emit("audio", audio),
-        frame => this.enqueueFrame(frame),
-        video => this.emit("encodedVideo", video)
+        (err) => this.emit("malformed", err),
+        (audio) => this.emit("audio", audio),
+        (frame) => this.enqueueFrame(frame),
+        (video) => this.emit("encodedVideo", video),
       );
       // `onFrame` keeps the decoder from allocating an array for a coalesced
       // stdout chunk. Preserve the fallback return path for direct decoder use.
@@ -253,16 +251,16 @@ export class IOSScreenCaptureHelper extends EventEmitter {
       }
     });
 
-    proc.stderr.on("data", chunk => {
+    proc.stderr.on("data", (chunk) => {
       const text = Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
       this.appendStderr(text);
     });
 
-    proc.once("error", error => {
+    proc.once("error", (error) => {
       this.emit("error", error instanceof Error ? error : new Error(String(error)));
     });
 
-    this.exitPromise = new Promise(resolve => {
+    this.exitPromise = new Promise((resolve) => {
       proc.once("exit", (code, signal) => {
         if (this.stderrBuffer.length > 0) {
           this.handleStderrLine(this.stderrBuffer);
@@ -274,15 +272,15 @@ export class IOSScreenCaptureHelper extends EventEmitter {
       });
     });
 
-    logger.debug(
-      `[IOSScreenCaptureHelper] spawned ${this.binaryPath} pid=${proc.pid ?? "?"}`
-    );
+    logger.debug(`[IOSScreenCaptureHelper] spawned ${this.binaryPath} pid=${proc.pid ?? "?"}`);
   }
 
   /** SIGTERMs the process and awaits exit. No-op if never started or already exited. */
   async stop(): Promise<{ code: number | null; signal: NodeJS.Signals | null } | null> {
     const proc = this.process;
-    if (proc === null) {return null;}
+    if (proc === null) {
+      return null;
+    }
 
     if (proc.exitCode !== null || proc.killed) {
       const result = await this.waitForExitWithinGrace();
@@ -297,7 +295,7 @@ export class IOSScreenCaptureHelper extends EventEmitter {
     }
 
     logger.warn(
-      `[IOSScreenCaptureHelper] helper pid=${proc.pid ?? "?"} did not exit after SIGTERM; escalating to SIGKILL`
+      `[IOSScreenCaptureHelper] helper pid=${proc.pid ?? "?"} did not exit after SIGTERM; escalating to SIGKILL`,
     );
     proc.kill("SIGKILL");
     if (process.platform === "darwin") {
@@ -308,14 +306,14 @@ export class IOSScreenCaptureHelper extends EventEmitter {
           // A surviving process group can leak detached ScreenCaptureKit XPC
           // children, so surface the failure rather than swallowing it at debug.
           logger.warn(
-            `[IOSScreenCaptureHelper] process-group cleanup failed for pid=${proc.pid}; detached children may leak: ${error}`
+            `[IOSScreenCaptureHelper] process-group cleanup failed for pid=${proc.pid}; detached children may leak: ${error}`,
           );
         }
       } else {
         // Without a pid the detached process group cannot be targeted; the
         // direct SIGKILL above is the only cleanup, so flag the potential leak.
         logger.warn(
-          "[IOSScreenCaptureHelper] helper pid unknown after SIGKILL; cannot group-kill, detached children may leak"
+          "[IOSScreenCaptureHelper] helper pid unknown after SIGKILL; cannot group-kill, detached children may leak",
         );
       }
     }
@@ -344,7 +342,9 @@ export class IOSScreenCaptureHelper extends EventEmitter {
       return;
     }
     this.emit("frameMetrics", this.frameQueue.metrics());
-    if (this.frameDeliveryScheduled) {return;}
+    if (this.frameDeliveryScheduled) {
+      return;
+    }
     this.frameDeliveryScheduled = true;
     this.frameDeliveryScheduler.schedule(() => this.deliverLatestFrame());
   }
@@ -352,7 +352,9 @@ export class IOSScreenCaptureHelper extends EventEmitter {
   private deliverLatestFrame(): void {
     this.frameDeliveryScheduled = false;
     const frame = this.frameQueue.take();
-    if (frame === null) {return;}
+    if (frame === null) {
+      return;
+    }
     this.emit("frame", frame);
     this.emit("frameMetrics", this.frameQueue.metrics());
     if (this.frameQueue.metrics().queueDepth === 1) {
@@ -436,13 +438,18 @@ export class IOSScreenCaptureHelper extends EventEmitter {
    * resync storm (issue #4787).
    */
   assertSupportsEncodedVideo(): void {
-    if (this.supportsEncodedVideo()) {return;}
+    if (this.supportsEncodedVideo()) {
+      return;
+    }
     throw new ActionableError(
-      "The screen-capture-helper did not advertise the '" + ENCODED_VIDEO_CAPABILITY +
-      "' capability at startup, so it cannot emit encoded H.264 video. This is an " +
-      "outdated helper. Unset AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER to use the " +
-      "checksum-pinned release helper, or point it at a build that advertises " +
-      "'" + ENCODED_VIDEO_CAPABILITY + "'."
+      "The screen-capture-helper did not advertise the '" +
+        ENCODED_VIDEO_CAPABILITY +
+        "' capability at startup, so it cannot emit encoded H.264 video. This is an " +
+        "outdated helper. Unset AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER to use the " +
+        "checksum-pinned release helper, or point it at a build that advertises " +
+        "'" +
+        ENCODED_VIDEO_CAPABILITY +
+        "'.",
     );
   }
 
@@ -452,7 +459,7 @@ export class IOSScreenCaptureHelper extends EventEmitter {
   } | null> {
     const exitPromise = this.exitPromise ?? Promise.resolve(null);
     let timeout: NodeJS.Timeout | undefined;
-    const timedOut = new Promise<null>(resolve => {
+    const timedOut = new Promise<null>((resolve) => {
       timeout = this.timer.setTimeout(() => resolve(null), this.stopGraceMs);
     });
     try {
@@ -538,7 +545,7 @@ function parseNativeFrameMetrics(line: string): NativeFrameMetrics | null {
     return value;
   } catch (error) {
     logger.debug(
-      `[IOSScreenCaptureHelper] ignored malformed native frame metrics: ${errorMessage(error)}`
+      `[IOSScreenCaptureHelper] ignored malformed native frame metrics: ${errorMessage(error)}`,
     );
     return null;
   }
@@ -596,7 +603,7 @@ function buildArgs(target: CaptureTarget): string[] {
           target.fps > SIMULATOR_FPS_MAX
         ) {
           throw new RangeError(
-            `simulator fps must be an integer in [${SIMULATOR_FPS_MIN}, ${SIMULATOR_FPS_MAX}]; got ${target.fps}`
+            `simulator fps must be an integer in [${SIMULATOR_FPS_MIN}, ${SIMULATOR_FPS_MAX}]; got ${target.fps}`,
           );
         }
         args.push("--simulator-fps", String(target.fps));

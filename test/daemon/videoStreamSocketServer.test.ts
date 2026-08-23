@@ -86,7 +86,7 @@ async function startHarness(
     timer?: Timer;
     /** Pre-arms each created source to throttle this many key-frame requests. */
     keyFrameRejections?: number;
-  } = {}
+  } = {},
 ): Promise<Harness> {
   const dir = mkdtempSync(path.join(tmpdir(), "amvs-"));
   const socketPath = path.join(dir, "video-stream.sock");
@@ -103,7 +103,7 @@ async function startHarness(
         }
         return DEVICE;
       },
-      createCaptureSource: async opts => {
+      createCaptureSource: async (opts) => {
         onData = opts.onData;
         onRotation = opts.onRotation ?? null;
         captureOptions.push(opts);
@@ -123,7 +123,7 @@ async function startHarness(
     },
     socketPath,
     options.timer ?? defaultTimer,
-    options.authenticator ?? allowAllAuthenticator
+    options.authenticator ?? allowAllAuthenticator,
   );
   await server.start();
 
@@ -132,8 +132,8 @@ async function startHarness(
     socketPath,
     sources,
     captureOptions,
-    emit: chunk => onData?.(chunk),
-    emitRotation: rotation => onRotation?.(rotation),
+    emit: (chunk) => onData?.(chunk),
+    emitRotation: (rotation) => onRotation?.(rotation),
     cleanup: async () => {
       await server.close();
       rmSync(dir, { recursive: true, force: true });
@@ -146,13 +146,13 @@ async function startHarness(
 /** Connects, subscribes, and resolves with the ack line plus a reader for subsequent binary. */
 async function subscribe(
   socketPath: string,
-  request: Record<string, unknown> = { action: "subscribe", deviceId: DEVICE.deviceId }
+  request: Record<string, unknown> = { action: "subscribe", deviceId: DEVICE.deviceId },
 ): Promise<{ socket: net.Socket; ack: Record<string, unknown>; binary: () => Buffer }> {
   const socket = new net.Socket();
   await connectBounded(socket, socketPath);
 
   const chunks: Buffer[] = [];
-  socket.on("data", data => chunks.push(data));
+  socket.on("data", (data) => chunks.push(data));
   socket.write(`${JSON.stringify(request)}\n`);
 
   // Wait for the newline-terminated acknowledgement.
@@ -342,7 +342,9 @@ describe("VideoStreamSocketServer", () => {
 
     const packet = binary().subarray(12);
     expect(packet.readInt32BE(8)).toBe(7); // payload length
-    expect(packet.subarray(12, 19)).toEqual(Buffer.from([0x00, 0x00, 0x00, 0x01, 0x05, 0xaa, 0xbb]));
+    expect(packet.subarray(12, 19)).toEqual(
+      Buffer.from([0x00, 0x00, 0x00, 0x01, 0x05, 0xaa, 0xbb]),
+    );
   });
 
   test("does not mistake arbitrary source chunks for complete H.264 NAL units", async () => {
@@ -356,7 +358,9 @@ describe("VideoStreamSocketServer", () => {
 
     const packet = binary().subarray(12);
     expect(packet.readInt32BE(8)).toBe(7);
-    expect(packet.subarray(12, 19)).toEqual(Buffer.from([0x00, 0x00, 0x00, 0x01, 0x05, 0xaa, 0xbb]));
+    expect(packet.subarray(12, 19)).toEqual(
+      Buffer.from([0x00, 0x00, 0x00, 0x01, 0x05, 0xaa, 0xbb]),
+    );
     expect(packet.readBigInt64BE(0) & (1n << 62n)).toBe(1n << 62n); // IDR sets key-frame.
   });
 
@@ -373,7 +377,7 @@ describe("VideoStreamSocketServer", () => {
 
   test("keeps startup media behind every pending subscriber acknowledgement", async () => {
     let releaseStart: () => void;
-    const startGate = new Promise<void>(resolve => {
+    const startGate = new Promise<void>((resolve) => {
       releaseStart = resolve;
     });
     const h = await startHarness({
@@ -424,19 +428,21 @@ describe("VideoStreamSocketServer", () => {
     const socketPath = path.join(dir, "video-stream.sock");
     const source = new FakeCaptureSource();
     let resolveSource: ((source: H264CaptureSource) => void) | undefined;
-    const sourceCreated = new Promise<void>(resolve => {
+    const sourceCreated = new Promise<void>((resolve) => {
       const server = new VideoStreamSocketServer(
         {
           resolveDevice: async () => DEVICE,
           createCaptureSource: async () => {
             resolve();
-            return await new Promise<H264CaptureSource>(sourceResolve => { resolveSource = sourceResolve; });
+            return await new Promise<H264CaptureSource>((sourceResolve) => {
+              resolveSource = sourceResolve;
+            });
           },
           nowUs: () => 1_000n,
         },
         socketPath,
         defaultTimer,
-        allowAllAuthenticator
+        allowAllAuthenticator,
       );
       void server.start().then(() => {
         harnesses.push({
@@ -453,8 +459,8 @@ describe("VideoStreamSocketServer", () => {
       });
     });
 
-    await waitFor(() => harnesses.some(h => h.socketPath === socketPath));
-    const harness = harnesses.find(h => h.socketPath === socketPath)!;
+    await waitFor(() => harnesses.some((h) => h.socketPath === socketPath));
+    const harness = harnesses.find((h) => h.socketPath === socketPath)!;
     const socket = new net.Socket();
     await connectBounded(socket, socketPath);
     socket.write(`${JSON.stringify({ action: "subscribe", deviceId: DEVICE.deviceId })}\n`);
@@ -480,7 +486,9 @@ describe("VideoStreamSocketServer", () => {
         createCaptureSource: async () => {
           sourceCalls++;
           if (sourceCalls === 1) {
-            return await new Promise<H264CaptureSource>(resolve => { resolveAbandonedSource = resolve; });
+            return await new Promise<H264CaptureSource>((resolve) => {
+              resolveAbandonedSource = resolve;
+            });
           }
           return replacementSource;
         },
@@ -488,7 +496,7 @@ describe("VideoStreamSocketServer", () => {
       },
       socketPath,
       defaultTimer,
-      allowAllAuthenticator
+      allowAllAuthenticator,
     );
     await server.start();
     harnesses.push({
@@ -505,7 +513,9 @@ describe("VideoStreamSocketServer", () => {
 
     const abandonedSocket = new net.Socket();
     await connectBounded(abandonedSocket, socketPath);
-    abandonedSocket.write(`${JSON.stringify({ action: "subscribe", deviceId: DEVICE.deviceId })}\n`);
+    abandonedSocket.write(
+      `${JSON.stringify({ action: "subscribe", deviceId: DEVICE.deviceId })}\n`,
+    );
     await waitFor(() => resolveAbandonedSource !== undefined);
     abandonedSocket.destroy();
     await waitFor(() => server.activeDeviceIds().length === 0);
@@ -760,14 +770,14 @@ describe("VideoStreamSocketServer", () => {
       approvalTarget: "AutoMobile",
     });
     expect(ack.error).toBe(
-      "Screen Recording permission is required to discover and observe iOS Simulator windows."
+      "Screen Recording permission is required to discover and observe iOS Simulator windows.",
     );
     expect(h.server.activeDeviceIds()).toHaveLength(0);
   });
 
   test("reports a pending Screen Recording denial to every subscriber", async () => {
     let releaseStart: () => void;
-    const startGate = new Promise<void>(resolve => {
+    const startGate = new Promise<void>((resolve) => {
       releaseStart = resolve;
     });
     const h = await startHarness({
@@ -818,7 +828,7 @@ describe("VideoStreamSocketServer", () => {
     await connectBounded(socket, h.socketPath);
 
     const chunks: Buffer[] = [];
-    socket.on("data", data => chunks.push(data));
+    socket.on("data", (data) => chunks.push(data));
     socket.write("{not json\n");
     await waitFor(() => Buffer.concat(chunks).includes("\n"));
 
@@ -841,10 +851,10 @@ describe("VideoStreamSocketServer", () => {
 
   describe("authentication (issue #4751)", () => {
     function fakeSessionManager(
-      overrides: Partial<StreamAuthSessionManager> = {}
+      overrides: Partial<StreamAuthSessionManager> = {},
     ): StreamAuthSessionManager {
       return {
-        getSession: sessionUuid => (sessionUuid === "session-1" ? {} : null),
+        getSession: (sessionUuid) => (sessionUuid === "session-1" ? {} : null),
         getSessionForDevice: () => null,
         getDeviceLabels: () => undefined,
         ...overrides,
@@ -852,7 +862,11 @@ describe("VideoStreamSocketServer", () => {
     }
 
     function enforcing(sm: StreamAuthSessionManager): StreamSocketAuthenticator {
-      return new SessionScopedStreamAuthenticator(() => sm, "video-stream subscribe", {} as NodeJS.ProcessEnv);
+      return new SessionScopedStreamAuthenticator(
+        () => sm,
+        "video-stream subscribe",
+        {} as NodeJS.ProcessEnv,
+      );
     }
 
     test("rejects an unauthenticated subscribe and starts no capture", async () => {
@@ -896,7 +910,7 @@ describe("VideoStreamSocketServer", () => {
     test("rejects riding along on a device owned by another session", async () => {
       const h = await startHarness({
         authenticator: enforcing(
-          fakeSessionManager({ getSessionForDevice: () => "other-session" })
+          fakeSessionManager({ getSessionForDevice: () => "other-session" }),
         ),
       });
 

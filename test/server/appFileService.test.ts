@@ -90,21 +90,29 @@ describe("AppFileService", () => {
       platform: "android",
     };
 
-    await expect(service.putFile({
-      device,
-      appId: "../com.example.app",
-      container: "documents",
-      contentText: "hello",
-      destinationPath: "fixtures/welcome.txt",
-    })).rejects.toThrow("appId must be a non-empty app identifier without path separators or traversal segments");
+    await expect(
+      service.putFile({
+        device,
+        appId: "../com.example.app",
+        container: "documents",
+        contentText: "hello",
+        destinationPath: "fixtures/welcome.txt",
+      }),
+    ).rejects.toThrow(
+      "appId must be a non-empty app identifier without path separators or traversal segments",
+    );
 
-    await expect(service.putFile({
-      device,
-      appId: "com.example.app",
-      container: "documents",
-      contentText: "hello",
-      destinationPath: "/absolute.txt",
-    })).rejects.toThrow("destinationPath must be a non-empty relative path without '.' or '..' segments");
+    await expect(
+      service.putFile({
+        device,
+        appId: "com.example.app",
+        container: "documents",
+        contentText: "hello",
+        destinationPath: "/absolute.txt",
+      }),
+    ).rejects.toThrow(
+      "destinationPath must be a non-empty relative path without '.' or '..' segments",
+    );
 
     expect(provider.putRequests).toHaveLength(0);
   });
@@ -112,20 +120,20 @@ describe("AppFileService", () => {
   test("maps unsupported platform capabilities to explicit operation errors", async () => {
     const service = createAppFileServiceForTesting({
       providers: [new RecordingAppFileProvider("android")],
-      deviceResolver: async deviceId => ({
+      deviceResolver: async (deviceId) => ({
         deviceId,
         name: "iPhone",
         platform: "ios",
       }),
     });
 
-    await expect(service.listFiles({
-      deviceId: "sim-1",
-      appId: "com.example.app",
-      container: "documents",
-    })).rejects.toThrow(
-      "listFiles is not supported for appId com.example.app in documents on ios"
-    );
+    await expect(
+      service.listFiles({
+        deviceId: "sim-1",
+        appId: "com.example.app",
+        container: "documents",
+      }),
+    ).rejects.toThrow("listFiles is not supported for appId com.example.app in documents on ios");
   });
 
   test("writes Android inline content through run-as and returns stable response metadata", async () => {
@@ -158,7 +166,8 @@ describe("AppFileService", () => {
       container: "documents",
       destinationPath: "fixtures/welcome file.txt",
       byteCount: 5,
-      resourceUri: "automobile:devices/emulator-5554/apps/com.example.app/files/documents/fixtures/welcome%20file.txt",
+      resourceUri:
+        "automobile:devices/emulator-5554/apps/com.example.app/files/documents/fixtures/welcome%20file.txt",
     });
 
     const commands = adbFactory.getFakeClient().getAllCommands();
@@ -208,7 +217,11 @@ describe("AppFileService", () => {
       simctlFactory: () => {
         throw new Error("simctl not used");
       },
-      deviceResolver: async () => ({ deviceId: "emulator-5554", name: "Pixel", platform: "android" }),
+      deviceResolver: async () => ({
+        deviceId: "emulator-5554",
+        name: "Pixel",
+        platform: "android",
+      }),
     });
 
     const result = await service.listFiles({
@@ -237,13 +250,17 @@ describe("AppFileService", () => {
       platform: "android",
     };
 
-    await expect(service.putFile({
-      device,
-      appId: "../other.app",
-      container: "externalFiles",
-      contentText: "hello",
-      destinationPath: "fixtures/welcome.txt",
-    })).rejects.toThrow("appId must be a non-empty app identifier without path separators or traversal segments");
+    await expect(
+      service.putFile({
+        device,
+        appId: "../other.app",
+        container: "externalFiles",
+        contentText: "hello",
+        destinationPath: "fixtures/welcome.txt",
+      }),
+    ).rejects.toThrow(
+      "appId must be a non-empty app identifier without path separators or traversal segments",
+    );
 
     expect(adbFactory.getFakeClient().getAllCommands()).toEqual([]);
   });
@@ -254,7 +271,7 @@ describe("AppFileService", () => {
     const simctl = new FakeSimCtlClient();
     simctl.setCommandResult(
       `get_app_container '${iosSimulatorDevice.deviceId}' 'com.example.app' data`,
-      dataRoot
+      dataRoot,
     );
     const service = createAppFileServiceForTesting({
       simctlFactory: () => simctl as any,
@@ -278,7 +295,9 @@ describe("AppFileService", () => {
       destinationPath: "Support/config.txt",
       byteCount: 9,
     });
-    await expect(fileSystem.readText(join(dataRoot, "Library", "Support", "config.txt"))).resolves.toBe("hello ios");
+    await expect(
+      fileSystem.readText(join(dataRoot, "Library", "Support", "config.txt")),
+    ).resolves.toBe("hello ios");
   });
 
   test("maps iOS logical containers to simulator data container folders", async () => {
@@ -287,7 +306,7 @@ describe("AppFileService", () => {
     const simctl = new FakeSimCtlClient();
     simctl.setCommandResult(
       `get_app_container '${iosSimulatorDevice.deviceId}' 'com.example.app' data`,
-      dataRoot
+      dataRoot,
     );
     const service = createAppFileServiceForTesting({
       simctlFactory: () => simctl as any,
@@ -316,9 +335,15 @@ describe("AppFileService", () => {
       destinationPath: "fixtures/value.txt",
     });
 
-    await expect(fileSystem.readText(join(dataRoot, "Documents", "fixtures", "value.txt"))).resolves.toBe("documents");
-    await expect(fileSystem.readText(join(dataRoot, "Library", "Caches", "fixtures", "value.txt"))).resolves.toBe("cache");
-    await expect(fileSystem.readText(join(dataRoot, "tmp", "fixtures", "value.txt"))).resolves.toBe("tmp");
+    await expect(
+      fileSystem.readText(join(dataRoot, "Documents", "fixtures", "value.txt")),
+    ).resolves.toBe("documents");
+    await expect(
+      fileSystem.readText(join(dataRoot, "Library", "Caches", "fixtures", "value.txt")),
+    ).resolves.toBe("cache");
+    await expect(fileSystem.readText(join(dataRoot, "tmp", "fixtures", "value.txt"))).resolves.toBe(
+      "tmp",
+    );
   });
 
   test("preserves iOS binary app files exactly when writing and reading", async () => {
@@ -327,7 +352,7 @@ describe("AppFileService", () => {
     const simctl = new FakeSimCtlClient();
     simctl.setCommandResult(
       `get_app_container '${iosSimulatorDevice.deviceId}' 'com.example.app' data`,
-      dataRoot
+      dataRoot,
     );
     const service = createAppFileServiceForTesting({
       simctlFactory: () => simctl as any,
@@ -376,7 +401,7 @@ describe("AppFileService", () => {
       const simctl = new FakeSimCtlClient();
       simctl.setCommandResult(
         `get_app_container '${iosSimulatorDevice.deviceId}' 'com.example.app' data`,
-        dataRoot
+        dataRoot,
       );
       const service = createAppFileServiceForTesting({
         simctlFactory: () => simctl as any,
@@ -394,8 +419,9 @@ describe("AppFileService", () => {
       });
 
       expect(result.byteCount).toBe(sourceBytes.byteLength);
-      await expect(fileSystem.readFileBuffer(join(dataRoot, "Documents", "fixtures", "copied.bin")))
-        .resolves.toEqual(sourceBytes);
+      await expect(
+        fileSystem.readFileBuffer(join(dataRoot, "Documents", "fixtures", "copied.bin")),
+      ).resolves.toEqual(sourceBytes);
     } finally {
       if (previousLaunchCwd === undefined) {
         delete process.env[DAEMON_LAUNCH_CWD_ENV];
@@ -410,12 +436,15 @@ describe("AppFileService", () => {
     const dataRoot = "/simulators/SIM-1/data";
     await fileSystem.mkdir(join(dataRoot, "Documents", "fixtures"));
     await fileSystem.writeFileBuffer(join(dataRoot, "Documents", "root.txt"), Buffer.from("root"));
-    await fileSystem.writeFileBuffer(join(dataRoot, "Documents", "fixtures", "welcome.png"), Buffer.from([0, 1, 2]));
+    await fileSystem.writeFileBuffer(
+      join(dataRoot, "Documents", "fixtures", "welcome.png"),
+      Buffer.from([0, 1, 2]),
+    );
     fileSystem.setSymlink(join(dataRoot, "Documents", "broken-link"));
     const simctl = new FakeSimCtlClient();
     simctl.setCommandResult(
       `get_app_container '${iosSimulatorDevice.deviceId}' 'com.example.app' data`,
-      dataRoot
+      dataRoot,
     );
     const service = createAppFileServiceForTesting({
       simctlFactory: () => simctl as any,
@@ -429,18 +458,18 @@ describe("AppFileService", () => {
       container: "documents",
     });
 
-    expect(result.files.map(file => file.path).sort()).toEqual([
+    expect(result.files.map((file) => file.path).sort()).toEqual([
       "fixtures",
       "fixtures/welcome.png",
       "root.txt",
     ]);
-    expect(result.files.every(file => !file.path.startsWith(dataRoot))).toBe(true);
-    expect(result.files.find(file => file.path === "fixtures")).toMatchObject({
+    expect(result.files.every((file) => !file.path.startsWith(dataRoot))).toBe(true);
+    expect(result.files.find((file) => file.path === "fixtures")).toMatchObject({
       name: "fixtures",
       isDirectory: true,
       resourceUri: `automobile:devices/${iosSimulatorDevice.deviceId}/apps/com.example.app/files/documents/fixtures`,
     });
-    const fileEntry = result.files.find(file => file.path === "fixtures/welcome.png");
+    const fileEntry = result.files.find((file) => file.path === "fixtures/welcome.png");
     expect(fileEntry).toMatchObject({
       name: "welcome.png",
       byteCount: 3,
@@ -455,7 +484,7 @@ describe("AppFileService", () => {
     const service = createAppFileServiceForTesting({
       simctlFactory: () => simctl as any,
       fileSystem: new TestAppFileFileSystem(),
-      deviceResolver: async deviceId => ({ deviceId, name: "iPhone", platform: "ios" }),
+      deviceResolver: async (deviceId) => ({ deviceId, name: "iPhone", platform: "ios" }),
     });
     const physicalDevice: BootedDevice = {
       deviceId: "00008030-001A2B3C0E11002E",
@@ -463,19 +492,23 @@ describe("AppFileService", () => {
       platform: "ios",
     };
 
-    await expect(service.putFile({
-      device: physicalDevice,
-      appId: "com.example.app",
-      container: "documents",
-      contentText: "hello",
-      destinationPath: "config.txt",
-    })).rejects.toThrow("iOS app file putFile is only supported on iOS simulators");
+    await expect(
+      service.putFile({
+        device: physicalDevice,
+        appId: "com.example.app",
+        container: "documents",
+        contentText: "hello",
+        destinationPath: "config.txt",
+      }),
+    ).rejects.toThrow("iOS app file putFile is only supported on iOS simulators");
 
-    await expect(service.listFiles({
-      deviceId: physicalDevice.deviceId,
-      appId: "com.example.app",
-      container: "documents",
-    })).rejects.toThrow("iOS app file listFiles is only supported on iOS simulators");
+    await expect(
+      service.listFiles({
+        deviceId: physicalDevice.deviceId,
+        appId: "com.example.app",
+        container: "documents",
+      }),
+    ).rejects.toThrow("iOS app file listFiles is only supported on iOS simulators");
     expect(simctl.getMethodCalls("executeCommand")).toHaveLength(0);
   });
 
@@ -483,7 +516,9 @@ describe("AppFileService", () => {
     const simctl = new FakeSimCtlClient();
     simctl.setCommandError(
       `get_app_container '${iosSimulatorDevice.deviceId}' 'com.missing.app' data`,
-      new Error("An error was encountered processing the command (domain=NSPOSIXErrorDomain, code=2): The application is not installed.")
+      new Error(
+        "An error was encountered processing the command (domain=NSPOSIXErrorDomain, code=2): The application is not installed.",
+      ),
     );
     const service = createAppFileServiceForTesting({
       simctlFactory: () => simctl as any,
@@ -491,19 +526,21 @@ describe("AppFileService", () => {
       deviceResolver: async () => iosSimulatorDevice,
     });
 
-    await expect(service.readFile({
-      deviceId: iosSimulatorDevice.deviceId,
-      appId: "com.missing.app",
-      container: "documents",
-      path: "config.json",
-    })).rejects.toThrow("iOS app com.missing.app is not installed on simulator");
+    await expect(
+      service.readFile({
+        deviceId: iosSimulatorDevice.deviceId,
+        appId: "com.missing.app",
+        container: "documents",
+        path: "config.json",
+      }),
+    ).rejects.toThrow("iOS app com.missing.app is not installed on simulator");
   });
 
   test("maps unavailable iOS simulators to actionable errors", async () => {
     const simctl = new FakeSimCtlClient();
     simctl.setCommandError(
       `get_app_container '${iosSimulatorDevice.deviceId}' 'com.example.app' data`,
-      new Error("No such device or device is shutdown")
+      new Error("No such device or device is shutdown"),
     );
     const service = createAppFileServiceForTesting({
       simctlFactory: () => simctl as any,
@@ -511,11 +548,15 @@ describe("AppFileService", () => {
       deviceResolver: async () => iosSimulatorDevice,
     });
 
-    await expect(service.listFiles({
-      deviceId: iosSimulatorDevice.deviceId,
-      appId: "com.example.app",
-      container: "documents",
-    })).rejects.toThrow("iOS simulator AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE is unavailable or not booted");
+    await expect(
+      service.listFiles({
+        deviceId: iosSimulatorDevice.deviceId,
+        appId: "com.example.app",
+        container: "documents",
+      }),
+    ).rejects.toThrow(
+      "iOS simulator AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE is unavailable or not booted",
+    );
   });
 
   test("does not let iOS app file paths escape the resolved app container", async () => {
@@ -526,12 +567,16 @@ describe("AppFileService", () => {
       deviceResolver: async () => iosSimulatorDevice,
     });
 
-    await expect(service.readFile({
-      deviceId: iosSimulatorDevice.deviceId,
-      appId: "com.example.app",
-      container: "documents",
-      path: "../Library/Preferences/config.plist",
-    })).rejects.toThrow("destinationPath must be a non-empty relative path without '.' or '..' segments");
+    await expect(
+      service.readFile({
+        deviceId: iosSimulatorDevice.deviceId,
+        appId: "com.example.app",
+        container: "documents",
+        path: "../Library/Preferences/config.plist",
+      }),
+    ).rejects.toThrow(
+      "destinationPath must be a non-empty relative path without '.' or '..' segments",
+    );
 
     expect(simctl.getMethodCalls("executeCommand")).toHaveLength(0);
   });
@@ -541,7 +586,7 @@ describe("AppFileService", () => {
     const service = createAppFileServiceForTesting({
       simctlFactory: () => simctl as any,
       fileSystem: new TestAppFileFileSystem(),
-      deviceResolver: async deviceId => ({ deviceId, name: "iPhone", platform: "ios" }),
+      deviceResolver: async (deviceId) => ({ deviceId, name: "iPhone", platform: "ios" }),
     });
     const device: BootedDevice = {
       deviceId: iosSimulatorDevice.deviceId,
@@ -549,19 +594,25 @@ describe("AppFileService", () => {
       platform: "ios",
     };
 
-    await expect(service.putFile({
-      device,
-      appId: "com.example.app",
-      container: "externalFiles",
-      contentText: "hello",
-      destinationPath: "config.txt",
-    })).rejects.toThrow("putFile is not supported for appId com.example.app in externalFiles on ios");
+    await expect(
+      service.putFile({
+        device,
+        appId: "com.example.app",
+        container: "externalFiles",
+        contentText: "hello",
+        destinationPath: "config.txt",
+      }),
+    ).rejects.toThrow("putFile is not supported for appId com.example.app in externalFiles on ios");
 
-    await expect(service.listFiles({
-      deviceId: iosSimulatorDevice.deviceId,
-      appId: "com.example.app",
-      container: "externalFiles",
-    })).rejects.toThrow("listFiles is not supported for appId com.example.app in externalFiles on ios");
+    await expect(
+      service.listFiles({
+        deviceId: iosSimulatorDevice.deviceId,
+        appId: "com.example.app",
+        container: "externalFiles",
+      }),
+    ).rejects.toThrow(
+      "listFiles is not supported for appId com.example.app in externalFiles on ios",
+    );
 
     expect(simctl.getMethodCalls("executeCommand")).toHaveLength(0);
   });
@@ -573,7 +624,11 @@ describe("AppFileService", () => {
       simctlFactory: () => {
         throw new Error("simctl not used");
       },
-      deviceResolver: async () => ({ deviceId: "emulator-5554", name: "Pixel", platform: "android" }),
+      deviceResolver: async () => ({
+        deviceId: "emulator-5554",
+        name: "Pixel",
+        platform: "android",
+      }),
     });
 
     await service.readFile({
@@ -593,7 +648,9 @@ describe("AppFileService", () => {
     expect(calls).toHaveLength(2);
     expect(calls[0]?.command).toContain("shell run-as 'com.example.app' base64");
     expect(calls[0]?.maxBuffer).toBeGreaterThan(1024 * 1024);
-    expect(calls[1]?.command).toContain("shell base64 '/sdcard/Android/data/com.example.app/files/screenshots/home.png'");
+    expect(calls[1]?.command).toContain(
+      "shell base64 '/sdcard/Android/data/com.example.app/files/screenshots/home.png'",
+    );
     expect(calls[1]?.maxBuffer).toBe(calls[0]?.maxBuffer);
   });
 
@@ -604,7 +661,11 @@ describe("AppFileService", () => {
       simctlFactory: () => {
         throw new Error("simctl not used");
       },
-      deviceResolver: async () => ({ deviceId: "emulator-5554", name: "Pixel", platform: "android" }),
+      deviceResolver: async () => ({
+        deviceId: "emulator-5554",
+        name: "Pixel",
+        platform: "android",
+      }),
     });
 
     await service.listFiles({
@@ -623,7 +684,9 @@ describe("AppFileService", () => {
     expect(calls[0]?.command).toContain("shell run-as 'com.example.app' sh -c");
     expect(calls[0]?.command).toContain("find");
     expect(calls[0]?.maxBuffer).toBeGreaterThan(1024 * 1024);
-    expect(calls[1]?.command).toContain("shell if [ -d '/sdcard/Android/data/com.example.app/files'");
+    expect(calls[1]?.command).toContain(
+      "shell if [ -d '/sdcard/Android/data/com.example.app/files'",
+    );
     expect(calls[1]?.command).toContain("find");
     expect(calls[1]?.maxBuffer).toBe(calls[0]?.maxBuffer);
   });
@@ -635,7 +698,11 @@ describe("AppFileService", () => {
       simctlFactory: () => {
         throw new Error("simctl not used");
       },
-      deviceResolver: async () => ({ deviceId: "emulator-5554", name: "Pixel", platform: "android" }),
+      deviceResolver: async () => ({
+        deviceId: "emulator-5554",
+        name: "Pixel",
+        platform: "android",
+      }),
     });
 
     await service.readFile({
@@ -652,7 +719,7 @@ describe("AppFileService", () => {
 
     const calls = adbFactory.getFakeClient().getCommandCalls();
     expect(calls).toHaveLength(2);
-    expect(calls.every(call => call.noRetry === true)).toBe(true);
+    expect(calls.every((call) => call.noRetry === true)).toBe(true);
   });
 
   test("propagates noRetry and the caller's AbortSignal through every Android putFile command", async () => {
@@ -682,23 +749,32 @@ describe("AppFileService", () => {
     const calls = adbFactory.getFakeClient().getCommandCalls();
     // push to temp, run-as cp, and the rm cleanup all flow through the helper / adb.
     expect(calls.length).toBeGreaterThanOrEqual(3);
-    expect(calls.every(call => call.noRetry === true)).toBe(true);
-    expect(calls.every(call => call.signal === controller.signal)).toBe(true);
+    expect(calls.every((call) => call.noRetry === true)).toBe(true);
+    expect(calls.every((call) => call.signal === controller.signal)).toBe(true);
   });
 
   test("lists Android externalFiles with file names, directory markers, byte sizes, and last-modified metadata", async () => {
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("find '/sdcard/Android/data/com.example.app/files'", execResult([
-      "directory|4096|1710000000|/sdcard/Android/data/com.example.app/files",
-      "directory|4096|1710000060|/sdcard/Android/data/com.example.app/files/fixtures",
-      "regular file|4|1710000123|/sdcard/Android/data/com.example.app/files/fixtures/welcome file.txt",
-    ].join("\n")));
+    adb.setCommandResponse(
+      "find '/sdcard/Android/data/com.example.app/files'",
+      execResult(
+        [
+          "directory|4096|1710000000|/sdcard/Android/data/com.example.app/files",
+          "directory|4096|1710000060|/sdcard/Android/data/com.example.app/files/fixtures",
+          "regular file|4|1710000123|/sdcard/Android/data/com.example.app/files/fixtures/welcome file.txt",
+        ].join("\n"),
+      ),
+    );
     const service = createAppFileServiceForTesting({
       adbFactory: adbFactoryFor(adb),
       simctlFactory: () => {
         throw new Error("simctl not used");
       },
-      deviceResolver: async () => ({ deviceId: "emulator-5554", name: "Pixel", platform: "android" }),
+      deviceResolver: async () => ({
+        deviceId: "emulator-5554",
+        name: "Pixel",
+        platform: "android",
+      }),
     });
 
     const result = await service.listFiles({
@@ -713,7 +789,8 @@ describe("AppFileService", () => {
         name: "fixtures",
         isDirectory: true,
         lastModified: "2024-03-09T16:01:00.000Z",
-        resourceUri: "automobile:devices/emulator-5554/apps/com.example.app/files/externalFiles/fixtures",
+        resourceUri:
+          "automobile:devices/emulator-5554/apps/com.example.app/files/externalFiles/fixtures",
       },
       {
         path: "fixtures/welcome file.txt",
@@ -721,22 +798,28 @@ describe("AppFileService", () => {
         byteCount: 4,
         isDirectory: false,
         lastModified: "2024-03-09T16:02:03.000Z",
-        resourceUri: "automobile:devices/emulator-5554/apps/com.example.app/files/externalFiles/fixtures/welcome%20file.txt",
+        resourceUri:
+          "automobile:devices/emulator-5554/apps/com.example.app/files/externalFiles/fixtures/welcome%20file.txt",
       },
     ]);
   });
 
   test("reads Android UTF-8 files as text without platform-specific decoding", async () => {
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("base64 '/sdcard/Android/data/com.example.app/files/config/settings.json'", execResult(
-      Buffer.from("{\"enabled\":true}\n", "utf8").toString("base64")
-    ));
+    adb.setCommandResponse(
+      "base64 '/sdcard/Android/data/com.example.app/files/config/settings.json'",
+      execResult(Buffer.from('{"enabled":true}\n', "utf8").toString("base64")),
+    );
     const service = createAppFileServiceForTesting({
       adbFactory: adbFactoryFor(adb),
       simctlFactory: () => {
         throw new Error("simctl not used");
       },
-      deviceResolver: async () => ({ deviceId: "emulator-5554", name: "Pixel", platform: "android" }),
+      deviceResolver: async () => ({
+        deviceId: "emulator-5554",
+        name: "Pixel",
+        platform: "android",
+      }),
     });
 
     const result = await service.readFile({
@@ -749,7 +832,7 @@ describe("AppFileService", () => {
     expect(result).toMatchObject({
       byteCount: 17,
       mimeType: "text/plain; charset=utf-8",
-      text: "{\"enabled\":true}\n",
+      text: '{"enabled":true}\n',
     });
     expect(result.blob).toBeUndefined();
   });
@@ -757,15 +840,20 @@ describe("AppFileService", () => {
   test("preserves UTF-8 BOM bytes when reading text app files", async () => {
     const bytes = Buffer.from([0xef, 0xbb, 0xbf, 0x7b, 0x7d]);
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("base64 '/sdcard/Android/data/com.example.app/files/config/bom.json'", execResult(
-      bytes.toString("base64")
-    ));
+    adb.setCommandResponse(
+      "base64 '/sdcard/Android/data/com.example.app/files/config/bom.json'",
+      execResult(bytes.toString("base64")),
+    );
     const service = createAppFileServiceForTesting({
       adbFactory: adbFactoryFor(adb),
       simctlFactory: () => {
         throw new Error("simctl not used");
       },
-      deviceResolver: async () => ({ deviceId: "emulator-5554", name: "Pixel", platform: "android" }),
+      deviceResolver: async () => ({
+        deviceId: "emulator-5554",
+        name: "Pixel",
+        platform: "android",
+      }),
     });
 
     const result = await service.readFile({
@@ -787,15 +875,20 @@ describe("AppFileService", () => {
   test("keeps Android binary reads as lossless MCP blobs", async () => {
     const bytes = Buffer.from([0, 159, 146, 150, 255]);
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("base64 '/sdcard/Android/data/com.example.app/files/fixtures/pixel.bin'", execResult(
-      bytes.toString("base64")
-    ));
+    adb.setCommandResponse(
+      "base64 '/sdcard/Android/data/com.example.app/files/fixtures/pixel.bin'",
+      execResult(bytes.toString("base64")),
+    );
     const service = createAppFileServiceForTesting({
       adbFactory: adbFactoryFor(adb),
       simctlFactory: () => {
         throw new Error("simctl not used");
       },
-      deviceResolver: async () => ({ deviceId: "emulator-5554", name: "Pixel", platform: "android" }),
+      deviceResolver: async () => ({
+        deviceId: "emulator-5554",
+        name: "Pixel",
+        platform: "android",
+      }),
     });
 
     const result = await service.readFile({
@@ -815,25 +908,33 @@ describe("AppFileService", () => {
 
   test("maps Android run-as failures to actionable private-storage guidance", async () => {
     const adb = new FakeAdbExecutor();
-    adb.setCommandError("shell run-as 'com.example.app'", new Error("run-as: Package 'com.example.app' is not debuggable"));
+    adb.setCommandError(
+      "shell run-as 'com.example.app'",
+      new Error("run-as: Package 'com.example.app' is not debuggable"),
+    );
     const service = createAppFileServiceForTesting({
       adbFactory: adbFactoryFor(adb),
       simctlFactory: () => {
         throw new Error("simctl not used");
       },
-      deviceResolver: async () => ({ deviceId: "emulator-5554", name: "Pixel", platform: "android" }),
+      deviceResolver: async () => ({
+        deviceId: "emulator-5554",
+        name: "Pixel",
+        platform: "android",
+      }),
     });
 
-    await expect(service.readFile({
-      deviceId: "emulator-5554",
-      appId: "com.example.app",
-      container: "documents",
-      path: "fixtures/private.txt",
-    })).rejects.toThrow(
-      "Android documents app file read for com.example.app on emulator-5554 requires a debuggable app build because it uses run-as"
+    await expect(
+      service.readFile({
+        deviceId: "emulator-5554",
+        appId: "com.example.app",
+        container: "documents",
+        path: "fixtures/private.txt",
+      }),
+    ).rejects.toThrow(
+      "Android documents app file read for com.example.app on emulator-5554 requires a debuggable app build because it uses run-as",
     );
   });
-
 });
 
 class RecordingAppFileProvider implements AppFileProvider {
@@ -903,7 +1004,10 @@ class TestAppFileFileSystem implements AppFileFileSystem {
       }
     }
 
-    return [...names].filter(Boolean).sort().map(name => ({ name }));
+    return [...names]
+      .filter(Boolean)
+      .sort()
+      .map((name) => ({ name }));
   }
 
   async mkdir(path: string): Promise<void> {
@@ -973,7 +1077,8 @@ class TestAppFileFileSystem implements AppFileFileSystem {
     let current = normalized.startsWith("/") ? "/" : "";
 
     for (const segment of segments) {
-      current = current === "/" || current === "" ? `${current}${segment}` : `${current}/${segment}`;
+      current =
+        current === "/" || current === "" ? `${current}${segment}` : `${current}/${segment}`;
       this.directories.add(current);
     }
   }

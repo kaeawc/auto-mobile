@@ -3,7 +3,7 @@ import {
   SystemImage,
   CreateAvdParams,
   AvdInfo,
-  DeviceProfile
+  DeviceProfile,
 } from "../avdmanager";
 
 /**
@@ -17,7 +17,7 @@ export interface AvdManager {
    */
   acceptLicenses(): Promise<{
     success: boolean;
-    message: string
+    message: string;
   }>;
 
   /**
@@ -40,7 +40,10 @@ export interface AvdManager {
    * @param acceptLicense - Whether to accept license (default: true)
    * @returns Promise with success status and message
    */
-  installSystemImage(packageName: string, acceptLicense?: boolean): Promise<{
+  installSystemImage(
+    packageName: string,
+    acceptLicense?: boolean,
+  ): Promise<{
     success: boolean;
     message: string;
   }>;

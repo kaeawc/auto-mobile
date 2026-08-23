@@ -31,10 +31,7 @@ interface SamplePayload {
 
 // A loose view of the accessor, used ONLY to exercise the runtime own-key guard
 // with keys the type system now (correctly) forbids passing directly.
-const looseField = getStructuredField as unknown as (
-  response: unknown,
-  key: string
-) => unknown;
+const looseField = getStructuredField as unknown as (response: unknown, key: string) => unknown;
 
 describe("getStructuredField (typed)", () => {
   test("returns a payload field that lives under structuredContent", () => {
@@ -45,7 +42,10 @@ describe("getStructuredField (typed)", () => {
 
   test("returns a nested object field by reference", () => {
     const hierarchy = { hierarchy: { node: {} } };
-    const response = createStructuredToolResponse<SamplePayload>({ success: true, viewHierarchy: hierarchy });
+    const response = createStructuredToolResponse<SamplePayload>({
+      success: true,
+      viewHierarchy: hierarchy,
+    });
     expect(getStructuredField(response, "viewHierarchy")).toBe(hierarchy);
   });
 
@@ -158,7 +158,9 @@ describe("createStructuredToolResponse typed envelope", () => {
   });
 
   test("tolerates non-object payloads without hoisting", () => {
-    const response = createStructuredToolResponse("plain-string" as unknown as { success?: boolean });
+    const response = createStructuredToolResponse(
+      "plain-string" as unknown as { success?: boolean },
+    );
     expect(response.structuredContent).toBe("plain-string");
     expect("success" in response).toBe(false);
   });

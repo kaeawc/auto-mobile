@@ -1,9 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { CountingIdGenerator, createTimestampedId, NodeIdGenerator } from "../../src/utils/IdGenerator";
+import {
+  CountingIdGenerator,
+  createTimestampedId,
+  NodeIdGenerator,
+} from "../../src/utils/IdGenerator";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 
-describe("NodeIdGenerator", function() {
-  test("produces unique UUID-shaped ids", function() {
+describe("NodeIdGenerator", function () {
+  test("produces unique UUID-shaped ids", function () {
     const generator = new NodeIdGenerator();
     const first = generator.next();
     const second = generator.next();
@@ -14,15 +18,15 @@ describe("NodeIdGenerator", function() {
   });
 });
 
-describe("CountingIdGenerator", function() {
-  test("produces incrementing ids with the configured prefix", function() {
+describe("CountingIdGenerator", function () {
+  test("produces incrementing ids with the configured prefix", function () {
     const generator = new CountingIdGenerator("req");
 
     expect(generator.next()).toBe("req-1");
     expect(generator.next()).toBe("req-2");
   });
 
-  test("reset restarts the counter", function() {
+  test("reset restarts the counter", function () {
     const generator = new CountingIdGenerator("id");
 
     generator.next();
@@ -32,8 +36,8 @@ describe("CountingIdGenerator", function() {
   });
 });
 
-describe("FakeIdGenerator", function() {
-  test("returns scripted ids before counter fallback", function() {
+describe("FakeIdGenerator", function () {
+  test("returns scripted ids before counter fallback", function () {
     const generator = new FakeIdGenerator(["a", "b"]);
 
     expect(generator.next()).toBe("a");
@@ -41,7 +45,7 @@ describe("FakeIdGenerator", function() {
     expect(generator.next()).toBe("fake-1");
   });
 
-  test("does not re-issue an already-emitted auto id after setScripted swaps the script", function() {
+  test("does not re-issue an already-emitted auto id after setScripted swaps the script", function () {
     const generator = new FakeIdGenerator();
 
     const firstAuto = generator.next();
@@ -56,8 +60,8 @@ describe("FakeIdGenerator", function() {
   });
 });
 
-describe("createTimestampedId", function() {
-  test("keeps an observable timestamp while injecting deterministic uniqueness", function() {
+describe("createTimestampedId", function () {
+  test("keeps an observable timestamp while injecting deterministic uniqueness", function () {
     const timer = { now: () => 1234 };
     const ids = new CountingIdGenerator("test");
 

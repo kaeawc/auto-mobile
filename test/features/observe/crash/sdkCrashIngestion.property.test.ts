@@ -5,7 +5,7 @@ import {
   normalizeAnr,
   normalizeCrash,
   type SdkAnrPayload,
-  type SdkCrashPayload
+  type SdkCrashPayload,
 } from "../../../../src/features/observe/crash/sdkCrashIngestion";
 
 // Property-based tests. See test/utils/Backoff.property.test.ts for the pinned-seed rationale.
@@ -17,7 +17,7 @@ const deviceInfo: fc.Arbitrary<CrashDeviceInfo> = fc.record({
   model: str,
   manufacturer: str,
   osVersion: str,
-  sdkInt: fc.integer({ min: 1, max: 40 })
+  sdkInt: fc.integer({ min: 1, max: 40 }),
 });
 
 const crashPayload: fc.Arbitrary<SdkCrashPayload> = fc.record({
@@ -29,7 +29,7 @@ const crashPayload: fc.Arbitrary<SdkCrashPayload> = fc.record({
   currentScreen: optStr,
   packageName: str,
   appVersion: optStr,
-  deviceInfo
+  deviceInfo,
 });
 
 const anrPayload: fc.Arbitrary<SdkAnrPayload> = fc.record({
@@ -41,7 +41,7 @@ const anrPayload: fc.Arbitrary<SdkAnrPayload> = fc.record({
   reason: str,
   packageName: optStr,
   appVersion: optStr,
-  deviceInfo
+  deviceInfo,
 });
 
 describe("normalizeCrash (property-based)", () => {
@@ -51,7 +51,7 @@ describe("normalizeCrash (property-based)", () => {
         const e = normalizeCrash(p, deviceId);
         return e.crashType === "java" && e.detectionSource === "sdk_websocket";
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -72,7 +72,7 @@ describe("normalizeCrash (property-based)", () => {
           e.deviceInfo === p.deviceInfo
         );
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 });
@@ -80,15 +80,23 @@ describe("normalizeCrash (property-based)", () => {
 describe("normalizeAnr (property-based)", () => {
   test("stamps the constant sdk_websocket discriminator", () => {
     fc.assert(
-      fc.property(anrPayload, str, (p, deviceId) => normalizeAnr(p, deviceId).detectionSource === "sdk_websocket"),
-      RUN_OPTIONS
+      fc.property(
+        anrPayload,
+        str,
+        (p, deviceId) => normalizeAnr(p, deviceId).detectionSource === "sdk_websocket",
+      ),
+      RUN_OPTIONS,
     );
   });
 
   test("packageName falls back to processName only when absent (nullish, not falsy)", () => {
     fc.assert(
-      fc.property(anrPayload, str, (p, deviceId) => normalizeAnr(p, deviceId).packageName === (p.packageName ?? p.processName)),
-      RUN_OPTIONS
+      fc.property(
+        anrPayload,
+        str,
+        (p, deviceId) => normalizeAnr(p, deviceId).packageName === (p.packageName ?? p.processName),
+      ),
+      RUN_OPTIONS,
     );
   });
 
@@ -108,7 +116,7 @@ describe("normalizeAnr (property-based)", () => {
           e.deviceInfo === p.deviceInfo
         );
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 });

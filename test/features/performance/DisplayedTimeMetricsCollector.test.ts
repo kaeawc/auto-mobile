@@ -2,21 +2,25 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import { DisplayedTimeMetricsCollector } from "../../../src/features/performance/DisplayedTimeMetricsCollector";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 
-describe("DisplayedTimeMetricsCollector - Unit Tests", function() {
+describe("DisplayedTimeMetricsCollector - Unit Tests", function () {
   let collector: DisplayedTimeMetricsCollector;
 
-  beforeEach(function() {
+  beforeEach(function () {
     // Use FakeAdbExecutor to avoid starting real adb daemon
     const fakeAdb = new FakeAdbExecutor();
-    collector = new DisplayedTimeMetricsCollector({ deviceId: "test", name: "test", platform: "android" }, fakeAdb as any);
+    collector = new DisplayedTimeMetricsCollector(
+      { deviceId: "test", name: "test", platform: "android" },
+      fakeAdb as any,
+    );
   });
 
-  test("parses ActivityManager displayed metrics with millisecond duration", function() {
-    const output = "1694099696.789  1234  5678 I ActivityManager: Displayed com.example/.MainActivity: +824ms";
+  test("parses ActivityManager displayed metrics with millisecond duration", function () {
+    const output =
+      "1694099696.789  1234  5678 I ActivityManager: Displayed com.example/.MainActivity: +824ms";
     const result = (collector as any).parseDisplayedMetrics(output, {
       packageName: "com.example",
       startTimestampMs: 1694099696000,
-      endTimestampMs: 1694099697000
+      endTimestampMs: 1694099697000,
     });
 
     expect(result.length).toBe(1);
@@ -26,12 +30,13 @@ describe("DisplayedTimeMetricsCollector - Unit Tests", function() {
     expect(result[0].logcatTag).toBe("ActivityManager");
   });
 
-  test("parses ActivityTaskManager displayed metrics with seconds duration", function() {
-    const output = "1694099697.123  1111  2222 I ActivityTaskManager: Displayed com.example/com.example.MainActivity: +1s234ms";
+  test("parses ActivityTaskManager displayed metrics with seconds duration", function () {
+    const output =
+      "1694099697.123  1111  2222 I ActivityTaskManager: Displayed com.example/com.example.MainActivity: +1s234ms";
     const result = (collector as any).parseDisplayedMetrics(output, {
       packageName: "com.example",
       startTimestampMs: 1694099697000,
-      endTimestampMs: 1694099698000
+      endTimestampMs: 1694099698000,
     });
 
     expect(result.length).toBe(1);
@@ -40,17 +45,17 @@ describe("DisplayedTimeMetricsCollector - Unit Tests", function() {
     expect(result[0].logcatTag).toBe("ActivityTaskManager");
   });
 
-  test("filters metrics by package and time window", function() {
+  test("filters metrics by package and time window", function () {
     const output = [
       "1694099696.100  1234  5678 I ActivityManager: Displayed com.example/.SplashActivity: +200ms",
       "1694099600.000  1234  5678 I ActivityManager: Displayed com.example/.OldActivity: +400ms",
-      "1694099696.200  1234  5678 I ActivityManager: Displayed com.other/.MainActivity: +300ms"
+      "1694099696.200  1234  5678 I ActivityManager: Displayed com.other/.MainActivity: +300ms",
     ].join("\n");
 
     const result = (collector as any).parseDisplayedMetrics(output, {
       packageName: "com.example",
       startTimestampMs: 1694099696000,
-      endTimestampMs: 1694099697000
+      endTimestampMs: 1694099697000,
     });
 
     expect(result.length).toBe(1);
@@ -58,7 +63,7 @@ describe("DisplayedTimeMetricsCollector - Unit Tests", function() {
     expect(result[0].displayedTimeMs).toBe(200);
   });
 
-  describe("getPreferredLogcatTag API-level boundary", function() {
+  describe("getPreferredLogcatTag API-level boundary", function () {
     type ConstructorAdb = ConstructorParameters<typeof DisplayedTimeMetricsCollector>[1];
     type LogcatTagProbe = { getPreferredLogcatTag(): Promise<string> };
 
@@ -69,7 +74,7 @@ describe("DisplayedTimeMetricsCollector - Unit Tests", function() {
       };
       return new DisplayedTimeMetricsCollector(
         { deviceId: "test", name: "test", platform: "android" },
-        fakeAdb as unknown as ConstructorAdb
+        fakeAdb as unknown as ConstructorAdb,
       );
     }
 
@@ -80,17 +85,17 @@ describe("DisplayedTimeMetricsCollector - Unit Tests", function() {
       ["an unknown API level falls back to ActivityManager", null, "ActivityManager"],
     ];
 
-    test.each(cases)("%s", async function(_name, apiLevel, expected) {
+    test.each(cases)("%s", async function (_name, apiLevel, expected) {
       const collector = collectorForApiLevel(apiLevel);
       const tag = await (collector as unknown as LogcatTagProbe).getPreferredLogcatTag();
       expect(tag).toBe(expected);
     });
 
-    test("falls back to ActivityManager when the executor cannot report an API level", async function() {
+    test("falls back to ActivityManager when the executor cannot report an API level", async function () {
       const fakeAdb = { executeCommand: async () => ({ stdout: "", stderr: "" }) };
       const collector = new DisplayedTimeMetricsCollector(
         { deviceId: "test", name: "test", platform: "android" },
-        fakeAdb as unknown as ConstructorAdb
+        fakeAdb as unknown as ConstructorAdb,
       );
       const tag = await (collector as unknown as LogcatTagProbe).getPreferredLogcatTag();
       expect(tag).toBe("ActivityManager");

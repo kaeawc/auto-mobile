@@ -3,6 +3,7 @@
 Bun TypeScript MCP server providing Android & iOS device automation capabilities through its tools and resources. Kotlin & Swift supporting libraries and apps in `android/` and `ios/` respectively.
 
 ## Key Rules
+
 - TypeScript only (no JavaScript)
 - Write GitHub issue and pull request references as clickable Markdown links only
   in AI-authored prose a human reads directly — issue and PR bodies, review
@@ -30,16 +31,19 @@ Bun TypeScript MCP server providing Android & iOS device automation capabilities
 This document summarizes the AutoMobile repo layout and where to find key components.
 
 ## Core Code
+
 - `src/` - MCP server source code (TypeScript)
 - `test/` - MCP server test code (TypeScript)
 - `schemas/` - Generated schemas and tool definitions
 - `dist/` - Build output
 
 ## Mobile Platforms
+
 - `android/` - Android Kotlin Gradle project (apps, libraries, IDE plugin)
 - `ios/` - Swift packages and Xcode projects
 
 ## Tooling and Automation
+
 - `scripts/` - Local validation and utility scripts
 - `benchmark/` - Benchmarks and baselines
 - `docs/` - User and developer documentation
@@ -81,16 +85,20 @@ shellcheck scripts/**/*.sh  # Lint shell scripts
 This is a high-level summary of core MCP tools exposed by the server.
 
 ## Observation
+
 - `observe` - Capture screen state and view hierarchy
 
 ## Interaction
+
 - `tapOn`, `swipeOn`, `dragAndDrop`, `pinchOn`
 - `inputText`, `clearText`, `pressButton`, `pressKey`
 
 ## App Management
+
 - `launchApp`, `terminateApp`, `installApp`
 
 ## Device Management
+
 - `listDevices`, `startDevice`, `killDevice`, `setActiveDevice`
 
 # Android Notification Group Handling (Hard-Won Knowledge)
@@ -161,11 +169,13 @@ plain `git` stays fine for read-only queries (`git log`, `git diff`, `gh`).
 ## Skills
 
 ### Foundation Skills
+
 - github-cli: Use `gh` for PRs, issues, checks, and repo metadata. Path: `skills/github-cli/SKILL.md`.
 - android-gradlew: Run Android tasks via `android/gradlew`. Path: `skills/android-gradlew/SKILL.md`.
 - bun-tasks: Use `package.json` scripts with Bun. Path: `skills/bun-tasks/SKILL.md`.
 
 ### Workflow Skills
+
 - check-ci: Inspect PR checks, fetch failing logs, reproduce likely failures locally, and summarize next steps. Path: `skills/check-ci/SKILL.md`.
 - github-pr-feedback: Collect every PR discussion and review thread, triage it, and safely resolve feedback after verified fixes without posting comments. Path: `skills/github-pr-feedback/SKILL.md`.
 - dead-code: Detect and remove dead code using repo scripts and targeted validation. Path: `skills/dead-code/SKILL.md`.

@@ -1,4 +1,9 @@
-import { ISimCtl, AppleDevice, AppleDeviceRuntime, AppleDeviceType } from "../../src/utils/interfaces/Simctl";
+import {
+  ISimCtl,
+  AppleDevice,
+  AppleDeviceRuntime,
+  AppleDeviceType,
+} from "../../src/utils/interfaces/Simctl";
 import { BootedDevice, ExecResult, DeviceInfo, ScreenSize } from "../../src/models";
 
 /**
@@ -19,12 +24,12 @@ export class FakeSimctl implements ISimCtl {
     pid?: number;
     error?: string;
   } = {
-      success: true,
-      pid: 12345
-    };
+    success: true,
+    pid: 12345,
+  };
   private screenSize: ScreenSize = {
     width: 1179,
-    height: 2556
+    height: 2556,
   };
   private isAvailableResult: boolean = true;
   private isSimulatorRunningResult: boolean = false;
@@ -33,7 +38,7 @@ export class FakeSimctl implements ISimCtl {
     stderr: "",
     toString: () => "",
     trim: () => "",
-    includes: () => false
+    includes: () => false,
   };
   private createdSimulatorUdid: string = "created-simulator-udid-123";
 
@@ -85,11 +90,7 @@ export class FakeSimctl implements ISimCtl {
   /**
    * Configure launchApp response
    */
-  setLaunchAppResult(result: {
-    success: boolean;
-    pid?: number;
-    error?: string;
-  }): void {
+  setLaunchAppResult(result: { success: boolean; pid?: number; error?: string }): void {
     this.launchAppResult = result;
   }
 
@@ -198,7 +199,7 @@ export class FakeSimctl implements ISimCtl {
       killed: false,
       connected: false,
       exitCode: 0,
-      signalCode: null
+      signalCode: null,
     };
   }
 
@@ -208,14 +209,14 @@ export class FakeSimctl implements ISimCtl {
 
   async waitForSimulatorReady(udid: string, _timeoutMs?: number): Promise<BootedDevice> {
     this.recordCall("waitForSimulatorReady", { udid });
-    const simulator = this.bootedSimulators.find(s => s.deviceId === udid);
+    const simulator = this.bootedSimulators.find((s) => s.deviceId === udid);
     if (simulator) {
       return simulator;
     }
     return {
       deviceId: udid,
       name: "Unknown Simulator",
-      platform: "ios"
+      platform: "ios",
     } as BootedDevice;
   }
 
@@ -236,14 +237,14 @@ export class FakeSimctl implements ISimCtl {
 
   async bootSimulator(udid: string): Promise<BootedDevice> {
     this.recordCall("bootSimulator", { udid });
-    const simulator = this.bootedSimulators.find(s => s.deviceId === udid);
+    const simulator = this.bootedSimulators.find((s) => s.deviceId === udid);
     if (simulator) {
       return simulator;
     }
     return {
       deviceId: udid,
       name: "Booted Simulator",
-      platform: "ios"
+      platform: "ios",
     } as BootedDevice;
   }
 
@@ -274,7 +275,7 @@ export class FakeSimctl implements ISimCtl {
   async launchApp(
     bundleId: string,
     options?: { foregroundIfRunning?: boolean },
-    deviceId?: string
+    deviceId?: string,
   ): Promise<{
     success: boolean;
     pid?: number;

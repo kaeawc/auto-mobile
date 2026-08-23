@@ -156,14 +156,14 @@ export class FailuresStreamSocketServer extends RequestResponseSocketServer<
   constructor(
     socketPath: string = getSocketPath(FAILURES_STREAM_SOCKET_CONFIG),
     timer: Timer = defaultTimer,
-    repository: FailuresStreamRepository = failureAnalyticsRepository
+    repository: FailuresStreamRepository = failureAnalyticsRepository,
   ) {
     super(socketPath, timer, "FailuresStream");
     this.repository = repository;
   }
 
   protected async handleRequest(
-    request: FailuresStreamSocketRequest
+    request: FailuresStreamSocketRequest,
   ): Promise<FailuresStreamSocketResponse> {
     switch (request.command) {
       case "poll_notifications":
@@ -179,7 +179,10 @@ export class FailuresStreamSocketServer extends RequestResponseSocketServer<
     }
   }
 
-  protected createErrorResponse(_id: string | undefined, error: string): FailuresStreamSocketResponse {
+  protected createErrorResponse(
+    _id: string | undefined,
+    error: string,
+  ): FailuresStreamSocketResponse {
     return {
       success: false,
       error,
@@ -187,7 +190,7 @@ export class FailuresStreamSocketServer extends RequestResponseSocketServer<
   }
 
   private async handlePollNotifications(
-    request: FailuresStreamSocketRequest
+    request: FailuresStreamSocketRequest,
   ): Promise<FailuresStreamSocketResponse> {
     const sinceTimestamp = normalizeTimestamp(request.sinceTimestamp, "sinceTimestamp");
     const sinceId = normalizeSinceId(request.sinceId);
@@ -223,7 +226,7 @@ export class FailuresStreamSocketServer extends RequestResponseSocketServer<
   }
 
   private async handlePollGroups(
-    request: FailuresStreamSocketRequest
+    request: FailuresStreamSocketRequest,
   ): Promise<FailuresStreamSocketResponse> {
     // Calculate time range if dateRange is provided
     let startTime = normalizeTimestamp(request.startTime, "startTime");
@@ -251,7 +254,7 @@ export class FailuresStreamSocketServer extends RequestResponseSocketServer<
   }
 
   private async handlePollTimeline(
-    request: FailuresStreamSocketRequest
+    request: FailuresStreamSocketRequest,
   ): Promise<FailuresStreamSocketResponse> {
     const aggregation = normalizeAggregation(request.aggregation);
 
@@ -268,7 +271,7 @@ export class FailuresStreamSocketServer extends RequestResponseSocketServer<
     } else {
       // Default to 24h if no range specified
       endTime = endTime ?? now;
-      startTime = startTime ?? (endTime - 24 * 60 * 60 * 1000);
+      startTime = startTime ?? endTime - 24 * 60 * 60 * 1000;
     }
 
     const result = await this.repository.getTimelineData({
@@ -285,7 +288,7 @@ export class FailuresStreamSocketServer extends RequestResponseSocketServer<
   }
 
   private async handleAcknowledge(
-    request: FailuresStreamSocketRequest
+    request: FailuresStreamSocketRequest,
   ): Promise<FailuresStreamSocketResponse> {
     const ids = request.notificationIds;
     if (!ids || !Array.isArray(ids)) {

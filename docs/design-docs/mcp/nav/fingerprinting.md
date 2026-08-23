@@ -37,6 +37,7 @@ AutoMobile uses a tiered fallback approach with confidence levels:
 **How**: Extract and hash the navigation resource-id
 
 **Example**:
+
 ```typescript
 // Hierarchy contains:
 { "resource-id": "navigation.HomeDestination" }
@@ -51,11 +52,13 @@ AutoMobile uses a tiered fallback approach with confidence levels:
 ```
 
 **Advantages**:
+
 - Perfect identifier for SDK apps
 - Immune to content changes
 - Very stable
 
 **Limitations**:
+
 - Only works with AutoMobile SDK
 - Disappears when keyboard occludes app
 
@@ -68,6 +71,7 @@ AutoMobile uses a tiered fallback approach with confidence levels:
 **How**: Use cached navigation ID from previous observation (within TTL)
 
 **Example**:
+
 ```typescript
 // Before keyboard: navigation.TextScreen visible
 // Keyboard appears: only keyboard elements visible
@@ -75,16 +79,18 @@ AutoMobile uses a tiered fallback approach with confidence levels:
 
 compute(hierarchyWithKeyboard, {
   cachedNavigationId: "navigation.TextScreen",
-  cachedNavigationIdTimestamp: previousTimestamp
-})
+  cachedNavigationIdTimestamp: previousTimestamp,
+});
 ```
 
 **Advantages**:
+
 - Handles keyboard occlusion gracefully
 - Maintains high confidence
 - Prevents false screen changes
 
 **Limitations**:
+
 - Requires temporal tracking
 - Cache expires after TTL (default: 10 seconds)
 
@@ -97,12 +103,14 @@ compute(hierarchyWithKeyboard, {
 **How**: Enhanced hierarchy filtering with shallow scrollable markers
 
 **Strategy**:
+
 1. **Shallow Scrollable Markers**: Keep container metadata, drop all children
 2. **Selected State Preservation**: Extract and preserve `selected="true"` items
 3. **Dynamic Content Filtering**: Remove time, numbers, system UI
 4. **Static Text Inclusion**: Keep labels and titles for differentiation
 
 **Example**:
+
 ```json
 // Before filtering:
 {
@@ -126,12 +134,14 @@ compute(hierarchyWithKeyboard, {
 ```
 
 **Advantages**:
+
 - Handles scrolling perfectly
 - Prevents tab collision (different screens with same structure)
 - Works for non-SDK apps
 - Reduces noise from dynamic content
 
 **Limitations**:
+
 - Lower confidence than navigation ID
 - May struggle with very similar screens
 
@@ -144,14 +154,17 @@ compute(hierarchyWithKeyboard, {
 **How**: Same as Tier 3 but with keyboard element filtering
 
 **Additional Filtering**:
+
 - Remove nodes with keyboard indicators (Delete, Enter, emoji)
 - Filter `keyboard` and `inputmethod` resource-ids
 
 **Advantages**:
+
 - Best effort for keyboard scenarios without cache
 - Still provides reasonable differentiation
 
 **Limitations**:
+
 - Lowest confidence
 - May miss subtle screen differences
 
@@ -185,6 +198,7 @@ metadata stays constant as content scrolls)
 **Critical Fix**: Preserve selected items even in scrollable containers
 
 **Example of Collision Prevention**:
+
 ```typescript
 // Without selected state preservation - COLLISION
 Home Screen:     scrollable tab_row → hash(container)
@@ -204,10 +218,12 @@ Settings Screen: scrollable + _selected: ["Settings"] → hash2
 #### 3. Keyboard Detection & Filtering
 
 **Indicators**:
+
 - `content-desc` containing: Delete, Enter, keyboard, emoji, Shift
 - `resource-id` containing: keyboard, inputmethod
 
 **Actions**:
+
 ```mermaid
 flowchart LR
     A["Keyboard detected"] --> B["Set keyboardDetected = true"];
@@ -228,6 +244,7 @@ flowchart LR
 #### 4. Editable Text Filtering
 
 **Detection**:
+
 - `className` contains EditText
 - `text-entry-mode="true"`
 - `editable="true"`
@@ -248,6 +265,7 @@ flowchart LR
 **Percentage Patterns**: `45%`, `90%`
 
 **System UI**:
+
 - `com.android.systemui:id/*` resource-ids
 - `android:id/*` resource-ids
 - Battery/signal content-descriptions
@@ -259,17 +277,17 @@ flowchart LR
 ### Computing a Fingerprint
 
 ```typescript
-import { ScreenFingerprint } from './features/navigation/ScreenFingerprint';
+import { ScreenFingerprint } from "./features/navigation/ScreenFingerprint";
 
 const result = ScreenFingerprint.compute(hierarchy, {
   cachedNavigationId: previousResult?.navigationId,
   cachedNavigationIdTimestamp: previousResult?.timestamp,
-  cacheTTL: 10000 // optional, defaults to 10s
+  cacheTTL: 10000, // optional, defaults to 10s
 });
 
-console.log(result.hash);        // SHA-256 fingerprint
-console.log(result.confidence);  // 95, 85, 75, or 60
-console.log(result.method);      // navigation-id, cached-navigation-id, etc.
+console.log(result.hash); // SHA-256 fingerprint
+console.log(result.confidence); // 95, 85, 75, or 60
+console.log(result.method); // navigation-id, cached-navigation-id, etc.
 console.log(result.keyboardDetected);
 ```
 
@@ -288,7 +306,7 @@ class NavigationTracker {
 
     // Check if screen changed
     if (!this.lastFingerprint || fingerprint.hash !== this.lastFingerprint.hash) {
-      console.log('Screen changed!');
+      console.log("Screen changed!");
       this.onScreenChange(fingerprint);
     }
 

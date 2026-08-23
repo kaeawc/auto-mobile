@@ -139,7 +139,7 @@ export class VideoServerStreamParser {
     if (value > cap) {
       throw new ActionableError(
         `video-server stream declared ${field}=${value}, exceeding the ${cap} cap; ` +
-          "the stream is likely corrupt or out of sync."
+          "the stream is likely corrupt or out of sync.",
       );
     }
   }
@@ -162,7 +162,8 @@ export class VideoServerStreamParser {
         }
         const fullHeader = this.buffered.peek(headerBytes);
         this.muxTracks = new Map();
-        let videoHeader: Pick<VideoServerStreamHeader, "codecId" | "width" | "height"> | null = null;
+        let videoHeader: Pick<VideoServerStreamHeader, "codecId" | "width" | "height"> | null =
+          null;
         let hasPcmAudioTrack = false;
         for (let i = 0; i < trackCount; i++) {
           const offset = STREAM_HEADER_BYTES + i * MUX_TRACK_BYTES;
@@ -173,7 +174,10 @@ export class VideoServerStreamParser {
           this.muxTracks.set(trackId, { codecId, param1, param2 });
           if (codecId === VIDEO_SERVER_CODEC_ID_H264) {
             videoHeader = { codecId, width: param1, height: param2 };
-          } else if (trackId === VIDEO_SERVER_TRACK_ID_AUDIO && codecId === VIDEO_SERVER_CODEC_ID_PCM16) {
+          } else if (
+            trackId === VIDEO_SERVER_TRACK_ID_AUDIO &&
+            codecId === VIDEO_SERVER_CODEC_ID_PCM16
+          ) {
             hasPcmAudioTrack = true;
           }
         }

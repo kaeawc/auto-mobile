@@ -14,7 +14,7 @@ describe("XcodebuildClient executeCommand timeout", () => {
       _file: string,
       args: string[],
       _maxBuffer?: number,
-      signal?: AbortSignal
+      signal?: AbortSignal,
     ): Promise<ExecResult> => {
       // Availability probe runs first; answer it so executeCommand proceeds.
       if (args.join(" ") === "-version") {
@@ -41,7 +41,7 @@ describe("XcodebuildClient executeCommand timeout", () => {
     timer.advanceTime(1234);
 
     await expect(promise).rejects.toThrow(
-      "Command timed out after 1234ms: xcodebuild -showBuildSettings"
+      "Command timed out after 1234ms: xcodebuild -showBuildSettings",
     );
     // The timeout must abort the child rather than leave it running orphaned.
     expect(capturedSignal.aborted).toBe(true);
@@ -54,7 +54,7 @@ describe("XcodebuildClient executeCommand timeout", () => {
       _file: string,
       args: string[],
       _maxBuffer?: number,
-      signal?: AbortSignal
+      signal?: AbortSignal,
     ): Promise<ExecResult> => {
       if (args.join(" ") === "-version") {
         return createExecResult("Xcode 26.5", "");
@@ -83,7 +83,7 @@ describe("XcodebuildClient executeCommand timeout", () => {
     });
 
     await expect(client.executeCommand(["-showBuildSettings"])).rejects.toThrow(
-      "xcodebuild is not available. Please install Xcode to continue."
+      "xcodebuild is not available. Please install Xcode to continue.",
     );
   });
 
@@ -124,7 +124,7 @@ describe("XcodebuildClient executeCommand timeout", () => {
     timer.advanceTime(1234);
 
     await expect(promise).rejects.toThrow(
-      "Command timed out after 1234ms: xcodebuild -showBuildSettings"
+      "Command timed out after 1234ms: xcodebuild -showBuildSettings",
     );
     expect(probeSignal.aborted).toBe(true);
   });
@@ -133,32 +133,38 @@ describe("XcodebuildClient executeCommand timeout", () => {
 describe("XcodebuildClient streaming runner", () => {
   test("starts a detached argv-form runner without a shell", async () => {
     const child = new FakeChildProcess();
-    const calls: Array<{ command: string; args: string[]; options: import("node:child_process").SpawnOptions }> = [];
+    const calls: Array<{
+      command: string;
+      args: string[];
+      options: import("node:child_process").SpawnOptions;
+    }> = [];
     const client = new XcodebuildClient(
       async () => createExecResult("Xcode 26.5", ""),
       new FakeTimer(),
       (command, args, options) => {
         calls.push({ command, args, options });
         return child as never;
-      }
+      },
     );
 
     const result = await client.startStreaming(
       ["test-without-building", "-destination", "id=A B"],
-      { detached: true, env: { AUTOMOBILE_DEVICE_ID: "A B" }, stdio: ["ignore", "pipe", "pipe"] }
+      { detached: true, env: { AUTOMOBILE_DEVICE_ID: "A B" }, stdio: ["ignore", "pipe", "pipe"] },
     );
 
     expect(result).toBe(child);
-    expect(calls).toEqual([{
-      command: "xcodebuild",
-      args: ["test-without-building", "-destination", "id=A B"],
-      options: {
-        detached: true,
-        env: { AUTOMOBILE_DEVICE_ID: "A B" },
-        stdio: ["ignore", "pipe", "pipe"],
-        shell: false,
-      }
-    }]);
+    expect(calls).toEqual([
+      {
+        command: "xcodebuild",
+        args: ["test-without-building", "-destination", "id=A B"],
+        options: {
+          detached: true,
+          env: { AUTOMOBILE_DEVICE_ID: "A B" },
+          stdio: ["ignore", "pipe", "pipe"],
+          shell: false,
+        },
+      },
+    ]);
   });
 
   test("rejects a streaming runner when xcodebuild is unavailable", async () => {
@@ -167,7 +173,7 @@ describe("XcodebuildClient streaming runner", () => {
     });
 
     await expect(client.startStreaming(["test-without-building"])).rejects.toThrow(
-      "xcodebuild is not available"
+      "xcodebuild is not available",
     );
   });
 
@@ -177,14 +183,15 @@ describe("XcodebuildClient streaming runner", () => {
     let resolveAvailability: (() => void) | undefined;
     let spawned = false;
     const client = new XcodebuildClient(
-      async () => new Promise<ExecResult>(resolve => {
-        resolveAvailability = () => resolve(createExecResult("Xcode 26.5", ""));
-      }),
+      async () =>
+        new Promise<ExecResult>((resolve) => {
+          resolveAvailability = () => resolve(createExecResult("Xcode 26.5", ""));
+        }),
       timer,
       () => {
         spawned = true;
         return child as never;
-      }
+      },
     );
 
     const promise = client.startStreaming(["test-without-building"]);
@@ -211,7 +218,7 @@ describe("XcodebuildClient streaming runner", () => {
     }, timer);
 
     await expect(
-      client.startStreaming(["test-without-building"], { timeoutMs: 5000 })
+      client.startStreaming(["test-without-building"], { timeoutMs: 5000 }),
     ).rejects.toThrow("xcodebuild is not available");
 
     expect(timer.getPendingTimeoutCount()).toBe(0);

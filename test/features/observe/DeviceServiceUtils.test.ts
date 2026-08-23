@@ -285,7 +285,7 @@ describe("DeviceServiceUtils", () => {
           return true;
         },
         { maxAttempts: 3, delayMs: 1000 },
-        fakeTimer
+        fakeTimer,
       );
 
       expect(result).toBe(true);
@@ -302,13 +302,13 @@ describe("DeviceServiceUtils", () => {
           return callCount >= 3;
         },
         { maxAttempts: 5, delayMs: 100 },
-        fakeTimer
+        fakeTimer,
       );
 
       // Interleave time advancement with async execution
       for (let i = 0; i < 5; i++) {
         fakeTimer.advanceTime(100);
-        await new Promise(r => setImmediate(r));
+        await new Promise((r) => setImmediate(r));
       }
 
       const result = await promise;
@@ -327,13 +327,13 @@ describe("DeviceServiceUtils", () => {
           return false;
         },
         { maxAttempts: 3, delayMs: 100 },
-        fakeTimer
+        fakeTimer,
       );
 
       // Interleave time advancement with async execution
       for (let i = 0; i < 5; i++) {
         fakeTimer.advanceTime(100);
-        await new Promise(r => setImmediate(r));
+        await new Promise((r) => setImmediate(r));
       }
 
       const result = await promise;
@@ -356,7 +356,7 @@ describe("DeviceServiceUtils", () => {
           return false;
         },
         undefined,
-        fakeTimer
+        fakeTimer,
       );
 
       // After the first failing attempt, the default 1000ms delay is scheduled.
@@ -365,7 +365,7 @@ describe("DeviceServiceUtils", () => {
 
       for (let i = 0; i < 4; i++) {
         fakeTimer.advanceTime(1000);
-        await new Promise(r => setImmediate(r));
+        await new Promise((r) => setImmediate(r));
       }
 
       expect(await promise).toBe(false);
@@ -382,13 +382,13 @@ describe("DeviceServiceUtils", () => {
           return callCount >= 2;
         },
         { maxAttempts: 3, delayMs: 100 },
-        fakeTimer
+        fakeTimer,
       );
 
       // Interleave time advancement with async execution
       for (let i = 0; i < 5; i++) {
         fakeTimer.advanceTime(100);
-        await new Promise(r => setImmediate(r));
+        await new Promise((r) => setImmediate(r));
       }
 
       const result = await promise;
@@ -495,9 +495,11 @@ describe("DeviceServiceUtils", () => {
       const result = parseMessage("not valid json", log);
 
       expect(result).toBeNull();
-      expect(log.at("debug")).toContainEqual(expect.objectContaining({
-        message: expect.stringContaining("Failed to parse device service message"),
-      }));
+      expect(log.at("debug")).toContainEqual(
+        expect.objectContaining({
+          message: expect.stringContaining("Failed to parse device service message"),
+        }),
+      );
     });
 
     test("returns null for empty string", () => {

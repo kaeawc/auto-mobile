@@ -45,8 +45,12 @@ const DIGEST_Z = "f".repeat(64);
 
 describe("combineApkDigests", () => {
   test("is order-independent and content-derived (split APKs)", () => {
-    const a = combineApkDigests(`${DIGEST_A}  /data/app/base.apk\n${DIGEST_B}  /data/app/split_config.apk\n`);
-    const reordered = combineApkDigests(`${DIGEST_B}  /data/app/split_config.apk\n${DIGEST_A}  /data/app/base.apk\n`);
+    const a = combineApkDigests(
+      `${DIGEST_A}  /data/app/base.apk\n${DIGEST_B}  /data/app/split_config.apk\n`,
+    );
+    const reordered = combineApkDigests(
+      `${DIGEST_B}  /data/app/split_config.apk\n${DIGEST_A}  /data/app/base.apk\n`,
+    );
     expect(a).toBe(reordered);
   });
 
@@ -95,7 +99,7 @@ describe("CachingContentHashProvider", () => {
       new Map([
         ["emu-1::com.example.app::5", "V5"],
         ["emu-1::com.example.app::6", "V6"],
-      ])
+      ]),
     );
     const provider = new CachingContentHashProvider(hasher);
     const v5 = await provider.resolveContentHash(fakeDevice("emu-1"), "com.example.app", 5);
@@ -117,7 +121,7 @@ describe("CachingContentHashProvider", () => {
         ["emu-1::com.example.app::5", "V5"],
         ["emu-1::com.example.app::6", "V6"],
         ["emu-1::com.other.app::5", "OTHER"],
-      ])
+      ]),
     );
     const provider = new CachingContentHashProvider(hasher);
     await provider.resolveContentHash(fakeDevice("emu-1"), "com.example.app", 5);
@@ -143,7 +147,9 @@ describe("CachingContentHashProvider", () => {
       async computeHash() {
         computeCalls += 1;
         if (computeCalls === 1) {
-          return new Promise<string>(resolve => { release = resolve; });
+          return new Promise<string>((resolve) => {
+            release = resolve;
+          });
         }
         return "sha256:FRESH";
       },
@@ -164,7 +170,8 @@ describe("CachingContentHashProvider", () => {
 
 describe("parsePmPathOutput", () => {
   test("extracts base + split APK paths, stripping the package: prefix", () => {
-    const out = "package:/data/app/~~x==/com.example.app-1/base.apk\npackage:/data/app/~~x==/com.example.app-1/split_config.en.apk\n";
+    const out =
+      "package:/data/app/~~x==/com.example.app-1/base.apk\npackage:/data/app/~~x==/com.example.app-1/split_config.en.apk\n";
     expect(parsePmPathOutput(out)).toEqual([
       "/data/app/~~x==/com.example.app-1/base.apk",
       "/data/app/~~x==/com.example.app-1/split_config.en.apk",
@@ -192,7 +199,7 @@ describe("AndroidApkContentHasher (pm path resolution)", () => {
   test("resolves APK paths via pm path and returns a non-null hash (installPath-independent)", async () => {
     // This is the WS-package-info-success case: GetAppMetadata would return installPath=""
     // but pm path still yields the APKs, so hashing succeeds on the normal path.
-    const adb = fakeAdb(command => {
+    const adb = fakeAdb((command) => {
       if (command.includes("pm path")) {
         return ok("package:/data/app/com.example.app-1/base.apk\n");
       }
@@ -223,7 +230,7 @@ describe("AndroidApkContentHasher (pm path resolution)", () => {
         return { checksum: pullChecksums === 1 ? DIGEST_B : DIGEST_Z, source: "node" as const };
       },
     };
-    const adb = fakeAdb(command => {
+    const adb = fakeAdb((command) => {
       if (command.includes("pm path")) {
         return ok("package:/a/base.apk\npackage:/a/split.apk\n");
       }

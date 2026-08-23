@@ -35,7 +35,7 @@ describe("exportGraphSummaryForApp provenance (#4985)", () => {
     await seedRepo.recordNodeObservation(home.id, buildB.id, "device-2", "session-2", 200);
 
     const summary = await harness.manager.exportGraphSummaryForApp(APP);
-    const node = summary.nodes.find(n => n.screenName === "Home");
+    const node = summary.nodes.find((n) => n.screenName === "Home");
     expect(node).toBeDefined();
     expect(node!.provenance).toHaveLength(2);
     // Recency-first ordering.
@@ -55,7 +55,7 @@ describe("exportGraphSummaryForApp provenance (#4985)", () => {
     await seedRepo.recordNodeObservation(home.id, buildA.id, "device-1", "session-1", 100);
 
     const summary = await harness.manager.exportGraphSummaryForApp(APP);
-    const node = summary.nodes.find(n => n.screenName === "Home")!;
+    const node = summary.nodes.find((n) => n.screenName === "Home")!;
     expect(node.id).toBe(home.id);
     expect(node.screenName).toBe("Home");
     expect(node.visitCount).toBe(1);
@@ -64,7 +64,7 @@ describe("exportGraphSummaryForApp provenance (#4985)", () => {
   test("a node with no observations gets an empty provenance array", async () => {
     await seedRepo.getOrCreateNode(APP, "Home", 100);
     const summary = await harness.manager.exportGraphSummaryForApp(APP);
-    const node = summary.nodes.find(n => n.screenName === "Home")!;
+    const node = summary.nodes.find((n) => n.screenName === "Home")!;
     expect(node.provenance).toEqual([]);
   });
 
@@ -81,7 +81,7 @@ describe("exportGraphSummaryForApp provenance (#4985)", () => {
     await seedRepo.recordEdgeObservation(edge2.id, buildB.id, "device-1", "session-1", 500);
 
     const summary = await harness.manager.exportGraphSummaryForApp(APP);
-    const edges = summary.edges.filter(e => e.from === "Home" && e.to === "Details");
+    const edges = summary.edges.filter((e) => e.from === "Home" && e.to === "Details");
     expect(edges).toHaveLength(1);
     const edge = edges[0];
     expect(edge.traversalCount).toBe(2);

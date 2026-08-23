@@ -53,7 +53,7 @@ export const IOS_CTRLPROXY_SCREENSHOT_METADATA: ScreenshotMetadata = {
 
 export function metadataForScreenshotFormat(
   metadata: ScreenshotMetadata,
-  format?: string
+  format?: string,
 ): ScreenshotMetadata {
   const metadataWithoutFormat = { ...metadata };
   delete metadataWithoutFormat.screenshotMimeType;

@@ -39,17 +39,17 @@ class FakeBackend implements VideoCaptureBackend {
   }
 }
 
-describe("HybridVideoCaptureBackend - Unit Tests", function() {
+describe("HybridVideoCaptureBackend - Unit Tests", function () {
   let ffmpegBackend: FakeBackend;
   let platformBackend: FakeBackend;
   let backend: HybridVideoCaptureBackend;
   let baseConfig: VideoCaptureConfig;
 
-  afterEach(function() {
+  afterEach(function () {
     delete process.env.AUTOMOBILE_ANDROID_VIDEO_USE_FFMPEG_PIPE;
   });
 
-  beforeEach(function() {
+  beforeEach(function () {
     delete process.env.AUTOMOBILE_ANDROID_VIDEO_USE_FFMPEG_PIPE;
     ffmpegBackend = new FakeBackend("ffmpeg");
     platformBackend = new FakeBackend("platform");
@@ -77,7 +77,7 @@ describe("HybridVideoCaptureBackend - Unit Tests", function() {
     };
   });
 
-  test("routes Android recording to platform backend", async function() {
+  test("routes Android recording to platform backend", async function () {
     const handle = await backend.start(baseConfig);
 
     expect(platformBackend.startCalls.length).toBe(1);
@@ -89,7 +89,7 @@ describe("HybridVideoCaptureBackend - Unit Tests", function() {
     expect(ffmpegBackend.stopCalls.length).toBe(0);
   });
 
-  test("routes Android recording to ffmpeg backend when AUTOMOBILE_ANDROID_VIDEO_USE_FFMPEG_PIPE=1", async function() {
+  test("routes Android recording to ffmpeg backend when AUTOMOBILE_ANDROID_VIDEO_USE_FFMPEG_PIPE=1", async function () {
     process.env.AUTOMOBILE_ANDROID_VIDEO_USE_FFMPEG_PIPE = "1";
     const handle = await backend.start(baseConfig);
 
@@ -102,7 +102,7 @@ describe("HybridVideoCaptureBackend - Unit Tests", function() {
     expect(platformBackend.stopCalls.length).toBe(0);
   });
 
-  test("routes Android recording to ffmpeg backend when the opt-in flag is the string \"true\"", async function() {
+  test('routes Android recording to ffmpeg backend when the opt-in flag is the string "true"', async function () {
     process.env.AUTOMOBILE_ANDROID_VIDEO_USE_FFMPEG_PIPE = "true";
     await backend.start(baseConfig);
     expect(ffmpegBackend.startCalls.length).toBe(1);
@@ -111,35 +111,33 @@ describe("HybridVideoCaptureBackend - Unit Tests", function() {
 
   // The opt-in check is case-sensitive: only "1" / "true" enable ffmpeg. An
   // uppercase "TRUE" must fall through to the default platform backend.
-  test("does NOT treat an uppercase \"TRUE\" opt-in value as enabled", async function() {
+  test('does NOT treat an uppercase "TRUE" opt-in value as enabled', async function () {
     process.env.AUTOMOBILE_ANDROID_VIDEO_USE_FFMPEG_PIPE = "TRUE";
     await backend.start(baseConfig);
     expect(platformBackend.startCalls.length).toBe(1);
     expect(ffmpegBackend.startCalls.length).toBe(0);
   });
 
-  test("treats an empty opt-in value as disabled and uses the platform backend", async function() {
+  test("treats an empty opt-in value as disabled and uses the platform backend", async function () {
     process.env.AUTOMOBILE_ANDROID_VIDEO_USE_FFMPEG_PIPE = "";
     await backend.start(baseConfig);
     expect(platformBackend.startCalls.length).toBe(1);
     expect(ffmpegBackend.startCalls.length).toBe(0);
   });
 
-  test("start rejects when no device is provided", async function() {
+  test("start rejects when no device is provided", async function () {
     const configWithoutDevice: VideoCaptureConfig = { ...baseConfig, device: undefined };
-    await expect(backend.start(configWithoutDevice)).rejects.toThrow(
-      "Device is required"
-    );
+    await expect(backend.start(configWithoutDevice)).rejects.toThrow("Device is required");
   });
 
-  test("stop rejects when the backend handle is missing or not a hybrid handle", async function() {
+  test("stop rejects when the backend handle is missing or not a hybrid handle", async function () {
     await expect(
       backend.stop({
         recordingId: "x",
         outputPath: "/tmp/x.mp4",
         startedAt: new Date().toISOString(),
         backendHandle: undefined,
-      })
+      }),
     ).rejects.toThrow("Missing backend handle for hybrid");
 
     await expect(
@@ -148,11 +146,11 @@ describe("HybridVideoCaptureBackend - Unit Tests", function() {
         outputPath: "/tmp/x.mp4",
         startedAt: new Date().toISOString(),
         backendHandle: { kind: "not-hybrid" } as never,
-      })
+      }),
     ).rejects.toThrow("Missing backend handle for hybrid");
   });
 
-  test("routes iOS recording to ffmpeg backend", async function() {
+  test("routes iOS recording to ffmpeg backend", async function () {
     const iosConfig = {
       ...baseConfig,
       device: {

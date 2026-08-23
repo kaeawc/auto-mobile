@@ -7,12 +7,7 @@
     "build": {
       "description": "Compile TypeScript source to dist/",
       "outputs": ["dist/**"],
-      "inputs": [
-        "src/**",
-        "build.ts",
-        "schemas/**",
-        "package.json"
-      ],
+      "inputs": ["src/**", "build.ts", "schemas/**", "package.json"],
       "outputLogs": "new-only",
       "env": [
         "AUTOMOBILE_SOURCEMAP_INCLUDE_DEPS",
@@ -66,11 +61,7 @@
     },
     "check:android-emulator-boundary": {
       "description": "Prevent Android emulator execution outside AndroidEmulatorClient",
-      "inputs": [
-        "src/**",
-        "scripts/check-android-emulator-boundary.sh",
-        "package.json"
-      ],
+      "inputs": ["src/**", "scripts/check-android-emulator-boundary.sh", "package.json"],
       "outputs": [],
       "outputLogs": "new-only"
     },
@@ -94,7 +85,13 @@
     },
     "typecheck": {
       "description": "tsgo --noEmit baseline gate (scripts/typecheck-baseline.sh, issue #3001). Cached on src/** + tsconfig + the baseline so an unchanged src/ skips the ~5.6s run; a test/docs/native-only edit is a cache hit. Keyed on declared inputs, not the tsc/tsgo binary, so it is migration-neutral — a TypeScript-version bump changes package.json and the regenerated baseline and busts the hash. Only exit-0 is cached, so a red gate is never memoized.",
-      "inputs": ["src/**", "tsconfig.json", "scripts/typecheck-baseline.sh", "scripts/typecheck-baseline.txt", "package.json"],
+      "inputs": [
+        "src/**",
+        "tsconfig.json",
+        "scripts/typecheck-baseline.sh",
+        "scripts/typecheck-baseline.txt",
+        "package.json"
+      ],
       "outputs": [],
       "outputLogs": "new-only",
       "passThroughEnv": ["CI", "GITHUB_ACTIONS"]

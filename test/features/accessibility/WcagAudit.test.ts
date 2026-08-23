@@ -8,16 +8,20 @@ import { WcagAudit, type WcagBaselineStore } from "../../../src/features/accessi
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { Element } from "../../../src/models/Element";
 import type { ViewHierarchyNode } from "../../../src/models/ViewHierarchyResult";
-import type { AccessibilityAuditConfig, WcagViolation } from "../../../src/models/AccessibilityAudit";
+import type {
+  AccessibilityAuditConfig,
+  WcagViolation,
+} from "../../../src/models/AccessibilityAudit";
 
 /**
  * Baseline-store fake that returns a canned baseline without touching persistence.
  */
 class StubBaselineManager implements WcagBaselineStore {
-  constructor(private readonly stub: { violations: Pick<WcagViolation, "fingerprint">[] } | null) {
-  }
+  constructor(private readonly stub: { violations: Pick<WcagViolation, "fingerprint">[] } | null) {}
 
-  async getBaseline(_screenId: string): Promise<{ violations: Pick<WcagViolation, "fingerprint">[] } | null> {
+  async getBaseline(
+    _screenId: string,
+  ): Promise<{ violations: Pick<WcagViolation, "fingerprint">[] } | null> {
     return this.stub;
   }
 
@@ -26,15 +30,15 @@ class StubBaselineManager implements WcagBaselineStore {
   async clearBaseline(_screenId: string): Promise<void> {}
 }
 
-describe("WcagAudit", function() {
+describe("WcagAudit", function () {
   let audit: WcagAudit;
 
-  beforeEach(function() {
+  beforeEach(function () {
     audit = new WcagAudit();
   });
 
-  describe("Missing Content Descriptions", function() {
-    it("should detect clickable elements without text or content-desc", async function() {
+  describe("Missing Content Descriptions", function () {
+    it("should detect clickable elements without text or content-desc", async function () {
       const elements: Element[] = [
         {
           bounds: { left: 0, top: 0, right: 100, bottom: 50 },
@@ -53,12 +57,12 @@ describe("WcagAudit", function() {
       const result = await audit.audit(elements, hierarchy, undefined, "com.test", config);
 
       const contentDescViolations = result.violations.filter(
-        v => v.type === "missing-content-description"
+        (v) => v.type === "missing-content-description",
       );
       expect(contentDescViolations).toHaveLength(1);
     });
 
-    it("should NOT flag elements with text", async function() {
+    it("should NOT flag elements with text", async function () {
       const elements: Element[] = [
         {
           bounds: { left: 0, top: 0, right: 100, bottom: 50 },
@@ -77,16 +81,16 @@ describe("WcagAudit", function() {
       const result = await audit.audit(elements, hierarchy, undefined, "com.test", config);
 
       const contentDescViolations = result.violations.filter(
-        v => v.type === "missing-content-description"
+        (v) => v.type === "missing-content-description",
       );
       expect(contentDescViolations).toHaveLength(0);
     });
 
-    it("should NOT flag elements with content-desc", async function() {
+    it("should NOT flag elements with content-desc", async function () {
       const elements: Element[] = [
         {
-          "bounds": { left: 0, top: 0, right: 100, bottom: 50 },
-          "clickable": true,
+          bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+          clickable: true,
           "content-desc": "Clickable button",
         },
       ];
@@ -101,12 +105,12 @@ describe("WcagAudit", function() {
       const result = await audit.audit(elements, hierarchy, undefined, "com.test", config);
 
       const contentDescViolations = result.violations.filter(
-        v => v.type === "missing-content-description"
+        (v) => v.type === "missing-content-description",
       );
       expect(contentDescViolations).toHaveLength(0);
     });
 
-    it("should NOT flag non-interactive elements without labels", async function() {
+    it("should NOT flag non-interactive elements without labels", async function () {
       const elements: Element[] = [
         {
           bounds: { left: 0, top: 0, right: 100, bottom: 50 },
@@ -125,12 +129,12 @@ describe("WcagAudit", function() {
       const result = await audit.audit(elements, hierarchy, undefined, "com.test", config);
 
       const contentDescViolations = result.violations.filter(
-        v => v.type === "missing-content-description"
+        (v) => v.type === "missing-content-description",
       );
       expect(contentDescViolations).toHaveLength(0);
     });
 
-    it("should handle elements with only whitespace text", async function() {
+    it("should handle elements with only whitespace text", async function () {
       const elements: Element[] = [
         {
           bounds: { left: 0, top: 0, right: 100, bottom: 50 },
@@ -149,15 +153,15 @@ describe("WcagAudit", function() {
       const result = await audit.audit(elements, hierarchy, undefined, "com.test", config);
 
       const contentDescViolations = result.violations.filter(
-        v => v.type === "missing-content-description"
+        (v) => v.type === "missing-content-description",
       );
       // Current implementation treats whitespace as valid text (doesn't trim)
       expect(contentDescViolations).toHaveLength(0);
     });
   });
 
-  describe("Touch Target Size", function() {
-    it("should detect targets smaller than 44x44dp", async function() {
+  describe("Touch Target Size", function () {
+    it("should detect targets smaller than 44x44dp", async function () {
       const elements: Element[] = [
         {
           bounds: { left: 0, top: 0, right: 40, bottom: 40 }, // 40x40 < 44x44
@@ -175,11 +179,11 @@ describe("WcagAudit", function() {
 
       const result = await audit.audit(elements, hierarchy, undefined, "com.test", config);
 
-      const sizeViolations = result.violations.filter(v => v.type === "touch-target-too-small");
+      const sizeViolations = result.violations.filter((v) => v.type === "touch-target-too-small");
       expect(sizeViolations).toHaveLength(1);
     });
 
-    it("should pass targets at exactly 44x44dp", async function() {
+    it("should pass targets at exactly 44x44dp", async function () {
       const elements: Element[] = [
         {
           bounds: { left: 0, top: 0, right: 44, bottom: 44 }, // Exactly 44x44
@@ -197,11 +201,11 @@ describe("WcagAudit", function() {
 
       const result = await audit.audit(elements, hierarchy, undefined, "com.test", config);
 
-      const sizeViolations = result.violations.filter(v => v.type === "touch-target-too-small");
+      const sizeViolations = result.violations.filter((v) => v.type === "touch-target-too-small");
       expect(sizeViolations).toHaveLength(0);
     });
 
-    it("should pass targets larger than 44x44dp", async function() {
+    it("should pass targets larger than 44x44dp", async function () {
       const elements: Element[] = [
         {
           bounds: { left: 0, top: 0, right: 100, bottom: 50 }, // Larger
@@ -219,11 +223,11 @@ describe("WcagAudit", function() {
 
       const result = await audit.audit(elements, hierarchy, undefined, "com.test", config);
 
-      const sizeViolations = result.violations.filter(v => v.type === "touch-target-too-small");
+      const sizeViolations = result.violations.filter((v) => v.type === "touch-target-too-small");
       expect(sizeViolations).toHaveLength(0);
     });
 
-    it("should only check clickable elements", async function() {
+    it("should only check clickable elements", async function () {
       const elements: Element[] = [
         {
           bounds: { left: 0, top: 0, right: 20, bottom: 20 }, // Small but not clickable
@@ -241,13 +245,13 @@ describe("WcagAudit", function() {
 
       const result = await audit.audit(elements, hierarchy, undefined, "com.test", config);
 
-      const sizeViolations = result.violations.filter(v => v.type === "touch-target-too-small");
+      const sizeViolations = result.violations.filter((v) => v.type === "touch-target-too-small");
       expect(sizeViolations).toHaveLength(0);
     });
   });
 
-  describe("Summary Generation", function() {
-    it("should generate correct summary statistics", async function() {
+  describe("Summary Generation", function () {
+    it("should generate correct summary statistics", async function () {
       const elements: Element[] = [
         {
           bounds: { left: 0, top: 0, right: 20, bottom: 20 },
@@ -280,7 +284,7 @@ describe("WcagAudit", function() {
       expect(result.summary.passed).toBe(false);
     });
 
-    it("should handle missing screenshot gracefully", async function() {
+    it("should handle missing screenshot gracefully", async function () {
       const elements: Element[] = [
         {
           bounds: { left: 0, top: 0, right: 100, bottom: 50 },
@@ -302,13 +306,13 @@ describe("WcagAudit", function() {
       expect(result.violations).toBeInstanceOf(Array);
       // Should not have contrast violations without screenshot
       const contrastViolations = result.violations.filter(
-        v => v.type === "insufficient-contrast"
+        (v) => v.type === "insufficient-contrast",
       );
       expect(contrastViolations).toHaveLength(0);
     });
   });
 
-  describe("Form Input Labels", function() {
+  describe("Form Input Labels", function () {
     const config: AccessibilityAuditConfig = {
       level: "AA",
       failureMode: "report",
@@ -318,31 +322,42 @@ describe("WcagAudit", function() {
 
     async function formInputViolations(elements: Element[], density?: number) {
       const result = await audit.audit(elements, hierarchy, undefined, "com.test", config, density);
-      return result.violations.filter(v => v.type === "unlabeled-form-input");
+      return result.violations.filter((v) => v.type === "unlabeled-form-input");
     }
 
-    it("flags an EditText with no text, content-desc, or nearby TextView", async function() {
+    it("flags an EditText with no text, content-desc, or nearby TextView", async function () {
       const elements: Element[] = [
         { class: "android.widget.EditText", bounds: { left: 0, top: 0, right: 200, bottom: 60 } },
       ];
       expect(await formInputViolations(elements)).toHaveLength(1);
     });
 
-    it("does NOT flag an EditText with a label TextView directly above it", async function() {
+    it("does NOT flag an EditText with a label TextView directly above it", async function () {
       const elements: Element[] = [
-        { class: "android.widget.EditText", bounds: { left: 0, top: 100, right: 200, bottom: 160 } },
+        {
+          class: "android.widget.EditText",
+          bounds: { left: 0, top: 100, right: 200, bottom: 160 },
+        },
         // Label sits directly above with a 20px vertical gap and full horizontal
         // overlap: bounding boxes are adjacent, so it is a genuine label.
-        { class: "android.widget.TextView", text: "Name", bounds: { left: 0, top: 40, right: 200, bottom: 80 } },
+        {
+          class: "android.widget.TextView",
+          text: "Name",
+          bounds: { left: 0, top: 40, right: 200, bottom: 80 },
+        },
       ];
       expect(await formInputViolations(elements)).toHaveLength(0);
     });
 
-    it("flags an EditText whose only TextView is far away on both axes", async function() {
+    it("flags an EditText whose only TextView is far away on both axes", async function () {
       const elements: Element[] = [
         { class: "android.widget.EditText", bounds: { left: 0, top: 0, right: 100, bottom: 60 } },
         // Label far from the input on both axes: bounding boxes are not adjacent.
-        { class: "android.widget.TextView", text: "Far", bounds: { left: 500, top: 500, right: 600, bottom: 560 } },
+        {
+          class: "android.widget.TextView",
+          text: "Far",
+          bounds: { left: 500, top: 500, right: 600, bottom: 560 },
+        },
       ];
       expect(await formInputViolations(elements)).toHaveLength(1);
     });
@@ -351,50 +366,83 @@ describe("WcagAudit", function() {
     // TextView sharing the input's horizontal band (|centerY diff| < 50) as a
     // label, even one on the opposite edge of the screen. That under-reports
     // unlabeled inputs (false negative). A real proximity metric must flag this.
-    it("flags an EditText whose only TextView shares its row but is far to the side", async function() {
+    it("flags an EditText whose only TextView shares its row but is far to the side", async function () {
       const elements: Element[] = [
         { class: "android.widget.EditText", bounds: { left: 0, top: 0, right: 100, bottom: 60 } },
         // Same vertical band (identical centerY) but ~1900px away horizontally.
-        { class: "android.widget.TextView", text: "Unrelated", bounds: { left: 2000, top: 0, right: 2100, bottom: 60 } },
+        {
+          class: "android.widget.TextView",
+          text: "Unrelated",
+          bounds: { left: 2000, top: 0, right: 2100, bottom: 60 },
+        },
       ];
       expect(await formInputViolations(elements)).toHaveLength(1);
     });
 
     // Companion to the above for the vertical axis: a TextView sharing the
     // input's column but far above it must not count as a label either.
-    it("flags an EditText whose only TextView shares its column but is far above", async function() {
+    it("flags an EditText whose only TextView shares its column but is far above", async function () {
       const elements: Element[] = [
-        { class: "android.widget.EditText", bounds: { left: 0, top: 2000, right: 100, bottom: 2060 } },
+        {
+          class: "android.widget.EditText",
+          bounds: { left: 0, top: 2000, right: 100, bottom: 2060 },
+        },
         // Same horizontal band (identical centerX) but ~1940px above.
-        { class: "android.widget.TextView", text: "Header", bounds: { left: 0, top: 0, right: 100, bottom: 60 } },
+        {
+          class: "android.widget.TextView",
+          text: "Header",
+          bounds: { left: 0, top: 0, right: 100, bottom: 60 },
+        },
       ];
       expect(await formInputViolations(elements)).toHaveLength(1);
     });
 
-    it("picks the nearest TextView: a far one does not mask a genuinely absent label", async function() {
+    it("picks the nearest TextView: a far one does not mask a genuinely absent label", async function () {
       const elements: Element[] = [
         { class: "android.widget.EditText", bounds: { left: 0, top: 0, right: 100, bottom: 60 } },
         // Two TextViews, both too far to be labels; the nearest still exceeds the gate.
-        { class: "android.widget.TextView", text: "A", bounds: { left: 400, top: 0, right: 500, bottom: 60 } },
-        { class: "android.widget.TextView", text: "B", bounds: { left: 0, top: 400, right: 100, bottom: 460 } },
+        {
+          class: "android.widget.TextView",
+          text: "A",
+          bounds: { left: 400, top: 0, right: 500, bottom: 60 },
+        },
+        {
+          class: "android.widget.TextView",
+          text: "B",
+          bounds: { left: 0, top: 400, right: 100, bottom: 460 },
+        },
       ];
       expect(await formInputViolations(elements)).toHaveLength(1);
     });
 
-    it("does NOT flag when a genuine label sits beside an unrelated far TextView", async function() {
+    it("does NOT flag when a genuine label sits beside an unrelated far TextView", async function () {
       const elements: Element[] = [
-        { class: "android.widget.EditText", bounds: { left: 200, top: 100, right: 400, bottom: 160 } },
+        {
+          class: "android.widget.EditText",
+          bounds: { left: 200, top: 100, right: 400, bottom: 160 },
+        },
         // Adjacent label to the left (10px horizontal gap, rows overlap).
-        { class: "android.widget.TextView", text: "Email", bounds: { left: 0, top: 100, right: 190, bottom: 160 } },
+        {
+          class: "android.widget.TextView",
+          text: "Email",
+          bounds: { left: 0, top: 100, right: 190, bottom: 160 },
+        },
         // Unrelated far-away TextView must not change the result.
-        { class: "android.widget.TextView", text: "Far", bounds: { left: 2000, top: 2000, right: 2100, bottom: 2060 } },
+        {
+          class: "android.widget.TextView",
+          text: "Far",
+          bounds: { left: 2000, top: 2000, right: 2100, bottom: 2060 },
+        },
       ];
       expect(await formInputViolations(elements)).toHaveLength(0);
     });
 
-    it("ignores TextViews with no text when resolving labels", async function() {
+    it("ignores TextViews with no text when resolving labels", async function () {
       const elements: Element[] = [
-        { class: "android.widget.EditText", bounds: { left: 0, top: 100, right: 200, bottom: 160 } },
+        {
+          class: "android.widget.EditText",
+          bounds: { left: 0, top: 100, right: 200, bottom: 160 },
+        },
         // Empty-text TextView must not count as a label even though it is adjacent.
         { class: "android.widget.TextView", bounds: { left: 0, top: 40, right: 200, bottom: 80 } },
       ];
@@ -408,21 +456,25 @@ describe("WcagAudit", function() {
     const highDensityLabel: Element[] = [
       { class: "android.widget.EditText", bounds: { left: 0, top: 200, right: 200, bottom: 260 } },
       // Label directly above with a 120px vertical gap (label.bottom 80, input.top 200).
-      { class: "android.widget.TextView", text: "Name", bounds: { left: 0, top: 20, right: 200, bottom: 80 } },
+      {
+        class: "android.widget.TextView",
+        text: "Name",
+        bounds: { left: 0, top: 20, right: 200, bottom: 80 },
+      },
     ];
 
-    it("does NOT flag a normally-spaced label on a high-density (480 DPI) device", async function() {
+    it("does NOT flag a normally-spaced label on a high-density (480 DPI) device", async function () {
       // 120px gap == 40dp <= 50dp gate scaled to 150px.
       expect(await formInputViolations(highDensityLabel, 480)).toHaveLength(0);
     });
 
-    it("flags the same 120px gap as unlabeled on a low-density (160 DPI) device", async function() {
+    it("flags the same 120px gap as unlabeled on a low-density (160 DPI) device", async function () {
       // At mdpi 1dp == 1px, so a 120px gap is a genuine 120dp away: not a label.
       expect(await formInputViolations(highDensityLabel, 160)).toHaveLength(1);
     });
   });
 
-  describe("Touch Target Size (parameterized)", function() {
+  describe("Touch Target Size (parameterized)", function () {
     const hierarchy: ViewHierarchyNode = { class: "View", children: [] };
 
     // width × height × level → (violation?, severity). checkTouchTargetSizes
@@ -433,15 +485,15 @@ describe("WcagAudit", function() {
       [40, 40, "AA", true, "warning"],
       [44, 44, "AA", false, undefined],
       [100, 50, "AA", false, undefined],
-      [44, 40, "AA", true, "warning"],   // height under, width exactly at bound
-      [40, 44, "AA", true, "warning"],   // width under, height exactly at bound
-      [43, 100, "AA", true, "warning"],  // single axis under
-      [40, 40, "AAA", true, "error"],    // severity flip at AAA
+      [44, 40, "AA", true, "warning"], // height under, width exactly at bound
+      [40, 44, "AA", true, "warning"], // width under, height exactly at bound
+      [43, 100, "AA", true, "warning"], // single axis under
+      [40, 40, "AAA", true, "error"], // severity flip at AAA
       [44, 44, "AAA", false, undefined],
-      [100, 43, "AAA", true, "error"],   // single axis under, AAA severity
+      [100, 43, "AAA", true, "error"], // single axis under, AAA severity
     ])(
       "%ix%i at level %s flags=%p severity=%s",
-      async function(width, height, level, expectViolation, expectedSeverity) {
+      async function (width, height, level, expectViolation, expectedSeverity) {
         const elements: Element[] = [
           {
             bounds: { left: 0, top: 0, right: width as number, bottom: height as number },
@@ -456,7 +508,7 @@ describe("WcagAudit", function() {
         };
 
         const result = await audit.audit(elements, hierarchy, undefined, "com.test", config);
-        const sizeViolations = result.violations.filter(v => v.type === "touch-target-too-small");
+        const sizeViolations = result.violations.filter((v) => v.type === "touch-target-too-small");
 
         if (expectViolation) {
           expect(sizeViolations).toHaveLength(1);
@@ -465,11 +517,11 @@ describe("WcagAudit", function() {
         } else {
           expect(sizeViolations).toHaveLength(0);
         }
-      }
+      },
     );
   });
 
-  describe("Heading Hierarchy", function() {
+  describe("Heading Hierarchy", function () {
     const config: AccessibilityAuditConfig = {
       level: "AA",
       failureMode: "report",
@@ -499,37 +551,34 @@ describe("WcagAudit", function() {
       ["three descending sizes", [50, 40, 30]],
       ["ascending sizes", [30, 50]],
       ["small nodes near the old inclusion gate", [50, 20, 21]],
-    ])(
-      "produces no heading violations for %s",
-      async function(_label, heights) {
-        const result = await audit.audit(
-          [],
-          hierarchyWithHeadingHeights(heights as number[]),
-          undefined,
-          "com.test",
-          config
-        );
-        const headingViolations = result.violations.filter(v =>
-          v.type.includes("heading")
-        );
-        expect(headingViolations).toHaveLength(0);
-      }
-    );
+    ])("produces no heading violations for %s", async function (_label, heights) {
+      const result = await audit.audit(
+        [],
+        hierarchyWithHeadingHeights(heights as number[]),
+        undefined,
+        "com.test",
+        config,
+      );
+      const headingViolations = result.violations.filter((v) => v.type.includes("heading"));
+      expect(headingViolations).toHaveLength(0);
+    });
 
-    it("does not report heading-hierarchy-skip in the byType summary", async function() {
+    it("does not report heading-hierarchy-skip in the byType summary", async function () {
       const result = await audit.audit(
         [],
         hierarchyWithHeadingHeights([50, 30, 25]),
         undefined,
         "com.test",
-        config
+        config,
       );
       // The heading violation type is no longer produced or tracked.
-      expect((result.summary.byType as Record<string, number>)["heading-hierarchy-skip"]).toBeUndefined();
+      expect(
+        (result.summary.byType as Record<string, number>)["heading-hierarchy-skip"],
+      ).toBeUndefined();
     });
   });
 
-  describe("Baseline Suppression", function() {
+  describe("Baseline Suppression", function () {
     const hierarchy: ViewHierarchyNode = { class: "View", children: [] };
     // Two clickable, unlabelled, undersized elements → 4 violations.
     const elements: Element[] = [
@@ -547,7 +596,7 @@ describe("WcagAudit", function() {
       return seedResult;
     }
 
-    it("suppresses violations whose fingerprint is present in the baseline", async function() {
+    it("suppresses violations whose fingerprint is present in the baseline", async function () {
       const seedResult = await baselineAndFindings();
       expect(seedResult.violations.length).toBeGreaterThanOrEqual(2);
       const suppressed = seedResult.violations[0];
@@ -562,13 +611,15 @@ describe("WcagAudit", function() {
         useBaseline: true,
       });
 
-      expect(result.violations.find(v => v.fingerprint === suppressed.fingerprint)).toBeUndefined();
+      expect(
+        result.violations.find((v) => v.fingerprint === suppressed.fingerprint),
+      ).toBeUndefined();
       expect(result.violations).toHaveLength(seedResult.violations.length - 1);
       expect(result.summary.baselinedViolations).toBe(1);
       expect(result.summary.totalViolations).toBe(seedResult.violations.length);
     });
 
-    it("suppresses every violation and counts them when the whole finding set is baselined", async function() {
+    it("suppresses every violation and counts them when the whole finding set is baselined", async function () {
       const seedResult = await baselineAndFindings();
 
       const stub = new StubBaselineManager({

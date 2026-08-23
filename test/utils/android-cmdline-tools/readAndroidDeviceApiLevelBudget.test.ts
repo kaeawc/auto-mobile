@@ -39,7 +39,7 @@ interface Probe {
 function budgetProbe(
   timer: FakeTimer,
   primaryElapsedMs: number,
-  fallbackStdout: string
+  fallbackStdout: string,
 ): { adb: AdbExecutor; probe: Probe } {
   const probe: Probe = { fallbackCalls: 0, fallbackTimeoutMs: undefined };
   const adb = {

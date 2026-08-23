@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { DEFAULT_OBSERVATION_INLINE_MAX_BYTES, finalizeToolResponse } from "../../src/server/finalizeToolResponse";
+import {
+  DEFAULT_OBSERVATION_INLINE_MAX_BYTES,
+  finalizeToolResponse,
+} from "../../src/server/finalizeToolResponse";
 import {
   createStructuredToolResponse,
   stringifyToolResponse,
@@ -24,14 +27,14 @@ function makeObserveResult(): ObserveResult {
         node: {
           "resource-id": "com.example:id/root",
           "view-id": "com.example:id/root", // duplicate → dropped
-          "text": "", // empty → dropped
-          "clickable": "false", // default-false boolean → dropped
+          text: "", // empty → dropped
+          clickable: "false", // default-false boolean → dropped
           "content-desc": "keep-me",
-          "node": [
+          node: [
             {
               "resource-id": "com.example:id/child",
-              "text": "Hello",
-              "focusable": "false", // dropped
+              text: "Hello",
+              focusable: "false", // dropped
             } as any,
           ],
         } as any,
@@ -56,9 +59,12 @@ function makeObserveResultWithBounds(): ObserveResult {
       hierarchy: {
         node: {
           "resource-id": "com.example:id/root",
-          "bounds": { left: 0, top: 0, right: 1080, bottom: 1920 },
-          "node": [
-            { "resource-id": "com.example:id/child", "bounds": { left: 10, top: 20, right: 30, bottom: 40 } } as any,
+          bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
+          node: [
+            {
+              "resource-id": "com.example:id/child",
+              bounds: { left: 10, top: 20, right: 30, bottom: 40 },
+            } as any,
           ],
         } as any,
       },
@@ -109,9 +115,14 @@ describe("finalizeToolResponse", () => {
 
     // project:"full" opts out of the now-default skeleton so this stays a test of
     // hierarchy trimming.
-    const finalized = finalizeToolResponse(response, { name: "observe", sessionUuid: "s1", args: { project: "full" } });
+    const finalized = finalizeToolResponse(response, {
+      name: "observe",
+      sessionUuid: "s1",
+      args: { project: "full" },
+    });
 
-    const rootSc = (finalized.structuredContent as ObserveResult).viewHierarchy!.hierarchy.node as any;
+    const rootSc = (finalized.structuredContent as ObserveResult).viewHierarchy!.hierarchy
+      .node as any;
     // Trimmed: duplicate view-id, empty text, default-false clickable all gone.
     expect(rootSc["view-id"]).toBeUndefined();
     expect(rootSc.text).toBeUndefined();
@@ -152,11 +163,17 @@ describe("finalizeToolResponse", () => {
     // opts back in. project:"full" keeps the headline hierarchy so `elements`
     // is the field under test rather than the skeleton default.
     serverConfig.setObserveResultIncludeElementsEnabled(true);
-    const keep = finalizeToolResponse(createStructuredToolResponse(makeObserveResult()), { name: "observe", args: { project: "full" } });
+    const keep = finalizeToolResponse(createStructuredToolResponse(makeObserveResult()), {
+      name: "observe",
+      args: { project: "full" },
+    });
     expect((keep.structuredContent as ObserveResult).elements).toBeDefined();
 
     serverConfig.setObserveResultIncludeElementsEnabled(false);
-    const drop = finalizeToolResponse(createStructuredToolResponse(makeObserveResult()), { name: "observe", args: { project: "full" } });
+    const drop = finalizeToolResponse(createStructuredToolResponse(makeObserveResult()), {
+      name: "observe",
+      args: { project: "full" },
+    });
     expect((drop.structuredContent as ObserveResult).elements).toBeUndefined();
     expect(JSON.parse(drop.content[0].text).elements).toBeUndefined();
   });
@@ -256,8 +273,16 @@ describe("finalizeToolResponse", () => {
 
   test("preserves the observe-only awaitedElement extras spread into the payload", () => {
     const obs = makeObserveResult();
-    const withExtras = { ...obs, awaitedElement: { text: "Found" }, awaitDuration: 250, awaitTimeout: false };
-    const finalized = finalizeToolResponse(createStructuredToolResponse(withExtras), { name: "observe", args: { project: "full" } });
+    const withExtras = {
+      ...obs,
+      awaitedElement: { text: "Found" },
+      awaitDuration: 250,
+      awaitTimeout: false,
+    };
+    const finalized = finalizeToolResponse(createStructuredToolResponse(withExtras), {
+      name: "observe",
+      args: { project: "full" },
+    });
 
     const sc = finalized.structuredContent as any;
     expect(sc.awaitedElement).toEqual({ text: "Found" });
@@ -267,7 +292,10 @@ describe("finalizeToolResponse", () => {
   });
 
   test("drops elements on an action's nested .observation by default", () => {
-    const response = createStructuredToolResponse({ success: true, observation: makeObserveResult() });
+    const response = createStructuredToolResponse({
+      success: true,
+      observation: makeObserveResult(),
+    });
     const finalized = finalizeToolResponse(response, { name: "tapOn" });
     expect((finalized.structuredContent as any).observation.elements).toBeUndefined();
     expect(JSON.parse(finalized.content[0].text).observation.elements).toBeUndefined();
@@ -276,10 +304,13 @@ describe("finalizeToolResponse", () => {
   test("trims an array-shaped root node (both roots)", () => {
     const obs = makeObserveResult();
     obs.viewHierarchy!.hierarchy.node = [
-      { "resource-id": "a", "view-id": "a", "clickable": "false" } as any,
-      { "resource-id": "b", "view-id": "b", "focusable": "false" } as any,
+      { "resource-id": "a", "view-id": "a", clickable: "false" } as any,
+      { "resource-id": "b", "view-id": "b", focusable: "false" } as any,
     ] as any;
-    const finalized = finalizeToolResponse(createStructuredToolResponse(obs), { name: "observe", args: { project: "full" } });
+    const finalized = finalizeToolResponse(createStructuredToolResponse(obs), {
+      name: "observe",
+      args: { project: "full" },
+    });
     const roots = (finalized.structuredContent as any).viewHierarchy.hierarchy.node;
     expect(roots[0]["view-id"]).toBeUndefined();
     expect(roots[0].clickable).toBeUndefined();
@@ -290,7 +321,10 @@ describe("finalizeToolResponse", () => {
   test("falls back to content text when structuredContent is absent", () => {
     const obs = makeObserveResult();
     const textOnly: any = { content: [{ type: "text", text: JSON.stringify(obs) }] };
-    const finalized = finalizeToolResponse(textOnly, { name: "observe", args: { project: "full" } });
+    const finalized = finalizeToolResponse(textOnly, {
+      name: "observe",
+      args: { project: "full" },
+    });
     const root = JSON.parse(finalized.content[0].text).viewHierarchy.hierarchy.node;
     expect(root["view-id"]).toBeUndefined();
     expect(root.clickable).toBeUndefined();
@@ -299,7 +333,7 @@ describe("finalizeToolResponse", () => {
   test("EC-C: compaction flattens node bounds in both structuredContent and text (permanent default)", () => {
     const finalized = finalizeToolResponse(
       createStructuredToolResponse(makeObserveResultWithBounds()),
-      { name: "observe", args: { project: "full" } }
+      { name: "observe", args: { project: "full" } },
     );
 
     const rootSc = (finalized.structuredContent as any).viewHierarchy.hierarchy.node;
@@ -313,7 +347,10 @@ describe("finalizeToolResponse", () => {
   });
 
   test("EC-C: compaction flattens bounds on an action's nested .observation (tapOn path)", () => {
-    const response = createStructuredToolResponse({ success: true, observation: makeObserveResultWithBounds() });
+    const response = createStructuredToolResponse({
+      success: true,
+      observation: makeObserveResultWithBounds(),
+    });
     const finalized = finalizeToolResponse(response, { name: "tapOn", sessionUuid: "s1" });
 
     const obsSc = (finalized.structuredContent as any).observation;
@@ -332,7 +369,7 @@ describe("finalizeToolResponse", () => {
     // explicit opt-in the served bounds are the positional tuple, never the object.
     const finalized = finalizeToolResponse(
       createStructuredToolResponse(makeObserveResultWithBounds()),
-      { name: "observe", args: { project: "full" } }
+      { name: "observe", args: { project: "full" } },
     );
     const rootSc = (finalized.structuredContent as any).viewHierarchy.hierarchy.node;
     expect(Array.isArray(rootSc.bounds)).toBe(true);
@@ -343,7 +380,12 @@ describe("finalizeToolResponse", () => {
     const obs = makeObserveResultWithBounds();
     finalizeToolResponse(createStructuredToolResponse(obs), { name: "observe" });
     expect(obs.viewHierarchy!.hierarchy.node).not.toBeInstanceOf(Array);
-    expect((obs.viewHierarchy!.hierarchy.node as any).bounds).toEqual({ left: 0, top: 0, right: 1080, bottom: 1920 });
+    expect((obs.viewHierarchy!.hierarchy.node as any).bounds).toEqual({
+      left: 0,
+      top: 0,
+      right: 1080,
+      bottom: 1920,
+    });
   });
 
   test("EC-C: compaction composes with the default elements-drop and the wire-strip flag", () => {
@@ -351,8 +393,14 @@ describe("finalizeToolResponse", () => {
     const originalStrip = serverConfig.isToolResultsNoStructuredContentEnabled();
     serverConfig.setToolResultsNoStructuredContentEnabled(true);
     try {
-      const obs = { ...makeObserveResultWithBounds(), elements: { clickable: [], scrollable: [], text: [], media: [] } };
-      const finalized = finalizeToolResponse(createStructuredToolResponse(obs), { name: "observe", args: { project: "full" } });
+      const obs = {
+        ...makeObserveResultWithBounds(),
+        elements: { clickable: [], scrollable: [], text: [], media: [] },
+      };
+      const finalized = finalizeToolResponse(createStructuredToolResponse(obs), {
+        name: "observe",
+        args: { project: "full" },
+      });
       const sc = finalized.structuredContent as any;
       // finalize keeps structuredContent (the strip is a later wire-boundary concern).
       expect(sc).toBeDefined();
@@ -370,10 +418,9 @@ describe("finalizeToolResponse", () => {
     const originalStrip = serverConfig.isToolResultsNoStructuredContentEnabled();
     serverConfig.setToolResultsNoStructuredContentEnabled(true);
     try {
-      const finalized = finalizeToolResponse(
-        createStructuredToolResponse(makeObserveResult()),
-        { name: "observe" }
-      );
+      const finalized = finalizeToolResponse(createStructuredToolResponse(makeObserveResult()), {
+        name: "observe",
+      });
       expect(finalized.structuredContent).toBeDefined();
     } finally {
       serverConfig.setToolResultsNoStructuredContentEnabled(originalStrip);
@@ -407,7 +454,10 @@ describe("finalizeToolResponse", () => {
     test("EC-D1: compaction still flattens a post-action .observation when the diff flag is also on", () => {
       serverConfig.setActionsDiffObserveEnabled(true);
 
-      const response = createStructuredToolResponse({ success: true, observation: makeObserveResultWithBounds() });
+      const response = createStructuredToolResponse({
+        success: true,
+        observation: makeObserveResultWithBounds(),
+      });
       const finalized = finalizeToolResponse(response, { name: "tapOn", sessionUuid: "s1" });
 
       const obsSc = (finalized.structuredContent as any).observation;
@@ -424,7 +474,10 @@ describe("finalizeToolResponse", () => {
     test("EC-D2: the diff flag on still compacts — bounds are the tuple (compaction is unconditional)", () => {
       serverConfig.setActionsDiffObserveEnabled(true);
 
-      const response = createStructuredToolResponse({ success: true, observation: makeObserveResultWithBounds() });
+      const response = createStructuredToolResponse({
+        success: true,
+        observation: makeObserveResultWithBounds(),
+      });
       const finalized = finalizeToolResponse(response, { name: "tapOn" });
 
       const node = (finalized.structuredContent as any).observation.viewHierarchy.hierarchy.node;
@@ -452,7 +505,7 @@ describe("finalizeToolResponse", () => {
             node: {
               "resource-id": "com.example:id/root",
               "content-desc": "keep-me",
-              "node": [{ "resource-id": "com.example:id/child", "text": "Hello" } as any],
+              node: [{ "resource-id": "com.example:id/child", text: "Hello" } as any],
             } as any,
           },
         },
@@ -460,20 +513,28 @@ describe("finalizeToolResponse", () => {
     }
 
     /** In-memory baseline store standing in for the sessionManager cache slot. */
-    function makeStore(): { store: { get: (u: string) => ObserveResult | undefined; set: (u: string, o: ObserveResult) => void }; map: Map<string, ObserveResult> } {
+    function makeStore(): {
+      store: {
+        get: (u: string) => ObserveResult | undefined;
+        set: (u: string, o: ObserveResult) => void;
+      };
+      map: Map<string, ObserveResult>;
+    } {
       const map = new Map<string, ObserveResult>();
       return {
         map,
         store: {
           get: (u: string) => map.get(u),
-          set: (u: string, o: ObserveResult) => { map.set(u, o); },
+          set: (u: string, o: ObserveResult) => {
+            map.set(u, o);
+          },
         },
       };
     }
 
     function expectObservationDiff(
       finalized: { structuredContent?: unknown; content: Array<{ text: string }> },
-      expected: Record<string, unknown>
+      expected: Record<string, unknown>,
     ): any {
       const metadata = (finalized.structuredContent as any).observationDiff;
       expect(metadata).toMatchObject(expected);
@@ -484,7 +545,7 @@ describe("finalizeToolResponse", () => {
 
     function iosScreenObserve(
       key: string,
-      confidence: "high" | "medium" | "low" = "high"
+      confidence: "high" | "medium" | "low" = "high",
     ): ObserveResult {
       return {
         ...sameScreenObserve(),
@@ -508,7 +569,7 @@ describe("finalizeToolResponse", () => {
 
     function checkedIosScreenObserve(
       key: string,
-      confidence: "high" | "medium" | "low" = "high"
+      confidence: "high" | "medium" | "low" = "high",
     ): ObserveResult {
       const observation = iosScreenObserve(key, confidence);
       (observation.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
@@ -519,23 +580,27 @@ describe("finalizeToolResponse", () => {
       name: string,
       actionArgs: Record<string, unknown>,
       key = "bundle=com.apple.reminders|focus=Title",
-      nextKey = key
+      nextKey = key,
     ): StructuredToolResponse<{ success: boolean; observation: ObserveResult }> {
       const { store } = makeStore();
       const baseline = iosScreenObserve(key, "low");
-      finalizeToolResponse(
-        createStructuredToolResponse(baseline),
-        { name: "observe", sessionUuid: "s1", baselineStore: store }
-      );
+      finalizeToolResponse(createStructuredToolResponse(baseline), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
 
       return finalizeToolResponse(
-        createStructuredToolResponse({ success: true, observation: checkedIosScreenObserve(nextKey, "low") }),
+        createStructuredToolResponse({
+          success: true,
+          observation: checkedIosScreenObserve(nextKey, "low"),
+        }),
         {
           name,
           args: actionArgs,
           sessionUuid: "s1",
           baselineStore: store,
-        }
+        },
       );
     }
 
@@ -551,8 +616,15 @@ describe("finalizeToolResponse", () => {
     test("flag off leaves the action observation full and never touches the store", () => {
       serverConfig.setActionsDiffObserveEnabled(false);
       const { store, map } = makeStore();
-      const response = createStructuredToolResponse({ success: true, observation: sameScreenObserve() });
-      const finalized = finalizeToolResponse(response, { name: "tapOn", sessionUuid: "s1", baselineStore: store });
+      const response = createStructuredToolResponse({
+        success: true,
+        observation: sameScreenObserve(),
+      });
+      const finalized = finalizeToolResponse(response, {
+        name: "tapOn",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
 
       const obsSc = (finalized.structuredContent as any).observation;
       expect(obsSc.isDiff).toBeUndefined();
@@ -583,14 +655,18 @@ describe("finalizeToolResponse", () => {
     test("a non-observe action emits a diff vs the baseline in both representations", () => {
       const { store } = makeStore();
       // Seed the baseline via an observe.
-      finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), { name: "observe", sessionUuid: "s1", baselineStore: store });
+      finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
 
       // Next action toggles a child's `checked` on the same screen.
       const next = sameScreenObserve();
       (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store }
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
       );
 
       const obsSc = (finalized.structuredContent as any).observation;
@@ -610,7 +686,11 @@ describe("finalizeToolResponse", () => {
     test("hierarchy-less action observations emit full sanitized payloads, not empty diffs", () => {
       const { store, map } = makeStore();
       const baseline = sameScreenObserve();
-      finalizeToolResponse(createStructuredToolResponse(baseline), { name: "observe", sessionUuid: "s1", baselineStore: store });
+      finalizeToolResponse(createStructuredToolResponse(baseline), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
 
       const hierarchyLess = (durationMs: number): ObserveResult => ({
         updatedAt: durationMs,
@@ -623,11 +703,11 @@ describe("finalizeToolResponse", () => {
 
       const first = finalizeToolResponse(
         createStructuredToolResponse({ success: false, observation: hierarchyLess(12) }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store }
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
       );
       const second = finalizeToolResponse(
         createStructuredToolResponse({ success: false, observation: hierarchyLess(13) }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store }
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
       );
 
       const firstObs = (first.structuredContent as any).observation;
@@ -658,13 +738,16 @@ describe("finalizeToolResponse", () => {
 
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store }
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
       );
 
       const obsSc = (finalized.structuredContent as any).observation;
       expect(obsSc.isDiff).toBeUndefined();
       expect(obsSc.viewHierarchy).toBeDefined();
-      const metadata = expectObservationDiff(finalized, { mode: "full", reason: "unrenderable_hierarchy" });
+      const metadata = expectObservationDiff(finalized, {
+        mode: "full",
+        reason: "unrenderable_hierarchy",
+      });
       expect(metadata.fromScreen.activeWindow.appId).toBe("com.example");
       expect(metadata.toScreen.activeWindow.appId).toBe("com.example");
       expect(map.get("s1")!.viewHierarchy?.hierarchy).toBeDefined();
@@ -672,11 +755,19 @@ describe("finalizeToolResponse", () => {
 
     test("a non-observe action updates the baseline to its own observation (next diff is against current state)", () => {
       const { store, map } = makeStore();
-      finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), { name: "observe", sessionUuid: "s1", baselineStore: store });
+      finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
 
       const next = sameScreenObserve();
       (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
-      finalizeToolResponse(createStructuredToolResponse({ success: true, observation: next }), { name: "tapOn", sessionUuid: "s1", baselineStore: store });
+      finalizeToolResponse(createStructuredToolResponse({ success: true, observation: next }), {
+        name: "tapOn",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
 
       // Baseline now reflects the post-action observation (checked=true present).
       const baseline = map.get("s1")!;
@@ -687,7 +778,7 @@ describe("finalizeToolResponse", () => {
       const { store, map } = makeStore();
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store }
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
       );
       const obsSc = (finalized.structuredContent as any).observation;
       expect(obsSc.isDiff).toBeUndefined();
@@ -700,7 +791,7 @@ describe("finalizeToolResponse", () => {
     test("falls back to the full observation when the session baseline store is missing", () => {
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
-        { name: "tapOn", sessionUuid: "s1" }
+        { name: "tapOn", sessionUuid: "s1" },
       );
       const obsSc = (finalized.structuredContent as any).observation;
       expect(obsSc.isDiff).toBeUndefined();
@@ -710,7 +801,11 @@ describe("finalizeToolResponse", () => {
 
     test("falls back to full when the screen (app/activity/package) changed", () => {
       const { store } = makeStore();
-      finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), { name: "observe", sessionUuid: "s1", baselineStore: store });
+      finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
 
       const otherScreen = {
         ...sameScreenObserve(),
@@ -718,7 +813,7 @@ describe("finalizeToolResponse", () => {
       } as ObserveResult;
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: otherScreen }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store }
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
       );
       const obsSc = (finalized.structuredContent as any).observation;
       expect(obsSc.isDiff).toBeUndefined();
@@ -731,13 +826,17 @@ describe("finalizeToolResponse", () => {
     test("falls back to full when an iOS screen identity changes under the same app", () => {
       const { store } = makeStore();
       const baseline = iosScreenObserve("bundle=com.apple.reminders|nav=Reminders");
-      finalizeToolResponse(createStructuredToolResponse(baseline), { name: "observe", sessionUuid: "s1", baselineStore: store });
+      finalizeToolResponse(createStructuredToolResponse(baseline), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
 
       const next = checkedIosScreenObserve("bundle=com.apple.reminders|nav=New Reminder");
 
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store }
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
       );
 
       const obsSc = (finalized.structuredContent as any).observation;
@@ -745,20 +844,28 @@ describe("finalizeToolResponse", () => {
       expect(obsSc.viewHierarchy).toBeDefined();
       expect(obsSc.screenIdentity.key).toBe("bundle=com.apple.reminders|nav=New Reminder");
       const metadata = expectObservationDiff(finalized, { mode: "full", reason: "screen_changed" });
-      expect(metadata.fromScreen.screenIdentity.key).toBe("bundle=com.apple.reminders|nav=Reminders");
-      expect(metadata.toScreen.screenIdentity.key).toBe("bundle=com.apple.reminders|nav=New Reminder");
+      expect(metadata.fromScreen.screenIdentity.key).toBe(
+        "bundle=com.apple.reminders|nav=Reminders",
+      );
+      expect(metadata.toScreen.screenIdentity.key).toBe(
+        "bundle=com.apple.reminders|nav=New Reminder",
+      );
     });
 
     test("emits a diff when high-confidence iOS screen identity stays stable", () => {
       const { store } = makeStore();
       const baseline = iosScreenObserve("bundle=com.apple.reminders|nav=Reminders");
-      finalizeToolResponse(createStructuredToolResponse(baseline), { name: "observe", sessionUuid: "s1", baselineStore: store });
+      finalizeToolResponse(createStructuredToolResponse(baseline), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
 
       const next = checkedIosScreenObserve("bundle=com.apple.reminders|nav=Reminders");
 
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store }
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
       );
 
       const obsSc = (finalized.structuredContent as any).observation;
@@ -771,7 +878,7 @@ describe("finalizeToolResponse", () => {
       const { store } = makeStore();
       finalizeToolResponse(
         createStructuredToolResponse(iosScreenObserve("bundle=com.apple.reminders|nav=Reminders")),
-        { name: "observe", sessionUuid: "s1", baselineStore: store }
+        { name: "observe", sessionUuid: "s1", baselineStore: store },
       );
 
       const next = {
@@ -786,7 +893,7 @@ describe("finalizeToolResponse", () => {
 
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store }
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
       );
 
       const obsSc = (finalized.structuredContent as any).observation;
@@ -797,13 +904,17 @@ describe("finalizeToolResponse", () => {
     test("falls back to full when medium-confidence iOS screen identity changes under the same app", () => {
       const { store } = makeStore();
       const baseline = iosScreenObserve("bundle=com.apple.reminders|tab=Inbox", "medium");
-      finalizeToolResponse(createStructuredToolResponse(baseline), { name: "observe", sessionUuid: "s1", baselineStore: store });
+      finalizeToolResponse(createStructuredToolResponse(baseline), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
 
       const next = checkedIosScreenObserve("bundle=com.apple.reminders|tab=Search", "medium");
 
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store }
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
       );
 
       const obsSc = (finalized.structuredContent as any).observation;
@@ -816,13 +927,17 @@ describe("finalizeToolResponse", () => {
     test("falls back to full and updates baseline when iOS screen identity is low confidence", () => {
       const { store, map } = makeStore();
       const baseline = iosScreenObserve("bundle=com.apple.reminders|focus=Title", "low");
-      finalizeToolResponse(createStructuredToolResponse(baseline), { name: "observe", sessionUuid: "s1", baselineStore: store });
+      finalizeToolResponse(createStructuredToolResponse(baseline), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
 
       const next = checkedIosScreenObserve("bundle=com.apple.reminders|focus=Title", "low");
 
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store }
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
       );
 
       const obsSc = (finalized.structuredContent as any).observation;
@@ -854,7 +969,7 @@ describe("finalizeToolResponse", () => {
       const finalized = finalizeChangedLowConfidenceAction(
         "swipeOn",
         { direction: "up" },
-        "bundle=com.apple.reminders|list=Inbox"
+        "bundle=com.apple.reminders|list=Inbox",
       );
 
       const obsSc = (finalized.structuredContent as any).observation;
@@ -868,7 +983,7 @@ describe("finalizeToolResponse", () => {
         "inputText",
         { text: "hello" },
         "bundle=com.apple.reminders|focus=Title",
-        "bundle=com.apple.reminders|focus=Search"
+        "bundle=com.apple.reminders|focus=Search",
       );
 
       const obsSc = (finalized.structuredContent as any).observation;
@@ -882,7 +997,7 @@ describe("finalizeToolResponse", () => {
         "swipeOn",
         { direction: "up" },
         "bundle=com.apple.reminders|list=Inbox",
-        "bundle=com.apple.reminders|list=Search"
+        "bundle=com.apple.reminders|list=Search",
       );
 
       const obsSc = (finalized.structuredContent as any).observation;
@@ -903,7 +1018,10 @@ describe("finalizeToolResponse", () => {
     });
 
     test("action policy: submit-style IME actions are navigation-prone", () => {
-      const inputSearch = finalizeChangedLowConfidenceAction("inputText", { text: "query", imeAction: "search" });
+      const inputSearch = finalizeChangedLowConfidenceAction("inputText", {
+        text: "query",
+        imeAction: "search",
+      });
       expect((inputSearch.structuredContent as any).observation.isDiff).toBeUndefined();
       expect((inputSearch.structuredContent as any).observation.viewHierarchy).toBeDefined();
       expectObservationDiff(inputSearch, { mode: "full", reason: "screen_changed" });
@@ -915,7 +1033,10 @@ describe("finalizeToolResponse", () => {
     });
 
     test("action policy: focus-traversal IME actions remain in-place", () => {
-      const inputNext = finalizeChangedLowConfidenceAction("inputText", { text: "value", imeAction: "next" });
+      const inputNext = finalizeChangedLowConfidenceAction("inputText", {
+        text: "value",
+        imeAction: "next",
+      });
       expect((inputNext.structuredContent as any).observation.isDiff).toBe(true);
       expectObservationDiff(inputNext, { mode: "diff", reason: "diff_emitted" });
 
@@ -953,7 +1074,7 @@ describe("finalizeToolResponse", () => {
         expect((finalized.structuredContent as any).observation.isDiff).toBeUndefined();
         expect((finalized.structuredContent as any).observation.viewHierarchy).toBeDefined();
         expectObservationDiff(finalized, { mode: "full", reason: "screen_changed" });
-      }
+      },
     );
 
     const inPlaceAndScrollActions: Array<[string, Record<string, unknown>]> = [
@@ -979,14 +1100,14 @@ describe("finalizeToolResponse", () => {
         const finalized = finalizeChangedLowConfidenceAction(name, args);
         expect((finalized.structuredContent as any).observation.isDiff).toBe(true);
         expectObservationDiff(finalized, { mode: "diff", reason: "diff_emitted" });
-      }
+      },
     );
 
     test("falls back to full when there is no sessionUuid (legacy single-agent path)", () => {
       const { store, map } = makeStore();
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
-        { name: "tapOn", baselineStore: store }
+        { name: "tapOn", baselineStore: store },
       );
       const obsSc = (finalized.structuredContent as any).observation;
       expect(obsSc.isDiff).toBeUndefined();
@@ -997,12 +1118,20 @@ describe("finalizeToolResponse", () => {
 
     test("observe resets the baseline after a diff-producing action", () => {
       const { store, map } = makeStore();
-      finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), { name: "observe", sessionUuid: "s1", baselineStore: store });
+      finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
       const first = map.get("s1");
       // An observe with a different hierarchy overwrites the baseline wholesale.
       const reset = sameScreenObserve();
       (reset.viewHierarchy!.hierarchy.node as any)["content-desc"] = "changed-root";
-      finalizeToolResponse(createStructuredToolResponse(reset), { name: "observe", sessionUuid: "s1", baselineStore: store });
+      finalizeToolResponse(createStructuredToolResponse(reset), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
       const second = map.get("s1")!;
       expect(second).not.toBe(first);
       expect((second.viewHierarchy!.hierarchy.node as any)["content-desc"]).toBe("changed-root");
@@ -1010,11 +1139,19 @@ describe("finalizeToolResponse", () => {
 
     test("diff path is output-only — the caller's in-memory observation is untouched", () => {
       const { store } = makeStore();
-      finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), { name: "observe", sessionUuid: "s1", baselineStore: store });
+      finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
       const next = sameScreenObserve();
       (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
       const before = JSON.stringify(next);
-      finalizeToolResponse(createStructuredToolResponse({ success: true, observation: next }), { name: "tapOn", sessionUuid: "s1", baselineStore: store });
+      finalizeToolResponse(createStructuredToolResponse({ success: true, observation: next }), {
+        name: "tapOn",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
       expect(JSON.stringify(next)).toBe(before);
     });
 
@@ -1022,24 +1159,34 @@ describe("finalizeToolResponse", () => {
       // The diff runs on the sanitized (always-compacted) observation, so a node
       // surfaced in the diff carries the tuple bounds, not the object shape.
       const { store } = makeStore();
-      const withBounds = (): ObserveResult => ({
-        ...makeObserveResult(),
-        activeWindow: { appId: "com.example", activityName: ".Main", layoutSeqSum: 1 },
-        viewHierarchy: {
-          packageName: "com.example",
-          hierarchy: { node: { "resource-id": "com.example:id/root", "bounds": { left: 0, top: 0, right: 100, bottom: 100 } } as any },
-        },
-      } as ObserveResult);
+      const withBounds = (): ObserveResult =>
+        ({
+          ...makeObserveResult(),
+          activeWindow: { appId: "com.example", activityName: ".Main", layoutSeqSum: 1 },
+          viewHierarchy: {
+            packageName: "com.example",
+            hierarchy: {
+              node: {
+                "resource-id": "com.example:id/root",
+                bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+              } as any,
+            },
+          },
+        }) as ObserveResult;
 
-      finalizeToolResponse(createStructuredToolResponse(withBounds()), { name: "observe", sessionUuid: "s1", baselineStore: store });
+      finalizeToolResponse(createStructuredToolResponse(withBounds()), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
 
       const next = withBounds();
       (next.viewHierarchy!.hierarchy.node as any).node = [
-        { "resource-id": "com.example:id/added", "bounds": { left: 5, top: 6, right: 7, bottom: 8 } },
+        { "resource-id": "com.example:id/added", bounds: { left: 5, top: 6, right: 7, bottom: 8 } },
       ];
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store }
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
       );
 
       const obsSc = (finalized.structuredContent as any).observation;
@@ -1063,21 +1210,29 @@ describe("finalizeToolResponse", () => {
           hierarchy: {
             node: {
               "resource-id": "com.example:id/root",
-              "bounds": { left: 0, top: 0, right: 100, bottom: 100 },
-              "node": [{ "resource-id": "com.example:id/child", "text": "Hello" } as any],
+              bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+              node: [{ "resource-id": "com.example:id/child", text: "Hello" } as any],
             } as any,
           },
         },
       } as ObserveResult;
     }
 
-    function makeStore(): { store: { get: (u: string) => ObserveResult | undefined; set: (u: string, o: ObserveResult) => void }; map: Map<string, ObserveResult> } {
+    function makeStore(): {
+      store: {
+        get: (u: string) => ObserveResult | undefined;
+        set: (u: string, o: ObserveResult) => void;
+      };
+      map: Map<string, ObserveResult>;
+    } {
       const map = new Map<string, ObserveResult>();
       return {
         map,
         store: {
           get: (u: string) => map.get(u),
-          set: (u: string, o: ObserveResult) => { map.set(u, o); },
+          set: (u: string, o: ObserveResult) => {
+            map.set(u, o);
+          },
         },
       };
     }
@@ -1100,7 +1255,12 @@ describe("finalizeToolResponse", () => {
         createStructuredToolResponse(makeObserveResult()),
         // project:"full" so the artifacted observation is the full sanitized tree
         // (the view-id dedup under test) rather than the default skeleton.
-        { name: "observe", sessionUuid: "s1", artifactWriter: writer, args: { project: "full" } } as any
+        {
+          name: "observe",
+          sessionUuid: "s1",
+          artifactWriter: writer,
+          args: { project: "full" },
+        } as any,
       );
 
       expect(finalized.structuredContent).toEqual({
@@ -1114,7 +1274,9 @@ describe("finalizeToolResponse", () => {
       });
       expect((finalized.structuredContent as any).viewHierarchy).toBeUndefined();
       expect(writer.writes).toHaveLength(1);
-      expect((writer.writes[0].data as any).viewHierarchy.hierarchy.node["view-id"]).toBeUndefined();
+      expect(
+        (writer.writes[0].data as any).viewHierarchy.hierarchy.node["view-id"],
+      ).toBeUndefined();
       expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
     });
 
@@ -1128,7 +1290,7 @@ describe("finalizeToolResponse", () => {
           polls: 3,
           waitMs: 250,
         }),
-        { name: "observe", sessionUuid: "s1", artifactWriter: writer } as any
+        { name: "observe", sessionUuid: "s1", artifactWriter: writer } as any,
       );
 
       expect(finalized.structuredContent).toMatchObject({
@@ -1145,7 +1307,7 @@ describe("finalizeToolResponse", () => {
       const writer = new FakeObservationArtifactWriter();
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: makeObserveResult() }),
-        { name: "tapOn", sessionUuid: "s1", artifactWriter: writer } as any
+        { name: "tapOn", sessionUuid: "s1", artifactWriter: writer } as any,
       );
 
       expect((finalized.structuredContent as any).success).toBe(true);
@@ -1159,33 +1321,38 @@ describe("finalizeToolResponse", () => {
         },
       });
       expect((finalized.structuredContent as any).observation.viewHierarchy).toBeUndefined();
-      expect((writer.writes[0].data as any).viewHierarchy.hierarchy.node["view-id"]).toBeUndefined();
+      expect(
+        (writer.writes[0].data as any).viewHierarchy.hierarchy.node["view-id"],
+      ).toBeUndefined();
       expect(JSON.parse(finalized.content[0].text)).toEqual(finalized.structuredContent);
     });
 
     test("artifact writer receives the compacted diff after existing output transforms", () => {
       serverConfig.setActionsDiffObserveEnabled(true);
       const { store } = makeStore();
-      finalizeToolResponse(
-        createStructuredToolResponse(sameScreenObserve()),
-        { name: "observe", sessionUuid: "s1", baselineStore: store }
-      );
+      finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
 
       const next = sameScreenObserve();
       (next.viewHierarchy!.hierarchy.node as any).node = [
-        { "resource-id": "com.example:id/added", "bounds": { left: 5, top: 6, right: 7, bottom: 8 } },
+        { "resource-id": "com.example:id/added", bounds: { left: 5, top: 6, right: 7, bottom: 8 } },
       ];
       const writer = new FakeObservationArtifactWriter();
 
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store, artifactWriter: writer } as any
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store, artifactWriter: writer } as any,
       );
 
       expect((writer.writes[0].data as any).isDiff).toBe(true);
       expect(writer.writes[0].payload).toBe("ObserveDiff");
       expect((writer.writes[0].data as any).added[0].attributes.bounds).toEqual([5, 6, 7, 8]);
-      expect((finalized.structuredContent as any).observation.artifact.path).toBe("/tmp/auto-mobile/tapOn-1.json");
+      expect((finalized.structuredContent as any).observation.artifact.path).toBe(
+        "/tmp/auto-mobile/tapOn-1.json",
+      );
       expect((finalized.structuredContent as any).observation.artifact.payload).toBe("ObserveDiff");
       expect((finalized.structuredContent as any).observationDiff).toMatchObject({
         mode: "diff",
@@ -1200,7 +1367,7 @@ describe("finalizeToolResponse", () => {
 
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: makeObserveResult() }),
-        { name: "tapOn", sessionUuid: "s1", internal: true, artifactWriter: writer } as any
+        { name: "tapOn", sessionUuid: "s1", internal: true, artifactWriter: writer } as any,
       );
 
       expect(writer.writes).toHaveLength(0);
@@ -1214,10 +1381,13 @@ describe("finalizeToolResponse", () => {
       writer.throwOnWrite = new Error("artifact disk is full");
       const response = createStructuredToolResponse(makeObserveResult());
 
-      expect(() => finalizeToolResponse(
-        response,
-        { name: "observe", sessionUuid: "s1", artifactWriter: writer } as any
-      )).toThrow("artifact disk is full");
+      expect(() =>
+        finalizeToolResponse(response, {
+          name: "observe",
+          sessionUuid: "s1",
+          artifactWriter: writer,
+        } as any),
+      ).toThrow("artifact disk is full");
       expect((response.structuredContent as any).viewHierarchy).toBeDefined();
       expect((response.structuredContent as any).artifact).toBeUndefined();
     });
@@ -1225,22 +1395,30 @@ describe("finalizeToolResponse", () => {
     test("artifact write failures do not advance the diff baseline", () => {
       serverConfig.setActionsDiffObserveEnabled(true);
       const { store, map } = makeStore();
-      finalizeToolResponse(
-        createStructuredToolResponse(sameScreenObserve()),
-        { name: "observe", sessionUuid: "s1", baselineStore: store }
-      );
+      finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
       const renderedBaseline = map.get("s1");
       const next = sameScreenObserve();
       (next.viewHierarchy!.hierarchy.node as any).node = [
-        { "resource-id": "com.example:id/not-rendered", "bounds": { left: 1, top: 2, right: 3, bottom: 4 } },
+        {
+          "resource-id": "com.example:id/not-rendered",
+          bounds: { left: 1, top: 2, right: 3, bottom: 4 },
+        },
       ];
       const writer = new FakeObservationArtifactWriter();
       writer.throwOnWrite = new Error("artifact disk is full");
 
-      expect(() => finalizeToolResponse(
-        createStructuredToolResponse({ success: true, observation: next }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store, artifactWriter: writer } as any
-      )).toThrow("artifact disk is full");
+      expect(() =>
+        finalizeToolResponse(createStructuredToolResponse({ success: true, observation: next }), {
+          name: "tapOn",
+          sessionUuid: "s1",
+          baselineStore: store,
+          artifactWriter: writer,
+        } as any),
+      ).toThrow("artifact disk is full");
       expect(map.get("s1")).toBe(renderedBaseline);
     });
 
@@ -1262,7 +1440,7 @@ describe("finalizeToolResponse", () => {
       });
 
       const oversizedCtx = (writer: FakeObservationArtifactWriter) =>
-        ({ name: "tapOn", artifactMode: "oversized", artifactWriter: writer } as any);
+        ({ name: "tapOn", artifactMode: "oversized", artifactWriter: writer }) as any;
 
       // Build a tapOn response padded so the object measured by the size gate
       // serializes to exactly `targetBytes`. The `pad` field is copied verbatim
@@ -1273,7 +1451,10 @@ describe("finalizeToolResponse", () => {
       function tapResponseOfSize(targetBytes: number): StructuredToolResponse {
         const build = (pad: string) =>
           createStructuredToolResponse({ success: true, pad, observation: makeObserveResult() });
-        const probe = finalizeToolResponse(build(""), oversizedCtx(new FakeObservationArtifactWriter()));
+        const probe = finalizeToolResponse(
+          build(""),
+          oversizedCtx(new FakeObservationArtifactWriter()),
+        );
         const baseBytes = Buffer.byteLength(stringifyToolResponse(probe.structuredContent), "utf8");
         return build("x".repeat(targetBytes - baseBytes));
       }
@@ -1282,10 +1463,12 @@ describe("finalizeToolResponse", () => {
         const writer = new FakeObservationArtifactWriter();
         const finalized = finalizeToolResponse(
           tapResponseOfSize(INLINE_MAX_BYTES),
-          oversizedCtx(writer)
+          oversizedCtx(writer),
         );
 
-        expect(Buffer.byteLength(stringifyToolResponse(finalized.structuredContent), "utf8")).toBe(65536);
+        expect(Buffer.byteLength(stringifyToolResponse(finalized.structuredContent), "utf8")).toBe(
+          65536,
+        );
         expect(writer.writes).toHaveLength(0);
         expect((finalized.structuredContent as any).observation.viewHierarchy).toBeDefined();
         expect((finalized.structuredContent as any).observation.artifact).toBeUndefined();
@@ -1295,7 +1478,7 @@ describe("finalizeToolResponse", () => {
         const writer = new FakeObservationArtifactWriter();
         const finalized = finalizeToolResponse(
           tapResponseOfSize(FIRST_ARTIFACT_BYTES),
-          oversizedCtx(writer)
+          oversizedCtx(writer),
         );
 
         expect(writer.writes).toHaveLength(1);
@@ -1320,7 +1503,7 @@ describe("finalizeToolResponse", () => {
         capturedAtMs: 123,
         activeWindow: { appId: "com.example" },
         viewHierarchy: { hierarchy: { node: { "resource-id": "root" } } },
-        rawViewHierarchy: "<hierarchy><node text=\"large\" /></hierarchy>",
+        rawViewHierarchy: '<hierarchy><node text="large" /></hierarchy>',
         visibleTextsSample: ["Submit"],
         resourceIdsSample: ["com.example:id/submit"],
       };
@@ -1332,7 +1515,7 @@ describe("finalizeToolResponse", () => {
       const debugFailureObservation = {
         capturedAtMs: 789,
         viewHierarchy: { hierarchy: { node: { "resource-id": "debug-failure-root" } } },
-        rawViewHierarchy: "<hierarchy><node text=\"debug failure\" /></hierarchy>",
+        rawViewHierarchy: '<hierarchy><node text="debug failure" /></hierarchy>',
         visibleTextsSample: ["Debug failure"],
       };
       const payload = {
@@ -1358,10 +1541,10 @@ describe("finalizeToolResponse", () => {
         },
       };
 
-      const finalized = finalizeToolResponse(
-        createStructuredToolResponse(payload),
-        { name: "executePlan", artifactWriter: writer } as any
-      );
+      const finalized = finalizeToolResponse(createStructuredToolResponse(payload), {
+        name: "executePlan",
+        artifactWriter: writer,
+      } as any);
 
       const failedObservation = (finalized.structuredContent as any).failedStep.failureObservation;
       expect(failedObservation.capturedAtMs).toBe(123);
@@ -1386,14 +1569,22 @@ describe("finalizeToolResponse", () => {
         },
       });
 
-      const finalizedStepObservation = (finalized.structuredContent as any).debug.steps[0].details.stepObservation;
+      const finalizedStepObservation = (finalized.structuredContent as any).debug.steps[0].details
+        .stepObservation;
       expect(finalizedStepObservation.visibleTextsSample).toEqual(["Step"]);
-      expect(finalizedStepObservation.viewHierarchy.artifact.payload).toBe("ExecutePlanDebugStepObservationViewHierarchy");
-      const finalizedDebugFailureObservation = (finalized.structuredContent as any).debug.steps[0].details.failureObservation;
+      expect(finalizedStepObservation.viewHierarchy.artifact.payload).toBe(
+        "ExecutePlanDebugStepObservationViewHierarchy",
+      );
+      const finalizedDebugFailureObservation = (finalized.structuredContent as any).debug.steps[0]
+        .details.failureObservation;
       expect(finalizedDebugFailureObservation.visibleTextsSample).toEqual(["Debug failure"]);
-      expect(finalizedDebugFailureObservation.viewHierarchy.artifact.payload).toBe("ExecutePlanDebugFailureObservationViewHierarchy");
-      expect(finalizedDebugFailureObservation.rawViewHierarchy.artifact.payload).toBe("ExecutePlanDebugFailureObservationRawViewHierarchy");
-      expect(writer.writes.map(write => write.payload)).toEqual([
+      expect(finalizedDebugFailureObservation.viewHierarchy.artifact.payload).toBe(
+        "ExecutePlanDebugFailureObservationViewHierarchy",
+      );
+      expect(finalizedDebugFailureObservation.rawViewHierarchy.artifact.payload).toBe(
+        "ExecutePlanDebugFailureObservationRawViewHierarchy",
+      );
+      expect(writer.writes.map((write) => write.payload)).toEqual([
         "ExecutePlanFailureObservationViewHierarchy",
         "ExecutePlanFailureObservationRawViewHierarchy",
         "ExecutePlanDebugStepObservationViewHierarchy",
@@ -1416,7 +1607,7 @@ describe("finalizeToolResponse", () => {
         device: { deviceId: "emulator-5554", platform: "android" },
         screenState: { currentPackage: "com.example" },
         viewHierarchy: {
-          rawXml: "<hierarchy><node text=\"large\" /></hierarchy>",
+          rawXml: '<hierarchy><node text="large" /></hierarchy>',
           elementCount: 42,
           filteredNodeCount: 3,
           clickableElements: [{ text: "Submit", bounds: { left: 0, top: 0, right: 1, bottom: 1 } }],
@@ -1434,10 +1625,10 @@ describe("finalizeToolResponse", () => {
         errors: [],
       };
 
-      const finalized = finalizeToolResponse(
-        createStructuredToolResponse(payload),
-        { name: "bugReport", artifactWriter: writer } as any
-      );
+      const finalized = finalizeToolResponse(createStructuredToolResponse(payload), {
+        name: "bugReport",
+        artifactWriter: writer,
+      } as any);
 
       const report = finalized.structuredContent as any;
       expect(report.reportId).toBe("bug-1");
@@ -1457,7 +1648,7 @@ describe("finalizeToolResponse", () => {
       });
       expect(report.windowState.focusedWindow).toBe("com.example/.Main");
       expect(report.windowState.windows.artifact.payload).toBe("BugReportWindowList");
-      expect(writer.writes.map(write => write.payload)).toEqual([
+      expect(writer.writes.map((write) => write.payload)).toEqual([
         "BugReportViewHierarchyRawXml",
         "BugReportLogcat",
         "BugReportWindowList",
@@ -1486,10 +1677,10 @@ describe("finalizeToolResponse", () => {
         ],
       };
 
-      const finalized = finalizeToolResponse(
-        createStructuredToolResponse(payload),
-        { name: "getNetworkGraph", artifactWriter: writer } as any
-      );
+      const finalized = finalizeToolResponse(createStructuredToolResponse(payload), {
+        name: "getNetworkGraph",
+        artifactWriter: writer,
+      } as any);
 
       expect(finalized.structuredContent).toEqual({
         graph: {
@@ -1526,10 +1717,11 @@ describe("finalizeToolResponse", () => {
         },
       };
 
-      const finalized = finalizeToolResponse(
-        createStructuredToolResponse(payload),
-        { name: "executePlan", internal: true, artifactWriter: writer } as any
-      );
+      const finalized = finalizeToolResponse(createStructuredToolResponse(payload), {
+        name: "executePlan",
+        internal: true,
+        artifactWriter: writer,
+      } as any);
 
       expect(writer.writes).toHaveLength(0);
       expect(finalized.structuredContent).toEqual(payload);
@@ -1558,7 +1750,10 @@ describe("finalizeToolResponse", () => {
 
     test("strips the embedded observation from a non-observe action in both representations", () => {
       serverConfig.setActionsNoObserveEnabled(true);
-      const response = createStructuredToolResponse({ success: true, observation: makeObserveResult() });
+      const response = createStructuredToolResponse({
+        success: true,
+        observation: makeObserveResult(),
+      });
       const finalized = finalizeToolResponse(response, { name: "tapOn", sessionUuid: "s1" });
 
       expect((finalized.structuredContent as any).observation).toBeUndefined();
@@ -1576,7 +1771,11 @@ describe("finalizeToolResponse", () => {
 
     test("does not strip the observe tool's own observation", () => {
       serverConfig.setActionsNoObserveEnabled(true);
-      const finalized = finalizeToolResponse(createStructuredToolResponse(makeObserveResult()), { name: "observe", sessionUuid: "s1", args: { project: "full" } });
+      const finalized = finalizeToolResponse(createStructuredToolResponse(makeObserveResult()), {
+        name: "observe",
+        sessionUuid: "s1",
+        args: { project: "full" },
+      });
       // observe still returns the full (sanitized) observation.
       expect((finalized.structuredContent as any).viewHierarchy).toBeDefined();
     });
@@ -1585,7 +1784,7 @@ describe("finalizeToolResponse", () => {
       serverConfig.setActionsNoObserveEnabled(false);
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: makeObserveResult() }),
-        { name: "tapOn" }
+        { name: "tapOn" },
       );
       expect((finalized.structuredContent as any).observation).toBeDefined();
     });
@@ -1594,11 +1793,16 @@ describe("finalizeToolResponse", () => {
       serverConfig.setActionsNoObserveEnabled(true);
       serverConfig.setActionsDiffObserveEnabled(true);
       const map = new Map<string, ObserveResult>();
-      const store = { get: (u: string) => map.get(u), set: (u: string, o: ObserveResult) => { map.set(u, o); } };
+      const store = {
+        get: (u: string) => map.get(u),
+        set: (u: string, o: ObserveResult) => {
+          map.set(u, o);
+        },
+      };
 
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: makeObserveResult() }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store }
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
       );
       const obsSc = (finalized.structuredContent as any).observation;
       expect(obsSc).toBeUndefined(); // stripped, not a diff
@@ -1613,7 +1817,9 @@ describe("finalizeToolResponse", () => {
     test("non-observe tool without an observation passes through unchanged", () => {
       serverConfig.setActionsNoObserveEnabled(true);
       const payload = { success: true, message: "done" };
-      const finalized = finalizeToolResponse(createStructuredToolResponse(payload), { name: "pressButton" });
+      const finalized = finalizeToolResponse(createStructuredToolResponse(payload), {
+        name: "pressButton",
+      });
       expect(finalized.structuredContent).toEqual(payload);
     });
   });
@@ -1637,16 +1843,30 @@ describe("finalizeToolResponse", () => {
             node: {
               "resource-id": "com.example:id/root",
               "content-desc": "keep-me",
-              "node": [{ "resource-id": "com.example:id/child", "text": "Hello" } as any],
+              node: [{ "resource-id": "com.example:id/child", text: "Hello" } as any],
             } as any,
           },
         },
       } as ObserveResult;
     }
 
-    function makeStore(): { store: { get: (u: string) => ObserveResult | undefined; set: (u: string, o: ObserveResult) => void }; map: Map<string, ObserveResult> } {
+    function makeStore(): {
+      store: {
+        get: (u: string) => ObserveResult | undefined;
+        set: (u: string, o: ObserveResult) => void;
+      };
+      map: Map<string, ObserveResult>;
+    } {
       const map = new Map<string, ObserveResult>();
-      return { map, store: { get: (u: string) => map.get(u), set: (u: string, o: ObserveResult) => { map.set(u, o); } } };
+      return {
+        map,
+        store: {
+          get: (u: string) => map.get(u),
+          set: (u: string, o: ObserveResult) => {
+            map.set(u, o);
+          },
+        },
+      };
     }
 
     beforeEach(() => {
@@ -1668,7 +1888,7 @@ describe("finalizeToolResponse", () => {
 
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store, internal: true }
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store, internal: true },
       );
 
       const obsSc = (finalized.structuredContent as any).observation;
@@ -1688,7 +1908,7 @@ describe("finalizeToolResponse", () => {
 
       finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store, internal: true }
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store, internal: true },
       );
 
       // Internal calls neither read a diff nor advance the agent-facing baseline.
@@ -1701,7 +1921,7 @@ describe("finalizeToolResponse", () => {
 
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
-        { name: "tapOn", sessionUuid: "s1", internal: true }
+        { name: "tapOn", sessionUuid: "s1", internal: true },
       );
 
       const obsSc = (finalized.structuredContent as any).observation;
@@ -1714,7 +1934,7 @@ describe("finalizeToolResponse", () => {
       serverConfig.setActionsDiffObserveEnabled(true);
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: makeObserveResult() }),
-        { name: "tapOn", sessionUuid: "s1", internal: true }
+        { name: "tapOn", sessionUuid: "s1", internal: true },
       );
       const node = (finalized.structuredContent as any).observation.viewHierarchy.hierarchy.node;
       // Sanitization (issue #2758) is independent of the diff guard.
@@ -1730,7 +1950,7 @@ describe("finalizeToolResponse", () => {
 
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store, internal: false }
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store, internal: false },
       );
 
       expect((finalized.structuredContent as any).observation.isDiff).toBe(true);
@@ -1748,10 +1968,10 @@ describe("finalizeToolResponse", () => {
       obs.elements = {
         clickable: [
           {
-            "bounds": { left: 0, top: 0, right: 100, bottom: 50 },
+            bounds: { left: 0, top: 0, right: 100, bottom: 50 },
             "resource-id": "com.example:id/btn",
-            "text": "Submit",
-            "clickable": "true",
+            text: "Submit",
+            clickable: "true",
             "test-tag": "submit-with-terms",
             "semantic-links": [{ text: "Terms", occurrence: 0, start: 7, end: 12 }],
           } as any,
@@ -1766,7 +1986,7 @@ describe("finalizeToolResponse", () => {
     test("default (no project arg): observe returns a skeleton and omits viewHierarchy + elements", () => {
       const finalized = finalizeToolResponse(
         createStructuredToolResponse(observeWithActionableElements()),
-        { name: "observe" }
+        { name: "observe" },
       );
       const sc = finalized.structuredContent as ObserveResult;
       expect(Array.isArray(sc.skeleton)).toBe(true);
@@ -1774,7 +1994,9 @@ describe("finalizeToolResponse", () => {
       expect(sc.viewHierarchy).toBeUndefined();
       expect(sc.elements).toBeUndefined();
       expect(sc.skeleton![0].testTag).toBe("submit-with-terms");
-      expect(sc.skeleton![0].semanticLinks).toEqual([{ text: "Terms", occurrence: 0, start: 7, end: 12 }]);
+      expect(sc.skeleton![0].semanticLinks).toEqual([
+        { text: "Terms", occurrence: 0, start: 7, end: 12 },
+      ]);
       // text mirror agrees with structuredContent.
       const parsed = JSON.parse(finalized.content[0].text);
       expect(parsed.skeleton.length).toBe(sc.skeleton!.length);
@@ -1783,7 +2005,7 @@ describe("finalizeToolResponse", () => {
     test("per-call project:'skeleton' arg also projects to the skeleton", () => {
       const finalized = finalizeToolResponse(
         createStructuredToolResponse(observeWithActionableElements()),
-        { name: "observe", args: { project: "skeleton" } }
+        { name: "observe", args: { project: "skeleton" } },
       );
       const sc = finalized.structuredContent as ObserveResult;
       expect(sc.skeleton).toBeDefined();
@@ -1793,7 +2015,7 @@ describe("finalizeToolResponse", () => {
     test("explicit project:'full' opts out of the skeleton default (full tree returned)", () => {
       const finalized = finalizeToolResponse(
         createStructuredToolResponse(observeWithActionableElements()),
-        { name: "observe", args: { project: "full" } }
+        { name: "observe", args: { project: "full" } },
       );
       const sc = finalized.structuredContent as ObserveResult;
       expect(sc.skeleton).toBeUndefined();
@@ -1803,7 +2025,7 @@ describe("finalizeToolResponse", () => {
     test("raw:true opts out to the full tree", () => {
       const finalized = finalizeToolResponse(
         createStructuredToolResponse(observeWithActionableElements()),
-        { name: "observe", args: { raw: true } }
+        { name: "observe", args: { raw: true } },
       );
       const sc = finalized.structuredContent as ObserveResult;
       expect(sc.skeleton).toBeUndefined();
@@ -1812,8 +2034,11 @@ describe("finalizeToolResponse", () => {
 
     test("embedded action observations are never skeletonized (scoped to observe)", () => {
       const finalized = finalizeToolResponse(
-        createStructuredToolResponse({ success: true, observation: observeWithActionableElements() }),
-        { name: "tapOn", sessionUuid: "s1" }
+        createStructuredToolResponse({
+          success: true,
+          observation: observeWithActionableElements(),
+        }),
+        { name: "tapOn", sessionUuid: "s1" },
       );
       const obsSc = (finalized.structuredContent as any).observation as ObserveResult;
       expect(obsSc.skeleton).toBeUndefined();
@@ -1851,13 +2076,20 @@ describe("finalizeToolResponse observe scope experiments (#4344)", () => {
         packageName: "com.example.app",
         hierarchy: {
           node: {
-            "class": "Root",
-            "bounds": { left: 0, top: 0, right: 1000, bottom: 2000 },
+            class: "Root",
+            bounds: { left: 0, top: 0, right: 1000, bottom: 2000 },
             // Package-qualified resource-ids are the app-vs-chrome signal that
             // survives cleanNodeProperties (per-node `package` does not).
-            "node": [
-              { "resource-id": "com.android.systemui:id/status_bar", "bounds": { left: 0, top: 0, right: 1000, bottom: 100 } },
-              { "resource-id": "com.example.app:id/content", "text": "Hi", "bounds": { left: 0, top: 100, right: 1000, bottom: 1900 } },
+            node: [
+              {
+                "resource-id": "com.android.systemui:id/status_bar",
+                bounds: { left: 0, top: 0, right: 1000, bottom: 100 },
+              },
+              {
+                "resource-id": "com.example.app:id/content",
+                text: "Hi",
+                bounds: { left: 0, top: 100, right: 1000, bottom: 1900 },
+              },
             ],
           } as any,
         },
@@ -1888,7 +2120,10 @@ describe("finalizeToolResponse observe scope experiments (#4344)", () => {
   });
 
   test("no scope in the call: payload is untouched (scope is a no-op)", () => {
-    const finalized = finalizeToolResponse(createStructuredToolResponse(chromeObserve()), { name: "observe", args: { project: "full" } });
+    const finalized = finalizeToolResponse(createStructuredToolResponse(chromeObserve()), {
+      name: "observe",
+      args: { project: "full" },
+    });
     expect((finalized.structuredContent as ObserveResult).observeScope).toBeUndefined();
   });
 
@@ -1946,17 +2181,23 @@ describe("finalizeToolResponse observe scope experiments (#4344)", () => {
   });
 
   test("internal observe calls are never scoped", () => {
-    const finalized = finalizeToolResponse(
-      createStructuredToolResponse(chromeObserve()),
-      { name: "observe", internal: true, args: { project: "full", scope: { focus: true } } }
-    );
+    const finalized = finalizeToolResponse(createStructuredToolResponse(chromeObserve()), {
+      name: "observe",
+      internal: true,
+      args: { project: "full", scope: { focus: true } },
+    });
     expect((finalized.structuredContent as ObserveResult).observeScope).toBeUndefined();
   });
 
   test("diff baseline is the full sanitized tree, not the scoped copy", () => {
     serverConfig.setActionsDiffObserveEnabled(true);
     const map = new Map<string, ObserveResult>();
-    const store = { get: (u: string) => map.get(u), set: (u: string, o: ObserveResult) => { map.set(u, o); } };
+    const store = {
+      get: (u: string) => map.get(u),
+      set: (u: string, o: ObserveResult) => {
+        map.set(u, o);
+      },
+    };
 
     finalizeToolResponse(createStructuredToolResponse(chromeObserve()), {
       name: "observe",
@@ -1970,8 +2211,12 @@ describe("finalizeToolResponse observe scope experiments (#4344)", () => {
     expect(baseline.observeScope).toBeUndefined();
     const ids: string[] = [];
     const walk = (n: any): void => {
-      if (n["resource-id"]) { ids.push(n["resource-id"]); }
-      for (const c of (n.node ?? [])) { walk(c); }
+      if (n["resource-id"]) {
+        ids.push(n["resource-id"]);
+      }
+      for (const c of n.node ?? []) {
+        walk(c);
+      }
     };
     walk(baseline.viewHierarchy!.hierarchy.node);
     expect(ids).toContain("com.android.systemui:id/status_bar");
@@ -1980,32 +2225,52 @@ describe("finalizeToolResponse observe scope experiments (#4344)", () => {
 
 describe("finalizeToolResponse — scope-then-cap for layoutWarnings (issue #5074 finding 3)", () => {
   test("an in-region warning survives even when 100+ higher-priority warnings are out of region", () => {
-    const W = 1080, H = 2400;
+    const W = 1080,
+      H = 2400;
     // One in-region node (top) plus 120 out-of-region nodes (bottom), each distinct bounds.
     const inRegionBounds = { left: 0, top: 100, right: 200, bottom: 160 };
     const outNodes = Array.from({ length: 120 }, (_, i) => ({
       "resource-id": `com.example:id/out_${i}`,
-      "bounds": { left: 0, top: 1300 + i, right: 200, bottom: 1360 + i },
+      bounds: { left: 0, top: 1300 + i, right: 200, bottom: 1360 + i },
     }));
-    const mkWarning = (bounds: Record<string, number>, severity: "warning" | "info", overflow: number): any => ({
-      type: "important-content-under-inset", severity, element: { bounds },
-      categories: ["text"], insetTypes: ["systemBars"], sides: ["top"],
-      overflowPx: { top: overflow }, insetPx: { top: overflow }, overlapPercent: 100, confidence: "medium",
+    const mkWarning = (
+      bounds: Record<string, number>,
+      severity: "warning" | "info",
+      overflow: number,
+    ): any => ({
+      type: "important-content-under-inset",
+      severity,
+      element: { bounds },
+      categories: ["text"],
+      insetTypes: ["systemBars"],
+      sides: ["top"],
+      overflowPx: { top: overflow },
+      insetPx: { top: overflow },
+      overlapPercent: 100,
+      confidence: "medium",
     });
     const obs = {
-      updatedAt: 1, screenSize: { width: W, height: H }, systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      updatedAt: 1,
+      screenSize: { width: W, height: H },
+      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
       activeWindow: { appId: "com.example" },
-      viewHierarchy: { packageName: "com.example", hierarchy: { node: {
-        "resource-id": "com.example:id/root", "bounds": { left: 0, top: 0, right: W, bottom: H },
-        "node": [{ text: "in", bounds: inRegionBounds }, ...outNodes],
-      } } },
+      viewHierarchy: {
+        packageName: "com.example",
+        hierarchy: {
+          node: {
+            "resource-id": "com.example:id/root",
+            bounds: { left: 0, top: 0, right: W, bottom: H },
+            node: [{ text: "in", bounds: inRegionBounds }, ...outNodes],
+          },
+        },
+      },
       layoutWarnings: {
         scope: "full",
         warnings: [
           // In-region warning is deliberately LOW priority, so a cap taken BEFORE
           // scoping (the bug) would evict it in favor of the 120 out-of-region ones.
           mkWarning(inRegionBounds, "info", 1),
-          ...outNodes.map(n => mkWarning(n.bounds, "warning", 999)),
+          ...outNodes.map((n) => mkWarning(n.bounds, "warning", 999)),
         ],
       },
     } as unknown as ObserveResult;

@@ -4,12 +4,12 @@ import type { BootedDevice } from "../../../../src/models";
 import { FakeWebSocket, WebSocketState } from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 
-describe("CtrlProxyDatabase (iOS)", function() {
+describe("CtrlProxyDatabase (iOS)", function () {
   let testDevice: BootedDevice;
   let fakeTimer: FakeTimer;
   const serverPort = 8765;
 
-  beforeEach(function() {
+  beforeEach(function () {
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     testDevice = {
@@ -44,26 +44,37 @@ describe("CtrlProxyDatabase (iOS)", function() {
   };
 
   const waitForSocketOpen = async (socket: FakeWebSocket | null): Promise<void> => {
-    if (!socket || socket.readyState === WebSocketState.OPEN) { return; }
-    await new Promise<void>(resolve => socket.once("open", () => resolve()));
+    if (!socket || socket.readyState === WebSocketState.OPEN) {
+      return;
+    }
+    await new Promise<void>((resolve) => socket.once("open", () => resolve()));
   };
 
   const waitForSocket = async (
-    getSocket: () => CapturingWebSocket | null
+    getSocket: () => CapturingWebSocket | null,
   ): Promise<CapturingWebSocket | null> => {
     for (let i = 0; i < 5; i += 1) {
       const socket = getSocket();
-      if (socket) { return socket; }
-      await new Promise(resolve => setImmediate(resolve));
+      if (socket) {
+        return socket;
+      }
+      await new Promise((resolve) => setImmediate(resolve));
     }
     return getSocket();
   };
 
-  const waitForSentMessages = async (socket: CapturingWebSocket | null, minCount = 1): Promise<void> => {
-    if (!socket) { return; }
+  const waitForSentMessages = async (
+    socket: CapturingWebSocket | null,
+    minCount = 1,
+  ): Promise<void> => {
+    if (!socket) {
+      return;
+    }
     for (let i = 0; i < 10; i += 1) {
-      if (commandPayloads(socket).length >= minCount) { return; }
-      await new Promise(resolve => setImmediate(resolve));
+      if (commandPayloads(socket).length >= minCount) {
+        return;
+      }
+      await new Promise((resolve) => setImmediate(resolve));
     }
   };
 
@@ -75,15 +86,19 @@ describe("CtrlProxyDatabase (iOS)", function() {
 
   const commandPayloads = (socket: CapturingWebSocket): any[] =>
     socket.sentMessages
-      .map(message => JSON.parse(message))
-      .filter(payload => !syncMessageTypes.has(payload.type));
+      .map((message) => JSON.parse(message))
+      .filter((payload) => !syncMessageTypes.has(payload.type));
 
-  test("executeSQLForIos sends execute_sql and returns query rows including blob strings", async function() {
+  test("executeSQLForIos sends execute_sql and returns query rows including blob strings", async function () {
     const { factory, getSocket } = createCapturingFactory();
     const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
 
     try {
-      const resultPromise = client.executeSQLForIos("com.example.app", "/app/Documents/app.db", "SELECT id, payload FROM notes");
+      const resultPromise = client.executeSQLForIos(
+        "com.example.app",
+        "/app/Documents/app.db",
+        "SELECT id, payload FROM notes",
+      );
       const socket = await waitForSocket(getSocket);
       await waitForSocketOpen(socket);
       await waitForSentMessages(socket);
@@ -94,16 +109,18 @@ describe("CtrlProxyDatabase (iOS)", function() {
       expect(sentMessage.databasePath).toBe("/app/Documents/app.db");
       expect(sentMessage.query).toBe("SELECT id, payload FROM notes");
 
-      socket!.simulateMessage(JSON.stringify({
-        type: "execute_sql_result",
-        requestId: sentMessage.requestId,
-        success: true,
-        queryType: "query",
-        columns: ["id", "payload"],
-        rows: [["1", "0xCAFE"]],
-        rowsAffected: 0,
-        totalTimeMs: 4,
-      }));
+      socket!.simulateMessage(
+        JSON.stringify({
+          type: "execute_sql_result",
+          requestId: sentMessage.requestId,
+          success: true,
+          queryType: "query",
+          columns: ["id", "payload"],
+          rows: [["1", "0xCAFE"]],
+          rowsAffected: 0,
+          totalTimeMs: 4,
+        }),
+      );
 
       await expect(resultPromise).resolves.toEqual({
         type: "query",
@@ -115,25 +132,31 @@ describe("CtrlProxyDatabase (iOS)", function() {
     }
   });
 
-  test("executeSQLForIos returns mutation rowsAffected", async function() {
+  test("executeSQLForIos returns mutation rowsAffected", async function () {
     const { factory, getSocket } = createCapturingFactory();
     const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
 
     try {
-      const resultPromise = client.executeSQLForIos("com.example.app", "/app/Documents/app.db", "UPDATE notes SET title = 'x'");
+      const resultPromise = client.executeSQLForIos(
+        "com.example.app",
+        "/app/Documents/app.db",
+        "UPDATE notes SET title = 'x'",
+      );
       const socket = await waitForSocket(getSocket);
       await waitForSocketOpen(socket);
       await waitForSentMessages(socket);
       const sentMessage = commandPayloads(socket!)[0];
 
-      socket!.simulateMessage(JSON.stringify({
-        type: "execute_sql_result",
-        requestId: sentMessage.requestId,
-        success: true,
-        queryType: "mutation",
-        rowsAffected: 2,
-        totalTimeMs: 5,
-      }));
+      socket!.simulateMessage(
+        JSON.stringify({
+          type: "execute_sql_result",
+          requestId: sentMessage.requestId,
+          success: true,
+          queryType: "mutation",
+          rowsAffected: 2,
+          totalTimeMs: 5,
+        }),
+      );
 
       await expect(resultPromise).resolves.toEqual({
         type: "mutation",
@@ -144,24 +167,31 @@ describe("CtrlProxyDatabase (iOS)", function() {
     }
   });
 
-  test("executeSQLForIos surfaces disabled SDK errors without timing out", async function() {
+  test("executeSQLForIos surfaces disabled SDK errors without timing out", async function () {
     const { factory, getSocket } = createCapturingFactory();
     const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
 
     try {
-      const resultPromise = client.executeSQLForIos("com.example.app", "/app/Documents/app.db", "SELECT 1");
+      const resultPromise = client.executeSQLForIos(
+        "com.example.app",
+        "/app/Documents/app.db",
+        "SELECT 1",
+      );
       const socket = await waitForSocket(getSocket);
       await waitForSocketOpen(socket);
       await waitForSentMessages(socket);
       const sentMessage = commandPayloads(socket!)[0];
 
-      socket!.simulateMessage(JSON.stringify({
-        type: "execute_sql_result",
-        requestId: sentMessage.requestId,
-        success: false,
-        error: "database inspection unavailable - embed the AutoMobile SDK and call DatabaseInspector.shared.setEnabled(true)",
-        totalTimeMs: 3,
-      }));
+      socket!.simulateMessage(
+        JSON.stringify({
+          type: "execute_sql_result",
+          requestId: sentMessage.requestId,
+          success: false,
+          error:
+            "database inspection unavailable - embed the AutoMobile SDK and call DatabaseInspector.shared.setEnabled(true)",
+          totalTimeMs: 3,
+        }),
+      );
 
       await expect(resultPromise).rejects.toThrow("setEnabled(true)");
     } finally {
@@ -181,11 +211,14 @@ describe("CtrlProxyDatabase (iOS)", function() {
 // executeSQL `queryType` default is pinned. Timeouts fire by advancing the fake
 // clock (asserted message), never by a real hang.
 // ---------------------------------------------------------------------------
-import { createIosDelegateHarness, type IosDelegateHarness } from "../../../helpers/iosDelegateHarness";
+import {
+  createIosDelegateHarness,
+  type IosDelegateHarness,
+} from "../../../helpers/iosDelegateHarness";
 import { CtrlProxyDatabase } from "../../../../src/features/observe/ios/CtrlProxyDatabase";
 
 describe("CtrlProxyDatabase delegate outcomes", () => {
-  const flush = (): Promise<void> => new Promise<void>(resolve => setImmediate(resolve));
+  const flush = (): Promise<void> => new Promise<void>((resolve) => setImmediate(resolve));
   const TIMEOUT = 5000;
 
   let h: IosDelegateHarness;
@@ -213,8 +246,14 @@ describe("CtrlProxyDatabase delegate outcomes", () => {
       timeoutMsg: `Execute SQL timeout after ${TIMEOUT}ms`,
       defaultErrorMsg: "Execute SQL failed",
       call: () => db.executeSQL("com.app", "/db/main.db", "SELECT 1", TIMEOUT),
-      successPayload: { success: true, totalTimeMs: 1, queryType: "query", columns: ["id"], rows: [[1], [2]] },
-      assertSuccess: value => {
+      successPayload: {
+        success: true,
+        totalTimeMs: 1,
+        queryType: "query",
+        columns: ["id"],
+        rows: [[1], [2]],
+      },
+      assertSuccess: (value) => {
         expect(value).toEqual({ type: "query", columns: ["id"], rows: [[1], [2]] });
       },
     },
@@ -224,8 +263,12 @@ describe("CtrlProxyDatabase delegate outcomes", () => {
       timeoutMsg: `List databases timeout after ${TIMEOUT}ms`,
       defaultErrorMsg: "List databases failed",
       call: () => db.listDatabases("com.app", TIMEOUT),
-      successPayload: { success: true, totalTimeMs: 1, databases: [{ name: "main", path: "/db/main.db" }] },
-      assertSuccess: value => {
+      successPayload: {
+        success: true,
+        totalTimeMs: 1,
+        databases: [{ name: "main", path: "/db/main.db" }],
+      },
+      assertSuccess: (value) => {
         expect(value).toEqual([{ name: "main", path: "/db/main.db" }]);
       },
     },
@@ -236,7 +279,7 @@ describe("CtrlProxyDatabase delegate outcomes", () => {
       defaultErrorMsg: "List tables failed",
       call: () => db.listTables("com.app", "/db/main.db", TIMEOUT),
       successPayload: { success: true, totalTimeMs: 1, tables: ["users", "orders"] },
-      assertSuccess: value => {
+      assertSuccess: (value) => {
         expect(value).toEqual(["users", "orders"]);
       },
     },
@@ -246,8 +289,14 @@ describe("CtrlProxyDatabase delegate outcomes", () => {
       timeoutMsg: `Get table data timeout after ${TIMEOUT}ms`,
       defaultErrorMsg: "Get table data failed",
       call: () => db.getTableData("com.app", "/db/main.db", "users", 50, 0, TIMEOUT),
-      successPayload: { success: true, totalTimeMs: 1, columns: ["id", "name"], rows: [[1, "a"]], total: 1 },
-      assertSuccess: value => {
+      successPayload: {
+        success: true,
+        totalTimeMs: 1,
+        columns: ["id", "name"],
+        rows: [[1, "a"]],
+        total: 1,
+      },
+      assertSuccess: (value) => {
         expect(value).toEqual({ columns: ["id", "name"], rows: [[1, "a"]], total: 1 });
       },
     },
@@ -262,8 +311,10 @@ describe("CtrlProxyDatabase delegate outcomes", () => {
         totalTimeMs: 1,
         columns: [{ name: "id", type: "INTEGER", nullable: false, primaryKey: true }],
       },
-      assertSuccess: value => {
-        expect(value).toEqual({ columns: [{ name: "id", type: "INTEGER", nullable: false, primaryKey: true }] });
+      assertSuccess: (value) => {
+        expect(value).toEqual({
+          columns: [{ name: "id", type: "INTEGER", nullable: false, primaryKey: true }],
+        });
       },
     },
   ];

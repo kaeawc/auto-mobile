@@ -20,12 +20,12 @@ function makeResult(label: string): ObserveResult {
   };
 }
 
-describe("FileSystemObserveCacheStore", function() {
+describe("FileSystemObserveCacheStore", function () {
   let cacheDir: string;
   let timer: FakeTimer;
   let store: FileSystemObserveCacheStore;
 
-  beforeEach(function() {
+  beforeEach(function () {
     cacheDir = path.join(os.tmpdir(), `observe-cache-test-${randomUUID()}`);
     mkdirSync(cacheDir, { recursive: true });
     timer = new FakeTimer();
@@ -33,13 +33,13 @@ describe("FileSystemObserveCacheStore", function() {
     store = new FileSystemObserveCacheStore(timer, cacheDir);
   });
 
-  afterEach(function() {
+  afterEach(function () {
     if (existsSync(cacheDir)) {
       rmSync(cacheDir, { recursive: true, force: true });
     }
   });
 
-  test("creates the cache directory on construction if missing", function() {
+  test("creates the cache directory on construction if missing", function () {
     const fresh = path.join(os.tmpdir(), `observe-cache-fresh-${randomUUID()}`);
     expect(existsSync(fresh)).toBe(false);
     new FileSystemObserveCacheStore(timer, fresh);
@@ -47,13 +47,13 @@ describe("FileSystemObserveCacheStore", function() {
     rmSync(fresh, { recursive: true, force: true });
   });
 
-  test("put then getRecentInMemoryForDevice returns the cached result", async function() {
+  test("put then getRecentInMemoryForDevice returns the cached result", async function () {
     const result = makeResult("a");
     await store.put("device-1", result);
     expect(store.getRecentInMemoryForDevice("device-1")).toBe(result);
   });
 
-  test("put then getRecentInMemory (cross-device) returns the latest result", async function() {
+  test("put then getRecentInMemory (cross-device) returns the latest result", async function () {
     const older = makeResult("older");
     const newer = makeResult("newer");
     await store.put("device-1", older);
@@ -62,7 +62,7 @@ describe("FileSystemObserveCacheStore", function() {
     expect(store.getRecentInMemory()).toBe(newer);
   });
 
-  test("TTL: entry older than 5 minutes is evicted from memory on read", async function() {
+  test("TTL: entry older than 5 minutes is evicted from memory on read", async function () {
     const result = makeResult("expired");
     await store.put("device-1", result);
     timer.advanceTime(OBSERVE_RESULT_CACHE_TTL_MS + 1);
@@ -70,7 +70,7 @@ describe("FileSystemObserveCacheStore", function() {
     expect(store.getRecentInMemory()).toBeUndefined();
   });
 
-  test("multi-device isolation: getRecentInMemoryForDevice returns only matching device", async function() {
+  test("multi-device isolation: getRecentInMemoryForDevice returns only matching device", async function () {
     const r1 = makeResult("d1");
     const r2 = makeResult("d2");
     await store.put("device-1", r1);
@@ -80,7 +80,7 @@ describe("FileSystemObserveCacheStore", function() {
     expect(store.getRecentInMemoryForDevice("device-2")).toBe(r2);
   });
 
-  test("disk fallback: getMostRecent restores from disk after memory clear", async function() {
+  test("disk fallback: getMostRecent restores from disk after memory clear", async function () {
     const result = makeResult("on-disk");
     await store.put("device-1", result);
 
@@ -96,7 +96,7 @@ describe("FileSystemObserveCacheStore", function() {
     expect(reloaded.getRecentInMemoryForDevice("device-1")).toBeDefined();
   });
 
-  test("clear(deviceId) only removes entries for that device", async function() {
+  test("clear(deviceId) only removes entries for that device", async function () {
     await store.put("device-1", makeResult("d1"));
     timer.advanceTime(1);
     await store.put("device-2", makeResult("d2"));
@@ -106,7 +106,7 @@ describe("FileSystemObserveCacheStore", function() {
     expect(store.getRecentInMemoryForDevice("device-2")).toBeDefined();
   });
 
-  test("clear() removes everything in memory", async function() {
+  test("clear() removes everything in memory", async function () {
     await store.put("device-1", makeResult("d1"));
     timer.advanceTime(1);
     await store.put("device-2", makeResult("d2"));
@@ -117,23 +117,23 @@ describe("FileSystemObserveCacheStore", function() {
     expect(store.getRecentInMemoryForDevice("device-2")).toBeUndefined();
   });
 
-  test("put writes a JSON file with the sanitized device id in the name", async function() {
+  test("put writes a JSON file with the sanitized device id in the name", async function () {
     await store.put("emulator-5554:abcd", makeResult("with-colon"));
-    const files = readdirSync(cacheDir).filter(f => f.endsWith(".json"));
+    const files = readdirSync(cacheDir).filter((f) => f.endsWith(".json"));
     expect(files.length).toBe(1);
     expect(files[0]).toContain("emulator-5554_abcd");
     expect(files[0]).not.toContain(":");
   });
 
-  test("getMostRecent returns undefined when nothing cached", async function() {
+  test("getMostRecent returns undefined when nothing cached", async function () {
     const result = await store.getMostRecent("device-1");
     expect(result).toBeUndefined();
   });
 
-  test("clear() followed immediately by put() does not delete the fresh file", async function() {
+  test("clear() followed immediately by put() does not delete the fresh file", async function () {
     // Seed an existing entry so clear() has something to delete.
     await store.put("device-1", makeResult("stale"));
-    expect(readdirSync(cacheDir).filter(f => f.endsWith(".json")).length).toBe(1);
+    expect(readdirSync(cacheDir).filter((f) => f.endsWith(".json")).length).toBe(1);
 
     // Advance the clock so the fresh write gets a different filename than the
     // stale one — otherwise the keys collide and the cleanup deletes the
@@ -149,10 +149,10 @@ describe("FileSystemObserveCacheStore", function() {
     // taken inside clear() should NOT include the post-clear write, so the
     // file count must settle at exactly one.
     for (let i = 0; i < 20; i++) {
-      await new Promise(resolve => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
     }
 
-    const files = readdirSync(cacheDir).filter(f => f.endsWith(".json"));
+    const files = readdirSync(cacheDir).filter((f) => f.endsWith(".json"));
     expect(files.length).toBe(1);
 
     // The surviving file must be the fresh one, not the stale one.
@@ -161,40 +161,57 @@ describe("FileSystemObserveCacheStore", function() {
   });
 });
 
-describe("normalizeCachedObserveResult — legacy layoutWarnings migration (#5074)", function() {
+describe("normalizeCachedObserveResult — legacy layoutWarnings migration (#5074)", function () {
   // A pre-#5074 daemon wrote layoutWarnings as an array plus a sibling number.
-  const warning = { type: "important-content-under-inset", severity: "info", element: { bounds: { left: 0, top: 0, right: 10, bottom: 10 } } };
+  const warning = {
+    type: "important-content-under-inset",
+    severity: "info",
+    element: { bounds: { left: 0, top: 0, right: 10, bottom: 10 } },
+  };
 
-  test("wraps a legacy array + layoutWarningsTruncated into a truncated envelope", function() {
+  test("wraps a legacy array + layoutWarningsTruncated into a truncated envelope", function () {
     const result = normalizeCachedObserveResult({
-      updatedAt: "x", screenSize: { width: 1, height: 1 }, systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-      layoutWarnings: [warning], layoutWarningsTruncated: 150,
+      updatedAt: "x",
+      screenSize: { width: 1, height: 1 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      layoutWarnings: [warning],
+      layoutWarningsTruncated: 150,
     });
-    expect(result.layoutWarnings).toEqual({ scope: "truncated", total: 150, warnings: [warning] } as never);
+    expect(result.layoutWarnings).toEqual({
+      scope: "truncated",
+      total: 150,
+      warnings: [warning],
+    } as never);
     expect((result as Record<string, unknown>).layoutWarningsTruncated).toBeUndefined();
   });
 
-  test("wraps a legacy array with no truncation as a full envelope", function() {
+  test("wraps a legacy array with no truncation as a full envelope", function () {
     const result = normalizeCachedObserveResult({
-      updatedAt: "x", screenSize: { width: 1, height: 1 }, systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      updatedAt: "x",
+      screenSize: { width: 1, height: 1 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
       layoutWarnings: [warning],
     });
     expect(result.layoutWarnings).toEqual({ scope: "full", warnings: [warning] } as never);
   });
 
-  test("passes a modern envelope through unchanged", function() {
+  test("passes a modern envelope through unchanged", function () {
     const envelope = { scope: "full" as const, warnings: [warning] };
     const result = normalizeCachedObserveResult({
-      updatedAt: "x", screenSize: { width: 1, height: 1 }, systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      updatedAt: "x",
+      screenSize: { width: 1, height: 1 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
       layoutWarnings: envelope,
     });
     expect(result.layoutWarnings).toBe(envelope as never);
   });
 
-  test("a normalized legacy result no longer throws when capped (regression: #5074 finding 7)", function() {
+  test("a normalized legacy result no longer throws when capped (regression: #5074 finding 7)", function () {
     const many = Array.from({ length: 150 }, () => warning);
     const result = normalizeCachedObserveResult({
-      updatedAt: "x", screenSize: { width: 1, height: 1 }, systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      updatedAt: "x",
+      screenSize: { width: 1, height: 1 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
       layoutWarnings: many,
     });
     expect(() => capLayoutWarnings(result.layoutWarnings!)).not.toThrow();

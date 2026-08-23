@@ -25,7 +25,7 @@ export class BoundedAndroidDeviceReboot implements AndroidDeviceReboot {
     let attempts = this.attemptsByTarget.get(targetKey) ?? 0;
     if (attempts >= this.maxAttempts) {
       logger.warn(
-        `[Android reboot] Restart budget exhausted for ${target.name} (${attempts}/${this.maxAttempts})`
+        `[Android reboot] Restart budget exhausted for ${target.name} (${attempts}/${this.maxAttempts})`,
       );
       return false;
     }
@@ -43,7 +43,7 @@ export class BoundedAndroidDeviceReboot implements AndroidDeviceReboot {
       } catch (error) {
         logger.warn(
           `[Android reboot] Failed to restart ${target.name} (attempt ${attempts}/${this.maxAttempts}): ${error}`,
-          error
+          error,
         );
         if (attempts < this.maxAttempts) {
           await this.timer.sleep(this.backoff.delayForAttempt(attempts));

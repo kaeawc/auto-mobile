@@ -67,7 +67,9 @@ export async function readCaptureStageRecords(dir: string): Promise<CaptureStage
       parsed = JSON.parse(await readFile(file, "utf8"));
     } catch (error) {
       // Not JSON, or malformed JSON — an artifact directory mixes logs in; skip it.
-      process.stderr.write(`skipping ${file}: ${error instanceof Error ? error.message : String(error)}\n`);
+      process.stderr.write(
+        `skipping ${file}: ${error instanceof Error ? error.message : String(error)}\n`,
+      );
       continue;
     }
     if (isCaptureStageRecord(parsed)) {
@@ -80,7 +82,7 @@ export async function readCaptureStageRecords(dir: string): Promise<CaptureStage
 /** Read the records under `dir` and reduce them to a p50/p95 baseline summary. */
 export async function summarizeBaselineFromDir(
   dir: string,
-  options: { platform?: string } = {}
+  options: { platform?: string } = {},
 ): Promise<CaptureBaselineSummary> {
   const records = await readCaptureStageRecords(dir);
   return aggregateCaptureStageRecords(records, options);
@@ -89,7 +91,9 @@ export async function summarizeBaselineFromDir(
 async function main(): Promise<void> {
   const [dir, platform] = process.argv.slice(2);
   if (!dir) {
-    throw new Error("Usage: bun scripts/webrtc/aggregate-egress-baseline.ts <artifacts-dir> [platform]");
+    throw new Error(
+      "Usage: bun scripts/webrtc/aggregate-egress-baseline.ts <artifacts-dir> [platform]",
+    );
   }
   const summary = await summarizeBaselineFromDir(dir, platform ? { platform } : {});
   process.stdout.write(`${formatCaptureBaselineSummary(summary)}\n`);

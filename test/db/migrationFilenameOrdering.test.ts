@@ -40,18 +40,18 @@ describe("checkMigrationFilenames detector (issue #2868)", () => {
         "2026_08_01_000_alpha.beta.ts",
       ]) {
         const violations = checkMigrationFilenames([bad]);
-        expect(violations.map(v => v.rule)).toEqual(["malformed-filename"]);
+        expect(violations.map((v) => v.rule)).toEqual(["malformed-filename"]);
       }
     });
 
     test("flags a stray non-TypeScript file in the migrations directory", () => {
       const violations = checkMigrationFilenames(["README.md"]);
-      expect(violations.map(v => v.rule)).toEqual(["malformed-filename"]);
+      expect(violations.map((v) => v.rule)).toEqual(["malformed-filename"]);
     });
 
     test("flags a trailing underscore before the extension", () => {
       const violations = checkMigrationFilenames(["2026_08_01_000_alpha_.ts"]);
-      expect(violations.map(v => v.rule)).toEqual(["malformed-filename"]);
+      expect(violations.map((v) => v.rule)).toEqual(["malformed-filename"]);
     });
 
     test("accepts the canonical shape, including digits in the description", () => {
@@ -87,7 +87,7 @@ describe("checkMigrationFilenames detector (issue #2868)", () => {
 
     test("does NOT flag the grandfathered historical pairs", () => {
       const violations = checkMigrationFilenames(
-        Object.values(GRANDFATHERED_PREFIX_COLLISIONS).flat()
+        Object.values(GRANDFATHERED_PREFIX_COLLISIONS).flat(),
       );
       expect(violations).toEqual([]);
     });
@@ -97,7 +97,7 @@ describe("checkMigrationFilenames detector (issue #2868)", () => {
         ...Object.values(GRANDFATHERED_PREFIX_COLLISIONS).flat(),
         "2026_01_03_000_zzz_new_table.ts",
       ]);
-      const collisions = violations.filter(v => v.rule === "prefix-collision");
+      const collisions = violations.filter((v) => v.rule === "prefix-collision");
       expect(collisions).toHaveLength(1);
       expect(collisions[0].files).toContain("2026_01_03_000_zzz_new_table.ts");
     });
@@ -116,7 +116,7 @@ describe("checkMigrationFilenames detector (issue #2868)", () => {
   describe("stale-grandfather-entry ratchet", () => {
     test("flags a grandfathered file that no longer exists (allowlist must shrink)", () => {
       const all = Object.values(GRANDFATHERED_PREFIX_COLLISIONS).flat();
-      const withoutOne = all.filter(f => f !== "2026_01_27_000_failures.ts");
+      const withoutOne = all.filter((f) => f !== "2026_01_27_000_failures.ts");
       const stale = findStaleGrandfatherEntries(withoutOne);
       expect(stale).toHaveLength(1);
       expect(stale[0].rule).toBe("stale-grandfather-entry");
@@ -164,7 +164,7 @@ describe("real src/db/migrations directory (issue #2868 meta-test)", () => {
       ...checkMigrationFilenames(filenames),
       ...findStaleGrandfatherEntries(filenames),
     ];
-    const rendered = violations.map(v => `[${v.rule}] ${v.message}`).join("\n\n");
+    const rendered = violations.map((v) => `[${v.rule}] ${v.message}`).join("\n\n");
     expect(rendered).toBe("");
   });
 });

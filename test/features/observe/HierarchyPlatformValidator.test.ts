@@ -14,7 +14,10 @@ describe("RealHierarchyPlatformValidator", () => {
       const viewHierarchy: ViewHierarchyResult = {
         hierarchy: {
           node: {
-            $: { class: "android.widget.FrameLayout", bounds: { left: 0, top: 0, right: 1080, bottom: 1920 } },
+            $: {
+              class: "android.widget.FrameLayout",
+              bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
+            },
           },
         },
         density: 440,
@@ -125,7 +128,10 @@ describe("RealHierarchyPlatformValidator", () => {
       const viewHierarchy: ViewHierarchyResult = {
         hierarchy: {
           node: {
-            $: { class: "android.widget.FrameLayout", bounds: { left: 0, top: 0, right: 1080, bottom: 1920 } },
+            $: {
+              class: "android.widget.FrameLayout",
+              bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
+            },
           },
         },
         density: 440,
@@ -142,7 +148,10 @@ describe("RealHierarchyPlatformValidator", () => {
       const viewHierarchy: ViewHierarchyResult = {
         hierarchy: {
           node: {
-            $: { class: "android.view.View", bounds: { left: 0, top: 0, right: 1080, bottom: 2400 } },
+            $: {
+              class: "android.view.View",
+              bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+            },
           },
         },
         sdkInt: 33,
@@ -217,32 +226,39 @@ describe("RealHierarchyPlatformValidator", () => {
 
 describe("discardHierarchyDerivedData", () => {
   // Build a result populated with every hierarchy-derived field.
-  const contaminatedResult = (): ObserveResult => ({
-    updatedAt: 0,
-    screenSize: { width: 390, height: 844 },
-    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-    viewHierarchy: { hierarchy: { node: { $: { class: "UIWindow" } } }, screenScale: 3.0 } as unknown as ViewHierarchyResult,
-    elements: {
-      clickable: [{ "resource-id": "id/x", "text": "Stale" } as unknown as Element],
-      scrollable: [],
-      text: [{ "text": "Stale" } as unknown as Element],
-      media: [],
-    },
-    selectedElements: [{ } as never],
-    focusedElement: { "text": "Stale" } as unknown as Element,
-    accessibilityFocusedElement: { "text": "Stale" } as unknown as Element,
-    intentChooserDetected: true,
-    notificationPermissionDetected: true,
-    activeWindow: { appId: "com.other.platform", activityName: "", layoutSeqSum: 0 },
-    screenIdentity: {
-      platform: "ios",
-      source: "heuristic",
-      confidence: "medium",
-      key: JSON.stringify([["bundle", "com.other.platform"], ["focus", "stale-id"]]),
-      components: { bundleId: "com.other.platform", focusedElementId: "stale-id" },
-    },
-    predictions: { } as never,
-  } as unknown as ObserveResult);
+  const contaminatedResult = (): ObserveResult =>
+    ({
+      updatedAt: 0,
+      screenSize: { width: 390, height: 844 },
+      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      viewHierarchy: {
+        hierarchy: { node: { $: { class: "UIWindow" } } },
+        screenScale: 3.0,
+      } as unknown as ViewHierarchyResult,
+      elements: {
+        clickable: [{ "resource-id": "id/x", text: "Stale" } as unknown as Element],
+        scrollable: [],
+        text: [{ text: "Stale" } as unknown as Element],
+        media: [],
+      },
+      selectedElements: [{} as never],
+      focusedElement: { text: "Stale" } as unknown as Element,
+      accessibilityFocusedElement: { text: "Stale" } as unknown as Element,
+      intentChooserDetected: true,
+      notificationPermissionDetected: true,
+      activeWindow: { appId: "com.other.platform", activityName: "", layoutSeqSum: 0 },
+      screenIdentity: {
+        platform: "ios",
+        source: "heuristic",
+        confidence: "medium",
+        key: JSON.stringify([
+          ["bundle", "com.other.platform"],
+          ["focus", "stale-id"],
+        ]),
+        components: { bundleId: "com.other.platform", focusedElementId: "stale-id" },
+      },
+      predictions: {} as never,
+    }) as unknown as ObserveResult;
 
   test("clears every hierarchy-derived field", () => {
     const result = contaminatedResult();
@@ -278,7 +294,7 @@ describe("discardHierarchyDerivedData", () => {
 
   test("leaves genuinely device-derived fields untouched", () => {
     const result = contaminatedResult();
-    result.backStack = { } as never;
+    result.backStack = {} as never;
 
     discardHierarchyDerivedData(result);
 
@@ -290,22 +306,26 @@ describe("discardHierarchyDerivedData", () => {
 describe("enforceHierarchyPlatform", () => {
   const validator = new RealHierarchyPlatformValidator();
 
-  const baseResult = (viewHierarchy?: ViewHierarchyResult): ObserveResult => ({
-    updatedAt: 0,
-    screenSize: { width: 1080, height: 1920 },
-    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-    viewHierarchy,
-    focusedElement: { "text": "Stale" } as unknown as Element,
-    intentChooserDetected: true,
-    elements: { clickable: [], scrollable: [], text: [], media: [] },
-    screenIdentity: {
-      platform: "ios",
-      source: "heuristic",
-      confidence: "medium",
-      key: JSON.stringify([["bundle", "com.other.platform"], ["focus", "stale-id"]]),
-      components: { bundleId: "com.other.platform", focusedElementId: "stale-id" },
-    },
-  } as unknown as ObserveResult);
+  const baseResult = (viewHierarchy?: ViewHierarchyResult): ObserveResult =>
+    ({
+      updatedAt: 0,
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      viewHierarchy,
+      focusedElement: { text: "Stale" } as unknown as Element,
+      intentChooserDetected: true,
+      elements: { clickable: [], scrollable: [], text: [], media: [] },
+      screenIdentity: {
+        platform: "ios",
+        source: "heuristic",
+        confidence: "medium",
+        key: JSON.stringify([
+          ["bundle", "com.other.platform"],
+          ["focus", "stale-id"],
+        ]),
+        components: { bundleId: "com.other.platform", focusedElementId: "stale-id" },
+      },
+    }) as unknown as ObserveResult;
 
   test("rejects an opposite-platform hierarchy and scrubs all derived fields", () => {
     const result = baseResult({
@@ -330,7 +350,14 @@ describe("enforceHierarchyPlatform", () => {
 
   test("preserves a matching hierarchy and its derived fields", () => {
     const result = baseResult({
-      hierarchy: { node: { $: { class: "android.widget.FrameLayout", bounds: { left: 0, top: 0, right: 1080, bottom: 1920 } } } },
+      hierarchy: {
+        node: {
+          $: {
+            class: "android.widget.FrameLayout",
+            bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
+          },
+        },
+      },
       density: 440,
       sdkInt: 34,
     });

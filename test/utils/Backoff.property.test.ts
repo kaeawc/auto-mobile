@@ -4,7 +4,7 @@ import {
   delayForAttempt,
   exponentialBackoff,
   fixedBackoff,
-  sequenceBackoff
+  sequenceBackoff,
 } from "../../src/utils/Backoff";
 
 // Property-based testing proof-of-concept.
@@ -23,16 +23,15 @@ const delayMs = fc.integer({ min: 0, max: 10_000 });
 const finiteDelayMs = fc.double({ min: 0, max: 10_000, noNaN: true });
 const multiplier = fc.double({ min: 1, max: 10, noNaN: true });
 
-const isNonNegativeInteger = (value: number): boolean =>
-  Number.isInteger(value) && value >= 0;
+const isNonNegativeInteger = (value: number): boolean => Number.isInteger(value) && value >= 0;
 
 describe("Backoff (property-based)", () => {
   test("every policy yields a non-negative integer delay", () => {
     fc.assert(
       fc.property(delayMs, attempt, (ms, n) =>
-        isNonNegativeInteger(fixedBackoff(ms).delayForAttempt(n))
+        isNonNegativeInteger(fixedBackoff(ms).delayForAttempt(n)),
       ),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -43,7 +42,7 @@ describe("Backoff (property-based)", () => {
         const expected = Math.floor(ms);
         return policy.delayForAttempt(a) === expected && policy.delayForAttempt(b) === expected;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -58,7 +57,7 @@ describe("Backoff (property-based)", () => {
 
         return isNonNegativeInteger(current) && current <= capFloor && next >= current;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -68,7 +67,7 @@ describe("Backoff (property-based)", () => {
         const policy = exponentialBackoff({ initialDelayMs, multiplier: mult });
         return policy.delayForAttempt(1) === Math.floor(initialDelayMs);
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -82,9 +81,9 @@ describe("Backoff (property-based)", () => {
           const last = policy.delayForAttempt(delays.length);
           // Any attempt at or beyond the sequence length returns the final delay.
           return policy.delayForAttempt(delays.length + overshoot) === last;
-        }
+        },
       ),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -94,21 +93,21 @@ describe("Backoff (property-based)", () => {
         const result = delayForAttempt(() => raw, n);
         return result === Math.max(0, Math.floor(raw));
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
   test("non-positive or non-integer attempts always throw", () => {
     const badAttempt = fc.oneof(
       fc.integer({ min: -50, max: 0 }),
-      fc.double({ min: 0.01, max: 50, noNaN: true }).filter(n => !Number.isInteger(n))
+      fc.double({ min: 0.01, max: 50, noNaN: true }).filter((n) => !Number.isInteger(n)),
     );
     fc.assert(
       fc.property(delayMs, badAttempt, (ms, n) => {
         expect(() => fixedBackoff(ms).delayForAttempt(n)).toThrow(/positive integer/);
         return true;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 });

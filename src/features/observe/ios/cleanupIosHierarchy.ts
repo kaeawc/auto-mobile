@@ -19,13 +19,13 @@ export function cleanupIosXCTestHierarchy<T>(hierarchy: T): T {
   const root = hierarchy as Record<string, unknown>;
   return {
     ...root,
-    hierarchy: cleanupNodeSlot(root.hierarchy)
+    hierarchy: cleanupNodeSlot(root.hierarchy),
   } as T;
 }
 
 function cleanupNodeSlot(node: unknown): unknown {
   if (Array.isArray(node)) {
-    return node.flatMap(child => {
+    return node.flatMap((child) => {
       const cleaned = cleanupNode(child as IosHierarchyNode);
       return cleaned ? [cleaned] : [];
     });
@@ -36,7 +36,10 @@ function cleanupNodeSlot(node: unknown): unknown {
   return node;
 }
 
-function cleanupNode(node: IosHierarchyNode, siblingNoiseScope?: NoiseSiblingScope): IosHierarchyNode | null {
+function cleanupNode(
+  node: IosHierarchyNode,
+  siblingNoiseScope?: NoiseSiblingScope,
+): IosHierarchyNode | null {
   const childNoiseScope = siblingNoiseScope ?? createNoiseSiblingScope();
   const originalChildren = normalizeChildren(node.node);
   const compactedChildren: IosHierarchyNode[] = [];
@@ -82,7 +85,10 @@ function normalizeChildren(node: IosHierarchyNode["node"]): IosHierarchyNode[] {
   return Array.isArray(node) ? node : [node];
 }
 
-function isRedundantStaticTextChildForParent(parent: IosHierarchyNode, child: IosHierarchyNode): boolean {
+function isRedundantStaticTextChildForParent(
+  parent: IosHierarchyNode,
+  child: IosHierarchyNode,
+): boolean {
   const parentText = normalizedText(parent.text);
   if (!parentText || !canOwnStaticText(parent)) {
     return false;
@@ -121,7 +127,7 @@ function isRedundantStaticTextChild(parentText: string, child: IosHierarchyNode)
 
 function wasStructuralWrapperEmptiedByScopedDedupe(
   original: IosHierarchyNode,
-  cleaned: IosHierarchyNode
+  cleaned: IosHierarchyNode,
 ): boolean {
   if (normalizeChildren(cleaned.node).length !== 0) {
     return false;
@@ -135,30 +141,36 @@ function wasStructuralWrapperEmptiedByScopedDedupe(
     return false;
   }
 
-  return isContentlessNodeOfClass(cleaned, readClassName(original)) &&
+  return (
+    isContentlessNodeOfClass(cleaned, readClassName(original)) &&
     isContentlessStructuralWrapper(original) &&
-    originalChildren.every(isNoiseOnlyStructuralSubtree);
+    originalChildren.every(isNoiseOnlyStructuralSubtree)
+  );
 }
 
 function isContentlessNodeOfClass(node: IosHierarchyNode, className: unknown): boolean {
-  return readClassName(node) === className &&
+  return (
+    readClassName(node) === className &&
     !normalizedText(node.text) &&
     !hasStandaloneContentProperties(node) &&
     !hasExtras(node) &&
     !hasActions(node) &&
     !hasStateProperties(node) &&
-    !hasDirectActionProperties(node);
+    !hasDirectActionProperties(node)
+  );
 }
 
 function isContentlessStructuralWrapper(node: IosHierarchyNode): boolean {
   const className = readClassName(node);
-  return (className === "UIView" || className === "WKWebView") &&
+  return (
+    (className === "UIView" || className === "WKWebView") &&
     !normalizedText(node.text) &&
     !hasStandaloneContentProperties(node) &&
     !hasExtras(node) &&
     !hasActions(node) &&
     !hasStateProperties(node) &&
-    !hasDirectActionProperties(node);
+    !hasDirectActionProperties(node)
+  );
 }
 
 function isNoiseOnlyStructuralSubtree(node: IosHierarchyNode): boolean {
@@ -167,14 +179,16 @@ function isNoiseOnlyStructuralSubtree(node: IosHierarchyNode): boolean {
   }
 
   const children = normalizeChildren(node.node);
-  return children.length > 0 &&
+  return (
+    children.length > 0 &&
     isContentlessStructuralWrapper(node) &&
-    children.every(isNoiseOnlyStructuralSubtree);
+    children.every(isNoiseOnlyStructuralSubtree)
+  );
 }
 
 function dedupeCurrentNoiseSibling(
   node: IosHierarchyNode,
-  scope: NoiseSiblingScope | undefined
+  scope: NoiseSiblingScope | undefined,
 ): IosHierarchyNode | null {
   if (!scope) {
     return node;
@@ -241,7 +255,7 @@ function hasStandaloneContentProperties(node: IosHierarchyNode): boolean {
     hasNonEmptyString(readHintText(node)) ||
     hasNonEmptyString(node["test-tag"]) ||
     hasNonEmptyString(node.testTag) ||
-    hasMeaningfulViewId(node)
+    hasMeaningfulViewId(node),
   );
 }
 
@@ -260,12 +274,12 @@ function isStructuralWrapperWithOnlyScrollBarNoise(node: IosHierarchyNode): bool
     return false;
   }
 
-  return children.every(child => isScrollBarNoise(child) && !isProtectedNoiseNode(child));
+  return children.every((child) => isScrollBarNoise(child) && !isProtectedNoiseNode(child));
 }
 
 function isSingleChildStructuralWrapper(
   node: IosHierarchyNode,
-  children: IosHierarchyNode[]
+  children: IosHierarchyNode[],
 ): boolean {
   if (children.length !== 1 || hasExtras(node) || hasActions(node)) {
     return false;
@@ -282,12 +296,12 @@ function isSingleChildStructuralWrapper(
 
 function isNoiseOnlyCollapse(
   originalChildren: IosHierarchyNode[],
-  remainingChild: IosHierarchyNode | undefined
+  remainingChild: IosHierarchyNode | undefined,
 ): boolean {
   return Boolean(
     remainingChild &&
     isNoiseOnlyStructuralSubtree(remainingChild) &&
-    originalChildren.every(isNoiseOnlyStructuralSubtree)
+    originalChildren.every(isNoiseOnlyStructuralSubtree),
   );
 }
 
@@ -298,15 +312,13 @@ function hasStateProperties(node: IosHierarchyNode): boolean {
     node.accessibilityFocused === "true" ||
     node["accessibility-focused"] === "true" ||
     node.selected === "true" ||
-    node.checked === "true"
+    node.checked === "true",
   );
 }
 
 function hasMeaningfulViewId(node: IosHierarchyNode): boolean {
   const viewId = readViewId(node);
-  return typeof viewId === "string" &&
-    viewId !== "" &&
-    !GENERATED_VIEW_ID_PATTERN.test(viewId);
+  return typeof viewId === "string" && viewId !== "" && !GENERATED_VIEW_ID_PATTERN.test(viewId);
 }
 
 function hasDirectActionProperties(node: IosHierarchyNode): boolean {
@@ -315,7 +327,7 @@ function hasDirectActionProperties(node: IosHierarchyNode): boolean {
     node.focusable === "true" ||
     node["long-clickable"] === "true" ||
     node.longClickable === "true" ||
-    node.checkable === "true"
+    node.checkable === "true",
   );
 }
 
@@ -325,7 +337,7 @@ function isProtectedNoiseNode(node: IosHierarchyNode): boolean {
     hasActions(node) ||
     hasStateProperties(node) ||
     hasDirectActionProperties(node) ||
-    hasStandaloneContentProperties(node)
+    hasStandaloneContentProperties(node),
   );
 }
 

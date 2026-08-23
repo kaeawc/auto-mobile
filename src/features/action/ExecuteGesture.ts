@@ -13,7 +13,6 @@ import { logger } from "../../utils/logger";
  * Executes gestures using platform-specific commands
  */
 export class ExecuteGesture extends BaseVisualChange {
-
   constructor(device: BootedDevice, adb: AdbClient | null = null) {
     super(device, adb);
     this.device = device;
@@ -37,7 +36,7 @@ export class ExecuteGesture extends BaseVisualChange {
     x2: number,
     y2: number,
     options: GestureOptions = {},
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<SwipeResult> {
     // Platform-specific swipe execution (no observedInteraction - caller handles observation)
     switch (this.device.platform) {
@@ -66,7 +65,7 @@ export class ExecuteGesture extends BaseVisualChange {
     x2: number,
     y2: number,
     options: GestureOptions = {},
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<SwipeResult> {
     const duration = options.duration || 300; // Default duration
     const scrollMode = options.scrollMode || "adb"; // Default to ADB mode
@@ -87,7 +86,7 @@ export class ExecuteGesture extends BaseVisualChange {
       y1,
       x2,
       y2,
-      duration
+      duration,
     };
   }
 
@@ -108,7 +107,7 @@ export class ExecuteGesture extends BaseVisualChange {
     x2: number,
     y2: number,
     duration: number,
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<SwipeResult> {
     try {
       const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
@@ -118,7 +117,9 @@ export class ExecuteGesture extends BaseVisualChange {
       });
 
       if (result.success) {
-        logger.info(`[SWIPE] A11y swipe successful: deviceTotal=${result.totalTimeMs}ms, gesture=${result.gestureTimeMs}ms`);
+        logger.info(
+          `[SWIPE] A11y swipe successful: deviceTotal=${result.totalTimeMs}ms, gesture=${result.gestureTimeMs}ms`,
+        );
         return {
           success: true,
           x1,
@@ -127,7 +128,7 @@ export class ExecuteGesture extends BaseVisualChange {
           y2,
           duration,
           a11yTotalTimeMs: result.totalTimeMs,
-          a11yGestureTimeMs: result.gestureTimeMs
+          a11yGestureTimeMs: result.gestureTimeMs,
         };
       } else {
         logger.warn(`[SWIPE] A11y swipe failed: ${result.error}, falling back to ADB`);
@@ -142,7 +143,7 @@ export class ExecuteGesture extends BaseVisualChange {
           x2,
           y2,
           duration,
-          fallbackReason: result.error
+          fallbackReason: result.error,
         };
       }
     } catch (error) {
@@ -158,7 +159,7 @@ export class ExecuteGesture extends BaseVisualChange {
         x2,
         y2,
         duration,
-        fallbackReason: `${error}`
+        fallbackReason: `${error}`,
       };
     }
   }
@@ -179,7 +180,7 @@ export class ExecuteGesture extends BaseVisualChange {
     x2: number,
     y2: number,
     options: GestureOptions = {},
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<SwipeResult> {
     const duration = options.duration || 300;
     return await this.executeXCTestSwipe(x1, y1, x2, y2, duration, perf);
@@ -202,7 +203,7 @@ export class ExecuteGesture extends BaseVisualChange {
     x2: number,
     y2: number,
     duration: number,
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<SwipeResult> {
     const client = IOSCtrlProxyClient.getInstance(this.device);
 
@@ -211,7 +212,9 @@ export class ExecuteGesture extends BaseVisualChange {
     });
 
     if (result.success) {
-      logger.info(`[SWIPE] CtrlProxy iOS swipe successful: deviceTotal=${result.totalTimeMs}ms, gesture=${result.gestureTimeMs}ms`);
+      logger.info(
+        `[SWIPE] CtrlProxy iOS swipe successful: deviceTotal=${result.totalTimeMs}ms, gesture=${result.gestureTimeMs}ms`,
+      );
       return {
         success: true,
         x1,
@@ -220,7 +223,7 @@ export class ExecuteGesture extends BaseVisualChange {
         y2,
         duration,
         a11yTotalTimeMs: result.totalTimeMs,
-        a11yGestureTimeMs: result.gestureTimeMs
+        a11yGestureTimeMs: result.gestureTimeMs,
       };
     } else {
       logger.error(`[SWIPE] CtrlProxy iOS swipe failed: ${result.error}`);
@@ -231,7 +234,7 @@ export class ExecuteGesture extends BaseVisualChange {
         x2,
         y2,
         duration,
-        error: result.error
+        error: result.error,
       };
     }
   }
@@ -244,10 +247,7 @@ export class ExecuteGesture extends BaseVisualChange {
    * @param duration - Duration in milliseconds
    * @returns Result of the executed gesture
    */
-  async execute(
-    path: Point[] | FingerPath[],
-    duration: number = 300,
-  ): Promise<any> {
+  async execute(path: Point[] | FingerPath[], duration: number = 300): Promise<any> {
     // Platform-specific gesture execution (no observedInteraction - caller handles observation)
     switch (this.device.platform) {
       case "android":
@@ -262,7 +262,10 @@ export class ExecuteGesture extends BaseVisualChange {
   /**
    * Execute Android-specific gesture
    */
-  private async executeAndroidGesture(path: Point[] | FingerPath[], duration: number): Promise<any> {
+  private async executeAndroidGesture(
+    path: Point[] | FingerPath[],
+    duration: number,
+  ): Promise<any> {
     // Generate and execute adb touch events
     if (Array.isArray(path) && path.length > 0) {
       if ("finger" in path[0]) {
@@ -276,7 +279,7 @@ export class ExecuteGesture extends BaseVisualChange {
           const end = points[points.length - 1];
 
           await this.adb.executeCommand(
-            `shell input swipe ${start.x} ${start.y} ${end.x} ${end.y} ${duration}`
+            `shell input swipe ${start.x} ${start.y} ${end.x} ${end.y} ${duration}`,
           );
         }
       }
@@ -285,7 +288,7 @@ export class ExecuteGesture extends BaseVisualChange {
     return {
       pathLength: path.length,
       duration,
-      platform: "android"
+      platform: "android",
     };
   }
 
@@ -308,7 +311,7 @@ export class ExecuteGesture extends BaseVisualChange {
             duration,
             undefined,
             undefined,
-            swipe.fingerSpacing
+            swipe.fingerSpacing,
           );
           if (!result.success) {
             throw new Error(`iOS multi-finger gesture failed: ${result.error ?? "unknown error"}`);
@@ -330,7 +333,7 @@ export class ExecuteGesture extends BaseVisualChange {
     return {
       pathLength: path.length,
       duration,
-      platform: "ios"
+      platform: "ios",
     };
   }
 
@@ -371,7 +374,9 @@ export class ExecuteGesture extends BaseVisualChange {
         !this.sameCoordinate(start.x - firstStart.x, expectedOffset) ||
         !this.sameCoordinate(end.x - firstEnd.x, expectedOffset)
       ) {
-        throw new Error("iOS multi-finger gestures only support horizontally spaced parallel swipes");
+        throw new Error(
+          "iOS multi-finger gestures only support horizontally spaced parallel swipes",
+        );
       }
     }
 

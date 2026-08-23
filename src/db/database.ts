@@ -117,7 +117,7 @@ const DEFAULT_DB_DIR = path.join(os.homedir(), ".auto-mobile");
 // @deprecated AUTO_MOBILE_DB_DIR - use AUTOMOBILE_DB_DIR instead
 export function resolveDatabasePathFromEnvironment(
   env: NodeJS.ProcessEnv = process.env,
-  defaultDbDir: string = DEFAULT_DB_DIR
+  defaultDbDir: string = DEFAULT_DB_DIR,
 ): string {
   const envDbPath = env.AUTOMOBILE_DB_PATH ?? env.AUTO_MOBILE_DB_PATH;
   if (envDbPath) {
@@ -140,7 +140,7 @@ export function resolveDatabasePathFromEnvironment(
             `migrated-but-empty — the first query (e.g. \`tool_calls\`) would fail with ` +
             `\`no such table\`. Point AUTOMOBILE_DB_PATH at a real file (or unset it to use ` +
             `~/.auto-mobile/auto-mobile.db). The \`:memory:\` sentinel is for lifecycle ` +
-            `tests only; set ${IN_MEMORY_DB_OPT_IN_ENV}=1 to opt in from a test.`
+            `tests only; set ${IN_MEMORY_DB_OPT_IN_ENV}=1 to opt in from a test.`,
         );
       }
       return envDbPath;
@@ -149,9 +149,7 @@ export function resolveDatabasePathFromEnvironment(
   }
 
   const envDbDir = env.AUTOMOBILE_DB_DIR ?? env.AUTO_MOBILE_DB_DIR;
-  const dbDir = envDbDir
-    ? resolvePathFromDaemonLaunchWorkingDirectory(envDbDir)
-    : defaultDbDir;
+  const dbDir = envDbDir ? resolvePathFromDaemonLaunchWorkingDirectory(envDbDir) : defaultDbDir;
   return path.join(dbDir, "auto-mobile.db");
 }
 
@@ -189,7 +187,7 @@ const DB_PATH_OVERRIDE_ENV_KEYS = [
 ] as const;
 
 function hasExplicitDbPathOverride(env: NodeJS.ProcessEnv): boolean {
-  return DB_PATH_OVERRIDE_ENV_KEYS.some(key => {
+  return DB_PATH_OVERRIDE_ENV_KEYS.some((key) => {
     const value = env[key];
     return value !== undefined && value !== "";
   });
@@ -228,7 +226,7 @@ function assertUnitTestDbAccessAllowed(env: NodeJS.ProcessEnv, resolvedPath: str
       "assertions (issue #3063). Inject an in-memory DB via createTestDatabase() " +
       "(and NavigationGraphManager.setInstanceForTesting / TelemetryRecorder spies " +
       "for singletons), or, if the test must exercise real file behavior, set " +
-      "AUTOMOBILE_DB_DIR to a temp dir or AUTOMOBILE_DB_PATH=':memory:' explicitly."
+      "AUTOMOBILE_DB_DIR to a temp dir or AUTOMOBILE_DB_PATH=':memory:' explicitly.",
   );
 }
 
@@ -362,10 +360,7 @@ async function waitForMigrationsBeforeQuery(): Promise<void> {
   }
 }
 
-function createSqliteKysely<T>(
-  dbPath: string,
-  beforeQuery?: () => Promise<void>
-): Kysely<T> {
+function createSqliteKysely<T>(dbPath: string, beforeQuery?: () => Promise<void>): Kysely<T> {
   return new Kysely<T>({
     dialect: new BunSqliteDialect({
       database: () => openConfiguredSqliteDatabase(dbPath),
@@ -445,12 +440,12 @@ function ensureMigrationsStarted(dbPath: string): void {
         lifecycle.migrationsRun = true;
         lifecycle.migrationsError = null;
       },
-      error => {
+      (error) => {
         if (generation !== lifecycle.migrationsGeneration) {
           return; // Superseded run; do not resurrect a stale failure.
         }
         lifecycle.migrationsError = createStartupMigrationError(error);
-      }
+      },
     );
   }
 }
@@ -608,7 +603,7 @@ function resetDbLifecycleState(): void {
  */
 export async function awaitInFlightMigrations(
   timeoutMs: number,
-  timer: Timer = defaultTimer
+  timer: Timer = defaultTimer,
 ): Promise<boolean> {
   return awaitPromiseBounded(lifecycle.migrationsPromise, timeoutMs, timer);
 }
@@ -624,14 +619,14 @@ export async function awaitInFlightMigrations(
 export async function awaitPromiseBounded(
   inFlight: Promise<void> | null,
   timeoutMs: number,
-  timer: Timer = defaultTimer
+  timer: Timer = defaultTimer,
 ): Promise<boolean> {
   if (!inFlight) {
     return true;
   }
 
   let handle: NodeJS.Timeout | undefined;
-  const timeout = new Promise<boolean>(resolve => {
+  const timeout = new Promise<boolean>((resolve) => {
     handle = timer.setTimeout(() => resolve(false), timeoutMs);
   });
 

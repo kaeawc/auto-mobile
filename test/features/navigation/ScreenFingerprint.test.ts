@@ -12,8 +12,8 @@ describe("ScreenFingerprint - Enhanced Implementation", () => {
       const hierarchy = createHierarchy({
         node: {
           "resource-id": "navigation.HomeDestination",
-          "node": {
-            "text": "Home Screen",
+          node: {
+            text: "Home Screen",
             "resource-id": "home_screen_content",
           },
         },
@@ -35,7 +35,7 @@ describe("ScreenFingerprint - Enhanced Implementation", () => {
             className: "Container",
             node: {
               "resource-id": "navigation.SettingsScreen",
-              "node": {
+              node: {
                 text: "Settings",
               },
             },
@@ -53,14 +53,14 @@ describe("ScreenFingerprint - Enhanced Implementation", () => {
       const hierarchy1 = createHierarchy({
         node: {
           "resource-id": "navigation.Home",
-          "node": { text: "Different content 1" },
+          node: { text: "Different content 1" },
         },
       });
 
       const hierarchy2 = createHierarchy({
         node: {
           "resource-id": "navigation.Home",
-          "node": { text: "Different content 2" },
+          node: { text: "Different content 2" },
         },
       });
 
@@ -91,7 +91,7 @@ describe("ScreenFingerprint - Enhanced Implementation", () => {
       const hierarchyWithKeyboard = createHierarchy({
         node: {
           "content-desc": "Delete",
-          "node": { "content-desc": "Enter" },
+          node: { "content-desc": "Enter" },
         },
       });
 
@@ -147,18 +147,43 @@ describe("ScreenFingerprint - Enhanced Implementation", () => {
     }
 
     const cacheTtlRows: CacheTtlRow[] = [
-      { name: "uses cache when age is within an explicit TTL", ageMs: 5000, cacheTTL: 10000, usesCache: true },
-      { name: "rejects cache when age equals the TTL boundary", ageMs: 10000, cacheTTL: 10000, usesCache: false },
-      { name: "rejects cache when age exceeds the TTL", ageMs: 15000, cacheTTL: 10000, usesCache: false },
-      { name: "rejects cache when the requested TTL is negative", ageMs: 5000, cacheTTL: -1, usesCache: false },
-      { name: "rejects cache when the requested TTL is zero (no cache)", ageMs: 5000, cacheTTL: 0, usesCache: false },
+      {
+        name: "uses cache when age is within an explicit TTL",
+        ageMs: 5000,
+        cacheTTL: 10000,
+        usesCache: true,
+      },
+      {
+        name: "rejects cache when age equals the TTL boundary",
+        ageMs: 10000,
+        cacheTTL: 10000,
+        usesCache: false,
+      },
+      {
+        name: "rejects cache when age exceeds the TTL",
+        ageMs: 15000,
+        cacheTTL: 10000,
+        usesCache: false,
+      },
+      {
+        name: "rejects cache when the requested TTL is negative",
+        ageMs: 5000,
+        cacheTTL: -1,
+        usesCache: false,
+      },
+      {
+        name: "rejects cache when the requested TTL is zero (no cache)",
+        ageMs: 5000,
+        cacheTTL: 0,
+        usesCache: false,
+      },
     ];
 
     test.each(cacheTtlRows)("$name", ({ ageMs, cacheTTL, usesCache }) => {
       const hierarchyWithKeyboard = createHierarchy({
         node: {
           "content-desc": "Delete",
-          "node": { "content-desc": "Enter" },
+          node: { "content-desc": "Enter" },
         },
       });
 
@@ -221,7 +246,7 @@ describe("ScreenFingerprint - Enhanced Implementation", () => {
     test("should not detect keyboard in normal content", () => {
       const hierarchy = createHierarchy({
         node: {
-          "text": "Regular content",
+          text: "Regular content",
           "resource-id": "app:id/content",
         },
       });
@@ -236,25 +261,25 @@ describe("ScreenFingerprint - Enhanced Implementation", () => {
     test("should create shallow marker for scrollable container", () => {
       const hierarchy1 = createHierarchy({
         node: {
-          "scrollable": "true",
+          scrollable: "true",
           "resource-id": "list_container",
-          "className": "RecyclerView",
-          "node": [
-            { "text": "Item 1", "resource-id": "item" },
-            { "text": "Item 2", "resource-id": "item" },
-            { "text": "Item 3", "resource-id": "item" },
+          className: "RecyclerView",
+          node: [
+            { text: "Item 1", "resource-id": "item" },
+            { text: "Item 2", "resource-id": "item" },
+            { text: "Item 3", "resource-id": "item" },
           ],
         },
       });
 
       const hierarchy2 = createHierarchy({
         node: {
-          "scrollable": "true",
+          scrollable: "true",
           "resource-id": "list_container",
-          "className": "RecyclerView",
-          "node": [
-            { "text": "Item 4", "resource-id": "item" },
-            { "text": "Item 5", "resource-id": "item" },
+          className: "RecyclerView",
+          node: [
+            { text: "Item 4", "resource-id": "item" },
+            { text: "Item 5", "resource-id": "item" },
           ],
         },
       });
@@ -270,9 +295,9 @@ describe("ScreenFingerprint - Enhanced Implementation", () => {
     test("should handle scrolling with completely different items", () => {
       const hierarchyBeforeScroll = createHierarchy({
         node: {
-          "scrollable": "true",
+          scrollable: "true",
           "resource-id": "tap_screen_content",
-          "node": [
+          node: [
             { "resource-id": "button_regular" },
             { "resource-id": "button_elevated" },
             { "resource-id": "press_duration_tracker" },
@@ -282,9 +307,9 @@ describe("ScreenFingerprint - Enhanced Implementation", () => {
 
       const hierarchyAfterScroll = createHierarchy({
         node: {
-          "scrollable": "true",
+          scrollable: "true",
           "resource-id": "tap_screen_content",
-          "node": [
+          node: [
             { "resource-id": "filter_chip_1" },
             { "resource-id": "icon_button_delete" },
             { "resource-id": "slider_control" },
@@ -328,9 +353,9 @@ describe("ScreenFingerprint - Enhanced Implementation", () => {
     test("should preserve selected items in scrollable tab rows (critical)", () => {
       const homeTabScrolled = createHierarchy({
         node: {
-          "scrollable": "true",
+          scrollable: "true",
           "resource-id": "tab_row",
-          "node": [
+          node: [
             { selected: "true", node: { text: "Home" } },
             { selected: "false", node: { text: "Profile" } },
             { selected: "false", node: { text: "Settings" } },
@@ -340,9 +365,9 @@ describe("ScreenFingerprint - Enhanced Implementation", () => {
 
       const settingsTabScrolled = createHierarchy({
         node: {
-          "scrollable": "true",
+          scrollable: "true",
           "resource-id": "tab_row",
-          "node": [
+          node: [
             { selected: "false", node: { text: "Profile" } },
             { selected: "true", node: { text: "Settings" } },
             { selected: "false", node: { text: "About" } },
@@ -360,9 +385,9 @@ describe("ScreenFingerprint - Enhanced Implementation", () => {
     test("should handle same screen with scrollable tabs at different positions", () => {
       const settingsVisible1 = createHierarchy({
         node: {
-          "scrollable": "true",
+          scrollable: "true",
           "resource-id": "tab_row",
-          "node": [
+          node: [
             { selected: "false", node: { text: "Home" } },
             { selected: "false", node: { text: "Profile" } },
             { selected: "true", node: { text: "Settings" } },
@@ -373,9 +398,9 @@ describe("ScreenFingerprint - Enhanced Implementation", () => {
 
       const settingsVisible2 = createHierarchy({
         node: {
-          "scrollable": "true",
+          scrollable: "true",
           "resource-id": "tab_row",
-          "node": [
+          node: [
             { selected: "false", node: { text: "Profile" } },
             { selected: "true", node: { text: "Settings" } },
             { selected: "false", node: { text: "About" } },
@@ -504,16 +529,16 @@ describe("ScreenFingerprint - Enhanced Implementation", () => {
     test("should filter text from EditText fields", () => {
       const hierarchy1 = createHierarchy({
         node: {
-          "className": "android.widget.EditText",
-          "text": "user input 1",
+          className: "android.widget.EditText",
+          text: "user input 1",
           "resource-id": "edit_field",
         },
       });
 
       const hierarchy2 = createHierarchy({
         node: {
-          "className": "android.widget.EditText",
-          "text": "different user input",
+          className: "android.widget.EditText",
+          text: "different user input",
           "resource-id": "edit_field",
         },
       });
@@ -529,14 +554,14 @@ describe("ScreenFingerprint - Enhanced Implementation", () => {
       const hierarchy1 = createHierarchy({
         node: {
           "text-entry-mode": "true",
-          "text": "input 1",
+          text: "input 1",
         },
       });
 
       const hierarchy2 = createHierarchy({
         node: {
           "text-entry-mode": "true",
-          "text": "input 2",
+          text: "input 2",
         },
       });
 
@@ -571,14 +596,14 @@ describe("ScreenFingerprint - Enhanced Implementation", () => {
       const hierarchy1 = createHierarchy({
         node: {
           "resource-id": "text_input_field",
-          "text": "input 1",
+          text: "input 1",
         },
       });
 
       const hierarchy2 = createHierarchy({
         node: {
           "resource-id": "text_input_field",
-          "text": "input 2",
+          text: "input 2",
         },
       });
 
@@ -593,16 +618,14 @@ describe("ScreenFingerprint - Enhanced Implementation", () => {
     test("should filter keyboard elements from hierarchy", () => {
       const hierarchyWithKeyboard = createHierarchy({
         node: [
-          { "text": "App Content", "resource-id": "app:id/content" },
+          { text: "App Content", "resource-id": "app:id/content" },
           { "content-desc": "Delete", "resource-id": "keyboard:id/delete" },
           { "content-desc": "Enter", "resource-id": "keyboard:id/enter" },
         ],
       });
 
       const hierarchyWithoutKeyboard = createHierarchy({
-        node: [
-          { "text": "App Content", "resource-id": "app:id/content" },
-        ],
+        node: [{ text: "App Content", "resource-id": "app:id/content" }],
       });
 
       const result1 = ScreenFingerprint.compute(hierarchyWithKeyboard);
@@ -693,10 +716,7 @@ describe("ScreenFingerprint - Enhanced Implementation", () => {
 
     test("should return LOW_MEDIUM confidence for shallow scrollable with keyboard", () => {
       const hierarchy = createHierarchy({
-        node: [
-          { text: "Content" },
-          { "content-desc": "Delete" },
-        ],
+        node: [{ text: "Content" }, { "content-desc": "Delete" }],
       });
 
       const result = ScreenFingerprint.compute(hierarchy);
@@ -738,15 +758,12 @@ describe("ScreenFingerprint - Enhanced Implementation", () => {
       const screenWithoutKeyboard = createHierarchy({
         node: {
           "resource-id": "navigation.TextScreen",
-          "node": { text: "Type something" },
+          node: { text: "Type something" },
         },
       });
 
       const screenWithKeyboard = createHierarchy({
-        node: [
-          { "content-desc": "Delete" },
-          { "content-desc": "Enter" },
-        ],
+        node: [{ "content-desc": "Delete" }, { "content-desc": "Enter" }],
       });
 
       const result1 = ScreenFingerprint.compute(screenWithoutKeyboard);
@@ -803,12 +820,12 @@ describe("ScreenFingerprint - Enhanced Implementation", () => {
         scrollable: "true",
         node: [
           {
-            "selected": "true",
+            selected: "true",
             "content-desc": "Home",
             "resource-id": "tab_home",
           },
           {
-            "selected": "false",
+            selected: "false",
             "content-desc": "Profile",
             "resource-id": "tab_profile",
           },
@@ -824,12 +841,12 @@ describe("ScreenFingerprint - Enhanced Implementation", () => {
         scrollable: "true",
         node: [
           {
-            "selected": "false",
+            selected: "false",
             "content-desc": "Home",
             "resource-id": "tab_home",
           },
           {
-            "selected": "true",
+            selected: "true",
             "content-desc": "Profile",
             "resource-id": "tab_profile",
           },
@@ -850,7 +867,7 @@ describe("ScreenFingerprint - Enhanced Implementation", () => {
           { text: "Main Content" },
           {
             "content-desc": "emoji",
-            "className": "KeyboardKey",
+            className: "KeyboardKey",
           },
         ],
       };
@@ -877,7 +894,7 @@ describe("ScreenFingerprint - Enhanced Implementation", () => {
           { text: "Main Content" },
           {
             "content-desc": "Shift",
-            "className": "KeyboardKey",
+            className: "KeyboardKey",
           },
         ],
       };
@@ -900,11 +917,7 @@ describe("ScreenFingerprint - Enhanced Implementation", () => {
     test("should produce same hash when keyboard toggles (emoji/Shift filtered)", () => {
       const withKeyboardNoToggle = {
         className: "Screen",
-        node: [
-          { text: "Input Field" },
-          { "content-desc": "Delete" },
-          { "content-desc": "Enter" },
-        ],
+        node: [{ text: "Input Field" }, { "content-desc": "Delete" }, { "content-desc": "Enter" }],
       };
 
       const withKeyboardAndEmoji = {
@@ -950,7 +963,7 @@ describe("ScreenFingerprint - Enhanced Implementation", () => {
       const hierarchy = createHierarchy({
         node: {
           "resource-id": "navigation.HomeDestination",
-          "node": { "text": "Home Screen", "resource-id": "home_screen_content" },
+          node: { text: "Home Screen", "resource-id": "home_screen_content" },
         },
       });
 
@@ -966,17 +979,17 @@ describe("ScreenFingerprint - Enhanced Implementation", () => {
           className: "Root",
           node: [
             {
-              "scrollable": "true",
+              scrollable: "true",
               "resource-id": "app:id/list",
-              "className": "RecyclerView",
-              "node": [
-                { "selected": "true", "text": "Tab One", "resource-id": "app:id/tab1" },
-                { "selected": "false", "text": "Tab Two", "resource-id": "app:id/tab2" },
+              className: "RecyclerView",
+              node: [
+                { selected: "true", text: "Tab One", "resource-id": "app:id/tab1" },
+                { selected: "false", text: "Tab Two", "resource-id": "app:id/tab2" },
               ],
             },
-            { "text": "Static Label", "resource-id": "app:id/label" },
+            { text: "Static Label", "resource-id": "app:id/label" },
             { "content-desc": "Battery 50 percent" },
-            { "text": "12:34" },
+            { text: "12:34" },
           ],
         },
       });
@@ -991,9 +1004,7 @@ describe("ScreenFingerprint - Enhanced Implementation", () => {
 });
 
 // Helper function to create AccessibilityHierarchy
-function createHierarchy(
-  hierarchy: Record<string, any>
-): AccessibilityHierarchy {
+function createHierarchy(hierarchy: Record<string, any>): AccessibilityHierarchy {
   return {
     updatedAt: 1234567890,
     packageName: "com.test.app",

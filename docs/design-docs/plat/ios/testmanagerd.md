@@ -60,10 +60,10 @@ The benefit over `xcodebuild test-without-building` is that `simctl spawn` skips
 
 ## Summary
 
-| Question | Answer |
-|---|---|
-| Why XCUITest? | Only path to cross-process privileged accessibility access on iOS |
-| Who provides that access? | `testmanagerd`, a privileged system daemon |
-| How does the runner connect? | Via `XCTRunnerDaemonSession → testmanagerd → DTXConnection` |
-| Why can't third parties replicate it? | Private entitlements + no public API |
-| Why simctl spawn for simulators? | Skips xcodebuild overhead while preserving the testmanagerd connection |
+| Question                              | Answer                                                                 |
+| ------------------------------------- | ---------------------------------------------------------------------- |
+| Why XCUITest?                         | Only path to cross-process privileged accessibility access on iOS      |
+| Who provides that access?             | `testmanagerd`, a privileged system daemon                             |
+| How does the runner connect?          | Via `XCTRunnerDaemonSession → testmanagerd → DTXConnection`            |
+| Why can't third parties replicate it? | Private entitlements + no public API                                   |
+| Why simctl spawn for simulators?      | Skips xcodebuild overhead while preserving the testmanagerd connection |

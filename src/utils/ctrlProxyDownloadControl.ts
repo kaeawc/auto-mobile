@@ -8,7 +8,7 @@ export function isTruthyEnvValue(value: string | undefined): boolean {
 
 export function shouldSkipCtrlProxyDownload(
   args: string[],
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   return (
     args.includes(SKIP_CTRL_PROXY_DOWNLOAD_FLAG) ||

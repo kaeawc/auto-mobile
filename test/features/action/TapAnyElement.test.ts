@@ -15,15 +15,16 @@ const createTapAnyElement = (selector: FakeElementSelector) => {
     {
       timer: new FakeTimer(),
       elementSelector: selector,
-    }
+    },
   );
 };
 
-const makeElement = () => ({
-  bounds: { left: 10, top: 20, right: 110, bottom: 70 },
-  text: "ListItem",
-  clickable: "true",
-} as any);
+const makeElement = () =>
+  ({
+    bounds: { left: 10, top: 20, right: 110, bottom: 70 },
+    text: "ListItem",
+    clickable: "true",
+  }) as any;
 
 describe("TapAnyElement", () => {
   describe("validateOptions", () => {
@@ -60,7 +61,7 @@ describe("TapAnyElement", () => {
 
       const result = (tapAny as any).findClickableElement(
         { action: "tap" },
-        { hierarchy: { node: {} } }
+        { hierarchy: { node: {} } },
       );
 
       expect(result.element).not.toBeNull();
@@ -73,7 +74,7 @@ describe("TapAnyElement", () => {
 
       (tapAny as any).findClickableElement(
         { action: "tap", selectionStrategy: "random" },
-        { hierarchy: { node: {} } }
+        { hierarchy: { node: {} } },
       );
 
       expect(selector.lastStrategy).toBe("random");
@@ -85,7 +86,7 @@ describe("TapAnyElement", () => {
 
       (tapAny as any).findClickableElement(
         { action: "tap", scrollableContainer: true },
-        { hierarchy: { node: {} } }
+        { hierarchy: { node: {} } },
       );
 
       expect(selector.lastScrollableContainer).toBe(true);
@@ -95,10 +96,7 @@ describe("TapAnyElement", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapAny = createTapAnyElement(selector);
 
-      (tapAny as any).findClickableElement(
-        { action: "tap" },
-        { hierarchy: { node: {} } }
-      );
+      (tapAny as any).findClickableElement({ action: "tap" }, { hierarchy: { node: {} } });
 
       expect(selector.lastScrollableContainer).toBeUndefined();
     });
@@ -109,7 +107,7 @@ describe("TapAnyElement", () => {
 
       const result = (tapAny as any).findClickableElement(
         { action: "tap" },
-        { hierarchy: { node: {} } }
+        { hierarchy: { node: {} } },
       );
 
       expect(result.element).toBeNull();
@@ -127,7 +125,7 @@ describe("TapAnyElement", () => {
       const result = (tapAny as any).findClickableElement(
         { action: "tap" },
         { hierarchy: { node: {} } },
-        { width: 1080, height: 1920 }
+        { width: 1080, height: 1920 },
       );
 
       expect(result.element).toBeNull();
@@ -140,7 +138,7 @@ describe("TapAnyElement", () => {
       const result = (tapAny as any).findClickableElement(
         { action: "tap" },
         { hierarchy: { node: {} } },
-        { width: 1080, height: 1920 }
+        { width: 1080, height: 1920 },
       );
 
       expect(result.element).not.toBeNull();
@@ -152,7 +150,7 @@ describe("TapAnyElement", () => {
 
       const result = (tapAny as any).findClickableElement(
         { action: "tap" },
-        { hierarchy: { node: {} } }
+        { hierarchy: { node: {} } },
       );
 
       expect(result.element).not.toBeNull();

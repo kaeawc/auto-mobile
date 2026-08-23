@@ -41,7 +41,7 @@ describe("snapshot tool", () => {
       timer: fakeTimer,
       now: () => new Date(fakeTimer.now()),
       createCaptureProvider: () => ({
-        capture: async args => {
+        capture: async (args) => {
           captureCalls.push({ ...args });
           const timestamp = new Date(fakeTimer.now()).toISOString();
           const manifest: DeviceSnapshotManifest = {
@@ -63,7 +63,7 @@ describe("snapshot tool", () => {
         },
       }),
       createRestoreProvider: () => ({
-        restore: async args => {
+        restore: async (args) => {
           restoreCalls.push({ ...args });
           return {
             snapshotType: args.manifest.snapshotType,
@@ -95,7 +95,9 @@ describe("snapshot tool", () => {
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error.issues[0].path).toEqual(["snapshotName"]);
-      expect(result.error.issues[0].message).toBe("snapshotName is required when action is restore");
+      expect(result.error.issues[0].message).toBe(
+        "snapshotName is required when action is restore",
+      );
     }
   });
 
@@ -111,8 +113,9 @@ describe("snapshot tool", () => {
   });
 
   test("keeps generated tool definition free of top-level combinators", () => {
-    const toolDefinition = ToolRegistry.getToolDefinitions()
-      .find(tool => tool.name === "deviceSnapshot");
+    const toolDefinition = ToolRegistry.getToolDefinitions().find(
+      (tool) => tool.name === "deviceSnapshot",
+    );
 
     expect(toolDefinition).toBeDefined();
     const schema = toolDefinition!.inputSchema as any;
@@ -187,8 +190,10 @@ describe("snapshot tool", () => {
     const tool = ToolRegistry.getTool("deviceSnapshot");
     expect(tool?.deviceAwareHandler).toBeDefined();
 
-    await expect(tool!.deviceAwareHandler!(device, {
-      action: "restore",
-    } as any)).rejects.toThrow("snapshotName is required");
+    await expect(
+      tool!.deviceAwareHandler!(device, {
+        action: "restore",
+      } as any),
+    ).rejects.toThrow("snapshotName is required");
   });
 });

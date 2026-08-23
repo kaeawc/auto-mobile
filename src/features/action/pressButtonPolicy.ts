@@ -18,13 +18,13 @@ export function isInPlacePressButton(button: unknown): boolean {
  * `shell input keyevent <function Object() { [native code] }>` (issue #4187).
  */
 const ANDROID_KEY_CODES: Record<string, number> = Object.assign(Object.create(null), {
-  "home": 3,
-  "back": 4,
-  "menu": 82,
-  "power": 26,
-  "volume_up": 24,
-  "volume_down": 25,
-  "recent": 187,
+  home: 3,
+  back: 4,
+  menu: 82,
+  power: 26,
+  volume_up: 24,
+  volume_down: 25,
+  recent: 187,
 });
 
 /**

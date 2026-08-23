@@ -47,7 +47,11 @@ export type IosTelemetryRecorder = Pick<
  */
 export interface NavigationEventSink {
   recordNavigationEvent(event: NavigationEvent): Promise<void>;
-  updateNodeScreenshot(appId: string, screenName: string, screenshotPath: string | null): Promise<void>;
+  updateNodeScreenshot(
+    appId: string,
+    screenName: string,
+    screenshotPath: string | null,
+  ): Promise<void>;
 }
 
 /**
@@ -88,8 +92,8 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
     this.captureScreenshot = deps.captureScreenshot;
     this.telemetryRecorderOverride = deps.telemetryRecorder;
     this.failureRecorderOverride = deps.failureRecorder;
-    this.navigationScreenshotsEnabled = deps.navigationScreenshotsEnabled
-      ?? (() => serverConfig.isNavigationScreenshotsEnabled());
+    this.navigationScreenshotsEnabled =
+      deps.navigationScreenshotsEnabled ?? (() => serverConfig.isNavigationScreenshotsEnabled());
   }
 
   /**
@@ -118,29 +122,41 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
         switch (event.type) {
           case "network_request":
             await recorder.recordNetworkEvent({
-              timestamp: ts, applicationId,
-              url: (p.url as string) ?? "", method: (p.method as string) ?? "GET",
-              statusCode: (p.statusCode as number) ?? 0, durationMs: (p.durationMs as number) ?? 0,
-              requestBodySize: (p.requestBodySize as number) ?? -1, responseBodySize: (p.responseBodySize as number) ?? -1,
-              protocol: (p.protocol as string) ?? null, host: (p.host as string) ?? null,
-              path: (p.path as string) ?? null, error: (p.error as string) ?? null,
+              timestamp: ts,
+              applicationId,
+              url: (p.url as string) ?? "",
+              method: (p.method as string) ?? "GET",
+              statusCode: (p.statusCode as number) ?? 0,
+              durationMs: (p.durationMs as number) ?? 0,
+              requestBodySize: (p.requestBodySize as number) ?? -1,
+              responseBodySize: (p.responseBodySize as number) ?? -1,
+              protocol: (p.protocol as string) ?? null,
+              host: (p.host as string) ?? null,
+              path: (p.path as string) ?? null,
+              error: (p.error as string) ?? null,
               requestHeaders: (p.requestHeaders as Record<string, string>) ?? null,
               responseHeaders: (p.responseHeaders as Record<string, string>) ?? null,
-              requestBody: (p.requestBody as string) ?? null, responseBody: (p.responseBody as string) ?? null,
+              requestBody: (p.requestBody as string) ?? null,
+              responseBody: (p.responseBody as string) ?? null,
               contentType: (p.contentType as string) ?? null,
             });
             break;
           case "log":
             await recorder.recordLogEvent({
-              timestamp: ts, applicationId,
-              level: (p.level as number) ?? 0, tag: (p.tag as string) ?? "",
-              message: (p.message as string) ?? "", filterName: (p.filterName as string) ?? "",
+              timestamp: ts,
+              applicationId,
+              level: (p.level as number) ?? 0,
+              tag: (p.tag as string) ?? "",
+              message: (p.message as string) ?? "",
+              filterName: (p.filterName as string) ?? "",
             });
             break;
           case "lifecycle":
             await recorder.recordOsEvent({
-              timestamp: ts, applicationId,
-              category: "lifecycle", kind: (p.state as string) ?? "unknown",
+              timestamp: ts,
+              applicationId,
+              category: "lifecycle",
+              kind: (p.state as string) ?? "unknown",
               details: { state: (p.state as string) ?? "", bundleId: (p.bundleId as string) ?? "" },
             });
             break;
@@ -156,8 +172,11 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
               // nav-event↔hierarchy-update ordering (issue #2885); a mid-flight
               // shutdown race is dropped cleanly by Part 1 (issue #2792).
               const navWrite = this.getNavigationGraphManager().recordNavigationEvent({
-                applicationId, destination, source: navSource,
-                arguments: navArgs ?? {}, metadata: navMeta ?? {},
+                applicationId,
+                destination,
+                source: navSource,
+                arguments: navArgs ?? {},
+                metadata: navMeta ?? {},
                 triggeringInteraction: null,
               } as NavigationEvent);
               void getDbWriteBarrier().trackExisting(navWrite);
@@ -167,7 +186,11 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
                 try {
                   const path = await this.captureNavigationScreenshot(applicationId, destination);
                   if (path) {
-                    await this.getNavigationGraphManager().updateNodeScreenshot(applicationId, destination, path);
+                    await this.getNavigationGraphManager().updateNodeScreenshot(
+                      applicationId,
+                      destination,
+                      path,
+                    );
                     try {
                       const { getDatabase } = await import("../../../db");
                       const db = getDatabase();
@@ -180,14 +203,22 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
                       if (node) {
                         screenshotUri = `automobile:navigation/nodes/${node.id}/screenshot`;
                       }
-                    } catch { /* non-fatal */ }
+                    } catch {
+                      /* non-fatal */
+                    }
                   }
-                } catch { /* non-fatal */ }
+                } catch {
+                  /* non-fatal */
+                }
               }
             }
             await recorder.recordNavigationEvent({
-              timestamp: ts, applicationId,
-              destination, source: navSource, arguments: navArgs, metadata: navMeta,
+              timestamp: ts,
+              applicationId,
+              destination,
+              source: navSource,
+              arguments: navArgs,
+              metadata: navMeta,
               screenshotUri,
             });
             break;
@@ -196,68 +227,97 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
             // Custom events are merged into log events
             const customName = (p.name as string) ?? "custom";
             const customProps = (p.properties as Record<string, string>) ?? {};
-            const propsStr = Object.keys(customProps).length > 0 ? ` ${JSON.stringify(customProps)}` : "";
+            const propsStr =
+              Object.keys(customProps).length > 0 ? ` ${JSON.stringify(customProps)}` : "";
             await recorder.recordLogEvent({
-              timestamp: ts, applicationId,
-              level: 4, tag: "CustomEvent", message: `${customName}${propsStr}`, filterName: "custom",
+              timestamp: ts,
+              applicationId,
+              level: 4,
+              tag: "CustomEvent",
+              message: `${customName}${propsStr}`,
+              filterName: "custom",
             });
             break;
           }
           case "handled_exception": {
             const failureRecorder = this.failureRecorder;
             const exType = (p.exceptionClass as string) ?? (p.errorDomain as string) ?? "unknown";
-            const exMsg = (p.exceptionMessage as string) ?? (p.message as string) ?? "Handled exception";
+            const exMsg =
+              (p.exceptionMessage as string) ?? (p.message as string) ?? "Handled exception";
             const stackStr = (p.stackTrace as string) ?? "";
-            const stackFrames = stackStr.split("\n").filter(Boolean).map(line => ({
-              className: "", methodName: line.trim(), fileName: null as string | null, lineNumber: null as number | null,
-              isAppCode: line.includes(applicationId ?? ""),
-            }));
+            const stackFrames = stackStr
+              .split("\n")
+              .filter(Boolean)
+              .map((line) => ({
+                className: "",
+                methodName: line.trim(),
+                fileName: null as string | null,
+                lineNumber: null as number | null,
+                isAppCode: line.includes(applicationId ?? ""),
+              }));
             await failureRecorder.recordNonFatal({
-              exceptionType: exType, exceptionMessage: exMsg,
+              exceptionType: exType,
+              exceptionMessage: exMsg,
               stackTrace: stackFrames,
               customMessage: (p.customMessage as string) ?? undefined,
               deviceId: this.deviceId,
-              deviceModel: "iOS Simulator", os: "iOS",
-              appVersion: "1.0", sessionId: `ios-${this.deviceId}-${ts}`,
+              deviceModel: "iOS Simulator",
+              os: "iOS",
+              appVersion: "1.0",
+              sessionId: `ios-${this.deviceId}-${ts}`,
               currentScreen: (p.currentScreen as string) ?? (p.screen as string) ?? undefined,
             });
             break;
           }
           case "crash": {
             const crashRecorder = this.failureRecorder;
-            const crashType = (p.exceptionClass as string) ?? (p.errorDomain as string) ?? "unknown";
+            const crashType =
+              (p.exceptionClass as string) ?? (p.errorDomain as string) ?? "unknown";
             const crashMsg = (p.exceptionMessage as string) ?? (p.message as string) ?? "Crash";
-            const crashStack = ((p.stackTrace as string) ?? "").split("\n").filter(Boolean).map(line => ({
-              className: "", methodName: line.trim(), fileName: null as string | null, lineNumber: null as number | null,
-              isAppCode: line.includes(applicationId ?? ""),
-            }));
+            const crashStack = ((p.stackTrace as string) ?? "")
+              .split("\n")
+              .filter(Boolean)
+              .map((line) => ({
+                className: "",
+                methodName: line.trim(),
+                fileName: null as string | null,
+                lineNumber: null as number | null,
+                isAppCode: line.includes(applicationId ?? ""),
+              }));
             await crashRecorder.recordCrash({
-              exceptionType: crashType, exceptionMessage: crashMsg,
+              exceptionType: crashType,
+              exceptionMessage: crashMsg,
               stackTrace: crashStack,
               deviceId: this.deviceId,
-              deviceModel: "iOS Simulator", os: "iOS",
-              appVersion: "1.0", sessionId: `ios-${this.deviceId}-${ts}`,
+              deviceModel: "iOS Simulator",
+              os: "iOS",
+              appVersion: "1.0",
+              sessionId: `ios-${this.deviceId}-${ts}`,
               currentScreen: (p.currentScreen as string) ?? (p.screen as string) ?? undefined,
             });
             break;
           }
           case "hang":
             await recorder.recordOsEvent({
-              timestamp: ts, applicationId,
-              category: "hang", kind: `${(p.durationMs as number) ?? 0}ms`,
+              timestamp: ts,
+              applicationId,
+              category: "hang",
+              kind: `${(p.durationMs as number) ?? 0}ms`,
               details: { durationMs: String((p.durationMs as number) ?? 0) },
             });
             break;
           case "webview":
             await recorder.recordOsEvent({
-              timestamp: ts, applicationId,
-              category: "webview", kind: (p.name as string) ?? "unknown",
+              timestamp: ts,
+              applicationId,
+              category: "webview",
+              kind: (p.name as string) ?? "unknown",
               details: {
                 webViewId: (p.webViewId as string) ?? "",
                 url: (p.url as string) ?? "",
                 frameId: (p.frameId as string) ?? "",
                 requestId: (p.requestId as string) ?? "",
-                ...(p.metadata as Record<string, string> ?? {}),
+                ...((p.metadata as Record<string, string>) ?? {}),
               },
             });
             break;
@@ -279,11 +339,15 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
             //  - otherwise ⇒ thread the runner-supplied prior value when present, else
             //    omit so the repository's `previousValue !== undefined` guard falls
             //    through to the auto-lookup (#3000). An explicit null is honored verbatim.
-            const previousValue: string | null | undefined = changeType === "add"
-              ? null
-              : ("previousValue" in p ? (p.previousValue as string | null) : undefined);
+            const previousValue: string | null | undefined =
+              changeType === "add"
+                ? null
+                : "previousValue" in p
+                  ? (p.previousValue as string | null)
+                  : undefined;
             await recorder.recordStorageEvent({
-              timestamp: ts, applicationId,
+              timestamp: ts,
+              applicationId,
               fileName: (p.suiteName as string) ?? "",
               key: (p.key as string) ?? null,
               value: (p.newValue as string) ?? (p.value as string) ?? null,
@@ -294,10 +358,14 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
             break;
           }
           default:
-          // Record unknown types as log events
+            // Record unknown types as log events
             await recorder.recordLogEvent({
-              timestamp: ts, applicationId,
-              level: 4, tag: "UnknownEvent", message: `${event.type}: ${JSON.stringify(p).substring(0, 1000)}`, filterName: "custom",
+              timestamp: ts,
+              applicationId,
+              level: 4,
+              tag: "UnknownEvent",
+              message: `${event.type}: ${JSON.stringify(p).substring(0, 1000)}`,
+              filterName: "custom",
             });
         }
       } finally {
@@ -310,13 +378,21 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
   }
 
   /** Capture and store a screenshot for an iOS navigation event. Returns the stored path or null. */
-  private async captureNavigationScreenshot(applicationId: string, destination: string): Promise<string | null> {
+  private async captureNavigationScreenshot(
+    applicationId: string,
+    destination: string,
+  ): Promise<string | null> {
     try {
       const result = await this.captureScreenshot(3000);
       if (result?.data) {
         const screenshotManager = NavigationScreenshotManager.getInstance();
         const bytes = Buffer.from(result.data, "base64");
-        return await screenshotManager.storeScreenshot(applicationId, destination, bytes, result.format ?? "png");
+        return await screenshotManager.storeScreenshot(
+          applicationId,
+          destination,
+          bytes,
+          result.format ?? "png",
+        );
       }
     } catch (error) {
       logger.debug(`[IosSdkEventIngestor] iOS nav screenshot capture skipped: ${error}`);
@@ -353,7 +429,10 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
         recompositionCount: nodeCount,
         durationMs: null,
         likelyCause: null,
-        detailsJson: hierarchyJson.length < 200000 ? hierarchyJson : JSON.stringify({ nodeCount, truncated: true }),
+        detailsJson:
+          hierarchyJson.length < 200000
+            ? hierarchyJson
+            : JSON.stringify({ nodeCount, truncated: true }),
         screenName: hierarchy.packageName ?? null,
       });
     } catch {
@@ -376,10 +455,14 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
   }
 
   private countViewHierarchyNodes(node: unknown): number {
-    if (!node || typeof node !== "object") { return 0; }
+    if (!node || typeof node !== "object") {
+      return 0;
+    }
     const obj = node as Record<string, unknown>;
     let count = 0;
-    if (obj["$"] || obj["node"]) { count = 1; }
+    if (obj["$"] || obj["node"]) {
+      count = 1;
+    }
     const children = obj["node"];
     if (Array.isArray(children)) {
       for (const child of children) {

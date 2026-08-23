@@ -6,11 +6,11 @@ import {
   type InMemoryNavManagerHarness,
 } from "../../helpers/navigationTestHarness";
 
-describe("SmartNavigationHelper", function() {
+describe("SmartNavigationHelper", function () {
   let navGraph: NavigationGraphManager;
   let navHarness: InMemoryNavManagerHarness;
 
-  beforeEach(async function() {
+  beforeEach(async function () {
     // Back the singleton with an in-memory, already-migrated DB (and silence the
     // fire-and-forget telemetry write) so navigation writes are deterministic and
     // never touch the real ~/.auto-mobile DB (issues #3063/#3067).
@@ -20,13 +20,13 @@ describe("SmartNavigationHelper", function() {
     await navGraph.clearCurrentGraph();
   });
 
-  afterEach(async function() {
+  afterEach(async function () {
     await navHarness.dispose();
     SmartNavigationHelper.resetOptimizer();
   });
 
-  describe("shouldUseBackButton", function() {
-    test("should recommend back button for direct parent screen", async function() {
+  describe("shouldUseBackButton", function () {
+    test("should recommend back button for direct parent screen", async function () {
       // Set up a simple navigation graph
       await navGraph.recordNavigationEvent({
         destination: "ScreenA",
@@ -35,13 +35,13 @@ describe("SmartNavigationHelper", function() {
         metadata: {},
         timestamp: Date.now(),
         sequenceNumber: 1,
-        applicationId: "com.example.app"
+        applicationId: "com.example.app",
       });
 
       // Update ScreenA with back stack depth 0
       await navGraph.recordBackStack({
         depth: 0,
-        currentTaskId: 100
+        currentTaskId: 100,
       });
 
       await navGraph.recordNavigationEvent({
@@ -50,19 +50,19 @@ describe("SmartNavigationHelper", function() {
         arguments: {},
         metadata: {},
         timestamp: Date.now() + 100,
-        sequenceNumber: 2
+        sequenceNumber: 2,
       });
 
       // Update ScreenB with back stack depth 1
       await navGraph.recordBackStack({
         depth: 1,
-        currentTaskId: 100
+        currentTaskId: 100,
       });
 
       const result = await SmartNavigationHelper.shouldUseBackButton(
         "ScreenB",
         "ScreenA",
-        1 // Current back stack depth
+        1, // Current back stack depth
       );
 
       expect(result.shouldUseBack).toBe(true);
@@ -70,7 +70,7 @@ describe("SmartNavigationHelper", function() {
       expect(result.reason).toContain("Depth difference is 1");
     });
 
-    test("should not recommend back button when current depth is lower", async function() {
+    test("should not recommend back button when current depth is lower", async function () {
       await navGraph.recordNavigationEvent({
         destination: "ScreenA",
         source: "",
@@ -78,12 +78,12 @@ describe("SmartNavigationHelper", function() {
         metadata: {},
         timestamp: Date.now(),
         sequenceNumber: 1,
-        applicationId: "com.example.app"
+        applicationId: "com.example.app",
       });
 
       await navGraph.recordBackStack({
         depth: 2,
-        currentTaskId: 100
+        currentTaskId: 100,
       });
 
       await navGraph.recordNavigationEvent({
@@ -92,25 +92,25 @@ describe("SmartNavigationHelper", function() {
         arguments: {},
         metadata: {},
         timestamp: Date.now() + 100,
-        sequenceNumber: 2
+        sequenceNumber: 2,
       });
 
       await navGraph.recordBackStack({
         depth: 5,
-        currentTaskId: 100
+        currentTaskId: 100,
       });
 
       const result = await SmartNavigationHelper.shouldUseBackButton(
         "ScreenB",
         "ScreenA",
-        2 // Current depth is less than target depth
+        2, // Current depth is less than target depth
       );
 
       expect(result.shouldUseBack).toBe(false);
       expect(result.reason).toContain("not greater than target depth");
     });
 
-    test("should not recommend back button when target has no back stack info", async function() {
+    test("should not recommend back button when target has no back stack info", async function () {
       await navGraph.recordNavigationEvent({
         destination: "ScreenA",
         source: "",
@@ -118,22 +118,18 @@ describe("SmartNavigationHelper", function() {
         metadata: {},
         timestamp: Date.now(),
         sequenceNumber: 1,
-        applicationId: "com.example.app"
+        applicationId: "com.example.app",
       });
 
       // Don't record back stack for ScreenA
 
-      const result = await SmartNavigationHelper.shouldUseBackButton(
-        "ScreenB",
-        "ScreenA",
-        3
-      );
+      const result = await SmartNavigationHelper.shouldUseBackButton("ScreenB", "ScreenA", 3);
 
       expect(result.shouldUseBack).toBe(false);
       expect(result.reason).toContain("no back stack information");
     });
 
-    test("should recommend multiple back presses when path matches depth", async function() {
+    test("should recommend multiple back presses when path matches depth", async function () {
       // Create a linear path: A -> B -> C
       const baseTime = Date.now();
 
@@ -144,7 +140,7 @@ describe("SmartNavigationHelper", function() {
         metadata: {},
         timestamp: baseTime,
         sequenceNumber: 1,
-        applicationId: "com.example.app"
+        applicationId: "com.example.app",
       });
       await navGraph.recordBackStack({ depth: 0, currentTaskId: 100 });
 
@@ -158,7 +154,7 @@ describe("SmartNavigationHelper", function() {
         arguments: {},
         metadata: {},
         timestamp: baseTime + 100,
-        sequenceNumber: 2
+        sequenceNumber: 2,
       });
       await navGraph.recordBackStack({ depth: 1, currentTaskId: 100 });
 
@@ -171,14 +167,14 @@ describe("SmartNavigationHelper", function() {
         arguments: {},
         metadata: {},
         timestamp: baseTime + 200,
-        sequenceNumber: 3
+        sequenceNumber: 3,
       });
       await navGraph.recordBackStack({ depth: 2, currentTaskId: 100 });
 
       const result = await SmartNavigationHelper.shouldUseBackButton(
         "ScreenC",
         "ScreenA",
-        2 // Current depth
+        2, // Current depth
       );
 
       // findPath(target="ScreenA") searches outward from ScreenA, but the only
@@ -190,8 +186,8 @@ describe("SmartNavigationHelper", function() {
     });
   });
 
-  describe("areInSameTask", function() {
-    test("should return true for screens in same task", async function() {
+  describe("areInSameTask", function () {
+    test("should return true for screens in same task", async function () {
       await navGraph.recordNavigationEvent({
         destination: "ScreenA",
         source: "",
@@ -199,7 +195,7 @@ describe("SmartNavigationHelper", function() {
         metadata: {},
         timestamp: Date.now(),
         sequenceNumber: 1,
-        applicationId: "com.example.app"
+        applicationId: "com.example.app",
       });
       await navGraph.recordBackStack({ depth: 0, currentTaskId: 100 });
 
@@ -209,7 +205,7 @@ describe("SmartNavigationHelper", function() {
         arguments: {},
         metadata: {},
         timestamp: Date.now() + 100,
-        sequenceNumber: 2
+        sequenceNumber: 2,
       });
       await navGraph.recordBackStack({ depth: 1, currentTaskId: 100 });
 
@@ -218,7 +214,7 @@ describe("SmartNavigationHelper", function() {
       expect(result).toBe(true);
     });
 
-    test("should return false for screens in different tasks", async function() {
+    test("should return false for screens in different tasks", async function () {
       await navGraph.recordNavigationEvent({
         destination: "ScreenA",
         source: "",
@@ -226,7 +222,7 @@ describe("SmartNavigationHelper", function() {
         metadata: {},
         timestamp: Date.now(),
         sequenceNumber: 1,
-        applicationId: "com.example.app"
+        applicationId: "com.example.app",
       });
       await navGraph.recordBackStack({ depth: 0, currentTaskId: 100 });
 
@@ -236,7 +232,7 @@ describe("SmartNavigationHelper", function() {
         arguments: {},
         metadata: {},
         timestamp: Date.now() + 100,
-        sequenceNumber: 2
+        sequenceNumber: 2,
       });
       await navGraph.recordBackStack({ depth: 0, currentTaskId: 200 });
 
@@ -245,7 +241,7 @@ describe("SmartNavigationHelper", function() {
       expect(result).toBe(false);
     });
 
-    test("should return false when task info is missing", async function() {
+    test("should return false when task info is missing", async function () {
       await navGraph.recordNavigationEvent({
         destination: "ScreenA",
         source: "",
@@ -253,7 +249,7 @@ describe("SmartNavigationHelper", function() {
         metadata: {},
         timestamp: Date.now(),
         sequenceNumber: 1,
-        applicationId: "com.example.app"
+        applicationId: "com.example.app",
       });
 
       const result = await SmartNavigationHelper.areInSameTask("ScreenA", "ScreenB");
@@ -262,8 +258,8 @@ describe("SmartNavigationHelper", function() {
     });
   });
 
-  describe("getNavigationRecommendation", function() {
-    test("should recommend back navigation when appropriate", async function() {
+  describe("getNavigationRecommendation", function () {
+    test("should recommend back navigation when appropriate", async function () {
       await navGraph.recordNavigationEvent({
         destination: "ScreenA",
         source: "",
@@ -271,7 +267,7 @@ describe("SmartNavigationHelper", function() {
         metadata: {},
         timestamp: Date.now(),
         sequenceNumber: 1,
-        applicationId: "com.example.app"
+        applicationId: "com.example.app",
       });
       await navGraph.recordBackStack({ depth: 0, currentTaskId: 100 });
 
@@ -281,21 +277,21 @@ describe("SmartNavigationHelper", function() {
         arguments: {},
         metadata: {},
         timestamp: Date.now() + 100,
-        sequenceNumber: 2
+        sequenceNumber: 2,
       });
       await navGraph.recordBackStack({ depth: 1, currentTaskId: 100 });
 
       const result = await SmartNavigationHelper.getNavigationRecommendation(
         "ScreenA",
         "ScreenB",
-        1
+        1,
       );
 
       expect(result.method).toBe("back");
       expect(result.backPresses).toBe(1);
     });
 
-    test("should recommend forward navigation when back is not suitable", async function() {
+    test("should recommend forward navigation when back is not suitable", async function () {
       await navGraph.recordNavigationEvent({
         destination: "ScreenA",
         source: "",
@@ -303,7 +299,7 @@ describe("SmartNavigationHelper", function() {
         metadata: {},
         timestamp: Date.now(),
         sequenceNumber: 1,
-        applicationId: "com.example.app"
+        applicationId: "com.example.app",
       });
       await navGraph.recordBackStack({ depth: 0, currentTaskId: 100 });
 
@@ -315,24 +311,24 @@ describe("SmartNavigationHelper", function() {
         arguments: {},
         metadata: {},
         timestamp: Date.now() + 100,
-        sequenceNumber: 2
+        sequenceNumber: 2,
       });
       await navGraph.recordBackStack({ depth: 0, currentTaskId: 100 });
 
       const result = await SmartNavigationHelper.getNavigationRecommendation(
         "ScreenB",
         "ScreenA",
-        0
+        0,
       );
 
       expect(result.method).toBe("forward");
     });
 
-    test("should return unknown when no navigation path exists", async function() {
+    test("should return unknown when no navigation path exists", async function () {
       const result = await SmartNavigationHelper.getNavigationRecommendation(
         "UnknownScreen",
         "CurrentScreen",
-        2
+        2,
       );
 
       expect(result.method).toBe("unknown");

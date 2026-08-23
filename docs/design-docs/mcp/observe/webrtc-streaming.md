@@ -23,6 +23,7 @@
 > See the [Status Glossary](../../status-glossary.md) for chip definitions.
 
 This is the **browser/CI-facing** streaming path. It is distinct from:
+
 - the `videoRecording` MCP tool (records a clip to a file), and
 - the desktop live-mirroring path over `video-stream.sock` + an in-process FFmpeg decoder
   ([screen-streaming.md](./screen-streaming.md)).
@@ -34,7 +35,7 @@ of the device it is driving to a central web server, which fans the stream out
 to browsers (dashboards, debugging UIs, pair-debugging). WebRTC is the natural
 fit: H.264 is a first-class WebRTC codec, latency is sub-second, and the browser
 needs no plugin. **WHIP** (WebRTC-HTTP Ingestion Protocol) is the standard way to
-*publish* a WebRTC stream to a server with a single HTTP POST, and is supported
+_publish_ a WebRTC stream to a server with a single HTTP POST, and is supported
 by common media servers (MediaMTX, LiveKit, Janus, Cloudflare).
 
 ## Architecture
@@ -69,26 +70,26 @@ by common media servers (MediaMTX, LiveKit, Janus, Cloudflare).
 
 ### Components (in `src/features/webrtc/`)
 
-| File | Responsibility |
-|------|----------------|
-| `h264.ts` | Annex-B NAL splitter, access-unit assembler, RFC 6184 RTP packetizer (single-NAL + FU-A) |
-| `RtpH264TrackWriter.ts` | Turns the elementary stream into werift `RtpPacket`s; wall-clock 90 kHz timestamps, marker bit on the last packet of a frame |
-| `RtpPcmuTrackWriter.ts` | Turns 8 kHz mono PCM16LE audio into PCMU/G.711 RTP packets |
-| `AndroidH264Source.ts` | Runs `adb exec-out screenrecord --output-format=h264 -`; rotates segments before the 180 s `--time-limit` cap so the stream stays continuous |
-| `PersistentEncoderH264Source.ts` | Runs the long-lived `video-server` (VirtualDisplay + MediaCodec, plus optional playback audio) via `app_process`; parsed by `VideoServerStreamParser.ts` |
+| File                                 | Responsibility                                                                                                                                                    |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `h264.ts`                            | Annex-B NAL splitter, access-unit assembler, RFC 6184 RTP packetizer (single-NAL + FU-A)                                                                          |
+| `RtpH264TrackWriter.ts`              | Turns the elementary stream into werift `RtpPacket`s; wall-clock 90 kHz timestamps, marker bit on the last packet of a frame                                      |
+| `RtpPcmuTrackWriter.ts`              | Turns 8 kHz mono PCM16LE audio into PCMU/G.711 RTP packets                                                                                                        |
+| `AndroidH264Source.ts`               | Runs `adb exec-out screenrecord --output-format=h264 -`; rotates segments before the 180 s `--time-limit` cap so the stream stays continuous                      |
+| `PersistentEncoderH264Source.ts`     | Runs the long-lived `video-server` (VirtualDisplay + MediaCodec, plus optional playback audio) via `app_process`; parsed by `VideoServerStreamParser.ts`          |
 | `androidH264CaptureSourceFactory.ts` | Prefers the persistent encoder when `automobile-video.jar` is resolvable (`videoServerJar.ts`), falling back to `screenrecord` on unavailability or start failure |
-| `WhipClient.ts` | WHIP `POST` (offer→answer) and `DELETE`; resolves the `Location` resource URL used to reconnect/tear down |
-| `ReconnectController.ts` | Connect / reconnect with injectable backoff (default exponential 1 s→30 s) |
-| `WebRtcPublisher.ts` | werift `RTCPeerConnection` (H.264 sendonly) + WHIP + auto-reconnect; exposes a reconnect descriptor |
-| `webrtcStreamingConfig.ts` | Resolves config from `AUTOMOBILE_WEBRTC_*` env vars + per-request overrides |
+| `WhipClient.ts`                      | WHIP `POST` (offer→answer) and `DELETE`; resolves the `Location` resource URL used to reconnect/tear down                                                         |
+| `ReconnectController.ts`             | Connect / reconnect with injectable backoff (default exponential 1 s→30 s)                                                                                        |
+| `WebRtcPublisher.ts`                 | werift `RTCPeerConnection` (H.264 sendonly) + WHIP + auto-reconnect; exposes a reconnect descriptor                                                               |
+| `webrtcStreamingConfig.ts`           | Resolves config from `AUTOMOBILE_WEBRTC_*` env vars + per-request overrides                                                                                       |
 
 Control plane:
 
-| File | Responsibility |
-|------|----------------|
-| `src/server/webrtcStreamManager.ts` | Per-device stream lifecycle; prepares and retains capture while it wires source ⇄ publisher |
-| `src/daemon/webrtcStreamSocketServer.ts` | `webrtc-stream.sock` request/response control (`start`/`stop`/`status`/`list`/`await`) |
-| `src/daemon/webrtcStreamClient.ts` | Minimal client for scripts/tooling |
+| File                                     | Responsibility                                                                              |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `src/server/webrtcStreamManager.ts`      | Per-device stream lifecycle; prepares and retains capture while it wires source ⇄ publisher |
+| `src/daemon/webrtcStreamSocketServer.ts` | `webrtc-stream.sock` request/response control (`start`/`stop`/`status`/`list`/`await`)      |
+| `src/daemon/webrtcStreamClient.ts`       | Minimal client for scripts/tooling                                                          |
 
 ### Coordinator lifecycle
 
@@ -192,17 +193,17 @@ Newline-delimited JSON request/response.
 
 ```jsonc
 {
-  "id": "1",                    // optional correlation id
-  "action": "start",            // "start" | "stop" | "status" | "list" | "await"
-  "deviceId": "emulator-5554",  // optional; defaults to the sole Android device
-  "streamId": "ci-run-42",      // optional; generated if omitted
-  "leaseId": "lease_...",       // returned by start; renew/release this lease
-  "whipEndpoint": "https://coord:8080/whip",  // optional override of env
-  "whipToken": "…",             // optional bearer token
+  "id": "1", // optional correlation id
+  "action": "start", // "start" | "stop" | "status" | "list" | "await"
+  "deviceId": "emulator-5554", // optional; defaults to the sole Android device
+  "streamId": "ci-run-42", // optional; generated if omitted
+  "leaseId": "lease_...", // returned by start; renew/release this lease
+  "whipEndpoint": "https://coord:8080/whip", // optional override of env
+  "whipToken": "…", // optional bearer token
   "iceServers": [{ "urls": "stun:stun.l.google.com:19302" }],
-  "bitrateKbps": 4000,          // optional
-  "size": { "width": 720, "height": 1280 },   // optional downscale
-  "audio": true                               // optional Android audio
+  "bitrateKbps": 4000, // optional
+  "size": { "width": 720, "height": 1280 }, // optional downscale
+  "audio": true, // optional Android audio
 }
 ```
 
@@ -261,15 +262,15 @@ producer; a numeric zero is a measured value. `captureSourceState` is
 
 ## Configuration
 
-| Environment variable | Meaning |
-|----------------------|---------|
-| `AUTOMOBILE_WEBRTC_WHIP_ENDPOINT` | WHIP ingest URL (required unless passed per request) |
-| `AUTOMOBILE_WEBRTC_WHIP_TOKEN` | Bearer token for the ingest endpoint |
-| `AUTOMOBILE_WEBRTC_ICE_SERVERS` | Comma-separated STUN/TURN URLs, or a JSON array of `{urls,username,credential}` |
-| `AUTOMOBILE_WEBRTC_BITRATE_KBPS` | Target encoder bitrate |
-| `AUTOMOBILE_WEBRTC_MAX_SIZE` | Capture downscale, `WIDTHxHEIGHT` |
-| `AUTOMOBILE_WEBRTC_IOS_SIMULATOR_FPS` | iOS Simulator capture rate, integer in `[5, 60]` (default `15`; `iosSimulatorFps` per request) |
-| `AUTOMOBILE_WEBRTC_AUDIO` | Enable optional audio (`audio: true` per request). Android requires the persistent `video-server` jar; iOS supports Simulator-window audio only. |
+| Environment variable                  | Meaning                                                                                                                                          |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `AUTOMOBILE_WEBRTC_WHIP_ENDPOINT`     | WHIP ingest URL (required unless passed per request)                                                                                             |
+| `AUTOMOBILE_WEBRTC_WHIP_TOKEN`        | Bearer token for the ingest endpoint                                                                                                             |
+| `AUTOMOBILE_WEBRTC_ICE_SERVERS`       | Comma-separated STUN/TURN URLs, or a JSON array of `{urls,username,credential}`                                                                  |
+| `AUTOMOBILE_WEBRTC_BITRATE_KBPS`      | Target encoder bitrate                                                                                                                           |
+| `AUTOMOBILE_WEBRTC_MAX_SIZE`          | Capture downscale, `WIDTHxHEIGHT`                                                                                                                |
+| `AUTOMOBILE_WEBRTC_IOS_SIMULATOR_FPS` | iOS Simulator capture rate, integer in `[5, 60]` (default `15`; `iosSimulatorFps` per request)                                                   |
+| `AUTOMOBILE_WEBRTC_AUDIO`             | Enable optional audio (`audio: true` per request). Android requires the persistent `video-server` jar; iOS supports Simulator-window audio only. |
 
 Per-request fields override the environment defaults.
 
@@ -313,7 +314,7 @@ in `webrtcStreamManager`; the capture-source factory stays synchronous):
 1. `AUTOMOBILE_VIDEO_SERVER_JAR` — explicit local override (an already-built jar).
 2. A valid **cached download** at `~/.auto-mobile/video-server/automobile-video.jar`
    (with a `video-server-jar.json` sidecar recording `{version, sha256, size,
-   downloadedAt}`).
+downloadedAt}`).
 3. A **fresh download** from the release, sha256-verified against the pinned
    release's `videoJarSha256` in the checksum registry.
 4. The local Gradle build output
@@ -327,17 +328,17 @@ is warmed by a **background prefetch at daemon startup**, but only when WebRTC
 streaming is configured (`AUTOMOBILE_WEBRTC_WHIP_ENDPOINT` is set) — daemons that
 never stream download nothing.
 
-**Fail-modes.** The jar is *optional* (the encoder already degrades to
+**Fail-modes.** The jar is _optional_ (the encoder already degrades to
 `screenrecord`), so unavailability degrades gracefully — but integrity is never
 compromised:
 
-| Situation | Behavior |
-| --- | --- |
-| Checksum known + **matches** | use the jar |
-| Checksum known + **mismatch** | stream start returns `success: false` with a typed `capture_start_failed` screenshot fallback; the corrupted/tampered jar is never accepted |
-| Checksum **absent** (a pin predating jar delivery / unknown) | **degrade** to `screenrecord` |
-| `AUTOMOBILE_REQUIRE_VIDEO_SERVER=1` | any degrade case returns the same typed screenshot fallback instead of starting a stream — for CI that must not silently fall back |
-| `AUTOMOBILE_SKIP_VIDEO_SERVER_DOWNLOAD=1` | **local-only** (override / Gradle build); the network is never touched. A dedicated flag — it does **not** overload `AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD`, whose CtrlProxy APK is mandatory |
+| Situation                                                    | Behavior                                                                                                                                                                                    |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Checksum known + **matches**                                 | use the jar                                                                                                                                                                                 |
+| Checksum known + **mismatch**                                | stream start returns `success: false` with a typed `capture_start_failed` screenshot fallback; the corrupted/tampered jar is never accepted                                                 |
+| Checksum **absent** (a pin predating jar delivery / unknown) | **degrade** to `screenrecord`                                                                                                                                                               |
+| `AUTOMOBILE_REQUIRE_VIDEO_SERVER=1`                          | any degrade case returns the same typed screenshot fallback instead of starting a stream — for CI that must not silently fall back                                                          |
+| `AUTOMOBILE_SKIP_VIDEO_SERVER_DOWNLOAD=1`                    | **local-only** (override / Gradle build); the network is never touched. A dedicated flag — it does **not** overload `AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD`, whose CtrlProxy APK is mandatory |
 
 See [Environment variables](../../../using/environment-variables.md) for the full
 flag reference.
@@ -363,7 +364,7 @@ tracks to WHEP subscribers.
   `video-server` jar and falls back to `screenrecord`; iOS capture uses the
   CtrlProxy helper and local `ffmpeg` H.264 encoding. Keep both helper binaries
   available on workers that may stream either platform.
-- ~~**Persistent-encoder distribution.**~~ *Resolved:* the `video-server` jar now
+- ~~**Persistent-encoder distribution.**~~ _Resolved:_ the `video-server` jar now
   ships as a checksum-verified GitHub release asset and is downloaded/cached on
   demand, so production installs use the persistent encoder by default. See
   [Persistent-encoder delivery](#persistent-encoder-delivery-automobile-videojar)

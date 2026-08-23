@@ -1,15 +1,11 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import {
-  awaitInFlightMigrations,
-  awaitPromiseBounded,
-  closeDatabase,
-} from "../../src/db/database";
+import { awaitInFlightMigrations, awaitPromiseBounded, closeDatabase } from "../../src/db/database";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { withInMemorySingletonDatabase } from "./inMemorySingletonDatabase";
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
   let resolve!: () => void;
-  const promise = new Promise<void>(res => {
+  const promise = new Promise<void>((res) => {
     resolve = res;
   });
   return { promise, resolve };
@@ -55,9 +51,7 @@ describe("awaitInFlightMigrations (module state)", () => {
 
   it("returns true once the real :memory: startup migration has settled", async () => {
     await withInMemorySingletonDatabase(async () => {
-      const { getDatabase, ensureMigrations } = await import(
-        "../../src/db/database"
-      );
+      const { getDatabase, ensureMigrations } = await import("../../src/db/database");
       getDatabase();
       await ensureMigrations();
       // Migration already settled: the bound never needs to fire.

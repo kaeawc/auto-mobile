@@ -27,7 +27,12 @@ export interface EmulatorConsoleClient {
  * returned so callers can detect `KO:` failure prefixes.
  */
 export interface EmulatorConsoleTransport {
-  execute(host: string, port: number, authToken: string | null, commands: string[]): Promise<string>;
+  execute(
+    host: string,
+    port: number,
+    authToken: string | null,
+    commands: string[],
+  ): Promise<string>;
 }
 
 /**
@@ -40,7 +45,9 @@ export interface EmulatorConsoleAuthTokenReader {
 }
 
 export class FileEmulatorConsoleAuthTokenReader implements EmulatorConsoleAuthTokenReader {
-  constructor(private readonly tokenPath: string = path.join(os.homedir(), ".emulator_console_auth_token")) {}
+  constructor(
+    private readonly tokenPath: string = path.join(os.homedir(), ".emulator_console_auth_token"),
+  ) {}
 
   async read(): Promise<string | null> {
     try {
@@ -52,7 +59,9 @@ export class FileEmulatorConsoleAuthTokenReader implements EmulatorConsoleAuthTo
       if (err.code === "ENOENT") {
         return null;
       }
-      logger.warn(`Failed to read emulator console auth token from ${this.tokenPath}: ${err.message}`);
+      logger.warn(
+        `Failed to read emulator console auth token from ${this.tokenPath}: ${err.message}`,
+      );
       return null;
     }
   }
@@ -64,10 +73,15 @@ export class NetEmulatorConsoleTransport implements EmulatorConsoleTransport {
   constructor(
     private readonly connect: (port: number, host: string) => net.Socket = net.connect,
     private readonly timeoutMs: number = 5000,
-    private readonly timer: Timer = defaultTimer
+    private readonly timer: Timer = defaultTimer,
   ) {}
 
-  execute(host: string, port: number, authToken: string | null, commands: string[]): Promise<string> {
+  execute(
+    host: string,
+    port: number,
+    authToken: string | null,
+    commands: string[],
+  ): Promise<string> {
     return new Promise((resolve, reject) => {
       let settled = false;
       let buffer = "";
@@ -76,27 +90,42 @@ export class NetEmulatorConsoleTransport implements EmulatorConsoleTransport {
       socket.setEncoding("utf-8");
 
       const finish = (err: Error | null, output?: string) => {
-        if (settled) { return; }
+        if (settled) {
+          return;
+        }
         settled = true;
         socket.removeAllListeners();
         socket.destroy();
-        if (err) { reject(err); } else { resolve(output ?? buffer); }
+        if (err) {
+          reject(err);
+        } else {
+          resolve(output ?? buffer);
+        }
       };
 
       const timeoutHandle = this.timer.setTimeout(
-        () => finish(new ActionableError(`Emulator console connection to ${host}:${port} timed out after ${this.timeoutMs}ms`)),
-        this.timeoutMs
+        () =>
+          finish(
+            new ActionableError(
+              `Emulator console connection to ${host}:${port} timed out after ${this.timeoutMs}ms`,
+            ),
+          ),
+        this.timeoutMs,
       );
 
-      socket.on("error", err => {
+      socket.on("error", (err) => {
         this.timer.clearTimeout(timeoutHandle);
-        finish(new ActionableError(`Emulator console connection to ${host}:${port} failed: ${err.message}`));
+        finish(
+          new ActionableError(
+            `Emulator console connection to ${host}:${port} failed: ${err.message}`,
+          ),
+        );
       });
       socket.on("close", () => {
         this.timer.clearTimeout(timeoutHandle);
         finish(null, buffer);
       });
-      socket.on("data", chunk => {
+      socket.on("data", (chunk) => {
         buffer += chunk.toString();
       });
       socket.on("connect", () => {
@@ -114,9 +143,13 @@ export class NetEmulatorConsoleTransport implements EmulatorConsoleTransport {
 
 export function consolePortFromSerial(deviceId: string): number | null {
   const match = /^emulator-(\d+)$/.exec(deviceId);
-  if (!match) { return null; }
+  if (!match) {
+    return null;
+  }
   const port = Number.parseInt(match[1], 10);
-  if (!Number.isFinite(port) || port <= 0 || port > 65535) { return null; }
+  if (!Number.isFinite(port) || port <= 0 || port > 65535) {
+    return null;
+  }
   return port;
 }
 
@@ -124,7 +157,7 @@ function validatePhoneNumber(phoneNumber: string): string {
   const trimmed = phoneNumber.trim();
   if (!/^\+?[0-9]{1,20}$/.test(trimmed)) {
     throw new ActionableError(
-      `Invalid phone number '${phoneNumber}'. Expected digits with optional leading '+' (max 20 digits).`
+      `Invalid phone number '${phoneNumber}'. Expected digits with optional leading '+' (max 20 digits).`,
     );
   }
   return trimmed;
@@ -133,13 +166,17 @@ function validatePhoneNumber(phoneNumber: string): string {
 function validateSmsMessage(message: string): string {
   // Newlines would terminate the command on the wire; carriage returns and NULs would too.
   if (/[\r\n\0]/.test(message)) {
-    throw new ActionableError("SMS message must not contain newline, carriage return, or NUL characters.");
+    throw new ActionableError(
+      "SMS message must not contain newline, carriage return, or NUL characters.",
+    );
   }
   if (message.length === 0) {
     throw new ActionableError("SMS message must not be empty.");
   }
   if (message.length > 1024) {
-    throw new ActionableError(`SMS message must be 1024 characters or fewer (got ${message.length}).`);
+    throw new ActionableError(
+      `SMS message must be 1024 characters or fewer (got ${message.length}).`,
+    );
   }
   return message;
 }
@@ -148,7 +185,7 @@ export class RealEmulatorConsoleClient implements EmulatorConsoleClient {
   constructor(
     private readonly port: number,
     private readonly transport: EmulatorConsoleTransport,
-    private readonly tokenReader: EmulatorConsoleAuthTokenReader
+    private readonly tokenReader: EmulatorConsoleAuthTokenReader,
   ) {}
 
   private async runCommands(commands: string[]): Promise<void> {
@@ -160,15 +197,26 @@ export class RealEmulatorConsoleClient implements EmulatorConsoleClient {
     }
   }
 
-  private async gsmCommand(verb: "call" | "accept" | "cancel" | "busy", phoneNumber: string): Promise<void> {
+  private async gsmCommand(
+    verb: "call" | "accept" | "cancel" | "busy",
+    phoneNumber: string,
+  ): Promise<void> {
     const number = validatePhoneNumber(phoneNumber);
     await this.runCommands([`gsm ${verb} ${number}`]);
   }
 
-  gsmCall(phoneNumber: string): Promise<void> { return this.gsmCommand("call", phoneNumber); }
-  gsmAccept(phoneNumber: string): Promise<void> { return this.gsmCommand("accept", phoneNumber); }
-  gsmCancel(phoneNumber: string): Promise<void> { return this.gsmCommand("cancel", phoneNumber); }
-  gsmBusy(phoneNumber: string): Promise<void> { return this.gsmCommand("busy", phoneNumber); }
+  gsmCall(phoneNumber: string): Promise<void> {
+    return this.gsmCommand("call", phoneNumber);
+  }
+  gsmAccept(phoneNumber: string): Promise<void> {
+    return this.gsmCommand("accept", phoneNumber);
+  }
+  gsmCancel(phoneNumber: string): Promise<void> {
+    return this.gsmCommand("cancel", phoneNumber);
+  }
+  gsmBusy(phoneNumber: string): Promise<void> {
+    return this.gsmCommand("busy", phoneNumber);
+  }
 
   async gsmHold(): Promise<void> {
     await this.runCommands(["gsm hold"]);

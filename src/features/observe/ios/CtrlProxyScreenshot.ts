@@ -5,10 +5,7 @@
  */
 
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
-import type {
-  DelegateContext,
-  CtrlProxyScreenshotResult,
-} from "./types";
+import type { DelegateContext, CtrlProxyScreenshotResult } from "./types";
 import { sendCommand } from "../DeviceServiceUtils";
 
 /**
@@ -26,7 +23,7 @@ export class CtrlProxyScreenshot {
    */
   async requestScreenshot(
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyScreenshotResult> {
     return sendCommand<CtrlProxyScreenshotResult>(this.context, {
       idPrefix: "screenshot",
@@ -36,7 +33,10 @@ export class CtrlProxyScreenshot {
       perf,
       cancelScreenshotBackoff: false,
       notConnectedError: () => ({ success: false, error: "Not connected" }),
-      timeoutError: timeout => ({ success: false, error: `Screenshot timed out after ${timeout}ms` }),
+      timeoutError: (timeout) => ({
+        success: false,
+        error: `Screenshot timed out after ${timeout}ms`,
+      }),
     });
   }
 }

@@ -20,11 +20,15 @@ describe("parseDaemonArgs output-reduction flags", () => {
   });
 
   test("--observe-result-include-elements sets observeResultIncludeElements", () => {
-    expect(parseDaemonArgs(["--observe-result-include-elements"]).observeResultIncludeElements).toBe(true);
+    expect(
+      parseDaemonArgs(["--observe-result-include-elements"]).observeResultIncludeElements,
+    ).toBe(true);
   });
 
   test("--tool-results-no-structured-content sets toolResultsNoStructuredContent", () => {
-    expect(parseDaemonArgs(["--tool-results-no-structured-content"]).toolResultsNoStructuredContent).toBe(true);
+    expect(
+      parseDaemonArgs(["--tool-results-no-structured-content"]).toolResultsNoStructuredContent,
+    ).toBe(true);
   });
 
   test("--actions-diff-observe sets actionsDiffObserve", () => {
@@ -87,9 +91,7 @@ describe("output-reduction daemon-arg round trip", () => {
   });
 
   test("all-on flags round-trip through serialize -> parse intact", () => {
-    const allOn = Object.fromEntries(
-      OUTPUT_REDUCTION_FLAG_SPECS.map(spec => [spec.field, true])
-    );
+    const allOn = Object.fromEntries(OUTPUT_REDUCTION_FLAG_SPECS.map((spec) => [spec.field, true]));
     const options = parseDaemonArgs(outputReductionFlagsToArgs(allOn));
     for (const spec of OUTPUT_REDUCTION_FLAG_SPECS) {
       expect(options[spec.field]).toBe(true);
@@ -99,39 +101,43 @@ describe("output-reduction daemon-arg round trip", () => {
 
 describe("event-all markers daemon arg relay", () => {
   test("--event-all-markers parses a csv into DaemonOptions", () => {
-    expect(parseDaemonArgs(["--event-all-markers", "@,/,#"]).eventAllMarkers)
-      .toEqual(["@", "/", "#"]);
+    expect(parseDaemonArgs(["--event-all-markers", "@,/,#"]).eventAllMarkers).toEqual([
+      "@",
+      "/",
+      "#",
+    ]);
   });
 
   test("--event-all-markers=<csv> parses into DaemonOptions", () => {
-    expect(parseDaemonArgs(["--event-all-markers=@,/,#"]).eventAllMarkers)
-      .toEqual(["@", "/", "#"]);
+    expect(parseDaemonArgs(["--event-all-markers=@,/,#"]).eventAllMarkers).toEqual(["@", "/", "#"]);
   });
 
   test("trims and drops empties on parse", () => {
-    expect(parseDaemonArgs(["--event-all-markers", " @ , / , "]).eventAllMarkers)
-      .toEqual(["@", "/"]);
+    expect(parseDaemonArgs(["--event-all-markers", " @ , / , "]).eventAllMarkers).toEqual([
+      "@",
+      "/",
+    ]);
   });
 
   test("falls back to AUTOMOBILE_EVENT_ALL_MARKERS", () => {
-    expect(parseDaemonArgs([], { AUTOMOBILE_EVENT_ALL_MARKERS: "@,:" }).eventAllMarkers)
-      .toEqual(["@", ":"]);
+    expect(parseDaemonArgs([], { AUTOMOBILE_EVENT_ALL_MARKERS: "@,:" }).eventAllMarkers).toEqual([
+      "@",
+      ":",
+    ]);
   });
 
   test("preserves an explicit empty CLI override over AUTOMOBILE_EVENT_ALL_MARKERS", () => {
-    const options = parseDaemonArgs(
-      ["--event-all-markers="],
-      { AUTOMOBILE_EVENT_ALL_MARKERS: "@,:" }
-    );
+    const options = parseDaemonArgs(["--event-all-markers="], {
+      AUTOMOBILE_EVENT_ALL_MARKERS: "@,:",
+    });
     expect(options.eventAllMarkers).toEqual([]);
     expect(options.eventAllMarkersCliOverride).toBe(true);
   });
 
   test("CLI flag wins over AUTOMOBILE_EVENT_ALL_MARKERS", () => {
-    const options = parseDaemonArgs(
-      ["--event-all-markers", "#"],
-      { AUTOMOBILE_EVENT_ALL_MARKERS: "@" }
-    );
+    const options = parseDaemonArgs(["--event-all-markers", "#"], {
+      AUTOMOBILE_EVENT_ALL_MARKERS: "@",
+    });
     expect(options.eventAllMarkers).toEqual(["#"]);
     expect(options.eventAllMarkersCliOverride).toBe(true);
   });
@@ -148,18 +154,21 @@ describe("event-all markers daemon arg relay", () => {
 
 describe("tool outputs directory daemon arg relay", () => {
   test("--tool-outputs-dir parses into DaemonOptions", () => {
-    expect(parseDaemonArgs(["--tool-outputs-dir", "/tmp/artifacts"]).toolOutputsDir)
-      .toBe("/tmp/artifacts");
+    expect(parseDaemonArgs(["--tool-outputs-dir", "/tmp/artifacts"]).toolOutputsDir).toBe(
+      "/tmp/artifacts",
+    );
   });
 
   test("--tool-output-dir alias parses into DaemonOptions", () => {
-    expect(parseDaemonArgs(["--tool-output-dir", "/tmp/artifacts"]).toolOutputsDir)
-      .toBe("/tmp/artifacts");
+    expect(parseDaemonArgs(["--tool-output-dir", "/tmp/artifacts"]).toolOutputsDir).toBe(
+      "/tmp/artifacts",
+    );
   });
 
   test("legacy AUTO_MOBILE_TOOL_OUTPUTS_DIR env alias parses into DaemonOptions", () => {
-    expect(parseDaemonArgs([], { AUTO_MOBILE_TOOL_OUTPUTS_DIR: "/tmp/legacy-artifacts" }).toolOutputsDir)
-      .toBe("/tmp/legacy-artifacts");
+    expect(
+      parseDaemonArgs([], { AUTO_MOBILE_TOOL_OUTPUTS_DIR: "/tmp/legacy-artifacts" }).toolOutputsDir,
+    ).toBe("/tmp/legacy-artifacts");
   });
 
   test("ignores missing or flag-shaped values", () => {

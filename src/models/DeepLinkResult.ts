@@ -1,30 +1,30 @@
 export interface IntentFilter {
-    action: string;
-    category: string[];
-    data?: {
-        scheme?: string;
-        host?: string;
-        port?: string;
-        path?: string;
-        pathPattern?: string;
-        pathPrefix?: string;
-        mimeType?: string;
-    }[];
+  action: string;
+  category: string[];
+  data?: {
+    scheme?: string;
+    host?: string;
+    port?: string;
+    path?: string;
+    pathPattern?: string;
+    pathPrefix?: string;
+    mimeType?: string;
+  }[];
 }
 
 export interface DeepLinkInfo {
-    schemes: string[];
-    hosts: string[];
-    intentFilters: IntentFilter[];
-    supportedMimeTypes: string[];
+  schemes: string[];
+  hosts: string[];
+  intentFilters: IntentFilter[];
+  supportedMimeTypes: string[];
 }
 
 export interface DeepLinkResult {
-    success: boolean;
-    appId: string;
-    deepLinks: DeepLinkInfo;
-    rawOutput?: string;
-    error?: string;
+  success: boolean;
+  appId: string;
+  deepLinks: DeepLinkInfo;
+  rawOutput?: string;
+  error?: string;
 }
 
 /**
@@ -34,7 +34,7 @@ export interface DeepLinkResult {
  * the code-signing entitlements (`com.apple.developer.associated-domains`).
  */
 export interface IosInfoPlist {
-    CFBundleURLTypes?: { CFBundleURLName?: string; CFBundleURLSchemes?: string[] }[];
-    CFBundleDocumentTypes?: { LSItemContentTypes?: string[] }[];
-    LSApplicationQueriesSchemes?: string[];
+  CFBundleURLTypes?: { CFBundleURLName?: string; CFBundleURLSchemes?: string[] }[];
+  CFBundleDocumentTypes?: { LSItemContentTypes?: string[] }[];
+  LSApplicationQueriesSchemes?: string[];
 }

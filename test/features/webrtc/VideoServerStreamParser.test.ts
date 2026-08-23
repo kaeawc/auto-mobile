@@ -67,12 +67,12 @@ function collect(): {
   parser: VideoServerStreamParser;
   headers: VideoServerStreamHeader[];
   packets: VideoServerPacket[];
-  } {
+} {
   const headers: VideoServerStreamHeader[] = [];
   const packets: VideoServerPacket[] = [];
   const parser = new VideoServerStreamParser({
-    onHeader: header => headers.push(header),
-    onPacket: packet => packets.push(packet),
+    onHeader: (header) => headers.push(header),
+    onPacket: (packet) => packets.push(packet),
   });
   return { parser, headers, packets };
 }
@@ -140,15 +140,17 @@ describe("VideoServerStreamParser", () => {
       packet(Buffer.from([0xcc]), 0n, 20),
     ]);
     parser.push(combined);
-    expect(packets.map(p => p.data[0])).toEqual([0xaa, 0xbb, 0xcc]);
+    expect(packets.map((p) => p.data[0])).toEqual([0xaa, 0xbb, 0xcc]);
   });
 
   test("reports replayed packets without changing their flags or timestamp", () => {
     const { parser, packets } = collect();
-    parser.push(Buffer.concat([
-      streamHeader(1, 1),
-      packet(Buffer.from([0, 0, 0, 1, 0x65]), FLAG_KEY_FRAME | FLAG_REPLAYED, 20),
-    ]));
+    parser.push(
+      Buffer.concat([
+        streamHeader(1, 1),
+        packet(Buffer.from([0, 0, 0, 1, 0x65]), FLAG_KEY_FRAME | FLAG_REPLAYED, 20),
+      ]),
+    );
 
     expect(packets[0]).toMatchObject({
       keyFrame: true,
@@ -159,11 +161,13 @@ describe("VideoServerStreamParser", () => {
 
   test("parses muxed video and audio packets", () => {
     const { parser, headers, packets } = collect();
-    parser.push(Buffer.concat([
-      muxHeader(),
-      muxPacket(VIDEO_SERVER_TRACK_ID_AUDIO, Buffer.from([1, 2, 3, 4]), 0n, 10),
-      muxPacket(VIDEO_SERVER_TRACK_ID_VIDEO, Buffer.from([0, 0, 0, 1, 0x65]), FLAG_KEY_FRAME, 20),
-    ]));
+    parser.push(
+      Buffer.concat([
+        muxHeader(),
+        muxPacket(VIDEO_SERVER_TRACK_ID_AUDIO, Buffer.from([1, 2, 3, 4]), 0n, 10),
+        muxPacket(VIDEO_SERVER_TRACK_ID_VIDEO, Buffer.from([0, 0, 0, 1, 0x65]), FLAG_KEY_FRAME, 20),
+      ]),
+    );
 
     expect(headers).toEqual([
       {
@@ -175,7 +179,7 @@ describe("VideoServerStreamParser", () => {
         muxVersion: 1,
       },
     ]);
-    expect(packets.map(packet => [packet.trackId, packet.codecId, packet.ptsUs])).toEqual([
+    expect(packets.map((packet) => [packet.trackId, packet.codecId, packet.ptsUs])).toEqual([
       [VIDEO_SERVER_TRACK_ID_AUDIO, VIDEO_SERVER_CODEC_ID_PCM16, 10],
       [VIDEO_SERVER_TRACK_ID_VIDEO, VIDEO_SERVER_CODEC_ID_H264, 20],
     ]);
@@ -186,23 +190,27 @@ describe("VideoServerStreamParser", () => {
     // A refactor that skipped the advance would spin forever on the unknown
     // packet; here the following known-track packet must still be delivered.
     const { parser, packets } = collect();
-    parser.push(Buffer.concat([
-      muxHeader(),
-      muxPacket(99, Buffer.from([0xde, 0xad]), 0n, 5),
-      muxPacket(VIDEO_SERVER_TRACK_ID_VIDEO, Buffer.from([0, 0, 0, 1, 0x65]), FLAG_KEY_FRAME, 20),
-    ]));
+    parser.push(
+      Buffer.concat([
+        muxHeader(),
+        muxPacket(99, Buffer.from([0xde, 0xad]), 0n, 5),
+        muxPacket(VIDEO_SERVER_TRACK_ID_VIDEO, Buffer.from([0, 0, 0, 1, 0x65]), FLAG_KEY_FRAME, 20),
+      ]),
+    );
 
-    expect(packets.map(packet => packet.trackId)).toEqual([VIDEO_SERVER_TRACK_ID_VIDEO]);
+    expect(packets.map((packet) => packet.trackId)).toEqual([VIDEO_SERVER_TRACK_ID_VIDEO]);
     expect(packets[0].ptsUs).toBe(20);
   });
 
   test("emits a zero-size video packet without stalling the parser", () => {
     const { parser, packets } = collect();
-    parser.push(Buffer.concat([
-      streamHeader(100, 200),
-      packet(Buffer.alloc(0), FLAG_CONFIG, 7),
-      packet(Buffer.from([0xaa]), 0n, 8),
-    ]));
+    parser.push(
+      Buffer.concat([
+        streamHeader(100, 200),
+        packet(Buffer.alloc(0), FLAG_CONFIG, 7),
+        packet(Buffer.from([0xaa]), 0n, 8),
+      ]),
+    );
 
     expect(packets).toHaveLength(2);
     expect(packets[0].data).toHaveLength(0);
@@ -266,7 +274,11 @@ describe("VideoServerStreamParser", () => {
     const { parser, packets } = collect();
     parser.push(streamHeader(1280, 720));
     const idr = Buffer.alloc(512 * 1024, 0x41);
-    idr[0] = 0x00; idr[1] = 0x00; idr[2] = 0x00; idr[3] = 0x01; idr[4] = 0x65;
+    idr[0] = 0x00;
+    idr[1] = 0x00;
+    idr[2] = 0x00;
+    idr[3] = 0x01;
+    idr[4] = 0x65;
     const framed = packet(idr, FLAG_KEY_FRAME, 4242);
     const CHUNK = 1024;
     for (let offset = 0; offset < framed.length; offset += CHUNK) {
@@ -290,10 +302,12 @@ describe("VideoServerStreamParser", () => {
     zeroTrackHeader.writeUInt32BE(0, 8); // trackCount = 0
 
     const { parser, headers, packets } = collect();
-    parser.push(Buffer.concat([
-      zeroTrackHeader,
-      muxPacket(VIDEO_SERVER_TRACK_ID_VIDEO, Buffer.from([0xaa]), 0n, 1),
-    ]));
+    parser.push(
+      Buffer.concat([
+        zeroTrackHeader,
+        muxPacket(VIDEO_SERVER_TRACK_ID_VIDEO, Buffer.from([0xaa]), 0n, 1),
+      ]),
+    );
 
     expect(headers).toEqual([]);
     expect(packets).toEqual([]);
@@ -306,7 +320,7 @@ describe("VideoServerStreamParser", () => {
       const { parser, packets } = collect();
       parser.push(streamHeader(1080, 2400));
       parser.push(
-        packet(Buffer.from([0, 0, 0, 1, 0x67]), FLAG_CONFIG | rotationBits(rotation), 4242)
+        packet(Buffer.from([0, 0, 0, 1, 0x67]), FLAG_CONFIG | rotationBits(rotation), 4242),
       );
 
       expect(packets).toHaveLength(1);
@@ -334,7 +348,7 @@ describe("VideoServerStreamParser", () => {
     const { parser, packets } = collect();
     parser.push(streamHeader(1080, 2400));
     parser.push(
-      packet(Buffer.from([0, 0, 0, 1, 0x67]), FLAG_CONFIG | FLAG_REPLAYED | rotationBits(3), 10)
+      packet(Buffer.from([0, 0, 0, 1, 0x67]), FLAG_CONFIG | FLAG_REPLAYED | rotationBits(3), 10),
     );
 
     expect(packets[0]).toMatchObject({ config: true, replayed: true, rotation: 3, ptsUs: 10 });

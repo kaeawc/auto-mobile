@@ -51,17 +51,24 @@ export class DeviceLockRepository {
       const now = sql<string>`(datetime('now'))`;
       await db
         .insertInto("device_locks")
-        .values({ device_id: deviceId, lock_type: lockType, lock_credential: credential, updated_at: now })
-        .onConflict(oc =>
+        .values({
+          device_id: deviceId,
+          lock_type: lockType,
+          lock_credential: credential,
+          updated_at: now,
+        })
+        .onConflict((oc) =>
           oc.column("device_id").doUpdateSet({
             lock_type: lockType,
             lock_credential: credential,
             updated_at: now,
-          })
+          }),
         )
         .execute();
     } catch (error) {
-      logger.warn(`[DeviceLockRepository] Failed to remember lock for device ${deviceId}: ${error}`);
+      logger.warn(
+        `[DeviceLockRepository] Failed to remember lock for device ${deviceId}: ${error}`,
+      );
     }
   }
 }

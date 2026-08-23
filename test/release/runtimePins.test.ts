@@ -180,9 +180,7 @@ describe("resolveRuntimeClosure", () => {
       }
     }`);
     expect(() => resolveRuntimeClosure(graph, ["root"])).toThrow("missing");
-    expect(() => resolveRuntimeClosure(graph, ["also-missing"])).toThrow(
-      "also-missing",
-    );
+    expect(() => resolveRuntimeClosure(graph, ["also-missing"])).toThrow("also-missing");
   });
 });
 
@@ -190,9 +188,7 @@ describe("findRuntimeDependencyOwners", () => {
   test("records each runtime parent that owns a residual dependency", () => {
     const graph = parseBunLock(FIXTURE_LOCK);
 
-    expect(
-      findRuntimeDependencyOwners(graph, ["img-lib"], ["shared", "asn1"]),
-    ).toEqual({
+    expect(findRuntimeDependencyOwners(graph, ["img-lib"], ["shared", "asn1"])).toEqual({
       codec: { asn1: ["3.1.9"] },
       "img-lib": { shared: ["1.9.0"] },
     });
@@ -275,9 +271,7 @@ describe("repartitionDependencies", () => {
     expect(result.devDependencies.werift).toBe("^0.24.0");
     expect(result.devDependencies.typescript).toBe("^7.0.0");
     // No name may appear in both maps.
-    const both = Object.keys(result.dependencies).filter(
-      (n) => n in result.devDependencies,
-    );
+    const both = Object.keys(result.dependencies).filter((n) => n in result.devDependencies);
     expect(both).toEqual([]);
   });
 

@@ -5,14 +5,15 @@ import { PerceptualHasher } from "./PerceptualHasher";
 import { ScreenshotCache } from "./ScreenshotCache";
 import { ScreenshotMatcher, SimilarScreenshotResult } from "./ScreenshotMatcher";
 
-
 /**
  * Facade class that maintains backward compatibility with the original ScreenshotUtils API
  * while delegating to specialized classes for each responsibility.
  */
 export class ScreenshotUtils {
   // Re-export the PNG header constant for backward compatibility
-  private static readonly PNG_HEADER = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+  private static readonly PNG_HEADER = Buffer.from([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+  ]);
 
   // ============================================================================
   // Pixel-level Comparison (delegates to ScreenshotComparator)
@@ -55,7 +56,7 @@ export class ScreenshotUtils {
   static async resizeImageIfNeeded(
     buffer: Buffer,
     targetWidth: number,
-    targetHeight: number
+    targetHeight: number,
   ): Promise<Buffer> {
     return ScreenshotComparator.resizeImageIfNeeded(buffer, targetWidth, targetHeight);
   }
@@ -72,7 +73,7 @@ export class ScreenshotUtils {
     buffer1: Buffer,
     buffer2: Buffer,
     threshold: number = 0.1,
-    fastMode: boolean = false
+    fastMode: boolean = false,
   ): Promise<ScreenshotComparisonResult> {
     return ScreenshotComparator.compareImages(buffer1, buffer2, threshold, fastMode);
   }
@@ -148,9 +149,14 @@ export class ScreenshotUtils {
     targetBuffer: Buffer,
     screenshotPaths: string[],
     tolerancePercent?: number,
-    fastMode?: boolean
+    fastMode?: boolean,
   ): Promise<Array<{ filePath: string; similarity: number; matchFound: boolean }>> {
-    return ScreenshotMatcher.batchCompareScreenshots(targetBuffer, screenshotPaths, tolerancePercent, fastMode);
+    return ScreenshotMatcher.batchCompareScreenshots(
+      targetBuffer,
+      screenshotPaths,
+      tolerancePercent,
+      fastMode,
+    );
   }
 
   /**
@@ -165,9 +171,14 @@ export class ScreenshotUtils {
     targetBuffer: Buffer,
     screenshotPaths: string[],
     tolerancePercent?: number,
-    fastMode?: boolean
+    fastMode?: boolean,
   ): Promise<Array<{ filePath: string; similarity: number; matchFound: boolean }>> {
-    return ScreenshotMatcher.optimizedBatchCompareScreenshots(targetBuffer, screenshotPaths, tolerancePercent, fastMode);
+    return ScreenshotMatcher.optimizedBatchCompareScreenshots(
+      targetBuffer,
+      screenshotPaths,
+      tolerancePercent,
+      fastMode,
+    );
   }
 
   /**
@@ -182,9 +193,14 @@ export class ScreenshotUtils {
     targetBuffer: Buffer,
     cacheDir: string,
     tolerancePercent?: number,
-    maxComparisons?: number
+    maxComparisons?: number,
   ): Promise<SimilarScreenshotResult> {
-    return ScreenshotMatcher.findSimilarScreenshots(targetBuffer, cacheDir, tolerancePercent, maxComparisons);
+    return ScreenshotMatcher.findSimilarScreenshots(
+      targetBuffer,
+      cacheDir,
+      tolerancePercent,
+      maxComparisons,
+    );
   }
 
   // ============================================================================

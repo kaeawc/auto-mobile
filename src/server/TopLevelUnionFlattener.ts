@@ -54,9 +54,10 @@ export function flattenTopLevelUnion(schema: Record<string, unknown>): Record<st
     requiredSets.push(new Set(req ?? []));
   }
 
-  const commonRequired = requiredSets.length > 0
-    ? [...requiredSets[0]].filter(key => requiredSets.every(s => s.has(key)))
-    : [];
+  const commonRequired =
+    requiredSets.length > 0
+      ? [...requiredSets[0]].filter((key) => requiredSets.every((s) => s.has(key)))
+      : [];
 
   const result: Record<string, unknown> = {
     ...("$schema" in schema ? { $schema: schema.$schema } : {}),
@@ -96,7 +97,7 @@ interface ConditionalRequirement {
 
 function buildConditionalRequired(
   branches: Record<string, unknown>[],
-  commonRequired: string[]
+  commonRequired: string[],
 ): ConditionalRequirement | undefined {
   const commonRequiredSet = new Set(commonRequired);
   const requirements: ConditionalRequirement[] = [];
@@ -105,7 +106,7 @@ function buildConditionalRequired(
     const required = Array.isArray(branch.required)
       ? branch.required.filter((key): key is string => typeof key === "string")
       : [];
-    const branchOnlyRequired = required.filter(key => !commonRequiredSet.has(key));
+    const branchOnlyRequired = required.filter((key) => !commonRequiredSet.has(key));
     if (branchOnlyRequired.length === 0) {
       continue;
     }
@@ -127,7 +128,7 @@ function buildConditionalRequired(
 }
 
 function buildDiscriminatorCondition(
-  branch: Record<string, unknown>
+  branch: Record<string, unknown>,
 ): ConditionalRequirement["if"] | undefined {
   const properties = isJsonSchemaObject(branch.properties) ? branch.properties : {};
   for (const [key, value] of Object.entries(properties)) {
@@ -149,7 +150,7 @@ function buildDiscriminatorCondition(
 }
 
 function chainConditionalRequirements(
-  requirements: ConditionalRequirement[]
+  requirements: ConditionalRequirement[],
 ): ConditionalRequirement | undefined {
   let chain: ConditionalRequirement | undefined;
 

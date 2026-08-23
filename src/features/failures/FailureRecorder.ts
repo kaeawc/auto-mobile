@@ -1,4 +1,7 @@
-import { FailureAnalyticsRepository, RecordFailureInput } from "../../db/failureAnalyticsRepository";
+import {
+  FailureAnalyticsRepository,
+  RecordFailureInput,
+} from "../../db/failureAnalyticsRepository";
 import type {
   FailureSeverity,
   FailureType,
@@ -9,7 +12,10 @@ import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import crypto from "node:crypto";
 import type { FailureRecorderService } from "./interfaces/FailureRecorderService";
-import { getFailuresPushServer, FailureNotificationPush } from "../../daemon/failuresPushSocketServer";
+import {
+  getFailuresPushServer,
+  FailureNotificationPush,
+} from "../../daemon/failuresPushSocketServer";
 import { TelemetryRecorder } from "../telemetry/TelemetryRecorder";
 
 /**
@@ -134,7 +140,9 @@ export interface RecordNonFatalInput {
 export class FailureRecorder implements FailureRecorderService {
   private repository: FailureAnalyticsRepository;
   private timer: Timer;
-  private telemetryRecorder: { recordFailureTelemetry: TelemetryRecorder["recordFailureTelemetry"] };
+  private telemetryRecorder: {
+    recordFailureTelemetry: TelemetryRecorder["recordFailureTelemetry"];
+  };
   private static instance: FailureRecorder | null = null;
 
   constructor(
@@ -175,7 +183,10 @@ export class FailureRecorder implements FailureRecorderService {
    * Record a tool call failure
    */
   async recordToolFailure(input: RecordToolFailureInput): Promise<string> {
-    const signature = this.generateToolFailureSignature(input.toolName, input.errorCode ?? "UNKNOWN");
+    const signature = this.generateToolFailureSignature(
+      input.toolName,
+      input.errorCode ?? "UNKNOWN",
+    );
     const severity = this.calculateToolFailureSeverity(input.errorCode);
 
     const toolCallInfo: AggregatedToolCallInfo = {
@@ -184,12 +195,12 @@ export class FailureRecorder implements FailureRecorderService {
       parameterVariants: this.extractParameterVariants(input.toolArgs),
       durationStats: input.durationMs
         ? {
-          minMs: input.durationMs,
-          maxMs: input.durationMs,
-          avgMs: input.durationMs,
-          medianMs: input.durationMs,
-          p95Ms: input.durationMs,
-        }
+            minMs: input.durationMs,
+            maxMs: input.durationMs,
+            avgMs: input.durationMs,
+            medianMs: input.durationMs,
+            p95Ms: input.durationMs,
+          }
         : null,
     };
 
@@ -229,7 +240,7 @@ export class FailureRecorder implements FailureRecorderService {
         severity,
         failureInput.title,
         input.errorMessage,
-        input.deviceId ?? null
+        input.deviceId ?? null,
       );
 
       return occurrenceId;
@@ -280,7 +291,7 @@ export class FailureRecorder implements FailureRecorderService {
         severity,
         title,
         `${input.exceptionType}: ${input.exceptionMessage}`,
-        input.deviceId ?? null
+        input.deviceId ?? null,
       );
 
       // Push to telemetry timeline
@@ -345,7 +356,7 @@ export class FailureRecorder implements FailureRecorderService {
         "high", // ANRs are always high severity
         title,
         input.reason,
-        input.deviceId ?? null
+        input.deviceId ?? null,
       );
 
       // Push to telemetry timeline
@@ -410,7 +421,7 @@ export class FailureRecorder implements FailureRecorderService {
         severity,
         title,
         failureInput.message,
-        input.deviceId ?? null
+        input.deviceId ?? null,
       );
 
       // Push to telemetry timeline
@@ -446,7 +457,7 @@ export class FailureRecorder implements FailureRecorderService {
     severity: FailureSeverity,
     title: string,
     message: string,
-    deviceId: string | null
+    deviceId: string | null,
   ): void {
     const server = getFailuresPushServer();
     if (server) {
@@ -466,7 +477,9 @@ export class FailureRecorder implements FailureRecorderService {
       logger.debug(`[FailureRecorder] Pushing failure notification: ${type} - ${title}`);
       server.pushFailure(notification);
     } else {
-      logger.warn(`[FailureRecorder] Push server not available, cannot push failure notification: ${type} - ${title}`);
+      logger.warn(
+        `[FailureRecorder] Push server not available, cannot push failure notification: ${type} - ${title}`,
+      );
     }
   }
 
@@ -476,7 +489,7 @@ export class FailureRecorder implements FailureRecorderService {
 
   private generateCrashSignature(exceptionType: string, stackTrace: StackTraceElement[]): string {
     // Find the first app code frame for signature
-    const appFrame = stackTrace.find(frame => frame.isAppCode);
+    const appFrame = stackTrace.find((frame) => frame.isAppCode);
     if (appFrame) {
       return `crash:${exceptionType}:${appFrame.className}.${appFrame.methodName}`;
     }
@@ -486,7 +499,7 @@ export class FailureRecorder implements FailureRecorderService {
 
   private generateAnrSignature(reason: string, stackTrace?: StackTraceElement[]): string {
     // Find the first app code frame for signature
-    const appFrame = stackTrace?.find(frame => frame.isAppCode);
+    const appFrame = stackTrace?.find((frame) => frame.isAppCode);
     if (appFrame) {
       return `anr:${appFrame.className}.${appFrame.methodName}`;
     }
@@ -495,9 +508,12 @@ export class FailureRecorder implements FailureRecorderService {
     return `anr:${hash}`;
   }
 
-  private generateNonFatalSignature(exceptionType: string, stackTrace: StackTraceElement[]): string {
+  private generateNonFatalSignature(
+    exceptionType: string,
+    stackTrace: StackTraceElement[],
+  ): string {
     // Find the first app code frame for signature
-    const appFrame = stackTrace.find(frame => frame.isAppCode);
+    const appFrame = stackTrace.find((frame) => frame.isAppCode);
     if (appFrame) {
       return `nonfatal:${exceptionType}:${appFrame.className}.${appFrame.methodName}`;
     }
@@ -506,7 +522,7 @@ export class FailureRecorder implements FailureRecorderService {
   }
 
   private generateCrashTitle(exceptionType: string, stackTrace: StackTraceElement[]): string {
-    const appFrame = stackTrace.find(frame => frame.isAppCode);
+    const appFrame = stackTrace.find((frame) => frame.isAppCode);
     if (appFrame) {
       const fileName = appFrame.fileName ?? appFrame.className.split(".").pop();
       const line = appFrame.lineNumber ? `:${appFrame.lineNumber}` : "";
@@ -516,7 +532,7 @@ export class FailureRecorder implements FailureRecorderService {
   }
 
   private generateAnrTitle(reason: string, stackTrace?: StackTraceElement[]): string {
-    const appFrame = stackTrace?.find(frame => frame.isAppCode);
+    const appFrame = stackTrace?.find((frame) => frame.isAppCode);
     if (appFrame) {
       return `ANR: ${appFrame.className.split(".").pop()}.${appFrame.methodName}`;
     }
@@ -526,7 +542,7 @@ export class FailureRecorder implements FailureRecorderService {
   }
 
   private generateNonFatalTitle(exceptionType: string, stackTrace: StackTraceElement[]): string {
-    const appFrame = stackTrace.find(frame => frame.isAppCode);
+    const appFrame = stackTrace.find((frame) => frame.isAppCode);
     if (appFrame) {
       const fileName = appFrame.fileName ?? appFrame.className.split(".").pop();
       const line = appFrame.lineNumber ? `:${appFrame.lineNumber}` : "";
@@ -536,7 +552,9 @@ export class FailureRecorder implements FailureRecorderService {
   }
 
   private calculateToolFailureSeverity(errorCode?: string): FailureSeverity {
-    if (!errorCode) {return "medium";}
+    if (!errorCode) {
+      return "medium";
+    }
 
     // Critical errors
     if (errorCode.includes("CRASH") || errorCode.includes("FATAL")) {
@@ -580,10 +598,7 @@ export class FailureRecorder implements FailureRecorderService {
     }
 
     // Low severity crashes (usually recoverable)
-    if (
-      exceptionType.includes("NumberFormat") ||
-      exceptionType.includes("ParseException")
-    ) {
+    if (exceptionType.includes("NumberFormat") || exceptionType.includes("ParseException")) {
       return "low";
     }
 
@@ -605,10 +620,10 @@ export class FailureRecorder implements FailureRecorderService {
     return "low";
   }
 
-  private extractParameterVariants(
-    toolArgs?: Record<string, unknown>
-  ): Record<string, string[]> {
-    if (!toolArgs) {return {};}
+  private extractParameterVariants(toolArgs?: Record<string, unknown>): Record<string, string[]> {
+    if (!toolArgs) {
+      return {};
+    }
 
     const variants: Record<string, string[]> = {};
     for (const [key, value] of Object.entries(toolArgs)) {
@@ -622,7 +637,7 @@ export class FailureRecorder implements FailureRecorderService {
 
   private selectCapture(
     screenshotPath?: string,
-    videoPath?: string
+    videoPath?: string,
   ): RecordFailureInput["capture"] | undefined {
     // Prefer video over screenshot
     if (videoPath) {

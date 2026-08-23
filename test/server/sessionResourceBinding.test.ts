@@ -20,11 +20,8 @@ describe("session-scoped resource binding", () => {
     await fixture.setup();
 
     ToolRegistry.clearTools();
-    ToolRegistry.register(
-      "getAndroid",
-      "getAndroid",
-      z.object({}),
-      async () => createJSONToolResponse({ sessionId: "direct-session-1" }),
+    ToolRegistry.register("getAndroid", "getAndroid", z.object({}), async () =>
+      createJSONToolResponse({ sessionId: "direct-session-1" }),
     );
     ResourceRegistry.registerTemplateWithReadContext(
       "automobile:test-session-binding/{sessionUuid}",
@@ -38,16 +35,22 @@ describe("session-scoped resource binding", () => {
     );
 
     const { client } = fixture.getContext();
-    await client.request({
-      method: "tools/call",
-      params: { name: "getAndroid", arguments: {} },
-    }, z.any());
-    const response = await client.request({
-      method: "resources/read",
-      params: { uri: "automobile:test-session-binding/direct-session-1" },
-    }, z.object({
-      contents: z.array(z.object({ text: z.string().optional() })),
-    }));
+    await client.request(
+      {
+        method: "tools/call",
+        params: { name: "getAndroid", arguments: {} },
+      },
+      z.any(),
+    );
+    const response = await client.request(
+      {
+        method: "resources/read",
+        params: { uri: "automobile:test-session-binding/direct-session-1" },
+      },
+      z.object({
+        contents: z.array(z.object({ text: z.string().optional() })),
+      }),
+    );
 
     expect(JSON.parse(response.contents[0].text!)).toEqual({
       sessionUuid: "direct-session-1",

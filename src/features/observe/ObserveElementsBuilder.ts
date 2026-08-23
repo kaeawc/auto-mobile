@@ -4,13 +4,14 @@ import { DefaultObserveElementCollector, ObserveElementCollector } from "./Obser
 export class ObserveElementsBuilder {
   private collector: ObserveElementCollector;
 
-  constructor(
-    collector: ObserveElementCollector = new DefaultObserveElementCollector()
-  ) {
+  constructor(collector: ObserveElementCollector = new DefaultObserveElementCollector()) {
     this.collector = collector;
   }
 
-  build(viewHierarchy: ViewHierarchyResult, platform: "android" | "ios" = "android"): ObserveResult["elements"] {
+  build(
+    viewHierarchy: ViewHierarchyResult,
+    platform: "android" | "ios" = "android",
+  ): ObserveResult["elements"] {
     return this.collector.collect(viewHierarchy, platform);
   }
 }

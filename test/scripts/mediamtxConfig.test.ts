@@ -78,19 +78,19 @@ describe("MediaMTX WebRTC configuration", () => {
     // #4345: the two must only ever move together. Tightening either alone makes
     // MediaMTX close a publisher that is still inside its own first-frame budget.
     expect(loadTrackGatherTimeoutMs()).toBeGreaterThanOrEqual(
-      IOS_FIRST_FRAME_TIMEOUT_MS + ENCODER_STARTUP_HEADROOM_MS
+      IOS_FIRST_FRAME_TIMEOUT_MS + ENCODER_STARTUP_HEADROOM_MS,
     );
   });
 
   test("keeps the relay deadline clear of the measured p95 track-gather time", () => {
     expect(loadTrackGatherTimeoutMs()).toBeGreaterThanOrEqual(
-      MEASURED_IOS_P95_MS * P95_SAFETY_FACTOR
+      MEASURED_IOS_P95_MS * P95_SAFETY_FACTOR,
     );
   });
 
   test("keeps the iOS first-frame contract above the slowest observed source startup", () => {
     expect(IOS_FIRST_FRAME_TIMEOUT_MS).toBeGreaterThanOrEqual(
-      MEASURED_IOS_MAX_WHIP_TO_SOURCE_STARTED_MS
+      MEASURED_IOS_MAX_WHIP_TO_SOURCE_STARTED_MS,
     );
   });
 

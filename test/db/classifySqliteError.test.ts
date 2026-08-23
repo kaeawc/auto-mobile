@@ -66,7 +66,9 @@ describe("classifySqliteError", () => {
     [
       "double-cause (code two levels deep, not found)",
       new Error("outer", {
-        cause: new Error("mid", { cause: Object.assign(new Error("deep"), { code: "SQLITE_BUSY" }) }),
+        cause: new Error("mid", {
+          cause: Object.assign(new Error("deep"), { code: "SQLITE_BUSY" }),
+        }),
       }),
       "fatal",
     ],

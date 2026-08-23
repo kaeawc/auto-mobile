@@ -18,25 +18,25 @@ on iOS.
 
 ### Light
 
-| Role | Hex | Source in the icon |
-|---|---|---|
-| primary / onPrimary | `#D62A22` / `#FFFFFF` | marker-red truck outline (`#DF3028`, darkened slightly so it also meets AA as link/accent text on the background) |
-| secondary / onSecondary | `#1F6FC2` / `#FFFFFF` | swing/sky blue (deepened for AA text) |
-| tertiary / onTertiary | `#FFD23F` / `#3A2E00` | sun yellow |
-| background / onBackground | `#FFF7EC` / `#241E18` | warm crayon paper |
-| surface / onSurface | `#FFFFFF` / `#241E18` | — |
-| error / onError | `#C1271F` / `#FFFFFF` | — |
+| Role                      | Hex                   | Source in the icon                                                                                                |
+| ------------------------- | --------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| primary / onPrimary       | `#D62A22` / `#FFFFFF` | marker-red truck outline (`#DF3028`, darkened slightly so it also meets AA as link/accent text on the background) |
+| secondary / onSecondary   | `#1F6FC2` / `#FFFFFF` | swing/sky blue (deepened for AA text)                                                                             |
+| tertiary / onTertiary     | `#FFD23F` / `#3A2E00` | sun yellow                                                                                                        |
+| background / onBackground | `#FFF7EC` / `#241E18` | warm crayon paper                                                                                                 |
+| surface / onSurface       | `#FFFFFF` / `#241E18` | —                                                                                                                 |
+| error / onError           | `#C1271F` / `#FFFFFF` | —                                                                                                                 |
 
 ### Dark
 
-| Role | Hex |
-|---|---|
-| primary / onPrimary | `#FF8A7E` / `#3A0A05` |
-| secondary / onSecondary | `#8FC4F5` / `#0A2A45` |
-| tertiary / onTertiary | `#FFDD6B` / `#3A2E00` |
+| Role                      | Hex                   |
+| ------------------------- | --------------------- |
+| primary / onPrimary       | `#FF8A7E` / `#3A0A05` |
+| secondary / onSecondary   | `#8FC4F5` / `#0A2A45` |
+| tertiary / onTertiary     | `#FFDD6B` / `#3A2E00` |
 | background / onBackground | `#14110D` / `#F3E9DB` |
-| surface / onSurface | `#241E17` / `#F3E9DB` |
-| error / onError | `#FFB4AB` / `#690005` |
+| surface / onSurface       | `#241E17` / `#F3E9DB` |
+| error / onError           | `#FFB4AB` / `#690005` |
 
 ### Playful accents (illustration / component fills, not guaranteed AA as text)
 
@@ -74,8 +74,8 @@ Crayon/paper grain via real GPU shaders:
 
 ## Platform mapping
 
-| Concept | Android | iOS |
-|---|---|---|
-| Tokens | `design/system/theme/{Color,Typography,Shapes}.kt` → `AutoMobileTheme` (`dynamicColor=false`) | `Sources/Theme/{Colors,Typography,Shapes}.swift` → `AutoMobileTheme` env |
-| Components | `design/system/components/*` | new SwiftUI component layer |
-| Texture | AGSL + Canvas fallback | ShaderLibrary Metal |
+| Concept    | Android                                                                                       | iOS                                                                      |
+| ---------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Tokens     | `design/system/theme/{Color,Typography,Shapes}.kt` → `AutoMobileTheme` (`dynamicColor=false`) | `Sources/Theme/{Colors,Typography,Shapes}.swift` → `AutoMobileTheme` env |
+| Components | `design/system/components/*`                                                                  | new SwiftUI component layer                                              |
+| Texture    | AGSL + Canvas fallback                                                                        | ShaderLibrary Metal                                                      |

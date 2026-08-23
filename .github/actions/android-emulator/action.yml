@@ -8,7 +8,7 @@ inputs:
     required: "true"
   script:
     description: "Script to execute once Android Emulator is ready"
-    example: './gradlew tests'
+    example: "./gradlew tests"
     required: "true"
   api_level:
     description: "Android API level"

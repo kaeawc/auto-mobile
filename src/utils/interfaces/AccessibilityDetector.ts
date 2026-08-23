@@ -22,7 +22,7 @@ export interface AccessibilityDetector {
   isAccessibilityEnabled(
     deviceId: string,
     adb: AdbExecutor,
-    featureFlags?: FeatureFlagService
+    featureFlags?: FeatureFlagService,
   ): Promise<boolean>;
 
   /**
@@ -36,7 +36,7 @@ export interface AccessibilityDetector {
   detectMethod(
     deviceId: string,
     adb: AdbExecutor,
-    featureFlags?: FeatureFlagService
+    featureFlags?: FeatureFlagService,
   ): Promise<AccessibilityService>;
 
   /**

@@ -876,8 +876,8 @@ jobs:
       - name: "Install JDK"
         uses: actions/setup-java@v5
         with:
-          distribution: 'zulu'
-          java-version: '21'
+          distribution: "zulu"
+          java-version: "21"
 
       - name: "Validate Kotlin 2.2 consumer compatibility"
         run: bash scripts/android/validate-junit-runner-kotlin-consumer.sh
@@ -944,7 +944,7 @@ jobs:
       - uses: ./.github/actions/android-emulator
         with:
           script: "./gradlew :junit-runner:test"
-          working-directory: './android/'
+          working-directory: "./android/"
           accessibility-apk-path: control-proxy/build/outputs/apk/debug/control-proxy-debug.apk
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           release-keystore-base64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
@@ -964,7 +964,7 @@ jobs:
         if: always()
         with:
           check_name: "JUnit Runner Emulator Test Report"
-          report_paths: '**/build/test-results/**/*.xml'
+          report_paths: "**/build/test-results/**/*.xml"
 
   playground-automobile-emulator-tests:
     name: "Run Playground Automobile Emulator Tests"
@@ -992,7 +992,7 @@ jobs:
       - uses: ./.github/actions/android-emulator
         with:
           script: "./gradlew :playground:app:test --stacktrace"
-          working-directory: './android/'
+          working-directory: "./android/"
           accessibility-apk-path: control-proxy/build/outputs/apk/debug/control-proxy-debug.apk
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           release-keystore-base64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
@@ -1012,7 +1012,7 @@ jobs:
         if: always()
         with:
           check_name: "Playground Automobile Emulator Test Report"
-          report_paths: '**/build/test-results/**/*.xml'
+          report_paths: "**/build/test-results/**/*.xml"
 
   android-control-proxy-unit-tests:
     name: "Run CtrlProxy Unit Tests"
@@ -1136,36 +1136,36 @@ jobs:
 
       - name: "Store Sample APK"
         uses: actions/upload-artifact@v6
-        if: success()  # Only upload if build succeeded
+        if: success() # Only upload if build succeeded
         with:
           name: playground-app-apk
           path: android/playground/app/build/outputs/apk/debug/playground-app-debug.apk
 
-#  playground-app-unit-tests:
-#    name: "Build Playground App"
-#    runs-on: ubuntu-latest
-#    defaults:
-#      run:
-#        working-directory: android
-#    steps:
-#      - name: "Git Checkout"
-#        uses: actions/checkout@v6
-#        with:
-#          lfs: false
-#
-#      - uses: ./.github/actions/setup-auto-mobile-npm-package
-#
-#      - uses: actions/download-artifact@v7
-#        with:
-#          name: apk
-#
-#      - uses: ./.github/actions/android-emulator
-#        with:
-#          script: ":playground:app:installDebug"
-#
-#      - uses: ./.github/actions/android-emulator
-#        with:
-#          script: ":playground:app:testDebugUnitTest"
+  #  playground-app-unit-tests:
+  #    name: "Build Playground App"
+  #    runs-on: ubuntu-latest
+  #    defaults:
+  #      run:
+  #        working-directory: android
+  #    steps:
+  #      - name: "Git Checkout"
+  #        uses: actions/checkout@v6
+  #        with:
+  #          lfs: false
+  #
+  #      - uses: ./.github/actions/setup-auto-mobile-npm-package
+  #
+  #      - uses: actions/download-artifact@v7
+  #        with:
+  #          name: apk
+  #
+  #      - uses: ./.github/actions/android-emulator
+  #        with:
+  #          script: ":playground:app:installDebug"
+  #
+  #      - uses: ./.github/actions/android-emulator
+  #        with:
+  #          script: ":playground:app:testDebugUnitTest"
 
   # =============================================================================
   # TypeScript Code Coverage
@@ -1321,7 +1321,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           lfs: false
-          fetch-depth: 0  # Full history so the badge commit push to main isn't rejected as a shallow update
+          fetch-depth: 0 # Full history so the badge commit push to main isn't rejected as a shallow update
           token: ${{ secrets.AUTO_MOBILE_PR_TOKEN }}
 
       - name: "Commit and push badge update to main"

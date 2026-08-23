@@ -10,22 +10,26 @@ Perform touch gestures including taps, swipes, scrolls, pinches, and drag-and-dr
 Use `tapOn` to interact with elements:
 
 **Single tap:**
+
 ```
 tapOn with text: "Submit"
 tapOn with id: "login_button"
 ```
 
 **Double tap:**
+
 ```
 tapOn with text: "Image", action: "doubleTap"
 ```
 
 **Long press:**
+
 ```
 tapOn with text: "Item", action: "longPress"
 ```
 
 **Focus (without keyboard):**
+
 ```
 tapOn with text: "Email", action: "focus"
 ```
@@ -45,27 +49,32 @@ tapOn with text: "Save", container: {id: "dialog"}
 Use `swipeOn` for scrolling and swiping:
 
 **Scroll content:**
+
 ```
 swipeOn with direction: "up"      # Scroll down (content moves up)
 swipeOn with direction: "down"    # Scroll up
 ```
 
 **Swipe gesture (faster):**
+
 ```
 swipeOn with direction: "left", gestureType: "swipe"
 ```
 
 **Fling (fastest):**
+
 ```
 swipeOn with direction: "up", gestureType: "fling"
 ```
 
 **Scroll until element found:**
+
 ```
 swipeOn with direction: "up", lookFor: {text: "Settings"}
 ```
 
 **Scroll within container:**
+
 ```
 swipeOn with direction: "up", container: {id: "list_view"}
 ```
@@ -73,6 +82,7 @@ swipeOn with direction: "up", container: {id: "list_view"}
 ## Drag and Drop
 
 Move elements between locations:
+
 ```
 dragAndDrop with source: {text: "Item 1"}, target: {text: "Folder"}
 dragAndDrop with source: {id: "draggable"}, target: {id: "drop_zone"}
@@ -83,18 +93,21 @@ dragAndDrop with source: {id: "draggable"}, target: {id: "drop_zone"}
 Use `pinchOn` for zoom gestures:
 
 **Zoom in:**
+
 ```
 pinchOn with direction: "out"
 ```
 
 **Zoom out:**
+
 ```
 pinchOn with direction: "in"
 ```
 
-**With rotation** — `rotationDegrees` is a *combined pinch + rotate*: the two-finger axis
+**With rotation** — `rotationDegrees` is a _combined pinch + rotate_: the two-finger axis
 starts horizontal and ends rotated by this amount (not a pinch along a fixed rotated axis).
 Default is `0` (a plain pinch/zoom). Same convention on Android and iOS.
+
 ```
 pinchOn with direction: "out", rotationDegrees: 45
 ```
@@ -102,16 +115,19 @@ pinchOn with direction: "out", rotationDegrees: 45
 ## Common Workflows
 
 **Scroll and tap:**
+
 ```
 swipeOn "up" lookFor: {text: "Settings"} → tapOn "Settings"
 ```
 
 **Reorder list items:**
+
 ```
 tapOn "Item" action: "longPress" → dragAndDrop to target
 ```
 
 **Zoom and interact:**
+
 ```
 pinchOn "out" → tapOn (now-visible element)
 ```

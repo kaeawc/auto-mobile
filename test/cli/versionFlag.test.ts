@@ -10,7 +10,9 @@ describe("version flag", () => {
 
   test("ignores version-like values after the CLI argument boundary", () => {
     expect(hasGlobalVersionFlag(["--cli", "inputText", "--text", "-v"])).toBe(false);
-    expect(hasGlobalVersionFlag(["--debug", "--cli", "inputText", "--text", "--version"])).toBe(false);
+    expect(hasGlobalVersionFlag(["--debug", "--cli", "inputText", "--text", "--version"])).toBe(
+      false,
+    );
     expect(hasGlobalVersionFlag(["--version", "--cli", "doctor"])).toBe(true);
     expect(hasGlobalVersionFlag(["-v", "--cli", "doctor"])).toBe(true);
   });

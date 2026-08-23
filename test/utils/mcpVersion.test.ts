@@ -11,8 +11,11 @@ import {
 import { DefaultGitMetadataClient } from "../../src/utils/GitMetadataClient";
 import { compareVersions } from "../../src/server/deviceMatcher";
 
-const git = (shortSha: string, dirty = false, dirtyHash: string | null = null): GitVersionInfo =>
-  ({ shortSha, dirty, dirtyHash });
+const git = (shortSha: string, dirty = false, dirtyHash: string | null = null): GitVersionInfo => ({
+  shortSha,
+  dirty,
+  dirtyHash,
+});
 
 describe("releaseVersion", () => {
   test("returns the version unchanged when there is no build metadata", () => {
@@ -51,12 +54,15 @@ describe("formatMcpServerVersion", () => {
   });
 
   test("appends a bare dirty marker when no diff hash is available", () => {
-    expect(formatMcpServerVersion("0.0.39", git("1a2b3c4d5e6f", true))).toBe("0.0.39+g1a2b3c4d5e6f.dirty");
+    expect(formatMcpServerVersion("0.0.39", git("1a2b3c4d5e6f", true))).toBe(
+      "0.0.39+g1a2b3c4d5e6f.dirty",
+    );
   });
 
   test("includes the tracked-diff hash in the dirty marker when available", () => {
-    expect(formatMcpServerVersion("0.0.39", git("1a2b3c4d5e6f", true, "abc123def456")))
-      .toBe("0.0.39+g1a2b3c4d5e6f.dirty.abc123def456");
+    expect(formatMcpServerVersion("0.0.39", git("1a2b3c4d5e6f", true, "abc123def456"))).toBe(
+      "0.0.39+g1a2b3c4d5e6f.dirty.abc123def456",
+    );
   });
 
   test("two different commits yield two different version strings", () => {
@@ -109,12 +115,21 @@ describe("readGitVersion", () => {
   // stdout. Keeps these tests pure — no spawn, no real repo. `readName` is
   // injected too so the ownership check needs no filesystem.
   const OWN = "@kaeawc/auto-mobile";
-  const fakeRun = (responses: Record<string, string | null>) =>
+  const fakeRun =
+    (responses: Record<string, string | null>) =>
     (_cwd: string, args: string[]): string | null => {
-      if (args[0] === "rev-parse" && args[1] === "--show-toplevel") {return responses.toplevel ?? null;}
-      if (args[0] === "rev-parse" && args[1] === "--short=12") {return responses.sha ?? null;}
-      if (args[0] === "status") {return responses.status ?? null;}
-      if (args[0] === "diff") {return responses.diff ?? null;}
+      if (args[0] === "rev-parse" && args[1] === "--show-toplevel") {
+        return responses.toplevel ?? null;
+      }
+      if (args[0] === "rev-parse" && args[1] === "--short=12") {
+        return responses.sha ?? null;
+      }
+      if (args[0] === "status") {
+        return responses.status ?? null;
+      }
+      if (args[0] === "diff") {
+        return responses.diff ?? null;
+      }
       return null;
     };
   const fakeClient = (responses: Record<string, string | null>) => {
@@ -125,8 +140,13 @@ describe("readGitVersion", () => {
 
   test("returns null for a node_modules location without consulting git (dependency install)", () => {
     let called = false;
-    const client = new DefaultGitMetadataClient(() => { called = true; return null; });
-    expect(readGitVersion("/host/node_modules/@kaeawc/auto-mobile/dist", client, ownsRepo)).toBeNull();
+    const client = new DefaultGitMetadataClient(() => {
+      called = true;
+      return null;
+    });
+    expect(
+      readGitVersion("/host/node_modules/@kaeawc/auto-mobile/dist", client, ownsRepo),
+    ).toBeNull();
     expect(called).toBe(false);
   });
 
@@ -138,7 +158,9 @@ describe("readGitVersion", () => {
     // git rev-parse walks upward; a copy nested in a host repo must not be
     // stamped with the host's commit.
     const client = fakeClient({ toplevel: "/host/repo", sha: "deadbeefcafe" });
-    expect(readGitVersion("/host/repo/vendor/auto-mobile", client, () => "some-host-app")).toBeNull();
+    expect(
+      readGitVersion("/host/repo/vendor/auto-mobile", client, () => "some-host-app"),
+    ).toBeNull();
   });
 
   test("returns null when HEAD has no resolvable short SHA", () => {
@@ -176,7 +198,12 @@ describe("readGitVersion", () => {
   });
 
   test("falls back to a bare dirty marker when the diff is unavailable", () => {
-    const client = fakeClient({ toplevel: "/src/auto-mobile", sha: "1a2b3c4d5e6f", status: " M x", diff: null });
+    const client = fakeClient({
+      toplevel: "/src/auto-mobile",
+      sha: "1a2b3c4d5e6f",
+      status: " M x",
+      diff: null,
+    });
     expect(readGitVersion("/src/auto-mobile", client, ownsRepo)).toEqual({
       shortSha: "1a2b3c4d5e6f",
       dirty: true,
@@ -194,16 +221,14 @@ describe("resolveMcpServerVersion", () => {
   });
 
   test("MCP_SERVER_VERSION override is returned verbatim, even inside a git checkout", () => {
-    expect(
-      resolveMcpServerVersion(deps({ env: { MCP_SERVER_VERSION: "9.9.9" } }))
-    ).toBe("9.9.9");
+    expect(resolveMcpServerVersion(deps({ env: { MCP_SERVER_VERSION: "9.9.9" } }))).toBe("9.9.9");
   });
 
   test("npm_package_version is used as the base and stamped when git is present", () => {
     expect(
       resolveMcpServerVersion(
-        deps({ env: { npm_package_version: "1.2.3" }, readGitVersion: () => git("abcdef123456") })
-      )
+        deps({ env: { npm_package_version: "1.2.3" }, readGitVersion: () => git("abcdef123456") }),
+      ),
     ).toBe("1.2.3+gabcdef123456");
   });
 
@@ -212,14 +237,10 @@ describe("resolveMcpServerVersion", () => {
   });
 
   test("returns 'unknown' with no stamp when no base version can be resolved", () => {
-    expect(
-      resolveMcpServerVersion(deps({ readPackageVersion: () => null }))
-    ).toBe("unknown");
+    expect(resolveMcpServerVersion(deps({ readPackageVersion: () => null }))).toBe("unknown");
   });
 
   test("release build (no git) reports the base version unchanged", () => {
-    expect(
-      resolveMcpServerVersion(deps({ readGitVersion: () => null }))
-    ).toBe("0.0.39");
+    expect(resolveMcpServerVersion(deps({ readGitVersion: () => null }))).toBe("0.0.39");
   });
 });

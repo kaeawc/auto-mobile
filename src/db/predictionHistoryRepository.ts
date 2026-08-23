@@ -4,7 +4,7 @@ import type {
   Database,
   NewPredictionOutcome,
   NewPredictionTransitionStats,
-  PredictionTransitionStats
+  PredictionTransitionStats,
 } from "./types";
 import { normalizeToolArgs } from "../utils/predictionUtils";
 
@@ -64,38 +64,37 @@ export class PredictionHistoryRepository {
       actual_screen: outcome.actualScreen,
       tool_name: outcome.toolName,
       tool_args: toolArgs,
-      predicted_elements: outcome.predictedElements.length > 0
-        ? JSON.stringify(outcome.predictedElements)
-        : null,
-      found_elements: outcome.foundElements.length > 0
-        ? JSON.stringify(outcome.foundElements)
-        : null,
+      predicted_elements:
+        outcome.predictedElements.length > 0 ? JSON.stringify(outcome.predictedElements) : null,
+      found_elements:
+        outcome.foundElements.length > 0 ? JSON.stringify(outcome.foundElements) : null,
       confidence: outcome.confidence,
       match_score: outcome.matchScore,
       correct: outcome.correct ? 1 : 0,
       partial_match: outcome.partialMatch ? 1 : 0,
       error_type: outcome.errorType ?? null,
-      created_at: now
+      created_at: now,
     };
 
-    await db
-      .insertInto("prediction_outcomes")
-      .values(record)
-      .execute();
+    await db.insertInto("prediction_outcomes").values(record).execute();
 
-    await this.upsertTransitionStats({
-      appId: outcome.appId,
-      fromScreen: outcome.fromScreen,
-      toScreen: outcome.predictedScreen,
-      toolName: outcome.toolName,
-      toolArgs: outcome.toolArgs,
-    }, outcome.confidence, outcome.correct);
+    await this.upsertTransitionStats(
+      {
+        appId: outcome.appId,
+        fromScreen: outcome.fromScreen,
+        toScreen: outcome.predictedScreen,
+        toolName: outcome.toolName,
+        toolArgs: outcome.toolArgs,
+      },
+      outcome.confidence,
+      outcome.correct,
+    );
   }
 
   async upsertTransitionStats(
     transition: TransitionKey,
     confidence: number,
-    correct: boolean
+    correct: boolean,
   ): Promise<PredictionTransitionStats> {
     const db = this.getDb();
     const now = new Date().toISOString();
@@ -120,22 +119,22 @@ export class PredictionHistoryRepository {
       total_confidence: confidence,
       brier_score_sum: brier,
       updated_at: now,
-      created_at: now
+      created_at: now,
     };
 
     const result = await db
       .insertInto("prediction_transition_stats")
       .values(newStats)
-      .onConflict(oc =>
+      .onConflict((oc) =>
         oc
           .columns(["app_id", "from_screen", "to_screen", "tool_name", "tool_args"])
-          .doUpdateSet(eb => ({
+          .doUpdateSet((eb) => ({
             attempts: eb("prediction_transition_stats.attempts", "+", 1),
             successes: eb("prediction_transition_stats.successes", "+", successIncrement),
             total_confidence: eb("prediction_transition_stats.total_confidence", "+", confidence),
             brier_score_sum: eb("prediction_transition_stats.brier_score_sum", "+", brier),
-            updated_at: now
-          }))
+            updated_at: now,
+          })),
       )
       .returningAll()
       .executeTakeFirstOrThrow();
@@ -145,7 +144,7 @@ export class PredictionHistoryRepository {
 
   async getTransitionStatsForScreen(
     appId: string,
-    fromScreen: string
+    fromScreen: string,
   ): Promise<PredictionTransitionStats[]> {
     const db = this.getDb();
     return db

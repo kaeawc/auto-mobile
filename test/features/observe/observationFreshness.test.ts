@@ -150,13 +150,21 @@ describe("computeFreshness", () => {
 
   describe("with a requested minimum (the `waitFor` polling path)", () => {
     test("semantics are unchanged: satisfied", () => {
-      const v = computeFreshness({ requestedAfter: NOW - 1_000, actualTimestamp: NOW - 500, now: NOW });
+      const v = computeFreshness({
+        requestedAfter: NOW - 1_000,
+        actualTimestamp: NOW - 500,
+        now: NOW,
+      });
       expect(v.isFresh).toBe(true);
       expect(v.staleDurationMs).toBeUndefined();
     });
 
     test("semantics are unchanged: not satisfied, staleDurationMs is the shortfall", () => {
-      const v = computeFreshness({ requestedAfter: NOW - 500, actualTimestamp: NOW - 181_858, now: NOW });
+      const v = computeFreshness({
+        requestedAfter: NOW - 500,
+        actualTimestamp: NOW - 181_858,
+        now: NOW,
+      });
       expect(v.isFresh).toBe(false);
       expect(v.staleDurationMs).toBe(181_358);
     });
@@ -167,7 +175,11 @@ describe("computeFreshness", () => {
     });
 
     test("a requested minimum still reports the wall-clock age alongside the verdict", () => {
-      const v = computeFreshness({ requestedAfter: NOW - 10_000, actualTimestamp: NOW - 5_000, now: NOW });
+      const v = computeFreshness({
+        requestedAfter: NOW - 10_000,
+        actualTimestamp: NOW - 5_000,
+        now: NOW,
+      });
       expect(v.isFresh).toBe(true);
       expect(v.ageMs).toBe(5_000);
     });

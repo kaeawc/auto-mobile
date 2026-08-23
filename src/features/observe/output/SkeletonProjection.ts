@@ -74,9 +74,9 @@ function deriveAffordances(el: Element): Affordance[] {
     affordances.push("tap");
   }
   if (
-    isTruthy(el["long-clickable"])
-    || isTruthy(el.longClickable)
-    || hasAccessibilityAction(el.actions, "long_click")
+    isTruthy(el["long-clickable"]) ||
+    isTruthy(el.longClickable) ||
+    hasAccessibilityAction(el.actions, "long_click")
   ) {
     affordances.push("long-press");
   }
@@ -99,7 +99,7 @@ function boundsTuple(el: Element): SkeletonElement["bounds"] | undefined {
     return undefined;
   }
   const { left, top, right, bottom } = b;
-  if ([left, top, right, bottom].some(v => typeof v !== "number" || !Number.isFinite(v))) {
+  if ([left, top, right, bottom].some((v) => typeof v !== "number" || !Number.isFinite(v))) {
     return undefined;
   }
   return [left, top, right, bottom];
@@ -117,7 +117,11 @@ interface SkeletonAccumulator {
 }
 
 /** NUL-joined identity so `(id, label, bounds)` triples dedup without straddling. */
-function identityKey(id: string | undefined, label: string | undefined, bounds: SkeletonElement["bounds"]): string {
+function identityKey(
+  id: string | undefined,
+  label: string | undefined,
+  bounds: SkeletonElement["bounds"],
+): string {
   return [id ?? "", label ?? "", bounds.join(",")].join("\0");
 }
 
@@ -126,12 +130,17 @@ function area(bounds: SkeletonElement["bounds"]): number {
 }
 
 /** Whether `outer` strictly contains `inner` (all edges enclosing, strictly larger area). */
-function strictlyContains(outer: SkeletonElement["bounds"], inner: SkeletonElement["bounds"]): boolean {
-  return outer[0] <= inner[0]
-    && outer[1] <= inner[1]
-    && outer[2] >= inner[2]
-    && outer[3] >= inner[3]
-    && area(outer) > area(inner);
+function strictlyContains(
+  outer: SkeletonElement["bounds"],
+  inner: SkeletonElement["bounds"],
+): boolean {
+  return (
+    outer[0] <= inner[0] &&
+    outer[1] <= inner[1] &&
+    outer[2] >= inner[2] &&
+    outer[3] >= inner[3] &&
+    area(outer) > area(inner)
+  );
 }
 
 /**
@@ -180,7 +189,10 @@ function accumulateByIdentity(elements: ObserveElements): SkeletonAccumulator[] 
  * Semantic links remain independently discoverable even when the linked text is
  * inside a generic tappable card that would otherwise suppress its text row.
  */
-function shouldKeep(acc: SkeletonAccumulator, clickableBounds: SkeletonElement["bounds"][]): boolean {
+function shouldKeep(
+  acc: SkeletonAccumulator,
+  clickableBounds: SkeletonElement["bounds"][],
+): boolean {
   if (acc.affordances.size > 0) {
     return true;
   }
@@ -190,14 +202,14 @@ function shouldKeep(acc: SkeletonAccumulator, clickableBounds: SkeletonElement["
   if (acc.label === undefined) {
     return false;
   }
-  return !clickableBounds.some(bounds => strictlyContains(bounds, acc.bounds));
+  return !clickableBounds.some((bounds) => strictlyContains(bounds, acc.bounds));
 }
 
 /** Materialize one accumulator into an emitted skeleton row (omitting absent optionals). */
 function toSkeletonEntry(acc: SkeletonAccumulator): SkeletonElement {
   const entry: SkeletonElement = {
     bounds: acc.bounds,
-    affordances: AFFORDANCE_ORDER.filter(affordance => acc.affordances.has(affordance)),
+    affordances: AFFORDANCE_ORDER.filter((affordance) => acc.affordances.has(affordance)),
   };
   if (acc.id !== undefined) {
     entry.id = acc.id;
@@ -226,10 +238,8 @@ export function toSkeleton(elements: ObserveElements): SkeletonElement[] {
   const accumulators = accumulateByIdentity(elements);
   // Bounds of every tappable row, for the clickable-ancestor suppression test.
   const clickableBounds = accumulators
-    .filter(acc => acc.affordances.has("tap"))
-    .map(acc => acc.bounds);
+    .filter((acc) => acc.affordances.has("tap"))
+    .map((acc) => acc.bounds);
 
-  return accumulators
-    .filter(acc => shouldKeep(acc, clickableBounds))
-    .map(toSkeletonEntry);
+  return accumulators.filter((acc) => shouldKeep(acc, clickableBounds)).map(toSkeletonEntry);
 }

@@ -15,9 +15,11 @@ const noopExec = async (): Promise<ExecResult> => createExecResult("", "");
 
 function clientWithAvd(avdName: string): AndroidEmulatorClient {
   const client = new AndroidEmulatorClient(noopExec, null, new FakeTimer());
-  (client as unknown as { ensureEmulatorPath: () => Promise<string> }).ensureEmulatorPath = async () => "emulator";
-  (client as unknown as { listAvds: () => Promise<DeviceInfo[]> }).listAvds = async () =>
-    [{ name: avdName, platform: "android", isRunning: false } as DeviceInfo];
+  (client as unknown as { ensureEmulatorPath: () => Promise<string> }).ensureEmulatorPath =
+    async () => "emulator";
+  (client as unknown as { listAvds: () => Promise<DeviceInfo[]> }).listAvds = async () => [
+    { name: avdName, platform: "android", isRunning: false } as DeviceInfo,
+  ];
   return client;
 }
 
@@ -34,8 +36,10 @@ describe("AndroidEmulatorClient startEmulator handle", () => {
 
   test("returns null when the AVD is already starting", async () => {
     const client = clientWithAvd("Pixel_9");
-    (client as unknown as { isAvdRunning: () => Promise<boolean> }).isAvdRunning = async () => false;
-    (client as unknown as { isAvdStarting: () => Promise<boolean> }).isAvdStarting = async () => true;
+    (client as unknown as { isAvdRunning: () => Promise<boolean> }).isAvdRunning = async () =>
+      false;
+    (client as unknown as { isAvdStarting: () => Promise<boolean> }).isAvdStarting = async () =>
+      true;
 
     const result = await client.startEmulator("Pixel_9");
 

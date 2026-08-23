@@ -7,11 +7,11 @@ describe("PerDeviceInstalledAppsCacheWriteCoordinator", () => {
     const deviceId = "device-1";
     const generation = coordinator.beginRebuild(deviceId);
     let releaseFirstWrite: (() => void) | undefined;
-    const firstWriteStarted = new Promise<void>(resolve => {
+    const firstWriteStarted = new Promise<void>((resolve) => {
       releaseFirstWrite = resolve;
     });
     let releaseFirstWriteCompletion: (() => void) | undefined;
-    const firstWriteCompletion = new Promise<void>(resolve => {
+    const firstWriteCompletion = new Promise<void>((resolve) => {
       releaseFirstWriteCompletion = resolve;
     });
     const writes: string[] = [];
@@ -44,11 +44,11 @@ describe("PerDeviceInstalledAppsCacheWriteCoordinator", () => {
     const coordinator = new PerDeviceInstalledAppsCacheWriteCoordinator();
     const deviceId = "device-2";
     let releaseInvalidation: (() => void) | undefined;
-    const invalidationStarted = new Promise<void>(resolve => {
+    const invalidationStarted = new Promise<void>((resolve) => {
       releaseInvalidation = resolve;
     });
     let releaseInvalidationWrite: (() => void) | undefined;
-    const invalidationWrite = new Promise<void>(resolve => {
+    const invalidationWrite = new Promise<void>((resolve) => {
       releaseInvalidationWrite = resolve;
     });
 
@@ -72,11 +72,11 @@ describe("PerDeviceInstalledAppsCacheWriteCoordinator", () => {
     const coordinator = new PerDeviceInstalledAppsCacheWriteCoordinator();
     const deviceId = "device-3";
     let releaseClear: (() => void) | undefined;
-    const clearStarted = new Promise<void>(resolve => {
+    const clearStarted = new Promise<void>((resolve) => {
       releaseClear = resolve;
     });
     let finishClear: (() => void) | undefined;
-    const clearFinished = new Promise<void>(resolve => {
+    const clearFinished = new Promise<void>((resolve) => {
       finishClear = resolve;
     });
 
@@ -86,9 +86,13 @@ describe("PerDeviceInstalledAppsCacheWriteCoordinator", () => {
     });
     await clearStarted;
 
-    const rebuild = coordinator.commitRebuild(deviceId, coordinator.beginRebuild(deviceId), async () => {
-      throw new Error("A rebuild started before a cache clear must not commit");
-    });
+    const rebuild = coordinator.commitRebuild(
+      deviceId,
+      coordinator.beginRebuild(deviceId),
+      async () => {
+        throw new Error("A rebuild started before a cache clear must not commit");
+      },
+    );
     finishClear?.();
 
     await clear;
@@ -99,11 +103,11 @@ describe("PerDeviceInstalledAppsCacheWriteCoordinator", () => {
     const barrier = new InMemoryDbWriteBarrier();
     const coordinator = new PerDeviceInstalledAppsCacheWriteCoordinator(() => barrier);
     let releaseFirst: (() => void) | undefined;
-    const firstStarted = new Promise<void>(resolve => {
+    const firstStarted = new Promise<void>((resolve) => {
       releaseFirst = resolve;
     });
     let finishFirst: (() => void) | undefined;
-    const firstFinished = new Promise<void>(resolve => {
+    const firstFinished = new Promise<void>((resolve) => {
       finishFirst = resolve;
     });
     const writes: string[] = [];
@@ -131,13 +135,17 @@ describe("PerDeviceInstalledAppsCacheWriteCoordinator", () => {
     const coordinator = new PerDeviceInstalledAppsCacheWriteCoordinator();
     const deviceId = "device-5";
 
-    await expect(coordinator.invalidate(deviceId, async () => {
-      throw new Error("transient DB failure");
-    })).rejects.toThrow("transient DB failure");
+    await expect(
+      coordinator.invalidate(deviceId, async () => {
+        throw new Error("transient DB failure");
+      }),
+    ).rejects.toThrow("transient DB failure");
     expect(coordinator.isDirty(deviceId)).toBe(true);
 
     const generation = coordinator.beginRebuild(deviceId);
-    await expect(coordinator.commitRebuild(deviceId, generation, async () => undefined)).resolves.toBe(true);
+    await expect(
+      coordinator.commitRebuild(deviceId, generation, async () => undefined),
+    ).resolves.toBe(true);
     expect(coordinator.markRebuilt(deviceId, generation)).toBe(true);
     expect(coordinator.isDirty(deviceId)).toBe(false);
   });

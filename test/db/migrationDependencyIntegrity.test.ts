@@ -20,7 +20,7 @@ describe("isMissingPackageError", () => {
   test("recognizes bun's ResolveMessage 'Cannot find package' shape", () => {
     const error = new Error(
       "Cannot find package 'kysely' from " +
-        "'/tmp/bunx-501-@kaeawc/auto-mobile@1.2.3/node_modules/@kaeawc/auto-mobile/dist/src/db/migrations/2026_01_01_000.ts'"
+        "'/tmp/bunx-501-@kaeawc/auto-mobile@1.2.3/node_modules/@kaeawc/auto-mobile/dist/src/db/migrations/2026_01_01_000.ts'",
     );
     expect(isMissingPackageError(error)).toBe(true);
   });
@@ -38,7 +38,9 @@ describe("isMissingPackageError", () => {
 
   test("rejects unrelated failures (busy sqlite file, deterministic migration throw)", () => {
     expect(isMissingPackageError(new Error("SQLITE_BUSY: database is locked"))).toBe(false);
-    expect(isMissingPackageError(new Error("migration 0007 failed: column already exists"))).toBe(false);
+    expect(isMissingPackageError(new Error("migration 0007 failed: column already exists"))).toBe(
+      false,
+    );
     expect(isMissingPackageError(undefined)).toBe(false);
     expect(isMissingPackageError("a plain string")).toBe(false);
   });
@@ -85,7 +87,9 @@ describe("bun ResolveMessage shape (not instanceof Error)", () => {
 describe("isMissingMigrationDependencyError", () => {
   test("is true only when a KNOWN migration runtime dependency is missing", () => {
     expect(
-      isMissingMigrationDependencyError(new Error("Cannot find package 'kysely' from '/tmp/x/m.ts'"))
+      isMissingMigrationDependencyError(
+        new Error("Cannot find package 'kysely' from '/tmp/x/m.ts'"),
+      ),
     ).toBe(true);
     expect(MIGRATION_RUNTIME_DEPENDENCIES).toContain("kysely");
   });
@@ -94,10 +98,12 @@ describe("isMissingMigrationDependencyError", () => {
     // A code-level bug in a migration must fall through to the generic error, not
     // be mislabeled as an incomplete extraction whose fix is "re-extract".
     expect(
-      isMissingMigrationDependencyError(new Error("Cannot find package 'kysley' from '/tmp/x/m.ts'"))
+      isMissingMigrationDependencyError(
+        new Error("Cannot find package 'kysley' from '/tmp/x/m.ts'"),
+      ),
     ).toBe(false);
     expect(
-      isMissingMigrationDependencyError(new Error("Cannot find package 'some-unpublished-dep'"))
+      isMissingMigrationDependencyError(new Error("Cannot find package 'some-unpublished-dep'")),
     ).toBe(false);
   });
 

@@ -25,7 +25,9 @@ export class GetDeepLinks {
 
       const result = await this.deepLinkManager.getDeepLinks(appId);
 
-      logger.info(`[GetDeepLinks] Deep link discovery completed for ${appId}. Found ${result.deepLinks.schemes.length} schemes and ${result.deepLinks.hosts.length} hosts`);
+      logger.info(
+        `[GetDeepLinks] Deep link discovery completed for ${appId}. Found ${result.deepLinks.schemes.length} schemes and ${result.deepLinks.hosts.length} hosts`,
+      );
 
       return result;
     } catch (error) {
@@ -38,9 +40,9 @@ export class GetDeepLinks {
           schemes: [],
           hosts: [],
           intentFilters: [],
-          supportedMimeTypes: []
+          supportedMimeTypes: [],
         },
-        error: errorMessage(error)
+        error: errorMessage(error),
       };
     }
   }

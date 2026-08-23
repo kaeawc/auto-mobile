@@ -104,8 +104,8 @@ async function tableExists(db: Kysely<unknown>, tableName: string): Promise<bool
 async function ensureMigrationTableExists(db: Kysely<unknown>): Promise<void> {
   await db.schema
     .createTable(DEFAULT_MIGRATION_TABLE)
-    .addColumn("name", "varchar(255)", col => col.notNull().primaryKey())
-    .addColumn("timestamp", "varchar(255)", col => col.notNull())
+    .addColumn("name", "varchar(255)", (col) => col.notNull().primaryKey())
+    .addColumn("timestamp", "varchar(255)", (col) => col.notNull())
     .ifNotExists()
     .execute();
 }
@@ -113,7 +113,7 @@ async function ensureMigrationTableExists(db: Kysely<unknown>): Promise<void> {
 async function rebuildMigrationTable(
   db: Kysely<unknown>,
   migrator: Migrator,
-  timer: Timer = defaultTimer
+  timer: Timer = defaultTimer,
 ): Promise<{ pruned: string[]; kept: string[] }> {
   const hasMigrationTable = await tableExists(db, DEFAULT_MIGRATION_TABLE);
   if (!hasMigrationTable) {
@@ -121,23 +121,23 @@ async function rebuildMigrationTable(
   }
 
   const availableMigrations = await migrator.getMigrations();
-  const availableNames = new Set(availableMigrations.map(migration => migration.name));
+  const availableNames = new Set(availableMigrations.map((migration) => migration.name));
   const executedRows = await db
     .selectFrom(DEFAULT_MIGRATION_TABLE as any)
     .select(["name", "timestamp"])
     .execute();
 
-  const pruned = executedRows
-    .filter(row => !availableNames.has(row.name))
-    .map(row => row.name);
+  const pruned = executedRows.filter((row) => !availableNames.has(row.name)).map((row) => row.name);
   const executedSet = new Set(
-    executedRows.filter(row => availableNames.has(row.name)).map(row => row.name)
+    executedRows.filter((row) => availableNames.has(row.name)).map((row) => row.name),
   );
-  const kept = availableMigrations.map(migration => migration.name).filter(name => executedSet.has(name));
+  const kept = availableMigrations
+    .map((migration) => migration.name)
+    .filter((name) => executedSet.has(name));
 
   await ensureMigrationTableExists(db);
 
-  await db.transaction().execute(async trx => {
+  await db.transaction().execute(async (trx) => {
     await trx.deleteFrom(DEFAULT_MIGRATION_TABLE as any).execute();
 
     if (kept.length > 0) {
@@ -148,7 +148,7 @@ async function rebuildMigrationTable(
           kept.map((name, index) => ({
             name,
             timestamp: new Date(baseTimestamp + index).toISOString(),
-          }))
+          })),
         )
         .execute();
     }
@@ -159,7 +159,7 @@ async function rebuildMigrationTable(
 
 const defaultCountTableRows: CountTableRows = async (db, tableName) => {
   const result = await sql<{ count: number }>`select count(*) as count from ${sql.table(
-    tableName
+    tableName,
   )}`.execute(db);
   return Number(result.rows[0]?.count ?? 0);
 };
@@ -172,7 +172,7 @@ const defaultCountTableRows: CountTableRows = async (db, tableName) => {
 export async function isAnyTableNonEmpty(
   db: Kysely<unknown>,
   tableNames: string[],
-  countTableRows: CountTableRows = defaultCountTableRows
+  countTableRows: CountTableRows = defaultCountTableRows,
 ): Promise<boolean> {
   for (const tableName of tableNames) {
     try {
@@ -183,7 +183,7 @@ export async function isAnyTableNonEmpty(
       logger.warn(
         `Row-count during migration recovery failed for table "${tableName}"; ` +
           "assuming the database is populated and refusing the destructive reset.",
-        error
+        error,
       );
       return true;
     }
@@ -203,7 +203,7 @@ export async function isAnyTableNonEmpty(
  * the connection's `foreign_keys` pragma untouched (it auto-resets at commit).
  */
 async function dropAllTables(db: Kysely<unknown>, tableNames: string[]): Promise<void> {
-  await db.transaction().execute(async trx => {
+  await db.transaction().execute(async (trx) => {
     await sql`PRAGMA defer_foreign_keys = ON`.execute(trx);
     for (const name of tableNames) {
       await trx.schema.dropTable(name).ifExists().execute();
@@ -218,7 +218,7 @@ interface MigrationHistoryRow {
 
 /** Snapshot the current migration history so it can be restored if recovery refuses. */
 async function snapshotMigrationHistory(
-  db: Kysely<unknown>
+  db: Kysely<unknown>,
 ): Promise<MigrationHistoryRow[] | null> {
   if (!(await tableExists(db, DEFAULT_MIGRATION_TABLE))) {
     return null;
@@ -227,19 +227,22 @@ async function snapshotMigrationHistory(
     .selectFrom(DEFAULT_MIGRATION_TABLE as any)
     .select(["name", "timestamp"])
     .execute();
-  return rows.map(row => ({ name: String(row.name), timestamp: String(row.timestamp) }));
+  return rows.map((row) => ({ name: String(row.name), timestamp: String(row.timestamp) }));
 }
 
 /** Replace the migration history with a previously captured snapshot. */
 async function restoreMigrationHistory(
   db: Kysely<unknown>,
-  snapshot: MigrationHistoryRow[]
+  snapshot: MigrationHistoryRow[],
 ): Promise<void> {
   await ensureMigrationTableExists(db);
-  await db.transaction().execute(async trx => {
+  await db.transaction().execute(async (trx) => {
     await trx.deleteFrom(DEFAULT_MIGRATION_TABLE as any).execute();
     if (snapshot.length > 0) {
-      await trx.insertInto(DEFAULT_MIGRATION_TABLE as any).values(snapshot).execute();
+      await trx
+        .insertInto(DEFAULT_MIGRATION_TABLE as any)
+        .values(snapshot)
+        .execute();
     }
   });
 }
@@ -248,7 +251,7 @@ async function resetDatabaseState(
   db: Kysely<unknown>,
   options: RunMigrationsOptions,
   env: NodeJS.ProcessEnv,
-  originalHistory: MigrationHistoryRow[] | null
+  originalHistory: MigrationHistoryRow[] | null,
 ): Promise<void> {
   const tables = await db
     .selectFrom("sqlite_master" as any)
@@ -257,14 +260,14 @@ async function resetDatabaseState(
     .where("name", "not like", "sqlite_%")
     .execute();
 
-  const tableNames = tables.map(table => String(table.name));
+  const tableNames = tables.map((table) => String(table.name));
   // Exclude BOTH migration-bookkeeping tables from the populated check: the
   // history table always has rows post-rebuild, and the lock table is seeded
   // with one row — counting either would false-positive a genuinely empty user
   // DB and break the frictionless empty-DB auto-heal. They are still dropped
   // below so the replay gets a clean slate.
   const userTables = tableNames.filter(
-    name => name !== DEFAULT_MIGRATION_TABLE && name !== MIGRATION_LOCK_TABLE
+    (name) => name !== DEFAULT_MIGRATION_TABLE && name !== MIGRATION_LOCK_TABLE,
   );
 
   const populated = await isAnyTableNonEmpty(db, userTables);
@@ -285,7 +288,7 @@ async function resetDatabaseState(
         "corrupted (most likely an out-of-order or renamed migration). Your data and the " +
         "original migration history have been left untouched — fix the migration " +
         "ordering/name, or set AUTOMOBILE_MIGRATION_RECOVERY=1 to allow a destructive reset " +
-        "(a timestamped backup of the database is written first)."
+        "(a timestamped backup of the database is written first).",
     );
   }
 
@@ -293,7 +296,7 @@ async function resetDatabaseState(
     if (!options.backup) {
       throw new ActionableError(
         "Refusing to drop a populated database during migration recovery: no backup " +
-          "mechanism is available to preserve the data before the destructive reset."
+          "mechanism is available to preserve the data before the destructive reset.",
       );
     }
     await options.backup();
@@ -323,12 +326,12 @@ async function recoverCorruptedMigrations(
   migrator: Migrator,
   error: Error,
   options: RunMigrationsOptions,
-  env: NodeJS.ProcessEnv
+  env: NodeJS.ProcessEnv,
 ) {
   logger.warn(`Corrupted migrations detected: ${error.message}`);
   logger.warn(
     "Attempting automatic recovery by rebuilding migration history (destructive). " +
-      "Set AUTOMOBILE_MIGRATION_RECOVERY=0 to disable."
+      "Set AUTOMOBILE_MIGRATION_RECOVERY=0 to disable.",
   );
 
   // Capture the history BEFORE the rebuild rewrites it, so a later refusal on a
@@ -338,7 +341,7 @@ async function recoverCorruptedMigrations(
   const rebuildResult = await rebuildMigrationTable(db, migrator);
   if (rebuildResult.pruned.length > 0) {
     logger.warn(
-      `Pruned missing migrations from history (destructive): ${rebuildResult.pruned.join(", ")}`
+      `Pruned missing migrations from history (destructive): ${rebuildResult.pruned.join(", ")}`,
     );
   } else {
     logger.warn("Rebuilt migration history table to match existing migrations (destructive).");
@@ -368,7 +371,7 @@ async function recoverCorruptedMigrations(
  */
 export async function runMigrations(
   db: Kysely<unknown>,
-  options: RunMigrationsOptions = {}
+  options: RunMigrationsOptions = {},
 ): Promise<void> {
   const env = options.env ?? process.env;
   const lock = options.lock ?? new NoOpMigrationLock();
@@ -402,7 +405,7 @@ export async function runMigrations(
       if (isCorruptedMigrationError(error) && !isMigrationRecoveryEnabled(env)) {
         logger.error(
           "Corrupted migrations detected. Set AUTOMOBILE_MIGRATION_RECOVERY=1 to enable automatic " +
-            "recovery or reset the local database state."
+            "recovery or reset the local database state.",
         );
       }
 

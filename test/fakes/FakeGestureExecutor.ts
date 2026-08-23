@@ -18,7 +18,7 @@ export class FakeGestureExecutor implements GestureExecutor {
     x2: number,
     y2: number,
     options: GestureOptions = {},
-    _perf: PerformanceTracker | undefined = undefined
+    _perf: PerformanceTracker | undefined = undefined,
   ): Promise<SwipeResult> {
     this.swipeCalls.push({ x1, y1, x2, y2, options });
     return {
@@ -27,7 +27,7 @@ export class FakeGestureExecutor implements GestureExecutor {
       y1,
       x2,
       y2,
-      duration: options.duration ?? 0
+      duration: options.duration ?? 0,
     };
   }
 

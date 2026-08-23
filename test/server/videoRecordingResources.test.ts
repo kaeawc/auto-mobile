@@ -60,7 +60,7 @@ describe("getLatestVideoRecording", () => {
         getLatest: async () => latest,
         getById: async () => latest,
         readFile: async () => Buffer.from("abc"),
-      })
+      }),
     );
     expect(content.mimeType).toBe("video/mp4");
     expect(content.blob).toBe(Buffer.from("abc").toString("base64"));
@@ -79,7 +79,7 @@ describe("getVideoArchiveList", () => {
 
   test("reports the count of archived recordings", async () => {
     const content = await getVideoArchiveList(
-      store({ list: async () => [metadata({ recordingId: "a" }), metadata({ recordingId: "b" })] })
+      store({ list: async () => [metadata({ recordingId: "a" }), metadata({ recordingId: "b" })] }),
     );
     expect(parse(content.text).count).toBe(2);
   });
@@ -92,7 +92,10 @@ describe("getVideoArchiveItem", () => {
   });
 
   test("reports a not-found error for an unknown recording ID", async () => {
-    const content = await getVideoArchiveItem({ recordingId: "ghost" }, store({ getById: async () => null }));
+    const content = await getVideoArchiveItem(
+      { recordingId: "ghost" },
+      store({ getById: async () => null }),
+    );
     expect(content.uri).toBe(buildVideoArchiveItemUri("ghost"));
     expect(parse(content.text).error).toBe("Recording not found: ghost");
   });
@@ -100,7 +103,7 @@ describe("getVideoArchiveItem", () => {
   test("returns content for a known recording ID", async () => {
     const content = await getVideoArchiveItem(
       { recordingId: "rec-1" },
-      store({ getById: async () => metadata(), readFile: async () => Buffer.from("xy") })
+      store({ getById: async () => metadata(), readFile: async () => Buffer.from("xy") }),
     );
     expect(content.blob).toBe(Buffer.from("xy").toString("base64"));
   });
@@ -127,7 +130,7 @@ describe("assertWithinArchiveRoot", () => {
 
   test("throws for a traversal escaping the archive root", () => {
     expect(() => assertWithinArchiveRoot("../../etc/passwd", root)).toThrow(
-      /outside the archive root/
+      /outside the archive root/,
     );
   });
 });
@@ -137,7 +140,7 @@ describe("buildVideoResourceContent", () => {
     const content = await buildVideoResourceContent(
       metadata({ filePath: "", recordingId: "no-file" }),
       VIDEO_RESOURCE_URIS.LATEST,
-      store()
+      store(),
     );
     expect(content.mimeType).toBe("application/json");
     expect(parse(content.text).error).toBe("Missing file path for recording no-file");
@@ -154,7 +157,7 @@ describe("buildVideoResourceContent", () => {
           readCalled = true;
           return Buffer.from("secret");
         },
-      })
+      }),
     );
     expect(readCalled).toBe(false);
     expect(content.blob).toBeUndefined();
@@ -172,7 +175,7 @@ describe("buildVideoResourceContent", () => {
           readCalled = true;
           return Buffer.from("secret");
         },
-      })
+      }),
     );
     expect(readCalled).toBe(false);
     expect(content.blob).toBeUndefined();
@@ -186,7 +189,7 @@ describe("buildVideoResourceContent", () => {
         readFile: async () => {
           throw new Error("ENOENT");
         },
-      })
+      }),
     );
     expect(content.mimeType).toBe("application/json");
     expect(parse(content.text).error).toContain("Failed to read video data");

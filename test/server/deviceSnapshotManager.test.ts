@@ -46,7 +46,7 @@ describe("deviceSnapshotManager", () => {
       timer: fakeTimer,
       now: () => new Date(fakeTimer.now()),
       createCaptureProvider: () => ({
-        capture: async args => {
+        capture: async (args) => {
           captureCalls.push({ ...args });
           const timestamp = new Date(fakeTimer.now()).toISOString();
           const manifest: DeviceSnapshotManifest = {
@@ -68,7 +68,7 @@ describe("deviceSnapshotManager", () => {
         },
       }),
       createRestoreProvider: () => ({
-        restore: async args => {
+        restore: async (args) => {
           restoreCalls.push({ ...args });
           return {
             snapshotType: args.manifest.snapshotType,
@@ -223,7 +223,9 @@ describe("deviceSnapshotManager", () => {
     });
 
     expect(returnedManifest.iosSettings).toEqual(manifest.iosSettings);
-    expect(restoreCalls[restoreCalls.length - 1]?.manifest.iosSettings).toEqual(manifest.iosSettings);
+    expect(restoreCalls[restoreCalls.length - 1]?.manifest.iosSettings).toEqual(
+      manifest.iosSettings,
+    );
   });
 
   test("restoreDeviceSnapshot migrates legacy manifest when missing from repository", async () => {
@@ -250,7 +252,7 @@ describe("deviceSnapshotManager", () => {
 
       await fs.writeFile(
         path.join(snapshotDir, "manifest.json"),
-        JSON.stringify(legacyManifest, null, 2)
+        JSON.stringify(legacyManifest, null, 2),
       );
 
       await setDeviceSnapshotManagerDependencies({
@@ -299,7 +301,7 @@ describe("deviceSnapshotManager", () => {
 
       await fs.writeFile(
         path.join(snapshotDir, "manifest.json"),
-        JSON.stringify(legacyManifest, null, 2)
+        JSON.stringify(legacyManifest, null, 2),
       );
 
       await setDeviceSnapshotManagerDependencies({

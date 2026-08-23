@@ -183,8 +183,28 @@ describe("NetworkState", () => {
     });
 
     it("clears all mocks", () => {
-      state.addMock({ host: "a.com", path: "/1", method: "*", limit: null, remaining: null, statusCode: 200, responseHeaders: {}, responseBody: "", contentType: "application/json" });
-      state.addMock({ host: "b.com", path: "/2", method: "POST", limit: 5, remaining: 5, statusCode: 201, responseHeaders: {}, responseBody: "", contentType: "application/json" });
+      state.addMock({
+        host: "a.com",
+        path: "/1",
+        method: "*",
+        limit: null,
+        remaining: null,
+        statusCode: 200,
+        responseHeaders: {},
+        responseBody: "",
+        contentType: "application/json",
+      });
+      state.addMock({
+        host: "b.com",
+        path: "/2",
+        method: "POST",
+        limit: 5,
+        remaining: 5,
+        statusCode: 201,
+        responseHeaders: {},
+        responseBody: "",
+        contentType: "application/json",
+      });
 
       const cleared = state.clearAllMocks();
       expect(cleared).toBe(2);
@@ -192,8 +212,28 @@ describe("NetworkState", () => {
     });
 
     it("builds mock summary", () => {
-      state.addMock({ host: "a.com", path: "/x", method: "GET", limit: null, remaining: null, statusCode: 200, responseHeaders: {}, responseBody: "", contentType: "application/json" });
-      state.addMock({ host: "b.com", path: "/y", method: "POST", limit: 3, remaining: 3, statusCode: 201, responseHeaders: {}, responseBody: "", contentType: "application/json" });
+      state.addMock({
+        host: "a.com",
+        path: "/x",
+        method: "GET",
+        limit: null,
+        remaining: null,
+        statusCode: 200,
+        responseHeaders: {},
+        responseBody: "",
+        contentType: "application/json",
+      });
+      state.addMock({
+        host: "b.com",
+        path: "/y",
+        method: "POST",
+        limit: 3,
+        remaining: 3,
+        statusCode: 201,
+        responseHeaders: {},
+        responseBody: "",
+        contentType: "application/json",
+      });
 
       const summary = state.getMockSummary();
       expect(summary["GET a.com/x"]).toBe(-1);

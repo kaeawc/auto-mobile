@@ -43,9 +43,11 @@ export interface ScreenGeometryBinding {
  * Kept as a free function so both platform clients derive them the same way and neither method has
  * to inline the optional-field spreads.
  */
-export function screenshotBindingPushOptions(
-  binding: ScreenGeometryBinding | undefined
-): { captureSequence?: number; coordinateSpace?: CoordinateSpace; nativeScale?: number } {
+export function screenshotBindingPushOptions(binding: ScreenGeometryBinding | undefined): {
+  captureSequence?: number;
+  coordinateSpace?: CoordinateSpace;
+  nativeScale?: number;
+} {
   return {
     captureSequence: binding?.captureSequence,
     ...(binding?.coordinateSpace ? { coordinateSpace: binding.coordinateSpace } : {}),
@@ -120,7 +122,7 @@ export class TrackedScreenGeometry {
     width: number,
     height: number,
     coordinateSpace?: CoordinateSpace,
-    nativeScale?: number
+    nativeScale?: number,
   ): void {
     // Unusable geometry CLEARS rather than leaving the previous entry intact: keeping stale
     // forwarded dimensions here would let a later hierarchy push vouch for geometry that no longer

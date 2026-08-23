@@ -34,7 +34,7 @@ export class CtrlProxyNavigation {
   async requestPressHome(
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
-    frameContext?: string
+    frameContext?: string,
   ): Promise<CtrlProxyPressHomeResult> {
     return sendCommand<CtrlProxyPressHomeResult>(this.context, {
       idPrefix: "pressHome",
@@ -55,7 +55,7 @@ export class CtrlProxyNavigation {
   async requestPressBack(
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
-    frameContext?: string
+    frameContext?: string,
   ): Promise<CtrlProxyPressBackResult> {
     return sendCommand<CtrlProxyPressBackResult>(this.context, {
       idPrefix: "pressBack",
@@ -75,7 +75,7 @@ export class CtrlProxyNavigation {
    */
   async requestShake(
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyShakeResult> {
     return sendCommand<CtrlProxyShakeResult>(this.context, {
       idPrefix: "shake",
@@ -96,7 +96,7 @@ export class CtrlProxyNavigation {
     button: string,
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
-    frameContext?: string
+    frameContext?: string,
   ): Promise<CtrlProxyPressButtonResult> {
     return sendCommand<CtrlProxyPressButtonResult>(this.context, {
       idPrefix: "pressButton",
@@ -117,7 +117,7 @@ export class CtrlProxyNavigation {
   async requestRotate(
     orientation: string,
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyRotateResult> {
     return sendCommand<CtrlProxyRotateResult>(this.context, {
       idPrefix: "rotate",
@@ -145,7 +145,7 @@ export class CtrlProxyNavigation {
         value: 0,
         rotationPerformed: false,
       }),
-      timeoutError: timeout => ({
+      timeoutError: (timeout) => ({
         success: false,
         totalTimeMs: timeout,
         error: `Rotate timed out after ${timeout}ms`,
@@ -164,7 +164,7 @@ export class CtrlProxyNavigation {
     bundleId: string,
     timeoutMs: number = 10000,
     perf?: PerformanceTracker,
-    coldBoot: boolean = false
+    coldBoot: boolean = false,
   ): Promise<CtrlProxyLaunchAppResult> {
     return sendCommand<CtrlProxyLaunchAppResult>(this.context, {
       idPrefix: "launchApp",
@@ -185,7 +185,7 @@ export class CtrlProxyNavigation {
   async requestRecentApps(
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
-    frameContext?: string
+    frameContext?: string,
   ): Promise<CtrlProxyRecentAppsResult> {
     return sendCommand<CtrlProxyRecentAppsResult>(this.context, {
       idPrefix: "recentApps",

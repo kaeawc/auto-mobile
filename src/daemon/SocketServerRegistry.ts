@@ -38,10 +38,7 @@ export class SocketServerRegistry {
    * @param name - Unique identifier for the server
    * @param config - Server configuration including factory
    */
-  register<T extends BaseSocketServer>(
-    name: string,
-    config: SocketServerConfig<T>
-  ): void {
+  register<T extends BaseSocketServer>(name: string, config: SocketServerConfig<T>): void {
     if (this.factories.has(name)) {
       logger.warn(`[SocketServerRegistry] Overwriting existing registration for '${name}'`);
     }
@@ -107,9 +104,9 @@ export class SocketServerRegistry {
       // Default autoStart to true if not specified
       if (config.autoStart !== false) {
         startPromises.push(
-          this.start(name).catch(error => {
+          this.start(name).catch((error) => {
             logger.error(`[SocketServerRegistry] Failed to start '${name}': ${error}`);
-          })
+          }),
         );
       }
     }
@@ -125,9 +122,9 @@ export class SocketServerRegistry {
 
     for (const name of this.servers.keys()) {
       stopPromises.push(
-        this.stop(name).catch(error => {
+        this.stop(name).catch((error) => {
           logger.warn(`[SocketServerRegistry] Failed to stop '${name}': ${error}`);
-        })
+        }),
       );
     }
 
@@ -167,9 +164,7 @@ export class SocketServerRegistry {
    * Get the names of all running servers.
    */
   getRunningNames(): string[] {
-    return Array.from(this.servers.keys()).filter(name =>
-      this.servers.get(name)?.isListening()
-    );
+    return Array.from(this.servers.keys()).filter((name) => this.servers.get(name)?.isListening());
   }
 
   /**

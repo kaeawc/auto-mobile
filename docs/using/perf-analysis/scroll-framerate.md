@@ -11,4 +11,4 @@ Make sure to read [the overview guide for performance analysis](index.md).
 > Scroll back through history in this screen as fast and as far as possible. Generate a timeseries of swipe # against available performance data
 
 ??? example "See demo: Scroll performance"
-    ![Scroll performance demo](../../img/scroll-transition-perf.gif)
+![Scroll performance demo](../../img/scroll-transition-perf.gif)

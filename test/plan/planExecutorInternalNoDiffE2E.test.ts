@@ -25,7 +25,11 @@ import type { ObserveResult } from "../../src/models/ObserveResult";
  * handler honors it); this pins that the whole seam holds together.
  */
 describe("PlanExecutor → finalize internal no-diff (end-to-end, #3053)", () => {
-  const androidA: BootedDevice = { name: "Pixel A", deviceId: "emulator-5554", platform: "android" };
+  const androidA: BootedDevice = {
+    name: "Pixel A",
+    deviceId: "emulator-5554",
+    platform: "android",
+  };
 
   let planExecutor: DefaultPlanExecutor;
   let fakeDeviceSessionManager: FakeDeviceSessionManager;
@@ -41,7 +45,9 @@ describe("PlanExecutor → finalize internal no-diff (end-to-end, #3053)", () =>
       activeWindow: { appId: "com.example", activityName: ".Main", layoutSeqSum: 1 },
       viewHierarchy: {
         packageName: "com.example",
-        hierarchy: { node: { "resource-id": "com.example:id/root", "content-desc": "keep" } as any },
+        hierarchy: {
+          node: { "resource-id": "com.example:id/root", "content-desc": "keep" } as any,
+        },
       },
     } as ObserveResult;
   }
@@ -59,7 +65,13 @@ describe("PlanExecutor → finalize internal no-diff (end-to-end, #3053)", () =>
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const fakeDeviceUtils = new FakeDeviceUtils();
     fakeDeviceUtils.setBootedDevices("android", [androidA]);
-    const pool = new DevicePool(daemonSessionManager, "daemon-session", timer, undefined, fakeDeviceUtils);
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
     await pool.initializeWithDevices([androidA]);
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     return (await pool.autolockDevice(androidA.deviceId, "android", "mcp-session-1"))!;
@@ -90,15 +102,20 @@ describe("PlanExecutor → finalize internal no-diff (end-to-end, #3053)", () =>
     serverConfig.setActionsDiffObserveEnabled(true);
     const sessionId = await setupAutolockedSession();
 
-    ToolRegistry.registerDeviceAware("observe", "observe", baseSchema,
-                                     async () => createStructuredToolResponse(sameScreenObserve()));
-    ToolRegistry.registerDeviceAware("tapOn", "tapOn", baseSchema,
-                                     async () => createStructuredToolResponse({ success: true, observation: sameScreenObserve() }));
+    ToolRegistry.registerDeviceAware("observe", "observe", baseSchema, async () =>
+      createStructuredToolResponse(sameScreenObserve()),
+    );
+    ToolRegistry.registerDeviceAware("tapOn", "tapOn", baseSchema, async () =>
+      createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
+    );
     (ToolRegistry.getTool("tapOn") as { planExecutable: boolean }).planExecutable = true;
     (ToolRegistry.getTool("observe") as { planExecutable: boolean }).planExecutable = true;
 
     // Seed the agent-facing baseline via a normal (non-plan) observe call.
-    await ToolRegistry.getTool("observe")!.handler({ platform: "android", __mcpSessionId: "mcp-session-1" });
+    await ToolRegistry.getTool("observe")!.handler({
+      platform: "android",
+      __mcpSessionId: "mcp-session-1",
+    });
     const baselineAfterObserve = daemonSessionManager!.getLastRenderedObservation(sessionId);
     expect(baselineAfterObserve).toBeDefined();
 

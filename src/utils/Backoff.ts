@@ -20,7 +20,7 @@ export const fixedBackoff = (delayMs: number): BackoffPolicy => {
     delayForAttempt(attempt: number): number {
       assertAttempt(attempt);
       return normalized;
-    }
+    },
   };
 };
 
@@ -34,16 +34,17 @@ export const sequenceBackoff = (delaysMs: readonly number[]): BackoffPolicy => {
     delayForAttempt(attempt: number): number {
       assertAttempt(attempt);
       return normalized[Math.min(attempt - 1, normalized.length - 1)]!;
-    }
+    },
   };
 };
 
 export const exponentialBackoff = (options: ExponentialBackoffOptions): BackoffPolicy => {
   const initialDelayMs = normalizeDelay(options.initialDelayMs);
   const multiplier = options.multiplier ?? 2;
-  const maxDelayMs = options.maxDelayMs === undefined
-    ? Number.POSITIVE_INFINITY
-    : normalizeDelay(options.maxDelayMs);
+  const maxDelayMs =
+    options.maxDelayMs === undefined
+      ? Number.POSITIVE_INFINITY
+      : normalizeDelay(options.maxDelayMs);
 
   if (!Number.isFinite(multiplier) || multiplier < 1) {
     throw new Error(`exponentialBackoff multiplier must be >= 1, got ${multiplier}`);
@@ -53,7 +54,7 @@ export const exponentialBackoff = (options: ExponentialBackoffOptions): BackoffP
     delayForAttempt(attempt: number): number {
       assertAttempt(attempt);
       return normalizeDelay(Math.min(initialDelayMs * multiplier ** (attempt - 1), maxDelayMs));
-    }
+    },
   };
 };
 
@@ -69,7 +70,7 @@ export const normalizeBackoff = (input: BackoffInput): BackoffPolicy => {
       delayForAttempt(attempt: number): number {
         assertAttempt(attempt);
         return normalizeDelay(input(attempt));
-      }
+      },
     };
   }
   return input;

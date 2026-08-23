@@ -29,7 +29,7 @@ const retentionState = createEventRetentionState();
 
 export async function recordNetworkEvent(
   input: RecordNetworkEventInput,
-  db?: Kysely<Database>
+  db?: Kysely<Database>,
 ): Promise<number> {
   const result = await getDb(db)
     .insertInto("network_events")
@@ -109,7 +109,7 @@ function mapRow(r: any): NetworkEventWithId {
 
 export async function getNetworkEventById(
   id: number,
-  db?: Kysely<Database>
+  db?: Kysely<Database>,
 ): Promise<NetworkEventWithId | null> {
   const row = await getDb(db)
     .selectFrom("network_events")
@@ -128,7 +128,7 @@ export async function getNetworkEventById(
 
 export async function getNetworkEvents(
   query: NetworkEventQuery,
-  db?: Kysely<Database>
+  db?: Kysely<Database>,
 ): Promise<NetworkEventWithId[]> {
   let q = getDb(db).selectFrom("network_events").selectAll();
 
@@ -168,7 +168,7 @@ export async function getNetworkEvents(
 export async function cleanupIfNeeded(
   db?: Kysely<Database>,
   maxRows?: number,
-  checkInterval?: number
+  checkInterval?: number,
 ): Promise<void> {
   await cleanupEventTable("network_events", retentionState, db, maxRows, checkInterval);
 }

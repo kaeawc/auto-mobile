@@ -9,7 +9,7 @@ describe("McpTimeoutError", () => {
       origin: "DaemonClient.sendRequest",
     });
     expect(err.message).toBe(
-      "MCP timeout: startDevice exceeded 180000ms at DaemonClient.sendRequest"
+      "MCP timeout: startDevice exceeded 180000ms at DaemonClient.sendRequest",
     );
     expect(err.name).toBe("McpTimeoutError");
     expect(err.toolName).toBe("startDevice");
@@ -25,8 +25,7 @@ describe("McpTimeoutError", () => {
       detail: "spent 601000ms waiting in queue",
     });
     expect(err.message).toBe(
-      "MCP timeout: executePlan exceeded 600000ms at UnixSocketServer.handleRequest (spent 601000ms waiting in queue)"
+      "MCP timeout: executePlan exceeded 600000ms at UnixSocketServer.handleRequest (spent 601000ms waiting in queue)",
     );
   });
-
 });

@@ -1,5 +1,8 @@
 import { describe, test, expect, beforeEach } from "bun:test";
-import { parseTouchNodes, discoverTouchNode } from "../../../../src/features/record/android/TouchNodeDiscovery";
+import {
+  parseTouchNodes,
+  discoverTouchNode,
+} from "../../../../src/features/record/android/TouchNodeDiscovery";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 
 // ---------------------------------------------------------------------------

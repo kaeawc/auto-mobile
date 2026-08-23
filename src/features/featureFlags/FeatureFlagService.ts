@@ -1,5 +1,12 @@
-import type { FeatureFlagConfig, FeatureFlagDefinition, FeatureFlagKey } from "./FeatureFlagDefinitions";
-import { FEATURE_FLAG_DEFINITIONS, TOOL_DEFINITION_AFFECTING_FLAGS } from "./FeatureFlagDefinitions";
+import type {
+  FeatureFlagConfig,
+  FeatureFlagDefinition,
+  FeatureFlagKey,
+} from "./FeatureFlagDefinitions";
+import {
+  FEATURE_FLAG_DEFINITIONS,
+  TOOL_DEFINITION_AFFECTING_FLAGS,
+} from "./FeatureFlagDefinitions";
 import type { FeatureFlagRepository } from "./FeatureFlagRepository";
 import { SqliteFeatureFlagRepository } from "./FeatureFlagRepository";
 import type { FeatureFlagApplier } from "./FeatureFlagApplier";
@@ -26,7 +33,7 @@ export class FeatureFlagService {
     if (!FeatureFlagService.instance) {
       FeatureFlagService.instance = new FeatureFlagService(
         new SqliteFeatureFlagRepository(),
-        new DefaultFeatureFlagApplier()
+        new DefaultFeatureFlagApplier(),
       );
     }
     return FeatureFlagService.instance;
@@ -36,11 +43,9 @@ export class FeatureFlagService {
     private readonly repository: FeatureFlagRepository,
     private readonly applier: FeatureFlagApplier,
     private readonly definitions: FeatureFlagDefinition[] = FEATURE_FLAG_DEFINITIONS,
-    private notifier: ToolListChangedNotifier = new NoopToolListChangedNotifier()
+    private notifier: ToolListChangedNotifier = new NoopToolListChangedNotifier(),
   ) {
-    this.definitionByKey = new Map(
-      definitions.map(definition => [definition.key, definition])
-    );
+    this.definitionByKey = new Map(definitions.map((definition) => [definition.key, definition]));
   }
 
   /**
@@ -59,15 +64,12 @@ export class FeatureFlagService {
 
     await this.repository.ensureFlags(this.definitions);
     const records = await this.repository.listFlags();
-    const recordByKey = new Map(records.map(record => [record.key, record]));
+    const recordByKey = new Map(records.map((record) => [record.key, record]));
 
     for (const definition of this.definitions) {
       const record = recordByKey.get(definition.key);
       const enabled = record ? record.enabled : definition.defaultValue;
-      const config =
-        record?.config ??
-        definition.defaultConfig ??
-        null;
+      const config = record?.config ?? definition.defaultConfig ?? null;
       this.flagsByKey.set(definition.key, enabled);
       this.configsByKey.set(definition.key, config);
       this.applier.apply(definition.key, enabled, config);
@@ -78,7 +80,7 @@ export class FeatureFlagService {
 
   async listFlags(): Promise<FeatureFlagState[]> {
     await this.initialize();
-    return this.definitions.map(definition => ({
+    return this.definitions.map((definition) => ({
       key: definition.key,
       label: definition.label,
       description: definition.description,
@@ -87,7 +89,11 @@ export class FeatureFlagService {
     }));
   }
 
-  async setFlag(key: FeatureFlagKey, enabled: boolean, config?: FeatureFlagConfig | null): Promise<FeatureFlagState> {
+  async setFlag(
+    key: FeatureFlagKey,
+    enabled: boolean,
+    config?: FeatureFlagConfig | null,
+  ): Promise<FeatureFlagState> {
     await this.initialize();
     const definition = this.definitionByKey.get(key);
     if (!definition) {
@@ -97,7 +103,7 @@ export class FeatureFlagService {
     const nextConfig =
       config !== undefined
         ? config
-        : this.configsByKey.get(key) ?? definition.defaultConfig ?? null;
+        : (this.configsByKey.get(key) ?? definition.defaultConfig ?? null);
 
     // Capture the effective value BEFORE mutating so we only notify on an actual
     // change — re-setting a flag to its current value must not emit (issue #2963,
@@ -130,7 +136,10 @@ export class FeatureFlagService {
     };
   }
 
-  async setFlagConfig(key: FeatureFlagKey, config: FeatureFlagConfig | null): Promise<FeatureFlagState> {
+  async setFlagConfig(
+    key: FeatureFlagKey,
+    config: FeatureFlagConfig | null,
+  ): Promise<FeatureFlagState> {
     await this.initialize();
     const definition = this.definitionByKey.get(key);
     if (!definition) {

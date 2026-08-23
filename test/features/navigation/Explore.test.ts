@@ -11,22 +11,20 @@ import { INTERNAL_NO_DIFF_PARAM } from "../../../src/server/internalToolCall";
 // Import extracted functions for testing
 import {
   extractNavigationElements,
-  getElementKey
+  getElementKey,
 } from "../../../src/features/navigation/ExploreElementExtraction";
-import {
-  calculateNavigationScore
-} from "../../../src/features/navigation/ExploreElementScoring";
+import { calculateNavigationScore } from "../../../src/features/navigation/ExploreElementScoring";
 import {
   isPermissionDialog,
   isLoginScreen,
-  isRatingDialog
+  isRatingDialog,
 } from "../../../src/features/navigation/ExploreBlockerDetection";
 import {
   initializeGraphTraversal,
   getEdgeKey,
   markNodeVisited,
   markEdgeTraversed,
-  selectNextEdgeToTraverse
+  selectNextEdgeToTraverse,
 } from "../../../src/features/navigation/ExploreValidateMode";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import type { ElementParser } from "../../../src/utils/interfaces/ElementParser";
@@ -51,7 +49,7 @@ describe("Explore", () => {
     device = {
       deviceId: "test-device-123",
       platform: "android",
-      source: "local"
+      source: "local",
     } as BootedDevice;
 
     // Create mock ADB client
@@ -66,7 +64,7 @@ describe("Explore", () => {
             metadata: {},
             timestamp: Date.now(),
             sequenceNumber: 0,
-            applicationId: "com.test.app"
+            applicationId: "com.test.app",
           });
           return "Back button pressed";
         }
@@ -74,7 +72,7 @@ describe("Explore", () => {
           return "Home button pressed";
         }
         return "";
-      }
+      },
     } as AdbClient;
 
     // Create mock ObserveScreen that cycles through different screens
@@ -91,14 +89,14 @@ describe("Explore", () => {
             metadata: {},
             timestamp: Date.now(),
             sequenceNumber: observeCallCount,
-            applicationId: "com.test.app"
+            applicationId: "com.test.app",
           });
         }
         return createMockObservation();
       },
       getMostRecentCachedObserveResult: async () => {
         return createMockObservation();
-      }
+      },
     };
   });
 
@@ -109,52 +107,58 @@ describe("Explore", () => {
   function createMockViewHierarchyNode(overrides: any = {}): any {
     const defaults = {
       $: {
-        "class": "android.widget.Button",
-        "text": "Button",
+        class: "android.widget.Button",
+        text: "Button",
         "resource-id": "com.test:id/button",
-        "clickable": "true",
-        "enabled": "true",
-        "bounds": { left: 0, top: 0, right: 100, bottom: 50 }
-      }
+        clickable: "true",
+        enabled: "true",
+        bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+      },
     };
 
     return {
       $: { ...defaults.$, ...overrides },
-      bounds: { left: 0, top: 0, right: 100, bottom: 50 }
+      bounds: { left: 0, top: 0, right: 100, bottom: 50 },
     };
   }
 
   function createMockElement(overrides: Partial<Element> = {}): Element {
     return {
-      "bounds": { left: 0, top: 0, right: 100, bottom: 50 },
-      "clickable": true,
-      "enabled": true,
-      "text": "Button",
-      "class": "android.widget.Button",
+      bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+      clickable: true,
+      enabled: true,
+      text: "Button",
+      class: "android.widget.Button",
       "resource-id": "com.test:id/button",
-      ...overrides
+      ...overrides,
     } as Element;
   }
 
-  function createMockObservation(nodes: any[] = [], packageName: string = "com.test.app"): ObserveResult {
-    const defaultNodes = nodes.length > 0 ? nodes : [
-      createMockViewHierarchyNode({
-        "text": "Settings",
-        "resource-id": "com.test:id/settings_btn"
-      }),
-      createMockViewHierarchyNode({
-        "text": "Profile",
-        "resource-id": "com.test:id/profile_btn"
-      })
-    ];
+  function createMockObservation(
+    nodes: any[] = [],
+    packageName: string = "com.test.app",
+  ): ObserveResult {
+    const defaultNodes =
+      nodes.length > 0
+        ? nodes
+        : [
+            createMockViewHierarchyNode({
+              text: "Settings",
+              "resource-id": "com.test:id/settings_btn",
+            }),
+            createMockViewHierarchyNode({
+              text: "Profile",
+              "resource-id": "com.test:id/profile_btn",
+            }),
+          ];
 
     return {
       viewHierarchy: {
         hierarchy: {
-          node: defaultNodes
+          node: defaultNodes,
         },
-        packageName
-      }
+        packageName,
+      },
     } as ObserveResult;
   }
 
@@ -168,12 +172,12 @@ describe("Explore", () => {
           metadata: {},
           timestamp: fakeTimer.now(),
           sequenceNumber: 1,
-          applicationId: "com.test.app"
+          applicationId: "com.test.app",
         });
 
         explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
         (explore as any).observeScreen = {
-          execute: async () => createMockObservation()
+          execute: async () => createMockObservation(),
         };
         (explore as any).performInteraction = async () => {
           fakeGraph.recordNavigationEvent({
@@ -183,7 +187,7 @@ describe("Explore", () => {
             metadata: {},
             timestamp: fakeTimer.now(),
             sequenceNumber: 2,
-            applicationId: "com.test.app"
+            applicationId: "com.test.app",
           });
           return true;
         };
@@ -196,11 +200,11 @@ describe("Explore", () => {
             maxInteractions: 1,
             timeoutMs: 5000,
             packageName: "com.test.app",
-            mode
+            mode,
           },
           (_current, _total, message) => {
             progressMessages.push(message);
-          }
+          },
         );
 
         expect(fakeGraph.getMethodCallCount("getStats")).toBe(1);
@@ -215,20 +219,20 @@ describe("Explore", () => {
     test("should prioritize navigation elements", async () => {
       const nodes = [
         createMockViewHierarchyNode({
-          "text": "Settings",
-          "class": "android.widget.Button",
-          "resource-id": "com.test:id/settings_btn"
+          text: "Settings",
+          class: "android.widget.Button",
+          "resource-id": "com.test:id/settings_btn",
         }),
         createMockViewHierarchyNode({
-          "text": "Like",
-          "class": "android.widget.ImageButton",
-          "clickable": "true"
+          text: "Like",
+          class: "android.widget.ImageButton",
+          clickable: "true",
         }),
         createMockViewHierarchyNode({
-          "text": "",
-          "class": "android.widget.EditText",
-          "clickable": "true"
-        })
+          text: "",
+          class: "android.widget.EditText",
+          clickable: "true",
+        }),
       ];
 
       const mockObservation = createMockObservation(nodes);
@@ -245,17 +249,17 @@ describe("Explore", () => {
 
     test("should calculate navigation scores correctly", async () => {
       const buttonElement = createMockElement({
-        "text": "Settings",
-        "class": "android.widget.Button",
-        "resource-id": "com.test:id/settings_btn"
+        text: "Settings",
+        class: "android.widget.Button",
+        "resource-id": "com.test:id/settings_btn",
       });
       // Set hierarchyDepth for button (deeper in the hierarchy)
       (buttonElement as any).hierarchyDepth = 8;
 
       const tabElement = createMockElement({
-        "text": "Profile",
-        "class": "android.widget.TabLayout",
-        "resource-id": "com.test:id/tab_profile"
+        text: "Profile",
+        class: "android.widget.TabLayout",
+        "resource-id": "com.test:id/tab_profile",
       });
       // Set hierarchyDepth for tab (closer to root, should score higher)
       (tabElement as any).hierarchyDepth = 2;
@@ -272,9 +276,9 @@ describe("Explore", () => {
 
     test("should filter out non-clickable elements", async () => {
       const nodes = [
-        createMockViewHierarchyNode({ "clickable": "true" }),
-        createMockViewHierarchyNode({ "clickable": "false" }),
-        createMockViewHierarchyNode({ "clickable": "true", "enabled": "false" })
+        createMockViewHierarchyNode({ clickable: "true" }),
+        createMockViewHierarchyNode({ clickable: "false" }),
+        createMockViewHierarchyNode({ clickable: "true", enabled: "false" }),
       ];
 
       const mockObservation = createMockObservation(nodes);
@@ -291,7 +295,7 @@ describe("Explore", () => {
       const elements = [
         createMockElement({ text: "Allow" }),
         createMockElement({ text: "While using the app" }),
-        createMockElement({ text: "This app needs camera permission" })
+        createMockElement({ text: "This app needs camera permission" }),
       ];
 
       const isPermission = isPermissionDialog(elements);
@@ -301,9 +305,9 @@ describe("Explore", () => {
 
     test("should detect login screens", async () => {
       const elements = [
-        createMockElement({ "text": "Sign in", "class": "android.widget.Button" }),
-        createMockElement({ "text": "", "class": "android.widget.EditText" }),
-        createMockElement({ "text": "Password", "class": "android.widget.TextView" })
+        createMockElement({ text: "Sign in", class: "android.widget.Button" }),
+        createMockElement({ text: "", class: "android.widget.EditText" }),
+        createMockElement({ text: "Password", class: "android.widget.TextView" }),
       ];
 
       const isLogin = isLoginScreen(elements);
@@ -315,7 +319,7 @@ describe("Explore", () => {
       const elements = [
         createMockElement({ text: "Rate this app" }),
         createMockElement({ text: "Not now" }),
-        createMockElement({ text: "5 stars" })
+        createMockElement({ text: "5 stars" }),
       ];
 
       const isRating = isRatingDialog(elements);
@@ -327,7 +331,7 @@ describe("Explore", () => {
       const elements = [
         createMockElement({ text: "Home" }),
         createMockElement({ text: "Settings" }),
-        createMockElement({ text: "Profile" })
+        createMockElement({ text: "Profile" }),
       ];
 
       const isPermission = isPermissionDialog(elements);
@@ -356,7 +360,7 @@ describe("Explore", () => {
             backPresses.push(cmd);
           }
           return "";
-        }
+        },
       } as AdbClient;
 
       explore = new Explore(device, adbWithTracking, fakeTimer, fakeGraph);
@@ -372,12 +376,12 @@ describe("Explore", () => {
             return createMockObservation([], "com.test.app");
           }
           return createMockObservation([], "com.android.settings");
-        }
+        },
       };
 
       const result = await explore.execute({
         maxInteractions: 50,
-        timeoutMs: 5000
+        timeoutMs: 5000,
       });
 
       expect(result.stopReason).toContain("com.test.app");
@@ -393,7 +397,7 @@ describe("Explore", () => {
             backPresses.push(cmd);
           }
           return "";
-        }
+        },
       } as AdbClient;
 
       explore = new Explore(device, adbWithTracking, fakeTimer, fakeGraph);
@@ -401,13 +405,13 @@ describe("Explore", () => {
         backPresses.push("back");
       };
       (explore as any).observeScreen = {
-        execute: async () => createMockObservation([], "com.android.settings")
+        execute: async () => createMockObservation([], "com.android.settings"),
       };
 
       const result = await explore.execute({
         maxInteractions: 50,
         timeoutMs: 5000,
-        packageName: "com.test.app"
+        packageName: "com.test.app",
       });
 
       expect(result.stopReason).toContain("com.test.app");
@@ -420,22 +424,22 @@ describe("Explore", () => {
       const iOSDevice = {
         deviceId: "ios-simulator-123",
         platform: "ios",
-        source: "local"
+        source: "local",
       } as BootedDevice;
       const adbCommands: string[] = [];
       const adb = {
         executeCommand: async (command: string) => {
           adbCommands.push(command);
           return "";
-        }
+        },
       } as AdbClient;
       const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
 
-      ToolRegistry.register("pressButton", "pressButton", {}, async args => {
+      ToolRegistry.register("pressButton", "pressButton", {}, async (args) => {
         calls.push({ name: "pressButton", args });
         return { success: true };
       });
-      ToolRegistry.register("homeScreen", "homeScreen", {}, async args => {
+      ToolRegistry.register("homeScreen", "homeScreen", {}, async (args) => {
         calls.push({ name: "homeScreen", args });
         return { success: true };
       });
@@ -447,19 +451,32 @@ describe("Explore", () => {
       expect(calls).toEqual([
         {
           name: "pressButton",
-          args: { button: "back", platform: "ios", deviceId: "ios-simulator-123", [INTERNAL_NO_DIFF_PARAM]: true }
+          args: {
+            button: "back",
+            platform: "ios",
+            deviceId: "ios-simulator-123",
+            [INTERNAL_NO_DIFF_PARAM]: true,
+          },
         },
         {
           name: "homeScreen",
-          args: { platform: "ios", deviceId: "ios-simulator-123", [INTERNAL_NO_DIFF_PARAM]: true }
-        }
+          args: { platform: "ios", deviceId: "ios-simulator-123", [INTERNAL_NO_DIFF_PARAM]: true },
+        },
       ]);
       expect(adbCommands).toEqual([]);
     });
 
     test("targets the selected iOS device when another iOS simulator is booted", async () => {
-      const iosA = { deviceId: "ios-simulator-a", name: "iPhone A", platform: "ios" } as BootedDevice;
-      const iosB = { deviceId: "ios-simulator-b", name: "iPhone B", platform: "ios" } as BootedDevice;
+      const iosA = {
+        deviceId: "ios-simulator-a",
+        name: "iPhone A",
+        platform: "ios",
+      } as BootedDevice;
+      const iosB = {
+        deviceId: "ios-simulator-b",
+        name: "iPhone B",
+        platform: "ios",
+      } as BootedDevice;
       const sessions = new FakeDeviceSessionManager();
       sessions.setConnectedDevices([iosA, iosB]);
       const registry = ToolRegistry as unknown as { deviceSessionManager: unknown };
@@ -468,11 +485,15 @@ describe("Explore", () => {
       const selectedDeviceIds: string[] = [];
 
       try {
-        ToolRegistry.registerDeviceAware("pressButton", "pressButton", { parse: (args: unknown) => args } as any,
-                                         async selectedDevice => {
-                                           selectedDeviceIds.push(selectedDevice.deviceId);
-                                           return { success: true };
-                                         });
+        ToolRegistry.registerDeviceAware(
+          "pressButton",
+          "pressButton",
+          { parse: (args: unknown) => args } as any,
+          async (selectedDevice) => {
+            selectedDeviceIds.push(selectedDevice.deviceId);
+            return { success: true };
+          },
+        );
         explore = new Explore(iosB, null, fakeTimer, fakeGraph);
 
         await (explore as any).handleDeadEnd();
@@ -489,11 +510,11 @@ describe("Explore", () => {
         execute: async (args: string[]) => {
           commands.push(args.join(" "));
           return "";
-        }
+        },
       } as AdbClient;
       const progressUpdates: Array<{ current: number; total?: number; message?: string }> = [];
       const ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
-        requestGlobalAction: async () => ({ success: false, error: "unavailable" })
+        requestGlobalAction: async () => ({ success: false, error: "unavailable" }),
       } as never);
       ToolRegistry.register("pressButton", "pressButton", {}, async () => {
         throw new Error("Android recovery must not use the global tool registry");
@@ -504,12 +525,16 @@ describe("Explore", () => {
       explore = new Explore(device, adb, fakeTimer, fakeGraph);
 
       try {
-        await (explore as any).handleDeadEnd(async (current: number, total?: number, message?: string) => {
-          progressUpdates.push({ current, total, message });
-        });
-        await (explore as any).resetToHome(async (current: number, total?: number, message?: string) => {
-          progressUpdates.push({ current, total, message });
-        });
+        await (explore as any).handleDeadEnd(
+          async (current: number, total?: number, message?: string) => {
+            progressUpdates.push({ current, total, message });
+          },
+        );
+        await (explore as any).resetToHome(
+          async (current: number, total?: number, message?: string) => {
+            progressUpdates.push({ current, total, message });
+          },
+        );
       } finally {
         ctrlProxySpy.mockRestore();
       }
@@ -517,16 +542,18 @@ describe("Explore", () => {
       expect(commands).toEqual(["shell input keyevent 4", "shell input keyevent 3"]);
       expect(progressUpdates).toEqual([
         { current: 0, total: 1, message: "Dead end detected, navigating back..." },
-        { current: 0, total: 1, message: "Resetting to home screen..." }
+        { current: 0, total: 1, message: "Resetting to home screen..." },
       ]);
     });
 
     test("records failed dead-end recovery as a terminal partial-report reason", async () => {
       const ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
-        requestGlobalAction: async () => ({ success: false, error: "unavailable" })
+        requestGlobalAction: async () => ({ success: false, error: "unavailable" }),
       } as never);
       const adb = {
-        execute: async () => { throw new Error("Back navigation was rejected"); }
+        execute: async () => {
+          throw new Error("Back navigation was rejected");
+        },
       } as AdbClient;
       explore = new Explore(device, adb, fakeTimer, fakeGraph);
 
@@ -537,16 +564,18 @@ describe("Explore", () => {
       }
 
       expect((explore as any).stopReason).toBe(
-        "Back-navigation recovery failed: Failed to press button: Back navigation was rejected"
+        "Back-navigation recovery failed: Failed to press button: Back navigation was rejected",
       );
     });
 
     test("records failed home reset as a terminal partial-report reason", async () => {
       const ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
-        requestGlobalAction: async () => ({ success: false, error: "unavailable" })
+        requestGlobalAction: async () => ({ success: false, error: "unavailable" }),
       } as never);
       const adb = {
-        execute: async () => { throw new Error("Home navigation was rejected"); }
+        execute: async () => {
+          throw new Error("Home navigation was rejected");
+        },
       } as AdbClient;
       explore = new Explore(device, adb, fakeTimer, fakeGraph);
 
@@ -557,20 +586,22 @@ describe("Explore", () => {
       }
 
       expect((explore as any).stopReason).toBe(
-        "Home-screen recovery failed: Failed to press button: Home navigation was rejected"
+        "Home-screen recovery failed: Failed to press button: Home navigation was rejected",
       );
     });
 
     test("returns a partial report when dead-end recovery fails", async () => {
       const ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
-        requestGlobalAction: async () => ({ success: false, error: "unavailable" })
+        requestGlobalAction: async () => ({ success: false, error: "unavailable" }),
       } as never);
       const adb = {
-        execute: async () => { throw new Error("Back navigation was rejected"); }
+        execute: async () => {
+          throw new Error("Back navigation was rejected");
+        },
       } as AdbClient;
       explore = new Explore(device, adb, fakeTimer, fakeGraph);
       (explore as any).observeScreen = {
-        execute: async () => createMockObservation([], "com.test.app")
+        execute: async () => createMockObservation([], "com.test.app"),
       };
       (explore as any).selectNextElement = async () => undefined;
 
@@ -579,7 +610,7 @@ describe("Explore", () => {
         result = await explore.execute({
           maxInteractions: 1,
           timeoutMs: 5000,
-          packageName: "com.test.app"
+          packageName: "com.test.app",
         });
       } finally {
         ctrlProxySpy.mockRestore();
@@ -587,7 +618,7 @@ describe("Explore", () => {
 
       expect(result.success).toBe(true);
       expect(result.stopReason).toBe(
-        "Back-navigation recovery failed: Failed to press button: Back navigation was rejected"
+        "Back-navigation recovery failed: Failed to press button: Back navigation was rejected",
       );
     });
   });
@@ -595,18 +626,18 @@ describe("Explore", () => {
   describe("element tracking", () => {
     test("should generate unique element keys", async () => {
       const element1 = createMockElement({
-        "text": "Button",
-        "resource-id": "com.test:id/btn"
+        text: "Button",
+        "resource-id": "com.test:id/btn",
       });
 
       const element2 = createMockElement({
-        "text": "Button",
-        "resource-id": "com.test:id/btn"
+        text: "Button",
+        "resource-id": "com.test:id/btn",
       });
 
       const element3 = createMockElement({
-        "text": "Other",
-        "resource-id": "com.test:id/other"
+        text: "Other",
+        "resource-id": "com.test:id/other",
       });
 
       const key1 = getElementKey(element1);
@@ -628,15 +659,15 @@ describe("Explore", () => {
         metadata: {},
         timestamp: Date.now(),
         sequenceNumber: 1,
-        applicationId: "com.test.app"
+        applicationId: "com.test.app",
       });
 
       fakeGraph.recordToolCall(
         "tapOn",
         { text: "Button1" },
         {
-          selectedElements: [{ text: "Button1", resourceId: "btn1", contentDesc: "" }]
-        }
+          selectedElements: [{ text: "Button1", resourceId: "btn1", contentDesc: "" }],
+        },
       );
 
       fakeGraph.recordNavigationEvent({
@@ -646,7 +677,7 @@ describe("Explore", () => {
         metadata: {},
         timestamp: Date.now(),
         sequenceNumber: 2,
-        applicationId: "com.test.app"
+        applicationId: "com.test.app",
       });
 
       // Initialize traversal using the extracted function with fakeGraph
@@ -702,8 +733,8 @@ describe("Explore", () => {
         interaction: {
           toolName: "tapOn",
           args: { text: "Submit Button" },
-          timestamp: Date.now()
-        }
+          timestamp: Date.now(),
+        },
       };
 
       markEdgeTraversed(state, mockEdge, "Screen2", true, fakeTimer, undefined, 0.95);
@@ -734,19 +765,11 @@ describe("Explore", () => {
         interaction: {
           toolName: "tapOn",
           args: { text: "Navigate Button" },
-          timestamp: Date.now()
-        }
+          timestamp: Date.now(),
+        },
       };
 
-      markEdgeTraversed(
-        state,
-        mockEdge,
-        "Screen3",
-        false,
-        fakeTimer,
-        "Navigation diverged",
-        0.8
-      );
+      markEdgeTraversed(state, mockEdge, "Screen3", false, fakeTimer, "Navigation diverged", 0.8);
 
       const edgeKey = getEdgeKey(mockEdge);
       const validation = state.edgeValidationResults.get(edgeKey);
@@ -766,8 +789,8 @@ describe("Explore", () => {
         interaction: {
           toolName: "tapOn",
           args: { text: "Button A" },
-          timestamp: 1000
-        }
+          timestamp: 1000,
+        },
       };
 
       const edge2 = {
@@ -778,8 +801,8 @@ describe("Explore", () => {
         interaction: {
           toolName: "tapOn",
           args: { text: "Button A" }, // Same interaction
-          timestamp: 2000
-        }
+          timestamp: 2000,
+        },
       };
 
       const edge3 = {
@@ -790,8 +813,8 @@ describe("Explore", () => {
         interaction: {
           toolName: "tapOn",
           args: { text: "Button B" }, // Different interaction
-          timestamp: 1000
-        }
+          timestamp: 1000,
+        },
       };
 
       const edge4 = {
@@ -802,8 +825,8 @@ describe("Explore", () => {
         interaction: {
           toolName: "tapOn",
           args: { text: "Button A" },
-          timestamp: 1000
-        }
+          timestamp: 1000,
+        },
       };
 
       const key1 = getEdgeKey(edge1);
@@ -831,20 +854,20 @@ describe("Explore", () => {
         interaction: {
           toolName: "tapOn",
           args: { text: "Test Button" },
-          timestamp: fakeTimer.now()
-        }
+          timestamp: fakeTimer.now(),
+        },
       };
       fakeGraph.addNode({
         screenName: "Screen1",
         firstSeenAt: fakeTimer.now(),
         lastSeenAt: fakeTimer.now(),
-        visitCount: 1
+        visitCount: 1,
       });
       fakeGraph.addNode({
         screenName: "Screen2",
         firstSeenAt: fakeTimer.now(),
         lastSeenAt: fakeTimer.now(),
-        visitCount: 1
+        visitCount: 1,
       });
       fakeGraph.addEdge(mockEdge);
 

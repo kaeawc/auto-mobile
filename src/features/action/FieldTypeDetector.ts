@@ -10,25 +10,25 @@ const ANDROID_PATTERNS = {
     "android.widget.AutoCompleteTextView",
     "android.widget.MultiAutoCompleteTextView",
     "androidx.appcompat.widget.AppCompatEditText",
-    "com.google.android.material.textfield.TextInputEditText"
+    "com.google.android.material.textfield.TextInputEditText",
   ],
   toggle: [
     "android.widget.Switch",
     "android.widget.ToggleButton",
     "androidx.appcompat.widget.SwitchCompat",
-    "com.google.android.material.switchmaterial.SwitchMaterial"
+    "com.google.android.material.switchmaterial.SwitchMaterial",
   ],
   checkbox: [
     "android.widget.CheckBox",
     "androidx.appcompat.widget.AppCompatCheckBox",
     "android.widget.RadioButton",
-    "androidx.appcompat.widget.AppCompatRadioButton"
+    "androidx.appcompat.widget.AppCompatRadioButton",
   ],
   dropdown: [
     "android.widget.Spinner",
     "androidx.appcompat.widget.AppCompatSpinner",
-    "android.widget.AutoCompleteTextView" // Can act as dropdown
-  ]
+    "android.widget.AutoCompleteTextView", // Can act as dropdown
+  ],
 };
 
 const IOS_PATTERNS = {
@@ -40,18 +40,13 @@ const IOS_PATTERNS = {
     // shouldSkipVerification below.
     "UISecureTextField",
     "UITextView",
-    "UISearchBar"
+    "UISearchBar",
   ],
-  toggle: [
-    "UISwitch"
-  ],
+  toggle: ["UISwitch"],
   checkbox: [
     // iOS doesn't have native checkbox, often uses custom views
   ],
-  dropdown: [
-    "UIPickerView",
-    "UIDatePicker"
-  ]
+  dropdown: ["UIPickerView", "UIDatePicker"],
 };
 
 /**
@@ -118,17 +113,21 @@ export class FieldTypeDetector {
 
   private matchesTogglePattern(className: string): boolean {
     const patterns = [...ANDROID_PATTERNS.toggle, ...IOS_PATTERNS.toggle];
-    return patterns.some(pattern => className.includes(pattern.toLowerCase()));
+    return patterns.some((pattern) => className.includes(pattern.toLowerCase()));
   }
 
   private matchesDropdownPattern(className: string): boolean {
     const patterns = [...ANDROID_PATTERNS.dropdown, ...IOS_PATTERNS.dropdown];
     // Exclude AutoCompleteTextView if it doesn't have dropdown indicators
-    return patterns.some(pattern => {
+    return patterns.some((pattern) => {
       const lowerPattern = pattern.toLowerCase();
       if (lowerPattern.includes("autocomplete")) {
         // Only match AutoCompleteTextView if it looks like a spinner/dropdown
-        return className.includes("spinner") || className.includes("dropdown") || className.includes("picker");
+        return (
+          className.includes("spinner") ||
+          className.includes("dropdown") ||
+          className.includes("picker")
+        );
       }
       return className.includes(lowerPattern);
     });
@@ -136,7 +135,7 @@ export class FieldTypeDetector {
 
   private matchesTextPattern(className: string): boolean {
     const patterns = [...ANDROID_PATTERNS.text, ...IOS_PATTERNS.text];
-    return patterns.some(pattern => className.includes(pattern.toLowerCase()));
+    return patterns.some((pattern) => className.includes(pattern.toLowerCase()));
   }
 
   /**
@@ -185,9 +184,11 @@ export class FieldTypeDetector {
    */
   isIOSElement(element: Element): boolean {
     const className = this.getClassName(element);
-    return IOS_PATTERNS.text.some(pattern => className.includes(pattern.toLowerCase())) ||
-           IOS_PATTERNS.toggle.some(pattern => className.includes(pattern.toLowerCase())) ||
-           IOS_PATTERNS.dropdown.some(pattern => className.includes(pattern.toLowerCase()));
+    return (
+      IOS_PATTERNS.text.some((pattern) => className.includes(pattern.toLowerCase())) ||
+      IOS_PATTERNS.toggle.some((pattern) => className.includes(pattern.toLowerCase())) ||
+      IOS_PATTERNS.dropdown.some((pattern) => className.includes(pattern.toLowerCase()))
+    );
   }
 
   /**

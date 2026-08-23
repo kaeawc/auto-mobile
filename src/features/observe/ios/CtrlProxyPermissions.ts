@@ -32,7 +32,7 @@ export class CtrlProxyPermissions {
     bundleId: string,
     permissions: string[],
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyResetPermissionsResult> {
     return sendCommand<CtrlProxyResetPermissionsResult>(this.context, {
       idPrefix: "resetPermissions",

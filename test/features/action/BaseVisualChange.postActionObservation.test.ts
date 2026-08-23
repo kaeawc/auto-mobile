@@ -27,8 +27,8 @@ describe("BaseVisualChange post-action observation", () => {
       screenSize: { width: 1080, height: 1920 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
       viewHierarchy: { hierarchy: {} },
-      ...overrides
-    } as unknown as ObserveResult);
+      ...overrides,
+    }) as unknown as ObserveResult;
 
   function createVisualChange(platform: "android" | "ios" = "ios"): BaseVisualChange {
     const device: BootedDevice = { name: "test-device", platform, deviceId: "device-123" };
@@ -55,12 +55,14 @@ describe("BaseVisualChange post-action observation", () => {
     // Tag each observation with its call index so the returned observation is
     // identifiable: a regression that keeps looping but stops threading each
     // attempt's return value through would surface as a wrong final updatedAt.
-    fakeObserveScreen.setObserveResult(index => makeObserve({ freshness: { isFresh: false }, updatedAt: index }));
+    fakeObserveScreen.setObserveResult((index) =>
+      makeObserve({ freshness: { isFresh: false }, updatedAt: index }),
+    );
 
     const result = await instance.observedInteraction(async () => ({ success: true }), {
       changeExpected: false,
       skipPreviousObserve: true,
-      overrideMinTimestamp: 1000
+      overrideMinTimestamp: 1000,
     });
 
     // 1 initial final-observe + 4 capped retries.
@@ -78,14 +80,14 @@ describe("BaseVisualChange post-action observation", () => {
     fakeObserveScreen.setObserveResult(
       makeObserve({
         viewHierarchy: { hierarchy: { error: "accessibility service unavailable" } },
-        freshness: { isFresh: false }
-      })
+        freshness: { isFresh: false },
+      }),
     );
 
     await instance.observedInteraction(async () => ({ success: true }), {
       changeExpected: false,
       skipPreviousObserve: true,
-      overrideMinTimestamp: 1000
+      overrideMinTimestamp: 1000,
     });
 
     // Exactly one observe: the errored hierarchy short-circuits all retries.
@@ -101,7 +103,7 @@ describe("BaseVisualChange post-action observation", () => {
     // internal re-observe must skip the device PNG capture.
     await instance.observedInteraction(async () => ({ success: true }), {
       changeExpected: false,
-      skipPreviousObserve: true
+      skipPreviousObserve: true,
     });
 
     const options = fakeObserveScreen.getExecuteOptions();
@@ -116,7 +118,7 @@ describe("BaseVisualChange post-action observation", () => {
     fakeObserveScreen.setObserveResult(makeObserve());
 
     await instance.observedInteraction(async () => ({ success: true }), {
-      changeExpected: false
+      changeExpected: false,
     });
 
     // Cache read once; the only execute() is the post-action final observe.

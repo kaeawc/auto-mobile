@@ -32,7 +32,7 @@ class ServerConfigPlanExecutionLockScopeProvider implements PlanExecutionLockSco
 export class ExecutionTrackerPlanExecutionLock implements PlanExecutionLock {
   constructor(
     private readonly tracker: ExecutionTracker,
-    private readonly scopeProvider: PlanExecutionLockScopeProvider
+    private readonly scopeProvider: PlanExecutionLockScopeProvider,
   ) {}
 
   evaluate(request: PlanExecutionLockRequest): PlanExecutionLockDecision {
@@ -58,6 +58,6 @@ export class ExecutionTrackerPlanExecutionLock implements PlanExecutionLock {
 export const createDefaultPlanExecutionLock = (): PlanExecutionLock => {
   return new ExecutionTrackerPlanExecutionLock(
     executionTracker,
-    new ServerConfigPlanExecutionLockScopeProvider()
+    new ServerConfigPlanExecutionLockScopeProvider(),
   );
 };

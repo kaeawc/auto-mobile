@@ -44,7 +44,7 @@ export async function installInMemoryNavManager(): Promise<InMemoryNavManagerHar
   TelemetryRecorder.resetInstance();
   const telemetrySpy = spyOn(
     TelemetryRecorder.getInstance(),
-    "recordNavigationEvent"
+    "recordNavigationEvent",
   ).mockResolvedValue(undefined);
 
   return {

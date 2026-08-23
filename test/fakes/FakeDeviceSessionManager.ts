@@ -186,7 +186,7 @@ export class FakeDeviceSessionManager implements DeviceSessionManager {
   async ensureDeviceReady(
     platform: SomePlatform,
     providedDeviceId?: string,
-    options?: DeviceReadyOptions
+    options?: DeviceReadyOptions,
   ): Promise<BootedDevice> {
     this.ensureDeviceReadyCalls++;
     this.lastOptions = options;
@@ -199,7 +199,7 @@ export class FakeDeviceSessionManager implements DeviceSessionManager {
 
     // Use provided device ID if given
     if (providedDeviceId) {
-      selectedDevice = this.connectedDevices.find(d => d.deviceId === providedDeviceId);
+      selectedDevice = this.connectedDevices.find((d) => d.deviceId === providedDeviceId);
       if (!selectedDevice) {
         throw new ActionableError(`Device ${providedDeviceId} not found`);
       }
@@ -208,7 +208,7 @@ export class FakeDeviceSessionManager implements DeviceSessionManager {
       if (platform === "either") {
         selectedDevice = this.connectedDevices[0];
       } else {
-        selectedDevice = this.connectedDevices.find(d => d.platform === platform);
+        selectedDevice = this.connectedDevices.find((d) => d.platform === platform);
       }
 
       if (!selectedDevice) {
@@ -254,7 +254,11 @@ export class FakeDeviceSessionManager implements DeviceSessionManager {
     return [...this.connectedPlatforms];
   }
 
-  async verifyDevice(deviceId: string, platform: Platform, options?: DeviceReadyOptions): Promise<void> {
+  async verifyDevice(
+    deviceId: string,
+    platform: Platform,
+    options?: DeviceReadyOptions,
+  ): Promise<void> {
     this.lastOptions = options;
     const attempts = (this.verificationAttempts.get(deviceId) || 0) + 1;
     this.verificationAttempts.set(deviceId, attempts);
@@ -269,15 +273,13 @@ export class FakeDeviceSessionManager implements DeviceSessionManager {
     }
 
     // Verify device exists in connected devices
-    const device = this.connectedDevices.find(d => d.deviceId === deviceId);
+    const device = this.connectedDevices.find((d) => d.deviceId === deviceId);
     if (!device) {
       throw new ActionableError(`Device ${deviceId} not found`);
     }
 
     if (device.platform !== platform) {
-      throw new ActionableError(
-        `Device ${deviceId} is ${device.platform}, not ${platform}`
-      );
+      throw new ActionableError(`Device ${deviceId} is ${device.platform}, not ${platform}`);
     }
   }
 
@@ -291,7 +293,7 @@ export class FakeDeviceSessionManager implements DeviceSessionManager {
       throw new ActionableError(`Android device ${deviceId} disconnected`);
     }
 
-    const device = this.connectedDevices.find(d => d.deviceId === deviceId);
+    const device = this.connectedDevices.find((d) => d.deviceId === deviceId);
     if (!device) {
       throw new ActionableError(`Android device ${deviceId} not found`);
     }
@@ -322,7 +324,7 @@ export class FakeDeviceSessionManager implements DeviceSessionManager {
       throw new ActionableError(`iOS device ${deviceId} disconnected`);
     }
 
-    const device = this.connectedDevices.find(d => d.deviceId === deviceId);
+    const device = this.connectedDevices.find((d) => d.deviceId === deviceId);
     if (!device) {
       throw new ActionableError(`iOS device ${deviceId} not found`);
     }
@@ -347,7 +349,7 @@ export class FakeDeviceSessionManager implements DeviceSessionManager {
     }
 
     // Filter devices based on platform
-    const availableDevices = this.connectedDevices.filter(d => d.platform === platform);
+    const availableDevices = this.connectedDevices.filter((d) => d.platform === platform);
 
     if (availableDevices.length === 0) {
       throw new ActionableError(`No ${platform} device found`);
@@ -366,7 +368,7 @@ export class FakeDeviceSessionManager implements DeviceSessionManager {
       throw new ActionableError("No Android devices available");
     }
 
-    const androidDevice = this.connectedDevices.find(d => d.platform === "android");
+    const androidDevice = this.connectedDevices.find((d) => d.platform === "android");
 
     if (!androidDevice) {
       throw new ActionableError("No Android device found");
@@ -384,7 +386,7 @@ export class FakeDeviceSessionManager implements DeviceSessionManager {
       throw new ActionableError("No iOS devices available");
     }
 
-    const iosDevice = this.connectedDevices.find(d => d.platform === "ios");
+    const iosDevice = this.connectedDevices.find((d) => d.platform === "ios");
 
     if (!iosDevice) {
       throw new ActionableError("No iOS device found");

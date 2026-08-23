@@ -8,7 +8,7 @@ describe("App file resources", () => {
     putFile: async () => {
       throw new Error("not used");
     },
-    listFiles: async request => ({
+    listFiles: async (request) => ({
       deviceId: request.deviceId,
       platform: "ios",
       appId: request.appId,
@@ -17,11 +17,12 @@ describe("App file resources", () => {
         {
           path: "fixtures/onboarding/welcome image.png",
           byteCount: 4,
-          resourceUri: "automobile:devices/device%201/apps/com.example.app/files/documents/fixtures/onboarding/welcome%20image.png",
+          resourceUri:
+            "automobile:devices/device%201/apps/com.example.app/files/documents/fixtures/onboarding/welcome%20image.png",
         },
       ],
     }),
-    readFile: async request => ({
+    readFile: async (request) => ({
       deviceId: request.deviceId,
       platform: "ios",
       appId: request.appId,
@@ -45,11 +46,11 @@ describe("App file resources", () => {
     registerAppFileResources(fakeService);
 
     const templates = ResourceRegistry.getTemplateDefinitions();
-    expect(templates.map(template => template.uriTemplate)).toContain(
-      "automobile:devices/{deviceId}/apps/{appId}/files/{container}"
+    expect(templates.map((template) => template.uriTemplate)).toContain(
+      "automobile:devices/{deviceId}/apps/{appId}/files/{container}",
     );
-    expect(templates.map(template => template.uriTemplate)).toContain(
-      "automobile:devices/{deviceId}/apps/{appId}/files/{container}/{path}"
+    expect(templates.map((template) => template.uriTemplate)).toContain(
+      "automobile:devices/{deviceId}/apps/{appId}/files/{container}/{path}",
     );
   });
 
@@ -57,7 +58,7 @@ describe("App file resources", () => {
     registerAppFileResources(fakeService);
 
     const match = ResourceRegistry.matchTemplate(
-      "automobile:devices/device%201/apps/com.example.app/files/documents"
+      "automobile:devices/device%201/apps/com.example.app/files/documents",
     );
     expect(match).toBeDefined();
 
@@ -73,7 +74,8 @@ describe("App file resources", () => {
     expect(payload.files[0]).toMatchObject({
       path: "fixtures/onboarding/welcome image.png",
       byteCount: 4,
-      resourceUri: "automobile:devices/device%201/apps/com.example.app/files/documents/fixtures/onboarding/welcome%20image.png",
+      resourceUri:
+        "automobile:devices/device%201/apps/com.example.app/files/documents/fixtures/onboarding/welcome%20image.png",
     });
   });
 
@@ -81,13 +83,13 @@ describe("App file resources", () => {
     registerAppFileResources(fakeService);
 
     const match = ResourceRegistry.matchTemplate(
-      "automobile:devices/device%201/apps/com.example.app/files/documents/fixtures/onboarding/welcome%20image.png"
+      "automobile:devices/device%201/apps/com.example.app/files/documents/fixtures/onboarding/welcome%20image.png",
     );
     expect(match).toBeDefined();
 
     const content = await match!.template.handler(match!.params);
     expect(content.uri).toBe(
-      "automobile:devices/device%201/apps/com.example.app/files/documents/fixtures/onboarding/welcome%20image.png"
+      "automobile:devices/device%201/apps/com.example.app/files/documents/fixtures/onboarding/welcome%20image.png",
     );
     expect(content.mimeType).toBe("application/octet-stream");
     expect(content.blob).toBe("AAEC/w==");
@@ -97,7 +99,7 @@ describe("App file resources", () => {
   test("reads UTF-8 app files as MCP text content", async () => {
     registerAppFileResources({
       ...fakeService,
-      readFile: async request => ({
+      readFile: async (request) => ({
         deviceId: request.deviceId,
         platform: "android",
         appId: request.appId,
@@ -105,21 +107,21 @@ describe("App file resources", () => {
         path: request.path,
         byteCount: 17,
         mimeType: "text/plain; charset=utf-8",
-        text: "{\"enabled\":true}\n",
+        text: '{"enabled":true}\n',
       }),
     });
 
     const match = ResourceRegistry.matchTemplate(
-      "automobile:devices/emulator-5554/apps/com.example.app/files/externalFiles/config/settings.json"
+      "automobile:devices/emulator-5554/apps/com.example.app/files/externalFiles/config/settings.json",
     );
     expect(match).toBeDefined();
 
     const content = await match!.template.handler(match!.params);
     expect(content.uri).toBe(
-      "automobile:devices/emulator-5554/apps/com.example.app/files/externalFiles/config/settings.json"
+      "automobile:devices/emulator-5554/apps/com.example.app/files/externalFiles/config/settings.json",
     );
     expect(content.mimeType).toBe("text/plain; charset=utf-8");
-    expect(content.text).toBe("{\"enabled\":true}\n");
+    expect(content.text).toBe('{"enabled":true}\n');
     expect(content.blob).toBeUndefined();
   });
 });

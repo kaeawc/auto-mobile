@@ -94,7 +94,7 @@ const CONSTRAINT_CODE_PREFIX = "SQLITE_CONSTRAINT";
 export function classifySqliteError(error: unknown): SqliteErrorAction {
   const code = extractSqliteCode(error);
   if (code !== undefined) {
-    if (RETRYABLE_CODE_PREFIXES.some(prefix => code.startsWith(prefix))) {
+    if (RETRYABLE_CODE_PREFIXES.some((prefix) => code.startsWith(prefix))) {
       return "retryable";
     }
     if (code.startsWith(CONSTRAINT_CODE_PREFIX)) {

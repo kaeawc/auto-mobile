@@ -76,7 +76,7 @@ export class FakeVideoCaptureBackend implements VideoCaptureBackend {
   }
 
   waitForStopCall(): Promise<RecordingHandle> {
-    return new Promise(resolve => {
+    return new Promise((resolve) => {
       this.stopResolvers.push(resolve);
     });
   }

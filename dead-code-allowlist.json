@@ -17,10 +17,7 @@
     "src/vision/index.ts",
     "test/helpers/test-database.ts"
   ],
-  "ignorePathPatterns": [
-    "src/daemon/",
-    "scripts/memory/"
-  ],
+  "ignorePathPatterns": ["src/daemon/", "scripts/memory/"],
   "ignoreEntries": [
     {
       "file": "src/features/action/UninstallApp.ts",

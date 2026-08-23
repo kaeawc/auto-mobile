@@ -87,8 +87,12 @@ export class McpCallRecorder {
   }
 
   record(toolName: string, args: Record<string, unknown>): void {
-    if (!this.recording) {return;}
-    if (!PLAN_RELEVANT_TOOLS.has(toolName)) {return;}
+    if (!this.recording) {
+      return;
+    }
+    if (!PLAN_RELEVANT_TOOLS.has(toolName)) {
+      return;
+    }
 
     const params = stripInternalParams(args);
     this.steps.push({ tool: toolName, params });

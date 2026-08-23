@@ -53,7 +53,7 @@ async function indexColumns(db: Kysely<unknown>, name: string): Promise<string[]
   const result = await sql<{ seqno: number; name: string }>`
     SELECT seqno, name FROM pragma_index_info(${name}) ORDER BY seqno
   `.execute(db);
-  return result.rows.map(r => r.name);
+  return result.rows.map((r) => r.name);
 }
 
 /**
@@ -70,23 +70,23 @@ async function buildPreMigrationSchema(bunDb: BunDatabase, db: Kysely<unknown>):
   for (const table of TABLES) {
     await db.schema
       .createTable(table)
-      .addColumn("id", "integer", col => col.primaryKey().autoIncrement())
-      .addColumn("build_key_id", "integer", col => col.notNull())
-      .addColumn("last_seen_at", "integer", col => col.notNull())
+      .addColumn("id", "integer", (col) => col.primaryKey().autoIncrement())
+      .addColumn("build_key_id", "integer", (col) => col.notNull())
+      .addColumn("last_seen_at", "integer", (col) => col.notNull())
       .execute();
     await db.schema.createIndex(buildIndexFor(table)).on(table).column("build_key_id").execute();
   }
   await db.schema
     .createTable("navigation_build_keys")
-    .addColumn("id", "integer", col => col.primaryKey())
+    .addColumn("id", "integer", (col) => col.primaryKey())
     .addColumn("app_id", "text")
     .execute();
 
   const insertNode = bunDb.prepare(
-    "INSERT INTO navigation_node_observations (build_key_id, last_seen_at) VALUES (?, ?)"
+    "INSERT INTO navigation_node_observations (build_key_id, last_seen_at) VALUES (?, ?)",
   );
   const insertEdge = bunDb.prepare(
-    "INSERT INTO navigation_edge_observations (build_key_id, last_seen_at) VALUES (?, ?)"
+    "INSERT INTO navigation_edge_observations (build_key_id, last_seen_at) VALUES (?, ?)",
   );
   const seed = bunDb.transaction((rows: number) => {
     for (let i = 0; i < rows; i++) {
@@ -103,11 +103,14 @@ async function buildPreMigrationSchema(bunDb: BunDatabase, db: Kysely<unknown>):
 }
 
 /** EXPLAIN QUERY PLAN detail lines (newline-joined) for a compiled kysely query. */
-function planFor(bunDb: BunDatabase, compiled: { sql: string; parameters: readonly unknown[] }): string {
+function planFor(
+  bunDb: BunDatabase,
+  compiled: { sql: string; parameters: readonly unknown[] },
+): string {
   const rows = bunDb
     .query(`EXPLAIN QUERY PLAN ${compiled.sql}`)
     .all(...(compiled.parameters as unknown[])) as Array<{ detail: string }>;
-  return rows.map(r => r.detail).join("\n");
+  return rows.map((r) => r.detail).join("\n");
 }
 
 const TEMP_SORT = "USE TEMP B-TREE FOR ORDER BY";
@@ -126,12 +129,36 @@ interface EvictionCase {
  */
 function evictionCases(db: Kysely<Database>): EvictionCase[] {
   return [
-    { label: "node global", table: "navigation_node_observations", sql: buildOldestNodeEvictableQuery(db, null, [], 500).compile() },
-    { label: "node app-scoped", table: "navigation_node_observations", sql: buildOldestNodeEvictableQuery(db, "app1", [], 500).compile() },
-    { label: "node protected", table: "navigation_node_observations", sql: buildOldestNodeEvictableQuery(db, null, [5, 7], 500).compile() },
-    { label: "edge global", table: "navigation_edge_observations", sql: buildOldestEdgeEvictableQuery(db, null, [], 500).compile() },
-    { label: "edge app-scoped", table: "navigation_edge_observations", sql: buildOldestEdgeEvictableQuery(db, "app1", [], 500).compile() },
-    { label: "edge protected", table: "navigation_edge_observations", sql: buildOldestEdgeEvictableQuery(db, null, [5, 7], 500).compile() },
+    {
+      label: "node global",
+      table: "navigation_node_observations",
+      sql: buildOldestNodeEvictableQuery(db, null, [], 500).compile(),
+    },
+    {
+      label: "node app-scoped",
+      table: "navigation_node_observations",
+      sql: buildOldestNodeEvictableQuery(db, "app1", [], 500).compile(),
+    },
+    {
+      label: "node protected",
+      table: "navigation_node_observations",
+      sql: buildOldestNodeEvictableQuery(db, null, [5, 7], 500).compile(),
+    },
+    {
+      label: "edge global",
+      table: "navigation_edge_observations",
+      sql: buildOldestEdgeEvictableQuery(db, null, [], 500).compile(),
+    },
+    {
+      label: "edge app-scoped",
+      table: "navigation_edge_observations",
+      sql: buildOldestEdgeEvictableQuery(db, "app1", [], 500).compile(),
+    },
+    {
+      label: "edge protected",
+      table: "navigation_edge_observations",
+      sql: buildOldestEdgeEvictableQuery(db, null, [5, 7], 500).compile(),
+    },
   ];
 }
 
@@ -163,7 +190,7 @@ describe("2026_08_22_002_navigation_observation_eviction_index migration", () =>
   });
 
   test("the real global eviction queries temp-sort before the migration", () => {
-    for (const c of evictionCases(db).filter(c => c.label.endsWith("global"))) {
+    for (const c of evictionCases(db).filter((c) => c.label.endsWith("global"))) {
       expect(planFor(bunDb, c.sql)).toContain(TEMP_SORT);
     }
   });
@@ -191,7 +218,7 @@ describe("2026_08_22_002_navigation_observation_eviction_index migration", () =>
 
     expect(after).toEqual(before);
     // Oldest-first: last_seen_at ascending, ties broken by id ascending.
-    const seen = after.map(r => r.last_seen_at);
+    const seen = after.map((r) => r.last_seen_at);
     expect([...seen].sort((a, b) => a - b)).toEqual(seen);
   });
 

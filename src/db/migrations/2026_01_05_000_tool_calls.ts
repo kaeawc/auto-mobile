@@ -4,13 +4,11 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await db.schema
     .createTable("tool_calls")
     .ifNotExists()
-    .addColumn("id", "integer", col => col.primaryKey().autoIncrement())
-    .addColumn("tool_name", "text", col => col.notNull())
-    .addColumn("timestamp", "text", col => col.notNull())
+    .addColumn("id", "integer", (col) => col.primaryKey().autoIncrement())
+    .addColumn("tool_name", "text", (col) => col.notNull())
+    .addColumn("timestamp", "text", (col) => col.notNull())
     .addColumn("session_uuid", "text")
-    .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo(sql`(datetime('now'))`)
-    )
+    .addColumn("created_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
     .execute();
 
   await db.schema

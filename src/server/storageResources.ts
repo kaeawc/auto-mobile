@@ -33,7 +33,7 @@ interface StorageCache {
 
 const cache: StorageCache = {
   files: new Map(),
-  entries: new Map()
+  entries: new Map(),
 };
 
 /**
@@ -44,7 +44,7 @@ function generateHash(data: unknown): string {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
     const char = str.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
+    hash = (hash << 5) - hash + char;
     hash = hash & hash;
   }
   return hash.toString(16);
@@ -58,13 +58,17 @@ async function findBootedDevice(deviceId: string): Promise<BootedDevice | null> 
     const manager = PlatformDeviceManagerFactory.getInstance();
     // Try Android first
     const androidDevices = await manager.getBootedDevices("android");
-    const android = androidDevices.find(d => d.deviceId === deviceId);
-    if (android) {return android;}
+    const android = androidDevices.find((d) => d.deviceId === deviceId);
+    if (android) {
+      return android;
+    }
 
     // Try iOS
     const iosDevices = await manager.getBootedDevices("ios");
-    const ios = iosDevices.find(d => d.deviceId === deviceId);
-    if (ios) {return ios;}
+    const ios = iosDevices.find((d) => d.deviceId === deviceId);
+    if (ios) {
+      return ios;
+    }
 
     return null;
   } catch (error) {
@@ -76,7 +80,10 @@ async function findBootedDevice(deviceId: string): Promise<BootedDevice | null> 
 /**
  * List preference files using the platform-appropriate client
  */
-async function listPreferenceFilesForDevice(device: BootedDevice, packageName: string): Promise<PreferenceFile[]> {
+async function listPreferenceFilesForDevice(
+  device: BootedDevice,
+  packageName: string,
+): Promise<PreferenceFile[]> {
   if (device.platform === "android") {
     const client = AndroidCtrlProxyClient.getInstance(device, defaultAdbClientFactory);
     return client.listPreferenceFiles(packageName);
@@ -90,7 +97,11 @@ async function listPreferenceFilesForDevice(device: BootedDevice, packageName: s
 /**
  * Get preference entries using the platform-appropriate client
  */
-async function getPreferenceEntriesForDevice(device: BootedDevice, packageName: string, fileName: string): Promise<KeyValueEntry[]> {
+async function getPreferenceEntriesForDevice(
+  device: BootedDevice,
+  packageName: string,
+  fileName: string,
+): Promise<KeyValueEntry[]> {
   if (device.platform === "android") {
     const client = AndroidCtrlProxyClient.getInstance(device, defaultAdbClientFactory);
     return client.getPreferenceEntries(packageName, fileName);
@@ -137,7 +148,9 @@ async function getStorageFilesResource(params: Record<string, string>): Promise<
   const decodedPackage = decodeURIComponent(packageName);
   const uri = buildFilesUri(deviceId, decodedPackage);
 
-  logger.info(`[StorageResources] getStorageFilesResource: deviceId=${deviceId}, packageName=${decodedPackage}`);
+  logger.info(
+    `[StorageResources] getStorageFilesResource: deviceId=${deviceId}, packageName=${decodedPackage}`,
+  );
 
   try {
     const device = await findBootedDevice(deviceId);
@@ -146,11 +159,13 @@ async function getStorageFilesResource(params: Record<string, string>): Promise<
       return {
         uri,
         mimeType: "application/json",
-        text: JSON.stringify({ error: `Device not found or not booted: ${deviceId}` }, null, 2)
+        text: JSON.stringify({ error: `Device not found or not booted: ${deviceId}` }, null, 2),
       };
     }
 
-    logger.info(`[StorageResources] Found device: ${device.deviceId} (${device.platform}), calling listPreferenceFiles`);
+    logger.info(
+      `[StorageResources] Found device: ${device.deviceId} (${device.platform}), calling listPreferenceFiles`,
+    );
     const files = await listPreferenceFilesForDevice(device, decodedPackage);
     logger.info(`[StorageResources] listPreferenceFiles returned ${files.length} files`);
     const lastUpdated = new Date().toISOString();
@@ -170,21 +185,25 @@ async function getStorageFilesResource(params: Record<string, string>): Promise<
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify({
-        deviceId,
-        packageName: decodedPackage,
-        platform: device.platform,
-        files,
-        totalCount: files.length,
-        lastUpdated
-      }, null, 2)
+      text: JSON.stringify(
+        {
+          deviceId,
+          packageName: decodedPackage,
+          platform: device.platform,
+          files,
+          totalCount: files.length,
+          lastUpdated,
+        },
+        null,
+        2,
+      ),
     };
   } catch (error) {
     logger.error(`[StorageResources] Failed to list storage files: ${error}`);
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify({ error: `Failed to list storage files: ${error}` }, null, 2)
+      text: JSON.stringify({ error: `Failed to list storage files: ${error}` }, null, 2),
     };
   }
 }
@@ -204,7 +223,7 @@ async function getStorageEntriesResource(params: Record<string, string>): Promis
       return {
         uri,
         mimeType: "application/json",
-        text: JSON.stringify({ error: `Device not found or not booted: ${deviceId}` }, null, 2)
+        text: JSON.stringify({ error: `Device not found or not booted: ${deviceId}` }, null, 2),
       };
     }
 
@@ -216,7 +235,9 @@ async function getStorageEntriesResource(params: Record<string, string>): Promis
     const cacheKey = getEntriesCacheKey(deviceId, decodedPackage, decodedFileName);
     const cached = cache.entries.get(cacheKey);
     if (cached && cached.hash !== hash) {
-      logger.info(`[StorageResources] Storage entries changed for ${decodedPackage}/${decodedFileName} on ${deviceId}`);
+      logger.info(
+        `[StorageResources] Storage entries changed for ${decodedPackage}/${decodedFileName} on ${deviceId}`,
+      );
       void ResourceRegistry.notifyResourceUpdated(uri);
     }
 
@@ -226,22 +247,26 @@ async function getStorageEntriesResource(params: Record<string, string>): Promis
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify({
-        deviceId,
-        packageName: decodedPackage,
-        fileName: decodedFileName,
-        platform: device.platform,
-        entries,
-        totalCount: entries.length,
-        lastUpdated
-      }, null, 2)
+      text: JSON.stringify(
+        {
+          deviceId,
+          packageName: decodedPackage,
+          fileName: decodedFileName,
+          platform: device.platform,
+          entries,
+          totalCount: entries.length,
+          lastUpdated,
+        },
+        null,
+        2,
+      ),
     };
   } catch (error) {
     logger.error(`[StorageResources] Failed to get storage entries: ${error}`);
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify({ error: `Failed to get storage entries: ${error}` }, null, 2)
+      text: JSON.stringify({ error: `Failed to get storage entries: ${error}` }, null, 2),
     };
   }
 }
@@ -256,7 +281,7 @@ export function registerStorageResources(): void {
     "App Storage Files",
     "List all storage files in an app (Android SharedPreferences or iOS UserDefaults suites). Requires app to have AutoMobile SDK with storage inspection enabled.",
     "application/json",
-    getStorageFilesResource
+    getStorageFilesResource,
   );
 
   // Register template for getting storage entries
@@ -265,7 +290,7 @@ export function registerStorageResources(): void {
     "Storage File Entries",
     "Get all key-value entries from a storage file (Android SharedPreferences or iOS UserDefaults suite).",
     "application/json",
-    getStorageEntriesResource
+    getStorageEntriesResource,
   );
 
   logger.info("[StorageResources] Registered storage resources");

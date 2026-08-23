@@ -40,8 +40,8 @@ beforeAll(() => {
 // miss a later, broader override that also enables the rule (widening its
 // scope), so uniqueness is part of the guarantee.
 function filesScopingRule(rule: string): string[] | undefined {
-  const matches = config.overrides.filter(o =>
-    o.rules ? Object.prototype.hasOwnProperty.call(o.rules, rule) : false
+  const matches = config.overrides.filter((o) =>
+    o.rules ? Object.prototype.hasOwnProperty.call(o.rules, rule) : false,
   );
   expect(matches.length, `${rule} must be gated by exactly one override`).toBe(1);
   return matches[0]?.files;
@@ -59,7 +59,9 @@ describe(".oxlintrc.json rule scoping (via oxlint --print-config)", () => {
   });
 
   test("stress-explicit-timeout is scoped to test/stress/**", () => {
-    expect(filesScopingRule("auto-mobile/stress-explicit-timeout")).toEqual(["test/stress/**/*.ts"]);
+    expect(filesScopingRule("auto-mobile/stress-explicit-timeout")).toEqual([
+      "test/stress/**/*.ts",
+    ]);
   });
 
   test("no-bare-expect is scoped to test/**", () => {

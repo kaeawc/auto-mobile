@@ -27,7 +27,7 @@ class FakeBatchTelemetryRepository implements BatchTelemetryRepository {
 
   /** Make the next recordLogEvents block until releaseLogFlush() is called. */
   holdNextLogFlush(): void {
-    this.pendingLogGate = new Promise<void>(resolve => {
+    this.pendingLogGate = new Promise<void>((resolve) => {
       this.releaseLogGate = resolve;
     });
   }
@@ -108,10 +108,10 @@ describe("TelemetryEventBuffer", () => {
     buffer.addLog(makeLog("b"));
     buffer.addLog(makeLog("c"));
     // Let the fire-and-forget cap flush settle without requesting one ourselves.
-    await new Promise<void>(resolve => setImmediate(resolve));
+    await new Promise<void>((resolve) => setImmediate(resolve));
 
     expect(repository.logBatches).toHaveLength(1);
-    expect(repository.logBatches[0].map(r => r.message)).toEqual(["a", "b", "c"]);
+    expect(repository.logBatches[0].map((r) => r.message)).toEqual(["a", "b", "c"]);
   });
 
   it("counts rows across all kinds toward the cap", async () => {
@@ -119,10 +119,10 @@ describe("TelemetryEventBuffer", () => {
     buffer.addLog(makeLog("a"));
     buffer.addOs(makeOs("resume"));
     buffer.addLog(makeLog("b"));
-    await new Promise<void>(resolve => setImmediate(resolve));
+    await new Promise<void>((resolve) => setImmediate(resolve));
 
-    expect(repository.logBatches[0].map(r => r.message)).toEqual(["a", "b"]);
-    expect(repository.osBatches[0].map(r => r.kind)).toEqual(["resume"]);
+    expect(repository.logBatches[0].map((r) => r.message)).toEqual(["a", "b"]);
+    expect(repository.osBatches[0].map((r) => r.kind)).toEqual(["resume"]);
   });
 
   it("flushes buffered events when the interval timer fires", async () => {
@@ -136,9 +136,9 @@ describe("TelemetryEventBuffer", () => {
 
     timer.advanceTime(250);
     // Let the interval's fire-and-forget flush settle without requesting one ourselves.
-    await new Promise<void>(resolve => setImmediate(resolve));
+    await new Promise<void>((resolve) => setImmediate(resolve));
 
-    expect(repository.logBatches[0].map(r => r.message)).toEqual(["tick"]);
+    expect(repository.logBatches[0].map((r) => r.message)).toEqual(["tick"]);
   });
 
   it("drains remaining events on stop()", async () => {
@@ -148,7 +148,7 @@ describe("TelemetryEventBuffer", () => {
 
     await buffer.stop();
 
-    expect(repository.logBatches[0].map(r => r.message)).toEqual(["leftover"]);
+    expect(repository.logBatches[0].map((r) => r.message)).toEqual(["leftover"]);
     // The interval must be cleared so no timer keeps the process alive.
     expect(timer.getPendingIntervalCount()).toBe(0);
   });
@@ -162,7 +162,7 @@ describe("TelemetryEventBuffer", () => {
     await buffer.flush();
 
     expect(repository.logBatches).toHaveLength(0);
-    expect(repository.osBatches[0].map(r => r.kind)).toEqual(["resume"]);
+    expect(repository.osBatches[0].map((r) => r.kind)).toEqual(["resume"]);
   });
 
   it("emits nothing to the repository when there is nothing buffered", async () => {
@@ -179,7 +179,7 @@ describe("TelemetryEventBuffer", () => {
     repository.holdNextLogFlush();
     const firstFlush = buffer.flush();
     // Let doFlush snapshot+clear the buffer and park on the repository gate.
-    await new Promise<void>(resolve => setImmediate(resolve));
+    await new Promise<void>((resolve) => setImmediate(resolve));
 
     // Arrives while the first flush is awaiting the repository — must not join the
     // in-flight batch (already snapshotted) nor be lost.
@@ -188,10 +188,10 @@ describe("TelemetryEventBuffer", () => {
     repository.releaseLogFlush();
     await firstFlush;
 
-    expect(repository.logBatches[0].map(r => r.message)).toEqual(["first"]);
+    expect(repository.logBatches[0].map((r) => r.message)).toEqual(["first"]);
 
     await buffer.flush();
-    expect(repository.logBatches[1].map(r => r.message)).toEqual(["second"]);
+    expect(repository.logBatches[1].map((r) => r.message)).toEqual(["second"]);
   });
 
   it("serializes overlapping flushes so batches never interleave", async () => {
@@ -201,7 +201,7 @@ describe("TelemetryEventBuffer", () => {
     repository.holdNextLogFlush();
     const firstFlush = buffer.flush();
     // Let the first flush snapshot ["first"] and park on the repository gate.
-    await new Promise<void>(resolve => setImmediate(resolve));
+    await new Promise<void>((resolve) => setImmediate(resolve));
 
     // A second flush requested while the first is still blocked must queue behind
     // it — crucially, its buffer snapshot must not happen until the first flush
@@ -221,7 +221,7 @@ describe("TelemetryEventBuffer", () => {
     await Promise.all([firstFlush, secondFlush]);
 
     expect(repository.logBatches).toHaveLength(2);
-    expect(repository.logBatches[0].map(r => r.message)).toEqual(["first"]);
-    expect(repository.logBatches[1].map(r => r.message)).toEqual(["second", "third"]);
+    expect(repository.logBatches[0].map((r) => r.message)).toEqual(["first"]);
+    expect(repository.logBatches[1].map((r) => r.message)).toEqual(["second", "third"]);
   });
 });

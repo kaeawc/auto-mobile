@@ -45,7 +45,6 @@ interface CliHelpParameterInfo {
 
 // Initialize tool registry for CLI mode
 function initializeCliTools(): void {
-
   // Register all tool categories
   registerObserveTools();
   registerInteractionTools();
@@ -128,8 +127,12 @@ function coerceCliValue(raw: string, declared: DeclaredType | undefined): unknow
     case "bigint":
       return asDeclaredNumber(raw);
     case "boolean":
-      if (raw === "true") { return true; }
-      if (raw === "false") { return false; }
+      if (raw === "true") {
+        return true;
+      }
+      if (raw === "false") {
+        return false;
+      }
       return bestEffort();
     default:
       return bestEffort();
@@ -201,7 +204,7 @@ function getDeclaredParamTypes(toolName: string): Record<string, DeclaredType> |
   return Object.fromEntries(
     [...byParam.entries()]
       .filter(([, entry]) => entry.types.size === 1)
-      .map(([key, entry]) => [key, { type: [...entry.types][0], nullable: entry.nullable }])
+      .map(([key, entry]) => [key, { type: [...entry.types][0], nullable: entry.nullable }]),
   );
 }
 
@@ -218,7 +221,13 @@ function getDeclaredParamTypes(toolName: string): Record<string, DeclaredType> |
  * coerces as a string rather than falling through.
  */
 const SCHEMA_WRAPPER_TYPES = new Set([
-  "optional", "nullable", "default", "readonly", "catch", "branded", "lazy"
+  "optional",
+  "nullable",
+  "default",
+  "readonly",
+  "catch",
+  "branded",
+  "lazy",
 ]);
 
 /** The zod type name of a schema, normalized ("ZodString" -> "string"). */
@@ -292,9 +301,15 @@ function collectSchemaShapes(schema: any): Record<string, any>[] {
   return [];
 }
 
-export function parseCliArgs(args: string[]): { toolName: string; sessionUuid?: string; params: Record<string, any> } {
+export function parseCliArgs(args: string[]): {
+  toolName: string;
+  sessionUuid?: string;
+  params: Record<string, any>;
+} {
   if (args.length === 0) {
-    throw new ActionableError("No tool name provided. Usage: --cli [--session-uuid <uuid>] <tool-name> [--param value ...]");
+    throw new ActionableError(
+      "No tool name provided. Usage: --cli [--session-uuid <uuid>] <tool-name> [--param value ...]",
+    );
   }
 
   let toolNameIndex = 0;
@@ -355,23 +370,23 @@ export function parseCliArgs(args: string[]): { toolName: string; sessionUuid?: 
  * threading can be observed without globally mocking the daemonMcpProxy module
  * (which would replace the real DaemonMcpProxy that daemonMcpProxy.test.ts needs).
  */
-let daemonProxyFactory: (config: DaemonMcpProxyConfig) => DaemonMcpProxy =
-  config => new DaemonMcpProxy(config);
+let daemonProxyFactory: (config: DaemonMcpProxyConfig) => DaemonMcpProxy = (config) =>
+  new DaemonMcpProxy(config);
 
 export function setDaemonProxyFactoryForTesting(
-  factory: (config: DaemonMcpProxyConfig) => DaemonMcpProxy
+  factory: (config: DaemonMcpProxyConfig) => DaemonMcpProxy,
 ): void {
   daemonProxyFactory = factory;
 }
 
 export function resetDaemonProxyFactoryForTesting(): void {
-  daemonProxyFactory = config => new DaemonMcpProxy(config);
+  daemonProxyFactory = (config) => new DaemonMcpProxy(config);
 }
 
 async function runToolViaDaemon(
   toolName: string,
   params: Record<string, any>,
-  daemonOptions?: DaemonOptions
+  daemonOptions?: DaemonOptions,
 ): Promise<any> {
   const proxy = daemonProxyFactory({ daemonOptions });
 
@@ -380,7 +395,7 @@ async function runToolViaDaemon(
     if (result === null) {
       throw new ActionableError(
         "Daemon returned null result. This may indicate a daemon connectivity issue. " +
-        `Try: bunx ${resolveDaemonInstallSpecifier()} --daemon restart`
+          `Try: bunx ${resolveDaemonInstallSpecifier()} --daemon restart`,
       );
     }
     return result;
@@ -388,7 +403,7 @@ async function runToolViaDaemon(
     if (error instanceof DaemonUnavailableError) {
       throw new ActionableError(
         `Daemon became unavailable during tool execution: ${error.message}. ` +
-        `Try: auto-mobile --daemon restart`
+          `Try: auto-mobile --daemon restart`,
       );
     }
     if (error instanceof ActionableError) {
@@ -396,8 +411,7 @@ async function runToolViaDaemon(
     }
     const message = errorMessage(error);
     throw new ActionableError(
-      `Error calling daemon: ${message}. ` +
-      `Try: auto-mobile --daemon restart`
+      `Error calling daemon: ${message}. ` + `Try: auto-mobile --daemon restart`,
     );
   } finally {
     // Always close the proxy connection to prevent connection leaks
@@ -432,7 +446,7 @@ async function runDoctorViaDaemon(params: Record<string, any>): Promise<any> {
     if (result === null) {
       throw new ActionableError(
         "Daemon returned null result for doctor. " +
-        `Try: bunx ${resolveDaemonInstallSpecifier()} --daemon restart`
+          `Try: bunx ${resolveDaemonInstallSpecifier()} --daemon restart`,
       );
     }
     return result;
@@ -482,7 +496,12 @@ async function runDoctorCommand(params: Record<string, any>): Promise<void> {
 async function handleDoctorResult(result: any, jsonOutput: boolean): Promise<void> {
   // Extract the report from MCP response format
   let report = result;
-  if (result && typeof result === "object" && "content" in result && Array.isArray(result.content)) {
+  if (
+    result &&
+    typeof result === "object" &&
+    "content" in result &&
+    Array.isArray(result.content)
+  ) {
     if (result.content.length > 0 && result.content[0].type === "text") {
       try {
         report = JSON.parse(result.content[0].text);
@@ -523,7 +542,12 @@ function handleToolResult(result: any, toolName: string): void {
   // Check if the result indicates failure and exit with code 1
   // Handle both direct result format and MCP content format
   let actualResult = result;
-  if (result && typeof result === "object" && "content" in result && Array.isArray(result.content)) {
+  if (
+    result &&
+    typeof result === "object" &&
+    "content" in result &&
+    Array.isArray(result.content)
+  ) {
     // MCP format - extract from content array
     if (result.content.length > 0 && result.content[0].type === "text") {
       try {
@@ -545,7 +569,9 @@ function handleToolResult(result: any, toolName: string): void {
     if (toolName === "executePlan") {
       console.error(`Executed ${actualResult.executedSteps} of ${actualResult.totalSteps} steps`);
       if (actualResult.failedStep) {
-        console.error(`Failed at step ${actualResult.failedStep.stepIndex + 1}: ${actualResult.failedStep.tool}`);
+        console.error(
+          `Failed at step ${actualResult.failedStep.stepIndex + 1}: ${actualResult.failedStep.tool}`,
+        );
         console.error(`Step error: ${actualResult.failedStep.error}`);
       }
     }
@@ -597,7 +623,6 @@ export async function runCliCommand(args: string[], daemonOptions?: DaemonOption
 
     // Note: Session cleanup for executePlan now happens automatically on the daemon side
     // See toolRegistry.ts registerDeviceAware() finally block
-
   } catch (error) {
     if (error instanceof ActionableError) {
       logger.error(`CLI Error: ${error.message}`);
@@ -661,14 +686,12 @@ Session-based Execution:
     "getAndroid",
     "getApple",
     "killDevice",
-    "checkRunningDevices"
+    "checkRunningDevices",
   ];
-  const systemConfigTools = [
-    "changeLocalization"
-  ];
+  const systemConfigTools = ["changeLocalization"];
 
   // Group tools by category (based on their prefixes or common patterns)
-  tools.forEach(tool => {
+  tools.forEach((tool) => {
     let category = "General";
 
     if (systemConfigTools.includes(tool.name)) {
@@ -699,13 +722,15 @@ Session-based Execution:
   // Display tools by category
   categories.forEach((toolList, category) => {
     console.log(`\n${category}:`);
-    toolList.forEach(tool => {
+    toolList.forEach((tool) => {
       console.log(`  ${tool.name.padEnd(25)} - ${tool.description}`);
     });
   });
 
   console.log(`\nTotal: ${tools.length} tools available`);
-  console.log(`\nUse 'bunx ${installSpecifier} --cli help <tool-name>' for detailed information about a specific tool.`);
+  console.log(
+    `\nUse 'bunx ${installSpecifier} --cli help <tool-name>' for detailed information about a specific tool.`,
+  );
 }
 
 // Show help for a specific tool
@@ -770,12 +795,11 @@ export function getCliHelpSchemaShape(schema: any): CliHelpSchemaShape {
 }
 
 export function getCliHelpParameterInfo(schema: any): CliHelpParameterInfo {
-  const isOptional = typeof schema?.isOptional === "function"
-    ? schema.isOptional()
-    : schema?._def?.typeName === "ZodOptional";
-  const actualType = isOptional
-    ? schema?._def?.innerType ?? schema
-    : schema;
+  const isOptional =
+    typeof schema?.isOptional === "function"
+      ? schema.isOptional()
+      : schema?._def?.typeName === "ZodOptional";
+  const actualType = isOptional ? (schema?._def?.innerType ?? schema) : schema;
   const rawTypeName = actualType?._def?.typeName ?? actualType?._def?.type ?? "unknown";
   const typeName = String(rawTypeName).replace(/^Zod/, "").toLowerCase();
 

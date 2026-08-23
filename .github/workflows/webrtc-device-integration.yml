@@ -90,7 +90,7 @@ jobs:
             AUTOMOBILE_VIDEO_SERVER_JAR="$GITHUB_WORKSPACE/android/video-server/build/libs/automobile-video.jar" \
             AUTOMOBILE_REQUIRE_VIDEO_SERVER=1 \
               bun run test:integration:webrtc-device
-          working-directory: './android/'
+          working-directory: "./android/"
           accessibility-apk-path: control-proxy/build/outputs/apk/debug/control-proxy-debug.apk
       # Print the legend for reading result.txt / stage-latency.json and the
       # benign chrome.log/mediamtx.log ERROR lines (#4308). if: always() so it

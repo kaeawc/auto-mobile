@@ -110,7 +110,7 @@ describe("removeTempDbDir (issue #2916)", () => {
 
   test.each(["EPERM", "ENOTEMPTY"])(
     "treats %s as a transient Windows lock and gives up gracefully",
-    async code => {
+    async (code) => {
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
       const rm = async () => {
@@ -129,7 +129,7 @@ describe("removeTempDbDir (issue #2916)", () => {
       });
 
       expect(gaveUp).toBe(true);
-    }
+    },
   );
 
   test("removes a real temp dir (and its contents) through the default rm/timer", async () => {
@@ -153,7 +153,7 @@ describe("removeTempDbDir (issue #2916)", () => {
     };
 
     await expect(
-      removeTempDbDir("/tmp/auto-mobile-locked", { rm, maxAttempts: 2, delayMs: 1 })
+      removeTempDbDir("/tmp/auto-mobile-locked", { rm, maxAttempts: 2, delayMs: 1 }),
     ).resolves.toBeUndefined();
   });
 
@@ -167,7 +167,7 @@ describe("removeTempDbDir (issue #2916)", () => {
     };
 
     await expect(
-      removeTempDbDir("/tmp/auto-mobile-x", { rm, timer, maxAttempts: 5, delayMs: 50 })
+      removeTempDbDir("/tmp/auto-mobile-x", { rm, timer, maxAttempts: 5, delayMs: 50 }),
     ).rejects.toThrow("EACCES");
     expect(attempts).toBe(1);
     expect(timer.getSleepCallCount()).toBe(0);
@@ -372,7 +372,7 @@ describe("removeTempDbDirSync (issue #2948)", () => {
 
   test.each(["EPERM", "ENOTEMPTY"])(
     "treats %s as a transient sync Windows lock and gives up gracefully",
-    code => {
+    (code) => {
       const timer = new FakeSyncTimer();
       const rmSync = () => {
         throw ebusy(code);
@@ -390,7 +390,7 @@ describe("removeTempDbDirSync (issue #2948)", () => {
       });
 
       expect(gaveUp).toBe(true);
-    }
+    },
   );
 
   test("removes a real temp dir (and its contents) through the default sync rm/timer", () => {
@@ -409,7 +409,7 @@ describe("removeTempDbDirSync (issue #2948)", () => {
     };
 
     expect(() =>
-      removeTempDbDirSync("/tmp/auto-mobile-locked", { rmSync, maxAttempts: 2, delayMs: 1 })
+      removeTempDbDirSync("/tmp/auto-mobile-locked", { rmSync, maxAttempts: 2, delayMs: 1 }),
     ).not.toThrow();
   });
 
@@ -422,7 +422,7 @@ describe("removeTempDbDirSync (issue #2948)", () => {
     };
 
     expect(() =>
-      removeTempDbDirSync("/tmp/auto-mobile-x", { rmSync, timer, maxAttempts: 5, delayMs: 50 })
+      removeTempDbDirSync("/tmp/auto-mobile-x", { rmSync, timer, maxAttempts: 5, delayMs: 50 }),
     ).toThrow("EACCES");
     expect(attempts).toBe(1);
     expect(timer.getSleepCallCount()).toBe(0);

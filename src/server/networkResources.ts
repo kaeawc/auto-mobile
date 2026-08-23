@@ -51,11 +51,9 @@ function eventToSummary(event: NetworkEventWithId) {
 
 function eventToDetail(event: NetworkEventWithId) {
   const requestBodyTruncated =
-    event.requestBody !== null &&
-    event.requestBodySize > BODY_TRUNCATION_LIMIT;
+    event.requestBody !== null && event.requestBodySize > BODY_TRUNCATION_LIMIT;
   const responseBodyTruncated =
-    event.responseBody !== null &&
-    event.responseBodySize > BODY_TRUNCATION_LIMIT;
+    event.responseBody !== null && event.responseBodySize > BODY_TRUNCATION_LIMIT;
 
   return {
     id: event.id,
@@ -81,22 +79,17 @@ function eventToDetail(event: NetworkEventWithId) {
 }
 
 function parseTrafficParams(params: Record<string, string>) {
-  const unknownKeys = Object.keys(params).filter(key => !TRAFFIC_QUERY_PARAM_KEYS.has(key));
+  const unknownKeys = Object.keys(params).filter((key) => !TRAFFIC_QUERY_PARAM_KEYS.has(key));
   if (unknownKeys.length > 0) {
     throw new Error(`Unknown query parameters: ${unknownKeys.join(", ")}`);
   }
 
-  const since = params.since
-    ? parseInt(params.since, 10)
-    : undefined;
-  const limitRaw = params.limit
-    ? parseInt(params.limit, 10)
-    : undefined;
+  const since = params.since ? parseInt(params.since, 10) : undefined;
+  const limitRaw = params.limit ? parseInt(params.limit, 10) : undefined;
   const limit = limitRaw ? Math.min(Math.max(1, limitRaw), 200) : 50;
-  const bucketRaw = params.bucketSeconds
-    ? parseInt(params.bucketSeconds, 10)
-    : undefined;
-  const bucketSeconds = bucketRaw && Number.isFinite(bucketRaw) && bucketRaw > 0 ? bucketRaw : undefined;
+  const bucketRaw = params.bucketSeconds ? parseInt(params.bucketSeconds, 10) : undefined;
+  const bucketSeconds =
+    bucketRaw && Number.isFinite(bucketRaw) && bucketRaw > 0 ? bucketRaw : undefined;
 
   return {
     host: params.host,
@@ -121,11 +114,16 @@ export interface TimeSeriesBucket {
 
 const MAX_BUCKETS = 1000;
 
-export function bucketEvents(events: NetworkEventWithId[], bucketSeconds: number): TimeSeriesBucket[] {
-  if (events.length === 0) {return [];}
+export function bucketEvents(
+  events: NetworkEventWithId[],
+  bucketSeconds: number,
+): TimeSeriesBucket[] {
+  if (events.length === 0) {
+    return [];
+  }
 
   const bucketMs = bucketSeconds * 1000;
-  const timestamps = events.map(e => e.timestamp);
+  const timestamps = events.map((e) => e.timestamp);
   const minTs = Math.min(...timestamps);
   const maxTs = Math.max(...timestamps);
 
@@ -146,20 +144,23 @@ export function bucketEvents(events: NetworkEventWithId[], bucketSeconds: number
   for (const event of events) {
     const key = Math.floor(event.timestamp / bucketMs) * bucketMs;
     const bucket = buckets.get(key);
-    if (bucket) {bucket.push(event);}
+    if (bucket) {
+      bucket.push(event);
+    }
   }
 
   const result: TimeSeriesBucket[] = [];
   for (const [start, bucketEvents] of buckets) {
-    const durations = bucketEvents.map(e => e.durationMs).sort((a, b) => a - b);
+    const durations = bucketEvents.map((e) => e.durationMs).sort((a, b) => a - b);
     result.push({
       bucketStart: start,
       bucketEnd: start + bucketMs,
       requests: bucketEvents.length,
-      errors: bucketEvents.filter(e => e.statusCode >= 400).length,
-      avgDurationMs: durations.length > 0
-        ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length)
-        : 0,
+      errors: bucketEvents.filter((e) => e.statusCode >= 400).length,
+      avgDurationMs:
+        durations.length > 0
+          ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length)
+          : 0,
       p50: Math.round(computePercentile(durations, 50)),
       p95: Math.round(computePercentile(durations, 95)),
     });
@@ -211,9 +212,7 @@ export function aggregateStatsByHost(events: NetworkEventWithId[]): Record<strin
   return byHost;
 }
 
-async function handleTrafficQuery(
-  params: Record<string, string>
-): Promise<ResourceContent> {
+async function handleTrafficQuery(params: Record<string, string>): Promise<ResourceContent> {
   try {
     const query = parseTrafficParams(params);
     const events = await getNetworkEvents(query);
@@ -223,11 +222,15 @@ async function handleTrafficQuery(
       return {
         uri: NETWORK_RESOURCE_URIS.TRAFFIC,
         mimeType: "application/json",
-        text: JSON.stringify({
-          timeSeries: buckets,
-          bucketSeconds: query.bucketSeconds,
-          totalRequests: events.length,
-        }, null, 2),
+        text: JSON.stringify(
+          {
+            timeSeries: buckets,
+            bucketSeconds: query.bucketSeconds,
+            totalRequests: events.length,
+          },
+          null,
+          2,
+        ),
       };
     }
 
@@ -242,9 +245,7 @@ async function handleTrafficQuery(
       text: JSON.stringify(response, null, 2),
     };
   } catch (error) {
-    logger.error(
-      `[NetworkResources] Failed to query traffic: ${error}`
-    );
+    logger.error(`[NetworkResources] Failed to query traffic: ${error}`);
     return {
       uri: NETWORK_RESOURCE_URIS.TRAFFIC,
       mimeType: "application/json",
@@ -260,7 +261,7 @@ export function registerNetworkResources(): void {
     "Network Traffic",
     "Query captured network traffic. Use query parameters to filter by host, method, statusCode, since, limit, deviceId.",
     "application/json",
-    () => handleTrafficQuery({})
+    () => handleTrafficQuery({}),
   );
 
   ResourceRegistry.registerTemplate(
@@ -268,7 +269,7 @@ export function registerNetworkResources(): void {
     "Network Traffic",
     "Query captured network traffic with optional filters.",
     "application/json",
-    async params => handleTrafficQuery(params)
+    async (params) => handleTrafficQuery(params),
   );
 
   // Single request detail by ID
@@ -277,7 +278,7 @@ export function registerNetworkResources(): void {
     "Network Request Detail",
     "Full HTTP request and response detail for a single captured network call (bodies truncated to 10KB).",
     "application/json",
-    async params => {
+    async (params) => {
       const requestId = parseInt(params.requestId, 10);
       if (!Number.isFinite(requestId) || requestId < 1) {
         return {
@@ -309,7 +310,7 @@ export function registerNetworkResources(): void {
           text: JSON.stringify({ error: `Failed to retrieve request: ${error}` }),
         };
       }
-    }
+    },
   );
 
   // Subscription resources (readable state when notified)
@@ -325,7 +326,7 @@ export function registerNetworkResources(): void {
         mimeType: "application/json",
         text: JSON.stringify({ events: events.map(eventToSummary) }, null, 2),
       };
-    }
+    },
   );
 
   ResourceRegistry.register(
@@ -340,7 +341,7 @@ export function registerNetworkResources(): void {
         mimeType: "application/json",
         text: JSON.stringify({ errors: errors.map(eventToSummary) }, null, 2),
       };
-    }
+    },
   );
 
   ResourceRegistry.register(
@@ -351,13 +352,14 @@ export function registerNetworkResources(): void {
     async () => {
       const events = await getNetworkEvents({ limit: 200 });
       const totalRequests = events.length;
-      const errorCount = events.filter(e => e.statusCode >= 400).length;
+      const errorCount = events.filter((e) => e.statusCode >= 400).length;
       const errorRate = totalRequests > 0 ? errorCount / totalRequests : 0;
-      const durations = events.map(e => e.durationMs).filter(d => d > 0).sort((a, b) => a - b);
+      const durations = events
+        .map((e) => e.durationMs)
+        .filter((d) => d > 0)
+        .sort((a, b) => a - b);
       const avgDurationMs =
-        durations.length > 0
-          ? durations.reduce((a, b) => a + b, 0) / durations.length
-          : 0;
+        durations.length > 0 ? durations.reduce((a, b) => a + b, 0) / durations.length : 0;
       const p50 = Math.round(computePercentile(durations, 50));
       const p95 = Math.round(computePercentile(durations, 95));
 
@@ -369,10 +371,10 @@ export function registerNetworkResources(): void {
         text: JSON.stringify(
           { totalRequests, errorCount, errorRate, avgDurationMs, p50, p95, byHost },
           null,
-          2
+          2,
         ),
       };
-    }
+    },
   );
 
   // Slow requests resource
@@ -385,17 +387,21 @@ export function registerNetworkResources(): void {
       const state = NetworkState.getInstance();
       const thresholdMs = state.slowThresholdMs;
       const events = await getNetworkEvents({ limit: 200 });
-      const slow = events.filter(e => e.durationMs >= thresholdMs);
+      const slow = events.filter((e) => e.durationMs >= thresholdMs);
       return {
         uri: NETWORK_RESOURCE_URIS.SLOW,
         mimeType: "application/json",
-        text: JSON.stringify({
-          thresholdMs,
-          events: slow.slice(0, 50).map(eventToSummary),
-          count: slow.length,
-        }, null, 2),
+        text: JSON.stringify(
+          {
+            thresholdMs,
+            events: slow.slice(0, 50).map(eventToSummary),
+            count: slow.length,
+          },
+          null,
+          2,
+        ),
       };
-    }
+    },
   );
 
   // Network state resource
@@ -411,7 +417,7 @@ export function registerNetworkResources(): void {
         mimeType: "application/json",
         text: JSON.stringify(state.getSnapshot(), null, 2),
       };
-    }
+    },
   );
 
   // Active mocks resource
@@ -426,12 +432,16 @@ export function registerNetworkResources(): void {
       return {
         uri: NETWORK_RESOURCE_URIS.MOCKS,
         mimeType: "application/json",
-        text: JSON.stringify({
-          count: mocks.length,
-          mocks,
-        }, null, 2),
+        text: JSON.stringify(
+          {
+            count: mocks.length,
+            mocks,
+          },
+          null,
+          2,
+        ),
       };
-    }
+    },
   );
 
   ResourceRegistry.register(
@@ -443,9 +453,12 @@ export function registerNetworkResources(): void {
       return {
         uri: NETWORK_RESOURCE_URIS.CONNECTIVITY,
         mimeType: "application/json",
-        text: JSON.stringify({ type: "unknown", details: "Connectivity status requires active device connection" }),
+        text: JSON.stringify({
+          type: "unknown",
+          details: "Connectivity status requires active device connection",
+        }),
       };
-    }
+    },
   );
 
   logger.info("[NetworkResources] Registered network resources");

@@ -1,9 +1,9 @@
 ---
 name: Bug Report
 about: Report a bug or unexpected behavior in auto-worktree
-title: ''
-labels: 'bug'
-assignees: ''
+title: ""
+labels: "bug"
+assignees: ""
 ---
 
 ## What functionality was being used?

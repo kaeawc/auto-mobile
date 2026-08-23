@@ -1,10 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ObserveResult } from "../../../src/models/ObserveResult";
-import {
-  loadAndroidHomeObserve,
-  measureObserveBreakdown,
-  measureValue,
-} from "./observeFixture";
+import { loadAndroidHomeObserve, measureObserveBreakdown, measureValue } from "./observeFixture";
 
 /**
  * Baseline fixture for the MCP output-context reduction effort (issue #2755).
@@ -81,7 +77,7 @@ describe("android-home observe baseline fixture", () => {
     }
 
     // The three heavy fields dominate the top of the breakdown.
-    const heavy = new Set(breakdown.fields.slice(0, 3).map(f => f.key));
+    const heavy = new Set(breakdown.fields.slice(0, 3).map((f) => f.key));
     expect(heavy.has("performanceAudit")).toBe(true);
     expect(heavy.has("elements")).toBe(true);
     expect(heavy.has("viewHierarchy")).toBe(true);

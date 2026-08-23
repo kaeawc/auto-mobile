@@ -21,18 +21,20 @@ describe("MCP Ping", () => {
   // ping registration — it proved nothing. The real wire ping below is the
   // actual behavioral test and is kept.
 
-  test("should respond to ping using createMcpServer directly", async function() {
+  test("should respond to ping using createMcpServer directly", async function () {
     const { client } = fixture.getContext();
 
     // Send ping request using the client
-    const result = await client.request({
-      method: "ping",
-      params: {}
-    }, z.object({}));
+    const result = await client.request(
+      {
+        method: "ping",
+        params: {},
+      },
+      z.object({}),
+    );
 
     // Verify ping response
     expect(typeof result).toBe("object");
     expect(result).toEqual({});
   });
-
 });

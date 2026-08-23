@@ -11,7 +11,7 @@ export function optionalString(value: string | undefined): string | undefined {
 export function optionalInteger(
   value: string | undefined,
   label: string,
-  options: IntegerParamOptions = {}
+  options: IntegerParamOptions = {},
 ): number | undefined {
   const normalized = optionalString(value);
   if (normalized === undefined) {
@@ -19,8 +19,11 @@ export function optionalInteger(
   }
   const parsed = Number(normalized);
   const min = options.min ?? 0;
-  if (!Number.isSafeInteger(parsed) || parsed < min ||
-    options.max !== undefined && parsed > options.max) {
+  if (
+    !Number.isSafeInteger(parsed) ||
+    parsed < min ||
+    (options.max !== undefined && parsed > options.max)
+  ) {
     throw new Error(`Invalid ${label}: ${value}`);
   }
   return parsed;
@@ -29,7 +32,7 @@ export function optionalInteger(
 export function optionalEnum<T extends string>(
   value: string | undefined,
   label: string,
-  allowed: readonly T[]
+  allowed: readonly T[],
 ): T | undefined {
   const normalized = optionalString(value);
   if (normalized === undefined) {

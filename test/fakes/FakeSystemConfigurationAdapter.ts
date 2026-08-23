@@ -47,11 +47,11 @@ export class FakeSystemConfigurationAdapter implements SystemConfigurationAdapte
   }
 
   wasMethodCalled(operationName: string): boolean {
-    return this.executedOperations.some(op => op.includes(operationName));
+    return this.executedOperations.some((op) => op.includes(operationName));
   }
 
   getCallCount(operationName: string): number {
-    return this.executedOperations.filter(op => op.includes(operationName)).length;
+    return this.executedOperations.filter((op) => op.includes(operationName)).length;
   }
 
   clearHistory(): void {

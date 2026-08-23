@@ -26,13 +26,13 @@ const ASSIGNED_WEIGHTS: Array<{ metric: string; weight: number }> = [
   { metric: "anr", weight: 1.0 },
 ];
 
-describe("PerformanceAudit.generateDiagnostics - top contributors", function() {
+describe("PerformanceAudit.generateDiagnostics - top contributors", function () {
   let audit: PerformanceAudit;
 
-  beforeEach(function() {
+  beforeEach(function () {
     audit = new PerformanceAudit(
       { deviceId: "test-device", name: "test", platform: "android" },
-      new FakeAdbClientFactory()
+      new FakeAdbClientFactory(),
     );
   });
 
@@ -58,9 +58,11 @@ describe("PerformanceAudit.generateDiagnostics - top contributors", function() {
   });
 
   const generate = (metrics: Record<string, unknown>, violations: TestViolation[]): string =>
-    (audit as unknown as {
-      generateDiagnostics: (m: unknown, v: TestViolation[]) => string;
-    }).generateDiagnostics(metrics, violations);
+    (
+      audit as unknown as {
+        generateDiagnostics: (m: unknown, v: TestViolation[]) => string;
+      }
+    ).generateDiagnostics(metrics, violations);
 
   /** The lines rendered between "Top contributors:" and the next section. */
   const contributorLines = (diagnostics: string): string[] => {
@@ -69,13 +71,27 @@ describe("PerformanceAudit.generateDiagnostics - top contributors", function() {
     const rest = diagnostics.slice(start + "Top contributors:\n".length);
     const end = rest.indexOf("\nDiagnostic details:");
     expect(end).toBeGreaterThanOrEqual(0);
-    return rest.slice(0, end).split("\n").filter(line => line.length > 0);
+    return rest
+      .slice(0, end)
+      .split("\n")
+      .filter((line) => line.length > 0);
   };
 
-  test("renders a non-empty Top contributors section for a CPU-only violation", function() {
-    const metrics = { ...baseMetrics(), cpuUsagePercent: 92, threadCount: 40, cpuStatsRaw: "raw cpu stats" };
+  test("renders a non-empty Top contributors section for a CPU-only violation", function () {
+    const metrics = {
+      ...baseMetrics(),
+      cpuUsagePercent: 92,
+      threadCount: 40,
+      cpuStatsRaw: "raw cpu stats",
+    };
     const violations: TestViolation[] = [
-      { metric: "cpuUsage", threshold: 80, actual: 92, severity: "warning", contributionWeight: 0.5 },
+      {
+        metric: "cpuUsage",
+        threshold: 80,
+        actual: 92,
+        severity: "warning",
+        contributionWeight: 0.5,
+      },
     ];
 
     const diagnostics = generate(metrics, violations);
@@ -85,10 +101,21 @@ describe("PerformanceAudit.generateDiagnostics - top contributors", function() {
     ]);
   });
 
-  test("includes the CPU stats dump for a CPU-only violation", function() {
-    const metrics = { ...baseMetrics(), cpuUsagePercent: 92, threadCount: 40, cpuStatsRaw: "raw cpu stats" };
+  test("includes the CPU stats dump for a CPU-only violation", function () {
+    const metrics = {
+      ...baseMetrics(),
+      cpuUsagePercent: 92,
+      threadCount: 40,
+      cpuStatsRaw: "raw cpu stats",
+    };
     const violations: TestViolation[] = [
-      { metric: "cpuUsage", threshold: 80, actual: 92, severity: "warning", contributionWeight: 0.5 },
+      {
+        metric: "cpuUsage",
+        threshold: 80,
+        actual: 92,
+        severity: "warning",
+        contributionWeight: 0.5,
+      },
     ];
 
     const diagnostics = generate(metrics, violations);
@@ -99,7 +126,7 @@ describe("PerformanceAudit.generateDiagnostics - top contributors", function() {
 
   test.each(ASSIGNED_WEIGHTS)(
     "a lone $metric violation at its assigned weight $weight is a top contributor",
-    function({ metric, weight }) {
+    function ({ metric, weight }) {
       const violations: TestViolation[] = [
         { metric, threshold: 10, actual: 20, severity: "warning", contributionWeight: weight },
       ];
@@ -109,14 +136,20 @@ describe("PerformanceAudit.generateDiagnostics - top contributors", function() {
       expect(contributorLines(diagnostics)).toEqual([
         `- ${metric}: 20.00 (threshold: 10.00) [warning]`,
       ]);
-    }
+    },
   );
 
-  test("mixed violations still drop low-weight entries and stay weight-ordered", function() {
+  test("mixed violations still drop low-weight entries and stay weight-ordered", function () {
     const violations: TestViolation[] = [
       { metric: "p99", threshold: 30, actual: 90, severity: "warning", contributionWeight: 0.4 },
       { metric: "p50", threshold: 15, actual: 40, severity: "warning", contributionWeight: 0.6 },
-      { metric: "jankCount", threshold: 5, actual: 30, severity: "critical", contributionWeight: 0.9 },
+      {
+        metric: "jankCount",
+        threshold: 5,
+        actual: 30,
+        severity: "critical",
+        contributionWeight: 0.9,
+      },
     ];
 
     const diagnostics = generate(baseMetrics(), violations);
@@ -127,9 +160,15 @@ describe("PerformanceAudit.generateDiagnostics - top contributors", function() {
     ]);
   });
 
-  test("a mixed set containing the boundary weight includes the boundary entry", function() {
+  test("a mixed set containing the boundary weight includes the boundary entry", function () {
     const violations: TestViolation[] = [
-      { metric: "cpuUsage", threshold: 80, actual: 92, severity: "warning", contributionWeight: 0.5 },
+      {
+        metric: "cpuUsage",
+        threshold: 80,
+        actual: 92,
+        severity: "warning",
+        contributionWeight: 0.5,
+      },
       { metric: "p95", threshold: 20, actual: 60, severity: "critical", contributionWeight: 0.8 },
     ];
 
@@ -141,7 +180,7 @@ describe("PerformanceAudit.generateDiagnostics - top contributors", function() {
     ]);
   });
 
-  test("returns the no-issues message when there are no violations", function() {
+  test("returns the no-issues message when there are no violations", function () {
     expect(generate(baseMetrics(), [])).toBe("No performance issues detected");
   });
 });

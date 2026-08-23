@@ -50,7 +50,7 @@ export interface DisconnectMonitorEvaluationInput {
 }
 
 export function evaluateDeviceDisconnects(
-  input: DisconnectMonitorEvaluationInput
+  input: DisconnectMonitorEvaluationInput,
 ): DisconnectMonitorEvaluation {
   const disconnected: string[] = [];
   const missed: Array<{ deviceId: string; misses: number }> = [];
@@ -130,10 +130,7 @@ export function evaluateDeviceDisconnects(
       candidateIncarnation === deviceDisconnectMissIncarnations.get(deviceId)
         ? (input.deviceDisconnectMisses.get(deviceId) ?? 0)
         : 0;
-    const misses = Math.min(
-      priorMisses + 1,
-      input.missThreshold
-    );
+    const misses = Math.min(priorMisses + 1, input.missThreshold);
     input.deviceDisconnectMisses.set(deviceId, misses);
     if (candidateIncarnation === undefined) {
       deviceDisconnectMissIncarnations.delete(deviceId);

@@ -61,7 +61,7 @@ async function indexColumns(db: Kysely<unknown>, name: string): Promise<string[]
   const result = await sql<{ seqno: number; name: string }>`
     SELECT seqno, name FROM pragma_index_info(${name}) ORDER BY seqno
   `.execute(db);
-  return result.rows.map(r => r.name);
+  return result.rows.map((r) => r.name);
 }
 
 /** All index names attached to a table (PRAGMA index_list). */
@@ -69,13 +69,13 @@ async function indexList(db: Kysely<unknown>, table: string): Promise<string[]> 
   const result = await sql<{ name: string }>`
     SELECT name FROM pragma_index_list(${table})
   `.execute(db);
-  return result.rows.map(r => r.name);
+  return result.rows.map((r) => r.name);
 }
 
 /** EXPLAIN QUERY PLAN detail lines for an arbitrary statement (raw bun:sqlite handle). */
 function queryPlan(bunDb: BunDatabase, sqlText: string): string[] {
   const rows = bunDb.query(`EXPLAIN QUERY PLAN ${sqlText}`).all() as Array<{ detail: string }>;
-  return rows.map(r => r.detail);
+  return rows.map((r) => r.detail);
 }
 
 describe("2026_07_03_000_drop_redundant_device_indexes migration", () => {
@@ -131,7 +131,7 @@ describe("2026_07_03_000_drop_redundant_device_indexes migration", () => {
     for (const table of EVENT_TABLES) {
       const plan = queryPlan(
         bunDb,
-        `SELECT * FROM ${table} WHERE device_id = 'dev-1' ORDER BY timestamp DESC LIMIT 100`
+        `SELECT * FROM ${table} WHERE device_id = 'dev-1' ORDER BY timestamp DESC LIMIT 100`,
       ).join("\n");
       const composite = `idx_${table}_device_timestamp`;
       expect(plan).toMatch(new RegExp(`SEARCH .*USING INDEX ${composite}`));
@@ -145,10 +145,7 @@ describe("2026_07_03_000_drop_redundant_device_indexes migration", () => {
     await dropUp(db);
 
     for (const table of EVENT_TABLES) {
-      const plan = queryPlan(
-        bunDb,
-        `SELECT * FROM ${table} WHERE device_id = 'dev-1'`
-      ).join("\n");
+      const plan = queryPlan(bunDb, `SELECT * FROM ${table} WHERE device_id = 'dev-1'`).join("\n");
       expect(plan).toMatch(new RegExp(`SEARCH .*USING INDEX idx_${table}_device_timestamp`));
     }
   });
@@ -157,10 +154,9 @@ describe("2026_07_03_000_drop_redundant_device_indexes migration", () => {
     await dropUp(db);
 
     for (const table of EVENT_TABLES) {
-      const plan = queryPlan(
-        bunDb,
-        `SELECT COUNT(*) FROM ${table} WHERE device_id = 'dev-1'`
-      ).join("\n");
+      const plan = queryPlan(bunDb, `SELECT COUNT(*) FROM ${table} WHERE device_id = 'dev-1'`).join(
+        "\n",
+      );
       expect(plan).toContain(`idx_${table}_device_timestamp`);
     }
   });
@@ -176,7 +172,7 @@ describe("2026_07_03_000_drop_redundant_device_indexes migration", () => {
       bunDb,
       `SELECT value FROM storage_events
        WHERE device_id = 'dev-1' AND file_name = 'prefs.xml' AND key = 'theme'
-       ORDER BY timestamp DESC LIMIT 1`
+       ORDER BY timestamp DESC LIMIT 1`,
     ).join("\n");
     expect(plan).toMatch(/SEARCH .*USING INDEX idx_storage_events_device_timestamp/);
     expect(plan).not.toContain("USE TEMP B-TREE FOR ORDER BY");
@@ -188,7 +184,7 @@ describe("2026_07_03_000_drop_redundant_device_indexes migration", () => {
     for (const table of EVENT_TABLES) {
       const plan = queryPlan(
         bunDb,
-        `SELECT timestamp FROM ${table} ORDER BY timestamp DESC LIMIT 1 OFFSET 10000`
+        `SELECT timestamp FROM ${table} ORDER BY timestamp DESC LIMIT 1 OFFSET 10000`,
       ).join("\n");
       // The composite cannot substitute (device_id leads it); the standalone
       // timestamp index provides the covering scan with no filesort.
@@ -217,7 +213,7 @@ describe("2026_07_03_000_drop_redundant_device_indexes migration", () => {
     const after = await read();
 
     expect(after).toEqual(before);
-    expect(after.map(r => r.timestamp)).toEqual([300, 200, 100]);
+    expect(after.map((r) => r.timestamp)).toEqual([300, 200, 100]);
   });
 
   test("up is idempotent (safe to re-run, as destructive-recovery replay would)", async () => {

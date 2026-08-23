@@ -130,7 +130,7 @@ export class FakeCtrlProxyManager implements CtrlProxyManager {
    * @returns true if the operation was called at least once
    */
   wasMethodCalled(operationName: string): boolean {
-    return this.executedOperations.some(op => op.includes(operationName));
+    return this.executedOperations.some((op) => op.includes(operationName));
   }
 
   /**
@@ -139,8 +139,7 @@ export class FakeCtrlProxyManager implements CtrlProxyManager {
    * @returns Number of times the operation was called
    */
   getCallCount(operationName: string): number {
-    return this.executedOperations.filter(op => op.includes(operationName))
-      .length;
+    return this.executedOperations.filter((op) => op.includes(operationName)).length;
   }
 
   /**
@@ -186,7 +185,14 @@ export class FakeCtrlProxyManager implements CtrlProxyManager {
     allowDownloadWhenInstalled?: boolean;
     bypassVersionCheckCache?: boolean;
   }): Promise<{
-    status: "skipped" | "not_installed" | "compatible" | "upgraded" | "installed" | "reinstalled" | "failed";
+    status:
+      | "skipped"
+      | "not_installed"
+      | "compatible"
+      | "upgraded"
+      | "installed"
+      | "reinstalled"
+      | "failed";
     expectedSha256?: string;
     installedSha256?: string | null;
     installedShaSource?: "device" | "host" | "none";
@@ -202,7 +208,7 @@ export class FakeCtrlProxyManager implements CtrlProxyManager {
     this.executedOperations.push("ensureCompatibleVersion");
     return {
       status: this.versionCompatible ? "compatible" : "failed",
-      installedSha256: this.installedSha256
+      installedSha256: this.installedSha256,
     };
   }
 
@@ -270,7 +276,7 @@ export class FakeCtrlProxyManager implements CtrlProxyManager {
       return {
         success: false,
         message: "Failed to setup CtrlProxy",
-        error: "Mock setup failure"
+        error: "Mock setup failure",
       };
     }
 

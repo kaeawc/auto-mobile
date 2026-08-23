@@ -1,13 +1,19 @@
-import type { FailureGroup, TimelineDataPoint, PeriodTotals, FailureType, FailureSeverity } from "../server/failuresResources";
+import type {
+  FailureGroup,
+  TimelineDataPoint,
+  PeriodTotals,
+  FailureType,
+  FailureSeverity,
+} from "../server/failuresResources";
 
 /**
  * Commands supported by the failures stream socket
  */
 export type FailuresStreamCommand =
-  | "poll_notifications"  // Get new failure notifications since cursor
-  | "poll_groups"         // Get failure groups with optional filters
-  | "poll_timeline"       // Get timeline data with aggregation
-  | "acknowledge";        // Acknowledge notifications
+  | "poll_notifications" // Get new failure notifications since cursor
+  | "poll_groups" // Get failure groups with optional filters
+  | "poll_timeline" // Get timeline data with aggregation
+  | "acknowledge"; // Acknowledge notifications
 
 /**
  * Time aggregation options for timeline queries

@@ -2,7 +2,6 @@ import type { AdbExecutor } from "./interfaces/AdbExecutor";
 import { logger } from "../logger";
 import { defaultTimer, type Timer } from "../SystemTimer";
 
-
 /**
  * Reads `ro.build.version.sdk` from the device, or null if unavailable.
  *
@@ -16,7 +15,7 @@ import { defaultTimer, type Timer } from "../SystemTimer";
 export async function readAndroidDeviceApiLevel(
   adb: AdbExecutor,
   timeoutMs?: number,
-  timer: Timer = defaultTimer
+  timer: Timer = defaultTimer,
 ): Promise<number | null> {
   const extended = adb as AdbExecutor & {
     getAndroidApiLevel?: (timeoutMs?: number) => Promise<number | null>;
@@ -56,13 +55,16 @@ export async function readAndroidDeviceApiLevel(
       "shell getprop ro.build.version.sdk",
       fallbackTimeoutMs,
       undefined,
-      true
+      true,
     );
     const n = parseInt(r.stdout.trim(), 10);
     return Number.isFinite(n) ? n : null;
   } catch (error) {
     // getprop can fail if the device disconnects mid-command; null lets the caller fall back to another detection path.
-    logger.debug(`src/utils/android-cmdline-tools/readAndroidDeviceApiLevel.ts fallback failed: ${error}`, error);
+    logger.debug(
+      `src/utils/android-cmdline-tools/readAndroidDeviceApiLevel.ts fallback failed: ${error}`,
+      error,
+    );
     return null;
   }
 }

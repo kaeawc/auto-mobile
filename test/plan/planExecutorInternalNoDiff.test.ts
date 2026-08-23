@@ -38,7 +38,7 @@ describe("PlanExecutor internal no-diff marker (#3053)", () => {
     ToolRegistry.register("tapOn", "Mock tapOn", schema, async (args: any) => {
       capturedArgs.push(args);
       return createStructuredToolResponse(
-        success ? { success: true, message: "ok" } : { success: false, error: "not found" }
+        success ? { success: true, message: "ok" } : { success: false, error: "not found" },
       );
     });
     (ToolRegistry.getTool("tapOn") as { requiresDevice: boolean }).requiresDevice = true;

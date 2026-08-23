@@ -6,7 +6,7 @@ describe("RtpPcmuTrackWriter", () => {
   test("encodes 8kHz mono PCM16LE as PCMU RTP packets", () => {
     const packets: RtpPacket[] = [];
     const writer = new RtpPcmuTrackWriter({
-      sink: { writeRtp: packet => packets.push(packet) },
+      sink: { writeRtp: (packet) => packets.push(packet) },
       ssrc: 0x1234,
       initialSequenceNumber: 7,
     });
@@ -25,15 +25,15 @@ describe("RtpPcmuTrackWriter", () => {
   test("splits large PCM chunks on the RTP payload limit and advances timestamps", () => {
     const packets: RtpPacket[] = [];
     const writer = new RtpPcmuTrackWriter({
-      sink: { writeRtp: packet => packets.push(packet) },
+      sink: { writeRtp: (packet) => packets.push(packet) },
       ssrc: 1,
       mtu: 2,
     });
 
     writer.writePcm16Chunk(Buffer.alloc(10));
 
-    expect(packets.map(packet => packet.payload.length)).toEqual([2, 2, 1]);
-    expect(packets.map(packet => packet.header.timestamp)).toEqual([0, 2, 4]);
+    expect(packets.map((packet) => packet.payload.length)).toEqual([2, 2, 1]);
+    expect(packets.map((packet) => packet.header.timestamp)).toEqual([0, 2, 4]);
     expect(writer.stats).toEqual({ packetsWritten: 3, samplesWritten: 5 });
   });
 
@@ -50,7 +50,10 @@ describe("RtpPcmuTrackWriter", () => {
     [-8031, 0x20],
   ])("encodes PCM16 sample %p to mu-law byte", (sample, expectedByte) => {
     const packets: RtpPacket[] = [];
-    const writer = new RtpPcmuTrackWriter({ sink: { writeRtp: packet => packets.push(packet) }, ssrc: 1 });
+    const writer = new RtpPcmuTrackWriter({
+      sink: { writeRtp: (packet) => packets.push(packet) },
+      ssrc: 1,
+    });
     const chunk = Buffer.alloc(2);
     chunk.writeInt16LE(sample, 0);
 
@@ -70,13 +73,16 @@ describe("RtpPcmuTrackWriter", () => {
     [Number.NaN, "non-finite MTU cannot advance the payload loop"],
   ])("rejects a non-advancing mtu %p at construction", (mtu, _why) => {
     expect(
-      () => new RtpPcmuTrackWriter({ sink: { writeRtp: () => undefined }, ssrc: 1, mtu })
+      () => new RtpPcmuTrackWriter({ sink: { writeRtp: () => undefined }, ssrc: 1, mtu }),
     ).toThrow(/MTU/i);
   });
 
   test("preserves a PCM16 sample split across arbitrary chunk boundaries", () => {
     const packets: RtpPacket[] = [];
-    const writer = new RtpPcmuTrackWriter({ sink: { writeRtp: packet => packets.push(packet) }, ssrc: 1 });
+    const writer = new RtpPcmuTrackWriter({
+      sink: { writeRtp: (packet) => packets.push(packet) },
+      ssrc: 1,
+    });
 
     writer.writePcm16Chunk(Buffer.from([0x00]));
     expect(packets).toHaveLength(0);

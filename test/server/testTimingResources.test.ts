@@ -65,7 +65,10 @@ describe("testTimingData", () => {
     });
 
     test("returns empty results when no executions match", async () => {
-      const response = await buildTestTimingResponse({ testClass: "com.example.Nonexistent" }, repo);
+      const response = await buildTestTimingResponse(
+        { testClass: "com.example.Nonexistent" },
+        repo,
+      );
 
       expect(response.testTimings).toHaveLength(0);
       expect(response.totalTests).toBe(0);
@@ -94,7 +97,9 @@ describe("testTimingData", () => {
       expect(ResourceRegistry.getResource("automobile:test-timings")).toBeDefined();
 
       const templates = ResourceRegistry.getAllTemplates();
-      const queryTemplate = templates.find(t => t.uriTemplate.startsWith("automobile:test-timings?"));
+      const queryTemplate = templates.find((t) =>
+        t.uriTemplate.startsWith("automobile:test-timings?"),
+      );
       expect(queryTemplate).toBeDefined();
     });
   });

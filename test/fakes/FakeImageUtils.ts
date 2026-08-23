@@ -9,13 +9,13 @@ export class FakeImageUtils implements ImageUtils {
   private originalBufferResult: Buffer = Buffer.from("original buffer data");
   private resizeResult: Buffer = Buffer.from("resized buffer data");
   private cropResult: Buffer = Buffer.from("cropped buffer data");
-  private pngResult: Buffer = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]); // PNG magic bytes
+  private pngResult: Buffer = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); // PNG magic bytes
   private webpResult: Buffer = Buffer.from("RIFF");
   private metadataResult = {
     width: 1080,
     height: 2400,
     format: "png",
-    size: 1024000
+    size: 1024000,
   };
   private batchProcessResult: Buffer[] = [];
 
@@ -188,7 +188,7 @@ export class FakeImageUtils implements ImageUtils {
     buffer: Buffer,
     width: number,
     height?: number,
-    maintainAspectRatio = true
+    maintainAspectRatio = true,
   ): Promise<Buffer> {
     this.recordCall("resize", { bufferLength: buffer.length, width, height, maintainAspectRatio });
     if (this.shouldThrowOnResize) {
@@ -197,13 +197,7 @@ export class FakeImageUtils implements ImageUtils {
     return this.resizeResult;
   }
 
-  async crop(
-    buffer: Buffer,
-    width: number,
-    height: number,
-    x = 0,
-    y = 0
-  ): Promise<Buffer> {
+  async crop(buffer: Buffer, width: number, height: number, x = 0, y = 0): Promise<Buffer> {
     this.recordCall("crop", { bufferLength: buffer.length, width, height, x, y });
     if (this.shouldThrowOnCrop) {
       throw new Error("Simulated error in crop");
@@ -225,13 +219,13 @@ export class FakeImageUtils implements ImageUtils {
       quality?: number;
       lossless?: boolean;
       nearLossless?: boolean;
-    }
+    },
   ): Promise<Buffer> {
     this.recordCall("toWebp", {
       bufferLength: buffer.length,
       quality: options?.quality,
       lossless: options?.lossless,
-      nearLossless: options?.nearLossless
+      nearLossless: options?.nearLossless,
     });
     if (this.shouldThrowOnToWebp) {
       throw new Error("Simulated error in toWebp");
@@ -262,7 +256,7 @@ export class FakeImageUtils implements ImageUtils {
 
   async batchProcess(
     buffers: Buffer[],
-    transform: (buffer: Buffer) => Promise<Buffer>
+    transform: (buffer: Buffer) => Promise<Buffer>,
   ): Promise<Buffer[]> {
     this.recordCall("batchProcess", { bufferCount: buffers.length });
     if (this.shouldThrowOnBatchProcess) {
@@ -272,6 +266,6 @@ export class FakeImageUtils implements ImageUtils {
       return this.batchProcessResult;
     }
     // Default: apply transform to each buffer
-    return Promise.all(buffers.map(buffer => transform(buffer)));
+    return Promise.all(buffers.map((buffer) => transform(buffer)));
   }
 }

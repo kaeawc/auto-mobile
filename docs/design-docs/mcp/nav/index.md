@@ -90,33 +90,39 @@ Read more about [how to use the 🔍 `explore` tool's modes](explore.md).
 #### For SDK-Instrumented Apps
 
 ✅ **Do**:
+
 - Use unique navigation resource-ids for each screen
 - Follow `navigation.*` naming convention
 - Ensure navigation IDs persist during keyboard
 
 ✅ **Consider**:
+
 - Add navigation IDs even to modal/overlay screens
 - Use descriptive names: `navigation.ProfileEditScreen`
 
 #### For Non-SDK Apps
 
 ✅ **Do**:
+
 - Rely on Tier 3 shallow scrollable strategy
 - Ensure screens have distinguishing static text or selected states
 - Test fingerprinting across different app states
 
 ⚠️ **Watch for**:
+
 - Screens with identical layout but different data
 - Heavy use of dynamic content without static labels
 
 #### For All Apps
 
 ✅ **Do**:
+
 - Cache previous fingerprint results for stateful tracking
 - Monitor confidence levels
 - Log fingerprint method for debugging
 
 ❌ **Don't**:
+
 - Assume 100% accuracy without navigation IDs
 - Ignore confidence levels in decision-making
 - Skip validation on critical navigation paths

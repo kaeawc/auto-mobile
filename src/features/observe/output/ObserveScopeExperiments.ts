@@ -135,14 +135,16 @@ function isTruthyFlag(value: unknown): boolean {
  * tuple `[left, top, right, bottom]`. Returns null when unreadable.
  */
 export function readBounds(value: unknown): ElementBounds | null {
-  if (Array.isArray(value) && value.length === 4 && value.every(n => typeof n === "number")) {
+  if (Array.isArray(value) && value.length === 4 && value.every((n) => typeof n === "number")) {
     return { left: value[0], top: value[1], right: value[2], bottom: value[3] };
   }
   if (value && typeof value === "object") {
     const b = value as NodeRecord;
     if (
-      typeof b.left === "number" && typeof b.top === "number"
-      && typeof b.right === "number" && typeof b.bottom === "number"
+      typeof b.left === "number" &&
+      typeof b.top === "number" &&
+      typeof b.right === "number" &&
+      typeof b.bottom === "number"
     ) {
       return { left: b.left, top: b.top, right: b.right, bottom: b.bottom };
     }
@@ -197,7 +199,11 @@ function findAnchor(nodes: NodeRecord[], anchor: FocusAnchor): NodeRecord | null
     if (anchor.resourceId !== undefined && stringAttr(node, "resource-id") === anchor.resourceId) {
       return node;
     }
-    if (anchor.text !== undefined && anchor.text !== "" && stringAttr(node, "text").includes(anchor.text)) {
+    if (
+      anchor.text !== undefined &&
+      anchor.text !== "" &&
+      stringAttr(node, "text").includes(anchor.text)
+    ) {
       return node;
     }
     const found = findAnchor(childrenOf(node), anchor);
@@ -252,7 +258,7 @@ function pruneForeignChrome(node: NodeRecord, fgPackage: string): NodeRecord | n
     return null;
   }
   const keptChildren = childrenOf(node)
-    .map(child => pruneForeignChrome(child, fgPackage))
+    .map((child) => pruneForeignChrome(child, fgPackage))
     .filter((child): child is NodeRecord => child !== null);
   return withChildren(node, keptChildren);
 }
@@ -290,7 +296,7 @@ function filterElementsByForeignPackage(obs: ObserveResult, fgPackage: string): 
  */
 export function scopeToFocus(
   input: ObserveResult,
-  anchor?: FocusAnchor
+  anchor?: FocusAnchor,
 ): { result: ObserveResult; focus: NonNullable<ObserveScopeMetadata["focus"]> } {
   const obs = clone(input);
   const roots = rootNodes(obs);
@@ -309,7 +315,7 @@ export function scopeToFocus(
   }
   const before = countNodes(roots);
   const kept = roots
-    .map(root => pruneForeignChrome(root, pkg))
+    .map((root) => pruneForeignChrome(root, pkg))
     .filter((root): root is NodeRecord => root !== null);
   setRootNodes(obs, kept);
   filterElementsByForeignPackage(obs, pkg);
@@ -360,7 +366,7 @@ function regionToPx(obs: ObserveResult, box: NormalizedRegion): ElementBounds | 
  */
 function pruneToRect(node: NodeRecord, rect: ElementBounds): NodeRecord | null {
   const keptChildren = childrenOf(node)
-    .map(child => pruneToRect(child, rect))
+    .map((child) => pruneToRect(child, rect))
     .filter((child): child is NodeRecord => child !== null);
   if (keptChildren.length > 0) {
     return withChildren(node, keptChildren);
@@ -398,7 +404,7 @@ function filterElementsByRect(obs: ObserveResult, rect: ElementBounds): void {
  */
 export function scopeToRegion(
   input: ObserveResult,
-  box?: NormalizedRegion
+  box?: NormalizedRegion,
 ): { result: ObserveResult; rectPx: ElementBounds | null } {
   const obs = clone(input);
   const rect = box ? regionToPx(obs, box) : contentRectPx(obs);
@@ -406,7 +412,7 @@ export function scopeToRegion(
     return { result: obs, rectPx: null };
   }
   const kept = rootNodes(obs)
-    .map(root => pruneToRect(root, rect))
+    .map((root) => pruneToRect(root, rect))
     .filter((root): root is NodeRecord => root !== null);
   setRootNodes(obs, kept);
   filterElementsByRect(obs, rect);
@@ -427,11 +433,13 @@ export function scopeToRegion(
  * them into an `omittedDescendants` count.
  */
 function isStructural(node: NodeRecord, hasKeptChildren: boolean): boolean {
-  return hasKeptChildren
-    || isTruthyFlag(attr(node, "scrollable"))
-    || isTruthyFlag(attr(node, "clickable"))
-    || stringAttr(node, "resource-id") !== ""
-    || stringAttr(node, "content-desc") !== "";
+  return (
+    hasKeptChildren ||
+    isTruthyFlag(attr(node, "scrollable")) ||
+    isTruthyFlag(attr(node, "clickable")) ||
+    stringAttr(node, "resource-id") !== "" ||
+    stringAttr(node, "content-desc") !== ""
+  );
 }
 
 /** Keep only the structural-attribute allowlist on an overview node. */
@@ -458,7 +466,7 @@ function trimToStructuralAttrs(node: NodeRecord): NodeRecord {
  */
 function toOverviewNode(node: NodeRecord): { node: NodeRecord | null; dropped: number } {
   const results = childrenOf(node).map(toOverviewNode);
-  const keptChildren = results.map(r => r.node).filter((n): n is NodeRecord => n !== null);
+  const keptChildren = results.map((r) => r.node).filter((n): n is NodeRecord => n !== null);
   const droppedBelow = results.reduce((sum, r) => sum + r.dropped, 0);
 
   if (!isStructural(node, keptChildren.length > 0)) {
@@ -490,7 +498,7 @@ export function toOverview(input: ObserveResult): ObserveResult {
   const obs = clone(input);
   const kept = rootNodes(obs)
     .map(toOverviewNode)
-    .map(r => r.node)
+    .map((r) => r.node)
     .filter((n): n is NodeRecord => n !== null);
   setRootNodes(obs, kept);
   delete obs.elements;
@@ -515,7 +523,12 @@ function elementsCount(obs: ObserveResult): number {
   if (!e) {
     return 0;
   }
-  return (e.clickable?.length ?? 0) + (e.scrollable?.length ?? 0) + (e.text?.length ?? 0) + (e.media?.length ?? 0);
+  return (
+    (e.clickable?.length ?? 0) +
+    (e.scrollable?.length ?? 0) +
+    (e.text?.length ?? 0) +
+    (e.media?.length ?? 0)
+  );
 }
 
 /**
@@ -525,8 +538,10 @@ function elementsCount(obs: ObserveResult): number {
  * as applied; without the element check `applied[]` would under-report it.
  */
 function scopeChanged(before: ObserveResult, after: ObserveResult): boolean {
-  return countNodes(rootNodes(before)) !== countNodes(rootNodes(after))
-    || elementsCount(before) !== elementsCount(after);
+  return (
+    countNodes(rootNodes(before)) !== countNodes(rootNodes(after)) ||
+    elementsCount(before) !== elementsCount(after)
+  );
 }
 
 function runFocusStage(run: ScopeRun, cfg: ObserveScopeConfig): void {
@@ -559,7 +574,7 @@ function runOverviewStage(run: ScopeRun): void {
 function buildScopeMetadata(
   run: ScopeRun,
   nodesBefore: number,
-  gatedOff: ObserveScopeKind[]
+  gatedOff: ObserveScopeKind[],
 ): ObserveScopeMetadata {
   const metadata: ObserveScopeMetadata = {
     applied: run.applied,
@@ -587,7 +602,7 @@ function buildScopeMetadata(
  */
 export function applyObserveScopeExperiments(
   input: ObserveResult,
-  cfg: ObserveScopeConfig
+  cfg: ObserveScopeConfig,
 ): ObserveResult {
   const gatedOff = cfg.gatedOff ?? [];
   if (!cfg.focus && !cfg.region && !cfg.overview && gatedOff.length === 0) {
@@ -651,7 +666,7 @@ function scopeLayoutWarnings(out: ObserveResult, survivors: SurvivorIndex, prune
   if (!layoutWarnings || layoutWarnings.warnings.length === 0) {
     return;
   }
-  const kept = layoutWarnings.warnings.filter(warning => warningSurvives(warning, survivors));
+  const kept = layoutWarnings.warnings.filter((warning) => warningSurvives(warning, survivors));
   const dropped = kept.length !== layoutWarnings.warnings.length;
   // A `truncated` total counted the un-scoped population; once pruning hides
   // nodes it may over-count what is reachable, so it is no longer trustworthy.
@@ -701,7 +716,10 @@ function indexSurvivor(node: NodeRecord, index: SurvivorIndex): void {
   index.set(key, list);
 }
 
-function warningSurvives(warning: LayoutWarnings["warnings"][number], survivors: SurvivorIndex): boolean {
+function warningSurvives(
+  warning: LayoutWarnings["warnings"][number],
+  survivors: SurvivorIndex,
+): boolean {
   const bounds = readBounds(warning.element?.bounds);
   if (bounds === null) {
     return false;
@@ -710,7 +728,7 @@ function warningSurvives(warning: LayoutWarnings["warnings"][number], survivors:
   if (candidates === undefined) {
     return false; // no node survives at this rectangle
   }
-  return candidates.some(node => nodeMatchesWarning(node, warning.element ?? {}));
+  return candidates.some((node) => nodeMatchesWarning(node, warning.element ?? {}));
 }
 
 type WarningElement = { viewId?: string; resourceId?: string; contentDesc?: string; text?: string };
@@ -742,20 +760,22 @@ function hasAnyIdentity(id: WarningElement | NodeIdentity): boolean {
  */
 function nodeMatchesWarning(node: NodeIdentity, element: WarningElement): boolean {
   if (
-    conflicts(element.resourceId, node.resourceId)
-    || conflicts(element.viewId, node.viewId)
-    || conflicts(element.contentDesc, node.contentDesc)
-    || conflicts(element.text, node.text)
+    conflicts(element.resourceId, node.resourceId) ||
+    conflicts(element.viewId, node.viewId) ||
+    conflicts(element.contentDesc, node.contentDesc) ||
+    conflicts(element.text, node.text)
   ) {
     return false;
   }
   if (!hasAnyIdentity(element) || !hasAnyIdentity(node)) {
     return true;
   }
-  return shares(element.resourceId, node.resourceId)
-    || shares(element.viewId, node.viewId)
-    || shares(element.contentDesc, node.contentDesc)
-    || shares(element.text, node.text);
+  return (
+    shares(element.resourceId, node.resourceId) ||
+    shares(element.viewId, node.viewId) ||
+    shares(element.contentDesc, node.contentDesc) ||
+    shares(element.text, node.text)
+  );
 }
 
 /** Canonical bounds identity, shape-independent (object and tuple map to the same key). */
@@ -777,7 +797,7 @@ function isDimensionRequested(dim: boolean | object | undefined): boolean {
 
 function gatedOffDimensions(
   flags: ObserveScopeFlags,
-  scope: ObserveScopeInput | undefined
+  scope: ObserveScopeInput | undefined,
 ): ObserveScopeKind[] {
   const gatedOff: ObserveScopeKind[] = [];
   if (!flags.focus && isDimensionRequested(scope?.focus)) {
@@ -811,7 +831,7 @@ function regionBoxOf(region: ObserveScopeInput["region"]): NormalizedRegion | un
  */
 export function buildObserveScopeConfig(
   flags: ObserveScopeFlags,
-  scope: ObserveScopeInput | undefined
+  scope: ObserveScopeInput | undefined,
 ): ObserveScopeConfig {
   return {
     focus: flags.focus && isDimensionRequested(scope?.focus),

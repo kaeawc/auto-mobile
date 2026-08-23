@@ -14,7 +14,7 @@ describe("DragAndDrop", () => {
   const device: BootedDevice = {
     deviceId: "test-device",
     platform: "android",
-    name: "Test Device"
+    name: "Test Device",
   };
 
   let dragAndDrop: DragAndDrop;
@@ -33,30 +33,30 @@ describe("DragAndDrop", () => {
         {
           $: {
             "resource-id": "source-id",
-            "text": "Source",
-            "bounds": { left: 0, top: 0, right: 100, bottom: 100 },
-            "class": "android.widget.TextView"
-          }
+            text: "Source",
+            bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+            class: "android.widget.TextView",
+          },
         },
         {
           $: {
             "resource-id": "target-id",
-            "text": "Target",
-            "bounds": { left: 200, top: 200, right: 300, bottom: 300 },
-            "class": "android.widget.TextView"
-          }
-        }
-      ]
+            text: "Target",
+            bounds: { left: 200, top: 200, right: 300, bottom: 300 },
+            class: "android.widget.TextView",
+          },
+        },
+      ],
     },
     packageName: "com.test.app",
-    updatedAt: Date.now()
+    updatedAt: Date.now(),
   });
 
   const createObserveResult = (): ObserveResult => ({
     updatedAt: Date.now(),
     screenSize: { width: 1080, height: 1920 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    viewHierarchy: createHierarchy()
+    viewHierarchy: createHierarchy(),
   });
 
   beforeEach(() => {
@@ -70,12 +70,18 @@ describe("DragAndDrop", () => {
 
     fakeObserveScreen.setObserveResult(() => createObserveResult());
     fakeWindow.configureCachedActiveWindow(null);
-    fakeWindow.configureActiveWindow({ appId: "com.test.app", activityName: "MainActivity", layoutSeqSum: 123 });
+    fakeWindow.configureActiveWindow({
+      appId: "com.test.app",
+      activityName: "MainActivity",
+      layoutSeqSum: 123,
+    });
 
     managerSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
-      isAvailable: async () => true
+      isAvailable: async () => true,
     } as any);
-    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeA11yService as any);
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+      fakeA11yService as any,
+    );
 
     dragAndDrop = new DragAndDrop(device, null, fakeTimer);
     (dragAndDrop as any).observeScreen = fakeObserveScreen;
@@ -93,7 +99,7 @@ describe("DragAndDrop", () => {
     fakeA11yService.setDragResult({
       success: true,
       totalTimeMs: 750,
-      gestureTimeMs: 500
+      gestureTimeMs: 500,
     });
 
     const result = await dragAndDrop.execute({
@@ -101,7 +107,7 @@ describe("DragAndDrop", () => {
       target: { elementId: "target-id" },
       pressDurationMs: 600,
       dragDurationMs: 500,
-      holdDurationMs: 200
+      holdDurationMs: 200,
     });
 
     expect(result.success).toBe(true);
@@ -122,12 +128,12 @@ describe("DragAndDrop", () => {
     fakeA11yService.setDragResult({
       success: false,
       totalTimeMs: 300,
-      error: "Drag gesture rejected"
+      error: "Drag gesture rejected",
     });
 
     const result = await dragAndDrop.execute({
       source: { elementId: "source-id" },
-      target: { elementId: "target-id" }
+      target: { elementId: "target-id" },
     });
 
     expect(result.success).toBe(false);
@@ -139,7 +145,7 @@ describe("DragAndDrop", () => {
 
     const result = await dragAndDrop.execute({
       source: { elementId: "source-id" },
-      target: { elementId: "target-id" }
+      target: { elementId: "target-id" },
     });
 
     expect(result.success).toBe(false);
@@ -149,7 +155,7 @@ describe("DragAndDrop", () => {
   test("uses default gesture durations and a 1600ms drag timeout when none are supplied", async () => {
     await dragAndDrop.execute({
       source: { elementId: "source-id" },
-      target: { elementId: "target-id" }
+      target: { elementId: "target-id" },
     });
 
     const [dragCall] = fakeA11yService.getDragHistory();
@@ -166,7 +172,7 @@ describe("DragAndDrop", () => {
       target: { elementId: "target-id" },
       pressDurationMs: 600,
       dragDurationMs: 500,
-      holdDurationMs: 200
+      holdDurationMs: 200,
     });
 
     const [dragCall] = fakeA11yService.getDragHistory();
@@ -180,27 +186,39 @@ describe("DragAndDrop", () => {
       [
         "source with both selectors",
         { source: { elementId: "source-id", text: "Source" }, target: { elementId: "target-id" } },
-        "source must specify exactly one of text or elementId"
+        "source must specify exactly one of text or elementId",
       ],
       [
         "target with both selectors",
         { source: { elementId: "source-id" }, target: { elementId: "target-id", text: "Target" } },
-        "target must specify exactly one of text or elementId"
+        "target must specify exactly one of text or elementId",
       ],
       [
         "pressDurationMs above the maximum",
-        { source: { elementId: "source-id" }, target: { elementId: "target-id" }, pressDurationMs: 5000 },
-        "pressDurationMs must be between 600ms and 3000ms"
+        {
+          source: { elementId: "source-id" },
+          target: { elementId: "target-id" },
+          pressDurationMs: 5000,
+        },
+        "pressDurationMs must be between 600ms and 3000ms",
       ],
       [
         "dragDurationMs above the maximum",
-        { source: { elementId: "source-id" }, target: { elementId: "target-id" }, dragDurationMs: 5000 },
-        "dragDurationMs must be between 300ms and 2000ms"
+        {
+          source: { elementId: "source-id" },
+          target: { elementId: "target-id" },
+          dragDurationMs: 5000,
+        },
+        "dragDurationMs must be between 300ms and 2000ms",
       ],
       [
         "holdDurationMs below the minimum",
-        { source: { elementId: "source-id" }, target: { elementId: "target-id" }, holdDurationMs: 5 },
-        "holdDurationMs must be between 100ms and 3000ms"
+        {
+          source: { elementId: "source-id" },
+          target: { elementId: "target-id" },
+          holdDurationMs: 5,
+        },
+        "holdDurationMs must be between 100ms and 3000ms",
       ],
     ])("rejects %s without dispatching a drag", async (_name, options, expected) => {
       const result = await dragAndDrop.execute(options);

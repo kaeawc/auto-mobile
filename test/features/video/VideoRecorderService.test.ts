@@ -142,12 +142,14 @@ describe("VideoRecorderService", () => {
 
   test("allows a later graceful stop after a force-stop failure", async () => {
     const recording = await service.startRecording();
-    backend.forceStop = async handle => {
+    backend.forceStop = async (handle) => {
       backend.forceStopCalls.push(handle);
       throw new Error("force stop failed");
     };
 
-    await expect(service.forceStopRecording(recording.recordingId)).rejects.toThrow("force stop failed");
+    await expect(service.forceStopRecording(recording.recordingId)).rejects.toThrow(
+      "force stop failed",
+    );
     await expect(service.stopRecording(recording.recordingId)).resolves.toMatchObject({
       recordingId: recording.recordingId,
     });
@@ -183,9 +185,11 @@ describe("VideoRecorderService", () => {
   test("shares one backend stop when shutdown overlaps a user stop", async () => {
     const recording = await service.startRecording();
     let resolveStop: (() => void) | undefined;
-    backend.stop = async handle => {
+    backend.stop = async (handle) => {
       backend.stopCalls.push(handle);
-      await new Promise<void>(resolve => { resolveStop = resolve; });
+      await new Promise<void>((resolve) => {
+        resolveStop = resolve;
+      });
       return { recordingId: handle.recordingId, outputPath: handle.outputPath };
     };
 

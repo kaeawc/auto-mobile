@@ -1,8 +1,4 @@
-import type {
-  BootedDevice,
-  ObserveResult,
-  ViewHierarchyResult,
-} from "../../../models";
+import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../models";
 import type { TapOnElementOptions } from "../../../models/TapOnElementOptions";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { ViewHierarchy } from "../../observe/ViewHierarchy";
@@ -25,13 +21,13 @@ export class AndroidTapStrategy implements TapStrategy {
     private readonly device: BootedDevice,
     private readonly adb: AdbExecutor,
     private readonly accessibilityDetector: AccessibilityDetector = defaultAccessibilityDetector,
-    private readonly featureFlags?: FeatureFlagService
+    private readonly featureFlags?: FeatureFlagService,
   ) {}
 
   prepareViewHierarchyForResponse(
     rawHierarchy: ViewHierarchyResult,
     viewHierarchy: ViewHierarchy,
-    _screenSize?: ObserveResult["screenSize"]
+    _screenSize?: ObserveResult["screenSize"],
   ): ViewHierarchyResult | null {
     const filtered = viewHierarchy.filterViewHierarchy(rawHierarchy);
     attachRawViewHierarchy(filtered, rawHierarchy);
@@ -44,7 +40,7 @@ export class AndroidTapStrategy implements TapStrategy {
     const method = await this.accessibilityDetector.detectMethod(
       this.device.deviceId,
       this.adb,
-      this.featureFlags
+      this.featureFlags,
     );
     return method === "talkback";
   }

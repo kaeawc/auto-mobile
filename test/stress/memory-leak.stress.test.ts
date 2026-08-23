@@ -1,8 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import {
-  createStressHarness,
-  runStressOperations
-} from "../../scripts/memory/stress-harness";
+import { createStressHarness, runStressOperations } from "../../scripts/memory/stress-harness";
 import { serverConfig } from "../../src/utils/ServerConfig";
 
 const supportsGc = typeof global.gc === "function";
@@ -37,7 +34,7 @@ describe("MCP Server Memory Leak Tests", () => {
         iterations: 200,
         opsPerSecond: 0,
         operations: ["observe", "tapOn", "swipeOn", "inputText"],
-        gcEvery: 0
+        gcEvery: 0,
       });
 
       if (supportsGc) {

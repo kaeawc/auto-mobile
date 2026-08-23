@@ -108,14 +108,14 @@ export class FakeIOSCtrlProxyManager implements CtrlProxyIosManager {
    * Check if a specific method was called
    */
   wasMethodCalled(operationName: string): boolean {
-    return this.executedOperations.some(op => op.includes(operationName));
+    return this.executedOperations.some((op) => op.includes(operationName));
   }
 
   /**
    * Get count of times a specific method was called
    */
   getCallCount(operationName: string): number {
-    return this.executedOperations.filter(op => op.includes(operationName)).length;
+    return this.executedOperations.filter((op) => op.includes(operationName)).length;
   }
 
   getLastSetupMinimumHealthPollDurationMs(): number | undefined {
@@ -192,7 +192,7 @@ export class FakeIOSCtrlProxyManager implements CtrlProxyIosManager {
       return {
         success: false,
         message: "Failed to setup IOSCtrlProxy",
-        error: "Mock setup failure"
+        error: "Mock setup failure",
       };
     }
 
@@ -200,13 +200,13 @@ export class FakeIOSCtrlProxyManager implements CtrlProxyIosManager {
       this.runningState = true;
       return {
         success: true,
-        message: "IOSCtrlProxy started successfully"
+        message: "IOSCtrlProxy started successfully",
       };
     }
 
     return {
       success: true,
-      message: "IOSCtrlProxy was already running"
+      message: "IOSCtrlProxy was already running",
     };
   }
 

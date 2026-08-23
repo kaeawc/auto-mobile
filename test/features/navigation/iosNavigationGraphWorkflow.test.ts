@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { NavigateTo } from "../../../src/features/navigation/NavigateTo";
 import {
   DefaultIosSdkEventIngestor,
-  type IosTelemetryRecorder
+  type IosTelemetryRecorder,
 } from "../../../src/features/observe/ios/IosSdkEventIngestor";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { INTERNAL_NO_DIFF_PARAM } from "../../../src/server/internalToolCall";
@@ -16,7 +16,7 @@ import type { ScreenTransitionWaiter } from "../../../src/features/navigation/in
 const iOSDevice: BootedDevice = {
   deviceId: "ios-simulator-navigation-workflow",
   platform: "ios",
-  source: "local"
+  source: "local",
 } as BootedDevice;
 
 const noOpTelemetryRecorder: IosTelemetryRecorder = {
@@ -27,7 +27,7 @@ const noOpTelemetryRecorder: IosTelemetryRecorder = {
   recordOsEvent: async () => {},
   recordNavigationEvent: async () => {},
   recordStorageEvent: async () => {},
-  recordLayoutEvent: async () => {}
+  recordLayoutEvent: async () => {},
 };
 
 describe("iOS navigation-event graph workflow", () => {
@@ -42,44 +42,52 @@ describe("iOS navigation-event graph workflow", () => {
       getNavigationGraphManager: () => graph,
       captureScreenshot: async () => ({ success: false }),
       telemetryRecorder: noOpTelemetryRecorder,
-      navigationScreenshotsEnabled: () => false
+      navigationScreenshotsEnabled: () => false,
     });
     const navigationEvent = (destination: string): SdkEvent => ({
       type: "navigation",
       timestamp: Date.now(),
-      payload: { destination, source: "swiftui_navigation", arguments: {}, metadata: {} }
+      payload: { destination, source: "swiftui_navigation", arguments: {}, metadata: {} },
     });
 
-    await ingestor.recordSdkEvent(navigationEvent("Home"), "dev.jasonpearson.automobile.Playground");
+    await ingestor.recordSdkEvent(
+      navigationEvent("Home"),
+      "dev.jasonpearson.automobile.Playground",
+    );
     graph.recordToolCall("tapOn", { text: "Settings", action: "tap", platform: "ios" });
-    await ingestor.recordSdkEvent(navigationEvent("Settings"), "dev.jasonpearson.automobile.Playground");
+    await ingestor.recordSdkEvent(
+      navigationEvent("Settings"),
+      "dev.jasonpearson.automobile.Playground",
+    );
 
     const graphReport = await graph.exportGraph();
-    expect(graphReport.nodes.map(node => node.screenName)).toEqual(["Home", "Settings"]);
+    expect(graphReport.nodes.map((node) => node.screenName)).toEqual(["Home", "Settings"]);
     expect(graphReport.edges).toHaveLength(1);
     expect(graphReport.edges[0]).toMatchObject({
       from: "Home",
       to: "Settings",
-      interaction: { toolName: "tapOn", args: { text: "Settings", platform: "ios" } }
+      interaction: { toolName: "tapOn", args: { text: "Settings", platform: "ios" } },
     });
 
     // Model the iOS back action that returns the user to the learned source screen.
     graph.setCurrentScreenValue("Home");
     let replayArgs: Record<string, unknown> | undefined;
-    ToolRegistry.register("tapOn", "tapOn", {}, async args => {
+    ToolRegistry.register("tapOn", "tapOn", {}, async (args) => {
       replayArgs = args;
       return { success: true };
     });
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const screenWaiter: ScreenTransitionWaiter = { waitForScreen: async screen => screen === "Settings" };
+    const screenWaiter: ScreenTransitionWaiter = {
+      waitForScreen: async (screen) => screen === "Settings",
+    };
     const navigateTo = new NavigateTo(
       iOSDevice,
       new FakeAdbClientFactory(),
       null,
       screenWaiter,
       graph,
-      timer
+      timer,
     );
 
     const replay = await navigateTo.execute({ targetScreen: "Settings", platform: "ios" });
@@ -91,7 +99,7 @@ describe("iOS navigation-event graph workflow", () => {
       action: "tap",
       platform: "ios",
       deviceId: "ios-simulator-navigation-workflow",
-      [INTERNAL_NO_DIFF_PARAM]: true
+      [INTERNAL_NO_DIFF_PARAM]: true,
     });
   });
 });

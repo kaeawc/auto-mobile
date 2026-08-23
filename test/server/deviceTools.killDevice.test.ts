@@ -2643,7 +2643,7 @@ describe("killDevice handler", () => {
       notifyResourcesChanged: async () => {},
       ensureCtrlProxyReady: async () => {},
       clearInstalledAppsForDevice: async () => {},
-      stopAndroidObservers: async target => {
+      stopAndroidObservers: async (target) => {
         stoppedObserverDeviceIds.push(target.deviceId);
         observationManager.markObserversStopped();
       },
@@ -2655,7 +2655,7 @@ describe("killDevice handler", () => {
     }
 
     const result = tool.handler({ device });
-    await new Promise(resolve => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
     // Advancing the full deadline makes the pre-fix hang deterministic: without
     // observer teardown the device never disappears and this reaches the timeout.
     timer.advanceTime(30_000);
@@ -3101,41 +3101,44 @@ describe("killDevice handler", () => {
   // (issue #5452) still holds on Windows — the observer detach simply degrades to
   // a no-op and shutdown proceeds — and this close/evict behavior is verified on
   // macOS/Linux, where module identity is stable.
-  test.skipIf(process.platform === "win32")("closes the registered Android CtrlProxy observer during teardown", async () => {
-    const timer = new FakeTimer();
-    const device: BootedDevice = {
-      name: "Pixel 8",
-      platform: "android",
-      deviceId: "emulator-5554",
-    };
-    const successfulManager = new SuccessfulKillDeviceManager();
-    manager = successfulManager;
-    setDeviceToolsDependencies({
-      deviceManagerFactory: () => successfulManager,
-      notifyResourcesChanged: async () => {},
-      ensureCtrlProxyReady: async () => {},
-      clearInstalledAppsForDevice: async () => {},
-      timer,
-    });
-    // A real per-device observer singleton, backed by a fake ADB factory so no
-    // real device I/O runs. The default stopAndroidObservers dependency must
-    // find and close it during teardown.
-    const observer = AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory());
-    const closeSpy = spyOn(observer, "close").mockResolvedValue(undefined);
-    try {
-      const tool = ToolRegistry.getTool("killDevice");
-      if (!tool) {
-        throw new Error("killDevice not registered");
+  test.skipIf(process.platform === "win32")(
+    "closes the registered Android CtrlProxy observer during teardown",
+    async () => {
+      const timer = new FakeTimer();
+      const device: BootedDevice = {
+        name: "Pixel 8",
+        platform: "android",
+        deviceId: "emulator-5554",
+      };
+      const successfulManager = new SuccessfulKillDeviceManager();
+      manager = successfulManager;
+      setDeviceToolsDependencies({
+        deviceManagerFactory: () => successfulManager,
+        notifyResourcesChanged: async () => {},
+        ensureCtrlProxyReady: async () => {},
+        clearInstalledAppsForDevice: async () => {},
+        timer,
+      });
+      // A real per-device observer singleton, backed by a fake ADB factory so no
+      // real device I/O runs. The default stopAndroidObservers dependency must
+      // find and close it during teardown.
+      const observer = AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory());
+      const closeSpy = spyOn(observer, "close").mockResolvedValue(undefined);
+      try {
+        const tool = ToolRegistry.getTool("killDevice");
+        if (!tool) {
+          throw new Error("killDevice not registered");
+        }
+
+        await tool.handler({ device });
+
+        expect(closeSpy).toHaveBeenCalledTimes(1);
+        // The detached observer is evicted so a re-booted same-serial emulator
+        // does not reuse a closed, reconnect-disabled client.
+        expect(AndroidCtrlProxyClient.getExistingInstance(device.deviceId)).toBeNull();
+      } finally {
+        closeSpy.mockRestore();
       }
-
-      await tool.handler({ device });
-
-      expect(closeSpy).toHaveBeenCalledTimes(1);
-      // The detached observer is evicted so a re-booted same-serial emulator
-      // does not reuse a closed, reconnect-disabled client.
-      expect(AndroidCtrlProxyClient.getExistingInstance(device.deviceId)).toBeNull();
-    } finally {
-      closeSpy.mockRestore();
-    }
-  });
+    },
+  );
 });

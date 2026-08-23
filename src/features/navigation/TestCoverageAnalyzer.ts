@@ -112,7 +112,7 @@ export class TestCoverageAnalyzer {
     const criticalGaps = await this.identifyCriticalGaps(
       appId,
       coverageData.uncoveredNodes,
-      coverageData.uncoveredEdges
+      coverageData.uncoveredEdges,
     );
 
     // Generate recommendations
@@ -121,13 +121,11 @@ export class TestCoverageAnalyzer {
     // Generate suggested test scenarios
     const suggestedScenarios = await this.generateTestScenarios(appId, criticalGaps);
 
-    const nodeCoveragePercent = coverageData.totalNodes > 0
-      ? (coverageData.coveredNodes / coverageData.totalNodes) * 100
-      : 0;
+    const nodeCoveragePercent =
+      coverageData.totalNodes > 0 ? (coverageData.coveredNodes / coverageData.totalNodes) * 100 : 0;
 
-    const edgeCoveragePercent = coverageData.totalEdges > 0
-      ? (coverageData.coveredEdges / coverageData.totalEdges) * 100
-      : 0;
+    const edgeCoveragePercent =
+      coverageData.totalEdges > 0 ? (coverageData.coveredEdges / coverageData.totalEdges) * 100 : 0;
 
     const report: TestCoverageReport = {
       appId,
@@ -148,7 +146,7 @@ export class TestCoverageAnalyzer {
 
     logger.info(
       `[TEST_COVERAGE] Report generated: ${report.overallCoveragePercent.toFixed(1)}% overall coverage, ` +
-      `${report.criticalGaps.length} critical gaps identified`
+        `${report.criticalGaps.length} critical gaps identified`,
     );
 
     return report;
@@ -161,7 +159,7 @@ export class TestCoverageAnalyzer {
   private async identifyCriticalGaps(
     appId: string,
     uncoveredNodes: NavigationNode[],
-    uncoveredEdges: NavigationEdge[]
+    uncoveredEdges: NavigationEdge[],
   ): Promise<CoverageGap[]> {
     const gaps: CoverageGap[] = [];
 
@@ -171,7 +169,7 @@ export class TestCoverageAnalyzer {
     const graphAnalysis = this.buildGraphAnalysis(allNodes, allEdges);
 
     // Calculate max values for normalization
-    const maxVisits = Math.max(...allNodes.map(n => n.visit_count), 1);
+    const maxVisits = Math.max(...allNodes.map((n) => n.visit_count), 1);
 
     // Analyze uncovered nodes
     for (const node of uncoveredNodes) {
@@ -237,7 +235,10 @@ export class TestCoverageAnalyzer {
    * Build graph indexes once per report so each coverage gap can be scored with
    * constant-time lookups.
    */
-  private buildGraphAnalysis(allNodes: NavigationNode[], allEdges: NavigationEdge[]): GraphAnalysis {
+  private buildGraphAnalysis(
+    allNodes: NavigationNode[],
+    allEdges: NavigationEdge[],
+  ): GraphAnalysis {
     const nodeByScreen = new Map<string, NavigationNode>();
     const inEdgesByScreen = new Map<string, NavigationEdge[]>();
     const outEdgesByScreen = new Map<string, NavigationEdge[]>();
@@ -280,7 +281,7 @@ export class TestCoverageAnalyzer {
 
   private calculateDepthsFromEntryPoints(
     entryPoints: string[],
-    outEdgesByScreen: Map<string, NavigationEdge[]>
+    outEdgesByScreen: Map<string, NavigationEdge[]>,
   ): Map<string, number> {
     const depthsByScreen = new Map<string, number>();
     const queue: Array<{ screen: string; depth: number }> = [];
@@ -322,7 +323,7 @@ export class TestCoverageAnalyzer {
   private generateNodeRecommendation(
     node: NavigationNode,
     depth: number,
-    edgeCount: number
+    edgeCount: number,
   ): string {
     const visitText = node.visit_count > 1 ? `${node.visit_count} visits` : "1 visit";
     const depthText = depth <= 2 ? "shallow" : depth <= 4 ? "medium" : "deep";
@@ -343,50 +344,45 @@ export class TestCoverageAnalyzer {
   /**
    * Generate high-level recommendations based on coverage data.
    */
-  private generateRecommendations(
-    coverageData: any,
-    criticalGaps: CoverageGap[]
-  ): string[] {
+  private generateRecommendations(coverageData: any, criticalGaps: CoverageGap[]): string[] {
     const recommendations: string[] = [];
 
     // Overall coverage recommendation
     if (coverageData.coveragePercentage < 50) {
       recommendations.push(
-        `Overall coverage is ${coverageData.coveragePercentage.toFixed(1)}% - significantly increase test coverage across the application.`
+        `Overall coverage is ${coverageData.coveragePercentage.toFixed(1)}% - significantly increase test coverage across the application.`,
       );
     } else if (coverageData.coveragePercentage < 80) {
       recommendations.push(
-        `Overall coverage is ${coverageData.coveragePercentage.toFixed(1)}% - add tests for critical user journeys to reach 80%+ coverage.`
+        `Overall coverage is ${coverageData.coveragePercentage.toFixed(1)}% - add tests for critical user journeys to reach 80%+ coverage.`,
       );
     } else {
       recommendations.push(
-        `Overall coverage is ${coverageData.coveragePercentage.toFixed(1)}% - focus on edge cases and less common user flows.`
+        `Overall coverage is ${coverageData.coveragePercentage.toFixed(1)}% - focus on edge cases and less common user flows.`,
       );
     }
 
     // Node vs edge coverage
-    const nodeCoverage = coverageData.totalNodes > 0
-      ? (coverageData.coveredNodes / coverageData.totalNodes) * 100
-      : 0;
-    const edgeCoverage = coverageData.totalEdges > 0
-      ? (coverageData.coveredEdges / coverageData.totalEdges) * 100
-      : 0;
+    const nodeCoverage =
+      coverageData.totalNodes > 0 ? (coverageData.coveredNodes / coverageData.totalNodes) * 100 : 0;
+    const edgeCoverage =
+      coverageData.totalEdges > 0 ? (coverageData.coveredEdges / coverageData.totalEdges) * 100 : 0;
 
     if (nodeCoverage - edgeCoverage > 20) {
       recommendations.push(
-        `Node coverage (${nodeCoverage.toFixed(1)}%) is significantly higher than edge coverage (${edgeCoverage.toFixed(1)}%). Focus on testing transitions and user journeys between screens.`
+        `Node coverage (${nodeCoverage.toFixed(1)}%) is significantly higher than edge coverage (${edgeCoverage.toFixed(1)}%). Focus on testing transitions and user journeys between screens.`,
       );
     } else if (edgeCoverage - nodeCoverage > 20) {
       recommendations.push(
-        `Edge coverage (${edgeCoverage.toFixed(1)}%) is higher than node coverage (${nodeCoverage.toFixed(1)}%). Ensure all screens are visited during tests.`
+        `Edge coverage (${edgeCoverage.toFixed(1)}%) is higher than node coverage (${nodeCoverage.toFixed(1)}%). Ensure all screens are visited during tests.`,
       );
     }
 
     // Critical gaps
-    const highCriticalityGaps = criticalGaps.filter(g => g.criticalityScore > 60);
+    const highCriticalityGaps = criticalGaps.filter((g) => g.criticalityScore > 60);
     if (highCriticalityGaps.length > 0) {
       recommendations.push(
-        `${highCriticalityGaps.length} high-priority coverage gap(s) identified in frequently-used, shallow screens. Prioritize testing these areas.`
+        `${highCriticalityGaps.length} high-priority coverage gap(s) identified in frequently-used, shallow screens. Prioritize testing these areas.`,
       );
     }
 
@@ -397,7 +393,7 @@ export class TestCoverageAnalyzer {
         .map((n: NavigationNode) => n.screen_name)
         .join(", ");
       recommendations.push(
-        `${coverageData.uncoveredNodes.length} screen(s) have no test coverage. Top uncovered: ${topUncovered}`
+        `${coverageData.uncoveredNodes.length} screen(s) have no test coverage. Top uncovered: ${topUncovered}`,
       );
     }
 
@@ -409,34 +405,40 @@ export class TestCoverageAnalyzer {
    */
   private async generateTestScenarios(
     appId: string,
-    criticalGaps: CoverageGap[]
+    criticalGaps: CoverageGap[],
   ): Promise<TestScenario[]> {
     const scenarios: TestScenario[] = [];
 
     // Group gaps by criticality
-    const highPriority = criticalGaps.filter(g => g.criticalityScore > 60);
-    const mediumPriority = criticalGaps.filter(g => g.criticalityScore > 30 && g.criticalityScore <= 60);
+    const highPriority = criticalGaps.filter((g) => g.criticalityScore > 60);
+    const mediumPriority = criticalGaps.filter(
+      (g) => g.criticalityScore > 30 && g.criticalityScore <= 60,
+    );
 
     // Generate scenarios for high-priority gaps
     if (highPriority.length > 0) {
-      const nodeGaps = highPriority.filter(g => g.type === "node");
-      const edgeGaps = highPriority.filter(g => g.type === "edge");
+      const nodeGaps = highPriority.filter((g) => g.type === "node");
+      const edgeGaps = highPriority.filter((g) => g.type === "edge");
 
       if (nodeGaps.length > 0) {
         scenarios.push({
           title: "Cover Critical Screens",
           description: `Test ${nodeGaps.length} frequently-accessed screen(s) that currently have no coverage. These are shallow in the navigation tree and likely part of core user journeys.`,
           priority: "high",
-          targetScreens: nodeGaps.map(g => g.screenName!),
+          targetScreens: nodeGaps.map((g) => g.screenName!),
           estimatedCoverageImprovement: (nodeGaps.length / (criticalGaps.length || 1)) * 100,
         });
       }
 
       if (edgeGaps.length > 0) {
         const uniqueScreens = new Set<string>();
-        edgeGaps.forEach(g => {
-          if (g.fromScreen) {uniqueScreens.add(g.fromScreen);}
-          if (g.toScreen) {uniqueScreens.add(g.toScreen);}
+        edgeGaps.forEach((g) => {
+          if (g.fromScreen) {
+            uniqueScreens.add(g.fromScreen);
+          }
+          if (g.toScreen) {
+            uniqueScreens.add(g.toScreen);
+          }
         });
 
         scenarios.push({
@@ -451,14 +453,14 @@ export class TestCoverageAnalyzer {
 
     // Generate scenarios for medium-priority gaps
     if (mediumPriority.length > 0 && scenarios.length < 3) {
-      const nodeGaps = mediumPriority.filter(g => g.type === "node");
+      const nodeGaps = mediumPriority.filter((g) => g.type === "node");
 
       if (nodeGaps.length > 0) {
         scenarios.push({
           title: "Expand Screen Coverage",
           description: `Add tests for ${nodeGaps.length} additional screen(s) to improve overall coverage. These are moderately important screens in the navigation flow.`,
           priority: "medium",
-          targetScreens: nodeGaps.slice(0, 5).map(g => g.screenName!),
+          targetScreens: nodeGaps.slice(0, 5).map((g) => g.screenName!),
           estimatedCoverageImprovement: (nodeGaps.length / (criticalGaps.length || 1)) * 100,
         });
       }

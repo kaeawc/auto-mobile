@@ -16,20 +16,20 @@ const createViewHierarchy = (nodes: NodeSpec[]): ViewHierarchyResult => {
       node: {
         $: {
           bounds: { left: 0, top: 0, right: 100, bottom: 100 },
-          class: "android.widget.FrameLayout"
+          class: "android.widget.FrameLayout",
         },
-        node: nodes.map(node => ({
+        node: nodes.map((node) => ({
           $: {
             bounds: node.bounds,
             class: "android.widget.TextView",
             ...(node.text ? { text: node.text } : {}),
-            ...(node.resourceId ? { "resource-id": node.resourceId } : {})
-          }
-        }))
-      }
+            ...(node.resourceId ? { "resource-id": node.resourceId } : {}),
+          },
+        })),
+      },
     },
     screenWidth: 100,
-    screenHeight: 100
+    screenHeight: 100,
   } as ViewHierarchyResult;
 };
 
@@ -38,7 +38,7 @@ describe("DefaultElementSelector", () => {
     const selector = new DefaultElementSelector(new DefaultElementFinder(), () => 0);
     const viewHierarchy = createViewHierarchy([
       { bounds: { left: 0, top: 0, right: 30, bottom: 30 }, text: "Match" },
-      { bounds: { left: 0, top: 0, right: 10, bottom: 10 }, text: "Match" }
+      { bounds: { left: 0, top: 0, right: 10, bottom: 10 }, text: "Match" },
     ]);
 
     const match = selector.selectByText(viewHierarchy, "Match", { strategy: "first" });
@@ -53,7 +53,7 @@ describe("DefaultElementSelector", () => {
     const selector = new DefaultElementSelector(new DefaultElementFinder(), () => 0);
     const viewHierarchy = createViewHierarchy([
       { bounds: { left: -20, top: 0, right: -10, bottom: 10 }, text: "Match" },
-      { bounds: { left: 10, top: 0, right: 40, bottom: 30 }, text: "Match" }
+      { bounds: { left: 10, top: 0, right: 40, bottom: 30 }, text: "Match" },
     ]);
 
     const match = selector.selectByText(viewHierarchy, "Match", { strategy: "first" });
@@ -67,7 +67,7 @@ describe("DefaultElementSelector", () => {
     const selector = new DefaultElementSelector(new DefaultElementFinder(), () => 0);
     const viewHierarchy = createViewHierarchy([
       { bounds: { left: -300, top: 0, right: -200, bottom: 30 }, text: "Match" },
-      { bounds: { left: 120, top: 0, right: 160, bottom: 30 }, text: "Match" }
+      { bounds: { left: 120, top: 0, right: 160, bottom: 30 }, text: "Match" },
     ]);
 
     const match = selector.selectByText(viewHierarchy, "Match", { strategy: "first" });
@@ -83,7 +83,7 @@ describe("DefaultElementSelector", () => {
     const selector = new DefaultElementSelector(new DefaultElementFinder(), random);
     const viewHierarchy = createViewHierarchy([
       { bounds: { left: 0, top: 0, right: 10, bottom: 10 }, text: "Match" },
-      { bounds: { left: 0, top: 0, right: 20, bottom: 20 }, text: "Match" }
+      { bounds: { left: 0, top: 0, right: 20, bottom: 20 }, text: "Match" },
     ]);
 
     const first = selector.selectByText(viewHierarchy, "Match", { strategy: "random" });
@@ -100,7 +100,7 @@ describe("DefaultElementSelector", () => {
     const selector = new DefaultElementSelector(new DefaultElementFinder(), () => 0.9);
     const viewHierarchy = createViewHierarchy([
       { bounds: { left: 0, top: 0, right: 10, bottom: 10 }, text: "Match" },
-      { bounds: { left: 0, top: 0, right: 20, bottom: 20 }, text: "Match 2" }
+      { bounds: { left: 0, top: 0, right: 20, bottom: 20 }, text: "Match 2" },
     ]);
 
     const match = selector.selectByText(viewHierarchy, "Match", { strategy: "random" });
@@ -112,7 +112,7 @@ describe("DefaultElementSelector", () => {
   test("returns null when no matches are found", () => {
     const selector = new DefaultElementSelector(new DefaultElementFinder(), () => 0);
     const viewHierarchy = createViewHierarchy([
-      { bounds: { left: 0, top: 0, right: 10, bottom: 10 }, text: "Other" }
+      { bounds: { left: 0, top: 0, right: 10, bottom: 10 }, text: "Other" },
     ]);
 
     const match = selector.selectByText(viewHierarchy, "Match", { strategy: "first" });
@@ -125,10 +125,12 @@ describe("DefaultElementSelector", () => {
   test("random strategy returns single match for resource ID", () => {
     const selector = new DefaultElementSelector(new DefaultElementFinder(), () => 0.5);
     const viewHierarchy = createViewHierarchy([
-      { bounds: { left: 0, top: 0, right: 10, bottom: 10 }, resourceId: "test:id/button" }
+      { bounds: { left: 0, top: 0, right: 10, bottom: 10 }, resourceId: "test:id/button" },
     ]);
 
-    const match = selector.selectByResourceId(viewHierarchy, "test:id/button", { strategy: "random" });
+    const match = selector.selectByResourceId(viewHierarchy, "test:id/button", {
+      strategy: "random",
+    });
 
     expect(match.element?.["resource-id"]).toBe("test:id/button");
     expect(match.totalMatches).toBe(1);
@@ -136,10 +138,9 @@ describe("DefaultElementSelector", () => {
 });
 
 describe("selectClickableSiblingOfText — nested label rows", () => {
-
   const node = (attrs: Record<string, any>, children?: any[]): any => ({
     $: attrs,
-    ...(children ? { node: children } : {})
+    ...(children ? { node: children } : {}),
   });
 
   // A list row that nests its label under a leading container (e.g. an avatar): the NAME
@@ -148,46 +149,103 @@ describe("selectClickableSiblingOfText — nested label rows", () => {
   // share the removeButton resource-id.
   const row = (name: string, top: number) =>
     node(
-      { "bounds": { left: 0, top, right: 100, bottom: top + 20 }, "class": "android.view.ViewGroup", "resource-id": "app:id/row", "clickable": "true" },
+      {
+        bounds: { left: 0, top, right: 100, bottom: top + 20 },
+        class: "android.view.ViewGroup",
+        "resource-id": "app:id/row",
+        clickable: "true",
+      },
       [
         node(
-          { "bounds": { left: 5, top: top + 2, right: 80, bottom: top + 18 }, "class": "android.view.ViewGroup", "resource-id": "app:id/avatar" },
-          [node({ "bounds": { left: 10, top: top + 2, right: 80, bottom: top + 10 }, "class": "android.widget.TextView", "resource-id": "app:id/nameLabel", "text": name })]
+          {
+            bounds: { left: 5, top: top + 2, right: 80, bottom: top + 18 },
+            class: "android.view.ViewGroup",
+            "resource-id": "app:id/avatar",
+          },
+          [
+            node({
+              bounds: { left: 10, top: top + 2, right: 80, bottom: top + 10 },
+              class: "android.widget.TextView",
+              "resource-id": "app:id/nameLabel",
+              text: name,
+            }),
+          ],
         ),
-        node({ "bounds": { left: 85, top: top + 2, right: 98, bottom: top + 18 }, "class": "android.widget.ImageButton", "resource-id": "app:id/removeButton", "clickable": "true" })
-      ]
+        node({
+          bounds: { left: 85, top: top + 2, right: 98, bottom: top + 18 },
+          class: "android.widget.ImageButton",
+          "resource-id": "app:id/removeButton",
+          clickable: "true",
+        }),
+      ],
     );
 
   const rowWithClickableContent = (name: string, top: number) =>
     node(
-      { "bounds": { left: 0, top, right: 100, bottom: top + 20 }, "class": "android.view.ViewGroup", "resource-id": "app:id/row", "clickable": "true" },
+      {
+        bounds: { left: 0, top, right: 100, bottom: top + 20 },
+        class: "android.view.ViewGroup",
+        "resource-id": "app:id/row",
+        clickable: "true",
+      },
       [
         node(
-          { "bounds": { left: 5, top: top + 2, right: 80, bottom: top + 18 }, "class": "android.view.ViewGroup", "resource-id": "app:id/content", "clickable": "true" },
-          [node({ "bounds": { left: 10, top: top + 2, right: 80, bottom: top + 10 }, "class": "android.widget.TextView", "resource-id": "app:id/nameLabel", "text": name })]
+          {
+            bounds: { left: 5, top: top + 2, right: 80, bottom: top + 18 },
+            class: "android.view.ViewGroup",
+            "resource-id": "app:id/content",
+            clickable: "true",
+          },
+          [
+            node({
+              bounds: { left: 10, top: top + 2, right: 80, bottom: top + 10 },
+              class: "android.widget.TextView",
+              "resource-id": "app:id/nameLabel",
+              text: name,
+            }),
+          ],
         ),
-        node({ "bounds": { left: 85, top: top + 2, right: 98, bottom: top + 18 }, "class": "android.widget.ImageButton", "resource-id": "app:id/removeButton", "clickable": "true" })
-      ]
+        node({
+          bounds: { left: 85, top: top + 2, right: 98, bottom: top + 18 },
+          class: "android.widget.ImageButton",
+          "resource-id": "app:id/removeButton",
+          clickable: "true",
+        }),
+      ],
     );
 
   const rowsHierarchy = {
     hierarchy: {
-      node: node({ bounds: { left: 0, top: 0, right: 100, bottom: 100 }, class: "android.widget.FrameLayout" }, [
-        node({ "bounds": { left: 0, top: 0, right: 100, bottom: 60 }, "class": "androidx.recyclerview.widget.RecyclerView", "resource-id": "app:id/list" }, [
-          row("Alice Adams", 0),
-          row("Bob Brown", 20)
-        ])
-      ])
+      node: node(
+        {
+          bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+          class: "android.widget.FrameLayout",
+        },
+        [
+          node(
+            {
+              bounds: { left: 0, top: 0, right: 100, bottom: 60 },
+              class: "androidx.recyclerview.widget.RecyclerView",
+              "resource-id": "app:id/list",
+            },
+            [row("Alice Adams", 0), row("Bob Brown", 20)],
+          ),
+        ],
+      ),
     },
     screenWidth: 100,
-    screenHeight: 100
+    screenHeight: 100,
   } as unknown as ViewHierarchyResult;
 
   test("finds the remove button in the SAME row as the named row", () => {
     const selector = new DefaultElementSelector(new DefaultElementFinder(), () => 0);
 
-    const alice = selector.selectClickableSiblingOfText(rowsHierarchy, "Alice Adams", { strategy: "first" });
-    const bob = selector.selectClickableSiblingOfText(rowsHierarchy, "Bob Brown", { strategy: "first" });
+    const alice = selector.selectClickableSiblingOfText(rowsHierarchy, "Alice Adams", {
+      strategy: "first",
+    });
+    const bob = selector.selectClickableSiblingOfText(rowsHierarchy, "Bob Brown", {
+      strategy: "first",
+    });
 
     // Both resolve (before the fix, the nested name returned no clickable sibling)...
     expect(alice.element?.["resource-id"]).toBe("app:id/removeButton");
@@ -202,22 +260,57 @@ describe("selectClickableSiblingOfText — nested label rows", () => {
     // the list and return Bob's control (a silent wrong tap) — it must be a clean null.
     const aliceNoButton = {
       hierarchy: {
-        node: node({ bounds: { left: 0, top: 0, right: 100, bottom: 100 }, class: "android.widget.FrameLayout" }, [
-          node({ "bounds": { left: 0, top: 0, right: 100, bottom: 60 }, "class": "androidx.recyclerview.widget.RecyclerView", "resource-id": "app:id/list" }, [
-            node({ "bounds": { left: 0, top: 0, right: 100, bottom: 20 }, "class": "android.view.ViewGroup", "resource-id": "app:id/row", "clickable": "true" }, [
-              node({ "bounds": { left: 5, top: 2, right: 80, bottom: 18 }, "class": "android.view.ViewGroup", "resource-id": "app:id/avatar" }, [
-                node({ "bounds": { left: 10, top: 2, right: 80, bottom: 10 }, "class": "android.widget.TextView", "resource-id": "app:id/nameLabel", "text": "Alice Adams" })
-              ])
-            ]),
-            row("Bob Brown", 20)
-          ])
-        ])
+        node: node(
+          {
+            bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+            class: "android.widget.FrameLayout",
+          },
+          [
+            node(
+              {
+                bounds: { left: 0, top: 0, right: 100, bottom: 60 },
+                class: "androidx.recyclerview.widget.RecyclerView",
+                "resource-id": "app:id/list",
+              },
+              [
+                node(
+                  {
+                    bounds: { left: 0, top: 0, right: 100, bottom: 20 },
+                    class: "android.view.ViewGroup",
+                    "resource-id": "app:id/row",
+                    clickable: "true",
+                  },
+                  [
+                    node(
+                      {
+                        bounds: { left: 5, top: 2, right: 80, bottom: 18 },
+                        class: "android.view.ViewGroup",
+                        "resource-id": "app:id/avatar",
+                      },
+                      [
+                        node({
+                          bounds: { left: 10, top: 2, right: 80, bottom: 10 },
+                          class: "android.widget.TextView",
+                          "resource-id": "app:id/nameLabel",
+                          text: "Alice Adams",
+                        }),
+                      ],
+                    ),
+                  ],
+                ),
+                row("Bob Brown", 20),
+              ],
+            ),
+          ],
+        ),
       },
       screenWidth: 100,
-      screenHeight: 100
+      screenHeight: 100,
     } as unknown as ViewHierarchyResult;
 
-    const alice = selector.selectClickableSiblingOfText(aliceNoButton, "Alice Adams", { strategy: "first" });
+    const alice = selector.selectClickableSiblingOfText(aliceNoButton, "Alice Adams", {
+      strategy: "first",
+    });
     expect(alice.element).toBeNull();
   });
 
@@ -225,18 +318,30 @@ describe("selectClickableSiblingOfText — nested label rows", () => {
     const selector = new DefaultElementSelector(new DefaultElementFinder(), () => 0);
     const clickableContentRows = {
       hierarchy: {
-        node: node({ bounds: { left: 0, top: 0, right: 100, bottom: 100 }, class: "android.widget.FrameLayout" }, [
-          node({ "bounds": { left: 0, top: 0, right: 100, bottom: 60 }, "class": "androidx.recyclerview.widget.RecyclerView", "resource-id": "app:id/list" }, [
-            rowWithClickableContent("Alice Adams", 0),
-            rowWithClickableContent("Bob Brown", 20)
-          ])
-        ])
+        node: node(
+          {
+            bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+            class: "android.widget.FrameLayout",
+          },
+          [
+            node(
+              {
+                bounds: { left: 0, top: 0, right: 100, bottom: 60 },
+                class: "androidx.recyclerview.widget.RecyclerView",
+                "resource-id": "app:id/list",
+              },
+              [rowWithClickableContent("Alice Adams", 0), rowWithClickableContent("Bob Brown", 20)],
+            ),
+          ],
+        ),
       },
       screenWidth: 100,
-      screenHeight: 100
+      screenHeight: 100,
     } as unknown as ViewHierarchyResult;
 
-    const bob = selector.selectClickableSiblingOfText(clickableContentRows, "Bob Brown", { strategy: "first" });
+    const bob = selector.selectClickableSiblingOfText(clickableContentRows, "Bob Brown", {
+      strategy: "first",
+    });
     expect(bob.element?.["resource-id"]).toBe("app:id/removeButton");
     expect(bob.element?.bounds.top).toBe(22);
   });
@@ -245,16 +350,30 @@ describe("selectClickableSiblingOfText — nested label rows", () => {
     const selector = new DefaultElementSelector(new DefaultElementFinder(), () => 0);
     const flatRow = {
       hierarchy: {
-        node: node({ bounds: { left: 0, top: 0, right: 100, bottom: 20 }, class: "android.view.ViewGroup" }, [
-          node({ bounds: { left: 0, top: 0, right: 50, bottom: 10 }, class: "android.widget.TextView", text: "Accept Terms" }),
-          node({ "bounds": { left: 50, top: 0, right: 60, bottom: 10 }, "class": "android.widget.CheckBox", "resource-id": "app:id/cb", "clickable": "true" })
-        ])
+        node: node(
+          { bounds: { left: 0, top: 0, right: 100, bottom: 20 }, class: "android.view.ViewGroup" },
+          [
+            node({
+              bounds: { left: 0, top: 0, right: 50, bottom: 10 },
+              class: "android.widget.TextView",
+              text: "Accept Terms",
+            }),
+            node({
+              bounds: { left: 50, top: 0, right: 60, bottom: 10 },
+              class: "android.widget.CheckBox",
+              "resource-id": "app:id/cb",
+              clickable: "true",
+            }),
+          ],
+        ),
       },
       screenWidth: 100,
-      screenHeight: 100
+      screenHeight: 100,
     } as unknown as ViewHierarchyResult;
 
-    const match = selector.selectClickableSiblingOfText(flatRow, "Accept Terms", { strategy: "first" });
+    const match = selector.selectClickableSiblingOfText(flatRow, "Accept Terms", {
+      strategy: "first",
+    });
     expect(match.element?.["resource-id"]).toBe("app:id/cb");
   });
 });
@@ -262,31 +381,54 @@ describe("selectClickableSiblingOfText — nested label rows", () => {
 describe("selectByResourceId — index", () => {
   const node = (attrs: Record<string, any>, children?: any[]): any => ({
     $: attrs,
-    ...(children ? { node: children } : {})
+    ...(children ? { node: children } : {}),
   });
 
   // Two controls sharing one resource-id (a repeated per-row action), stacked
   // top-to-bottom. `index` picks the Nth on-screen match in hierarchy order.
   const repeated = {
     hierarchy: {
-      node: node({ bounds: { left: 0, top: 0, right: 100, bottom: 100 }, class: "android.widget.FrameLayout" }, [
-        node({ "bounds": { left: 0, top: 0, right: 100, bottom: 20 }, "class": "android.widget.ImageButton", "resource-id": "app:id/remove", "clickable": "true" }),
-        node({ "bounds": { left: 0, top: 20, right: 20, bottom: 30 }, "class": "android.widget.ImageButton", "resource-id": "app:id/remove", "clickable": "true" })
-      ])
+      node: node(
+        {
+          bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+          class: "android.widget.FrameLayout",
+        },
+        [
+          node({
+            bounds: { left: 0, top: 0, right: 100, bottom: 20 },
+            class: "android.widget.ImageButton",
+            "resource-id": "app:id/remove",
+            clickable: "true",
+          }),
+          node({
+            bounds: { left: 0, top: 20, right: 20, bottom: 30 },
+            class: "android.widget.ImageButton",
+            "resource-id": "app:id/remove",
+            clickable: "true",
+          }),
+        ],
+      ),
     },
     screenWidth: 100,
-    screenHeight: 100
+    screenHeight: 100,
   } as unknown as ViewHierarchyResult;
 
   test("index selects the Nth match and is out-of-range safe", () => {
     const selector = new DefaultElementSelector(new DefaultElementFinder(), () => 0);
 
-    expect(selector.selectByResourceId(repeated, "app:id/remove", { index: 0 }).element?.bounds.top).toBe(0);
-    expect(selector.selectByResourceId(repeated, "app:id/remove", { index: 1 }).element?.bounds.top).toBe(20);
+    expect(
+      selector.selectByResourceId(repeated, "app:id/remove", { index: 0 }).element?.bounds.top,
+    ).toBe(0);
+    expect(
+      selector.selectByResourceId(repeated, "app:id/remove", { index: 1 }).element?.bounds.top,
+    ).toBe(20);
     // Out of range → no match, rather than silently grabbing another element.
     expect(selector.selectByResourceId(repeated, "app:id/remove", { index: 2 }).element).toBeNull();
     // No index → strategy default (first/smallest exact match) still applies.
-    expect(selector.selectByResourceId(repeated, "app:id/remove", { strategy: "first" }).element?.bounds.top).toBe(20);
+    expect(
+      selector.selectByResourceId(repeated, "app:id/remove", { strategy: "first" }).element?.bounds
+        .top,
+    ).toBe(20);
   });
 
   // (Deleted a duplicate "index uses hierarchy order…" test: its two assertions
@@ -300,12 +442,16 @@ describe("selectByText — index", () => {
     const selector = new DefaultElementSelector(new DefaultElementFinder(), () => 0);
     const viewHierarchy = createViewHierarchy([
       { bounds: { left: 0, top: 0, right: 100, bottom: 20 }, text: "Match" },
-      { bounds: { left: 0, top: 20, right: 20, bottom: 30 }, text: "Match" }
+      { bounds: { left: 0, top: 20, right: 20, bottom: 30 }, text: "Match" },
     ]);
 
     expect(selector.selectByText(viewHierarchy, "Match", { index: 0 }).element?.bounds.top).toBe(0);
-    expect(selector.selectByText(viewHierarchy, "Match", { index: 1 }).element?.bounds.top).toBe(20);
+    expect(selector.selectByText(viewHierarchy, "Match", { index: 1 }).element?.bounds.top).toBe(
+      20,
+    );
     // No index → strategy default (first/smallest exact match) still applies.
-    expect(selector.selectByText(viewHierarchy, "Match", { strategy: "first" }).element?.bounds.top).toBe(20);
+    expect(
+      selector.selectByText(viewHierarchy, "Match", { strategy: "first" }).element?.bounds.top,
+    ).toBe(20);
   });
 });

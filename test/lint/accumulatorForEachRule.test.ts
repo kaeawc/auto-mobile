@@ -9,7 +9,7 @@ function lintSnippet(code: string): string[] {
 }
 
 function matches(messages: string[], fragment: string): boolean {
-  return messages.some(message => message.startsWith(fragment));
+  return messages.some((message) => message.startsWith(fragment));
 }
 
 describe("auto-mobile/no-accumulator-foreach", () => {
@@ -65,7 +65,8 @@ describe("auto-mobile/no-accumulator-foreach", () => {
   // Explicit loops are deliberately allowed. The rule nudges toward declarative
   // style where a clean declarative form exists; it does not outlaw iteration.
   test("allows every explicit loop form", async () => {
-    const messages = await lintSnippet(`export function probe(o: Record<string, number>, xs: number[]): number {
+    const messages =
+      await lintSnippet(`export function probe(o: Record<string, number>, xs: number[]): number {
   let n = 0;
   for (const key in o) {
     n += o[key];
@@ -102,7 +103,7 @@ describe("auto-mobile/no-accumulator-foreach", () => {
   return out;
 }
 `);
-    expect(messages.filter(message => message.startsWith(ACCUMULATION))).toHaveLength(1);
+    expect(messages.filter((message) => message.startsWith(ACCUMULATION))).toHaveLength(1);
     // The Timer ban is a no-restricted-syntax rule and must still be separate.
     expect(matches(messages, "Use Timer.setTimeout()")).toBe(false);
   });

@@ -1,12 +1,7 @@
 {
   "description": "Pinned runtime dependency graph for @kaeawc/auto-mobile. Regenerate with `bun scripts/release/pin-runtime-deps.ts --write` after a dependency or security update; see docs/design-docs/release/runtime-dependency-pinning.md.",
   "issue": 5421,
-  "roots": [
-    "@jimp/core",
-    "jimp",
-    "kysely",
-    "sharp"
-  ],
+  "roots": ["@jimp/core", "jimp", "kysely", "sharp"],
   "dependencies": {
     "@borewit/text-codec": "0.2.2",
     "@emnapi/runtime": "1.11.2",
@@ -76,43 +71,25 @@
     "zod": "3.25.76"
   },
   "bundledRuntimeDependencies": {
-    "pixelmatch": [
-      "5.3.0"
-    ],
-    "pngjs": [
-      "7.0.0",
-      "6.0.0"
-    ],
-    "xml2js": [
-      "0.5.0"
-    ]
+    "pixelmatch": ["5.3.0"],
+    "pngjs": ["7.0.0", "6.0.0"],
+    "xml2js": ["0.5.0"]
   },
   "bundledRuntimeDependencyOwners": {
     "@jimp/diff": {
-      "pixelmatch": [
-        "5.3.0"
-      ]
+      "pixelmatch": ["5.3.0"]
     },
     "@jimp/diff/node_modules/pixelmatch": {
-      "pngjs": [
-        "6.0.0"
-      ]
+      "pngjs": ["6.0.0"]
     },
     "@jimp/js-png": {
-      "pngjs": [
-        "7.0.0"
-      ]
+      "pngjs": ["7.0.0"]
     },
     "parse-bmfont-xml": {
-      "xml2js": [
-        "0.5.0"
-      ]
+      "xml2js": ["0.5.0"]
     }
   },
   "multiVersion": {
-    "pngjs": [
-      "7.0.0",
-      "6.0.0"
-    ]
+    "pngjs": ["7.0.0", "6.0.0"]
   }
 }

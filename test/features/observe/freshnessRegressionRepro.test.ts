@@ -67,11 +67,17 @@ class FakeScreenshotRecorder implements ObserveScreenshotRecorder {
   async capture(_perf?: PerformanceTracker, _signal?: AbortSignal): Promise<void> {}
 }
 
-class NoOpAuditor implements Pick<PerformanceAuditor & AccessibilityAuditor & AccessibilityStateDetector, "run"> {
+class NoOpAuditor implements Pick<
+  PerformanceAuditor & AccessibilityAuditor & AccessibilityStateDetector,
+  "run"
+> {
   async run(): Promise<void> {}
 }
 
-class FakeDeviceStateCollector implements Pick<DeviceStateCollector, "collectBackStack" | "collectWakefulness" | "collectDeviceLock" | "collectActiveWindow"> {
+class FakeDeviceStateCollector implements Pick<
+  DeviceStateCollector,
+  "collectBackStack" | "collectWakefulness" | "collectDeviceLock" | "collectActiveWindow"
+> {
   async collectBackStack(): Promise<void> {}
   async collectWakefulness(result: ObserveResult): Promise<void> {
     result.wakefulness = "Awake";
@@ -81,8 +87,18 @@ class FakeDeviceStateCollector implements Pick<DeviceStateCollector, "collectBac
 }
 
 /** Hands `execute()` a caller-controlled `result.viewHierarchy` directly. */
-class ScriptedHierarchyCollector implements Pick<HierarchyCollector, "collect" | "collectRaw" | "extractScreenSize" | "reconcileScreenDimensions"> {
-  constructor(private viewHierarchy: { hierarchy: unknown; updatedAt?: number; receivedAt?: number; fresh?: boolean }) {}
+class ScriptedHierarchyCollector implements Pick<
+  HierarchyCollector,
+  "collect" | "collectRaw" | "extractScreenSize" | "reconcileScreenDimensions"
+> {
+  constructor(
+    private viewHierarchy: {
+      hierarchy: unknown;
+      updatedAt?: number;
+      receivedAt?: number;
+      fresh?: boolean;
+    },
+  ) {}
   async collect(result: ObserveResult): Promise<void> {
     result.viewHierarchy = {
       screenWidth: 1080,
@@ -107,17 +123,24 @@ function createObserveScreen(
   viewHierarchy: { hierarchy: unknown; updatedAt?: number; receivedAt?: number; fresh?: boolean },
   platformValidator?: HierarchyPlatformValidator,
 ) {
-  const observeScreen = new RealObserveScreen(device, new FakeAdbClientFactory(new FakeAdbExecutor()), {
-    cacheStore: new FakeObserveCacheStore(fakeTimer),
-    screenshotStateStore: new FakeScreenshotStateStore(),
-    screenshotRecorder: new FakeScreenshotRecorder(),
-    hierarchyCollector: new ScriptedHierarchyCollector(viewHierarchy) as unknown as HierarchyCollector,
-    deviceStateCollector: new FakeDeviceStateCollector() as unknown as DeviceStateCollector,
-    performanceAuditor: new NoOpAuditor() as unknown as PerformanceAuditor,
-    accessibilityAuditor: new NoOpAuditor() as unknown as AccessibilityAuditor,
-    accessibilityStateDetector: new NoOpAuditor() as unknown as AccessibilityStateDetector,
-    platformValidator,
-  }, fakeTimer);
+  const observeScreen = new RealObserveScreen(
+    device,
+    new FakeAdbClientFactory(new FakeAdbExecutor()),
+    {
+      cacheStore: new FakeObserveCacheStore(fakeTimer),
+      screenshotStateStore: new FakeScreenshotStateStore(),
+      screenshotRecorder: new FakeScreenshotRecorder(),
+      hierarchyCollector: new ScriptedHierarchyCollector(
+        viewHierarchy,
+      ) as unknown as HierarchyCollector,
+      deviceStateCollector: new FakeDeviceStateCollector() as unknown as DeviceStateCollector,
+      performanceAuditor: new NoOpAuditor() as unknown as PerformanceAuditor,
+      accessibilityAuditor: new NoOpAuditor() as unknown as AccessibilityAuditor,
+      accessibilityStateDetector: new NoOpAuditor() as unknown as AccessibilityStateDetector,
+      platformValidator,
+    },
+    fakeTimer,
+  );
   return { observeScreen };
 }
 
@@ -223,30 +246,34 @@ describe("freshness regression repro (receivedAt-vs-updatedAt clock, CtrlProxyHi
     let cached: CtrlProxyCachedHierarchy | null = null;
     let fetches = 0;
 
-    const makeHierarchy = (updatedAt: number, marker: string): XCTestHierarchy => ({
-      updatedAt,
-      packageName: "com.test.app",
-      hierarchy: { text: marker },
-    } as XCTestHierarchy);
+    const makeHierarchy = (updatedAt: number, marker: string): XCTestHierarchy =>
+      ({
+        updatedAt,
+        packageName: "com.test.app",
+        hierarchy: { text: marker },
+      }) as XCTestHierarchy;
 
     const context: HierarchyDelegateContext = {
-      getWebSocket: () => ({
-        readyState: 1,
-        send: (data: string) => {
-          const message = JSON.parse(data) as { requestId: string };
-          fetches += 1;
-          requestManager.resolve(message.requestId, {
-            hierarchy: makeHierarchy(timer.now(), `fetch-${fetches}`),
-          });
-        },
-      } as never),
+      getWebSocket: () =>
+        ({
+          readyState: 1,
+          send: (data: string) => {
+            const message = JSON.parse(data) as { requestId: string };
+            fetches += 1;
+            requestManager.resolve(message.requestId, {
+              hierarchy: makeHierarchy(timer.now(), `fetch-${fetches}`),
+            });
+          },
+        }) as never,
       requestManager,
       timer,
       ensureConnected: async () => true,
       cancelScreenshotBackoff: () => {},
       cacheFreshTtlMs: 500,
       getCachedHierarchy: () => cached,
-      setCachedHierarchy: h => { cached = h; },
+      setCachedHierarchy: (h) => {
+        cached = h;
+      },
     };
 
     const hierarchy = new CtrlProxyHierarchy(context);

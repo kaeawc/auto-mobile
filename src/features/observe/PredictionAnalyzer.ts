@@ -1,6 +1,9 @@
 import { DefaultElementParser } from "../utility/ElementParser";
 import { ObserveResult, PredictedAction } from "../../models";
-import { PredictionHistoryRepository, PredictionErrorType } from "../../db/predictionHistoryRepository";
+import {
+  PredictionHistoryRepository,
+  PredictionErrorType,
+} from "../../db/predictionHistoryRepository";
 import { NavigationGraphManager } from "../navigation/NavigationGraphManager";
 import { NodeCryptoService } from "../../utils/crypto";
 import { normalizeIdentifier, normalizeToolArgs } from "../../utils/predictionUtils";
@@ -31,7 +34,7 @@ export class PredictionAnalyzer {
   constructor(
     historyRepository: PredictionHistoryStore = new PredictionHistoryRepository(),
     navigationGraph: NavigationGraphLike = NavigationGraphManager.getInstance(),
-    timer: Timer = defaultTimer
+    timer: Timer = defaultTimer,
   ) {
     this.historyRepository = historyRepository;
     this.navigationGraph = navigationGraph;
@@ -41,7 +44,7 @@ export class PredictionAnalyzer {
   async recordOutcomeForAction(
     previousObservation: ObserveResult | null,
     actualObservation: ObserveResult | null,
-    context: PredictionActionContext
+    context: PredictionActionContext,
   ): Promise<void> {
     if (!previousObservation?.predictions?.likelyActions || !actualObservation) {
       return;
@@ -50,7 +53,7 @@ export class PredictionAnalyzer {
     const prediction = this.findMatchingPrediction(
       previousObservation.predictions.likelyActions,
       context.toolName,
-      context.toolArgs
+      context.toolArgs,
     );
 
     if (!prediction) {
@@ -64,18 +67,35 @@ export class PredictionAnalyzer {
 
     const predictedElements = prediction.predictedElements ?? [];
     const foundElements = this.extractElementIdentifiers(actualObservation);
-    const matchScore = this.calculateMatchScore(predictedElements, foundElements, prediction.predictedScreen, actualScreen);
-    const correct = this.isCorrectPrediction(prediction.predictedScreen, actualScreen, predictedElements, matchScore);
+    const matchScore = this.calculateMatchScore(
+      predictedElements,
+      foundElements,
+      prediction.predictedScreen,
+      actualScreen,
+    );
+    const correct = this.isCorrectPrediction(
+      prediction.predictedScreen,
+      actualScreen,
+      predictedElements,
+      matchScore,
+    );
     const partialMatch = this.isPartialMatch(prediction.predictedScreen, actualScreen, matchScore);
-    const errorType = this.resolveErrorType(prediction.predictedScreen, actualScreen, predictedElements, matchScore);
+    const errorType = this.resolveErrorType(
+      prediction.predictedScreen,
+      actualScreen,
+      predictedElements,
+      matchScore,
+    );
 
-    const predictionId = NodeCryptoService.generateCacheKey(JSON.stringify({
-      fromScreen: context.fromScreen,
-      predictedScreen: prediction.predictedScreen,
-      toolName: context.toolName,
-      toolArgs: normalizeToolArgs(context.toolArgs),
-      timestamp: this.timer.now()
-    }));
+    const predictionId = NodeCryptoService.generateCacheKey(
+      JSON.stringify({
+        fromScreen: context.fromScreen,
+        predictedScreen: prediction.predictedScreen,
+        toolName: context.toolName,
+        toolArgs: normalizeToolArgs(context.toolArgs),
+        timestamp: this.timer.now(),
+      }),
+    );
 
     try {
       await this.historyRepository.recordOutcome({
@@ -93,7 +113,7 @@ export class PredictionAnalyzer {
         matchScore,
         correct,
         partialMatch,
-        errorType
+        errorType,
       });
     } catch (error) {
       logger.warn(`[PredictionAnalyzer] Failed to record outcome: ${error}`);
@@ -103,9 +123,9 @@ export class PredictionAnalyzer {
   private findMatchingPrediction(
     predictions: PredictedAction[],
     toolName: string,
-    toolArgs: Record<string, any>
+    toolArgs: Record<string, any>,
   ): PredictedAction | undefined {
-    const candidates = predictions.filter(prediction => prediction.action === toolName);
+    const candidates = predictions.filter((prediction) => prediction.action === toolName);
     if (candidates.length === 0) {
       return undefined;
     }
@@ -154,7 +174,7 @@ export class PredictionAnalyzer {
 
   private matchesTarget(
     args: { text?: string; elementId?: string; contentDesc?: string },
-    target?: { text?: string; elementId?: string; contentDesc?: string }
+    target?: { text?: string; elementId?: string; contentDesc?: string },
   ): boolean {
     if (!target) {
       return false;
@@ -209,7 +229,7 @@ export class PredictionAnalyzer {
     predictedElements: string[],
     foundElements: string[],
     predictedScreen: string,
-    actualScreen: string
+    actualScreen: string,
   ): number {
     if (predictedScreen !== actualScreen) {
       return 0;
@@ -220,18 +240,14 @@ export class PredictionAnalyzer {
     }
 
     const predictedSet = new Set(
-      predictedElements
-        .map(normalizeIdentifier)
-        .filter((value): value is string => Boolean(value))
+      predictedElements.map(normalizeIdentifier).filter((value): value is string => Boolean(value)),
     );
     if (predictedSet.size === 0) {
       return 1;
     }
 
     const foundSet = new Set(
-      foundElements
-        .map(normalizeIdentifier)
-        .filter((value): value is string => Boolean(value))
+      foundElements.map(normalizeIdentifier).filter((value): value is string => Boolean(value)),
     );
 
     let matches = 0;
@@ -248,7 +264,7 @@ export class PredictionAnalyzer {
     predictedScreen: string,
     actualScreen: string,
     predictedElements: string[],
-    matchScore: number
+    matchScore: number,
   ): boolean {
     if (predictedScreen !== actualScreen) {
       return false;
@@ -264,7 +280,7 @@ export class PredictionAnalyzer {
   private isPartialMatch(
     predictedScreen: string,
     actualScreen: string,
-    matchScore: number
+    matchScore: number,
   ): boolean {
     return predictedScreen === actualScreen && matchScore > 0 && matchScore < 1;
   }
@@ -273,7 +289,7 @@ export class PredictionAnalyzer {
     predictedScreen: string,
     actualScreen: string,
     predictedElements: string[],
-    matchScore: number
+    matchScore: number,
   ): PredictionErrorType | undefined {
     if (predictedScreen !== actualScreen) {
       return "wrong_screen";

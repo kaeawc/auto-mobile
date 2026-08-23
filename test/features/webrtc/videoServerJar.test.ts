@@ -36,7 +36,7 @@ describe("resolveVideoServerJarPath", () => {
   test("ignores an env override that does not exist", () => {
     const cwd = makeTempDir();
     expect(
-      resolveVideoServerJarPath({ [VIDEO_SERVER_JAR_ENV]: "/no/such/file.jar" }, cwd)
+      resolveVideoServerJarPath({ [VIDEO_SERVER_JAR_ENV]: "/no/such/file.jar" }, cwd),
     ).toBeNull();
   });
 

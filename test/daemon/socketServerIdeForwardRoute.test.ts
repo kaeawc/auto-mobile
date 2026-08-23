@@ -7,7 +7,11 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import type { DaemonRequest } from "../../src/daemon/types";
 import type { DeviceLabelMap, Session } from "../../src/daemon/sessionManager";
 
-function createFakeSession(sessionId: string, assignedDevice: string, deviceLabels?: DeviceLabelMap): Session {
+function createFakeSession(
+  sessionId: string,
+  assignedDevice: string,
+  deviceLabels?: DeviceLabelMap,
+): Session {
   return {
     sessionId,
     assignedDevice,
@@ -71,9 +75,11 @@ function createServer(): UnixSocketServer {
 }
 
 function bindSocketToSessionA(server: UnixSocketServer, socketSessionId: string): void {
-  const boundMap = (server as unknown as {
-    boundMcpClientKeysBySocketSession: Map<string, BoundClientEntry>;
-  }).boundMcpClientKeysBySocketSession;
+  const boundMap = (
+    server as unknown as {
+      boundMcpClientKeysBySocketSession: Map<string, BoundClientEntry>;
+    }
+  ).boundMcpClientKeysBySocketSession;
   boundMap.set(socketSessionId, {
     clientKey: `socket:${socketSessionId}:session:session-a`,
     executionKey: "device:device-1",
@@ -82,10 +88,16 @@ function bindSocketToSessionA(server: UnixSocketServer, socketSessionId: string)
   });
 }
 
-function route(server: UnixSocketServer, request: DaemonRequest, socketSessionId: string): McpForwardRoute {
-  return (server as unknown as {
-    getMcpForwardRoute: (r: DaemonRequest, s: string) => McpForwardRoute;
-  }).getMcpForwardRoute(request, socketSessionId);
+function route(
+  server: UnixSocketServer,
+  request: DaemonRequest,
+  socketSessionId: string,
+): McpForwardRoute {
+  return (
+    server as unknown as {
+      getMcpForwardRoute: (r: DaemonRequest, s: string) => McpForwardRoute;
+    }
+  ).getMcpForwardRoute(request, socketSessionId);
 }
 
 describe("UnixSocketServer ide/getNavigationGraph cross-session routing", () => {

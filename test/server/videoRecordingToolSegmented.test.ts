@@ -170,7 +170,7 @@ describe("videoRecording tool segmentation branch", () => {
         deviceId: androidDevice.deviceId,
         maxDuration: 60,
         outputName: "short",
-      })
+      }),
     );
 
     expect(res.count).toBe(1);
@@ -195,7 +195,7 @@ describe("videoRecording tool segmentation branch", () => {
         deviceId: iosDevice.deviceId,
         maxDuration: 200,
         outputName: "long-ios",
-      })
+      }),
     );
 
     expect(res.count).toBe(1);
@@ -219,7 +219,7 @@ describe("videoRecording tool segmentation branch", () => {
         deviceId: iosDevice.deviceId,
         maxDuration: 500,
         outputName: "long-ios",
-      })
+      }),
     );
 
     expect(res.count).toBe(1);
@@ -242,7 +242,7 @@ describe("videoRecording tool segmentation branch", () => {
         deviceId: androidDevice.deviceId,
         maxDuration: 400,
         outputName: "vid",
-      })
+      }),
     );
 
     expect(startRes.count).toBe(1);
@@ -258,7 +258,7 @@ describe("videoRecording tool segmentation branch", () => {
         action: "stop",
         platform: "android",
         recordingId: handle,
-      })
+      }),
     );
 
     expect(stopRes.segmented).toBe(true);
@@ -285,19 +285,19 @@ describe("videoRecording tool segmentation branch", () => {
         index,
         recordingId: segment.recordingId,
         filePath: segment.filePath,
-      }))
+      })),
     );
   });
 
   test("bare (by-device) stop finalizes the segmented session and leaves no rotation timer", async () => {
     setSegmentedSessionRecordingDependencies({
-      startVideoRecording: async request => {
+      startVideoRecording: async (request) => {
         const outputName = request.outputName;
         const recordingId = outputName ?? `segment-${segmentStarts.length}`;
         segmentStarts.push(recordingId);
         return makeSegmentRecording(recordingId, outputName);
       },
-      stopVideoRecording: async recordingId => {
+      stopVideoRecording: async (recordingId) => {
         const id = recordingId ?? `segment-${segmentStops.length}`;
         segmentStops.push(id);
         return {
@@ -316,7 +316,7 @@ describe("videoRecording tool segmentation branch", () => {
         deviceId: androidDevice.deviceId,
         maxDuration: 300,
         outputName: "vid",
-      })
+      }),
     );
     const started = (startRes.recordings as Array<Record<string, unknown>>)[0];
     expect(started.segmented).toBe(true);
@@ -333,7 +333,7 @@ describe("videoRecording tool segmentation branch", () => {
     segmentTimer.advanceTime(ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS);
     await waitFor(
       () => segmentStarts.length === 2 && segmentStops.length === 1,
-      "segment 2 to start after rotation"
+      "segment 2 to start after rotation",
     );
 
     const stopRes = parse(
@@ -341,26 +341,28 @@ describe("videoRecording tool segmentation branch", () => {
         action: "stop",
         platform: "android",
         // NO recordingId — bare, by-device stop.
-      })
+      }),
     );
 
     // Regression guard for #3943: the bare stop must resolve its target device through the
     // injected DeviceSessionManager singleton, never the real one (whose detectConnectedPlatforms
     // spawns an `xcrun simctl` subprocess that stalls the test on macOS CI).
-    expect(fakeDeviceSessionManager.getDetectConnectedPlatformsCallCount()).toBeGreaterThanOrEqual(1);
+    expect(fakeDeviceSessionManager.getDetectConnectedPlatformsCallCount()).toBeGreaterThanOrEqual(
+      1,
+    );
 
     expect(stopRes.segmented).toBe(true);
     const segments = stopRes.recordings as Array<Record<string, unknown>>;
     expect(segments.length).toBe(2);
-    expect(segments.every(segment => segment.segmented === true)).toBe(true);
+    expect(segments.every((segment) => segment.segmented === true)).toBe(true);
     expect(typeof segments[0].filePath).toBe("string");
     expect(typeof segments[1].filePath).toBe("string");
     // Segments carry their capture order and a shared sessionId (the first segment's id),
     // and a bare stop surfaces the manifest path(s) it wrote (#3905).
-    expect(segments.map(segment => segment.segmentIndex)).toEqual([0, 1]);
+    expect(segments.map((segment) => segment.segmentIndex)).toEqual([0, 1]);
     const sessionId = segments[0].sessionId;
     expect(sessionId).toBe(segments[0].recordingId);
-    expect(segments.every(segment => segment.sessionId === sessionId)).toBe(true);
+    expect(segments.every((segment) => segment.sessionId === sessionId)).toBe(true);
     expect((stopRes.manifestPaths as string[]).length).toBe(1);
 
     // Invariant: the rotation timer must not survive a bare stop.
@@ -375,13 +377,13 @@ describe("videoRecording tool segmentation branch", () => {
 
   test("maxDuration auto-stop removes the session so a later bare stop reports only fresh segments", async () => {
     setSegmentedSessionRecordingDependencies({
-      startVideoRecording: async request => {
+      startVideoRecording: async (request) => {
         const outputName = request.outputName;
         const recordingId = outputName ?? `segment-${segmentStarts.length}`;
         segmentStarts.push(recordingId);
         return makeSegmentRecording(recordingId, outputName);
       },
-      stopVideoRecording: async recordingId => {
+      stopVideoRecording: async (recordingId) => {
         const id = recordingId ?? `segment-${segmentStops.length}`;
         segmentStops.push(id);
         return {
@@ -411,7 +413,7 @@ describe("videoRecording tool segmentation branch", () => {
     segmentTimer.advanceTime(181_000);
     await waitFor(
       () => segmentStops.length === 2,
-      "auto-stop to finalize both segments of the first session"
+      "auto-stop to finalize both segments of the first session",
     );
     await drainMicrotasks();
 
@@ -434,19 +436,19 @@ describe("videoRecording tool segmentation branch", () => {
         action: "stop",
         platform: "android",
         // NO recordingId — bare, by-device stop.
-      })
+      }),
     );
 
     // Regression guard for #3943 (this bare stop hits the same device-resolution path):
     // it must go through the injected DeviceSessionManager, never the real subprocess one.
-    expect(fakeDeviceSessionManager.getDetectConnectedPlatformsCallCount()).toBeGreaterThanOrEqual(1);
+    expect(fakeDeviceSessionManager.getDetectConnectedPlatformsCallCount()).toBeGreaterThanOrEqual(
+      1,
+    );
 
     const segments = stopRes.recordings as Array<Record<string, unknown>>;
     expect(segments.length).toBe(1);
     expect(segments[0].recordingId).toBe("second");
-    expect(
-      segments.some(segment => String(segment.filePath).includes("first"))
-    ).toBe(false);
+    expect(segments.some((segment) => String(segment.filePath).includes("first"))).toBe(false);
   });
 
   test("by-handle stop still works after wiring the bare-stop path", async () => {
@@ -457,7 +459,7 @@ describe("videoRecording tool segmentation branch", () => {
         deviceId: androidDevice.deviceId,
         maxDuration: 300,
         outputName: "vid",
-      })
+      }),
     );
     const handle = (startRes.recordings as Array<Record<string, unknown>>)[0].recordingId as string;
 
@@ -466,7 +468,7 @@ describe("videoRecording tool segmentation branch", () => {
         action: "stop",
         platform: "android",
         recordingId: handle,
-      })
+      }),
     );
 
     expect(stopRes.segmented).toBe(true);

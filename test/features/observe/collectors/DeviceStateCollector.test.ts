@@ -3,18 +3,14 @@ import { DeviceStateCollector } from "../../../../src/features/observe/collector
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { FakeWindow } from "../../../fakes/FakeWindow";
 import { FakeTimer } from "../../../fakes/FakeTimer";
-import type {
-  BootedDevice,
-  ObserveResult,
-  BackStackInfo
-} from "../../../../src/models";
+import type { BootedDevice, ObserveResult, BackStackInfo } from "../../../../src/models";
 import type { BackStack } from "../../../../src/features/observe/interfaces/BackStack";
 
 function makeResult(): ObserveResult {
   return {
     updatedAt: 0,
     screenSize: { width: 0, height: 0 },
-    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 }
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
   };
 }
 
@@ -22,7 +18,7 @@ function makeDevice(): BootedDevice {
   return {
     name: "test-device",
     platform: "android",
-    deviceId: "test-device"
+    deviceId: "test-device",
   } as BootedDevice;
 }
 
@@ -30,7 +26,7 @@ class FakeBackStack implements BackStack {
   configured: BackStackInfo = {
     activities: [],
     tasks: [],
-    currentActivity: null
+    currentActivity: null,
   } as unknown as BackStackInfo;
   shouldFail: Error | null = null;
   async execute(): Promise<BackStackInfo> {
@@ -58,7 +54,7 @@ describe("DeviceStateCollector", () => {
       window: fakeWindow,
       backStack: fakeBackStack,
       adb: fakeAdb,
-      timer: fakeTimer
+      timer: fakeTimer,
     });
   });
 
@@ -135,13 +131,20 @@ describe("DeviceStateCollector", () => {
 
   describe("collectActiveWindow", () => {
     test("uses the legacy window query only when the caller explicitly invokes the bootstrap fallback", async () => {
-      fakeWindow.configureActiveWindow({ appId: "com.example.app", activityName: "MainActivity", layoutSeqSum: 1 });
+      fakeWindow.configureActiveWindow({
+        appId: "com.example.app",
+        activityName: "MainActivity",
+        layoutSeqSum: 1,
+      });
       const result = makeResult();
 
       await collector.collectActiveWindow(result);
 
-      expect(result.activeWindow).toEqual({ appId: "com.example.app", activityName: "MainActivity", layoutSeqSum: 1 });
+      expect(result.activeWindow).toEqual({
+        appId: "com.example.app",
+        activityName: "MainActivity",
+        layoutSeqSum: 1,
+      });
     });
   });
-
 });

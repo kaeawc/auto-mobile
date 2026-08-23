@@ -22,7 +22,7 @@ describe("getScreenBounds (property-based)", () => {
           bounds.bottom === size.height
         );
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -33,7 +33,7 @@ describe("getScreenBounds (property-based)", () => {
         const y = getScreenBounds(size, b, true);
         return x.left === y.left && x.top === y.top && x.right === y.right && x.bottom === y.bottom;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -41,35 +41,49 @@ describe("getScreenBounds (property-based)", () => {
     fc.assert(
       fc.property(screenSize, fc.constantFrom(null, undefined), (size, missingInsets) => {
         const bounds = getScreenBounds(size, missingInsets, false);
-        return bounds.left === 0 && bounds.top === 0 && bounds.right === size.width && bounds.bottom === size.height;
+        return (
+          bounds.left === 0 &&
+          bounds.top === 0 &&
+          bounds.right === size.width &&
+          bounds.bottom === size.height
+        );
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
   test("insets that fit inside the screen produce a non-degenerate region", () => {
     // Bound each axis so left+right <= width and top+bottom <= height — the
     // realistic case where the visible content region is well-formed.
-    const fittingCase = screenSize.chain(size =>
-      fc.record({
-        size: fc.constant(size),
-        insets: fc.record({
-          left: fc.integer({ min: 0, max: size.width }),
-          right: fc.integer({ min: 0, max: size.width }),
-          top: fc.integer({ min: 0, max: size.height }),
-          bottom: fc.integer({ min: 0, max: size.height })
+    const fittingCase = screenSize.chain((size) =>
+      fc
+        .record({
+          size: fc.constant(size),
+          insets: fc.record({
+            left: fc.integer({ min: 0, max: size.width }),
+            right: fc.integer({ min: 0, max: size.width }),
+            top: fc.integer({ min: 0, max: size.height }),
+            bottom: fc.integer({ min: 0, max: size.height }),
+          }),
         })
-      }).filter(({ insets }) => insets.left + insets.right <= size.width && insets.top + insets.bottom <= size.height)
+        .filter(
+          ({ insets }) =>
+            insets.left + insets.right <= size.width && insets.top + insets.bottom <= size.height,
+        ),
     );
     fc.assert(
       fc.property(fittingCase, ({ size, insets }) => {
         const b = getScreenBounds(size, insets, false);
         return (
-          b.left >= 0 && b.left <= b.right && b.right <= size.width &&
-          b.top >= 0 && b.top <= b.bottom && b.bottom <= size.height
+          b.left >= 0 &&
+          b.left <= b.right &&
+          b.right <= size.width &&
+          b.top >= 0 &&
+          b.top <= b.bottom &&
+          b.bottom <= size.height
         );
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -80,11 +94,11 @@ describe("getScreenBounds (property-based)", () => {
         const larger = getScreenBounds(
           size,
           { ...base, right: base.right + delta, bottom: base.bottom + delta },
-          false
+          false,
         );
         return larger.right <= smaller.right && larger.bottom <= smaller.bottom;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 });

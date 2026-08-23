@@ -13,7 +13,7 @@ export interface ElementSelector {
       strategy?: ElementSelectionStrategy;
       /** 0-based position among on-screen matches; overrides strategy. Out of range → null. */
       index?: number;
-    }
+    },
   ): ElementSelectionResult;
 
   selectByResourceId(
@@ -25,7 +25,7 @@ export interface ElementSelector {
       strategy?: ElementSelectionStrategy;
       /** 0-based position among on-screen matches; overrides strategy. Out of range → null. */
       index?: number;
-    }
+    },
   ): ElementSelectionResult;
 
   selectByTestTag(
@@ -36,7 +36,7 @@ export interface ElementSelector {
       strategy?: ElementSelectionStrategy;
       /** 0-based position among on-screen matches; overrides strategy. Out of range → null. */
       index?: number;
-    }
+    },
   ): ElementSelectionResult;
 
   selectClickableSiblingOfText(
@@ -49,7 +49,7 @@ export interface ElementSelector {
       strategy?: ElementSelectionStrategy;
       /** 0-based position among on-screen matches; overrides strategy. Out of range → null. */
       index?: number;
-    }
+    },
   ): ElementSelectionResult;
 
   selectClickableSiblingOfResourceId(
@@ -61,6 +61,6 @@ export interface ElementSelector {
       strategy?: ElementSelectionStrategy;
       /** 0-based position among on-screen matches; overrides strategy. Out of range → null. */
       index?: number;
-    }
+    },
   ): ElementSelectionResult;
 }

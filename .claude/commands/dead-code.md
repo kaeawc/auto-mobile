@@ -7,6 +7,7 @@ Detect and remove dead code across TypeScript, Bash, Kotlin, and iOS/Swift codeb
 The user may specify a target scope as arguments: `$ARGUMENTS`
 
 Supported scopes:
+
 - **ts** / **typescript** — TypeScript dead code (ts-prune + knip)
 - **bash** / **shell** — Unused variables, functions, and files in shell scripts
 - **kotlin** / **android** — Unused Kotlin code in android/ (plus a specific module like `android/control-proxy`)
@@ -74,14 +75,14 @@ Parse `$ARGUMENTS` to determine which language(s) and optional subdirectory to s
 
 For each detected item, determine the correct action:
 
-| Verdict | Action |
-|---------|--------|
-| **DEAD — unused file** | Delete the file, remove from barrel exports and allowlists |
-| **DEAD — unused export** | Remove the export (and the code if nothing else in the file uses it) |
-| **DEAD — unused dependency** | Remove from package.json / build.gradle.kts / Package.swift |
-| **FALSE POSITIVE — test usage** | Add to allowlist with reason if not already there |
-| **FALSE POSITIVE — public API** | Add to allowlist with reason if not already there |
-| **FALSE POSITIVE — barrel re-export** | Add to allowlist with reason if not already there |
+| Verdict                               | Action                                                               |
+| ------------------------------------- | -------------------------------------------------------------------- |
+| **DEAD — unused file**                | Delete the file, remove from barrel exports and allowlists           |
+| **DEAD — unused export**              | Remove the export (and the code if nothing else in the file uses it) |
+| **DEAD — unused dependency**          | Remove from package.json / build.gradle.kts / Package.swift          |
+| **FALSE POSITIVE — test usage**       | Add to allowlist with reason if not already there                    |
+| **FALSE POSITIVE — public API**       | Add to allowlist with reason if not already there                    |
+| **FALSE POSITIVE — barrel re-export** | Add to allowlist with reason if not already there                    |
 
 ### Step 4: Apply fixes
 
@@ -102,6 +103,7 @@ For each detected item, determine the correct action:
 ### Step 6: Report
 
 Summarize what was done:
+
 - How many items were flagged
 - How many were truly dead (removed)
 - How many were false positives (allowlisted or ignored)

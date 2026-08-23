@@ -55,14 +55,18 @@ export function assertArchiveEntriesSafe(entries: string[], destinationDir: stri
     // path.isAbsolute on POSIX but resolves against another drive's cwd on Windows.
     if (path.isAbsolute(entry) || /^[a-zA-Z]:/.test(entry) || entry.startsWith("\\")) {
       throw new ActionableError(
-        `Refusing to extract archive entry '${rawEntry}' with an absolute path; the archive may be malicious.`
+        `Refusing to extract archive entry '${rawEntry}' with an absolute path; the archive may be malicious.`,
       );
     }
     const resolvedEntry = path.resolve(resolvedRoot, entry);
     const relativeToRoot = path.relative(resolvedRoot, resolvedEntry);
-    if (relativeToRoot === ".." || relativeToRoot.startsWith(`..${path.sep}`) || path.isAbsolute(relativeToRoot)) {
+    if (
+      relativeToRoot === ".." ||
+      relativeToRoot.startsWith(`..${path.sep}`) ||
+      path.isAbsolute(relativeToRoot)
+    ) {
       throw new ActionableError(
-        `Refusing to extract archive entry '${rawEntry}' that escapes the destination directory; the archive may be malicious (path traversal).`
+        `Refusing to extract archive entry '${rawEntry}' that escapes the destination directory; the archive may be malicious (path traversal).`,
       );
     }
   }
@@ -70,7 +74,7 @@ export function assertArchiveEntriesSafe(entries: string[], destinationDir: stri
 
 /** Split `tar -tzf` output into individual entry paths. */
 function parseTarEntries(listing: string): string[] {
-  return listing.split(/\r?\n/).filter(line => line.trim().length > 0);
+  return listing.split(/\r?\n/).filter((line) => line.trim().length > 0);
 }
 
 export class DefaultArchiveExtractor implements ArchiveExtractor {
@@ -118,17 +122,16 @@ export class DefaultArchiveExtractor implements ArchiveExtractor {
     archivePath: string,
     stagingDir: string,
     timeoutMs: number,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<void> {
     try {
-      await this.executor.executeCommand(
-        "tar",
-        ["-xzf", archivePath, "-C", stagingDir],
-        { timeoutMs, signal }
-      );
+      await this.executor.executeCommand("tar", ["-xzf", archivePath, "-C", stagingDir], {
+        timeoutMs,
+        signal,
+      });
     } catch (error) {
       throw new ActionableError(
-        `Failed to extract archive '${archivePath}' into '${stagingDir}': ${errorMessage(error)}.`
+        `Failed to extract archive '${archivePath}' into '${stagingDir}': ${errorMessage(error)}.`,
       );
     }
   }
@@ -150,24 +153,27 @@ export class DefaultArchiveExtractor implements ArchiveExtractor {
         await fs.rename(from, to);
       } catch (error) {
         throw new ActionableError(
-          `Failed to move extracted entry into place ('${from}' -> '${to}'): ${errorMessage(error)}.`
+          `Failed to move extracted entry into place ('${from}' -> '${to}'): ${errorMessage(error)}.`,
         );
       }
     }
   }
 
-  private async listEntries(archivePath: string, timeoutMs: number, signal?: AbortSignal): Promise<string[]> {
+  private async listEntries(
+    archivePath: string,
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<string[]> {
     try {
-      const result = await this.executor.executeCommand(
-        "tar",
-        ["-tzf", archivePath],
-        { timeoutMs, signal }
-      );
+      const result = await this.executor.executeCommand("tar", ["-tzf", archivePath], {
+        timeoutMs,
+        signal,
+      });
       return parseTarEntries(result.stdout ?? "");
     } catch (error) {
       throw new ActionableError(
         `Unable to inspect archive '${archivePath}' before extraction: ${errorMessage(error)}. ` +
-        "The archive may be missing or corrupt."
+          "The archive may be missing or corrupt.",
       );
     }
   }
@@ -192,7 +198,7 @@ async function assertStagedSymlinksSafe(stagingDir: string): Promise<void> {
     if (dirent.isSymbolicLink()) {
       throw new ActionableError(
         `Refusing to extract archive symlink member '${dirent.name}'; symlinks are not ` +
-        "permitted in extracted archives and the archive may be malicious."
+          "permitted in extracted archives and the archive may be malicious.",
       );
     }
     if (dirent.isDirectory()) {
@@ -227,4 +233,3 @@ async function restoreOwnerWritable(dir: string): Promise<void> {
     }
   }
 }
-

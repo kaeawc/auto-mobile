@@ -39,10 +39,7 @@ export class FakeVideoRecordingRepository implements VideoRecordingRepositoryCon
     });
   }
 
-  async updateRecording(
-    recordingId: string,
-    update: Partial<VideoRecordingRecord>
-  ): Promise<void> {
+  async updateRecording(recordingId: string, update: Partial<VideoRecordingRecord>): Promise<void> {
     const existing = this.records.get(recordingId);
     if (!existing) {
       return;
@@ -58,7 +55,7 @@ export class FakeVideoRecordingRepository implements VideoRecordingRepositoryCon
 
   async getRecording(
     recordingId: string,
-    scope: VideoRecordingOwnerScope = {}
+    scope: VideoRecordingOwnerScope = {},
   ): Promise<VideoRecordingRecord | null> {
     const record = this.records.get(recordingId) ?? null;
     if (record && !ownerVisible(record, scope.ownerSessionUuid)) {
@@ -69,20 +66,22 @@ export class FakeVideoRecordingRepository implements VideoRecordingRepositoryCon
 
   async listRecordings(query: VideoRecordingQuery = {}): Promise<VideoRecordingRecord[]> {
     const statuses = query.status
-      ? (Array.isArray(query.status) ? query.status : [query.status])
+      ? Array.isArray(query.status)
+        ? query.status
+        : [query.status]
       : null;
 
     let results = Array.from(this.records.values());
 
-    results = results.filter(record => ownerVisible(record, query.ownerSessionUuid));
+    results = results.filter((record) => ownerVisible(record, query.ownerSessionUuid));
     if (statuses) {
-      results = results.filter(record => statuses.includes(record.status));
+      results = results.filter((record) => statuses.includes(record.status));
     }
     if (query.deviceId) {
-      results = results.filter(record => record.deviceId === query.deviceId);
+      results = results.filter((record) => record.deviceId === query.deviceId);
     }
     if (query.platform) {
-      results = results.filter(record => record.platform === query.platform);
+      results = results.filter((record) => record.platform === query.platform);
     }
     if (query.orderByLastAccessed) {
       results.sort((left, right) => {

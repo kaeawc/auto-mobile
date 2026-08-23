@@ -38,7 +38,7 @@ export interface PathOptimizer {
   shouldUseBackButton(
     currentScreen: string,
     targetScreen: string,
-    currentBackStackDepth: number
+    currentBackStackDepth: number,
   ): Promise<BackButtonRecommendation>;
 
   /**
@@ -61,6 +61,6 @@ export interface PathOptimizer {
   getNavigationRecommendation(
     targetScreen: string,
     currentScreen: string,
-    currentBackStackDepth: number
+    currentBackStackDepth: number,
   ): Promise<NavigationRecommendation>;
 }

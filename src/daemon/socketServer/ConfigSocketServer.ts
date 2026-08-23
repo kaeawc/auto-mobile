@@ -5,10 +5,7 @@ import type { StreamSocketAuthenticator } from "../streamSocketAuth";
 
 export type ConfigSocketMethod = "config/get" | "config/set";
 
-export interface ConfigSocketRequest<
-  TRequestType extends string,
-  TInput,
-> extends SocketRequest {
+export interface ConfigSocketRequest<TRequestType extends string, TInput> extends SocketRequest {
   id: string;
   type: TRequestType;
   method: ConfigSocketMethod;
@@ -19,10 +16,7 @@ export interface ConfigSocketRequest<
   };
 }
 
-export type ConfigSocketResult<
-  TConfig,
-  TEvictedKey extends string,
-> = {
+export type ConfigSocketResult<TConfig, TEvictedKey extends string> = {
   config: TConfig;
 } & Partial<Record<TEvictedKey, string[]>>;
 
@@ -84,12 +78,12 @@ export class ConfigSocketServer<
   private readonly evictedKey: TEvictedKey;
   private readonly methodLabel: string;
   private readonly getConfig: () => Promise<TConfig>;
-  private readonly updateConfig: (update: TInput | null) => Promise<ConfigSocketUpdateResult<TConfig>>;
+  private readonly updateConfig: (
+    update: TInput | null,
+  ) => Promise<ConfigSocketUpdateResult<TConfig>>;
   private readonly authenticator?: StreamSocketAuthenticator;
 
-  constructor(
-    options: ConfigSocketServerOptions<TConfig, TInput, TResponseType, TEvictedKey>
-  ) {
+  constructor(options: ConfigSocketServerOptions<TConfig, TInput, TResponseType, TEvictedKey>) {
     super(options.socketPath, options.timer ?? defaultTimer, options.serverName);
     this.responseType = options.responseType;
     this.evictedKey = options.evictedKey;
@@ -100,7 +94,7 @@ export class ConfigSocketServer<
   }
 
   protected async handleRequest(
-    request: ConfigSocketRequest<TRequestType, TInput>
+    request: ConfigSocketRequest<TRequestType, TInput>,
   ): Promise<ConfigSocketResponse<TResponseType, TConfig, TEvictedKey>> {
     switch (request.method) {
       case "config/get": {
@@ -140,7 +134,7 @@ export class ConfigSocketServer<
 
   protected createErrorResponse(
     id: string | undefined,
-    error: string
+    error: string,
   ): ConfigSocketResponse<TResponseType, TConfig, TEvictedKey> {
     return {
       id: id ?? "unknown",

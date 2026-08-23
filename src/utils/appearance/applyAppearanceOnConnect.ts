@@ -4,7 +4,7 @@ import { applyAppearanceToDevice } from "../deviceAppearance";
 import { logger } from "../logger";
 
 export async function applyAppearanceOnConnect(
-  device: BootedDevice
+  device: BootedDevice,
 ): Promise<AppearanceMode | null> {
   try {
     const config = await getAppearanceConfig();

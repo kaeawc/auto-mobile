@@ -34,7 +34,7 @@ describe("FEATURE_FLAG_DEFINITIONS", () => {
   });
 
   test("flag keys are unique", () => {
-    const keys = FEATURE_FLAG_DEFINITIONS.map(definition => definition.key);
+    const keys = FEATURE_FLAG_DEFINITIONS.map((definition) => definition.key);
     expect(new Set(keys).size).toBe(keys.length);
   });
 });

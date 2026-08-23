@@ -1,4 +1,7 @@
-import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  AdbClientFactory,
+  defaultAdbClientFactory,
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
 import { Idle } from "./Idle";
@@ -22,7 +25,11 @@ export class AwaitIdle implements AwaitIdleInterface {
    * @param device - Device to run ADB commands against
    * @param adbFactory - Factory for creating AdbClient instances
    */
-  constructor(device: BootedDevice, adbFactory: AdbClientFactory = defaultAdbClientFactory, timer: Timer = defaultTimer) {
+  constructor(
+    device: BootedDevice,
+    adbFactory: AdbClientFactory = defaultAdbClientFactory,
+    timer: Timer = defaultTimer,
+  ) {
     this.adbFactory = adbFactory;
     this.adb = adbFactory.create(device);
     this.idle = new Idle(device, this.adbFactory);
@@ -39,7 +46,11 @@ export class AwaitIdle implements AwaitIdleInterface {
     const startTime = this.timer.now();
 
     while (true) {
-      const rotationResult = await this.idle.getRotationStatus(targetRotation, startTime, timeoutMs);
+      const rotationResult = await this.idle.getRotationStatus(
+        targetRotation,
+        startTime,
+        timeoutMs,
+      );
 
       if (rotationResult.rotationComplete) {
         return; // Rotation complete
@@ -61,12 +72,17 @@ export class AwaitIdle implements AwaitIdleInterface {
    * @param timeoutMs - Maximum time to wait for stability
    * @returns Promise with initialized state
    */
-  public async initializeUiStabilityTracking(packageName: string, timeoutMs: number): Promise<UiStabilityState> {
+  public async initializeUiStabilityTracking(
+    packageName: string,
+    timeoutMs: number,
+  ): Promise<UiStabilityState> {
     const startTime = this.timer.now();
     const lastNonIdleTime = startTime;
 
     // Reset the gfxinfo stats for the package
-    logger.info(`[AwaitIdle] Starting UI stability wait for ${packageName} (timeout: ${timeoutMs}ms, threshold: ${this.stabilityThresholdMs}ms)`);
+    logger.info(
+      `[AwaitIdle] Starting UI stability wait for ${packageName} (timeout: ${timeoutMs}ms, threshold: ${this.stabilityThresholdMs}ms)`,
+    );
 
     try {
       await this.adb.executeCommand(`shell dumpsys gfxinfo ${packageName} reset`);
@@ -85,7 +101,7 @@ export class AwaitIdle implements AwaitIdleInterface {
       prevSlowUiThread: null,
       prevFrameDeadlineMissed: null,
       prevTotalFrames: null,
-      firstGfxInfoLog: true
+      firstGfxInfoLog: true,
     };
   }
 
@@ -99,7 +115,7 @@ export class AwaitIdle implements AwaitIdleInterface {
   public checkUiStabilityTimeout(
     lastNonIdleTime: number,
     startTime: number,
-    timeoutMs: number
+    timeoutMs: number,
   ): { isStable: boolean; shouldContinue: boolean; stableTime: number; elapsedTime: number } {
     const elapsedTime = this.timer.now() - startTime;
     const stableTime = this.timer.now() - lastNonIdleTime;
@@ -124,7 +140,7 @@ export class AwaitIdle implements AwaitIdleInterface {
       prevTotalFrames: number | null;
       firstGfxInfoLog: boolean;
       lastNonIdleTime: number;
-    }
+    },
   ): Promise<{
     updatedState: typeof state;
     shouldUpdateLastNonIdleTime: boolean;
@@ -135,7 +151,7 @@ export class AwaitIdle implements AwaitIdleInterface {
       state.prevSlowUiThread,
       state.prevFrameDeadlineMissed,
       state.prevTotalFrames,
-      state.firstGfxInfoLog
+      state.firstGfxInfoLog,
     );
 
     const updatedState = {
@@ -144,12 +160,14 @@ export class AwaitIdle implements AwaitIdleInterface {
       prevFrameDeadlineMissed: stabilityResult.updatedPrevFrameDeadlineMissed,
       prevTotalFrames: stabilityResult.updatedPrevTotalFrames,
       firstGfxInfoLog: stabilityResult.updatedFirstGfxInfoLog,
-      lastNonIdleTime: stabilityResult.shouldUpdateLastNonIdleTime ? this.timer.now() : state.lastNonIdleTime
+      lastNonIdleTime: stabilityResult.shouldUpdateLastNonIdleTime
+        ? this.timer.now()
+        : state.lastNonIdleTime,
     };
 
     return {
       updatedState,
-      shouldUpdateLastNonIdleTime: stabilityResult.shouldUpdateLastNonIdleTime
+      shouldUpdateLastNonIdleTime: stabilityResult.shouldUpdateLastNonIdleTime,
     };
   }
 
@@ -174,9 +192,11 @@ export class AwaitIdle implements AwaitIdleInterface {
       firstGfxInfoLog: boolean;
     },
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<GfxMetrics | null> {
-    logger.info(`[AwaitIdle] Continuing UI stability wait with existing state for package: ${packageName}`);
+    logger.info(
+      `[AwaitIdle] Continuing UI stability wait with existing state for package: ${packageName}`,
+    );
 
     // Use the provided state instead of initializing
     let state = initState;
@@ -197,7 +217,7 @@ export class AwaitIdle implements AwaitIdleInterface {
       percentile99thMs: null,
       missedVsyncCount: null,
       slowUiThreadCount: null,
-      frameDeadlineMissedCount: null
+      frameDeadlineMissedCount: null,
     };
 
     try {
@@ -229,10 +249,14 @@ export class AwaitIdle implements AwaitIdleInterface {
           timeoutMs,
         );
 
-        logger.info(`[AwaitIdle] Checking stability: ${timeoutCheck.elapsedTime}ms elapsed of ${timeoutMs}ms timeout, stable for ${timeoutCheck.stableTime}ms/${this.stabilityThresholdMs}ms`);
+        logger.info(
+          `[AwaitIdle] Checking stability: ${timeoutCheck.elapsedTime}ms elapsed of ${timeoutMs}ms timeout, stable for ${timeoutCheck.stableTime}ms/${this.stabilityThresholdMs}ms`,
+        );
 
         if (timeoutCheck.isStable) {
-          logger.info(`[AwaitIdle] UI stable after ${timeoutCheck.elapsedTime}ms (stable for ${timeoutCheck.stableTime}ms)`);
+          logger.info(
+            `[AwaitIdle] UI stable after ${timeoutCheck.elapsedTime}ms (stable for ${timeoutCheck.stableTime}ms)`,
+          );
           isStable = true;
           break;
         }
@@ -247,7 +271,13 @@ export class AwaitIdle implements AwaitIdleInterface {
     // Get final gfxinfo to capture percentiles
     try {
       const finalGfxInfo = await perf.track("finalGfxinfo", async () => {
-        return this.adb.executeCommand(`shell dumpsys gfxinfo ${packageName}`, undefined, undefined, undefined, signal);
+        return this.adb.executeCommand(
+          `shell dumpsys gfxinfo ${packageName}`,
+          undefined,
+          undefined,
+          undefined,
+          signal,
+        );
       });
       const metrics = this.idle.parseMetrics(finalGfxInfo.stdout);
       finalMetrics.percentile50thMs = metrics.percentile50th;
@@ -274,7 +304,7 @@ export class AwaitIdle implements AwaitIdleInterface {
       frameDeadlineMissedCount: finalMetrics.frameDeadlineMissedCount,
       pollCount,
       stabilityWaitMs,
-      isStable
+      isStable,
     };
   }
 
@@ -289,10 +319,11 @@ export class AwaitIdle implements AwaitIdleInterface {
     packageName: string,
     timeoutMs: number,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<GfxMetrics | null> {
-
-    logger.info(`[AwaitIdle] Waiting for UI stability for package: ${packageName} with timeoutMs: ${timeoutMs}`);
+    logger.info(
+      `[AwaitIdle] Waiting for UI stability for package: ${packageName} with timeoutMs: ${timeoutMs}`,
+    );
     const state = await perf.track("initUiStabilityTracking", async () => {
       return this.initializeUiStabilityTracking(packageName, timeoutMs);
     });

@@ -15,7 +15,7 @@ export type FetchLike = (
     headers: Record<string, string>;
     body?: string;
     signal?: AbortSignal;
-  }
+  },
 ) => Promise<{
   status: number;
   ok: boolean;
@@ -95,7 +95,7 @@ export class WhipClient {
     if (response.status !== 201) {
       const detail = await this.safeText(response);
       throw new ActionableError(
-        `WHIP ingest failed: expected 201 Created, got ${response.status}${detail ? ` — ${detail}` : ""}`
+        `WHIP ingest failed: expected 201 Created, got ${response.status}${detail ? ` — ${detail}` : ""}`,
       );
     }
 
@@ -124,7 +124,7 @@ export class WhipClient {
     resourceUrl: string,
     etag: string,
     sdpFragment: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<void> {
     const response = await this.fetchWithTimeout(resourceUrl, {
       method: "PATCH",
@@ -164,7 +164,7 @@ export class WhipClient {
 
   private async fetchWithTimeout(
     url: string,
-    init: { method: string; headers: Record<string, string>; body?: string; signal?: AbortSignal }
+    init: { method: string; headers: Record<string, string>; body?: string; signal?: AbortSignal },
   ): Promise<Awaited<ReturnType<FetchLike>>> {
     const controller = new AbortController();
     const onAbort = (): void => controller.abort();
@@ -178,7 +178,9 @@ export class WhipClient {
       return await this.fetchImpl(url, { ...init, signal: controller.signal });
     } catch (error) {
       if (controller.signal.aborted && !init.signal?.aborted) {
-        throw new ActionableError(`WHIP ${init.method} request timed out after ${this.requestTimeoutMs}ms.`);
+        throw new ActionableError(
+          `WHIP ${init.method} request timed out after ${this.requestTimeoutMs}ms.`,
+        );
       }
       throw error;
     } finally {
@@ -191,7 +193,9 @@ export class WhipClient {
     try {
       return new URL(location, this.endpoint).toString();
     } catch {
-      logger.warn(`[WHIP] Could not resolve Location header "${location}" against ${this.endpoint}`);
+      logger.warn(
+        `[WHIP] Could not resolve Location header "${location}" against ${this.endpoint}`,
+      );
       return location;
     }
   }
@@ -206,15 +210,23 @@ export class WhipClient {
   }
 
   /** Keep the request deadline in force when a peer stalls after HTTP headers. */
-  private async readTextWithTimeout(response: { text(): Promise<string> }, method: string): Promise<string> {
+  private async readTextWithTimeout(
+    response: { text(): Promise<string> },
+    method: string,
+  ): Promise<string> {
     let timeout: NodeJS.Timeout | undefined;
     try {
       return await Promise.race([
         response.text(),
         new Promise<never>((_, reject) => {
           timeout = this.timer.setTimeout(
-            () => reject(new ActionableError(`WHIP ${method} response body timed out after ${this.requestTimeoutMs}ms.`)),
-            this.requestTimeoutMs
+            () =>
+              reject(
+                new ActionableError(
+                  `WHIP ${method} response body timed out after ${this.requestTimeoutMs}ms.`,
+                ),
+              ),
+            this.requestTimeoutMs,
           );
         }),
       ]);

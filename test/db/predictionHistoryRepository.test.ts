@@ -2,7 +2,10 @@ import { beforeEach, afterEach, describe, expect, test } from "bun:test";
 import type { Kysely } from "kysely";
 import type { Database } from "../../src/db/types";
 import { PredictionHistoryRepository } from "../../src/db/predictionHistoryRepository";
-import type { PredictionOutcomeRecord, TransitionKey } from "../../src/db/predictionHistoryRepository";
+import type {
+  PredictionOutcomeRecord,
+  TransitionKey,
+} from "../../src/db/predictionHistoryRepository";
 import { createTestDatabase } from "./testDbHelper";
 
 describe("PredictionHistoryRepository", () => {
@@ -53,11 +56,13 @@ describe("PredictionHistoryRepository", () => {
     });
 
     test("records incorrect prediction", async () => {
-      await repo.recordOutcome(makeOutcome({
-        correct: false,
-        actualScreen: "ErrorScreen",
-        errorType: "wrong_screen",
-      }));
+      await repo.recordOutcome(
+        makeOutcome({
+          correct: false,
+          actualScreen: "ErrorScreen",
+          errorType: "wrong_screen",
+        }),
+      );
 
       const outcomes = await db.selectFrom("prediction_outcomes").selectAll().execute();
       expect(outcomes[0].correct).toBe(0);
@@ -127,8 +132,8 @@ describe("PredictionHistoryRepository", () => {
 
       await expect(
         Promise.all(
-          Array.from({ length: N }, () => repo.upsertTransitionStats(key, confidence, correct))
-        )
+          Array.from({ length: N }, () => repo.upsertTransitionStats(key, confidence, correct)),
+        ),
       ).resolves.toBeDefined();
 
       const stats = await repo.getTransitionStatsForScreen("com.example.app", "Login");

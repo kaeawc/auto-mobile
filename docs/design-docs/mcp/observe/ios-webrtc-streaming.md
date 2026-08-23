@@ -22,7 +22,10 @@ the existing `WebRtcPublisher` **unchanged** — i.e. a new capture source that
 satisfies the same contract the Android sources do:
 
 ```ts
-interface H264CaptureSource { start(): Promise<void>; stop(): Promise<void>; }
+interface H264CaptureSource {
+  start(): Promise<void>;
+  stop(): Promise<void>;
+}
 // feeding: onData(chunk: Buffer /* Annex-B */) => void
 ```
 
@@ -36,11 +39,11 @@ persistent `video-server` encoder, #3776): a live Annex-B byte stream on stdout.
 iOS has **no drop-in equivalent**. Empirically verified on macOS with a booted
 `iPhone 16 Pro` simulator (Xcode simctl):
 
-| Candidate | Result |
-|-----------|--------|
-| `xcrun simctl io <udid> recordVideo --codec h264 --force /dev/stdout` | **Fails**: `Couldn't create an asset writer … simctl.SimulatorError.allocationError`. `AVAssetWriter` requires a seekable file; it cannot target a pipe. |
-| `recordVideo … out.mov` then remux live | **Not live**: writes a QuickTime container whose `moov` atom is finalized only on clean `SIGINT` (see [iOS simctl moov atom flush]). A growing MOV cannot be `-c:v copy`-streamed. |
-| `ffmpeg -f avfoundation -list_devices` | Only exposes **`Capture screen 0`** (the whole Mac display) — there is **no per-simulator capture device**. Whole-screen capture + window-cropping is the wrong scope (captures unrelated content), permission-gated, and brittle. |
+| Candidate                                                             | Result                                                                                                                                                                                                                             |
+| --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `xcrun simctl io <udid> recordVideo --codec h264 --force /dev/stdout` | **Fails**: `Couldn't create an asset writer … simctl.SimulatorError.allocationError`. `AVAssetWriter` requires a seekable file; it cannot target a pipe.                                                                           |
+| `recordVideo … out.mov` then remux live                               | **Not live**: writes a QuickTime container whose `moov` atom is finalized only on clean `SIGINT` (see [iOS simctl moov atom flush]). A growing MOV cannot be `-c:v copy`-streamed.                                                 |
+| `ffmpeg -f avfoundation -list_devices`                                | Only exposes **`Capture screen 0`** (the whole Mac display) — there is **no per-simulator capture device**. Whole-screen capture + window-cropping is the wrong scope (captures unrelated content), permission-gated, and brittle. |
 
 So `simctl` provides screenshots and finalized recordings, not a live elementary
 stream — exactly the premise of #3777.

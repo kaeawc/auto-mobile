@@ -16,10 +16,10 @@ class TestableServer extends TestRecordingSocketServer {
 }
 
 function recordingAuthenticator(
-  calls: Array<{ sessionUuid?: string; deviceId?: string }>
+  calls: Array<{ sessionUuid?: string; deviceId?: string }>,
 ): StreamSocketAuthenticator {
   return {
-    authorize: input => {
+    authorize: (input) => {
       calls.push(input);
       if (input.sessionUuid !== "live") {
         throw new ActionableError(`rejected session ${input.sessionUuid}`);
@@ -33,7 +33,7 @@ describe("TestRecordingSocketServer authorization (issue #4752)", () => {
     const calls: Array<{ sessionUuid?: string; deviceId?: string }> = [];
     const server = new TestableServer(undefined, undefined, recordingAuthenticator(calls));
     await expect(
-      server.invoke({ command: "start", deviceId: "emu-1", platform: "android" })
+      server.invoke({ command: "start", deviceId: "emu-1", platform: "android" }),
     ).rejects.toThrow(/rejected session/);
     // Authorized against the request's own device, before resolveDevice/start.
     expect(calls).toEqual([{ sessionUuid: undefined, deviceId: "emu-1" }]);
@@ -46,9 +46,9 @@ describe("TestRecordingSocketServer authorization (issue #4752)", () => {
     // The scoped device is whatever the current active recording reports (or
     // undefined), so assert on the caller identity, not on cross-suite global
     // recording state.
-    await expect(
-      server.invoke({ command: "stop", sessionUuid: "intruder" })
-    ).rejects.toThrow(/rejected session/);
+    await expect(server.invoke({ command: "stop", sessionUuid: "intruder" })).rejects.toThrow(
+      /rejected session/,
+    );
     expect(calls).toHaveLength(1);
     expect(calls[0].sessionUuid).toBe("intruder");
   });

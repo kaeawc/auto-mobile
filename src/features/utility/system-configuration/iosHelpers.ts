@@ -43,7 +43,11 @@ export function buildAppleLanguages(languageTag: string): string[] {
  * `"12"` shape that {@link normalizeTimeFormat} expects.
  */
 export function parseAppleTimeFormatRaw(raw: string | null): string | null {
-  if (raw === "1") {return "24";}
-  if (raw === "0") {return "12";}
+  if (raw === "1") {
+    return "24";
+  }
+  if (raw === "0") {
+    return "12";
+  }
   return raw;
 }

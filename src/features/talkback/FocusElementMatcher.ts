@@ -18,7 +18,7 @@ export class FocusElementMatcher {
   findTargetIndex(
     elements: Element[],
     selector: FocusElementSelector,
-    options: TextMatchOptions = {}
+    options: TextMatchOptions = {},
   ): number | null {
     if (!elements.length) {
       return null;
@@ -35,7 +35,9 @@ export class FocusElementMatcher {
     // If bounds are provided in selector and there are multiple matches,
     // prefer the element with matching bounds (for disambiguation in lists)
     if (selector.bounds && matches.length > 1) {
-      const boundsMatch = matches.find(({ element }) => this.boundsMatch(element, selector.bounds!));
+      const boundsMatch = matches.find(({ element }) =>
+        this.boundsMatch(element, selector.bounds!),
+      );
       if (boundsMatch) {
         return boundsMatch.index;
       }
@@ -52,32 +54,38 @@ export class FocusElementMatcher {
 
     const resourceId = this.getResourceId(currentFocus);
     if (resourceId) {
-      return this.findIndexByValue(elements, element => this.getResourceId(element), resourceId);
+      return this.findIndexByValue(elements, (element) => this.getResourceId(element), resourceId);
     }
 
     const testTag = this.getTestTag(currentFocus);
     if (testTag) {
-      return this.findIndexByValue(elements, element => this.getTestTag(element), testTag);
+      return this.findIndexByValue(elements, (element) => this.getTestTag(element), testTag);
     }
 
     const contentDesc = this.getContentDesc(currentFocus);
     if (contentDesc) {
-      return this.findIndexByValue(elements, element => this.getContentDesc(element), contentDesc, true);
+      return this.findIndexByValue(
+        elements,
+        (element) => this.getContentDesc(element),
+        contentDesc,
+        true,
+      );
     }
 
     const text = this.getText(currentFocus);
     if (text) {
-      return this.findIndexByValue(elements, element => this.getText(element), text, true);
+      return this.findIndexByValue(elements, (element) => this.getText(element), text, true);
     }
 
     if (currentFocus.bounds) {
       const bounds = currentFocus.bounds;
-      const index = elements.findIndex(element =>
-        element.bounds &&
-        element.bounds.left === bounds.left &&
-        element.bounds.top === bounds.top &&
-        element.bounds.right === bounds.right &&
-        element.bounds.bottom === bounds.bottom
+      const index = elements.findIndex(
+        (element) =>
+          element.bounds &&
+          element.bounds.left === bounds.left &&
+          element.bounds.top === bounds.top &&
+          element.bounds.right === bounds.right &&
+          element.bounds.bottom === bounds.bottom,
       );
       return index === -1 ? null : index;
     }
@@ -88,7 +96,7 @@ export class FocusElementMatcher {
   matchesSelector(
     element: Element,
     selector: FocusElementSelector,
-    options: TextMatchOptions = {}
+    options: TextMatchOptions = {},
   ): boolean {
     const resourceId = this.getResourceId(element);
     const contentDesc = this.getContentDesc(element);
@@ -131,10 +139,10 @@ export class FocusElementMatcher {
     elements: Element[],
     getter: (element: Element) => string | undefined,
     value: string,
-    caseInsensitive: boolean = false
+    caseInsensitive: boolean = false,
   ): number | null {
     const target = caseInsensitive ? value.toLowerCase() : value;
-    const index = elements.findIndex(element => {
+    const index = elements.findIndex((element) => {
       const candidate = getter(element);
       if (!candidate) {
         return false;
@@ -151,7 +159,8 @@ export class FocusElementMatcher {
   }
 
   private getContentDesc(element: Element): string | undefined {
-    const contentDesc = element["content-desc"] ?? (element as { contentDesc?: string }).contentDesc;
+    const contentDesc =
+      element["content-desc"] ?? (element as { contentDesc?: string }).contentDesc;
     return typeof contentDesc === "string" && contentDesc.length > 0 ? contentDesc : undefined;
   }
 
@@ -175,7 +184,10 @@ export class FocusElementMatcher {
     return width > 0 && height > 0;
   }
 
-  private boundsMatch(element: Element, bounds: { left: number; top: number; right: number; bottom: number }): boolean {
+  private boundsMatch(
+    element: Element,
+    bounds: { left: number; top: number; right: number; bottom: number },
+  ): boolean {
     if (!element.bounds) {
       return false;
     }

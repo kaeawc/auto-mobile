@@ -16,8 +16,8 @@ The agent will:
 4. Take a [snapshot](../design-docs/mcp/storage/snapshots.md) of device state to be shared on other machines.
 
 ??? example "See demo: Bug reproduction"
-    ![Bug reproduction workflow](../img/bug-repro.gif)
-    *Demo: An AI agent reproducing a sample counter bug and [highlighting](../design-docs/mcp/observe/visual-highlighting.md) the main issue.*
+![Bug reproduction workflow](../img/bug-repro.gif)
+_Demo: An AI agent reproducing a sample counter bug and [highlighting](../design-docs/mcp/observe/visual-highlighting.md) the main issue._
 
 **Best Practices**
 

@@ -14,32 +14,38 @@ const detector = new OverlayDetector({} as any, new DefaultElementGeometry(), {}
 
 // Arbitrary rectangles, allowing some degenerate/inverted ones (width/height <= 0)
 // so intersectBounds's null-handling for non-overlapping/empty rects is exercised.
-const rect: fc.Arbitrary<ElementBounds> = fc.record({
-  left: fc.integer({ min: -500, max: 500 }),
-  top: fc.integer({ min: -500, max: 500 }),
-  width: fc.integer({ min: -100, max: 400 }),
-  height: fc.integer({ min: -100, max: 400 })
-}).map(({ left, top, width, height }) => ({
-  left,
-  top,
-  right: left + width,
-  bottom: top + height
-}));
+const rect: fc.Arbitrary<ElementBounds> = fc
+  .record({
+    left: fc.integer({ min: -500, max: 500 }),
+    top: fc.integer({ min: -500, max: 500 }),
+    width: fc.integer({ min: -100, max: 400 }),
+    height: fc.integer({ min: -100, max: 400 }),
+  })
+  .map(({ left, top, width, height }) => ({
+    left,
+    top,
+    right: left + width,
+    bottom: top + height,
+  }));
 
 // A reasonably sized, always-valid container for computeSafeSwipeCoordinates.
-const containerBounds: fc.Arbitrary<ElementBounds> = fc.record({
-  left: fc.integer({ min: 0, max: 100 }),
-  top: fc.integer({ min: 0, max: 100 }),
-  width: fc.integer({ min: 100, max: 800 }),
-  height: fc.integer({ min: 100, max: 800 })
-}).map(({ left, top, width, height }) => ({
-  left,
-  top,
-  right: left + width,
-  bottom: top + height
-}));
+const containerBounds: fc.Arbitrary<ElementBounds> = fc
+  .record({
+    left: fc.integer({ min: 0, max: 100 }),
+    top: fc.integer({ min: 0, max: 100 }),
+    width: fc.integer({ min: 100, max: 800 }),
+    height: fc.integer({ min: 100, max: 800 }),
+  })
+  .map(({ left, top, width, height }) => ({
+    left,
+    top,
+    right: left + width,
+    bottom: top + height,
+  }));
 
-const direction = fc.constantFrom("up", "down", "left", "right") as fc.Arbitrary<"up" | "down" | "left" | "right">;
+const direction = fc.constantFrom("up", "down", "left", "right") as fc.Arbitrary<
+  "up" | "down" | "left" | "right"
+>;
 const overlays = fc.array(rect, { minLength: 0, maxLength: 4 });
 
 describe("OverlayDetector (property-based)", () => {
@@ -50,7 +56,7 @@ describe("OverlayDetector (property-based)", () => {
         const ba = detector.intersectBounds(b, a);
         return JSON.stringify(ab) === JSON.stringify(ba);
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -62,20 +68,25 @@ describe("OverlayDetector (property-based)", () => {
           return true;
         }
         return (
-          result.left >= a.left && result.right <= a.right &&
-          result.top >= a.top && result.bottom <= a.bottom &&
-          result.left >= b.left && result.right <= b.right &&
-          result.top >= b.top && result.bottom <= b.bottom
+          result.left >= a.left &&
+          result.right <= a.right &&
+          result.top >= a.top &&
+          result.bottom <= a.bottom &&
+          result.left >= b.left &&
+          result.right <= b.right &&
+          result.top >= b.top &&
+          result.bottom <= b.bottom
         );
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
   test("intersectBounds is null exactly when the rectangles don't overlap with positive area", () => {
     fc.assert(
       fc.property(rect, rect, (a, b) => {
-        const noOverlap = Math.min(a.right, b.right) <= Math.max(a.left, b.left) ||
+        const noOverlap =
+          Math.min(a.right, b.right) <= Math.max(a.left, b.left) ||
           Math.min(a.bottom, b.bottom) <= Math.max(a.top, b.top);
         const result = detector.intersectBounds(a, b);
 
@@ -85,7 +96,7 @@ describe("OverlayDetector (property-based)", () => {
 
         return result !== null && result.right > result.left && result.bottom > result.top;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -98,13 +109,17 @@ describe("OverlayDetector (property-based)", () => {
         }
 
         return (
-          result.startX >= bounds.left && result.startX <= bounds.right &&
-          result.endX >= bounds.left && result.endX <= bounds.right &&
-          result.startY >= bounds.top && result.startY <= bounds.bottom &&
-          result.endY >= bounds.top && result.endY <= bounds.bottom
+          result.startX >= bounds.left &&
+          result.startX <= bounds.right &&
+          result.endX >= bounds.left &&
+          result.endX <= bounds.right &&
+          result.startY >= bounds.top &&
+          result.startY <= bounds.bottom &&
+          result.endY >= bounds.top &&
+          result.endY <= bounds.bottom
         );
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -114,7 +129,7 @@ describe("OverlayDetector (property-based)", () => {
         detector.computeSafeSwipeCoordinates(dir, bounds, overlayBounds);
         return true;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 });

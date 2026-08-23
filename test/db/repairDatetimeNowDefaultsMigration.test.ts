@@ -39,7 +39,7 @@ describe("2026_07_03_000_repair_datetime_now_defaults migration (#2895)", () => 
         `CREATE TABLE "navigation_apps" (` +
           `"app_id" text primary key, ` +
           `"created_at" text default 'datetime(''now'')' not null, ` +
-          `"updated_at" text not null)`
+          `"updated_at" text not null)`,
       );
       bunDb.exec(`CREATE INDEX "idx_na_updated" ON "navigation_apps" ("updated_at")`);
       bunDb.query(`INSERT INTO navigation_apps (app_id, updated_at) VALUES ('old', 'u')`).run();
@@ -79,12 +79,12 @@ describe("2026_07_03_000_repair_datetime_now_defaults migration (#2895)", () => 
       bunDb.exec(
         `CREATE TABLE "recomp" (` +
           `"id" integer primary key, ` +
-          `"created_at" text default 'CURRENT_TIMESTAMP' not null)`
+          `"created_at" text default 'CURRENT_TIMESTAMP' not null)`,
       );
       bunDb.query(`INSERT INTO recomp (id) VALUES (1)`).run();
       expect(
         (bunDb.query(`SELECT created_at FROM recomp WHERE id=1`).get() as { created_at: string })
-          .created_at
+          .created_at,
       ).toBe("CURRENT_TIMESTAMP");
 
       await repairUp(db);
@@ -110,11 +110,9 @@ describe("2026_07_03_000_repair_datetime_now_defaults migration (#2895)", () => 
         `CREATE TABLE "storage_events" (` +
           `"id" integer primary key, ` +
           `"value" text, ` +
-          `"created_at" text default 'datetime(''now'')' not null)`
+          `"created_at" text default 'datetime(''now'')' not null)`,
       );
-      bunDb
-        .query(`INSERT INTO storage_events (id, value) VALUES (1, 'datetime(''now'')')`)
-        .run();
+      bunDb.query(`INSERT INTO storage_events (id, value) VALUES (1, 'datetime(''now'')')`).run();
 
       await repairUp(db);
 
@@ -133,7 +131,7 @@ describe("2026_07_03_000_repair_datetime_now_defaults migration (#2895)", () => 
       bunDb.exec(
         `CREATE TABLE "recomp" (` +
           `"id" integer primary key autoincrement, ` +
-          `"created_at" text default 'datetime(''now'')' not null)`
+          `"created_at" text default 'datetime(''now'')' not null)`,
       );
       bunDb.query(`INSERT INTO recomp (created_at) VALUES ('a')`).run(); // id 1
       bunDb.query(`INSERT INTO recomp (created_at) VALUES ('b')`).run(); // id 2
@@ -154,12 +152,12 @@ describe("2026_07_03_000_repair_datetime_now_defaults migration (#2895)", () => 
         `CREATE TABLE "navigation_apps" (` +
           `"app_id" text primary key, ` +
           `"created_at" text default 'datetime(''now'')' not null, ` +
-          `"updated_at" text not null)`
+          `"updated_at" text not null)`,
       );
       bunDb.exec(
         `CREATE TABLE "navigation_nodes" (` +
           `"id" integer primary key, ` +
-          `"app_id" text not null references "navigation_apps" ("app_id") on delete cascade)`
+          `"app_id" text not null references "navigation_apps" ("app_id") on delete cascade)`,
       );
       bunDb.query(`INSERT INTO navigation_apps (app_id, updated_at) VALUES ('a', 'u')`).run();
       bunDb.query(`INSERT INTO navigation_nodes (id, app_id) VALUES (1, 'a')`).run();
@@ -173,7 +171,7 @@ describe("2026_07_03_000_repair_datetime_now_defaults migration (#2895)", () => 
       expect(child.app_id).toBe("a");
       // FK still enforced after rebuild: inserting an orphan child must fail.
       expect(() =>
-        bunDb.query(`INSERT INTO navigation_nodes (id, app_id) VALUES (2, 'missing')`).run()
+        bunDb.query(`INSERT INTO navigation_nodes (id, app_id) VALUES (2, 'missing')`).run(),
       ).toThrow();
     });
 
@@ -182,7 +180,7 @@ describe("2026_07_03_000_repair_datetime_now_defaults migration (#2895)", () => 
         `CREATE TABLE "navigation_apps" (` +
           `"app_id" text primary key, ` +
           `"created_at" text default 'datetime(''now'')' not null, ` +
-          `"updated_at" text not null)`
+          `"updated_at" text not null)`,
       );
       bunDb.query(`INSERT INTO navigation_apps (app_id, updated_at) VALUES ('old', 'u')`).run();
 
@@ -254,11 +252,11 @@ describe("repair migrations read pragma_table_info consistently (#3612)", () => 
   const sources = {
     "07_03": readFileSync(
       join(migrationsDir, "2026_07_03_000_repair_datetime_now_defaults.ts"),
-      "utf8"
+      "utf8",
     ),
     "07_05": readFileSync(
       join(migrationsDir, "2026_07_05_000_repair_updated_at_defaults.ts"),
-      "utf8"
+      "utf8",
     ),
   };
 

@@ -9,7 +9,7 @@ const RUN_OPTIONS = { seed: 1_234_567, numRuns: 300 } as const;
 // quoting hard: single quotes, backslashes, and expansion metacharacters.
 const shellUnit = fc.oneof(
   fc.constantFrom("'", "\\", "$", "`", '"', " ", "\n", "\t", "*", "?", ";", "|", "&", "(", ")"),
-  fc.integer({ min: 0x20, max: 0x7e }).map(code => String.fromCharCode(code))
+  fc.integer({ min: 0x20, max: 0x7e }).map((code) => String.fromCharCode(code)),
 );
 const shellHostile = fc.string({ unit: shellUnit, maxLength: 40 });
 
@@ -50,18 +50,18 @@ const posixUnquote = (quoted: string): string => {
 describe("shellQuote (property-based)", () => {
   test("a POSIX shell recovers the exact original literal (round-trip)", () => {
     fc.assert(
-      fc.property(shellHostile, value => posixUnquote(shellQuote(value)) === value),
-      RUN_OPTIONS
+      fc.property(shellHostile, (value) => posixUnquote(shellQuote(value)) === value),
+      RUN_OPTIONS,
     );
   });
 
   test("the result is always wrapped in single quotes", () => {
     fc.assert(
-      fc.property(shellHostile, value => {
+      fc.property(shellHostile, (value) => {
         const quoted = shellQuote(value);
         return quoted.startsWith("'") && quoted.endsWith("'") && quoted.length >= 2;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -69,8 +69,12 @@ describe("shellQuote (property-based)", () => {
     // POSIX joins directly-adjacent quoted words into one literal, so quoting the
     // parts and concatenating must be indistinguishable from quoting the whole.
     fc.assert(
-      fc.property(shellHostile, shellHostile, (a, b) => posixUnquote(shellQuote(a) + shellQuote(b)) === a + b),
-      RUN_OPTIONS
+      fc.property(
+        shellHostile,
+        shellHostile,
+        (a, b) => posixUnquote(shellQuote(a) + shellQuote(b)) === a + b,
+      ),
+      RUN_OPTIONS,
     );
   });
 });

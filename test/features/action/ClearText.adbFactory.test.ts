@@ -25,7 +25,7 @@ describe("ClearText accessibility-service path", () => {
     AndroidCtrlProxyClient.getInstance = ((dev: BootedDevice, adbFactory: unknown) => {
       capturedArgs.push(adbFactory);
       return {
-        requestClearText: async () => ({ success: true, totalTimeMs: 50 })
+        requestClearText: async () => ({ success: true, totalTimeMs: 50 }),
       } as any;
     }) as any;
 

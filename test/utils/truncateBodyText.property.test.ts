@@ -3,7 +3,7 @@ import fc from "fast-check";
 import {
   BODY_TRUNCATION_LIMIT,
   boundStructuredField,
-  truncateBodyText
+  truncateBodyText,
 } from "../../src/utils/truncateBodyText";
 
 // Property-based tests. See Backoff.property.test.ts for the pinned-seed rationale.
@@ -13,7 +13,7 @@ const RUN_OPTIONS = { seed: 1_234_567, numRuns: 300 } as const;
 // (malformed input) — exactly the boundary case truncateBodyText must survive.
 const anyUtf16 = fc
   .array(fc.integer({ min: 0, max: 0xffff }), { maxLength: 200 })
-  .map(codes => String.fromCharCode(...codes));
+  .map((codes) => String.fromCharCode(...codes));
 
 // Well-formed UTF-16: every code point is either a BMP non-surrogate or an
 // astral character (a valid high+low pair). This is the function's realistic
@@ -22,8 +22,11 @@ const anyUtf16 = fc
 // (Deliberately malformed input — e.g. two adjacent lone high surrogates — is
 // out of contract; the function caps such input but does not sanitize it.)
 const wellFormedUtf16 = fc
-  .array(fc.integer({ min: 0, max: 0x10ffff }).filter(cp => cp < 0xd800 || cp > 0xdfff), { maxLength: 200 })
-  .map(cps => String.fromCodePoint(...cps));
+  .array(
+    fc.integer({ min: 0, max: 0x10ffff }).filter((cp) => cp < 0xd800 || cp > 0xdfff),
+    { maxLength: 200 },
+  )
+  .map((cps) => String.fromCodePoint(...cps));
 
 const limit = fc.integer({ min: 1, max: 128 });
 
@@ -37,7 +40,7 @@ describe("truncateBodyText (property-based)", () => {
         const result = truncateBodyText(text, max);
         return result !== null && result.length <= max && text.startsWith(result);
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -47,7 +50,7 @@ describe("truncateBodyText (property-based)", () => {
         const once = truncateBodyText(text, max);
         return truncateBodyText(once, max) === once;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -69,17 +72,20 @@ describe("truncateBodyText (property-based)", () => {
         }
         return true;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
   test("returns short-enough text and null unchanged", () => {
     const shortText = fc
       .array(fc.integer({ min: 0x20, max: 0x7e }), { maxLength: BODY_TRUNCATION_LIMIT })
-      .map(codes => String.fromCharCode(...codes));
+      .map((codes) => String.fromCharCode(...codes));
     fc.assert(
-      fc.property(shortText, text => truncateBodyText(text) === text && truncateBodyText(null) === null),
-      RUN_OPTIONS
+      fc.property(
+        shortText,
+        (text) => truncateBodyText(text) === text && truncateBodyText(null) === null,
+      ),
+      RUN_OPTIONS,
     );
   });
 });
@@ -104,7 +110,7 @@ describe("boundStructuredField (property-based)", () => {
         const marker = result as { _truncated?: boolean; bytes?: number };
         return marker._truncated === true && marker.bytes === serialized.length;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -116,7 +122,7 @@ describe("boundStructuredField (property-based)", () => {
           boundStructuredField(undefined, asJsonString, max) === undefined
         );
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 });

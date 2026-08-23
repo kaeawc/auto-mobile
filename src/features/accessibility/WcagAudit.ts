@@ -19,7 +19,9 @@ import { BaselineManager } from "./BaselineManager";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 
 export interface WcagBaselineStore {
-  getBaseline(screenId: string): Promise<{ violations: Pick<WcagViolation, "fingerprint">[] } | null>;
+  getBaseline(
+    screenId: string,
+  ): Promise<{ violations: Pick<WcagViolation, "fingerprint">[] } | null>;
   saveBaseline(screenId: string, violations: WcagViolation[]): Promise<void>;
   clearBaseline(screenId: string): Promise<void>;
 }
@@ -29,7 +31,10 @@ export class WcagAudit {
   private baselineStore: WcagBaselineStore;
   private timer: Timer;
 
-  constructor(timer: Timer = defaultTimer, baselineStore: WcagBaselineStore = new BaselineManager()) {
+  constructor(
+    timer: Timer = defaultTimer,
+    baselineStore: WcagBaselineStore = new BaselineManager(),
+  ) {
     this.contrastChecker = new ContrastChecker({}, timer);
     this.baselineStore = baselineStore;
     this.timer = timer;
@@ -44,7 +49,7 @@ export class WcagAudit {
     screenshotPath: string | undefined,
     packageName: string,
     config: AccessibilityAuditConfig,
-    density?: number
+    density?: number,
   ): Promise<AccessibilityAuditResult> {
     const violations: WcagViolation[] = [];
 
@@ -57,7 +62,7 @@ export class WcagAudit {
         elements,
         screenshotPath,
         config.level,
-        config.contrast
+        config.contrast,
       );
       violations.push(...contrastViolations);
     }
@@ -78,19 +83,14 @@ export class WcagAudit {
     if (config.useBaseline) {
       const baseline = await this.baselineStore.getBaseline(screenId);
       if (baseline) {
-        const baselineFingerprints = new Set(baseline.violations.map(v => v.fingerprint));
-        filteredViolations = violations.filter(v => !baselineFingerprints.has(v.fingerprint));
+        const baselineFingerprints = new Set(baseline.violations.map((v) => v.fingerprint));
+        filteredViolations = violations.filter((v) => !baselineFingerprints.has(v.fingerprint));
         baselinedCount = violations.length - filteredViolations.length;
       }
     }
 
     // Generate summary
-    const summary = this.generateSummary(
-      violations,
-      filteredViolations,
-      baselinedCount,
-      config
-    );
+    const summary = this.generateSummary(violations, filteredViolations, baselinedCount, config);
 
     return {
       config,
@@ -157,19 +157,21 @@ export class WcagAudit {
     elements: Element[],
     screenshotPath: string,
     wcagLevel: string,
-    contrastConfig?: AccessibilityAuditConfig["contrast"]
+    contrastConfig?: AccessibilityAuditConfig["contrast"],
   ): Promise<WcagViolation[]> {
     const violations: WcagViolation[] = [];
 
     // Filter to text elements only
-    const textElements = elements.filter(e => e.text && e.text.trim().length > 0);
+    const textElements = elements.filter((e) => e.text && e.text.trim().length > 0);
 
     // Use batch processing for optimal performance
-    const checker = contrastConfig ? new ContrastChecker(contrastConfig, this.timer) : this.contrastChecker;
+    const checker = contrastConfig
+      ? new ContrastChecker(contrastConfig, this.timer)
+      : this.contrastChecker;
     const results = await checker.checkContrastBatch(
       screenshotPath,
       textElements,
-      wcagLevel as "A" | "AA" | "AAA"
+      wcagLevel as "A" | "AA" | "AAA",
     );
 
     // Process results and create violations
@@ -246,22 +248,22 @@ export class WcagAudit {
   private checkFormInputLabels(
     elements: Element[],
     hierarchy: ViewHierarchyNode,
-    density?: number
+    density?: number,
   ): WcagViolation[] {
     const violations: WcagViolation[] = [];
 
     // Identify form input elements
     const inputElements = elements.filter(
-      e =>
+      (e) =>
         e.class?.includes("EditText") ||
         e.class?.includes("Spinner") ||
         e.class?.includes("CheckBox") ||
-        e.class?.includes("RadioButton")
+        e.class?.includes("RadioButton"),
     );
 
     // Compute the candidate label TextViews once, not once per input
     // (hasNearbyLabel was O(inputs * elements) just rebuilding this list).
-    const textViews = elements.filter(e => e.class?.includes("TextView") && e.text);
+    const textViews = elements.filter((e) => e.class?.includes("TextView") && e.text);
 
     // Scale the proximity gate for this device's pixel density once per audit.
     const gapThresholdPx = this.labelGapThresholdPx(density);
@@ -410,12 +412,12 @@ export class WcagAudit {
     allViolations: WcagViolation[],
     filteredViolations: WcagViolation[],
     baselinedCount: number,
-    config: AccessibilityAuditConfig
+    config: AccessibilityAuditConfig,
   ): AccessibilityAuditSummary {
     const bySeverity = {
-      error: filteredViolations.filter(v => v.severity === "error").length,
-      warning: filteredViolations.filter(v => v.severity === "warning").length,
-      info: filteredViolations.filter(v => v.severity === "info").length,
+      error: filteredViolations.filter((v) => v.severity === "error").length,
+      warning: filteredViolations.filter((v) => v.severity === "warning").length,
+      info: filteredViolations.filter((v) => v.severity === "info").length,
     };
 
     const byType: Record<ViolationType, number> = {
@@ -438,9 +440,13 @@ export class WcagAudit {
       failureReason = `Found ${filteredViolations.length} accessibility violation(s) in strict mode`;
     } else if (config.failureMode === "threshold") {
       const minSeverity = config.minSeverity || "warning";
-      const relevantViolations = filteredViolations.filter(v => {
-        if (minSeverity === "error") {return v.severity === "error";}
-        if (minSeverity === "warning") {return v.severity === "error" || v.severity === "warning";}
+      const relevantViolations = filteredViolations.filter((v) => {
+        if (minSeverity === "error") {
+          return v.severity === "error";
+        }
+        if (minSeverity === "warning") {
+          return v.severity === "error" || v.severity === "warning";
+        }
         return true;
       });
 

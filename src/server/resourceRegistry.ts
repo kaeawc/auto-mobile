@@ -1,5 +1,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { Resource, ResourceTemplate, ReadResourceRequestSchema, ListResourcesRequestSchema, ListResourceTemplatesRequestSchema, SubscribeRequestSchema, UnsubscribeRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import {
+  Resource,
+  ResourceTemplate,
+  ReadResourceRequestSchema,
+  ListResourcesRequestSchema,
+  ListResourceTemplatesRequestSchema,
+  SubscribeRequestSchema,
+  UnsubscribeRequestSchema,
+} from "@modelcontextprotocol/sdk/types.js";
 import { logger } from "../utils/logger";
 import { ListChangedBroadcaster } from "./listChangedBroadcast";
 
@@ -59,10 +67,11 @@ export function getRequestedResourceUri(params: Record<string, string>): string 
   return (params as Record<PropertyKey, unknown>)[requestedResourceUri] as string | undefined;
 }
 
-type RegisteredResourceTemplate = ResourceTemplateMetadata & (
-  | { handler: ResourceTemplateHandler }
-  | { handlerWithReadContext: ContextualResourceTemplateHandler }
-);
+type RegisteredResourceTemplate = ResourceTemplateMetadata &
+  (
+    | { handler: ResourceTemplateHandler }
+    | { handlerWithReadContext: ContextualResourceTemplateHandler }
+  );
 
 // Compile an RFC 6570 URI template into an anchored RegExp plus its ordered
 // parameter names. Pure and called once per template at registration.
@@ -105,7 +114,7 @@ function compileUriTemplate(template: string): {
 // named parameters. Returns null when the URI does not match the template.
 function extractTemplateParams(
   template: RegisteredResourceTemplate,
-  uri: string
+  uri: string,
 ): Record<string, string> | null {
   const match = uri.match(template.regex);
   if (!match) {
@@ -151,7 +160,7 @@ class ResourceRegistryClass {
     name: string,
     description: string,
     mimeType: string,
-    handler: ResourceHandler
+    handler: ResourceHandler,
   ): void {
     this.resources.set(uri, { uri, name, description, mimeType, handler });
   }
@@ -162,7 +171,7 @@ class ResourceRegistryClass {
     name: string,
     description: string,
     mimeType: string,
-    handler: ResourceTemplateHandler
+    handler: ResourceTemplateHandler,
   ): void {
     const { regex, paramNames, queryParamNames } = compileUriTemplate(uriTemplate);
     this.templates.set(uriTemplate, {
@@ -182,7 +191,7 @@ class ResourceRegistryClass {
     name: string,
     description: string,
     mimeType: string,
-    handlerWithReadContext: ContextualResourceTemplateHandler
+    handlerWithReadContext: ContextualResourceTemplateHandler,
   ): void {
     const { regex, paramNames, queryParamNames } = compileUriTemplate(uriTemplate);
     this.templates.set(uriTemplate, {
@@ -208,7 +217,9 @@ class ResourceRegistryClass {
   }
 
   // Match a URI against registered templates and return the template and extracted parameters
-  matchTemplate(uri: string): { template: RegisteredResourceTemplate; params: Record<string, string> } | undefined {
+  matchTemplate(
+    uri: string,
+  ): { template: RegisteredResourceTemplate; params: Record<string, string> } | undefined {
     for (const registeredTemplate of this.templates.values()) {
       const params = extractTemplateParams(registeredTemplate, uri);
       if (params) {
@@ -235,21 +246,21 @@ class ResourceRegistryClass {
 
   // Get resources in MCP format for ListResources response
   getResourceDefinitions(): Resource[] {
-    return Array.from(this.resources.values()).map(resource => ({
+    return Array.from(this.resources.values()).map((resource) => ({
       uri: resource.uri,
       name: resource.name,
       description: resource.description,
-      mimeType: resource.mimeType
+      mimeType: resource.mimeType,
     }));
   }
 
   // Get resource templates in MCP format for ListResourceTemplates response
   getTemplateDefinitions(): ResourceTemplate[] {
-    return Array.from(this.templates.values()).map(template => ({
+    return Array.from(this.templates.values()).map((template) => ({
       uriTemplate: template.uriTemplate,
       name: template.name,
       description: template.description,
-      mimeType: template.mimeType
+      mimeType: template.mimeType,
     }));
   }
 
@@ -280,7 +291,7 @@ class ResourceRegistryClass {
     // Set handler for listing resources
     server.server.setRequestHandler(ListResourcesRequestSchema, async () => {
       return {
-        resources: this.getResourceDefinitions()
+        resources: this.getResourceDefinitions(),
       };
     });
 
@@ -301,7 +312,7 @@ class ResourceRegistryClass {
           const suggestedUri = uri.replace(/^[a-z][a-z0-9+.-]*:\/?\/?/i, "automobile:");
           throw new Error(
             `Unknown URI scheme '${scheme}://'. AutoMobile resources use the 'automobile:' prefix. ` +
-            `Try: ${suggestedUri}`
+              `Try: ${suggestedUri}`,
           );
         }
       }
@@ -311,7 +322,7 @@ class ResourceRegistryClass {
       if (resource) {
         const content = await resource.handler();
         return {
-          contents: [content]
+          contents: [content],
         };
       }
 
@@ -319,36 +330,37 @@ class ResourceRegistryClass {
       const templateMatch = this.matchTemplate(uri);
       if (templateMatch) {
         const { template, params } = templateMatch;
-        const content = "handlerWithReadContext" in template
-          ? await template.handlerWithReadContext(params, getReadContext(extra.signal))
-          : await template.handler(params);
+        const content =
+          "handlerWithReadContext" in template
+            ? await template.handlerWithReadContext(params, getReadContext(extra.signal))
+            : await template.handler(params);
         return {
-          contents: [content]
+          contents: [content],
         };
       }
 
       // Provide helpful error message with available resource patterns
       throw new Error(
         `Resource not found: ${uri}\n\n` +
-        `Available resource patterns:\n` +
-        `  - automobile:devices/booted - List all booted devices\n` +
-        `  - automobile:devices/booted/{platform} - List devices by platform (android|ios)\n` +
-        `  - automobile:devices/{deviceId}/apps - List apps for a device\n` +
-        `  - automobile:apps?deviceId={deviceId} - Query apps with filters\n` +
-        `  - automobile:observation/latest - Latest screen observation\n\n` +
-        `Use the listApps tool for detailed guidance on listing apps.`
+          `Available resource patterns:\n` +
+          `  - automobile:devices/booted - List all booted devices\n` +
+          `  - automobile:devices/booted/{platform} - List devices by platform (android|ios)\n` +
+          `  - automobile:devices/{deviceId}/apps - List apps for a device\n` +
+          `  - automobile:apps?deviceId={deviceId} - Query apps with filters\n` +
+          `  - automobile:observation/latest - Latest screen observation\n\n` +
+          `Use the listApps tool for detailed guidance on listing apps.`,
       );
     });
 
     // Set handler for listing resource templates
     server.server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => {
       return {
-        resourceTemplates: this.getTemplateDefinitions()
+        resourceTemplates: this.getTemplateDefinitions(),
       };
     });
 
     // Set handler for subscribe
-    server.server.setRequestHandler(SubscribeRequestSchema, async request => {
+    server.server.setRequestHandler(SubscribeRequestSchema, async (request) => {
       const { uri } = request.params;
       this.subscriptions.add(uri);
       logger.info(`[ResourceRegistry] Client subscribed to: ${uri}`);
@@ -356,7 +368,7 @@ class ResourceRegistryClass {
     });
 
     // Set handler for unsubscribe
-    server.server.setRequestHandler(UnsubscribeRequestSchema, async request => {
+    server.server.setRequestHandler(UnsubscribeRequestSchema, async (request) => {
       const { uri } = request.params;
       this.subscriptions.delete(uri);
       logger.info(`[ResourceRegistry] Client unsubscribed from: ${uri}`);
@@ -394,8 +406,8 @@ class ResourceRegistryClass {
         await server.server.notification({
           method: "notifications/resources/updated",
           params: {
-            uri: resource ? resource.uri : uri
-          }
+            uri: resource ? resource.uri : uri,
+          },
         });
       } catch (error) {
         // Silently ignore notification errors (e.g., when transport is not connected during tests)
@@ -421,7 +433,7 @@ class ResourceRegistryClass {
       try {
         await server.server.notification({
           method: "notifications/resources/list_changed",
-          params: {}
+          params: {},
         });
       } catch (error) {
         // Best-effort: a failed notification must never break the resource

@@ -7,15 +7,15 @@ import { FakeFileDownloader } from "../fakes/FakeFileDownloader";
  * Gate for the startup APK prefetch: it must skip cleanly when Android
  * prerequisites are absent and still download when they are present (#4404).
  */
-describe("AndroidCtrlProxyManager prefetch prerequisite gate", function() {
+describe("AndroidCtrlProxyManager prefetch prerequisite gate", function () {
   let fakeDownloader: FakeFileDownloader;
   let originalApkPathEnv: string | undefined;
 
   const detectorReturning = (value: boolean): AndroidPrerequisiteDetector => ({
-    hasAndroidPrerequisites: async () => value
+    hasAndroidPrerequisites: async () => value,
   });
 
-  beforeEach(async function() {
+  beforeEach(async function () {
     originalApkPathEnv = process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH;
     // The local-APK override short-circuits prefetch entirely; keep it unset.
     delete process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH;
@@ -24,7 +24,7 @@ describe("AndroidCtrlProxyManager prefetch prerequisite gate", function() {
     AndroidCtrlProxyManager.setPrefetchFileDownloaderForTesting(fakeDownloader);
   });
 
-  afterEach(async function() {
+  afterEach(async function () {
     AndroidCtrlProxyManager.setAndroidPrerequisiteDetectorForTesting(null);
     AndroidCtrlProxyManager.setPrefetchFileDownloaderForTesting(null);
     await AndroidCtrlProxyManager.cleanupPrefetchedApk();
@@ -35,7 +35,7 @@ describe("AndroidCtrlProxyManager prefetch prerequisite gate", function() {
     }
   });
 
-  test("does not download the APK when Android prerequisites are absent", async function() {
+  test("does not download the APK when Android prerequisites are absent", async function () {
     AndroidCtrlProxyManager.setAndroidPrerequisiteDetectorForTesting(detectorReturning(false));
 
     AndroidCtrlProxyManager.prefetchApk();
@@ -47,7 +47,7 @@ describe("AndroidCtrlProxyManager prefetch prerequisite gate", function() {
     expect(fakeDownloader.downloadedUrls).toHaveLength(0);
   });
 
-  test("attempts the APK download when Android prerequisites are present", async function() {
+  test("attempts the APK download when Android prerequisites are present", async function () {
     AndroidCtrlProxyManager.setAndroidPrerequisiteDetectorForTesting(detectorReturning(true));
 
     AndroidCtrlProxyManager.prefetchApk();

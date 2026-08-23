@@ -51,9 +51,15 @@ function skipEmulatorPathDetection(client: AndroidEmulatorClient): void {
 
 describe("resolveHeadlessMode", () => {
   test("AUTOMOBILE_EMULATOR_HEADLESS=true forces headless on any platform", () => {
-    expect(resolveHeadlessMode("darwin", { AUTOMOBILE_EMULATOR_HEADLESS: "true" }).headless).toBe(true);
-    expect(resolveHeadlessMode("linux", { AUTOMOBILE_EMULATOR_HEADLESS: "true" }).headless).toBe(true);
-    expect(resolveHeadlessMode("win32", { AUTOMOBILE_EMULATOR_HEADLESS: "true" }).headless).toBe(true);
+    expect(resolveHeadlessMode("darwin", { AUTOMOBILE_EMULATOR_HEADLESS: "true" }).headless).toBe(
+      true,
+    );
+    expect(resolveHeadlessMode("linux", { AUTOMOBILE_EMULATOR_HEADLESS: "true" }).headless).toBe(
+      true,
+    );
+    expect(resolveHeadlessMode("win32", { AUTOMOBILE_EMULATOR_HEADLESS: "true" }).headless).toBe(
+      true,
+    );
   });
 
   test("AUTOMOBILE_EMULATOR_HEADLESS=false forces windowed even on a Linux host without a display", () => {
@@ -105,7 +111,12 @@ describe("AndroidEmulatorClient detectDisplayError", () => {
     const fakeTimer = new FakeTimer();
     const fakeAdb = new FakeAdbExecutor();
     const fakeFactory = new TestAdbClientFactory(fakeAdb);
-    client = new AndroidEmulatorClient(async () => createExecResult("", ""), null, fakeTimer, fakeFactory);
+    client = new AndroidEmulatorClient(
+      async () => createExecResult("", ""),
+      null,
+      fakeTimer,
+      fakeFactory,
+    );
   });
 
   test("detects 'could not connect to display'", () => {
@@ -116,14 +127,15 @@ describe("AndroidEmulatorClient detectDisplayError", () => {
   });
 
   test("detects Qt 'xcb' platform plugin failure", () => {
-    const output = 'Info: Could not load the Qt platform plugin "xcb" in "" even though it was found.';
+    const output =
+      'Info: Could not load the Qt platform plugin "xcb" in "" even though it was found.';
     const result = client.detectDisplayError(output);
     expect(result.isDisplayError).toBe(true);
     // REWRITE-4: pin the exact surfaced message, not merely that one exists.
     // toBeDefined() passes for any string, so it could not catch a message that
     // regressed to the opaque "exited with code: null" this branch exists to avoid.
     expect(result.message).toBe(
-      "Emulator could not connect to a display (Qt 'xcb' platform plugin failed to load)"
+      "Emulator could not connect to a display (Qt 'xcb' platform plugin failed to load)",
     );
   });
 
@@ -168,7 +180,10 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
     emitter.stderr = new Readable({ read() {} }) as any;
     emitter.killed = false;
     emitter.pid = 1234;
-    emitter.kill = () => { emitter.killed = true; return true; };
+    emitter.kill = () => {
+      emitter.killed = true;
+      return true;
+    };
     return emitter;
   }
 
@@ -193,7 +208,13 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
     };
 
     fakeTimer.enableAutoAdvance();
-    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory, fakeAvdConfigReader);
+    const client = new AndroidEmulatorClient(
+      execAsync,
+      spawnFn,
+      fakeTimer,
+      fakeFactory,
+      fakeAvdConfigReader,
+    );
     skipEmulatorPathDetection(client);
 
     try {
@@ -230,7 +251,13 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
     };
 
     fakeTimer.enableAutoAdvance();
-    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory, fakeAvdConfigReader);
+    const client = new AndroidEmulatorClient(
+      execAsync,
+      spawnFn,
+      fakeTimer,
+      fakeFactory,
+      fakeAvdConfigReader,
+    );
     skipEmulatorPathDetection(client);
 
     try {
@@ -247,8 +274,16 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
 
     const spawnFn = ((_cmd: string, _args: string[]) => {
       process.nextTick(() => {
-        fakeChild.stderr!.emit("data", Buffer.from("Warning: could not connect to display  (:0, )\n"));
-        fakeChild.stderr!.emit("data", Buffer.from('Info: Could not load the Qt platform plugin "xcb" in "" even though it was found.\n'));
+        fakeChild.stderr!.emit(
+          "data",
+          Buffer.from("Warning: could not connect to display  (:0, )\n"),
+        );
+        fakeChild.stderr!.emit(
+          "data",
+          Buffer.from(
+            'Info: Could not load the Qt platform plugin "xcb" in "" even though it was found.\n',
+          ),
+        );
         // Signal death surfaces as a null exit code from Node.
         fakeChild.emit("exit", null);
         fakeChild.emit("close", null);
@@ -264,7 +299,13 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
     };
 
     fakeTimer.enableAutoAdvance();
-    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory, fakeAvdConfigReader);
+    const client = new AndroidEmulatorClient(
+      execAsync,
+      spawnFn,
+      fakeTimer,
+      fakeFactory,
+      fakeAvdConfigReader,
+    );
     skipEmulatorPathDetection(client);
 
     try {
@@ -288,12 +329,17 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
       return createExecResult("");
     };
 
-    const client = new AndroidEmulatorClient(execAsync, null, fakeTimer, fakeFactory, fakeAvdConfigReader);
+    const client = new AndroidEmulatorClient(
+      execAsync,
+      null,
+      fakeTimer,
+      fakeFactory,
+      fakeAvdConfigReader,
+    );
     skipEmulatorPathDetection(client);
 
     await expect(client.startEmulator("Missing_Device")).rejects.toThrow(
-      "AVD 'Missing_Device' not found. Available AVDs: Pixel_9_Pro, Medium_Phone_API_35"
+      "AVD 'Missing_Device' not found. Available AVDs: Pixel_9_Pro, Medium_Phone_API_35",
     );
   });
-
 });

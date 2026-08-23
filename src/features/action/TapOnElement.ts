@@ -402,7 +402,9 @@ export class TapOnElement extends BaseVisualChange {
     if (!viewHierarchy) {
       return false;
     }
-    const elements = this.elementParser.flattenViewHierarchy(viewHierarchy).map(({ element }) => element);
+    const elements = this.elementParser
+      .flattenViewHierarchy(viewHierarchy)
+      .map(({ element }) => element);
     if (this.device.platform === "ios") {
       const ownerResourceId = owner["resource-id"];
       return (

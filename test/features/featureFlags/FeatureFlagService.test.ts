@@ -28,8 +28,8 @@ describe("FeatureFlagService", () => {
     const flags = await service.listFlags();
 
     expect(flags).toHaveLength(2);
-    expect(flags.find(flag => flag.key === "debug")?.enabled).toBe(false);
-    expect(flags.find(flag => flag.key === "ui-perf-mode")?.enabled).toBe(true);
+    expect(flags.find((flag) => flag.key === "debug")?.enabled).toBe(false);
+    expect(flags.find((flag) => flag.key === "ui-perf-mode")?.enabled).toBe(true);
     expect(applier.applied).toContainEqual({ key: "debug", enabled: false, config: null });
     expect(applier.applied).toContainEqual({ key: "ui-perf-mode", enabled: true, config: null });
   });

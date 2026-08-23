@@ -4,7 +4,7 @@ import { PathResult } from "../../utils/interfaces/NavigationGraph";
 import {
   PathOptimizer,
   BackButtonRecommendation,
-  NavigationRecommendation
+  NavigationRecommendation,
 } from "./interfaces/PathOptimizer";
 
 /**
@@ -24,7 +24,7 @@ export class DefaultPathOptimizer implements PathOptimizer {
   public async shouldUseBackButton(
     currentScreen: string,
     targetScreen: string,
-    currentBackStackDepth: number
+    currentBackStackDepth: number,
   ): Promise<BackButtonRecommendation> {
     // Get the target node
     const targetNode = await this.navigationGraph.getNode(targetScreen);
@@ -32,7 +32,7 @@ export class DefaultPathOptimizer implements PathOptimizer {
       return {
         shouldUseBack: false,
         backPresses: 0,
-        reason: "Target screen not in navigation graph"
+        reason: "Target screen not in navigation graph",
       };
     }
 
@@ -41,7 +41,7 @@ export class DefaultPathOptimizer implements PathOptimizer {
       return {
         shouldUseBack: false,
         backPresses: 0,
-        reason: "Target screen has no back stack information"
+        reason: "Target screen has no back stack information",
       };
     }
 
@@ -50,7 +50,7 @@ export class DefaultPathOptimizer implements PathOptimizer {
       return {
         shouldUseBack: false,
         backPresses: 0,
-        reason: `Current depth (${currentBackStackDepth}) not greater than target depth (${targetNode.backStackDepth})`
+        reason: `Current depth (${currentBackStackDepth}) not greater than target depth (${targetNode.backStackDepth})`,
       };
     }
 
@@ -65,7 +65,7 @@ export class DefaultPathOptimizer implements PathOptimizer {
     if (!hasForwardPath) {
       logger.debug(
         `[PATH_OPTIMIZER] No forward path from ${targetScreen} to ${currentScreen}, ` +
-        `cannot verify back navigation safety`
+          `cannot verify back navigation safety`,
       );
 
       // Be conservative: only use back button if depth difference is 1
@@ -74,14 +74,14 @@ export class DefaultPathOptimizer implements PathOptimizer {
         return {
           shouldUseBack: true,
           backPresses: 1,
-          reason: `Depth difference is 1, likely direct parent screen`
+          reason: `Depth difference is 1, likely direct parent screen`,
         };
       }
 
       return {
         shouldUseBack: false,
         backPresses: 0,
-        reason: "No known navigation path to verify safety"
+        reason: "No known navigation path to verify safety",
       };
     }
 
@@ -90,13 +90,13 @@ export class DefaultPathOptimizer implements PathOptimizer {
     if (pathResult.path.length === depthDifference) {
       logger.info(
         `[PATH_OPTIMIZER] Using back button navigation: ${currentScreen} -> ${targetScreen} ` +
-        `(${depthDifference} back presses)`
+          `(${depthDifference} back presses)`,
       );
 
       return {
         shouldUseBack: true,
         backPresses: depthDifference,
-        reason: `Path length (${pathResult.path.length}) matches depth difference (${depthDifference})`
+        reason: `Path length (${pathResult.path.length}) matches depth difference (${depthDifference})`,
       };
     }
 
@@ -105,7 +105,7 @@ export class DefaultPathOptimizer implements PathOptimizer {
     return {
       shouldUseBack: false,
       backPresses: 0,
-      reason: `Path length (${pathResult.path.length}) doesn't match depth difference (${depthDifference}), not safe to use back`
+      reason: `Path length (${pathResult.path.length}) doesn't match depth difference (${depthDifference}), not safe to use back`,
     };
   }
 
@@ -133,20 +133,20 @@ export class DefaultPathOptimizer implements PathOptimizer {
   public async getNavigationRecommendation(
     targetScreen: string,
     currentScreen: string,
-    currentBackStackDepth: number
+    currentBackStackDepth: number,
   ): Promise<NavigationRecommendation> {
     // Check if we can use back button
     const backResult = await this.shouldUseBackButton(
       currentScreen,
       targetScreen,
-      currentBackStackDepth
+      currentBackStackDepth,
     );
 
     if (backResult.shouldUseBack) {
       return {
         method: "back",
         backPresses: backResult.backPresses,
-        reason: backResult.reason
+        reason: backResult.reason,
       };
     }
 
@@ -156,14 +156,14 @@ export class DefaultPathOptimizer implements PathOptimizer {
     if (pathResult.found) {
       return {
         method: "forward",
-        reason: `Known forward path with ${pathResult.path.length} steps`
+        reason: `Known forward path with ${pathResult.path.length} steps`,
       };
     }
 
     // No known path
     return {
       method: "unknown",
-      reason: "No known navigation path to target screen"
+      reason: "No known navigation path to target screen",
     };
   }
 }

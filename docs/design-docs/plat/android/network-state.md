@@ -1,6 +1,6 @@
 # Network State Control
 
-<kbd>❌ Not Implemented</kbd> *(MCP tool)* · <kbd>✅ Implemented</kbd> *(ADB commands, validated)*
+<kbd>❌ Not Implemented</kbd> _(MCP tool)_ · <kbd>✅ Implemented</kbd> _(ADB commands, validated)_
 
 > **Current state:** The `setNetworkState` MCP tool has **not been built**. The ADB commands for Wi-Fi, cellular data, airplane mode, and emulator network shaping are validated on API 35 and documented below. See the [Status Glossary](../../status-glossary.md) for chip definitions.
 

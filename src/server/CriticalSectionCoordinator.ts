@@ -54,12 +54,12 @@ export class CriticalSectionCoordinator {
   }
 
   /**
-	 * Build the internal map key for a lock. When a namespace is supplied (the
-	 * plan's base session UUID), it scopes the lock so two independent plans that
-	 * happen to reuse the same lock name get isolated barrier/mutex state instead
-	 * of colliding (issue: cross-plan barrier collision). Callers that pass no
-	 * namespace key by the bare lock name, preserving the pre-namespace behavior.
-	 */
+   * Build the internal map key for a lock. When a namespace is supplied (the
+   * plan's base session UUID), it scopes the lock so two independent plans that
+   * happen to reuse the same lock name get isolated barrier/mutex state instead
+   * of colliding (issue: cross-plan barrier collision). Callers that pass no
+   * namespace key by the bare lock name, preserving the pre-namespace behavior.
+   */
   private scopedKey(lock: string, namespace?: string): string {
     return namespace
       ? `${namespace}${CriticalSectionCoordinator.NAMESPACE_SEPARATOR}${lock}`
@@ -67,20 +67,18 @@ export class CriticalSectionCoordinator {
   }
 
   /**
-	 * Registers the expected number of devices for a lock.
-	 * Must be called before any device arrives at the barrier.
-	 */
+   * Registers the expected number of devices for a lock.
+   * Must be called before any device arrives at the barrier.
+   */
   public registerExpectedDevices(lock: string, deviceCount: number, namespace?: string): void {
     if (deviceCount < 1) {
       throw new Error(
-        `Invalid device count ${deviceCount} for lock "${lock}". Must be at least 1.`
+        `Invalid device count ${deviceCount} for lock "${lock}". Must be at least 1.`,
       );
     }
 
     const key = this.scopedKey(lock, namespace);
-    logger.debug(
-      `Registering ${deviceCount} expected devices for lock "${lock}"`
-    );
+    logger.debug(`Registering ${deviceCount} expected devices for lock "${lock}"`);
     this.expectedDeviceCounts.set(key, deviceCount);
 
     // Ensure lock mutex exists
@@ -103,14 +101,14 @@ export class CriticalSectionCoordinator {
   }
 
   /**
-	 * Wait at the barrier for all devices to arrive, then execute the critical section.
-	 * Returns a release function that must be called after execution completes.
-	 */
+   * Wait at the barrier for all devices to arrive, then execute the critical section.
+   * Returns a release function that must be called after execution completes.
+   */
   public async enterCriticalSection(
     lock: string,
     deviceId: string,
     timeout: number = this.BARRIER_TIMEOUT_MS,
-    namespace?: string
+    namespace?: string,
   ): Promise<() => void> {
     const key = this.scopedKey(lock, namespace);
     logger.debug(`Device ${deviceId} entering critical section "${lock}"`);
@@ -138,22 +136,22 @@ export class CriticalSectionCoordinator {
   }
 
   /**
-	 * Wait at a barrier until all expected devices arrive, then proceed
-	 * concurrently. Unlike {@link enterCriticalSection}, this acquires no mutex
-	 * and returns no release function: once the barrier lifts, every device
-	 * continues in parallel with no serialized section.
-	 *
-	 * Registers the expected device count (idempotently) before waiting, so each
-	 * participating device may call this with the same lock and deviceCount.
-	 * Schedules resource cleanup once the barrier lifts; on timeout the caller
-	 * should {@link forceCleanup} to release any devices still waiting.
-	 */
+   * Wait at a barrier until all expected devices arrive, then proceed
+   * concurrently. Unlike {@link enterCriticalSection}, this acquires no mutex
+   * and returns no release function: once the barrier lifts, every device
+   * continues in parallel with no serialized section.
+   *
+   * Registers the expected device count (idempotently) before waiting, so each
+   * participating device may call this with the same lock and deviceCount.
+   * Schedules resource cleanup once the barrier lifts; on timeout the caller
+   * should {@link forceCleanup} to release any devices still waiting.
+   */
   public async awaitBarrier(
     lock: string,
     deviceId: string,
     deviceCount: number,
     timeout: number = this.BARRIER_TIMEOUT_MS,
-    namespace?: string
+    namespace?: string,
   ): Promise<void> {
     this.registerExpectedDevices(lock, deviceCount, namespace);
     const key = this.scopedKey(lock, namespace);
@@ -162,24 +160,24 @@ export class CriticalSectionCoordinator {
   }
 
   /**
-	 * Wait at the barrier until all expected devices have arrived.
-	 *
-	 * Operates on the already-scoped map `key`; `label` is the human lock name
-	 * used only for log/error messages so namespaced keys never leak into
-	 * user-facing text.
-	 */
+   * Wait at the barrier until all expected devices have arrived.
+   *
+   * Operates on the already-scoped map `key`; `label` is the human lock name
+   * used only for log/error messages so namespaced keys never leak into
+   * user-facing text.
+   */
   private async waitAtBarrier(
     key: string,
     deviceId: string,
     timeout: number,
-    label: string
+    label: string,
   ): Promise<void> {
     const expectedCount = this.expectedDeviceCounts.get(key);
 
     if (expectedCount === undefined) {
       throw new Error(
         `No expected device count registered for lock "${label}". ` +
-					`Call registerExpectedDevices() before entering critical section.`
+          `Call registerExpectedDevices() before entering critical section.`,
       );
     }
 
@@ -193,7 +191,7 @@ export class CriticalSectionCoordinator {
     if (arrivedDevices.has(deviceId)) {
       throw new Error(
         `Device ${deviceId} already arrived at barrier for lock "${label}". ` +
-					`Nested critical sections with the same lock are not supported.`
+          `Nested critical sections with the same lock are not supported.`,
       );
     }
 
@@ -201,14 +199,12 @@ export class CriticalSectionCoordinator {
     const currentCount = arrivedDevices.size;
 
     logger.debug(
-      `Device ${deviceId} arrived at barrier "${label}" (${currentCount}/${expectedCount})`
+      `Device ${deviceId} arrived at barrier "${label}" (${currentCount}/${expectedCount})`,
     );
 
     // If all devices have arrived, release all waiting devices
     if (currentCount === expectedCount) {
-      logger.debug(
-        `All ${expectedCount} devices arrived at barrier "${label}", releasing all`
-      );
+      logger.debug(`All ${expectedCount} devices arrived at barrier "${label}", releasing all`);
 
       const resolvers = this.barrierResolvers.get(key) || [];
       this.barrierResolvers.set(key, []);
@@ -244,9 +240,9 @@ export class CriticalSectionCoordinator {
         reject(
           new Error(
             `Timeout waiting for critical section "${label}". ` +
-							`${arrivedCount}/${expectedCount} devices arrived after ${timeout}ms. ` +
-							`Missing devices may have failed or not reached the critical section.`
-          )
+              `${arrivedCount}/${expectedCount} devices arrived after ${timeout}ms. ` +
+              `Missing devices may have failed or not reached the critical section.`,
+          ),
         );
       }, timeout);
 
@@ -267,8 +263,8 @@ export class CriticalSectionCoordinator {
   }
 
   /**
-	 * Schedule cleanup of lock resources after all devices have finished.
-	 */
+   * Schedule cleanup of lock resources after all devices have finished.
+   */
   private scheduleCleanup(key: string): void {
     const existingTimer = this.cleanupTimers.get(key);
     if (existingTimer) {
@@ -289,11 +285,11 @@ export class CriticalSectionCoordinator {
   }
 
   /**
-	 * Immediately clean up resources for a lock (used in error scenarios).
-	 *
-	 * Scoped by the same optional namespace as the other methods so one plan's
-	 * error-path cleanup cannot wipe a different plan's live lock state.
-	 */
+   * Immediately clean up resources for a lock (used in error scenarios).
+   *
+   * Scoped by the same optional namespace as the other methods so one plan's
+   * error-path cleanup cannot wipe a different plan's live lock state.
+   */
   public forceCleanup(lock: string, namespace?: string): void {
     const key = this.scopedKey(lock, namespace);
     logger.debug(`Force cleaning up lock resources for "${lock}"`);
@@ -311,8 +307,8 @@ export class CriticalSectionCoordinator {
   }
 
   /**
-	 * Reset all coordinator state (primarily for testing).
-	 */
+   * Reset all coordinator state (primarily for testing).
+   */
   public reset(): void {
     for (const timer of this.cleanupTimers.values()) {
       this.timer.clearTimeout(timer);

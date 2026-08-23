@@ -16,7 +16,11 @@ export class SwipeOnElement extends BaseVisualChange {
   private executeGesture: ExecuteGesture;
   private geometry: ElementGeometry;
 
-  constructor(device: BootedDevice, adb: AdbClient | null = null, geometry: ElementGeometry = new DefaultElementGeometry()) {
+  constructor(
+    device: BootedDevice,
+    adb: AdbClient | null = null,
+    geometry: ElementGeometry = new DefaultElementGeometry(),
+  ) {
     super(device, adb);
     this.executeGesture = new ExecuteGesture(device, adb);
     this.geometry = geometry;
@@ -35,12 +39,14 @@ export class SwipeOnElement extends BaseVisualChange {
     direction: "up" | "down" | "left" | "right",
     options: GestureOptions = {},
     progress?: ProgressCallback,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<SwipeResult> {
     const perf = createGlobalPerformanceTracker();
     perf.serial("swipeOnElement");
 
-    logger.info(`[SwipeOnElement] Starting swipe: direction=${direction}, platform=${this.device.platform}`);
+    logger.info(
+      `[SwipeOnElement] Starting swipe: direction=${direction}, platform=${this.device.platform}`,
+    );
     logger.info(`[SwipeOnElement] Element bounds: ${JSON.stringify(element.bounds)}`);
     logger.info(`[SwipeOnElement] Options: ${JSON.stringify(options)}`);
 
@@ -50,17 +56,21 @@ export class SwipeOnElement extends BaseVisualChange {
 
         const { startX, startY, endX, endY } = this.geometry.getSwipeWithinBounds(
           direction,
-          element.bounds
+          element.bounds,
         );
 
-        logger.info(`[SwipeOnElement] Raw swipe coordinates: start=(${startX}, ${startY}), end=(${endX}, ${endY})`);
+        logger.info(
+          `[SwipeOnElement] Raw swipe coordinates: start=(${startX}, ${startY}), end=(${endX}, ${endY})`,
+        );
 
         const flooredStartX = Math.floor(startX);
         const flooredStartY = Math.floor(startY);
         const flooredEndX = Math.floor(endX);
         const flooredEndY = Math.floor(endY);
 
-        logger.info(`[SwipeOnElement] Floored swipe coordinates: start=(${flooredStartX}, ${flooredStartY}), end=(${flooredEndX}, ${flooredEndY})`);
+        logger.info(
+          `[SwipeOnElement] Floored swipe coordinates: start=(${flooredStartX}, ${flooredStartY}), end=(${flooredEndX}, ${flooredEndY})`,
+        );
 
         try {
           const result = await perf.track("executeSwipe", () =>
@@ -70,8 +80,8 @@ export class SwipeOnElement extends BaseVisualChange {
               flooredEndX,
               flooredEndY,
               options,
-              perf
-            )
+              perf,
+            ),
           );
           logger.info(`[SwipeOnElement] Swipe completed successfully: ${JSON.stringify(result)}`);
           return result;
@@ -86,8 +96,8 @@ export class SwipeOnElement extends BaseVisualChange {
         timeoutMs: 500,
         progress,
         perf,
-        signal
-      }
+        signal,
+      },
     );
   }
 }

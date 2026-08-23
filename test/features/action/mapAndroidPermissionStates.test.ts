@@ -5,7 +5,7 @@ describe("mapAndroidPermissionStates", () => {
   test("reports granted and denied runtime permissions", () => {
     const result = mapAndroidPermissionStates(
       ["android.permission.CAMERA", "android.permission.RECORD_AUDIO"],
-      { "android.permission.CAMERA": true, "android.permission.RECORD_AUDIO": false }
+      { "android.permission.CAMERA": true, "android.permission.RECORD_AUDIO": false },
     );
 
     expect(result).toEqual([
@@ -35,8 +35,9 @@ describe("mapAndroidPermissionStates", () => {
     ["__proto__"],
     // Control row: an ordinary absent permission must behave identically.
     ["android.permission.NOT_REPORTED"],
-  ])("reports the absent permission %s as unknown", permission => {
-    expect(mapAndroidPermissionStates([permission], { "android.permission.CAMERA": true }))
-      .toEqual([{ permission, state: "unknown", source: "androidRuntime" }]);
+  ])("reports the absent permission %s as unknown", (permission) => {
+    expect(mapAndroidPermissionStates([permission], { "android.permission.CAMERA": true })).toEqual(
+      [{ permission, state: "unknown", source: "androidRuntime" }],
+    );
   });
 });

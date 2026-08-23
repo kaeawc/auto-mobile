@@ -10,7 +10,7 @@ describe("SimCtlClient listApps", () => {
       deviceId: "ios-device-123",
       name: "iOS Device",
       platform: "ios",
-      source: "local"
+      source: "local",
     };
     const execCalls: string[] = [];
     const execAsync = async (file: string, args: string[]) => {
@@ -21,7 +21,7 @@ describe("SimCtlClient listApps", () => {
       }
       if (cmd === "xcrun simctl listapps ios-device-123 --all") {
         const payload = JSON.stringify({
-          "com.apple.Preferences": { bundleName: "Settings" }
+          "com.apple.Preferences": { bundleName: "Settings" },
         });
         return createExecResult(payload, "");
       }
@@ -32,7 +32,7 @@ describe("SimCtlClient listApps", () => {
     const apps = await simctl.listApps();
 
     expect(execCalls).toContain("xcrun simctl listapps ios-device-123 --all");
-    expect(execCalls.some(c => c.startsWith("/bin/sh "))).toBe(false);
+    expect(execCalls.some((c) => c.startsWith("/bin/sh "))).toBe(false);
     expect(apps).toEqual([{ bundleId: "com.apple.Preferences", bundleName: "Settings" }]);
   });
 
@@ -41,7 +41,7 @@ describe("SimCtlClient listApps", () => {
       deviceId: "ios-device-456",
       name: "iOS Device",
       platform: "ios",
-      source: "local"
+      source: "local",
     };
     const execCalls: string[] = [];
     const execAsync = async (file: string, args: string[]) => {
@@ -55,7 +55,7 @@ describe("SimCtlClient listApps", () => {
       }
       if (cmd === "xcrun simctl listapps ios-device-456") {
         const payload = JSON.stringify({
-          "com.apple.Fitness": { bundleName: "Fitness" }
+          "com.apple.Fitness": { bundleName: "Fitness" },
         });
         return createExecResult(payload, "");
       }
@@ -71,12 +71,17 @@ describe("SimCtlClient listApps", () => {
   });
 
   test("converts plist output through the bytes-safe PlistClient path", async () => {
-    const device: BootedDevice = { deviceId: "ios-device-plist", name: "iOS Device", platform: "ios", source: "local" };
+    const device: BootedDevice = {
+      deviceId: "ios-device-plist",
+      name: "iOS Device",
+      platform: "ios",
+      source: "local",
+    };
     const calls: string[] = [];
     let converted: Buffer | undefined;
     const plist: PlistReader = {
       readJsonFile: async () => ({}),
-      readJsonBytes: async bytes => {
+      readJsonBytes: async (bytes) => {
         converted = bytes;
         return { "com.apple.Maps": { bundleName: "Maps" } };
       },
@@ -86,15 +91,28 @@ describe("SimCtlClient listApps", () => {
     };
     const execAsync = async (file: string, args: string[]) => {
       calls.push(`${file} ${args.join(" ")}`);
-      if (args.join(" ") === "simctl --version") {return createExecResult("simctl version 1.0.0", "");}
-      if (args.join(" ") === "simctl listapps ios-device-plist --all") {return createExecResult("<plist />", "");}
+      if (args.join(" ") === "simctl --version") {
+        return createExecResult("simctl version 1.0.0", "");
+      }
+      if (args.join(" ") === "simctl listapps ios-device-plist --all") {
+        return createExecResult("<plist />", "");
+      }
       return createExecResult("", "");
     };
 
-    const apps = await new SimCtlClient(device, execAsync, undefined, undefined, undefined, undefined, undefined, plist).listApps();
+    const apps = await new SimCtlClient(
+      device,
+      execAsync,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      plist,
+    ).listApps();
 
     expect(converted?.toString("utf8")).toBe("<plist />");
-    expect(calls.some(call => call.startsWith("plutil "))).toBe(false);
+    expect(calls.some((call) => call.startsWith("plutil "))).toBe(false);
     expect(apps).toEqual([{ bundleId: "com.apple.Maps", bundleName: "Maps" }]);
   });
 });

@@ -35,7 +35,9 @@ export class DefaultElementParser implements ElementParser {
    * @returns The node with parsed bounds or null
    */
   parseNodeBounds(node: ViewHierarchyNode): Element | null {
-    if (!node) {return null;}
+    if (!node) {
+      return null;
+    }
 
     // Copy the node properties but drop the nested `node` children so each element
     // stays a flat descriptor (id/text/bounds/etc.), not a subtree. Under the
@@ -87,20 +89,22 @@ export class DefaultElementParser implements ElementParser {
    */
   extractWindowRootGroups(
     viewHierarchy: ViewHierarchyResult,
-    order: WindowSearchOrder = "topmost-first"
+    order: WindowSearchOrder = "topmost-first",
   ): ViewHierarchyNode[][] {
     const searchHierarchy = resolveViewHierarchyForSearch(viewHierarchy);
     if (!searchHierarchy?.windows || searchHierarchy.windows.length === 0) {
       return [];
     }
 
-    const windowsWithHierarchy = searchHierarchy.windows.filter(window => window.hierarchy);
+    const windowsWithHierarchy = searchHierarchy.windows.filter((window) => window.hierarchy);
     if (windowsWithHierarchy.length === 0) {
       return [];
     }
 
     const sortedWindows = this.sortWindows(windowsWithHierarchy, order);
-    return sortedWindows.map(window => this.extractHierarchyRoots(window.hierarchy as ViewHierarchyNode));
+    return sortedWindows.map((window) =>
+      this.extractHierarchyRoots(window.hierarchy as ViewHierarchyNode),
+    );
   }
 
   /**
@@ -111,13 +115,10 @@ export class DefaultElementParser implements ElementParser {
    */
   extractWindowRootNodes(
     viewHierarchy: ViewHierarchyResult,
-    order: WindowSearchOrder = "topmost-first"
+    order: WindowSearchOrder = "topmost-first",
   ): ViewHierarchyNode[] {
     const groups = this.extractWindowRootGroups(viewHierarchy, order);
-    return groups.reduce(
-      (acc, group) => acc.concat(group),
-      [] as ViewHierarchyNode[]
-    );
+    return groups.reduce((acc, group) => acc.concat(group), [] as ViewHierarchyNode[]);
   }
 
   private extractHierarchyRoots(hierarchy: any): ViewHierarchyNode[] {
@@ -136,19 +137,23 @@ export class DefaultElementParser implements ElementParser {
     return [hierarchy];
   }
 
-  private sortWindows<T extends { windowLayer: number }>(windows: T[], order: WindowSearchOrder): T[] {
+  private sortWindows<T extends { windowLayer: number }>(
+    windows: T[],
+    order: WindowSearchOrder,
+  ): T[] {
     const direction = order === "topmost-first" ? -1 : 1;
     return windows
       .map((window, index) => ({ window, index }))
       .sort((a, b) => {
-        const layerDelta = this.normalizeWindowLayer(a.window.windowLayer) -
+        const layerDelta =
+          this.normalizeWindowLayer(a.window.windowLayer) -
           this.normalizeWindowLayer(b.window.windowLayer);
         if (layerDelta !== 0) {
           return layerDelta * direction;
         }
         return a.index - b.index;
       })
-      .map(entry => entry.window);
+      .map((entry) => entry.window);
   }
 
   private normalizeWindowLayer(value: unknown): number {
@@ -171,7 +176,9 @@ export class DefaultElementParser implements ElementParser {
    * @param depth - Current depth in the hierarchy (0 = root)
    */
   traverseNode(node: any, callback: (node: any, depth: number) => void, depth: number = 0): void {
-    if (!node) {return;}
+    if (!node) {
+      return;
+    }
 
     // Process the current node with its depth
     callback(node, depth);
@@ -196,19 +203,24 @@ export class DefaultElementParser implements ElementParser {
    */
   flattenViewHierarchy(
     viewHierarchy: ViewHierarchyResult,
-    options: { includeWindows?: boolean; windowOrder?: WindowSearchOrder } = {}
+    options: { includeWindows?: boolean; windowOrder?: WindowSearchOrder } = {},
   ): Array<{ element: Element; index: number; depth: number; text?: string }> {
     const searchHierarchy = resolveViewHierarchyForSearch(viewHierarchy);
     if (!searchHierarchy) {
       return [];
     }
 
-    const flattenedElements: Array<{ element: Element; index: number; depth: number; text?: string }> = [];
+    const flattenedElements: Array<{
+      element: Element;
+      index: number;
+      depth: number;
+      text?: string;
+    }> = [];
     const rootNodes = options.includeWindows
       ? [
-        ...this.extractRootNodes(searchHierarchy),
-        ...this.extractWindowRootNodes(searchHierarchy, options.windowOrder ?? "topmost-first")
-      ]
+          ...this.extractRootNodes(searchHierarchy),
+          ...this.extractWindowRootNodes(searchHierarchy, options.windowOrder ?? "topmost-first"),
+        ]
       : this.extractRootNodes(searchHierarchy);
     let currentIndex = 0;
 
@@ -218,13 +230,14 @@ export class DefaultElementParser implements ElementParser {
         const parsedNode = this.parseNodeBounds(node);
         if (parsedNode) {
           const nodeProperties = this.extractNodeProperties(node);
-          const accessibilityText = nodeProperties.text || nodeProperties["content-desc"] || undefined;
+          const accessibilityText =
+            nodeProperties.text || nodeProperties["content-desc"] || undefined;
 
           flattenedElements.push({
             element: parsedNode,
             index: currentIndex,
             depth: depth,
-            text: accessibilityText
+            text: accessibilityText,
           });
           currentIndex++;
         }

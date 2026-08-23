@@ -4,7 +4,7 @@ import { sql } from "kysely";
 async function columnExists(
   db: Kysely<unknown>,
   tableName: string,
-  columnName: string
+  columnName: string,
 ): Promise<boolean> {
   const result = await sql<{ name: string }>`
     SELECT name FROM pragma_table_info(${tableName}) WHERE name = ${columnName}
@@ -12,10 +12,7 @@ async function columnExists(
   return result.rows.length > 0;
 }
 
-async function tableExists(
-  db: Kysely<unknown>,
-  tableName: string
-): Promise<boolean> {
+async function tableExists(db: Kysely<unknown>, tableName: string): Promise<boolean> {
   const result = await sql<{ name: string }>`
     SELECT name FROM sqlite_master WHERE type = 'table' AND name = ${tableName}
   `.execute(db);
@@ -27,50 +24,32 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   if (!(await columnExists(db, "tool_calls", "status"))) {
     await db.schema
       .alterTable("tool_calls")
-      .addColumn("status", "text", col => col.defaultTo("success"))
+      .addColumn("status", "text", (col) => col.defaultTo("success"))
       .execute();
   }
 
   if (!(await columnExists(db, "tool_calls", "error_message"))) {
-    await db.schema
-      .alterTable("tool_calls")
-      .addColumn("error_message", "text")
-      .execute();
+    await db.schema.alterTable("tool_calls").addColumn("error_message", "text").execute();
   }
 
   if (!(await columnExists(db, "tool_calls", "error_type"))) {
-    await db.schema
-      .alterTable("tool_calls")
-      .addColumn("error_type", "text")
-      .execute();
+    await db.schema.alterTable("tool_calls").addColumn("error_type", "text").execute();
   }
 
   if (!(await columnExists(db, "tool_calls", "device_id"))) {
-    await db.schema
-      .alterTable("tool_calls")
-      .addColumn("device_id", "text")
-      .execute();
+    await db.schema.alterTable("tool_calls").addColumn("device_id", "text").execute();
   }
 
   if (!(await columnExists(db, "tool_calls", "package_name"))) {
-    await db.schema
-      .alterTable("tool_calls")
-      .addColumn("package_name", "text")
-      .execute();
+    await db.schema.alterTable("tool_calls").addColumn("package_name", "text").execute();
   }
 
   if (!(await columnExists(db, "tool_calls", "duration_ms"))) {
-    await db.schema
-      .alterTable("tool_calls")
-      .addColumn("duration_ms", "integer")
-      .execute();
+    await db.schema.alterTable("tool_calls").addColumn("duration_ms", "integer").execute();
   }
 
   if (!(await columnExists(db, "tool_calls", "tool_args"))) {
-    await db.schema
-      .alterTable("tool_calls")
-      .addColumn("tool_args", "text")
-      .execute();
+    await db.schema.alterTable("tool_calls").addColumn("tool_args", "text").execute();
   }
 
   // Create index for failed tool calls
@@ -87,11 +66,11 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     await db.schema
       .createTable("crashes")
       .ifNotExists()
-      .addColumn("id", "integer", col => col.primaryKey().autoIncrement())
-      .addColumn("device_id", "text", col => col.notNull())
-      .addColumn("package_name", "text", col => col.notNull())
-      .addColumn("crash_type", "text", col => col.notNull()) // java, native, system
-      .addColumn("timestamp", "integer", col => col.notNull())
+      .addColumn("id", "integer", (col) => col.primaryKey().autoIncrement())
+      .addColumn("device_id", "text", (col) => col.notNull())
+      .addColumn("package_name", "text", (col) => col.notNull())
+      .addColumn("crash_type", "text", (col) => col.notNull()) // java, native, system
+      .addColumn("timestamp", "integer", (col) => col.notNull())
       .addColumn("process_name", "text")
       .addColumn("pid", "integer")
       .addColumn("exception_class", "text") // e.g., NullPointerException
@@ -100,19 +79,17 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       .addColumn("signal", "text") // For native crashes (SIGSEGV, SIGABRT, etc.)
       .addColumn("fault_address", "text") // For native crashes
       .addColumn("tombstone_path", "text") // Path to tombstone file if available
-      .addColumn("detection_source", "text", col => col.notNull()) // logcat, tombstone, dropbox, accessibility, process_monitor
+      .addColumn("detection_source", "text", (col) => col.notNull()) // logcat, tombstone, dropbox, accessibility, process_monitor
       .addColumn("raw_log", "text") // Raw crash log output
       // Nullable FKs for linking to navigation and test runs
-      .addColumn("navigation_node_id", "integer", col =>
-        col.references("navigation_nodes.id").onDelete("set null")
+      .addColumn("navigation_node_id", "integer", (col) =>
+        col.references("navigation_nodes.id").onDelete("set null"),
       )
-      .addColumn("test_execution_id", "integer", col =>
-        col.references("test_executions.id").onDelete("set null")
+      .addColumn("test_execution_id", "integer", (col) =>
+        col.references("test_executions.id").onDelete("set null"),
       )
       .addColumn("session_uuid", "text")
-      .addColumn("created_at", "text", col =>
-        col.notNull().defaultTo(sql`(datetime('now'))`)
-      )
+      .addColumn("created_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
       .execute();
 
     await db.schema
@@ -156,10 +133,10 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     await db.schema
       .createTable("anrs")
       .ifNotExists()
-      .addColumn("id", "integer", col => col.primaryKey().autoIncrement())
-      .addColumn("device_id", "text", col => col.notNull())
-      .addColumn("package_name", "text", col => col.notNull())
-      .addColumn("timestamp", "integer", col => col.notNull())
+      .addColumn("id", "integer", (col) => col.primaryKey().autoIncrement())
+      .addColumn("device_id", "text", (col) => col.notNull())
+      .addColumn("package_name", "text", (col) => col.notNull())
+      .addColumn("timestamp", "integer", (col) => col.notNull())
       .addColumn("process_name", "text")
       .addColumn("pid", "integer")
       .addColumn("reason", "text") // e.g., "Input dispatching timed out"
@@ -168,19 +145,17 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       .addColumn("cpu_usage", "text") // CPU usage info at time of ANR
       .addColumn("main_thread_state", "text") // State of main thread
       .addColumn("stacktrace", "text") // Main thread stacktrace
-      .addColumn("detection_source", "text", col => col.notNull()) // logcat, dropbox, accessibility
+      .addColumn("detection_source", "text", (col) => col.notNull()) // logcat, dropbox, accessibility
       .addColumn("raw_log", "text") // Raw ANR log output
       // Nullable FKs for linking to navigation and test runs
-      .addColumn("navigation_node_id", "integer", col =>
-        col.references("navigation_nodes.id").onDelete("set null")
+      .addColumn("navigation_node_id", "integer", (col) =>
+        col.references("navigation_nodes.id").onDelete("set null"),
       )
-      .addColumn("test_execution_id", "integer", col =>
-        col.references("test_executions.id").onDelete("set null")
+      .addColumn("test_execution_id", "integer", (col) =>
+        col.references("test_executions.id").onDelete("set null"),
       )
       .addColumn("session_uuid", "text")
-      .addColumn("created_at", "text", col =>
-        col.notNull().defaultTo(sql`(datetime('now'))`)
-      )
+      .addColumn("created_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
       .execute();
 
     await db.schema

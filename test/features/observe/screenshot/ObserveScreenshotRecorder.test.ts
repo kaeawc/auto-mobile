@@ -6,7 +6,10 @@ import { BootedDevice } from "../../../../src/models";
 import { ScreenshotResult } from "../../../../src/models/ScreenshotResult";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../../src/utils/constants";
 import { NoOpPerformanceTracker } from "../../../../src/utils/PerformanceTracker";
-import type { ScreenshotJobHandle, ScreenshotJobOptions } from "../../../../src/utils/ScreenshotJobTracker";
+import type {
+  ScreenshotJobHandle,
+  ScreenshotJobOptions,
+} from "../../../../src/utils/ScreenshotJobTracker";
 import type { ScreenshotOptions } from "../../../../src/features/observe/TakeScreenshot";
 import {
   DefaultObserveScreenshotRecorder,
@@ -76,7 +79,7 @@ class FakeTrackedScreenshotService implements TrackedScreenshotService {
 
   startTrackedCapture(
     _options: ScreenshotOptions = { format: "png" },
-    trackerOptions: ScreenshotJobOptions = {}
+    trackerOptions: ScreenshotJobOptions = {},
   ): ScreenshotJobHandle {
     this.lastTrackerOptions = trackerOptions;
     const abortController = new AbortController();

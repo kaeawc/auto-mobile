@@ -3,12 +3,7 @@ import { getDatabase } from "../../db/database";
 import { Database, MemoryBaseline } from "../../db/types";
 import { logger } from "../../utils/logger";
 import { MemoryMetrics } from "./MemoryMetricsCollector";
-import {
-  safeDivide,
-  getCutoffDate,
-  DEFAULT_EMA_ALPHA,
-  DEFAULT_TTL,
-} from "../shared/MetricsUtils";
+import { safeDivide, getCutoffDate, DEFAULT_EMA_ALPHA, DEFAULT_TTL } from "../shared/MetricsUtils";
 
 /**
  * Manages adaptive memory baselines per app/device/tool combination
@@ -38,7 +33,7 @@ export class MemoryBaselineManager {
   async getBaseline(
     deviceId: string,
     packageName: string,
-    toolName: string
+    toolName: string,
   ): Promise<MemoryBaseline | null> {
     try {
       const baseline = await this.db
@@ -65,7 +60,7 @@ export class MemoryBaselineManager {
     packageName: string,
     toolName: string,
     metrics: MemoryMetrics,
-    alpha: number = DEFAULT_EMA_ALPHA
+    alpha: number = DEFAULT_EMA_ALPHA,
   ): Promise<void> {
     try {
       const now = new Date().toISOString();
@@ -85,7 +80,7 @@ export class MemoryBaselineManager {
           sample_count: 1,
           last_updated: now,
         })
-        .onConflict(oc =>
+        .onConflict((oc) =>
           oc.columns(["device_id", "package_name", "tool_name"]).doUpdateSet({
             java_heap_baseline_mb: sql<number>`${alpha} * ${metrics.postSnapshot.javaHeapMb} + (1 - ${alpha}) * java_heap_baseline_mb`,
             native_heap_baseline_mb: sql<number>`${alpha} * ${metrics.postSnapshot.nativeHeapMb} + (1 - ${alpha}) * native_heap_baseline_mb`,
@@ -94,13 +89,11 @@ export class MemoryBaselineManager {
             unreachable_objects_baseline: sql<number>`${alpha} * ${unreachableObjects} + (1 - ${alpha}) * unreachable_objects_baseline`,
             sample_count: sql<number>`sample_count + 1`,
             last_updated: now,
-          })
+          }),
         )
         .execute();
 
-      logger.info(
-        `[MemoryBaselineManager] Upserted baseline for ${packageName}/${toolName}`
-      );
+      logger.info(`[MemoryBaselineManager] Upserted baseline for ${packageName}/${toolName}`);
     } catch (error) {
       logger.error(`[MemoryBaselineManager] Failed to update baseline: ${error}`);
       throw error;
@@ -113,7 +106,7 @@ export class MemoryBaselineManager {
    */
   calculateAnomalyMultiplier(
     baseline: MemoryBaseline,
-    metrics: MemoryMetrics
+    metrics: MemoryMetrics,
   ): {
     javaHeapMultiplier: number;
     nativeHeapMultiplier: number;
@@ -124,23 +117,17 @@ export class MemoryBaselineManager {
     return {
       javaHeapMultiplier: safeDivide(
         metrics.postSnapshot.javaHeapMb,
-        baseline.java_heap_baseline_mb
+        baseline.java_heap_baseline_mb,
       ),
       nativeHeapMultiplier: safeDivide(
         metrics.postSnapshot.nativeHeapMb,
-        baseline.native_heap_baseline_mb
+        baseline.native_heap_baseline_mb,
       ),
-      gcCountMultiplier: safeDivide(
-        metrics.gcCount,
-        baseline.gc_count_baseline
-      ),
-      gcDurationMultiplier: safeDivide(
-        metrics.gcTotalDurationMs,
-        baseline.gc_duration_baseline_ms
-      ),
+      gcCountMultiplier: safeDivide(metrics.gcCount, baseline.gc_count_baseline),
+      gcDurationMultiplier: safeDivide(metrics.gcTotalDurationMs, baseline.gc_duration_baseline_ms),
       unreachableObjectsMultiplier: safeDivide(
         metrics.unreachableObjects?.count || 0,
-        baseline.unreachable_objects_baseline
+        baseline.unreachable_objects_baseline,
       ),
     };
   }
@@ -171,7 +158,7 @@ export class MemoryBaselineManager {
       const deletedCount = Number(deleted.numDeletedRows) || 0;
       if (deletedCount > 0) {
         logger.info(
-          `[MemoryBaselineManager] Cleaned up ${deletedCount} stale baselines older than ${daysOld} days`
+          `[MemoryBaselineManager] Cleaned up ${deletedCount} stale baselines older than ${daysOld} days`,
         );
       }
     } catch (error) {
@@ -182,10 +169,7 @@ export class MemoryBaselineManager {
   /**
    * Get all baselines for a package across all tools
    */
-  async getPackageBaselines(
-    deviceId: string,
-    packageName: string
-  ): Promise<MemoryBaseline[]> {
+  async getPackageBaselines(deviceId: string, packageName: string): Promise<MemoryBaseline[]> {
     try {
       const baselines = await this.db
         .selectFrom("memory_baselines")

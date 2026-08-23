@@ -11,8 +11,16 @@ import { FakeImageBackend } from "../../fakes/FakeImageBackend";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 /** Build a uniform RGBA raw image for backend-seam tests. */
-function uniformRaw(width: number, height: number, r: number, g: number, b: number): {
-  width: number; height: number; data: Buffer;
+function uniformRaw(
+  width: number,
+  height: number,
+  r: number,
+  g: number,
+  b: number,
+): {
+  width: number;
+  height: number;
+  data: Buffer;
 } {
   const data = Buffer.alloc(width * height * 4);
   for (let i = 0; i < width * height; i++) {
@@ -24,17 +32,17 @@ function uniformRaw(width: number, height: number, r: number, g: number, b: numb
   return { width, height, data };
 }
 
-describe("ContrastChecker", function() {
+describe("ContrastChecker", function () {
   let checker: ContrastChecker;
   const fixturesDir = path.join(__dirname, "../../fixtures/screenshots");
   const syntheticScreenshotPath = "/synthetic/contrast.png";
 
-  beforeEach(function() {
+  beforeEach(function () {
     checker = new ContrastChecker();
   });
 
-  describe("Color Calculations", function() {
-    it("should calculate correct contrast ratio for black on white (21:1)", async function() {
+  describe("Color Calculations", function () {
+    it("should calculate correct contrast ratio for black on white (21:1)", async function () {
       const screenshotPath = path.join(fixturesDir, "black-on-white.png");
       const element: Element = {
         bounds: { left: 0, top: 0, right: 100, bottom: 50 },
@@ -49,7 +57,7 @@ describe("ContrastChecker", function() {
       expect(result!.meetsAAA).toBe(true);
     });
 
-    it("should calculate correct contrast ratio for WCAG AA minimum (4.5:1)", async function() {
+    it("should calculate correct contrast ratio for WCAG AA minimum (4.5:1)", async function () {
       const screenshotPath = path.join(fixturesDir, "wcag-aa-minimum.png");
       const element: Element = {
         bounds: { left: 0, top: 0, right: 100, bottom: 50 },
@@ -65,7 +73,7 @@ describe("ContrastChecker", function() {
       expect(result!.meetsAA).toBe(true);
     });
 
-    it("should fail elements below threshold", async function() {
+    it("should fail elements below threshold", async function () {
       const screenshotPath = path.join(fixturesDir, "wcag-aa-fail.png");
       const element: Element = {
         bounds: { left: 0, top: 0, right: 100, bottom: 50 },
@@ -79,7 +87,7 @@ describe("ContrastChecker", function() {
       expect(result!.meetsAA).toBe(false);
     });
 
-    it("should pass elements above threshold", async function() {
+    it("should pass elements above threshold", async function () {
       const screenshotPath = path.join(fixturesDir, "black-on-white.png");
       const element: Element = {
         bounds: { left: 0, top: 0, right: 100, bottom: 50 },
@@ -93,7 +101,7 @@ describe("ContrastChecker", function() {
       expect(result!.meetsAA).toBe(true);
     });
 
-    it("should handle large text vs normal text thresholds", async function() {
+    it("should handle large text vs normal text thresholds", async function () {
       const screenshotPath = path.join(fixturesDir, "wcag-aa-large-text.png");
 
       // Small text element (height < 24px) - requires 4.5:1 for AA
@@ -119,7 +127,7 @@ describe("ContrastChecker", function() {
       expect(largeResult!.requiredRatio).toEqual(3.0);
     });
 
-    it("should skip elements too small to analyze", async function() {
+    it("should skip elements too small to analyze", async function () {
       const screenshotPath = path.join(fixturesDir, "small-element.png");
 
       // Element with width < 2 or height < 2
@@ -133,7 +141,7 @@ describe("ContrastChecker", function() {
       expect(result).toBeNull();
     });
 
-    it("should handle colored text on colored background", async function() {
+    it("should handle colored text on colored background", async function () {
       const screenshotPath = path.join(fixturesDir, "blue-on-yellow.png");
       const element: Element = {
         bounds: { left: 0, top: 0, right: 100, bottom: 50 },
@@ -153,8 +161,8 @@ describe("ContrastChecker", function() {
     });
   });
 
-  describe("WCAG Level Requirements", function() {
-    it("should use 4.5:1 for AA normal text", async function() {
+  describe("WCAG Level Requirements", function () {
+    it("should use 4.5:1 for AA normal text", async function () {
       const screenshotPath = path.join(fixturesDir, "black-on-white.png");
       const element: Element = {
         bounds: { left: 0, top: 0, right: 100, bottom: 20 }, // Normal size
@@ -167,7 +175,7 @@ describe("ContrastChecker", function() {
       expect(result!.requiredRatio).toEqual(4.5);
     });
 
-    it("should use 3.0:1 for AA large text", async function() {
+    it("should use 3.0:1 for AA large text", async function () {
       const screenshotPath = path.join(fixturesDir, "black-on-white.png");
       const element: Element = {
         bounds: { left: 0, top: 0, right: 100, bottom: 30 }, // Large size (>= 24px)
@@ -180,7 +188,7 @@ describe("ContrastChecker", function() {
       expect(result!.requiredRatio).toEqual(3.0);
     });
 
-    it("should use 7.0:1 for AAA normal text", async function() {
+    it("should use 7.0:1 for AAA normal text", async function () {
       const screenshotPath = path.join(fixturesDir, "black-on-white.png");
       const element: Element = {
         bounds: { left: 0, top: 0, right: 100, bottom: 20 }, // Normal size
@@ -193,7 +201,7 @@ describe("ContrastChecker", function() {
       expect(result!.requiredRatio).toEqual(7.0);
     });
 
-    it("should use 4.5:1 for AAA large text", async function() {
+    it("should use 4.5:1 for AAA large text", async function () {
       const screenshotPath = path.join(fixturesDir, "black-on-white.png");
       const element: Element = {
         bounds: { left: 0, top: 0, right: 100, bottom: 30 }, // Large size (>= 24px)
@@ -206,7 +214,7 @@ describe("ContrastChecker", function() {
       expect(result!.requiredRatio).toEqual(4.5);
     });
 
-    it("should correctly evaluate AAA compliance for high contrast", async function() {
+    it("should correctly evaluate AAA compliance for high contrast", async function () {
       const screenshotPath = path.join(fixturesDir, "wcag-aaa-normal.png");
       // Use full image bounds to get proper edge sampling from background
       const element: Element = {
@@ -222,7 +230,7 @@ describe("ContrastChecker", function() {
       expect(result!.meetsAA).toBe(true); // Should also meet AAA
     });
 
-    it("should correctly evaluate AAA compliance for borderline contrast", async function() {
+    it("should correctly evaluate AAA compliance for borderline contrast", async function () {
       const screenshotPath = path.join(fixturesDir, "wcag-aa-large-text.png");
       // Use full image bounds - height 50 makes it "large text"
       // Large text requires 4.5:1 for AAA, but this image only has 3.0:1
@@ -240,8 +248,8 @@ describe("ContrastChecker", function() {
     });
   });
 
-  describe("Edge Cases", function() {
-    it("should handle white on black (inverted contrast)", async function() {
+  describe("Edge Cases", function () {
+    it("should handle white on black (inverted contrast)", async function () {
       const screenshotPath = path.join(fixturesDir, "white-on-black.png");
       const element: Element = {
         bounds: { left: 0, top: 0, right: 100, bottom: 50 },
@@ -256,7 +264,7 @@ describe("ContrastChecker", function() {
       expect(result!.meetsAAA).toBe(true);
     });
 
-    it("should return null for invalid screenshot path", async function() {
+    it("should return null for invalid screenshot path", async function () {
       const element: Element = {
         bounds: { left: 0, top: 0, right: 100, bottom: 50 },
         text: "Text",
@@ -267,7 +275,7 @@ describe("ContrastChecker", function() {
       expect(result).toBeNull();
     });
 
-    it("should handle elements at image boundaries", async function() {
+    it("should handle elements at image boundaries", async function () {
       const screenshotPath = path.join(fixturesDir, "black-on-white.png");
 
       // Element right at the edge of a 100x50 image
@@ -285,7 +293,7 @@ describe("ContrastChecker", function() {
       expect(result!.ratio).toBeGreaterThanOrEqual(1);
     });
 
-    it("should handle elements larger than screenshot", async function() {
+    it("should handle elements larger than screenshot", async function () {
       const screenshotPath = path.join(fixturesDir, "small-element.png");
 
       // Element bounds larger than the image: pixel sampling edge-clamps rather
@@ -303,8 +311,8 @@ describe("ContrastChecker", function() {
     });
   });
 
-  describe("Color Sampling", function() {
-    it("should sample text color from center region", async function() {
+  describe("Color Sampling", function () {
+    it("should sample text color from center region", async function () {
       const screenshotPath = path.join(fixturesDir, "black-on-white.png");
       // Use full image bounds - center will have text color (black from 5-95)
       const element: Element = {
@@ -321,7 +329,7 @@ describe("ContrastChecker", function() {
       expect(result!.textColor.b).toBeLessThan(50);
     });
 
-    it("should sample background color from edges", async function() {
+    it("should sample background color from edges", async function () {
       const screenshotPath = path.join(fixturesDir, "black-on-white.png");
       // Use full image bounds so edges are actually the background
       const element: Element = {
@@ -339,8 +347,8 @@ describe("ContrastChecker", function() {
     });
   });
 
-  describe("Enhanced Sampling", function() {
-    it("should report worst-case contrast on gradients", async function() {
+  describe("Enhanced Sampling", function () {
+    it("should report worst-case contrast on gradients", async function () {
       const screenshotPath = path.join(fixturesDir, "gradient-contrast-fail.png");
       const element: Element = {
         bounds: { left: 0, top: 0, right: 120, bottom: 60 },
@@ -355,7 +363,7 @@ describe("ContrastChecker", function() {
       expect(result!.gradient?.isGradient).toBe(true);
     });
 
-    it("should composite semi-transparent overlays when enabled", async function() {
+    it("should composite semi-transparent overlays when enabled", async function () {
       const overlayChecker = new ContrastChecker({ compositeOverlays: true });
       const screenshotPath = path.join(fixturesDir, "overlay-scrim.png");
       const element: Element = {
@@ -370,7 +378,7 @@ describe("ContrastChecker", function() {
       expect(result!.backgroundColor.r).toBeLessThan(200);
     });
 
-    it("should fall back to overlay color when no opaque pixels exist", async function() {
+    it("should fall back to overlay color when no opaque pixels exist", async function () {
       const overlayChecker = new ContrastChecker({ compositeOverlays: true });
       const screenshotPath = path.join(fixturesDir, "overlay-fullscreen.png");
       const element: Element = {
@@ -384,7 +392,7 @@ describe("ContrastChecker", function() {
       expect(result!.backgroundColor.r).toBeGreaterThan(150);
     });
 
-    it("should adjust contrast requirements when text shadow is detected", async function() {
+    it("should adjust contrast requirements when text shadow is detected", async function () {
       const shadowChecker = new ContrastChecker({ detectTextShadows: true });
       const screenshotPath = path.join(fixturesDir, "shadowed-text.png");
       const element: Element = {
@@ -400,13 +408,14 @@ describe("ContrastChecker", function() {
     });
   });
 
-  describe("Backend seam", function() {
-    it("decodes screenshots through the injected ImageBackend.rawPixels", async function() {
+  describe("Backend seam", function () {
+    it("decodes screenshots through the injected ImageBackend.rawPixels", async function () {
       const backend = new FakeImageBackend();
       backend.setRawPixelsResult(uniformRaw(100, 50, 255, 255, 255));
       const screenshotBytes = Buffer.from("synthetic screenshot");
       const seamChecker = new ContrastChecker({}, undefined, backend, {
-        readFile: async path => path === syntheticScreenshotPath ? screenshotBytes : Buffer.from("unexpected"),
+        readFile: async (path) =>
+          path === syntheticScreenshotPath ? screenshotBytes : Buffer.from("unexpected"),
       });
       const element: Element = {
         bounds: { left: 0, top: 0, right: 100, bottom: 50 },
@@ -421,7 +430,7 @@ describe("ContrastChecker", function() {
       expect(backend.rawPixelsCalls[0]).toBe(screenshotBytes);
     });
 
-    it("tolerates element bounds beyond the image via edge clamping", async function() {
+    it("tolerates element bounds beyond the image via edge clamping", async function () {
       const backend = new FakeImageBackend();
       backend.setRawPixelsResult(uniformRaw(20, 20, 0, 0, 0));
       const seamChecker = new ContrastChecker({}, undefined, backend, {
@@ -440,7 +449,7 @@ describe("ContrastChecker", function() {
     });
   });
 
-  describe("Required ratio (parameterized)", function() {
+  describe("Required ratio (parameterized)", function () {
     // getRequiredContrastRatio keys off isLargeText (height >= 24) and the level.
     // 23/24/25 straddle the large-text boundary; level "A" falls through to the
     // same ratios as AA. requiredRatio is independent of the sampled contrast,
@@ -463,26 +472,23 @@ describe("ContrastChecker", function() {
       [23, "AAA", 7.0],
       [24, "AAA", 4.5],
       [25, "AAA", 4.5],
-    ])(
-      "height %i at level %s requires %f:1",
-      async function(height, level, expected) {
-        const element: Element = {
-          bounds: { left: 0, top: 0, right: 100, bottom: height as number },
-          text: "Sample",
-        };
-        const result = await ratioChecker().checkContrast(
-          syntheticScreenshotPath,
-          element,
-          level as "A" | "AA" | "AAA"
-        );
+    ])("height %i at level %s requires %f:1", async function (height, level, expected) {
+      const element: Element = {
+        bounds: { left: 0, top: 0, right: 100, bottom: height as number },
+        text: "Sample",
+      };
+      const result = await ratioChecker().checkContrast(
+        syntheticScreenshotPath,
+        element,
+        level as "A" | "AA" | "AAA",
+      );
 
-        expect(result).not.toBeNull();
-        expect(result!.requiredRatio).toBe(expected as number);
-      }
-    );
+      expect(result).not.toBeNull();
+      expect(result!.requiredRatio).toBe(expected as number);
+    });
   });
 
-  describe("Screenshot cache (TTL + fingerprint)", function() {
+  describe("Screenshot cache (TTL + fingerprint)", function () {
     // A real fixture path is used where a STABLE fingerprint is needed:
     // getScreenshotFingerprint stats the real file, so its mtime/size are fixed
     // across a FakeTimer advance — isolating the TTL check from the fingerprint
@@ -500,7 +506,7 @@ describe("ContrastChecker", function() {
       });
     }
 
-    it("decodes once when the same screenshot is reused within the TTL", async function() {
+    it("decodes once when the same screenshot is reused within the TTL", async function () {
       const timer = new FakeTimer();
       const backend = new FakeImageBackend();
       backend.setRawPixelsResult(uniformRaw(100, 50, 255, 255, 255));
@@ -513,7 +519,7 @@ describe("ContrastChecker", function() {
       expect(backend.rawPixelsCalls).toHaveLength(1);
     });
 
-    it("re-decodes a screenshot whose cache entry has aged past the TTL", async function() {
+    it("re-decodes a screenshot whose cache entry has aged past the TTL", async function () {
       const timer = new FakeTimer();
       const backend = new FakeImageBackend();
       backend.setRawPixelsResult(uniformRaw(100, 50, 255, 255, 255));
@@ -528,7 +534,7 @@ describe("ContrastChecker", function() {
       expect(backend.rawPixelsCalls).toHaveLength(2);
     });
 
-    it("re-decodes when the screenshot fingerprint changes within the TTL", async function() {
+    it("re-decodes when the screenshot fingerprint changes within the TTL", async function () {
       const timer = new FakeTimer();
       const backend = new FakeImageBackend();
       backend.setRawPixelsResult(uniformRaw(100, 50, 255, 255, 255));

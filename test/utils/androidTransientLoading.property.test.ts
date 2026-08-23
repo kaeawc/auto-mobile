@@ -27,14 +27,18 @@ const rawNodeAtDepth = (depth: number): fc.Arbitrary<RawNode> =>
   fc.record({
     loading: fc.boolean(),
     kind: fc.constantFrom<"rid" | "class">("rid", "class"),
-    children: depth <= 0 ? fc.constant([] as RawNode[]) : fc.array(rawNodeAtDepth(depth - 1), { maxLength: 3 })
+    children:
+      depth <= 0
+        ? fc.constant([] as RawNode[])
+        : fc.array(rawNodeAtDepth(depth - 1), { maxLength: 3 }),
   });
 const forest = fc.array(rawNodeAtDepth(3), { maxLength: 4 });
 
-const anyLoading = (nodes: RawNode[]): boolean => nodes.some(n => n.loading || anyLoading(n.children));
+const anyLoading = (nodes: RawNode[]): boolean =>
+  nodes.some((n) => n.loading || anyLoading(n.children));
 
 const toHier = (raw: RawNode): HierNode => {
-  const props: Record<string, string> = { "resource-id": BENIGN_RID, "class": BENIGN_CLASS };
+  const props: Record<string, string> = { "resource-id": BENIGN_RID, class: BENIGN_CLASS };
   if (raw.loading) {
     if (raw.kind === "rid") {
       props["resource-id"] = LOADING_RID;
@@ -62,41 +66,45 @@ const detect = (roots: RawNode[]): boolean => {
 describe("androidViewHierarchyIndicatesLikelyBlockingLoading (property-based)", () => {
   test("is total — a boolean for any forest, never throwing", () => {
     fc.assert(
-      fc.property(forest, roots => typeof detect(roots) === "boolean"),
-      RUN_OPTIONS
+      fc.property(forest, (roots) => typeof detect(roots) === "boolean"),
+      RUN_OPTIONS,
     );
   });
 
   test("is true iff a loading node exists anywhere in the tree (membership)", () => {
     fc.assert(
-      fc.property(forest, roots => detect(roots) === anyLoading(roots)),
-      RUN_OPTIONS
+      fc.property(forest, (roots) => detect(roots) === anyLoading(roots)),
+      RUN_OPTIONS,
     );
   });
 
   test("a forest with no loading node is never flagged", () => {
     const benignForest = fc.array(
-      fc.record({ loading: fc.constant(false), kind: fc.constant<"rid">("rid"), children: fc.constant([] as RawNode[]) }),
-      { maxLength: 6 }
+      fc.record({
+        loading: fc.constant(false),
+        kind: fc.constant<"rid">("rid"),
+        children: fc.constant([] as RawNode[]),
+      }),
+      { maxLength: 6 },
     );
     fc.assert(
-      fc.property(benignForest, roots => detect(roots) === false),
-      RUN_OPTIONS
+      fc.property(benignForest, (roots) => detect(roots) === false),
+      RUN_OPTIONS,
     );
   });
 
   test("appending a loading root always flags the tree (monotonic)", () => {
     const loadingRoot: RawNode = { loading: true, kind: "rid", children: [] };
     fc.assert(
-      fc.property(forest, roots => detect([...roots, loadingRoot])),
-      RUN_OPTIONS
+      fc.property(forest, (roots) => detect([...roots, loadingRoot])),
+      RUN_OPTIONS,
     );
   });
 
   test("an empty hierarchy is never flagged", () => {
     fc.assert(
-      fc.property(fc.constant([] as RawNode[]), roots => detect(roots) === false),
-      RUN_OPTIONS
+      fc.property(fc.constant([] as RawNode[]), (roots) => detect(roots) === false),
+      RUN_OPTIONS,
     );
   });
 });

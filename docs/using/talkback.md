@@ -47,13 +47,13 @@ If a selector targets `text: "Settings"` expecting to match the `TextView` direc
 
 AutoMobile reads the active accessibility services from ADB secure settings when a device session starts and caches the result (refreshed every 60 seconds). When TalkBack is detected, the following adaptations apply transparently:
 
-| Tool | Standard behavior | TalkBack behavior |
-|------|------------------|-------------------|
-| `tapOn` | Coordinate-based tap | `ACTION_CLICK` on the target element; semantic links activate their matching native span |
-| `swipeOn` / scroll | Single-finger swipe | `ACTION_SCROLL_FORWARD`/`BACKWARD` or two-finger swipe |
-| `inputText` / `clearText` | `ACTION_SET_TEXT` | `ACTION_SET_TEXT` (unchanged) |
-| `pressButton` | Device/navigation button | Device/navigation button (unchanged; see note below) |
-| `launchApp`, `terminateApp`, `installApp` | Standard | Unchanged |
+| Tool                                      | Standard behavior        | TalkBack behavior                                                                        |
+| ----------------------------------------- | ------------------------ | ---------------------------------------------------------------------------------------- |
+| `tapOn`                                   | Coordinate-based tap     | `ACTION_CLICK` on the target element; semantic links activate their matching native span |
+| `swipeOn` / scroll                        | Single-finger swipe      | `ACTION_SCROLL_FORWARD`/`BACKWARD` or two-finger swipe                                   |
+| `inputText` / `clearText`                 | `ACTION_SET_TEXT`        | `ACTION_SET_TEXT` (unchanged)                                                            |
+| `pressButton`                             | Device/navigation button | Device/navigation button (unchanged; see note below)                                     |
+| `launchApp`, `terminateApp`, `installApp` | Standard                 | Unchanged                                                                                |
 
 Existing automation scripts work without modification. Semantic link targeting is available on Android API 26+ and iOS when the native accessibility tree exposes a link. Flattened text, stale owners, unsupported runners, or ambiguous targets fail explicitly; no coordinate fallback is attempted.
 

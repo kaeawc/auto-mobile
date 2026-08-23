@@ -137,7 +137,7 @@ export interface DeviceService {
     y: number,
     duration?: number,
     timeoutMs?: number,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<GestureResult>;
 
   /**
@@ -157,7 +157,7 @@ export interface DeviceService {
     y2: number,
     duration?: number,
     timeoutMs?: number,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<GestureResult>;
 
   /**
@@ -179,7 +179,7 @@ export interface DeviceService {
     pressDurationMs: number,
     dragDurationMs: number,
     holdDurationMs: number,
-    timeoutMs: number
+    timeoutMs: number,
   ): Promise<GestureResult>;
 
   /**
@@ -201,7 +201,7 @@ export interface DeviceService {
     rotationDegrees?: number,
     duration?: number,
     timeoutMs?: number,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<GestureResult>;
 
   // ---------------------------------------------------------------------------
@@ -213,10 +213,7 @@ export interface DeviceService {
    * @param text Text to input
    * @param options Optional targeting, timeout, performance, and keyboard options
    */
-  requestSetText(
-    text: string,
-    options?: SetTextOptions
-  ): Promise<TextResult>;
+  requestSetText(text: string, options?: SetTextOptions): Promise<TextResult>;
 
   /**
    * Clear text from the focused input field.
@@ -227,7 +224,7 @@ export interface DeviceService {
   requestClearText(
     resourceId?: string,
     timeoutMs?: number,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<TextResult>;
 
   /**
@@ -239,7 +236,7 @@ export interface DeviceService {
   requestImeAction(
     action: string,
     timeoutMs?: number,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<ImeActionResult>;
 
   // ---------------------------------------------------------------------------
@@ -251,10 +248,7 @@ export interface DeviceService {
    * @param timeoutMs Operation timeout in milliseconds
    * @param perf Optional performance tracker
    */
-  requestScreenshot(
-    timeoutMs?: number,
-    perf?: PerformanceTracker
-  ): Promise<ScreenshotResult>;
+  requestScreenshot(timeoutMs?: number, perf?: PerformanceTracker): Promise<ScreenshotResult>;
 }
 
 // =============================================================================
@@ -271,11 +265,7 @@ export interface AndroidDeviceService extends DeviceService {
    * @param text Text to copy (required for "copy" action)
    * @param timeoutMs Operation timeout in milliseconds
    */
-  requestClipboard(
-    action: string,
-    text?: string,
-    timeoutMs?: number
-  ): Promise<ClipboardResult>;
+  requestClipboard(action: string, text?: string, timeoutMs?: number): Promise<ClipboardResult>;
 
   /**
    * Select all text in the focused input field.
@@ -289,11 +279,7 @@ export interface AndroidDeviceService extends DeviceService {
    * @param resourceId Optional element identifier
    * @param timeoutMs Operation timeout in milliseconds
    */
-  requestAction(
-    action: string,
-    resourceId?: string,
-    timeoutMs?: number
-  ): Promise<ActionResult>;
+  requestAction(action: string, resourceId?: string, timeoutMs?: number): Promise<ActionResult>;
 
   /**
    * Get current accessibility focus information.

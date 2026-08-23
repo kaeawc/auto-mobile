@@ -14,7 +14,7 @@ import {
   OBSERVE_MCP_TIMEOUT_ENV_VAR,
   OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
   START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
-  resolveMcpRequestTimeoutMs
+  resolveMcpRequestTimeoutMs,
 } from "../../src/daemon/mcpRequestTimeout";
 import type { DaemonRequest } from "../../src/daemon/types";
 import {
@@ -31,7 +31,7 @@ describe("resolveMcpRequestTimeoutMs", () => {
     OBSERVE_MCP_TIMEOUT_ENV_VAR,
     LEGACY_OBSERVE_MCP_TIMEOUT_ENV_VAR,
   ];
-  const originalEnv = new Map(timeoutEnvVars.map(name => [name, process.env[name]]));
+  const originalEnv = new Map(timeoutEnvVars.map((name) => [name, process.env[name]]));
 
   beforeEach(() => {
     for (const name of timeoutEnvVars) {
@@ -68,69 +68,265 @@ describe("resolveMcpRequestTimeoutMs", () => {
 
   const cases: TimeoutCase[] = [
     // --- Tool floors applied when the client omits timeoutMs (base -> DEFAULT) ---
-    { name: "tool without a floor -> default", tool: "tapOn", expected: DEFAULT_MCP_REQUEST_TIMEOUT_MS },
-    { name: "executePlan floor when timeoutMs omitted", tool: "executePlan", expected: MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS },
-    { name: "startDevice floor when timeoutMs omitted", tool: "startDevice", expected: MIN_START_DEVICE_MCP_TIMEOUT_MS },
-    { name: "provisionDevice floor when timeoutMs omitted", tool: "provisionDevice", expected: MIN_PROVISION_DEVICE_MCP_TIMEOUT_MS },
-    { name: "deleteDevice floor when timeoutMs omitted", tool: "deleteDevice", expected: MIN_TEARDOWN_DEVICE_MCP_TIMEOUT_MS },
-    { name: "launchApp floor when timeoutMs omitted", tool: "launchApp", expected: MIN_LAUNCH_APP_MCP_TIMEOUT_MS },
-    { name: "uninstallApp floor when timeoutMs omitted", tool: "uninstallApp", expected: MIN_UNINSTALL_APP_MCP_TIMEOUT_MS },
-    { name: "observe default floor when timeoutMs omitted", tool: "observe", expected: DEFAULT_OBSERVE_MCP_TIMEOUT_MS },
-    { name: "openLink default floor when timeoutMs omitted", tool: "openLink", expected: DEFAULT_OPEN_LINK_MCP_TIMEOUT_MS },
+    {
+      name: "tool without a floor -> default",
+      tool: "tapOn",
+      expected: DEFAULT_MCP_REQUEST_TIMEOUT_MS,
+    },
+    {
+      name: "executePlan floor when timeoutMs omitted",
+      tool: "executePlan",
+      expected: MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS,
+    },
+    {
+      name: "startDevice floor when timeoutMs omitted",
+      tool: "startDevice",
+      expected: MIN_START_DEVICE_MCP_TIMEOUT_MS,
+    },
+    {
+      name: "provisionDevice floor when timeoutMs omitted",
+      tool: "provisionDevice",
+      expected: MIN_PROVISION_DEVICE_MCP_TIMEOUT_MS,
+    },
+    {
+      name: "deleteDevice floor when timeoutMs omitted",
+      tool: "deleteDevice",
+      expected: MIN_TEARDOWN_DEVICE_MCP_TIMEOUT_MS,
+    },
+    {
+      name: "launchApp floor when timeoutMs omitted",
+      tool: "launchApp",
+      expected: MIN_LAUNCH_APP_MCP_TIMEOUT_MS,
+    },
+    {
+      name: "uninstallApp floor when timeoutMs omitted",
+      tool: "uninstallApp",
+      expected: MIN_UNINSTALL_APP_MCP_TIMEOUT_MS,
+    },
+    {
+      name: "observe default floor when timeoutMs omitted",
+      tool: "observe",
+      expected: DEFAULT_OBSERVE_MCP_TIMEOUT_MS,
+    },
+    {
+      name: "openLink default floor when timeoutMs omitted",
+      tool: "openLink",
+      expected: DEFAULT_OPEN_LINK_MCP_TIMEOUT_MS,
+    },
 
     // --- Short timeouts are raised to the floor (base < floor) ---
-    { name: "raises short executePlan to floor", tool: "executePlan", timeoutMs: 180_000, expected: MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS },
-    { name: "raises short startDevice to floor", tool: "startDevice", timeoutMs: 60_000, expected: MIN_START_DEVICE_MCP_TIMEOUT_MS },
-    { name: "raises short provisionDevice to floor", tool: "provisionDevice", timeoutMs: 60_000, expected: MIN_PROVISION_DEVICE_MCP_TIMEOUT_MS },
-    { name: "raises short deleteDevice to floor", tool: "deleteDevice", timeoutMs: 30_000, expected: MIN_TEARDOWN_DEVICE_MCP_TIMEOUT_MS },
-    { name: "raises short launchApp to floor", tool: "launchApp", timeoutMs: 10_000, expected: MIN_LAUNCH_APP_MCP_TIMEOUT_MS },
-    { name: "raises short uninstallApp to floor", tool: "uninstallApp", timeoutMs: 30_000, expected: MIN_UNINSTALL_APP_MCP_TIMEOUT_MS },
-    { name: "raises short observe to floor", tool: "observe", timeoutMs: 30_000, expected: DEFAULT_OBSERVE_MCP_TIMEOUT_MS },
-    { name: "raises short openLink to floor", tool: "openLink", timeoutMs: 10_000, expected: DEFAULT_OPEN_LINK_MCP_TIMEOUT_MS },
+    {
+      name: "raises short executePlan to floor",
+      tool: "executePlan",
+      timeoutMs: 180_000,
+      expected: MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS,
+    },
+    {
+      name: "raises short startDevice to floor",
+      tool: "startDevice",
+      timeoutMs: 60_000,
+      expected: MIN_START_DEVICE_MCP_TIMEOUT_MS,
+    },
+    {
+      name: "raises short provisionDevice to floor",
+      tool: "provisionDevice",
+      timeoutMs: 60_000,
+      expected: MIN_PROVISION_DEVICE_MCP_TIMEOUT_MS,
+    },
+    {
+      name: "raises short deleteDevice to floor",
+      tool: "deleteDevice",
+      timeoutMs: 30_000,
+      expected: MIN_TEARDOWN_DEVICE_MCP_TIMEOUT_MS,
+    },
+    {
+      name: "raises short launchApp to floor",
+      tool: "launchApp",
+      timeoutMs: 10_000,
+      expected: MIN_LAUNCH_APP_MCP_TIMEOUT_MS,
+    },
+    {
+      name: "raises short uninstallApp to floor",
+      tool: "uninstallApp",
+      timeoutMs: 30_000,
+      expected: MIN_UNINSTALL_APP_MCP_TIMEOUT_MS,
+    },
+    {
+      name: "raises short observe to floor",
+      tool: "observe",
+      timeoutMs: 30_000,
+      expected: DEFAULT_OBSERVE_MCP_TIMEOUT_MS,
+    },
+    {
+      name: "raises short openLink to floor",
+      tool: "openLink",
+      timeoutMs: 10_000,
+      expected: DEFAULT_OPEN_LINK_MCP_TIMEOUT_MS,
+    },
 
     // --- Timeouts above the floor are preserved (base > floor) ---
-    { name: "preserves executePlan above floor", tool: "executePlan", timeoutMs: 900_000, expected: 900_000 },
-    { name: "preserves startDevice above floor", tool: "startDevice", timeoutMs: 300_000, expected: 300_000 },
+    {
+      name: "preserves executePlan above floor",
+      tool: "executePlan",
+      timeoutMs: 900_000,
+      expected: 900_000,
+    },
+    {
+      name: "preserves startDevice above floor",
+      tool: "startDevice",
+      timeoutMs: 300_000,
+      expected: 300_000,
+    },
     {
       name: "preserves provisionDevice outer request timeout above the floor",
       tool: "provisionDevice",
       timeoutMs: 600_000,
       expected: 600_000,
     },
-    { name: "preserves deleteDevice above floor", tool: "deleteDevice", timeoutMs: 120_000, expected: 120_000 },
-    { name: "preserves launchApp above floor", tool: "launchApp", timeoutMs: 150_000, expected: 150_000 },
-    { name: "preserves uninstallApp above floor", tool: "uninstallApp", timeoutMs: 90_000, expected: 90_000 },
-    { name: "preserves observe above floor", tool: "observe", timeoutMs: 150_000, expected: 150_000 },
+    {
+      name: "preserves deleteDevice above floor",
+      tool: "deleteDevice",
+      timeoutMs: 120_000,
+      expected: 120_000,
+    },
+    {
+      name: "preserves launchApp above floor",
+      tool: "launchApp",
+      timeoutMs: 150_000,
+      expected: 150_000,
+    },
+    {
+      name: "preserves uninstallApp above floor",
+      tool: "uninstallApp",
+      timeoutMs: 90_000,
+      expected: 90_000,
+    },
+    {
+      name: "preserves observe above floor",
+      tool: "observe",
+      timeoutMs: 150_000,
+      expected: 150_000,
+    },
 
     // --- Boundary: base exactly equal to the floor stays put (Math.max is idempotent) ---
-    { name: "executePlan exactly at floor stays", tool: "executePlan", timeoutMs: MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS, expected: MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS },
-    { name: "launchApp exactly at floor stays", tool: "launchApp", timeoutMs: MIN_LAUNCH_APP_MCP_TIMEOUT_MS, expected: MIN_LAUNCH_APP_MCP_TIMEOUT_MS },
+    {
+      name: "executePlan exactly at floor stays",
+      tool: "executePlan",
+      timeoutMs: MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS,
+      expected: MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS,
+    },
+    {
+      name: "launchApp exactly at floor stays",
+      tool: "launchApp",
+      timeoutMs: MIN_LAUNCH_APP_MCP_TIMEOUT_MS,
+      expected: MIN_LAUNCH_APP_MCP_TIMEOUT_MS,
+    },
 
     // --- Degenerate base values collapse to DEFAULT (not finite / not > 0) ---
-    { name: "NaN base -> default (no floor)", tool: "tapOn", timeoutMs: NaN, expected: DEFAULT_MCP_REQUEST_TIMEOUT_MS },
-    { name: "Infinity base -> default (no floor)", tool: "tapOn", timeoutMs: Infinity, expected: DEFAULT_MCP_REQUEST_TIMEOUT_MS },
+    {
+      name: "NaN base -> default (no floor)",
+      tool: "tapOn",
+      timeoutMs: NaN,
+      expected: DEFAULT_MCP_REQUEST_TIMEOUT_MS,
+    },
+    {
+      name: "Infinity base -> default (no floor)",
+      tool: "tapOn",
+      timeoutMs: Infinity,
+      expected: DEFAULT_MCP_REQUEST_TIMEOUT_MS,
+    },
     // Infinity is not finite, so base collapses to DEFAULT and is then floored by the tool.
-    { name: "Infinity base -> default then floored", tool: "executePlan", timeoutMs: Infinity, expected: MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS },
-    { name: "negative base -> default (no floor)", tool: "tapOn", timeoutMs: -1, expected: DEFAULT_MCP_REQUEST_TIMEOUT_MS },
-    { name: "zero base -> default (no floor)", tool: "tapOn", timeoutMs: 0, expected: DEFAULT_MCP_REQUEST_TIMEOUT_MS },
+    {
+      name: "Infinity base -> default then floored",
+      tool: "executePlan",
+      timeoutMs: Infinity,
+      expected: MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS,
+    },
+    {
+      name: "negative base -> default (no floor)",
+      tool: "tapOn",
+      timeoutMs: -1,
+      expected: DEFAULT_MCP_REQUEST_TIMEOUT_MS,
+    },
+    {
+      name: "zero base -> default (no floor)",
+      tool: "tapOn",
+      timeoutMs: 0,
+      expected: DEFAULT_MCP_REQUEST_TIMEOUT_MS,
+    },
 
     // --- A tiny positive base is honoured for a non-floored tool, floored otherwise ---
     { name: "1ms honoured for a non-floored tool", tool: "tapOn", timeoutMs: 1, expected: 1 },
-    { name: "1ms floored for a floored tool", tool: "executePlan", timeoutMs: 1, expected: MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS },
+    {
+      name: "1ms floored for a floored tool",
+      tool: "executePlan",
+      timeoutMs: 1,
+      expected: MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS,
+    },
 
     // --- The floor is gated on method === "tools/call": a non-"tools/call" method
     //     with a floored tool name in params.name must NOT get the floor. ---
-    { name: "non-tools/call + startDevice name -> no floor, default", method: "daemon/availableDevices", tool: "startDevice", expected: DEFAULT_MCP_REQUEST_TIMEOUT_MS },
-    { name: "non-tools/call + executePlan name -> raw honoured, no floor", method: "resources/read", tool: "executePlan", timeoutMs: 1, expected: 1 },
-    { name: "non-tools/call + startDevice name -> raw above floor untouched", method: "tools/list", tool: "startDevice", timeoutMs: 5_000, expected: 5_000 },
+    {
+      name: "non-tools/call + startDevice name -> no floor, default",
+      method: "daemon/availableDevices",
+      tool: "startDevice",
+      expected: DEFAULT_MCP_REQUEST_TIMEOUT_MS,
+    },
+    {
+      name: "non-tools/call + executePlan name -> raw honoured, no floor",
+      method: "resources/read",
+      tool: "executePlan",
+      timeoutMs: 1,
+      expected: 1,
+    },
+    {
+      name: "non-tools/call + startDevice name -> raw above floor untouched",
+      method: "tools/list",
+      tool: "startDevice",
+      timeoutMs: 5_000,
+      expected: 5_000,
+    },
 
     // --- Environment-configured floors for observe/openLink ---
-    { name: "observe env floor when timeoutMs omitted", tool: "observe", env: { [OBSERVE_MCP_TIMEOUT_ENV_VAR]: "150000" }, expected: 150_000 },
-    { name: "openLink env floor when timeoutMs omitted", tool: "openLink", env: { [OPEN_LINK_MCP_TIMEOUT_ENV_VAR]: "90000" }, expected: 90_000 },
-    { name: "openLink legacy env floor when timeoutMs omitted", tool: "openLink", env: { [LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR]: "45000" }, expected: 45_000 },
-    { name: "raises short openLink to env floor", tool: "openLink", env: { [OPEN_LINK_MCP_TIMEOUT_ENV_VAR]: "90000" }, timeoutMs: 30_000, expected: 90_000 },
-    { name: "preserves openLink above env floor", tool: "openLink", env: { [OPEN_LINK_MCP_TIMEOUT_ENV_VAR]: "90000" }, timeoutMs: 120_000, expected: 120_000 },
-    { name: "invalid openLink env falls back to default floor", tool: "openLink", env: { [OPEN_LINK_MCP_TIMEOUT_ENV_VAR]: "not-a-number" }, timeoutMs: 10_000, expected: DEFAULT_OPEN_LINK_MCP_TIMEOUT_MS },
+    {
+      name: "observe env floor when timeoutMs omitted",
+      tool: "observe",
+      env: { [OBSERVE_MCP_TIMEOUT_ENV_VAR]: "150000" },
+      expected: 150_000,
+    },
+    {
+      name: "openLink env floor when timeoutMs omitted",
+      tool: "openLink",
+      env: { [OPEN_LINK_MCP_TIMEOUT_ENV_VAR]: "90000" },
+      expected: 90_000,
+    },
+    {
+      name: "openLink legacy env floor when timeoutMs omitted",
+      tool: "openLink",
+      env: { [LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR]: "45000" },
+      expected: 45_000,
+    },
+    {
+      name: "raises short openLink to env floor",
+      tool: "openLink",
+      env: { [OPEN_LINK_MCP_TIMEOUT_ENV_VAR]: "90000" },
+      timeoutMs: 30_000,
+      expected: 90_000,
+    },
+    {
+      name: "preserves openLink above env floor",
+      tool: "openLink",
+      env: { [OPEN_LINK_MCP_TIMEOUT_ENV_VAR]: "90000" },
+      timeoutMs: 120_000,
+      expected: 120_000,
+    },
+    {
+      name: "invalid openLink env falls back to default floor",
+      tool: "openLink",
+      env: { [OPEN_LINK_MCP_TIMEOUT_ENV_VAR]: "not-a-number" },
+      timeoutMs: 10_000,
+      expected: DEFAULT_OPEN_LINK_MCP_TIMEOUT_MS,
+    },
   ];
 
   for (const testCase of cases) {
@@ -180,7 +376,6 @@ describe("resolveMcpRequestTimeoutMs", () => {
   });
 
   test("keeps transport alive for getAndroid's named preparation budgets", () => {
-
     const request: DaemonRequest = {
       id: "1",
       type: "mcp_request",
@@ -281,9 +476,7 @@ describe("resolveMcpRequestTimeoutMs", () => {
     };
 
     const resolved = resolveMcpRequestTimeoutMs(request);
-    expect(resolved).toBe(
-      MAX_DEVICE_READY_TIMEOUT_MS + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
-    );
+    expect(resolved).toBe(MAX_DEVICE_READY_TIMEOUT_MS + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS);
     expect(resolved).toBeLessThan(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
   });
   test("keeps transport alive for the legacy nested startDevice timeout", () => {
@@ -314,9 +507,7 @@ describe("resolveMcpRequestTimeoutMs", () => {
     };
 
     const resolved = resolveMcpRequestTimeoutMs(request);
-    expect(resolved).toBe(
-      MAX_DEVICE_READY_TIMEOUT_MS + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
-    );
+    expect(resolved).toBe(MAX_DEVICE_READY_TIMEOUT_MS + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS);
     expect(resolved).toBeLessThan(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
   });
 });

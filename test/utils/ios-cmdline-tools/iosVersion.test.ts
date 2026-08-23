@@ -105,9 +105,9 @@ describe("iosMajorVersionFromSimctlListDevices", () => {
     // `JSON.parse` accepts these; the function must still honor its null contract.
     expect(iosMajorVersionFromSimctlListDevices("null", udid)).toBeNull();
     expect(iosMajorVersionFromSimctlListDevices("42", udid)).toBeNull();
-    expect(iosMajorVersionFromSimctlListDevices("\"hi\"", udid)).toBeNull();
+    expect(iosMajorVersionFromSimctlListDevices('"hi"', udid)).toBeNull();
     expect(iosMajorVersionFromSimctlListDevices("[]", udid)).toBeNull();
-    expect(iosMajorVersionFromSimctlListDevices("{\"devices\":null}", udid)).toBeNull();
+    expect(iosMajorVersionFromSimctlListDevices('{"devices":null}', udid)).toBeNull();
   });
 
   test("returns null when the runtime id has no iOS version token", () => {

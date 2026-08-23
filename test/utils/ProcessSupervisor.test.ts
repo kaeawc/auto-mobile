@@ -9,8 +9,8 @@ const flushMicrotasks = async (count: number = 5): Promise<void> => {
   }
 };
 
-describe("DefaultProcessSupervisor", function() {
-  test("monitors liveness and restarts when the process dies", async function() {
+describe("DefaultProcessSupervisor", function () {
+  test("monitors liveness and restarts when the process dies", async function () {
     const timer = new FakeTimer();
     let alive = true;
     let exits = 0;
@@ -47,7 +47,7 @@ describe("DefaultProcessSupervisor", function() {
     expect(timer.getPendingIntervals()).toEqual([250]);
   });
 
-  test("uses the injected Backoff policy for retry progression", async function() {
+  test("uses the injected Backoff policy for retry progression", async function () {
     const timer = new FakeTimer();
     const attemptedAt: number[] = [];
     const supervisor = new DefaultProcessSupervisor({
@@ -78,7 +78,7 @@ describe("DefaultProcessSupervisor", function() {
     expect(timer.getPendingTimeouts()).toEqual([400]);
   });
 
-  test("stop clears monitor and restart timers and suppresses future restarts", async function() {
+  test("stop clears monitor and restart timers and suppresses future restarts", async function () {
     const timer = new FakeTimer();
     let restarts = 0;
     const supervisor = new DefaultProcessSupervisor({
@@ -111,7 +111,7 @@ describe("DefaultProcessSupervisor", function() {
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
-  test("waits for async exit cleanup before scheduling restart", async function() {
+  test("waits for async exit cleanup before scheduling restart", async function () {
     const timer = new FakeTimer();
     let finishExit!: () => void;
     const supervisor = new DefaultProcessSupervisor({
@@ -122,7 +122,7 @@ describe("DefaultProcessSupervisor", function() {
       restart: async () => {},
       isAlive: async () => false,
       onExit: async () => {
-        await new Promise<void>(resolve => {
+        await new Promise<void>((resolve) => {
           finishExit = resolve;
         });
       },
@@ -139,7 +139,7 @@ describe("DefaultProcessSupervisor", function() {
     expect(timer.getPendingTimeouts()).toEqual([100]);
   });
 
-  test("does not resume monitoring when stopped while restart is in flight", async function() {
+  test("does not resume monitoring when stopped while restart is in flight", async function () {
     const timer = new FakeTimer();
     let finishRestart!: () => void;
     const supervisor = new DefaultProcessSupervisor({
@@ -148,7 +148,7 @@ describe("DefaultProcessSupervisor", function() {
       monitorIntervalMs: 250,
       restartBackoff: sequenceBackoff([100]),
       restart: async () => {
-        await new Promise<void>(resolve => {
+        await new Promise<void>((resolve) => {
           finishRestart = resolve;
         });
       },
@@ -168,7 +168,7 @@ describe("DefaultProcessSupervisor", function() {
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
-  test("does not schedule another retry when auto-restart is disabled during an in-flight restart", async function() {
+  test("does not schedule another retry when auto-restart is disabled during an in-flight restart", async function () {
     const timer = new FakeTimer();
     let failRestart!: () => void;
     const supervisor = new DefaultProcessSupervisor({
@@ -177,7 +177,7 @@ describe("DefaultProcessSupervisor", function() {
       monitorIntervalMs: 250,
       restartBackoff: sequenceBackoff([100, 200]),
       restart: async () => {
-        await new Promise<void>(resolve => {
+        await new Promise<void>((resolve) => {
           failRestart = resolve;
         });
         throw new Error("restart failed");
@@ -197,7 +197,7 @@ describe("DefaultProcessSupervisor", function() {
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
-  test("stops scheduling restarts once the max-attempt cap is reached", async function() {
+  test("stops scheduling restarts once the max-attempt cap is reached", async function () {
     const timer = new FakeTimer();
     let restarts = 0;
     const supervisor = new DefaultProcessSupervisor({
@@ -230,7 +230,7 @@ describe("DefaultProcessSupervisor", function() {
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
-  test("resets the attempt counter after the cap so a later exit can restart again", async function() {
+  test("resets the attempt counter after the cap so a later exit can restart again", async function () {
     const timer = new FakeTimer();
     const supervisor = new DefaultProcessSupervisor({
       name: "test-process",
@@ -260,7 +260,7 @@ describe("DefaultProcessSupervisor", function() {
     expect(timer.getPendingTimeouts()).toEqual([100]);
   });
 
-  test("does not treat a throwing liveness probe as a process death", async function() {
+  test("does not treat a throwing liveness probe as a process death", async function () {
     const timer = new FakeTimer();
     let exits = 0;
     const supervisor = new DefaultProcessSupervisor({
@@ -287,7 +287,7 @@ describe("DefaultProcessSupervisor", function() {
     expect(timer.getPendingIntervals()).toEqual([250]);
   });
 
-  test("reports liveness through the injected liveness check", async function() {
+  test("reports liveness through the injected liveness check", async function () {
     const timer = new FakeTimer();
     let alive = true;
     const supervisor = new DefaultProcessSupervisor({
@@ -304,7 +304,7 @@ describe("DefaultProcessSupervisor", function() {
     await expect(supervisor.isAlive()).resolves.toBe(false);
   });
 
-  test("delegates every isAlive query to the injected probe", async function() {
+  test("delegates every isAlive query to the injected probe", async function () {
     const timer = new FakeTimer();
     const probeResults = [true, false, true];
     let calls = 0;

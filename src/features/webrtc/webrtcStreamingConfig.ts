@@ -134,24 +134,30 @@ export function parseIceServers(raw: string | undefined): RTCIceServer[] | undef
       throw new ActionableError(`Invalid JSON in ${WEBRTC_ENV.ICE_SERVERS}.`);
     }
     if (!Array.isArray(parsed)) {
-      throw new ActionableError(`${WEBRTC_ENV.ICE_SERVERS} JSON must be an array of { urls } objects.`);
+      throw new ActionableError(
+        `${WEBRTC_ENV.ICE_SERVERS} JSON must be an array of { urls } objects.`,
+      );
     }
     // werift's RTCIceServer takes a single `urls` string, but the standard
     // RTCIceServer allows `urls` to be a string OR an array of strings (common
     // for TURN with UDP + TLS variants). Normalize each array entry into one
     // werift server per URL, sharing username/credential.
     const servers: RTCIceServer[] = [];
-    for (const entry of parsed as Array<{ urls?: unknown; username?: string; credential?: string }>) {
+    for (const entry of parsed as Array<{
+      urls?: unknown;
+      username?: string;
+      credential?: string;
+    }>) {
       const { username, credential } = entry ?? {};
       if (typeof entry?.urls === "string") {
         servers.push({ urls: entry.urls, username, credential });
-      } else if (Array.isArray(entry?.urls) && entry.urls.every(url => typeof url === "string")) {
+      } else if (Array.isArray(entry?.urls) && entry.urls.every((url) => typeof url === "string")) {
         for (const url of entry.urls as string[]) {
           servers.push({ urls: url, username, credential });
         }
       } else {
         throw new ActionableError(
-          `${WEBRTC_ENV.ICE_SERVERS} JSON entries must have a string or string[] "urls".`
+          `${WEBRTC_ENV.ICE_SERVERS} JSON entries must have a string or string[] "urls".`,
         );
       }
     }
@@ -159,9 +165,9 @@ export function parseIceServers(raw: string | undefined): RTCIceServer[] | undef
   }
   return trimmed
     .split(",")
-    .map(url => url.trim())
-    .filter(url => url.length > 0)
-    .map(url => ({ urls: url }));
+    .map((url) => url.trim())
+    .filter((url) => url.length > 0)
+    .map((url) => ({ urls: url }));
 }
 
 /** Parse a `WIDTHxHEIGHT` string (e.g. `1280x720`). */
@@ -202,29 +208,34 @@ function parseBitrate(raw: string | undefined): number | undefined {
  */
 export function resolveWebRtcStreamingConfig(
   overrides: WebRtcStreamingOverrides = {},
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
 ): WebRtcStreamingConfig {
   const whipEndpoint = overrides.whipEndpoint ?? env[WEBRTC_ENV.WHIP_ENDPOINT];
   if (!whipEndpoint || !whipEndpoint.trim()) {
     throw new ActionableError(
-      `No WHIP endpoint configured. Set ${WEBRTC_ENV.WHIP_ENDPOINT} or pass whipEndpoint.`
+      `No WHIP endpoint configured. Set ${WEBRTC_ENV.WHIP_ENDPOINT} or pass whipEndpoint.`,
     );
   }
 
   const iceServers =
     overrides.iceServers ?? parseIceServers(env[WEBRTC_ENV.ICE_SERVERS]) ?? DEFAULT_ICE_SERVERS;
-  const bitrateKbps = overrides.bitrateKbps === undefined
-    ? parseBitrate(env[WEBRTC_ENV.BITRATE_KBPS])
-    : validateBitrate(overrides.bitrateKbps);
-  const size = overrides.size === undefined
-    ? parseSize(env[WEBRTC_ENV.MAX_SIZE])
-    : validateSize(overrides.size);
-  const iosSimulatorFps = overrides.iosSimulatorFps === undefined
-    ? parseIosSimulatorFps(env[WEBRTC_ENV.IOS_SIMULATOR_FPS]) ?? WEBRTC_IOS_SIMULATOR_FPS_DEFAULT
-    : validateIosSimulatorFps(overrides.iosSimulatorFps);
-  const androidFps = overrides.androidFps === undefined
-    ? parseAndroidFps(env[WEBRTC_ENV.ANDROID_FPS]) ?? WEBRTC_ANDROID_FPS_DEFAULT
-    : validateAndroidFps(overrides.androidFps);
+  const bitrateKbps =
+    overrides.bitrateKbps === undefined
+      ? parseBitrate(env[WEBRTC_ENV.BITRATE_KBPS])
+      : validateBitrate(overrides.bitrateKbps);
+  const size =
+    overrides.size === undefined
+      ? parseSize(env[WEBRTC_ENV.MAX_SIZE])
+      : validateSize(overrides.size);
+  const iosSimulatorFps =
+    overrides.iosSimulatorFps === undefined
+      ? (parseIosSimulatorFps(env[WEBRTC_ENV.IOS_SIMULATOR_FPS]) ??
+        WEBRTC_IOS_SIMULATOR_FPS_DEFAULT)
+      : validateIosSimulatorFps(overrides.iosSimulatorFps);
+  const androidFps =
+    overrides.androidFps === undefined
+      ? (parseAndroidFps(env[WEBRTC_ENV.ANDROID_FPS]) ?? WEBRTC_ANDROID_FPS_DEFAULT)
+      : validateAndroidFps(overrides.androidFps);
   const trickleIce = overrides.trickleIce ?? parseBooleanFlag(env[WEBRTC_ENV.TRICKLE_ICE]);
   const audioEnabled = overrides.audioEnabled ?? parseBooleanFlag(env[WEBRTC_ENV.AUDIO]);
 
@@ -255,7 +266,7 @@ function validateIosSimulatorFps(value: number, raw: string = String(value)): nu
     value > WEBRTC_IOS_SIMULATOR_FPS_MAX
   ) {
     throw new ActionableError(
-      `Invalid iOS Simulator capture fps "${raw}"; expected an integer in [${WEBRTC_IOS_SIMULATOR_FPS_MIN}, ${WEBRTC_IOS_SIMULATOR_FPS_MAX}]. Set ${WEBRTC_ENV.IOS_SIMULATOR_FPS} or pass iosSimulatorFps.`
+      `Invalid iOS Simulator capture fps "${raw}"; expected an integer in [${WEBRTC_IOS_SIMULATOR_FPS_MIN}, ${WEBRTC_IOS_SIMULATOR_FPS_MAX}]. Set ${WEBRTC_ENV.IOS_SIMULATOR_FPS} or pass iosSimulatorFps.`,
     );
   }
   return value;
@@ -275,7 +286,7 @@ function validateAndroidFps(value: number, raw: string = String(value)): number 
     value > WEBRTC_ANDROID_FPS_MAX
   ) {
     throw new ActionableError(
-      `Invalid Android capture fps "${raw}"; expected an integer in [${WEBRTC_ANDROID_FPS_MIN}, ${WEBRTC_ANDROID_FPS_MAX}]. Set ${WEBRTC_ENV.ANDROID_FPS} or pass androidFps.`
+      `Invalid Android capture fps "${raw}"; expected an integer in [${WEBRTC_ANDROID_FPS_MIN}, ${WEBRTC_ANDROID_FPS_MAX}]. Set ${WEBRTC_ENV.ANDROID_FPS} or pass androidFps.`,
     );
   }
   return value;
@@ -300,7 +311,7 @@ function validateSize(size: { width: number; height: number }): { width: number;
     h264MacroblocksPerFrame(width, height) > WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME
   ) {
     throw new ActionableError(
-      `Invalid size "${width}x${height}"; width and height must be positive even integers within the H.264 Level 4.2 frame limit.`
+      `Invalid size "${width}x${height}"; width and height must be positive even integers within the H.264 Level 4.2 frame limit.`,
     );
   }
   return { width, height };
@@ -332,10 +343,14 @@ function whipUrlOrThrow(endpoint: string): URL {
   try {
     url = new URL(trimmed);
   } catch {
-    throw new ActionableError(`Invalid WHIP endpoint "${trimmed}"; expected an absolute http(s) URL.`);
+    throw new ActionableError(
+      `Invalid WHIP endpoint "${trimmed}"; expected an absolute http(s) URL.`,
+    );
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new ActionableError(`Invalid WHIP endpoint "${trimmed}"; expected an absolute http(s) URL.`);
+    throw new ActionableError(
+      `Invalid WHIP endpoint "${trimmed}"; expected an absolute http(s) URL.`,
+    );
   }
   return url;
 }
@@ -356,7 +371,7 @@ function validateWhipEndpoint(endpoint: string, env: NodeJS.ProcessEnv = process
     throw new ActionableError(
       `Refusing plaintext WHIP endpoint "${endpoint.trim()}": http:// is only permitted for loopback ` +
         `(127.0.0.1/localhost/::1) because the bearer token and SDP would travel in cleartext. Use https://, ` +
-        `or set ${WEBRTC_ENV.ALLOW_INSECURE_WHIP}=1 to allow insecure endpoints (not recommended).`
+        `or set ${WEBRTC_ENV.ALLOW_INSECURE_WHIP}=1 to allow insecure endpoints (not recommended).`,
     );
   }
   return endpoint.trim();
@@ -368,8 +383,8 @@ function parseWhipAllowedOrigins(raw: string | undefined): string[] {
   }
   return raw
     .split(",")
-    .map(entry => entry.trim())
-    .filter(entry => entry.length > 0);
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
 }
 
 function toOrigin(candidate: string): string | undefined {
@@ -394,7 +409,7 @@ function toOrigin(candidate: string): string | undefined {
  */
 export function assertWhipOverrideAllowed(
   endpoint: string,
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
 ): void {
   if (isInsecureWhipAllowed(env)) {
     return;
@@ -424,7 +439,7 @@ export function assertWhipOverrideAllowed(
       `Refusing WHIP endpoint override "${endpoint.trim()}": its origin ${url.origin} is not allow-listed. ` +
         `Add it to ${WEBRTC_ENV.WHIP_ALLOWED_ORIGINS} (comma-separated origins), align it with the daemon's ` +
         `${WEBRTC_ENV.WHIP_ENDPOINT}, or set ${WEBRTC_ENV.ALLOW_INSECURE_WHIP}=1 to accept arbitrary ` +
-        `destinations (not recommended).`
+        `destinations (not recommended).`,
     );
   }
 }

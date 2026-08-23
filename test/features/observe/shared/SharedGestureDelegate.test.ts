@@ -14,14 +14,19 @@ function createFakeContext(overrides?: Partial<DelegateContext>): {
   let cancelCount = 0;
   const sent: string[] = [];
   const context: DelegateContext = {
-    getWebSocket: () => ({
-      send: (data: string) => { sent.push(data); },
-      readyState: 1,
-    } as any),
+    getWebSocket: () =>
+      ({
+        send: (data: string) => {
+          sent.push(data);
+        },
+        readyState: 1,
+      }) as any,
     requestManager: new RequestManager(timer),
     timer,
     ensureConnected: async () => true,
-    cancelScreenshotBackoff: () => { cancelCount++; },
+    cancelScreenshotBackoff: () => {
+      cancelCount++;
+    },
     ...overrides,
   };
   return { context, sent, cancelCalls: () => cancelCount };
@@ -32,7 +37,7 @@ async function callAndResolve<T>(
   sent: string[],
   requestManager: RequestManager,
   action: () => Promise<T>,
-  result: unknown = { success: true, totalTimeMs: 1 }
+  result: unknown = { success: true, totalTimeMs: 1 },
 ): Promise<{ result: T; sentMsg: Record<string, unknown> }> {
   const promise = action();
   // Let async ensureConnected resolve so the message gets sent
@@ -48,10 +53,13 @@ describe("SharedGestureDelegate", () => {
   describe("coordinate rounding", () => {
     it("rounds coordinates when configured", async () => {
       const { context, sent } = createFakeContext();
-      const delegate = new SharedGestureDelegate(context, { logTag: "TEST", roundCoordinates: true });
+      const delegate = new SharedGestureDelegate(context, {
+        logTag: "TEST",
+        roundCoordinates: true,
+      });
 
       const { sentMsg } = await callAndResolve(sent, context.requestManager, () =>
-        delegate.requestTapCoordinates(10.7, 20.3)
+        delegate.requestTapCoordinates(10.7, 20.3),
       );
 
       expect(sentMsg.x).toBe(11);
@@ -60,10 +68,13 @@ describe("SharedGestureDelegate", () => {
 
     it("passes exact coordinates when rounding disabled", async () => {
       const { context, sent } = createFakeContext();
-      const delegate = new SharedGestureDelegate(context, { logTag: "TEST", roundCoordinates: false });
+      const delegate = new SharedGestureDelegate(context, {
+        logTag: "TEST",
+        roundCoordinates: false,
+      });
 
       const { sentMsg } = await callAndResolve(sent, context.requestManager, () =>
-        delegate.requestTapCoordinates(10.7, 20.3)
+        delegate.requestTapCoordinates(10.7, 20.3),
       );
 
       expect(sentMsg.x).toBe(10.7);
@@ -72,10 +83,13 @@ describe("SharedGestureDelegate", () => {
 
     it("rounds swipe coordinates", async () => {
       const { context, sent } = createFakeContext();
-      const delegate = new SharedGestureDelegate(context, { logTag: "TEST", roundCoordinates: true });
+      const delegate = new SharedGestureDelegate(context, {
+        logTag: "TEST",
+        roundCoordinates: true,
+      });
 
       const { sentMsg } = await callAndResolve(sent, context.requestManager, () =>
-        delegate.requestSwipe(1.1, 2.2, 3.7, 4.9)
+        delegate.requestSwipe(1.1, 2.2, 3.7, 4.9),
       );
 
       expect(sentMsg.x1).toBe(1);
@@ -86,10 +100,13 @@ describe("SharedGestureDelegate", () => {
 
     it("rounds pinch coordinates", async () => {
       const { context, sent } = createFakeContext();
-      const delegate = new SharedGestureDelegate(context, { logTag: "TEST", roundCoordinates: true });
+      const delegate = new SharedGestureDelegate(context, {
+        logTag: "TEST",
+        roundCoordinates: true,
+      });
 
       const { sentMsg } = await callAndResolve(sent, context.requestManager, () =>
-        delegate.requestPinch(50.1, 50.9, 100.3, 200.7, 0)
+        delegate.requestPinch(50.1, 50.9, 100.3, 200.7, 0),
       );
 
       expect(sentMsg.centerX).toBe(50);
@@ -102,18 +119,29 @@ describe("SharedGestureDelegate", () => {
   describe("cancelScreenshotBackoff", () => {
     it("cancels on every gesture type", async () => {
       const { context, sent, cancelCalls } = createFakeContext();
-      const delegate = new SharedGestureDelegate(context, { logTag: "TEST", roundCoordinates: false });
+      const delegate = new SharedGestureDelegate(context, {
+        logTag: "TEST",
+        roundCoordinates: false,
+      });
 
-      await callAndResolve(sent, context.requestManager, () => delegate.requestTapCoordinates(10, 20));
+      await callAndResolve(sent, context.requestManager, () =>
+        delegate.requestTapCoordinates(10, 20),
+      );
       expect(cancelCalls()).toBe(1);
 
-      await callAndResolve(sent, context.requestManager, () => delegate.requestSwipe(0, 0, 100, 100));
+      await callAndResolve(sent, context.requestManager, () =>
+        delegate.requestSwipe(0, 0, 100, 100),
+      );
       expect(cancelCalls()).toBe(2);
 
-      await callAndResolve(sent, context.requestManager, () => delegate.requestDrag(0, 0, 100, 100, 200, 300, 100, 5000));
+      await callAndResolve(sent, context.requestManager, () =>
+        delegate.requestDrag(0, 0, 100, 100, 200, 300, 100, 5000),
+      );
       expect(cancelCalls()).toBe(3);
 
-      await callAndResolve(sent, context.requestManager, () => delegate.requestPinch(50, 50, 100, 200, 0));
+      await callAndResolve(sent, context.requestManager, () =>
+        delegate.requestPinch(50, 50, 100, 200, 0),
+      );
       expect(cancelCalls()).toBe(4);
     });
   });
@@ -121,10 +149,13 @@ describe("SharedGestureDelegate", () => {
   describe("message format", () => {
     it("sends correct tap message", async () => {
       const { context, sent } = createFakeContext();
-      const delegate = new SharedGestureDelegate(context, { logTag: "TEST", roundCoordinates: false });
+      const delegate = new SharedGestureDelegate(context, {
+        logTag: "TEST",
+        roundCoordinates: false,
+      });
 
       const { sentMsg } = await callAndResolve(sent, context.requestManager, () =>
-        delegate.requestTapCoordinates(10, 20, 50)
+        delegate.requestTapCoordinates(10, 20, 50),
       );
 
       expect(sentMsg.type).toBe("request_tap_coordinates");
@@ -136,10 +167,13 @@ describe("SharedGestureDelegate", () => {
 
     it("sends correct swipe message", async () => {
       const { context, sent } = createFakeContext();
-      const delegate = new SharedGestureDelegate(context, { logTag: "TEST", roundCoordinates: false });
+      const delegate = new SharedGestureDelegate(context, {
+        logTag: "TEST",
+        roundCoordinates: false,
+      });
 
       const { sentMsg } = await callAndResolve(sent, context.requestManager, () =>
-        delegate.requestSwipe(10, 20, 30, 40, 500)
+        delegate.requestSwipe(10, 20, 30, 40, 500),
       );
 
       expect(sentMsg.type).toBe("request_swipe");
@@ -152,10 +186,13 @@ describe("SharedGestureDelegate", () => {
 
     it("sends correct drag message", async () => {
       const { context, sent } = createFakeContext();
-      const delegate = new SharedGestureDelegate(context, { logTag: "TEST", roundCoordinates: false });
+      const delegate = new SharedGestureDelegate(context, {
+        logTag: "TEST",
+        roundCoordinates: false,
+      });
 
       const { sentMsg } = await callAndResolve(sent, context.requestManager, () =>
-        delegate.requestDrag(10, 20, 30, 40, 100, 200, 50, 5000)
+        delegate.requestDrag(10, 20, 30, 40, 100, 200, 50, 5000),
       );
 
       expect(sentMsg.type).toBe("request_drag");
@@ -166,10 +203,13 @@ describe("SharedGestureDelegate", () => {
 
     it("sends correct pinch message", async () => {
       const { context, sent } = createFakeContext();
-      const delegate = new SharedGestureDelegate(context, { logTag: "TEST", roundCoordinates: false });
+      const delegate = new SharedGestureDelegate(context, {
+        logTag: "TEST",
+        roundCoordinates: false,
+      });
 
       const { sentMsg } = await callAndResolve(sent, context.requestManager, () =>
-        delegate.requestPinch(50, 60, 100, 200, 45, 500)
+        delegate.requestPinch(50, 60, 100, 200, 45, 500),
       );
 
       expect(sentMsg.type).toBe("request_pinch");
@@ -185,7 +225,10 @@ describe("SharedGestureDelegate", () => {
   describe("not connected", () => {
     it("returns error for all gestures when not connected", async () => {
       const { context, sent } = createFakeContext({ ensureConnected: async () => false });
-      const delegate = new SharedGestureDelegate(context, { logTag: "TEST", roundCoordinates: false });
+      const delegate = new SharedGestureDelegate(context, {
+        logTag: "TEST",
+        roundCoordinates: false,
+      });
 
       const tap = await delegate.requestTapCoordinates(10, 20);
       expect(tap.success).toBe(false);
@@ -212,7 +255,10 @@ describe("SharedGestureDelegate", () => {
       const timer = new FakeTimer();
       const requestManager = new RequestManager(timer);
       const { context } = createFakeContext({ timer, requestManager });
-      const delegate = new SharedGestureDelegate(context, { logTag: "TEST", roundCoordinates: false });
+      const delegate = new SharedGestureDelegate(context, {
+        logTag: "TEST",
+        roundCoordinates: false,
+      });
 
       const promise = delegate.requestTapCoordinates(10, 20, 0, 100);
 

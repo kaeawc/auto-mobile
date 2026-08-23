@@ -33,14 +33,14 @@ describe("getDaemonHealthReport", () => {
 
       expect(isAvailable).toHaveBeenCalledWith(
         socketPath,
-        expect.objectContaining({ skipStaleCleanup: true })
+        expect.objectContaining({ skipStaleCleanup: true }),
       );
       expect(report.socketExists).toBe(true);
       expect(report.pidFileExists).toBe(false);
       expect(report.socketConnectable).toBe(true);
       expect(report.daemonRunning).toBe(true);
       expect(report.recommendations).toContain(
-        "Daemon socket is responsive, but PID bookkeeping is stale or missing."
+        "Daemon socket is responsive, but PID bookkeeping is stale or missing.",
       );
     } finally {
       isAvailable.mockRestore();

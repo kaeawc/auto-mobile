@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { FakeFailureRecorder } from "./FakeFailureRecorder";
-import type { RecordToolFailureInput, RecordCrashInput, RecordAnrInput } from "../../src/features/failures/FailureRecorder";
+import type {
+  RecordToolFailureInput,
+  RecordCrashInput,
+  RecordAnrInput,
+} from "../../src/features/failures/FailureRecorder";
 
 describe("FakeFailureRecorder", () => {
   let recorder: FakeFailureRecorder;
@@ -98,7 +102,9 @@ describe("FakeFailureRecorder", () => {
     it("causes next call to throw", async () => {
       recorder.setFailure(new Error("Database error"));
 
-      await expect(recorder.recordToolFailure(createToolFailureInput())).rejects.toThrow("Database error");
+      await expect(recorder.recordToolFailure(createToolFailureInput())).rejects.toThrow(
+        "Database error",
+      );
     });
 
     it("can be cleared", async () => {

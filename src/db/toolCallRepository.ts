@@ -31,9 +31,10 @@ export class ToolCallRepository {
         tool_name: record.toolName,
         timestamp: record.timestamp,
         session_uuid: record.sessionUuid ?? null,
-        duration_ms: record.durationMs === undefined || record.durationMs === null
-          ? null
-          : Math.max(0, Math.round(record.durationMs)),
+        duration_ms:
+          record.durationMs === undefined || record.durationMs === null
+            ? null
+            : Math.max(0, Math.round(record.durationMs)),
       };
 
       await db.insertInto("tool_calls").values(entry).execute();
@@ -53,7 +54,7 @@ export class ToolCallRepository {
   async listToolNamesBetween(
     startTime: string,
     endTime: string,
-    excludeTools: string[] = []
+    excludeTools: string[] = [],
   ): Promise<string[]> {
     try {
       const db = this.getDb();
@@ -73,7 +74,7 @@ export class ToolCallRepository {
       }
 
       const rows = await query.execute();
-      return rows.map(row => row.tool_name);
+      return rows.map((row) => row.tool_name);
     } catch (error) {
       logger.warn(`[ToolCallRepository] Failed to list tool calls: ${error}`);
       return [];

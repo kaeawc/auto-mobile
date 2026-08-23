@@ -18,11 +18,12 @@ const ANDROID_H264_INTEGRATION_TEST_PATH = new URL(
 function directAdbExecutionCalls(source: string): string[] {
   const ast = executionBoundaryAst(source);
   return ast.calls
-    .filter(call =>
-      (ast.isLauncher(call) || ast.isExecutionSeam(call)) &&
-      ast.strings(call.arguments[0]).includes("adb"),
+    .filter(
+      (call) =>
+        (ast.isLauncher(call) || ast.isExecutionSeam(call)) &&
+        ast.strings(call.arguments[0]).includes("adb"),
     )
-    .map(call => call.getText());
+    .map((call) => call.getText());
 }
 
 describe("createAdbIntegrationCommandRunner", () => {

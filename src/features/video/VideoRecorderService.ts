@@ -306,7 +306,7 @@ export class VideoRecorderService {
 
   private async forceStopActiveRecording(
     active: ActiveRecordingState,
-    backendForceStop: NonNullable<VideoCaptureBackend["forceStop"]>
+    backendForceStop: NonNullable<VideoCaptureBackend["forceStop"]>,
   ): Promise<void> {
     try {
       await backendForceStop.call(this.backend, active.handle);

@@ -20,23 +20,26 @@ import type { Database as DatabaseSchema } from "../../../src/db/types";
 /** Render a Date as SQLite's `YYYY-MM-DD HH:MM:SS` (UTC) — the format a
  * `datetime('now')` column default produces (no `T`, no `Z`, no milliseconds). */
 function toSqliteFormat(date: Date): string {
-  return date.toISOString().replace("T", " ").replace(/\.\d{3}Z$/, "");
+  return date
+    .toISOString()
+    .replace("T", " ")
+    .replace(/\.\d{3}Z$/, "");
 }
 
-describe("BaselineManager", function() {
+describe("BaselineManager", function () {
   let testDb: Kysely<DatabaseSchema>;
   let manager: BaselineManager;
 
-  beforeEach(async function() {
+  beforeEach(async function () {
     testDb = await createTestDatabase();
     manager = new BaselineManager(testDb);
   });
 
-  afterEach(async function() {
+  afterEach(async function () {
     await testDb.destroy();
   });
 
-  describe("CRUD Operations", function() {
+  describe("CRUD Operations", function () {
     const mockViolations: WcagViolation[] = [
       {
         type: "missing-content-description",
@@ -63,7 +66,7 @@ describe("BaselineManager", function() {
       },
     ];
 
-    it("should save baseline to database", async function() {
+    it("should save baseline to database", async function () {
       const screenId = "com.example.app.MainActivity";
 
       await manager.saveBaseline(screenId, mockViolations);
@@ -75,7 +78,7 @@ describe("BaselineManager", function() {
       expect(baseline!.violations[0].fingerprint).toBe("abc123");
     });
 
-    it("should retrieve baseline by screen ID", async function() {
+    it("should retrieve baseline by screen ID", async function () {
       const screenId = "com.example.app.SettingsActivity";
 
       await manager.saveBaseline(screenId, mockViolations);
@@ -86,7 +89,7 @@ describe("BaselineManager", function() {
       expect(baseline!.violations).toEqual(mockViolations);
     });
 
-    it("should update existing baseline", async function() {
+    it("should update existing baseline", async function () {
       const screenId = "com.example.app.MainActivity";
 
       // Save initial baseline
@@ -115,7 +118,7 @@ describe("BaselineManager", function() {
       expect(baseline!.violations[0].fingerprint).toBe("ghi789");
     });
 
-    it("should delete baseline", async function() {
+    it("should delete baseline", async function () {
       const screenId = "com.example.app.MainActivity";
 
       await manager.saveBaseline(screenId, mockViolations);
@@ -125,7 +128,7 @@ describe("BaselineManager", function() {
       expect(baseline).toBeNull();
     });
 
-    it("should list all baselines", async function() {
+    it("should list all baselines", async function () {
       await manager.saveBaseline("screen1", mockViolations.slice(0, 1));
       await manager.saveBaseline("screen2", mockViolations.slice(1, 2));
       await manager.saveBaseline("screen3", mockViolations);
@@ -133,11 +136,11 @@ describe("BaselineManager", function() {
       const baselines = await manager.listBaselines();
       expect(baselines).toHaveLength(3);
 
-      const screenIds = baselines.map(b => b.screenId);
+      const screenIds = baselines.map((b) => b.screenId);
       expect(screenIds).toEqual(expect.arrayContaining(["screen1", "screen2", "screen3"]));
     });
 
-    it("should clear all baselines", async function() {
+    it("should clear all baselines", async function () {
       await manager.saveBaseline("screen1", mockViolations);
       await manager.saveBaseline("screen2", mockViolations);
       await manager.saveBaseline("screen3", mockViolations);
@@ -149,13 +152,13 @@ describe("BaselineManager", function() {
     });
   });
 
-  describe("Filtering", function() {
-    it("should handle empty baseline", async function() {
+  describe("Filtering", function () {
+    it("should handle empty baseline", async function () {
       const baseline = await manager.getBaseline("nonexistent");
       expect(baseline).toBeNull();
     });
 
-    it("should handle baseline with empty violations array", async function() {
+    it("should handle baseline with empty violations array", async function () {
       const screenId = "com.example.app.EmptyScreen";
 
       await manager.saveBaseline(screenId, []);
@@ -166,8 +169,8 @@ describe("BaselineManager", function() {
     });
   });
 
-  describe("Cleanup", function() {
-    it("should cleanup old baselines", async function() {
+  describe("Cleanup", function () {
+    it("should cleanup old baselines", async function () {
       // Create a baseline with an old updated_at timestamp
       const now = new Date();
       const oldDate = new Date(now.getTime() - 31 * 24 * 60 * 60 * 1000); // 31 days ago
@@ -199,7 +202,7 @@ describe("BaselineManager", function() {
       expect(recentBaseline).not.toBeNull();
     });
 
-    it("should return 0 when no baselines to cleanup", async function() {
+    it("should return 0 when no baselines to cleanup", async function () {
       await manager.saveBaseline("recent_screen", []);
 
       const deletedCount = await manager.cleanupOldBaselines(30);
@@ -207,7 +210,7 @@ describe("BaselineManager", function() {
       expect(deletedCount).toBe(0);
     });
 
-    it("should not delete a SQLite-format row that is newer than the cutoff (#2937)", async function() {
+    it("should not delete a SQLite-format row that is newer than the cutoff (#2937)", async function () {
       // Regression guard for the ISO-vs-`datetime('now')` format trap. Once a
       // defaulted `updated_at` writer lands, the column can hold SQLite's
       // `YYYY-MM-DD HH:MM:SS` form. A naive string `<` against the ISO-8601 cutoff
@@ -257,8 +260,8 @@ describe("BaselineManager", function() {
     });
   });
 
-  describe("Data Integrity", function() {
-    it("should preserve violation structure in JSON serialization", async function() {
+  describe("Data Integrity", function () {
+    it("should preserve violation structure in JSON serialization", async function () {
       const screenId = "test_screen";
       const violations: WcagViolation[] = [
         {
@@ -288,7 +291,7 @@ describe("BaselineManager", function() {
       expect(baseline!.violations[0].details).toEqual(violations[0].details);
     });
 
-    it("should handle special characters in screen IDs", async function() {
+    it("should handle special characters in screen IDs", async function () {
       const screenId = "com.example/MainActivity:Fragment@123";
 
       await manager.saveBaseline(screenId, []);
@@ -298,7 +301,7 @@ describe("BaselineManager", function() {
       expect(baseline!.screenId).toBe(screenId);
     });
 
-    test("getBaseline returns null instead of throwing when a row has corrupt violations_json", async function() {
+    test("getBaseline returns null instead of throwing when a row has corrupt violations_json", async function () {
       const now = new Date().toISOString();
       await testDb
         .insertInto("accessibility_baselines")
@@ -315,7 +318,7 @@ describe("BaselineManager", function() {
       expect(baseline).toBeNull();
     });
 
-    test("listBaselines skips a corrupt row and still returns the intact ones", async function() {
+    test("listBaselines skips a corrupt row and still returns the intact ones", async function () {
       const now = new Date().toISOString();
       await manager.saveBaseline("good_screen", []);
       await testDb
@@ -329,10 +332,10 @@ describe("BaselineManager", function() {
         .execute();
 
       const baselines = await manager.listBaselines();
-      expect(baselines.map(b => b.screenId)).toEqual(["good_screen"]);
+      expect(baselines.map((b) => b.screenId)).toEqual(["good_screen"]);
     });
 
-    it("should store and retrieve updated_at timestamp", async function() {
+    it("should store and retrieve updated_at timestamp", async function () {
       const screenId = "test_screen";
       const beforeSave = new Date();
 

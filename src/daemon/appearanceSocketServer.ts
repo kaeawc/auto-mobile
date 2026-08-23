@@ -28,12 +28,15 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
   AppearanceSocketRequest,
   AppearanceSocketResponse
 > {
-  constructor(socketPath: string = getSocketPath(APPEARANCE_SOCKET_CONFIG), timer: Timer = defaultTimer) {
+  constructor(
+    socketPath: string = getSocketPath(APPEARANCE_SOCKET_CONFIG),
+    timer: Timer = defaultTimer,
+  ) {
     super(socketPath, timer, "Appearance");
   }
 
   protected async handleRequest(
-    request: AppearanceSocketRequest
+    request: AppearanceSocketRequest,
   ): Promise<AppearanceSocketResponse> {
     const command = (request.command ?? request.method) as AppearanceSocketCommand | undefined;
 
@@ -103,11 +106,12 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
 
   private async applyToTargets(
     config: Awaited<ReturnType<typeof getAppearanceConfig>>,
-    explicitMode?: string
+    explicitMode?: string,
   ): Promise<AppearanceMode | null> {
-    const mode = explicitMode && explicitMode !== "auto"
-      ? (explicitMode as AppearanceMode)
-      : await resolveAppearanceMode(config);
+    const mode =
+      explicitMode && explicitMode !== "auto"
+        ? (explicitMode as AppearanceMode)
+        : await resolveAppearanceMode(config);
 
     const targets = this.getTargets();
     if (targets.length === 0) {

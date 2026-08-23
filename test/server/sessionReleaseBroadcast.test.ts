@@ -42,7 +42,7 @@ describe("SessionReleaseBroadcaster", () => {
     const unsubscribeThrowing = SessionReleaseBroadcaster.subscribe(() => {
       throw new Error("listener boom");
     });
-    const unsubscribeHealthy = SessionReleaseBroadcaster.subscribe(sessionId => {
+    const unsubscribeHealthy = SessionReleaseBroadcaster.subscribe((sessionId) => {
       received.push(sessionId);
     });
 

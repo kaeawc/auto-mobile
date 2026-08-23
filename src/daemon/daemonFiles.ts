@@ -57,7 +57,8 @@ export const WEBRTC_STREAM_SOCKET_CONFIG: SocketServerConfig = {
 };
 
 function resolveWebRtcStreamSocketPath(env: NodeJS.ProcessEnv = process.env): string {
-  const override = env.AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH ?? env.AUTO_MOBILE_WEBRTC_STREAM_SOCKET_PATH;
+  const override =
+    env.AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH ?? env.AUTO_MOBILE_WEBRTC_STREAM_SOCKET_PATH;
   return override
     ? resolvePathFromDaemonLaunchWorkingDirectory(override)
     : path.join(os.homedir(), ".auto-mobile", "webrtc-stream.sock");
@@ -70,8 +71,11 @@ function resolveWebRtcStreamSocketPath(env: NodeJS.ProcessEnv = process.env): st
  * from it, and the exhaustive `Record` type means adding a member to
  * `AuxiliaryDaemonSocketName` without registering it here is a compile error.
  */
-export const AUXILIARY_SOCKET_CONFIGS_BY_NAME: Record<AuxiliaryDaemonSocketName, SocketServerConfig> = {
-  "appearance": APPEARANCE_SOCKET_CONFIG,
+export const AUXILIARY_SOCKET_CONFIGS_BY_NAME: Record<
+  AuxiliaryDaemonSocketName,
+  SocketServerConfig
+> = {
+  appearance: APPEARANCE_SOCKET_CONFIG,
   "device-snapshot": DEVICE_SNAPSHOT_SOCKET_CONFIG,
   "failures-push": FAILURES_PUSH_SOCKET_CONFIG,
   "failures-stream": FAILURES_STREAM_SOCKET_CONFIG,
@@ -106,7 +110,7 @@ export interface StaleDaemonFileCleanupOptions extends DaemonFileCleanupOptions 
 export function getDaemonSocketPathList(): string[] {
   return [
     SOCKET_PATH,
-    ...Object.values(AUXILIARY_SOCKET_CONFIGS_BY_NAME).map(config => getSocketPath(config)),
+    ...Object.values(AUXILIARY_SOCKET_CONFIGS_BY_NAME).map((config) => getSocketPath(config)),
   ];
 }
 
@@ -194,7 +198,10 @@ export function isProcessRunning(pid: number): boolean {
   }
 }
 
-function shouldCleanupForExpectedPid(pidFilePath: string, expectedPid: number | undefined): boolean {
+function shouldCleanupForExpectedPid(
+  pidFilePath: string,
+  expectedPid: number | undefined,
+): boolean {
   if (expectedPid === undefined) {
     return true;
   }
@@ -203,7 +210,7 @@ function shouldCleanupForExpectedPid(pidFilePath: string, expectedPid: number | 
 }
 
 export function cleanupStaleDaemonFilesForDeadPidSync(
-  options: StaleDaemonFileCleanupOptions = {}
+  options: StaleDaemonFileCleanupOptions = {},
 ): boolean {
   const pidFilePath = options.pidFilePath ?? PID_FILE_PATH;
   const pidData = readPidFileDataSync(pidFilePath);

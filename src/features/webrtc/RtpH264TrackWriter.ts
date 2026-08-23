@@ -41,11 +41,7 @@ export interface RtpH264TrackWriterOptions {
   /** Observes each complete SPS before it can be sent to the negotiated peer. */
   onSps?: (nal: Buffer) => void;
   /** Observes each complete H.264 access unit after it is published to RTP. */
-  onAccessUnit?: (event: {
-    timestampMs: number;
-    isIdr: boolean;
-    rtpPacketCount: number;
-  }) => void;
+  onAccessUnit?: (event: { timestampMs: number; isIdr: boolean; rtpPacketCount: number }) => void;
 }
 
 /**

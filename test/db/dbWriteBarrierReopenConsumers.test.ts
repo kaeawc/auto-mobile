@@ -75,8 +75,12 @@ describe("captured-reference consumers survive a same-process barrier reopen (is
   describe("TelemetryRecorder", () => {
     class FakeRepository implements TelemetryRepository {
       logEvents: RecordLogEventInput[] = [];
-      async recordNetworkEvent(_input: RecordNetworkEventInput): Promise<number> { return 1; }
-      async recordLogEvent(input: RecordLogEventInput): Promise<void> { this.logEvents.push(input); }
+      async recordNetworkEvent(_input: RecordNetworkEventInput): Promise<number> {
+        return 1;
+      }
+      async recordLogEvent(input: RecordLogEventInput): Promise<void> {
+        this.logEvents.push(input);
+      }
       async recordOsEvent(_input: RecordOsEventInput): Promise<void> {}
       async recordNavigationEvent(_input: RecordNavigationEventInput): Promise<void> {}
       async recordStorageEvent(_input: RecordStorageEventInput): Promise<void> {}
@@ -99,7 +103,11 @@ describe("captured-reference consumers survive a same-process barrier reopen (is
       const drained = new FakeDbWriteBarrier();
       drained.beginDrain();
       let current: DbWriteBarrier = drained;
-      const recorder = new TelemetryRecorder(repo, () => null, () => current);
+      const recorder = new TelemetryRecorder(
+        repo,
+        () => null,
+        () => current,
+      );
 
       // Reopen swaps in a fresh, non-draining barrier.
       const reopened = new FakeDbWriteBarrier();
@@ -117,7 +125,11 @@ describe("captured-reference consumers survive a same-process barrier reopen (is
       const repo = new FakeRepository();
       const draining = new FakeDbWriteBarrier();
       draining.beginDrain();
-      const recorder = new TelemetryRecorder(repo, () => null, () => draining);
+      const recorder = new TelemetryRecorder(
+        repo,
+        () => null,
+        () => draining,
+      );
 
       await recorder.recordLogEvent(makeLogInput());
       expect(repo.logEvents).toHaveLength(0);
@@ -140,7 +152,9 @@ describe("captured-reference consumers survive a same-process barrier reopen (is
       const activity: string[] = [];
       const repo = {
         async upsertActiveSession(): Promise<void> {},
-        async recordActivity(sessionId: string): Promise<void> { activity.push(sessionId); },
+        async recordActivity(sessionId: string): Promise<void> {
+          activity.push(sessionId);
+        },
         async markReleased(): Promise<void> {},
         async markStaleActiveSessionsExpired(): Promise<void> {},
       };

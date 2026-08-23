@@ -109,7 +109,7 @@ describe("NavigationRepository", () => {
         "Home",
         "tapOn",
         { element: "loginButton" },
-        2000
+        2000,
       );
 
       expect(edge.app_id).toBe("com.example.app");
@@ -123,14 +123,7 @@ describe("NavigationRepository", () => {
     test("creates edge with null tool_name", async () => {
       await repo.getOrCreateApp("com.example.app");
 
-      const edge = await repo.createEdge(
-        "com.example.app",
-        "Login",
-        "Home",
-        null,
-        null,
-        2000
-      );
+      const edge = await repo.createEdge("com.example.app", "Login", "Home", null, null, 2000);
 
       expect(edge.tool_name).toBeNull();
       expect(edge.tool_args).toBeNull();
@@ -181,7 +174,7 @@ describe("NavigationRepository", () => {
       const element = await repo.getOrCreateUIElement(
         "com.example.app",
         { text: "Login", resourceId: "btn_login", clickable: true },
-        1000
+        1000,
       );
 
       expect(element.text).toBe("Login");
@@ -196,12 +189,12 @@ describe("NavigationRepository", () => {
       const first = await repo.getOrCreateUIElement(
         "com.example.app",
         { text: "Login", resourceId: "btn_login" },
-        1000
+        1000,
       );
       const second = await repo.getOrCreateUIElement(
         "com.example.app",
         { text: "Login", resourceId: "btn_login" },
-        2000
+        2000,
       );
 
       expect(second.id).toBe(first.id);
@@ -240,7 +233,7 @@ describe("NavigationRepository", () => {
       const target = await repo.getOrCreateUIElement(
         "com.example.app",
         { text: "Target", resourceId: "target_elem" },
-        1000
+        1000,
       );
 
       await repo.setScrollPosition(edge.id, target.id, "down", undefined, "slow", 3);
@@ -264,13 +257,20 @@ describe("NavigationRepository", () => {
       await repo.getOrCreateUIElement(
         "com.example.app",
         { text: "Login", resourceId: "btn_login" },
-        1000
+        1000,
       );
       await repo.addOrUpdateSuggestion("com.example.app", "hash-abc", "{}", 1000);
 
       await repo.clearApp("com.example.app");
 
-      const countIn = async (table: "navigation_apps" | "navigation_nodes" | "navigation_edges" | "ui_elements" | "navigation_suggestions"): Promise<number> => {
+      const countIn = async (
+        table:
+          | "navigation_apps"
+          | "navigation_nodes"
+          | "navigation_edges"
+          | "ui_elements"
+          | "navigation_suggestions",
+      ): Promise<number> => {
         const rows = await db
           .selectFrom(table)
           .selectAll()
@@ -308,7 +308,7 @@ describe("NavigationRepository", () => {
 
     test("N concurrent getOrCreateApp yield one row and never reject", async () => {
       await expect(
-        Promise.all(Array.from({ length: N }, () => repo.getOrCreateApp("com.example.app")))
+        Promise.all(Array.from({ length: N }, () => repo.getOrCreateApp("com.example.app"))),
       ).resolves.toBeDefined();
 
       const apps = await db
@@ -323,7 +323,9 @@ describe("NavigationRepository", () => {
       await repo.getOrCreateApp("com.example.app");
 
       const results = await Promise.all(
-        Array.from({ length: N }, () => repo.getOrCreateNode("com.example.app", "HomeScreen", 1000))
+        Array.from({ length: N }, () =>
+          repo.getOrCreateNode("com.example.app", "HomeScreen", 1000),
+        ),
       );
 
       const nodes = await repo.getNodes("com.example.app");
@@ -331,9 +333,9 @@ describe("NavigationRepository", () => {
       expect(nodes[0].visit_count).toBe(N);
 
       // Every returned value carries the same row id (the get-or-create contract).
-      const ids = new Set(results.map(r => r.id));
+      const ids = new Set(results.map((r) => r.id));
       expect(ids.size).toBe(1);
-      expect(results.every(r => r.id === nodes[0].id)).toBe(true);
+      expect(results.every((r) => r.id === nodes[0].id)).toBe(true);
     });
 
     test("N concurrent addOrUpdateSuggestion yield one row with occurrence_count === N and never reject", async () => {
@@ -341,14 +343,14 @@ describe("NavigationRepository", () => {
 
       const results = await Promise.all(
         Array.from({ length: N }, () =>
-          repo.addOrUpdateSuggestion("com.example.app", "hash-abc", "{}", 1000)
-        )
+          repo.addOrUpdateSuggestion("com.example.app", "hash-abc", "{}", 1000),
+        ),
       );
 
       const suggestions = await repo.getSuggestions("com.example.app");
       expect(suggestions).toHaveLength(1);
       expect(suggestions[0].occurrence_count).toBe(N);
-      expect(results.every(r => r.id === suggestions[0].id)).toBe(true);
+      expect(results.every((r) => r.id === suggestions[0].id)).toBe(true);
     });
 
     test("N concurrent getOrCreateFingerprint yield one row with occurrence_count === N and never reject", async () => {
@@ -357,14 +359,14 @@ describe("NavigationRepository", () => {
 
       const results = await Promise.all(
         Array.from({ length: N }, () =>
-          repo.getOrCreateFingerprint("com.example.app", node.id, "fp-hash", "{}", 1000)
-        )
+          repo.getOrCreateFingerprint("com.example.app", node.id, "fp-hash", "{}", 1000),
+        ),
       );
 
       const fingerprints = await repo.getFingerprintsForNode(node.id);
       expect(fingerprints).toHaveLength(1);
       expect(fingerprints[0].occurrence_count).toBe(N);
-      expect(results.every(r => r.id === fingerprints[0].id)).toBe(true);
+      expect(results.every((r) => r.id === fingerprints[0].id)).toBe(true);
     });
 
     test("N concurrent getOrCreateUIElement for one element yield one row and one id", async () => {
@@ -375,9 +377,9 @@ describe("NavigationRepository", () => {
           repo.getOrCreateUIElement(
             "com.example.app",
             { text: "Login", resourceId: "btn_login" },
-            1000 + i
-          )
-        )
+            1000 + i,
+          ),
+        ),
       );
 
       const elements = await db
@@ -386,7 +388,7 @@ describe("NavigationRepository", () => {
         .where("app_id", "=", "com.example.app")
         .execute();
       expect(elements).toHaveLength(1);
-      const ids = new Set(results.map(r => r.id));
+      const ids = new Set(results.map((r) => r.id));
       expect(ids.size).toBe(1);
       expect(results[0].id).toBe(elements[0].id);
     });
@@ -418,7 +420,7 @@ describe("NavigationRepository", () => {
       await repo.getOrCreateUIElement(
         "com.example.app",
         { text: "Login", resourceId: "btn_login" },
-        1000
+        1000,
       );
       await repo.addOrUpdateSuggestion("com.example.app", "hash-abc", "{}", 1000);
 
@@ -504,7 +506,7 @@ describe("NavigationRepository", () => {
 
       const page = await repo.getEdgesPage("com.example.app", { limit: 2 });
 
-      expect(page.edges.map(e => e.timestamp)).toEqual([1000, 2000]);
+      expect(page.edges.map((e) => e.timestamp)).toEqual([1000, 2000]);
       expect(page.hasMore).toBe(true);
     });
 

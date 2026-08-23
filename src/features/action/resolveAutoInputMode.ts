@@ -18,7 +18,7 @@
  */
 export function resolveAutoInputMode(
   text: string,
-  markers: readonly string[]
+  markers: readonly string[],
 ): "eventAll" | undefined {
   for (const marker of markers) {
     // Guard against an empty marker: text.includes("") is always true, which

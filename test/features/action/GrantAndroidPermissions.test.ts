@@ -26,11 +26,11 @@ describe("GrantAndroidPermissions", () => {
     const client = factory.getFakeClient();
     client.setCommandResult(
       "shell pm grant --user 0 'com.example.app' 'android.permission.POST_NOTIFICATIONS'",
-      ""
+      "",
     );
     client.setCommandResult(
       "shell pm grant --user 0 'com.example.app' 'android.permission.CAMERA'",
-      ""
+      "",
     );
 
     const action = new GrantAndroidPermissions(androidDevice, factory);
@@ -42,15 +42,19 @@ describe("GrantAndroidPermissions", () => {
     expect(result.success).toBe(true);
     expect(result.userId).toBe(0);
     expect(result.results).toHaveLength(2);
-    expect(result.results.every(r => r.success && r.countsTowardSuccess)).toBe(true);
-    expect(result.results.map(r => r.operationId)).toEqual([
+    expect(result.results.every((r) => r.success && r.countsTowardSuccess)).toBe(true);
+    expect(result.results.map((r) => r.operationId)).toEqual([
       "pm_grant:android.permission.POST_NOTIFICATIONS",
       "pm_grant:android.permission.CAMERA",
     ]);
 
-    const calls = client.getCommandCalls().map(c => c.command);
-    expect(calls).toContain("shell pm grant --user 0 'com.example.app' 'android.permission.POST_NOTIFICATIONS'");
-    expect(calls).toContain("shell pm grant --user 0 'com.example.app' 'android.permission.CAMERA'");
+    const calls = client.getCommandCalls().map((c) => c.command);
+    expect(calls).toContain(
+      "shell pm grant --user 0 'com.example.app' 'android.permission.POST_NOTIFICATIONS'",
+    );
+    expect(calls).toContain(
+      "shell pm grant --user 0 'com.example.app' 'android.permission.CAMERA'",
+    );
   });
 
   test("runs pm revoke for each permission with the resolved target user", async () => {
@@ -58,7 +62,7 @@ describe("GrantAndroidPermissions", () => {
     const client = factory.getFakeClient();
     client.setCommandResult(
       "shell pm revoke --user 12 'com.example.app' 'android.permission.POST_NOTIFICATIONS'",
-      ""
+      "",
     );
 
     const action = new GrantAndroidPermissions(androidDevice, factory);
@@ -80,8 +84,8 @@ describe("GrantAndroidPermissions", () => {
     ]);
     expect(
       client.wasCommandExecuted(
-        "shell pm revoke --user 12 'com.example.app' 'android.permission.POST_NOTIFICATIONS'"
-      )
+        "shell pm revoke --user 12 'com.example.app' 'android.permission.POST_NOTIFICATIONS'",
+      ),
     ).toBe(true);
   });
 
@@ -90,7 +94,8 @@ describe("GrantAndroidPermissions", () => {
     const client = factory.getFakeClient();
     const packageName = "com.example.app; id #";
     const permission = "android.permission.CAMERA; id #";
-    const command = "shell pm revoke --user 0 'com.example.app; id #' 'android.permission.CAMERA; id #'";
+    const command =
+      "shell pm revoke --user 0 'com.example.app; id #' 'android.permission.CAMERA; id #'";
     client.setCommandResult(command, "");
 
     const action = new GrantAndroidPermissions(androidDevice, factory);
@@ -154,7 +159,8 @@ describe("GrantAndroidPermissions", () => {
         operationId: "pm_reset_permissions",
         success: false,
         countsTowardSuccess: true,
-        error: "Android reset requires permissions=['all'] because pm reset-permissions is device-wide",
+        error:
+          "Android reset requires permissions=['all'] because pm reset-permissions is device-wide",
       },
     ]);
     expect(result.error).toContain("pm_reset_permissions");
@@ -190,7 +196,7 @@ describe("GrantAndroidPermissions", () => {
     client.setCommandResult(
       "shell pm reset-permissions",
       "",
-      "java.lang.SecurityException: Permission reset denied"
+      "java.lang.SecurityException: Permission reset denied",
     );
 
     const action = new GrantAndroidPermissions(androidDevice, factory);
@@ -217,7 +223,7 @@ describe("GrantAndroidPermissions", () => {
     client.setCommandResult(
       "shell pm grant --user 0 'com.example.app' 'android.permission.SEND_SMS'",
       "",
-      "java.lang.SecurityException: Permission denial"
+      "java.lang.SecurityException: Permission denial",
     );
 
     const action = new GrantAndroidPermissions(androidDevice, factory);
@@ -237,7 +243,7 @@ describe("GrantAndroidPermissions", () => {
     const client = factory.getFakeClient();
     client.setCommandResult(
       "shell pm grant --user 0 com.example.app android.permission.CAMERA",
-      ""
+      "",
     );
 
     const action = new GrantAndroidPermissions(androidDevice, factory);
@@ -262,28 +268,31 @@ describe("GrantAndroidPermissions", () => {
   test.each([
     ["grant", "android.permission.SEND_SMS"],
     ["revoke", "android.permission.CAMERA"],
-  ] as const)("reports the failed %s operation ID when setting a permission fails", async (actionType, permission) => {
-    const factory = new FakeAdbClientFactory();
-    const client = factory.getFakeClient();
-    client.setCommandError(
-      `shell pm ${actionType} --user 0 'com.example.app' '${permission}'`,
-      new Error("java.lang.SecurityException: Permission denial")
-    );
+  ] as const)(
+    "reports the failed %s operation ID when setting a permission fails",
+    async (actionType, permission) => {
+      const factory = new FakeAdbClientFactory();
+      const client = factory.getFakeClient();
+      client.setCommandError(
+        `shell pm ${actionType} --user 0 'com.example.app' '${permission}'`,
+        new Error("java.lang.SecurityException: Permission denial"),
+      );
 
-    const action = new GrantAndroidPermissions(
-      androidDevice,
-      factory,
-      () => new NoOpPerformanceTracker()
-    );
-    const result = await action.execute("com.example.app", {
-      action: actionType,
-      permissions: [permission],
-      userId: 0,
-    });
+      const action = new GrantAndroidPermissions(
+        androidDevice,
+        factory,
+        () => new NoOpPerformanceTracker(),
+      );
+      const result = await action.execute("com.example.app", {
+        action: actionType,
+        permissions: [permission],
+        userId: 0,
+      });
 
-    expect(result.success).toBe(false);
-    expect(result.error).toBe(`Failed step(s): pm_${actionType}:${permission}`);
-  });
+      expect(result.success).toBe(false);
+      expect(result.error).toBe(`Failed step(s): pm_${actionType}:${permission}`);
+    },
+  );
 
   test("non-Android device returns structured failure without adb", async () => {
     const factory = new FakeAdbClientFactory();

@@ -1,9 +1,6 @@
 import { type Kysely, sql } from "kysely";
 
-async function tableExists(
-  db: Kysely<unknown>,
-  tableName: string
-): Promise<boolean> {
+async function tableExists(db: Kysely<unknown>, tableName: string): Promise<boolean> {
   const result = await db
     .selectFrom("sqlite_master" as never)
     .select("name")
@@ -19,20 +16,20 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     await db.schema
       .createTable("failure_groups")
       .ifNotExists()
-      .addColumn("id", "text", col => col.primaryKey())
-      .addColumn("type", "text", col => col.notNull()) // crash, anr, tool_failure
-      .addColumn("signature", "text", col => col.notNull()) // Stack trace hash or tool+error
-      .addColumn("title", "text", col => col.notNull())
-      .addColumn("message", "text", col => col.notNull())
-      .addColumn("severity", "text", col => col.notNull()) // critical, high, medium, low
-      .addColumn("first_occurrence", "integer", col => col.notNull())
-      .addColumn("last_occurrence", "integer", col => col.notNull())
-      .addColumn("total_count", "integer", col => col.notNull().defaultTo(0))
-      .addColumn("unique_sessions", "integer", col => col.notNull().defaultTo(0))
+      .addColumn("id", "text", (col) => col.primaryKey())
+      .addColumn("type", "text", (col) => col.notNull()) // crash, anr, tool_failure
+      .addColumn("signature", "text", (col) => col.notNull()) // Stack trace hash or tool+error
+      .addColumn("title", "text", (col) => col.notNull())
+      .addColumn("message", "text", (col) => col.notNull())
+      .addColumn("severity", "text", (col) => col.notNull()) // critical, high, medium, low
+      .addColumn("first_occurrence", "integer", (col) => col.notNull())
+      .addColumn("last_occurrence", "integer", (col) => col.notNull())
+      .addColumn("total_count", "integer", (col) => col.notNull().defaultTo(0))
+      .addColumn("unique_sessions", "integer", (col) => col.notNull().defaultTo(0))
       .addColumn("stack_trace_json", "text") // JSON array of StackTraceElement
       .addColumn("tool_call_info_json", "text") // JSON of AggregatedToolCallInfo
-      .addColumn("created_at", "text", col => col.notNull().defaultTo(sql`(datetime('now'))`))
-      .addColumn("updated_at", "text", col => col.notNull().defaultTo(sql`(datetime('now'))`))
+      .addColumn("created_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
+      .addColumn("updated_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
       .execute();
 
     await db.schema
@@ -62,23 +59,23 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     await db.schema
       .createTable("failure_occurrences")
       .ifNotExists()
-      .addColumn("id", "text", col => col.primaryKey())
-      .addColumn("group_id", "text", col =>
-        col.notNull().references("failure_groups.id").onDelete("cascade")
+      .addColumn("id", "text", (col) => col.primaryKey())
+      .addColumn("group_id", "text", (col) =>
+        col.notNull().references("failure_groups.id").onDelete("cascade"),
       )
-      .addColumn("timestamp", "integer", col => col.notNull())
+      .addColumn("timestamp", "integer", (col) => col.notNull())
       .addColumn("device_id", "text")
-      .addColumn("device_model", "text", col => col.notNull())
-      .addColumn("os", "text", col => col.notNull())
-      .addColumn("app_version", "text", col => col.notNull())
-      .addColumn("session_id", "text", col => col.notNull())
+      .addColumn("device_model", "text", (col) => col.notNull())
+      .addColumn("os", "text", (col) => col.notNull())
+      .addColumn("app_version", "text", (col) => col.notNull())
+      .addColumn("session_id", "text", (col) => col.notNull())
       .addColumn("screen_at_failure", "text")
       .addColumn("test_name", "text")
       .addColumn("test_execution_id", "integer") // FK to test_executions if from a test
       .addColumn("error_code", "text") // For tool failures
       .addColumn("duration_ms", "integer") // For tool failures
       .addColumn("tool_args_json", "text") // For tool failures - JSON of parameters
-      .addColumn("created_at", "text", col => col.notNull().defaultTo(sql`(datetime('now'))`))
+      .addColumn("created_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
       .execute();
 
     await db.schema
@@ -115,13 +112,13 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     await db.schema
       .createTable("failure_occurrence_screens")
       .ifNotExists()
-      .addColumn("id", "integer", col => col.primaryKey().autoIncrement())
-      .addColumn("occurrence_id", "text", col =>
-        col.notNull().references("failure_occurrences.id").onDelete("cascade")
+      .addColumn("id", "integer", (col) => col.primaryKey().autoIncrement())
+      .addColumn("occurrence_id", "text", (col) =>
+        col.notNull().references("failure_occurrences.id").onDelete("cascade"),
       )
-      .addColumn("screen_name", "text", col => col.notNull())
-      .addColumn("visit_order", "integer", col => col.notNull())
-      .addColumn("created_at", "text", col => col.notNull().defaultTo(sql`(datetime('now'))`))
+      .addColumn("screen_name", "text", (col) => col.notNull())
+      .addColumn("visit_order", "integer", (col) => col.notNull())
+      .addColumn("created_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
       .execute();
 
     await db.schema
@@ -137,15 +134,15 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     await db.schema
       .createTable("failure_captures")
       .ifNotExists()
-      .addColumn("id", "text", col => col.primaryKey())
-      .addColumn("occurrence_id", "text", col =>
-        col.notNull().references("failure_occurrences.id").onDelete("cascade")
+      .addColumn("id", "text", (col) => col.primaryKey())
+      .addColumn("occurrence_id", "text", (col) =>
+        col.notNull().references("failure_occurrences.id").onDelete("cascade"),
       )
-      .addColumn("type", "text", col => col.notNull()) // screenshot, video
-      .addColumn("path", "text", col => col.notNull())
-      .addColumn("timestamp", "integer", col => col.notNull())
-      .addColumn("device_model", "text", col => col.notNull())
-      .addColumn("created_at", "text", col => col.notNull().defaultTo(sql`(datetime('now'))`))
+      .addColumn("type", "text", (col) => col.notNull()) // screenshot, video
+      .addColumn("path", "text", (col) => col.notNull())
+      .addColumn("timestamp", "integer", (col) => col.notNull())
+      .addColumn("device_model", "text", (col) => col.notNull())
+      .addColumn("created_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
       .execute();
 
     await db.schema
@@ -161,17 +158,17 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     await db.schema
       .createTable("failure_notifications")
       .ifNotExists()
-      .addColumn("id", "integer", col => col.primaryKey().autoIncrement())
-      .addColumn("occurrence_id", "text", col =>
-        col.notNull().references("failure_occurrences.id").onDelete("cascade")
+      .addColumn("id", "integer", (col) => col.primaryKey().autoIncrement())
+      .addColumn("occurrence_id", "text", (col) =>
+        col.notNull().references("failure_occurrences.id").onDelete("cascade"),
       )
-      .addColumn("group_id", "text", col => col.notNull())
-      .addColumn("type", "text", col => col.notNull()) // crash, anr, tool_failure
-      .addColumn("severity", "text", col => col.notNull())
-      .addColumn("title", "text", col => col.notNull())
-      .addColumn("timestamp", "integer", col => col.notNull())
-      .addColumn("acknowledged", "integer", col => col.notNull().defaultTo(0)) // SQLite boolean
-      .addColumn("created_at", "text", col => col.notNull().defaultTo(sql`(datetime('now'))`))
+      .addColumn("group_id", "text", (col) => col.notNull())
+      .addColumn("type", "text", (col) => col.notNull()) // crash, anr, tool_failure
+      .addColumn("severity", "text", (col) => col.notNull())
+      .addColumn("title", "text", (col) => col.notNull())
+      .addColumn("timestamp", "integer", (col) => col.notNull())
+      .addColumn("acknowledged", "integer", (col) => col.notNull().defaultTo(0)) // SQLite boolean
+      .addColumn("created_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
       .execute();
 
     await db.schema

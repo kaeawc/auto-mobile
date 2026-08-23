@@ -23,8 +23,8 @@ import type { DaemonSocketPaths } from "./types";
  */
 export function getDaemonSocketPathsByName(): DaemonSocketPaths {
   return {
-    "control": SOCKET_PATH,
-    "appearance": getAppearanceSocketPath(),
+    control: SOCKET_PATH,
+    appearance: getAppearanceSocketPath(),
     "device-snapshot": getDeviceSnapshotSocketPath(),
     "failures-push": getFailuresPushSocketPath(),
     "failures-stream": getFailuresStreamSocketPath(),

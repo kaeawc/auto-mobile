@@ -635,9 +635,7 @@ export class DeviceBootService {
     if (operationFailureRecorded && operationFailure !== controller.signal.reason) {
       return operationFailure;
     }
-    return new ActionableError(
-      `startDevice timeout exhausted while ${phase}; remainingBudgetMs=0`,
-    );
+    return new ActionableError(`startDevice timeout exhausted while ${phase}; remainingBudgetMs=0`);
   }
 
   private throwExternalAbortReason(signal: AbortSignal | undefined, phase: string): void {

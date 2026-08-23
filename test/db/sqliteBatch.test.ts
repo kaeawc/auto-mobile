@@ -24,13 +24,9 @@ describe("chunkBySqliteParameterLimit", () => {
   ])("%s", (_label, valuesLength, fixedParams, maxBound, expectedSizes) => {
     const values = Array.from({ length: valuesLength as number }, (_v, i) => i);
 
-    const chunks = chunkBySqliteParameterLimit(
-      values,
-      fixedParams as number,
-      maxBound as number
-    );
+    const chunks = chunkBySqliteParameterLimit(values, fixedParams as number, maxBound as number);
 
-    expect(chunks.map(c => c.length)).toEqual(expectedSizes as number[]);
+    expect(chunks.map((c) => c.length)).toEqual(expectedSizes as number[]);
     // No value is dropped and order is preserved across the chunk boundary.
     expect(chunks.flat()).toEqual(values);
   });
@@ -41,19 +37,19 @@ describe("chunkBySqliteParameterLimit", () => {
     const chunks = chunkBySqliteParameterLimit(values);
 
     expect(SQLITE_MAX_BOUND_PARAMETERS).toBe(999);
-    expect(chunks.map(c => c.length)).toEqual([999, 1]);
+    expect(chunks.map((c) => c.length)).toEqual([999, 1]);
     expect(chunks.flat()).toEqual(values);
   });
 
   test("throws when the fixed parameters leave no room for a single value", () => {
     expect(() => chunkBySqliteParameterLimit([1, 2, 3], 10, 10)).toThrow(
-      "SQLite batch query has 10 fixed parameters, exceeding 10 available bound parameters"
+      "SQLite batch query has 10 fixed parameters, exceeding 10 available bound parameters",
     );
   });
 
   test("throws when the fixed parameters exceed the bound-parameter ceiling", () => {
     expect(() => chunkBySqliteParameterLimit([1], 12, 10)).toThrow(
-      /12 fixed parameters, exceeding 10 available/
+      /12 fixed parameters, exceeding 10 available/,
     );
   });
 });

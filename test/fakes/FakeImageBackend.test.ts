@@ -7,7 +7,7 @@ describe("FakeImageBackend", () => {
   const source = Buffer.from("src");
   const pipeline: ImagePipeline = {
     operations: [{ type: "resize", width: 10, height: 10, maintainAspectRatio: false }],
-    encoding: { mime: "image/png" }
+    encoding: { mime: "image/png" },
   };
 
   beforeEach(() => {
@@ -105,12 +105,12 @@ describe("FakeImageBackend", () => {
     };
     const methods: Method[] = ["execute", "metadata", "rawPixels"];
 
-    test.each(methods)("%s throws only when its own injection is armed", async method => {
+    test.each(methods)("%s throws only when its own injection is armed", async (method) => {
       arm(backend, method, true);
       await expect(invoke(backend, method)).rejects.toThrow(`Simulated error in ${method}`);
     });
 
-    test.each(methods)("%s stops throwing once its injection is disarmed", async method => {
+    test.each(methods)("%s stops throwing once its injection is disarmed", async (method) => {
       arm(backend, method, true);
       arm(backend, method, false);
       await expect(invoke(backend, method)).resolves.toBeDefined();
@@ -120,12 +120,9 @@ describe("FakeImageBackend", () => {
       ["execute", "metadata"],
       ["execute", "rawPixels"],
       ["metadata", "rawPixels"],
-    ] as Array<[Method, Method]>)(
-      "arming %s does not make %s throw",
-      async (armed, other) => {
-        arm(backend, armed, true);
-        await expect(invoke(backend, other)).resolves.toBeDefined();
-      }
-    );
+    ] as Array<[Method, Method]>)("arming %s does not make %s throw", async (armed, other) => {
+      arm(backend, armed, true);
+      await expect(invoke(backend, other)).resolves.toBeDefined();
+    });
   });
 });

@@ -27,7 +27,7 @@ export function selectScreenshotsToEvict(
   files: ScreenshotCacheFile[],
   maxSizeBytes: number,
   minAgeMs: number,
-  nowMs: number
+  nowMs: number,
 ): string[] {
   const total = files.reduce((sum, f) => sum + f.size, 0);
   if (total <= maxSizeBytes) {

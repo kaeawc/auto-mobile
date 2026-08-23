@@ -81,7 +81,7 @@ export class DeviceSessionRepository {
       await db
         .insertInto("device_sessions")
         .values(row)
-        .onConflict(oc =>
+        .onConflict((oc) =>
           oc.column("session_uuid").doUpdateSet({
             device_id: row.device_id,
             platform: row.platform,
@@ -98,11 +98,13 @@ export class DeviceSessionRepository {
             heartbeat_timeout_ms: row.heartbeat_timeout_ms,
             has_received_heartbeat: row.has_received_heartbeat,
             updated_at: now,
-          })
+          }),
         )
         .execute();
     } catch (error) {
-      logger.warn(`[DeviceSessionRepository] Failed to upsert device session ${record.sessionUuid}: ${error}`);
+      logger.warn(
+        `[DeviceSessionRepository] Failed to upsert device session ${record.sessionUuid}: ${error}`,
+      );
       throw error;
     }
   }
@@ -122,7 +124,9 @@ export class DeviceSessionRepository {
         .where("status", "=", "active")
         .execute();
     } catch (error) {
-      logger.warn(`[DeviceSessionRepository] Failed to record activity for ${sessionUuid}: ${error}`);
+      logger.warn(
+        `[DeviceSessionRepository] Failed to record activity for ${sessionUuid}: ${error}`,
+      );
     }
   }
 
@@ -133,7 +137,7 @@ export class DeviceSessionRepository {
       daemonSessionId?: string | null;
       lastUsedAtMs: number;
       expiresAtMs: number;
-    }
+    },
   ): Promise<void> {
     try {
       const db = await this.getDb();
@@ -154,7 +158,9 @@ export class DeviceSessionRepository {
         .where("session_uuid", "=", sessionUuid)
         .execute();
     } catch (error) {
-      logger.warn(`[DeviceSessionRepository] Failed to mark autolock session ${sessionUuid}: ${error}`);
+      logger.warn(
+        `[DeviceSessionRepository] Failed to mark autolock session ${sessionUuid}: ${error}`,
+      );
     }
   }
 
@@ -162,7 +168,7 @@ export class DeviceSessionRepository {
     sessionUuid: string,
     status: DeviceSessionStatus,
     releasedAtMs: number,
-    reason: string
+    reason: string,
   ): Promise<void> {
     try {
       const db = await this.getDb();
@@ -177,7 +183,9 @@ export class DeviceSessionRepository {
         .where("session_uuid", "=", sessionUuid)
         .execute();
     } catch (error) {
-      logger.warn(`[DeviceSessionRepository] Failed to mark session ${sessionUuid} ${status}: ${error}`);
+      logger.warn(
+        `[DeviceSessionRepository] Failed to mark session ${sessionUuid} ${status}: ${error}`,
+      );
       throw error;
     }
   }
@@ -194,7 +202,7 @@ export class DeviceSessionRepository {
   async markStaleActiveSessionsExpired(
     currentDaemonSessionId: string,
     releasedAtMs: number,
-    reason: string = "daemon-restart"
+    reason: string = "daemon-restart",
   ): Promise<void> {
     const db = await this.getDb();
     await db
@@ -206,11 +214,11 @@ export class DeviceSessionRepository {
         updated_at: new Date().toISOString(),
       })
       .where("status", "=", "active")
-      .where(eb =>
+      .where((eb) =>
         eb.or([
           eb("daemon_session_id", "is", null),
           eb("daemon_session_id", "!=", currentDaemonSessionId),
-        ])
+        ]),
       )
       .execute();
   }

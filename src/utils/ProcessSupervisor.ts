@@ -90,14 +90,14 @@ export class DefaultProcessSupervisor implements ProcessSupervisor {
 
   private async checkLiveness(): Promise<void> {
     try {
-      if (!await this.options.isAlive()) {
+      if (!(await this.options.isAlive())) {
         logger.warn(`[ProcessSupervisor] ${this.options.name} is no longer alive`);
         this.processExited();
       }
     } catch (error) {
       logger.warn(
         `[ProcessSupervisor] ${this.options.name} liveness check failed: ` +
-        `${errorMessage(error)}`
+          `${errorMessage(error)}`,
       );
     }
   }
@@ -109,7 +109,9 @@ export class DefaultProcessSupervisor implements ProcessSupervisor {
 
     const maxAttempts = this.options.maxRestartAttempts;
     if (maxAttempts !== undefined && this.restartAttempts >= maxAttempts) {
-      logger.warn(`[ProcessSupervisor] ${this.options.name} max restart attempts (${maxAttempts}) reached`);
+      logger.warn(
+        `[ProcessSupervisor] ${this.options.name} max restart attempts (${maxAttempts}) reached`,
+      );
       this.restartAttempts = 0;
       return;
     }
@@ -117,7 +119,9 @@ export class DefaultProcessSupervisor implements ProcessSupervisor {
     this.restartAttempts++;
     const attempt = this.restartAttempts;
     const delay = this.options.restartBackoff.delayForAttempt(attempt);
-    logger.info(`[ProcessSupervisor] Scheduling ${this.options.name} restart in ${delay}ms (attempt ${attempt})`);
+    logger.info(
+      `[ProcessSupervisor] Scheduling ${this.options.name} restart in ${delay}ms (attempt ${attempt})`,
+    );
 
     this.restartTimeout = this.options.timer.setTimeout(() => {
       this.restartTimeout = null;
@@ -141,7 +145,7 @@ export class DefaultProcessSupervisor implements ProcessSupervisor {
       await this.options.onRestartFailure?.(error);
       logger.warn(
         `[ProcessSupervisor] ${this.options.name} restart attempt ${attempt} failed: ` +
-        `${errorMessage(error)}`
+          `${errorMessage(error)}`,
       );
       this.scheduleRestart();
     }

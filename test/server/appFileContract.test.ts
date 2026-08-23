@@ -14,23 +14,27 @@ describe("App file resource contract", () => {
   });
 
   test("builds stable URIs with encoded app IDs and nested file paths", () => {
-    expect(buildAppFileResourceUri({
-      deviceId: "device 1",
-      appId: "com.example.app",
-      container: "documents",
-      path: "fixtures/onboarding/welcome image.png",
-    })).toBe(
-      "automobile:devices/device%201/apps/com.example.app/files/documents/fixtures/onboarding/welcome%20image.png"
+    expect(
+      buildAppFileResourceUri({
+        deviceId: "device 1",
+        appId: "com.example.app",
+        container: "documents",
+        path: "fixtures/onboarding/welcome image.png",
+      }),
+    ).toBe(
+      "automobile:devices/device%201/apps/com.example.app/files/documents/fixtures/onboarding/welcome%20image.png",
     );
   });
 
   test("parses decoded template params back to contract fields", () => {
-    expect(parseAppFileResourceParams({
-      deviceId: "device%201",
-      appId: "com.example.app",
-      container: "documents",
-      path: "fixtures/onboarding/welcome%20image.png",
-    })).toEqual({
+    expect(
+      parseAppFileResourceParams({
+        deviceId: "device%201",
+        appId: "com.example.app",
+        container: "documents",
+        path: "fixtures/onboarding/welcome%20image.png",
+      }),
+    ).toEqual({
       deviceId: "device 1",
       appId: "com.example.app",
       container: "documents",
@@ -44,15 +48,15 @@ describe("App file resource contract", () => {
       "App File",
       "Read app file",
       "application/octet-stream",
-      async params => ({
+      async (params) => ({
         uri: buildAppFileResourceUri(parseAppFileResourceParams(params)),
         mimeType: "application/json",
         text: JSON.stringify(parseAppFileResourceParams(params)),
-      })
+      }),
     );
 
     const match = ResourceRegistry.matchTemplate(
-      "automobile:devices/device%201/apps/com.example.app/files/documents/fixtures/onboarding/welcome%20image.png"
+      "automobile:devices/device%201/apps/com.example.app/files/documents/fixtures/onboarding/welcome%20image.png",
     );
 
     expect(match).toBeDefined();
@@ -106,18 +110,10 @@ describe("normalizeAppFileRelativePath container guard (#4183 P5/P16)", () => {
     expect(normalizeAppFileRelativePath(input)).toBe(expected);
   });
 
-  test.each([
-    [""],
-    ["/a/b.txt"],
-    ["../secret"],
-    ["a/../b"],
-    ["a/./b"],
-    ["a//b"],
-    ["."],
-    [".."],
-  ])("rejects unsafe path %p", input => {
-    expect(() => normalizeAppFileRelativePath(input)).toThrow(
-      /non-empty relative path/
-    );
-  });
+  test.each([[""], ["/a/b.txt"], ["../secret"], ["a/../b"], ["a/./b"], ["a//b"], ["."], [".."]])(
+    "rejects unsafe path %p",
+    (input) => {
+      expect(() => normalizeAppFileRelativePath(input)).toThrow(/non-empty relative path/);
+    },
+  );
 });

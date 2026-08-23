@@ -4,13 +4,12 @@ import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
-
 function makeElement(): Element {
   return {
-    "text": "Submit",
+    text: "Submit",
     "resource-id": "com.app:id/submit_btn",
-    "class": "android.widget.Button",
-    "bounds": { left: 10, top: 20, right: 110, bottom: 70 }
+    class: "android.widget.Button",
+    bounds: { left: 10, top: 20, right: 110, bottom: 70 },
   } as Element;
 }
 
@@ -28,11 +27,10 @@ function createTapOnElement(): { tap: TapOnElement; timer: FakeTimer } {
       deviceId: "emulator-5554",
     } as any,
     new FakeAdbClient() as any,
-    { timer }
+    { timer },
   );
   return { tap, timer };
 }
-
 
 describe("retryTapIfNoChange", () => {
   test("does not retry when hierarchy changed after tap", async () => {
@@ -43,7 +41,9 @@ describe("retryTapIfNoChange", () => {
     (tap as any).refreshViewHierarchy = async () => postHierarchy;
 
     let tapCallCount = 0;
-    (tap as any).executeAndroidTap = async () => { tapCallCount++; };
+    (tap as any).executeAndroidTap = async () => {
+      tapCallCount++;
+    };
 
     const preTapHash = (tap as any).hashViewHierarchy(preHierarchy);
 
@@ -68,7 +68,9 @@ describe("retryTapIfNoChange", () => {
     (tap as any).refreshViewHierarchy = async () => hierarchy;
 
     let tapCallCount = 0;
-    (tap as any).executeAndroidTap = async () => { tapCallCount++; };
+    (tap as any).executeAndroidTap = async () => {
+      tapCallCount++;
+    };
 
     const preTapHash = (tap as any).hashViewHierarchy(hierarchy);
 
@@ -93,7 +95,9 @@ describe("retryTapIfNoChange", () => {
     (tap as any).refreshViewHierarchy = async () => null;
 
     let tapCallCount = 0;
-    (tap as any).executeAndroidTap = async () => { tapCallCount++; };
+    (tap as any).executeAndroidTap = async () => {
+      tapCallCount++;
+    };
 
     const preTapHash = (tap as any).hashViewHierarchy(preHierarchy);
 
@@ -152,8 +156,14 @@ describe("retryTapIfNoChange passes isTalkBackEnabled to executeAndroidTap", () 
 
       let capturedIsTalkBackEnabled: boolean | undefined;
       (tap as any).executeAndroidTap = async (
-        _action: string, _x: number, _y: number, _dur: number,
-        _el: Element, _signal: unknown, _opts: unknown, isTalkBack: boolean
+        _action: string,
+        _x: number,
+        _y: number,
+        _dur: number,
+        _el: Element,
+        _signal: unknown,
+        _opts: unknown,
+        isTalkBack: boolean,
       ) => {
         capturedIsTalkBackEnabled = isTalkBack;
       };

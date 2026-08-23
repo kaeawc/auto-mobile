@@ -12,9 +12,7 @@ export function safeProcessCwd(fallback: string = "/"): string {
   }
 }
 
-export function resolveStableDaemonWorkingDirectory(
-  homeDirectory: string = homedir()
-): string {
+export function resolveStableDaemonWorkingDirectory(homeDirectory: string = homedir()): string {
   if (homeDirectory.length > 0 && existsSync(homeDirectory)) {
     return homeDirectory;
   }
@@ -24,12 +22,10 @@ export function resolveStableDaemonWorkingDirectory(
 
 export function resolveDaemonLaunchWorkingDirectory(
   currentWorkingDirectory: string = safeProcessCwd(),
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
 ): string {
   const launchCwd = env[DAEMON_LAUNCH_CWD_ENV]?.trim();
-  return launchCwd && path.isAbsolute(launchCwd)
-    ? launchCwd
-    : currentWorkingDirectory;
+  return launchCwd && path.isAbsolute(launchCwd) ? launchCwd : currentWorkingDirectory;
 }
 
 export function resolvePathFromDaemonLaunchWorkingDirectory(filePath: string): string {

@@ -11,7 +11,13 @@ import { FakeAdbProcess } from "./FakeAdbProcess";
 
 type FakeAdbClientContract = Pick<
   AdbExecutor,
-  "execute" | "executeCommand" | "getForegroundApp" | "getDeviceTimestampMs" | "getDeviceTimestampMsWithSource" | "listUsers" | "spawn"
+  | "execute"
+  | "executeCommand"
+  | "getForegroundApp"
+  | "getDeviceTimestampMs"
+  | "getDeviceTimestampMsWithSource"
+  | "listUsers"
+  | "spawn"
 >;
 
 /** How a spawned command should terminate, keyed by a substring of its argv. */
@@ -36,7 +42,8 @@ export class FakeAdbClient implements FakeAdbClientContract {
     signal?: AbortSignal;
   }> = [];
   private commandResults: Map<string, { stdout: string; stderr: string }> = new Map();
-  private commandResultSequences: Map<string, Array<{ stdout: string; stderr: string }>> = new Map();
+  private commandResultSequences: Map<string, Array<{ stdout: string; stderr: string }>> =
+    new Map();
   private commandSequenceCursor: Map<string, number> = new Map();
   private commandErrors: Map<string, Error> = new Map();
   private foregroundApp: { packageName: string; userId: number } | null = null;
@@ -56,8 +63,14 @@ export class FakeAdbClient implements FakeAdbClientContract {
     timeoutMs?: number,
     maxBuffer?: number,
     noRetry?: boolean,
-    signal?: AbortSignal
-  ): Promise<{ stdout: string; stderr: string; toString: () => string; trim: () => string; includes: (search: string) => boolean }> {
+    signal?: AbortSignal,
+  ): Promise<{
+    stdout: string;
+    stderr: string;
+    toString: () => string;
+    trim: () => string;
+    includes: (search: string) => boolean;
+  }> {
     this.commandCalls.push({ command, timeoutMs, maxBuffer, noRetry, signal });
 
     const error = this.commandErrors.get(command);
@@ -69,7 +82,7 @@ export class FakeAdbClient implements FakeAdbClientContract {
     // deterministically (e.g. an adb backup the user never confirms). Safe
     // because the caller races it against a FakeTimer setTimeout, so nothing
     // actually blocks the test.
-    if (this.hangingCommandPatterns.some(pattern => command.includes(pattern))) {
+    if (this.hangingCommandPatterns.some((pattern) => command.includes(pattern))) {
       return new Promise(() => {});
     }
 
@@ -91,7 +104,7 @@ export class FakeAdbClient implements FakeAdbClientContract {
       stderr: result.stderr,
       toString: () => result.stdout,
       trim: () => result.stdout.trim(),
-      includes: (search: string) => result.stdout.includes(search)
+      includes: (search: string) => result.stdout.includes(search),
     };
   }
 
@@ -109,7 +122,7 @@ export class FakeAdbClient implements FakeAdbClientContract {
       options?.timeoutMs,
       options?.maxBuffer,
       options?.noRetry,
-      options?.signal
+      options?.signal,
     );
   }
 
@@ -123,7 +136,7 @@ export class FakeAdbClient implements FakeAdbClientContract {
     this.spawnCalls.push([...args]);
     const proc = new FakeAdbProcess();
     const joined = args.join(" ");
-    const behavior = this.spawnBehaviors.find(b => joined.includes(b.match));
+    const behavior = this.spawnBehaviors.find((b) => joined.includes(b.match));
     if (behavior?.outcome.kind === "reject") {
       throw behavior.outcome.error;
     } else if (behavior?.outcome.kind === "error") {
@@ -153,12 +166,12 @@ export class FakeAdbClient implements FakeAdbClientContract {
 
   /** All recorded spawn argv arrays, in order. */
   getSpawnCalls(): string[][] {
-    return this.spawnCalls.map(call => [...call]);
+    return this.spawnCalls.map((call) => [...call]);
   }
 
   /** True if any spawned command's argv contained `match`. */
   wasSpawned(match: string): boolean {
-    return this.spawnCalls.some(call => call.join(" ").includes(match));
+    return this.spawnCalls.some((call) => call.join(" ").includes(match));
   }
 
   /**
@@ -173,13 +186,16 @@ export class FakeAdbClient implements FakeAdbClientContract {
    * Call N returns entry N; once exhausted the last entry repeats. Takes
    * precedence over {@link setCommandResult} for the same command.
    */
-  setCommandResultSequence(command: string, results: Array<{ stdout: string; stderr?: string } | string>): void {
+  setCommandResultSequence(
+    command: string,
+    results: Array<{ stdout: string; stderr?: string } | string>,
+  ): void {
     this.commandResultSequences.set(
       command,
-      results.map(entry => ({
+      results.map((entry) => ({
         stdout: typeof entry === "string" ? entry : entry.stdout,
-        stderr: typeof entry === "string" ? "" : entry.stderr ?? "",
-      }))
+        stderr: typeof entry === "string" ? "" : (entry.stderr ?? ""),
+      })),
     );
     this.commandSequenceCursor.set(command, 0);
   }
@@ -221,7 +237,9 @@ export class FakeAdbClient implements FakeAdbClientContract {
   /**
    * Configure the list of users
    */
-  setUsers(users: Array<{ userId: number; name: string; flags?: number; running?: boolean }>): void {
+  setUsers(
+    users: Array<{ userId: number; name: string; flags?: number; running?: boolean }>,
+  ): void {
     this.users = [...users];
   }
 
@@ -238,7 +256,9 @@ export class FakeAdbClient implements FakeAdbClientContract {
   /**
    * Return the list of users
    */
-  async listUsers(): Promise<Array<{ userId: number; name: string; flags?: number; running?: boolean }>> {
+  async listUsers(): Promise<
+    Array<{ userId: number; name: string; flags?: number; running?: boolean }>
+  > {
     return [...this.users];
   }
 
@@ -288,13 +308,15 @@ export class FakeAdbClient implements FakeAdbClientContract {
   /**
    * Get the last command call details
    */
-  getLastCommandCall(): {
-    command: string;
-    timeoutMs?: number;
-    maxBuffer?: number;
-    noRetry?: boolean;
-    signal?: AbortSignal;
-  } | undefined {
+  getLastCommandCall():
+    | {
+        command: string;
+        timeoutMs?: number;
+        maxBuffer?: number;
+        noRetry?: boolean;
+        signal?: AbortSignal;
+      }
+    | undefined {
     return this.commandCalls[this.commandCalls.length - 1];
   }
 
@@ -309,7 +331,7 @@ export class FakeAdbClient implements FakeAdbClientContract {
    * Get all commands executed
    */
   getAllCommands(): string[] {
-    return this.commandCalls.map(call => call.command);
+    return this.commandCalls.map((call) => call.command);
   }
 
   /**
@@ -343,9 +365,9 @@ export class FakeAdbClient implements FakeAdbClientContract {
    */
   wasCommandExecuted(commandPattern: string | RegExp): boolean {
     if (typeof commandPattern === "string") {
-      return this.commandCalls.some(call => call.command.includes(commandPattern));
+      return this.commandCalls.some((call) => call.command.includes(commandPattern));
     }
-    return this.commandCalls.some(call => commandPattern.test(call.command));
+    return this.commandCalls.some((call) => commandPattern.test(call.command));
   }
 
   /**
@@ -353,8 +375,8 @@ export class FakeAdbClient implements FakeAdbClientContract {
    */
   getCommandCount(commandPattern: string | RegExp): number {
     if (typeof commandPattern === "string") {
-      return this.commandCalls.filter(call => call.command.includes(commandPattern)).length;
+      return this.commandCalls.filter((call) => call.command.includes(commandPattern)).length;
     }
-    return this.commandCalls.filter(call => commandPattern.test(call.command)).length;
+    return this.commandCalls.filter((call) => commandPattern.test(call.command)).length;
   }
 }

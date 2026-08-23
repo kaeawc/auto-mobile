@@ -91,11 +91,11 @@ describe("TOOL_DEFINITION_AFFECTING_FLAGS drift guard", () => {
   });
 
   test("every config getter the tool-list methods use is mapped (no unmapped drift)", () => {
-    const unmapped = gettersUsed.filter(getter => !(getter in CONFIG_GETTER_TO_FLAG));
+    const unmapped = gettersUsed.filter((getter) => !(getter in CONFIG_GETTER_TO_FLAG));
     expect(
       unmapped,
       `New config getter(s) affect tools/list but are not mapped in this test: ${unmapped.join(", ")}. ` +
-        "Add each to CONFIG_GETTER_TO_FLAG (and to TOOL_DEFINITION_AFFECTING_FLAGS if it maps to a runtime flag)."
+        "Add each to CONFIG_GETTER_TO_FLAG (and to TOOL_DEFINITION_AFFECTING_FLAGS if it maps to a runtime flag).",
     ).toEqual([]);
   });
 
@@ -105,7 +105,7 @@ describe("TOOL_DEFINITION_AFFECTING_FLAGS drift guard", () => {
       if (flag !== null && flag !== undefined) {
         expect(
           TOOL_DEFINITION_AFFECTING_FLAGS.has(flag),
-          `${getter} maps to flag "${flag}" which affects tools/list but is missing from TOOL_DEFINITION_AFFECTING_FLAGS.`
+          `${getter} maps to flag "${flag}" which affects tools/list but is missing from TOOL_DEFINITION_AFFECTING_FLAGS.`,
         ).toBe(true);
       }
     }
@@ -114,13 +114,13 @@ describe("TOOL_DEFINITION_AFFECTING_FLAGS drift guard", () => {
   test("the set contains no flag that no longer affects tool definitions", () => {
     const flagsBackedByGetters = new Set(
       gettersUsed
-        .map(getter => CONFIG_GETTER_TO_FLAG[getter])
-        .filter((flag): flag is FeatureFlagKey => flag !== null && flag !== undefined)
+        .map((getter) => CONFIG_GETTER_TO_FLAG[getter])
+        .filter((flag): flag is FeatureFlagKey => flag !== null && flag !== undefined),
     );
     for (const flag of TOOL_DEFINITION_AFFECTING_FLAGS) {
       expect(
         flagsBackedByGetters.has(flag),
-        `TOOL_DEFINITION_AFFECTING_FLAGS lists "${flag}" but no tool-list getter maps to it — remove it or update the mapping.`
+        `TOOL_DEFINITION_AFFECTING_FLAGS lists "${flag}" but no tool-list getter maps to it — remove it or update the mapping.`,
       ).toBe(true);
     }
   });

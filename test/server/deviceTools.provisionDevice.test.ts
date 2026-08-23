@@ -61,14 +61,14 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
     }
     return existing.result
       ? {
-        started: false as const,
-        result: existing.result,
-        reconcileExistingConfiguration: existing.creationStarted,
-      }
+          started: false as const,
+          result: existing.result,
+          reconcileExistingConfiguration: existing.creationStarted,
+        }
       : {
-        started: true as const,
-        reconcileExistingConfiguration: existing.creationStarted,
-      };
+          started: true as const,
+          reconcileExistingConfiguration: existing.creationStarted,
+        };
   }
 
   async markDeviceCreationStarted(operationId: string): Promise<void> {
@@ -122,17 +122,19 @@ describe("provisionDevice handler", () => {
   });
 
   test("accepts omitted boot and readiness with their documented defaults", () => {
-    expect(provisionDeviceSchema.parse({
-      operationId: "operation-defaults",
-      device: {
-        platform: "android",
-        name: "phone-api-36-a",
-        spec: {
-          runtime: "system-images;android-36;google_apis;x86_64",
-          deviceType: "pixel_9",
+    expect(
+      provisionDeviceSchema.parse({
+        operationId: "operation-defaults",
+        device: {
+          platform: "android",
+          name: "phone-api-36-a",
+          spec: {
+            runtime: "system-images;android-36;google_apis;x86_64",
+            deviceType: "pixel_9",
+          },
         },
-      },
-    })).toMatchObject({
+      }),
+    ).toMatchObject({
       boot: true,
       readiness: "automation",
     });
@@ -151,18 +153,20 @@ describe("provisionDevice handler", () => {
   });
 
   test("rejects unbootable memory for modern Play Store Android images", () => {
-    expect(() => provisionDeviceSchema.parse({
-      operationId: "operation-low-play-memory",
-      device: {
-        platform: "android",
-        name: "phone-api-36-play",
-        spec: {
-          runtime: "system-images;android-36;google_apis_playstore;x86_64",
-          deviceType: "pixel_9",
-          configuration: { memoryMb: 1024 },
+    expect(() =>
+      provisionDeviceSchema.parse({
+        operationId: "operation-low-play-memory",
+        device: {
+          platform: "android",
+          name: "phone-api-36-play",
+          spec: {
+            runtime: "system-images;android-36;google_apis_playstore;x86_64",
+            deviceType: "pixel_9",
+            configuration: { memoryMb: 1024 },
+          },
         },
-      },
-    })).toThrow(/at least 2048/);
+      }),
+    ).toThrow(/at least 2048/);
   });
 
   test("creates the caller-specified device once and replays its structured result by operationId", async () => {
@@ -185,13 +189,17 @@ describe("provisionDevice handler", () => {
       readiness: "automation",
     };
 
-    const first = JSON.parse((await tool.handler({
-      ...args,
-      __mcpSessionId: "mcp-session-5434",
-      __executionId: "execution-5434",
-      __executionStartTime: 0,
-    } as any) as any).content[0].text);
-    const second = JSON.parse((await tool.handler(args) as any).content[0].text);
+    const first = JSON.parse(
+      (
+        (await tool.handler({
+          ...args,
+          __mcpSessionId: "mcp-session-5434",
+          __executionId: "execution-5434",
+          __executionStartTime: 0,
+        } as any)) as any
+      ).content[0].text,
+    );
+    const second = JSON.parse(((await tool.handler(args)) as any).content[0].text);
 
     expect(exactProvisioner.requests).toHaveLength(1);
     expect(exactProvisioner.requests[0]).toMatchObject({
@@ -262,11 +270,13 @@ describe("provisionDevice handler", () => {
   });
 
   test("boots the exact device and runs automation readiness when requested", async () => {
-    deviceManager.setDeviceImages("android", [{
-      name: "phone-api-36-a",
-      platform: "android",
-      isRunning: false,
-    }]);
+    deviceManager.setDeviceImages("android", [
+      {
+        name: "phone-api-36-a",
+        platform: "android",
+        isRunning: false,
+      },
+    ]);
     let readinessRequest: unknown;
     setDeviceToolsDependencies({
       ensureCtrlProxyReady: async (request) => {
@@ -279,19 +289,23 @@ describe("provisionDevice handler", () => {
       throw new Error("provisionDevice not registered");
     }
 
-    const result = JSON.parse((await tool.handler({
-      operationId: "operation-boot",
-      device: {
-        platform: "android",
-        name: "phone-api-36-a",
-        spec: {
-          runtime: "system-images;android-36;google_apis;x86_64",
-          deviceType: "pixel_9",
-        },
-      },
-      boot: true,
-      readiness: "automation",
-    }) as any).content[0].text);
+    const result = JSON.parse(
+      (
+        (await tool.handler({
+          operationId: "operation-boot",
+          device: {
+            platform: "android",
+            name: "phone-api-36-a",
+            spec: {
+              runtime: "system-images;android-36;google_apis;x86_64",
+              deviceType: "pixel_9",
+            },
+          },
+          boot: true,
+          readiness: "automation",
+        })) as any
+      ).content[0].text,
+    );
 
     expect(deviceManager.wasMethodCalled("startDevice")).toBe(true);
     expect(readinessRequest).toMatchObject({
@@ -305,34 +319,42 @@ describe("provisionDevice handler", () => {
   });
 
   test("adopts a running Android AVD by resolving its transport ID before boot", async () => {
-    deviceManager.setDeviceImages("android", [{
-      name: "phone-api-36-a",
-      platform: "android",
-      isRunning: true,
-    }]);
-    deviceManager.setBootedDevices("android", [{
-      name: "phone-api-36-a",
-      platform: "android",
-      deviceId: "emulator-5554",
-    }]);
+    deviceManager.setDeviceImages("android", [
+      {
+        name: "phone-api-36-a",
+        platform: "android",
+        isRunning: true,
+      },
+    ]);
+    deviceManager.setBootedDevices("android", [
+      {
+        name: "phone-api-36-a",
+        platform: "android",
+        deviceId: "emulator-5554",
+      },
+    ]);
     const tool = ToolRegistry.getTool("provisionDevice");
     if (!tool) {
       throw new Error("provisionDevice not registered");
     }
 
-    const result = JSON.parse((await tool.handler({
-      operationId: "operation-adopt-running",
-      device: {
-        platform: "android",
-        name: "phone-api-36-a",
-        spec: {
-          runtime: "system-images;android-36;google_apis;x86_64",
-          deviceType: "pixel_9",
-        },
-      },
-      boot: true,
-      readiness: "none",
-    }) as any).content[0].text);
+    const result = JSON.parse(
+      (
+        (await tool.handler({
+          operationId: "operation-adopt-running",
+          device: {
+            platform: "android",
+            name: "phone-api-36-a",
+            spec: {
+              runtime: "system-images;android-36;google_apis;x86_64",
+              deviceType: "pixel_9",
+            },
+          },
+          boot: true,
+          readiness: "none",
+        })) as any
+      ).content[0].text,
+    );
 
     expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
     expect(result).toMatchObject({
@@ -345,19 +367,23 @@ describe("provisionDevice handler", () => {
   });
 
   test("boots the provisioned iOS UDID instead of another running simulator with the same name", async () => {
-    deviceManager.setDeviceImages("ios", [{
-      name: "phone-api-36-a",
-      platform: "ios",
-      deviceId: "requested-udid",
-      isRunning: false,
-      runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
-      deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
-    }]);
-    deviceManager.setBootedDevices("ios", [{
-      name: "phone-api-36-a",
-      platform: "ios",
-      deviceId: "other-udid",
-    }]);
+    deviceManager.setDeviceImages("ios", [
+      {
+        name: "phone-api-36-a",
+        platform: "ios",
+        deviceId: "requested-udid",
+        isRunning: false,
+        runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
+        deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+      },
+    ]);
+    deviceManager.setBootedDevices("ios", [
+      {
+        name: "phone-api-36-a",
+        platform: "ios",
+        deviceId: "other-udid",
+      },
+    ]);
     const exactIosProvisioner: ExactDeviceProvisioner = {
       provision: async () => ({
         created: false,
@@ -384,19 +410,23 @@ describe("provisionDevice handler", () => {
       throw new Error("provisionDevice not registered");
     }
 
-    const response = JSON.parse((await tool.handler({
-      operationId: "operation-ios-running-identity",
-      device: {
-        platform: "ios",
-        name: "phone-api-36-a",
-        spec: {
-          runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
-          deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
-        },
-      },
-      boot: true,
-      readiness: "none",
-    }) as any).content[0].text);
+    const response = JSON.parse(
+      (
+        (await tool.handler({
+          operationId: "operation-ios-running-identity",
+          device: {
+            platform: "ios",
+            name: "phone-api-36-a",
+            spec: {
+              runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
+              deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+            },
+          },
+          boot: true,
+          readiness: "none",
+        })) as any
+      ).content[0].text,
+    );
 
     expect(response).toMatchObject({
       device: {
@@ -415,19 +445,23 @@ describe("provisionDevice handler", () => {
       throw new Error("provisionDevice not registered");
     }
 
-    const response = JSON.parse((await tool.handler({
-      operationId: "operation-ios-discovery-incomplete",
-      device: {
-        platform: "ios",
-        name: "iPhone 17",
-        spec: {
-          runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
-          deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
-        },
-      },
-      boot: false,
-      readiness: "none",
-    }) as any).content[0].text);
+    const response = JSON.parse(
+      (
+        (await tool.handler({
+          operationId: "operation-ios-discovery-incomplete",
+          device: {
+            platform: "ios",
+            name: "iPhone 17",
+            spec: {
+              runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
+              deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+            },
+          },
+          boot: false,
+          readiness: "none",
+        })) as any
+      ).content[0].text,
+    );
 
     expect(response).toMatchObject({
       success: false,
@@ -510,8 +544,12 @@ describe("provisionDevice handler", () => {
     });
     let teardownSettled = false;
     void teardown.then(
-      () => { teardownSettled = true; },
-      () => { teardownSettled = true; },
+      () => {
+        teardownSettled = true;
+      },
+      () => {
+        teardownSettled = true;
+      },
     );
     for (let attempt = 0; attempt < 50; attempt++) {
       await Promise.resolve();
@@ -528,11 +566,13 @@ describe("provisionDevice handler", () => {
   });
 
   test("rebinds a live session before replaying a completed boot operation", async () => {
-    deviceManager.setDeviceImages("android", [{
-      name: "phone-api-36-a",
-      platform: "android",
-      isRunning: false,
-    }]);
+    deviceManager.setDeviceImages("android", [
+      {
+        name: "phone-api-36-a",
+        platform: "android",
+        isRunning: false,
+      },
+    ]);
     const tool = ToolRegistry.getTool("provisionDevice");
     if (!tool) {
       throw new Error("provisionDevice not registered");
@@ -551,9 +591,9 @@ describe("provisionDevice handler", () => {
       readiness: "none" as const,
     };
 
-    const first = JSON.parse((await tool.handler(args) as any).content[0].text);
+    const first = JSON.parse(((await tool.handler(args)) as any).content[0].text);
     await Promise.resolve();
-    const second = JSON.parse((await tool.handler(args) as any).content[0].text);
+    const second = JSON.parse(((await tool.handler(args)) as any).content[0].text);
 
     expect(exactProvisioner.requests).toHaveLength(2);
     expect(exactProvisioner.requests[1]?.reconcileExistingConfiguration).toBe(false);
@@ -568,23 +608,19 @@ describe("provisionDevice handler", () => {
   test("returns a completed boot operation while its session is still live", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      sessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      deviceManager,
-    );
+    const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, deviceManager);
     const bootedDevice = {
       name: "phone-api-36-a",
       platform: "android" as const,
       deviceId: "mock-phone-api-36-a",
     };
-    deviceManager.setDeviceImages("android", [{
-      name: "phone-api-36-a",
-      platform: "android",
-      isRunning: false,
-    }]);
+    deviceManager.setDeviceImages("android", [
+      {
+        name: "phone-api-36-a",
+        platform: "android",
+        isRunning: false,
+      },
+    ]);
     await pool.initializeWithDevices([bootedDevice]);
     DaemonState.getInstance().initialize(sessionManager, pool);
     let readinessCalls = 0;
@@ -612,8 +648,8 @@ describe("provisionDevice handler", () => {
       readiness: "automation" as const,
     };
 
-    const first = JSON.parse((await tool.handler(args) as any).content[0].text);
-    const second = JSON.parse((await tool.handler(args) as any).content[0].text);
+    const first = JSON.parse(((await tool.handler(args)) as any).content[0].text);
+    const second = JSON.parse(((await tool.handler(args)) as any).content[0].text);
 
     expect(second).toEqual(first);
     expect(exactProvisioner.requests).toHaveLength(1);
@@ -627,24 +663,20 @@ describe("provisionDevice handler", () => {
     process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      sessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      deviceManager,
-    );
+    const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, deviceManager);
     const bootedDevice = {
       name: "phone-api-36-a",
       platform: "android" as const,
       deviceId: "mock-phone-api-36-a",
     };
     try {
-      deviceManager.setDeviceImages("android", [{
-        name: "phone-api-36-a",
-        platform: "android",
-        isRunning: false,
-      }]);
+      deviceManager.setDeviceImages("android", [
+        {
+          name: "phone-api-36-a",
+          platform: "android",
+          isRunning: false,
+        },
+      ]);
       await pool.initializeWithDevices([bootedDevice]);
       DaemonState.getInstance().initialize(sessionManager, pool);
       const tool = ToolRegistry.getTool("provisionDevice");
@@ -665,20 +697,27 @@ describe("provisionDevice handler", () => {
         readiness: "none" as const,
       };
 
-      const first = JSON.parse((await tool.handler({
-        ...args,
-        __mcpSessionId: "mcp-session-original",
-      }) as any).content[0].text);
-      const second = JSON.parse((await tool.handler({
-        ...args,
-        __mcpSessionId: "mcp-session-reconnected",
-      }) as any).content[0].text);
+      const first = JSON.parse(
+        (
+          (await tool.handler({
+            ...args,
+            __mcpSessionId: "mcp-session-original",
+          })) as any
+        ).content[0].text,
+      );
+      const second = JSON.parse(
+        (
+          (await tool.handler({
+            ...args,
+            __mcpSessionId: "mcp-session-reconnected",
+          })) as any
+        ).content[0].text,
+      );
 
       expect(second).toEqual(first);
-      expect(pool.resolveAutolockSessionForMcpSession(
-        "mcp-session-reconnected",
-        "android",
-      )).toBe(first.sessionId);
+      expect(pool.resolveAutolockSessionForMcpSession("mcp-session-reconnected", "android")).toBe(
+        first.sessionId,
+      );
     } finally {
       sessionManager.stopCleanupTimer();
       if (originalAutolock === undefined) {
@@ -692,23 +731,19 @@ describe("provisionDevice handler", () => {
   test("releases a live replay session when automation readiness fails", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      sessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      deviceManager,
-    );
+    const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, deviceManager);
     const bootedDevice = {
       name: "phone-api-36-a",
       platform: "android" as const,
       deviceId: "mock-phone-api-36-a",
     };
-    deviceManager.setDeviceImages("android", [{
-      name: "phone-api-36-a",
-      platform: "android",
-      isRunning: false,
-    }]);
+    deviceManager.setDeviceImages("android", [
+      {
+        name: "phone-api-36-a",
+        platform: "android",
+        isRunning: false,
+      },
+    ]);
     await pool.initializeWithDevices([bootedDevice]);
     DaemonState.getInstance().initialize(sessionManager, pool);
     let readinessCalls = 0;
@@ -739,7 +774,7 @@ describe("provisionDevice handler", () => {
     };
 
     await tool.handler(args);
-    const failedReplay = JSON.parse((await tool.handler(args) as any).content[0].text);
+    const failedReplay = JSON.parse(((await tool.handler(args)) as any).content[0].text);
 
     expect(failedReplay).toMatchObject({
       success: false,
@@ -756,23 +791,19 @@ describe("provisionDevice handler", () => {
   test("rebinds an errored persisted session instead of replaying its stale readiness", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      sessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      deviceManager,
-    );
+    const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, deviceManager);
     const bootedDevice = {
       name: "phone-api-36-a",
       platform: "android" as const,
       deviceId: "mock-phone-api-36-a",
     };
-    deviceManager.setDeviceImages("android", [{
-      name: "phone-api-36-a",
-      platform: "android",
-      isRunning: false,
-    }]);
+    deviceManager.setDeviceImages("android", [
+      {
+        name: "phone-api-36-a",
+        platform: "android",
+        isRunning: false,
+      },
+    ]);
     await pool.initializeWithDevices([bootedDevice]);
     DaemonState.getInstance().initialize(sessionManager, pool);
 
@@ -794,13 +825,13 @@ describe("provisionDevice handler", () => {
       readiness: "none" as const,
     };
 
-    const first = JSON.parse((await tool.handler(args) as any).content[0].text);
+    const first = JSON.parse(((await tool.handler(args)) as any).content[0].text);
     const pooledDevice = pool.getDevice(bootedDevice.deviceId);
     if (!pooledDevice) {
       throw new Error("expected pooled device");
     }
     pooledDevice.status = "error";
-    const second = JSON.parse((await tool.handler(args) as any).content[0].text);
+    const second = JSON.parse(((await tool.handler(args)) as any).content[0].text);
 
     expect(second).toMatchObject({
       lifecycleState: "ready",
@@ -815,23 +846,19 @@ describe("provisionDevice handler", () => {
   test("releases the bound session when completion persistence fails", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      sessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      deviceManager,
-    );
+    const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, deviceManager);
     const bootedDevice = {
       name: "phone-api-36-a",
       platform: "android" as const,
       deviceId: "mock-phone-api-36-a",
     };
-    deviceManager.setDeviceImages("android", [{
-      name: "phone-api-36-a",
-      platform: "android",
-      isRunning: false,
-    }]);
+    deviceManager.setDeviceImages("android", [
+      {
+        name: "phone-api-36-a",
+        platform: "android",
+        isRunning: false,
+      },
+    ]);
     await pool.initializeWithDevices([bootedDevice]);
     DaemonState.getInstance().initialize(sessionManager, pool);
     operationStore.completeError = new Error("database unavailable");
@@ -840,19 +867,23 @@ describe("provisionDevice handler", () => {
     if (!tool) {
       throw new Error("provisionDevice not registered");
     }
-    const response = JSON.parse((await tool.handler({
-      operationId: "operation-persistence-failure",
-      device: {
-        platform: "android",
-        name: "phone-api-36-a",
-        spec: {
-          runtime: "system-images;android-36;google_apis;x86_64",
-          deviceType: "pixel_9",
-        },
-      },
-      boot: true,
-      readiness: "none",
-    }) as any).content[0].text);
+    const response = JSON.parse(
+      (
+        (await tool.handler({
+          operationId: "operation-persistence-failure",
+          device: {
+            platform: "android",
+            name: "phone-api-36-a",
+            spec: {
+              runtime: "system-images;android-36;google_apis;x86_64",
+              deviceType: "pixel_9",
+            },
+          },
+          boot: true,
+          readiness: "none",
+        })) as any
+      ).content[0].text,
+    );
 
     expect(response).toMatchObject({
       success: false,
@@ -884,11 +915,13 @@ describe("provisionDevice handler", () => {
         };
       },
     };
-    deviceManager.setDeviceImages("android", [{
-      name: "phone-api-36-a",
-      platform: "android",
-      isRunning: false,
-    }]);
+    deviceManager.setDeviceImages("android", [
+      {
+        name: "phone-api-36-a",
+        platform: "android",
+        isRunning: false,
+      },
+    ]);
     setDeviceToolsDependencies({
       exactDeviceProvisionerFactory: () => replayProvisioner,
     });
@@ -911,8 +944,8 @@ describe("provisionDevice handler", () => {
       readiness: "none" as const,
     };
 
-    const first = JSON.parse((await tool.handler(args) as any).content[0].text);
-    const second = JSON.parse((await tool.handler(args) as any).content[0].text);
+    const first = JSON.parse(((await tool.handler(args)) as any).content[0].text);
+    const second = JSON.parse(((await tool.handler(args)) as any).content[0].text);
 
     expect(calls).toBe(2);
     expect(first).toMatchObject({ created: true, adopted: false });
@@ -939,11 +972,13 @@ describe("provisionDevice handler", () => {
       },
     };
     let readinessCalls = 0;
-    deviceManager.setDeviceImages("android", [{
-      name: "phone-api-36-a",
-      platform: "android",
-      isRunning: false,
-    }]);
+    deviceManager.setDeviceImages("android", [
+      {
+        name: "phone-api-36-a",
+        platform: "android",
+        isRunning: false,
+      },
+    ]);
     setDeviceToolsDependencies({
       exactDeviceProvisionerFactory: () => retryingProvisioner,
       ensureCtrlProxyReady: async () => {
@@ -972,8 +1007,8 @@ describe("provisionDevice handler", () => {
       readiness: "automation" as const,
     };
 
-    const failed = JSON.parse((await tool.handler(args) as any).content[0].text);
-    const retried = JSON.parse((await tool.handler(args) as any).content[0].text);
+    const failed = JSON.parse(((await tool.handler(args)) as any).content[0].text);
+    const retried = JSON.parse(((await tool.handler(args)) as any).content[0].text);
 
     expect(failed).toMatchObject({ success: false });
     expect(retried).toMatchObject({ created: true, adopted: false });
@@ -984,10 +1019,11 @@ describe("provisionDevice handler", () => {
     let resolveProvision!: (result: ExactProvisionedDevice) => void;
     let provisionSignal: AbortSignal | undefined;
     const pendingProvisioner: ExactDeviceProvisioner = {
-      provision: async (request) => await new Promise<ExactProvisionedDevice>((resolve) => {
-        provisionSignal = request.signal;
-        resolveProvision = resolve;
-      }),
+      provision: async (request) =>
+        await new Promise<ExactProvisionedDevice>((resolve) => {
+          provisionSignal = request.signal;
+          resolveProvision = resolve;
+        }),
     };
     setDeviceToolsDependencies({
       exactDeviceProvisionerFactory: () => pendingProvisioner,
@@ -1016,7 +1052,7 @@ describe("provisionDevice handler", () => {
     const second = tool.handler(args);
     firstCaller.abort(new Error("first caller disconnected"));
 
-    expect(JSON.parse((await first as any).content[0].text)).toMatchObject({
+    expect(JSON.parse(((await first) as any).content[0].text)).toMatchObject({
       success: false,
     });
     expect(provisionSignal?.aborted).toBe(false);
@@ -1031,7 +1067,7 @@ describe("provisionDevice handler", () => {
       resolvedSpec: args.device.spec,
     });
 
-    expect(JSON.parse((await second as any).content[0].text)).toMatchObject({
+    expect(JSON.parse(((await second) as any).content[0].text)).toMatchObject({
       operationId: "operation-shared-abort",
     });
     expect(provisionSignal?.aborted).toBe(false);
@@ -1057,16 +1093,20 @@ describe("provisionDevice handler", () => {
     };
 
     await tool.handler(base);
-    const conflicting = JSON.parse((await tool.handler({
-      ...base,
-      device: {
-        ...base.device,
-        spec: {
-          ...base.device.spec,
-          deviceType: "com.apple.CoreSimulator.SimDeviceType.iPad-Pro-13-inch-M4",
-        },
-      },
-    }) as any).content[0].text);
+    const conflicting = JSON.parse(
+      (
+        (await tool.handler({
+          ...base,
+          device: {
+            ...base.device,
+            spec: {
+              ...base.device.spec,
+              deviceType: "com.apple.CoreSimulator.SimDeviceType.iPad-Pro-13-inch-M4",
+            },
+          },
+        })) as any
+      ).content[0].text,
+    );
 
     expect(conflicting).toMatchObject({
       success: false,
@@ -1080,10 +1120,13 @@ describe("provisionDevice handler", () => {
     const timer = new FakeTimer();
     let provisionSignal: AbortSignal | undefined;
     const pendingProvisioner: ExactDeviceProvisioner = {
-      provision: async (request) => await new Promise<ExactProvisionedDevice>((_resolve, reject) => {
-        provisionSignal = request.signal;
-        request.signal?.addEventListener("abort", () => reject(request.signal?.reason), { once: true });
-      }),
+      provision: async (request) =>
+        await new Promise<ExactProvisionedDevice>((_resolve, reject) => {
+          provisionSignal = request.signal;
+          request.signal?.addEventListener("abort", () => reject(request.signal?.reason), {
+            once: true,
+          });
+        }),
     };
     setDeviceToolsDependencies({
       timer,
@@ -1116,7 +1159,7 @@ describe("provisionDevice handler", () => {
     expect(provisionSignal).toBeInstanceOf(AbortSignal);
     timer.advanceTime(1_000);
 
-    expect(JSON.parse((await response as any).content[0].text)).toMatchObject({
+    expect(JSON.parse(((await response) as any).content[0].text)).toMatchObject({
       success: false,
       error: {
         code: "timeout",

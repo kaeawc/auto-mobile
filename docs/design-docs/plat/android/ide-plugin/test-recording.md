@@ -6,7 +6,6 @@
 
 The AutoMobile IDE Plugin includes test recording capabilities to capture user interactions and generate executable test plans.
 
-
 Test recording allows developers to:
 
 - **Record interactions** - Capture taps, swipes, and inputs as they interact with the app
@@ -34,6 +33,7 @@ flowchart LR
 ### Start Recording
 
 From the IDE plugin tool window:
+
 1. Ensure the AutoMobile server is running
 2. Select the target device from the dropdown
 3. Click "Start Recording" to begin capturing interactions
@@ -92,6 +92,7 @@ steps:
 ### From IDE Plugin
 
 Use the "Execute Plan" button in the tool window to run the recorded test:
+
 1. Open the YAML plan file
 2. Click "Execute Plan"
 3. Monitor execution in the tool window
@@ -104,7 +105,7 @@ Use the `executePlan` MCP tool directly:
 await executePlan({
   planContent: yamlPlanString,
   platform: "android",
-})
+});
 ```
 
 ### From CI
@@ -143,15 +144,17 @@ steps:
 ### Advanced Features
 
 **Conditional steps**:
+
 ```yaml
 - tool: tapOn
   params:
     text: "Skip Tutorial"
     action: tap
-  optional: true  # Don't fail if element not found
+  optional: true # Don't fail if element not found
 ```
 
 **Assertions**:
+
 ```yaml
 - tool: observe
   assert:
@@ -159,6 +162,7 @@ steps:
 ```
 
 **Wait conditions**:
+
 ```yaml
 - tool: tapOn
   params:

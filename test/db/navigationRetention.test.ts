@@ -78,11 +78,11 @@ describe("navigationRetention config", () => {
   test("rejects non-positive / non-numeric env values", () => {
     process.env.AUTOMOBILE_NAV_RETENTION_PER_APP_MAX_OBSERVATIONS = "-5";
     expect(resolveNavigationRetentionConfig().perAppMaxObservations).toBe(
-      DEFAULT_PER_APP_MAX_OBSERVATIONS
+      DEFAULT_PER_APP_MAX_OBSERVATIONS,
     );
     process.env.AUTOMOBILE_NAV_RETENTION_PER_APP_MAX_OBSERVATIONS = "abc";
     expect(resolveNavigationRetentionConfig().perAppMaxObservations).toBe(
-      DEFAULT_PER_APP_MAX_OBSERVATIONS
+      DEFAULT_PER_APP_MAX_OBSERVATIONS,
     );
   });
 
@@ -97,33 +97,37 @@ describe("navigationRetention config", () => {
   });
 
   test("rejects invalid EXPLICIT overrides (0 / negative / NaN / float) -> default", () => {
-    expect(resolveNavigationRetentionConfig({ perAppMaxObservations: 0 }).perAppMaxObservations).toBe(
-      DEFAULT_PER_APP_MAX_OBSERVATIONS
-    );
     expect(
-      resolveNavigationRetentionConfig({ perAppMaxObservations: -3 }).perAppMaxObservations
+      resolveNavigationRetentionConfig({ perAppMaxObservations: 0 }).perAppMaxObservations,
     ).toBe(DEFAULT_PER_APP_MAX_OBSERVATIONS);
     expect(
-      resolveNavigationRetentionConfig({ globalMaxObservations: Number.NaN }).globalMaxObservations
+      resolveNavigationRetentionConfig({ perAppMaxObservations: -3 }).perAppMaxObservations,
+    ).toBe(DEFAULT_PER_APP_MAX_OBSERVATIONS);
+    expect(
+      resolveNavigationRetentionConfig({ globalMaxObservations: Number.NaN }).globalMaxObservations,
     ).toBe(DEFAULT_GLOBAL_MAX_OBSERVATIONS);
     expect(resolveNavigationRetentionConfig({ structureTtlMs: 1.5 }).structureTtlMs).toBe(
-      DEFAULT_STRUCTURE_TTL_MS
+      DEFAULT_STRUCTURE_TTL_MS,
     );
     // A valid override still wins.
-    expect(resolveNavigationRetentionConfig({ perAppMaxObservations: 7 }).perAppMaxObservations).toBe(7);
+    expect(
+      resolveNavigationRetentionConfig({ perAppMaxObservations: 7 }).perAppMaxObservations,
+    ).toBe(7);
   });
 
   test("rejects an interval above the Int32 setInterval ceiling (would clamp to 1ms)", () => {
     process.env.AUTOMOBILE_NAV_RETENTION_INTERVAL_MS = String(MAX_INTERVAL_MS + 1);
     expect(resolveNavigationRetentionIntervalMs()).toBe(DEFAULT_NAV_RETENTION_INTERVAL_MS);
-    expect(resolveNavigationRetentionIntervalMs(3_000_000_000)).toBe(DEFAULT_NAV_RETENTION_INTERVAL_MS);
+    expect(resolveNavigationRetentionIntervalMs(3_000_000_000)).toBe(
+      DEFAULT_NAV_RETENTION_INTERVAL_MS,
+    );
     // A large-but-in-range interval is honored.
     expect(resolveNavigationRetentionIntervalMs(MAX_INTERVAL_MS)).toBe(MAX_INTERVAL_MS);
   });
 
   test("clamps evictionChunkSize to the safe batch ceiling (env and override)", () => {
     expect(resolveNavigationRetentionConfig({ evictionChunkSize: 300_000 }).evictionChunkSize).toBe(
-      MAX_EVICTION_CHUNK_SIZE
+      MAX_EVICTION_CHUNK_SIZE,
     );
     expect(resolveNavigationRetentionConfig({ evictionChunkSize: 2 }).evictionChunkSize).toBe(2);
     expect(resolveNavigationRetentionConfig().evictionChunkSize).toBe(DEFAULT_EVICTION_CHUNK_SIZE);
@@ -147,7 +151,7 @@ describe("NavigationRetention prune", () => {
   });
 
   function retention(config = CONFIG): NavigationRetention {
-    return new NavigationRetention(db, config, async filePath => {
+    return new NavigationRetention(db, config, async (filePath) => {
       removed.push(filePath);
     });
   }
@@ -168,7 +172,7 @@ describe("NavigationRetention prune", () => {
     nodeId: number,
     buildKeyId: number,
     session: string,
-    seenAt: number
+    seenAt: number,
   ): Promise<void> {
     await repo.recordNodeObservation(nodeId, buildKeyId, "device-1", session, seenAt);
   }
@@ -176,7 +180,7 @@ describe("NavigationRetention prune", () => {
   async function countNodeObs(): Promise<number> {
     const row = await db
       .selectFrom("navigation_node_observations")
-      .select(eb => eb.fn.countAll<number>().as("c"))
+      .select((eb) => eb.fn.countAll<number>().as("c"))
       .executeTakeFirst();
     return Number(row?.c ?? 0);
   }
@@ -197,10 +201,14 @@ describe("NavigationRetention prune", () => {
     expect(summary.nodeObservationsDeleted).toBe(1);
     const remaining = await db
       .selectFrom("navigation_node_observations")
-      .innerJoin("navigation_build_keys as bk", "bk.id", "navigation_node_observations.build_key_id")
+      .innerJoin(
+        "navigation_build_keys as bk",
+        "bk.id",
+        "navigation_node_observations.build_key_id",
+      )
       .select("bk.version_code as v")
       .execute();
-    expect(remaining.map(r => r.v)).toEqual([2]);
+    expect(remaining.map((r) => r.v)).toEqual([2]);
   });
 
   test("computeProtectedBuildKeyIds picks the newest-seen build per app", async () => {
@@ -259,7 +267,7 @@ describe("NavigationRetention prune", () => {
     expect(summary.screenshotsCleared).toBe(5);
     expect(removed.sort()).toEqual(paths.sort());
     const remaining = await db.selectFrom("navigation_nodes").select("screenshot_path").execute();
-    expect(remaining.every(r => r.screenshot_path === null)).toBe(true);
+    expect(remaining.every((r) => r.screenshot_path === null)).toBe(true);
   });
 
   test("keeps a recent screenshot (within short TTL)", async () => {
@@ -290,7 +298,7 @@ describe("NavigationRetention prune", () => {
     const nodeCount = await countNodeObs();
     const edgeCount = await db
       .selectFrom("navigation_edge_observations")
-      .select(eb => eb.fn.countAll<number>().as("c"))
+      .select((eb) => eb.fn.countAll<number>().as("c"))
       .executeTakeFirst();
     expect(nodeCount).toBe(1);
     expect(Number(edgeCount?.c)).toBe(1);
@@ -322,7 +330,7 @@ describe("NavigationRetention prune", () => {
       .select(["session_uuid", "last_seen_at"])
       .orderBy("last_seen_at", "asc")
       .execute();
-    const sessions = remaining.map(r => r.session_uuid).sort();
+    const sessions = remaining.map((r) => r.session_uuid).sort();
     expect(sessions).toEqual(["active", "s4"]); // oldest s0..s3 gone; newest kept
   });
 
@@ -347,10 +355,10 @@ describe("NavigationRetention prune", () => {
       .selectFrom("navigation_node_observations")
       .select("session_uuid")
       .execute();
-    expect(remaining.map(r => r.session_uuid).sort()).toEqual(["s3", "s4", "s5"]);
+    expect(remaining.map((r) => r.session_uuid).sort()).toEqual(["s3", "s4", "s5"]);
     // (c) the protected build key is never orphan-swept even after thinning.
     const keys = await db.selectFrom("navigation_build_keys").select("id").execute();
-    expect(keys.map(k => k.id)).toEqual([bk]);
+    expect(keys.map((k) => k.id)).toEqual([bk]);
   });
 
   test("never evicts the active row even under an aggressive cap", async () => {
@@ -373,7 +381,7 @@ describe("NavigationRetention prune", () => {
       .selectFrom("navigation_node_observations")
       .select("session_uuid")
       .execute();
-    expect(remaining.map(r => r.session_uuid)).toEqual(["active"]);
+    expect(remaining.map((r) => r.session_uuid)).toEqual(["active"]);
   });
 
   test("evicts in bounded batches (chunk loop) without missing rows", async () => {
@@ -398,7 +406,7 @@ describe("NavigationRetention prune", () => {
       .selectFrom("navigation_node_observations")
       .select("session_uuid")
       .execute();
-    expect(remaining.map(r => r.session_uuid)).toEqual(["s6"]);
+    expect(remaining.map((r) => r.session_uuid)).toEqual(["s6"]);
   });
 
   test("global LRU cap evicts oldest across apps, sparing each app's active build", async () => {
@@ -432,7 +440,7 @@ describe("NavigationRetention prune", () => {
       .selectFrom("navigation_node_observations")
       .select("session_uuid")
       .execute();
-    const sessions = rows.map(r => r.session_uuid).sort();
+    const sessions = rows.map((r) => r.session_uuid).sort();
     expect(sessions).toEqual(["p1", "p2"]);
   });
 
@@ -450,7 +458,7 @@ describe("NavigationRetention prune", () => {
     // bkOld's only observation pruned -> bkOld orphaned and swept; bkNew protected.
     expect(summary.buildKeysDeleted).toBe(1);
     const keys = await db.selectFrom("navigation_build_keys").select("id").execute();
-    expect(keys.map(k => k.id)).toEqual([bkNew]);
+    expect(keys.map((k) => k.id)).toEqual([bkNew]);
   });
 
   test("is idempotent: a second pass at the same clock deletes nothing", async () => {
@@ -462,8 +470,9 @@ describe("NavigationRetention prune", () => {
     await repo.updateNodeScreenshotById(nodeId, "/tmp/x.webp");
 
     const first = await retention().prune(1_000_000);
-    expect(first.nodeObservationsDeleted + first.buildKeysDeleted + first.screenshotsCleared)
-      .toBeGreaterThan(0);
+    expect(
+      first.nodeObservationsDeleted + first.buildKeysDeleted + first.screenshotsCleared,
+    ).toBeGreaterThan(0);
 
     removed.length = 0;
     const second = await retention().prune(1_000_000);
@@ -503,13 +512,23 @@ describe("eviction active-row exclusion is relational (bounded bind params)", ()
     // active/observation row (which a `NOT IN (activeIds)` list would produce and
     // could exceed bun:sqlite's MAX_VARIABLE_NUMBER of 250_000).
     const protectedIds = [1, 2, 3, 4, 5];
-    const compiled = buildOldestNodeEvictableQuery(db, "com.example.app", protectedIds, 100).compile();
+    const compiled = buildOldestNodeEvictableQuery(
+      db,
+      "com.example.app",
+      protectedIds,
+      100,
+    ).compile();
     // app id (1) + protectedIds (5) + limit (1) = 7; the correlated max subquery
     // and the app-scope subquery bind no per-row params.
     expect(compiled.parameters.length).toBe(protectedIds.length + 2);
     // Bind shape does not depend on active-row count: a larger protected set grows
     // the param count by exactly its own size, nothing more.
-    const bigger = buildOldestNodeEvictableQuery(db, "com.example.app", [1, 2, 3, 4, 5, 6, 7], 100).compile();
+    const bigger = buildOldestNodeEvictableQuery(
+      db,
+      "com.example.app",
+      [1, 2, 3, 4, 5, 6, 7],
+      100,
+    ).compile();
     expect(bigger.parameters.length).toBe(7 + 2);
   });
 
@@ -541,6 +560,6 @@ describe("eviction active-row exclusion is relational (bounded bind params)", ()
       .select(["session_uuid", "last_seen_at"])
       .execute();
     expect(survivors.length).toBe(300);
-    expect(survivors.every(r => r.last_seen_at === 10_000)).toBe(true);
+    expect(survivors.every((r) => r.last_seen_at === 10_000)).toBe(true);
   });
 });

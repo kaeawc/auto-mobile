@@ -46,14 +46,12 @@ export class PlanValidator {
    */
   private static validateDevicesField(plan: Plan): void {
     if (!Array.isArray(plan.devices)) {
-      throw new ActionableError(
-        "Plan 'devices' field must be an array of device labels"
-      );
+      throw new ActionableError("Plan 'devices' field must be an array of device labels");
     }
 
     if (plan.devices.length === 0) {
       throw new ActionableError(
-        "Plan 'devices' array cannot be empty. Remove the field or specify at least one device."
+        "Plan 'devices' array cannot be empty. Remove the field or specify at least one device.",
       );
     }
 
@@ -61,7 +59,7 @@ export class PlanValidator {
 
     if (hasDefinitions && hasLabels) {
       throw new ActionableError(
-        "Plan 'devices' must be a list of labels or a list of objects with label/platform (do not mix formats)."
+        "Plan 'devices' must be a list of labels or a list of objects with label/platform (do not mix formats).",
       );
     }
 
@@ -69,12 +67,12 @@ export class PlanValidator {
       for (const device of definitions) {
         if (!device.label || device.label.trim() === "") {
           throw new ActionableError(
-            `Invalid device label: ${JSON.stringify(device.label)}. Device labels must be non-empty strings.`
+            `Invalid device label: ${JSON.stringify(device.label)}. Device labels must be non-empty strings.`,
           );
         }
         if (!device.platform || (device.platform !== "android" && device.platform !== "ios")) {
           throw new ActionableError(
-            `Invalid device platform for ${device.label}: ${JSON.stringify(device.platform)}.`
+            `Invalid device platform for ${device.label}: ${JSON.stringify(device.platform)}.`,
           );
         }
       }
@@ -82,21 +80,21 @@ export class PlanValidator {
 
     if (labels.length !== plan.devices.length) {
       throw new ActionableError(
-        "Plan 'devices' entries must be strings or objects with label/platform."
+        "Plan 'devices' entries must be strings or objects with label/platform.",
       );
     }
 
     const uniqueDevices = new Set(labels);
     if (uniqueDevices.size !== labels.length) {
       throw new ActionableError(
-        `Plan 'devices' array contains duplicate labels: [${labels.join(", ")}]`
+        `Plan 'devices' array contains duplicate labels: [${labels.join(", ")}]`,
       );
     }
 
     for (const device of labels) {
       if (typeof device !== "string" || device.trim() === "") {
         throw new ActionableError(
-          `Invalid device label: ${JSON.stringify(device)}. Device labels must be non-empty strings.`
+          `Invalid device label: ${JSON.stringify(device)}. Device labels must be non-empty strings.`,
         );
       }
     }
@@ -182,41 +180,36 @@ export class PlanValidator {
     const errors: string[] = [];
 
     if (missingLabels.length > 0) {
-      const steps = missingLabels
-        .map(m => `step ${m.index} (${m.tool})`)
-        .join(", ");
+      const steps = missingLabels.map((m) => `step ${m.index} (${m.tool})`).join(", ");
       errors.push(
-        `Plan declares 'devices' field but the following steps are missing 'device' parameter: ${steps}`
+        `Plan declares 'devices' field but the following steps are missing 'device' parameter: ${steps}`,
       );
     }
 
     if (invalidLabels.length > 0) {
       const steps = invalidLabels
-        .map(m => `step ${m.index} (${m.tool}): device="${m.device}"`)
+        .map((m) => `step ${m.index} (${m.tool}): device="${m.device}"`)
         .join(", ");
       errors.push(
-        `Plan declares devices [${Array.from(deviceSet).join(", ")}] but the following steps use invalid device labels: ${steps}`
+        `Plan declares devices [${Array.from(deviceSet).join(", ")}] but the following steps use invalid device labels: ${steps}`,
       );
     }
 
     if (missingInCriticalSection.length > 0) {
       const steps = missingInCriticalSection
-        .map(m => `step ${m.parentIndex}.steps[${m.subIndex}] (${m.tool})`)
+        .map((m) => `step ${m.parentIndex}.steps[${m.subIndex}] (${m.tool})`)
         .join(", ");
       errors.push(
-        `Every step inside a criticalSection must declare a 'device' parameter, but the following sub-steps are missing it: ${steps}`
+        `Every step inside a criticalSection must declare a 'device' parameter, but the following sub-steps are missing it: ${steps}`,
       );
     }
 
     if (invalidInCriticalSection.length > 0) {
       const steps = invalidInCriticalSection
-        .map(
-          m =>
-            `step ${m.parentIndex}.steps[${m.subIndex}] (${m.tool}): device="${m.device}"`
-        )
+        .map((m) => `step ${m.parentIndex}.steps[${m.subIndex}] (${m.tool}): device="${m.device}"`)
         .join(", ");
       errors.push(
-        `Plan declares devices [${Array.from(deviceSet).join(", ")}] but the following criticalSection sub-steps use invalid device labels: ${steps}`
+        `Plan declares devices [${Array.from(deviceSet).join(", ")}] but the following criticalSection sub-steps use invalid device labels: ${steps}`,
       );
     }
 
@@ -272,29 +265,25 @@ export class PlanValidator {
 
     for (const [lock, occurrences] of lockUsage.entries()) {
       const deviceCounts = new Set(
-        occurrences
-          .map(o => o.deviceCount)
-          .filter(c => typeof c === "number")
+        occurrences.map((o) => o.deviceCount).filter((c) => typeof c === "number"),
       );
 
       if (deviceCounts.size > 1) {
         const detail = occurrences
-          .map(o => `step ${o.stepIndex} deviceCount=${String(o.deviceCount)}`)
+          .map((o) => `step ${o.stepIndex} deviceCount=${String(o.deviceCount)}`)
           .join(", ");
         errors.push(
-          `criticalSection lock "${lock}" has inconsistent deviceCount values: ${detail}. All steps sharing a lock must declare the same deviceCount.`
+          `criticalSection lock "${lock}" has inconsistent deviceCount values: ${detail}. All steps sharing a lock must declare the same deviceCount.`,
         );
         continue;
       }
 
       const declaredCount =
-        deviceCounts.size === 1
-          ? (deviceCounts.values().next().value as number)
-          : undefined;
+        deviceCounts.size === 1 ? (deviceCounts.values().next().value as number) : undefined;
 
       if (declaredCount !== undefined && occurrences.length !== declaredCount) {
         errors.push(
-          `criticalSection lock "${lock}" declares deviceCount=${declaredCount} but ${occurrences.length} step${occurrences.length === 1 ? "" : "s"} reference${occurrences.length === 1 ? "s" : ""} it. Every participating device needs its own criticalSection step with this lock.`
+          `criticalSection lock "${lock}" declares deviceCount=${declaredCount} but ${occurrences.length} step${occurrences.length === 1 ? "" : "s"} reference${occurrences.length === 1 ? "s" : ""} it. Every participating device needs its own criticalSection step with this lock.`,
         );
       }
 
@@ -310,7 +299,7 @@ export class PlanValidator {
       for (const [device, indices] of devicesSeen.entries()) {
         if (indices.length > 1) {
           errors.push(
-            `criticalSection lock "${lock}" is entered twice by device "${device}" (steps ${indices.join(", ")}). Each device can participate in a given lock at most once.`
+            `criticalSection lock "${lock}" is entered twice by device "${device}" (steps ${indices.join(", ")}). Each device can participate in a given lock at most once.`,
           );
         }
       }
@@ -354,7 +343,7 @@ export class PlanValidator {
     if (hasFeatures && (!plan.devices || plan.devices.length === 0)) {
       throw new ActionableError(
         "Plan uses multi-device features (device labels or criticalSection) but does not declare 'devices' field. " +
-          "Add a 'devices' array at the top level of your plan."
+          "Add a 'devices' array at the top level of your plan.",
       );
     }
   }

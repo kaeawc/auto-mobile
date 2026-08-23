@@ -82,7 +82,7 @@ describe("TelemetryRecorder default repository override (#3084)", () => {
         source: null,
         arguments: null,
         metadata: null,
-      })
+      }),
     ).resolves.toBeUndefined();
 
     // No lingering barrier work from the no-op path.

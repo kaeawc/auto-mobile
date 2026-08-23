@@ -1,17 +1,29 @@
 import { errorMessage } from "../../utils/describeUnknownError";
-import { BootedDevice, ActionableError, DeviceSnapshotManifest, DeviceSnapshotType } from "../../models";
+import {
+  BootedDevice,
+  ActionableError,
+  DeviceSnapshotManifest,
+  DeviceSnapshotType,
+} from "../../models";
 import type { SnapshotRestoreProvider } from "../../utils/interfaces/SnapshotProvider";
-import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  AdbClientFactory,
+  defaultAdbClientFactory,
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AndroidEmulatorClient } from "../../utils/android-cmdline-tools/AndroidEmulatorClient";
 import {
   buildVmSnapshotCommand,
   evaluateVmSnapshotResult,
-  formatVmSnapshotExecutionError
+  formatVmSnapshotExecutionError,
 } from "../../utils/android-cmdline-tools/vmSnapshot";
 import { DeviceSnapshotStore, SnapshotPathOptions } from "../../utils/DeviceSnapshotStore";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
-import { getAppDataContainerPath, IOS_APP_DATA_FOLDERS, terminateAppIfRunning } from "../../utils/ios-cmdline-tools/iosAppContainer";
+import {
+  getAppDataContainerPath,
+  IOS_APP_DATA_FOLDERS,
+  terminateAppIfRunning,
+} from "../../utils/ios-cmdline-tools/iosAppContainer";
 import { restoreIosSettings } from "../../utils/ios-cmdline-tools/iosSettings";
 import { pathExists } from "../../utils/filesystem/DefaultFileSystem";
 import { logger } from "../../utils/logger";
@@ -55,7 +67,7 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
     emulator?: AndroidEmulatorClient,
     timer: Timer = defaultTimer,
     store: DeviceSnapshotStore = new DeviceSnapshotStore(),
-    simctl?: SimCtlClient
+    simctl?: SimCtlClient,
   ) {
     this.device = device;
     this.adb = adbFactory.create(device);
@@ -83,19 +95,23 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
       case "ios":
         return this.executeIos(args);
       default:
-        throw new ActionableError(`Snapshot restore is not supported for platform '${this.device.platform}'`);
+        throw new ActionableError(
+          `Snapshot restore is not supported for platform '${this.device.platform}'`,
+        );
     }
   }
 
   private async executeAndroid(args: RestoreSnapshotArgs): Promise<RestoreSnapshotResult> {
     const { snapshotName, manifest, useVmSnapshot = true, vmSnapshotTimeoutMs = 30000 } = args;
 
-    logger.info(`Restoring snapshot '${snapshotName}' (type: ${manifest.snapshotType}) to device ${this.device.deviceId}`);
+    logger.info(
+      `Restoring snapshot '${snapshotName}' (type: ${manifest.snapshotType}) to device ${this.device.deviceId}`,
+    );
 
     // Verify device compatibility
     if (manifest.platform !== this.device.platform) {
       throw new ActionableError(
-        `Snapshot platform '${manifest.platform}' does not match device platform '${this.device.platform}'`
+        `Snapshot platform '${manifest.platform}' does not match device platform '${this.device.platform}'`,
       );
     }
 
@@ -113,7 +129,7 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
 
     return {
       snapshotType: manifest.snapshotType,
-      restoredAt: new Date().toISOString()
+      restoredAt: new Date().toISOString(),
     };
   }
 
@@ -123,7 +139,7 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
   private async restoreVmSnapshot(
     snapshotName: string,
     manifest: DeviceSnapshotManifest,
-    vmSnapshotTimeoutMs: number
+    vmSnapshotTimeoutMs: number,
   ): Promise<void> {
     logger.info(`Restoring VM snapshot for emulator ${this.device.deviceId}`);
 
@@ -162,7 +178,7 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
    */
   private async restoreAdbSnapshot(
     snapshotName: string,
-    manifest: DeviceSnapshotManifest
+    manifest: DeviceSnapshotManifest,
   ): Promise<void> {
     logger.info(`Restoring ADB-based snapshot for device ${this.device.deviceId}`);
 
@@ -258,16 +274,25 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
           let applied = false;
           try {
             const a11y = AndroidCtrlProxyClient.getInstance(this.device);
-            const a11yResult = await a11y.requestSettingsPut(settingsType as SettingsNamespace, key, value, "string");
+            const a11yResult = await a11y.requestSettingsPut(
+              settingsType as SettingsNamespace,
+              key,
+              value,
+              "string",
+            );
             if (a11yResult.success) {
               applied = true;
             }
           } catch (error) {
-            logger.debug(`[RestoreSnapshot] a11y settings put failed for ${settingsType}/${key}: ${error}`);
+            logger.debug(
+              `[RestoreSnapshot] a11y settings put failed for ${settingsType}/${key}: ${error}`,
+            );
           }
           if (!applied) {
             // ADB hands the command to the device shell, so preserve the setting value as one literal word.
-            await this.adb.executeCommand(`shell settings put ${settingsType} ${key} ${shellQuote(value)}`);
+            await this.adb.executeCommand(
+              `shell settings put ${settingsType} ${key} ${shellQuote(value)}`,
+            );
           }
           successCount++;
         } catch (error) {
@@ -276,7 +301,9 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
         }
       }
 
-      logger.info(`${settingsType} settings restored: ${successCount} succeeded, ${failureCount} failed`);
+      logger.info(
+        `${settingsType} settings restored: ${successCount} succeeded, ${failureCount} failed`,
+      );
     }
   }
 
@@ -285,7 +312,7 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
    */
   private async restoreAppData(
     snapshotName: string,
-    manifest: DeviceSnapshotManifest
+    manifest: DeviceSnapshotManifest,
   ): Promise<void> {
     logger.info("Restoring app data");
 
@@ -298,7 +325,12 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
     const { backupFile, backupMethod, backedUpPackages } = manifest.appDataBackup;
 
     // If no backup was performed, skip restore
-    if (backupMethod === "none" || !backupFile || !backedUpPackages || backedUpPackages.length === 0) {
+    if (
+      backupMethod === "none" ||
+      !backupFile ||
+      !backedUpPackages ||
+      backedUpPackages.length === 0
+    ) {
       logger.info(`No app data backup available (method: ${backupMethod || "none"})`);
       return;
     }
@@ -316,7 +348,9 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
         return;
       }
 
-      logger.info(`Found backup file: ${backupFilePath} (${(stats.size / 1024 / 1024).toFixed(2)} MB)`);
+      logger.info(
+        `Found backup file: ${backupFilePath} (${(stats.size / 1024 / 1024).toFixed(2)} MB)`,
+      );
       logger.info(`Restoring ${backedUpPackages.length} apps using adb restore`);
       logger.info("Please confirm the restore on your device if prompted");
 
@@ -340,7 +374,7 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
    */
   private async performAdbRestore(
     backupFilePath: string,
-    timeoutMs: number = 30000
+    timeoutMs: number = 30000,
   ): Promise<{ success: boolean; timedOut: boolean }> {
     // Declared outside try so the catch block can clear a pending timeout.
     let timeoutHandle: NodeJS.Timeout | null = null;
@@ -351,12 +385,12 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
 
       const result = await Promise.race([
         this.adb.executeCommand(`restore "${backupFilePath}"`),
-        new Promise<{ stdout: string; stderr: string; timedOut: true }>(resolve => {
+        new Promise<{ stdout: string; stderr: string; timedOut: true }>((resolve) => {
           timeoutHandle = this.timer.setTimeout(() => {
             timedOut = true;
             resolve({ stdout: "", stderr: "Restore timed out", timedOut: true });
           }, timeoutMs);
-        })
+        }),
       ]);
 
       // Clear timeout if command completed first
@@ -365,7 +399,9 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
       }
 
       if ("timedOut" in result && result.timedOut) {
-        logger.warn(`Restore timed out after ${timeoutMs}ms - user may not have confirmed on device`);
+        logger.warn(
+          `Restore timed out after ${timeoutMs}ms - user may not have confirmed on device`,
+        );
         return { success: false, timedOut: true };
       }
 
@@ -391,7 +427,7 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
     try {
       // Launch the app to restore foreground state
       await this.adb.executeCommand(
-        `shell am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER ${packageName}`
+        `shell am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER ${packageName}`,
       );
       logger.info(`Launched ${packageName}`);
     } catch (error) {
@@ -406,13 +442,13 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
 
     if (manifest.platform !== "ios") {
       throw new ActionableError(
-        `Snapshot platform '${manifest.platform}' does not match device platform '${this.device.platform}'`
+        `Snapshot platform '${manifest.platform}' does not match device platform '${this.device.platform}'`,
       );
     }
 
     if (manifest.snapshotType !== "app_data") {
       throw new ActionableError(
-        `Unsupported iOS snapshot type '${manifest.snapshotType}'. Re-capture using app container backups.`
+        `Unsupported iOS snapshot type '${manifest.snapshotType}'. Re-capture using app container backups.`,
       );
     }
 
@@ -438,7 +474,7 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
 
   private async restoreIosAppData(
     snapshotName: string,
-    manifest: DeviceSnapshotManifest
+    manifest: DeviceSnapshotManifest,
   ): Promise<void> {
     if (!manifest.includeAppData) {
       logger.info("[iOS] Snapshot does not include app data; skipping restore");
@@ -464,10 +500,10 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
 
     const installedBundles = await this.getInstalledIosBundleIds();
     if (installedBundles.size > 0) {
-      const missingBundles = bundleIds.filter(bundleId => !installedBundles.has(bundleId));
+      const missingBundles = bundleIds.filter((bundleId) => !installedBundles.has(bundleId));
       if (missingBundles.length > 0) {
         throw new ActionableError(
-          `App(s) not installed on simulator: ${missingBundles.join(", ")}. Please reinstall and retry restore.`
+          `App(s) not installed on simulator: ${missingBundles.join(", ")}. Please reinstall and retry restore.`,
         );
       }
     } else {
@@ -491,9 +527,12 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
    */
   private async resolveIosAppDataPath(
     snapshotName: string,
-    manifest: DeviceSnapshotManifest
+    manifest: DeviceSnapshotManifest,
   ): Promise<string | undefined> {
-    const manifestPath = this.store.getAppDataPath(snapshotName, this.getIosPathOptions(manifest.deviceId));
+    const manifestPath = this.store.getAppDataPath(
+      snapshotName,
+      this.getIosPathOptions(manifest.deviceId),
+    );
     if (await pathExists(manifestPath)) {
       return manifestPath;
     }
@@ -502,13 +541,16 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
       return undefined;
     }
 
-    const fallbackPath = this.store.getAppDataPath(snapshotName, this.getIosPathOptions(this.device.deviceId));
+    const fallbackPath = this.store.getAppDataPath(
+      snapshotName,
+      this.getIosPathOptions(this.device.deviceId),
+    );
     if (!(await pathExists(fallbackPath))) {
       return undefined;
     }
 
     logger.info(
-      `[iOS] App data not found for '${manifest.deviceId}', using current device path '${this.device.deviceId}'`
+      `[iOS] App data not found for '${manifest.deviceId}', using current device path '${this.device.deviceId}'`,
     );
     return fallbackPath;
   }
@@ -520,7 +562,11 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
    */
   private async restoreIosBundleContainer(bundleId: string, appDataPath: string): Promise<void> {
     await terminateAppIfRunning(this.simctl, this.device.deviceId, bundleId);
-    const containerPath = await getAppDataContainerPath(this.simctl, this.device.deviceId, bundleId);
+    const containerPath = await getAppDataContainerPath(
+      this.simctl,
+      this.device.deviceId,
+      bundleId,
+    );
     if (!containerPath) {
       return;
     }
@@ -560,7 +606,7 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
     if (snapshotVersion.major !== targetVersion.major) {
       throw new ActionableError(
         `Snapshot iOS version '${manifest.osVersion}' is incompatible with simulator iOS '${deviceOsVersion}'. ` +
-        `Please restore on an iOS ${snapshotVersion.major}.x simulator.`
+          `Please restore on an iOS ${snapshotVersion.major}.x simulator.`,
       );
     }
   }
@@ -575,7 +621,7 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
       let osVersion: string | undefined = deviceInfo.os_version;
       if (!osVersion && deviceInfo.runtime) {
         const runtimes = await this.simctl.getRuntimes();
-        const runtime = runtimes.find(entry => entry.identifier === deviceInfo.runtime);
+        const runtime = runtimes.find((entry) => entry.identifier === deviceInfo.runtime);
         osVersion = runtime?.version || runtime?.name;
       }
 
@@ -618,7 +664,7 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
 
   private async resolveIosSnapshotBundleIds(
     appDataPath: string,
-    manifest: DeviceSnapshotManifest
+    manifest: DeviceSnapshotManifest,
   ): Promise<string[]> {
     const fromManifest = manifest.appDataBackup?.backedUpPackages;
     if (fromManifest && fromManifest.length > 0) {
@@ -627,9 +673,7 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
 
     try {
       const entries = await fs.readdir(appDataPath, { withFileTypes: true });
-      return entries
-        .filter(entry => entry.isDirectory())
-        .map(entry => entry.name);
+      return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
     } catch (error) {
       logger.warn(`[iOS] Failed to read app data bundles: ${error}`);
       return [];

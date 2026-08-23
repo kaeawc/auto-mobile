@@ -75,14 +75,14 @@ export class CtrlProxyHierarchy {
     perf?: PerformanceTracker,
     skipWaitForFresh?: boolean,
     minTimestamp?: number,
-    disableAllFiltering?: boolean
+    disableAllFiltering?: boolean,
   ): Promise<ViewHierarchyResult | null> {
     const response = await this.getLatestHierarchy(
       !skipWaitForFresh,
       15000, // Increased from 2000ms - XCUITest hierarchy extraction is slow
       perf,
       skipWaitForFresh,
-      minTimestamp
+      minTimestamp,
     );
 
     if (!response.hierarchy) {
@@ -110,7 +110,7 @@ export class CtrlProxyHierarchy {
     timeout: number = 15000,
     perf?: PerformanceTracker,
     skipWaitForFresh: boolean = false,
-    minTimestamp: number = 0
+    minTimestamp: number = 0,
   ): Promise<CtrlProxyHierarchyResponse> {
     // Check cache first
     const cachedHierarchy = this.context.getCachedHierarchy();
@@ -120,7 +120,8 @@ export class CtrlProxyHierarchy {
       // so it cannot safely be subtracted from host time. Instead, age the first
       // host sighting of that capture. The client preserves it for repeated
       // deliveries of an unchanged `updatedAt`.
-      cachedCaptureAgeMs = this.context.timer.now() -
+      cachedCaptureAgeMs =
+        this.context.timer.now() -
         (cachedHierarchy.captureReceivedAt ?? cachedHierarchy.receivedAt);
       const cacheAge = cachedCaptureAgeMs;
       // `fresh` is honoured as well as elapsed time: without it, invalidateCache()
@@ -129,8 +130,11 @@ export class CtrlProxyHierarchy {
       // sequences hit this cache instead of the device (#5472); it stays capped by
       // `maxObservationAgeMs` here, and the `cacheStale` check below still forces a
       // synchronous re-verification once a capture ages past that budget.
-      const isFresh = cachedHierarchy.fresh && cacheAge < Math.min(this.context.cacheFreshTtlMs, maxObservationAgeMs());
-      const meetsMinTimestamp = minTimestamp === 0 || cachedHierarchy.hierarchy.updatedAt >= minTimestamp;
+      const isFresh =
+        cachedHierarchy.fresh &&
+        cacheAge < Math.min(this.context.cacheFreshTtlMs, maxObservationAgeMs());
+      const meetsMinTimestamp =
+        minTimestamp === 0 || cachedHierarchy.hierarchy.updatedAt >= minTimestamp;
 
       if (isFresh && meetsMinTimestamp) {
         if (cachedHierarchy.hierarchy.packageName) {
@@ -168,11 +172,12 @@ export class CtrlProxyHierarchy {
     // has wedged — leaves the entry frozen and every subsequent `observe`
     // re-serves it, forever. That is the "no known mechanism to recover a stale
     // tree" symptom: there was no code path that asked.
-    const cacheStale = cachedCaptureAgeMs !== undefined && cachedCaptureAgeMs > maxObservationAgeMs();
+    const cacheStale =
+      cachedCaptureAgeMs !== undefined && cachedCaptureAgeMs > maxObservationAgeMs();
     if (!skipWaitForFresh || cacheInvalidated || cacheStale) {
       if (cacheStale && skipWaitForFresh && !cacheInvalidated) {
         logger.debug(
-          `[CTRL_PROXY] Cached hierarchy is ${cachedCaptureAgeMs}ms old (budget ${maxObservationAgeMs()}ms); forcing a synchronous re-verification`
+          `[CTRL_PROXY] Cached hierarchy is ${cachedCaptureAgeMs}ms old (budget ${maxObservationAgeMs()}ms); forcing a synchronous re-verification`,
         );
       }
       const result = await this.requestHierarchySync(perf, false, undefined, timeout);
@@ -188,7 +193,6 @@ export class CtrlProxyHierarchy {
           frameContext: result.frameContext,
         };
       }
-
     }
 
     const reconnectStatus = this.context.getReconnectStatus?.() ?? undefined;
@@ -201,10 +205,11 @@ export class CtrlProxyHierarchy {
     // Note this only re-reads; it must never null the cache, because under
     // skipWaitForFresh a missing cache yields no hierarchy at all (#4193/#4230).
     const fallbackHierarchy = this.context.getCachedHierarchy() ?? cachedHierarchy;
-    const fallbackSupersededOriginal = fallbackHierarchy !== cachedHierarchy &&
+    const fallbackSupersededOriginal =
+      fallbackHierarchy !== cachedHierarchy &&
       !isDeepStrictEqual(
         { hierarchy: fallbackHierarchy?.hierarchy, frameContext: fallbackHierarchy?.frameContext },
-        { hierarchy: cachedHierarchy?.hierarchy, frameContext: cachedHierarchy?.frameContext }
+        { hierarchy: cachedHierarchy?.hierarchy, frameContext: cachedHierarchy?.frameContext },
       );
 
     // Return cached (stale) data if available.
@@ -218,14 +223,19 @@ export class CtrlProxyHierarchy {
       const fallbackCapturedAt = fallbackHierarchy.hierarchy.updatedAt;
       logger.warn(
         `[CTRL_PROXY] Serving an UNVERIFIED cached hierarchy: the runner did not answer a synchronous ` +
-        `hierarchy request within ${timeout}ms. Tree was captured ` +
-        `${typeof fallbackCapturedAt === "number" ? this.context.timer.now() - fallbackCapturedAt : "?"}ms ago. ` +
-        `Reporting freshness.isFresh=false.`
+          `hierarchy request within ${timeout}ms. Tree was captured ` +
+          `${typeof fallbackCapturedAt === "number" ? this.context.timer.now() - fallbackCapturedAt : "?"}ms ago. ` +
+          `Reporting freshness.isFresh=false.`,
       );
       // Update tracking from cache — it may have been refreshed by a WebSocket push
       if (fallbackHierarchy.hierarchy.packageName) {
-        if (this.lastKnownPackageName && fallbackHierarchy.hierarchy.packageName !== this.lastKnownPackageName) {
-          logger.warn(`[CTRL_PROXY] Stale cache packageName differs: cached=${fallbackHierarchy.hierarchy.packageName}, lastKnown=${this.lastKnownPackageName}`);
+        if (
+          this.lastKnownPackageName &&
+          fallbackHierarchy.hierarchy.packageName !== this.lastKnownPackageName
+        ) {
+          logger.warn(
+            `[CTRL_PROXY] Stale cache packageName differs: cached=${fallbackHierarchy.hierarchy.packageName}, lastKnown=${this.lastKnownPackageName}`,
+          );
         }
         this.lastKnownPackageName = fallbackHierarchy.hierarchy.packageName;
       }
@@ -241,7 +251,7 @@ export class CtrlProxyHierarchy {
         reconnectStatus,
         reconnectMessage: reconnectStatus
           ? this.buildReconnectMessage(reconnectStatus.retryAfterSeconds)
-          : undefined
+          : undefined,
       };
     }
 
@@ -250,7 +260,7 @@ export class CtrlProxyHierarchy {
         hierarchy: null,
         fresh: false,
         reconnectStatus,
-        reconnectMessage: this.buildReconnectMessage(reconnectStatus.retryAfterSeconds)
+        reconnectMessage: this.buildReconnectMessage(reconnectStatus.retryAfterSeconds),
       };
     }
 
@@ -269,9 +279,13 @@ export class CtrlProxyHierarchy {
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
     timeoutMs: number = 5000,
-    suppressObservationStreamPush: boolean = false
-  ): Promise<{ hierarchy: XCTestHierarchy; perfTiming?: CtrlProxyPerfTiming; frameContext?: string } | null> {
-    if (!await this.context.ensureConnected(perf)) {
+    suppressObservationStreamPush: boolean = false,
+  ): Promise<{
+    hierarchy: XCTestHierarchy;
+    perfTiming?: CtrlProxyPerfTiming;
+    frameContext?: string;
+  } | null> {
+    if (!(await this.context.ensureConnected(perf))) {
       return null;
     }
 
@@ -283,17 +297,12 @@ export class CtrlProxyHierarchy {
       hierarchy?: XCTestHierarchy;
       perfTiming?: CtrlProxyPerfTiming;
       frameContext?: string;
-    }>(
-      requestId,
-      "hierarchy",
-      timeoutMs,
-      () => ({ hierarchy: undefined, perfTiming: undefined })
-    );
+    }>(requestId, "hierarchy", timeoutMs, () => ({ hierarchy: undefined, perfTiming: undefined }));
 
     const message = {
       type: disableAllFiltering ? "request_hierarchy" : "request_hierarchy_if_stale",
       requestId,
-      disableAllFiltering: disableAllFiltering ?? false
+      disableAllFiltering: disableAllFiltering ?? false,
     };
 
     const ws = this.context.getWebSocket();
@@ -330,9 +339,8 @@ export class CtrlProxyHierarchy {
     previous: CachedHierarchy | null,
     now: number,
   ): number {
-    const sameCapture = previous?.hierarchy.updatedAt === hierarchy.updatedAt
-      ? previous
-      : undefined;
+    const sameCapture =
+      previous?.hierarchy.updatedAt === hierarchy.updatedAt ? previous : undefined;
     return sameCapture?.captureReceivedAt ?? sameCapture?.receivedAt ?? now;
   }
 
@@ -348,7 +356,7 @@ export class CtrlProxyHierarchy {
 
     return {
       hierarchy: {
-        node: filteredNode ?? undefined
+        node: filteredNode ?? undefined,
       },
       packageName: hierarchy.packageName,
       updatedAt: hierarchy.updatedAt,
@@ -376,37 +384,83 @@ export class CtrlProxyHierarchy {
   private convertNode(node: CtrlProxyNode): ConvertedNode {
     const attrs: Record<string, unknown> = {};
 
-    if (node.text) {attrs["text"] = node.text;}
-    if (node.value) {attrs["value"] = node.value;}
+    if (node.text) {
+      attrs["text"] = node.text;
+    }
+    if (node.value) {
+      attrs["value"] = node.value;
+    }
     const contentDesc = this.readNodeField<string>(node, "contentDesc", "content-desc");
     const resourceId = this.readNodeField<string>(node, "resourceId", "resource-id");
     const testTag = this.readNodeField<string>(node, "testTag", "test-tag");
-    const accessibilityFocused = this.readNodeField<string>(node, "accessibilityFocused", "accessibility-focused");
+    const accessibilityFocused = this.readNodeField<string>(
+      node,
+      "accessibilityFocused",
+      "accessibility-focused",
+    );
     const longClickable = this.readNodeField<string>(node, "longClickable", "long-clickable");
-    const semanticLinks = this.readNodeField<SemanticLink[]>(node, "semanticLinks", "semantic-links");
-    const stateDescription = this.readNodeField<string>(node, "stateDescription", "state-description");
+    const semanticLinks = this.readNodeField<SemanticLink[]>(
+      node,
+      "semanticLinks",
+      "semantic-links",
+    );
+    const stateDescription = this.readNodeField<string>(
+      node,
+      "stateDescription",
+      "state-description",
+    );
     const errorMessage = this.readNodeField<string>(node, "errorMessage", "error-message");
     const hintText = this.readNodeField<string>(node, "hintText", "hint-text");
     const viewId = this.readNodeField<string>(node, "viewId", "view-id");
 
-    if (contentDesc) {attrs["content-desc"] = contentDesc;}
-    if (resourceId) {attrs["resource-id"] = resourceId;}
-    if (node.className) {attrs["class"] = node.className;}
-    if (testTag) {attrs["test-tag"] = testTag;}
+    if (contentDesc) {
+      attrs["content-desc"] = contentDesc;
+    }
+    if (resourceId) {
+      attrs["resource-id"] = resourceId;
+    }
+    if (node.className) {
+      attrs["class"] = node.className;
+    }
+    if (testTag) {
+      attrs["test-tag"] = testTag;
+    }
     if (node.bounds) {
       attrs["bounds"] = node.bounds;
     }
-    if (node.clickable) {attrs["clickable"] = node.clickable;}
-    if (node.enabled) {attrs["enabled"] = node.enabled;}
-    if (node.focusable) {attrs["focusable"] = node.focusable;}
-    if (node.focused) {attrs["focused"] = node.focused;}
-    if (accessibilityFocused) {attrs["accessibility-focused"] = accessibilityFocused;}
-    if (node.scrollable) {attrs["scrollable"] = node.scrollable;}
-    if (node.password) {attrs["password"] = node.password;}
-    if (node.checkable) {attrs["checkable"] = node.checkable;}
-    if (node.checked) {attrs["checked"] = node.checked;}
-    if (node.selected) {attrs["selected"] = node.selected;}
-    if (longClickable) {attrs["long-clickable"] = longClickable;}
+    if (node.clickable) {
+      attrs["clickable"] = node.clickable;
+    }
+    if (node.enabled) {
+      attrs["enabled"] = node.enabled;
+    }
+    if (node.focusable) {
+      attrs["focusable"] = node.focusable;
+    }
+    if (node.focused) {
+      attrs["focused"] = node.focused;
+    }
+    if (accessibilityFocused) {
+      attrs["accessibility-focused"] = accessibilityFocused;
+    }
+    if (node.scrollable) {
+      attrs["scrollable"] = node.scrollable;
+    }
+    if (node.password) {
+      attrs["password"] = node.password;
+    }
+    if (node.checkable) {
+      attrs["checkable"] = node.checkable;
+    }
+    if (node.checked) {
+      attrs["checked"] = node.checked;
+    }
+    if (node.selected) {
+      attrs["selected"] = node.selected;
+    }
+    if (longClickable) {
+      attrs["long-clickable"] = longClickable;
+    }
     if (semanticLinks && semanticLinks.length > 0) {
       attrs["semantic-links"] = semanticLinks;
     }
@@ -415,11 +469,21 @@ export class CtrlProxyHierarchy {
     } else if (node.role) {
       attrs["role"] = node.role;
     }
-    if (stateDescription) {attrs["state-description"] = stateDescription;}
-    if (errorMessage) {attrs["error-message"] = errorMessage;}
-    if (hintText) {attrs["hint-text"] = hintText;}
-    if (viewId) {attrs["view-id"] = viewId;}
-    if (node.actions && node.actions.length > 0) {attrs["actions"] = node.actions;}
+    if (stateDescription) {
+      attrs["state-description"] = stateDescription;
+    }
+    if (errorMessage) {
+      attrs["error-message"] = errorMessage;
+    }
+    if (hintText) {
+      attrs["hint-text"] = hintText;
+    }
+    if (viewId) {
+      attrs["view-id"] = viewId;
+    }
+    if (node.actions && node.actions.length > 0) {
+      attrs["actions"] = node.actions;
+    }
 
     const result: ConvertedNode = { $: attrs };
 
@@ -429,13 +493,17 @@ export class CtrlProxyHierarchy {
 
     if (node.node) {
       const children = Array.isArray(node.node) ? node.node : [node.node];
-      result.node = children.map(child => this.convertNode(child));
+      result.node = children.map((child) => this.convertNode(child));
     }
 
     return result;
   }
 
-  private readNodeField<T>(node: CtrlProxyNode, camelKey: keyof CtrlProxyNode, dashedKey?: string): T | undefined {
+  private readNodeField<T>(
+    node: CtrlProxyNode,
+    camelKey: keyof CtrlProxyNode,
+    dashedKey?: string,
+  ): T | undefined {
     const record = node as Record<string, unknown>;
     if (record[camelKey as string] !== undefined) {
       return record[camelKey as string] as T;
@@ -457,7 +525,7 @@ export class CtrlProxyHierarchy {
       (attrs["content-desc"] && attrs["content-desc"] !== "") ||
       (attrs["test-tag"] && attrs["test-tag"] !== "") ||
       (attrs["role"] && attrs["role"] !== "") ||
-      this.hasMeaningfulViewId(attrs)
+      this.hasMeaningfulViewId(attrs),
     );
   }
 
@@ -471,7 +539,7 @@ export class CtrlProxyHierarchy {
       attrs["focused"] === "true" ||
       attrs["accessibility-focused"] === "true" ||
       attrs["selected"] === "true" ||
-      attrs["checked"] === "true"
+      attrs["checked"] === "true",
     );
   }
 
@@ -480,7 +548,8 @@ export class CtrlProxyHierarchy {
    */
   private isStructuralWrapper(attrs: Record<string, unknown>, hasChildren: boolean): boolean {
     const className = typeof attrs["class"] === "string" ? attrs["class"] : "";
-    const isContainerClass = className === "UIWindow" || className === "UIView" || className === "UIImageView";
+    const isContainerClass =
+      className === "UIWindow" || className === "UIView" || className === "UIImageView";
 
     // Not a wrapper if it has content or is focused/selected/scrollable
     if (this.hasContentProperties(attrs) || this.hasInteractionProperties(attrs)) {
@@ -497,8 +566,19 @@ export class CtrlProxyHierarchy {
    */
   private cleanAttributes(attrs: Record<string, unknown>): Record<string, unknown> {
     const cleaned: Record<string, unknown> = {};
-    const booleanFields = ["clickable", "enabled", "focusable", "focused", "accessibility-focused", "scrollable",
-      "password", "checkable", "checked", "selected", "long-clickable"];
+    const booleanFields = [
+      "clickable",
+      "enabled",
+      "focusable",
+      "focused",
+      "accessibility-focused",
+      "scrollable",
+      "password",
+      "checkable",
+      "checked",
+      "selected",
+      "long-clickable",
+    ];
 
     for (const [key, value] of Object.entries(attrs)) {
       // Skip empty values
@@ -526,10 +606,7 @@ export class CtrlProxyHierarchy {
    * Filter hierarchy node - removes structural wrappers and nodes without meaningful properties
    * Similar to Android's optimizeHierarchy + filterViewHierarchy
    */
-  private filterHierarchyNode(
-    node: ConvertedNode,
-    isRoot: boolean = false
-  ): ConvertedNode | null {
+  private filterHierarchyNode(node: ConvertedNode, isRoot: boolean = false): ConvertedNode | null {
     const attrs = node.$ || {};
     const children = node.node || [];
 
@@ -553,7 +630,9 @@ export class CtrlProxyHierarchy {
     if (isRoot) {
       const cleanedAttrs = this.cleanAttributes(attrs);
       const result: ConvertedNode = { $: cleanedAttrs };
-      if (node.extras) { result.extras = node.extras; }
+      if (node.extras) {
+        result.extras = node.extras;
+      }
       if (dedupedChildren.length > 0) {
         result.node = dedupedChildren;
       }
@@ -581,7 +660,11 @@ export class CtrlProxyHierarchy {
     // 2. Has interaction properties (scrollable, focused, selected)
     // 3. Is clickable and is a leaf node (actual tappable element)
     // 4. Has meaningful filtered children
-    const keepNode = hasContent || hasInteraction || (isClickable && dedupedChildren.length === 0) || dedupedChildren.length > 0;
+    const keepNode =
+      hasContent ||
+      hasInteraction ||
+      (isClickable && dedupedChildren.length === 0) ||
+      dedupedChildren.length > 0;
 
     if (!keepNode) {
       return null;
@@ -589,7 +672,9 @@ export class CtrlProxyHierarchy {
 
     const cleanedAttrs = this.cleanAttributes(attrs);
     const result: ConvertedNode = { $: cleanedAttrs };
-    if (node.extras) { result.extras = node.extras; }
+    if (node.extras) {
+      result.extras = node.extras;
+    }
     if (dedupedChildren.length > 0) {
       result.node = dedupedChildren;
     }
@@ -616,19 +701,21 @@ export class CtrlProxyHierarchy {
 
   private dropRedundantStaticTextChildren(
     parentAttrs: Record<string, unknown>,
-    children: ConvertedNode[]
+    children: ConvertedNode[],
   ): ConvertedNode[] {
     const parentText = this.normalizedText(parentAttrs["text"]);
     if (!parentText || !this.canOwnStaticText(parentAttrs)) {
       return children;
     }
 
-    return children.filter(child => !this.isRedundantStaticTextChild(parentText, child));
+    return children.filter((child) => !this.isRedundantStaticTextChild(parentText, child));
   }
 
   private canOwnStaticText(attrs: Record<string, unknown>): boolean {
     const role = typeof attrs["role"] === "string" ? attrs["role"] : "";
-    return attrs["clickable"] === "true" || role === "button" || role === "link" || role === "listitem";
+    return (
+      attrs["clickable"] === "true" || role === "button" || role === "link" || role === "listitem"
+    );
   }
 
   private isRedundantStaticTextChild(parentText: string, child: ConvertedNode): boolean {
@@ -664,15 +751,13 @@ export class CtrlProxyHierarchy {
       (attrs["resource-id"] && attrs["resource-id"] !== "") ||
       (attrs["content-desc"] && attrs["content-desc"] !== "") ||
       (attrs["test-tag"] && attrs["test-tag"] !== "") ||
-      this.hasMeaningfulViewId(attrs)
+      this.hasMeaningfulViewId(attrs),
     );
   }
 
   private hasMeaningfulViewId(attrs: Record<string, unknown>): boolean {
     const viewId = attrs["view-id"];
-    return typeof viewId === "string" &&
-      viewId !== "" &&
-      !GENERATED_VIEW_ID_PATTERN.test(viewId);
+    return typeof viewId === "string" && viewId !== "" && !GENERATED_VIEW_ID_PATTERN.test(viewId);
   }
 
   private hasDirectActionProperties(attrs: Record<string, unknown>): boolean {
@@ -680,7 +765,7 @@ export class CtrlProxyHierarchy {
       attrs["clickable"] === "true" ||
       attrs["focusable"] === "true" ||
       attrs["long-clickable"] === "true" ||
-      attrs["checkable"] === "true"
+      attrs["checkable"] === "true",
     );
   }
 
@@ -690,7 +775,7 @@ export class CtrlProxyHierarchy {
       attrs["focused"] === "true" ||
       attrs["accessibility-focused"] === "true" ||
       attrs["selected"] === "true" ||
-      attrs["checked"] === "true"
+      attrs["checked"] === "true",
     );
   }
 

@@ -8,7 +8,7 @@ import {
   RecompositionNodeInfo,
   RecompositionSummary,
   TopRecompositionEntry,
-  ViewHierarchyResult
+  ViewHierarchyResult,
 } from "../../models";
 import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
@@ -93,7 +93,7 @@ export class RecompositionTracker {
       this.latestSummaryByDevice.set(`${device.deviceId}:${packageName}`, summary);
     }
 
-    this.latestTotals = new Map(metrics.map(entry => [entry.id, entry.total]));
+    this.latestTotals = new Map(metrics.map((entry) => [entry.id, entry.total]));
     this.lastObservationTotals = new Map(this.latestTotals);
     this.lastObservationAt = observationTimestamp;
 
@@ -116,16 +116,19 @@ export class RecompositionTracker {
   private collectEntries(viewHierarchy: ViewHierarchyResult): RecompositionEntryInput[] {
     const entries: RecompositionEntryInput[] = [];
     const rootNodes = this.parser.extractRootNodes(viewHierarchy);
-    const nodesToTraverse = rootNodes.length > 0 && viewHierarchy.hierarchy
-      ? rootNodes
-      : viewHierarchy.hierarchy
-        ? [viewHierarchy.hierarchy]
-        : [];
+    const nodesToTraverse =
+      rootNodes.length > 0 && viewHierarchy.hierarchy
+        ? rootNodes
+        : viewHierarchy.hierarchy
+          ? [viewHierarchy.hierarchy]
+          : [];
 
     for (const root of nodesToTraverse) {
       this.parser.traverseNode(root, (node: any) => {
         const props = this.parser.extractNodeProperties(node);
-        const recomposition = (props?.recomposition ?? node?.recomposition) as RecompositionNodeInfo | undefined;
+        const recomposition = (props?.recomposition ?? node?.recomposition) as
+          | RecompositionNodeInfo
+          | undefined;
         if (!recomposition || !recomposition.id) {
           return;
         }
@@ -155,7 +158,7 @@ export class RecompositionTracker {
           parentChain: recomposition.parentChain,
           stableAnnotated: recomposition.stableAnnotated,
           rememberedCount: recomposition.rememberedCount,
-          nodeRef: node
+          nodeRef: node,
         });
       });
     }
@@ -163,27 +166,31 @@ export class RecompositionTracker {
     return entries;
   }
 
-  private computeMetrics(entries: RecompositionEntryInput[], observationTimestamp: number): RecompositionEntryMetrics[] {
+  private computeMetrics(
+    entries: RecompositionEntryInput[],
+    observationTimestamp: number,
+  ): RecompositionEntryMetrics[] {
     const deltaSeconds = this.lastObservationAt
       ? Math.max(0, (observationTimestamp - this.lastObservationAt) / 1000)
       : 0;
 
-    return entries.map(entry => {
+    return entries.map((entry) => {
       const lastTotal = this.lastObservationTotals.get(entry.id) ?? 0;
       const lastInteractionTotal = this.lastInteractionTotals.get(entry.id) ?? lastTotal;
       const sinceLastObservation = Math.max(0, entry.total - lastTotal);
       const sinceLastInteraction = Math.max(0, entry.total - lastInteractionTotal);
-      const recompositionsPerSecond = entry.rolling1sAverage > 0
-        ? entry.rolling1sAverage
-        : deltaSeconds > 0
-          ? sinceLastObservation / deltaSeconds
-          : 0;
+      const recompositionsPerSecond =
+        entry.rolling1sAverage > 0
+          ? entry.rolling1sAverage
+          : deltaSeconds > 0
+            ? sinceLastObservation / deltaSeconds
+            : 0;
 
       return {
         ...entry,
         sinceLastObservation,
         sinceLastInteraction,
-        recompositionsPerSecond
+        recompositionsPerSecond,
       };
     });
   }
@@ -196,19 +203,25 @@ export class RecompositionTracker {
         rolling1sAverage: entry.rolling1sAverage,
         total: entry.total,
         skipCount: entry.skipCount,
-        durationMs: entry.durationMs
+        durationMs: entry.durationMs,
       };
 
       entry.nodeRef.recompositionMetrics = metrics;
     }
   }
 
-  private buildSummary(entries: RecompositionEntryMetrics[], observationTimestamp: number): RecompositionSummary {
+  private buildSummary(
+    entries: RecompositionEntryMetrics[],
+    observationTimestamp: number,
+  ): RecompositionSummary {
     const totalRecompositions = entries.reduce((sum, entry) => sum + entry.sinceLastObservation, 0);
-    const durationValues = entries.map(entry => entry.durationMs).filter((value): value is number => typeof value === "number");
-    const averageRecompositionDurationMs = durationValues.length > 0
-      ? durationValues.reduce((sum, value) => sum + value, 0) / durationValues.length
-      : undefined;
+    const durationValues = entries
+      .map((entry) => entry.durationMs)
+      .filter((value): value is number => typeof value === "number");
+    const averageRecompositionDurationMs =
+      durationValues.length > 0
+        ? durationValues.reduce((sum, value) => sum + value, 0) / durationValues.length
+        : undefined;
     const deltaSeconds = this.lastObservationAt
       ? Math.max(0, (observationTimestamp - this.lastObservationAt) / 1000)
       : 0;
@@ -232,14 +245,14 @@ export class RecompositionTracker {
         recompPerSecond: entry.recompositionsPerSecond,
         recompDurationMs: entry.durationMs,
         likelyCause: entry.likelyCause ?? "unknown",
-        parentChain: entry.parentChain
+        parentChain: entry.parentChain,
       }));
 
     return {
       totalRecompositions,
       averagePerSecond,
       averageRecompositionDurationMs,
-      topRecompositions
+      topRecompositions,
     };
   }
 
@@ -247,7 +260,7 @@ export class RecompositionTracker {
     entries: RecompositionEntryMetrics[],
     result: ObserveResult,
     device: BootedDevice,
-    observationTimestamp: number
+    observationTimestamp: number,
   ): Promise<void> {
     const packageName = result.activeWindow?.appId ?? result.viewHierarchy?.packageName;
     if (!packageName) {
@@ -259,7 +272,7 @@ export class RecompositionTracker {
     const timestamp = new Date(observationTimestamp).toISOString();
 
     try {
-      const rows: NewRecompositionMetrics[] = entries.map(entry => ({
+      const rows: NewRecompositionMetrics[] = entries.map((entry) => ({
         device_id: device.deviceId,
         session_id: sessionId,
         package_name: packageName,
@@ -280,7 +293,7 @@ export class RecompositionTracker {
               ? 1
               : 0,
         remembered_count: entry.rememberedCount ?? null,
-        timestamp
+        timestamp,
       }));
 
       if (rows.length > 0) {
@@ -293,7 +306,7 @@ export class RecompositionTracker {
 
       // Emit all composables with any recomposition activity, sorted by count desc, top 10
       const active = entries
-        .filter(e => e.total > 0)
+        .filter((e) => e.total > 0)
         .sort((a, b) => b.rolling1sAverage - a.rolling1sAverage)
         .slice(0, 10);
       for (const entry of active) {
@@ -332,11 +345,14 @@ export class RecompositionTracker {
       const deleteCount = count - MAX_RECOMPOSITION_RECORDS;
       await db
         .deleteFrom("recomposition_metrics")
-        .where("id", "in", db
-          .selectFrom("recomposition_metrics")
-          .select("id")
-          .orderBy("timestamp")
-          .limit(deleteCount)
+        .where(
+          "id",
+          "in",
+          db
+            .selectFrom("recomposition_metrics")
+            .select("id")
+            .orderBy("timestamp")
+            .limit(deleteCount),
         )
         .execute();
     } catch (error) {

@@ -26,12 +26,12 @@ import {
   type GoldenVector,
 } from "./pinchGoldenVectors";
 
-describe("pinch golden vector parity (issue #2997)", function() {
+describe("pinch golden vector parity (issue #2997)", function () {
   const canonical = loadCanonicalVectors();
   const swift = parseSwiftGoldenTable();
   const kotlin = parseKotlinGoldenTable();
 
-  test("canonical JSON exposes the full golden table", function() {
+  test("canonical JSON exposes the full golden table", function () {
     // Parsing succeeded and the fixture is non-trivial. Guards against an empty/renamed fixture
     // silently making every parity assertion vacuous.
     expect(canonical.length).toBeGreaterThanOrEqual(5);
@@ -40,32 +40,32 @@ describe("pinch golden vector parity (issue #2997)", function() {
     }
   });
 
-  test("both platform tables parse to the same number of rows as the source", function() {
+  test("both platform tables parse to the same number of rows as the source", function () {
     // If a platform table drops or gains rows relative to the canonical source, the parser row
     // count diverges — a coarse but decisive first-line check.
     expect(swift.length).toBe(canonical.length);
     expect(kotlin.length).toBe(canonical.length);
   });
 
-  test("AC1: iOS golden literals are verified against the single source", function() {
+  test("AC1: iOS golden literals are verified against the single source", function () {
     const diffs = diffGoldenTables(swift, canonical);
     expect(diffs).toEqual([]);
   });
 
-  test("AC1: Android golden literals are verified against the single source", function() {
+  test("AC1: Android golden literals are verified against the single source", function () {
     const diffs = diffGoldenTables(kotlin, canonical);
     expect(diffs).toEqual([]);
   });
 
-  test("transitively, the two platform tables agree with each other", function() {
+  test("transitively, the two platform tables agree with each other", function () {
     expect(diffGoldenTables(swift, kotlin)).toEqual([]);
   });
 
-  test("AC2: a coordinated one-sided convention edit is detected", function() {
+  test("AC2: a coordinated one-sided convention edit is detected", function () {
     // Simulate the exact failure mode the issue targets: someone changes ONE platform's endpoint
     // math and updates ONLY that platform's golden literals (here modeled as a mutation to the
     // parsed Swift table). The untouched canonical source no longer matches, so the guard trips.
-    const tampered: GoldenVector[] = swift.map(row => ({ ...row, expected: [...row.expected] }));
+    const tampered: GoldenVector[] = swift.map((row) => ({ ...row, expected: [...row.expected] }));
     // Nudge one endpoint of the first row well past tolerance — a plausible "flipped rotation
     // sign" / "swapped sin & cos" convention drift.
     tampered[0] = {
@@ -78,20 +78,20 @@ describe("pinch golden vector parity (issue #2997)", function() {
 
     const diffs = diffGoldenTables(tampered, canonical);
     expect(diffs.length).toBeGreaterThan(0);
-    expect(diffs.some(d => d.includes("row 0 point"))).toBe(true);
+    expect(diffs.some((d) => d.includes("row 0 point"))).toBe(true);
   });
 
-  test("AC2: an input-tuple divergence is also detected", function() {
+  test("AC2: an input-tuple divergence is also detected", function () {
     // The other half of a one-sided edit: changing an input row (e.g. a different rotationDegrees)
     // on one platform only. The set-based point comparison must not mask an input mismatch.
-    const tampered: GoldenVector[] = kotlin.map(row => ({ ...row }));
+    const tampered: GoldenVector[] = kotlin.map((row) => ({ ...row }));
     tampered[1] = { ...tampered[1], rotationDegrees: tampered[1].rotationDegrees + 15 };
 
     const diffs = diffGoldenTables(tampered, canonical);
-    expect(diffs.some(d => d.includes("rotationDegrees"))).toBe(true);
+    expect(diffs.some((d) => d.includes("rotationDegrees"))).toBe(true);
   });
 
-  test("the per-platform math<->literals runtime golden loops still exist", function() {
+  test("the per-platform math<->literals runtime golden loops still exist", function () {
     // This guard only proves literals <-> JSON. The other half of the parity chain — that each
     // platform's endpoint MATH is asserted against those literals — lives in the runtime golden
     // loops of the platform test files (`computePinchPoints`/`ObjCExceptionCatcher_computePinchPoints`
@@ -106,7 +106,7 @@ describe("pinch golden vector parity (issue #2997)", function() {
     expect(kotlinSource).toContain("assertEquals");
   });
 
-  test("Item 1 (#3021): every canonical row's expected endpoints are DERIVABLE from its inputs", function() {
+  test("Item 1 (#3021): every canonical row's expected endpoints are DERIVABLE from its inputs", function () {
     // Makes the JSON a derived source, not a third hand-copy: recompute each row's four endpoints
     // from (center, distances, rotation) via the reference port of the platform math and assert they
     // match the committed `expected` set (order-independent, same tolerance as the runtime loops).
@@ -119,15 +119,12 @@ describe("pinch golden vector parity (issue #2997)", function() {
         row.distanceEnd,
         row.rotationDegrees,
       );
-      const diffs = diffGoldenTables(
-        [{ ...row, expected: computed }],
-        [row],
-      );
+      const diffs = diffGoldenTables([{ ...row, expected: computed }], [row]);
       expect(diffs).toEqual([]);
     }
   });
 
-  test("Item 1 (#3021): the reference math catches a corrupted expected value in the source", function() {
+  test("Item 1 (#3021): the reference math catches a corrupted expected value in the source", function () {
     // Negative control: if a row's expected endpoint were mis-typed, the derivation check must trip.
     const row = canonical[0];
     const computed = referencePinchEndpoints(
@@ -144,18 +141,19 @@ describe("pinch golden vector parity (issue #2997)", function() {
         ...row.expected.slice(1),
       ] as GoldenVector["expected"],
     };
-    expect(diffGoldenTables([{ ...row, expected: computed }], [corrupted]).length)
-      .toBeGreaterThan(0);
+    expect(diffGoldenTables([{ ...row, expected: computed }], [corrupted]).length).toBeGreaterThan(
+      0,
+    );
   });
 
-  test("Item 2 (#3021): current platform golden regions contain no string literals", function() {
+  test("Item 2 (#3021): current platform golden regions contain no string literals", function () {
     // The live guard: parsing already runs assertNoStringLiterals; assert it passes for today's
     // tables (both parsed above without throwing) and that the checker is wired.
     expect(swift.length).toBeGreaterThan(0);
     expect(kotlin.length).toBeGreaterThan(0);
   });
 
-  test("Item 2 (#3021): a string literal inside the table region fails loudly", function() {
+  test("Item 2 (#3021): a string literal inside the table region fails loudly", function () {
     // A digit-bearing inline label like `"row 1"` inside the literal would corrupt positional number
     // extraction; the checker must throw a targeted error rather than silently mis-parse.
     expect(() => assertNoStringLiterals('60, 200, "row 1", 140', "fake.kt")).toThrow(
@@ -165,10 +163,10 @@ describe("pinch golden vector parity (issue #2997)", function() {
     expect(() => assertNoStringLiterals("60, 200, 140, 200", "fake.kt")).not.toThrow();
   });
 
-  test("the guard ignores finger-label ordering differences (no false drift)", function() {
+  test("the guard ignores finger-label ordering differences (no false drift)", function () {
     // The two runners label which finger is "first" oppositely. Reversing a row's point order must
     // NOT register as drift, or the guard would flag a cosmetic, semantically-identical change.
-    const reordered: GoldenVector[] = canonical.map(row => ({
+    const reordered: GoldenVector[] = canonical.map((row) => ({
       ...row,
       expected: [...row.expected].reverse() as GoldenVector["expected"],
     }));

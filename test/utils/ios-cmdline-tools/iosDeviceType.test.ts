@@ -93,7 +93,7 @@ describe("physical-UDID patterns stay disjoint from Android device ids", () => {
         // any compliant serial can get to a UDID) are covered at every length.
         const homogeneous = char.repeat(length);
         const mixed = Array.from({ length }, (_, i) =>
-          i % 2 === 0 ? char : CDD_SERIAL_ALPHABET[(i * 7 + length) % CDD_SERIAL_ALPHABET.length]
+          i % 2 === 0 ? char : CDD_SERIAL_ALPHABET[(i * 7 + length) % CDD_SERIAL_ALPHABET.length],
         ).join("");
 
         for (const serial of [homogeneous, mixed]) {
@@ -144,7 +144,14 @@ describe("isIosUdid", () => {
   });
 
   test("rejects Android serials and degenerate input", () => {
-    for (const serial of ["emulator-5554", "R58M12ABCDE", "192.168.1.24:5555", "", "   ", "not-a-uuid"]) {
+    for (const serial of [
+      "emulator-5554",
+      "R58M12ABCDE",
+      "192.168.1.24:5555",
+      "",
+      "   ",
+      "not-a-uuid",
+    ]) {
       expect(isIosUdid(serial)).toBe(false);
     }
   });

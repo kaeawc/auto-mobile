@@ -8,11 +8,13 @@ export interface ChecksumCalculator {
 }
 
 export class DefaultChecksumCalculator implements ChecksumCalculator {
-  public async computeFileSha256(filePath: string): Promise<{ checksum: string; source: Sha256Source }> {
+  public async computeFileSha256(
+    filePath: string,
+  ): Promise<{ checksum: string; source: Sha256Source }> {
     const hash = createHash("sha256");
     await new Promise<void>((resolve, reject) => {
       const stream = createReadStream(filePath);
-      stream.on("data", chunk => hash.update(chunk));
+      stream.on("data", (chunk) => hash.update(chunk));
       stream.on("error", reject);
       stream.on("end", () => resolve());
     });

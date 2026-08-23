@@ -3,7 +3,7 @@ import {
   consolePortFromSerial,
   EmulatorConsoleAuthTokenReader,
   RealEmulatorConsoleClient,
-  EmulatorConsoleTransport
+  EmulatorConsoleTransport,
 } from "../../../src/utils/android-cmdline-tools/EmulatorConsoleClient";
 
 class RecordingTransport implements EmulatorConsoleTransport {
@@ -11,16 +11,25 @@ class RecordingTransport implements EmulatorConsoleTransport {
   public nextOutput: string = "OK\n";
   public failWith: Error | null = null;
 
-  async execute(host: string, port: number, authToken: string | null, commands: string[]): Promise<string> {
+  async execute(
+    host: string,
+    port: number,
+    authToken: string | null,
+    commands: string[],
+  ): Promise<string> {
     this.calls.push({ host, port, authToken, commands });
-    if (this.failWith) { throw this.failWith; }
+    if (this.failWith) {
+      throw this.failWith;
+    }
     return this.nextOutput;
   }
 }
 
 class StaticTokenReader implements EmulatorConsoleAuthTokenReader {
   constructor(private token: string | null) {}
-  async read(): Promise<string | null> { return this.token; }
+  async read(): Promise<string | null> {
+    return this.token;
+  }
 }
 
 describe("consolePortFromSerial", () => {
@@ -70,7 +79,7 @@ describe("RealEmulatorConsoleClient", () => {
     await client.gsmCancel("5551234567");
     await client.gsmBusy("5551234567");
 
-    expect(transport.calls.map(c => c.commands[0])).toEqual([
+    expect(transport.calls.map((c) => c.commands[0])).toEqual([
       "gsm accept 5551234567",
       "gsm cancel 5551234567",
       "gsm busy 5551234567",
@@ -113,8 +122,11 @@ describe("RealEmulatorConsoleClient", () => {
   });
 
   test("throws ActionableError when transport output contains a KO: response", async () => {
-    transport.nextOutput = "Android Console: type 'help' for a list of commands\nOK\nKO: unknown command\n";
-    await expect(client.gsmCall("5551234567")).rejects.toThrow(/Emulator console rejected command: unknown command/);
+    transport.nextOutput =
+      "Android Console: type 'help' for a list of commands\nOK\nKO: unknown command\n";
+    await expect(client.gsmCall("5551234567")).rejects.toThrow(
+      /Emulator console rejected command: unknown command/,
+    );
   });
 
   test("propagates transport errors", async () => {
@@ -137,18 +149,22 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 class FakeSocket extends EventEmitter {
   public written: string[] = [];
   public destroyed = false;
-  setEncoding(): this { return this; }
-  write(data: string): boolean { this.written.push(data); return true; }
-  destroy(): this { this.destroyed = true; return this; }
+  setEncoding(): this {
+    return this;
+  }
+  write(data: string): boolean {
+    this.written.push(data);
+    return true;
+  }
+  destroy(): this {
+    this.destroyed = true;
+    return this;
+  }
 }
 
 describe("NetEmulatorConsoleTransport wire protocol", () => {
   function makeTransport(socket: FakeSocket, timer: FakeTimer): NetEmulatorConsoleTransport {
-    return new NetEmulatorConsoleTransport(
-      () => socket as unknown as net.Socket,
-      5000,
-      timer
-    );
+    return new NetEmulatorConsoleTransport(() => socket as unknown as net.Socket, 5000, timer);
   }
 
   test("sends the auth line, each command, and a trailing quit on connect", async () => {

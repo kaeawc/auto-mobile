@@ -9,13 +9,13 @@ import type { BootedDevice } from "../../../src/models";
 const SIMULATOR_DEVICE: BootedDevice = {
   deviceId: "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
   name: "iPhone 15 Pro",
-  platform: "ios"
+  platform: "ios",
 };
 
 const PHYSICAL_DEVICE: BootedDevice = {
   deviceId: "00008130-001234567890abcd",
   name: "iPhone 15 Pro",
-  platform: "ios"
+  platform: "ios",
 };
 
 describe("VoiceOverToggle", () => {
@@ -135,7 +135,7 @@ describe("VoiceOverToggle", () => {
       expect(fakeDetector.getCallCount()).toBe(2);
       expect(fakeDetector.getInvalidatedDevices()).toEqual([
         SIMULATOR_DEVICE.deviceId,
-        SIMULATOR_DEVICE.deviceId
+        SIMULATOR_DEVICE.deviceId,
       ]);
       expect(fakeDetector.isVoiceOverEnabledTimeoutMsArgs).toEqual([10_000, 9_500]);
       expect(fakeTimer.getSleepHistory()).toEqual([500]);
@@ -164,18 +164,18 @@ describe("VoiceOverToggle", () => {
 
       expect(
         fakeExec.wasCommandExecuted(
-          `xcrun simctl spawn ${udid} defaults write com.apple.Accessibility VoiceOverTouchEnabled -bool YES`
-        )
+          `xcrun simctl spawn ${udid} defaults write com.apple.Accessibility VoiceOverTouchEnabled -bool YES`,
+        ),
       ).toBe(true);
       expect(
         fakeExec.wasCommandExecuted(
-          `xcrun simctl spawn ${udid} notifyutil -p com.apple.accessibility.VoiceOverStatusDidChange`
-        )
+          `xcrun simctl spawn ${udid} notifyutil -p com.apple.accessibility.VoiceOverStatusDidChange`,
+        ),
       ).toBe(true);
       expect(
         fakeExec.wasCommandExecuted(
-          `xcrun simctl spawn ${udid} launchctl kickstart -p system/com.apple.VoiceOverTouch`
-        )
+          `xcrun simctl spawn ${udid} launchctl kickstart -p system/com.apple.VoiceOverTouch`,
+        ),
       ).toBe(true);
     });
 
@@ -185,7 +185,9 @@ describe("VoiceOverToggle", () => {
       // error text matches the already-stopped signature, the enable path must
       // surface it as a typed failure rather than claim success.
       fakeExec.setCommandHandler("launchctl kickstart", () => {
-        throw new Error("Command failed: launchctl kickstart\nexit code: 3\nstderr:\nNo process to signal.");
+        throw new Error(
+          "Command failed: launchctl kickstart\nexit code: 3\nstderr:\nNo process to signal.",
+        );
       });
       // Detection returns off by default; autoAdvance keeps the (mutated) confirm
       // loop from blocking on real time.
@@ -234,24 +236,26 @@ describe("VoiceOverToggle", () => {
 
       expect(
         fakeExec.wasCommandExecuted(
-          `xcrun simctl spawn ${udid} defaults write com.apple.Accessibility VoiceOverTouchEnabled -bool NO`
-        )
+          `xcrun simctl spawn ${udid} defaults write com.apple.Accessibility VoiceOverTouchEnabled -bool NO`,
+        ),
       ).toBe(true);
       expect(
         fakeExec.wasCommandExecuted(
-          `xcrun simctl spawn ${udid} notifyutil -p com.apple.accessibility.VoiceOverStatusDidChange`
-        )
+          `xcrun simctl spawn ${udid} notifyutil -p com.apple.accessibility.VoiceOverStatusDidChange`,
+        ),
       ).toBe(true);
       expect(
         fakeExec.wasCommandExecuted(
-          `xcrun simctl spawn ${udid} launchctl kill SIGTERM system/com.apple.VoiceOverTouch`
-        )
+          `xcrun simctl spawn ${udid} launchctl kill SIGTERM system/com.apple.VoiceOverTouch`,
+        ),
       ).toBe(true);
     });
 
     test("treats an already-stopped VoiceOver service as a successful disable", async () => {
       fakeExec.setCommandHandler("launchctl kill SIGTERM", () => {
-        throw new Error("Command failed: launchctl kill SIGTERM\nexit code: 3\nstderr:\nNo process to signal.");
+        throw new Error(
+          "Command failed: launchctl kill SIGTERM\nexit code: 3\nstderr:\nNo process to signal.",
+        );
       });
 
       const toggle = new VoiceOverToggle(SIMULATOR_DEVICE, fakeDetector, fakeExec);

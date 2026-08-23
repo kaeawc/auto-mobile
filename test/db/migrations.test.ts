@@ -120,25 +120,35 @@ describe("full migration chain", () => {
   });
 
   test("can insert and select from network_events", async () => {
-    await sql`INSERT INTO network_events (timestamp, url, method, status_code, duration_ms) VALUES (1000, 'https://example.com', 'GET', 200, 42)`.execute(db);
+    await sql`INSERT INTO network_events (timestamp, url, method, status_code, duration_ms) VALUES (1000, 'https://example.com', 'GET', 200, 42)`.execute(
+      db,
+    );
     const rows = await sql<{ url: string }>`SELECT url FROM network_events`.execute(db);
     expect(rows.rows[0]?.url).toBe("https://example.com");
   });
 
   test("can insert and select from log_events", async () => {
-    await sql`INSERT INTO log_events (timestamp, level, tag, message, filter_name) VALUES (1000, 3, 'MyTag', 'hello', 'default')`.execute(db);
+    await sql`INSERT INTO log_events (timestamp, level, tag, message, filter_name) VALUES (1000, 3, 'MyTag', 'hello', 'default')`.execute(
+      db,
+    );
     const rows = await sql<{ tag: string }>`SELECT tag FROM log_events`.execute(db);
     expect(rows.rows[0]?.tag).toBe("MyTag");
   });
 
   test("can insert and select from navigation_events", async () => {
-    await sql`INSERT INTO navigation_events (timestamp, destination) VALUES (2000, 'HomeScreen')`.execute(db);
-    const rows = await sql<{ destination: string }>`SELECT destination FROM navigation_events`.execute(db);
+    await sql`INSERT INTO navigation_events (timestamp, destination) VALUES (2000, 'HomeScreen')`.execute(
+      db,
+    );
+    const rows = await sql<{
+      destination: string;
+    }>`SELECT destination FROM navigation_events`.execute(db);
     expect(rows.rows[0]?.destination).toBe("HomeScreen");
   });
 
   test("can insert and select from storage_events", async () => {
-    await sql`INSERT INTO storage_events (timestamp, file_name, change_type) VALUES (3000, 'prefs.xml', 'put')`.execute(db);
+    await sql`INSERT INTO storage_events (timestamp, file_name, change_type) VALUES (3000, 'prefs.xml', 'put')`.execute(
+      db,
+    );
     const rows = await sql<{ file_name: string }>`SELECT file_name FROM storage_events`.execute(db);
     expect(rows.rows[0]?.file_name).toBe("prefs.xml");
   });
@@ -166,7 +176,9 @@ describe("2026_03_15_000_telemetry_events migration", () => {
 
   test("up is idempotent: a second up() preserves existing rows (not a destructive drop+create)", async () => {
     await telemetryMigration.up(db);
-    await sql`INSERT INTO log_events (timestamp, level, tag, message, filter_name) VALUES (1000, 3, 'TAG', 'hello', 'flt')`.execute(db);
+    await sql`INSERT INTO log_events (timestamp, level, tag, message, filter_name) VALUES (1000, 3, 'TAG', 'hello', 'flt')`.execute(
+      db,
+    );
 
     await expect(telemetryMigration.up(db)).resolves.toBeUndefined();
 
@@ -188,7 +200,17 @@ describe("2026_03_15_000_telemetry_events migration", () => {
   test("network_events has required columns", async () => {
     await telemetryMigration.up(db);
 
-    for (const col of ["id", "device_id", "timestamp", "url", "method", "status_code", "duration_ms", "host", "path"]) {
+    for (const col of [
+      "id",
+      "device_id",
+      "timestamp",
+      "url",
+      "method",
+      "status_code",
+      "duration_ms",
+      "host",
+      "path",
+    ]) {
       expect(await columnExists(db, "network_events", col)).toBe(true);
     }
   });
@@ -229,7 +251,18 @@ describe("2026_03_18_000_navigation_events migration", () => {
   test("navigation_events has required columns", async () => {
     await navigationEventsMigration.up(db);
 
-    for (const col of ["id", "device_id", "timestamp", "application_id", "session_id", "destination", "source", "arguments_json", "metadata_json", "created_at"]) {
+    for (const col of [
+      "id",
+      "device_id",
+      "timestamp",
+      "application_id",
+      "session_id",
+      "destination",
+      "source",
+      "arguments_json",
+      "metadata_json",
+      "created_at",
+    ]) {
       expect(await columnExists(db, "navigation_events", col)).toBe(true);
     }
   });
@@ -243,7 +276,7 @@ describe("2026_03_18_000_navigation_events migration", () => {
   test("destination is required (not null)", async () => {
     await navigationEventsMigration.up(db);
     await expect(
-      sql`INSERT INTO navigation_events (timestamp) VALUES (1000)`.execute(db)
+      sql`INSERT INTO navigation_events (timestamp) VALUES (1000)`.execute(db),
     ).rejects.toThrow();
   });
 });
@@ -267,7 +300,17 @@ describe("2026_03_19_000_storage_events migration", () => {
   test("storage_events has required columns", async () => {
     await storageEventsMigration.up(db);
 
-    for (const col of ["id", "device_id", "timestamp", "file_name", "key", "value", "value_type", "change_type", "created_at"]) {
+    for (const col of [
+      "id",
+      "device_id",
+      "timestamp",
+      "file_name",
+      "key",
+      "value",
+      "value_type",
+      "change_type",
+      "created_at",
+    ]) {
       expect(await columnExists(db, "storage_events", col)).toBe(true);
     }
   });
@@ -281,7 +324,7 @@ describe("2026_03_19_000_storage_events migration", () => {
   test("file_name and change_type are required (not null)", async () => {
     await storageEventsMigration.up(db);
     await expect(
-      sql`INSERT INTO storage_events (timestamp, change_type) VALUES (1000, 'put')`.execute(db)
+      sql`INSERT INTO storage_events (timestamp, change_type) VALUES (1000, 'put')`.execute(db),
     ).rejects.toThrow();
   });
 });
@@ -305,7 +348,19 @@ describe("2026_03_19_001_layout_events migration", () => {
   test("layout_events has required columns", async () => {
     await layoutEventsMigration.up(db);
 
-    for (const col of ["id", "device_id", "timestamp", "sub_type", "composable_name", "composable_id", "recomposition_count", "duration_ms", "likely_cause", "details_json", "created_at"]) {
+    for (const col of [
+      "id",
+      "device_id",
+      "timestamp",
+      "sub_type",
+      "composable_name",
+      "composable_id",
+      "recomposition_count",
+      "duration_ms",
+      "likely_cause",
+      "details_json",
+      "created_at",
+    ]) {
       expect(await columnExists(db, "layout_events", col)).toBe(true);
     }
   });
@@ -337,7 +392,9 @@ describe("2026_03_19_002_storage_events_previous_value migration", () => {
 
   test("up is idempotent: a second up() preserves existing rows and keeps the column", async () => {
     await storageEventsPreviousValueMigration.up(db);
-    await sql`INSERT INTO storage_events (timestamp, file_name, change_type) VALUES (1000, 'prefs.xml', 'modify')`.execute(db);
+    await sql`INSERT INTO storage_events (timestamp, file_name, change_type) VALUES (1000, 'prefs.xml', 'modify')`.execute(
+      db,
+    );
 
     await expect(storageEventsPreviousValueMigration.up(db)).resolves.toBeUndefined();
 
@@ -349,7 +406,9 @@ describe("2026_03_19_002_storage_events_previous_value migration", () => {
   test("previous_value is nullable", async () => {
     await storageEventsPreviousValueMigration.up(db);
     await expect(
-      sql`INSERT INTO storage_events (timestamp, file_name, change_type) VALUES (1000, 'prefs.xml', 'put')`.execute(db)
+      sql`INSERT INTO storage_events (timestamp, file_name, change_type) VALUES (1000, 'prefs.xml', 'put')`.execute(
+        db,
+      ),
     ).resolves.toBeDefined();
   });
 
@@ -380,7 +439,9 @@ describe("2026_03_19_003_layout_events_screen_name migration", () => {
 
   test("up is idempotent: a second up() preserves existing rows and keeps the column", async () => {
     await layoutEventsScreenNameMigration.up(db);
-    await sql`INSERT INTO layout_events (timestamp, sub_type) VALUES (1000, 'recomposition')`.execute(db);
+    await sql`INSERT INTO layout_events (timestamp, sub_type) VALUES (1000, 'recomposition')`.execute(
+      db,
+    );
 
     await expect(layoutEventsScreenNameMigration.up(db)).resolves.toBeUndefined();
 
@@ -392,7 +453,9 @@ describe("2026_03_19_003_layout_events_screen_name migration", () => {
   test("screen_name is nullable", async () => {
     await layoutEventsScreenNameMigration.up(db);
     await expect(
-      sql`INSERT INTO layout_events (timestamp, sub_type) VALUES (1000, 'recomposition')`.execute(db)
+      sql`INSERT INTO layout_events (timestamp, sub_type) VALUES (1000, 'recomposition')`.execute(
+        db,
+      ),
     ).resolves.toBeDefined();
   });
 
@@ -416,20 +479,34 @@ describe("2026_03_20_000_network_event_details migration", () => {
   });
 
   test("up adds detail columns to network_events", async () => {
-    for (const col of ["request_headers_json", "response_headers_json", "request_body", "response_body", "content_type"]) {
+    for (const col of [
+      "request_headers_json",
+      "response_headers_json",
+      "request_body",
+      "response_body",
+      "content_type",
+    ]) {
       expect(await columnExists(db, "network_events", col)).toBe(false);
     }
 
     await networkEventDetailsMigration.up(db);
 
-    for (const col of ["request_headers_json", "response_headers_json", "request_body", "response_body", "content_type"]) {
+    for (const col of [
+      "request_headers_json",
+      "response_headers_json",
+      "request_body",
+      "response_body",
+      "content_type",
+    ]) {
       expect(await columnExists(db, "network_events", col)).toBe(true);
     }
   });
 
   test("up is idempotent: a second up() preserves existing rows and keeps the columns", async () => {
     await networkEventDetailsMigration.up(db);
-    await sql`INSERT INTO network_events (timestamp, url, method) VALUES (1000, 'https://example.com', 'GET')`.execute(db);
+    await sql`INSERT INTO network_events (timestamp, url, method) VALUES (1000, 'https://example.com', 'GET')`.execute(
+      db,
+    );
 
     await expect(networkEventDetailsMigration.up(db)).resolves.toBeUndefined();
 
@@ -441,14 +518,22 @@ describe("2026_03_20_000_network_event_details migration", () => {
   test("all new columns are nullable", async () => {
     await networkEventDetailsMigration.up(db);
     await expect(
-      sql`INSERT INTO network_events (timestamp, url, method, status_code, duration_ms) VALUES (1000, 'https://example.com', 'GET', 200, 10)`.execute(db)
+      sql`INSERT INTO network_events (timestamp, url, method, status_code, duration_ms) VALUES (1000, 'https://example.com', 'GET', 200, 10)`.execute(
+        db,
+      ),
     ).resolves.toBeDefined();
   });
 
   test("down is a no-op (SQLite cannot drop columns)", async () => {
     await networkEventDetailsMigration.up(db);
     await expect(networkEventDetailsMigration.down(db)).resolves.toBeUndefined();
-    for (const col of ["request_headers_json", "response_headers_json", "request_body", "response_body", "content_type"]) {
+    for (const col of [
+      "request_headers_json",
+      "response_headers_json",
+      "request_body",
+      "response_body",
+      "content_type",
+    ]) {
       expect(await columnExists(db, "network_events", col)).toBe(true);
     }
   });

@@ -1,7 +1,7 @@
 # Controlling a Device from the Desktop App
 
-The AutoMobile desktop app can mirror a connected device's screen **and drive it**. In *control
-mode* the mirrored screen becomes interactive: clicking taps the device, dragging swipes it, and —
+The AutoMobile desktop app can mirror a connected device's screen **and drive it**. In _control
+mode_ the mirrored screen becomes interactive: clicking taps the device, dragging swipes it, and —
 on Android — typing forwards to the focused field. This turns the Layout inspector from a
 read-only view into a hands-on remote for the device under test.
 
@@ -32,17 +32,17 @@ disconnected — in every one of those cases the mirror falls back to the plain 
 
 ## Supported interactions
 
-| You do | The device gets |
-| --- | --- |
-| **Click** the mirror | A tap at that point |
-| **Drag** across the mirror | A swipe from where you pressed to where you released |
-| **`Esc`** (mirror focused) | The Back button |
-| **Enter / Tab / Backspace / Delete / arrow keys** | The matching key press (Android) |
-| **Type ASCII text** | The text, appended to the focused field (Android) |
+| You do                                            | The device gets                                      |
+| ------------------------------------------------- | ---------------------------------------------------- |
+| **Click** the mirror                              | A tap at that point                                  |
+| **Drag** across the mirror                        | A swipe from where you pressed to where you released |
+| **`Esc`** (mirror focused)                        | The Back button                                      |
+| **Enter / Tab / Backspace / Delete / arrow keys** | The matching key press (Android)                     |
+| **Type ASCII text**                               | The text, appended to the focused field (Android)    |
 
 A few details worth knowing:
 
-- **Panning while in control mode.** A plain drag is a *swipe*, so to pan/scroll the mirror view
+- **Panning while in control mode.** A plain drag is a _swipe_, so to pan/scroll the mirror view
   itself hold the zoom modifier (**Cmd** on macOS, **Ctrl** elsewhere) while dragging. Zoom with
   the same modifier + scroll wheel, or the on-screen zoom buttons.
 - **Tiny drags do nothing.** A drag shorter than a small threshold is neither a swipe nor a tap —
@@ -70,13 +70,13 @@ A few details worth knowing:
 
 ## Android vs iOS
 
-| Interaction | Android | iOS (simulator) |
-| --- | --- | --- |
-| Tap | ✅ | ✅ |
-| Drag → swipe | ✅ | ✅ |
-| Back button (`Esc`) | ✅ | ✅ |
-| Discrete keys (Enter, Tab, arrows) | ✅ | ❌ not available |
-| Typing text | ✅ (appended to the field) | ✅ (appended at the focused caret) |
+| Interaction                        | Android                    | iOS (simulator)                    |
+| ---------------------------------- | -------------------------- | ---------------------------------- |
+| Tap                                | ✅                         | ✅                                 |
+| Drag → swipe                       | ✅                         | ✅                                 |
+| Back button (`Esc`)                | ✅                         | ✅                                 |
+| Discrete keys (Enter, Tab, arrows) | ✅                         | ❌ not available                   |
+| Typing text                        | ✅ (appended to the field) | ✅ (appended at the focused caret) |
 
 **How typing works on iOS.** Control mode forwards printable ASCII text in append mode. CtrlProxy
 inserts it at the focused field's current caret through XCUITest `typeText`, without clearing the

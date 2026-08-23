@@ -29,7 +29,7 @@ function zipWithoutDexBuffer(): Buffer {
   return zip.toBuffer();
 }
 
-describe("VideoServerJarProvider (#3831)", function() {
+describe("VideoServerJarProvider (#3831)", function () {
   let cacheDir: string;
   let downloader: FakeFileDownloader;
   let checksum: FakeChecksumCalculator;
@@ -47,7 +47,7 @@ describe("VideoServerJarProvider (#3831)", function() {
     });
   }
 
-  beforeEach(async function() {
+  beforeEach(async function () {
     cacheDir = await fs.mkdtemp(path.join(os.tmpdir(), "video-jar-test-"));
     downloader = new FakeFileDownloader();
     downloader.payload = validJarBuffer();
@@ -59,12 +59,12 @@ describe("VideoServerJarProvider (#3831)", function() {
     VideoServerJarProvider.setExpectedChecksumForTesting(EXPECTED_SHA);
   });
 
-  afterEach(async function() {
+  afterEach(async function () {
     VideoServerJarProvider.resetInstances();
     await fs.rm(cacheDir, { recursive: true, force: true });
   });
 
-  test("downloads, verifies, and caches the jar with a metadata sidecar", async function() {
+  test("downloads, verifies, and caches the jar with a metadata sidecar", async function () {
     const provider = makeProvider();
     const jarPath = await provider.ensure();
 
@@ -78,7 +78,7 @@ describe("VideoServerJarProvider (#3831)", function() {
 
     // Metadata sidecar records version, sha, and (fake) timestamp.
     const meta = JSON.parse(
-      await fs.readFile(path.join(cacheDir, VIDEO_SERVER_JAR_METADATA_FILENAME), "utf8")
+      await fs.readFile(path.join(cacheDir, VIDEO_SERVER_JAR_METADATA_FILENAME), "utf8"),
     ) as VideoServerJarMetadata;
     expect(meta.sha256).toBe(EXPECTED_SHA);
     expect(meta.version).toBe("latest");
@@ -86,7 +86,7 @@ describe("VideoServerJarProvider (#3831)", function() {
     expect(meta.size).toBe(stats.size);
   });
 
-  test("computeLocalJarIntegrity returns the lowercased sha256 and byte size of a local jar (#4733)", async function() {
+  test("computeLocalJarIntegrity returns the lowercased sha256 and byte size of a local jar (#4733)", async function () {
     // A real on-disk jar so the fs.stat size is genuine; the sha comes from the
     // injected canonical calculator (here forced to a known value).
     const localJar = path.join(cacheDir, "override-automobile-video.jar");
@@ -101,7 +101,7 @@ describe("VideoServerJarProvider (#3831)", function() {
     expect(checksum.computedFiles).toContain(localJar);
   });
 
-  test("invalidates the cache and re-downloads when the on-disk jar size no longer matches the sidecar", async function() {
+  test("invalidates the cache and re-downloads when the on-disk jar size no longer matches the sidecar", async function () {
     const jarPath = (await makeProvider().ensure())!;
     expect(downloader.downloadedUrls).toHaveLength(1);
 
@@ -113,7 +113,7 @@ describe("VideoServerJarProvider (#3831)", function() {
     expect(downloader.downloadedUrls).toHaveLength(2);
   });
 
-  test("reuses a valid cache without re-downloading", async function() {
+  test("reuses a valid cache without re-downloading", async function () {
     await makeProvider().ensure();
     expect(downloader.downloadedUrls).toHaveLength(1);
 
@@ -124,7 +124,7 @@ describe("VideoServerJarProvider (#3831)", function() {
     expect(downloader.downloadedUrls).toHaveLength(1);
   });
 
-  test("re-downloads when the cached sha no longer matches the expected sha", async function() {
+  test("re-downloads when the cached sha no longer matches the expected sha", async function () {
     await makeProvider().ensure();
 
     // A new expected checksum (e.g. a version bump) invalidates the cache.
@@ -137,37 +137,33 @@ describe("VideoServerJarProvider (#3831)", function() {
     expect(downloader.downloadedUrls).toHaveLength(2);
   });
 
-  test("rejects a corrupt/truncated download (invalid zip, no classes.dex)", async function() {
+  test("rejects a corrupt/truncated download (invalid zip, no classes.dex)", async function () {
     downloader.payload = Buffer.from("not-a-zip-file");
     await expect(makeProvider().ensure()).rejects.toThrow(/classes\.dex/);
 
     // Nothing is left cached.
-    await expect(
-      fs.access(path.join(cacheDir, VIDEO_SERVER_JAR_CACHE_FILENAME))
-    ).rejects.toThrow();
+    await expect(fs.access(path.join(cacheDir, VIDEO_SERVER_JAR_CACHE_FILENAME))).rejects.toThrow();
   });
 
-  test("rejects a zip that is valid but missing classes.dex", async function() {
+  test("rejects a zip that is valid but missing classes.dex", async function () {
     downloader.payload = zipWithoutDexBuffer();
     await expect(makeProvider().ensure()).rejects.toThrow(/classes\.dex/);
   });
 
-  test("rejects a checksum mismatch and leaves no cached file", async function() {
+  test("rejects a checksum mismatch and leaves no cached file", async function () {
     checksum.checksum = "c".repeat(64); // differs from the forced expected sha
     await expect(makeProvider().ensure()).rejects.toThrow(/checksum verification failed/);
-    await expect(
-      fs.access(path.join(cacheDir, VIDEO_SERVER_JAR_CACHE_FILENAME))
-    ).rejects.toThrow();
+    await expect(fs.access(path.join(cacheDir, VIDEO_SERVER_JAR_CACHE_FILENAME))).rejects.toThrow();
   });
 
-  test("returns null (degrade) when the expected checksum is unknown, without touching the network", async function() {
+  test("returns null (degrade) when the expected checksum is unknown, without touching the network", async function () {
     VideoServerJarProvider.setExpectedChecksumForTesting("");
     const jarPath = await makeProvider().ensure();
     expect(jarPath).toBeNull();
     expect(downloader.downloadedUrls).toHaveLength(0);
   });
 
-  test("single-flight: concurrent ensure() calls share one download", async function() {
+  test("single-flight: concurrent ensure() calls share one download", async function () {
     const provider = makeProvider();
     const [a, b] = await Promise.all([provider.ensure(), provider.ensure()]);
     expect(a).toBe(b!);

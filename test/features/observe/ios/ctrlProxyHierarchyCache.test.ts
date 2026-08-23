@@ -50,25 +50,28 @@ function createHarness(): Harness {
   let connected = true;
 
   const context: HierarchyDelegateContext = {
-    getWebSocket: () => ({
-      readyState: 1,
-      send: (data: string) => {
-        const message = JSON.parse(data) as { requestId: string };
-        fetches += 1;
-        // Respond immediately with a hierarchy stamped at the current fake time,
-        // so each fetch is distinguishable from the previously cached one.
-        requestManager.resolve(message.requestId, {
-          hierarchy: makeHierarchy(timer.now(), `fetch-${fetches}`),
-        });
-      },
-    } as never),
+    getWebSocket: () =>
+      ({
+        readyState: 1,
+        send: (data: string) => {
+          const message = JSON.parse(data) as { requestId: string };
+          fetches += 1;
+          // Respond immediately with a hierarchy stamped at the current fake time,
+          // so each fetch is distinguishable from the previously cached one.
+          requestManager.resolve(message.requestId, {
+            hierarchy: makeHierarchy(timer.now(), `fetch-${fetches}`),
+          });
+        },
+      }) as never,
     requestManager,
     timer,
     ensureConnected: async () => connected,
     cancelScreenshotBackoff: () => {},
     cacheFreshTtlMs: CACHE_TTL_MS,
     getCachedHierarchy: () => cached,
-    setCachedHierarchy: h => { cached = h; },
+    setCachedHierarchy: (h) => {
+      cached = h;
+    },
   };
 
   return {
@@ -76,8 +79,12 @@ function createHarness(): Harness {
     timer,
     fetchCount: () => fetches,
     getCached: () => cached,
-    setCached: entry => { cached = entry; },
-    setConnected: value => { connected = value; },
+    setCached: (entry) => {
+      cached = entry;
+    },
+    setConnected: (value) => {
+      connected = value;
+    },
   };
 }
 

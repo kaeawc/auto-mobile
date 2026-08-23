@@ -17,7 +17,7 @@ const DEFAULT_VISUAL_SELECTION_CONFIG: Required<VisualSelectionConfig> = {
   minDifferencePercent: 1,
   minElementSizePx: 4,
   pixelmatchThreshold: 0.1,
-  confidenceScale: 5
+  confidenceScale: 5,
 };
 
 interface SelectionStateDetectorOptions {
@@ -48,7 +48,7 @@ export class SelectionStateDetector implements SelectionStateDetectorLike {
     this.imageUtils = options.imageUtils ?? new JimpImageUtils();
     this.config = {
       ...DEFAULT_VISUAL_SELECTION_CONFIG,
-      ...options.config
+      ...options.config,
     };
   }
 
@@ -63,9 +63,11 @@ export class SelectionStateDetector implements SelectionStateDetectorLike {
       const selectedElements = this.applySelectedState(accessibilityState.selectedElements, {
         method: "accessibility",
         confidence: 1,
-        reason: "selected attribute present in view hierarchy"
+        reason: "selected attribute present in view hierarchy",
       });
-      logger.info(`[SELECTION_STATE] Using accessibility selected state (${selectedElements.length} element(s))`);
+      logger.info(
+        `[SELECTION_STATE] Using accessibility selected state (${selectedElements.length} element(s))`,
+      );
       return selectedElements;
     }
 
@@ -90,7 +92,7 @@ export class SelectionStateDetector implements SelectionStateDetectorLike {
       context.beforeScreenshotPath,
       context.afterScreenshotPath,
       context.previousObservation?.screenSize,
-      currentObservation.screenSize
+      currentObservation.screenSize,
     );
 
     if (!visualResult) {
@@ -100,27 +102,29 @@ export class SelectionStateDetector implements SelectionStateDetectorLike {
     const detection: SelectedElementDetection = {
       method: "visual",
       confidence: visualResult.confidence,
-      reason: visualResult.reason
+      reason: visualResult.reason,
     };
 
     logger.info(
       `[SELECTION_STATE] Using visual fallback for ${this.describeElement(selectedElement)} ` +
-      `(diff=${visualResult.differencePercent.toFixed(2)}%, confidence=${visualResult.confidence})`
+        `(diff=${visualResult.differencePercent.toFixed(2)}%, confidence=${visualResult.confidence})`,
     );
 
-    return [{
-      ...selectedElement,
-      selectedState: detection
-    }];
+    return [
+      {
+        ...selectedElement,
+        selectedState: detection,
+      },
+    ];
   }
 
   private applySelectedState(
     selectedElements: SelectedElement[],
-    selectedState: SelectedElementDetection
+    selectedState: SelectedElementDetection,
   ): SelectedElement[] {
-    return selectedElements.map(element => ({
+    return selectedElements.map((element) => ({
       ...element,
-      selectedState: element.selectedState ?? selectedState
+      selectedState: element.selectedState ?? selectedState,
     }));
   }
 
@@ -128,7 +132,7 @@ export class SelectionStateDetector implements SelectionStateDetectorLike {
     const selected: SelectedElement = {
       text: element.text,
       resourceId: element["resource-id"],
-      contentDesc: element["content-desc"]
+      contentDesc: element["content-desc"],
     };
 
     if (!selected.text && !selected.resourceId && !selected.contentDesc) {
@@ -147,30 +151,34 @@ export class SelectionStateDetector implements SelectionStateDetectorLike {
     beforeScreenshotPath: string,
     afterScreenshotPath: string,
     beforeScreenSize?: ScreenSize,
-    afterScreenSize?: ScreenSize
+    afterScreenSize?: ScreenSize,
   ): Promise<{ differencePercent: number; confidence: number; reason: string } | null> {
     try {
       const beforeScreenshot = await this.screenshotUtils.getCachedScreenshot(beforeScreenshotPath);
       const afterScreenshot = await this.screenshotUtils.getCachedScreenshot(afterScreenshotPath);
 
-      const beforeDimensions = await this.screenshotUtils.getImageDimensions(beforeScreenshot.buffer);
+      const beforeDimensions = await this.screenshotUtils.getImageDimensions(
+        beforeScreenshot.buffer,
+      );
       const afterDimensions = await this.screenshotUtils.getImageDimensions(afterScreenshot.buffer);
 
       const beforeCrop = await this.cropElementRegion(
         beforeScreenshot.buffer,
         bounds,
         beforeScreenSize,
-        beforeDimensions
+        beforeDimensions,
       );
       const afterCrop = await this.cropElementRegion(
         afterScreenshot.buffer,
         bounds,
         afterScreenSize,
-        afterDimensions
+        afterDimensions,
       );
 
       if (!beforeCrop || !afterCrop) {
-        logger.debug("[SELECTION_STATE] Visual fallback skipped: invalid element bounds for cropping");
+        logger.debug(
+          "[SELECTION_STATE] Visual fallback skipped: invalid element bounds for cropping",
+        );
         return null;
       }
 
@@ -178,14 +186,14 @@ export class SelectionStateDetector implements SelectionStateDetectorLike {
         beforeCrop,
         afterCrop,
         this.config.pixelmatchThreshold,
-        false
+        false,
       );
 
       const differencePercent = Math.max(0, 100 - comparison.similarity);
       if (differencePercent < this.config.minDifferencePercent) {
         logger.debug(
           `[SELECTION_STATE] Visual fallback skipped: diff ${differencePercent.toFixed(2)}% ` +
-          `< threshold ${this.config.minDifferencePercent}%`
+            `< threshold ${this.config.minDifferencePercent}%`,
         );
         return null;
       }
@@ -194,7 +202,7 @@ export class SelectionStateDetector implements SelectionStateDetectorLike {
       return {
         differencePercent,
         confidence,
-        reason: `visual diff ${differencePercent.toFixed(2)}% >= ${this.config.minDifferencePercent}%`
+        reason: `visual diff ${differencePercent.toFixed(2)}% >= ${this.config.minDifferencePercent}%`,
       };
     } catch (error) {
       logger.warn(`[SELECTION_STATE] Visual fallback failed: ${error}`);
@@ -206,7 +214,7 @@ export class SelectionStateDetector implements SelectionStateDetectorLike {
     buffer: Buffer,
     bounds: ElementBounds,
     screenSize: ScreenSize | undefined,
-    imageDimensions: { width: number; height: number }
+    imageDimensions: { width: number; height: number },
   ): Promise<Buffer | null> {
     const normalized = this.normalizeBounds(bounds, screenSize, imageDimensions);
     if (!normalized) {
@@ -218,14 +226,14 @@ export class SelectionStateDetector implements SelectionStateDetectorLike {
       normalized.width,
       normalized.height,
       normalized.left,
-      normalized.top
+      normalized.top,
     );
   }
 
   private normalizeBounds(
     bounds: ElementBounds,
     screenSize: ScreenSize | undefined,
-    imageDimensions: { width: number; height: number }
+    imageDimensions: { width: number; height: number },
   ): { left: number; top: number; width: number; height: number } | null {
     if (imageDimensions.width <= 0 || imageDimensions.height <= 0) {
       return null;

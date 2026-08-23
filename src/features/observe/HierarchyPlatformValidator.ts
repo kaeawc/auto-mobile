@@ -7,7 +7,10 @@ export interface HierarchyPlatformValidation {
 }
 
 export interface HierarchyPlatformValidator {
-  validate(platform: "android" | "ios", viewHierarchy: ViewHierarchyResult): HierarchyPlatformValidation;
+  validate(
+    platform: "android" | "ios",
+    viewHierarchy: ViewHierarchyResult,
+  ): HierarchyPlatformValidation;
 }
 
 function isFromIos(viewHierarchy: ViewHierarchyResult): boolean {
@@ -47,14 +50,18 @@ function isFromAndroid(viewHierarchy: ViewHierarchyResult): boolean {
 }
 
 export class RealHierarchyPlatformValidator implements HierarchyPlatformValidator {
-  validate(platform: "android" | "ios", viewHierarchy: ViewHierarchyResult): HierarchyPlatformValidation {
+  validate(
+    platform: "android" | "ios",
+    viewHierarchy: ViewHierarchyResult,
+  ): HierarchyPlatformValidation {
     const ios = isFromIos(viewHierarchy);
     const android = isFromAndroid(viewHierarchy);
 
     if (platform === "android" && ios && !android) {
       return {
         valid: false,
-        error: "Platform mismatch detected: received iOS hierarchy for Android device. " +
+        error:
+          "Platform mismatch detected: received iOS hierarchy for Android device. " +
           "This may indicate a stale connection. Try calling observe again.",
       };
     }
@@ -62,7 +69,8 @@ export class RealHierarchyPlatformValidator implements HierarchyPlatformValidato
     if (platform === "ios" && android && !ios) {
       return {
         valid: false,
-        error: "Platform mismatch detected: received Android hierarchy for iOS device. " +
+        error:
+          "Platform mismatch detected: received Android hierarchy for iOS device. " +
           "This may indicate a stale connection. Try calling observe again.",
       };
     }
@@ -121,7 +129,7 @@ export function enforceHierarchyPlatform(
   result: ObserveResult,
   platform: "android" | "ios",
   deviceId: string,
-  validator: HierarchyPlatformValidator
+  validator: HierarchyPlatformValidator,
 ): boolean {
   if (!result.viewHierarchy?.hierarchy) {
     return true;
@@ -134,7 +142,7 @@ export function enforceHierarchyPlatform(
 
   logger.error(
     `[observe] Platform mismatch: device ${deviceId} is ${platform} but received hierarchy from other platform. ` +
-    `Discarding stale data to prevent cross-platform contamination.`
+      `Discarding stale data to prevent cross-platform contamination.`,
   );
   discardHierarchyDerivedData(result);
   result.error = validation.error;

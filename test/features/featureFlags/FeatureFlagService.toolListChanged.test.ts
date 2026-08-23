@@ -35,22 +35,22 @@ const makeService = (notifier: FakeToolListChangedNotifier) =>
     new FakeFeatureFlagRepository(),
     new FakeFeatureFlagApplier(),
     TEST_DEFINITIONS,
-    notifier
+    notifier,
   );
 
 describe("FeatureFlagService tools/list_changed notifications", () => {
-  test.each([
-    "tool-results-no-structured-content",
-    "debug",
-  ] as const)("toggling %s at runtime emits exactly one notification", async key => {
-    const notifier = new FakeToolListChangedNotifier();
-    const service = makeService(notifier);
-    await service.listFlags(); // force initialize()
+  test.each(["tool-results-no-structured-content", "debug"] as const)(
+    "toggling %s at runtime emits exactly one notification",
+    async (key) => {
+      const notifier = new FakeToolListChangedNotifier();
+      const service = makeService(notifier);
+      await service.listFlags(); // force initialize()
 
-    await service.setFlag(key, true);
+      await service.setFlag(key, true);
 
-    expect(notifier.count).toBe(1);
-  });
+      expect(notifier.count).toBe(1);
+    },
+  );
 
   test("toggling an unrelated flag emits no notification", async () => {
     const notifier = new FakeToolListChangedNotifier();
@@ -110,7 +110,7 @@ describe("FeatureFlagService tools/list_changed notifications", () => {
     const service = new FeatureFlagService(
       new FakeFeatureFlagRepository(),
       new FakeFeatureFlagApplier(),
-      TEST_DEFINITIONS
+      TEST_DEFINITIONS,
     );
 
     // Must not throw despite no notifier being provided.
@@ -136,7 +136,7 @@ describe("FeatureFlagService tools/list_changed notifications", () => {
       new FakeFeatureFlagRepository(),
       new FakeFeatureFlagApplier(),
       TEST_DEFINITIONS,
-      throwingNotifier
+      throwingNotifier,
     );
     await service.listFlags();
 

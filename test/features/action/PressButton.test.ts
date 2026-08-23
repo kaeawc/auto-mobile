@@ -9,13 +9,13 @@ describe("PressButton", () => {
   const iosDevice: BootedDevice = {
     deviceId: "ios-device",
     platform: "ios",
-    name: "iPhone"
+    name: "iPhone",
   };
 
   const iosSimulator: BootedDevice = {
     deviceId: "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
     platform: "ios",
-    name: "iPhone Simulator"
+    name: "iPhone Simulator",
   };
 
   test("ios back delegates to CtrlProxy pressBack", async () => {
@@ -26,7 +26,7 @@ describe("PressButton", () => {
         return { success: true, totalTimeMs: 5 };
       },
       requestPressHome: async () => ({ success: true, totalTimeMs: 5 }),
-      requestRecentApps: async () => ({ success: true, totalTimeMs: 5 })
+      requestRecentApps: async () => ({ success: true, totalTimeMs: 5 }),
     } as any);
 
     try {
@@ -49,7 +49,7 @@ describe("PressButton", () => {
       requestRecentApps: async () => {
         recentCalls++;
         return { success: true, totalTimeMs: 5 };
-      }
+      },
     } as any);
 
     try {
@@ -72,7 +72,7 @@ describe("PressButton", () => {
         homeCalls++;
         return { success: true, totalTimeMs: 5 };
       },
-      requestRecentApps: async () => ({ success: true, totalTimeMs: 5 })
+      requestRecentApps: async () => ({ success: true, totalTimeMs: 5 }),
     } as any);
 
     try {
@@ -83,7 +83,7 @@ describe("PressButton", () => {
         },
         execute: async () => {
           throw new Error("press should not observe");
-        }
+        },
       };
 
       const result = await pressButton.press("home");
@@ -115,11 +115,11 @@ describe("PressButton", () => {
         _button: string,
         _timeoutMs?: number,
         _perf?: unknown,
-        frameContext?: string
+        frameContext?: string,
       ) => {
         contexts.push(frameContext ?? "");
         return { success: true, totalTimeMs: 5 };
-      }
+      },
     } as any);
 
     try {
@@ -129,7 +129,12 @@ describe("PressButton", () => {
       await pressButton.press("recent", undefined, "desktop-frame");
       await pressButton.press("volume_up", undefined, "desktop-frame");
 
-      expect(contexts).toEqual(["desktop-frame", "desktop-frame", "desktop-frame", "desktop-frame"]);
+      expect(contexts).toEqual([
+        "desktop-frame",
+        "desktop-frame",
+        "desktop-frame",
+        "desktop-frame",
+      ]);
     } finally {
       getInstanceSpy.mockRestore();
     }
@@ -139,7 +144,7 @@ describe("PressButton", () => {
     const androidDevice: BootedDevice = {
       deviceId: "android-device",
       platform: "android",
-      name: "Pixel"
+      name: "Pixel",
     };
 
     const fakeTimer = new FakeTimer();
@@ -147,8 +152,14 @@ describe("PressButton", () => {
     const fakeAdb = {
       execute: async (_args: string[], options?: { timeoutMs?: number }) => {
         capturedTimeouts.push(options?.timeoutMs);
-        return { stdout: "", stderr: "", toString: () => "", trim: () => "", includes: () => false };
-      }
+        return {
+          stdout: "",
+          stderr: "",
+          toString: () => "",
+          trim: () => "",
+          includes: () => false,
+        };
+      },
     } as any;
 
     // "menu" is not a global-action button, so it goes straight to the ADB keyevent path.
@@ -164,15 +175,21 @@ describe("PressButton", () => {
     const androidDevice: BootedDevice = {
       deviceId: "android-device",
       platform: "android",
-      name: "Pixel"
+      name: "Pixel",
     };
 
     const capturedTimeouts: (number | undefined)[] = [];
     const fakeAdb = {
       execute: async (_args: string[], options?: { timeoutMs?: number }) => {
         capturedTimeouts.push(options?.timeoutMs);
-        return { stdout: "", stderr: "", toString: () => "", trim: () => "", includes: () => false };
-      }
+        return {
+          stdout: "",
+          stderr: "",
+          toString: () => "",
+          trim: () => "",
+          includes: () => false,
+        };
+      },
     } as any;
 
     const pressButton = new PressButton(androidDevice, fakeAdb);
@@ -186,7 +203,7 @@ describe("PressButton", () => {
     const androidDevice: BootedDevice = {
       deviceId: "android-device",
       platform: "android",
-      name: "Pixel"
+      name: "Pixel",
     };
 
     const fakeTimer = new FakeTimer();
@@ -200,14 +217,20 @@ describe("PressButton", () => {
         globalActionTimeouts.push(timeoutMs);
         fakeTimer.advanceTime(300);
         return { success: false, action, totalTimeMs: 300, error: "WebSocket not connected" };
-      }
+      },
     } as any);
 
     const fakeAdb = {
       execute: async (_args: string[], options?: { timeoutMs?: number }) => {
         adbTimeouts.push(options?.timeoutMs);
-        return { stdout: "", stderr: "", toString: () => "", trim: () => "", includes: () => false };
-      }
+        return {
+          stdout: "",
+          stderr: "",
+          toString: () => "",
+          trim: () => "",
+          includes: () => false,
+        };
+      },
     } as any;
 
     try {
@@ -233,7 +256,7 @@ describe("PressButton", () => {
     const androidDevice: BootedDevice = {
       deviceId: "android-device",
       platform: "android",
-      name: "Pixel"
+      name: "Pixel",
     };
 
     const fakeTimer = new FakeTimer();
@@ -244,14 +267,20 @@ describe("PressButton", () => {
         // Consume the entire budget.
         fakeTimer.advanceTime(timeoutMs);
         return { success: false, action, totalTimeMs: timeoutMs, error: "timeout" };
-      }
+      },
     } as any);
 
     const fakeAdb = {
       executeCommand: async () => {
         adbCalled = true;
-        return { stdout: "", stderr: "", toString: () => "", trim: () => "", includes: () => false };
-      }
+        return {
+          stdout: "",
+          stderr: "",
+          toString: () => "",
+          trim: () => "",
+          includes: () => false,
+        };
+      },
     } as any;
 
     try {
@@ -287,7 +316,7 @@ describe("PressButton", () => {
       requestPressButton: async (button: string) => {
         pressButtonCalls.push(button);
         return { success: true, totalTimeMs: 5 };
-      }
+      },
     } as any);
 
     try {
@@ -309,7 +338,7 @@ describe("PressButton", () => {
     const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
       requestPressButton: async () => {
         throw new Error("should not be called");
-      }
+      },
     } as any);
 
     try {
@@ -342,7 +371,7 @@ describe("PressButton", () => {
       requestPressButton: async (_button: string, timeoutMs?: number) => {
         buttonTimeouts.push(timeoutMs);
         return { success: true, totalTimeMs: 5 };
-      }
+      },
     } as any);
 
     try {
@@ -366,7 +395,7 @@ describe("PressButton", () => {
         homeTimeouts.push(timeoutMs);
         return { success: true, totalTimeMs: 5 };
       },
-      requestRecentApps: async () => ({ success: true, totalTimeMs: 5 })
+      requestRecentApps: async () => ({ success: true, totalTimeMs: 5 }),
     } as any);
 
     try {
@@ -384,8 +413,8 @@ describe("PressButton", () => {
       requestPressButton: async () => ({
         success: false,
         error: "Power/lock button is not supported on this device",
-        totalTimeMs: 5
-      })
+        totalTimeMs: 5,
+      }),
     } as any);
 
     try {

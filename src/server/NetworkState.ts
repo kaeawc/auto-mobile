@@ -143,15 +143,19 @@ export class NetworkState {
   startSimulation(
     errorType: SimulatedErrorType,
     durationSeconds: number,
-    limit: number | null
+    limit: number | null,
   ): void {
-    this.startSimulationUntil(errorType, Math.ceil(this.timer.now() + durationSeconds * 1000), limit);
+    this.startSimulationUntil(
+      errorType,
+      Math.ceil(this.timer.now() + durationSeconds * 1000),
+      limit,
+    );
   }
 
   startSimulationUntil(
     errorType: SimulatedErrorType,
     expiresAt: number,
-    limit: number | null
+    limit: number | null,
   ): void {
     if (this._simulationTimeout) {
       this.timer.clearTimeout(this._simulationTimeout);
@@ -254,10 +258,7 @@ export class NetworkState {
     if (sim) {
       snapshot.simulatingErrors = {
         errorType: sim.errorType,
-        remainingSeconds: Math.max(
-          0,
-          Math.ceil((sim.expiresAt - this.timer.now()) / 1000)
-        ),
+        remainingSeconds: Math.max(0, Math.ceil((sim.expiresAt - this.timer.now()) / 1000)),
       };
       if (sim.limit !== null) {
         snapshot.simulatingErrors.limit = sim.limit;
@@ -309,8 +310,8 @@ export class NetworkState {
       return;
     }
 
-    const hasErrors = pending.some(n => n.statusCode >= 400);
-    const hasSlow = pending.some(n => n.durationMs >= this._slowThresholdMs);
+    const hasErrors = pending.some((n) => n.statusCode >= 400);
+    const hasSlow = pending.some((n) => n.durationMs >= this._slowThresholdMs);
 
     try {
       // Always notify the live traffic resource
@@ -318,16 +319,12 @@ export class NetworkState {
 
       // Notify errors resource if any errors in batch
       if (hasErrors) {
-        this.notifier.notifyResourceUpdated(
-          "automobile://network/traffic/errors"
-        );
+        this.notifier.notifyResourceUpdated("automobile://network/traffic/errors");
       }
 
       // Notify slow resource if any slow requests in batch
       if (hasSlow) {
-        this.notifier.notifyResourceUpdated(
-          "automobile://network/traffic/slow"
-        );
+        this.notifier.notifyResourceUpdated("automobile://network/traffic/slow");
       }
 
       // Stats resource always gets notified (it computes aggregates on read)

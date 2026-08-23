@@ -3,6 +3,7 @@
 Node TypeScript MCP server providing Android Debug Bridge (ADB) capabilities through MCP tool calls for device automation.
 
 ## Key Rules
+
 - TypeScript only (no JavaScript) for application code. The one exception is
   lint tooling: `oxlint-plugins/auto-mobile.mjs` (oxlint's plugin API is
   JS-first), as `eslint.config.mjs` was before it. Every rule in it is covered by
@@ -39,6 +40,7 @@ caller's contract, not by local precedent. The building blocks already exist:
    whose failure should surface to the client. Throw `ActionableError` with
    actionable context, or use `toActionableError(error, context)` to wrap an
    unknown caught value in one call:
+
    ```ts
    } catch (error) {
      throw toActionableError(error, "Failed to start Android screenrecord");
@@ -47,10 +49,11 @@ caller's contract, not by local precedent. The building blocks already exist:
 
 2. **Log, then return a typed failure** — for diagnostic/best-effort paths that
    return a status object (e.g. `doctor` checks) instead of throwing. Log the
-   underlying error *before* returning, so there is a trace even when the user
+   underlying error _before_ returning, so there is a trace even when the user
    only sees a summarized message. Use `logger.warn` for unexpected failures —
    the default level is `INFO`, so `logger.debug` is **dropped** unless the user
    opted into debug logging, which defeats the trace:
+
    ```ts
    } catch (error) {
      logger.warn(`simctl check failed: ${errorMessage(error)}`, error);
@@ -60,7 +63,7 @@ caller's contract, not by local precedent. The building blocks already exist:
 
 3. **Log-and-continue (swallow)** — only for genuinely-expected non-errors
    (port probes, optional capability checks). Log at `debug` and add a one-line
-   comment stating *why* it is safe to swallow:
+   comment stating _why_ it is safe to swallow:
    ```ts
    } catch (error) {
      // Connection refused is expected when no emulator is on this port.
@@ -76,16 +79,19 @@ lint allows it (`caughtErrors: "none"`), so this convention is the only backstop
 This document summarizes the AutoMobile repo layout and where to find key components.
 
 ## Core Code
+
 - `src/` - MCP server source code (TypeScript)
 - `test/` - MCP server test code (TypeScript)
 - `schemas/` - Generated schemas and tool definitions
 - `dist/` - Build output
 
 ## Mobile Platforms
+
 - `android/` - Android Kotlin Gradle project (apps, libraries, IDE plugin)
 - `ios/` - Swift packages and Xcode projects
 
 ## Tooling and Automation
+
 - `scripts/` - Local validation and utility scripts
 - `benchmark/` - Benchmarks and baselines
 - `docs/` - User and developer documentation
@@ -207,16 +213,20 @@ shellcheck scripts/**/*.sh  # Lint shell scripts
 This is a high-level summary of core MCP tools exposed by the server.
 
 ## Observation
+
 - `observe` - Capture screen state and view hierarchy
 
 ## Interaction
+
 - `tapOn`, `swipeOn`, `dragAndDrop`, `pinchOn`
 - `inputText`, `clearText`, `pressButton`, `pressKey`
 
 ## App Management
+
 - `launchApp`, `terminateApp`, `installApp`, `uninstallApp`
 
 ## Device Management
+
 - `listDevices`, `startDevice`, `killDevice`, `setActiveDevice`
 
 # Android Notification Group Handling (Hard-Won Knowledge)

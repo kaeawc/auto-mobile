@@ -26,7 +26,9 @@ describe("readAndroidDeviceApiLevel", () => {
 
     expect(level).toBe(31);
     // The fast path must not fall through to a getprop probe when the client answered.
-    expect(adb.getExecutedCommands().some(c => c.includes("getprop ro.build.version.sdk"))).toBe(false);
+    expect(adb.getExecutedCommands().some((c) => c.includes("getprop ro.build.version.sdk"))).toBe(
+      false,
+    );
   });
 
   test("falls back to getprop when the executor's API level reads null", async () => {
@@ -37,7 +39,9 @@ describe("readAndroidDeviceApiLevel", () => {
     const level = await readAndroidDeviceApiLevel(adb);
 
     expect(level).toBe(29);
-    expect(adb.getExecutedCommands().some(c => c.includes("getprop ro.build.version.sdk"))).toBe(true);
+    expect(adb.getExecutedCommands().some((c) => c.includes("getprop ro.build.version.sdk"))).toBe(
+      true,
+    );
   });
 
   test("reads getprop when the executor exposes no API-level method at all", async () => {

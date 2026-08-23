@@ -20,17 +20,21 @@ export async function runAllCleanupOperations(
   onCleanupFailure?: (error: unknown) => void,
 ): Promise<void> {
   const cleanupResults = await Promise.allSettled(
-    cleanupOperations.map(operation => Promise.resolve().then(operation).catch(error => {
-      onCleanupFailure?.(error);
-      throw error;
-    })),
+    cleanupOperations.map((operation) =>
+      Promise.resolve()
+        .then(operation)
+        .catch((error) => {
+          onCleanupFailure?.(error);
+          throw error;
+        }),
+    ),
   );
   const cleanupFailures = cleanupResults.filter(
     (result): result is PromiseRejectedResult => result.status === "rejected",
   );
   if (cleanupFailures.length > 0) {
     throw new AggregateError(
-      cleanupFailures.map(result => result.reason),
+      cleanupFailures.map((result) => result.reason),
       "One or more shutdown cleanup operations failed",
     );
   }
@@ -46,7 +50,7 @@ export type ProcessLifecycleEventMap = {
 export interface ProcessLifecycleProcess {
   on<K extends keyof ProcessLifecycleEventMap>(
     event: K,
-    listener: (...args: ProcessLifecycleEventMap[K]) => void
+    listener: (...args: ProcessLifecycleEventMap[K]) => void,
   ): unknown;
   exit(code?: number): never;
 }
@@ -71,7 +75,7 @@ export class ProcessLifecycleHandlers {
   private stdinShutdownTimeoutArmed = false;
   private stdinShutdownTimeoutHandle: NodeJS.Timeout | undefined;
   private resolveStdinShutdownTimeout!: (value: false) => void;
-  private readonly stdinShutdownTimeout = new Promise<false>(resolve => {
+  private readonly stdinShutdownTimeout = new Promise<false>((resolve) => {
     this.resolveStdinShutdownTimeout = resolve;
   });
   private shutdownHandler: ProcessShutdownHandler | undefined;
@@ -96,7 +100,7 @@ export class ProcessLifecycleHandlers {
     this.lifecycleProcess.on("SIGTERM", () => {
       void this.shutdown("SIGTERM");
     });
-    this.lifecycleProcess.on("uncaughtException", error => {
+    this.lifecycleProcess.on("uncaughtException", (error) => {
       void this.handleFatalProcessEvent({ type: "uncaughtException", error });
     });
     this.lifecycleProcess.on("unhandledRejection", (reason, promise) => {
@@ -194,9 +198,11 @@ export class ProcessLifecycleHandlers {
       PROCESS_SHUTDOWN_FINALIZATION_TIMEOUT_MS,
     );
     let timeoutHandle: NodeJS.Timeout | undefined;
-    const timedOut = new Promise<undefined>(resolve => {
+    const timedOut = new Promise<undefined>((resolve) => {
       timeoutHandle = this.timer.setTimeout(() => {
-        writeEmergencyLog(`Shutdown finalization timed out after ${finalizationTimeoutMs}ms; forcing exit`);
+        writeEmergencyLog(
+          `Shutdown finalization timed out after ${finalizationTimeoutMs}ms; forcing exit`,
+        );
         resolve(undefined);
       }, finalizationTimeoutMs);
     });

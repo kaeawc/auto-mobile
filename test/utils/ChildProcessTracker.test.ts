@@ -34,7 +34,7 @@ class FakeStoppableProcess extends EventEmitter implements StoppableProcess {
 }
 
 function createExitPromise(process: EventEmitter): Promise<void> {
-  return new Promise<void>(resolve => {
+  return new Promise<void>((resolve) => {
     process.once("exit", () => resolve());
   });
 }

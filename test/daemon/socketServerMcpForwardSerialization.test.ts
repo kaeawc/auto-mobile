@@ -390,19 +390,23 @@ describe("UnixSocketServer MCP forward serialization", () => {
       );
       for (let attempt = 0; attempt < 20; attempt++) {
         const contexts = Array.from(
-          (server as unknown as {
-            sessions: Map<string, { requestQueue: unknown[] }>;
-          }).sessions.values(),
+          (
+            server as unknown as {
+              sessions: Map<string, { requestQueue: unknown[] }>;
+            }
+          ).sessions.values(),
         );
-        if (contexts.some(context => context.requestQueue.length > 0)) {
+        if (contexts.some((context) => context.requestQueue.length > 0)) {
           break;
         }
-        await new Promise<void>(resolve => setImmediate(resolve));
+        await new Promise<void>((resolve) => setImmediate(resolve));
       }
       const queuedRequestCount = Array.from(
-        (server as unknown as {
-          sessions: Map<string, { requestQueue: unknown[] }>;
-        }).sessions.values(),
+        (
+          server as unknown as {
+            sessions: Map<string, { requestQueue: unknown[] }>;
+          }
+        ).sessions.values(),
       ).reduce((count, context) => count + context.requestQueue.length, 0);
       expect(queuedRequestCount).toBe(1);
 

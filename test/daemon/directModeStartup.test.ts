@@ -12,7 +12,7 @@ import {
  */
 function recordingSteps(
   noProxy: boolean,
-  overrides: Partial<DirectModeStartupSteps> = {}
+  overrides: Partial<DirectModeStartupSteps> = {},
 ): { steps: DirectModeStartupSteps; calls: string[] } {
   const calls: string[] = [];
   return {
@@ -61,7 +61,7 @@ describe("runDirectModeStartup", () => {
         applyFeatureFlagStartup: async () => {
           calls.push("applyFeatureFlagStartup");
         },
-      })
+      }),
     ).rejects.toBe(refusal);
 
     // Feature-flag startup (the first DB touch) must never run once the guard

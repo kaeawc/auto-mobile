@@ -19,8 +19,13 @@ describe("ToolRegistry post-timeout result logging", () => {
   });
 
   function registerProbe(): void {
-    ToolRegistry.registerDeviceAware("postTimeoutProbe", "Resolves with success regardless of caller state", z.object({}), async () => ({ success: true }), { shouldEnsureDevice: () => false,
-      nonDeviceHandler: async () => ({ success: true }), });
+    ToolRegistry.registerDeviceAware(
+      "postTimeoutProbe",
+      "Resolves with success regardless of caller state",
+      z.object({}),
+      async () => ({ success: true }),
+      { shouldEnsureDevice: () => false, nonDeviceHandler: async () => ({ success: true }) },
+    );
   }
 
   test("warns (not infos) when the caller's request already timed out", async () => {
@@ -38,13 +43,13 @@ describe("ToolRegistry post-timeout result logging", () => {
       expect(response).toEqual({ success: true });
 
       const resultWarn = warnSpy.mock.calls.find(
-        ([msg]) => typeof msg === "string" && msg.includes("postTimeoutProbe result")
+        ([msg]) => typeof msg === "string" && msg.includes("postTimeoutProbe result"),
       );
       expect(resultWarn).toBeDefined();
       expect(String(resultWarn![0])).toMatch(/timed out/i);
 
       const resultInfo = infoSpy.mock.calls.find(
-        ([msg]) => typeof msg === "string" && msg.includes("postTimeoutProbe result")
+        ([msg]) => typeof msg === "string" && msg.includes("postTimeoutProbe result"),
       );
       expect(resultInfo).toBeUndefined();
     } finally {
@@ -65,12 +70,12 @@ describe("ToolRegistry post-timeout result logging", () => {
       expect(response).toEqual({ success: true });
 
       const resultInfo = infoSpy.mock.calls.find(
-        ([msg]) => typeof msg === "string" && msg.includes("postTimeoutProbe result: success=true")
+        ([msg]) => typeof msg === "string" && msg.includes("postTimeoutProbe result: success=true"),
       );
       expect(resultInfo).toBeDefined();
 
       const resultWarn = warnSpy.mock.calls.find(
-        ([msg]) => typeof msg === "string" && msg.includes("postTimeoutProbe result")
+        ([msg]) => typeof msg === "string" && msg.includes("postTimeoutProbe result"),
       );
       expect(resultWarn).toBeUndefined();
     } finally {

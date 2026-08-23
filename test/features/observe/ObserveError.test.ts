@@ -6,7 +6,7 @@ function makeResult(): ObserveResult {
   return {
     updatedAt: 0,
     screenSize: { width: 0, height: 0 },
-    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 }
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
   };
 }
 
@@ -26,11 +26,7 @@ describe("appendObserveError", () => {
     appendObserveError(result, { phase: "rotation", message: "second" });
     appendObserveError(result, { phase: "viewHierarchy", message: "third", cause: "io" });
     expect(result.errors!.length).toBe(3);
-    expect(result.errors!.map(e => e.phase)).toEqual([
-      "screenSize",
-      "rotation",
-      "viewHierarchy"
-    ]);
+    expect(result.errors!.map((e) => e.phase)).toEqual(["screenSize", "rotation", "viewHierarchy"]);
     expect(result.errors![2].cause).toBe("io");
   });
 
@@ -52,7 +48,7 @@ describe("appendObserveError", () => {
     const result = makeResult();
     result.error = "legacy-preexisting";
     appendObserveError(result, { phase: "critical", message: "fresh" });
-    expect(result.errors!.map(e => e.message)).toEqual(["legacy-preexisting", "fresh"]);
+    expect(result.errors!.map((e) => e.message)).toEqual(["legacy-preexisting", "fresh"]);
     expect(result.error).toBe("legacy-preexisting; fresh");
     appendObserveError(result, { phase: "cache", message: "next" });
     expect(result.error).toBe("legacy-preexisting; fresh; next");

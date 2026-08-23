@@ -32,10 +32,10 @@ class RecordingPhysicalPrivacyClient implements IosPhysicalPrivacyClient {
 
   async resetAuthorizations(
     appId: string,
-    permissions: string[]
+    permissions: string[],
   ): Promise<IosSimulatorPermissionCommandResult[]> {
     this.calls.push({ appId, permissions });
-    return permissions.map(permission => ({ permission, success: true }));
+    return permissions.map((permission) => ({ permission, success: true }));
   }
 }
 
@@ -43,10 +43,16 @@ describe("AppPermissions", () => {
   test("sets Android runtime permissions and Android-specific options through one action", async () => {
     const adbFactory = new FakeAdbClientFactory();
     const client = adbFactory.getFakeClient();
-    client.setCommandResult("shell pm grant --user 0 'com.example.app' 'android.permission.CAMERA'", "");
+    client.setCommandResult(
+      "shell pm grant --user 0 'com.example.app' 'android.permission.CAMERA'",
+      "",
+    );
     client.setCommandResult("shell cmd notification set_enabled 'com.example.app' true", "");
     client.setCommandResult("shell cmd notification allow_dnd 'com.example.app'", "");
-    client.setCommandResult("shell appops set --uid 'com.example.app' SCHEDULE_EXACT_ALARM allow", "");
+    client.setCommandResult(
+      "shell appops set --uid 'com.example.app' SCHEDULE_EXACT_ALARM allow",
+      "",
+    );
 
     const permissions = new AppPermissions(androidDevice, { adbFactory });
     const result = await permissions.setPermissions("com.example.app", {
@@ -59,26 +65,41 @@ describe("AppPermissions", () => {
 
     expect(result.success).toBe(true);
     expect(result.changedCount).toBe(4);
-    expect(result.operations.map(operation => operation.operationId)).toEqual([
+    expect(result.operations.map((operation) => operation.operationId)).toEqual([
       "android_runtime_permissions:grant",
       "android_notifications_enabled",
       "android_notification_policy_access",
       "android_schedule_exact_alarm_appop",
     ]);
-    expect(client.wasCommandExecuted("shell pm grant --user 0 'com.example.app' 'android.permission.CAMERA'")).toBe(true);
-    expect(client.wasCommandExecuted("shell cmd notification set_enabled 'com.example.app' true")).toBe(true);
-    expect(client.wasCommandExecuted("shell cmd notification allow_dnd 'com.example.app'")).toBe(true);
-    expect(client.wasCommandExecuted("shell appops set --uid 'com.example.app' SCHEDULE_EXACT_ALARM allow")).toBe(true);
+    expect(
+      client.wasCommandExecuted(
+        "shell pm grant --user 0 'com.example.app' 'android.permission.CAMERA'",
+      ),
+    ).toBe(true);
+    expect(
+      client.wasCommandExecuted("shell cmd notification set_enabled 'com.example.app' true"),
+    ).toBe(true);
+    expect(client.wasCommandExecuted("shell cmd notification allow_dnd 'com.example.app'")).toBe(
+      true,
+    );
+    expect(
+      client.wasCommandExecuted(
+        "shell appops set --uid 'com.example.app' SCHEDULE_EXACT_ALARM allow",
+      ),
+    ).toBe(true);
   });
 
   test("aggregates Android revoke and notification command failures", async () => {
     const adbFactory = new FakeAdbClientFactory();
     const client = adbFactory.getFakeClient();
-    client.setCommandResult("shell pm revoke --user 0 'com.example.app' 'android.permission.CAMERA'", "");
+    client.setCommandResult(
+      "shell pm revoke --user 0 'com.example.app' 'android.permission.CAMERA'",
+      "",
+    );
     client.setCommandResult(
       "shell cmd notification set_enabled 'com.example.app' false",
       "",
-      "SecurityException: notification access denied"
+      "SecurityException: notification access denied",
     );
 
     const permissions = new AppPermissions(androidDevice, { adbFactory });
@@ -92,12 +113,14 @@ describe("AppPermissions", () => {
     expect(result.success).toBe(false);
     expect(result.changedCount).toBe(1);
     expect(result.failedCount).toBe(1);
-    expect(result.operations.map(operation => ({
-      operationId: operation.operationId,
-      success: operation.success,
-      changedCount: operation.changedCount,
-      failedCount: operation.failedCount,
-    }))).toEqual([
+    expect(
+      result.operations.map((operation) => ({
+        operationId: operation.operationId,
+        success: operation.success,
+        changedCount: operation.changedCount,
+        failedCount: operation.failedCount,
+      })),
+    ).toEqual([
       {
         operationId: "android_runtime_permissions:revoke",
         success: true,
@@ -127,10 +150,12 @@ describe("AppPermissions", () => {
     expect(result.success).toBe(true);
     expect(result.changedCount).toBe(1);
     expect(result.failedCount).toBe(0);
-    expect(result.operations.map(operation => operation.operationId)).toEqual([
+    expect(result.operations.map((operation) => operation.operationId)).toEqual([
       "android_notifications_enabled",
     ]);
-    expect(client.wasCommandExecuted("shell cmd notification set_enabled 'com.example.app' false")).toBe(true);
+    expect(
+      client.wasCommandExecuted("shell cmd notification set_enabled 'com.example.app' false"),
+    ).toBe(true);
   });
 
   test("quotes notification package names before passing them to the device shell", async () => {
@@ -162,16 +187,21 @@ describe("AppPermissions", () => {
     expect(result.success).toBe(false);
     expect(result.changedCount).toBe(0);
     expect(result.failedCount).toBe(1);
-    expect(result.operations.map(operation => operation.operationId)).toEqual([
+    expect(result.operations.map((operation) => operation.operationId)).toEqual([
       "android_runtime_permissions:reset",
     ]);
     expect(result.operations[0].result).toMatchObject({
-      results: [{
-        error: "Android reset requires permissions=['all'] because pm reset-permissions is device-wide",
-      }],
+      results: [
+        {
+          error:
+            "Android reset requires permissions=['all'] because pm reset-permissions is device-wide",
+        },
+      ],
     });
     expect(client.wasCommandExecuted("shell pm reset-permissions")).toBe(false);
-    expect(client.wasCommandExecuted("shell cmd notification set_enabled com.example.app false")).toBe(false);
+    expect(
+      client.wasCommandExecuted("shell cmd notification set_enabled com.example.app false"),
+    ).toBe(false);
   });
 
   test("reports Android reset as one standard operation", async () => {
@@ -188,7 +218,7 @@ describe("AppPermissions", () => {
     expect(result.success).toBe(true);
     expect(result.changedCount).toBe(1);
     expect(result.failedCount).toBe(0);
-    expect(result.operations.map(operation => operation.operationId)).toEqual([
+    expect(result.operations.map((operation) => operation.operationId)).toEqual([
       "android_runtime_permissions:reset",
     ]);
     expect(client.wasCommandExecuted("shell pm reset-permissions")).toBe(true);
@@ -206,9 +236,12 @@ describe("AppPermissions", () => {
 
     expect(result.success).toBe(false);
     expect(result.operations[0].result).toMatchObject({
-      results: [{
-        error: "Android reset requires permissions=['all'] because pm reset-permissions is device-wide",
-      }],
+      results: [
+        {
+          error:
+            "Android reset requires permissions=['all'] because pm reset-permissions is device-wide",
+        },
+      ],
     });
     expect(client.wasCommandExecuted("shell pm reset-permissions")).toBe(false);
   });
@@ -222,7 +255,7 @@ describe("AppPermissions", () => {
         "runtime permissions:",
         "  android.permission.CAMERA: granted=true, flags=[ USER_SET ]",
         "  android.permission.POST_NOTIFICATIONS: granted=false, flags=[ USER_FIXED ]",
-      ].join("\n")
+      ].join("\n"),
     );
 
     const permissions = new AppPermissions(androidDevice, { adbFactory });
@@ -235,14 +268,24 @@ describe("AppPermissions", () => {
     });
 
     expect(result.success).toBe(true);
-    expect(result.permissions.map(permission => ({
-      permission: permission.permission,
-      state: permission.state,
-      source: permission.source,
-    }))).toEqual([
+    expect(
+      result.permissions.map((permission) => ({
+        permission: permission.permission,
+        state: permission.state,
+        source: permission.source,
+      })),
+    ).toEqual([
       { permission: "android.permission.CAMERA", state: "granted", source: "androidRuntime" },
-      { permission: "android.permission.POST_NOTIFICATIONS", state: "denied", source: "androidRuntime" },
-      { permission: "android.permission.ACCESS_FINE_LOCATION", state: "unknown", source: "androidRuntime" },
+      {
+        permission: "android.permission.POST_NOTIFICATIONS",
+        state: "denied",
+        source: "androidRuntime",
+      },
+      {
+        permission: "android.permission.ACCESS_FINE_LOCATION",
+        state: "unknown",
+        source: "androidRuntime",
+      },
     ]);
   });
 
@@ -273,8 +316,14 @@ describe("AppPermissions", () => {
     expect(setResult.changedCount).toBe(1);
     expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([
       {
-        args: ["privacy", "12345678-1234-1234-1234-123456789ABC", "grant", "camera", "com.example.app"],
-        timeoutMs: undefined
+        args: [
+          "privacy",
+          "12345678-1234-1234-1234-123456789ABC",
+          "grant",
+          "camera",
+          "com.example.app",
+        ],
+        timeoutMs: undefined,
       },
     ]);
     expect(getResult.permissions).toEqual([
@@ -307,7 +356,7 @@ describe("AppPermissions", () => {
     expect(result.success).toBe(true);
     expect(result.platform).toBe("ios");
     expect(result.changedCount).toBe(2);
-    expect(result.operations.map(operation => operation.operationId)).toEqual([
+    expect(result.operations.map((operation) => operation.operationId)).toEqual([
       "ios_xcuitest_reset:reset:camera",
       "ios_xcuitest_reset:reset:photos",
     ]);
@@ -345,8 +394,8 @@ describe("AppPermissions", () => {
     expect(result.success).toBe(true);
     expect(result.changedCount).toBe(expandedResources.length);
     expect(result.failedCount).toBe(0);
-    expect(result.operations.map(operation => operation.operationId)).toEqual(
-      expandedResources.map(resource => `ios_xcuitest_reset:reset:${resource}`)
+    expect(result.operations.map((operation) => operation.operationId)).toEqual(
+      expandedResources.map((resource) => `ios_xcuitest_reset:reset:${resource}`),
     );
     expect(iosPhysicalClient.calls).toEqual([
       {
@@ -374,7 +423,7 @@ describe("AppPermissions", () => {
     expect(result.deviceId).toBe(iosPhysical.deviceId);
     expect(result.permissions).toEqual([]);
     expect(result.error).toBe(
-      "iOS permission state queries are not available on physical devices (no readable TCC store); use setAppPermissions with action=reset to re-arm the system prompt"
+      "iOS permission state queries are not available on physical devices (no readable TCC store); use setAppPermissions with action=reset to re-arm the system prompt",
     );
   });
 
@@ -410,7 +459,7 @@ describe("AppPermissions", () => {
       expect(result.changedCount).toBe(0);
       expect(result.failedCount).toBe(0);
       expect(result.error).toBe(
-        "setAppPermissions does not support the following fields on iOS: notificationPolicyAccess"
+        "setAppPermissions does not support the following fields on iOS: notificationPolicyAccess",
       );
     });
 
@@ -424,7 +473,7 @@ describe("AppPermissions", () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toBe(
-        "setAppPermissions does not support the following fields on iOS: scheduleExactAlarm"
+        "setAppPermissions does not support the following fields on iOS: scheduleExactAlarm",
       );
     });
 
@@ -438,7 +487,7 @@ describe("AppPermissions", () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toBe(
-        "setAppPermissions does not support the following fields on iOS: notificationsEnabled"
+        "setAppPermissions does not support the following fields on iOS: notificationsEnabled",
       );
     });
 
@@ -455,7 +504,7 @@ describe("AppPermissions", () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toBe(
-        "setAppPermissions does not support the following fields on iOS: notificationPolicyAccess, notificationsEnabled"
+        "setAppPermissions does not support the following fields on iOS: notificationPolicyAccess, notificationsEnabled",
       );
     });
 
@@ -470,7 +519,7 @@ describe("AppPermissions", () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toBe(
-        "setAppPermissions does not support the following fields on iOS: notificationPolicyAccess, scheduleExactAlarm"
+        "setAppPermissions does not support the following fields on iOS: notificationPolicyAccess, scheduleExactAlarm",
       );
     });
 
@@ -481,11 +530,11 @@ describe("AppPermissions", () => {
       const result = await permissions.setPermissions("com.example.app", {});
 
       expect(result.success).toBe(false);
-      expect(result.operations.map(operation => operation.operationId)).toEqual([
+      expect(result.operations.map((operation) => operation.operationId)).toEqual([
         "app_permissions:no_operation",
       ]);
       expect(result.error).toBe(
-        "Provide at least one permission or Android-specific permission option"
+        "Provide at least one permission or Android-specific permission option",
       );
     });
   });

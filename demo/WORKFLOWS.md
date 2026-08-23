@@ -80,11 +80,11 @@ ffmpeg -i device.mp4 frames/frame_%04d.png
 
 ### Timing Options
 
-| When to Merge | Method |
-|---------------|--------|
+| When to Merge         | Method                                       |
+| --------------------- | -------------------------------------------- |
 | **Before conversion** | Merge .cast + device video, convert together |
-| **After conversion** | Convert separately, merge MP4s (recommended) |
-| **During recording** | Use OBS with multiple sources |
+| **After conversion**  | Convert separately, merge MP4s (recommended) |
+| **During recording**  | Use OBS with multiple sources                |
 
 ### Layout Options
 
@@ -136,6 +136,7 @@ ffmpeg -i v1.mp4 -i v2.mp4 -i v3.mp4 -i v4.mp4 \
 ```
 
 **Process**:
+
 1. Start device recording (AutoMobile)
 2. Record terminal (asciicinema)
 3. Stop device recording
@@ -247,28 +248,31 @@ ffmpeg -i terminal.gif -pix_fmt yuv420p terminal.mp4
 
 ## Tool Comparison Matrix
 
-| Workflow | Tools | Output | Quality | Effort | Use Case |
-|----------|-------|--------|---------|--------|----------|
-| **Full Auto** | asciicinema, agg, ffmpeg | MP4 | High | Low | Quick demos |
-| **Direct Video** | ffmpeg, AutoMobile | MP4 | High | Medium | Skip conversion |
-| **GIF Only** | asciicinema, agg | GIF | Medium | Low | Documentation |
-| **OBS Live** | OBS Studio | MP4 | Highest | High | Presentations |
-| **Post-Production** | Video editor | MP4 | Highest | Highest | Marketing |
+| Workflow            | Tools                    | Output | Quality | Effort  | Use Case        |
+| ------------------- | ------------------------ | ------ | ------- | ------- | --------------- |
+| **Full Auto**       | asciicinema, agg, ffmpeg | MP4    | High    | Low     | Quick demos     |
+| **Direct Video**    | ffmpeg, AutoMobile       | MP4    | High    | Medium  | Skip conversion |
+| **GIF Only**        | asciicinema, agg         | GIF    | Medium  | Low     | Documentation   |
+| **OBS Live**        | OBS Studio               | MP4    | Highest | High    | Presentations   |
+| **Post-Production** | Video editor             | MP4    | Highest | Highest | Marketing       |
 
 ## Timing Considerations
 
 ### Synchronization Strategies
 
 **Option A: Start Both Simultaneously**
+
 ```bash
 device_recording_start &
 asciicinema rec ... &
 wait
 ```
+
 - Pros: Natural sync
 - Cons: Hard to coordinate
 
 **Option B: Device First, Then Terminal**
+
 ```bash
 # Start device (captures everything)
 start_device_recording
@@ -279,15 +283,18 @@ asciicinema rec ...
 stop_device_recording
 # Trim device video to match terminal
 ```
+
 - Pros: Easier coordination
 - Cons: Need to trim device video
 
 **Option C: Add Delays in Terminal**
+
 ```bash
 # In simulate-claude-code.sh
 show_mcp_call "launchApp" ...
 sleep 3  # Wait for device to catch up
 ```
+
 - Pros: Visual sync in output
 - Cons: Artificial delays
 
@@ -345,6 +352,7 @@ agg demo.cast demo.gif \
 ## Troubleshooting
 
 ### Audio Out of Sync
+
 ```bash
 # Add audio offset
 ffmpeg -i video.mp4 -itsoffset 0.5 -i audio.mp3 \
@@ -352,18 +360,21 @@ ffmpeg -i video.mp4 -itsoffset 0.5 -i audio.mp3 \
 ```
 
 ### Different Frame Rates
+
 ```bash
 # Force consistent frame rate
 ffmpeg -i input.mp4 -r 30 -c:v libx264 output.mp4
 ```
 
 ### Different Resolutions
+
 ```bash
 # Scale to same height before merging
 -filter_complex "[0:v]scale=-1:1080[v0];[1:v]scale=-1:1080[v1];[v0][v1]hstack"
 ```
 
 ### Videos Different Lengths
+
 ```bash
 # Use shortest video duration
 ffmpeg -i v1.mp4 -i v2.mp4 -filter_complex "[0][1]hstack" -shortest output.mp4
@@ -376,6 +387,7 @@ ffmpeg -stream_loop -1 -i short.mp4 -i long.mp4 \
 ## Advanced Techniques
 
 ### Add Timestamp Overlay
+
 ```bash
 ffmpeg -i input.mp4 \
   -vf "drawtext=text='%{pts\\:hms}':x=10:y=10:fontsize=24:fontcolor=white" \
@@ -383,11 +395,13 @@ ffmpeg -i input.mp4 \
 ```
 
 ### Add Border Between Videos
+
 ```bash
 -filter_complex "[0:v]pad=iw+10:ih[left];[left][1:v]hstack"
 ```
 
 ### Fade In/Out
+
 ```bash
 ffmpeg -i input.mp4 \
   -vf "fade=in:0:30,fade=out:870:30" \
@@ -395,6 +409,7 @@ ffmpeg -i input.mp4 \
 ```
 
 ### Speed Up/Slow Down
+
 ```bash
 # 2x speed
 ffmpeg -i input.mp4 -filter:v "setpts=0.5*PTS" output.mp4

@@ -10,7 +10,11 @@ describe("parseEventAllMarkersConfig", () => {
   });
 
   test("parses a comma-separated CLI value", () => {
-    expect(parseEventAllMarkersConfig(["--event-all-markers", "@,/,#"], {})).toEqual(["@", "/", "#"]);
+    expect(parseEventAllMarkersConfig(["--event-all-markers", "@,/,#"], {})).toEqual([
+      "@",
+      "/",
+      "#",
+    ]);
   });
 
   test("parses the --event-all-markers=<csv> form", () => {
@@ -18,23 +22,30 @@ describe("parseEventAllMarkersConfig", () => {
   });
 
   test("empty --event-all-markers= overrides the env var with no markers", () => {
-    expect(parseEventAllMarkersConfig(
-      ["--event-all-markers="],
-      { AUTOMOBILE_EVENT_ALL_MARKERS: "@" }
-    )).toEqual([]);
+    expect(
+      parseEventAllMarkersConfig(["--event-all-markers="], { AUTOMOBILE_EVENT_ALL_MARKERS: "@" }),
+    ).toEqual([]);
   });
 
   test("trims whitespace and drops empty entries", () => {
-    expect(parseEventAllMarkersConfig(["--event-all-markers", " @ , / , "], {})).toEqual(["@", "/"]);
+    expect(parseEventAllMarkersConfig(["--event-all-markers", " @ , / , "], {})).toEqual([
+      "@",
+      "/",
+    ]);
   });
 
   test("falls back to the env var when no CLI flag is present", () => {
-    expect(parseEventAllMarkersConfig([], { AUTOMOBILE_EVENT_ALL_MARKERS: "@,:" })).toEqual(["@", ":"]);
+    expect(parseEventAllMarkersConfig([], { AUTOMOBILE_EVENT_ALL_MARKERS: "@,:" })).toEqual([
+      "@",
+      ":",
+    ]);
   });
 
   test("CLI flag wins over the env var", () => {
     expect(
-      parseEventAllMarkersConfig(["--event-all-markers", "#"], { AUTOMOBILE_EVENT_ALL_MARKERS: "@" })
+      parseEventAllMarkersConfig(["--event-all-markers", "#"], {
+        AUTOMOBILE_EVENT_ALL_MARKERS: "@",
+      }),
     ).toEqual(["#"]);
   });
 

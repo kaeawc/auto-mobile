@@ -5,7 +5,10 @@ import { ScreenshotResult } from "../../../models/ScreenshotResult";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../utils/constants";
 import { pathExists } from "../../../utils/filesystem/DefaultFileSystem";
 import { NoOpPerformanceTracker, PerformanceTracker } from "../../../utils/PerformanceTracker";
-import type { ScreenshotJobHandle, ScreenshotJobOptions } from "../../../utils/ScreenshotJobTracker";
+import type {
+  ScreenshotJobHandle,
+  ScreenshotJobOptions,
+} from "../../../utils/ScreenshotJobTracker";
 import type { ScreenshotService } from "../interfaces/ScreenshotService";
 import type { ScreenshotOptions } from "../TakeScreenshot";
 import { getScreenshotStateStore, ScreenshotStateStore } from "./ScreenshotStateRegistry";
@@ -20,7 +23,7 @@ import { getScreenshotStateStore, ScreenshotStateStore } from "./ScreenshotState
 export interface TrackedScreenshotService extends ScreenshotService {
   startTrackedCapture(
     options?: ScreenshotOptions,
-    trackerOptions?: ScreenshotJobOptions
+    trackerOptions?: ScreenshotJobOptions,
   ): ScreenshotJobHandle;
 }
 
@@ -58,7 +61,7 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
   constructor(
     device: BootedDevice,
     screenshotUtil: TrackedScreenshotService,
-    store: ScreenshotStateStore = getScreenshotStateStore()
+    store: ScreenshotStateStore = getScreenshotStateStore(),
   ) {
     this.device = device;
     this.screenshotUtil = screenshotUtil;
@@ -76,7 +79,7 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
         // ~100ms causes a self-inflicted cancel loop because screencap takes
         // ~200-300ms — no screenshot ever completes.
         coalesceWithPending: true,
-        onComplete: async completion => {
+        onComplete: async (completion) => {
           if (!completion.isLatest) {
             return;
           }
@@ -89,19 +92,26 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
           } catch (err) {
             logger.warn(`[OBSERVE] Failed to finalize screenshot capture: ${err}`);
           }
-        }
-      }
+        },
+      },
     );
 
     // Swallow rejections from the chained finally so an unexpected throw inside
     // the tracked capture doesn't surface as an unhandled rejection. The
     // `onComplete` handler already records failures via the state store.
-    promise.finally(() => {
-      perf.endOperation("screenshot");
-    }).catch(() => { /* error already recorded in onComplete */ });
+    promise
+      .finally(() => {
+        perf.endOperation("screenshot");
+      })
+      .catch(() => {
+        /* error already recorded in onComplete */
+      });
   }
 
-  async capture(perf: PerformanceTracker = new NoOpPerformanceTracker(), signal?: AbortSignal): Promise<void> {
+  async capture(
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    signal?: AbortSignal,
+  ): Promise<void> {
     try {
       await perf.track("screenshot", async () => {
         const { promise } = this.screenshotUtil.startTrackedCapture(
@@ -111,7 +121,7 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
             // Awaitable observe captures share an ordinary in-flight capture,
             // but queue behind a non-coalescible fresh resource capture.
             coalesceWithPending: true,
-            onComplete: async completion => {
+            onComplete: async (completion) => {
               if (!completion.isLatest) {
                 return;
               }
@@ -124,8 +134,8 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
               } catch (err) {
                 logger.warn(`[OBSERVE] Failed to finalize screenshot capture: ${err}`);
               }
-            }
-          }
+            },
+          },
         );
         await promise;
       });
@@ -142,7 +152,7 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
 
   private async handleScreenshotResult(
     screenshotResult: ScreenshotResult,
-    options: { ignoreCancel?: boolean } = {}
+    options: { ignoreCancel?: boolean } = {},
   ): Promise<void> {
     if (!screenshotResult.success) {
       const errorMsg = screenshotResult.error || "Failed to capture screenshot";
@@ -156,7 +166,11 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
     }
 
     if (!screenshotResult.path) {
-      this.store.update(this.device.deviceId, undefined, "Screenshot capture returned no file path");
+      this.store.update(
+        this.device.deviceId,
+        undefined,
+        "Screenshot capture returned no file path",
+      );
       logger.warn("[OBSERVE] Screenshot capture succeeded but no file path was returned");
       return;
     }
@@ -164,7 +178,9 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
     const exists = await pathExists(screenshotResult.path);
     if (!exists) {
       this.store.update(this.device.deviceId, undefined, "Screenshot file missing after capture");
-      logger.warn(`[OBSERVE] Screenshot capture reported success but file missing: ${screenshotResult.path}`);
+      logger.warn(
+        `[OBSERVE] Screenshot capture reported success but file missing: ${screenshotResult.path}`,
+      );
       return;
     }
 

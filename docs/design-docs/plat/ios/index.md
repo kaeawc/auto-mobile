@@ -39,15 +39,15 @@ flowchart TB
 
 ## Components
 
-| Component | Description | Status |
-|-----------|-------------|--------|
-| [CtrlProxy iOS](ctrl-proxy-ios.md) | WebSocket server using native XCUITest APIs for element location and touch injection. | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> <kbd>📱 Simulator Only</kbd> |
-| [XCTestRunner](xctestrunner/index.md) | Test execution framework (plan execution, test ordering, retries). | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
-| [simctl integration](simctl.md) | Simulator lifecycle and app management. | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
-| [Managed App Configuration](managed-app-config.md) | MDM policies and app config payloads. | <kbd>🚧 Design Only</kbd> |
-| [Managed Apple IDs](managed-apple-ids.md) | Account policies and device profiles. | <kbd>🚧 Design Only</kbd> |
-| [AutoMobile SDK](auto-mobile-sdk.md) | Cross-platform SDK for event tracking, crash reporting, session management, and diagnostics. | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
-| [Screen Streaming](screen-streaming.md) | AVFoundation/ScreenCaptureKit live mirroring. | <kbd>🚧 Design Only</kbd> |
+| Component                                          | Description                                                                                  | Status                                                                      |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| [CtrlProxy iOS](ctrl-proxy-ios.md)                 | WebSocket server using native XCUITest APIs for element location and touch injection.        | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> <kbd>📱 Simulator Only</kbd> |
+| [XCTestRunner](xctestrunner/index.md)              | Test execution framework (plan execution, test ordering, retries).                           | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd>                              |
+| [simctl integration](simctl.md)                    | Simulator lifecycle and app management.                                                      | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd>                              |
+| [Managed App Configuration](managed-app-config.md) | MDM policies and app config payloads.                                                        | <kbd>🚧 Design Only</kbd>                                                   |
+| [Managed Apple IDs](managed-apple-ids.md)          | Account policies and device profiles.                                                        | <kbd>🚧 Design Only</kbd>                                                   |
+| [AutoMobile SDK](auto-mobile-sdk.md)               | Cross-platform SDK for event tracking, crash reporting, session management, and diagnostics. | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd>                              |
+| [Screen Streaming](screen-streaming.md)            | AVFoundation/ScreenCaptureKit live mirroring.                                                | <kbd>🚧 Design Only</kbd>                                                   |
 
 ## Status
 

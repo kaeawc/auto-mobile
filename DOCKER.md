@@ -5,12 +5,22 @@ This project includes Docker support for running AutoMobile in a containerized e
 ## For MCP Clients (Claude Desktop, Continue.dev, etc.)
 
 **Quick example for Claude Desktop**:
+
 ```json
 {
   "mcpServers": {
     "auto-mobile": {
       "command": "docker",
-      "args": ["run", "-i", "--rm", "--init", "--privileged", "--network", "host", "auto-mobile:latest"]
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "--init",
+        "--privileged",
+        "--network",
+        "host",
+        "auto-mobile:latest"
+      ]
     }
   }
 }
@@ -47,10 +57,10 @@ docker pull kaeawc/auto-mobile:0.0
 docker pull kaeawc/auto-mobile:main-abc1234
 ```
 
-
 ## What's Included
 
 The Docker image contains:
+
 - Bun 1.3.x
 - Java 21
 - Android SDK (API 36, Build Tools 35.0.0)
@@ -58,6 +68,7 @@ The Docker image contains:
 - All required development tools (ripgrep, ktfmt, lychee, shellcheck, xmlstarlet)
 
 To include Android emulator/system images, build with:
+
 ```bash
 docker build --platform=linux/amd64 --build-arg ANDROID_INSTALL_EMULATOR=true -t auto-mobile:latest .
 ```
@@ -122,11 +133,13 @@ support Docker-to-host simulator/emulator control. Run AutoMobile directly on ma
 or host-managed Android emulator workflows.
 
 ### ADB not seeing devices?
+
 1. Ensure device is connected to host: `adb devices`
 2. Restart ADB server: `adb kill-server && adb start-server`
 3. Verify container runs with `--privileged` flag
 
 ### Build failing?
+
 ```bash
 # Clean and rebuild
 docker-compose down -v
@@ -137,6 +150,7 @@ docker-compose up
 ## Testing
 
 ### Validate Dockerfile
+
 ```bash
 # Lint Dockerfile
 ./scripts/docker/validate_dockerfile.sh
@@ -146,6 +160,7 @@ docker-compose up
 ```
 
 ### Test MCP stdio Protocol
+
 ```bash
 # Build image
 docker build --platform=linux/amd64 -t auto-mobile:latest .

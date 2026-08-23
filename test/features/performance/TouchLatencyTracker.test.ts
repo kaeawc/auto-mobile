@@ -11,12 +11,15 @@ import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/
  * Used for testing scenarios where command responses change over time.
  */
 class DynamicFakeAdbExecutor extends FakeAdbExecutor {
-  private commandHandlers: Map<string, (command: string, callCount: number) => { stdout: string; stderr: string }> = new Map();
+  private commandHandlers: Map<
+    string,
+    (command: string, callCount: number) => { stdout: string; stderr: string }
+  > = new Map();
   private callCounts: Map<string, number> = new Map();
 
   setDynamicCommandHandler(
     pattern: string,
-    handler: (command: string, callCount: number) => { stdout: string; stderr: string }
+    handler: (command: string, callCount: number) => { stdout: string; stderr: string },
   ): void {
     this.commandHandlers.set(pattern, handler);
     this.callCounts.set(pattern, 0);
@@ -27,8 +30,14 @@ class DynamicFakeAdbExecutor extends FakeAdbExecutor {
     timeoutMs?: number,
     maxBuffer?: number,
     noRetry?: boolean,
-    signal?: AbortSignal
-  ): Promise<{ stdout: string; stderr: string; toString: () => string; trim: () => string; includes: (search: string) => boolean }> {
+    signal?: AbortSignal,
+  ): Promise<{
+    stdout: string;
+    stderr: string;
+    toString: () => string;
+    trim: () => string;
+    includes: (search: string) => boolean;
+  }> {
     // Check for dynamic handlers first
     for (const [pattern, handler] of this.commandHandlers.entries()) {
       if (command.includes(pattern)) {
@@ -40,7 +49,7 @@ class DynamicFakeAdbExecutor extends FakeAdbExecutor {
           stderr: result.stderr,
           toString: () => result.stdout,
           trim: () => result.stdout.trim(),
-          includes: (search: string) => result.stdout.includes(search)
+          includes: (search: string) => result.stdout.includes(search),
         };
       }
     }
@@ -55,24 +64,28 @@ class DynamicFakeAdbExecutor extends FakeAdbExecutor {
   }
 }
 
-describe("TouchLatencyTracker - Unit Tests", function() {
+describe("TouchLatencyTracker - Unit Tests", function () {
   let tracker: TouchLatencyTracker;
   let device: BootedDevice;
   let screenSize: ScreenSize;
   let perf: NoOpPerformanceTracker;
   let fakeTimer: FakeTimer;
 
-  async function runWithFakeTimer<T>(promise: Promise<T>, timer: FakeTimer, stepMs: number = 10): Promise<T> {
+  async function runWithFakeTimer<T>(
+    promise: Promise<T>,
+    timer: FakeTimer,
+    stepMs: number = 10,
+  ): Promise<T> {
     let settled = false;
     let result: T | undefined;
     let error: unknown;
 
     promise
-      .then(value => {
+      .then((value) => {
         settled = true;
         result = value;
       })
-      .catch(caught => {
+      .catch((caught) => {
         settled = true;
         error = caught;
       });
@@ -95,24 +108,24 @@ describe("TouchLatencyTracker - Unit Tests", function() {
     return result as T;
   }
 
-  beforeEach(function() {
+  beforeEach(function () {
     device = {
       deviceId: "test-device",
       platform: "android",
-      state: "device"
+      state: "device",
     };
 
     screenSize = {
       width: 1080,
-      height: 1920
+      height: 1920,
     };
 
     perf = new NoOpPerformanceTracker();
     fakeTimer = new FakeTimer();
   });
 
-  describe("selectSafeTouchLocation", function() {
-    test("should select a location in the top-right corner", function() {
+  describe("selectSafeTouchLocation", function () {
+    test("should select a location in the top-right corner", function () {
       const fakeAdb = new FakeAdbExecutor();
       const factory: AdbClientFactory = { create: () => fakeAdb };
       tracker = new TouchLatencyTracker(device, factory, fakeTimer);
@@ -125,7 +138,7 @@ describe("TouchLatencyTracker - Unit Tests", function() {
       expect(location.y).toBe(Math.floor(1920 * 0.02)); // 38
     });
 
-    test("should handle different screen sizes", function() {
+    test("should handle different screen sizes", function () {
       const fakeAdb = new FakeAdbExecutor();
       const factory: AdbClientFactory = { create: () => fakeAdb };
       tracker = new TouchLatencyTracker(device, factory, fakeTimer);
@@ -138,8 +151,8 @@ describe("TouchLatencyTracker - Unit Tests", function() {
     });
   });
 
-  describe("measureLatency", function() {
-    test("should return successful result when frame activity is detected", async function() {
+  describe("measureLatency", function () {
+    test("should return successful result when frame activity is detected", async function () {
       // Set up fake ADB responses with dynamic handler
       const dynamicAdb = new DynamicFakeAdbExecutor();
       let gfxinfoCallCount = 0;
@@ -163,7 +176,7 @@ describe("TouchLatencyTracker - Unit Tests", function() {
               Number Slow UI thread: 0
               Number Frame deadline missed: 0
             `,
-            stderr: ""
+            stderr: "",
           };
         } else {
           // After touch - show frame activity
@@ -177,7 +190,7 @@ describe("TouchLatencyTracker - Unit Tests", function() {
               Number Slow UI thread: 0
               Number Frame deadline missed: 0
             `,
-            stderr: ""
+            stderr: "",
           };
         }
       });
@@ -192,9 +205,9 @@ describe("TouchLatencyTracker - Unit Tests", function() {
           "com.example.app",
           screenSize,
           { sampleCount: 1, maxWaitMs: 200 },
-          perf
+          perf,
         ),
-        fakeTimer
+        fakeTimer,
       );
 
       expect(result.success).toBe(true);
@@ -204,7 +217,7 @@ describe("TouchLatencyTracker - Unit Tests", function() {
       expect(result.touchCoordinates.y).toBeGreaterThan(0);
     });
 
-    test("should calculate median from multiple samples", async function() {
+    test("should calculate median from multiple samples", async function () {
       const dynamicAdb = new DynamicFakeAdbExecutor();
       let callCount = 0;
 
@@ -223,7 +236,7 @@ describe("TouchLatencyTracker - Unit Tests", function() {
               Number Slow UI thread: 0
               Number Frame deadline missed: 0
             `,
-            stderr: ""
+            stderr: "",
           };
         } else {
           return {
@@ -232,7 +245,7 @@ describe("TouchLatencyTracker - Unit Tests", function() {
               Number Slow UI thread: 0
               Number Frame deadline missed: 0
             `,
-            stderr: ""
+            stderr: "",
           };
         }
       });
@@ -247,9 +260,9 @@ describe("TouchLatencyTracker - Unit Tests", function() {
           "com.example.app",
           screenSize,
           { sampleCount: 3, maxWaitMs: 200 },
-          perf
+          perf,
         ),
-        fakeTimer
+        fakeTimer,
       );
 
       expect(result.success).toBe(true);
@@ -257,7 +270,7 @@ describe("TouchLatencyTracker - Unit Tests", function() {
       expect(result.latencyMs).toBeGreaterThan(0);
     });
 
-    test("should handle timeout when no frame activity detected", async function() {
+    test("should handle timeout when no frame activity detected", async function () {
       const dynamicAdb = new DynamicFakeAdbExecutor();
 
       dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
@@ -272,7 +285,7 @@ describe("TouchLatencyTracker - Unit Tests", function() {
             Number Slow UI thread: 0
             Number Frame deadline missed: 0
           `,
-          stderr: ""
+          stderr: "",
         };
       });
 
@@ -286,9 +299,9 @@ describe("TouchLatencyTracker - Unit Tests", function() {
           "com.example.app",
           screenSize,
           { sampleCount: 1, maxWaitMs: 50 }, // Short timeout for fast test
-          perf
+          perf,
         ),
-        fakeTimer
+        fakeTimer,
       );
 
       expect(result.success).toBe(false);
@@ -296,7 +309,7 @@ describe("TouchLatencyTracker - Unit Tests", function() {
       expect(result.error).toContain("No successful measurements");
     });
 
-    test("should detect frame activity via slowUiThread increase", async function() {
+    test("should detect frame activity via slowUiThread increase", async function () {
       const dynamicAdb = new DynamicFakeAdbExecutor();
       let callCount = 0;
 
@@ -313,7 +326,7 @@ describe("TouchLatencyTracker - Unit Tests", function() {
               Number Slow UI thread: 0
               Number Frame deadline missed: 0
             `,
-            stderr: ""
+            stderr: "",
           };
         } else {
           return {
@@ -322,7 +335,7 @@ describe("TouchLatencyTracker - Unit Tests", function() {
               Number Slow UI thread: 1
               Number Frame deadline missed: 0
             `,
-            stderr: ""
+            stderr: "",
           };
         }
       });
@@ -337,16 +350,16 @@ describe("TouchLatencyTracker - Unit Tests", function() {
           "com.example.app",
           screenSize,
           { sampleCount: 1, maxWaitMs: 200 },
-          perf
+          perf,
         ),
-        fakeTimer
+        fakeTimer,
       );
 
       expect(result.success).toBe(true);
       expect(result.latencyMs).toBeGreaterThan(0);
     });
 
-    test("should detect frame activity via frameDeadlineMissed increase", async function() {
+    test("should detect frame activity via frameDeadlineMissed increase", async function () {
       const dynamicAdb = new DynamicFakeAdbExecutor();
       let callCount = 0;
 
@@ -363,7 +376,7 @@ describe("TouchLatencyTracker - Unit Tests", function() {
               Number Slow UI thread: 0
               Number Frame deadline missed: 0
             `,
-            stderr: ""
+            stderr: "",
           };
         } else {
           return {
@@ -372,7 +385,7 @@ describe("TouchLatencyTracker - Unit Tests", function() {
               Number Slow UI thread: 0
               Number Frame deadline missed: 2
             `,
-            stderr: ""
+            stderr: "",
           };
         }
       });
@@ -387,16 +400,16 @@ describe("TouchLatencyTracker - Unit Tests", function() {
           "com.example.app",
           screenSize,
           { sampleCount: 1, maxWaitMs: 200 },
-          perf
+          perf,
         ),
-        fakeTimer
+        fakeTimer,
       );
 
       expect(result.success).toBe(true);
       expect(result.latencyMs).toBeGreaterThan(0);
     });
 
-    test("should handle errors gracefully and return error result", async function() {
+    test("should handle errors gracefully and return error result", async function () {
       const errorAdb = new FakeAdbExecutor();
       errorAdb.setDefaultError(new Error("ADB connection failed"));
       const factory: AdbClientFactory = { create: () => errorAdb };
@@ -408,9 +421,9 @@ describe("TouchLatencyTracker - Unit Tests", function() {
           "com.example.app",
           screenSize,
           { sampleCount: 1, maxWaitMs: 200 },
-          perf
+          perf,
         ),
-        fakeTimer
+        fakeTimer,
       );
 
       expect(result.success).toBe(false);

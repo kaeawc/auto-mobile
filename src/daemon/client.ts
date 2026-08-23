@@ -82,11 +82,14 @@ export class DaemonClient {
   private socketPath: string;
   private connectionTimeout: number;
   private timer: Timer;
-  private pendingRequests: Map<string, {
-    resolve: (value: DaemonResponse) => void;
-    reject: (error: Error) => void;
-    timeout: NodeJS.Timeout;
-  }> = new Map();
+  private pendingRequests: Map<
+    string,
+    {
+      resolve: (value: DaemonResponse) => void;
+      reject: (error: Error) => void;
+      timeout: NodeJS.Timeout;
+    }
+  > = new Map();
   private buffer: string = "";
   private connected: boolean = false;
   private notificationHandlers: Set<(notification: DaemonNotification) => void> = new Set();
@@ -121,7 +124,10 @@ export class DaemonClient {
    * daemon's server-side handshake gate (#2744) can reject a wrong-build client.
    * Empty when {@link clientIdentity} is null (a deliberately ungated diagnostic client).
    */
-  private handshakeFields(): Pick<DaemonRequest, "clientVersion" | "clientBuildId" | "clientEntryScript"> {
+  private handshakeFields(): Pick<
+    DaemonRequest,
+    "clientVersion" | "clientBuildId" | "clientEntryScript"
+  > {
     if (!this.clientIdentity) {
       return {};
     }
@@ -138,7 +144,7 @@ export class DaemonClient {
    */
   static async isAvailable(
     socketPath: string = SOCKET_PATH,
-    recoveryOptions: DaemonClientRecoveryOptions = {}
+    recoveryOptions: DaemonClientRecoveryOptions = {},
   ): Promise<boolean> {
     // On Unix, verify the path exists and is a socket (not a stale regular file).
     // On Windows, named pipes don't have filesystem entries — skip the stat check
@@ -161,7 +167,7 @@ export class DaemonClient {
       }
     }
 
-    return new Promise<boolean>(resolve => {
+    return new Promise<boolean>((resolve) => {
       let settled = false;
       const settle = (value: boolean) => {
         if (!settled) {
@@ -220,9 +226,7 @@ export class DaemonClient {
   private remainingConnectTimeout(deadline: number, timeoutMs: number): number {
     const remaining = deadline - this.timer.now();
     if (remaining <= 0) {
-      throw new DaemonUnavailableError(
-        `Failed to connect to daemon within ${timeoutMs}ms`
-      );
+      throw new DaemonUnavailableError(`Failed to connect to daemon within ${timeoutMs}ms`);
     }
     return remaining;
   }
@@ -237,9 +241,7 @@ export class DaemonClient {
     }
 
     if (!existsSync(this.socketPath)) {
-      throw new DaemonUnavailableError(
-        `Daemon socket not found: ${this.socketPath}`
-      );
+      throw new DaemonUnavailableError(`Daemon socket not found: ${this.socketPath}`);
     }
 
     return new Promise((resolve, reject) => {
@@ -275,9 +277,7 @@ export class DaemonClient {
 
       const timeout = this.timer.setTimeout(() => {
         fail(
-          new DaemonUnavailableError(
-            `Failed to connect to daemon within ${connectionTimeout}ms`
-          )
+          new DaemonUnavailableError(`Failed to connect to daemon within ${connectionTimeout}ms`),
         );
       }, connectionTimeout);
 
@@ -298,11 +298,11 @@ export class DaemonClient {
         }
       });
 
-      this.socket.on("data", data => {
+      this.socket.on("data", (data) => {
         this.handleData(data);
       });
 
-      this.socket.on("error", error => {
+      this.socket.on("error", (error) => {
         logger.error(`Daemon socket error: ${error.message}`);
         fail(error);
       });
@@ -320,7 +320,7 @@ export class DaemonClient {
         // the error path.
         if (this.pendingRequests.size > 0) {
           rejectPendingRequests(
-            new DaemonUnavailableError("Daemon socket connection lost: connection closed")
+            new DaemonUnavailableError("Daemon socket connection lost: connection closed"),
           );
         }
       });
@@ -329,11 +329,11 @@ export class DaemonClient {
 
   private static cleanupStaleSocketIfDaemonDead(
     socketPath: string,
-    recoveryOptions: DaemonClientRecoveryOptions
+    recoveryOptions: DaemonClientRecoveryOptions,
   ): boolean {
-    const socketPaths = recoveryOptions.socketPaths ?? (
-      socketPath === SOCKET_PATH ? getDaemonSocketPathList() : [socketPath]
-    );
+    const socketPaths =
+      recoveryOptions.socketPaths ??
+      (socketPath === SOCKET_PATH ? getDaemonSocketPathList() : [socketPath]);
 
     return cleanupStaleDaemonFilesForDeadPidSync({
       ...recoveryOptions,
@@ -420,16 +420,14 @@ export class DaemonClient {
     if (response.success) {
       pending.resolve(response);
     } else {
-      const transportFailure = sanitizeDeviceControlTransportFailure(
-        response.transportFailure,
-      );
+      const transportFailure = sanitizeDeviceControlTransportFailure(response.transportFailure);
       pending.reject(
         transportFailure
           ? new DeviceControlTransportError(
-            response.error || "Device-control transport failure",
-            transportFailure,
-          )
-          : new ActionableError(response.error || "Unknown error from daemon")
+              response.error || "Device-control transport failure",
+              transportFailure,
+            )
+          : new ActionableError(response.error || "Unknown error from daemon"),
       );
     }
   }
@@ -468,7 +466,7 @@ export class DaemonClient {
     };
 
     const requestTimeoutMs = Math.max(resolveMcpRequestTimeoutMs(request), this.connectionTimeout);
-    const toolName = method === "tools/call" ? params?.name ?? method : method;
+    const toolName = method === "tools/call" ? (params?.name ?? method) : method;
 
     return new Promise((resolve, reject) => {
       const timeout = this.timer.setTimeout(() => {
@@ -478,12 +476,12 @@ export class DaemonClient {
             toolName,
             timeoutMs: requestTimeoutMs,
             origin: "DaemonClient.sendRequest",
-          })
+          }),
         );
       }, requestTimeoutMs);
 
       this.pendingRequests.set(requestId, {
-        resolve: response => {
+        resolve: (response) => {
           resolve(response.result);
         },
         reject,
@@ -493,9 +491,7 @@ export class DaemonClient {
       if (!this.socket) {
         this.timer.clearTimeout(timeout);
         this.pendingRequests.delete(requestId);
-        reject(
-          new DaemonUnavailableError("Socket connection lost")
-        );
+        reject(new DaemonUnavailableError("Socket connection lost"));
         return;
       }
 
@@ -506,10 +502,7 @@ export class DaemonClient {
   /**
    * Call a daemon method directly over the socket
    */
-  async callDaemonMethod(
-    method: string,
-    params: Record<string, any> = {}
-  ): Promise<any> {
+  async callDaemonMethod(method: string, params: Record<string, any> = {}): Promise<any> {
     if (!this.connected) {
       await this.connect();
     }
@@ -532,12 +525,12 @@ export class DaemonClient {
             toolName: method,
             timeoutMs: this.connectionTimeout,
             origin: "DaemonClient.callDaemonMethod",
-          })
+          }),
         );
       }, this.connectionTimeout);
 
       this.pendingRequests.set(requestId, {
-        resolve: response => {
+        resolve: (response) => {
           resolve(response.result);
         },
         reject,
@@ -547,9 +540,7 @@ export class DaemonClient {
       if (!this.socket) {
         this.timer.clearTimeout(timeout);
         this.pendingRequests.delete(requestId);
-        reject(
-          new DaemonUnavailableError("Socket connection lost")
-        );
+        reject(new DaemonUnavailableError("Socket connection lost"));
         return;
       }
 

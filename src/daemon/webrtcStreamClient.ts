@@ -16,7 +16,7 @@ export const DEFAULT_WEBRTC_STREAM_REQUEST_TIMEOUT_MS = 45_000;
  */
 export async function sendWebRtcStreamRequest(
   request: WebRtcStreamSocketRequest,
-  options: { socketPath?: string; timeoutMs?: number } = {}
+  options: { socketPath?: string; timeoutMs?: number } = {},
 ): Promise<WebRtcStreamSocketResponse> {
   const socketPath = options.socketPath ?? getSocketPath(WEBRTC_STREAM_SOCKET_CONFIG);
   const timeoutMs = options.timeoutMs ?? DEFAULT_WEBRTC_STREAM_REQUEST_TIMEOUT_MS;
@@ -40,8 +40,8 @@ export async function sendWebRtcStreamRequest(
       finish(() => reject(new Error(`WebRTC stream request timed out after ${timeoutMs}ms`)));
     }, timeoutMs);
 
-    socket.on("error", error => finish(() => reject(error)));
-    socket.on("data", chunk => {
+    socket.on("error", (error) => finish(() => reject(error)));
+    socket.on("data", (chunk) => {
       buffer += chunk.toString();
       const newlineIndex = buffer.indexOf("\n");
       if (newlineIndex === -1) {

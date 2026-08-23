@@ -12,7 +12,7 @@ class CapturingRequestManager extends RequestManager {
     type: string,
     timeoutMs: number,
     timeoutErrorFactory: (requestId: string, type: string, timeoutMs: number) => T,
-    responseErrorFactory?: (error: string, totalTimeMs: number) => T
+    responseErrorFactory?: (error: string, totalTimeMs: number) => T,
   ): Promise<T> {
     this.lastRegisteredType = type;
     return super.register(id, type, timeoutMs, timeoutErrorFactory, responseErrorFactory);
@@ -23,16 +23,19 @@ function createFakeContext(): {
   context: DelegateContext;
   sent: string[];
   requestManager: CapturingRequestManager;
-  } {
+} {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const sent: string[] = [];
   const requestManager = new CapturingRequestManager(timer);
   const context: DelegateContext = {
-    getWebSocket: () => ({
-      send: (data: string) => { sent.push(data); },
-      readyState: 1,
-    } as any),
+    getWebSocket: () =>
+      ({
+        send: (data: string) => {
+          sent.push(data);
+        },
+        readyState: 1,
+      }) as any,
     requestManager,
     timer,
     ensureConnected: async () => true,
@@ -46,7 +49,7 @@ async function callAndResolve<T>(
   sent: string[],
   requestManager: RequestManager,
   action: () => Promise<T>,
-  result: unknown = { success: true, totalTimeMs: 1 }
+  result: unknown = { success: true, totalTimeMs: 1 },
 ): Promise<{ sentMsg: Record<string, unknown>; result: T }> {
   const promise = action();
   await Promise.resolve();
@@ -63,10 +66,8 @@ describe("iOS CtrlProxyGestures", () => {
     const { context, sent } = createFakeContext();
     const gestures = new CtrlProxyGestures(context);
 
-    const { sentMsg, result } = await callAndResolve(
-      sent,
-      context.requestManager,
-      () => gestures.requestMultiFingerSwipe(10, 20, 30, 40, 3, 450),
+    const { sentMsg, result } = await callAndResolve(sent, context.requestManager, () =>
+      gestures.requestMultiFingerSwipe(10, 20, 30, 40, 3, 450),
     );
 
     expect(sentMsg.type).toBe("request_multi_finger_swipe");
@@ -79,10 +80,8 @@ describe("iOS CtrlProxyGestures", () => {
     const { context, sent, requestManager } = createFakeContext();
     const gestures = new CtrlProxyGestures(context);
 
-    const { sentMsg } = await callAndResolve(
-      sent,
-      requestManager,
-      () => gestures.requestMultiFingerSwipe(10, 20, 30, 40, 3, 450, 5000, undefined, 30.5),
+    const { sentMsg } = await callAndResolve(sent, requestManager, () =>
+      gestures.requestMultiFingerSwipe(10, 20, 30, 40, 3, 450, 5000, undefined, 30.5),
     );
 
     expect(sentMsg.offset).toBe(30.5);

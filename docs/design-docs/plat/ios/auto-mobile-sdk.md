@@ -14,7 +14,7 @@ flowchart TB
         AppInit["App Init"]
     end
 
-    subgraph "AutoMobileSDK" 
+    subgraph "AutoMobileSDK"
         SDK["AutoMobileSDK.shared"]
         Config["AutoMobileConfiguration"]
         Context["SdkContext"]
@@ -86,33 +86,33 @@ flowchart TB
 
 ## Components
 
-| Component | Description | Status |
-|-----------|-------------|--------|
-| `AutoMobileSDK` | Singleton entry point; initializes all subsystems and manages navigation listeners. | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
-| `AutoMobileConfiguration` | `Sendable` struct with `bufferSize`, `flushIntervalMs`, `maxBreadcrumbs`, `sessionTimeoutMs`, `eventProcessors`, `maxPendingEvents`. Static `.default` property. | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
-| `SdkContext` | Thread-safe mutable context (`@unchecked Sendable`) holding `sessionId`, `userId`, `appVersion`, and tags. Produces immutable `SdkContextSnapshot`. | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
-| `SessionTracker` | Lifecycle-driven session management with configurable timeout. Uses `TimerScheduling` protocol for testability. | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
-| `SdkEventBuffer` | Thread-safe ring buffer with capacity-triggered and timer-triggered flush. Integrates `DropCounting`. | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
-| `SdkEventBroadcaster` | Disk-first broadcaster: persists events, posts to `NotificationCenter`, delivers via HTTP to CtrlProxy (debug builds). | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
-| `DropCounter` | Tracks events lost due to `disabled`, `shutdown`, or `flushError` reasons. | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
-| `FileEventPersistence` | JSON file-backed event persistence with FIFO replay, batch removal, and age-based cleanup. | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
-| `BreadcrumbTrail` | Thread-safe ring buffer with configurable max size and disk persistence for crash recovery. | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
-| `AutoMobileCrashes` | Installs `NSSetUncaughtExceptionHandler` and optional signal handlers (`SIGABRT`, `SIGSEGV`, `SIGBUS`, `SIGFPE`, `SIGILL`). Chains to previous handlers. Signal crash persistence via file marker. | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
-| `AutoMobileHangs` | Main-thread hang detection via watchdog thread + `DispatchSemaphore`. Configurable threshold (default 2000ms) and poll interval (default 500ms). | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
-| `AutoMobileFailures` | Records handled (non-fatal) exceptions with stack traces, device info, and screen context. Keeps last 100 events in memory. | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
-| `NavigationEvent` / `NavigationListener` | Navigation event model with `destination`, `source`, `arguments`, `metadata`. Protocol + closure-based listener. | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
-| `SwiftUINavigationAdapter` | `NavigationFrameworkAdapter` for SwiftUI `NavigationStack`. Includes `.trackNavigation()` `ViewModifier`. | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
-| `AutoMobileNetwork` | URLSession monitoring via `AutoMobileURLProtocol`. Supports header/body capture (debug only for bodies), manual recording, and WebSocket frame tracking. | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
-| `RetryPolicy` | Exponential backoff with jitter for failed HTTP delivery. Retries on network failure, 408, 429, 5xx. | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
-| `AutoMobileLog` | Thin wrappers around `os.Logger` for structured logging. Methods: `v`, `d`, `i`, `w`, `e`, `fault`. Logs are captured by OSLogStore in CtrlProxy. | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
-| `AutoMobileInteractionTracker` | Tap tracking with 100ms debounce. Records coordinates, accessibility label/identifier, view type, and text. UIKit `UITapGestureRecognizer` convenience method. | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
-| `ViewBodyTracker` | Tracks SwiftUI view `body` evaluations with rolling average and duration measurement. Includes `.trackViewBody()` modifier and `MeasureViewBody` wrapper. Periodic snapshot broadcast (1s). | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
-| `UserDefaultsInspector` | Read/write UserDefaults with suite support, change listeners via `UserDefaults.didChangeNotification`, and `SdkStorageChangedEvent` emission. | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
-| `DatabaseInspector` / `SQLiteDatabaseDriver` | SQLite database discovery, table listing, paginated data retrieval, schema inspection, and raw SQL execution via the SQLite3 C API. | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
-| `AutoMobileBiometrics` | Test hook for injecting deterministic biometric authentication results with TTL-based expiry. | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
-| `AutoMobileNotifications` | Posts local notifications via `UNUserNotificationCenter` with action buttons, image attachments, and delegate chaining for action tracking. | <kbd>✅ Implemented</kbd> |
-| `AutoMobileOsEvents` | Tracks lifecycle (foreground/background/inactive/terminated), battery level/charging, screen brightness, and network connectivity via `NWPathMonitor`. | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
-| `AutoMobileNotificationObserver` | Monitors system notifications: locale change, timezone change, power state, memory warning, significant time change, screenshot taken. | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
+| Component                                    | Description                                                                                                                                                                                        | Status                                         |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| `AutoMobileSDK`                              | Singleton entry point; initializes all subsystems and manages navigation listeners.                                                                                                                | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
+| `AutoMobileConfiguration`                    | `Sendable` struct with `bufferSize`, `flushIntervalMs`, `maxBreadcrumbs`, `sessionTimeoutMs`, `eventProcessors`, `maxPendingEvents`. Static `.default` property.                                   | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
+| `SdkContext`                                 | Thread-safe mutable context (`@unchecked Sendable`) holding `sessionId`, `userId`, `appVersion`, and tags. Produces immutable `SdkContextSnapshot`.                                                | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
+| `SessionTracker`                             | Lifecycle-driven session management with configurable timeout. Uses `TimerScheduling` protocol for testability.                                                                                    | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
+| `SdkEventBuffer`                             | Thread-safe ring buffer with capacity-triggered and timer-triggered flush. Integrates `DropCounting`.                                                                                              | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
+| `SdkEventBroadcaster`                        | Disk-first broadcaster: persists events, posts to `NotificationCenter`, delivers via HTTP to CtrlProxy (debug builds).                                                                             | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
+| `DropCounter`                                | Tracks events lost due to `disabled`, `shutdown`, or `flushError` reasons.                                                                                                                         | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
+| `FileEventPersistence`                       | JSON file-backed event persistence with FIFO replay, batch removal, and age-based cleanup.                                                                                                         | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
+| `BreadcrumbTrail`                            | Thread-safe ring buffer with configurable max size and disk persistence for crash recovery.                                                                                                        | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
+| `AutoMobileCrashes`                          | Installs `NSSetUncaughtExceptionHandler` and optional signal handlers (`SIGABRT`, `SIGSEGV`, `SIGBUS`, `SIGFPE`, `SIGILL`). Chains to previous handlers. Signal crash persistence via file marker. | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
+| `AutoMobileHangs`                            | Main-thread hang detection via watchdog thread + `DispatchSemaphore`. Configurable threshold (default 2000ms) and poll interval (default 500ms).                                                   | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
+| `AutoMobileFailures`                         | Records handled (non-fatal) exceptions with stack traces, device info, and screen context. Keeps last 100 events in memory.                                                                        | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
+| `NavigationEvent` / `NavigationListener`     | Navigation event model with `destination`, `source`, `arguments`, `metadata`. Protocol + closure-based listener.                                                                                   | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
+| `SwiftUINavigationAdapter`                   | `NavigationFrameworkAdapter` for SwiftUI `NavigationStack`. Includes `.trackNavigation()` `ViewModifier`.                                                                                          | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
+| `AutoMobileNetwork`                          | URLSession monitoring via `AutoMobileURLProtocol`. Supports header/body capture (debug only for bodies), manual recording, and WebSocket frame tracking.                                           | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
+| `RetryPolicy`                                | Exponential backoff with jitter for failed HTTP delivery. Retries on network failure, 408, 429, 5xx.                                                                                               | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
+| `AutoMobileLog`                              | Thin wrappers around `os.Logger` for structured logging. Methods: `v`, `d`, `i`, `w`, `e`, `fault`. Logs are captured by OSLogStore in CtrlProxy.                                                  | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
+| `AutoMobileInteractionTracker`               | Tap tracking with 100ms debounce. Records coordinates, accessibility label/identifier, view type, and text. UIKit `UITapGestureRecognizer` convenience method.                                     | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
+| `ViewBodyTracker`                            | Tracks SwiftUI view `body` evaluations with rolling average and duration measurement. Includes `.trackViewBody()` modifier and `MeasureViewBody` wrapper. Periodic snapshot broadcast (1s).        | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
+| `UserDefaultsInspector`                      | Read/write UserDefaults with suite support, change listeners via `UserDefaults.didChangeNotification`, and `SdkStorageChangedEvent` emission.                                                      | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
+| `DatabaseInspector` / `SQLiteDatabaseDriver` | SQLite database discovery, table listing, paginated data retrieval, schema inspection, and raw SQL execution via the SQLite3 C API.                                                                | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
+| `AutoMobileBiometrics`                       | Test hook for injecting deterministic biometric authentication results with TTL-based expiry.                                                                                                      | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
+| `AutoMobileNotifications`                    | Posts local notifications via `UNUserNotificationCenter` with action buttons, image attachments, and delegate chaining for action tracking.                                                        | <kbd>✅ Implemented</kbd>                      |
+| `AutoMobileOsEvents`                         | Tracks lifecycle (foreground/background/inactive/terminated), battery level/charging, screen brightness, and network connectivity via `NWPathMonitor`.                                             | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
+| `AutoMobileNotificationObserver`             | Monitors system notifications: locale change, timezone change, power state, memory warning, significant time change, screenshot taken.                                                             | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
 
 ## Configuration
 
@@ -195,6 +195,7 @@ The `TimerScheduling` protocol (with `GCDTimer` default) allows injecting `FakeT
 `BreadcrumbTrail` is a thread-safe ring buffer of `Breadcrumb` entries with categories: `navigation`, `tap`, `lifecycle`, `network`, `log`, `custom`.
 
 Supports disk persistence for crash recovery:
+
 - `writeToDisk()` serializes breadcrumbs to `Library/Caches/automobile_breadcrumbs.json`
 - `loadFromDisk()` restores breadcrumbs from a previous session
 - `clearDisk()` removes the persisted file
@@ -284,6 +285,7 @@ Only entries matching at least one active filter are buffered as `SdkLogEvent`. 
 ## Interaction Tracking
 
 `AutoMobileInteractionTracker` records tap events with 100ms debounce. Each event captures:
+
 - Screen coordinates (`x`, `y`)
 - `accessibilityLabel`, `accessibilityIdentifier`
 - `viewType` (class name)
@@ -349,6 +351,7 @@ Test hook for deterministic biometric testing. `overrideResult(_:ttlMs:)` sets a
 ### AutoMobileNotifications
 
 Posts local notifications via `UNUserNotificationCenter`:
+
 - Supports title, body, image attachments (local files or remote URLs downloaded to temp), and action buttons
 - Registers `UNNotificationCategory` for actions, merging with existing app categories
 - `installActionHandler(on:)` installs a `UNUserNotificationCenterDelegate` that chains to any previous delegate and emits `SdkNotificationActionEvent` on action taps
@@ -356,6 +359,7 @@ Posts local notifications via `UNUserNotificationCenter`:
 ### AutoMobileOsEvents
 
 Tracks OS-level lifecycle events:
+
 - App lifecycle: foreground, background, inactive, terminated (via `UIApplication` notifications)
 - Battery: level and charging state changes (via `UIDevice.batteryLevelDidChangeNotification`)
 - Screen: brightness changes (via `UIScreen.brightnessDidChangeNotification`)
@@ -364,6 +368,7 @@ Tracks OS-level lifecycle events:
 ### AutoMobileNotificationObserver
 
 Monitors system `NotificationCenter` broadcasts:
+
 - `NSLocale.currentLocaleDidChangeNotification`
 - `.NSSystemTimeZoneDidChange`
 - `.NSProcessInfoPowerStateDidChange`
@@ -407,32 +412,32 @@ The SDK uses protocol + fake pattern throughout for testability:
 
 ## Cross-Platform Parity
 
-| Feature | Android | iOS | Notes |
-|---------|---------|-----|-------|
-| Singleton SDK | `AutoMobileSDK` | `AutoMobileSDK.shared` | Same pattern |
-| Configuration | `AutoMobileConfiguration` | `AutoMobileConfiguration` | Same fields |
-| Event buffer | `SdkEventBuffer` | `SdkEventBuffer` | Same capacity/timer design |
-| Event persistence | `FileEventPersistence` | `FileEventPersistence` | Disk-first, replay on launch |
-| Drop counter | `DropCounter` | `DefaultDropCounter` | Same reasons |
-| Context | `SdkContext` | `SdkContext` | Same snapshot pattern |
-| Session tracking | `SessionTracker` | `SessionTracker` | Lifecycle-based with timeout |
-| Breadcrumbs | `BreadcrumbTrail` | `BreadcrumbTrail` | Ring buffer + disk |
-| Navigation | Navigation3Adapter, CircuitAdapter | SwiftUINavigationAdapter | Framework-specific adapters |
-| Crash detection | `AutoMobileCrashes` (UncaughtExceptionHandler) | `AutoMobileCrashes` (NSSetUncaughtExceptionHandler + signals) | iOS adds signal handler support |
-| ANR / Hang detection | `AutoMobileAnr` | `AutoMobileHangs` | Watchdog thread approach |
-| Handled exceptions | `AutoMobileFailures` | `AutoMobileFailures` | Same API shape |
-| Network monitoring | OkHttp Interceptor | URLProtocol | Platform-native interception |
-| WebSocket tracking | `AutoMobileWebSocketListener` | `recordWebSocketFrame()` | Manual on iOS |
-| Log filtering | `AutoMobileLog` | `AutoMobileLog` | Android: regex filters with first-match semantics; iOS: `os.Logger` wrappers (filtering via OSLogStore) |
-| Interaction tracking | `AutoMobileClickTracker` | `AutoMobileInteractionTracker` | Tap with debounce |
-| View rendering tracking | `RecompositionTracker` (Compose) | `ViewBodyTracker` (SwiftUI) | Platform-specific UI framework |
-| Key-value storage | `SharedPreferencesInspector` | `UserDefaultsInspector` | Platform-native storage |
-| Database inspection | `DatabaseInspector` / `SQLiteDatabaseDriver` | `DatabaseInspector` / `SQLiteDatabaseDriver` | Same schema |
-| Biometric injection | `AutoMobileBiometrics` | `AutoMobileBiometrics` | Same override + TTL pattern |
-| Notifications | `AutoMobileNotifications` | `AutoMobileNotifications` | Platform notification APIs |
-| OS events | `AutoMobileOsEvents` | `AutoMobileOsEvents` | Lifecycle, battery, connectivity |
-| Broadcast / System events | `AutoMobileBroadcastInterceptor` | `AutoMobileNotificationObserver` | BroadcastReceiver vs NotificationCenter |
-| Network mock rules and error simulation | `NetworkMockRuleStore` | `NetworkMockRuleStore` | DEBUG-only; iOS requires sessions to register `AutoMobileNetwork.shared.protocolClass()`; error simulation also requires the supporting iOS CtrlProxy runner release or a local runner override |
+| Feature                                 | Android                                        | iOS                                                           | Notes                                                                                                                                                                                           |
+| --------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Singleton SDK                           | `AutoMobileSDK`                                | `AutoMobileSDK.shared`                                        | Same pattern                                                                                                                                                                                    |
+| Configuration                           | `AutoMobileConfiguration`                      | `AutoMobileConfiguration`                                     | Same fields                                                                                                                                                                                     |
+| Event buffer                            | `SdkEventBuffer`                               | `SdkEventBuffer`                                              | Same capacity/timer design                                                                                                                                                                      |
+| Event persistence                       | `FileEventPersistence`                         | `FileEventPersistence`                                        | Disk-first, replay on launch                                                                                                                                                                    |
+| Drop counter                            | `DropCounter`                                  | `DefaultDropCounter`                                          | Same reasons                                                                                                                                                                                    |
+| Context                                 | `SdkContext`                                   | `SdkContext`                                                  | Same snapshot pattern                                                                                                                                                                           |
+| Session tracking                        | `SessionTracker`                               | `SessionTracker`                                              | Lifecycle-based with timeout                                                                                                                                                                    |
+| Breadcrumbs                             | `BreadcrumbTrail`                              | `BreadcrumbTrail`                                             | Ring buffer + disk                                                                                                                                                                              |
+| Navigation                              | Navigation3Adapter, CircuitAdapter             | SwiftUINavigationAdapter                                      | Framework-specific adapters                                                                                                                                                                     |
+| Crash detection                         | `AutoMobileCrashes` (UncaughtExceptionHandler) | `AutoMobileCrashes` (NSSetUncaughtExceptionHandler + signals) | iOS adds signal handler support                                                                                                                                                                 |
+| ANR / Hang detection                    | `AutoMobileAnr`                                | `AutoMobileHangs`                                             | Watchdog thread approach                                                                                                                                                                        |
+| Handled exceptions                      | `AutoMobileFailures`                           | `AutoMobileFailures`                                          | Same API shape                                                                                                                                                                                  |
+| Network monitoring                      | OkHttp Interceptor                             | URLProtocol                                                   | Platform-native interception                                                                                                                                                                    |
+| WebSocket tracking                      | `AutoMobileWebSocketListener`                  | `recordWebSocketFrame()`                                      | Manual on iOS                                                                                                                                                                                   |
+| Log filtering                           | `AutoMobileLog`                                | `AutoMobileLog`                                               | Android: regex filters with first-match semantics; iOS: `os.Logger` wrappers (filtering via OSLogStore)                                                                                         |
+| Interaction tracking                    | `AutoMobileClickTracker`                       | `AutoMobileInteractionTracker`                                | Tap with debounce                                                                                                                                                                               |
+| View rendering tracking                 | `RecompositionTracker` (Compose)               | `ViewBodyTracker` (SwiftUI)                                   | Platform-specific UI framework                                                                                                                                                                  |
+| Key-value storage                       | `SharedPreferencesInspector`                   | `UserDefaultsInspector`                                       | Platform-native storage                                                                                                                                                                         |
+| Database inspection                     | `DatabaseInspector` / `SQLiteDatabaseDriver`   | `DatabaseInspector` / `SQLiteDatabaseDriver`                  | Same schema                                                                                                                                                                                     |
+| Biometric injection                     | `AutoMobileBiometrics`                         | `AutoMobileBiometrics`                                        | Same override + TTL pattern                                                                                                                                                                     |
+| Notifications                           | `AutoMobileNotifications`                      | `AutoMobileNotifications`                                     | Platform notification APIs                                                                                                                                                                      |
+| OS events                               | `AutoMobileOsEvents`                           | `AutoMobileOsEvents`                                          | Lifecycle, battery, connectivity                                                                                                                                                                |
+| Broadcast / System events               | `AutoMobileBroadcastInterceptor`               | `AutoMobileNotificationObserver`                              | BroadcastReceiver vs NotificationCenter                                                                                                                                                         |
+| Network mock rules and error simulation | `NetworkMockRuleStore`                         | `NetworkMockRuleStore`                                        | DEBUG-only; iOS requires sessions to register `AutoMobileNetwork.shared.protocolClass()`; error simulation also requires the supporting iOS CtrlProxy runner release or a local runner override |
 
 ## See also
 

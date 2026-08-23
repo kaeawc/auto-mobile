@@ -2,15 +2,15 @@
 
 AutoMobile is made of several components that must agree on one version:
 
-| Component | What it is |
-|-----------|------------|
-| **Daemon** | The `@kaeawc/auto-mobile` npm package (stdio/MCP + Unix-socket server) |
-| **Android CtrlProxy APK** | On-device accessibility service, downloaded by the daemon |
-| **iOS CtrlProxy IPA** | On-device XCUITest runner bundle, downloaded by the daemon |
-| **Android junit-runner** | Kotlin runner that spawns the daemon during tests |
-| **iOS XCTestRunner** | Swift runner that autostarts the daemon during tests |
+| Component                 | What it is                                                             |
+| ------------------------- | ---------------------------------------------------------------------- |
+| **Daemon**                | The `@kaeawc/auto-mobile` npm package (stdio/MCP + Unix-socket server) |
+| **Android CtrlProxy APK** | On-device accessibility service, downloaded by the daemon              |
+| **iOS CtrlProxy IPA**     | On-device XCUITest runner bundle, downloaded by the daemon             |
+| **Android junit-runner**  | Kotlin runner that spawns the daemon during tests                      |
+| **iOS XCTestRunner**      | Swift runner that autostarts the daemon during tests                   |
 
-The repo's own CI is hermetic *by construction* — every component comes from a single
+The repo's own CI is hermetic _by construction_ — every component comes from a single
 checkout — so a version knob is not needed there. **External CI consumers** don't have
 that luxury: their inputs are independent, and without pinning they can silently drift
 (a `@latest` daemon pulling one APK while a runner expects another). This page documents
@@ -120,9 +120,9 @@ set `AUTOMOBILE_ALLOW_INSECURE_ASSET_URL=1` to opt back into `http://`.
    ```
    The daemon copies (and extracts) this local bundle directly — no network fetch, no
    Xcode build. **Do not also set `AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD=1`**: that flag
-   short-circuits `needsRebuild()` and returns *before* the vendored IPA is consumed, so
+   short-circuits `needsRebuild()` and returns _before_ the vendored IPA is consumed, so
    on a fresh host CtrlProxy would never be installed. Use `AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD=1`
-   only when the extracted xctestrun artifacts are *already* present on the host.
+   only when the extracted xctestrun artifacts are _already_ present on the host.
    Alternatively, set `AUTOMOBILE_ASSET_BASE_URL` to your mirror for a checksummed
    download of a registry-known version (leave the IPA path unset).
 3. **Gate the job** on doctor:
@@ -164,15 +164,15 @@ Ask the running daemon what it will actually fetch — the `ide/status` handler 
   "android": {
     "ctrlProxy": {
       "url": "https://artifacts.internal/automobile/0.0.40/control-proxy-debug.apk",
-      "expectedSha256": "…"
-    }
+      "expectedSha256": "…",
+    },
   },
   "ios": {
     "xcTestService": {
       "url": "https://artifacts.internal/automobile/0.0.40/control-proxy.ipa",
-      "expectedSha256": "…"
-    }
-  }
+      "expectedSha256": "…",
+    },
+  },
 }
 ```
 

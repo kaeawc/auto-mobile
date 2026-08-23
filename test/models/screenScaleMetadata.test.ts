@@ -1,14 +1,17 @@
 import { describe, expect, test } from "bun:test";
-import { readScreenScaleMetadata, screenScaleMetadataSpread } from "../../src/models/ScreenScaleMetadata";
+import {
+  readScreenScaleMetadata,
+  screenScaleMetadataSpread,
+} from "../../src/models/ScreenScaleMetadata";
 
 describe("readScreenScaleMetadata (#4548)", () => {
   test("extracts complete, well-formed metadata", () => {
     expect(
-      readScreenScaleMetadata({ nativeScale: 3.144, pixelWidth: 1179, pixelHeight: 2553 })
+      readScreenScaleMetadata({ nativeScale: 3.144, pixelWidth: 1179, pixelHeight: 2553 }),
     ).toEqual({ nativeScale: 3.144, pixelWidth: 1179, pixelHeight: 2553 });
     // The Android scale-1 identity contract.
     expect(
-      readScreenScaleMetadata({ nativeScale: 1, pixelWidth: 1080, pixelHeight: 2340 })
+      readScreenScaleMetadata({ nativeScale: 1, pixelWidth: 1080, pixelHeight: 2340 }),
     ).toEqual({ nativeScale: 1, pixelWidth: 1080, pixelHeight: 2340 });
   });
 
@@ -18,7 +21,7 @@ describe("readScreenScaleMetadata (#4548)", () => {
     expect(readScreenScaleMetadata({})).toBeNull();
     // The Android runner serializes absent optionals as JSON null (encodeDefaults=true).
     expect(
-      readScreenScaleMetadata({ nativeScale: null, pixelWidth: null, pixelHeight: null })
+      readScreenScaleMetadata({ nativeScale: null, pixelWidth: null, pixelHeight: null }),
     ).toBeNull();
   });
 
@@ -38,7 +41,11 @@ describe("readScreenScaleMetadata (#4548)", () => {
     expect(readScreenScaleMetadata({ ...valid, pixelHeight: Number.POSITIVE_INFINITY })).toBeNull();
     // A coercible impostor (e.g. a string that survived JSON parsing) must not pass.
     expect(
-      readScreenScaleMetadata({ nativeScale: "3" as unknown as number, pixelWidth: 1179, pixelHeight: 2553 })
+      readScreenScaleMetadata({
+        nativeScale: "3" as unknown as number,
+        pixelWidth: 1179,
+        pixelHeight: 2553,
+      }),
     ).toBeNull();
   });
 });
@@ -46,7 +53,7 @@ describe("readScreenScaleMetadata (#4548)", () => {
 describe("screenScaleMetadataSpread (#4548)", () => {
   test("spreads the full tuple only when complete-finite-positive", () => {
     expect(
-      screenScaleMetadataSpread({ nativeScale: 3.144, pixelWidth: 1179, pixelHeight: 2553 })
+      screenScaleMetadataSpread({ nativeScale: 3.144, pixelWidth: 1179, pixelHeight: 2553 }),
     ).toEqual({ nativeScale: 3.144, pixelWidth: 1179, pixelHeight: 2553 });
   });
 

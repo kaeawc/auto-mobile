@@ -22,14 +22,19 @@ function createFakeContext(overrides?: Partial<DelegateContext>): {
   const requestManager = new RequestManager(timer);
   const sent: string[] = [];
   const context: DelegateContext = {
-    getWebSocket: () => ({
-      send: (data: string) => { sent.push(data); },
-      readyState: 1,
-    } as any),
+    getWebSocket: () =>
+      ({
+        send: (data: string) => {
+          sent.push(data);
+        },
+        readyState: 1,
+      }) as any,
     requestManager,
     timer,
     ensureConnected: async () => true,
-    cancelScreenshotBackoff: () => { /* no-op */ },
+    cancelScreenshotBackoff: () => {
+      /* no-op */
+    },
     ...overrides,
   };
   return { context, sent, timer, requestManager };
@@ -42,7 +47,7 @@ function createFakeContext(overrides?: Partial<DelegateContext>): {
  * running the immediate callback, so this stays robust against await-count changes (#3049).
  */
 async function flush(): Promise<void> {
-  await new Promise<void>(resolve => setImmediate(resolve));
+  await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
 describe("CtrlProxyGestures.requestTwoFingerSwipe (#2988)", () => {
@@ -113,7 +118,10 @@ describe("CtrlProxyGestures.requestTwoFingerSwipe (#2988)", () => {
     expect(sentMsg.offset).toBe(80);
 
     // Resolve so the promise settles (avoid a dangling pending request).
-    requestManager.resolve<A11ySwipeResult>(sentMsg.requestId as string, { success: true, totalTimeMs: 1 });
+    requestManager.resolve<A11ySwipeResult>(sentMsg.requestId as string, {
+      success: true,
+      totalTimeMs: 1,
+    });
     await promise;
   });
 
@@ -180,8 +188,12 @@ describe("CtrlProxyGestures.requestTwoFingerSwipe (#2988)", () => {
     expect(requestManager.getPendingCount()).toBe(2);
 
     // Resolve out of order: B first, then A, with distinguishable payloads.
-    expect(requestManager.resolve<A11ySwipeResult>(idB, { success: true, totalTimeMs: 222 })).toBe(true);
-    expect(requestManager.resolve<A11ySwipeResult>(idA, { success: true, totalTimeMs: 111 })).toBe(true);
+    expect(requestManager.resolve<A11ySwipeResult>(idB, { success: true, totalTimeMs: 222 })).toBe(
+      true,
+    );
+    expect(requestManager.resolve<A11ySwipeResult>(idA, { success: true, totalTimeMs: 111 })).toBe(
+      true,
+    );
 
     const [resultA, resultB] = await Promise.all([promiseA, promiseB]);
     // Each promise settled with ITS OWN result — no cross-talk.
@@ -191,7 +203,7 @@ describe("CtrlProxyGestures.requestTwoFingerSwipe (#2988)", () => {
     expect(requestManager.getPendingCount()).toBe(0);
   });
 
-  it("fails promptly on a type:\"error\" frame via resolveError (#3048, #2985)", async () => {
+  it('fails promptly on a type:"error" frame via resolveError (#3048, #2985)', async () => {
     // A runner-side failure can arrive as a structured error envelope (#2985), which the client
     // routes through RequestManager.resolveError by requestId. Because two-finger swipes now
     // register with RequestManager, resolveError must correlate and settle the pending promise

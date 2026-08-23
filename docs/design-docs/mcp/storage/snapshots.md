@@ -24,6 +24,7 @@ The snapshot feature provides deterministic device state management for mobile t
 Capture or restore device snapshots.
 
 **Parameters:**
+
 - `action` (required): `"capture"` or `"restore"`
 - `snapshotName` (capture: optional, restore: required): Name for the snapshot
 - `includeAppData` (capture only): Include app data directories in snapshot
@@ -38,6 +39,7 @@ Capture or restore device snapshots.
 - `device` (optional): Device label for multi-device control
 
 **Capture response:**
+
 ```json
 {
   "message": "Snapshot 'Pixel_5_2026-01-08_12-30-45' captured successfully",
@@ -52,6 +54,7 @@ Capture or restore device snapshots.
 ```
 
 **Restore response:**
+
 ```json
 {
   "message": "Snapshot 'clean-state-before-login-test' restored successfully",
@@ -64,6 +67,7 @@ Capture or restore device snapshots.
 ```
 
 **Examples:**
+
 ```javascript
 // Capture with auto-generated name
 await deviceSnapshot({ action: "capture" });
@@ -71,13 +75,13 @@ await deviceSnapshot({ action: "capture" });
 // Capture with custom name
 await deviceSnapshot({
   action: "capture",
-  snapshotName: "clean-state-before-login-test"
+  snapshotName: "clean-state-before-login-test",
 });
 
 // Restore a snapshot
 await deviceSnapshot({
   action: "restore",
-  snapshotName: "clean-state-before-login-test"
+  snapshotName: "clean-state-before-login-test",
 });
 ```
 
@@ -88,6 +92,7 @@ await deviceSnapshot({
 List archived device snapshots.
 
 **Returns:**
+
 ```json
 {
   "snapshots": [
@@ -116,6 +121,7 @@ List archived device snapshots.
 Device snapshot defaults can be read or updated via the Unix socket at `~/.auto-mobile/device-snapshot.sock`.
 
 **Defaults:**
+
 - `includeAppData`: `true`
 - `includeSettings`: `true`
 - `useVmSnapshot`: `true`
@@ -136,15 +142,18 @@ by the capture paths).
 ### VM Snapshots (Emulators Only)
 
 **Pros:**
+
 - Instant snapshot capture and restoration
 - Complete system state including RAM
 - No need to clear app data individually
 
 **Cons:**
+
 - Only works with Android emulators
 - Requires emulator console access
 
 **Technical Details:**
+
 - Uses `adb emu avd snapshot save/load` commands
 - Emulator replies with `OK` or `KO: <reason>` (missing `OK` is treated as failure)
 - Commands time out after 30000ms by default (configurable via `vmSnapshotTimeoutMs`)
@@ -154,16 +163,19 @@ by the capture paths).
 ### ADB Snapshots (All Devices)
 
 **Pros:**
+
 - Works with both emulators and physical devices
 - Portable across device types
 - Fine-grained control over what gets captured
 
 **Cons:**
+
 - Slower than VM snapshots
 - Requires clearing app data individually
 - App data backup requires root access or user confirmation
 
 **What Gets Captured:**
+
 - Package list (`pm list packages`)
 - System settings (global/secure/system via `settings list`)
 - Foreground app state
@@ -176,6 +188,7 @@ by the capture paths).
   - Apps with `android:allowBackup="false"` are automatically skipped
 
 **What Gets Restored:**
+
 - Clears app data for all packages via `pm clear`
 - Restores system settings via `settings put`
 - Restores app data via `adb restore` (if backup was successful)
@@ -186,14 +199,17 @@ by the capture paths).
 ### iOS App Container Backups (Current)
 
 **Pros:**
+
 - Portable between dev machines
 - Captures only the target app's container for focused reproduction
 
 **Cons:**
+
 - Does not include the keychain or other apps' state (captures the target app's container, plus global/secure/system settings when `includeSettings` is set)
 - Requires explicit bundle IDs for the target app(s)
 
 **Technical Details:**
+
 - Uses `xcrun simctl get_app_container <udid> <bundleId> data`
 - Captures `iosSettings` (global/secure/system) into the manifest when `includeSettings` is enabled (`captureIosSettings` in `src/utils/ios-cmdline-tools/iosSettings.ts`)
 - Copies `Documents/`, `Library/`, and `tmp/` for each bundle ID
@@ -259,7 +275,7 @@ await deviceSnapshot({ action: "capture", snapshotName: "test-base" });
 await Promise.all([
   runTest1(() => deviceSnapshot({ action: "restore", snapshotName: "test-base" })),
   runTest2(() => deviceSnapshot({ action: "restore", snapshotName: "test-base" })),
-  runTest3(() => deviceSnapshot({ action: "restore", snapshotName: "test-base" }))
+  runTest3(() => deviceSnapshot({ action: "restore", snapshotName: "test-base" })),
 ]);
 ```
 
@@ -330,29 +346,32 @@ The snapshot manifest includes detailed backup information:
 ### Backup Modes
 
 **Current App Only (default)**:
+
 ```javascript
 await deviceSnapshot({
   action: "capture",
-  userApps: "current",  // Only backup foreground app
-  includeAppData: true
+  userApps: "current", // Only backup foreground app
+  includeAppData: true,
 });
 ```
 
 **All User Apps**:
+
 ```javascript
 await deviceSnapshot({
   action: "capture",
-  userApps: "all",  // Backup all user-installed apps
-  includeAppData: true
+  userApps: "all", // Backup all user-installed apps
+  includeAppData: true,
 });
 ```
 
 **Strict Mode** (fail if backup times out):
+
 ```javascript
 await deviceSnapshot({
   action: "capture",
-  strictBackupMode: true,  // Fail entire snapshot if backup fails
-  backupTimeoutMs: 60000   // Wait 60 seconds for user confirmation
+  strictBackupMode: true, // Fail entire snapshot if backup fails
+  backupTimeoutMs: 60000, // Wait 60 seconds for user confirmation
 });
 ```
 

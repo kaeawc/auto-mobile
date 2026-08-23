@@ -32,4 +32,4 @@ export class SeededRandom implements Random {
   }
 }
 
-const normalizeSeed = (seed: number): number => (Math.floor(seed) >>> 0) || 1;
+const normalizeSeed = (seed: number): number => Math.floor(seed) >>> 0 || 1;

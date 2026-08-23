@@ -59,8 +59,9 @@ describe("SessionCacheData has no untyped escape hatch (issue #2973)", () => {
       // The `.customData` member access is gone entirely — the bag no longer exists.
       expect(source, `${rel} must not access .customData`).not.toMatch(/\.customData\b/);
       // And the specific unchecked casts the issue called out are gone.
-      expect(source, `${rel} must not cast to KeepScreenAwakeState out of the bag`)
-        .not.toMatch(/as\s+KeepScreenAwakeState\s*\|\s*undefined/);
+      expect(source, `${rel} must not cast to KeepScreenAwakeState out of the bag`).not.toMatch(
+        /as\s+KeepScreenAwakeState\s*\|\s*undefined/,
+      );
     }
   });
 
@@ -100,7 +101,7 @@ describe("SessionCacheData has no untyped escape hatch (issue #2973)", () => {
     const sessionManagerAbs = join(process.cwd(), SESSION_MANAGER);
     // `sessionManager.ts` is where the setters and `updateSessionCache` live, so
     // it is (by design) the one place that writes the slots directly.
-    const files = listSrcTsFiles().filter(abs => abs !== sessionManagerAbs);
+    const files = listSrcTsFiles().filter((abs) => abs !== sessionManagerAbs);
 
     // A single `updateSessionCache( … )` call, argument list captured (non-greedy,
     // no nested braces) so we can look for a typed-slot key inside it. Anchoring on
@@ -118,7 +119,7 @@ describe("SessionCacheData has no untyped escape hatch (issue #2973)", () => {
         //    (the `[^=]` lookahead lets `===`/`==` comparisons through).
         expect(
           source,
-          `${rel} must not assign .${slot} directly — use SessionManager.${setter}()`
+          `${rel} must not assign .${slot} directly — use SessionManager.${setter}()`,
         ).not.toMatch(new RegExp(`\\.${slot}\\s*=[^=]`));
 
         // 2. No `updateSessionCache(id, { keepScreenAwake | deviceLabels })` bypass —
@@ -127,7 +128,7 @@ describe("SessionCacheData has no untyped escape hatch (issue #2973)", () => {
         for (const call of source.matchAll(UPDATE_CALL)) {
           expect(
             call[1].match(new RegExp(`\\b${slot}\\s*[:,}]`)),
-            `${rel} must not pass { ${slot} } to updateSessionCache — use SessionManager.${setter}()`
+            `${rel} must not pass { ${slot} } to updateSessionCache — use SessionManager.${setter}()`,
           ).toBeNull();
         }
       }

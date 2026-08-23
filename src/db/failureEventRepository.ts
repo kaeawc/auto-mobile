@@ -1,14 +1,6 @@
 import type { Kysely, SelectQueryBuilder } from "kysely";
 import { getDatabase } from "./database";
-import type {
-  Database,
-  Crash,
-  NewCrash,
-  Anr,
-  NewAnr,
-  ToolCall,
-  NewToolCall,
-} from "./types";
+import type { Database, Crash, NewCrash, Anr, NewAnr, ToolCall, NewToolCall } from "./types";
 import type { CrashEvent, AnrEvent } from "../utils/interfaces/CrashMonitor";
 import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
@@ -117,7 +109,7 @@ export class FailureEventRepository {
       .executeTakeFirstOrThrow();
 
     logger.info(
-      `[FAILURE_REPO] Saved crash for ${event.packageName}: ${event.exceptionClass ?? "unknown"}`
+      `[FAILURE_REPO] Saved crash for ${event.packageName}: ${event.exceptionClass ?? "unknown"}`,
     );
 
     return result.id;
@@ -155,7 +147,7 @@ export class FailureEventRepository {
       .executeTakeFirstOrThrow();
 
     logger.info(
-      `[FAILURE_REPO] Saved ANR for ${event.packageName}: ${event.reason ?? "unknown reason"}`
+      `[FAILURE_REPO] Saved ANR for ${event.packageName}: ${event.reason ?? "unknown reason"}`,
     );
 
     return result.id;
@@ -175,7 +167,7 @@ export class FailureEventRepository {
       durationMs?: number;
       toolArgs?: string;
       sessionUuid?: string;
-    } = {}
+    } = {},
   ): Promise<number> {
     const db = this.getDb();
 
@@ -200,7 +192,7 @@ export class FailureEventRepository {
 
     if (options.status === "failure") {
       logger.info(
-        `[FAILURE_REPO] Saved tool call failure for ${toolName}: ${options.errorMessage ?? "unknown error"}`
+        `[FAILURE_REPO] Saved tool call failure for ${toolName}: ${options.errorMessage ?? "unknown error"}`,
       );
     }
 
@@ -215,7 +207,7 @@ export class FailureEventRepository {
   // the caller (a count must not be capped by `limit`).
   private applyCrashFilters<O>(
     query: SelectQueryBuilder<Database, "crashes", O>,
-    options: FailureQueryOptions
+    options: FailureQueryOptions,
   ): SelectQueryBuilder<Database, "crashes", O> {
     if (options.deviceId) {
       query = query.where("device_id", "=", options.deviceId);
@@ -240,7 +232,7 @@ export class FailureEventRepository {
 
   private applyAnrFilters<O>(
     query: SelectQueryBuilder<Database, "anrs", O>,
-    options: FailureQueryOptions
+    options: FailureQueryOptions,
   ): SelectQueryBuilder<Database, "anrs", O> {
     if (options.deviceId) {
       query = query.where("device_id", "=", options.deviceId);
@@ -268,7 +260,7 @@ export class FailureEventRepository {
   // applied by the caller so this helper can serve both selects and counts.
   private applyToolCallFilters<O>(
     query: SelectQueryBuilder<Database, "tool_calls", O>,
-    options: FailureQueryOptions
+    options: FailureQueryOptions,
   ): SelectQueryBuilder<Database, "tool_calls", O> {
     if (options.deviceId) {
       query = query.where("device_id", "=", options.deviceId);
@@ -293,7 +285,7 @@ export class FailureEventRepository {
 
     let query = this.applyCrashFilters(
       db.selectFrom("crashes").selectAll().orderBy("timestamp", "desc"),
-      options
+      options,
     );
 
     if (options.limit) {
@@ -311,7 +303,7 @@ export class FailureEventRepository {
 
     let query = this.applyAnrFilters(
       db.selectFrom("anrs").selectAll().orderBy("timestamp", "desc"),
-      options
+      options,
     );
 
     if (options.limit) {
@@ -333,7 +325,7 @@ export class FailureEventRepository {
         .selectAll()
         .where("status", "=", "failure")
         .orderBy("timestamp", "desc"),
-      options
+      options,
     );
 
     if (options.limit) {
@@ -444,11 +436,7 @@ export class FailureEventRepository {
    */
   async getAnrById(id: number): Promise<Anr | null> {
     const db = this.getDb();
-    const result = await db
-      .selectFrom("anrs")
-      .selectAll()
-      .where("id", "=", id)
-      .executeTakeFirst();
+    const result = await db.selectFrom("anrs").selectAll().where("id", "=", id).executeTakeFirst();
 
     return result ?? null;
   }
@@ -461,15 +449,9 @@ export class FailureEventRepository {
     const cutoffTimestamp = this.timer.now() - olderThanDays * 24 * 60 * 60 * 1000;
     const cutoffDate = new Date(cutoffTimestamp).toISOString();
 
-    await db
-      .deleteFrom("crashes")
-      .where("timestamp", "<", cutoffTimestamp)
-      .execute();
+    await db.deleteFrom("crashes").where("timestamp", "<", cutoffTimestamp).execute();
 
-    await db
-      .deleteFrom("anrs")
-      .where("timestamp", "<", cutoffTimestamp)
-      .execute();
+    await db.deleteFrom("anrs").where("timestamp", "<", cutoffTimestamp).execute();
 
     await db
       .deleteFrom("tool_calls")
@@ -477,9 +459,7 @@ export class FailureEventRepository {
       .where("timestamp", "<", cutoffDate)
       .execute();
 
-    logger.info(
-      `[FAILURE_REPO] Deleted failures older than ${olderThanDays} days`
-    );
+    logger.info(`[FAILURE_REPO] Deleted failures older than ${olderThanDays} days`);
   }
 
   /**
@@ -491,18 +471,18 @@ export class FailureEventRepository {
    * cap the count.
    */
   async getFailureCounts(
-    options: FailureQueryOptions = {}
+    options: FailureQueryOptions = {},
   ): Promise<{ crashes: number; anrs: number; toolCallFailures: number }> {
     const db = this.getDb();
 
     const crashes = await this.applyCrashFilters(
       db.selectFrom("crashes").select(db.fn.countAll<number>().as("count")),
-      options
+      options,
     ).executeTakeFirstOrThrow();
 
     const anrs = await this.applyAnrFilters(
       db.selectFrom("anrs").select(db.fn.countAll<number>().as("count")),
-      options
+      options,
     ).executeTakeFirstOrThrow();
 
     let toolCallFailures = 0;
@@ -512,7 +492,7 @@ export class FailureEventRepository {
           .selectFrom("tool_calls")
           .select(db.fn.countAll<number>().as("count"))
           .where("status", "=", "failure"),
-        options
+        options,
       ).executeTakeFirstOrThrow();
       toolCallFailures = Number(row.count);
     }

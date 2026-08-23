@@ -18,7 +18,7 @@ import type { Random } from "../../src/utils/Random";
 class FakeSqliteError extends Error {
   constructor(
     message: string,
-    readonly code: string
+    readonly code: string,
   ) {
     super(message);
     this.name = "SQLiteError";
@@ -126,8 +126,10 @@ describe("BunSqliteConnectionState BUSY/constraint-aware retry (issue #2874)", (
     });
 
     const error = await state.executeQuery(INSERT, Symbol("owner")).then(
-      () => { throw new Error("expected the constraint error to surface"); },
-      (e: unknown) => e
+      () => {
+        throw new Error("expected the constraint error to surface");
+      },
+      (e: unknown) => e,
     );
     expect(invocations()).toBe(1); // no retry
     expect(timer.getSleepHistory().length).toBe(0);
@@ -169,7 +171,7 @@ describe("BunSqliteConnectionState BUSY/constraint-aware retry (issue #2874)", (
       random: zeroRandom,
     });
 
-    const error = await state.executeQuery(SELECT, Symbol("owner")).catch(e => e as Error);
+    const error = await state.executeQuery(SELECT, Symbol("owner")).catch((e) => e as Error);
     expect(error).toBeInstanceOf(Error);
     // The #2793 cause-identity contract: the original SqliteError is reachable.
     expect((error as Error).cause).toBe(busy);

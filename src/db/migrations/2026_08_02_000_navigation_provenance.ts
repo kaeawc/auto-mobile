@@ -20,13 +20,13 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await db.schema
     .createTable("navigation_build_keys")
     .ifNotExists()
-    .addColumn("id", "integer", col => col.primaryKey().autoIncrement())
-    .addColumn("app_id", "text", col =>
-      col.notNull().references("navigation_apps.app_id").onDelete("cascade")
+    .addColumn("id", "integer", (col) => col.primaryKey().autoIncrement())
+    .addColumn("app_id", "text", (col) =>
+      col.notNull().references("navigation_apps.app_id").onDelete("cascade"),
     )
-    .addColumn("version_code", "integer", col => col.notNull())
-    .addColumn("content_hash", "text", col => col.notNull())
-    .addColumn("created_at", "text", col => col.notNull().defaultTo(sql`(datetime('now'))`))
+    .addColumn("version_code", "integer", (col) => col.notNull())
+    .addColumn("content_hash", "text", (col) => col.notNull())
+    .addColumn("created_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
     .execute();
 
   await db.schema
@@ -41,18 +41,18 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await db.schema
     .createTable("navigation_node_observations")
     .ifNotExists()
-    .addColumn("id", "integer", col => col.primaryKey().autoIncrement())
-    .addColumn("node_id", "integer", col =>
-      col.notNull().references("navigation_nodes.id").onDelete("cascade")
+    .addColumn("id", "integer", (col) => col.primaryKey().autoIncrement())
+    .addColumn("node_id", "integer", (col) =>
+      col.notNull().references("navigation_nodes.id").onDelete("cascade"),
     )
-    .addColumn("build_key_id", "integer", col =>
-      col.notNull().references("navigation_build_keys.id").onDelete("cascade")
+    .addColumn("build_key_id", "integer", (col) =>
+      col.notNull().references("navigation_build_keys.id").onDelete("cascade"),
     )
-    .addColumn("device_id", "text", col => col.notNull())
-    .addColumn("session_uuid", "text", col => col.notNull())
-    .addColumn("first_seen_at", "integer", col => col.notNull())
-    .addColumn("last_seen_at", "integer", col => col.notNull())
-    .addColumn("created_at", "text", col => col.notNull().defaultTo(sql`(datetime('now'))`))
+    .addColumn("device_id", "text", (col) => col.notNull())
+    .addColumn("session_uuid", "text", (col) => col.notNull())
+    .addColumn("first_seen_at", "integer", (col) => col.notNull())
+    .addColumn("last_seen_at", "integer", (col) => col.notNull())
+    .addColumn("created_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
     .execute();
 
   await db.schema
@@ -81,18 +81,18 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await db.schema
     .createTable("navigation_edge_observations")
     .ifNotExists()
-    .addColumn("id", "integer", col => col.primaryKey().autoIncrement())
-    .addColumn("edge_id", "integer", col =>
-      col.notNull().references("navigation_edges.id").onDelete("cascade")
+    .addColumn("id", "integer", (col) => col.primaryKey().autoIncrement())
+    .addColumn("edge_id", "integer", (col) =>
+      col.notNull().references("navigation_edges.id").onDelete("cascade"),
     )
-    .addColumn("build_key_id", "integer", col =>
-      col.notNull().references("navigation_build_keys.id").onDelete("cascade")
+    .addColumn("build_key_id", "integer", (col) =>
+      col.notNull().references("navigation_build_keys.id").onDelete("cascade"),
     )
-    .addColumn("device_id", "text", col => col.notNull())
-    .addColumn("session_uuid", "text", col => col.notNull())
-    .addColumn("first_seen_at", "integer", col => col.notNull())
-    .addColumn("last_seen_at", "integer", col => col.notNull())
-    .addColumn("created_at", "text", col => col.notNull().defaultTo(sql`(datetime('now'))`))
+    .addColumn("device_id", "text", (col) => col.notNull())
+    .addColumn("session_uuid", "text", (col) => col.notNull())
+    .addColumn("first_seen_at", "integer", (col) => col.notNull())
+    .addColumn("last_seen_at", "integer", (col) => col.notNull())
+    .addColumn("created_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
     .execute();
 
   await db.schema

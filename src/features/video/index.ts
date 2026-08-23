@@ -12,10 +12,7 @@ export type {
   ActiveVideoRecording,
   VideoRecorderServiceDependencies,
 } from "./VideoRecorderService";
-export {
-  DEFAULT_VIDEO_RECORDING_CONFIG,
-  parseVideoRecordingConfig,
-} from "./VideoRecorderService";
+export { DEFAULT_VIDEO_RECORDING_CONFIG, parseVideoRecordingConfig } from "./VideoRecorderService";
 export { PlatformVideoCaptureBackend } from "./PlatformVideoCaptureBackend";
 export { FfmpegVideoProcessingBackend } from "./FfmpegVideoProcessingBackend";
 export { HybridVideoCaptureBackend } from "./HybridVideoCaptureBackend";

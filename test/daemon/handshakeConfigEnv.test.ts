@@ -18,7 +18,7 @@ describe("DAEMON_HANDSHAKE_ENABLED env parsing", () => {
   // files, so deleting a key the caller set would leak the wrong handshake state
   // into later modules — restore, don't blanket-delete.
   const ORIGINAL_ENV = new Map<(typeof KEYS)[number], string | undefined>(
-    KEYS.map(key => [key, process.env[key]])
+    KEYS.map((key) => [key, process.env[key]]),
   );
 
   // Establish a clean baseline at the START of each row so "unset" rows are
@@ -43,13 +43,20 @@ describe("DAEMON_HANDSHAKE_ENABLED env parsing", () => {
   afterEach(restoreEnv);
 
   async function importFreshEnabled(): Promise<boolean> {
-    const mod = await import(`../../src/daemon/constants.ts?handshake-env=${Date.now()}-${Math.random()}`);
+    const mod = await import(
+      `../../src/daemon/constants.ts?handshake-env=${Date.now()}-${Math.random()}`
+    );
     return mod.DAEMON_HANDSHAKE_ENABLED as boolean;
   }
 
   // Table rows are the spec. `enabled` is the resulting DAEMON_HANDSHAKE_ENABLED
   // for the primary env var set to `value` (undefined = var unset).
-  const rows: Array<{ name: string; key: (typeof KEYS)[number]; value?: string; enabled: boolean }> = [
+  const rows: Array<{
+    name: string;
+    key: (typeof KEYS)[number];
+    value?: string;
+    enabled: boolean;
+  }> = [
     { name: "unset defaults to enabled", key: KEYS[0], value: undefined, enabled: true },
     { name: "empty string leaves it enabled", key: KEYS[0], value: "", enabled: true },
     { name: "'1' disables it", key: KEYS[0], value: "1", enabled: false },
@@ -59,7 +66,12 @@ describe("DAEMON_HANDSHAKE_ENABLED env parsing", () => {
     { name: "' 1 ' is trimmed then disables it", key: KEYS[0], value: " 1 ", enabled: false },
     { name: "'0' leaves it enabled", key: KEYS[0], value: "0", enabled: true },
     { name: "'no' leaves it enabled", key: KEYS[0], value: "no", enabled: true },
-    { name: "an unrecognized value leaves it enabled", key: KEYS[0], value: "maybe", enabled: true },
+    {
+      name: "an unrecognized value leaves it enabled",
+      key: KEYS[0],
+      value: "maybe",
+      enabled: true,
+    },
     { name: "the AUTO_MOBILE_ alias also disables it", key: KEYS[1], value: "1", enabled: false },
   ];
 

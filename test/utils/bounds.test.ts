@@ -6,7 +6,7 @@ import {
   clamp,
   isElementBounds,
   parseBounds,
-  parseBoundsString
+  parseBoundsString,
 } from "../../src/utils/bounds";
 
 describe("boundsNearlyEqual", () => {

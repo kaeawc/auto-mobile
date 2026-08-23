@@ -19,7 +19,7 @@ describe("DefaultToolRegistry adapter", () => {
       "Adapter progress probe",
       {},
       async () => ({ success: true }),
-      { supportsProgress: true }
+      { supportsProgress: true },
     );
 
     expect(ToolRegistry.getTool("adapterProgressProbe")?.supportsProgress).toBe(true);

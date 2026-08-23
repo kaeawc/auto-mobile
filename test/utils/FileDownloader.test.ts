@@ -3,17 +3,17 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { FakeFileDownloader } from "../fakes/FakeFileDownloader";
 
-describe("FakeFileDownloader", function() {
+describe("FakeFileDownloader", function () {
   let tempDir: string | null = null;
 
-  afterEach(async function() {
+  afterEach(async function () {
     if (tempDir) {
       await fs.rm(tempDir, { recursive: true, force: true });
       tempDir = null;
     }
   });
 
-  test("should track downloaded urls and destinations", async function() {
+  test("should track downloaded urls and destinations", async function () {
     const downloader = new FakeFileDownloader();
     const url = "https://example.com/file.zip";
     tempDir = await makeScratchTempDir("fake-downloader-");
@@ -26,13 +26,14 @@ describe("FakeFileDownloader", function() {
     expect(await fs.readFile(destination)).toEqual(downloader.payload);
   });
 
-  test("should throw configured error", async function() {
+  test("should throw configured error", async function () {
     const downloader = new FakeFileDownloader();
     downloader.shouldThrow = new Error("download failed");
     const destination = path.join(process.cwd(), "scratch", "fake-downloader-unused", "file.zip");
 
-    await expect(downloader.download("https://example.com/file.zip", destination))
-      .rejects.toThrow("download failed");
+    await expect(downloader.download("https://example.com/file.zip", destination)).rejects.toThrow(
+      "download failed",
+    );
   });
 });
 

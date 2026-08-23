@@ -20,7 +20,10 @@ export type GitCommandRunner = (
 ) => string | null;
 
 export interface GitMetadataClient {
-  readVersion(cwd: string, readPackageName: (directory: string) => string | null): GitVersionInfo | null;
+  readVersion(
+    cwd: string,
+    readPackageName: (directory: string) => string | null,
+  ): GitVersionInfo | null;
 }
 
 const PACKAGE_NAME = "@kaeawc/auto-mobile";
@@ -53,7 +56,10 @@ const defaultRunner: GitCommandRunner = (_command, args, { cwd, timeoutMs }) => 
 export class DefaultGitMetadataClient implements GitMetadataClient {
   constructor(private readonly run: GitCommandRunner = defaultRunner) {}
 
-  readVersion(cwd: string, readPackageName: (directory: string) => string | null): GitVersionInfo | null {
+  readVersion(
+    cwd: string,
+    readPackageName: (directory: string) => string | null,
+  ): GitVersionInfo | null {
     // A dependency install must not inherit the host repository's revision.
     if (cwd.split(/[\\/]/).includes("node_modules")) {
       return null;

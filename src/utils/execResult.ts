@@ -18,6 +18,6 @@ export function createExecResult(stdout: string | Buffer, stderr: string | Buffe
     },
     includes(searchString: string) {
       return this.stdout.includes(searchString);
-    }
+    },
   };
 }

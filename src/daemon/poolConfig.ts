@@ -43,7 +43,7 @@ export function parseDeviceRecoveryPolicy(env: Environment): DeviceRecoveryPolic
       onLoss = true;
     } else if (onLossValue !== "0") {
       warnings.push(
-        `Invalid AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS value ${JSON.stringify(onLossValue)}; using 0.`
+        `Invalid AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS value ${JSON.stringify(onLossValue)}; using 0.`,
       );
     }
   }
@@ -61,13 +61,13 @@ export function parseDeviceRecoveryPolicy(env: Environment): DeviceRecoveryPolic
       } else {
         warnings.push(
           `Invalid AUTOMOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS value ${JSON.stringify(maxAttemptsValue)}; ` +
-          `using ${DEFAULT_DEVICE_RECOVERY_MAX_ATTEMPTS}.`
+            `using ${DEFAULT_DEVICE_RECOVERY_MAX_ATTEMPTS}.`,
         );
       }
     } else {
       warnings.push(
         `Invalid AUTOMOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS value ${JSON.stringify(maxAttemptsValue)}; ` +
-        `using ${DEFAULT_DEVICE_RECOVERY_MAX_ATTEMPTS}.`
+          `using ${DEFAULT_DEVICE_RECOVERY_MAX_ATTEMPTS}.`,
       );
     }
   }
@@ -90,8 +90,7 @@ export function getDeviceRecoveryPolicy(): DeviceRecoveryPolicy {
  * - MINIMUM: prefer lowest OS version that satisfies the constraint
  */
 const matchingOverride =
-  process.env.AUTOMOBILE_DEVICE_POOL_MATCHING ??
-  process.env.AUTO_MOBILE_DEVICE_POOL_MATCHING;
+  process.env.AUTOMOBILE_DEVICE_POOL_MATCHING ?? process.env.AUTO_MOBILE_DEVICE_POOL_MATCHING;
 const validStrategies: MatchingStrategy[] = ["LATEST", "RANDOM", "MINIMUM"];
 export const DEVICE_POOL_MATCHING: MatchingStrategy =
   matchingOverride && validStrategies.includes(matchingOverride as MatchingStrategy)
@@ -107,8 +106,7 @@ export const DEVICE_POOL_MATCHING: MatchingStrategy =
  */
 export function isDevicePoolAutolockEnabled(): boolean {
   const override =
-    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK ??
-    process.env.AUTO_MOBILE_DEVICE_POOL_AUTOLOCK;
+    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK ?? process.env.AUTO_MOBILE_DEVICE_POOL_AUTOLOCK;
   return override === "1";
 }
 
@@ -131,8 +129,7 @@ export function isAndroidRebootOnDeathEnabled(): boolean {
  */
 export function getDevicePoolTimeoutMs(): number {
   const override =
-    process.env.AUTOMOBILE_DEVICE_POOL_TIMEOUT ??
-    process.env.AUTO_MOBILE_DEVICE_POOL_TIMEOUT;
+    process.env.AUTOMOBILE_DEVICE_POOL_TIMEOUT ?? process.env.AUTO_MOBILE_DEVICE_POOL_TIMEOUT;
   const parsed = override ? Number.parseInt(override, 10) : NaN;
   return Number.isFinite(parsed) && parsed > 0 ? parsed * 1000 : 60_000;
 }

@@ -15,8 +15,7 @@ import type {
 
 const MODELS_DIR = join(__dirname, "..", "..", "src", "models");
 
-const read = (name: string): string =>
-  readFileSync(join(MODELS_DIR, `${name}.ts`), "utf8");
+const read = (name: string): string => readFileSync(join(MODELS_DIR, `${name}.ts`), "utf8");
 
 /**
  * Extracts the body of `export interface <name> extends BaseActionResult { ... }`
@@ -122,7 +121,7 @@ describe("exact-trio results alias BaseActionResult", () => {
     test(`${name} is a bare alias of BaseActionResult`, () => {
       const src = read(name);
       expect(src).toMatch(
-        new RegExp(`import\\s+\\{[^}]*BaseActionResult[^}]*\\}\\s+from\\s+"\\./BaseActionResult"`)
+        new RegExp(`import\\s+\\{[^}]*BaseActionResult[^}]*\\}\\s+from\\s+"\\./BaseActionResult"`),
       );
       expect(src).toMatch(new RegExp(`export type ${name} = BaseActionResult;`));
       // The trio must no longer be hand-rolled inline.
@@ -147,7 +146,7 @@ describe("with-extras results extend BaseActionResult", () => {
     test(`${name} extends BaseActionResult and keeps '${extraField}'`, () => {
       const src = read(name);
       expect(src).toMatch(
-        new RegExp(`import\\s+\\{[^}]*BaseActionResult[^}]*\\}\\s+from\\s+"\\./BaseActionResult"`)
+        new RegExp(`import\\s+\\{[^}]*BaseActionResult[^}]*\\}\\s+from\\s+"\\./BaseActionResult"`),
       );
       expect(src).toMatch(new RegExp(`interface ${name} extends BaseActionResult`));
       // The shared trio moved to the base — no inline redeclaration in THIS
@@ -168,7 +167,7 @@ describe("with-extras results extend BaseActionResult", () => {
     const press: PressButtonResult = { success: true, button: "back", keyCode: 4 };
     const swipe: SwipeResult = { success: true, x1: 0, y1: 0, x2: 1, y2: 1, duration: 100 };
     const bases: BaseActionResult[] = [tap, launch, press, swipe];
-    expect(bases.every(b => b.success)).toBe(true);
+    expect(bases.every((b) => b.success)).toBe(true);
     expect(tap.x).toBe(1);
   });
 });
@@ -186,7 +185,7 @@ describe("coverage is exhaustive (self-enforcing lists)", () => {
   // hardcoded ALIAS_TYPES/EXTENDS_TYPES lists cannot silently miss a future
   // result type — a new adopter that isn't listed fails one of these tests.
   const modelFiles = readdirSync(MODELS_DIR).filter(
-    f => f.endsWith(".ts") && f !== "BaseActionResult.ts"
+    (f) => f.endsWith(".ts") && f !== "BaseActionResult.ts",
   );
 
   const actualAliases: string[] = [];

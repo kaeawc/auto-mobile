@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import {
   registerDeviceTools,
   resetDeviceToolsDependencies,
-  setDeviceToolsDependencies
+  setDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -11,28 +11,32 @@ import { FakeTimer } from "../fakes/FakeTimer";
 const resolveWithFakeTimer = async <T>(
   promise: Promise<T>,
   timer: FakeTimer,
-  stepMs: number = 10
+  stepMs: number = 10,
 ): Promise<T> => {
   let settled = false;
   let result: T | undefined;
   let error: unknown;
 
   promise
-    .then(value => {
+    .then((value) => {
       settled = true;
       result = value;
     })
-    .catch(caught => {
+    .catch((caught) => {
       settled = true;
       error = caught;
     });
 
   let steps = 0;
   while (!settled) {
-    if (timer.getPendingTimeoutCount() > 0 || timer.getPendingIntervalCount() > 0 || timer.getPendingSleepCount() > 0) {
+    if (
+      timer.getPendingTimeoutCount() > 0 ||
+      timer.getPendingIntervalCount() > 0 ||
+      timer.getPendingSleepCount() > 0
+    ) {
       timer.advanceTime(stepMs);
     }
-    await new Promise(resolve => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
     steps += 1;
     if (steps > 200) {
       throw new Error("FakeTimer pump exceeded max steps");
@@ -52,7 +56,7 @@ describe("listDevices tool", () => {
   beforeAll(() => {
     fakeDeviceUtils = new FakeDeviceUtils();
     setDeviceToolsDependencies({
-      deviceManagerFactory: () => fakeDeviceUtils
+      deviceManagerFactory: () => fakeDeviceUtils,
     });
 
     if (!ToolRegistry.getTool("listDevices")) {
@@ -86,7 +90,7 @@ describe("listDevices tool", () => {
       "automobile:devices/booted/ios",
       "automobile:devices/images",
       "automobile:devices/images/android",
-      "automobile:devices/images/ios"
+      "automobile:devices/images/ios",
     ]);
 
     // Verify the message contains workflow guidance
@@ -121,7 +125,7 @@ describe("listDevices tool", () => {
       "automobile:devices/booted/ios",
       "automobile:devices/images",
       "automobile:devices/images/android",
-      "automobile:devices/images/ios"
+      "automobile:devices/images/ios",
     ]);
 
     // Message should include platform filter indicator

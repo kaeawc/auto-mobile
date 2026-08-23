@@ -73,18 +73,18 @@ package (and swift-log) or allow the runner to resolve them from the network on 
 When the package is published to GitHub, switch to a version-pinned remote reference:
 
 === "XcodeGen"
-    ```yaml
+`yaml
     # ios/YourApp/project.yml
     packages:
       XCTestRunner:
         url: https://github.com/kaeawc/auto-mobile
         from: "0.0.14"
-    ```
+    `
 
 === "Package.swift"
-    ```swift
+`swift
     .package(url: "https://github.com/kaeawc/auto-mobile", from: "0.0.14")
-    ```
+    `
 
 ### Using a local build from source
 
@@ -95,13 +95,13 @@ package at your checked-out source tree:
 # ios/YourApp/project.yml
 packages:
   XCTestRunner:
-    path: /path/to/auto-mobile/ios/XCTestRunner   # absolute path during development
+    path: /path/to/auto-mobile/ios/XCTestRunner # absolute path during development
 ```
 
 !!! warning "Absolute paths are not portable"
-    Absolute path references only work on your machine. Use a repo-relative path (e.g.
-    `../../libs/spm/XCTestRunner`) for anything committed to source control so all team members
-    and CI runners resolve the package correctly.
+Absolute path references only work on your machine. Use a repo-relative path (e.g.
+`../../libs/spm/XCTestRunner`) for anything committed to source control so all team members
+and CI runners resolve the package correctly.
 
 ## Test target setup
 
@@ -116,7 +116,7 @@ require both.
 packages:
   # … existing packages …
   XCTestRunner:
-    path: ../../libs/spm/XCTestRunner   # or remote URL once published
+    path: ../../libs/spm/XCTestRunner # or remote URL once published
 
 targets:
   YourApp:
@@ -129,7 +129,7 @@ targets:
     sources:
       - path: Tests
         excludes:
-          - AutoMobile/**       # keep AutoMobile files out of the unit test bundle
+          - AutoMobile/** # keep AutoMobile files out of the unit test bundle
     dependencies:
       - target: YourApp
       # … existing test dependencies …
@@ -138,7 +138,7 @@ targets:
     type: bundle.unit-test
     platform: iOS
     sources:
-      - path: Tests/AutoMobile  # Swift files compiled; YAML files bundled as resources
+      - path: Tests/AutoMobile # Swift files compiled; YAML files bundled as resources
     dependencies:
       - target: YourApp
       - package: XCTestRunner
@@ -166,9 +166,9 @@ schemes:
 ```
 
 !!! note "Excluding AutoMobile files from unit tests"
-    The `excludes: [AutoMobile/**]` entry in `YourAppTests` prevents the AutoMobile test Swift
-    files from being compiled into the unit test bundle, where `XCTestRunner` is not linked.
-    Without this exclusion the build fails with "no such module 'XCTestRunner'".
+The `excludes: [AutoMobile/**]` entry in `YourAppTests` prevents the AutoMobile test Swift
+files from being compiled into the unit test bundle, where `XCTestRunner` is not linked.
+Without this exclusion the build fails with "no such module 'XCTestRunner'".
 
 ### Regenerate the Xcode project
 
@@ -372,14 +372,14 @@ xcrun xcresulttool get test-results tests \
 
 ## Troubleshooting
 
-| Problem | Likely cause | Fix |
-|---|---|---|
-| `no such module 'XCTestRunner'` | `YourAppTests` compiles AutoMobile files without the package linked | Add `excludes: [AutoMobile/**]` to `YourAppTests` sources in `project.yml`; regenerate |
-| `AutoMobile daemon is not running and could not be started` | `auto-mobile` not on PATH or daemon failed to start | Install `@kaeawc/auto-mobile` globally; check PATH includes `~/.bun/bin` or `/usr/local/bin` |
-| `Plan not found at path: test-plans/launch-app.yaml` | YAML file not bundled | Verify the YAML is under `Tests/AutoMobile/` and appears in Build Phases → Copy Bundle Resources |
-| `No booted iPhone simulator found` | No simulator running | Run `ios_version="$(xcrun --sdk iphonesimulator --show-sdk-version)"; auto-mobile --boot-device --platform ios --create-if-missing --timeout-ms 600000 --min-os-version "${ios_version}" --max-os-version "${ios_version}"` or `xcrun simctl boot "iPhone 16"` |
-| `Missing AutoMobile test plan path.` | `planPath` returns empty string | Override `var planPath: String` in your test class |
-| `Could not resolve package 'XCTestRunner'` | Local path wrong or source files missing | Verify `libs/spm/XCTestRunner/` exists and `Package.swift` references the correct `path` |
+| Problem                                                     | Likely cause                                                        | Fix                                                                                                                                                                                                                                                            |
+| ----------------------------------------------------------- | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `no such module 'XCTestRunner'`                             | `YourAppTests` compiles AutoMobile files without the package linked | Add `excludes: [AutoMobile/**]` to `YourAppTests` sources in `project.yml`; regenerate                                                                                                                                                                         |
+| `AutoMobile daemon is not running and could not be started` | `auto-mobile` not on PATH or daemon failed to start                 | Install `@kaeawc/auto-mobile` globally; check PATH includes `~/.bun/bin` or `/usr/local/bin`                                                                                                                                                                   |
+| `Plan not found at path: test-plans/launch-app.yaml`        | YAML file not bundled                                               | Verify the YAML is under `Tests/AutoMobile/` and appears in Build Phases → Copy Bundle Resources                                                                                                                                                               |
+| `No booted iPhone simulator found`                          | No simulator running                                                | Run `ios_version="$(xcrun --sdk iphonesimulator --show-sdk-version)"; auto-mobile --boot-device --platform ios --create-if-missing --timeout-ms 600000 --min-os-version "${ios_version}" --max-os-version "${ios_version}"` or `xcrun simctl boot "iPhone 16"` |
+| `Missing AutoMobile test plan path.`                        | `planPath` returns empty string                                     | Override `var planPath: String` in your test class                                                                                                                                                                                                             |
+| `Could not resolve package 'XCTestRunner'`                  | Local path wrong or source files missing                            | Verify `libs/spm/XCTestRunner/` exists and `Package.swift` references the correct `path`                                                                                                                                                                       |
 
 ## See also
 

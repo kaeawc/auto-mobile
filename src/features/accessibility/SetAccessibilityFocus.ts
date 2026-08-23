@@ -17,7 +17,7 @@ import {
   Element,
   SetAccessibilityFocusOptions,
   SetAccessibilityFocusResult,
-  ViewHierarchyResult
+  ViewHierarchyResult,
 } from "../../models";
 import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
 import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
@@ -54,15 +54,17 @@ export class SetAccessibilityFocus {
   constructor(device: BootedDevice, deps: SetAccessibilityFocusDependencies = {}) {
     this.device = device;
     this.finder = deps.finder ?? new DefaultElementFinder();
-    this.observeScreen = deps.observeScreen ?? new RealObserveScreen(device, defaultAdbClientFactory);
+    this.observeScreen =
+      deps.observeScreen ?? new RealObserveScreen(device, defaultAdbClientFactory);
     this.serviceFactory =
-      deps.serviceFactory ?? ((d: BootedDevice) => AndroidCtrlProxyClient.getInstance(d, defaultAdbClientFactory));
+      deps.serviceFactory ??
+      ((d: BootedDevice) => AndroidCtrlProxyClient.getInstance(d, defaultAdbClientFactory));
   }
 
   async execute(options: SetAccessibilityFocusOptions): Promise<SetAccessibilityFocusResult> {
     if (this.device.platform !== "android") {
       throw new ActionableError(
-        "accessibilityFocus is only supported on Android (TalkBack). iOS VoiceOver focus is not yet implemented."
+        "accessibilityFocus is only supported on Android (TalkBack). iOS VoiceOver focus is not yet implemented.",
       );
     }
 
@@ -70,7 +72,7 @@ export class SetAccessibilityFocus {
 
     if (!options.resourceId && !options.text && !options.contentDesc) {
       throw new ActionableError(
-        "accessibilityFocus requires a selector: provide one of resourceId, text, or contentDesc."
+        "accessibilityFocus requires a selector: provide one of resourceId, text, or contentDesc.",
       );
     }
 
@@ -121,13 +123,17 @@ export class SetAccessibilityFocus {
       // one we fall through and let CtrlProxy resolve the id as before.
       try {
         const viewHierarchy = await this.getViewHierarchy();
-        this.assertUniqueResourceId(viewHierarchy, options.resourceId, `resourceId "${options.resourceId}"`);
+        this.assertUniqueResourceId(
+          viewHierarchy,
+          options.resourceId,
+          `resourceId "${options.resourceId}"`,
+        );
       } catch (error) {
         if (error instanceof ActionableError) {
           throw error;
         }
         logger.warn(
-          `[accessibilityFocus] Could not observe to check resourceId uniqueness; proceeding: ${error}`
+          `[accessibilityFocus] Could not observe to check resourceId uniqueness; proceeding: ${error}`,
         );
       }
       return options.resourceId;
@@ -145,7 +151,7 @@ export class SetAccessibilityFocus {
     const resourceId = matched["resource-id"];
     if (!resourceId) {
       throw new ActionableError(
-        "Matched element has no resource-id; accessibility focus requires one."
+        "Matched element has no resource-id; accessibility focus requires one.",
       );
     }
 
@@ -162,7 +168,7 @@ export class SetAccessibilityFocus {
   private assertUniqueResourceId(
     viewHierarchy: ViewHierarchyResult,
     resourceId: string,
-    selectorLabel: string
+    selectorLabel: string,
   ): void {
     const sharing = this.countMatchingResourceIds(viewHierarchy, resourceId);
     if (sharing > 1) {
@@ -170,7 +176,7 @@ export class SetAccessibilityFocus {
         `${selectorLabel} resolves to resource-id "${resourceId}", which is shared by ` +
           `${sharing} elements (e.g. repeated list rows). Accessibility focus targets a node ` +
           `by resource-id and would focus the first match, not necessarily the one you ` +
-          `selected. Provide a more specific selector or a unique target.`
+          `selected. Provide a more specific selector or a unique target.`,
       );
     }
   }
@@ -181,8 +187,13 @@ export class SetAccessibilityFocus {
    * counted the same way the service would resolve them.
    */
   private countMatchingResourceIds(viewHierarchy: ViewHierarchyResult, resourceId: string): number {
-    const candidates = this.finder.findElementsByResourceId(viewHierarchy, resourceId, undefined, true);
-    return candidates.filter(el => {
+    const candidates = this.finder.findElementsByResourceId(
+      viewHierarchy,
+      resourceId,
+      undefined,
+      true,
+    );
+    return candidates.filter((el) => {
       const rid = el["resource-id"];
       return typeof rid === "string" && (rid === resourceId || rid.endsWith(`:id/${resourceId}`));
     }).length;
@@ -201,7 +212,7 @@ export class SetAccessibilityFocus {
 
   private findElement(
     viewHierarchy: ViewHierarchyResult,
-    options: SetAccessibilityFocusOptions
+    options: SetAccessibilityFocusOptions,
   ): Element | null {
     if (options.text) {
       return this.finder.findElementByText(viewHierarchy, options.text, undefined, false, false);
@@ -216,10 +227,10 @@ export class SetAccessibilityFocus {
         options.contentDesc,
         undefined,
         false,
-        false
+        false,
       );
       return (
-        candidates.find(el => {
+        candidates.find((el) => {
           const desc = el["content-desc"];
           return typeof desc === "string" && normalizeQuotes(desc).toLowerCase() === target;
         }) ?? null

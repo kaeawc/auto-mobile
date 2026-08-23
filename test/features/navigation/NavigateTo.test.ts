@@ -32,7 +32,7 @@ describe("NavigateTo", () => {
     device = {
       deviceId: "test-device-123",
       platform: "android",
-      source: "local"
+      source: "local",
     } as BootedDevice;
 
     // Create FakeAdbClientFactory to avoid real ADB calls
@@ -51,9 +51,9 @@ describe("NavigateTo", () => {
         id: z.string().optional(),
         text: z.string().optional(),
         action: z.string(),
-        platform: z.string()
+        platform: z.string(),
       }),
-      async args => {
+      async (args) => {
         toolCallLog.push({ toolName: "tapOn", args });
 
         // Simulate navigation by recording a navigation event
@@ -65,12 +65,12 @@ describe("NavigateTo", () => {
             arguments: {},
             metadata: {},
             timestamp: Date.now(),
-            sequenceNumber: 0
+            sequenceNumber: 0,
           });
         }
 
         return { success: true };
-      }
+      },
     );
 
     // Set up navigation graph with test data
@@ -89,12 +89,14 @@ describe("NavigateTo", () => {
       await navigateTo.execute({
         targetScreen: "HomeScreen",
         platform: "android",
-        sessionUuid: "options-session"
+        sessionUuid: "options-session",
       });
 
-      const uiStateSetup = (navigateTo as unknown as {
-        uiStateSetup: { sessionUuid?: string } | null;
-      }).uiStateSetup;
+      const uiStateSetup = (
+        navigateTo as unknown as {
+          uiStateSetup: { sessionUuid?: string } | null;
+        }
+      ).uiStateSetup;
       expect(uiStateSetup?.sessionUuid).toBe("options-session");
     });
 
@@ -104,7 +106,7 @@ describe("NavigateTo", () => {
 
       const result = await navigateTo.execute({
         targetScreen: "TargetScreen",
-        platform: "android"
+        platform: "android",
       });
 
       expect(result.success).toBe(false);
@@ -119,7 +121,7 @@ describe("NavigateTo", () => {
         arguments: {},
         metadata: {},
         timestamp: Date.now(),
-        sequenceNumber: 0
+        sequenceNumber: 0,
       });
 
       // Inject fakeGraph via constructor
@@ -127,7 +129,7 @@ describe("NavigateTo", () => {
 
       const result = await navigateTo.execute({
         targetScreen: "HomeScreen",
-        platform: "android"
+        platform: "android",
       });
 
       expect(result.success).toBe(true);
@@ -142,7 +144,7 @@ describe("NavigateTo", () => {
         arguments: {},
         metadata: {},
         timestamp: Date.now(),
-        sequenceNumber: 0
+        sequenceNumber: 0,
       });
 
       // Inject fakeGraph via constructor
@@ -150,7 +152,7 @@ describe("NavigateTo", () => {
 
       const result = await navigateTo.execute({
         targetScreen: "UnknownScreen",
-        platform: "android"
+        platform: "android",
       });
 
       expect(result.success).toBe(false);
@@ -175,7 +177,7 @@ describe("NavigateTo", () => {
         arguments: {},
         metadata: {},
         timestamp: now,
-        sequenceNumber: 0
+        sequenceNumber: 0,
       });
       await fakeGraph.recordNavigationEvent({
         destination: "SettingsScreen",
@@ -183,7 +185,7 @@ describe("NavigateTo", () => {
         arguments: {},
         metadata: {},
         timestamp: now + 100,
-        sequenceNumber: 1
+        sequenceNumber: 1,
       });
 
       // Go back to Home to test navigation
@@ -193,7 +195,7 @@ describe("NavigateTo", () => {
         arguments: {},
         metadata: {},
         timestamp: now + 200,
-        sequenceNumber: 2
+        sequenceNumber: 2,
       });
 
       // Inject fakeGraph via constructor
@@ -201,7 +203,7 @@ describe("NavigateTo", () => {
 
       await navigateTo.execute({
         targetScreen: "SettingsScreen",
-        platform: "android"
+        platform: "android",
       });
 
       // Should have attempted to execute the tool call
@@ -223,7 +225,7 @@ describe("NavigateTo", () => {
         arguments: {},
         metadata: {},
         timestamp: now,
-        sequenceNumber: 0
+        sequenceNumber: 0,
       });
       await fakeGraph.recordNavigationEvent({
         destination: "ProfileScreen",
@@ -231,7 +233,7 @@ describe("NavigateTo", () => {
         arguments: {},
         metadata: {},
         timestamp: now + 100,
-        sequenceNumber: 1
+        sequenceNumber: 1,
       });
       await fakeGraph.recordNavigationEvent({
         destination: "HomeScreen",
@@ -239,7 +241,7 @@ describe("NavigateTo", () => {
         arguments: {},
         metadata: {},
         timestamp: now + 200,
-        sequenceNumber: 2
+        sequenceNumber: 2,
       });
 
       // Inject fakeGraph via constructor
@@ -247,7 +249,7 @@ describe("NavigateTo", () => {
 
       const result = await navigateTo.execute({
         targetScreen: "ProfileScreen",
-        platform: "android"
+        platform: "android",
       });
 
       expect(result.path).toBeDefined();
@@ -269,7 +271,7 @@ describe("NavigateTo", () => {
         arguments: {},
         metadata: {},
         timestamp: now,
-        sequenceNumber: 0
+        sequenceNumber: 0,
       });
       await fakeGraph.recordNavigationEvent({
         destination: "Screen2",
@@ -277,7 +279,7 @@ describe("NavigateTo", () => {
         arguments: {},
         metadata: {},
         timestamp: now + 100,
-        sequenceNumber: 1
+        sequenceNumber: 1,
       });
       await fakeGraph.recordNavigationEvent({
         destination: "Screen1",
@@ -285,7 +287,7 @@ describe("NavigateTo", () => {
         arguments: {},
         metadata: {},
         timestamp: now + 200,
-        sequenceNumber: 2
+        sequenceNumber: 2,
       });
 
       // Inject fakeGraph via constructor
@@ -295,7 +297,7 @@ describe("NavigateTo", () => {
         { targetScreen: "Screen2", platform: "android" },
         async (current, total, message) => {
           progressUpdates.push({ current, total, message });
-        }
+        },
       );
 
       expect(progressUpdates.length > 0).toBe(true);
@@ -311,7 +313,7 @@ describe("NavigateTo", () => {
         arguments: {},
         metadata: {},
         timestamp: Date.now(),
-        sequenceNumber: 0
+        sequenceNumber: 0,
       });
 
       // Inject fakeGraph via constructor
@@ -319,7 +321,7 @@ describe("NavigateTo", () => {
 
       const result = await navigateTo.execute({
         targetScreen: "HomeScreen",
-        platform: "android"
+        platform: "android",
       });
 
       expect(result.durationMs).toBeDefined();
@@ -335,48 +337,44 @@ describe("NavigateTo", () => {
         arguments: {},
         metadata: {},
         timestamp: now,
-        sequenceNumber: 0
+        sequenceNumber: 0,
       });
       fakeGraph.addNode({
         screenName: "DetailScreen",
         firstSeenAt: now,
         lastSeenAt: now,
         visitCount: 1,
-        backStackDepth: 1
+        backStackDepth: 1,
       });
 
-      shouldUseBackButtonSpy = spyOn(SmartNavigationHelper, "shouldUseBackButton").mockResolvedValue({
+      shouldUseBackButtonSpy = spyOn(
+        SmartNavigationHelper,
+        "shouldUseBackButton",
+      ).mockResolvedValue({
         shouldUseBack: true,
         backPresses: 1,
-        reason: "test recommendation"
+        reason: "test recommendation",
       });
       const ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
-        requestGlobalAction: async () => ({ success: false, error: "unavailable" })
+        requestGlobalAction: async () => ({ success: false, error: "unavailable" }),
       } as never);
 
       const screenWaiter: ScreenTransitionWaiter = {
-        waitForScreen: async screenName => screenName === "HomeScreen"
+        waitForScreen: async (screenName) => screenName === "HomeScreen",
       };
       const fakeTimer = new FakeTimer();
       fakeTimer.enableAutoAdvance();
-      navigateTo = new NavigateTo(
-        device,
-        fakeAdbFactory,
-        null,
-        screenWaiter,
-        fakeGraph,
-        fakeTimer
-      );
+      navigateTo = new NavigateTo(device, fakeAdbFactory, null, screenWaiter, fakeGraph, fakeTimer);
 
       try {
         const result = await navigateTo.execute({
           targetScreen: "HomeScreen",
-          platform: "android"
+          platform: "android",
         });
 
         expect(shouldUseBackButtonSpy).toHaveBeenCalledWith("DetailScreen", "HomeScreen", 1);
         expect(result.success).toBe(true);
-        expect(result.message).toBe("Successfully navigated to \"HomeScreen\" using back button");
+        expect(result.message).toBe('Successfully navigated to "HomeScreen" using back button');
         expect(result.stepsExecuted).toBe(1);
         expect(result.path).toEqual(["pressButton(back)"]);
         expect(fakeAdbFactory.getFakeClient().getAllCommands()).toEqual(["shell input keyevent 4"]);
@@ -391,7 +389,7 @@ describe("NavigateTo", () => {
       const iOSDevice = {
         deviceId: "ios-simulator-123",
         platform: "ios",
-        source: "local"
+        source: "local",
       } as BootedDevice;
       await fakeGraph.recordNavigationEvent({
         destination: "DetailScreen",
@@ -399,32 +397,42 @@ describe("NavigateTo", () => {
         arguments: {},
         metadata: {},
         timestamp: now,
-        sequenceNumber: 0
+        sequenceNumber: 0,
       });
       fakeGraph.addNode({
         screenName: "DetailScreen",
         firstSeenAt: now,
         lastSeenAt: now,
         visitCount: 1,
-        backStackDepth: 1
+        backStackDepth: 1,
       });
-      shouldUseBackButtonSpy = spyOn(SmartNavigationHelper, "shouldUseBackButton").mockResolvedValue({
+      shouldUseBackButtonSpy = spyOn(
+        SmartNavigationHelper,
+        "shouldUseBackButton",
+      ).mockResolvedValue({
         shouldUseBack: true,
         backPresses: 1,
-        reason: "test recommendation"
+        reason: "test recommendation",
       });
 
       let pressButtonArgs: Record<string, unknown> | undefined;
-      ToolRegistry.register("pressButton", "pressButton", {}, async args => {
+      ToolRegistry.register("pressButton", "pressButton", {}, async (args) => {
         pressButtonArgs = args;
         return { success: true };
       });
       const screenWaiter: ScreenTransitionWaiter = {
-        waitForScreen: async screenName => screenName === "HomeScreen"
+        waitForScreen: async (screenName) => screenName === "HomeScreen",
       };
       const fakeTimer = new FakeTimer();
       fakeTimer.enableAutoAdvance();
-      navigateTo = new NavigateTo(iOSDevice, fakeAdbFactory, null, screenWaiter, fakeGraph, fakeTimer);
+      navigateTo = new NavigateTo(
+        iOSDevice,
+        fakeAdbFactory,
+        null,
+        screenWaiter,
+        fakeGraph,
+        fakeTimer,
+      );
 
       const result = await navigateTo.execute({ targetScreen: "HomeScreen", platform: "ios" });
 
@@ -433,40 +441,53 @@ describe("NavigateTo", () => {
         button: "back",
         platform: "ios",
         deviceId: "ios-simulator-123",
-        [INTERNAL_NO_DIFF_PARAM]: true
+        [INTERNAL_NO_DIFF_PARAM]: true,
       });
       expect(fakeAdbFactory.getFakeClient().getAllCommands()).toEqual([]);
     });
 
     test("reports an unsuccessful iOS smart-back recovery instead of claiming navigation succeeded", async () => {
-      const iOSDevice = { ...device, deviceId: "ios-simulator-456", platform: "ios" } as BootedDevice;
+      const iOSDevice = {
+        ...device,
+        deviceId: "ios-simulator-456",
+        platform: "ios",
+      } as BootedDevice;
       await fakeGraph.recordNavigationEvent({
         destination: "DetailScreen",
         source: "TEST",
         arguments: {},
         metadata: {},
         timestamp: 1,
-        sequenceNumber: 0
+        sequenceNumber: 0,
       });
       fakeGraph.addNode({
         screenName: "DetailScreen",
         firstSeenAt: 1,
         lastSeenAt: 1,
         visitCount: 1,
-        backStackDepth: 1
+        backStackDepth: 1,
       });
-      shouldUseBackButtonSpy = spyOn(SmartNavigationHelper, "shouldUseBackButton").mockResolvedValue({
+      shouldUseBackButtonSpy = spyOn(
+        SmartNavigationHelper,
+        "shouldUseBackButton",
+      ).mockResolvedValue({
         shouldUseBack: true,
         backPresses: 1,
-        reason: "test recommendation"
+        reason: "test recommendation",
       });
       ToolRegistry.register("pressButton", "pressButton", {}, async () => ({
         success: false,
-        error: "back unavailable"
+        error: "back unavailable",
       }));
-      navigateTo = new NavigateTo(iOSDevice, fakeAdbFactory, null, {
-        waitForScreen: async () => true
-      }, fakeGraph);
+      navigateTo = new NavigateTo(
+        iOSDevice,
+        fakeAdbFactory,
+        null,
+        {
+          waitForScreen: async () => true,
+        },
+        fakeGraph,
+      );
 
       const result = await navigateTo.execute({ targetScreen: "HomeScreen", platform: "ios" });
 
@@ -573,7 +594,7 @@ describe("NavigateTo", () => {
         throwingUiStateSetup,
         null,
         fakeGraph,
-        timer
+        timer,
       );
 
       const result = await navigateTo.execute({
@@ -601,27 +622,18 @@ describe("NavigateTo", () => {
       });
       fakeGraph.setPathResult({
         found: true,
-        path: [
-          { from: "HomeScreen", to: "TargetScreen", timestamp: 0, edgeType: "back" },
-        ],
+        path: [{ from: "HomeScreen", to: "TargetScreen", timestamp: 0, edgeType: "back" }],
         startScreen: "HomeScreen",
         targetScreen: "TargetScreen",
       });
 
       const screenWaiter: ScreenTransitionWaiter = {
-        waitForScreen: async screenName => screenName === "TargetScreen",
+        waitForScreen: async (screenName) => screenName === "TargetScreen",
       };
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
       ToolRegistry.register("pressButton", "Fake back tool", {}, async () => ({ success: true }));
-      navigateTo = new NavigateTo(
-        device,
-        fakeAdbFactory,
-        null,
-        screenWaiter,
-        fakeGraph,
-        timer
-      );
+      navigateTo = new NavigateTo(device, fakeAdbFactory, null, screenWaiter, fakeGraph, timer);
 
       const result = await navigateTo.execute({
         targetScreen: "TargetScreen",
@@ -652,7 +664,7 @@ describe("NavigateTo", () => {
         arguments: {},
         metadata: {},
         timestamp: now,
-        sequenceNumber: 0
+        sequenceNumber: 0,
       });
       await fakeGraph.recordNavigationEvent({
         destination: "SettingsScreen",
@@ -660,7 +672,7 @@ describe("NavigateTo", () => {
         arguments: {},
         metadata: {},
         timestamp: now + 100,
-        sequenceNumber: 1
+        sequenceNumber: 1,
       });
 
       fakeGraph.recordToolCall("tapOn", { text: "Advanced", action: "tap", platform: "android" });
@@ -670,7 +682,7 @@ describe("NavigateTo", () => {
         arguments: {},
         metadata: {},
         timestamp: now + 200,
-        sequenceNumber: 2
+        sequenceNumber: 2,
       });
 
       // Go back to Home
@@ -680,7 +692,7 @@ describe("NavigateTo", () => {
         arguments: {},
         metadata: {},
         timestamp: now + 300,
-        sequenceNumber: 3
+        sequenceNumber: 3,
       });
 
       // Inject fakeGraph via constructor
@@ -688,7 +700,7 @@ describe("NavigateTo", () => {
 
       await navigateTo.execute({
         targetScreen: "AdvancedScreen",
-        platform: "android"
+        platform: "android",
       });
 
       // Should execute two tool calls: Home -> Settings -> Advanced

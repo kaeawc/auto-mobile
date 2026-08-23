@@ -7,23 +7,35 @@ const OWNER = "src/utils/ios-cmdline-tools/AppBundleMetadataClient.ts";
 const repoPath = (file: string): string => relative(".", file).replaceAll("\\", "/");
 
 const sourceFiles = (directory: string): string[] =>
-  readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+  readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const path = join(directory, entry.name);
     return entry.isDirectory()
       ? sourceFiles(path)
-      : entry.isFile() && entry.name.endsWith(".ts") ? [path] : [];
+      : entry.isFile() && entry.name.endsWith(".ts")
+        ? [path]
+        : [];
   });
 
 const EXECUTION_METHODS = new Set([
-  "exec", "execFile", "execFileSync", "execSync", "execute", "execAsync",
-  "hostExec", "spawn", "spawnSync",
+  "exec",
+  "execFile",
+  "execFileSync",
+  "execSync",
+  "execute",
+  "execAsync",
+  "hostExec",
+  "spawn",
+  "spawnSync",
 ]);
 
 const staticString = (expression: ts.Expression): string | undefined => {
   if (ts.isStringLiteral(expression) || ts.isNoSubstitutionTemplateLiteral(expression)) {
     return expression.text;
   }
-  if (ts.isBinaryExpression(expression) && expression.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+  if (
+    ts.isBinaryExpression(expression) &&
+    expression.operatorToken.kind === ts.SyntaxKind.PlusToken
+  ) {
     const left = staticString(expression.left);
     const right = staticString(expression.right);
     return left === undefined || right === undefined ? undefined : left + right;
@@ -38,9 +50,17 @@ const isExecutionCall = (expression: ts.Expression): boolean => {
   return ts.isPropertyAccessExpression(expression) && EXECUTION_METHODS.has(expression.name.text);
 };
 
-const directlyExecutesCodesign = (file: string): Array<{ line: number; column: number; text: string }> => {
+const directlyExecutesCodesign = (
+  file: string,
+): Array<{ line: number; column: number; text: string }> => {
   const source = readFileSync(file, "utf8");
-  const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const sourceFile = ts.createSourceFile(
+    file,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
   const codesignAliases = new Set<string>();
   const violations: Array<{ line: number; column: number; text: string }> = [];
   const isCodesignExecutable = (expression: ts.Expression): boolean => {
@@ -52,7 +72,9 @@ const directlyExecutesCodesign = (file: string): Array<{ line: number; column: n
       return codesignAliases.has(expression.text);
     }
     if (ts.isArrayLiteralExpression(expression)) {
-      return expression.elements.some(element => ts.isExpression(element) && isCodesignExecutable(element));
+      return expression.elements.some(
+        (element) => ts.isExpression(element) && isCodesignExecutable(element),
+      );
     }
     return false;
   };
@@ -65,7 +87,11 @@ const directlyExecutesCodesign = (file: string): Array<{ line: number; column: n
     ) {
       codesignAliases.add(node.name.text);
     }
-    if (ts.isCallExpression(node) && isExecutionCall(node.expression) && node.arguments.some(isCodesignExecutable)) {
+    if (
+      ts.isCallExpression(node) &&
+      isExecutionCall(node.expression) &&
+      node.arguments.some(isCodesignExecutable)
+    ) {
       const position = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
       violations.push({
         line: position.line + 1,
@@ -94,9 +120,11 @@ const exceptions = new Map<string, string>([
   ],
 ]);
 const violations = sourceFiles(SOURCE_ROOT)
-  .map(file => ({ file, path: repoPath(file) }))
+  .map((file) => ({ file, path: repoPath(file) }))
   .filter(({ path }) => path !== OWNER && !exceptions.has(path))
-  .flatMap(({ file, path }) => directlyExecutesCodesign(file).map(violation => ({ path, ...violation })));
+  .flatMap(({ file, path }) =>
+    directlyExecutesCodesign(file).map((violation) => ({ path, ...violation })),
+  );
 
 if (violations.length > 0) {
   console.error("error: codesign execution must use AppBundleMetadataClient:");

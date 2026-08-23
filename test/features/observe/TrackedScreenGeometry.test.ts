@@ -67,7 +67,12 @@ describe("TrackedScreenGeometry", () => {
   it("clears tracked state for unusable geometry instead of keeping the previous entry", () => {
     // Keeping forwarded dimensions across a hierarchy that cannot confirm them would let a later
     // push vouch for geometry that no longer describes the device.
-    for (const [width, height] of [[0, 0], [-1, 100], [Number.NaN, 100], [100, Number.POSITIVE_INFINITY]]) {
+    for (const [width, height] of [
+      [0, 0],
+      [-1, 100],
+      [Number.NaN, 100],
+      [100, Number.POSITIVE_INFINITY],
+    ]) {
       const geometry = new TrackedScreenGeometry();
       geometry.update(1080, 2340);
       geometry.markForwarded(7);
@@ -107,7 +112,12 @@ describe("TrackedScreenGeometry", () => {
     const geometry = new TrackedScreenGeometry();
     geometry.update(1170, 2532, "px");
     geometry.markForwarded(9);
-    expect(geometry.bind()).toEqual({ captureSequence: 9, width: 1170, height: 2532, coordinateSpace: "px" });
+    expect(geometry.bind()).toEqual({
+      captureSequence: 9,
+      width: 1170,
+      height: 2532,
+      coordinateSpace: "px",
+    });
   });
 
   it("omits coordinateSpace from the binding when the geometry was bound in legacy point-space", () => {

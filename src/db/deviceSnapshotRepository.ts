@@ -20,15 +20,12 @@ export interface DeviceSnapshotQuery {
   orderByCreatedAt?: "asc" | "desc";
 }
 
-function parseManifest(
-  snapshotName: string,
-  manifestJson: string
-): DeviceSnapshotManifest | null {
+function parseManifest(snapshotName: string, manifestJson: string): DeviceSnapshotManifest | null {
   try {
     return JSON.parse(manifestJson) as DeviceSnapshotManifest;
   } catch (error) {
     logger.warn(
-      `[DeviceSnapshotRepository] Failed to parse manifest for ${snapshotName}: ${error}`
+      `[DeviceSnapshotRepository] Failed to parse manifest for ${snapshotName}: ${error}`,
     );
     return null;
   }
@@ -126,7 +123,7 @@ export class DeviceSnapshotRepository {
     await db
       .insertInto("device_snapshots")
       .values(row)
-      .onConflict(oc =>
+      .onConflict((oc) =>
         // created_at is intentionally omitted: on overwrite the original creation
         // time must survive (retention ordering / age display depend on it). The
         // INSERT still sets it for new rows; last_accessed_at carries the "touched"
@@ -141,15 +138,12 @@ export class DeviceSnapshotRepository {
           last_accessed_at: row.last_accessed_at,
           size_bytes: row.size_bytes,
           manifest_json: row.manifest_json,
-        })
+        }),
       )
       .execute();
   }
 
-  async updateSnapshot(
-    snapshotName: string,
-    update: Partial<DeviceSnapshotRecord>
-  ): Promise<void> {
+  async updateSnapshot(snapshotName: string, update: Partial<DeviceSnapshotRecord>): Promise<void> {
     const db = await this.getDb();
     const payload = buildUpdatePayload(update);
     if (Object.keys(payload).length === 0) {
@@ -176,9 +170,7 @@ export class DeviceSnapshotRepository {
 
   async listSnapshots(query: DeviceSnapshotQuery = {}): Promise<DeviceSnapshotRecord[]> {
     const db = await this.getDb();
-    let builder = db
-      .selectFrom("device_snapshots")
-      .selectAll();
+    let builder = db.selectFrom("device_snapshots").selectAll();
 
     if (query.deviceId) {
       builder = builder.where("device_id", "=", query.deviceId);
@@ -201,7 +193,7 @@ export class DeviceSnapshotRepository {
 
     const rows = await builder.execute();
     return rows
-      .map(row => toRecord(row))
+      .map((row) => toRecord(row))
       .filter((record): record is DeviceSnapshotRecord => Boolean(record));
   }
 

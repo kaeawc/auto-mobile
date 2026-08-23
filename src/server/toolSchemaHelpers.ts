@@ -3,8 +3,7 @@ import { z } from "zod/v4";
 /** Shared platform schema — single source of truth for all tool schemas. */
 export const platformSchema = z.enum(["android", "ios"]);
 
-export const DEVICE_LABEL_DESCRIPTION =
-  "Device label";
+export const DEVICE_LABEL_DESCRIPTION = "Device label";
 
 export const appIdFieldAliases = [
   "packageId",
@@ -34,7 +33,10 @@ export type JsonSchemaOverride = (jsonSchema: Record<string, unknown>) => void;
 const jsonSchemaOverrides = new WeakMap<object, JsonSchemaOverride>();
 const injectedDeviceIdSchemas = new WeakSet<object>();
 
-export function withJsonSchemaOverride<T extends z.ZodTypeAny>(schema: T, override: JsonSchemaOverride): T {
+export function withJsonSchemaOverride<T extends z.ZodTypeAny>(
+  schema: T,
+  override: JsonSchemaOverride,
+): T {
   jsonSchemaOverrides.set(schema, override);
   return schema;
 }
@@ -57,7 +59,7 @@ export function withCanonicalDiscriminatedUnionJsonSchema<T extends z.ZodTypeAny
 
 export function applyJsonSchemaOverride(
   zodSchema: object,
-  jsonSchema: Record<string, unknown>
+  jsonSchema: Record<string, unknown>,
 ): void {
   jsonSchemaOverrides.get(zodSchema)?.(jsonSchema);
 }
@@ -66,7 +68,9 @@ export function isInjectedDeviceIdSchema(zodSchema: object): boolean {
   if (injectedDeviceIdSchemas.has(zodSchema)) {
     return true;
   }
-  return zodSchema instanceof z.ZodObject && zodSchema.shape.deviceId === deviceTargetingShape.deviceId;
+  return (
+    zodSchema instanceof z.ZodObject && zodSchema.shape.deviceId === deviceTargetingShape.deviceId
+  );
 }
 
 /**
@@ -84,7 +88,7 @@ export function isInjectedDeviceIdSchema(zodSchema: object): boolean {
  */
 export function compactExclusiveSelectorProperties(
   jsonSchema: Record<string, unknown>,
-  propNames: readonly string[]
+  propNames: readonly string[],
 ): void {
   const props = jsonSchema.properties as Record<string, any> | undefined;
   if (!props) {
@@ -135,7 +139,10 @@ export function compactExclusiveSelectorProperties(
 }
 
 export function withFieldAliases<T extends z.ZodTypeAny>(schema: T, aliases: FieldAliasMap): T {
-  const aliased = z.preprocess(input => normalizeFieldAliases(input, aliases), schema) as unknown as T;
+  const aliased = z.preprocess(
+    (input) => normalizeFieldAliases(input, aliases),
+    schema,
+  ) as unknown as T;
   if (isInjectedDeviceIdSchema(schema)) {
     injectedDeviceIdSchemas.add(aliased);
   }
@@ -148,7 +155,7 @@ export function withAppIdAliases<T extends z.ZodTypeAny>(schema: T): T {
 
 function normalizeFieldAliases(input: unknown, aliases: FieldAliasMap): unknown {
   if (Array.isArray(input)) {
-    return input.map(item => normalizeFieldAliases(item, aliases));
+    return input.map((item) => normalizeFieldAliases(item, aliases));
   }
 
   if (!isPlainObject(input)) {
@@ -162,7 +169,7 @@ function normalizeFieldAliases(input: unknown, aliases: FieldAliasMap): unknown 
 
   for (const [canonicalField, fieldAliases] of Object.entries(aliases)) {
     if (normalized[canonicalField] === undefined) {
-      const matchingAlias = fieldAliases.find(alias => normalized[alias] !== undefined);
+      const matchingAlias = fieldAliases.find((alias) => normalized[alias] !== undefined);
       if (matchingAlias) {
         normalized[canonicalField] = normalized[matchingAlias];
       }
@@ -224,7 +231,7 @@ const deviceTargetingShape = {
  */
 function extendPreservingBase<T extends z.ZodObject<z.ZodRawShape>, S extends z.ZodRawShape>(
   schema: T,
-  fields: S
+  fields: S,
 ): z.ZodObject<Omit<S, keyof T["shape"]> & T["shape"]> {
   const added: Record<string, z.core.$ZodType> = {};
   for (const [key, field] of Object.entries(fields)) {

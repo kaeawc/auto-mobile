@@ -8,13 +8,13 @@ The steps below are ordered: confirm the app really runs on the device, remove v
 
 Grab **everything you can** from the same failing CI run; each source answers a different question.
 
-| Source | What it shows | Use it for |
-|--------|----------------|------------|
-| **CI job log** | Gradle, stderr lines like **`Logs: …/daemon.log`**, step ordering, env | First signal: *what* failed and whether the daemon log path was printed |
-| **`daemon.log`** | `[LaunchApp]`, CtrlProxy, MCP tool errors, timeouts | *How* AutoMobile drove the device and what the daemon rejected |
-| **JUnit / Gradle test output** | Failed test class, failed plan step, runner messages | *Which* YAML step failed and how the JUnit runner reported it |
-| **`failedStep.failureObservation`** (in `executePlan` JSON / JUnit failure blob) | Full hierarchy at failure time (`packageName`, nodes) | *What* was on screen when the step failed (launcher vs your app) |
-| **`logcat` (device)** | `FATAL EXCEPTION`, `AndroidRuntime`, stack traces for your package | *Why* the app exited or never held the foreground |
+| Source                                                                           | What it shows                                                          | Use it for                                                              |
+| -------------------------------------------------------------------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| **CI job log**                                                                   | Gradle, stderr lines like **`Logs: …/daemon.log`**, step ordering, env | First signal: _what_ failed and whether the daemon log path was printed |
+| **`daemon.log`**                                                                 | `[LaunchApp]`, CtrlProxy, MCP tool errors, timeouts                    | _How_ AutoMobile drove the device and what the daemon rejected          |
+| **JUnit / Gradle test output**                                                   | Failed test class, failed plan step, runner messages                   | _Which_ YAML step failed and how the JUnit runner reported it           |
+| **`failedStep.failureObservation`** (in `executePlan` JSON / JUnit failure blob) | Full hierarchy at failure time (`packageName`, nodes)                  | _What_ was on screen when the step failed (launcher vs your app)        |
+| **`logcat` (device)**                                                            | `FATAL EXCEPTION`, `AndroidRuntime`, stack traces for your package     | _Why_ the app exited or never held the foreground                       |
 
 **Reading order:** CI log + JUnit output → **`daemon.log`** → **`logcat`** (or reproduce launch locally with adb if CI did not save logcat). If you only keep two artifacts, prefer **`daemon.log`** and **`logcat`** (or CI log if logcat is unavailable).
 
@@ -86,11 +86,11 @@ Goal: avoid **prefetch checksum mismatch** followed by a **different** APK (e.g.
 
 ### 2.1 Prefer a single source of truth
 
-| Approach | What to do |
-|----------|------------|
-| **In-tree (this repo)** | Build CtrlProxy in CI and set **`AUTOMOBILE_CTRL_PROXY_APK_PATH`** to `android/control-proxy/build/outputs/apk/debug/control-proxy-debug.apk` (see [CI Integration](ci-integration.md) and [Project Setup](project-setup.md)). |
-| **Pinned release** | Download a **specific** GitHub release asset (not `latest` if you care about reproducibility) and point **`AUTOMOBILE_CTRL_PROXY_APK_PATH`** at that file. For checksum expectations, the published values live in AutoMobile’s **`src/constants/release.ts`** (`APK_URL`, `APK_SHA256_CHECKSUM`) for tagged releases. |
-| **Skip checksum only in dev** | Empty or “skip” checksum behavior is for local convenience; in CI, prefer **matching** URL + SHA or a **locally built** APK from the same commit as the daemon. |
+| Approach                      | What to do                                                                                                                                                                                                                                                                                                             |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **In-tree (this repo)**       | Build CtrlProxy in CI and set **`AUTOMOBILE_CTRL_PROXY_APK_PATH`** to `android/control-proxy/build/outputs/apk/debug/control-proxy-debug.apk` (see [CI Integration](ci-integration.md) and [Project Setup](project-setup.md)).                                                                                         |
+| **Pinned release**            | Download a **specific** GitHub release asset (not `latest` if you care about reproducibility) and point **`AUTOMOBILE_CTRL_PROXY_APK_PATH`** at that file. For checksum expectations, the published values live in AutoMobile’s **`src/constants/release.ts`** (`APK_URL`, `APK_SHA256_CHECKSUM`) for tagged releases. |
+| **Skip checksum only in dev** | Empty or “skip” checksum behavior is for local convenience; in CI, prefer **matching** URL + SHA or a **locally built** APK from the same commit as the daemon.                                                                                                                                                        |
 
 ### 2.2 Verify after install
 
@@ -116,10 +116,10 @@ The CLI flag to disable it is **`--no-ui-perf-mode`** (see [feature flags](../..
 
 `DaemonSocketPaths` appends optional CLI flags when the runner spawns the daemon:
 
-| Flag | Env var | System property |
-|------|---------|-------------------|
-| **`--dismiss-keyboard-after-input`** | — | `automobile.daemon.dismiss.keyboard.after.input=true` |
-| **`--no-ui-perf-mode`** | `AUTOMOBILE_DAEMON_NO_UI_PERF` (`true` / `1` / `yes`) | `automobile.daemon.no.ui.perf.mode=true` |
+| Flag                                 | Env var                                               | System property                                       |
+| ------------------------------------ | ----------------------------------------------------- | ----------------------------------------------------- |
+| **`--dismiss-keyboard-after-input`** | —                                                     | `automobile.daemon.dismiss.keyboard.after.input=true` |
+| **`--no-ui-perf-mode`**              | `AUTOMOBILE_DAEMON_NO_UI_PERF` (`true` / `1` / `yes`) | `automobile.daemon.no.ui.perf.mode=true`              |
 
 Set these in CI (and/or pass `-D…` on the Gradle CLI) so a **`--daemon restart`** uses the same options as a manual pre-start.
 

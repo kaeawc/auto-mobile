@@ -1,5 +1,9 @@
 import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
-import { AppLifecycleMonitor, DefaultAppLifecycleMonitor, AppLifecycleEvent } from "../../src/utils/AppLifecycleMonitor";
+import {
+  AppLifecycleMonitor,
+  DefaultAppLifecycleMonitor,
+  AppLifecycleEvent,
+} from "../../src/utils/AppLifecycleMonitor";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type { BootedDevice } from "../../src/models";
@@ -88,7 +92,10 @@ describe("AppLifecycleMonitor", () => {
     });
 
     test("should return false when pidof command fails", async () => {
-      fakeAdb.setCommandResponse("shell pidof com.example.app", { stdout: "", stderr: "pidof failed" });
+      fakeAdb.setCommandResponse("shell pidof com.example.app", {
+        stdout: "",
+        stderr: "pidof failed",
+      });
 
       const isRunning = await monitor.isPackageRunning(testDevice, "com.example.app");
       expect(isRunning).toBe(false);
@@ -117,11 +124,11 @@ describe("AppLifecycleMonitor", () => {
       launchEvents = [];
       terminateEvents = [];
 
-      monitor.addEventListener("launch", async event => {
+      monitor.addEventListener("launch", async (event) => {
         launchEvents.push(event);
       });
 
-      monitor.addEventListener("terminate", async event => {
+      monitor.addEventListener("terminate", async (event) => {
         terminateEvents.push(event);
       });
     });
@@ -176,8 +183,8 @@ describe("AppLifecycleMonitor", () => {
       await monitor.checkForChanges(testDevice);
 
       expect(launchEvents).toHaveLength(2);
-      expect(launchEvents.map(e => e.appId)).toContain("com.example.app1");
-      expect(launchEvents.map(e => e.appId)).toContain("com.example.app2");
+      expect(launchEvents.map((e) => e.appId)).toContain("com.example.app1");
+      expect(launchEvents.map((e) => e.appId)).toContain("com.example.app2");
     });
   });
 
@@ -218,7 +225,7 @@ describe("AppLifecycleMonitor", () => {
       const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
 
       try {
-        monitor.addEventListener("terminate", async event => {
+        monitor.addEventListener("terminate", async (event) => {
           terminateEvents.push(event);
         });
 
@@ -232,7 +239,9 @@ describe("AppLifecycleMonitor", () => {
         expect(monitor.getRunningPackages()).toEqual(["com.example.app"]);
         expect(terminateEvents).toEqual([]);
         expect(warnSpy).toHaveBeenCalledTimes(1);
-        expect(warnSpy.mock.calls[0]?.[0]).toContain("Failed to check whether com.example.app is running");
+        expect(warnSpy.mock.calls[0]?.[0]).toContain(
+          "Failed to check whether com.example.app is running",
+        );
         expect(warnSpy.mock.calls[0]?.[1]).toBe(probeError);
       } finally {
         warnSpy.mockRestore();

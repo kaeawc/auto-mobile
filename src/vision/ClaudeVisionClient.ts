@@ -24,7 +24,8 @@ export function parseClaudeResponse(response: Anthropic.Message): ClaudeVisionAn
     }
   }
 
-  const jsonMatch = responseText.match(/```json\n([\s\S]*?)\n```/) || responseText.match(/\{[\s\S]*\}/);
+  const jsonMatch =
+    responseText.match(/```json\n([\s\S]*?)\n```/) || responseText.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
     throw new Error("Failed to parse JSON from Claude response");
   }
@@ -58,21 +59,31 @@ export function toClaudeVisionFallbackResult(
   analysis: ClaudeVisionAnalysis,
   costUsd: number,
   durationMs: number,
-  screenshotPath: string
+  screenshotPath: string,
 ): VisionFallbackResult {
   const confidence: VisionFallbackResult["confidence"] =
     analysis.confidence >= 0.9 ? "high" : analysis.confidence >= 0.7 ? "medium" : "low";
-  const navigationSteps: NavigationStep[] | undefined = analysis.steps?.map(step => ({
+  const navigationSteps: NavigationStep[] | undefined = analysis.steps?.map((step) => ({
     action: mapClaudeAction(step.action),
     target: step.target,
     description: step.reasoning,
   }));
   const alternativeSelectors: AlternativeSelector[] = [];
   if (analysis.suggestedText) {
-    alternativeSelectors.push({ type: "text", value: analysis.suggestedText, confidence: analysis.confidence, reasoning: "Claude suggested this text as alternative" });
+    alternativeSelectors.push({
+      type: "text",
+      value: analysis.suggestedText,
+      confidence: analysis.confidence,
+      reasoning: "Claude suggested this text as alternative",
+    });
   }
   if (analysis.suggestedResourceId) {
-    alternativeSelectors.push({ type: "resourceId", value: analysis.suggestedResourceId, confidence: analysis.confidence, reasoning: "Claude suggested this resource ID as alternative" });
+    alternativeSelectors.push({
+      type: "resourceId",
+      value: analysis.suggestedResourceId,
+      confidence: analysis.confidence,
+      reasoning: "Claude suggested this resource ID as alternative",
+    });
   }
 
   return {
@@ -91,11 +102,21 @@ export function toClaudeVisionFallbackResult(
 
 function mapClaudeAction(action: string): NavigationStep["action"] {
   const normalized = action.toLowerCase();
-  if (normalized.includes("tap") || normalized.includes("click")) { return "tap"; }
-  if (normalized.includes("swipe")) { return "swipe"; }
-  if (normalized.includes("scroll")) { return "scroll"; }
-  if (normalized.includes("input") || normalized.includes("type")) { return "input"; }
-  if (normalized.includes("wait")) { return "wait"; }
+  if (normalized.includes("tap") || normalized.includes("click")) {
+    return "tap";
+  }
+  if (normalized.includes("swipe")) {
+    return "swipe";
+  }
+  if (normalized.includes("scroll")) {
+    return "scroll";
+  }
+  if (normalized.includes("input") || normalized.includes("type")) {
+    return "input";
+  }
+  if (normalized.includes("wait")) {
+    return "wait";
+  }
   return "tap";
 }
 
@@ -115,7 +136,7 @@ export class ClaudeVisionClient {
   async analyzeUIElement(
     screenshotPath: string,
     searchCriteria: ElementSearchCriteria,
-    viewHierarchy?: ViewHierarchyNode
+    viewHierarchy?: ViewHierarchyNode,
   ): Promise<VisionFallbackResult> {
     const startTime = this.timer.now();
 
@@ -163,12 +184,7 @@ export class ClaudeVisionClient {
       const durationMs = this.timer.now() - startTime;
 
       // Convert analysis to VisionFallbackResult
-      return toClaudeVisionFallbackResult(
-        analysis,
-        costUsd,
-        durationMs,
-        screenshotPath
-      );
+      return toClaudeVisionFallbackResult(analysis, costUsd, durationMs, screenshotPath);
     } catch (error) {
       logger.error("Claude Vision API error:", error);
       throw error;
@@ -177,11 +193,13 @@ export class ClaudeVisionClient {
 
   private buildAnalysisPrompt(
     criteria: ElementSearchCriteria,
-    hierarchy?: ViewHierarchyNode
+    hierarchy?: ViewHierarchyNode,
   ): string {
     const parts: string[] = [];
 
-    parts.push("You are an Android UI automation expert analyzing a screenshot to help locate a specific UI element.");
+    parts.push(
+      "You are an Android UI automation expert analyzing a screenshot to help locate a specific UI element.",
+    );
     parts.push("");
 
     parts.push("SEARCH CRITERIA:");
@@ -230,7 +248,9 @@ export class ClaudeVisionClient {
     parts.push("```json");
     parts.push("{");
     parts.push('  "elementFound": boolean,');
-    parts.push('  "elementLocation": {"x": number, "y": number, "width": number, "height": number} | null,');
+    parts.push(
+      '  "elementLocation": {"x": number, "y": number, "width": number, "height": number} | null,',
+    );
     parts.push('  "suggestedText": string | null,');
     parts.push('  "suggestedResourceId": string | null,');
     parts.push('  "navigationRequired": boolean,');
@@ -253,5 +273,4 @@ export class ClaudeVisionClient {
 
     return parts.join("\n");
   }
-
 }

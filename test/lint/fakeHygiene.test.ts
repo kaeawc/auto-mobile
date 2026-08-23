@@ -120,7 +120,7 @@ function standardObjectFor(expression: ts.Expression, scope: Scope): StandardObj
 
 function forbiddenMethodForProperty(
   object: StandardObject | undefined,
-  property: string
+  property: string,
 ): ForbiddenMethod | undefined {
   if (object === "Date" && property === "now") {
     return "Date.now";
@@ -149,7 +149,7 @@ function forbiddenMethodFor(expression: ts.Expression, scope: Scope): ForbiddenM
   if (ts.isPropertyAccessExpression(expression)) {
     return forbiddenMethodForProperty(
       standardObjectFor(expression.expression, scope),
-      expression.name.text
+      expression.name.text,
     );
   }
 
@@ -159,7 +159,7 @@ function forbiddenMethodFor(expression: ts.Expression, scope: Scope): ForbiddenM
   ) {
     return forbiddenMethodForProperty(
       standardObjectFor(expression.expression, scope),
-      expression.argumentExpression.text
+      expression.argumentExpression.text,
     );
   }
 
@@ -185,10 +185,7 @@ function isDefaultTimer(expression: ts.Expression, scope: Scope): boolean {
   return scope.lookup(expression.text) !== null;
 }
 
-function bindVariableDeclaration(
-  declaration: ts.VariableDeclaration,
-  scope: Scope
-): void {
+function bindVariableDeclaration(declaration: ts.VariableDeclaration, scope: Scope): void {
   const initializer = declaration.initializer;
   if (!initializer) {
     bindName(scope, declaration.name, null);
@@ -206,13 +203,12 @@ function bindVariableDeclaration(
   if (ts.isObjectBindingPattern(declaration.name) && object) {
     for (const element of declaration.name.elements) {
       const property = element.propertyName ?? element.name;
-      const propertyName = ts.isIdentifier(property) || ts.isStringLiteral(property)
-        ? property.text
-        : undefined;
+      const propertyName =
+        ts.isIdentifier(property) || ts.isStringLiteral(property) ? property.text : undefined;
       bindName(
         scope,
         element.name,
-        propertyName ? forbiddenMethodForProperty(object, propertyName) ?? null : null
+        propertyName ? (forbiddenMethodForProperty(object, propertyName) ?? null) : null,
       );
     }
     return;
@@ -227,7 +223,7 @@ function forbiddenLinesIn(source: string): string[] {
     source,
     ts.ScriptTarget.Latest,
     false,
-    ts.ScriptKind.TS
+    ts.ScriptKind.TS,
   );
   const lines: string[] = [];
 
@@ -248,19 +244,18 @@ function forbiddenLinesIn(source: string): string[] {
     if (importedBindings.name) {
       bindName(scope, importedBindings.name, null);
     }
-    if (
-      !importedBindings.namedBindings ||
-      !ts.isNamedImports(importedBindings.namedBindings)
-    ) {
+    if (!importedBindings.namedBindings || !ts.isNamedImports(importedBindings.namedBindings)) {
       return;
     }
     for (const element of importedBindings.namedBindings.elements) {
       const importedName = (element.propertyName ?? element.name).text;
-      const value = importedName === "defaultTimer"
-        ? "defaultTimer"
-        : importedName === "randomUUID" && declaration.moduleSpecifier.getText(sourceFile).includes("crypto")
-          ? "crypto.randomUUID"
-          : null;
+      const value =
+        importedName === "defaultTimer"
+          ? "defaultTimer"
+          : importedName === "randomUUID" &&
+              declaration.moduleSpecifier.getText(sourceFile).includes("crypto")
+            ? "crypto.randomUUID"
+            : null;
       bindName(scope, element.name, value);
       if (value === "defaultTimer") {
         reportDefaultTimer(element.name, scope);
@@ -310,20 +305,17 @@ function forbiddenLinesIn(source: string): string[] {
       if (node.name) {
         classScope.bind(node.name.text, null);
       }
-      ts.forEachChild(node, child => visit(child, classScope));
+      ts.forEachChild(node, (child) => visit(child, classScope));
       return;
     }
     if (ts.isIdentifier(node)) {
       reportDefaultTimer(node, scope);
       return;
     }
-    if (
-      ts.isCallExpression(node) &&
-      forbiddenMethodFor(node.expression, scope)
-    ) {
+    if (ts.isCallExpression(node) && forbiddenMethodFor(node.expression, scope)) {
       lines.push(lineAt(node.getStart(sourceFile)));
     }
-    ts.forEachChild(node, child => visit(child, scope));
+    ts.forEachChild(node, (child) => visit(child, scope));
   };
 
   visit(sourceFile, new Scope());
@@ -336,7 +328,7 @@ function sortedMultiset(values: string[]): string[] {
 
 describe("fake hygiene source scan (#4186)", () => {
   const fakeFiles = readdirSync(FAKES_DIR).filter(
-    name => name.endsWith(".ts") && !name.endsWith(".test.ts")
+    (name) => name.endsWith(".ts") && !name.endsWith(".test.ts"),
   );
 
   test("rejects aliased, computed, and whitespace-obscured nondeterminism", () => {

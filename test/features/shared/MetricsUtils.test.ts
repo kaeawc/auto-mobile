@@ -47,8 +47,8 @@ describe("MetricsUtils", () => {
       ];
       const avg = calculateWeightedAverage(
         items,
-        i => i.value,
-        i => i.weight
+        (i) => i.value,
+        (i) => i.weight,
       );
       expect(avg).toBe(15);
     });
@@ -61,8 +61,8 @@ describe("MetricsUtils", () => {
       // (10*3 + 20*1) / (3+1) = 50/4 = 12.5
       const avg = calculateWeightedAverage(
         items,
-        i => i.value,
-        i => i.weight
+        (i) => i.value,
+        (i) => i.weight,
       );
       expect(avg).toBe(12.5);
     });
@@ -71,7 +71,7 @@ describe("MetricsUtils", () => {
       const avg = calculateWeightedAverage(
         [],
         (i: TestItem) => i.value,
-        (i: TestItem) => i.weight
+        (i: TestItem) => i.weight,
       );
       expect(avg).toBeNull();
     });
@@ -83,8 +83,8 @@ describe("MetricsUtils", () => {
       ];
       const avg = calculateWeightedAverage(
         items,
-        i => i.value,
-        i => i.weight
+        (i) => i.value,
+        (i) => i.weight,
       );
       expect(avg).toBeNull();
     });
@@ -106,10 +106,10 @@ describe("MetricsUtils", () => {
       const result = calculateWeightedAverages(
         items,
         [
-          { key: "avgA", getValue: i => i.a },
-          { key: "avgB", getValue: i => i.b },
+          { key: "avgA", getValue: (i) => i.a },
+          { key: "avgB", getValue: (i) => i.b },
         ],
-        i => i.weight
+        (i) => i.weight,
       );
 
       expect(result).toEqual({ avgA: 15, avgB: 150 });
@@ -124,10 +124,10 @@ describe("MetricsUtils", () => {
       const result = calculateWeightedAverages(
         items,
         [
-          { key: "avgA", getValue: i => i.a, round: true },
-          { key: "avgB", getValue: i => i.b },
+          { key: "avgA", getValue: (i) => i.a, round: true },
+          { key: "avgB", getValue: (i) => i.b },
         ],
-        i => i.weight
+        (i) => i.weight,
       );
 
       expect(result).toEqual({ avgA: 13, avgB: 125 }); // 12.5 rounded to 13
@@ -136,8 +136,8 @@ describe("MetricsUtils", () => {
     it("returns null for empty array", () => {
       const result = calculateWeightedAverages(
         [] as TestData[],
-        [{ key: "avgA", getValue: i => i.a }],
-        i => i.weight
+        [{ key: "avgA", getValue: (i) => i.a }],
+        (i) => i.weight,
       );
       expect(result).toBeNull();
     });

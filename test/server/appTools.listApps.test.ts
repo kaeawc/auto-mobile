@@ -1,11 +1,15 @@
 import Ajv2020 from "ajv/dist/2020";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { registerAppTools, resetListAppsToolDependencies, setListAppsToolDependencies } from "../../src/server/appTools";
+import {
+  registerAppTools,
+  resetListAppsToolDependencies,
+  setListAppsToolDependencies,
+} from "../../src/server/appTools";
 import {
   APP_RESOURCE_TEMPLATES,
   APPS_RESOURCE_URIS,
   invalidateInstalledAppResourceCache,
-  invalidateInstalledAppsCache
+  invalidateInstalledAppsCache,
 } from "../../src/server/appResources";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeToolUtils } from "../fakes/FakeToolUtils";
@@ -15,18 +19,18 @@ import { getInstalledAppsCacheWriteCoordinator } from "../../src/db/installedApp
 const resolveWithFakeTimer = async <T>(
   promise: Promise<T>,
   timer: FakeTimer,
-  stepMs: number = 1
+  stepMs: number = 1,
 ): Promise<T> => {
   let settled = false;
   let result: T | undefined;
   let error: unknown;
 
   promise
-    .then(value => {
+    .then((value) => {
       settled = true;
       result = value;
     })
-    .catch(caught => {
+    .catch((caught) => {
       settled = true;
       error = caught;
     });
@@ -40,7 +44,7 @@ const resolveWithFakeTimer = async <T>(
     ) {
       timer.advanceTime(stepMs);
     }
-    await new Promise(resolve => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
     steps += 1;
     if (steps > 100) {
       throw new Error("FakeTimer pump exceeded max steps");
@@ -86,7 +90,8 @@ describe("listApps tool", () => {
     expect(fakeToolUtils.getJSONResponseCount()).toBe(1);
     const payload = fakeToolUtils.getLastJSONResponse();
     expect(payload).toEqual({
-      message: "To list installed apps, follow this workflow:\n\n" +
+      message:
+        "To list installed apps, follow this workflow:\n\n" +
         "1. Get available devices:\n" +
         "   Read resource: automobile:devices/booted\n\n" +
         "2. List apps for a specific device (using deviceId from step 1):\n" +
@@ -100,9 +105,9 @@ describe("listApps tool", () => {
       resources: [
         "automobile:devices/booted",
         APP_RESOURCE_TEMPLATES.DEVICE_APPS,
-        APPS_RESOURCE_URIS.BASE + "?deviceId={deviceId}"
+        APPS_RESOURCE_URIS.BASE + "?deviceId={deviceId}",
       ],
-      note: "All resource URIs use the 'automobile:' prefix. URIs like 'android://apps' are not supported."
+      note: "All resource URIs use the 'automobile:' prefix. URIs like 'android://apps' are not supported.",
     });
 
     const content = result.content?.[0];
@@ -140,82 +145,112 @@ describe("app permission tools", () => {
 
     expect(setAppTool).toBeDefined();
     expect(setAppTool?.requiresDevice).toBe(true);
-    expect(() => setAppTool!.schema.parse({
-      appId: "com.example.app",
-      permissions: ["camera"],
-      action: "grant"
-    })).not.toThrow();
-    expect(() => setAppTool!.schema.parse({
-      appId: "com.example.app",
-      permissions: []
-    })).toThrow();
-    expect(() => setAppTool!.schema.parse({
-      appId: "com.example.app",
-      notificationPolicyAccess: true,
-      scheduleExactAlarm: "allow"
-    })).not.toThrow();
-    expect(() => setAppTool!.schema.parse({
-      appId: "com.example.app",
-      notificationsEnabled: false,
-    })).not.toThrow();
-    expect(() => setAppTool!.schema.parse({
-      appId: "com.example.app",
-      permissions: ["android.permission.POST_NOTIFICATIONS"],
-      userId: 10,
-    })).not.toThrow();
-    expect(setAppTool!.schema.parse({
-      appId: " com.example.app ",
-      notificationsEnabled: false,
-    }).appId).toBe("com.example.app");
-    expect(() => setAppTool!.schema.parse({
-      appId: " ",
-      notificationsEnabled: false,
-    })).toThrow();
-    expect(() => setAppTool!.schema.parse({
-      appId: "com.example.app",
-      action: "reset",
-      permissions: ["all"],
-      userId: 10,
-    })).toThrow();
-    expect(() => setAppTool!.schema.parse({
-      appId: "com.example.app",
-      action: "reset",
-      notificationsEnabled: false,
-    })).toThrow();
-    expect(() => setAppTool!.schema.parse({
-      appId: "com.example.app",
-      action: "reset",
-      permissions: [],
-    })).toThrow();
-    expect(() => setAppTool!.schema.parse({
-      appId: "com.example.app",
-      action: "reset",
-      permissions: ["camera"],
-      platform: "android",
-    })).toThrow();
-    expect(() => setAppTool!.schema.parse({
-      appId: "com.example.app",
-      action: "reset",
-      permissions: [" all "],
-      platform: "android",
-    })).toThrow();
-    expect(() => setAppTool!.schema.parse({
-      appId: "com.example.app",
-      action: "reset",
-      permissions: ["camera"],
-      platform: "ios",
-    })).not.toThrow();
+    expect(() =>
+      setAppTool!.schema.parse({
+        appId: "com.example.app",
+        permissions: ["camera"],
+        action: "grant",
+      }),
+    ).not.toThrow();
+    expect(() =>
+      setAppTool!.schema.parse({
+        appId: "com.example.app",
+        permissions: [],
+      }),
+    ).toThrow();
+    expect(() =>
+      setAppTool!.schema.parse({
+        appId: "com.example.app",
+        notificationPolicyAccess: true,
+        scheduleExactAlarm: "allow",
+      }),
+    ).not.toThrow();
+    expect(() =>
+      setAppTool!.schema.parse({
+        appId: "com.example.app",
+        notificationsEnabled: false,
+      }),
+    ).not.toThrow();
+    expect(() =>
+      setAppTool!.schema.parse({
+        appId: "com.example.app",
+        permissions: ["android.permission.POST_NOTIFICATIONS"],
+        userId: 10,
+      }),
+    ).not.toThrow();
+    expect(
+      setAppTool!.schema.parse({
+        appId: " com.example.app ",
+        notificationsEnabled: false,
+      }).appId,
+    ).toBe("com.example.app");
+    expect(() =>
+      setAppTool!.schema.parse({
+        appId: " ",
+        notificationsEnabled: false,
+      }),
+    ).toThrow();
+    expect(() =>
+      setAppTool!.schema.parse({
+        appId: "com.example.app",
+        action: "reset",
+        permissions: ["all"],
+        userId: 10,
+      }),
+    ).toThrow();
+    expect(() =>
+      setAppTool!.schema.parse({
+        appId: "com.example.app",
+        action: "reset",
+        notificationsEnabled: false,
+      }),
+    ).toThrow();
+    expect(() =>
+      setAppTool!.schema.parse({
+        appId: "com.example.app",
+        action: "reset",
+        permissions: [],
+      }),
+    ).toThrow();
+    expect(() =>
+      setAppTool!.schema.parse({
+        appId: "com.example.app",
+        action: "reset",
+        permissions: ["camera"],
+        platform: "android",
+      }),
+    ).toThrow();
+    expect(() =>
+      setAppTool!.schema.parse({
+        appId: "com.example.app",
+        action: "reset",
+        permissions: [" all "],
+        platform: "android",
+      }),
+    ).toThrow();
+    expect(() =>
+      setAppTool!.schema.parse({
+        appId: "com.example.app",
+        action: "reset",
+        permissions: ["camera"],
+        platform: "ios",
+      }),
+    ).not.toThrow();
     expect(setAppTool?.description).toContain("POST_NOTIFICATIONS");
 
     expect(getAppTool).toBeDefined();
     expect(getAppTool?.requiresDevice).toBe(true);
-    expect(() => getAppTool!.schema.parse({
-      appId: "com.example.app",
-      permissions: ["camera"]
-    })).not.toThrow();
-    expect(() => getAppTool!.schema.parse({
-      appId: "com.example.app"
-    })).not.toThrow();
+    expect(() =>
+      getAppTool!.schema.parse({
+        appId: "com.example.app",
+        permissions: ["camera"],
+      }),
+    ).not.toThrow();
+    expect(() =>
+      getAppTool!.schema.parse({
+        appId: "com.example.app",
+      }),
+    ).not.toThrow();
   });
 
   test("does not register platform-named permission tools", () => {
@@ -228,44 +263,57 @@ describe("app permission tools", () => {
   });
 
   test("advertises Android permission action scope", () => {
-    const setAppPermissions = ToolRegistry.getToolDefinitions({ includeUnavailable: true })
-      .find(tool => tool.name === "setAppPermissions");
+    const setAppPermissions = ToolRegistry.getToolDefinitions({ includeUnavailable: true }).find(
+      (tool) => tool.name === "setAppPermissions",
+    );
     const validate = new Ajv2020({ strict: false }).compile(setAppPermissions!.inputSchema);
 
-    expect(validate({
-      appId: "com.example.app",
-      action: "reset",
-      permissions: ["all"],
-    })).toBe(true);
-    expect(validate({
-      appId: "com.example.app",
-      action: "reset",
-      permissions: ["all"],
-      userId: 10,
-    })).toBe(false);
-    expect(validate({
-      appId: "com.example.app",
-      action: "reset",
-      notificationsEnabled: false,
-    })).toBe(false);
-    expect(validate({
-      appId: "com.example.app",
-      action: "reset",
-      permissions: ["camera"],
-      platform: "android",
-    })).toBe(false);
-    expect(validate({
-      appId: "com.example.app",
-      action: "reset",
-      permissions: [],
-      platform: "android",
-    })).toBe(false);
-    expect(validate({
-      appId: "com.example.app",
-      action: "reset",
-      permissions: ["camera"],
-      platform: "ios",
-    })).toBe(true);
+    expect(
+      validate({
+        appId: "com.example.app",
+        action: "reset",
+        permissions: ["all"],
+      }),
+    ).toBe(true);
+    expect(
+      validate({
+        appId: "com.example.app",
+        action: "reset",
+        permissions: ["all"],
+        userId: 10,
+      }),
+    ).toBe(false);
+    expect(
+      validate({
+        appId: "com.example.app",
+        action: "reset",
+        notificationsEnabled: false,
+      }),
+    ).toBe(false);
+    expect(
+      validate({
+        appId: "com.example.app",
+        action: "reset",
+        permissions: ["camera"],
+        platform: "android",
+      }),
+    ).toBe(false);
+    expect(
+      validate({
+        appId: "com.example.app",
+        action: "reset",
+        permissions: [],
+        platform: "android",
+      }),
+    ).toBe(false);
+    expect(
+      validate({
+        appId: "com.example.app",
+        action: "reset",
+        permissions: ["camera"],
+        platform: "ios",
+      }),
+    ).toBe(true);
     expect(setAppPermissions!.description).toContain("userId grant/revoke");
     expect(setAppPermissions.description).toContain("device-wide reset ['all']");
     expect(setAppPermissions.description).toContain("no POST_NOTIFICATIONS");

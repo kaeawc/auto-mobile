@@ -40,11 +40,11 @@ describe("BunSqliteDialect RETURNING on upsert conflict path", () => {
         tool_call_info_json: null,
         updated_at: "2026-07-01T00:00:00.000Z",
       })
-      .onConflict(oc =>
-        oc.column("signature").doUpdateSet(eb => ({
+      .onConflict((oc) =>
+        oc.column("signature").doUpdateSet((eb) => ({
           last_occurrence: 2,
           total_count: eb("failure_groups.total_count", "+", 1),
-        }))
+        })),
       )
       .returning("id")
       .executeTakeFirstOrThrow();
@@ -91,11 +91,11 @@ describe("BunSqliteDialect RETURNING on upsert conflict path", () => {
         tool_call_info_json: null,
         updated_at: "2026-07-01T00:00:05.000Z",
       })
-      .onConflict(oc =>
-        oc.column("signature").doUpdateSet(eb => ({
+      .onConflict((oc) =>
+        oc.column("signature").doUpdateSet((eb) => ({
           last_occurrence: 5,
           total_count: eb("failure_groups.total_count", "+", 1),
-        }))
+        })),
       )
       .returning("id")
       .executeTakeFirstOrThrow();

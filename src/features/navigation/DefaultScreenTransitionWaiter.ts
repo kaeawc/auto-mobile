@@ -19,7 +19,7 @@ export class DefaultScreenTransitionWaiter implements ScreenTransitionWaiter {
   constructor(
     navigationManager: NavigationGraphManager,
     pollIntervalMs: number = 500,
-    timer: Timer = defaultTimer
+    timer: Timer = defaultTimer,
   ) {
     this.navigationManager = navigationManager;
     this.pollIntervalMs = pollIntervalMs;

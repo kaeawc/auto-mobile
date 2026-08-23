@@ -13,17 +13,20 @@ bun run estimate-context
 ```
 
 **Output:**
+
 - Detailed breakdown of token usage per tool/resource
 - Total token counts by category
 - Sorted by token count (highest first)
 
 **Options:**
+
 ```bash
 # Include operation traces from a JSON file
 bun run estimate-context --traces path/to/traces.json
 ```
 
 **Use Cases:**
+
 - Understanding current context usage
 - Identifying token-heavy tools or resources
 - Planning optimization efforts
@@ -38,10 +41,12 @@ bun run benchmark-context
 ```
 
 **Exit Codes:**
+
 - `0` - All thresholds passed
 - `1` - One or more thresholds exceeded or error occurred
 
 **Options:**
+
 ```bash
 # Use custom threshold configuration
 bun run benchmark-context --config path/to/thresholds.json
@@ -51,6 +56,7 @@ bun run benchmark-context --output reports/benchmark.json
 ```
 
 **Use Cases:**
+
 - CI/CD threshold enforcement
 - Pre-commit validation
 - Regression detection
@@ -94,6 +100,7 @@ cat result.json | scripts/observe-byte-breakdown.sh
 ```
 
 **Output:**
+
 - Total byte count of the observe result
 - Per top-level field bytes and % of total (sorted largest first)
 - Per `viewHierarchy` sub-key bytes and % of `viewHierarchy`
@@ -142,7 +149,7 @@ Two properties matter and are pinned by `test/bats/measure-ci.bats`:
 - **Repeated steps keep their ordinal.** A job that boots a simulator three
   times reports `Boot #1`, `Boot #2`, `Boot #3` separately. Grouping by name
   alone destroys the signal that justified dropping the Xcode 26.2 leg
-  ("all 9 boots >= 300s were the *third* boot").
+  ("all 9 boots >= 300s were the _third_ boot").
 - **Percentiles are nearest-rank**, not interpolated: `index = ceil(p/100 * n)`.
 
 The script is two separable layers. `--fetch-only` emits the normalized bundle
@@ -166,6 +173,7 @@ bun run benchmark-startup --compare benchmark/startup-baseline.json --output rep
 ```
 
 **Options:**
+
 ```bash
 # Only run cold or warm measurements
 bun run benchmark-startup --cold
@@ -183,6 +191,7 @@ bun run benchmark-startup --threshold 1.3
 ```
 
 **Notes:**
+
 - Device discovery scenarios run only when `adb` is available and at least one device is connected.
 - The benchmark will run `adb kill-server` when measuring cold ADB startup impact.
 
@@ -195,6 +204,7 @@ bun run benchmark-npm-unpacked-size --output reports/npm-unpacked-size.json
 ```
 
 **Options:**
+
 ```bash
 # Use custom threshold configuration
 bun run benchmark-npm-unpacked-size --config path/to/thresholds.json
@@ -204,6 +214,7 @@ bun run benchmark-npm-unpacked-size --output reports/npm-unpacked-size.json
 ```
 
 **Notes:**
+
 - Runs `prepublishOnly` before packing to match the published package contents.
 - Requires a prior `bun run build` so `dist/` is present.
 
@@ -234,6 +245,7 @@ bun run benchmark-npm-unpacked-size --output reports/npm-unpacked-size.json
 ### Validation Scripts
 
 See individual script directories for specialized validation:
+
 - `docker/` - Docker container testing
 - `ide-plugin/` - IntelliJ/Android Studio plugin validation
 - `ktfmt/` - Kotlin formatting
@@ -242,6 +254,7 @@ See individual script directories for specialized validation:
 - `xml/` - XML validation and formatting
 
 Root-level validation scripts:
+
 - `validate_codex_skills.sh` - Validate `skills/*/SKILL.md` metadata, optional `agents/openai.yaml` interface metadata (colocated with both the canonical skill and the discoverable `.agents/skills/<name>` wrapper, since Codex reads metadata next to the wrapper it discovers), `.agents/skills` Codex discovery wrappers, and `AGENTS.md` inventory consistency
 - `validate_dependabot.sh` - Validate Dependabot config YAML
 - `validate_mkdocs_nav.sh` - Validate MkDocs nav configuration
@@ -272,6 +285,7 @@ See workflow files for integration details.
 ## Development
 
 All scripts should:
+
 - Include usage instructions in header comments
 - Return appropriate exit codes (0 for success, non-zero for failure)
 - Provide clear error messages

@@ -14,14 +14,19 @@ function createFakeContext(overrides?: Partial<DelegateContext>): {
   let cancelCount = 0;
   const sent: string[] = [];
   const context: DelegateContext = {
-    getWebSocket: () => ({
-      send: (data: string) => { sent.push(data); },
-      readyState: 1,
-    } as any),
+    getWebSocket: () =>
+      ({
+        send: (data: string) => {
+          sent.push(data);
+        },
+        readyState: 1,
+      }) as any,
     requestManager: new RequestManager(timer),
     timer,
     ensureConnected: async () => true,
-    cancelScreenshotBackoff: () => { cancelCount++; },
+    cancelScreenshotBackoff: () => {
+      cancelCount++;
+    },
     ...overrides,
   };
   return { context, sent, cancelCalls: () => cancelCount };
@@ -31,7 +36,7 @@ async function callAndResolve<T>(
   sent: string[],
   requestManager: RequestManager,
   action: () => Promise<T>,
-  result: unknown = { success: true, totalTimeMs: 1 }
+  result: unknown = { success: true, totalTimeMs: 1 },
 ): Promise<{ result: T; sentMsg: Record<string, unknown> }> {
   const promise = action();
   await Promise.resolve();
@@ -51,9 +56,11 @@ describe("SharedTextDelegate", () => {
       await callAndResolve(sent, context.requestManager, () => delegate.requestSetText("hello"));
       expect(cancelCalls()).toBe(1);
 
-      await callAndResolve(sent, context.requestManager, () =>
-        delegate.requestImeAction("done"), { success: true, action: "done", totalTimeMs: 1 }
-      );
+      await callAndResolve(sent, context.requestManager, () => delegate.requestImeAction("done"), {
+        success: true,
+        action: "done",
+        totalTimeMs: 1,
+      });
       expect(cancelCalls()).toBe(2);
 
       await callAndResolve(sent, context.requestManager, () => delegate.requestSelectAll());
@@ -67,7 +74,7 @@ describe("SharedTextDelegate", () => {
       const delegate = new SharedTextDelegate(context);
 
       const { sentMsg } = await callAndResolve(sent, context.requestManager, () =>
-        delegate.requestSetText("hello world")
+        delegate.requestSetText("hello world"),
       );
 
       expect(sentMsg.type).toBe("request_set_text");
@@ -80,7 +87,7 @@ describe("SharedTextDelegate", () => {
       const delegate = new SharedTextDelegate(context);
 
       const { sentMsg } = await callAndResolve(sent, context.requestManager, () =>
-        delegate.requestSetText("hello", { resourceId: "com.app:id/input" })
+        delegate.requestSetText("hello", { resourceId: "com.app:id/input" }),
       );
 
       expect(sentMsg.resourceId).toBe("com.app:id/input");
@@ -91,7 +98,7 @@ describe("SharedTextDelegate", () => {
       const delegate = new SharedTextDelegate(context);
 
       const { sentMsg } = await callAndResolve(sent, context.requestManager, () =>
-        delegate.requestSetText("hello")
+        delegate.requestSetText("hello"),
       );
 
       expect(sentMsg.resourceId).toBeUndefined();
@@ -101,8 +108,11 @@ describe("SharedTextDelegate", () => {
       const { context, sent } = createFakeContext();
       const delegate = new SharedTextDelegate(context);
 
-      const { sentMsg } = await callAndResolve(sent, context.requestManager, () =>
-        delegate.requestImeAction("next"), { success: true, action: "next", totalTimeMs: 1 }
+      const { sentMsg } = await callAndResolve(
+        sent,
+        context.requestManager,
+        () => delegate.requestImeAction("next"),
+        { success: true, action: "next", totalTimeMs: 1 },
       );
 
       expect(sentMsg.type).toBe("request_ime_action");
@@ -114,7 +124,7 @@ describe("SharedTextDelegate", () => {
       const delegate = new SharedTextDelegate(context);
 
       const { sentMsg } = await callAndResolve(sent, context.requestManager, () =>
-        delegate.requestSelectAll()
+        delegate.requestSelectAll(),
       );
 
       expect(sentMsg.type).toBe("request_select_all");
@@ -127,7 +137,7 @@ describe("SharedTextDelegate", () => {
       const delegate = new SharedTextDelegate(context);
 
       const { sentMsg } = await callAndResolve(sent, context.requestManager, () =>
-        delegate.requestClearText()
+        delegate.requestClearText(),
       );
 
       expect(sentMsg.type).toBe("request_set_text");

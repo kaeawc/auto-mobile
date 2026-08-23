@@ -22,11 +22,9 @@ class TestableServer extends VideoRecordingSocketServer {
   }
 }
 
-function authenticator(
-  calls: Array<{ sessionUuid?: string }>
-): StreamSocketAuthenticator {
+function authenticator(calls: Array<{ sessionUuid?: string }>): StreamSocketAuthenticator {
   return {
-    authorize: input => {
+    authorize: (input) => {
       calls.push({ sessionUuid: input.sessionUuid });
       if (input.sessionUuid !== "live") {
         throw new ActionableError(`rejected session ${input.sessionUuid}`);
@@ -49,7 +47,7 @@ describe("VideoRecordingSocketServer config authorization (issue #4752)", () => 
           return { config: makeConfig(), evictedRecordingIds: ["evicted"] };
         },
       },
-      authenticator(calls)
+      authenticator(calls),
     );
 
     await expect(
@@ -58,7 +56,7 @@ describe("VideoRecordingSocketServer config authorization (issue #4752)", () => 
         type: "video_recording_request",
         method: "config/set",
         params: { config: { maxArchiveSizeMb: 1 } as VideoRecordingConfigInput },
-      })
+      }),
     ).rejects.toThrow(/rejected session/);
     expect(updateCalled).toBe(false);
     expect(calls).toEqual([{ sessionUuid: undefined }]);
@@ -71,9 +69,12 @@ describe("VideoRecordingSocketServer config authorization (issue #4752)", () => 
       undefined,
       {
         getConfig: async () => makeConfig(),
-        updateConfig: async () => ({ config: makeConfig({ maxArchiveSizeMb: 1 }), evictedRecordingIds: [] }),
+        updateConfig: async () => ({
+          config: makeConfig({ maxArchiveSizeMb: 1 }),
+          evictedRecordingIds: [],
+        }),
       },
-      authenticator(calls)
+      authenticator(calls),
     );
 
     const response = await server.invoke({
@@ -97,7 +98,7 @@ describe("VideoRecordingSocketServer config authorization (issue #4752)", () => 
         getConfig: async () => makeConfig({ fps: 30 }),
         updateConfig: async () => ({ config: makeConfig(), evictedRecordingIds: [] }),
       },
-      authenticator(calls)
+      authenticator(calls),
     );
 
     const response = await server.invoke({

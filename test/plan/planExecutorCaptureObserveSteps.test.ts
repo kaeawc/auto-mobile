@@ -26,9 +26,15 @@ describe("PlanExecutor — captureObserveSteps", () => {
         elements: {
           clickable: [],
           scrollable: [],
-          text: [{ text: "Dan Corkill", resourceId: "com.example:id/name", bounds: { left: 0, top: 0, right: 1, bottom: 1 } }],
+          text: [
+            {
+              text: "Dan Corkill",
+              resourceId: "com.example:id/name",
+              bounds: { left: 0, top: 0, right: 1, bottom: 1 },
+            },
+          ],
         },
-      })
+      }),
     );
     ToolRegistry.register("observe", "Mock observe", observeSchema, observeHandler);
     (ToolRegistry.getTool("observe") as { requiresDevice: boolean }).requiresDevice = true;
@@ -42,7 +48,7 @@ describe("PlanExecutor — captureObserveSteps", () => {
       "captureTestNoop",
       "Mock noop",
       noopSchema,
-      mock(async () => createStructuredToolResponse({ ok: true }))
+      mock(async () => createStructuredToolResponse({ ok: true })),
     );
     (ToolRegistry.getTool("captureTestNoop") as { requiresDevice: boolean }).requiresDevice = true;
   });
@@ -68,12 +74,12 @@ describe("PlanExecutor — captureObserveSteps", () => {
       undefined,
       undefined,
       undefined,
-      { captureObserveSteps: "summary" }
+      { captureObserveSteps: "summary" },
     );
 
     expect(result.success).toBe(true);
     expect(result.debug?.steps).toBeDefined();
-    const observeStep = result.debug!.steps.find(s => s.step.includes(": observe"));
+    const observeStep = result.debug!.steps.find((s) => s.step.includes(": observe"));
     expect(observeStep?.details?.stepObservation).toBeDefined();
     const snap = observeStep!.details.stepObservation as Record<string, unknown>;
     expect(snap.visibleTextsSample).toEqual(expect.arrayContaining(["Dan Corkill"]));
@@ -81,7 +87,7 @@ describe("PlanExecutor — captureObserveSteps", () => {
     expect(snap.viewHierarchy).toBeUndefined();
     expect(snap.rawViewHierarchy).toBeUndefined();
 
-    const noopStep = result.debug!.steps.find(s => s.step.includes(": captureTestNoop"));
+    const noopStep = result.debug!.steps.find((s) => s.step.includes(": captureTestNoop"));
     expect(noopStep?.details?.stepObservation).toBeUndefined();
   });
 
@@ -91,9 +97,18 @@ describe("PlanExecutor — captureObserveSteps", () => {
       steps: [{ tool: "observe", params: {} }],
     };
 
-    const result = await planExecutor.executePlan(plan, 0, "android", "emulator-5554", undefined, undefined, undefined, {
-      captureObserveSteps: "full",
-    });
+    const result = await planExecutor.executePlan(
+      plan,
+      0,
+      "android",
+      "emulator-5554",
+      undefined,
+      undefined,
+      undefined,
+      {
+        captureObserveSteps: "full",
+      },
+    );
 
     expect(result.success).toBe(true);
     const snap = result.debug!.steps[0].details.stepObservation as Record<string, unknown>;

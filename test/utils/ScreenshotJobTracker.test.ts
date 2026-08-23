@@ -20,8 +20,8 @@ describe("ScreenshotJobTracker", () => {
   });
 
   test("cancels the previous job for the same device", async () => {
-    const job1 = ScreenshotJobTracker.startJob("device-1", signal => {
-      return new Promise(resolve => {
+    const job1 = ScreenshotJobTracker.startJob("device-1", (signal) => {
+      return new Promise((resolve) => {
         if (signal.aborted) {
           resolve({ success: false, error: OPERATION_CANCELLED_MESSAGE });
           return;
@@ -30,10 +30,14 @@ describe("ScreenshotJobTracker", () => {
           resolve({ success: true, path: "job1" });
         }, 50);
 
-        signal.addEventListener("abort", () => {
-          fakeTimer.clearTimeout(timeoutId);
-          resolve({ success: false, error: OPERATION_CANCELLED_MESSAGE });
-        }, { once: true });
+        signal.addEventListener(
+          "abort",
+          () => {
+            fakeTimer.clearTimeout(timeoutId);
+            resolve({ success: false, error: OPERATION_CANCELLED_MESSAGE });
+          },
+          { once: true },
+        );
       });
     });
 
@@ -60,16 +64,20 @@ describe("ScreenshotJobTracker", () => {
   });
 
   test("waitForCompletion resolves with result when job completes", async () => {
-    ScreenshotJobTracker.startJob("device-2", async signal => {
-      return new Promise(resolve => {
+    ScreenshotJobTracker.startJob("device-2", async (signal) => {
+      return new Promise((resolve) => {
         const timeoutId = fakeTimer.setTimeout(() => {
           resolve({ success: true, path: "done" });
         }, 50);
 
-        signal.addEventListener("abort", () => {
-          fakeTimer.clearTimeout(timeoutId);
-          resolve({ success: false, error: OPERATION_CANCELLED_MESSAGE });
-        }, { once: true });
+        signal.addEventListener(
+          "abort",
+          () => {
+            fakeTimer.clearTimeout(timeoutId);
+            resolve({ success: false, error: OPERATION_CANCELLED_MESSAGE });
+          },
+          { once: true },
+        );
       });
     });
 
@@ -84,23 +92,28 @@ describe("ScreenshotJobTracker", () => {
 
   test("coalesceWithPending reuses an in-flight job instead of cancelling it", async () => {
     let runnerInvocations = 0;
-    const startCoalescedJob = () => ScreenshotJobTracker.startJob(
-      "device-3",
-      signal => {
-        runnerInvocations += 1;
-        return new Promise(resolve => {
-          const timeoutId = fakeTimer.setTimeout(() => {
-            resolve({ success: true, path: "shared" });
-          }, 200);
+    const startCoalescedJob = () =>
+      ScreenshotJobTracker.startJob(
+        "device-3",
+        (signal) => {
+          runnerInvocations += 1;
+          return new Promise((resolve) => {
+            const timeoutId = fakeTimer.setTimeout(() => {
+              resolve({ success: true, path: "shared" });
+            }, 200);
 
-          signal.addEventListener("abort", () => {
-            fakeTimer.clearTimeout(timeoutId);
-            resolve({ success: false, error: OPERATION_CANCELLED_MESSAGE });
-          }, { once: true });
-        });
-      },
-      { coalesceWithPending: true }
-    );
+            signal.addEventListener(
+              "abort",
+              () => {
+                fakeTimer.clearTimeout(timeoutId);
+                resolve({ success: false, error: OPERATION_CANCELLED_MESSAGE });
+              },
+              { once: true },
+            );
+          });
+        },
+        { coalesceWithPending: true },
+      );
 
     const job1 = startCoalescedJob();
     const job2 = startCoalescedJob();
@@ -122,11 +135,15 @@ describe("ScreenshotJobTracker", () => {
   });
 
   test("coalesceWithPending starts fresh when previous job has been aborted", async () => {
-    const job1 = ScreenshotJobTracker.startJob("device-4", signal => {
-      return new Promise(resolve => {
-        signal.addEventListener("abort", () => {
-          resolve({ success: false, error: OPERATION_CANCELLED_MESSAGE });
-        }, { once: true });
+    const job1 = ScreenshotJobTracker.startJob("device-4", (signal) => {
+      return new Promise((resolve) => {
+        signal.addEventListener(
+          "abort",
+          () => {
+            resolve({ success: false, error: OPERATION_CANCELLED_MESSAGE });
+          },
+          { once: true },
+        );
       });
     });
     await Promise.resolve();
@@ -141,7 +158,7 @@ describe("ScreenshotJobTracker", () => {
         secondRunnerCalled = true;
         return { success: true, path: "fresh" };
       },
-      { coalesceWithPending: true }
+      { coalesceWithPending: true },
     );
 
     expect(job2.jobId).not.toBe(job1.jobId);
@@ -153,11 +170,15 @@ describe("ScreenshotJobTracker", () => {
 
   test("without coalesceWithPending, startJob still cancels the previous job", async () => {
     let secondRunnerCalled = false;
-    const job1 = ScreenshotJobTracker.startJob("device-5", signal => {
-      return new Promise(resolve => {
-        signal.addEventListener("abort", () => {
-          resolve({ success: false, error: OPERATION_CANCELLED_MESSAGE });
-        }, { once: true });
+    const job1 = ScreenshotJobTracker.startJob("device-5", (signal) => {
+      return new Promise((resolve) => {
+        signal.addEventListener(
+          "abort",
+          () => {
+            resolve({ success: false, error: OPERATION_CANCELLED_MESSAGE });
+          },
+          { once: true },
+        );
       });
     });
     await Promise.resolve();
@@ -180,9 +201,10 @@ describe("ScreenshotJobTracker", () => {
     let resolveFirst: (result: { success: boolean; path?: string }) => void = () => {};
     const first = ScreenshotJobTracker.startJob(
       "device-queue",
-      () => new Promise(resolve => {
-        resolveFirst = resolve;
-      }),
+      () =>
+        new Promise((resolve) => {
+          resolveFirst = resolve;
+        }),
     );
     let secondRunnerCalls = 0;
     const second = ScreenshotJobTracker.startJob(
@@ -211,11 +233,12 @@ describe("ScreenshotJobTracker", () => {
     let firstWasLatest = false;
     const first = ScreenshotJobTracker.startJob(
       "device-queued-latest",
-      () => new Promise(resolve => {
-        resolveFirst = resolve;
-      }),
+      () =>
+        new Promise((resolve) => {
+          resolveFirst = resolve;
+        }),
       {
-        onComplete: completion => {
+        onComplete: (completion) => {
           firstWasLatest = completion.isLatest;
         },
       },
@@ -239,9 +262,10 @@ describe("ScreenshotJobTracker", () => {
     let observeRunnerCalls = 0;
     const fresh = ScreenshotJobTracker.startJob(
       "device-fresh-then-observe",
-      () => new Promise(resolve => {
-        resolveFresh = resolve;
-      }),
+      () =>
+        new Promise((resolve) => {
+          resolveFresh = resolve;
+        }),
       { queueAfterPending: true },
     );
     await Promise.resolve();
@@ -272,12 +296,17 @@ describe("ScreenshotJobTracker", () => {
     let resolveFirst: (result: { success: boolean; path?: string }) => void = () => {};
     const first = ScreenshotJobTracker.startJob(
       "device-cancel-queue",
-      signal => new Promise(resolve => {
-        resolveFirst = resolve;
-        signal.addEventListener("abort", () => {
-          resolve({ success: false, error: OPERATION_CANCELLED_MESSAGE });
-        }, { once: true });
-      }),
+      (signal) =>
+        new Promise((resolve) => {
+          resolveFirst = resolve;
+          signal.addEventListener(
+            "abort",
+            () => {
+              resolve({ success: false, error: OPERATION_CANCELLED_MESSAGE });
+            },
+            { once: true },
+          );
+        }),
     );
     let queuedRunnerCalls = 0;
     const queued = ScreenshotJobTracker.startJob(
@@ -308,12 +337,17 @@ describe("ScreenshotJobTracker", () => {
 
     const job1 = ScreenshotJobTracker.startJob(
       "device-a",
-      signal => new Promise(resolve => {
-        signal.addEventListener("abort", () => {
-          resolve({ success: false, error: OPERATION_CANCELLED_MESSAGE });
-        }, { once: true });
-      }),
-      { onComplete }
+      (signal) =>
+        new Promise((resolve) => {
+          signal.addEventListener(
+            "abort",
+            () => {
+              resolve({ success: false, error: OPERATION_CANCELLED_MESSAGE });
+            },
+            { once: true },
+          );
+        }),
+      { onComplete },
     );
     // Let job1's runner attach its abort listener before it is superseded.
     await Promise.resolve();
@@ -321,13 +355,13 @@ describe("ScreenshotJobTracker", () => {
     const job2 = ScreenshotJobTracker.startJob(
       "device-a",
       async () => ({ success: true, path: "latest" }),
-      { onComplete }
+      { onComplete },
     );
 
     await Promise.all([job1.promise, job2.promise]);
 
-    const c1 = completions.find(c => c.jobId === job1.jobId)!;
-    const c2 = completions.find(c => c.jobId === job2.jobId)!;
+    const c1 = completions.find((c) => c.jobId === job1.jobId)!;
+    const c2 = completions.find((c) => c.jobId === job2.jobId)!;
     // The superseded job is no longer latest and was aborted; its result must
     // not be allowed to overwrite the session cache.
     expect(c1.isLatest).toBe(false);
@@ -343,8 +377,8 @@ describe("ScreenshotJobTracker", () => {
       {
         onComplete: () => {
           throw new Error("handler boom");
-        }
-      }
+        },
+      },
     );
 
     const result = await job.promise;
@@ -361,13 +395,13 @@ describe("ScreenshotJobTracker", () => {
     let runnerSawAbort = false;
     const job = ScreenshotJobTracker.startJob(
       "device-c",
-      async signal => {
+      async (signal) => {
         runnerSawAbort = signal.aborted;
         return signal.aborted
           ? { success: false, error: OPERATION_CANCELLED_MESSAGE }
           : { success: true };
       },
-      { parentSignal: parent.signal }
+      { parentSignal: parent.signal },
     );
 
     const result = await job.promise;
@@ -385,14 +419,12 @@ describe("ScreenshotJobTracker", () => {
       },
       removeEventListener: (_type: string, cb: EventListenerOrEventListenerObject) => {
         listeners.delete(cb);
-      }
+      },
     } as unknown as AbortSignal;
 
-    const job = ScreenshotJobTracker.startJob(
-      "device-d",
-      async () => ({ success: true }),
-      { parentSignal }
-    );
+    const job = ScreenshotJobTracker.startJob("device-d", async () => ({ success: true }), {
+      parentSignal,
+    });
     // While in flight the job holds exactly one abort listener on the parent.
     expect(listeners.size).toBe(1);
 
@@ -406,9 +438,10 @@ describe("ScreenshotJobTracker", () => {
   test("getMostRecentPendingDeviceId returns the last-registered device when start times tie", async () => {
     // Both jobs start at fake time 0, so their startedAt values are identical;
     // this exercises the `>=` tie rule (last registration wins).
-    const hang = (signal: AbortSignal) => new Promise<{ success: boolean }>(resolve => {
-      signal.addEventListener("abort", () => resolve({ success: false }), { once: true });
-    });
+    const hang = (signal: AbortSignal) =>
+      new Promise<{ success: boolean }>((resolve) => {
+        signal.addEventListener("abort", () => resolve({ success: false }), { once: true });
+      });
 
     ScreenshotJobTracker.startJob("device-1", hang);
     ScreenshotJobTracker.startJob("device-2", hang);
@@ -425,14 +458,19 @@ describe("ScreenshotJobTracker", () => {
       },
       removeEventListener: (_type: string, cb: EventListenerOrEventListenerObject) => {
         listeners.delete(cb);
-      }
+      },
     } as unknown as AbortSignal;
 
-    const hang = (signal: AbortSignal) => new Promise<{ success: boolean; error?: string }>(resolve => {
-      signal.addEventListener("abort", () => {
-        resolve({ success: false, error: OPERATION_CANCELLED_MESSAGE });
-      }, { once: true });
-    });
+    const hang = (signal: AbortSignal) =>
+      new Promise<{ success: boolean; error?: string }>((resolve) => {
+        signal.addEventListener(
+          "abort",
+          () => {
+            resolve({ success: false, error: OPERATION_CANCELLED_MESSAGE });
+          },
+          { once: true },
+        );
+      });
 
     const jobA = ScreenshotJobTracker.startJob("device-1", hang);
     const jobB = ScreenshotJobTracker.startJob("device-2", hang, { parentSignal });
@@ -465,16 +503,20 @@ describe("ScreenshotJobTracker", () => {
   });
 
   test("waitForCompletion returns null when the job times out", async () => {
-    ScreenshotJobTracker.startJob("device-2", async signal => {
-      return new Promise(resolve => {
+    ScreenshotJobTracker.startJob("device-2", async (signal) => {
+      return new Promise((resolve) => {
         const timeoutId = fakeTimer.setTimeout(() => {
           resolve({ success: true, path: "late" });
         }, 200);
 
-        signal.addEventListener("abort", () => {
-          fakeTimer.clearTimeout(timeoutId);
-          resolve({ success: false, error: OPERATION_CANCELLED_MESSAGE });
-        }, { once: true });
+        signal.addEventListener(
+          "abort",
+          () => {
+            fakeTimer.clearTimeout(timeoutId);
+            resolve({ success: false, error: OPERATION_CANCELLED_MESSAGE });
+          },
+          { once: true },
+        );
       });
     });
 

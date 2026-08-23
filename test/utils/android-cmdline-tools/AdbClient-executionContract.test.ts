@@ -33,7 +33,7 @@ describe("AdbClient retry contract", () => {
       },
       null,
       defaultRetryExecutor,
-      new FakeTimer()
+      new FakeTimer(),
     );
     const internals = client as unknown as {
       getBaseCommandParts: () => Promise<{ adbPath: string; baseArgs: string[] }>;
@@ -46,7 +46,7 @@ describe("AdbClient retry contract", () => {
     await client.execute(["shell", "input", "keyevent", "KEYCODE_TAB"], {
       timeoutMs: 1234,
       noRetry: true,
-      beforeDispatch: async timeoutMs => {
+      beforeDispatch: async (timeoutMs) => {
         events.push(`validated:${timeoutMs}`);
       },
     });
@@ -64,7 +64,7 @@ describe("AdbClient retry contract", () => {
       },
       null,
       defaultRetryExecutor,
-      new FakeTimer()
+      new FakeTimer(),
     );
 
     await expect(
@@ -73,7 +73,7 @@ describe("AdbClient retry contract", () => {
         beforeDispatch: async () => {
           throw new Error("stale frame context");
         },
-      })
+      }),
     ).rejects.toThrow("stale frame context");
 
     expect(dispatches).toBe(0);
@@ -133,7 +133,7 @@ describe("AdbClient abort-reason preservation", () => {
     const client = new AdbClient(DEVICE, alwaysThrows, null, defaultRetryExecutor, new FakeTimer());
 
     await expect(
-      client.executeCommand("shell echo hi", undefined, undefined, true, controller.signal)
+      client.executeCommand("shell echo hi", undefined, undefined, true, controller.signal),
     ).rejects.toThrow("device-disconnected:emulator-5554");
   });
 
@@ -143,7 +143,7 @@ describe("AdbClient abort-reason preservation", () => {
     const client = new AdbClient(DEVICE, alwaysThrows, null, defaultRetryExecutor, new FakeTimer());
 
     await expect(
-      client.executeCommand("shell echo hi", undefined, undefined, true, controller.signal)
+      client.executeCommand("shell echo hi", undefined, undefined, true, controller.signal),
     ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
   });
 
@@ -153,7 +153,7 @@ describe("AdbClient abort-reason preservation", () => {
     const client = new AdbClient(DEVICE, alwaysThrows, null, defaultRetryExecutor, new FakeTimer());
 
     await expect(
-      client.executeCommand("shell echo hi", undefined, undefined, true, controller.signal)
+      client.executeCommand("shell echo hi", undefined, undefined, true, controller.signal),
     ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
   });
 });
@@ -297,9 +297,16 @@ describe("AdbClient.getDeviceTimestampMs three-tier fallback", () => {
 });
 
 describe("AdbClient argv construction (parseCommandArgs)", () => {
-  function recorder(): { argvs: string[][]; exec: (file: string, args: string[], maxBuffer: number | undefined) => Promise<ExecResult> } {
+  function recorder(): {
+    argvs: string[][];
+    exec: (file: string, args: string[], maxBuffer: number | undefined) => Promise<ExecResult>;
+  } {
     const argvs: string[][] = [];
-    const exec = (_file: string, args: string[], _maxBuffer: number | undefined): Promise<ExecResult> => {
+    const exec = (
+      _file: string,
+      args: string[],
+      _maxBuffer: number | undefined,
+    ): Promise<ExecResult> => {
       argvs.push(args);
       return Promise.resolve(ok(""));
     };
@@ -310,7 +317,7 @@ describe("AdbClient argv construction (parseCommandArgs)", () => {
     const { argvs, exec } = recorder();
     const client = new AdbClient(DEVICE, exec, null, defaultRetryExecutor, new FakeTimer());
 
-    await client.executeCommand("shell \"pm list packages | grep foo\"");
+    await client.executeCommand('shell "pm list packages | grep foo"');
 
     expect(argvs).toEqual([["-s", "emulator-5554", "shell", "pm list packages | grep foo"]]);
   });
@@ -328,7 +335,7 @@ describe("AdbClient argv construction (parseCommandArgs)", () => {
     const { argvs, exec } = recorder();
     const client = new AdbClient(DEVICE, exec, null, defaultRetryExecutor, new FakeTimer());
 
-    await client.executeCommand("install \"/tmp/my app.apk\"");
+    await client.executeCommand('install "/tmp/my app.apk"');
 
     expect(argvs).toEqual([["-s", "emulator-5554", "install", "/tmp/my app.apk"]]);
   });

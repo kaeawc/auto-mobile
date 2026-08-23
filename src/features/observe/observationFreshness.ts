@@ -63,7 +63,7 @@ export interface FreshnessInputs {
    * Did the delegate obtain a tree it verified against the device on THIS call,
    * as opposed to serving a host-side cache entry unverified? `undefined` when
    * the source cannot report it (no delegate plumbing on that platform yet).
-  */
+   */
   verified?: boolean;
   /** The hierarchy could not be retrieved, so no freshness verdict is possible. */
   unavailable?: boolean;
@@ -104,12 +104,11 @@ function computeRequestedFreshness(
   requestedAfter: number,
   actualTimestamp: number | undefined,
   ageMs: number | undefined,
-  verified: boolean | undefined
+  verified: boolean | undefined,
 ): FreshnessVerdict {
   const isFresh = actualTimestamp !== undefined && actualTimestamp >= requestedAfter;
-  const staleDurationMs = !isFresh && actualTimestamp !== undefined
-    ? requestedAfter - actualTimestamp
-    : undefined;
+  const staleDurationMs =
+    !isFresh && actualTimestamp !== undefined ? requestedAfter - actualTimestamp : undefined;
   return {
     requestedAfter,
     actualTimestamp,
@@ -138,7 +137,7 @@ function computeRequestedFreshness(
 function resolveAgeMs(
   hostAgeBasisMs: number | undefined,
   actualTimestamp: number | undefined,
-  now: number
+  now: number,
 ): number | undefined {
   const ageBasis = hostAgeBasisMs ?? actualTimestamp;
   return ageBasis !== undefined ? Math.max(0, now - ageBasis) : undefined;

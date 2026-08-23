@@ -4,7 +4,7 @@ import { sql } from "kysely";
 async function columnExists(
   db: Kysely<unknown>,
   tableName: string,
-  columnName: string
+  columnName: string,
 ): Promise<boolean> {
   const result = await sql<{ name: string }>`
     SELECT name FROM pragma_table_info(${tableName}) WHERE name = ${columnName}
@@ -12,10 +12,7 @@ async function columnExists(
   return result.rows.length > 0;
 }
 
-async function tableExists(
-  db: Kysely<unknown>,
-  tableName: string
-): Promise<boolean> {
+async function tableExists(db: Kysely<unknown>, tableName: string): Promise<boolean> {
   const result = await sql<{ name: string }>`
     SELECT name FROM sqlite_master WHERE type = 'table' AND name = ${tableName}
   `.execute(db);
@@ -25,26 +22,17 @@ async function tableExists(
 export async function up(db: Kysely<unknown>): Promise<void> {
   // Add error_message column to test_executions for storing failure details
   if (!(await columnExists(db, "test_executions", "error_message"))) {
-    await db.schema
-      .alterTable("test_executions")
-      .addColumn("error_message", "text")
-      .execute();
+    await db.schema.alterTable("test_executions").addColumn("error_message", "text").execute();
   }
 
   // Add video_path for test recordings
   if (!(await columnExists(db, "test_executions", "video_path"))) {
-    await db.schema
-      .alterTable("test_executions")
-      .addColumn("video_path", "text")
-      .execute();
+    await db.schema.alterTable("test_executions").addColumn("video_path", "text").execute();
   }
 
   // Add snapshot_path for test snapshots
   if (!(await columnExists(db, "test_executions", "snapshot_path"))) {
-    await db.schema
-      .alterTable("test_executions")
-      .addColumn("snapshot_path", "text")
-      .execute();
+    await db.schema.alterTable("test_executions").addColumn("snapshot_path", "text").execute();
   }
 
   // Create test_execution_steps table for step-level data (if not exists)
@@ -52,22 +40,20 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     await db.schema
       .createTable("test_execution_steps")
       .ifNotExists()
-      .addColumn("id", "integer", col => col.primaryKey().autoIncrement())
-      .addColumn("execution_id", "integer", col =>
-        col.notNull().references("test_executions.id").onDelete("cascade")
+      .addColumn("id", "integer", (col) => col.primaryKey().autoIncrement())
+      .addColumn("execution_id", "integer", (col) =>
+        col.notNull().references("test_executions.id").onDelete("cascade"),
       )
-      .addColumn("step_index", "integer", col => col.notNull())
-      .addColumn("action", "text", col => col.notNull()) // Tool name or action type
+      .addColumn("step_index", "integer", (col) => col.notNull())
+      .addColumn("action", "text", (col) => col.notNull()) // Tool name or action type
       .addColumn("target", "text") // Element target description
-      .addColumn("status", "text", col => col.notNull()) // completed, failed, skipped
-      .addColumn("duration_ms", "integer", col => col.notNull())
+      .addColumn("status", "text", (col) => col.notNull()) // completed, failed, skipped
+      .addColumn("duration_ms", "integer", (col) => col.notNull())
       .addColumn("screen_name", "text") // Screen name when step was executed
       .addColumn("screenshot_path", "text") // Screenshot captured for this step
       .addColumn("error_message", "text") // Error message if step failed
       .addColumn("details_json", "text") // Additional step details as JSON
-      .addColumn("created_at", "text", col =>
-        col.notNull().defaultTo(sql`(datetime('now'))`)
-      )
+      .addColumn("created_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
       .execute();
 
     await db.schema
@@ -83,16 +69,14 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     await db.schema
       .createTable("test_execution_screens")
       .ifNotExists()
-      .addColumn("id", "integer", col => col.primaryKey().autoIncrement())
-      .addColumn("execution_id", "integer", col =>
-        col.notNull().references("test_executions.id").onDelete("cascade")
+      .addColumn("id", "integer", (col) => col.primaryKey().autoIncrement())
+      .addColumn("execution_id", "integer", (col) =>
+        col.notNull().references("test_executions.id").onDelete("cascade"),
       )
-      .addColumn("screen_name", "text", col => col.notNull())
-      .addColumn("visit_order", "integer", col => col.notNull())
-      .addColumn("timestamp", "integer", col => col.notNull())
-      .addColumn("created_at", "text", col =>
-        col.notNull().defaultTo(sql`(datetime('now'))`)
-      )
+      .addColumn("screen_name", "text", (col) => col.notNull())
+      .addColumn("visit_order", "integer", (col) => col.notNull())
+      .addColumn("timestamp", "integer", (col) => col.notNull())
+      .addColumn("created_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
       .execute();
 
     await db.schema

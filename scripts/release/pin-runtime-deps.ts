@@ -47,10 +47,7 @@ interface Manifest {
 }
 
 function loadPackageJson(): Record<string, unknown> {
-  return JSON.parse(readFileSync(PACKAGE_JSON, "utf8")) as Record<
-    string,
-    unknown
-  >;
+  return JSON.parse(readFileSync(PACKAGE_JSON, "utf8")) as Record<string, unknown>;
 }
 
 /** Type declarations and platform-native sharp packages stay out of runtime deps. */
@@ -59,11 +56,7 @@ const EXCLUDE_PREFIXES = ["@types/", "@img/sharp-"];
 // repo's build-time versions. `zod` is a direct exact pin, so every Jimp owner
 // resolves it from the same published package root instead of requiring a
 // duplicate bundle per plugin.
-const BUNDLED_RUNTIME_PACKAGES = [
-  "@jimp/diff",
-  "@jimp/js-png",
-  "parse-bmfont-xml",
-];
+const BUNDLED_RUNTIME_PACKAGES = ["@jimp/diff", "@jimp/js-png", "parse-bmfont-xml"];
 
 interface Intended {
   roots: string[];
@@ -91,8 +84,7 @@ function computeIntended(roots: string[]): Intended {
   }
   const repartition = repartitionDependencies({
     currentDependencies: (pkg.dependencies as Record<string, string>) ?? {},
-    currentDevDependencies:
-      (pkg.devDependencies as Record<string, string>) ?? {},
+    currentDevDependencies: (pkg.devDependencies as Record<string, string>) ?? {},
     roots,
     closurePins: pins.dependencies,
     previousRuntimeDependencies: loadManifest()?.dependencies,
@@ -101,9 +93,7 @@ function computeIntended(roots: string[]): Intended {
   for (const name of repartition.residualUnpinned) {
     const versions = pins.versions[name];
     if (!versions || versions.length === 0) {
-      throw new Error(
-        `Residual runtime dependency ${name} has no resolved version in bun.lock.`,
-      );
+      throw new Error(`Residual runtime dependency ${name} has no resolved version in bun.lock.`);
     }
     bundledRuntimeDependencies[name] = versions;
   }
@@ -112,9 +102,7 @@ function computeIntended(roots: string[]): Intended {
     roots,
     repartition.residualUnpinned,
   );
-  const missingBundledOwners = Object.keys(
-    bundledRuntimeDependencyOwnerKeys,
-  ).filter(
+  const missingBundledOwners = Object.keys(bundledRuntimeDependencyOwnerKeys).filter(
     (ownerKey) =>
       !BUNDLED_RUNTIME_PACKAGES.some(
         (bundle) => ownerKey === bundle || ownerKey.startsWith(`${bundle}/`),
@@ -126,12 +114,10 @@ function computeIntended(roots: string[]): Intended {
     );
   }
   const bundledRuntimeDependencyOwners = Object.fromEntries(
-    Object.entries(bundledRuntimeDependencyOwnerKeys).map(
-      ([ownerKey, dependencies]) => [
-        lockKeyToNodeModulesPath(ownerKey),
-        dependencies,
-      ],
-    ),
+    Object.entries(bundledRuntimeDependencyOwnerKeys).map(([ownerKey, dependencies]) => [
+      lockKeyToNodeModulesPath(ownerKey),
+      dependencies,
+    ]),
   );
   return {
     roots,
@@ -152,9 +138,7 @@ function loadManifest(): Manifest | undefined {
 }
 
 function assertAllExact(dependencies: Record<string, string>): void {
-  const ranged = Object.entries(dependencies).filter(
-    ([, spec]) => !isExactVersion(spec),
-  );
+  const ranged = Object.entries(dependencies).filter(([, spec]) => !isExactVersion(spec));
   if (ranged.length > 0) {
     throw new Error(
       `Runtime dependencies must be exact-pinned, found ranges: ${ranged
@@ -185,15 +169,11 @@ function stableJson(value: unknown): string {
 
 function writeMode(): void {
   if (!existsSync(DIST_ENTRY)) {
-    throw new Error(
-      "dist/src/index.js not found — run `bun run build` before --write.",
-    );
+    throw new Error("dist/src/index.js not found — run `bun run build` before --write.");
   }
   const roots = deriveRootsFromDist(DIST_DIR);
   if (roots.length === 0) {
-    throw new Error(
-      "No runtime roots derived from dist — refusing to empty the dependency graph.",
-    );
+    throw new Error("No runtime roots derived from dist — refusing to empty the dependency graph.");
   }
   const intended = computeIntended(roots);
   assertAllExact(intended.dependencies);
@@ -217,7 +197,7 @@ function writeMode(): void {
   writeFileSync(MANIFEST, stableJson(manifest));
 
   console.log(
-      `Pinned ${Object.keys(intended.dependencies).length} runtime dependencies; ` +
+    `Pinned ${Object.keys(intended.dependencies).length} runtime dependencies; ` +
       `moved ${Object.keys(intended.devDependencies).length} to devDependencies; ` +
       `bundled ${Object.keys(intended.bundledRuntimeDependencyOwners).length} conflicting runtime owners.`,
   );
@@ -240,9 +220,7 @@ function checkMode(): void {
     : [];
 
   if (JSON.stringify(currentDeps) !== JSON.stringify(intended.dependencies)) {
-    errors.push(
-      "package.json `dependencies` differ from the intended pinned runtime graph.",
-    );
+    errors.push("package.json `dependencies` differ from the intended pinned runtime graph.");
   }
   // devDependencies must be a superset (the intended dev set); order-insensitive.
   for (const [name, spec] of Object.entries(intended.devDependencies)) {
@@ -252,10 +230,7 @@ function checkMode(): void {
       );
     }
   }
-  if (
-    JSON.stringify(currentBundled) !==
-    JSON.stringify([...intended.bundledDependencies].sort())
-  ) {
+  if (JSON.stringify(currentBundled) !== JSON.stringify([...intended.bundledDependencies].sort())) {
     errors.push(
       "package.json `bundledDependencies` differ from the required bundled runtime roots.",
     );
@@ -268,13 +243,8 @@ function checkMode(): void {
     if (!manifest) {
       throw new Error(`Could not load manifest ${MANIFEST}.`);
     }
-    if (
-      JSON.stringify(manifest.dependencies) !==
-      JSON.stringify(intended.dependencies)
-    ) {
-      errors.push(
-        "Manifest `dependencies` are out of sync with the intended pinned graph.",
-      );
+    if (JSON.stringify(manifest.dependencies) !== JSON.stringify(intended.dependencies)) {
+      errors.push("Manifest `dependencies` are out of sync with the intended pinned graph.");
     }
     if (
       JSON.stringify(manifest.bundledRuntimeDependencies) !==
@@ -301,10 +271,7 @@ function checkMode(): void {
     // Validation run where dist/ is absent.
     if (existsSync(DIST_ENTRY)) {
       const distRoots = deriveRootsFromDist(DIST_DIR);
-      if (
-        JSON.stringify([...distRoots].sort()) !==
-        JSON.stringify([...manifest.roots].sort())
-      ) {
+      if (JSON.stringify([...distRoots].sort()) !== JSON.stringify([...manifest.roots].sort())) {
         errors.push(
           `Manifest \`roots\` [${[...manifest.roots].sort().join(", ")}] differ from the roots ` +
             `the built artifact imports [${distRoots.join(", ")}] — run --write to refresh.`,
@@ -318,9 +285,7 @@ function checkMode(): void {
     for (const error of errors) {
       console.error(`  - ${error}`);
     }
-    console.error(
-      "Refresh with: bun scripts/release/pin-runtime-deps.ts --write && bun install",
-    );
+    console.error("Refresh with: bun scripts/release/pin-runtime-deps.ts --write && bun install");
     process.exit(1);
   }
   console.log(

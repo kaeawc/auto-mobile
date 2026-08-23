@@ -28,7 +28,7 @@ const iosDevice: BootedDevice = {
 
 function createFakeDeviceManager(
   devices: BootedDevice[],
-  succeededPlatforms: Set<"android" | "ios"> = new Set(["android", "ios"])
+  succeededPlatforms: Set<"android" | "ios"> = new Set(["android", "ios"]),
 ) {
   return {
     getBootedDevicesDetailed: mock(async () => ({
@@ -59,7 +59,7 @@ function sendRequest(
   socketPath: string,
   method: string,
   params: Record<string, unknown> = {},
-  timeoutMs?: number
+  timeoutMs?: number,
 ): Promise<{ response: DaemonResponse; frameCount: number }> {
   const request: DaemonRequest = {
     id: randomUUID(),
@@ -108,15 +108,25 @@ describe("UnixSocketServer input/key", () => {
     });
     InputKey.prototype.press = press;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(),
+      fakeTimer,
+    );
     server.mcpClientFactory = createMcpClient;
     await server.start();
 
-    const { response, frameCount } = await sendRequest(socketPath, "input/key", {
-      platform: "android",
-      deviceId: "emulator-5554",
-      key: "enter",
-    }, 1234);
+    const { response, frameCount } = await sendRequest(
+      socketPath,
+      "input/key",
+      {
+        platform: "android",
+        deviceId: "emulator-5554",
+        key: "enter",
+      },
+      1234,
+    );
 
     expect(frameCount).toBe(1);
     expect(response.success).toBe(true);
@@ -139,8 +149,14 @@ describe("UnixSocketServer input/key", () => {
     }));
     InputKey.prototype.press = press;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
-    (server as unknown as { requireCurrentFrameContext: () => void }).requireCurrentFrameContext = () => {};
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(),
+      fakeTimer,
+    );
+    (server as unknown as { requireCurrentFrameContext: () => void }).requireCurrentFrameContext =
+      () => {};
     await server.start();
 
     const { response } = await sendRequest(socketPath, "input/key", {
@@ -163,7 +179,12 @@ describe("UnixSocketServer input/key", () => {
     }));
     InputKey.prototype.press = press;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(),
+      fakeTimer,
+    );
     await server.start();
 
     const { response, frameCount } = await sendRequest(socketPath, "input/key", {
@@ -174,7 +195,9 @@ describe("UnixSocketServer input/key", () => {
 
     expect(frameCount).toBe(1);
     expect(response.success).toBe(false);
-    expect(response.error).toBe("input/key is unsupported on ios; CtrlProxy does not expose discrete key events");
+    expect(response.error).toBe(
+      "input/key is unsupported on ios; CtrlProxy does not expose discrete key events",
+    );
     expect(press).not.toHaveBeenCalled();
   });
 
@@ -183,7 +206,12 @@ describe("UnixSocketServer input/key", () => {
       throw new Error("iOS unsupported should be reported before routing");
     });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([]));
-    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(),
+      fakeTimer,
+    );
     await server.start();
 
     const { response, frameCount } = await sendRequest(socketPath, "input/key", {
@@ -193,18 +221,27 @@ describe("UnixSocketServer input/key", () => {
 
     expect(frameCount).toBe(1);
     expect(response.success).toBe(false);
-    expect(response.error).toBe("input/key is unsupported on ios; CtrlProxy does not expose discrete key events");
+    expect(response.error).toBe(
+      "input/key is unsupported on ios; CtrlProxy does not expose discrete key events",
+    );
   });
 
   test("returns the iOS unsupported error without requiring an iOS deviceId", async () => {
     InputKey.prototype.press = mock(async () => {
       throw new Error("iOS unsupported should be reported before routing");
     });
-    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([
-      iosDevice,
-      { ...iosDevice, deviceId: "ios-sim-2", name: "iPhone 16 Pro" },
-    ]));
-    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    PlatformDeviceManagerFactory.setInstance(
+      createFakeDeviceManager([
+        iosDevice,
+        { ...iosDevice, deviceId: "ios-sim-2", name: "iPhone 16 Pro" },
+      ]),
+    );
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(),
+      fakeTimer,
+    );
     await server.start();
 
     const { response, frameCount } = await sendRequest(socketPath, "input/key", {
@@ -214,7 +251,9 @@ describe("UnixSocketServer input/key", () => {
 
     expect(frameCount).toBe(1);
     expect(response.success).toBe(false);
-    expect(response.error).toBe("input/key is unsupported on ios; CtrlProxy does not expose discrete key events");
+    expect(response.error).toBe(
+      "input/key is unsupported on ios; CtrlProxy does not expose discrete key events",
+    );
   });
 
   test("validates the key payload and rejects modifiers in the first version", async () => {
@@ -222,7 +261,12 @@ describe("UnixSocketServer input/key", () => {
       throw new Error("validation should fail before routing");
     });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(),
+      fakeTimer,
+    );
     await server.start();
 
     const missing = await sendRequest(socketPath, "input/key", {
@@ -243,7 +287,7 @@ describe("UnixSocketServer input/key", () => {
     expect(missing.frameCount).toBe(1);
     expect(unsupported.response.success).toBe(false);
     expect(unsupported.response.error).toBe(
-      "input/key key must be one of: enter, tab, escape, backspace, delete, arrow_up, arrow_down, arrow_left, arrow_right"
+      "input/key key must be one of: enter, tab, escape, backspace, delete, arrow_up, arrow_down, arrow_left, arrow_right",
     );
     expect(unsupported.frameCount).toBe(1);
     expect(modifiers.response.success).toBe(false);

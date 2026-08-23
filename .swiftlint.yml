@@ -31,14 +31,14 @@ disabled_rules:
   - void_return
   - sorted_imports
   - closure_spacing
-  - trailing_comma  # SwiftFormat uses --commas always
+  - trailing_comma # SwiftFormat uses --commas always
 
   # Optional rules we don't want to enforce
-  - line_length  # SwiftFormat handles line wrapping
-  - file_length  # Can be overly restrictive for valid large files
-  - type_body_length  # Can be overly restrictive
-  - function_body_length  # Can be overly restrictive
-  - function_parameter_count  # Some APIs legitimately need many parameters
+  - line_length # SwiftFormat handles line wrapping
+  - file_length # Can be overly restrictive for valid large files
+  - type_body_length # Can be overly restrictive
+  - function_body_length # Can be overly restrictive
+  - function_parameter_count # Some APIs legitimately need many parameters
 
 # Opt-in rules (not enabled by default)
 # Only enable rules that add clear value without being too noisy

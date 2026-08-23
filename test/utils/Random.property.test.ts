@@ -20,22 +20,22 @@ describe("CryptoRandom (property-based)", () => {
         const value = new CryptoRandom().next();
         return value >= 0 && value < 1;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
   test("pick() always returns a member of the input array", () => {
     fc.assert(
-      fc.property(nonEmptyArray, items => items.includes(new CryptoRandom().pick(items))),
-      RUN_OPTIONS
+      fc.property(nonEmptyArray, (items) => items.includes(new CryptoRandom().pick(items))),
+      RUN_OPTIONS,
     );
   });
 
   test("pick() from a single-element array returns that element", () => {
     fc.assert(
       // includes() uses SameValueZero so a NaN element still matches itself.
-      fc.property(fc.anything(), only => [only].includes(new CryptoRandom().pick([only]))),
-      RUN_OPTIONS
+      fc.property(fc.anything(), (only) => [only].includes(new CryptoRandom().pick([only]))),
+      RUN_OPTIONS,
     );
   });
 
@@ -46,7 +46,7 @@ describe("CryptoRandom (property-based)", () => {
         expect(() => random.pick([])).toThrow(/empty array/);
         return true;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 });

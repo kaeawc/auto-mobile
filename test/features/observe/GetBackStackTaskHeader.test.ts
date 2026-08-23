@@ -100,7 +100,7 @@ describe("modern Task{...} header (#4223)", () => {
   test("parses the task id out of the Task{<hash> #id ...} header", async () => {
     const result = await parse(MODERN_TWO_TASKS);
 
-    expect(result.tasks.map(t => t.id)).toEqual([61, 1]);
+    expect(result.tasks.map((t) => t.id)).toEqual([61, 1]);
   });
 
   test("reads the affinity from the header's A= token", async () => {
@@ -121,7 +121,7 @@ describe("modern Task{...} header (#4223)", () => {
   test("counts the task's own Hist entries rather than trusting sz=", async () => {
     const result = await parse(MODERN_TWO_TASKS);
 
-    expect(result.tasks.map(t => t.numActivities)).toEqual([2, 1]);
+    expect(result.tasks.map((t) => t.numActivities)).toEqual([2, 1]);
   });
 
   test("carries the header affinity onto the task's activities", async () => {
@@ -149,7 +149,7 @@ describe("modern Task{...} header (#4223)", () => {
       * Hist  #0: ActivityRecord{bbb u0 com.example/.MainActivity t12}
 `);
 
-    expect(result.tasks.map(t => t.id)).toEqual([12]);
+    expect(result.tasks.map((t) => t.id)).toEqual([12]);
   });
 
   test("does not invent tasks from inline Task{...} references", async () => {
@@ -163,7 +163,7 @@ describe("modern Task{...} header (#4223)", () => {
       * Hist  #0: ActivityRecord{bbb u0 com.example/.MainActivity t12}
 `);
 
-    expect(result.tasks.map(t => t.id)).toEqual([12]);
+    expect(result.tasks.map((t) => t.id)).toEqual([12]);
   });
 
   test("still parses the legacy Task id # and TaskRecord{} headers", async () => {
@@ -174,7 +174,7 @@ describe("modern Task{...} header (#4223)", () => {
     numActivities=3
       * Hist #0: ActivityRecord{aaa u0 com.example/.MainActivity t7}
 `);
-    expect(legacy.tasks.map(t => t.id)).toEqual([7]);
+    expect(legacy.tasks.map((t) => t.id)).toEqual([7]);
     expect(legacy.tasks[0].affinity).toBe("com.example");
     // The explicit numActivities= line wins over the Hist count.
     expect(legacy.tasks[0].numActivities).toBe(3);
@@ -183,7 +183,7 @@ describe("modern Task{...} header (#4223)", () => {
     TaskRecord{task123 #123 A=dev.example U=0 StackId=1 sz=3}
       * Hist #0: ActivityRecord{aaa u0 dev.example/.MainActivity t123}
 `);
-    expect(taskRecord.tasks.map(t => t.id)).toEqual([123]);
+    expect(taskRecord.tasks.map((t) => t.id)).toEqual([123]);
   });
 });
 
@@ -201,13 +201,13 @@ describe("#4222's claim that depth/currentTaskId are independent of the task hea
 
   test("depth and currentTaskId are identical with the header line removed", async () => {
     const withoutHeaders = MODERN_TWO_TASKS.split("\n")
-      .filter(line => !/^\s*\*\s*Task\{/.test(line))
+      .filter((line) => !/^\s*\*\s*Task\{/.test(line))
       .join("\n");
     const result = await parse(withoutHeaders);
 
     expect(result.tasks).toEqual([]);
     expect(result.currentTaskId).toBe(61);
     expect(result.depth).toBe(1);
-    expect(result.activities.map(a => a.taskId)).toEqual([61, 61, 1]);
+    expect(result.activities.map((a) => a.taskId)).toEqual([61, 61, 1]);
   });
 });

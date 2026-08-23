@@ -10,7 +10,7 @@ const RUN_OPTIONS = { seed: 1_234_567, numRuns: 300 } as const;
 // the monotonicity tolerance below is safe.
 const sortedValues = fc
   .array(fc.integer({ min: -1_000_000, max: 1_000_000 }), { minLength: 1, maxLength: 64 })
-  .map(xs => [...xs].sort((a, b) => a - b));
+  .map((xs) => [...xs].sort((a, b) => a - b));
 
 const percentileP = fc.double({ min: 0, max: 100, noNaN: true });
 
@@ -21,19 +21,19 @@ describe("computePercentile (property-based)", () => {
         const result = computePercentile(sorted, p);
         return result >= sorted[0] && result <= sorted[sorted.length - 1];
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
   test("the endpoints select the first and last elements", () => {
     fc.assert(
-      fc.property(sortedValues, sorted => {
+      fc.property(sortedValues, (sorted) => {
         return (
           computePercentile(sorted, 0) === sorted[0] &&
           computePercentile(sorted, 100) === sorted[sorted.length - 1]
         );
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -46,14 +46,14 @@ describe("computePercentile (property-based)", () => {
         // absolute epsilon for floating-point rounding at the segment joins.
         return computePercentile(sorted, lo) <= computePercentile(sorted, hi) + 1e-6;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
   test("returns 0 for an empty array regardless of the percentile", () => {
     fc.assert(
-      fc.property(percentileP, p => computePercentile([], p) === 0),
-      RUN_OPTIONS
+      fc.property(percentileP, (p) => computePercentile([], p) === 0),
+      RUN_OPTIONS,
     );
   });
 });

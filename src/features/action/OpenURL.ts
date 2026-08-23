@@ -3,7 +3,10 @@ import { BaseVisualChange } from "./BaseVisualChange";
 import { BootedDevice, OpenURLResult } from "../../models";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { toActionableError } from "../../models/ActionableError";
-import { DeviceAppManager, DeviceUrlLauncher } from "../../utils/ios-cmdline-tools/DeviceAppManager";
+import {
+  DeviceAppManager,
+  DeviceUrlLauncher,
+} from "../../utils/ios-cmdline-tools/DeviceAppManager";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { IOSCtrlProxyManager } from "../../utils/IOSCtrlProxyManager";
 import { logger } from "../../utils/logger";
@@ -20,14 +23,7 @@ const SAFARI_BUNDLE_ID = "com.apple.mobilesafari";
  * bundle, which almost certainly can't open a `mailto:`/`tel:` payload. The
  * simulator path already gets this for free via `simctl openurl`.
  */
-const SYSTEM_URL_SCHEMES = new Set([
-  "mailto",
-  "tel",
-  "sms",
-  "facetime",
-  "facetime-audio",
-  "maps",
-]);
+const SYSTEM_URL_SCHEMES = new Set(["mailto", "tel", "sms", "facetime", "facetime-audio", "maps"]);
 
 /** True when `url`'s scheme is one iOS routes to a built-in system handler. */
 const isSystemUrlScheme = (url: string): boolean => {
@@ -36,7 +32,6 @@ const isSystemUrlScheme = (url: string): boolean => {
 };
 
 export class OpenURL extends BaseVisualChange {
-
   private readonly simctl: SimCtlClient | null;
   private readonly devicectl: DeviceUrlLauncher | null;
 
@@ -50,7 +45,7 @@ export class OpenURL extends BaseVisualChange {
     device: BootedDevice,
     adb: AdbClient | null = null,
     simctl: SimCtlClient | null = null,
-    devicectl: DeviceUrlLauncher | null = null
+    devicectl: DeviceUrlLauncher | null = null,
   ) {
     super(device, adb);
     this.device = device;
@@ -58,9 +53,7 @@ export class OpenURL extends BaseVisualChange {
     this.devicectl = devicectl;
   }
 
-  async execute(
-    url: string,
-  ): Promise<OpenURLResult> {
+  async execute(url: string): Promise<OpenURLResult> {
     const perf = createGlobalPerformanceTracker();
     perf.serial("openURL");
 
@@ -73,7 +66,7 @@ export class OpenURL extends BaseVisualChange {
       return {
         success: false,
         url: url || "",
-        error: "Invalid URL provided"
+        error: "Invalid URL provided",
       };
     }
 
@@ -91,7 +84,7 @@ export class OpenURL extends BaseVisualChange {
         return {
           success: false,
           url: trimmedUrl,
-          error: "Invalid package URL - no package name specified"
+          error: "Invalid package URL - no package name specified",
         };
       }
 
@@ -101,7 +94,7 @@ export class OpenURL extends BaseVisualChange {
         // Use LaunchApp to properly launch the application
         const launchApp = new LaunchApp(this.device, this.adb);
         const launchResult = await perf.track("launchApp", () =>
-          launchApp.execute(packageName, false, true)
+          launchApp.execute(packageName, false, true),
         );
 
         perf.end();
@@ -109,14 +102,14 @@ export class OpenURL extends BaseVisualChange {
           logger.info(`[OpenURL] Successfully launched app ${packageName}`);
           return {
             success: true,
-            url: trimmedUrl
+            url: trimmedUrl,
           };
         } else {
           logger.error(`[OpenURL] Failed to launch app ${packageName}: ${launchResult.error}`);
           return {
             success: false,
             url: trimmedUrl,
-            error: `Failed to launch app: ${launchResult.error}`
+            error: `Failed to launch app: ${launchResult.error}`,
           };
         }
       } catch (error) {
@@ -125,7 +118,7 @@ export class OpenURL extends BaseVisualChange {
         return {
           success: false,
           url: trimmedUrl,
-          error: toActionableError(error, "Failed to launch app").message
+          error: toActionableError(error, "Failed to launch app").message,
         };
       }
     }
@@ -138,13 +131,9 @@ export class OpenURL extends BaseVisualChange {
         // Platform-specific URL opening execution
         switch (this.device.platform) {
           case "android":
-            return await perf.track("androidOpenURL", () =>
-              this.executeAndroidOpenURL(trimmedUrl)
-            );
+            return await perf.track("androidOpenURL", () => this.executeAndroidOpenURL(trimmedUrl));
           case "ios":
-            return await perf.track("iOSOpenURL", () =>
-              this.executeiOSOpenURL(trimmedUrl)
-            );
+            return await perf.track("iOSOpenURL", () => this.executeiOSOpenURL(trimmedUrl));
           default:
             perf.end();
             throw new Error(`Unsupported platform: ${this.device.platform}`);
@@ -153,8 +142,8 @@ export class OpenURL extends BaseVisualChange {
       {
         changeExpected: false,
         timeoutMs: 12000,
-        perf
-      }
+        perf,
+      },
     );
   }
 
@@ -179,7 +168,7 @@ export class OpenURL extends BaseVisualChange {
 
     return {
       success: true,
-      url
+      url,
     };
   }
 
@@ -213,14 +202,17 @@ export class OpenURL extends BaseVisualChange {
 
       return {
         success: true,
-        url
+        url,
       };
     } catch (error) {
       logger.error(`[OpenURL] simctl openurl failed: ${error}`);
       return {
         success: false,
         url,
-        error: toActionableError(error, `Failed to open URL on iOS simulator ${this.device.deviceId}`).message
+        error: toActionableError(
+          error,
+          `Failed to open URL on iOS simulator ${this.device.deviceId}`,
+        ).message,
       };
     }
   }
@@ -242,8 +234,9 @@ export class OpenURL extends BaseVisualChange {
       return {
         success: false,
         url,
-        error: "Opening URLs on a physical iOS device requires Xcode 15+ and iOS 17+ (devicectl). " +
-               "Update Xcode/iOS, or open the URL on a simulator."
+        error:
+          "Opening URLs on a physical iOS device requires Xcode 15+ and iOS 17+ (devicectl). " +
+          "Update Xcode/iOS, or open the URL on a simulator.",
       };
     }
 
@@ -262,14 +255,14 @@ export class OpenURL extends BaseVisualChange {
       await devicectl.launchWithPayloadUrl(this.device.deviceId, bundleId, url);
       return {
         success: true,
-        url
+        url,
       };
     } catch (error) {
       logger.error(`[OpenURL] devicectl open URL failed: ${error}`);
       return {
         success: false,
         url,
-        error: toActionableError(error, "Failed to open URL on physical iOS device").message
+        error: toActionableError(error, "Failed to open URL on physical iOS device").message,
       };
     }
   }

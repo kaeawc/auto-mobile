@@ -4,7 +4,8 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { serverConfig } from "../../src/utils/ServerConfig";
 
 describe("ToolRegistry.getToolDefinitions", () => {
-  const originalStructuredContentSuppressed = serverConfig.isToolResultsNoStructuredContentEnabled();
+  const originalStructuredContentSuppressed =
+    serverConfig.isToolResultsNoStructuredContentEnabled();
 
   beforeEach(() => {
     ToolRegistry.clearTools();
@@ -22,7 +23,7 @@ describe("ToolRegistry.getToolDefinitions", () => {
       "A tool with schemas worth caching",
       z.object({ value: z.string() }),
       async () => ({ content: [{ type: "text", text: "ok" }] }),
-      { outputSchema: z.object({ ok: z.boolean() }) }
+      { outputSchema: z.object({ ok: z.boolean() }) },
     );
 
     const first = ToolRegistry.getToolDefinitions()[0];
@@ -38,7 +39,7 @@ describe("ToolRegistry.getToolDefinitions", () => {
       "A tool that should be reconverted after invalidation",
       z.object({ value: z.string() }),
       async () => ({ content: [{ type: "text", text: "ok" }] }),
-      { outputSchema: z.object({ ok: z.boolean() }) }
+      { outputSchema: z.object({ ok: z.boolean() }) },
     );
 
     const cached = ToolRegistry.getToolDefinitions()[0];
@@ -56,7 +57,7 @@ describe("ToolRegistry.getToolDefinitions", () => {
       "replaceTool",
       "Original tool",
       z.object({ before: z.string() }),
-      async () => ({ content: [{ type: "text", text: "before" }] })
+      async () => ({ content: [{ type: "text", text: "before" }] }),
     );
     const original = ToolRegistry.getToolDefinitions()[0];
 
@@ -64,7 +65,7 @@ describe("ToolRegistry.getToolDefinitions", () => {
       "replaceTool",
       "Replacement tool",
       z.object({ after: z.number() }),
-      async () => ({ content: [{ type: "text", text: "after" }] })
+      async () => ({ content: [{ type: "text", text: "after" }] }),
     );
     const replacement = ToolRegistry.getToolDefinitions()[0];
 
@@ -78,19 +79,16 @@ describe("ToolRegistry.getToolDefinitions", () => {
       "existingTool",
       "Existing tool",
       z.object({ existing: z.string() }),
-      async () => ({ content: [{ type: "text", text: "existing" }] })
+      async () => ({ content: [{ type: "text", text: "existing" }] }),
     );
     const originalExisting = ToolRegistry.getToolDefinitions()[0];
 
-    ToolRegistry.register(
-      "addedTool",
-      "Added tool",
-      z.object({ added: z.number() }),
-      async () => ({ content: [{ type: "text", text: "added" }] })
-    );
+    ToolRegistry.register("addedTool", "Added tool", z.object({ added: z.number() }), async () => ({
+      content: [{ type: "text", text: "added" }],
+    }));
     const definitions = ToolRegistry.getToolDefinitions();
-    const existing = definitions.find(tool => tool.name === "existingTool");
-    const added = definitions.find(tool => tool.name === "addedTool");
+    const existing = definitions.find((tool) => tool.name === "existingTool");
+    const added = definitions.find((tool) => tool.name === "addedTool");
 
     expect(existing).toBeDefined();
     expect(added).toBeDefined();
@@ -103,7 +101,7 @@ describe("ToolRegistry.getToolDefinitions", () => {
       "replaceDeviceTool",
       "Original device tool",
       z.object({ before: z.string() }),
-      async () => ({ content: [{ type: "text", text: "before" }] })
+      async () => ({ content: [{ type: "text", text: "before" }] }),
     );
     const original = ToolRegistry.getToolDefinitions()[0];
 
@@ -111,7 +109,7 @@ describe("ToolRegistry.getToolDefinitions", () => {
       "replaceDeviceTool",
       "Replacement device tool",
       z.object({ after: z.number() }),
-      async () => ({ content: [{ type: "text", text: "after" }] })
+      async () => ({ content: [{ type: "text", text: "after" }] }),
     );
     const replacement = ToolRegistry.getToolDefinitions()[0];
 
@@ -125,7 +123,7 @@ describe("ToolRegistry.getToolDefinitions", () => {
       "existingDeviceTool",
       "Existing device tool",
       z.object({ existing: z.string() }),
-      async () => ({ content: [{ type: "text", text: "existing" }] })
+      async () => ({ content: [{ type: "text", text: "existing" }] }),
     );
     const originalExisting = ToolRegistry.getToolDefinitions()[0];
 
@@ -133,11 +131,11 @@ describe("ToolRegistry.getToolDefinitions", () => {
       "addedDeviceTool",
       "Added device tool",
       z.object({ added: z.number() }),
-      async () => ({ content: [{ type: "text", text: "added" }] })
+      async () => ({ content: [{ type: "text", text: "added" }] }),
     );
     const definitions = ToolRegistry.getToolDefinitions();
-    const existing = definitions.find(tool => tool.name === "existingDeviceTool");
-    const added = definitions.find(tool => tool.name === "addedDeviceTool");
+    const existing = definitions.find((tool) => tool.name === "existingDeviceTool");
+    const added = definitions.find((tool) => tool.name === "addedDeviceTool");
 
     expect(existing).toBeDefined();
     expect(added).toBeDefined();
@@ -147,10 +145,12 @@ describe("ToolRegistry.getToolDefinitions", () => {
 
   test("caches output schema variants per structured-content flag (bounds tuple always advertised)", () => {
     const boundsSchema = z.object({
-      bounds: z.union([
-        z.object({ left: z.number(), top: z.number(), width: z.number(), height: z.number() }),
-        z.tuple([z.number(), z.number(), z.number(), z.number()]),
-      ]).describe("Element bounds. Default: positional tuple [left, top, right, bottom]."),
+      bounds: z
+        .union([
+          z.object({ left: z.number(), top: z.number(), width: z.number(), height: z.number() }),
+          z.tuple([z.number(), z.number(), z.number(), z.number()]),
+        ])
+        .describe("Element bounds. Default: positional tuple [left, top, right, bottom]."),
     });
 
     ToolRegistry.register(
@@ -158,7 +158,7 @@ describe("ToolRegistry.getToolDefinitions", () => {
       "A tool whose output schema follows runtime flags",
       z.object({}),
       async () => ({ content: [{ type: "text", text: "ok" }] }),
-      { outputSchema: boundsSchema }
+      { outputSchema: boundsSchema },
     );
 
     // Bounds compaction is now an unconditional default, so the positional tuple

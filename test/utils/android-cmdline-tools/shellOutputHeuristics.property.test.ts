@@ -13,28 +13,42 @@ const oracle = (stdout: string, stderr: string): boolean => {
 
 const text = fc.string({ maxLength: 24 });
 const whitespace = fc.string({ unit: fc.constantFrom(" ", "\t", "\n"), maxLength: 4 });
-const failureMarker = fc.constantFrom("Exception", "exception", "NullPointerException", "error:", "ERROR:");
-const benign = fc.constantFrom("Success", "OK", "done", "error occurred", "no errors found", "warning: low battery", "Broadcast completed");
+const failureMarker = fc.constantFrom(
+  "Exception",
+  "exception",
+  "NullPointerException",
+  "error:",
+  "ERROR:",
+);
+const benign = fc.constantFrom(
+  "Success",
+  "OK",
+  "done",
+  "error occurred",
+  "no errors found",
+  "warning: low battery",
+  "Broadcast completed",
+);
 
 describe("outputLooksLikeShellFailure (property-based)", () => {
   test("is total (a boolean) for arbitrary output", () => {
     fc.assert(
       fc.property(text, text, (o, e) => typeof outputLooksLikeShellFailure(o, e) === "boolean"),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
   test("agrees with the exception|error: heuristic oracle", () => {
     fc.assert(
       fc.property(text, text, (o, e) => outputLooksLikeShellFailure(o, e) === oracle(o, e)),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
   test("whitespace-only (or empty) output is never a failure", () => {
     fc.assert(
       fc.property(whitespace, whitespace, (o, e) => outputLooksLikeShellFailure(o, e) === false),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -46,14 +60,14 @@ describe("outputLooksLikeShellFailure (property-based)", () => {
           outputLooksLikeShellFailure("", `${other}${marker}`)
         );
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
   test("benign output (including a plain 'error' without a colon) is not a failure", () => {
     fc.assert(
       fc.property(benign, benign, (o, e) => outputLooksLikeShellFailure(o, e) === false),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 });

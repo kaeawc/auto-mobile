@@ -102,8 +102,9 @@ describe("H264AnnexBParser", () => {
   test("drops an unterminated oversized NAL instead of retaining it indefinitely", () => {
     const parser = new H264AnnexBParser(8);
 
-    expect(() => parser.push(Buffer.concat([START_4, Buffer.alloc(5, 0x67)])))
-      .toThrow(/buffer exceeded 8 bytes/);
+    expect(() => parser.push(Buffer.concat([START_4, Buffer.alloc(5, 0x67)]))).toThrow(
+      /buffer exceeded 8 bytes/,
+    );
     // The rejected partial NAL cannot contaminate the next capture source.
     expect(parser.push(Buffer.concat([START_4, makeNal(NAL_TYPE_IDR, 2)])).length).toBe(0);
   });
@@ -219,7 +220,7 @@ describe("packetizeNalUnit", () => {
     expect(packets[2][1] & 0x40).toBe(0x40);
 
     // Reassembled fragment payloads reconstruct the original (minus NAL header).
-    const reassembled = Buffer.concat(packets.map(packet => packet.subarray(2)));
+    const reassembled = Buffer.concat(packets.map((packet) => packet.subarray(2)));
     expect(reassembled.equals(nal.subarray(1))).toBe(true);
     // Original NAL type is preserved in the FU header.
     expect(packets[0][1] & 0x1f).toBe(NAL_TYPE_IDR);
@@ -249,13 +250,10 @@ describe("packetizeNalUnit", () => {
     [0, "zero MTU cannot advance"],
     [-1, "negative MTU cannot advance"],
     [Number.NaN, "NaN MTU would truncate the NAL to an empty fragment"],
-  ])(
-    "throws instead of looping when a NAL exceeds a non-advancing mtu %p",
-    (mtu, _why) => {
-      const nal = makeNal(NAL_TYPE_IDR, 40);
-      expect(() => packetizeNalUnit(nal, mtu)).toThrow(/MTU/);
-    }
-  );
+  ])("throws instead of looping when a NAL exceeds a non-advancing mtu %p", (mtu, _why) => {
+    const nal = makeNal(NAL_TYPE_IDR, 40);
+    expect(() => packetizeNalUnit(nal, mtu)).toThrow(/MTU/);
+  });
 
   test("an infinite mtu sends the whole NAL as one packet (not a defect)", () => {
     const nal = makeNal(NAL_TYPE_IDR, 40);
@@ -272,7 +270,7 @@ describe("packetizeAccessUnit", () => {
     const units = packetizeAccessUnit([sps, idr], 10);
 
     expect(units.length).toBeGreaterThan(2);
-    const markers = units.map(unit => unit.marker);
+    const markers = units.map((unit) => unit.marker);
     expect(markers.filter(Boolean)).toHaveLength(1);
     expect(units[units.length - 1].marker).toBe(true);
     expect(units[0].marker).toBe(false);

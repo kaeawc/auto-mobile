@@ -86,7 +86,9 @@ describe("network tool schema", () => {
     iosGetInstanceSpy.mockRestore();
     androidGetInstanceSpy.mockRestore();
     if (localRunnerIpa) {
-      await fs.rm(path.dirname(localRunnerIpa), { recursive: true, force: true }).catch(() => undefined);
+      await fs
+        .rm(path.dirname(localRunnerIpa), { recursive: true, force: true })
+        .catch(() => undefined);
       localRunnerIpa = undefined;
     }
     restoreEnv("AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH", originalIosBundlePath);
@@ -125,7 +127,9 @@ describe("network tool schema", () => {
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error.issues[0].path).toEqual(["simulateErrors", "durationSeconds"]);
-      expect(result.error.issues[0].message).toBe("durationSeconds is required unless cancel is true");
+      expect(result.error.issues[0].message).toBe(
+        "durationSeconds is required unless cancel is true",
+      );
     }
   });
 
@@ -160,12 +164,14 @@ describe("network tool schema", () => {
     expect(iosGetInstanceSpy).toHaveBeenCalledWith(iosDevice);
     expect(androidGetInstanceSpy).not.toHaveBeenCalled();
     expect(iosMessages).toHaveLength(0);
-    expect(iosErrorSimulations).toEqual([{
-      enabled: true,
-      errorType: "timeout",
-      limit: 2,
-      expiresAtEpochMs: expect.any(Number),
-    }]);
+    expect(iosErrorSimulations).toEqual([
+      {
+        enabled: true,
+        errorType: "timeout",
+        limit: 2,
+        expiresAtEpochMs: expect.any(Number),
+      },
+    ]);
   });
 
   test("network simulateErrors rounds fractional iOS expiry before syncing", async () => {
@@ -187,12 +193,14 @@ describe("network tool schema", () => {
         remainingSeconds: 2,
         limit: undefined,
       });
-      expect(iosErrorSimulations).toEqual([{
-        enabled: true,
-        errorType: "timeout",
-        limit: null,
-        expiresAtEpochMs: 2_235,
-      }]);
+      expect(iosErrorSimulations).toEqual([
+        {
+          enabled: true,
+          errorType: "timeout",
+          limit: null,
+          expiresAtEpochMs: 2_235,
+        },
+      ]);
       expect(state.simulation?.expiresAt).toBe(2_235);
     } finally {
       nowSpy.mockRestore();
@@ -283,11 +291,13 @@ describe("network tool schema", () => {
       }),
     } as IOSCtrlProxyClient);
 
-    await expect(tool!.deviceAwareHandler!(iosDevice, {
-      simulateErrors: {
-        cancel: true,
-      },
-    })).rejects.toThrow("in-app server is unreachable");
+    await expect(
+      tool!.deviceAwareHandler!(iosDevice, {
+        simulateErrors: {
+          cancel: true,
+        },
+      }),
+    ).rejects.toThrow("in-app server is unreachable");
 
     expect(NetworkState.getInstance().getSnapshot().simulatingErrors).toBeUndefined();
   });
@@ -304,12 +314,14 @@ describe("network tool schema", () => {
     } as IOSCtrlProxyClient);
     const tool = ToolRegistry.getTool("network");
 
-    await expect(tool!.deviceAwareHandler!(iosDevice, {
-      simulateErrors: {
-        errorType: "timeout",
-        durationSeconds: 30,
-      },
-    })).rejects.toThrow("does not support set_network_error_simulation");
+    await expect(
+      tool!.deviceAwareHandler!(iosDevice, {
+        simulateErrors: {
+          errorType: "timeout",
+          durationSeconds: 30,
+        },
+      }),
+    ).rejects.toThrow("does not support set_network_error_simulation");
 
     expect(NetworkState.getInstance().getSnapshot().simulatingErrors).toBeUndefined();
   });
@@ -330,12 +342,14 @@ describe("network tool schema", () => {
       limit: undefined,
     });
     expect(iosGetInstanceSpy).toHaveBeenCalledWith(iosDevice);
-    expect(iosErrorSimulations).toEqual([{
-      enabled: true,
-      errorType: "timeout",
-      limit: null,
-      expiresAtEpochMs: expect.any(Number),
-    }]);
+    expect(iosErrorSimulations).toEqual([
+      {
+        enabled: true,
+        errorType: "timeout",
+        limit: null,
+        expiresAtEpochMs: expect.any(Number),
+      },
+    ]);
   });
 
   test("network simulateErrors cancel syncs bundled iOS runner once the supporting release is pinned", async () => {
@@ -351,12 +365,14 @@ describe("network tool schema", () => {
 
     expect(parseToolJson(response).simulatingErrors).toBeUndefined();
     expect(iosGetInstanceSpy).toHaveBeenCalledWith(iosDevice);
-    expect(iosErrorSimulations).toEqual([{
-      enabled: false,
-      errorType: null,
-      limit: null,
-      expiresAtEpochMs: null,
-    }]);
+    expect(iosErrorSimulations).toEqual([
+      {
+        enabled: false,
+        errorType: null,
+        limit: null,
+        expiresAtEpochMs: null,
+      },
+    ]);
     expect(state.getSnapshot().simulatingErrors).toBeUndefined();
   });
 
@@ -377,21 +393,27 @@ describe("network tool schema", () => {
       limit: undefined,
     });
     expect(iosGetInstanceSpy).toHaveBeenCalledWith(iosDevice);
-    expect(iosErrorSimulations).toEqual([{
-      enabled: true,
-      errorType: "timeout",
-      limit: null,
-      expiresAtEpochMs: expect.any(Number),
-    }]);
+    expect(iosErrorSimulations).toEqual([
+      {
+        enabled: true,
+        errorType: "timeout",
+        limit: null,
+        expiresAtEpochMs: expect.any(Number),
+      },
+    ]);
   });
 
   test("iOS network error simulation release gate opens for a supporting released runner", () => {
-    expect(isIosNetworkErrorSimulationAvailable({}, [{
-      version: "0.0.41",
-      apkSha256: "apk",
-      ipaSha256: "ipa",
-      runnerSha256: "runner",
-    }])).toBe(true);
+    expect(
+      isIosNetworkErrorSimulationAvailable({}, [
+        {
+          version: "0.0.41",
+          apkSha256: "apk",
+          ipaSha256: "ipa",
+          runnerSha256: "runner",
+        },
+      ]),
+    ).toBe(true);
   });
 
   test("an unusable override does not open the gate when the released runner is too old (#4221)", () => {
@@ -399,10 +421,15 @@ describe("network tool schema", () => {
     // override could open it. A directory or missing path must not.
     const oldRegistry = [{ version: "0.0.40", apkSha256: "a", ipaSha256: "i", runnerSha256: "r" }];
 
-    expect(isIosNetworkErrorSimulationAvailable(
-      { AUTOMOBILE_VERSION: "0.0.40", AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH: "/no/such/runner.ipa" },
-      oldRegistry
-    )).toBe(false);
+    expect(
+      isIosNetworkErrorSimulationAvailable(
+        {
+          AUTOMOBILE_VERSION: "0.0.40",
+          AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH: "/no/such/runner.ipa",
+        },
+        oldRegistry,
+      ),
+    ).toBe(false);
   });
 
   test("a usable .ipa override opens the gate even when the released runner is too old (#4221)", async () => {
@@ -410,11 +437,15 @@ describe("network tool schema", () => {
     const ipa = path.join(overrideDir, "runner.ipa");
     await fs.writeFile(ipa, ipaBytes());
     try {
-      const oldRegistry = [{ version: "0.0.40", apkSha256: "a", ipaSha256: "i", runnerSha256: "r" }];
-      expect(isIosNetworkErrorSimulationAvailable(
-        { AUTOMOBILE_VERSION: "0.0.40", AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH: ipa },
-        oldRegistry
-      )).toBe(true);
+      const oldRegistry = [
+        { version: "0.0.40", apkSha256: "a", ipaSha256: "i", runnerSha256: "r" },
+      ];
+      expect(
+        isIosNetworkErrorSimulationAvailable(
+          { AUTOMOBILE_VERSION: "0.0.40", AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH: ipa },
+          oldRegistry,
+        ),
+      ).toBe(true);
     } finally {
       await fs.rm(overrideDir, { recursive: true, force: true });
     }
@@ -451,7 +482,7 @@ describe("network tool schema", () => {
       limit: 2,
       statusCode: 500,
       responseHeaders: { "x-test": "yes" },
-      responseBody: "{\"error\":\"mocked\"}",
+      responseBody: '{"error":"mocked"}',
       contentType: "application/json",
     });
 
@@ -466,18 +497,20 @@ describe("network tool schema", () => {
     expect(iosMessages).toHaveLength(1);
     expect(JSON.parse(iosMessages[0])).toEqual({
       type: "set_network_mock_rules",
-      rules: [{
-        mockId: "mock-1",
-        host: "api\\.example\\.com",
-        path: "^/v1/items",
-        method: "GET",
-        limit: 2,
-        remaining: 2,
-        statusCode: 500,
-        responseHeaders: { "x-test": "yes" },
-        responseBody: "{\"error\":\"mocked\"}",
-        contentType: "application/json",
-      }],
+      rules: [
+        {
+          mockId: "mock-1",
+          host: "api\\.example\\.com",
+          path: "^/v1/items",
+          method: "GET",
+          limit: 2,
+          remaining: 2,
+          statusCode: 500,
+          responseHeaders: { "x-test": "yes" },
+          responseBody: '{"error":"mocked"}',
+          contentType: "application/json",
+        },
+      ],
     });
   });
 
@@ -485,10 +518,14 @@ describe("network tool schema", () => {
     serverConfig.setNetworkMockableEnabled(false);
     const tool = ToolRegistry.getTool("mockNetwork");
 
-    await expect(tool!.deviceAwareHandler!(iosDevice, {
-      host: ".*",
-      path: ".*",
-    })).rejects.toThrow("Network mocking is disabled. Start the server with --network-mockable to enable.");
+    await expect(
+      tool!.deviceAwareHandler!(iosDevice, {
+        host: ".*",
+        path: ".*",
+      }),
+    ).rejects.toThrow(
+      "Network mocking is disabled. Start the server with --network-mockable to enable.",
+    );
     expect(iosMessages).toHaveLength(0);
   });
 
@@ -532,6 +569,8 @@ describe("network tool schema", () => {
       },
     });
     expect(iosMessages).toHaveLength(1);
-    expect(JSON.parse(iosMessages[0]).rules.map((rule: { mockId: string }) => rule.mockId)).toEqual(["mock-2"]);
+    expect(JSON.parse(iosMessages[0]).rules.map((rule: { mockId: string }) => rule.mockId)).toEqual(
+      ["mock-2"],
+    );
   });
 });

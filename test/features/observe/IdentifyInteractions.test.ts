@@ -12,7 +12,10 @@ function hierarchyOf(nodes: Array<Record<string, unknown>>): ObserveResult {
     viewHierarchy: {
       hierarchy: {
         node: {
-          $: { class: "android.widget.FrameLayout", bounds: { left: 0, top: 0, right: 1080, bottom: 1920 } },
+          $: {
+            class: "android.widget.FrameLayout",
+            bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
+          },
           node: nodes.map((attrs, i) => ({ $: { bounds: bounds(i), ...attrs } })),
         },
       },
@@ -29,7 +32,7 @@ describe("IdentifyInteractions", () => {
       { screenSize: { width: 1080, height: 1920 } } as unknown as ObserveResult,
       { platform: "android" },
       "HomeScreen",
-      []
+      [],
     );
 
     expect(result.success).toBe(false);
@@ -40,24 +43,40 @@ describe("IdentifyInteractions", () => {
   test("suggests tap (not focus) for a clickable button, and focus only for an input field", () => {
     const result = classifier.analyze(
       hierarchyOf([
-        { "class": "android.widget.Button", "clickable": "true", "text": "Submit", "resource-id": "btn_submit" },
-        { "class": "android.widget.EditText", "focusable": "true", "text": "Email", "resource-id": "field_email" },
+        {
+          class: "android.widget.Button",
+          clickable: "true",
+          text: "Submit",
+          "resource-id": "btn_submit",
+        },
+        {
+          class: "android.widget.EditText",
+          focusable: "true",
+          text: "Email",
+          "resource-id": "field_email",
+        },
       ]),
       { platform: "android" },
       "HomeScreen",
-      []
+      [],
     );
 
-    const button = result.interactions.find(i => i.element?.resourceId === "btn_submit");
-    const input = result.interactions.find(i => i.element?.resourceId === "field_email");
+    const button = result.interactions.find((i) => i.element?.resourceId === "btn_submit");
+    const input = result.interactions.find((i) => i.element?.resourceId === "field_email");
 
     // A button is an action; the model must be told to tap it, not focus it.
     expect(button?.type).toBe("action");
-    expect(button?.suggestedToolCall).toEqual({ tool: "tapOn", params: { id: "btn_submit", action: "tap" } });
+    expect(button?.suggestedToolCall).toEqual({
+      tool: "tapOn",
+      params: { id: "btn_submit", action: "tap" },
+    });
 
     // Only genuine input fields get the focus action.
     expect(input?.type).toBe("input");
-    expect(input?.suggestedToolCall).toEqual({ tool: "tapOn", params: { id: "field_email", action: "focus" } });
+    expect(input?.suggestedToolCall).toEqual({
+      tool: "tapOn",
+      params: { id: "field_email", action: "focus" },
+    });
   });
 
   test("classifies 'Design system' as navigation because 'sign' is a substring (documents the false positive)", () => {
@@ -65,7 +84,7 @@ describe("IdentifyInteractions", () => {
       hierarchyOf([{ class: "android.widget.TextView", clickable: "true", text: "Design system" }]),
       { platform: "android" },
       "HomeScreen",
-      []
+      [],
     );
 
     // "Design system" contains the nav keyword "sign", so the classifier calls
@@ -81,19 +100,34 @@ describe("IdentifyInteractions", () => {
     // is discovered last, so a limit of 2 drops it in favour of the two
     // lower-confidence clickables that come first in traversal order.
     const observeResult = hierarchyOf([
-      { "class": "android.widget.Button", "clickable": "true", "text": "Submit", "resource-id": "btn_submit" },
+      {
+        class: "android.widget.Button",
+        clickable: "true",
+        text: "Submit",
+        "resource-id": "btn_submit",
+      },
       { class: "android.widget.TextView", clickable: "true", text: "Design system" },
-      { "class": "android.widget.EditText", "focusable": "true", "text": "Email", "resource-id": "field_email" },
+      {
+        class: "android.widget.EditText",
+        focusable: "true",
+        text: "Email",
+        "resource-id": "field_email",
+      },
     ]);
 
-    const limited = classifier.analyze(observeResult, { platform: "android", filter: { limit: 2 } }, "HomeScreen", []);
+    const limited = classifier.analyze(
+      observeResult,
+      { platform: "android", filter: { limit: 2 } },
+      "HomeScreen",
+      [],
+    );
 
-    expect(limited.interactions.map(i => i.description)).toEqual([
+    expect(limited.interactions.map((i) => i.description)).toEqual([
       "Submit action",
       "Design system navigation",
     ]);
     // The higher-confidence input field is excluded purely because of order.
-    expect(limited.interactions.some(i => i.type === "input")).toBe(false);
+    expect(limited.interactions.some((i) => i.type === "input")).toBe(false);
   });
 
   test("predicts a screen change from a matching navigation edge (real NavigationEdge shape)", () => {
@@ -110,13 +144,20 @@ describe("IdentifyInteractions", () => {
     };
 
     const result = classifier.analyze(
-      hierarchyOf([{ "class": "android.widget.Button", "clickable": "true", "text": "Submit", "resource-id": "btn_submit" }]),
+      hierarchyOf([
+        {
+          class: "android.widget.Button",
+          clickable: "true",
+          text: "Submit",
+          "resource-id": "btn_submit",
+        },
+      ]),
       { platform: "android" },
       "HomeScreen",
-      [edge]
+      [edge],
     );
 
-    const button = result.interactions.find(i => i.element?.resourceId === "btn_submit");
+    const button = result.interactions.find((i) => i.element?.resourceId === "btn_submit");
     expect(button?.predictedOutcome).toEqual({
       type: "screen_change",
       destination: "DetailScreen",
@@ -127,13 +168,23 @@ describe("IdentifyInteractions", () => {
   test("summarises interactions by type", () => {
     const result = classifier.analyze(
       hierarchyOf([
-        { "class": "android.widget.Button", "clickable": "true", "text": "Submit", "resource-id": "btn_submit" },
+        {
+          class: "android.widget.Button",
+          clickable: "true",
+          text: "Submit",
+          "resource-id": "btn_submit",
+        },
         { class: "android.widget.TextView", clickable: "true", text: "Design system" },
-        { "class": "android.widget.EditText", "focusable": "true", "text": "Email", "resource-id": "field_email" },
+        {
+          class: "android.widget.EditText",
+          focusable: "true",
+          text: "Email",
+          "resource-id": "field_email",
+        },
       ]),
       { platform: "android" },
       "HomeScreen",
-      []
+      [],
     );
 
     expect(result.summary).toEqual({

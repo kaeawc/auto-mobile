@@ -85,7 +85,7 @@ describe("DefaultDatabaseHealthProbe", () => {
     });
 
     await expect(timer.resolvePromise(probe.check(), 25)).rejects.toThrow(
-      "Database health probe timed out after 25ms"
+      "Database health probe timed out after 25ms",
     );
   });
 });

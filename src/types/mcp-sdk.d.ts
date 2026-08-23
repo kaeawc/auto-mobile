@@ -8,13 +8,13 @@ declare module "@modelcontextprotocol/sdk/server/index.js" {
   }
 
   export class Server {
-  	constructor(
+    constructor(
       info: { name: string; version: string },
-      config: { capabilities: { tools: Record<string, any> } }
+      config: { capabilities: { tools: Record<string, any> } },
     );
 
-  	setRequestHandler(schema: any, handler: (request: any) => Promise<any>): void;
-  	connect(transport: Transport): Promise<void>;
+    setRequestHandler(schema: any, handler: (request: any) => Promise<any>): void;
+    connect(transport: Transport): Promise<void>;
   }
 }
 
@@ -22,12 +22,12 @@ declare module "@modelcontextprotocol/sdk/server/stdio.js" {
   import { Transport } from "@modelcontextprotocol/sdk/server/index.js";
 
   export class StdioServerTransport implements Transport {
-  	constructor();
-  	start(): Promise<void>;
-  	send(message: any): Promise<void>;
-  	close(): Promise<void>;
-  	onMessage(callback: (message: any) => void): void;
-  	onClose(callback: () => void): void;
+    constructor();
+    start(): Promise<void>;
+    send(message: any): Promise<void>;
+    close(): Promise<void>;
+    onMessage(callback: (message: any) => void): void;
+    onClose(callback: () => void): void;
   }
 }
 

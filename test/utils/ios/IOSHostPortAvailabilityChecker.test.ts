@@ -7,12 +7,12 @@ import { TcpHostPortAvailabilityChecker } from "../../../src/utils/ios/IOSHostPo
  * timers entirely: a listening server resolves the connect immediately, and a
  * closed port is refused immediately, so both settle well under the unit budget.
  */
-describe("TcpHostPortAvailabilityChecker", function() {
+describe("TcpHostPortAvailabilityChecker", function () {
   let server: Server | null = null;
 
-  afterEach(async function() {
+  afterEach(async function () {
     if (server) {
-      await new Promise<void>(resolve => server!.close(() => resolve()));
+      await new Promise<void>((resolve) => server!.close(() => resolve()));
       server = null;
     }
   });
@@ -32,16 +32,16 @@ describe("TcpHostPortAvailabilityChecker", function() {
     });
   }
 
-  test("reports a bound port as NOT available (connect succeeds)", async function() {
+  test("reports a bound port as NOT available (connect succeeds)", async function () {
     const port = await listenOnEphemeralPort();
     const checker = new TcpHostPortAvailabilityChecker();
     expect(await checker.isAvailable("127.0.0.1", port)).toBe(false);
   });
 
-  test("reports a closed port as available (connect refused)", async function() {
+  test("reports a closed port as available (connect refused)", async function () {
     // Bind then immediately release, so the port is almost certainly free and refuses.
     const port = await listenOnEphemeralPort();
-    await new Promise<void>(resolve => server!.close(() => resolve()));
+    await new Promise<void>((resolve) => server!.close(() => resolve()));
     server = null;
 
     const checker = new TcpHostPortAvailabilityChecker();

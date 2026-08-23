@@ -20,7 +20,7 @@ export function firstFlagValue(args: string[], flags: string[]): string | undefi
       }
       return value;
     }
-    const matched = flags.find(flag => arg.startsWith(`${flag}=`));
+    const matched = flags.find((flag) => arg.startsWith(`${flag}=`));
     if (matched) {
       return arg.slice(matched.length + 1);
     }

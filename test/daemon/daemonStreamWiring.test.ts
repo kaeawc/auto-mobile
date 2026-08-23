@@ -283,7 +283,7 @@ describe("Daemon stream wiring", () => {
     const stream = new FakeDeviceDataStreamServer();
     internals.getDeviceSessionRoutingTargets = () => targets(stream);
     const attachedManagers: NavigationGraphManager[] = [];
-    internals.setupNavigationGraphUpdateListener = manager => {
+    internals.setupNavigationGraphUpdateListener = (manager) => {
       attachedManagers.push(manager);
     };
 
@@ -374,7 +374,7 @@ describe("Daemon stream wiring", () => {
     );
     const internals = daemon as unknown as DaemonStreamInternals;
     const attachedManagers: NavigationGraphManager[] = [];
-    internals.setupNavigationGraphUpdateListener = manager => {
+    internals.setupNavigationGraphUpdateListener = (manager) => {
       attachedManagers.push(manager);
     };
 

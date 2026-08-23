@@ -128,19 +128,20 @@ function defaultOnGiveUp(helperName: string, dir: string, error: unknown): void 
   // Windows handle livelock is the expected reason and is safe to swallow.
   logger.warn(
     `${helperName}: gave up removing ${dir} after ${code}; leaving it for OS temp cleanup (issue #2916)`,
-    error
+    error,
   );
 }
 
 export async function removeTempDbDir(
   dir: string,
-  options: RemoveTempDbDirOptions = {}
+  options: RemoveTempDbDirOptions = {},
 ): Promise<void> {
-  const rm = options.rm ?? (target => fsRm(target, { recursive: true, force: true }));
+  const rm = options.rm ?? ((target) => fsRm(target, { recursive: true, force: true }));
   const timer = options.timer ?? defaultTimer;
   const maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
   const delayMs = options.delayMs ?? DEFAULT_DELAY_MS;
-  const onGiveUp = options.onGiveUp ?? ((target, error) => defaultOnGiveUp("removeTempDbDir", target, error));
+  const onGiveUp =
+    options.onGiveUp ?? ((target, error) => defaultOnGiveUp("removeTempDbDir", target, error));
 
   let lastError: unknown;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
@@ -161,11 +162,8 @@ export async function removeTempDbDir(
   onGiveUp(dir, lastError);
 }
 
-export function removeTempDbDirSync(
-  dir: string,
-  options: RemoveTempDbDirSyncOptions = {}
-): void {
-  const rmSync = options.rmSync ?? (target => fsRmSync(target, { recursive: true, force: true }));
+export function removeTempDbDirSync(dir: string, options: RemoveTempDbDirSyncOptions = {}): void {
+  const rmSync = options.rmSync ?? ((target) => fsRmSync(target, { recursive: true, force: true }));
   const timer = options.timer ?? defaultSyncTimer;
   const maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
   const delayMs = options.delayMs ?? DEFAULT_DELAY_MS;

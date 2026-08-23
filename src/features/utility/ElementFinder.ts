@@ -17,7 +17,7 @@ export class DefaultElementFinder implements ElementFinder {
 
   constructor(
     parser: ElementParser = new DefaultElementParser(),
-    textMatcher: TextMatcher = new DefaultTextMatcher()
+    textMatcher: TextMatcher = new DefaultTextMatcher(),
   ) {
     this.parser = parser;
     this.textMatcher = textMatcher;
@@ -25,7 +25,7 @@ export class DefaultElementFinder implements ElementFinder {
 
   hasContainerElement(
     viewHierarchy: ViewHierarchyResult,
-    container?: { elementId?: string; text?: string }
+    container?: { elementId?: string; text?: string },
   ): boolean {
     if (!viewHierarchy || !container) {
       return false;
@@ -37,7 +37,7 @@ export class DefaultElementFinder implements ElementFinder {
   private findContainerNodeInRoots(
     rootNodes: ViewHierarchyNode[],
     container: { elementId?: string; text?: string },
-    matchesContainerText: ((input?: string) => boolean) | null
+    matchesContainerText: ((input?: string) => boolean) | null,
   ): ViewHierarchyNode | null {
     for (const rootNode of rootNodes) {
       let containerNode: ViewHierarchyNode | null = null;
@@ -59,11 +59,9 @@ export class DefaultElementFinder implements ElementFinder {
 
         if (
           matchesContainerText &&
-          (
-            (typeof nodeText === "string" && matchesContainerText(nodeText)) ||
+          ((typeof nodeText === "string" && matchesContainerText(nodeText)) ||
             (typeof nodeContentDesc === "string" && matchesContainerText(nodeContentDesc)) ||
-            (typeof nodeIosLabel === "string" && matchesContainerText(nodeIosLabel))
-          )
+            (typeof nodeIosLabel === "string" && matchesContainerText(nodeIosLabel)))
         ) {
           containerNode = node;
         }
@@ -79,7 +77,7 @@ export class DefaultElementFinder implements ElementFinder {
 
   private findContainerNodeInternal(
     viewHierarchy: ViewHierarchyResult,
-    container: { elementId?: string; text?: string }
+    container: { elementId?: string; text?: string },
   ): ViewHierarchyNode | null {
     if (!viewHierarchy || !container) {
       return null;
@@ -92,7 +90,7 @@ export class DefaultElementFinder implements ElementFinder {
     const containerInMain = this.findContainerNodeInRoots(
       rootNodes,
       container,
-      matchesContainerText
+      matchesContainerText,
     );
     if (containerInMain) {
       return containerInMain;
@@ -103,7 +101,7 @@ export class DefaultElementFinder implements ElementFinder {
       const containerInWindow = this.findContainerNodeInRoots(
         windowRoots,
         container,
-        matchesContainerText
+        matchesContainerText,
       );
       if (containerInWindow) {
         return containerInWindow;
@@ -125,7 +123,7 @@ export class DefaultElementFinder implements ElementFinder {
     rootNodes: ViewHierarchyNode[],
     text: string,
     matchesText: (input?: string) => boolean,
-    sortByArea: boolean = true
+    sortByArea: boolean = true,
   ): { exactMatches: Element[]; partialMatches: Element[] } {
     const partialMatches: Element[] = [];
     const exactMatches: Element[] = [];
@@ -133,7 +131,9 @@ export class DefaultElementFinder implements ElementFinder {
     for (const searchNode of rootNodes) {
       this.parser.traverseNode(searchNode, (node: any) => {
         const nodeProperties = this.parser.extractNodeProperties(node);
-        logger.debug(`[Element] node: ${nodeProperties["text"]} ${nodeProperties["content-desc"]} ${nodeProperties["class"]}`);
+        logger.debug(
+          `[Element] node: ${nodeProperties["text"]} ${nodeProperties["content-desc"]} ${nodeProperties["class"]}`,
+        );
 
         // Check text attribute
         if (
@@ -172,21 +172,19 @@ export class DefaultElementFinder implements ElementFinder {
           logger.debug("[Element] Matches ios-accessibility-label property");
           const parsedNode = this.parser.parseNodeBounds(node);
           if (parsedNode) {
-            if (normalizeQuotes(nodeProperties["ios-accessibility-label"]) === normalizeQuotes(text)) {
+            if (
+              normalizeQuotes(nodeProperties["ios-accessibility-label"]) === normalizeQuotes(text)
+            ) {
               exactMatches.push(parsedNode);
             } else {
               partialMatches.push(parsedNode);
             }
           }
         } else if (
-          matchesText(
-            nodeProperties.text || nodeProperties["content-desc"] || ""
-          ) &&
-          (
-            nodeProperties["ios-role"] === "AXButton" ||
+          matchesText(nodeProperties.text || nodeProperties["content-desc"] || "") &&
+          (nodeProperties["ios-role"] === "AXButton" ||
             nodeProperties.class === "Button" ||
-            this.isClickableNode(nodeProperties)
-          )
+            this.isClickableNode(nodeProperties))
         ) {
           logger.debug("[Element] Matches clickable element with text");
           const parsedNode = this.parser.parseNodeBounds(node);
@@ -213,7 +211,7 @@ export class DefaultElementFinder implements ElementFinder {
     rootNodes: ViewHierarchyNode[],
     resourceId: string,
     partialMatch: boolean,
-    sortByArea: boolean = true
+    sortByArea: boolean = true,
   ): Element[] {
     const matches: Element[] = [];
     // Compose semantics (Modifier.testTag) surface via AccessibilityNodeInfo.viewIdResourceName
@@ -254,7 +252,7 @@ export class DefaultElementFinder implements ElementFinder {
   private collectTestTagMatchesInRoots(
     rootNodes: ViewHierarchyNode[],
     testTag: string,
-    sortByArea: boolean = true
+    sortByArea: boolean = true,
   ): Element[] {
     const matches: Element[] = [];
 
@@ -281,7 +279,9 @@ export class DefaultElementFinder implements ElementFinder {
     for (const rootNode of rootNodes) {
       let foundScrollable: Element | null = null;
       this.parser.traverseNode(rootNode, (node: any) => {
-        if (foundScrollable) {return;} // Already found one
+        if (foundScrollable) {
+          return;
+        } // Already found one
         const nodeProperties = this.parser.extractNodeProperties(node);
         if (nodeProperties.scrollable === "true" || nodeProperties.scrollable === true) {
           const parsedNode = this.parser.parseNodeBounds(node);
@@ -298,18 +298,25 @@ export class DefaultElementFinder implements ElementFinder {
     return null;
   }
 
-  private findFocusedTextInputInRoots(rootNodes: ViewHierarchyNode[], ANDROID_INPUT_CLASSES: string[]): Element | null {
+  private findFocusedTextInputInRoots(
+    rootNodes: ViewHierarchyNode[],
+    ANDROID_INPUT_CLASSES: string[],
+  ): Element | null {
     for (const rootNode of rootNodes) {
       let foundElement: Element | null = null;
       this.parser.traverseNode(rootNode, (node: any) => {
-        if (foundElement) {return;} // Already found one
+        if (foundElement) {
+          return;
+        } // Already found one
 
         const nodeProperties = this.parser.extractNodeProperties(node);
         // Check for both 'class' and 'className' property names
         const nodeClass = nodeProperties.class || nodeProperties.className;
-        if ((nodeProperties.focused === "true" || nodeProperties.focused === true) &&
+        if (
+          (nodeProperties.focused === "true" || nodeProperties.focused === true) &&
           nodeClass &&
-          ANDROID_INPUT_CLASSES.some(cls => nodeClass.includes(cls))) {
+          ANDROID_INPUT_CLASSES.some((cls) => nodeClass.includes(cls))
+        ) {
           const parsedNode = this.parser.parseNodeBounds(node);
           if (parsedNode) {
             foundElement = parsedNode;
@@ -317,7 +324,9 @@ export class DefaultElementFinder implements ElementFinder {
         }
       });
 
-      if (foundElement) {return foundElement;}
+      if (foundElement) {
+        return foundElement;
+      }
     }
 
     return null;
@@ -330,12 +339,14 @@ export class DefaultElementFinder implements ElementFinder {
   private isCollectionNode(props: Record<string, unknown>): boolean {
     const className = typeof props.class === "string" ? props.class : "";
     const scrollable = props.scrollable === "true" || props.scrollable === true;
-    return scrollable ||
+    return (
+      scrollable ||
       className.includes("RecyclerView") ||
       className.includes("ListView") ||
       className.includes("ScrollView") ||
       className.includes("CollectionView") ||
-      className.includes("TableView");
+      className.includes("TableView")
+    );
   }
 
   /**
@@ -353,7 +364,7 @@ export class DefaultElementFinder implements ElementFinder {
     container: { elementId?: string; text?: string } | null = null,
     partialMatch: boolean = true,
     caseSensitive: boolean = false,
-    preserveTraversalOrder: boolean = false
+    preserveTraversalOrder: boolean = false,
   ): Element[] {
     if (!viewHierarchy || !text) {
       return [];
@@ -368,38 +379,32 @@ export class DefaultElementFinder implements ElementFinder {
       return [];
     }
 
-    const selectMatches = (matches: { exactMatches: Element[]; partialMatches: Element[] }): Element[] => {
+    const selectMatches = (matches: {
+      exactMatches: Element[];
+      partialMatches: Element[];
+    }): Element[] => {
       return matches.exactMatches.length > 0 ? matches.exactMatches : matches.partialMatches;
     };
 
     if (containerNode) {
-      return selectMatches(this.collectTextMatchesInRoots(
-        [containerNode],
-        text,
-        matchesText,
-        !preserveTraversalOrder
-      ));
+      return selectMatches(
+        this.collectTextMatchesInRoots([containerNode], text, matchesText, !preserveTraversalOrder),
+      );
     }
 
     const rootNodes = this.parser.extractRootNodes(viewHierarchy);
-    const mainMatches = selectMatches(this.collectTextMatchesInRoots(
-      rootNodes,
-      text,
-      matchesText,
-      !preserveTraversalOrder
-    ));
+    const mainMatches = selectMatches(
+      this.collectTextMatchesInRoots(rootNodes, text, matchesText, !preserveTraversalOrder),
+    );
     if (mainMatches.length > 0) {
       return mainMatches;
     }
 
     const windowRootGroups = this.parser.extractWindowRootGroups(viewHierarchy, "topmost-first");
     for (const windowRoots of windowRootGroups) {
-      const windowMatches = selectMatches(this.collectTextMatchesInRoots(
-        windowRoots,
-        text,
-        matchesText,
-        !preserveTraversalOrder
-      ));
+      const windowMatches = selectMatches(
+        this.collectTextMatchesInRoots(windowRoots, text, matchesText, !preserveTraversalOrder),
+      );
       if (windowMatches.length > 0) {
         return windowMatches;
       }
@@ -422,9 +427,15 @@ export class DefaultElementFinder implements ElementFinder {
     text: string,
     container: { elementId?: string; text?: string } | null = null,
     partialMatch: boolean = true,
-    caseSensitive: boolean = false
+    caseSensitive: boolean = false,
   ): Element | null {
-    const matches = this.findElementsByText(viewHierarchy, text, container, partialMatch, caseSensitive);
+    const matches = this.findElementsByText(
+      viewHierarchy,
+      text,
+      container,
+      partialMatch,
+      caseSensitive,
+    );
     return matches[0] ?? null;
   }
 
@@ -441,7 +452,7 @@ export class DefaultElementFinder implements ElementFinder {
     resourceId: string,
     container: { elementId?: string; text?: string } | null = null,
     partialMatch: boolean = false,
-    preserveTraversalOrder: boolean = false
+    preserveTraversalOrder: boolean = false,
   ): Element[] {
     if (!viewHierarchy || !resourceId) {
       return [];
@@ -460,7 +471,7 @@ export class DefaultElementFinder implements ElementFinder {
         [containerNode],
         resourceId,
         partialMatch,
-        !preserveTraversalOrder
+        !preserveTraversalOrder,
       );
     }
 
@@ -469,7 +480,7 @@ export class DefaultElementFinder implements ElementFinder {
       rootNodes,
       resourceId,
       partialMatch,
-      !preserveTraversalOrder
+      !preserveTraversalOrder,
     );
     if (mainMatches.length > 0) {
       return mainMatches;
@@ -481,7 +492,7 @@ export class DefaultElementFinder implements ElementFinder {
         windowRoots,
         resourceId,
         partialMatch,
-        !preserveTraversalOrder
+        !preserveTraversalOrder,
       );
       if (windowMatches.length > 0) {
         return windowMatches;
@@ -503,9 +514,14 @@ export class DefaultElementFinder implements ElementFinder {
     viewHierarchy: ViewHierarchyResult,
     resourceId: string,
     container: { elementId?: string; text?: string } | null = null,
-    partialMatch: boolean = false
+    partialMatch: boolean = false,
   ): Element | null {
-    const matches = this.findElementsByResourceId(viewHierarchy, resourceId, container, partialMatch);
+    const matches = this.findElementsByResourceId(
+      viewHierarchy,
+      resourceId,
+      container,
+      partialMatch,
+    );
     return matches[0] ?? null;
   }
 
@@ -516,7 +532,7 @@ export class DefaultElementFinder implements ElementFinder {
     viewHierarchy: ViewHierarchyResult,
     testTag: string,
     container: { elementId?: string; text?: string } | null = null,
-    preserveTraversalOrder: boolean = false
+    preserveTraversalOrder: boolean = false,
   ): Element[] {
     if (!viewHierarchy || !testTag) {
       return [];
@@ -531,18 +547,14 @@ export class DefaultElementFinder implements ElementFinder {
     }
 
     if (containerNode) {
-      return this.collectTestTagMatchesInRoots(
-        [containerNode],
-        testTag,
-        !preserveTraversalOrder
-      );
+      return this.collectTestTagMatchesInRoots([containerNode], testTag, !preserveTraversalOrder);
     }
 
     const rootNodes = this.parser.extractRootNodes(viewHierarchy);
     const mainMatches = this.collectTestTagMatchesInRoots(
       rootNodes,
       testTag,
-      !preserveTraversalOrder
+      !preserveTraversalOrder,
     );
     if (mainMatches.length > 0) {
       return mainMatches;
@@ -553,7 +565,7 @@ export class DefaultElementFinder implements ElementFinder {
       const windowMatches = this.collectTestTagMatchesInRoots(
         windowRoots,
         testTag,
-        !preserveTraversalOrder
+        !preserveTraversalOrder,
       );
       if (windowMatches.length > 0) {
         return windowMatches;
@@ -571,7 +583,7 @@ export class DefaultElementFinder implements ElementFinder {
    */
   findContainerNode(
     viewHierarchy: ViewHierarchyResult,
-    container: { elementId?: string; text?: string }
+    container: { elementId?: string; text?: string },
   ): ViewHierarchyNode | null {
     return this.findContainerNodeInternal(viewHierarchy, container);
   }
@@ -582,14 +594,17 @@ export class DefaultElementFinder implements ElementFinder {
    * @param index - The index of the element to find
    * @returns The element at the specified index or null if not found
    */
-  findElementByIndex(viewHierarchy: ViewHierarchyResult, index: number): { element: Element; text?: string } | null {
+  findElementByIndex(
+    viewHierarchy: ViewHierarchyResult,
+    index: number,
+  ): { element: Element; text?: string } | null {
     if (!viewHierarchy || index < 0) {
       return null;
     }
 
     const flattenedElements = this.parser.flattenViewHierarchy(viewHierarchy, {
       includeWindows: true,
-      windowOrder: "topmost-first"
+      windowOrder: "topmost-first",
     });
 
     if (index >= flattenedElements.length) {
@@ -599,7 +614,7 @@ export class DefaultElementFinder implements ElementFinder {
     const found = flattenedElements[index];
     return {
       element: found.element,
-      text: found.text
+      text: found.text,
     };
   }
 
@@ -615,7 +630,7 @@ export class DefaultElementFinder implements ElementFinder {
 
     const rootNodes = [
       ...this.parser.extractRootNodes(viewHierarchy),
-      ...this.parser.extractWindowRootNodes(viewHierarchy, "topmost-first")
+      ...this.parser.extractWindowRootNodes(viewHierarchy, "topmost-first"),
     ];
     const scrollables: Element[] = [];
 
@@ -673,7 +688,7 @@ export class DefaultElementFinder implements ElementFinder {
 
     const rootNodes = [
       ...this.parser.extractRootNodes(viewHierarchy),
-      ...this.parser.extractWindowRootNodes(viewHierarchy, "topmost-first")
+      ...this.parser.extractWindowRootNodes(viewHierarchy, "topmost-first"),
     ];
     const clickables: Element[] = [];
 
@@ -702,7 +717,7 @@ export class DefaultElementFinder implements ElementFinder {
   findClickableElementsInContainer(
     viewHierarchy: ViewHierarchyResult,
     container: { elementId?: string; text?: string } | null = null,
-    scrollableContainer: boolean = false
+    scrollableContainer: boolean = false,
   ): Element[] {
     if (!viewHierarchy) {
       return [];
@@ -719,9 +734,9 @@ export class DefaultElementFinder implements ElementFinder {
     let searchRoots = containerNode
       ? [containerNode]
       : [
-        ...this.parser.extractRootNodes(viewHierarchy),
-        ...this.parser.extractWindowRootNodes(viewHierarchy, "topmost-first")
-      ];
+          ...this.parser.extractRootNodes(viewHierarchy),
+          ...this.parser.extractWindowRootNodes(viewHierarchy, "topmost-first"),
+        ];
 
     // If scrollableContainer is true, find all scrollable nodes first
     // and then search for clickables only within those
@@ -774,7 +789,7 @@ export class DefaultElementFinder implements ElementFinder {
 
     const rootNodes = [
       ...this.parser.extractRootNodes(viewHierarchy),
-      ...this.parser.extractWindowRootNodes(viewHierarchy, "topmost-first")
+      ...this.parser.extractWindowRootNodes(viewHierarchy, "topmost-first"),
     ];
     const childElements: Element[] = [];
     const parentBounds = parentElement.bounds;
@@ -834,11 +849,15 @@ export class DefaultElementFinder implements ElementFinder {
       "android.widget.CheckBox",
       "android.widget.RadioButton",
       "android.widget.Switch",
-      "android.widget.Spinner"
+      "android.widget.Spinner",
     ];
 
     // Check if the element itself is a spannable
-    if (element.class && spannableClasses.some(cls => element.class?.includes(cls)) && element.text) {
+    if (
+      element.class &&
+      spannableClasses.some((cls) => element.class?.includes(cls)) &&
+      element.text
+    ) {
       return [element];
     }
 
@@ -851,9 +870,12 @@ export class DefaultElementFinder implements ElementFinder {
       if (Array.isArray(children)) {
         for (const child of children) {
           const parsedNode = this.parser.parseNodeBounds(child);
-          if (parsedNode && parsedNode.class &&
-              spannableClasses.some(cls => parsedNode.class?.includes(cls)) &&
-              parsedNode.text) {
+          if (
+            parsedNode &&
+            parsedNode.class &&
+            spannableClasses.some((cls) => parsedNode.class?.includes(cls)) &&
+            parsedNode.text
+          ) {
             spannables.push(parsedNode);
           }
 
@@ -916,7 +938,8 @@ export class DefaultElementFinder implements ElementFinder {
     const isFocused = element.isFocused === "true" || element.isFocused === true;
 
     // Check if element has keyboard focus (for text inputs)
-    const hasKeyboardFocus = element["has-keyboard-focus"] === "true" || element["has-keyboard-focus"] === true;
+    const hasKeyboardFocus =
+      element["has-keyboard-focus"] === "true" || element["has-keyboard-focus"] === true;
 
     return focused || selected || isFocused || hasKeyboardFocus;
   }
@@ -927,7 +950,10 @@ export class DefaultElementFinder implements ElementFinder {
    * @param expectedText - Optional expected text for validation
    * @returns True if the element matches expectations
    */
-  validateElementText(foundElement: { element: Element; text?: string }, expectedText?: string): boolean {
+  validateElementText(
+    foundElement: { element: Element; text?: string },
+    expectedText?: string,
+  ): boolean {
     if (!expectedText) {
       return true; // No text validation required
     }
@@ -957,7 +983,7 @@ export class DefaultElementFinder implements ElementFinder {
     text: string,
     container: { elementId?: string; text?: string } | null = null,
     fuzzyMatch: boolean = true,
-    caseSensitive: boolean = false
+    caseSensitive: boolean = false,
   ): Element[] {
     if (!viewHierarchy || !text) {
       return [];
@@ -1001,7 +1027,7 @@ export class DefaultElementFinder implements ElementFinder {
    */
   private collectClickableParentsWithTextInRoots(
     rootNodes: ViewHierarchyNode[],
-    matchesText: (input?: string) => boolean
+    matchesText: (input?: string) => boolean,
   ): Element[] {
     const matches: Element[] = [];
 
@@ -1028,7 +1054,7 @@ export class DefaultElementFinder implements ElementFinder {
     text: string,
     container: { elementId?: string; text?: string } | null = null,
     fuzzyMatch: boolean = true,
-    caseSensitive: boolean = false
+    caseSensitive: boolean = false,
   ): Element[] {
     if (!viewHierarchy || !text) {
       return [];
@@ -1057,7 +1083,10 @@ export class DefaultElementFinder implements ElementFinder {
     if (!containerNode) {
       const windowRootGroups = this.parser.extractWindowRootGroups(viewHierarchy, "topmost-first");
       for (const windowRoots of windowRootGroups) {
-        const windowMatches = this.collectClickableSiblingsWithTextInRoots(windowRoots, matchesText);
+        const windowMatches = this.collectClickableSiblingsWithTextInRoots(
+          windowRoots,
+          matchesText,
+        );
         if (windowMatches.length > 0) {
           return windowMatches;
         }
@@ -1071,7 +1100,7 @@ export class DefaultElementFinder implements ElementFinder {
     viewHierarchy: ViewHierarchyResult,
     resourceId: string,
     container: { elementId?: string; text?: string } | null = null,
-    partialMatch: boolean = false
+    partialMatch: boolean = false,
   ): Element[] {
     if (!viewHierarchy || !resourceId) {
       return [];
@@ -1084,7 +1113,9 @@ export class DefaultElementFinder implements ElementFinder {
     const bareResourceId = idSeparatorIndex >= 0 ? resourceId.slice(idSeparatorIndex + 1) : null;
 
     const matchesId = (input?: string): boolean => {
-      if (!input) {return false;}
+      if (!input) {
+        return false;
+      }
       if (partialMatch) {
         return input.toLowerCase().includes(resourceId.toLowerCase());
       }
@@ -1112,7 +1143,10 @@ export class DefaultElementFinder implements ElementFinder {
     if (!containerNode) {
       const windowRootGroups = this.parser.extractWindowRootGroups(viewHierarchy, "topmost-first");
       for (const windowRoots of windowRootGroups) {
-        const windowMatches = this.collectClickableSiblingsWithResourceIdInRoots(windowRoots, matchesId);
+        const windowMatches = this.collectClickableSiblingsWithResourceIdInRoots(
+          windowRoots,
+          matchesId,
+        );
         if (windowMatches.length > 0) {
           return windowMatches;
         }
@@ -1124,7 +1158,7 @@ export class DefaultElementFinder implements ElementFinder {
 
   private collectClickableSiblingsWithResourceIdInRoots(
     rootNodes: ViewHierarchyNode[],
-    matchesId: (input?: string) => boolean
+    matchesId: (input?: string) => boolean,
   ): Element[] {
     const results: Element[] = [];
     for (const rootNode of rootNodes) {
@@ -1136,18 +1170,16 @@ export class DefaultElementFinder implements ElementFinder {
   private findClickableSiblingsOfResourceIdInNode(
     node: ViewHierarchyNode,
     matchesId: (input?: string) => boolean,
-    results: Element[]
+    results: Element[],
   ): void {
     const children = node.node;
     if (!children) {
       return;
     }
 
-    const childArray: ViewHierarchyNode[] = Array.isArray(children)
-      ? children
-      : [children];
+    const childArray: ViewHierarchyNode[] = Array.isArray(children) ? children : [children];
 
-    const hasIdMatch = childArray.some(child => {
+    const hasIdMatch = childArray.some((child) => {
       const props = this.parser.extractNodeProperties(child);
       const rid = props["resource-id"];
       return typeof rid === "string" && matchesId(rid);
@@ -1179,7 +1211,7 @@ export class DefaultElementFinder implements ElementFinder {
    */
   private collectClickableSiblingsWithTextInRoots(
     rootNodes: ViewHierarchyNode[],
-    matchesText: (input?: string) => boolean
+    matchesText: (input?: string) => boolean,
   ): Element[] {
     const results: Element[] = [];
 
@@ -1218,16 +1250,14 @@ export class DefaultElementFinder implements ElementFinder {
   private findClickableSiblingsInNode(
     node: ViewHierarchyNode,
     matchesText: (input?: string) => boolean,
-    results: Element[]
+    results: Element[],
   ): void {
     const children = node.node;
     if (!children) {
       return;
     }
 
-    const childArray: ViewHierarchyNode[] = Array.isArray(children)
-      ? children
-      : [children];
+    const childArray: ViewHierarchyNode[] = Array.isArray(children) ? children : [children];
 
     // Recurse first so the DEEPEST (nearest-to-text) row wins. If a descendant level
     // already produced matches, don't also collect at this (ancestor) level — that is
@@ -1242,9 +1272,7 @@ export class DefaultElementFinder implements ElementFinder {
 
     // At this level, which child's SUBTREE contains the text (deep, so a label nested
     // under an avatar/content group still counts)?
-    const textChild = childArray.find(child =>
-      this.nodeOrDescendantHasText(child, matchesText)
-    );
+    const textChild = childArray.find((child) => this.nodeOrDescendantHasText(child, matchesText));
     if (!textChild) {
       return;
     }
@@ -1280,7 +1308,7 @@ export class DefaultElementFinder implements ElementFinder {
   private findClickableParentsInNode(
     node: ViewHierarchyNode,
     matchesText: (input?: string) => boolean,
-    results: Element[]
+    results: Element[],
   ): boolean {
     const nodeProperties = this.parser.extractNodeProperties(node);
     const isClickable = this.isClickableNode(nodeProperties);
@@ -1315,10 +1343,7 @@ export class DefaultElementFinder implements ElementFinder {
   /**
    * Check if a node itself has text matching the predicate (shallow — no descendants).
    */
-  private nodeHasText(
-    node: ViewHierarchyNode,
-    matchesText: (input?: string) => boolean
-  ): boolean {
+  private nodeHasText(node: ViewHierarchyNode, matchesText: (input?: string) => boolean): boolean {
     const props = this.parser.extractNodeProperties(node);
     const text = props.text;
     const contentDesc = props["content-desc"];
@@ -1336,7 +1361,7 @@ export class DefaultElementFinder implements ElementFinder {
    */
   private nodeOrDescendantHasText(
     node: ViewHierarchyNode,
-    matchesText: (input?: string) => boolean
+    matchesText: (input?: string) => boolean,
   ): boolean {
     const nodeProperties = this.parser.extractNodeProperties(node);
 

@@ -1,23 +1,8 @@
 {
   "$schema": "https://unpkg.com/knip@latest/schema.json",
-  "entry": [
-    "src/index.ts",
-    "src/cli/index.ts",
-    "test/**/*.ts",
-    "scripts/**/*.ts"
-  ],
-  "project": [
-    "src/**/*.ts",
-    "test/**/*.ts",
-    "scripts/**/*.ts"
-  ],
-  "ignore": [
-    "dist/**",
-    "node_modules/**",
-    "android/**",
-    "src/db/migrations/**",
-    "**/*.d.ts"
-  ],
+  "entry": ["src/index.ts", "src/cli/index.ts", "test/**/*.ts", "scripts/**/*.ts"],
+  "project": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.ts"],
+  "ignore": ["dist/**", "node_modules/**", "android/**", "src/db/migrations/**", "**/*.d.ts"],
   "ignoreDependencies": ["@types/pixelmatch"],
   "ignoreBinaries": [],
   "ignoreExportsUsedInFile": true,

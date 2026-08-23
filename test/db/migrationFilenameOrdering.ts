@@ -31,7 +31,8 @@
  * lowercase snake_case description. Capture group 1 is the full ordering
  * prefix (`YYYY_MM_DD_NNN`).
  */
-export const MIGRATION_FILENAME_PATTERN = /^(\d{4}_\d{2}_\d{2}_\d{3})_[a-z0-9]+(?:_[a-z0-9]+)*\.ts$/;
+export const MIGRATION_FILENAME_PATTERN =
+  /^(\d{4}_\d{2}_\d{2}_\d{3})_[a-z0-9]+(?:_[a-z0-9]+)*\.ts$/;
 
 /**
  * Historical `YYYY_MM_DD_NNN` prefix collisions that shipped before this guard
@@ -94,7 +95,9 @@ function sameMembers(a: readonly string[], b: readonly string[]): boolean {
  * The allowlist ratchet lives in {@link findStaleGrandfatherEntries} so this
  * function stays meaningful for partial fixture lists.
  */
-export function checkMigrationFilenames(filenames: readonly string[]): MigrationFilenameViolation[] {
+export function checkMigrationFilenames(
+  filenames: readonly string[],
+): MigrationFilenameViolation[] {
   const violations: MigrationFilenameViolation[] = [];
   const byPrefix = new Map<string, string[]>();
 
@@ -138,7 +141,7 @@ export function checkMigrationFilenames(filenames: readonly string[]): Migration
         "alphabetical order of the description, which makes `corrupted migrations` " +
         "startup failures easy to trip (issue #2868). Rename the NEW file to the next " +
         `free NNN sequence for its date (e.g. "${prefix.slice(0, 11)}${String(
-          Number(prefix.slice(11)) + 1
+          Number(prefix.slice(11)) + 1,
         ).padStart(3, "0")}_..."). Do NOT extend GRANDFATHERED_PREFIX_COLLISIONS and do ` +
         "NOT rename an already-shipped migration — populated DBs record executed " +
         "filenames in `kysely_migration`, so renames wedge startup.",
@@ -156,11 +159,11 @@ export function checkMigrationFilenames(filenames: readonly string[]): Migration
  * FULL real directory listing (not partial fixtures).
  */
 export function findStaleGrandfatherEntries(
-  filenames: readonly string[]
+  filenames: readonly string[],
 ): MigrationFilenameViolation[] {
   const violations: MigrationFilenameViolation[] = [];
   for (const [prefix, grandfathered] of Object.entries(GRANDFATHERED_PREFIX_COLLISIONS)) {
-    const missing = grandfathered.filter(file => !filenames.includes(file));
+    const missing = grandfathered.filter((file) => !filenames.includes(file));
     if (missing.length > 0) {
       violations.push({
         rule: "stale-grandfather-entry",

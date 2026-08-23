@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager, type PortAvailabilityChecker } from "../../src/utils/PortManager";
+import {
+  IOS_CTRL_PROXY_RESERVED_PORTS,
+  PortManager,
+  type PortAvailabilityChecker,
+} from "../../src/utils/PortManager";
 
 class FakePortAvailabilityChecker implements PortAvailabilityChecker {
   public readonly checkedPorts: number[] = [];
@@ -44,8 +48,12 @@ describe("PortManager", () => {
   });
 
   test("should reserve the iOS SDK hierarchy server port when requested", () => {
-    const port1 = PortManager.allocate("device-1", { reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS });
-    const port2 = PortManager.allocate("device-2", { reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS });
+    const port1 = PortManager.allocate("device-1", {
+      reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS,
+    });
+    const port2 = PortManager.allocate("device-2", {
+      reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS,
+    });
 
     expect(port1).toBe(8765);
     expect(port2).toBe(8767);
@@ -106,7 +114,7 @@ describe("PortManager", () => {
     PortManager.allocate("device-1");
 
     expect(() => PortManager.reserve("device-2", 8765)).toThrow(
-      "Port 8765 is already allocated to device device-1"
+      "Port 8765 is already allocated to device device-1",
     );
   });
 
@@ -191,7 +199,9 @@ describe("PortManager", () => {
 
   test("should support many iOS devices while skipping reserved ports", () => {
     for (let i = 0; i < 50; i++) {
-      const port = PortManager.allocate(`ios-device-${i}`, { reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS });
+      const port = PortManager.allocate(`ios-device-${i}`, {
+        reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS,
+      });
       expect(port).toBe(expectedIosAllocatedPort(i));
     }
 
@@ -202,7 +212,9 @@ describe("PortManager", () => {
     const ports: number[] = [];
 
     for (let i = 0; i < PortManager.getMaxDevices(); i++) {
-      ports.push(PortManager.allocate(`ios-device-${i}`, { reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS }));
+      ports.push(
+        PortManager.allocate(`ios-device-${i}`, { reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS }),
+      );
     }
 
     expect(ports).toHaveLength(100);

@@ -45,7 +45,7 @@ export async function runExclusiveResetTest<T>(body: () => Promise<T>): Promise<
   // caller still surfaces its OWN body error below.
   const prior = tail;
   let release!: () => void;
-  tail = new Promise<void>(resolve => {
+  tail = new Promise<void>((resolve) => {
     release = resolve;
   });
 

@@ -78,7 +78,7 @@ export interface IosDelegateHarness {
  * Build an {@link IosDelegateHarness}. See the file header for the contract.
  */
 export function createIosDelegateHarness(
-  options: IosDelegateHarnessOptions = {}
+  options: IosDelegateHarnessOptions = {},
 ): IosDelegateHarness {
   const timer = options.timer ?? new FakeTimer();
   const requestManager = new RequestManager(timer);

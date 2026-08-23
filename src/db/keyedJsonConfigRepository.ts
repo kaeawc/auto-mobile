@@ -1,9 +1,5 @@
 import type { Kysely } from "kysely";
-import type {
-  AppearanceConfig,
-  DeviceSnapshotConfig,
-  VideoRecordingConfig,
-} from "../models";
+import type { AppearanceConfig, DeviceSnapshotConfig, VideoRecordingConfig } from "../models";
 import { logger, type Logger } from "../utils/logger";
 import { ensureMigrations, getDatabase } from "./database";
 import type { Database } from "./types";
@@ -35,10 +31,13 @@ const KEYED_JSON_CONFIG_TABLES = {
     tableName: "video_recording_configs",
     loggerTag: "VideoRecordingConfigRepository",
   },
-} as const satisfies Record<string, {
-  tableName: KeyedJsonConfigTableName;
-  loggerTag: string;
-}>;
+} as const satisfies Record<
+  string,
+  {
+    tableName: KeyedJsonConfigTableName;
+    loggerTag: string;
+  }
+>;
 
 export interface ConfigRepository<TConfig> {
   getConfig(): Promise<TConfig | null>;
@@ -102,27 +101,24 @@ export class KeyedJsonConfigRepository<TConfig> implements ConfigRepository<TCon
     await db
       .insertInto(this.tableName)
       .values(payload)
-      .onConflict(oc =>
+      .onConflict((oc) =>
         oc.column("key").doUpdateSet({
           config_json: payload.config_json,
           updated_at: payload.updated_at,
-        })
+        }),
       )
       .execute();
   }
 
   async clearConfig(): Promise<void> {
     const db = await this.getDb();
-    await db
-      .deleteFrom(this.tableName)
-      .where("key", "=", CONFIG_KEY)
-      .execute();
+    await db.deleteFrom(this.tableName).where("key", "=", CONFIG_KEY).execute();
   }
 }
 
 function createConfigRepository<TConfig>(
   key: keyof typeof KEYED_JSON_CONFIG_TABLES,
-  db?: Kysely<Database>
+  db?: Kysely<Database>,
 ): ConfigRepository<TConfig> {
   return new KeyedJsonConfigRepository<TConfig>({
     ...KEYED_JSON_CONFIG_TABLES[key],
@@ -131,19 +127,19 @@ function createConfigRepository<TConfig>(
 }
 
 export function createAppearanceConfigRepository(
-  db?: Kysely<Database>
+  db?: Kysely<Database>,
 ): ConfigRepository<AppearanceConfig> {
   return createConfigRepository<AppearanceConfig>("appearance", db);
 }
 
 export function createDeviceSnapshotConfigRepository(
-  db?: Kysely<Database>
+  db?: Kysely<Database>,
 ): ConfigRepository<DeviceSnapshotConfig> {
   return createConfigRepository<DeviceSnapshotConfig>("deviceSnapshot", db);
 }
 
 export function createVideoRecordingConfigRepository(
-  db?: Kysely<Database>
+  db?: Kysely<Database>,
 ): ConfigRepository<VideoRecordingConfig> {
   return createConfigRepository<VideoRecordingConfig>("videoRecording", db);
 }

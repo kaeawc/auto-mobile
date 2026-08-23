@@ -38,7 +38,7 @@ function adbFactoryFor(adb: AdbExecutor): AdbClientFactory {
 }
 
 function commandText(commands: string[], match: string): string {
-  const command = commands.find(entry => entry.includes(match));
+  const command = commands.find((entry) => entry.includes(match));
   expect(command).toBeDefined();
   return command!;
 }
@@ -52,7 +52,10 @@ function decodeBase64WritePayload(command: string): string {
 describe("AppPreferences", () => {
   test("reads Android system properties with adb getprop", async () => {
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("shell getprop debug.example.api.url", createExecResult("https://dev.example.com/\n", ""));
+    adb.setCommandResponse(
+      "shell getprop debug.example.api.url",
+      createExecResult("https://dev.example.com/\n", ""),
+    );
 
     const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
     const result = await preferences.getPreference({
@@ -70,9 +73,7 @@ describe("AppPreferences", () => {
       type: "string",
       found: true,
     });
-    expect(adb.getExecutedCommands()).toEqual([
-      "shell getprop debug.example.api.url",
-    ]);
+    expect(adb.getExecutedCommands()).toEqual(["shell getprop debug.example.api.url"]);
   });
 
   test("sets Android system properties and returns read-back verification", async () => {
@@ -109,7 +110,7 @@ describe("AppPreferences", () => {
     adb.setCommandResponse("shell getprop debug.example.empty", createExecResult("\n", ""));
     adb.setCommandResponse(
       "shell getprop",
-      createExecResult("[debug.example.empty]: []\n[debug.example.enabled]: [true]\n", "")
+      createExecResult("[debug.example.empty]: []\n[debug.example.enabled]: [true]\n", ""),
     );
 
     const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
@@ -133,8 +134,14 @@ describe("AppPreferences", () => {
 
   test("preserves whitespace in Android system property strings", async () => {
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("shell setprop debug.example.token '  token  '", createExecResult("", ""));
-    adb.setCommandResponse("shell getprop debug.example.token", createExecResult("  token  \n", ""));
+    adb.setCommandResponse(
+      "shell setprop debug.example.token '  token  '",
+      createExecResult("", ""),
+    );
+    adb.setCommandResponse(
+      "shell getprop debug.example.token",
+      createExecResult("  token  \n", ""),
+    );
 
     const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
     const result = await preferences.setPreference({
@@ -157,12 +164,14 @@ describe("AppPreferences", () => {
     const adb = new FakeAdbExecutor();
     const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
 
-    await expect(preferences.setPreference({
-      scope: "systemProperty",
-      key: "debug.example.count",
-      value: 3.5,
-      type: "int",
-    })).rejects.toThrow("Expected int preference value");
+    await expect(
+      preferences.setPreference({
+        scope: "systemProperty",
+        key: "debug.example.count",
+        value: 3.5,
+        type: "int",
+      }),
+    ).rejects.toThrow("Expected int preference value");
 
     expect(adb.getExecutedCommands()).toEqual([]);
   });
@@ -173,9 +182,9 @@ describe("AppPreferences", () => {
       "cat shared_prefs/settings.xml",
       createExecResult(
         "<?xml version='1.0' encoding='utf-8' standalone='yes' ?>\n" +
-          "<map><boolean name=\"onboarding_complete\" value=\"true\" /></map>\n",
-        ""
-      )
+          '<map><boolean name="onboarding_complete" value="true" /></map>\n',
+        "",
+      ),
     );
 
     const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
@@ -206,9 +215,9 @@ describe("AppPreferences", () => {
       "cat shared_prefs/automobile_anr.xml",
       createExecResult(
         "<?xml version='1.0' encoding='utf-8' standalone='yes' ?>\n" +
-          "<map><long name=\"last_reported_timestamp\" value=\"1710000000000\" /></map>\n",
-        ""
-      )
+          '<map><long name="last_reported_timestamp" value="1710000000000" /></map>\n',
+        "",
+      ),
     );
 
     const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
@@ -233,9 +242,9 @@ describe("AppPreferences", () => {
       "cat shared_prefs/settings.xml",
       createExecResult(
         "<?xml version='1.0' encoding='utf-8' standalone='yes' ?>\n" +
-          "<map><set name=\"enabled_flags\"><string>first</string><string>second</string></set></map>\n",
-        ""
-      )
+          '<map><set name="enabled_flags"><string>first</string><string>second</string></set></map>\n',
+        "",
+      ),
     );
 
     const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
@@ -258,24 +267,26 @@ describe("AppPreferences", () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandError(
       "shell run-as com.missing.app cat shared_prefs/settings.xml",
-      new Error("run-as: package not found: com.missing.app")
+      new Error("run-as: package not found: com.missing.app"),
     );
 
     const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
 
-    await expect(preferences.getPreference({
-      scope: "sharedPreferences",
-      appId: "com.missing.app",
-      suite: "settings",
-      key: "host",
-    })).rejects.toThrow("run-as");
+    await expect(
+      preferences.getPreference({
+        scope: "sharedPreferences",
+        appId: "com.missing.app",
+        suite: "settings",
+        key: "host",
+      }),
+    ).rejects.toThrow("run-as");
   });
 
   test("treats a missing Android SharedPreferences XML file as an empty map", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandError(
       "shell run-as com.example.app cat shared_prefs/settings.xml",
-      new Error("cat: shared_prefs/settings.xml: No such file or directory")
+      new Error("cat: shared_prefs/settings.xml: No such file or directory"),
     );
 
     const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
@@ -298,13 +309,13 @@ describe("AppPreferences", () => {
     adb.setCommandResponseSequence("cat shared_prefs/settings.xml", [
       createExecResult(
         "<?xml version='1.0' encoding='utf-8' standalone='yes' ?>\n" +
-          "<map><string name=\"host\">prod.example.com</string></map>\n",
-        ""
+          '<map><string name="host">prod.example.com</string></map>\n',
+        "",
       ),
       createExecResult(
         "<?xml version='1.0' encoding='utf-8' standalone='yes' ?>\n" +
-          "<map><string name=\"host\">prod.example.com</string><int name=\"launch_count\" value=\"3\" /></map>\n",
-        ""
+          '<map><string name="host">prod.example.com</string><int name="launch_count" value="3" /></map>\n',
+        "",
       ),
     ]);
 
@@ -334,8 +345,8 @@ describe("AppPreferences", () => {
 
     const writeCommand = commandText(commands, "base64 -d > shared_prefs/settings.xml");
     const writtenXml = decodeBase64WritePayload(writeCommand);
-    expect(writtenXml).toContain("<string name=\"host\">prod.example.com</string>");
-    expect(writtenXml).toContain("<int name=\"launch_count\" value=\"3\"/>");
+    expect(writtenXml).toContain('<string name="host">prod.example.com</string>');
+    expect(writtenXml).toContain('<int name="launch_count" value="3"/>');
   });
 
   test("writes the first Android SharedPreferences entry when the XML map is empty", async () => {
@@ -344,8 +355,8 @@ describe("AppPreferences", () => {
       createExecResult("<map/>", ""),
       createExecResult(
         "<?xml version='1.0' encoding='utf-8' standalone='yes' ?>\n" +
-          "<map><boolean name=\"onboarding_complete\" value=\"true\" /></map>\n",
-        ""
+          '<map><boolean name="onboarding_complete" value="true" /></map>\n',
+        "",
       ),
     ]);
 
@@ -360,9 +371,12 @@ describe("AppPreferences", () => {
     });
 
     expect(result.verified).toBe(true);
-    const writeCommand = commandText(adb.getExecutedCommands(), "base64 -d > shared_prefs/settings.xml");
+    const writeCommand = commandText(
+      adb.getExecutedCommands(),
+      "base64 -d > shared_prefs/settings.xml",
+    );
     const writtenXml = decodeBase64WritePayload(writeCommand);
-    expect(writtenXml).toContain("<boolean name=\"onboarding_complete\" value=\"true\"/>");
+    expect(writtenXml).toContain('<boolean name="onboarding_complete" value="true"/>');
   });
 
   test("rejects Android SharedPreferences int values outside the Java 32-bit range", async () => {
@@ -370,14 +384,16 @@ describe("AppPreferences", () => {
     adb.setCommandResponse("cat shared_prefs/settings.xml", createExecResult("<map/>", ""));
 
     const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
-    await expect(preferences.setPreference({
-      scope: "sharedPreferences",
-      appId: "com.example.app",
-      suite: "settings",
-      key: "timestamp_id",
-      value: 1710000000000,
-      type: "int",
-    })).rejects.toThrow("32-bit");
+    await expect(
+      preferences.setPreference({
+        scope: "sharedPreferences",
+        appId: "com.example.app",
+        suite: "settings",
+        key: "timestamp_id",
+        value: 1710000000000,
+        type: "int",
+      }),
+    ).rejects.toThrow("32-bit");
 
     expect(adb.getExecutedCommands()).toEqual([
       "shell run-as com.example.app cat shared_prefs/settings.xml",
@@ -388,12 +404,14 @@ describe("AppPreferences", () => {
     const adb = new FakeAdbExecutor();
     const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
 
-    await expect(preferences.getPreference({
-      scope: "sharedPreferences",
-      appId: "com.example.app",
-      suite: "prefs; echo pwn #",
-      key: "host",
-    })).rejects.toThrow("SharedPreferences suite");
+    await expect(
+      preferences.getPreference({
+        scope: "sharedPreferences",
+        appId: "com.example.app",
+        suite: "prefs; echo pwn #",
+        key: "host",
+      }),
+    ).rejects.toThrow("SharedPreferences suite");
 
     expect(adb.getExecutedCommands()).toEqual([]);
   });
@@ -402,7 +420,7 @@ describe("AppPreferences", () => {
     const simctl = new FakeSimCtlClient();
     simctl.setCommandResult(
       "spawn 12345678-1234-1234-1234-123456789ABC defaults read com.example.app onboardingComplete",
-      "1\n"
+      "1\n",
     );
 
     const preferences = new AppPreferences(iosSimulator, { simctl });
@@ -469,11 +487,11 @@ describe("AppPreferences", () => {
     const simctl = new FakeSimCtlClient();
     simctl.setCommandResult(
       "spawn 12345678-1234-1234-1234-123456789ABC defaults read com.example.app windowsPath",
-      "C:\\tmp\n"
+      "C:\\tmp\n",
     );
     simctl.setCommandResult(
       "spawn 12345678-1234-1234-1234-123456789ABC defaults read com.example.app emptyString",
-      "\n"
+      "\n",
     );
 
     const preferences = new AppPreferences(iosSimulator, { simctl });
@@ -525,11 +543,11 @@ describe("AppPreferences", () => {
     const simctl = new FakeSimCtlClient();
     simctl.setCommandResult(
       "spawn 12345678-1234-1234-1234-123456789ABC defaults read com.example.app paddedString",
-      "  padded value  \n"
+      "  padded value  \n",
     );
     simctl.setCommandResult(
       "spawn 12345678-1234-1234-1234-123456789ABC defaults read-type com.example.app paddedString",
-      "Type is string\n"
+      "Type is string\n",
     );
 
     const preferences = new AppPreferences(iosSimulator, { simctl });
@@ -553,11 +571,11 @@ describe("AppPreferences", () => {
     const simctl = new FakeSimCtlClient();
     simctl.setCommandResult(
       "spawn 12345678-1234-1234-1234-123456789ABC defaults read group\\com.example path\\key",
-      "C:\\tmp\n"
+      "C:\\tmp\n",
     );
     simctl.setCommandResult(
       "spawn 12345678-1234-1234-1234-123456789ABC defaults read-type group\\com.example path\\key",
-      "Type is string\n"
+      "Type is string\n",
     );
 
     const preferences = new AppPreferences(iosSimulator, { simctl });
@@ -599,7 +617,7 @@ describe("AppPreferences", () => {
     const simctl = new FakeSimCtlClient();
     simctl.setCommandResult(
       "spawn 12345678-1234-1234-1234-123456789ABC defaults read group.com.example defaultHost",
-      "dev.example.com\n"
+      "dev.example.com\n",
     );
 
     const preferences = new AppPreferences(iosSimulator, { simctl });
@@ -622,7 +640,7 @@ describe("AppPreferences", () => {
     const simctl = new FakeSimCtlClient();
     simctl.setCommandResult(
       "spawn 12345678-1234-1234-1234-123456789ABC defaults read com.example.app defaultHost",
-      "dev.example.com\n"
+      "dev.example.com\n",
     );
 
     const preferences = new AppPreferences(iosSimulator, { simctl });
@@ -646,13 +664,15 @@ describe("AppPreferences", () => {
     const simctl = new FakeSimCtlClient();
     const preferences = new AppPreferences(iosSimulator, { simctl });
 
-    await expect(preferences.setPreference({
-      scope: "userDefaults",
-      appId: "com.example.app",
-      key: "unsafeInteger",
-      value: "9007199254740993",
-      type: "int",
-    })).rejects.toThrow("safe integer");
+    await expect(
+      preferences.setPreference({
+        scope: "userDefaults",
+        appId: "com.example.app",
+        key: "unsafeInteger",
+        value: "9007199254740993",
+        type: "int",
+      }),
+    ).rejects.toThrow("safe integer");
 
     expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
   });
@@ -661,11 +681,11 @@ describe("AppPreferences", () => {
     const simctl = new FakeSimCtlClient();
     simctl.setCommandResult(
       "spawn 12345678-1234-1234-1234-123456789ABC defaults read com.example.app onboardingComplete",
-      "1\n"
+      "1\n",
     );
     simctl.setCommandResult(
       "spawn 12345678-1234-1234-1234-123456789ABC defaults read-type com.example.app onboardingComplete",
-      "Type is boolean\n"
+      "Type is boolean\n",
     );
 
     const preferences = new AppPreferences(iosSimulator, { simctl });
@@ -711,11 +731,11 @@ describe("AppPreferences", () => {
     const simctl = new FakeSimCtlClient();
     simctl.setCommandResult(
       "spawn 12345678-1234-1234-1234-123456789ABC defaults read com.example.app unsafeInteger",
-      "9007199254740993\n"
+      "9007199254740993\n",
     );
     simctl.setCommandResult(
       "spawn 12345678-1234-1234-1234-123456789ABC defaults read-type com.example.app unsafeInteger",
-      "Type is integer\n"
+      "Type is integer\n",
     );
 
     const preferences = new AppPreferences(iosSimulator, { simctl });
@@ -737,7 +757,7 @@ describe("AppPreferences", () => {
     const simctl = new FakeSimCtlClient();
     simctl.setCommandError(
       "spawn 12345678-1234-1234-1234-123456789ABC defaults read com.example.app missingKey",
-      new Error("The domain/default pair of (com.example.app, missingKey) does not exist")
+      new Error("The domain/default pair of (com.example.app, missingKey) does not exist"),
     );
 
     const preferences = new AppPreferences(iosSimulator, { simctl });
@@ -758,11 +778,13 @@ describe("AppPreferences", () => {
   test("rejects physical iOS UserDefaults instead of reading the runner process defaults", async () => {
     const preferences = new AppPreferences(physicalIosDevice);
 
-    await expect(preferences.getPreference({
-      scope: "userDefaults",
-      appId: "com.example.app",
-      key: "onboardingComplete",
-    })).rejects.toThrow("iOS physical devices");
+    await expect(
+      preferences.getPreference({
+        scope: "userDefaults",
+        appId: "com.example.app",
+        key: "onboardingComplete",
+      }),
+    ).rejects.toThrow("iOS physical devices");
   });
 
   describe("validateScope guards", () => {
@@ -773,11 +795,13 @@ describe("AppPreferences", () => {
       const adb = new FakeAdbExecutor();
       const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
 
-      await expect(preferences.getPreference({
-        scope: "userDefaults",
-        appId: "com.example.app",
-        key: "onboardingComplete",
-      })).rejects.toThrow("userDefaults scope is only supported on iOS devices.");
+      await expect(
+        preferences.getPreference({
+          scope: "userDefaults",
+          appId: "com.example.app",
+          key: "onboardingComplete",
+        }),
+      ).rejects.toThrow("userDefaults scope is only supported on iOS devices.");
       expect(adb.getExecutedCommands()).toEqual([]);
     });
 
@@ -785,10 +809,12 @@ describe("AppPreferences", () => {
       const simctl = new FakeSimCtlClient();
       const preferences = new AppPreferences(iosSimulator, { simctl });
 
-      await expect(preferences.getPreference({
-        scope: "systemProperty",
-        key: "debug.example.enabled",
-      })).rejects.toThrow("systemProperty scope is only supported on Android devices.");
+      await expect(
+        preferences.getPreference({
+          scope: "systemProperty",
+          key: "debug.example.enabled",
+        }),
+      ).rejects.toThrow("systemProperty scope is only supported on Android devices.");
       expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
     });
 
@@ -796,12 +822,14 @@ describe("AppPreferences", () => {
       const simctl = new FakeSimCtlClient();
       const preferences = new AppPreferences(iosSimulator, { simctl });
 
-      await expect(preferences.getPreference({
-        scope: "sharedPreferences",
-        appId: "com.example.app",
-        suite: "settings",
-        key: "host",
-      })).rejects.toThrow("sharedPreferences scope is only supported on Android devices.");
+      await expect(
+        preferences.getPreference({
+          scope: "sharedPreferences",
+          appId: "com.example.app",
+          suite: "settings",
+          key: "host",
+        }),
+      ).rejects.toThrow("sharedPreferences scope is only supported on Android devices.");
       expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
     });
 
@@ -809,11 +837,13 @@ describe("AppPreferences", () => {
       const adb = new FakeAdbExecutor();
       const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
 
-      await expect(preferences.getPreference({
-        scope: "sharedPreferences",
-        suite: "settings",
-        key: "host",
-      })).rejects.toThrow("appId is required for sharedPreferences.");
+      await expect(
+        preferences.getPreference({
+          scope: "sharedPreferences",
+          suite: "settings",
+          key: "host",
+        }),
+      ).rejects.toThrow("appId is required for sharedPreferences.");
       expect(adb.getExecutedCommands()).toEqual([]);
     });
 
@@ -821,10 +851,12 @@ describe("AppPreferences", () => {
       const simctl = new FakeSimCtlClient();
       const preferences = new AppPreferences(iosSimulator, { simctl });
 
-      await expect(preferences.getPreference({
-        scope: "userDefaults",
-        key: "onboardingComplete",
-      })).rejects.toThrow("appId is required for userDefaults.");
+      await expect(
+        preferences.getPreference({
+          scope: "userDefaults",
+          key: "onboardingComplete",
+        }),
+      ).rejects.toThrow("appId is required for userDefaults.");
       expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
     });
 
@@ -832,13 +864,15 @@ describe("AppPreferences", () => {
       const adb = new FakeAdbExecutor();
       const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
 
-      await expect(preferences.setPreference({
-        scope: "userDefaults",
-        appId: "com.example.app",
-        key: "onboardingComplete",
-        value: true,
-        type: "bool",
-      })).rejects.toThrow("userDefaults scope is only supported on iOS devices.");
+      await expect(
+        preferences.setPreference({
+          scope: "userDefaults",
+          appId: "com.example.app",
+          key: "onboardingComplete",
+          value: true,
+          type: "bool",
+        }),
+      ).rejects.toThrow("userDefaults scope is only supported on iOS devices.");
       expect(adb.getExecutedCommands()).toEqual([]);
     });
   });

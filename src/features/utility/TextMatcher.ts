@@ -7,10 +7,10 @@ import type { TextMatcher } from "../../utils/interfaces/TextMatcher";
  */
 export function normalizeQuotes(text: string): string {
   return text
-    .replace(/[\u2018\u2019\u201A\u201B\u2032\u0060\u00B4]/g, "'")   // single quotes/apostrophes → U+0027
-    .replace(/[\u201C\u201D\u201E\u201F\u2033\u00AB\u00BB]/g, '"')   // double quotes → U+0022
-    .replace(/[\u2010\u2011\u2012\u2013\u2014\u2015]/g, "-")         // dashes → U+002D
-    .replace(/\u2026/g, "...");                                        // ellipsis → three dots
+    .replace(/[\u2018\u2019\u201A\u201B\u2032\u0060\u00B4]/g, "'") // single quotes/apostrophes → U+0027
+    .replace(/[\u201C\u201D\u201E\u201F\u2033\u00AB\u00BB]/g, '"') // double quotes → U+0022
+    .replace(/[\u2010\u2011\u2012\u2013\u2014\u2015]/g, "-") // dashes → U+002D
+    .replace(/\u2026/g, "..."); // ellipsis → three dots
 }
 
 /**
@@ -43,19 +43,27 @@ export class DefaultTextMatcher implements TextMatcher {
    * @param caseSensitive - Whether to use case-sensitive matching
    * @returns A function that tests if an input string matches the search text
    */
-  createTextMatcher(text: string, partialMatch: boolean = true, caseSensitive: boolean = false): (input?: string) => boolean {
-    if (!text) {return () => false;}
+  createTextMatcher(
+    text: string,
+    partialMatch: boolean = true,
+    caseSensitive: boolean = false,
+  ): (input?: string) => boolean {
+    if (!text) {
+      return () => false;
+    }
 
     const searchText = caseSensitive ? normalizeQuotes(text) : normalizeQuotes(text).toLowerCase();
 
     return (input?: string): boolean => {
-      if (!input) {return false;}
+      if (!input) {
+        return false;
+      }
 
-      const targetText = caseSensitive ? normalizeQuotes(input) : normalizeQuotes(input).toLowerCase();
+      const targetText = caseSensitive
+        ? normalizeQuotes(input)
+        : normalizeQuotes(input).toLowerCase();
 
-      return partialMatch
-        ? targetText.includes(searchText)
-        : targetText === searchText;
+      return partialMatch ? targetText.includes(searchText) : targetText === searchText;
     };
   }
 }

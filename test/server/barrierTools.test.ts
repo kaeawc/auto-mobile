@@ -10,8 +10,7 @@ const makeDevice = (deviceId: string): BootedDevice => ({
   name: `Device ${deviceId}`,
 });
 
-const parseResponse = (response: any): any =>
-  JSON.parse(response.content[0].text);
+const parseResponse = (response: any): any => JSON.parse(response.content[0].text);
 
 describe("barrier tool", () => {
   beforeAll(() => {
@@ -38,7 +37,7 @@ describe("barrier tool", () => {
       makeDevice("device-1"),
       { lock: "solo", deviceCount: 1 },
       undefined,
-      undefined
+      undefined,
     );
     const parsed = parseResponse(response);
     expect(parsed.success).toBe(true);
@@ -55,21 +54,19 @@ describe("barrier tool", () => {
         makeDevice("device-1"),
         { lock: "pair", deviceCount: 2 },
         undefined,
-        undefined
+        undefined,
       ),
       tool!.deviceAwareHandler!(
         makeDevice("device-2"),
         { lock: "pair", deviceCount: 2 },
         undefined,
-        undefined
+        undefined,
       ),
     ]);
 
     const parsed = results.map(parseResponse);
-    expect(parsed.every(r => r.success)).toBe(true);
-    expect(new Set(parsed.map(r => r.deviceId))).toEqual(
-      new Set(["device-1", "device-2"])
-    );
+    expect(parsed.every((r) => r.success)).toBe(true);
+    expect(new Set(parsed.map((r) => r.deviceId))).toEqual(new Set(["device-1", "device-2"]));
   });
 
   test("rejects with an actionable error on barrier timeout", async () => {
@@ -80,8 +77,8 @@ describe("barrier tool", () => {
         makeDevice("device-1"),
         { lock: "lonely", deviceCount: 2, timeout: 50 },
         undefined,
-        undefined
-      )
+        undefined,
+      ),
     ).rejects.toThrow(/Barrier "lonely" failed for device device-1/);
   });
 
@@ -106,15 +103,19 @@ describe("barrier tool", () => {
       makeDevice("planA-device-1"),
       { lock: "sync", deviceCount: 2, timeout: 50, __lockNamespace: "session-A" },
       undefined,
-      undefined
-    ).then(() => "passed").catch(() => "timed-out");
+      undefined,
+    )
+      .then(() => "passed")
+      .catch(() => "timed-out");
 
     const bTimedOut = tool!.deviceAwareHandler!(
       makeDevice("planB-device-1"),
       { lock: "sync", deviceCount: 2, timeout: 50, __lockNamespace: "session-B" },
       undefined,
-      undefined
-    ).then(() => "passed").catch(() => "timed-out");
+      undefined,
+    )
+      .then(() => "passed")
+      .catch(() => "timed-out");
 
     expect(await aTimedOut).toBe("timed-out");
     expect(await bTimedOut).toBe("timed-out");

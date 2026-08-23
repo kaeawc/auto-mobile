@@ -23,19 +23,25 @@ describe("fileLock primitive", () => {
   });
 
   test("acquires on a fresh path and writes the owner pid", () => {
-    expect(tryAcquireExclusiveLock(lockPath, { pid: 100, isProcessRunning: () => true })).toBe(true);
+    expect(tryAcquireExclusiveLock(lockPath, { pid: 100, isProcessRunning: () => true })).toBe(
+      true,
+    );
     expect(readFileSync(lockPath, "utf-8").trim()).toBe("100");
   });
 
   test("fails when a different live holder owns it", () => {
     writeFileSync(lockPath, "9999");
-    expect(tryAcquireExclusiveLock(lockPath, { pid: 100, isProcessRunning: () => true })).toBe(false);
+    expect(tryAcquireExclusiveLock(lockPath, { pid: 100, isProcessRunning: () => true })).toBe(
+      false,
+    );
     expect(readFileSync(lockPath, "utf-8").trim()).toBe("9999");
   });
 
   test("treats an empty lock file as held (writer mid-write)", () => {
     writeFileSync(lockPath, "");
-    expect(tryAcquireExclusiveLock(lockPath, { pid: 100, isProcessRunning: () => true })).toBe(false);
+    expect(tryAcquireExclusiveLock(lockPath, { pid: 100, isProcessRunning: () => true })).toBe(
+      false,
+    );
   });
 
   test("surfaces a genuine IO error instead of reporting contention (#3623)", () => {
@@ -47,28 +53,34 @@ describe("fileLock primitive", () => {
     writeFileSync(filePath, "x");
     const badLockPath = join(filePath, "sub", "child.lock");
 
-    expect(() => tryAcquireExclusiveLock(badLockPath, { pid: 100, isProcessRunning: () => true })).toThrow(
-      /Failed to create exclusive lock file/
-    );
+    expect(() =>
+      tryAcquireExclusiveLock(badLockPath, { pid: 100, isProcessRunning: () => true }),
+    ).toThrow(/Failed to create exclusive lock file/);
   });
 
   test("treats an unreadable PID as held", () => {
     writeFileSync(lockPath, "not-a-pid");
-    expect(tryAcquireExclusiveLock(lockPath, { pid: 100, isProcessRunning: () => true })).toBe(false);
+    expect(tryAcquireExclusiveLock(lockPath, { pid: 100, isProcessRunning: () => true })).toBe(
+      false,
+    );
   });
 
   test("reclaims a lock left by a dead holder", () => {
     writeFileSync(lockPath, "9999");
-    expect(tryAcquireExclusiveLock(lockPath, { pid: 100, isProcessRunning: () => false })).toBe(true);
+    expect(tryAcquireExclusiveLock(lockPath, { pid: 100, isProcessRunning: () => false })).toBe(
+      true,
+    );
     expect(readFileSync(lockPath, "utf-8").trim()).toBe("100");
   });
 
   test("reclaim leaves no stray .reclaim marker behind", () => {
     writeFileSync(lockPath, "9999");
-    expect(tryAcquireExclusiveLock(lockPath, { pid: 100, isProcessRunning: () => false })).toBe(true);
+    expect(tryAcquireExclusiveLock(lockPath, { pid: 100, isProcessRunning: () => false })).toBe(
+      true,
+    );
 
     const lockName = basename(lockPath);
-    const strays = readdirSync(dir).filter(name => name !== lockName);
+    const strays = readdirSync(dir).filter((name) => name !== lockName);
     expect(strays).toEqual([]);
   });
 
@@ -78,7 +90,9 @@ describe("fileLock primitive", () => {
     writeFileSync(`${lockPath}.100.reclaim`, "9999");
     writeFileSync(lockPath, "9999");
 
-    expect(tryAcquireExclusiveLock(lockPath, { pid: 100, isProcessRunning: () => false })).toBe(true);
+    expect(tryAcquireExclusiveLock(lockPath, { pid: 100, isProcessRunning: () => false })).toBe(
+      true,
+    );
     expect(readFileSync(lockPath, "utf-8").trim()).toBe("100");
     expect(existsSync(`${lockPath}.100.reclaim`)).toBe(false);
   });
@@ -87,11 +101,17 @@ describe("fileLock primitive", () => {
     writeFileSync(lockPath, "100");
 
     // Default (daemon coordinator): a same-PID probe reads as held.
-    expect(tryAcquireExclusiveLock(lockPath, { pid: 100, isProcessRunning: () => true })).toBe(false);
+    expect(tryAcquireExclusiveLock(lockPath, { pid: 100, isProcessRunning: () => true })).toBe(
+      false,
+    );
 
     // reclaimOwnPid (migration singleton): a leaked own-PID lock is reclaimed.
     expect(
-      tryAcquireExclusiveLock(lockPath, { pid: 100, isProcessRunning: () => true, reclaimOwnPid: true })
+      tryAcquireExclusiveLock(lockPath, {
+        pid: 100,
+        isProcessRunning: () => true,
+        reclaimOwnPid: true,
+      }),
     ).toBe(true);
     expect(readFileSync(lockPath, "utf-8").trim()).toBe("100");
   });
@@ -99,7 +119,11 @@ describe("fileLock primitive", () => {
   describe("ownerToken distinguishes a live in-flight run from a stale recycled-PID leak (#2947)", () => {
     test("writes the owner token beneath the pid when provided", () => {
       expect(
-        tryAcquireExclusiveLock(lockPath, { pid: 100, isProcessRunning: () => true, ownerToken: "tok-A" })
+        tryAcquireExclusiveLock(lockPath, {
+          pid: 100,
+          isProcessRunning: () => true,
+          ownerToken: "tok-A",
+        }),
       ).toBe(true);
       // PID stays parseable as the first line so the daemon liveness reader and
       // releaseExclusiveLock (parseInt) keep working; the token trails on line 2.
@@ -120,7 +144,7 @@ describe("fileLock primitive", () => {
           isProcessRunning: () => true,
           reclaimOwnPid: true,
           ownerToken: "tok-A",
-        })
+        }),
       ).toBe(false);
       expect(readFileSync(lockPath, "utf-8")).toBe("100\ntok-A");
     });
@@ -135,7 +159,7 @@ describe("fileLock primitive", () => {
           isProcessRunning: () => true,
           reclaimOwnPid: true,
           ownerToken: "tok-A",
-        })
+        }),
       ).toBe(true);
       expect(readFileSync(lockPath, "utf-8").split("\n")[0]).toBe("100");
     });
@@ -150,7 +174,7 @@ describe("fileLock primitive", () => {
           isProcessRunning: () => true,
           reclaimOwnPid: true,
           ownerToken: "tok-A",
-        })
+        }),
       ).toBe(true);
     });
 
@@ -166,7 +190,7 @@ describe("fileLock primitive", () => {
           isProcessRunning: () => false,
           reclaimOwnPid: true,
           ownerToken: "tok-A",
-        })
+        }),
       ).toBe(true);
       expect(readFileSync(lockPath, "utf-8").split("\n")[0]).toBe("100");
     });
@@ -174,7 +198,11 @@ describe("fileLock primitive", () => {
     test("without reclaimOwnPid, our token on a live same-PID lock still reads as held (daemon default)", () => {
       writeFileSync(lockPath, "100\ntok-A");
       expect(
-        tryAcquireExclusiveLock(lockPath, { pid: 100, isProcessRunning: () => true, ownerToken: "tok-A" })
+        tryAcquireExclusiveLock(lockPath, {
+          pid: 100,
+          isProcessRunning: () => true,
+          ownerToken: "tok-A",
+        }),
       ).toBe(false);
     });
 
@@ -226,7 +254,10 @@ describe("fileLock primitive", () => {
 
     test("parseLockContent round-trips formatLockContent", () => {
       expect(parseLockContent(formatLockContent(100))).toEqual({ pid: 100, token: undefined });
-      expect(parseLockContent(formatLockContent(100, "tok-A"))).toEqual({ pid: 100, token: "tok-A" });
+      expect(parseLockContent(formatLockContent(100, "tok-A"))).toEqual({
+        pid: 100,
+        token: "tok-A",
+      });
       expect(parseLockContent(formatLockContent(100, undefined, "holder-log-path"))).toEqual({
         pid: 100,
         token: undefined,

@@ -24,7 +24,7 @@ function tagName(tag: unknown): unknown {
 }
 
 function findMergeTag(tags: readonly unknown[]): unknown {
-  return tags.find(tag => tagName(tag) === "tag:yaml.org,2002:merge");
+  return tags.find((tag) => tagName(tag) === "tag:yaml.org,2002:merge");
 }
 
 function createPlanYamlSchema(): yaml.Schema {
@@ -35,11 +35,9 @@ function createPlanYamlSchema(): yaml.Schema {
     return coreSchema.withTags(mergeTag);
   }
 
-  const defaultSchema = (yaml as typeof yaml & { DEFAULT_SCHEMA?: SchemaWithTagLists }).DEFAULT_SCHEMA;
-  const defaultTags = [
-    ...(defaultSchema?.implicit ?? []),
-    ...(defaultSchema?.explicit ?? []),
-  ];
+  const defaultSchema = (yaml as typeof yaml & { DEFAULT_SCHEMA?: SchemaWithTagLists })
+    .DEFAULT_SCHEMA;
+  const defaultTags = [...(defaultSchema?.implicit ?? []), ...(defaultSchema?.explicit ?? [])];
   const defaultMergeTag = findMergeTag(defaultTags);
 
   if (defaultMergeTag && typeof coreSchema.extend === "function") {

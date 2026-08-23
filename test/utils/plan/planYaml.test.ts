@@ -4,7 +4,8 @@ import { PLAN_YAML_LOAD_OPTIONS } from "../../../src/utils/plan/planYaml";
 
 describe("PLAN_YAML_LOAD_OPTIONS", () => {
   test("loads YAML merge keys", () => {
-    const loaded = yaml.load(`
+    const loaded = yaml.load(
+      `
 defaults: &defaults
   tool: tapOn
   params:
@@ -13,7 +14,9 @@ defaults: &defaults
 step:
   <<: *defaults
   label: Tap save
-`, PLAN_YAML_LOAD_OPTIONS) as {
+`,
+      PLAN_YAML_LOAD_OPTIONS,
+    ) as {
       step: {
         tool: string;
         params: { selector: { text: string } };

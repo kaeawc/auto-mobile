@@ -23,10 +23,10 @@ describe("#4966 XCTestRunner source-built CtrlProxy artifacts", () => {
     expect(pinIntegrity?.run).toContain("AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256");
     expect(pinIntegrity?.run).toContain("AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256_TARGET=xctest");
     expect(indexOfNamed(steps, "Build CtrlProxy iOS for Testing")).toBeLessThan(
-      indexOfNamed(steps, "Pin Source-Built CtrlProxy Runner Integrity")
+      indexOfNamed(steps, "Pin Source-Built CtrlProxy Runner Integrity"),
     );
     expect(indexOfNamed(steps, "Pin Source-Built CtrlProxy Runner Integrity")).toBeLessThan(
-      indexOfNamed(steps, "Ensure AutoMobile daemon ready (Xcode 26.5)")
+      indexOfNamed(steps, "Ensure AutoMobile daemon ready (Xcode 26.5)"),
     );
   });
 });

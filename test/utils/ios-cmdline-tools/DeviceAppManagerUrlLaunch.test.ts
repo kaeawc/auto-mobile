@@ -27,13 +27,17 @@ interface Harness {
 // would be a real regression the test should catch.
 const makeInspector = (overrides: Overrides = {}): Harness => {
   const commands: string[][] = [];
-  const unused = () => { throw new Error("unexpected filesystem dependency use in URL-launch path"); };
+  const unused = () => {
+    throw new Error("unexpected filesystem dependency use in URL-launch path");
+  };
   const inspector = new DeviceAppManager({
     platform: overrides.platform ?? (() => "darwin"),
-    execute: overrides.execute ?? (async (file: string, args: string[]) => {
-      commands.push([file, ...args]);
-      return execResult();
-    }),
+    execute:
+      overrides.execute ??
+      (async (file: string, args: string[]) => {
+        commands.push([file, ...args]);
+        return execResult();
+      }),
     readFile: unused,
     mkdtemp: unused,
     rm: unused,
@@ -60,24 +64,36 @@ describe("DeviceAppManager.isUrlLaunchAvailable", () => {
 
   test("returns false on darwin when the devicectl probe throws", async () => {
     const { inspector } = makeInspector({
-      execute: async () => { throw new Error("xcrun: devicectl not found"); },
+      execute: async () => {
+        throw new Error("xcrun: devicectl not found");
+      },
     });
     expect(await inspector.isUrlLaunchAvailable()).toBe(false);
   });
-
 });
 
 describe("DeviceAppManager.launchWithPayloadUrl", () => {
   test("passes device, URL, and bundle id as argv", async () => {
     const { inspector, commands } = makeInspector();
-    await inspector.launchWithPayloadUrl("00008110-000A4D", "com.apple.mobilesafari", "https://example.com/order/123");
+    await inspector.launchWithPayloadUrl(
+      "00008110-000A4D",
+      "com.apple.mobilesafari",
+      "https://example.com/order/123",
+    );
 
     expect(commands).toHaveLength(1);
     expect(commands[0]).toEqual([
-      "xcrun", "devicectl", "device", "process", "launch",
-      "--device", "00008110-000A4D",
-      "--payload-url", "https://example.com/order/123",
-      "--terminate-existing", "com.apple.mobilesafari"
+      "xcrun",
+      "devicectl",
+      "device",
+      "process",
+      "launch",
+      "--device",
+      "00008110-000A4D",
+      "--payload-url",
+      "https://example.com/order/123",
+      "--terminate-existing",
+      "com.apple.mobilesafari",
     ]);
   });
 
@@ -91,21 +107,28 @@ describe("DeviceAppManager.launchWithPayloadUrl", () => {
   test("throws an explicit macOS ActionableError on a non-darwin host", async () => {
     const { inspector, commands } = makeInspector({ platform: () => "linux" });
     await expect(
-      inspector.launchWithPayloadUrl("udid", "com.apple.mobilesafari", "https://example.com")
+      inspector.launchWithPayloadUrl("udid", "com.apple.mobilesafari", "https://example.com"),
     ).rejects.toThrow(/macOS/);
     await expect(
-      inspector.launchWithPayloadUrl("udid", "com.apple.mobilesafari", "https://example.com")
+      inspector.launchWithPayloadUrl("udid", "com.apple.mobilesafari", "https://example.com"),
     ).rejects.toBeInstanceOf(ActionableError);
     expect(commands).toHaveLength(0);
   });
 
   test("wraps an underlying devicectl exec failure in an ActionableError with context", async () => {
     const { inspector } = makeInspector({
-      execute: async () => { throw new Error("device locked"); },
+      execute: async () => {
+        throw new Error("device locked");
+      },
     });
     const thrown = await inspector
       .launchWithPayloadUrl("udid", "com.apple.mobilesafari", "https://example.com")
-      .then(() => { throw new Error("expected reject"); }, (e: unknown) => e);
+      .then(
+        () => {
+          throw new Error("expected reject");
+        },
+        (e: unknown) => e,
+      );
     expect(thrown).toBeInstanceOf(ActionableError);
     // Underlying diagnostic preserved …
     expect((thrown as Error).message).toContain("device locked");

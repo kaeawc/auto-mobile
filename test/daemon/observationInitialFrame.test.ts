@@ -28,7 +28,11 @@ class FakeObservationStreamServer {
   }> = [];
   readonly screenshotUpdates: ScreenshotUpdate[] = [];
 
-  pushHierarchyUpdate(deviceId: string, hierarchy: ViewHierarchyResult, frameContext?: string): number | null {
+  pushHierarchyUpdate(
+    deviceId: string,
+    hierarchy: ViewHierarchyResult,
+    frameContext?: string,
+  ): number | null {
     this.hierarchyUpdates.push({
       deviceId,
       hierarchy,
@@ -49,18 +53,21 @@ class FakeObservationStreamServer {
       nativeScale?: number;
       frameContext?: string;
       rotation?: number;
-    }
+    },
   ): void {
-    const screenshotOptions = options?.captureSequence === undefined && options?.rotation === undefined
-      ? undefined
-      : options;
+    const screenshotOptions =
+      options?.captureSequence === undefined && options?.rotation === undefined
+        ? undefined
+        : options;
     this.screenshotUpdates.push({
       deviceId,
       screenshotBase64,
       screenWidth,
       screenHeight,
       ...(metadata === undefined ? {} : { metadata }),
-      ...(options?.coordinateSpace === undefined ? {} : { coordinateSpace: options.coordinateSpace }),
+      ...(options?.coordinateSpace === undefined
+        ? {}
+        : { coordinateSpace: options.coordinateSpace }),
       ...(options?.nativeScale === undefined ? {} : { nativeScale: options.nativeScale }),
       ...(screenshotOptions === undefined ? {} : { options: screenshotOptions }),
       ...(options?.frameContext === undefined ? {} : { frameContext: options.frameContext }),
@@ -105,7 +112,7 @@ class FakeAndroidInitialFrameClient implements ObservationStreamAndroidClient {
       screenshotFormat: "jpeg",
       screenshotCaptureSource: "android_ctrlproxy_a11y",
       screenshotFallback: false,
-    }
+    },
   ) {}
 
   async ensureConnected(): Promise<boolean> {
@@ -116,7 +123,7 @@ class FakeAndroidInitialFrameClient implements ObservationStreamAndroidClient {
     waitForFresh?: boolean,
     timeout?: number,
     _perf?: unknown,
-    skipWaitForFresh?: boolean
+    skipWaitForFresh?: boolean,
   ): Promise<AccessibilityHierarchyResponse> {
     this.latestHierarchyCalls.push({ waitForFresh, timeout, skipWaitForFresh });
     return {
@@ -130,7 +137,7 @@ class FakeAndroidInitialFrameClient implements ObservationStreamAndroidClient {
     _perf?: unknown,
     _disableAllFiltering?: boolean,
     _signal?: AbortSignal,
-    timeoutMs?: number
+    timeoutMs?: number,
   ): Promise<{ hierarchy: AccessibilityHierarchy } | null> {
     this.suppressedSyncHierarchyCalls.push({ timeoutMs });
     return this.syncHierarchy ? { hierarchy: this.syncHierarchy } : null;
@@ -151,7 +158,7 @@ class FakeAndroidInitialFrameClient implements ObservationStreamAndroidClient {
 
   recordInitialObservationStreamHierarchy(
     hierarchy: ViewHierarchyResult,
-    captureSequence: number | null
+    captureSequence: number | null,
   ): void {
     this.forwardedInitialHierarchies.push({ hierarchy, captureSequence });
   }
@@ -175,8 +182,12 @@ class FakeIosInitialFrameClient implements ObservationStreamIosClient {
     private readonly connected: boolean,
     private readonly latestHierarchy: CtrlProxyHierarchy | null,
     private readonly syncHierarchy: CtrlProxyHierarchy | null = latestHierarchy,
-    private readonly screenshot: CtrlProxyScreenshotResult = { success: true, data: "ios-shot", format: "png" },
-    private readonly latestHierarchyFresh: boolean = true
+    private readonly screenshot: CtrlProxyScreenshotResult = {
+      success: true,
+      data: "ios-shot",
+      format: "png",
+    },
+    private readonly latestHierarchyFresh: boolean = true,
   ) {}
 
   async ensureConnected(): Promise<boolean> {
@@ -195,7 +206,7 @@ class FakeIosInitialFrameClient implements ObservationStreamIosClient {
     _perf?: unknown,
     _disableAllFiltering?: boolean,
     _signal?: AbortSignal,
-    timeoutMs?: number
+    timeoutMs?: number,
   ): Promise<{ hierarchy: CtrlProxyHierarchy } | null> {
     this.syncHierarchyCalls.push({ timeoutMs });
     return this.syncHierarchy ? { hierarchy: this.syncHierarchy } : null;
@@ -205,7 +216,7 @@ class FakeIosInitialFrameClient implements ObservationStreamIosClient {
     _perf?: unknown,
     _disableAllFiltering?: boolean,
     _signal?: AbortSignal,
-    timeoutMs?: number
+    timeoutMs?: number,
   ): Promise<{ hierarchy: CtrlProxyHierarchy } | null> {
     this.suppressedSyncHierarchyCalls.push({ timeoutMs });
     return this.syncHierarchy ? { hierarchy: this.syncHierarchy } : null;
@@ -226,9 +237,13 @@ class FakeIosInitialFrameClient implements ObservationStreamIosClient {
       screenScale: typedHierarchy.screenScale,
       // Additive #4548 scale metadata, mirroring the real converter's spread — so the daemon's
       // canonical-pixel path (#4549) is exercised when the runner supplied it.
-      ...(typedHierarchy.nativeScale === undefined ? {} : { nativeScale: typedHierarchy.nativeScale }),
+      ...(typedHierarchy.nativeScale === undefined
+        ? {}
+        : { nativeScale: typedHierarchy.nativeScale }),
       ...(typedHierarchy.pixelWidth === undefined ? {} : { pixelWidth: typedHierarchy.pixelWidth }),
-      ...(typedHierarchy.pixelHeight === undefined ? {} : { pixelHeight: typedHierarchy.pixelHeight }),
+      ...(typedHierarchy.pixelHeight === undefined
+        ? {}
+        : { pixelHeight: typedHierarchy.pixelHeight }),
       rotation: typedHierarchy.rotation,
       ...("frameContext" in typedHierarchy && typeof typedHierarchy.frameContext === "string"
         ? { frameContext: typedHierarchy.frameContext }
@@ -238,7 +253,7 @@ class FakeIosInitialFrameClient implements ObservationStreamIosClient {
 
   recordInitialObservationStreamHierarchy(
     hierarchy: ViewHierarchyResult,
-    captureSequence: number | null
+    captureSequence: number | null,
   ): void {
     this.forwardedInitialHierarchies.push({ hierarchy, captureSequence });
   }
@@ -247,7 +262,9 @@ class FakeIosInitialFrameClient implements ObservationStreamIosClient {
     return this.screenshot;
   }
 
-  async requestScreenshotWithoutObservationStreamPush(timeoutMs?: number): Promise<CtrlProxyScreenshotResult> {
+  async requestScreenshotWithoutObservationStreamPush(
+    timeoutMs?: number,
+  ): Promise<CtrlProxyScreenshotResult> {
     this.suppressedScreenshotCalls.push({ timeoutMs });
     return this.screenshot;
   }
@@ -287,7 +304,9 @@ describe("pushInitialObservationFramesForSubscriber", () => {
       {
         deviceId: androidDevice.id,
         hierarchy: {
-          hierarchy: { node: { text: "Home", bounds: { left: 0, top: 0, right: 1440, bottom: 3120 } } },
+          hierarchy: {
+            node: { text: "Home", bounds: { left: 0, top: 0, right: 1440, bottom: 3120 } },
+          },
           packageName: "com.example",
           updatedAt: 123,
           screenWidth: 1440,
@@ -383,7 +402,7 @@ describe("pushInitialObservationFramesForSubscriber", () => {
         success: true,
         data: "android-shot",
         frameContext: "android-hierarchy",
-      }
+      },
     );
 
     await pushInitialObservationFramesForSubscriber(androidDevice.id, [androidDevice], {
@@ -417,7 +436,7 @@ describe("pushInitialObservationFramesForSubscriber", () => {
         success: true,
         data: "android-shot",
         frameContext: "android-screen-b",
-      }
+      },
     );
 
     await pushInitialObservationFramesForSubscriber(androidDevice.id, [androidDevice], {
@@ -453,7 +472,7 @@ describe("pushInitialObservationFramesForSubscriber", () => {
         screenshotCaptureSource: "android_adb_screencap",
         screenshotFallback: true,
         screenshotFallbackReason: "websocket_unavailable",
-      }
+      },
     );
 
     await pushInitialObservationFramesForSubscriber(androidDevice.id, [androidDevice], {
@@ -505,7 +524,7 @@ describe("pushInitialObservationFramesForSubscriber", () => {
         screenshotEncodeDurationMs: 7,
         screenshotByteLength: 1200,
         screenshotBase64Length: 1600,
-      }
+      },
     );
 
     await pushInitialObservationFramesForSubscriber(androidDevice.id, [androidDevice], {
@@ -538,17 +557,13 @@ describe("pushInitialObservationFramesForSubscriber", () => {
 
   it("captures Android hierarchy without an automatic stream push when the initial cache is empty", async () => {
     const streamServer = new FakeObservationStreamServer();
-    const androidClient = new FakeAndroidInitialFrameClient(
-      true,
-      null,
-      {
-        updatedAt: 789,
-        packageName: "com.example",
-        screenWidth: 720,
-        screenHeight: 1280,
-        hierarchy: { text: "Cold start" },
-      }
-    );
+    const androidClient = new FakeAndroidInitialFrameClient(true, null, {
+      updatedAt: 789,
+      packageName: "com.example",
+      screenWidth: 720,
+      screenHeight: 1280,
+      hierarchy: { text: "Cold start" },
+    });
 
     await pushInitialObservationFramesForSubscriber(androidDevice.id, [androidDevice], {
       streamServer,
@@ -589,7 +604,7 @@ describe("pushInitialObservationFramesForSubscriber", () => {
         screenHeight: 1280,
         hierarchy: { text: "Fresh sync" },
       },
-      false
+      false,
     );
 
     await pushInitialObservationFramesForSubscriber(androidDevice.id, [androidDevice], {
@@ -602,20 +617,27 @@ describe("pushInitialObservationFramesForSubscriber", () => {
 
     expect(androidClient.suppressedSyncHierarchyCalls).toEqual([{ timeoutMs: 3000 }]);
     expect(streamServer.hierarchyUpdates[0].hierarchy.updatedAt).toBe(200);
-    expect(streamServer.hierarchyUpdates[0].hierarchy.hierarchy.node).toMatchObject({ text: "Fresh sync" });
+    expect(streamServer.hierarchyUpdates[0].hierarchy.hierarchy.node).toMatchObject({
+      text: "Fresh sync",
+    });
   });
 
   it("pushes iOS screenshot dimensions in pixels using screen scale", async () => {
     const streamServer = new FakeObservationStreamServer();
-    const iosClient = new FakeIosInitialFrameClient(true, {
-      updatedAt: 456,
-      packageName: "com.example.ios",
-      screenWidth: 390,
-      screenHeight: 844,
-      screenScale: 3,
-      rotation: 1,
-      hierarchy: { text: "Home" },
-    }, undefined, { success: true, data: "ios-shot", format: "png", rotation: 1 });
+    const iosClient = new FakeIosInitialFrameClient(
+      true,
+      {
+        updatedAt: 456,
+        packageName: "com.example.ios",
+        screenWidth: 390,
+        screenHeight: 844,
+        screenScale: 3,
+        rotation: 1,
+        hierarchy: { text: "Home" },
+      },
+      undefined,
+      { success: true, data: "ios-shot", format: "png", rotation: 1 },
+    );
 
     await pushInitialObservationFramesForSubscriber(iosDevice.id, [iosDevice], {
       streamServer,
@@ -627,7 +649,9 @@ describe("pushInitialObservationFramesForSubscriber", () => {
 
     expect(streamServer.hierarchyUpdates).toHaveLength(1);
     expect(streamServer.hierarchyUpdates[0].deviceId).toBe(iosDevice.id);
-    expect(streamServer.hierarchyUpdates[0].hierarchy.hierarchy.node).toEqual({ $: { text: "Home" } });
+    expect(streamServer.hierarchyUpdates[0].hierarchy.hierarchy.node).toEqual({
+      $: { text: "Home" },
+    });
     expect(streamServer.screenshotUpdates).toEqual([
       {
         deviceId: iosDevice.id,
@@ -713,7 +737,7 @@ describe("pushInitialObservationFramesForSubscriber", () => {
         frameContext: "ios-hierarchy",
       } as any,
       undefined,
-      { success: true, data: "ios-shot", format: "png", frameContext: "ios-hierarchy" }
+      { success: true, data: "ios-shot", format: "png", frameContext: "ios-hierarchy" },
     );
 
     await pushInitialObservationFramesForSubscriber(iosDevice.id, [iosDevice], {
@@ -743,7 +767,7 @@ describe("pushInitialObservationFramesForSubscriber", () => {
         frameContext: "ios-screen-a",
       } as any,
       undefined,
-      { success: true, data: "ios-shot", format: "png", frameContext: "ios-screen-b" }
+      { success: true, data: "ios-shot", format: "png", frameContext: "ios-screen-b" },
     );
 
     await pushInitialObservationFramesForSubscriber(iosDevice.id, [iosDevice], {
@@ -760,18 +784,14 @@ describe("pushInitialObservationFramesForSubscriber", () => {
 
   it("captures iOS hierarchy synchronously when the initial cache is empty", async () => {
     const streamServer = new FakeObservationStreamServer();
-    const iosClient = new FakeIosInitialFrameClient(
-      true,
-      null,
-      {
-        updatedAt: 987,
-        packageName: "com.example.ios",
-        screenWidth: 400,
-        screenHeight: 800,
-        screenScale: 2,
-        hierarchy: { text: "Cold start" },
-      }
-    );
+    const iosClient = new FakeIosInitialFrameClient(true, null, {
+      updatedAt: 987,
+      packageName: "com.example.ios",
+      screenWidth: 400,
+      screenHeight: 800,
+      screenScale: 2,
+      hierarchy: { text: "Cold start" },
+    });
 
     await pushInitialObservationFramesForSubscriber(iosDevice.id, [iosDevice], {
       streamServer,
@@ -784,7 +804,9 @@ describe("pushInitialObservationFramesForSubscriber", () => {
     expect(iosClient.syncHierarchyCalls).toHaveLength(0);
     expect(iosClient.suppressedSyncHierarchyCalls).toEqual([{ timeoutMs: 3000 }]);
     expect(streamServer.hierarchyUpdates[0].hierarchy.updatedAt).toBe(987);
-    expect(streamServer.hierarchyUpdates[0].hierarchy.hierarchy.node).toEqual({ $: { text: "Cold start" } });
+    expect(streamServer.hierarchyUpdates[0].hierarchy.hierarchy.node).toEqual({
+      $: { text: "Cold start" },
+    });
     expect(streamServer.screenshotUpdates[0]).toMatchObject({
       deviceId: iosDevice.id,
       screenWidth: 800,
@@ -794,19 +816,15 @@ describe("pushInitialObservationFramesForSubscriber", () => {
 
   it("forwards the synchronous iOS hierarchy context when the initial cache is empty", async () => {
     const streamServer = new FakeObservationStreamServer();
-    const iosClient = new FakeIosInitialFrameClient(
-      true,
-      null,
-      {
-        updatedAt: 789,
-        packageName: "com.example",
-        screenWidth: 390,
-        screenHeight: 844,
-        screenScale: 3,
-        hierarchy: { text: "Cold start" },
-        frameContext: "ios-sync",
-      } as any
-    );
+    const iosClient = new FakeIosInitialFrameClient(true, null, {
+      updatedAt: 789,
+      packageName: "com.example",
+      screenWidth: 390,
+      screenHeight: 844,
+      screenScale: 3,
+      hierarchy: { text: "Cold start" },
+      frameContext: "ios-sync",
+    } as any);
 
     await pushInitialObservationFramesForSubscriber(iosDevice.id, [iosDevice], {
       streamServer,
@@ -840,7 +858,7 @@ describe("pushInitialObservationFramesForSubscriber", () => {
         hierarchy: { text: "Fresh sync" },
       },
       { success: true, data: "ios-shot" },
-      false
+      false,
     );
 
     await pushInitialObservationFramesForSubscriber(iosDevice.id, [iosDevice], {
@@ -854,7 +872,9 @@ describe("pushInitialObservationFramesForSubscriber", () => {
     expect(iosClient.syncHierarchyCalls).toHaveLength(0);
     expect(iosClient.suppressedSyncHierarchyCalls).toEqual([{ timeoutMs: 3000 }]);
     expect(streamServer.hierarchyUpdates[0].hierarchy.updatedAt).toBe(200);
-    expect(streamServer.hierarchyUpdates[0].hierarchy.hierarchy.node).toEqual({ $: { text: "Fresh sync" } });
+    expect(streamServer.hierarchyUpdates[0].hierarchy.hierarchy.node).toEqual({
+      $: { text: "Fresh sync" },
+    });
   });
 
   it("honors a device-specific subscription filter", async () => {
@@ -875,8 +895,12 @@ describe("pushInitialObservationFramesForSubscriber", () => {
       },
     });
 
-    expect(streamServer.hierarchyUpdates.map(update => update.deviceId)).toEqual([androidDevice.id]);
-    expect(streamServer.screenshotUpdates.map(update => update.deviceId)).toEqual([androidDevice.id]);
+    expect(streamServer.hierarchyUpdates.map((update) => update.deviceId)).toEqual([
+      androidDevice.id,
+    ]);
+    expect(streamServer.screenshotUpdates.map((update) => update.deviceId)).toEqual([
+      androidDevice.id,
+    ]);
   });
 
   describe("coordinate-mapping golden vectors: iOS point->pixel (issue #4547)", () => {
@@ -904,11 +928,11 @@ describe("pushInitialObservationFramesForSubscriber", () => {
           // no metadata, so the daemon takes the legacy path and never stamps px.
           ...(hasMetadata
             ? {
-              screenScale: vector.scale,
-              nativeScale: vector.scale,
-              pixelWidth: vector.expectedPixelWidth,
-              pixelHeight: vector.expectedPixelHeight,
-            }
+                screenScale: vector.scale,
+                nativeScale: vector.scale,
+                pixelWidth: vector.expectedPixelWidth,
+                pixelHeight: vector.expectedPixelHeight,
+              }
             : {}),
           hierarchy: { text: "Golden" },
         } as any);
@@ -928,9 +952,11 @@ describe("pushInitialObservationFramesForSubscriber", () => {
         });
         // The px declaration is gated on runner metadata: present == canonical pixels declared,
         // absent (legacy runner) == no field so the client keeps its point-space fallback.
-        expect(streamServer.screenshotUpdates[0].coordinateSpace).toBe(hasMetadata ? "px" : undefined);
+        expect(streamServer.screenshotUpdates[0].coordinateSpace).toBe(
+          hasMetadata ? "px" : undefined,
+        );
         expect(streamServer.screenshotUpdates[0].nativeScale).toBe(
-          hasMetadata ? vector.scale : undefined
+          hasMetadata ? vector.scale : undefined,
         );
       });
     }

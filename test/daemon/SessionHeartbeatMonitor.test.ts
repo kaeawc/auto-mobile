@@ -46,7 +46,12 @@ describe("SessionHeartbeatMonitor", () => {
   describe("scheduling", () => {
     it("start registers an interval and stop clears it", () => {
       const before = timer.getPendingIntervalCount();
-      const monitor = new SessionHeartbeatMonitor(sessionManager, () => false, async () => {}, timer);
+      const monitor = new SessionHeartbeatMonitor(
+        sessionManager,
+        () => false,
+        async () => {},
+        timer,
+      );
 
       monitor.start();
       expect(timer.getPendingIntervalCount()).toBe(before + 1);
@@ -65,7 +70,9 @@ describe("SessionHeartbeatMonitor", () => {
       const monitor = new SessionHeartbeatMonitor(
         sessionManager,
         () => false,
-        async sid => { reaped.push(sid); },
+        async (sid) => {
+          reaped.push(sid);
+        },
         timer,
       );
       monitor.start();
@@ -83,7 +90,14 @@ describe("SessionHeartbeatMonitor", () => {
     it("does not reap a default-heartbeat session still within the pre-first-heartbeat grace period", async () => {
       await sessionManager.createSession("s1", "emulator-5554", "android", 60_000);
       const reaped: string[] = [];
-      const monitor = new SessionHeartbeatMonitor(sessionManager, () => false, async sid => { reaped.push(sid); }, timer);
+      const monitor = new SessionHeartbeatMonitor(
+        sessionManager,
+        () => false,
+        async (sid) => {
+          reaped.push(sid);
+        },
+        timer,
+      );
 
       timer.advanceTime(5_000);
       await monitor.tick();
@@ -131,7 +145,14 @@ describe("SessionHeartbeatMonitor", () => {
     it("does not reap a default-heartbeat session with recent activity before its first heartbeat", async () => {
       await sessionManager.createSession("s1", "emulator-5554", "android", 60_000);
       const reaped: string[] = [];
-      const monitor = new SessionHeartbeatMonitor(sessionManager, () => false, async sid => { reaped.push(sid); }, timer);
+      const monitor = new SessionHeartbeatMonitor(
+        sessionManager,
+        () => false,
+        async (sid) => {
+          reaped.push(sid);
+        },
+        timer,
+      );
 
       timer.advanceTime(4_000);
       await sessionManager.getOrCreateSession("s1");
@@ -147,7 +168,14 @@ describe("SessionHeartbeatMonitor", () => {
     it("skips a session with active executions", async () => {
       await sessionManager.createSession("s1", "emulator-5554", "android", 60_000);
       const reaped: string[] = [];
-      const monitor = new SessionHeartbeatMonitor(sessionManager, () => true, async sid => { reaped.push(sid); }, timer);
+      const monitor = new SessionHeartbeatMonitor(
+        sessionManager,
+        () => true,
+        async (sid) => {
+          reaped.push(sid);
+        },
+        timer,
+      );
 
       timer.advanceTime(5_001);
       await monitor.tick();
@@ -159,7 +187,14 @@ describe("SessionHeartbeatMonitor", () => {
       // heartbeatTimeoutMs = 60s, so a quiet session is not reaped at 31s...
       await sessionManager.createSession("s1", "emulator-5554", "android", 60_000, 60_000);
       const reaped: string[] = [];
-      const monitor = new SessionHeartbeatMonitor(sessionManager, () => false, async sid => { reaped.push(sid); }, timer);
+      const monitor = new SessionHeartbeatMonitor(
+        sessionManager,
+        () => false,
+        async (sid) => {
+          reaped.push(sid);
+        },
+        timer,
+      );
 
       timer.advanceTime(31_000);
       await monitor.tick();
@@ -169,9 +204,22 @@ describe("SessionHeartbeatMonitor", () => {
     it("treats explicit heartbeat timeout as custom even when it equals the configured default", async () => {
       process.env.AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS = "60000";
       await sessionManager.createSession("default-session", "emulator-5554", "android", 60_000);
-      await sessionManager.createSession("custom-session", "emulator-5556", "android", 60_000, 60_000);
+      await sessionManager.createSession(
+        "custom-session",
+        "emulator-5556",
+        "android",
+        60_000,
+        60_000,
+      );
       const reaped: string[] = [];
-      const monitor = new SessionHeartbeatMonitor(sessionManager, () => false, async sid => { reaped.push(sid); }, timer);
+      const monitor = new SessionHeartbeatMonitor(
+        sessionManager,
+        () => false,
+        async (sid) => {
+          reaped.push(sid);
+        },
+        timer,
+      );
 
       timer.advanceTime(5_001);
       await monitor.tick();
@@ -188,7 +236,9 @@ describe("SessionHeartbeatMonitor", () => {
       const monitor = new SessionHeartbeatMonitor(
         sessionManager,
         () => false,
-        async sid => { reaped.push(sid); },
+        async (sid) => {
+          reaped.push(sid);
+        },
         timer,
         { preFirstHeartbeatGraceMs: 1_000 },
       );
@@ -207,7 +257,9 @@ describe("SessionHeartbeatMonitor", () => {
       const monitor = new SessionHeartbeatMonitor(
         sessionManager,
         () => false,
-        async sid => { reaped.push(sid); },
+        async (sid) => {
+          reaped.push(sid);
+        },
         timer,
       );
 
@@ -230,7 +282,9 @@ describe("SessionHeartbeatMonitor", () => {
     it("does not overlap a heartbeat reap with the next interval tick", async () => {
       await sessionManager.createSession("s1", "emulator-5554", "android", 60_000);
       let resolveReap!: () => void;
-      const blockedReap = new Promise<void>(resolve => { resolveReap = resolve; });
+      const blockedReap = new Promise<void>((resolve) => {
+        resolveReap = resolve;
+      });
       let reapCount = 0;
       const monitor = new SessionHeartbeatMonitor(
         sessionManager,
@@ -251,7 +305,7 @@ describe("SessionHeartbeatMonitor", () => {
       expect(reapCount).toBe(1);
 
       resolveReap();
-      await new Promise<void>(resolve => setImmediate(resolve));
+      await new Promise<void>((resolve) => setImmediate(resolve));
       timer.advanceTime(1);
       expect(reapCount).toBe(2);
 
@@ -276,18 +330,25 @@ describe("SessionHeartbeatMonitor", () => {
     });
 
     // Mirrors daemon.ts cancelAndReleaseSession (minus execution cancellation).
-    const reapVia = (mgr: SessionManager, devicePool: DevicePool) => async (sid: string): Promise<void> => {
-      const deviceId = await mgr.releaseSession(sid);
-      if (deviceId) {
-        await devicePool.releaseDevice(deviceId, sid);
-      }
-    };
+    const reapVia =
+      (mgr: SessionManager, devicePool: DevicePool) =>
+      async (sid: string): Promise<void> => {
+        const deviceId = await mgr.releaseSession(sid);
+        if (deviceId) {
+          await devicePool.releaseDevice(deviceId, sid);
+        }
+      };
 
     it("releases an idle autolocked device promptly after the idle timeout", async () => {
       const sessionId = await pool.autolockDevice("emulator-5554", "android");
       expect(pool.getDevice("emulator-5554")!.status).toBe("busy");
 
-      const monitor = new SessionHeartbeatMonitor(sessionManager, () => false, reapVia(sessionManager, pool), timer);
+      const monitor = new SessionHeartbeatMonitor(
+        sessionManager,
+        () => false,
+        reapVia(sessionManager, pool),
+        timer,
+      );
 
       // Just past grace but well within the 60s idle window: still locked.
       timer.advanceTime(30_000);
@@ -307,7 +368,12 @@ describe("SessionHeartbeatMonitor", () => {
 
     it("keeps the device locked while it is being actively used", async () => {
       const sessionId = await pool.autolockDevice("emulator-5554", "android");
-      const monitor = new SessionHeartbeatMonitor(sessionManager, () => false, reapVia(sessionManager, pool), timer);
+      const monitor = new SessionHeartbeatMonitor(
+        sessionManager,
+        () => false,
+        reapVia(sessionManager, pool),
+        timer,
+      );
 
       // Interact every 40s (exceeds old 10s window, within 60s idle window).
       for (let i = 0; i < 5; i++) {
@@ -322,8 +388,8 @@ describe("SessionHeartbeatMonitor", () => {
       const firstSessionId = await pool.autolockDevice("emulator-5554", "android", "mcp-session-1");
       const executionTracker = new ExecutionTracker(timer);
       const hasActiveExecutions = (sessionUuid: string): boolean =>
-        executionTracker.hasActiveSessionUuidExecutions(sessionUuid)
-        || executionTracker.hasActiveAutolockSessionExecutions(sessionUuid);
+        executionTracker.hasActiveSessionUuidExecutions(sessionUuid) ||
+        executionTracker.hasActiveAutolockSessionExecutions(sessionUuid);
       sessionManager.setActiveSessionExecutionChecker(hasActiveExecutions);
       const monitor = new SessionHeartbeatMonitor(
         sessionManager,
@@ -359,12 +425,20 @@ describe("SessionHeartbeatMonitor", () => {
     });
 
     it("does not pin the mapped autolock for an explicit call to another session", async () => {
-      const mappedSessionId = await pool.autolockDevice("emulator-5554", "android", "mcp-session-1");
-      const explicitSessionId = await pool.autolockDevice("emulator-5556", "android", "other-mcp-session");
+      const mappedSessionId = await pool.autolockDevice(
+        "emulator-5554",
+        "android",
+        "mcp-session-1",
+      );
+      const explicitSessionId = await pool.autolockDevice(
+        "emulator-5556",
+        "android",
+        "other-mcp-session",
+      );
       const executionTracker = new ExecutionTracker(timer);
       const hasActiveExecutions = (sessionUuid: string): boolean =>
-        executionTracker.hasActiveSessionUuidExecutions(sessionUuid)
-        || executionTracker.hasActiveAutolockSessionExecutions(sessionUuid);
+        executionTracker.hasActiveSessionUuidExecutions(sessionUuid) ||
+        executionTracker.hasActiveAutolockSessionExecutions(sessionUuid);
       sessionManager.setActiveSessionExecutionChecker(hasActiveExecutions);
       const monitor = new SessionHeartbeatMonitor(
         sessionManager,

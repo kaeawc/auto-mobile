@@ -18,13 +18,16 @@ describe("daemon file cleanup", () => {
     const socketPath = join(dir, "daemon.sock");
     const pidFilePath = join(dir, "daemon.pid");
     writeFileSync(socketPath, "");
-    writeFileSync(pidFilePath, JSON.stringify({
-      pid: 12345,
-      socketPath,
-      port: 3000,
-      startedAt: 0,
-      version: "test",
-    } satisfies PidFileData));
+    writeFileSync(
+      pidFilePath,
+      JSON.stringify({
+        pid: 12345,
+        socketPath,
+        port: 3000,
+        startedAt: 0,
+        version: "test",
+      } satisfies PidFileData),
+    );
     return { dir, socketPath, pidFilePath };
   }
 
@@ -88,13 +91,16 @@ describe("daemon file cleanup", () => {
       pidFilePath,
       socketPaths: [socketPath],
       isProcessRunning: () => {
-        writeFileSync(pidFilePath, JSON.stringify({
-          pid: 67890,
-          socketPath,
-          port: 3000,
-          startedAt: 0,
-          version: "test",
-        } satisfies PidFileData));
+        writeFileSync(
+          pidFilePath,
+          JSON.stringify({
+            pid: 67890,
+            socketPath,
+            port: 3000,
+            startedAt: 0,
+            version: "test",
+          } satisfies PidFileData),
+        );
         return false;
       },
     });
@@ -123,9 +129,12 @@ describe("WebRTC stream socket path", () => {
 
   test("uses the explicit WebRTC stream socket override", async () => {
     process.env.AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH = ".auto-mobile/test-webrtc.sock";
-    const daemonFiles = await import(`../../src/daemon/daemonFiles.ts?webrtc-socket=${Date.now()}-${Math.random()}`);
+    const daemonFiles = await import(
+      `../../src/daemon/daemonFiles.ts?webrtc-socket=${Date.now()}-${Math.random()}`
+    );
 
-    expect(daemonFiles.WEBRTC_STREAM_SOCKET_CONFIG.defaultPath)
-      .toBe(resolve(".auto-mobile/test-webrtc.sock"));
+    expect(daemonFiles.WEBRTC_STREAM_SOCKET_CONFIG.defaultPath).toBe(
+      resolve(".auto-mobile/test-webrtc.sock"),
+    );
   });
 });

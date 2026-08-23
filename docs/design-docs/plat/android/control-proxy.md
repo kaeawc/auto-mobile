@@ -33,6 +33,7 @@ The accessibility service is enabled by modifying Android secure settings via AD
 3. **Enabling globally**: Set `accessibility_enabled` to `1`
 
 This approach:
+
 - Preserves other enabled accessibility services
 - Works on emulators without special permissions
 - Completes in milliseconds by avoiding Settings UI and animations
@@ -74,12 +75,14 @@ The accessibility service can also launch the overlay permission settings screen
 AutoMobile automatically detects whether settings-based toggling is supported on a device:
 
 **Supported devices:**
+
 - Android emulators (API 16+)
 - Physical devices with root access
 - Physical devices configured as device owner
 - Devices with appropriate shell permissions
 
 **Unsupported devices:**
+
 - Standard physical devices without special permissions
 - Devices below API level 16
 
@@ -137,7 +140,7 @@ The settings-toggle API lives in `src/utils/CtrlProxyManager.ts` and is implemen
 
 `ToggleCapabilities` describes whether programmatic toggling is supported:
 
-```ts
+````ts
 export type ToggleCapabilities = {
   supportsSettingsToggle: boolean;
   deviceType: "emulator" | "physical";
@@ -183,7 +186,7 @@ if (!capabilities.supportsSettingsToggle) {
 }
 
 await manager.enableViaSettings();
-```
+````
 
 ## Architecture
 

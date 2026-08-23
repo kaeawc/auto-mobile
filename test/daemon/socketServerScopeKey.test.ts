@@ -9,7 +9,7 @@ import type { DeviceLabelMap, Session } from "../../src/daemon/sessionManager";
 function createFakeSession(
   sessionId: string,
   assignedDevice: string,
-  deviceLabels?: DeviceLabelMap
+  deviceLabels?: DeviceLabelMap,
 ): Session {
   return {
     sessionId,
@@ -30,7 +30,7 @@ function createFakeSession(
 function createFakeDaemonState(
   sessionDevices: Map<string, string>,
   sessionDeviceLabels: Map<string, DeviceLabelMap>,
-  mcpAutolockSessions: Map<string, string>
+  mcpAutolockSessions: Map<string, string>,
 ) {
   return {
     isInitialized: () => true,
@@ -78,8 +78,9 @@ function createServer() {
 }
 
 function scopeKey(server: UnixSocketServer, args: unknown): string | undefined {
-  return (server as unknown as { getRequestArgumentScopeKey: (a: unknown) => string | undefined })
-    .getRequestArgumentScopeKey(args);
+  return (
+    server as unknown as { getRequestArgumentScopeKey: (a: unknown) => string | undefined }
+  ).getRequestArgumentScopeKey(args);
 }
 
 describe("UnixSocketServer.getRequestArgumentScopeKey precedence", () => {

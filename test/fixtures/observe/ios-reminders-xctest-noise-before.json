@@ -116,10 +116,7 @@
             "text": "Title",
             "value": "Buy milk",
             "focused": "true",
-            "actions": [
-              "set_text",
-              "clear_text"
-            ],
+            "actions": ["set_text", "clear_text"],
             "view-id": "title-field",
             "bounds": {
               "left": 16,

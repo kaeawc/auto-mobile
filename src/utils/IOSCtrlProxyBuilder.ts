@@ -17,11 +17,11 @@ import {
   resolvePinnedVersion,
   resolveRunnerChecksum,
   resolveRunnerChecksumTarget,
-  type RunnerSha256Target
+  type RunnerSha256Target,
 } from "../constants/release";
 import {
   DefaultIOSCtrlProxyBundleDownloader,
-  type CtrlProxyIosBundleDownloader
+  type CtrlProxyIosBundleDownloader,
 } from "./IOSCtrlProxyBundleDownloader";
 import { hashAppBundle } from "./ios-cmdline-tools/AppBundleHasher";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "./workingDirectory";
@@ -31,21 +31,18 @@ import {
   buildPlist,
   injectUITestEnvironment,
   parsePlist,
-  type PlistValue
+  type PlistValue,
 } from "./ios-cmdline-tools/XctestrunPlist";
 import { ActionableError, toActionableError } from "../models/ActionableError";
-import {
-  SKIP_CTRL_PROXY_DOWNLOAD_ENV,
-  isTruthyEnvValue,
-} from "./ctrlProxyDownloadControl";
+import { SKIP_CTRL_PROXY_DOWNLOAD_ENV, isTruthyEnvValue } from "./ctrlProxyDownloadControl";
 import {
   type IosPrerequisiteDetector,
-  DefaultIosPrerequisiteDetector
+  DefaultIosPrerequisiteDetector,
 } from "./ios-cmdline-tools/IosPrerequisiteDetector";
 import {
   type CodesignVerificationOutcome,
   type CtrlProxyCodesignVerifier,
-  DefaultCtrlProxyCodesignVerifier
+  DefaultCtrlProxyCodesignVerifier,
 } from "./ios-cmdline-tools/CtrlProxyCodesignVerifier";
 
 /**
@@ -95,7 +92,7 @@ export const IOS_CTRL_PROXY_USE_LOCAL_BUILD_ENV = "AUTOMOBILE_CTRL_PROXY_IOS_USE
  */
 function collectCodesignProblems(
   outcome: CodesignVerificationOutcome,
-  pinnedTeamId: string | null
+  pinnedTeamId: string | null,
 ): string[] {
   const problems: string[] = [];
   if (!outcome.verified) {
@@ -119,8 +116,8 @@ function collectCodesignProblems(
 export interface CtrlProxyIosBuildResult {
   success: boolean;
   message: string;
-  buildPath?: string;      // Path to build products
-  xctestrunPath?: string;  // Path to .xctestrun file
+  buildPath?: string; // Path to build products
+  xctestrunPath?: string; // Path to .xctestrun file
   error?: string;
 }
 
@@ -182,7 +179,11 @@ export class IOSCtrlProxyBuilder {
   private static readonly DEFAULT_DERIVED_DATA_SUBDIR = "derived-data";
   private static readonly DEFAULT_SCHEME = "CtrlProxyApp";
   private static readonly DEFAULT_DESTINATION = "generic/platform=iOS Simulator";
-  private static readonly DEFAULT_BUNDLE_CACHE_DIR = path.join(os.homedir(), ".automobile", "ctrl-proxy-ios");
+  private static readonly DEFAULT_BUNDLE_CACHE_DIR = path.join(
+    os.homedir(),
+    ".automobile",
+    "ctrl-proxy-ios",
+  );
   private static readonly DEFAULT_BUNDLE_FILENAME = "control-proxy.ipa";
   private static readonly METADATA_FILENAME = "ctrl-proxy-ios-bundle.json";
   private static readonly MIN_BUNDLE_SIZE_BYTES = 10000;
@@ -200,13 +201,15 @@ export class IOSCtrlProxyBuilder {
 
   // Gate that decides whether the startup runner-bundle prefetch should run at
   // all (issue #4407). Skips cleanly on hosts without a usable Xcode toolchain.
-  private static iosPrerequisiteDetector: IosPrerequisiteDetector = new DefaultIosPrerequisiteDetector();
+  private static iosPrerequisiteDetector: IosPrerequisiteDetector =
+    new DefaultIosPrerequisiteDetector();
   // Test seam for the builder the static prefetch drives; null uses getInstance().
   private static prefetchBuilderOverride: PrefetchBuilder | null = null;
 
   // Pre-launch codesign/notarization gate (issue #4760). Static seam mirrors
   // `timer` so tests inject a fake and never spawn a real `codesign`/`spctl`.
-  private static codesignVerifier: CtrlProxyCodesignVerifier = new DefaultCtrlProxyCodesignVerifier();
+  private static codesignVerifier: CtrlProxyCodesignVerifier =
+    new DefaultCtrlProxyCodesignVerifier();
 
   // Singleton instances per configuration
   private static instances: Map<string, IOSCtrlProxyBuilder> = new Map();
@@ -237,14 +240,23 @@ export class IOSCtrlProxyBuilder {
 
   private constructor(
     config: Partial<CtrlProxyIosBuildConfig> = {},
-    dependencies: CtrlProxyIosBuilderDependencies = {}
+    dependencies: CtrlProxyIosBuilderDependencies = {},
   ) {
     this.config = {
-      projectRoot: config.projectRoot || process.env.AUTOMOBILE_PROJECT_ROOT || IOSCtrlProxyBuilder.DEFAULT_PROJECT_ROOT,
-      derivedDataPath: config.derivedDataPath || process.env.AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA || getTempDir(IOSCtrlProxyBuilder.DEFAULT_DERIVED_DATA_SUBDIR),
+      projectRoot:
+        config.projectRoot ||
+        process.env.AUTOMOBILE_PROJECT_ROOT ||
+        IOSCtrlProxyBuilder.DEFAULT_PROJECT_ROOT,
+      derivedDataPath:
+        config.derivedDataPath ||
+        process.env.AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA ||
+        getTempDir(IOSCtrlProxyBuilder.DEFAULT_DERIVED_DATA_SUBDIR),
       scheme: config.scheme || IOSCtrlProxyBuilder.DEFAULT_SCHEME,
       destination: config.destination || IOSCtrlProxyBuilder.DEFAULT_DESTINATION,
-      bundleCacheDir: config.bundleCacheDir || process.env.AUTOMOBILE_CTRL_PROXY_IOS_CACHE_DIR || IOSCtrlProxyBuilder.DEFAULT_BUNDLE_CACHE_DIR,
+      bundleCacheDir:
+        config.bundleCacheDir ||
+        process.env.AUTOMOBILE_CTRL_PROXY_IOS_CACHE_DIR ||
+        IOSCtrlProxyBuilder.DEFAULT_BUNDLE_CACHE_DIR,
     };
     this.downloader = dependencies.downloader ?? new DefaultIOSCtrlProxyBundleDownloader();
   }
@@ -254,11 +266,11 @@ export class IOSCtrlProxyBuilder {
    */
   public static getInstance(
     config?: Partial<CtrlProxyIosBuildConfig>,
-    dependencies?: CtrlProxyIosBuilderDependencies
+    dependencies?: CtrlProxyIosBuilderDependencies,
   ): IOSCtrlProxyBuilder {
     const key = JSON.stringify({
       config: config || {},
-      deps: dependencies?.downloader ? "custom" : "default"
+      deps: dependencies?.downloader ? "custom" : "default",
     });
     if (!IOSCtrlProxyBuilder.instances.has(key)) {
       IOSCtrlProxyBuilder.instances.set(key, new IOSCtrlProxyBuilder(config, dependencies));
@@ -307,7 +319,9 @@ export class IOSCtrlProxyBuilder {
   }
 
   /** Override the iOS-prerequisite gate for the prefetch (issue #4407). Null restores the default detector. */
-  public static setIosPrerequisiteDetectorForTesting(detector: IosPrerequisiteDetector | null): void {
+  public static setIosPrerequisiteDetectorForTesting(
+    detector: IosPrerequisiteDetector | null,
+  ): void {
     IOSCtrlProxyBuilder.iosPrerequisiteDetector = detector ?? new DefaultIosPrerequisiteDetector();
   }
 
@@ -318,7 +332,7 @@ export class IOSCtrlProxyBuilder {
 
   public static setExpectedRunnerChecksumForTesting(
     checksum: string | null,
-    target: RunnerSha256Target | null = null
+    target: RunnerSha256Target | null = null,
   ): void {
     IOSCtrlProxyBuilder.expectedRunnerChecksumOverride = checksum;
     IOSCtrlProxyBuilder.expectedRunnerChecksumTargetOverride = target;
@@ -335,7 +349,9 @@ export class IOSCtrlProxyBuilder {
   /**
    * Get the build products directory path
    */
-  public async getBuildProductsPath(platform: IOSCtrlProxyPlatform = "simulator"): Promise<string | null> {
+  public async getBuildProductsPath(
+    platform: IOSCtrlProxyPlatform = "simulator",
+  ): Promise<string | null> {
     const cachedPath = this.cachedBuildProductsPath.get(platform);
     if (cachedPath) {
       try {
@@ -350,7 +366,7 @@ export class IOSCtrlProxyBuilder {
       this.config.derivedDataPath,
       "Build",
       "Products",
-      platform === "device" ? "Debug-iphoneos" : "Debug-iphonesimulator"
+      platform === "device" ? "Debug-iphoneos" : "Debug-iphonesimulator",
     );
 
     try {
@@ -384,8 +400,9 @@ export class IOSCtrlProxyBuilder {
     try {
       const files = await fs.readdir(productsDir);
       const xctestrunFiles = files.filter(
-        file => file.endsWith(".xctestrun") &&
-          !file.startsWith(IOSCtrlProxyBuilder.RUNNER_XCTESTRUN_PREFIX)
+        (file) =>
+          file.endsWith(".xctestrun") &&
+          !file.startsWith(IOSCtrlProxyBuilder.RUNNER_XCTESTRUN_PREFIX),
       );
       if (xctestrunFiles.length === 0) {
         return null;
@@ -393,7 +410,7 @@ export class IOSCtrlProxyBuilder {
 
       const platformFilter = platform === "device" ? "iphoneos" : "iphonesimulator";
       const candidates = platform
-        ? xctestrunFiles.filter(file => file.includes(platformFilter))
+        ? xctestrunFiles.filter((file) => file.includes(platformFilter))
         : xctestrunFiles;
 
       if (candidates.length === 0) {
@@ -406,11 +423,11 @@ export class IOSCtrlProxyBuilder {
         selected = candidates[0];
       } else {
         const withStats = await Promise.all(
-          candidates.map(async file => {
+          candidates.map(async (file) => {
             const filePath = path.join(productsDir, file);
             const stat = await fs.stat(filePath);
             return { file, mtime: stat.mtimeMs };
-          })
+          }),
         );
         withStats.sort((a, b) => b.mtime - a.mtime);
         selected = withStats[0].file;
@@ -450,7 +467,7 @@ export class IOSCtrlProxyBuilder {
   public async writeRunnerEnvironment(
     xctestrunPath: string,
     env: Record<string, string>,
-    deviceId: string
+    deviceId: string,
   ): Promise<string> {
     try {
       const xml = await fs.readFile(xctestrunPath, "utf-8");
@@ -462,24 +479,24 @@ export class IOSCtrlProxyBuilder {
       const injected = injectUITestEnvironment(root as Map<string, PlistValue>, env);
       if (injected === 0) {
         throw new Error(
-          "xctestrun contains no UI-test bundle (IsUITestBundle) to receive the runner environment"
+          "xctestrun contains no UI-test bundle (IsUITestBundle) to receive the runner environment",
         );
       }
 
       const safeDeviceId = deviceId.replace(/[^A-Za-z0-9._-]/g, "_") || "device";
       const outputPath = path.join(
         path.dirname(xctestrunPath),
-        `${IOSCtrlProxyBuilder.RUNNER_XCTESTRUN_PREFIX}${safeDeviceId}.xctestrun`
+        `${IOSCtrlProxyBuilder.RUNNER_XCTESTRUN_PREFIX}${safeDeviceId}.xctestrun`,
       );
       await fs.writeFile(outputPath, buildPlist(root), "utf-8");
       logger.info(
-        `[IOSCtrlProxyBuilder] Wrote runner xctestrun with injected environment to ${outputPath}`
+        `[IOSCtrlProxyBuilder] Wrote runner xctestrun with injected environment to ${outputPath}`,
       );
       return outputPath;
     } catch (error) {
       throw toActionableError(
         error,
-        `Failed to inject runner environment into xctestrun at ${xctestrunPath}`
+        `Failed to inject runner environment into xctestrun at ${xctestrunPath}`,
       );
     }
   }
@@ -492,25 +509,26 @@ export class IOSCtrlProxyBuilder {
     try {
       const files = await fs.readdir(productsDir);
       const xctestrunFiles = files.filter(
-        file => file.endsWith(".xctestrun") &&
-          !file.startsWith(IOSCtrlProxyBuilder.RUNNER_XCTESTRUN_PREFIX)
+        (file) =>
+          file.endsWith(".xctestrun") &&
+          !file.startsWith(IOSCtrlProxyBuilder.RUNNER_XCTESTRUN_PREFIX),
       );
       if (xctestrunFiles.length <= 1) {
         return;
       }
 
       for (const platformFilter of ["iphonesimulator", "iphoneos"]) {
-        const platformFiles = xctestrunFiles.filter(file => file.includes(platformFilter));
+        const platformFiles = xctestrunFiles.filter((file) => file.includes(platformFilter));
         if (platformFiles.length <= 1) {
           continue;
         }
 
         const withStats = await Promise.all(
-          platformFiles.map(async file => {
+          platformFiles.map(async (file) => {
             const filePath = path.join(productsDir, file);
             const stat = await fs.stat(filePath);
             return { file, filePath, mtime: stat.mtimeMs };
-          })
+          }),
         );
         withStats.sort((a, b) => b.mtime - a.mtime);
 
@@ -521,7 +539,9 @@ export class IOSCtrlProxyBuilder {
         }
       }
     } catch (error) {
-      logger.warn(`[IOSCtrlProxyBuilder] Failed to clean stale xctestrun files: ${errorMessage(error)}`);
+      logger.warn(
+        `[IOSCtrlProxyBuilder] Failed to clean stale xctestrun files: ${errorMessage(error)}`,
+      );
     }
   }
 
@@ -544,7 +564,9 @@ export class IOSCtrlProxyBuilder {
     // return false and silently keep the stale cached runner instead of the
     // vendored IPA — the documented escape hatch would be a no-op (#2746).
     if (this.getBundlePathOverride() !== null) {
-      logger.info("[IOSCtrlProxyBuilder] CtrlProxy bundle path override set, forcing extraction of the vendored bundle");
+      logger.info(
+        "[IOSCtrlProxyBuilder] CtrlProxy bundle path override set, forcing extraction of the vendored bundle",
+      );
       return true;
     }
 
@@ -575,7 +597,9 @@ export class IOSCtrlProxyBuilder {
           return true;
         }
         if (!metadata?.appHashes?.[platform]) {
-          logger.info("[IOSCtrlProxyBuilder] CtrlProxy app hash missing from metadata, need download");
+          logger.info(
+            "[IOSCtrlProxyBuilder] CtrlProxy app hash missing from metadata, need download",
+          );
           return true;
         }
       }
@@ -590,7 +614,7 @@ export class IOSCtrlProxyBuilder {
    */
   public async build(
     platform?: IOSCtrlProxyPlatform,
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<CtrlProxyIosBuildResult> {
     perf.serial("xcTestServiceDownload");
 
@@ -599,12 +623,14 @@ export class IOSCtrlProxyBuilder {
       return {
         success: false,
         message: "CtrlProxy download skipped",
-        error: `${SKIP_CTRL_PROXY_DOWNLOAD_ENV} is set`
+        error: `${SKIP_CTRL_PROXY_DOWNLOAD_ENV} is set`,
       };
     }
 
     try {
-      const { bundlePath, usedCachedFallback } = await perf.track("downloadBundle", () => this.ensureBundleDownloaded());
+      const { bundlePath, usedCachedFallback } = await perf.track("downloadBundle", () =>
+        this.ensureBundleDownloaded(),
+      );
       if (!usedCachedFallback) {
         await perf.track("extractBundle", () => this.extractBundle(bundlePath));
       }
@@ -624,7 +650,7 @@ export class IOSCtrlProxyBuilder {
         return {
           success: false,
           message: "Downloaded CtrlProxy bundle missing xctestrun",
-          error: "No .xctestrun file found after extraction"
+          error: "No .xctestrun file found after extraction",
         };
       }
 
@@ -667,7 +693,7 @@ export class IOSCtrlProxyBuilder {
     const startTime = IOSCtrlProxyBuilder.timer.now();
 
     IOSCtrlProxyBuilder.prefetchPromise = IOSCtrlProxyBuilder.doPrefetch()
-      .then(result => {
+      .then((result) => {
         const duration = IOSCtrlProxyBuilder.timer.now() - startTime;
         if (result && result.success) {
           IOSCtrlProxyBuilder.prefetchResult = result;
@@ -681,9 +707,10 @@ export class IOSCtrlProxyBuilder {
         }
         return result;
       })
-      .catch(error => {
+      .catch((error) => {
         const duration = IOSCtrlProxyBuilder.timer.now() - startTime;
-        IOSCtrlProxyBuilder.prefetchError = error instanceof Error ? error : new Error(String(error));
+        IOSCtrlProxyBuilder.prefetchError =
+          error instanceof Error ? error : new Error(String(error));
         logger.warn(`[IOSCtrlProxyBuilder] Prefetch failed after ${duration}ms`, {
           error: IOSCtrlProxyBuilder.prefetchError.message,
         });
@@ -704,12 +731,13 @@ export class IOSCtrlProxyBuilder {
     if (!(await IOSCtrlProxyBuilder.iosPrerequisiteDetector.hasIosPrerequisites())) {
       logger.info(
         "[IOSCtrlProxyBuilder] Prefetch skipped: iOS prerequisites (xcrun/xcodebuild) not detected; " +
-        "the runner bundle is only needed for iOS device work"
+          "the runner bundle is only needed for iOS device work",
       );
       return null;
     }
 
-    const builder: PrefetchBuilder = IOSCtrlProxyBuilder.prefetchBuilderOverride ?? IOSCtrlProxyBuilder.getInstance();
+    const builder: PrefetchBuilder =
+      IOSCtrlProxyBuilder.prefetchBuilderOverride ?? IOSCtrlProxyBuilder.getInstance();
     const needsDownload = await builder.needsRebuild();
     if (!needsDownload) {
       const buildPath = await builder.getBuildProductsPath();
@@ -780,7 +808,9 @@ export class IOSCtrlProxyBuilder {
     return { ...this.config };
   }
 
-  public async getAppBundlePath(platform: IOSCtrlProxyPlatform = "simulator"): Promise<string | null> {
+  public async getAppBundlePath(
+    platform: IOSCtrlProxyPlatform = "simulator",
+  ): Promise<string | null> {
     const buildPath = await this.getBuildProductsPath(platform);
     if (!buildPath) {
       return null;
@@ -797,7 +827,9 @@ export class IOSCtrlProxyBuilder {
     }
   }
 
-  public async getAppBundleHash(platform: IOSCtrlProxyPlatform = "simulator"): Promise<string | null> {
+  public async getAppBundleHash(
+    platform: IOSCtrlProxyPlatform = "simulator",
+  ): Promise<string | null> {
     const cached = this.cachedAppBundleHash.get(platform);
     if (cached) {
       return cached;
@@ -821,16 +853,17 @@ export class IOSCtrlProxyBuilder {
   /** Get the executable represented by the selected release's runner checksum. */
   public async getRunnerBinaryPath(
     platform: IOSCtrlProxyPlatform = "simulator",
-    target: RunnerSha256Target = this.getExpectedRunnerChecksumTarget()
+    target: RunnerSha256Target = this.getExpectedRunnerChecksumTarget(),
   ): Promise<string | null> {
     const buildPath = await this.getBuildProductsPath(platform);
     if (!buildPath) {
       return null;
     }
     const runnerAppPath = path.join(buildPath, "CtrlProxyUITests-Runner.app");
-    const runnerBinaryPath = target === "xctest"
-      ? path.join(runnerAppPath, "PlugIns", "CtrlProxyUITests.xctest", "CtrlProxyUITests")
-      : path.join(runnerAppPath, "CtrlProxyUITests-Runner");
+    const runnerBinaryPath =
+      target === "xctest"
+        ? path.join(runnerAppPath, "PlugIns", "CtrlProxyUITests.xctest", "CtrlProxyUITests")
+        : path.join(runnerAppPath, "CtrlProxyUITests-Runner");
     try {
       await fs.access(runnerBinaryPath);
       return runnerBinaryPath;
@@ -858,8 +891,9 @@ export class IOSCtrlProxyBuilder {
   }
 
   private getBundlePathOverride(): string | null {
-    const override = process.env.AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH?.trim()
-      || process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH?.trim();
+    const override =
+      process.env.AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH?.trim() ||
+      process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH?.trim();
     return override && override.length > 0
       ? resolvePathFromDaemonLaunchWorkingDirectory(override)
       : null;
@@ -882,7 +916,7 @@ export class IOSCtrlProxyBuilder {
     if (environmentOverride) {
       if (!/^[a-f0-9]{64}$/i.test(environmentOverride)) {
         throw new ActionableError(
-          `${IOS_CTRL_PROXY_RUNNER_SHA256_ENV} must be a 64-character hexadecimal SHA256 checksum`
+          `${IOS_CTRL_PROXY_RUNNER_SHA256_ENV} must be a 64-character hexadecimal SHA256 checksum`,
         );
       }
       return environmentOverride.toLowerCase();
@@ -901,7 +935,7 @@ export class IOSCtrlProxyBuilder {
     }
     if (environmentOverride) {
       throw new ActionableError(
-        `${IOS_CTRL_PROXY_RUNNER_SHA256_TARGET_ENV} must be either "runner" or "xctest"`
+        `${IOS_CTRL_PROXY_RUNNER_SHA256_TARGET_ENV} must be either "runner" or "xctest"`,
       );
     }
     return resolveRunnerChecksumTarget();
@@ -916,8 +950,9 @@ export class IOSCtrlProxyBuilder {
     }
     // For device platform, check generic overrides and the release constant (device build hash)
     if (platform === "device") {
-      const genericOverride = process.env.AUTOMOBILE_IOS_CTRL_PROXY_APP_HASH
-        ?? process.env.AUTOMOBILE_IOS_IOS_CTRL_PROXY_APP_HASH;
+      const genericOverride =
+        process.env.AUTOMOBILE_IOS_CTRL_PROXY_APP_HASH ??
+        process.env.AUTOMOBILE_IOS_IOS_CTRL_PROXY_APP_HASH;
       if (genericOverride && genericOverride.trim().length > 0) {
         return genericOverride.trim();
       }
@@ -929,13 +964,18 @@ export class IOSCtrlProxyBuilder {
     return "";
   }
 
-  private async ensureBundleDownloaded(): Promise<{ bundlePath: string; usedCachedFallback: boolean }> {
+  private async ensureBundleDownloaded(): Promise<{
+    bundlePath: string;
+    usedCachedFallback: boolean;
+  }> {
     await ensureSecureDir(this.config.bundleCacheDir);
     const bundlePath = this.getBundlePath();
 
     const overridePath = this.getBundlePathOverride();
     if (overridePath) {
-      logger.info("[IOSCtrlProxyBuilder] Using local CtrlProxy bundle override", { path: overridePath });
+      logger.info("[IOSCtrlProxyBuilder] Using local CtrlProxy bundle override", {
+        path: overridePath,
+      });
       const stats = await fs.stat(overridePath);
       if (!stats.isFile()) {
         throw new Error(`CtrlProxy bundle override is not a file: ${overridePath}`);
@@ -955,12 +995,14 @@ export class IOSCtrlProxyBuilder {
           logger.info("[IOSCtrlProxyBuilder] Downloading CtrlProxy bundle", {
             url: this.getBundleUrl(),
             destination: bundlePath,
-            reason: "checksum-mismatch-or-missing"
+            reason: "checksum-mismatch-or-missing",
           });
           await this.downloader.download(this.getBundleUrl(), bundlePath);
         } catch (error) {
           if (isLatest && cachedBundleExists) {
-            logger.warn(`[IOSCtrlProxyBuilder] Download failed, using cached bundle: ${errorMessage(error)}`);
+            logger.warn(
+              `[IOSCtrlProxyBuilder] Download failed, using cached bundle: ${errorMessage(error)}`,
+            );
             // `cachedBundleExists` only proves the cached IPA is size-valid — NOT
             // that its checksum matches. build() skips extractBundle+verifyBundle
             // for the fallback path, so checksum-verify here before reuse instead
@@ -1009,12 +1051,16 @@ export class IOSCtrlProxyBuilder {
     if (expectedChecksum.length > 0) {
       const { checksum, source } = await this.downloader.computeFileSha256(bundlePath);
       if (checksum.toLowerCase() !== expectedChecksum.toLowerCase()) {
-        throw new Error(`CtrlProxy checksum verification failed. Expected: ${expectedChecksum}, Got: ${checksum}`);
+        throw new Error(
+          `CtrlProxy checksum verification failed. Expected: ${expectedChecksum}, Got: ${checksum}`,
+        );
       }
       logger.info("[IOSCtrlProxyBuilder] Bundle checksum verified", { checksum, source });
     } else {
       this.assertPinnedVersionVerifiable();
-      logger.warn("[IOSCtrlProxyBuilder] Bundle checksum verification skipped (no checksum provided)");
+      logger.warn(
+        "[IOSCtrlProxyBuilder] Bundle checksum verification skipped (no checksum provided)",
+      );
     }
   }
 
@@ -1029,8 +1075,8 @@ export class IOSCtrlProxyBuilder {
     if (IOSCtrlProxyBuilder.isPinnedVersionUnverifiable()) {
       throw new ActionableError(
         `AUTOMOBILE_VERSION=${resolvePinnedVersion()} is not in the AutoMobile release ` +
-        `checksum registry, so the CtrlProxy bundle cannot be integrity-verified. ` +
-        `Pin a released version, or vendor a trusted bundle via AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH.`
+          `checksum registry, so the CtrlProxy bundle cannot be integrity-verified. ` +
+          `Pin a released version, or vendor a trusted bundle via AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH.`,
       );
     }
   }
@@ -1078,7 +1124,7 @@ export class IOSCtrlProxyBuilder {
       checksum: this.getExpectedChecksum() || null,
       version: resolveAssetVersion(resolvePinnedVersion()),
       extractedAt: new Date().toISOString(),
-      appHashes
+      appHashes,
     };
     await fs.writeFile(this.getMetadataPath(), JSON.stringify(metadata, null, 2), "utf-8");
   }
@@ -1154,7 +1200,7 @@ export class IOSCtrlProxyBuilder {
     const requiredPaths = [
       path.join(buildDir, "CtrlProxyApp.app"),
       path.join(buildDir, "CtrlProxyUITests-Runner.app"),
-      path.join(buildDir, "CtrlProxyTests.xctest")
+      path.join(buildDir, "CtrlProxyTests.xctest"),
     ];
 
     for (const requiredPath of requiredPaths) {
@@ -1172,11 +1218,15 @@ export class IOSCtrlProxyBuilder {
         throw new Error(`CtrlProxy app hash unavailable for ${platform}`);
       }
       if (localHash.toLowerCase() !== expectedAppHash.toLowerCase()) {
-        throw new Error(`CtrlProxy app hash mismatch for ${platform}. Expected: ${expectedAppHash}, Got: ${localHash}`);
+        throw new Error(
+          `CtrlProxy app hash mismatch for ${platform}. Expected: ${expectedAppHash}, Got: ${localHash}`,
+        );
       }
       logger.info("[IOSCtrlProxyBuilder] App bundle hash verified", { platform, hash: localHash });
     } else {
-      logger.warn(`[IOSCtrlProxyBuilder] App bundle hash verification skipped for ${platform} (no hash provided)`);
+      logger.warn(
+        `[IOSCtrlProxyBuilder] App bundle hash verification skipped for ${platform} (no hash provided)`,
+      );
     }
 
     // Verify the release-selected runner executable SHA256 for BOTH simulator
@@ -1199,7 +1249,7 @@ export class IOSCtrlProxyBuilder {
    */
   private async assertRunnerBinaryHash(
     platform: IOSCtrlProxyPlatform,
-    phase: "post-extract" | "pre-launch"
+    phase: "post-extract" | "pre-launch",
   ): Promise<void> {
     // First-class local-build mode (#5561): derive and trust the locally built
     // runner's own hash instead of the release-pinned baseline it can never
@@ -1212,7 +1262,9 @@ export class IOSCtrlProxyBuilder {
 
     const expectedRunnerSha256 = this.getExpectedRunnerChecksum();
     if (!expectedRunnerSha256 || expectedRunnerSha256.length === 0) {
-      logger.warn(`[IOSCtrlProxyBuilder] Runner binary SHA256 verification skipped for ${platform} (no hash provided)`);
+      logger.warn(
+        `[IOSCtrlProxyBuilder] Runner binary SHA256 verification skipped for ${platform} (no hash provided)`,
+      );
       return;
     }
     const runnerChecksumTarget = this.getExpectedRunnerChecksumTarget();
@@ -1224,11 +1276,14 @@ export class IOSCtrlProxyBuilder {
     if (checksum.toLowerCase() !== expectedRunnerSha256.toLowerCase()) {
       throw new ActionableError(
         `CtrlProxy runner binary SHA256 mismatch (${phase}) for ${platform}. ` +
-        `Expected: ${expectedRunnerSha256}, Got: ${checksum}. Refusing to launch a runner whose ` +
-        `binary changed since it was verified (possible TOCTOU tampering).`
+          `Expected: ${expectedRunnerSha256}, Got: ${checksum}. Refusing to launch a runner whose ` +
+          `binary changed since it was verified (possible TOCTOU tampering).`,
       );
     }
-    logger.info(`[IOSCtrlProxyBuilder] Runner binary SHA256 verified (${phase})`, { platform, checksum });
+    logger.info(`[IOSCtrlProxyBuilder] Runner binary SHA256 verified (${phase})`, {
+      platform,
+      checksum,
+    });
   }
 
   /** Whether the {@link IOS_CTRL_PROXY_USE_LOCAL_BUILD_ENV} switch is active (#5561). */
@@ -1325,13 +1380,17 @@ export class IOSCtrlProxyBuilder {
    */
   private async verifyRunnerCodesign(platform: IOSCtrlProxyPlatform): Promise<void> {
     if (process.platform !== "darwin") {
-      logger.debug(`[IOSCtrlProxyBuilder] codesign verification skipped on ${process.platform} (macOS-only)`);
+      logger.debug(
+        `[IOSCtrlProxyBuilder] codesign verification skipped on ${process.platform} (macOS-only)`,
+      );
       return;
     }
 
     const appPath = await this.getRunnerAppPath(platform);
     if (!appPath) {
-      logger.warn(`[IOSCtrlProxyBuilder] Runner app bundle missing for ${platform}; skipping codesign verification`);
+      logger.warn(
+        `[IOSCtrlProxyBuilder] Runner app bundle missing for ${platform}; skipping codesign verification`,
+      );
       return;
     }
 
@@ -1345,7 +1404,8 @@ export class IOSCtrlProxyBuilder {
       // The codesign/spctl tools themselves errored (e.g. not installed). Treat
       // as a non-fatal warning by default so a broken toolchain does not block
       // launch; fail closed only when the operator opted in.
-      const message = `Code-signing verification could not run for the ${platform} runner: ` +
+      const message =
+        `Code-signing verification could not run for the ${platform} runner: ` +
         `${errorMessage(error)}`;
       this.applyCodesignPolicy(message, requireCodesign, error);
       return;
@@ -1361,7 +1421,8 @@ export class IOSCtrlProxyBuilder {
       return;
     }
 
-    const summary = `Code-signing verification issues for the ${platform} runner: ${problems.join("; ")}.` +
+    const summary =
+      `Code-signing verification issues for the ${platform} runner: ${problems.join("; ")}.` +
       (outcome.detail ? ` (${outcome.detail})` : "");
     this.applyCodesignPolicy(summary, requireCodesign);
   }
@@ -1374,10 +1435,11 @@ export class IOSCtrlProxyBuilder {
   private applyCodesignPolicy(summary: string, requireCodesign: boolean, cause?: unknown): void {
     if (requireCodesign) {
       throw new ActionableError(
-        `${summary} Refusing to launch because ${IOS_HELPER_REQUIRE_CODESIGN_ENV} is set.`
+        `${summary} Refusing to launch because ${IOS_HELPER_REQUIRE_CODESIGN_ENV} is set.`,
       );
     }
-    const message = `[IOSCtrlProxyBuilder] ${summary} Proceeding anyway — code signing is not OS-enforced on the ` +
+    const message =
+      `[IOSCtrlProxyBuilder] ${summary} Proceeding anyway — code signing is not OS-enforced on the ` +
       `simulator, and the #4759 SHA-256 check already covers integrity. Set ` +
       `${IOS_HELPER_REQUIRE_CODESIGN_ENV}=1 to refuse launch, and ${IOS_HELPER_TEAM_ID_ENV} to pin a Team ID.`;
     if (cause === undefined) {
@@ -1388,7 +1450,9 @@ export class IOSCtrlProxyBuilder {
   }
 
   /** Path to the extracted runner `.app` bundle codesign verifies (issue #4760). */
-  public async getRunnerAppPath(platform: IOSCtrlProxyPlatform = "simulator"): Promise<string | null> {
+  public async getRunnerAppPath(
+    platform: IOSCtrlProxyPlatform = "simulator",
+  ): Promise<string | null> {
     const buildPath = await this.getBuildProductsPath(platform);
     if (!buildPath) {
       return null;
@@ -1429,15 +1493,18 @@ export class IOSCtrlProxyBuilder {
       // Directory does not exist yet (first extraction) — nothing to refuse. Any
       // other stat error is treated the same: the create step that follows will
       // surface a real failure with a clearer message.
-      logger.debug(`[IOSCtrlProxyBuilder] derived-data stat failed (treated as absent): ${error}`, error);
+      logger.debug(
+        `[IOSCtrlProxyBuilder] derived-data stat failed (treated as absent): ${error}`,
+        error,
+      );
       return;
     }
     const currentUid = getuid();
     if (stats.uid !== currentUid) {
       throw new ActionableError(
         `Refusing to reuse CtrlProxy derived-data directory ${this.config.derivedDataPath}: it is ` +
-        `owned by uid ${stats.uid}, not the current uid ${currentUid}. Another user may have pre-seeded ` +
-        `or tampered with it. Delete it, or set AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA to a directory you own.`
+          `owned by uid ${stats.uid}, not the current uid ${currentUid}. Another user may have pre-seeded ` +
+          `or tampered with it. Delete it, or set AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA to a directory you own.`,
       );
     }
   }

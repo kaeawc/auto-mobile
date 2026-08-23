@@ -32,36 +32,45 @@ describe("navigation tool session graph selection", () => {
     const sessionGraph = new FakeNavigationGraphManager();
     const usedManagers: unknown[] = [];
     const usedSessions: unknown[] = [];
-    const sessionManagerSpy = spyOn(NavigationGraphManager, "getInstanceForSession")
-      .mockReturnValue(sessionGraph as unknown as NavigationGraphManager);
+    const sessionManagerSpy = spyOn(
+      NavigationGraphManager,
+      "getInstanceForSession",
+    ).mockReturnValue(sessionGraph as unknown as NavigationGraphManager);
     PortManager.setPortAvailabilityCheckerForTesting({
       isPortAvailable: () => true,
     });
-    const navigateExecuteSpy = spyOn(NavigateTo.prototype, "execute").mockImplementation(async function() {
-      usedManagers.push((this as unknown as { navigationManager: unknown }).navigationManager);
-      usedSessions.push((this as unknown as { sessionUuid: unknown }).sessionUuid);
-      return {
-        success: false,
-        error: "No path",
-        currentScreen: null,
-        targetScreen: "Settings",
-        stepsExecuted: 0,
-      };
-    });
-    const exploreExecuteSpy = spyOn(Explore.prototype, "execute").mockImplementation(async function() {
-      usedManagers.push((this as unknown as { navigationManager: unknown }).navigationManager);
-      usedSessions.push((this as unknown as { sessionUuid: unknown }).sessionUuid);
-      return {
-        success: true,
-        interactionsPerformed: 0,
-        screensDiscovered: 0,
-        coverage: { explored: 0, total: 0, percentage: 0 },
-      } as any;
-    });
+    const navigateExecuteSpy = spyOn(NavigateTo.prototype, "execute").mockImplementation(
+      async function () {
+        usedManagers.push((this as unknown as { navigationManager: unknown }).navigationManager);
+        usedSessions.push((this as unknown as { sessionUuid: unknown }).sessionUuid);
+        return {
+          success: false,
+          error: "No path",
+          currentScreen: null,
+          targetScreen: "Settings",
+          stepsExecuted: 0,
+        };
+      },
+    );
+    const exploreExecuteSpy = spyOn(Explore.prototype, "execute").mockImplementation(
+      async function () {
+        usedManagers.push((this as unknown as { navigationManager: unknown }).navigationManager);
+        usedSessions.push((this as unknown as { sessionUuid: unknown }).sessionUuid);
+        return {
+          success: true,
+          interactionsPerformed: 0,
+          screensDiscovered: 0,
+          coverage: { explored: 0, total: 0, percentage: 0 },
+        } as any;
+      },
+    );
 
     try {
       const tools = ToolRegistry as unknown as {
-        tools: Map<string, { deviceAwareHandler?: (device: BootedDevice, args: any) => Promise<unknown> }>;
+        tools: Map<
+          string,
+          { deviceAwareHandler?: (device: BootedDevice, args: any) => Promise<unknown> }
+        >;
       };
       const navigateHandler = tools.tools.get("navigateTo")?.deviceAwareHandler;
       const exploreHandler = tools.tools.get("explore")?.deviceAwareHandler;
@@ -130,34 +139,42 @@ describe("navigation tool session graph selection", () => {
             { screenName: "iOS Settings", firstSeenAt: 1, lastSeenAt: 2, visitCount: 3 },
             { screenName: "iOS General", firstSeenAt: 2, lastSeenAt: 3, visitCount: 1 },
           ],
-          edges: [{
-            from: "iOS Settings",
-            to: "iOS General",
-            timestamp: 3,
-            edgeType: "tool" as const,
-            interaction: { toolName: "tapOn", args: { text: "General" }, timestamp: 3 },
-          }],
+          edges: [
+            {
+              from: "iOS Settings",
+              to: "iOS General",
+              timestamp: 3,
+              edgeType: "tool" as const,
+              interaction: { toolName: "tapOn", args: { text: "General" }, timestamp: 3 },
+            },
+          ],
         };
       },
     });
     const managerSpy = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
-      staleGraph as unknown as NavigationGraphManager
+      staleGraph as unknown as NavigationGraphManager,
     );
-    const observationSpy = spyOn(RealObserveScreen, "getRecentCachedResultForDevice").mockReturnValue({
-      viewHierarchy: { packageName: "com.apple.Preferences" }
+    const observationSpy = spyOn(
+      RealObserveScreen,
+      "getRecentCachedResultForDevice",
+    ).mockReturnValue({
+      viewHierarchy: { packageName: "com.apple.Preferences" },
     } as never);
 
     try {
-      const handler = (ToolRegistry as unknown as {
-        tools: Map<string, { deviceAwareHandler?: (device: BootedDevice, args: any) => Promise<any> }>;
-      }).tools.get("getNavigationGraph")?.deviceAwareHandler;
+      const handler = (
+        ToolRegistry as unknown as {
+          tools: Map<
+            string,
+            { deviceAwareHandler?: (device: BootedDevice, args: any) => Promise<any> }
+          >;
+        }
+      ).tools.get("getNavigationGraph")?.deviceAwareHandler;
 
       const response = await handler!(device, { platform: "ios" });
 
       const result = JSON.parse(response.content[0].text);
-      expect(result.message).toBe(
-        "Navigation graph for app: com.apple.Preferences"
-      );
+      expect(result.message).toBe("Navigation graph for app: com.apple.Preferences");
       expect(result).toMatchObject({
         currentScreen: null,
         nodeCount: 2,
@@ -168,13 +185,15 @@ describe("navigation tool session graph selection", () => {
           { name: "iOS Settings", visitCount: 3 },
           { name: "iOS General", visitCount: 1 },
         ],
-        transitions: [{
-          from: "iOS Settings",
-          to: "iOS General",
-          type: "tool",
-          tool: "tapOn",
-          args: { text: "General" },
-        }],
+        transitions: [
+          {
+            from: "iOS Settings",
+            to: "iOS General",
+            type: "tool",
+            tool: "tapOn",
+            args: { text: "General" },
+          },
+        ],
       });
     } finally {
       observationSpy.mockRestore();
@@ -208,27 +227,37 @@ describe("navigation tool session graph selection", () => {
             { screenName: "Issue4460Home", firstSeenAt: 1, lastSeenAt: 2, visitCount: 1 },
             { screenName: "Issue4460Detail", firstSeenAt: 2, lastSeenAt: 3, visitCount: 1 },
           ],
-          edges: [{
-            from: "Issue4460Home",
-            to: "Issue4460Detail",
-            timestamp: 3,
-            edgeType: "unknown" as const,
-          }],
+          edges: [
+            {
+              from: "Issue4460Home",
+              to: "Issue4460Detail",
+              timestamp: 3,
+              edgeType: "unknown" as const,
+            },
+          ],
         };
       },
     });
     const managerSpy = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
-      graph as unknown as NavigationGraphManager
+      graph as unknown as NavigationGraphManager,
     );
     // A concurrent hierarchy update marked SpringBoard current.
-    const observationSpy = spyOn(RealObserveScreen, "getRecentCachedResultForDevice").mockReturnValue({
-      viewHierarchy: { packageName: "com.apple.springboard" }
+    const observationSpy = spyOn(
+      RealObserveScreen,
+      "getRecentCachedResultForDevice",
+    ).mockReturnValue({
+      viewHierarchy: { packageName: "com.apple.springboard" },
     } as never);
 
     try {
-      const handler = (ToolRegistry as unknown as {
-        tools: Map<string, { deviceAwareHandler?: (device: BootedDevice, args: any) => Promise<any> }>;
-      }).tools.get("getNavigationGraph")?.deviceAwareHandler;
+      const handler = (
+        ToolRegistry as unknown as {
+          tools: Map<
+            string,
+            { deviceAwareHandler?: (device: BootedDevice, args: any) => Promise<any> }
+          >;
+        }
+      ).tools.get("getNavigationGraph")?.deviceAwareHandler;
 
       const response = await handler!(device, {
         platform: "ios",
@@ -284,14 +313,22 @@ describe("navigation tool session graph selection", () => {
       },
     });
     const managerSpy = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
-      staleGraph as unknown as NavigationGraphManager
+      staleGraph as unknown as NavigationGraphManager,
     );
-    const observationSpy = spyOn(RealObserveScreen, "getRecentCachedResultForDevice").mockReturnValue(undefined);
+    const observationSpy = spyOn(
+      RealObserveScreen,
+      "getRecentCachedResultForDevice",
+    ).mockReturnValue(undefined);
 
     try {
-      const handler = (ToolRegistry as unknown as {
-        tools: Map<string, { deviceAwareHandler?: (device: BootedDevice, args: any) => Promise<any> }>;
-      }).tools.get("getNavigationGraph")?.deviceAwareHandler;
+      const handler = (
+        ToolRegistry as unknown as {
+          tools: Map<
+            string,
+            { deviceAwareHandler?: (device: BootedDevice, args: any) => Promise<any> }
+          >;
+        }
+      ).tools.get("getNavigationGraph")?.deviceAwareHandler;
 
       const response = await handler!(device, { platform: "ios" });
 
@@ -346,16 +383,24 @@ describe("navigation tool session graph selection", () => {
       },
     });
     const managerSpy = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
-      graph as unknown as NavigationGraphManager
+      graph as unknown as NavigationGraphManager,
     );
-    const observationSpy = spyOn(RealObserveScreen, "getRecentCachedResultForDevice").mockReturnValue({
-      viewHierarchy: { packageName: "com.apple.Preferences" }
+    const observationSpy = spyOn(
+      RealObserveScreen,
+      "getRecentCachedResultForDevice",
+    ).mockReturnValue({
+      viewHierarchy: { packageName: "com.apple.Preferences" },
     } as never);
 
     try {
-      const handler = (ToolRegistry as unknown as {
-        tools: Map<string, { deviceAwareHandler?: (device: BootedDevice, args: any) => Promise<any> }>;
-      }).tools.get("getNavigationGraph")?.deviceAwareHandler;
+      const handler = (
+        ToolRegistry as unknown as {
+          tools: Map<
+            string,
+            { deviceAwareHandler?: (device: BootedDevice, args: any) => Promise<any> }
+          >;
+        }
+      ).tools.get("getNavigationGraph")?.deviceAwareHandler;
 
       const response = await handler!(device, { platform: "ios" });
 

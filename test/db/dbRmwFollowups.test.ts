@@ -20,7 +20,7 @@ describe("DB RMW follow-up fixes (#3415)", () => {
   const openDbs: Kysely<Database>[] = [];
 
   afterEach(async () => {
-    await Promise.all(openDbs.splice(0).map(db => db.destroy()));
+    await Promise.all(openDbs.splice(0).map((db) => db.destroy()));
   });
 
   async function openDb(): Promise<Kysely<Database>> {
@@ -97,8 +97,8 @@ describe("DB RMW follow-up fixes (#3415)", () => {
     });
 
     const flags = await repository.listFlags();
-    expect(flags.map(flag => flag.key).sort()).toEqual(["accessibility-audit", "debug"]);
-    expect(flags.find(flag => flag.key === "accessibility-audit")?.config).toEqual({
+    expect(flags.map((flag) => flag.key).sort()).toEqual(["accessibility-audit", "debug"]);
+    expect(flags.find((flag) => flag.key === "accessibility-audit")?.config).toEqual({
       level: "AA",
     });
   });
@@ -109,8 +109,7 @@ describe("DB RMW follow-up fixes (#3415)", () => {
 
     await runConcurrentSameKeyStress({
       count: N,
-      act: index =>
-        repository.upsertFlag("debug", index % 2 === 0, { writer: index }),
+      act: (index) => repository.upsertFlag("debug", index % 2 === 0, { writer: index }),
     });
 
     const flags = await repository.listFlags();
@@ -151,12 +150,12 @@ describe("DB RMW follow-up fixes (#3415)", () => {
         valueType: null,
         changeType: "add",
       },
-      db
+      db,
     );
 
     await runConcurrentSameKeyStress({
       count: N,
-      act: index =>
+      act: (index) =>
         recordStorageEvent(
           {
             deviceId: "device-1",
@@ -169,19 +168,19 @@ describe("DB RMW follow-up fixes (#3415)", () => {
             valueType: null,
             changeType: "modify",
           },
-          db
+          db,
         ),
     });
 
     const events = await getStorageEvents({ deviceId: "device-1", limit: N + 1 }, db);
-    const concurrentEvents = events.filter(event => event.value !== "seed");
+    const concurrentEvents = events.filter((event) => event.value !== "seed");
     expect(concurrentEvents).toHaveLength(N);
-    expect(concurrentEvents.filter(event => event.previousValue === "seed")).toHaveLength(1);
-    expect(concurrentEvents.every(event => event.previousValue !== null)).toBe(true);
+    expect(concurrentEvents.filter((event) => event.previousValue === "seed")).toHaveLength(1);
+    expect(concurrentEvents.every((event) => event.previousValue !== null)).toBe(true);
     expect(
       concurrentEvents
-        .filter(event => event.previousValue !== "seed")
-        .every(event => event.previousValue?.startsWith("value-"))
+        .filter((event) => event.previousValue !== "seed")
+        .every((event) => event.previousValue?.startsWith("value-")),
     ).toBe(true);
   });
 
@@ -194,7 +193,7 @@ describe("DB RMW follow-up fixes (#3415)", () => {
       "com.example.app",
       "settings-fingerprint",
       "{}",
-      2000
+      2000,
     );
     await sql`
       CREATE TRIGGER fail_promote_update
@@ -206,13 +205,10 @@ describe("DB RMW follow-up fixes (#3415)", () => {
     `.execute(db);
 
     await expect(repository.promoteSuggestion(suggestion.id, node.id, 3000)).rejects.toThrow(
-      /injected promote failure/
+      /injected promote failure/,
     );
 
-    const fingerprints = await db
-      .selectFrom("navigation_node_fingerprints")
-      .selectAll()
-      .execute();
+    const fingerprints = await db.selectFrom("navigation_node_fingerprints").selectAll().execute();
     expect(fingerprints).toHaveLength(0);
   });
 
@@ -222,7 +218,7 @@ describe("DB RMW follow-up fixes (#3415)", () => {
 
     await runConcurrentSameKeyStress({
       count: N,
-      act: index => manager.saveBaseline("screen-1", [violation(`fp-${index}`)]),
+      act: (index) => manager.saveBaseline("screen-1", [violation(`fp-${index}`)]),
     });
 
     const rows = await db.selectFrom("accessibility_baselines").selectAll().execute();
@@ -273,7 +269,8 @@ describe("DB RMW follow-up fixes (#3415)", () => {
 
     await runConcurrentSameKeyStress({
       count: 3,
-      act: () => manager.updateThresholdWeight("device-1", new Date().toISOString().split("T")[0], true),
+      act: () =>
+        manager.updateThresholdWeight("device-1", new Date().toISOString().split("T")[0], true),
     });
 
     const row = await db.selectFrom("performance_thresholds").selectAll().executeTakeFirstOrThrow();

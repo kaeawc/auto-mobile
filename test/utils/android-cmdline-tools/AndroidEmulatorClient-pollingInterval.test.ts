@@ -32,12 +32,9 @@ async function observePollingInterval(value: string | undefined): Promise<number
   }
 
   const timer = new FakeTimer();
-  const client = new AndroidEmulatorClient(
-    async () => result,
-    null,
-    timer,
-    { create: () => new FakeAdbExecutor() } as AdbClientFactory,
-  );
+  const client = new AndroidEmulatorClient(async () => result, null, timer, {
+    create: () => new FakeAdbExecutor(),
+  } as AdbClientFactory);
   const controller = new AbortController();
   const readiness = client.waitForEmulatorReady(
     "Missing",
@@ -62,16 +59,7 @@ async function observePollingInterval(value: string | undefined): Promise<number
 
 describe("AndroidEmulatorClient polling interval configuration", () => {
   test("uses the safe default for absent or invalid values", async () => {
-    const values = [
-      undefined,
-      "",
-      "garbage",
-      "-1",
-      "0",
-      "2147483648",
-      "1e308",
-      "9".repeat(400),
-    ];
+    const values = [undefined, "", "garbage", "-1", "0", "2147483648", "1e308", "9".repeat(400)];
     const observed = [];
 
     for (const value of values) {

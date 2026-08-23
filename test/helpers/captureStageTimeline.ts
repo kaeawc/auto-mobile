@@ -82,7 +82,7 @@ export interface CaptureRunIdentity {
 /** Read the run identity from the GitHub Actions environment. */
 export function captureRunIdentity(
   env: NodeJS.ProcessEnv = process.env,
-  nowIso: () => string = () => new Date().toISOString()
+  nowIso: () => string = () => new Date().toISOString(),
 ): CaptureRunIdentity {
   return {
     runId: env.GITHUB_RUN_ID ?? null,
@@ -221,7 +221,7 @@ export interface KeyframeRecoverySample {
  */
 export function keyframeRecovered(
   baseline: KeyframeRecoverySample,
-  latest: KeyframeRecoverySample
+  latest: KeyframeRecoverySample,
 ): boolean {
   return (
     latest.keyFramesDecoded > baseline.keyFramesDecoded &&
@@ -277,7 +277,9 @@ export class CaptureStageTimeline {
    */
   mark(stage: CaptureStage): void {
     if (!CAPTURE_STAGES.includes(stage)) {
-      throw new Error(`Unknown capture stage "${stage}"; expected one of ${CAPTURE_STAGES.join(", ")}.`);
+      throw new Error(
+        `Unknown capture stage "${stage}"; expected one of ${CAPTURE_STAGES.join(", ")}.`,
+      );
     }
     if (this.marks.has(stage)) {
       return;
@@ -307,7 +309,7 @@ export class CaptureStageTimeline {
       schemaVersion: CAPTURE_STAGE_RECORD_SCHEMA_VERSION,
       stages,
       phases: [...this.phases],
-      missingStages: CAPTURE_STAGES.filter(stage => !this.marks.has(stage)),
+      missingStages: CAPTURE_STAGES.filter((stage) => !this.marks.has(stage)),
       captureToBrowserMs: this.marks.get("firstDecodedFrame") ?? null,
     };
   }
@@ -319,26 +321,26 @@ function formatDimensions(size: CaptureDimensions | null): string {
 
 /** Human-readable summary written to the job log and the artifact directory. */
 export function formatCaptureStageRecord(record: CaptureStageRecord): string {
-  const width = Math.max(...CAPTURE_STAGES.map(stage => stage.length));
+  const width = Math.max(...CAPTURE_STAGES.map((stage) => stage.length));
   const lines = [
     `platform=${record.platform} stream=${record.streamId} outcome=${record.outcome}`,
     `source=${formatDimensions(record.sourceSize)} fps=${record.configuredFps ?? "none"} decoded=${formatDimensions(record.decodedSize)}`,
     `egress=${record.egressKbps === null ? "none" : `${Math.round(record.egressKbps)}kbps`} decodedFps=${record.decodedFps === null ? "none" : Math.round(record.decodedFps * 10) / 10}`,
     `run=${record.run.runId ?? "local"}/${record.run.runAttempt ?? "1"} sha=${record.run.commitSha ?? "unknown"} runner=${record.run.runnerImage ?? record.run.runnerOs ?? "unknown"}`,
     ...record.stages.map(
-      measurement =>
-        `  ${measurement.stage.padEnd(width)} ${Math.round(measurement.elapsedMs)}ms (+${Math.round(measurement.deltaMs)}ms)`
+      (measurement) =>
+        `  ${measurement.stage.padEnd(width)} ${Math.round(measurement.elapsedMs)}ms (+${Math.round(measurement.deltaMs)}ms)`,
     ),
   ];
   if (record.captureToBrowserMs !== null) {
     lines.push(`captureToBrowser=${Math.round(record.captureToBrowserMs)}ms`);
   }
   if (record.phases.length > 0) {
-    const phaseWidth = Math.max(...record.phases.map(phase => phase.phase.length));
+    const phaseWidth = Math.max(...record.phases.map((phase) => phase.phase.length));
     for (const phase of record.phases) {
       const detail = phase.detail ? `: ${phase.detail}` : "";
       lines.push(
-        `  [phase] ${phase.phase.padEnd(phaseWidth)} ${Math.round(phase.elapsedMs)}ms ${phase.status}${detail}`
+        `  [phase] ${phase.phase.padEnd(phaseWidth)} ${Math.round(phase.elapsedMs)}ms ${phase.status}${detail}`,
       );
     }
   }
@@ -386,7 +388,9 @@ export interface CaptureBaselineSummary {
  * "no samples" from "a real zero".
  */
 function summarizePercentiles(values: Array<number | null>): PercentileSummary | null {
-  const finite = values.filter((value): value is number => value !== null && Number.isFinite(value));
+  const finite = values.filter(
+    (value): value is number => value !== null && Number.isFinite(value),
+  );
   if (finite.length === 0) {
     return null;
   }
@@ -406,15 +410,19 @@ function summarizePercentiles(values: Array<number | null>): PercentileSummary |
  */
 export function aggregateCaptureStageRecords(
   records: CaptureStageRecord[],
-  options: { platform?: string } = {}
+  options: { platform?: string } = {},
 ): CaptureBaselineSummary {
   const platform = options.platform ?? null;
-  const considered = platform === null ? records : records.filter(record => record.platform === platform);
+  const considered =
+    platform === null ? records : records.filter((record) => record.platform === platform);
 
   const stages: Partial<Record<CaptureStage, PercentileSummary>> = {};
   for (const stage of CAPTURE_STAGES) {
     const elapsed = considered
-      .map(record => record.stages.find(measurement => measurement.stage === stage)?.elapsedMs ?? null)
+      .map(
+        (record) =>
+          record.stages.find((measurement) => measurement.stage === stage)?.elapsedMs ?? null,
+      )
       .filter((value): value is number => value !== null);
     const summary = summarizePercentiles(elapsed);
     if (summary !== null) {
@@ -425,8 +433,8 @@ export function aggregateCaptureStageRecords(
   return {
     platform,
     sampleCount: considered.length,
-    egressKbps: summarizePercentiles(considered.map(record => record.egressKbps)),
-    decodedFps: summarizePercentiles(considered.map(record => record.decodedFps)),
+    egressKbps: summarizePercentiles(considered.map((record) => record.egressKbps)),
+    decodedFps: summarizePercentiles(considered.map((record) => record.decodedFps)),
     stages,
   };
 }

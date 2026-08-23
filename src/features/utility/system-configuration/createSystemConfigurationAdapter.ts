@@ -13,7 +13,7 @@ import { IosSystemConfigurationAdapter } from "./IosSystemConfigurationAdapter";
 export function createSystemConfigurationAdapter(
   device: BootedDevice,
   adb: AdbExecutor,
-  processExecutor: HostCommandExecutor
+  processExecutor: HostCommandExecutor,
 ): SystemConfigurationAdapter {
   if (device.platform === "ios") {
     return new IosSystemConfigurationAdapter(device, processExecutor);

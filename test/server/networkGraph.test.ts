@@ -43,7 +43,7 @@ describe("buildNetworkGraph", () => {
     const result = buildNetworkGraph(events);
     expect(result.graph).toHaveLength(2);
 
-    const hosts = result.graph.map(g => g.host).sort();
+    const hosts = result.graph.map((g) => g.host).sort();
     expect(hosts).toEqual(["api.example.com", "cdn.example.com"]);
   });
 
@@ -149,7 +149,7 @@ describe("buildNetworkGraph", () => {
     const result = buildNetworkGraph(events);
     expect(result.graph).toHaveLength(2);
 
-    const schemes = result.graph.map(g => g.scheme).sort();
+    const schemes = result.graph.map((g) => g.scheme).sort();
     expect(schemes).toEqual(["http", "https"]);
   });
 
@@ -186,7 +186,7 @@ describe("buildNetworkGraph prototype-named path segments (issue #4187)", () => 
 
   it.each([...PROTOTYPE_SEGMENTS, "normalSegment"])(
     "builds a branch for the %s segment without touching Object",
-    segment => {
+    (segment) => {
       const events = [
         makeEvent({ url: `https://api.example.com/${segment}/items`, path: `/${segment}/items` }),
       ];
@@ -200,18 +200,15 @@ describe("buildNetworkGraph prototype-named path segments (issue #4187)", () => 
       expect(Object.keys(branch.paths)).toEqual(["items[GET]"]);
       expect((branch.paths["items[GET]"] as GraphLeaf).success).toBe(1);
       expect((Object as unknown as { paths?: unknown }).paths).toBeUndefined();
-    }
+    },
   );
 
-  it.each([...PROTOTYPE_SEGMENTS, "normalSegment"])(
-    "records a leaf named %s",
-    segment => {
-      const events = [makeEvent({ url: `https://api.example.com/${segment}`, path: `/${segment}` })];
+  it.each([...PROTOTYPE_SEGMENTS, "normalSegment"])("records a leaf named %s", (segment) => {
+    const events = [makeEvent({ url: `https://api.example.com/${segment}`, path: `/${segment}` })];
 
-      const result = buildNetworkGraph(events);
-      const root = result.graph[0].paths;
-      expect(Object.prototype.hasOwnProperty.call(root, `${segment}[GET]`)).toBe(true);
-      expect((root[`${segment}[GET]`] as GraphLeaf).success).toBe(1);
-    }
-  );
+    const result = buildNetworkGraph(events);
+    const root = result.graph[0].paths;
+    expect(Object.prototype.hasOwnProperty.call(root, `${segment}[GET]`)).toBe(true);
+    expect((root[`${segment}[GET]`] as GraphLeaf).success).toBe(1);
+  });
 });

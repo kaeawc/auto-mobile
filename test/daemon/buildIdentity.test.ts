@@ -59,10 +59,16 @@ describe("buildIdentity", () => {
     });
 
     test("falls back to entryScript when one buildId is unknown", () => {
-      const sameScriptUnknown: BuildIdentity = { entryScript: "/wt/dist/index.js", buildId: "unknown" };
+      const sameScriptUnknown: BuildIdentity = {
+        entryScript: "/wt/dist/index.js",
+        buildId: "unknown",
+      };
       expect(buildIdentitiesMatch(wt, sameScriptUnknown)).toBe(true);
 
-      const otherScriptUnknown: BuildIdentity = { entryScript: "/main/dist/index.js", buildId: "unknown" };
+      const otherScriptUnknown: BuildIdentity = {
+        entryScript: "/main/dist/index.js",
+        buildId: "unknown",
+      };
       expect(buildIdentitiesMatch(wt, otherScriptUnknown)).toBe(false);
     });
 
@@ -88,7 +94,7 @@ describe("buildIdentity", () => {
   describe("buildIdentityFromStatus", () => {
     test("projects populated status fields verbatim", () => {
       expect(
-        buildIdentityFromStatus({ entryScript: "/wt/dist/index.js", buildId: "aaaa" })
+        buildIdentityFromStatus({ entryScript: "/wt/dist/index.js", buildId: "aaaa" }),
       ).toEqual({ entryScript: "/wt/dist/index.js", buildId: "aaaa" });
     });
 

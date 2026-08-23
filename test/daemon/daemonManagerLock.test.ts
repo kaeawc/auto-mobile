@@ -22,7 +22,9 @@ describe("DaemonManager file lock", () => {
       try {
         const { rmSync } = require("node:fs");
         rmSync(dir, { recursive: true, force: true });
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
     tempDirs.length = 0;
     delete process.env.AUTOMOBILE_DATA_DIR;
@@ -138,7 +140,9 @@ describe("DaemonManager file lock", () => {
           return true; // Simulate daemon becoming ready
         }
         // Override to prevent real process spawning
-        override findAllDaemonProcesses(): number[] { return []; }
+        override findAllDaemonProcesses(): number[] {
+          return [];
+        }
       }
 
       const manager = new TestDaemonManager(undefined, undefined, fakeTimer, lockPath);
@@ -180,13 +184,15 @@ describe("DaemonManager file lock", () => {
           timeouts.push(timeout);
           return false; // Daemon never becomes ready
         }
-        override findAllDaemonProcesses(): number[] { return []; }
+        override findAllDaemonProcesses(): number[] {
+          return [];
+        }
       }
 
       const manager = new TestDaemonManager(undefined, undefined, fakeTimer, lockPath);
 
       await expect(manager.start()).rejects.toThrow(
-        /Another process is starting the daemon but it failed to become ready[\s\S]*holder-logs[\s\S]*SIMULATOR-B/
+        /Another process is starting the daemon but it failed to become ready[\s\S]*holder-logs[\s\S]*SIMULATOR-B/,
       );
       expect(timeouts).toEqual([30_000, 30_000]);
 
@@ -222,13 +228,15 @@ describe("DaemonManager file lock", () => {
           retryHolder?.releaseLock();
           return false;
         }
-        override findAllDaemonProcesses(): number[] { return []; }
+        override findAllDaemonProcesses(): number[] {
+          return [];
+        }
       }
 
       const manager = new TestDaemonManager(undefined, undefined, fakeTimer, lockPath);
 
       await expect(manager.start()).rejects.toThrow(
-        /Another process is starting the daemon but it failed to become ready[\s\S]*retry-holder-logs[\s\S]*Retry holder failed/
+        /Another process is starting the daemon but it failed to become ready[\s\S]*retry-holder-logs[\s\S]*Retry holder failed/,
       );
       expect(waitCount).toBe(2);
     });
@@ -239,8 +247,12 @@ describe("DaemonManager file lock", () => {
       fakeTimer.enableAutoAdvance();
 
       class TestDaemonManager extends DaemonManager {
-        override findAllDaemonProcesses(): number[] { return []; }
-        override async status(): Promise<any> { return { running: false }; }
+        override findAllDaemonProcesses(): number[] {
+          return [];
+        }
+        override async status(): Promise<any> {
+          return { running: false };
+        }
         override async waitForReady(_timeout: number): Promise<boolean> {
           return true;
         }
@@ -269,7 +281,9 @@ describe("DaemonManager file lock", () => {
       fakeTimer.enableAutoAdvance();
 
       class TestDaemonManager extends DaemonManager {
-        override findAllDaemonProcesses(): number[] { return []; }
+        override findAllDaemonProcesses(): number[] {
+          return [];
+        }
         override async status(): Promise<any> {
           throw new Error("simulated failure");
         }

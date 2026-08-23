@@ -1,4 +1,7 @@
-import { AdbClientFactory, defaultAdbClientFactory } from "./android-cmdline-tools/AdbClientFactory";
+import {
+  AdbClientFactory,
+  defaultAdbClientFactory,
+} from "./android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "./android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "./logger";
 import { BootedDevice } from "../models";
@@ -28,9 +31,7 @@ export class DeviceCapabilitiesDetector {
   async detectRefreshRate(): Promise<number> {
     try {
       // Try to get refresh rate from dumpsys display
-      const { stdout } = await this.adb.executeCommand(
-        "shell dumpsys display | grep mRefreshRate"
-      );
+      const { stdout } = await this.adb.executeCommand("shell dumpsys display | grep mRefreshRate");
 
       // Look for patterns like "mRefreshRate=120.0" or "mRefreshRate=60.0"
       const refreshRateMatch = stdout.match(/mRefreshRate[=:]\s*(\d+\.?\d*)/i);
@@ -42,7 +43,7 @@ export class DeviceCapabilitiesDetector {
 
       // Fallback: try dumpsys SurfaceFlinger
       const { stdout: sfOutput } = await this.adb.executeCommand(
-        "shell dumpsys SurfaceFlinger | grep 'refresh-rate'"
+        "shell dumpsys SurfaceFlinger | grep 'refresh-rate'",
       );
 
       const sfMatch = sfOutput.match(/refresh-rate[=:]\s*(\d+\.?\d*)/i);
@@ -54,7 +55,7 @@ export class DeviceCapabilitiesDetector {
 
       // Fallback: check display modes
       const { stdout: modesOutput } = await this.adb.executeCommand(
-        "shell dumpsys display | grep -A 5 'mBaseDisplayInfo'"
+        "shell dumpsys display | grep -A 5 'mBaseDisplayInfo'",
       );
 
       const modesMatch = modesOutput.match(/(\d+\.?\d*)\s*fps/i);

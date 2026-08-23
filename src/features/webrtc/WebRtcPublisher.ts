@@ -1,10 +1,4 @@
-import {
-  MediaStreamTrack,
-  RTCPeerConnection,
-  useH264,
-  usePCMU,
-  type RTCIceServer,
-} from "werift";
+import { MediaStreamTrack, RTCPeerConnection, useH264, usePCMU, type RTCIceServer } from "werift";
 import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import type { BackoffInput } from "../../utils/Backoff";
@@ -267,7 +261,7 @@ export class WebRtcPublisher {
     this.onLifecycleEvent = deps.onLifecycleEvent;
     this.createPeerConnection =
       deps.createPeerConnection ??
-      (iceServers =>
+      ((iceServers) =>
         new RTCPeerConnection({
           iceServers,
           // RFC 9725 §4.4.1 requires the WHIP client to use max-bundle. Besides
@@ -275,10 +269,13 @@ export class WebRtcPublisher {
           // gathers/trickles ICE candidates (RFC 9725 §4.3.2).
           bundlePolicy: "max-bundle",
           codecs: this.audioEnabled
-            ? { video: [useH264({ parameters: h264CodecParameters(this.h264Profile) })], audio: [usePCMU()] }
+            ? {
+                video: [useH264({ parameters: h264CodecParameters(this.h264Profile) })],
+                audio: [usePCMU()],
+              }
             : { video: [useH264({ parameters: h264CodecParameters(this.h264Profile) })] },
         }));
-    const createWhip = deps.createWhipClient ?? (options => new WhipClient(options));
+    const createWhip = deps.createWhipClient ?? ((options) => new WhipClient(options));
     this.whip = createWhip({
       // Pass the stream id to the ingest endpoint so a coordination server that
       // keys streams by id (like the bundled reference server, which reads
@@ -291,7 +288,7 @@ export class WebRtcPublisher {
       backoff: config.reconnectBackoff,
       maxAttempts: config.maxReconnectAttempts,
       timer: this.timer,
-      onStateChange: state => {
+      onStateChange: (state) => {
         this.state = state;
         deps.onStateChange?.(state);
       },
@@ -315,7 +312,7 @@ export class WebRtcPublisher {
     } catch (error) {
       const sourceFailure = error instanceof Error ? error : new Error(String(error));
       logger.warn(
-        `[WebRTC] stream ${this.config.streamId} emitted an H.264 stream outside its negotiated capability: ${sourceFailure.message}`
+        `[WebRTC] stream ${this.config.streamId} emitted an H.264 stream outside its negotiated capability: ${sourceFailure.message}`,
       );
       this.notifySourceFailed(sourceFailure);
     }
@@ -358,7 +355,7 @@ export class WebRtcPublisher {
     }
     const detail = error ? `: ${error.message}` : "";
     logger.warn(
-      `[WebRTC] stream ${this.config.streamId} capture source failed${detail}; reconnecting`
+      `[WebRTC] stream ${this.config.streamId} capture source failed${detail}; reconnecting`,
     );
     this.onSourceFailure?.(error ?? new Error("Capture source stopped producing media."));
     this.controller.notifyConnectionLost();
@@ -456,13 +453,13 @@ export class WebRtcPublisher {
         ssrc: transceiver.sender.ssrc,
         mtu: this.config.mtu ?? DEFAULT_RTP_MTU,
         timer: this.timer,
-        onSps: sps => {
+        onSps: (sps) => {
           const spsCompatibility = evaluateH264SpsForSend(sps, this.h264Profile);
           if (!spsCompatibility.compatible) {
             throw new Error(spsCompatibility.reason);
           }
         },
-        onAccessUnit: event => this.recordAccessUnit(event),
+        onAccessUnit: (event) => this.recordAccessUnit(event),
       });
       this.mediaTelemetryInitialized = true;
       this.firstRtpSent = false;
@@ -539,7 +536,7 @@ export class WebRtcPublisher {
       }
       logger.info(
         `[WebRTC] stream ${this.config.streamId} published to ${this.config.whipEndpoint}` +
-          (session.resourceUrl ? ` (resource ${session.resourceUrl})` : "")
+          (session.resourceUrl ? ` (resource ${session.resourceUrl})` : ""),
       );
     } catch (error) {
       // Any failure after the peer connection was created (offer, ICE, WHIP
@@ -567,7 +564,7 @@ export class WebRtcPublisher {
   }
 
   private watchConnectionState(pc: RTCPeerConnection): void {
-    pc.connectionStateChange.subscribe(state => {
+    pc.connectionStateChange.subscribe((state) => {
       if (this.closed || this.pc !== pc) {
         return;
       }
@@ -606,11 +603,13 @@ export class WebRtcPublisher {
           this.startFrameWatchdog(pc);
         }
       })
-      .catch(error => {
+      .catch((error) => {
         // Capture failed to start (e.g. adb/screenrecord spawn failed) even though
         // the peer connected. Without this the stream would report connected with
         // no media and never recover — route it through the reconnect path.
-        logger.warn(`[WebRTC] capture start failed for ${this.config.streamId}: ${error}; reconnecting`);
+        logger.warn(
+          `[WebRTC] capture start failed for ${this.config.streamId}: ${error}; reconnecting`,
+        );
         this.notifySourceFailed();
       });
   }
@@ -631,7 +630,10 @@ export class WebRtcPublisher {
     this.frameWatchdogLastFrames = this.writer?.stats.framesWritten ?? 0;
     this.frameWatchdogLastAdvanceMs = this.timer.now();
     const intervalMs = Math.max(500, Math.min(timeout, 2000));
-    this.frameWatchdogHandle = this.timer.setInterval(() => this.checkFrameProgress(pc, timeout), intervalMs);
+    this.frameWatchdogHandle = this.timer.setInterval(
+      () => this.checkFrameProgress(pc, timeout),
+      intervalMs,
+    );
   }
 
   /** Give an accepted keyframe recovery one bounded frame-stall interval to produce its IDR. */
@@ -661,7 +663,7 @@ export class WebRtcPublisher {
     if (this.timer.now() - this.frameWatchdogLastAdvanceMs >= timeoutMs) {
       logger.warn(
         `[WebRTC] stream ${this.config.streamId} produced no frames for ${timeoutMs}ms while connected ` +
-          `(framesSent=${frames}); treating capture as stalled and reconnecting`
+          `(framesSent=${frames}); treating capture as stalled and reconnecting`,
       );
       this.stopFrameWatchdog();
       this.notifySourceFailed();
@@ -731,17 +733,26 @@ export class WebRtcPublisher {
    * after publish), then PATCHed as `application/trickle-ice-sdpfrag`.
    */
   private subscribeTrickle(pc: RTCPeerConnection): () => void {
-    const pendingCandidates: Array<{
-      candidate: string;
-      sdpMid?: string;
-      sdpMLineIndex?: number;
-    } | null | undefined> = [];
+    const pendingCandidates: Array<
+      | {
+          candidate: string;
+          sdpMid?: string;
+          sdpMLineIndex?: number;
+        }
+      | null
+      | undefined
+    > = [];
     let forwarder: TrickleIceForwarder | null = null;
-    const addCandidate = (candidate: {
-      candidate: string;
-      sdpMid?: string;
-      sdpMLineIndex?: number;
-    } | null | undefined): void => {
+    const addCandidate = (
+      candidate:
+        | {
+            candidate: string;
+            sdpMid?: string;
+            sdpMLineIndex?: number;
+          }
+        | null
+        | undefined,
+    ): void => {
       if (!forwarder) {
         pendingCandidates.push(candidate);
         return;
@@ -756,7 +767,7 @@ export class WebRtcPublisher {
         forwarder.completeGathering();
       }
     };
-    this.candidateSub = pc.onIceCandidate.subscribe(candidate => {
+    this.candidateSub = pc.onIceCandidate.subscribe((candidate) => {
       if (this.pc === pc) {
         addCandidate(candidate);
       }
@@ -772,7 +783,7 @@ export class WebRtcPublisher {
         if (!etag) {
           return;
         }
-        void this.whip.patchCandidate(resourceUrl, etag, fragment).catch(error => {
+        void this.whip.patchCandidate(resourceUrl, etag, fragment).catch((error) => {
           logger.debug(`[WebRTC] trickle candidate PATCH failed: ${error}`);
         });
       }, contexts);
@@ -792,14 +803,16 @@ export class WebRtcPublisher {
     this.onLifecycleEvent?.("ice_gathering_started");
     try {
       await pc.iceGatheringStateChange.watch(
-        state => state === "complete",
-        ICE_GATHERING_TIMEOUT_MS
+        (state) => state === "complete",
+        ICE_GATHERING_TIMEOUT_MS,
       );
       this.onLifecycleEvent?.("ice_gathering_complete");
     } catch {
       // Timed out — proceed with whatever candidates gathered so far. Non-trickle
       // WHIP servers still often connect via the host/srflx candidates present.
-      logger.warn(`[WebRTC] ICE gathering did not complete within ${ICE_GATHERING_TIMEOUT_MS}ms; publishing partial offer`);
+      logger.warn(
+        `[WebRTC] ICE gathering did not complete within ${ICE_GATHERING_TIMEOUT_MS}ms; publishing partial offer`,
+      );
       this.onLifecycleEvent?.("ice_gathering_timeout");
     }
   }
@@ -841,7 +854,7 @@ function assertWhipAnswerAcceptsMedia(
   answerSdp: string,
   kind: "audio" | "video",
   codec: "h264" | "pcmu",
-  profile: H264Profile
+  profile: H264Profile,
 ): void {
   const section = findSdpMediaSection(answerSdp, kind);
   if (!section) {
@@ -858,9 +871,12 @@ function assertWhipAnswerAcceptsMedia(
 
   const direction =
     attributeLines
-      .map(line => line.match(/^a=(sendrecv|sendonly|recvonly|inactive)$/)?.[1])
-      .find((value): value is "sendrecv" | "sendonly" | "recvonly" | "inactive" => value !== undefined) ??
-    sessionDirection ?? "sendrecv";
+      .map((line) => line.match(/^a=(sendrecv|sendonly|recvonly|inactive)$/)?.[1])
+      .find(
+        (value): value is "sendrecv" | "sendonly" | "recvonly" | "inactive" => value !== undefined,
+      ) ??
+    sessionDirection ??
+    "sendrecv";
   // WHIP is unidirectional ingest: an accepting endpoint MUST answer recvonly
   // (RFC 9725 §4.2). Accepting sendrecv would make AutoMobile interoperate with
   // a non-conforming endpoint and hide an invalid session contract.
@@ -871,23 +887,33 @@ function assertWhipAnswerAcceptsMedia(
   const staticPayloadType = codec === "pcmu" ? "0" : undefined;
   const accepted =
     (staticPayloadType !== undefined && formats.has(staticPayloadType)) ||
-    attributeLines.some(line => isAcceptedCodecRtpMap(line, formats, codec, attributeLines, profile));
+    attributeLines.some((line) =>
+      isAcceptedCodecRtpMap(line, formats, codec, attributeLines, profile),
+    );
   if (!accepted) {
     throw new Error(`WHIP answer did not accept ${codec.toUpperCase()} ${kind}.`);
   }
 }
 
-function findSdpMediaSection(sdp: string, kind: "audio" | "video"): {
+function findSdpMediaSection(
+  sdp: string,
+  kind: "audio" | "video",
+): {
   mediaLine: string;
   attributeLines: string[];
   sessionDirection?: "sendrecv" | "sendonly" | "recvonly" | "inactive";
 } | null {
-  const lines = sdp.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-  const firstMedia = lines.findIndex(line => line.startsWith("m="));
+  const lines = sdp
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const firstMedia = lines.findIndex((line) => line.startsWith("m="));
   const sessionDirection = lines
     .slice(0, firstMedia < 0 ? lines.length : firstMedia)
-    .map(line => line.match(/^a=(sendrecv|sendonly|recvonly|inactive)$/)?.[1])
-    .find((value): value is "sendrecv" | "sendonly" | "recvonly" | "inactive" => value !== undefined);
+    .map((line) => line.match(/^a=(sendrecv|sendonly|recvonly|inactive)$/)?.[1])
+    .find(
+      (value): value is "sendrecv" | "sendonly" | "recvonly" | "inactive" => value !== undefined,
+    );
   for (let index = 0; index < lines.length; index++) {
     if (!lines[index].startsWith(`m=${kind} `)) {
       continue;
@@ -909,7 +935,7 @@ function isAcceptedCodecRtpMap(
   formats: Set<string>,
   codec: string,
   attributeLines: string[],
-  profile: H264Profile
+  profile: H264Profile,
 ): boolean {
   const match = line.match(/^a=rtpmap:(\S+)\s+([^/\s]+)\/(\d+)/i);
   if (!match || !formats.has(match[1]) || match[2].toLowerCase() !== codec) {
@@ -922,19 +948,24 @@ function isAcceptedCodecRtpMap(
   // uses FU-A, which requires packetization-mode=1. The local werift codec's
   // profile is this session's `profile` (Baseline 42e0xx or Main 4d00xx); level
   // may differ when asymmetry is negotiated.
-  return match[3] === "90000" && attributeLines.some(fmtp => {
-    if (!fmtp.startsWith(`a=fmtp:${match[1]} `)) {
-      return false;
-    }
-    const parameters = fmtp.slice(fmtp.indexOf(" ") + 1);
-    const packetizationMode = /(?:^|;)\s*packetization-mode\s*=\s*1(?:;|$)/i.test(parameters);
-    const profileLevelId = /(?:^|;)\s*profile-level-id\s*=\s*([0-9a-f]{6})(?:;|$)/i.exec(parameters)?.[1];
-    return (
-      packetizationMode &&
-      profileLevelId !== undefined &&
-      acceptsLocalH264Send(parameters, profileLevelId, profile)
-    );
-  });
+  return (
+    match[3] === "90000" &&
+    attributeLines.some((fmtp) => {
+      if (!fmtp.startsWith(`a=fmtp:${match[1]} `)) {
+        return false;
+      }
+      const parameters = fmtp.slice(fmtp.indexOf(" ") + 1);
+      const packetizationMode = /(?:^|;)\s*packetization-mode\s*=\s*1(?:;|$)/i.test(parameters);
+      const profileLevelId = /(?:^|;)\s*profile-level-id\s*=\s*([0-9a-f]{6})(?:;|$)/i.exec(
+        parameters,
+      )?.[1];
+      return (
+        packetizationMode &&
+        profileLevelId !== undefined &&
+        acceptsLocalH264Send(parameters, profileLevelId, profile)
+      );
+    })
+  );
 }
 
 function h264CodecParameters(profile: H264Profile): string {
@@ -944,7 +975,7 @@ function h264CodecParameters(profile: H264Profile): string {
 function acceptsLocalH264Send(
   parameters: string,
   profileLevelId: string,
-  profile: H264Profile
+  profile: H264Profile,
 ): boolean {
   if (!isCompatibleProfileForSession(profileLevelId, profile)) {
     return false;
@@ -957,7 +988,9 @@ function acceptsLocalH264Send(
   // level; max-recv-level is its separately advertised receive ceiling (RFC
   // 6184 §8.2.2). Do not send a Level 4.2 stream unless that ceiling permits it.
   const asymmetric = /(?:^|;)\s*level-asymmetry-allowed\s*=\s*1(?:;|$)/i.test(parameters);
-  const maxReceiveLevel = /(?:^|;)\s*max-recv-level\s*=\s*([0-9a-f]{4})(?:;|$)/i.exec(parameters)?.[1];
+  const maxReceiveLevel = /(?:^|;)\s*max-recv-level\s*=\s*([0-9a-f]{4})(?:;|$)/i.exec(
+    parameters,
+  )?.[1];
   // RFC 6184 §8.2.2 encodes max-recv-level as the two hexadecimal bytes after
   // profile_idc in an SPS: profile-iop followed by level_idc (for example,
   // e02a for constrained-baseline Level 4.2). It is not a decimal level number.
@@ -968,7 +1001,7 @@ function acceptsLocalH264Send(
 }
 
 function addWhipRtcpMuxOnly(sdp: string): string {
-  return sdp.replace(/a=rtcp-mux\r?\n/g, match => `${match}a=rtcp-mux-only\r\n`);
+  return sdp.replace(/a=rtcp-mux\r?\n/g, (match) => `${match}a=rtcp-mux-only\r\n`);
 }
 
 /**

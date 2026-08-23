@@ -31,7 +31,7 @@ interface Deferred<T> {
 
 function createDeferred<T = void>(): Deferred<T> {
   let resolve!: (value: T | PromiseLike<T>) => void;
-  const promise = new Promise<T>(res => {
+  const promise = new Promise<T>((res) => {
     resolve = res;
   });
 
@@ -68,9 +68,7 @@ describe("configureSqliteDatabase", () => {
     try {
       configureSqliteDatabase(sqliteDb);
 
-      const result = sqliteDb
-        .query<{ timeout: number }, []>("PRAGMA busy_timeout;")
-        .get();
+      const result = sqliteDb.query<{ timeout: number }, []>("PRAGMA busy_timeout;").get();
       expect(result?.timeout).toBe(5_000);
     } finally {
       sqliteDb.close();
@@ -94,9 +92,7 @@ describe("configureSqliteDatabase", () => {
         .get();
       expect(journalMode?.journal_mode).toBe("wal");
 
-      const synchronous = sqliteDb
-        .query<{ synchronous: number }, []>("PRAGMA synchronous;")
-        .get();
+      const synchronous = sqliteDb.query<{ synchronous: number }, []>("PRAGMA synchronous;").get();
       expect(synchronous?.synchronous).toBe(1);
     } finally {
       sqliteDb.close();
@@ -128,19 +124,13 @@ describe("configureSqliteDatabase", () => {
     try {
       configureSqliteDatabase(sqliteDb);
 
-      const cacheSize = sqliteDb
-        .query<{ cache_size: number }, []>("PRAGMA cache_size;")
-        .get();
+      const cacheSize = sqliteDb.query<{ cache_size: number }, []>("PRAGMA cache_size;").get();
       expect(cacheSize?.cache_size).toBe(-SQLITE_CACHE_SIZE_KIB);
 
-      const mmapSize = sqliteDb
-        .query<{ mmap_size: number }, []>("PRAGMA mmap_size;")
-        .get();
+      const mmapSize = sqliteDb.query<{ mmap_size: number }, []>("PRAGMA mmap_size;").get();
       expect(mmapSize?.mmap_size).toBe(SQLITE_MMAP_SIZE_BYTES);
 
-      const tempStore = sqliteDb
-        .query<{ temp_store: number }, []>("PRAGMA temp_store;")
-        .get();
+      const tempStore = sqliteDb.query<{ temp_store: number }, []>("PRAGMA temp_store;").get();
       expect(tempStore?.temp_store).toBe(2);
     } finally {
       sqliteDb.close();
@@ -174,7 +164,7 @@ describe("WAL checkpoint on close (issue #2802)", () => {
       // a busy checkpoint would silently skip truncation (issue #2802 review).
       const result = sqliteDb
         .query<{ busy: number; log: number; checkpointed: number }, []>(
-          "PRAGMA wal_checkpoint(TRUNCATE);"
+          "PRAGMA wal_checkpoint(TRUNCATE);",
         )
         .get();
       expect(result?.busy).toBe(0);
@@ -200,11 +190,14 @@ describe("WAL checkpoint on close (issue #2802)", () => {
     try {
       await db.schema
         .createTable("items")
-        .addColumn("id", "integer", col => col.primaryKey())
-        .addColumn("name", "text", col => col.notNull())
+        .addColumn("id", "integer", (col) => col.primaryKey())
+        .addColumn("name", "text", (col) => col.notNull())
         .execute();
       for (let i = 0; i < 50; i += 1) {
-        await db.insertInto("items").values({ id: i, name: `row-${i}` }).execute();
+        await db
+          .insertInto("items")
+          .values({ id: i, name: `row-${i}` })
+          .execute();
       }
       expect(walSize(dbPath)).toBeGreaterThan(0);
 
@@ -264,15 +257,15 @@ describe("BunSqliteDialect transactions", () => {
     try {
       await db.schema
         .createTable("items")
-        .addColumn("id", "integer", col => col.primaryKey())
-        .addColumn("name", "text", col => col.notNull())
+        .addColumn("id", "integer", (col) => col.primaryKey())
+        .addColumn("name", "text", (col) => col.notNull())
         .execute();
 
       await expect(
-        db.transaction().execute(async trx => {
+        db.transaction().execute(async (trx) => {
           await trx.insertInto("items").values({ id: 1, name: "rolled-back" }).execute();
           throw new Error("force rollback");
-        })
+        }),
       ).rejects.toThrow("force rollback");
 
       const rows = await db.selectFrom("items").selectAll().execute();
@@ -292,11 +285,11 @@ describe("BunSqliteDialect transactions", () => {
     try {
       await db.schema
         .createTable("items")
-        .addColumn("id", "integer", col => col.primaryKey())
-        .addColumn("name", "text", col => col.notNull())
+        .addColumn("id", "integer", (col) => col.primaryKey())
+        .addColumn("name", "text", (col) => col.notNull())
         .execute();
 
-      await db.transaction().execute(async trx => {
+      await db.transaction().execute(async (trx) => {
         await trx.insertInto("items").values({ id: 1, name: "committed" }).execute();
       });
 
@@ -317,14 +310,14 @@ describe("BunSqliteDialect transactions", () => {
     try {
       await db.schema
         .createTable("items")
-        .addColumn("id", "integer", col => col.primaryKey())
-        .addColumn("name", "text", col => col.notNull())
+        .addColumn("id", "integer", (col) => col.primaryKey())
+        .addColumn("name", "text", (col) => col.notNull())
         .execute();
 
       const transactionStarted = createDeferred();
       const failTransaction = createDeferred();
 
-      const transaction = db.transaction().execute(async trx => {
+      const transaction = db.transaction().execute(async (trx) => {
         await trx.insertInto("items").values({ id: 1, name: "rolled-back" }).execute();
         transactionStarted.resolve();
         await failTransaction.promise;
@@ -381,15 +374,15 @@ describe("BunSqliteDialect transactions", () => {
     try {
       await db.schema
         .createTable("items")
-        .addColumn("id", "integer", col => col.primaryKey())
-        .addColumn("name", "text", col => col.notNull())
+        .addColumn("id", "integer", (col) => col.primaryKey())
+        .addColumn("name", "text", (col) => col.notNull())
         .execute();
 
       holdNextQuery = true;
       const heldRead = db.selectFrom("items").selectAll().execute();
       await heldQueryStarted.promise;
 
-      const transaction = db.transaction().execute(async trx => {
+      const transaction = db.transaction().execute(async (trx) => {
         await trx.insertInto("items").values({ id: 1, name: "transaction" }).execute();
         transactionStarted.resolve();
         await releaseTransaction.promise;

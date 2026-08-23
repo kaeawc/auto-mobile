@@ -36,15 +36,15 @@ class FakeAdb implements Partial<AdbExecutor> {
 
   async executeCommand(command: string): Promise<ExecResult> {
     this.calls.push(command);
-    if (this.opts.reject?.some(r => command.includes(r))) {
+    if (this.opts.reject?.some((r) => command.includes(r))) {
       throw new Error(`fake adb: command failed: ${command}`);
     }
-    const hit = this.opts.responses?.find(r => command.includes(r.match));
+    const hit = this.opts.responses?.find((r) => command.includes(r.match));
     return execResult(hit ? hit.stdout : "");
   }
 
   called(substring: string): boolean {
-    return this.calls.some(c => c.includes(substring));
+    return this.calls.some((c) => c.includes(substring));
   }
 }
 

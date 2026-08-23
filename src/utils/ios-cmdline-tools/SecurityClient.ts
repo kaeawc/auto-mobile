@@ -32,7 +32,11 @@ interface SecurityExecutionOptions {
 
 export interface SecurityClientDependencies {
   platform: () => NodeJS.Platform;
-  execute: (file: string, args: string[], options?: SecurityExecutionOptions) => Promise<ExecResult>;
+  execute: (
+    file: string,
+    args: string[],
+    options?: SecurityExecutionOptions,
+  ) => Promise<ExecResult>;
   timer?: Timer;
 }
 
@@ -45,17 +49,19 @@ export interface SecurityClientApi {
 const defaultExecute = async (
   file: string,
   args: string[],
-  options: SecurityExecutionOptions = {}
+  options: SecurityExecutionOptions = {},
 ): Promise<ExecResult> => {
-  const result = await promisify(execFile)(file, args, { signal: options.signal, killSignal: options.killSignal ?? "SIGKILL" });
+  const result = await promisify(execFile)(file, args, {
+    signal: options.signal,
+    killSignal: options.killSignal ?? "SIGKILL",
+  });
   const stdout = String(result.stdout);
   const stderr = String(result.stderr);
   return createExecResult(stdout, stderr);
 };
 
-const parseIdentities = (output: string): SecurityIdentity[] => output
-  .split("\n")
-  .flatMap(line => {
+const parseIdentities = (output: string): SecurityIdentity[] =>
+  output.split("\n").flatMap((line) => {
     const match = line.match(/^\s*\d+\)\s+([0-9A-F]{40,64})\s+"([^\"]+)"/i);
     return match ? [{ fingerprint: match[1].toUpperCase(), name: match[2] }] : [];
   });
@@ -74,10 +80,12 @@ const isKeychainError = (error: unknown): boolean => {
 export class SecurityClient implements SecurityClientApi {
   private readonly timer: Timer;
 
-  constructor(private readonly dependencies: SecurityClientDependencies = {
-    platform: () => process.platform,
-    execute: defaultExecute
-  }) {
+  constructor(
+    private readonly dependencies: SecurityClientDependencies = {
+      platform: () => process.platform,
+      execute: defaultExecute,
+    },
+  ) {
     this.timer = dependencies.timer ?? defaultTimer;
   }
 
@@ -90,15 +98,23 @@ export class SecurityClient implements SecurityClientApi {
       await this.run("availability probe", ["help"], options);
       return { available: true, version: null };
     } catch (error) {
-      logger.debug(`[SecurityClient] Availability probe failed: ${error instanceof Error ? error.name : "unknown error"}`);
+      logger.debug(
+        `[SecurityClient] Availability probe failed: ${error instanceof Error ? error.name : "unknown error"}`,
+      );
       return { available: false, version: null };
     }
   }
 
-  public async listCodeSigningIdentities(options: SecurityCommandOptions = {}): Promise<SecurityIdentity[]> {
+  public async listCodeSigningIdentities(
+    options: SecurityCommandOptions = {},
+  ): Promise<SecurityIdentity[]> {
     this.requireDarwin();
     try {
-      const result = await this.run("identity lookup", ["find-identity", "-v", "-p", "codesigning"], options);
+      const result = await this.run(
+        "identity lookup",
+        ["find-identity", "-v", "-p", "codesigning"],
+        options,
+      );
       return parseIdentities(result.stdout);
     } catch (error) {
       throw this.toActionableError(error, "find code signing identities");
@@ -124,7 +140,7 @@ export class SecurityClient implements SecurityClientApi {
   private async run(
     operation: string,
     args: string[],
-    options: SecurityCommandOptions = {}
+    options: SecurityCommandOptions = {},
   ): Promise<ExecResult> {
     if (options.signal?.aborted) {
       throw new ActionableError(`Security ${operation} was cancelled.`);
@@ -148,8 +164,13 @@ export class SecurityClient implements SecurityClientApi {
         reject(new Error(`Security ${operation} timed out after ${timeoutMs}ms.`));
       }, timeoutMs);
     });
-    const execution = this.dependencies.execute(SECURITY_COMMAND, args, { signal: controller.signal, killSignal: "SIGKILL" });
-    execution.catch(() => { /* handled by the race when aborting a child */ });
+    const execution = this.dependencies.execute(SECURITY_COMMAND, args, {
+      signal: controller.signal,
+      killSignal: "SIGKILL",
+    });
+    execution.catch(() => {
+      /* handled by the race when aborting a child */
+    });
 
     try {
       return await Promise.race([execution, timeout, cancellation]);
@@ -170,11 +191,11 @@ export class SecurityClient implements SecurityClientApi {
     }
     if (isKeychainError(error)) {
       return new ActionableError(
-        `Could not ${operation}: macOS keychain access was denied. Unlock the login keychain and retry.`
+        `Could not ${operation}: macOS keychain access was denied. Unlock the login keychain and retry.`,
       );
     }
     return new ActionableError(
-      `Could not ${operation}. Verify that the macOS security tool is available and the provisioning data is valid.`
+      `Could not ${operation}. Verify that the macOS security tool is available and the provisioning data is valid.`,
     );
   }
 }

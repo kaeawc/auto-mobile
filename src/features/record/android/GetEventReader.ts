@@ -1,5 +1,8 @@
 import { logger } from "../../../utils/logger";
-import type { AdbExecutor, AdbProcess } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import type {
+  AdbExecutor,
+  AdbProcess,
+} from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { GestureEmitter, GestureEvent } from "./types";
 import type { TouchInputNode } from "./TouchNodeDiscovery";
 import type { CoordScaler } from "./AxisRanges";
@@ -26,29 +29,22 @@ export class GetEventReader implements GestureEmitter {
 
   constructor(private readonly opts: GetEventReaderOptions) {}
 
-  start(
-    onGesture: (event: GestureEvent) => void,
-    onError?: (err: Error) => void
-  ): void {
-    if (this.child || this.starting) {return;} // already running
+  start(onGesture: (event: GestureEvent) => void, onError?: (err: Error) => void): void {
+    if (this.child || this.starting) {
+      return;
+    } // already running
     this.starting = true;
     void this.startProcess(onGesture, onError);
   }
 
   private async startProcess(
     onGesture: (event: GestureEvent) => void,
-    onError?: (err: Error) => void
+    onError?: (err: Error) => void,
   ): Promise<void> {
-
     const reconstructor = new TouchFrameReconstructor();
     const classifier = new GestureClassifier(this.opts.scaler, this.opts.density);
 
-    const args = [
-      "shell",
-      "getevent",
-      "-lt",
-      this.opts.touchNode.path,
-    ];
+    const args = ["shell", "getevent", "-lt", this.opts.touchNode.path];
 
     logger.debug(`[GetEventReader] Spawning: ${args.join(" ")}`);
     try {
@@ -67,7 +63,9 @@ export class GetEventReader implements GestureEmitter {
     }
     this.starting = false;
     const child = this.child;
-    if (!child) {return;}
+    if (!child) {
+      return;
+    }
 
     let lineBuffer = "";
 
@@ -78,14 +76,20 @@ export class GetEventReader implements GestureEmitter {
       lineBuffer = lines.pop() ?? "";
 
       for (const line of lines) {
-        if (!line.trim()) {continue;}
+        if (!line.trim()) {
+          continue;
+        }
         const arrivedAt = Date.now();
         const result = reconstructor.feedLine(line, arrivedAt);
-        if (!result) {continue;}
+        if (!result) {
+          continue;
+        }
 
         if (isRawTouchFrame(result)) {
           const gesture = classifier.feedFrame(result);
-          if (gesture) {onGesture(gesture);}
+          if (gesture) {
+            onGesture(gesture);
+          }
         } else {
           // GestureEvent (pressButton)
           onGesture(result);
@@ -121,7 +125,7 @@ export class GetEventReader implements GestureEmitter {
 }
 
 function isRawTouchFrame(
-  result: ReturnType<TouchFrameReconstructor["feedLine"]>
+  result: ReturnType<TouchFrameReconstructor["feedLine"]>,
 ): result is import("./types").RawTouchFrame {
   return result !== null && "activeSlots" in result;
 }

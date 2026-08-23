@@ -14,14 +14,13 @@ export class DetectIntentChooser extends BaseVisualChange {
   }
 
   /**
-     * Execute intent chooser detection
-     * @returns Promise with intent chooser detection results
-     */
+   * Execute intent chooser detection
+   * @returns Promise with intent chooser detection results
+   */
   async execute(): Promise<IntentChooserResult> {
     return this.observedInteraction(
       async (observeResult: ObserveResult) => {
         try {
-
           const viewHierarchy = observeResult.viewHierarchy;
           if (!viewHierarchy) {
             return { success: false, error: "View hierarchy not found" };
@@ -32,11 +31,13 @@ export class DetectIntentChooser extends BaseVisualChange {
             viewHierarchy.intentChooserDetected ??
             this.deepLinkManager.detectIntentChooser(viewHierarchy);
 
-          logger.info(`[DetectIntentChooser] Intent chooser detection completed. Detected: ${detected}`);
+          logger.info(
+            `[DetectIntentChooser] Intent chooser detection completed. Detected: ${detected}`,
+          );
 
           return {
             success: true,
-            detected
+            detected,
           };
         } catch (error) {
           logger.error(`[DetectIntentChooser] Failed to detect intent chooser: ${error}`);
@@ -44,13 +45,13 @@ export class DetectIntentChooser extends BaseVisualChange {
           return {
             success: false,
             detected: false,
-            error: errorMessage(error)
+            error: errorMessage(error),
           };
         }
       },
       {
-        changeExpected: false
-      }
+        changeExpected: false,
+      },
     );
   }
 }

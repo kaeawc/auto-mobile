@@ -13,7 +13,7 @@ type SelectAllTextCtrlProxy = {
 };
 type SelectAllTextCtrlProxyFactory = (
   device: BootedDevice,
-  adbFactory: AdbClientFactory
+  adbFactory: AdbClientFactory,
 ) => SelectAllTextCtrlProxy;
 
 export class SelectAllText extends BaseVisualChange {
@@ -22,7 +22,7 @@ export class SelectAllText extends BaseVisualChange {
   constructor(
     device: BootedDevice,
     adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = null,
-    ctrlProxyFactory?: SelectAllTextCtrlProxyFactory
+    ctrlProxyFactory?: SelectAllTextCtrlProxyFactory,
   ) {
     super(device, adbFactoryOrExecutor);
     this.ctrlProxyFactory = ctrlProxyFactory;
@@ -38,13 +38,9 @@ export class SelectAllText extends BaseVisualChange {
           // Platform-specific select all execution
           switch (this.device.platform) {
             case "android":
-              return await perf.track("androidSelectAll", () =>
-                this.executeAndroidSelectAll()
-              );
+              return await perf.track("androidSelectAll", () => this.executeAndroidSelectAll());
             case "ios":
-              return await perf.track("iOSSelectAll", () =>
-                this.executeiOSSelectAll()
-              );
+              return await perf.track("iOSSelectAll", () => this.executeiOSSelectAll());
             default:
               perf.end();
               throw new Error(`Unsupported platform: ${this.device.platform}`);
@@ -53,7 +49,7 @@ export class SelectAllText extends BaseVisualChange {
           perf.end();
           return {
             success: false,
-            error: `Failed to select all text: ${errorMessage(error)}`
+            error: `Failed to select all text: ${errorMessage(error)}`,
           };
         }
       },
@@ -63,8 +59,8 @@ export class SelectAllText extends BaseVisualChange {
         timeoutMs: 500,
         progress,
         perf,
-        skipUiStability: true // Skip UI stability wait - a11y service is fast
-      }
+        skipUiStability: true, // Skip UI stability wait - a11y service is fast
+      },
     );
   }
 
@@ -73,7 +69,8 @@ export class SelectAllText extends BaseVisualChange {
    */
   private async executeiOSSelectAll(): Promise<SelectAllTextResult> {
     try {
-      const client = this.ctrlProxyFactory?.(this.device, this.adbFactory) ??
+      const client =
+        this.ctrlProxyFactory?.(this.device, this.adbFactory) ??
         IOSCtrlProxyClient.getInstance(this.device);
       const result = await client.requestSelectAll();
 
@@ -95,14 +92,17 @@ export class SelectAllText extends BaseVisualChange {
    * Uses ACTION_SET_SELECTION which is significantly faster than ADB double-tap.
    */
   private async executeAndroidSelectAll(): Promise<SelectAllTextResult> {
-    const a11yClient = this.ctrlProxyFactory?.(this.device, this.adbFactory) ??
+    const a11yClient =
+      this.ctrlProxyFactory?.(this.device, this.adbFactory) ??
       AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
     const a11yResult = await a11yClient.requestSelectAll();
 
     if (a11yResult.success) {
-      logger.info(`[SelectAllText] Select all via accessibility service: ${a11yResult.totalTimeMs}ms`);
+      logger.info(
+        `[SelectAllText] Select all via accessibility service: ${a11yResult.totalTimeMs}ms`,
+      );
       return {
-        success: true
+        success: true,
       };
     }
 
@@ -110,7 +110,7 @@ export class SelectAllText extends BaseVisualChange {
     logger.warn(`[SelectAllText] Accessibility service selectAll failed: ${a11yResult.error}`);
     return {
       success: false,
-      error: `Accessibility service selectAll failed: ${a11yResult.error}`
+      error: `Accessibility service selectAll failed: ${a11yResult.error}`,
     };
   }
 }

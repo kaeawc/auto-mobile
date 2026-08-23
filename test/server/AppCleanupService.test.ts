@@ -17,7 +17,10 @@ class FakeClearAppData {
 }
 
 class FakeTerminateApp {
-  public calls: { appId: string; options?: { skipObservation?: boolean; skipUiStability?: boolean } }[] = [];
+  public calls: {
+    appId: string;
+    options?: { skipObservation?: boolean; skipUiStability?: boolean };
+  }[] = [];
   private result: TerminateAppResult;
 
   constructor(result: TerminateAppResult) {
@@ -26,7 +29,7 @@ class FakeTerminateApp {
 
   async execute(
     appId: string,
-    options?: { skipObservation?: boolean; skipUiStability?: boolean }
+    options?: { skipObservation?: boolean; skipUiStability?: boolean },
   ): Promise<TerminateAppResult> {
     this.calls.push({ appId, options });
     return this.result;
@@ -116,7 +119,10 @@ describe("DefaultAppCleanupService", () => {
     const clearDevices: BootedDevice[] = [];
     const cleanupService = new DefaultAppCleanupService({
       createTerminateApp: () => terminate,
-      createClearAppData: device => { clearDevices.push(device); return clear; },
+      createClearAppData: (device) => {
+        clearDevices.push(device);
+        return clear;
+      },
     });
 
     await cleanupService.cleanup(iosDevice, {

@@ -29,13 +29,21 @@ export class FakeTalkBackSwipeExecutor implements TalkBackSwipeRunner {
     containerElement: Element | null,
     gestureOptions?: GestureOptions,
     _perf?: PerformanceTracker,
-    _boomerang?: BoomerangConfig
+    _boomerang?: BoomerangConfig,
   ): Promise<SwipeResult> {
     const overrideResult = this.nextResult;
     this.nextResult = null;
     if (overrideResult) {
       this.swipeCalls.push({ x1, y1, x2, y2, direction, containerElement, gestureOptions });
-      return { success: false, x1, y1, x2, y2, duration: gestureOptions?.duration ?? 300, ...overrideResult };
+      return {
+        success: false,
+        x1,
+        y1,
+        x2,
+        y2,
+        duration: gestureOptions?.duration ?? 300,
+        ...overrideResult,
+      };
     }
     this.swipeCalls.push({ x1, y1, x2, y2, direction, containerElement, gestureOptions });
     return {
@@ -44,7 +52,7 @@ export class FakeTalkBackSwipeExecutor implements TalkBackSwipeRunner {
       y1,
       x2,
       y2,
-      duration: gestureOptions?.duration ?? 300
+      duration: gestureOptions?.duration ?? 300,
     };
   }
 
@@ -61,7 +69,7 @@ export class FakeTalkBackSwipeExecutor implements TalkBackSwipeRunner {
   }
 
   getDirections(): SwipeDirection[] {
-    return this.swipeCalls.map(c => c.direction);
+    return this.swipeCalls.map((c) => c.direction);
   }
 
   getCallCount(): number {

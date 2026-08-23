@@ -317,7 +317,7 @@ const execAsync = async (
   signal?: AbortSignal,
 ): Promise<ExecResult> => {
   return runExecSeam(
-    execOptions => sharedExecFileAsync(file, args, execOptions),
+    (execOptions) => sharedExecFileAsync(file, args, execOptions),
     { maxBuffer, signal },
     { command: file, args },
     { preserveError: true },
@@ -782,9 +782,7 @@ export class SimCtlClient implements SimCtl {
         .then(() => undefined)
         .catch((err) => {
           SimCtlClient.localSimctlAvailability = null;
-          logger.debug(
-            `[iOS] simctl unavailable: ${errorMessage(err)}`,
-          );
+          logger.debug(`[iOS] simctl unavailable: ${errorMessage(err)}`);
           throw err;
         });
     }

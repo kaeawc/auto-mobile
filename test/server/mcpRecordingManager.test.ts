@@ -107,7 +107,9 @@ describe("mcpRecordingManager", () => {
 
       const stopTimer = new FakeTimer();
       stopTimer.setCurrentTime(2000);
-      expect(() => stopMcpRecording(undefined, stopTimer)).toThrow("No MCP tool calls were recorded");
+      expect(() => stopMcpRecording(undefined, stopTimer)).toThrow(
+        "No MCP tool calls were recorded",
+      );
     });
 
     test("returns YAML plan content with recorded steps", () => {

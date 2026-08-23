@@ -1,7 +1,15 @@
-import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  AdbClientFactory,
+  defaultAdbClientFactory,
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
-import { UiStabilityResult, TouchIdleResult, RotationCheckResult, BootedDevice } from "../../models";
+import {
+  UiStabilityResult,
+  TouchIdleResult,
+  RotationCheckResult,
+  BootedDevice,
+} from "../../models";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 
@@ -14,7 +22,11 @@ export class Idle {
    * @param device - Device to run ADB commands against
    * @param adbFactory - Factory for creating AdbClient instances
    */
-  constructor(device: BootedDevice, adbFactory: AdbClientFactory = defaultAdbClientFactory, timer: Timer = defaultTimer) {
+  constructor(
+    device: BootedDevice,
+    adbFactory: AdbClientFactory = defaultAdbClientFactory,
+    timer: Timer = defaultTimer,
+  ) {
     this.adb = adbFactory.create(device);
     this.timer = timer;
   }
@@ -40,7 +52,7 @@ export class Idle {
       "com.oneplus.launcher",
       "com.huawei.android.launcher",
       "com.sec.android.app.launcher",
-      "com.android.settings"
+      "com.android.settings",
     ];
 
     // Match by prefix, not substring. Reverse containment
@@ -48,8 +60,11 @@ export class Idle {
     // or "com" as system launchers because they are substrings of a real system
     // package name (issue #4172). A package is a system launcher only when it IS
     // one of these packages or a sub-package (e.g. "com.miui.home.settings").
-    return packageName === "android" || systemPackages.some(sysPackage =>
-      packageName === sysPackage || packageName.startsWith(`${sysPackage}.`)
+    return (
+      packageName === "android" ||
+      systemPackages.some(
+        (sysPackage) => packageName === sysPackage || packageName.startsWith(`${sysPackage}.`),
+      )
     );
   }
 
@@ -65,7 +80,7 @@ export class Idle {
     startTime: number,
     lastEventTime: number,
     timeoutMs: number,
-    hardLimitMs: number
+    hardLimitMs: number,
   ): TouchIdleResult {
     const currentElapsed = this.timer.now() - startTime;
     const idleTime = this.timer.now() - lastEventTime;
@@ -76,7 +91,7 @@ export class Idle {
       isIdle,
       shouldContinue,
       currentElapsed,
-      idleTime
+      idleTime,
     };
   }
 
@@ -92,7 +107,7 @@ export class Idle {
     targetRotation: number,
     startTime: number,
     timeoutMs: number,
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<RotationCheckResult> {
     const currentElapsed = this.timer.now() - startTime;
     const shouldContinue = currentElapsed < timeoutMs;
@@ -100,7 +115,7 @@ export class Idle {
     try {
       // Check the current rotation through window manager service
       const { stdout } = await perf.track("adbDumpsysWindowRotation", () =>
-        this.adb.executeCommand('shell dumpsys window | grep -i "mRotation="')
+        this.adb.executeCommand('shell dumpsys window | grep -i "mRotation="'),
       );
       const rotationMatch = stdout.match(/mRotation=(\d+)/);
 
@@ -113,21 +128,21 @@ export class Idle {
           return {
             rotationComplete: true,
             currentRotation,
-            shouldContinue: false
+            shouldContinue: false,
           };
         }
 
         return {
           rotationComplete: false,
           currentRotation,
-          shouldContinue
+          shouldContinue,
         };
       }
 
       return {
         rotationComplete: false,
         currentRotation: null,
-        shouldContinue
+        shouldContinue,
       };
     } catch (err) {
       // Continue polling on error, but trace it — otherwise a real ADB failure
@@ -136,7 +151,7 @@ export class Idle {
       return {
         rotationComplete: false,
         currentRotation: null,
-        shouldContinue
+        shouldContinue,
       };
     }
   }
@@ -151,14 +166,16 @@ export class Idle {
   async getUiStabilitySnapshot(
     packageName: string,
     measurementDelayMs: number = 200,
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<UiStabilityResult> {
-    logger.info(`[AwaitIdle] Measuring UI idle for ${packageName} with ${measurementDelayMs}ms delay`);
+    logger.info(
+      `[AwaitIdle] Measuring UI idle for ${packageName} with ${measurementDelayMs}ms delay`,
+    );
 
     try {
       // Reset the gfxinfo stats for the package
       await perf.track("adbGfxinfoReset", () =>
-        this.adb.executeCommand(`shell dumpsys gfxinfo ${packageName} reset`)
+        this.adb.executeCommand(`shell dumpsys gfxinfo ${packageName} reset`),
       );
 
       // Wait for measurement period to accumulate data. Use the injected timer
@@ -174,7 +191,7 @@ export class Idle {
         null, // No previous frame deadline missed
         null, // No previous total frames
         false, // Not first log since we just reset
-        perf
+        perf,
       );
     } catch (err) {
       logger.info(`[Idle] Error measuring UI idle: ${err}`);
@@ -184,7 +201,7 @@ export class Idle {
         updatedPrevMissedVsync: null,
         updatedPrevSlowUiThread: null,
         updatedPrevFrameDeadlineMissed: null,
-        updatedFirstGfxInfoLog: false
+        updatedFirstGfxInfoLog: false,
       };
     }
   }
@@ -199,11 +216,11 @@ export class Idle {
   private async getFrameStats(
     packageName: string,
     firstGfxInfoLog: boolean,
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<string> {
     try {
       const { stdout } = await perf.track("adbGfxinfo", () =>
-        this.adb.executeCommand(`shell dumpsys gfxinfo ${packageName}`)
+        this.adb.executeCommand(`shell dumpsys gfxinfo ${packageName}`),
       );
       if (firstGfxInfoLog) {
         logger.info(`[AwaitIdle] Initial gfxinfo stdout for ${packageName}:\n${stdout}`);
@@ -240,7 +257,9 @@ export class Idle {
     const slowUiThread = this.extractMetric(stdout, /Number Slow UI thread:\s+(\d+)/);
     const frameDeadlineMissed = this.extractMetric(stdout, /Number Frame deadline missed:\s+(\d+)/);
 
-    logger.debug(`Metrics: 50th=${percentile50th}ms 90th=${percentile90th}ms 95th=${percentile95th}ms 99th=${percentile99th}ms TotalFrames=${totalFrames} MissedVsync=${missedVsync} SlowUI=${slowUiThread} DeadlineMissed=${frameDeadlineMissed}`);
+    logger.debug(
+      `Metrics: 50th=${percentile50th}ms 90th=${percentile90th}ms 95th=${percentile95th}ms 99th=${percentile99th}ms TotalFrames=${totalFrames} MissedVsync=${missedVsync} SlowUI=${slowUiThread} DeadlineMissed=${frameDeadlineMissed}`,
+    );
 
     return {
       percentile50th,
@@ -250,7 +269,7 @@ export class Idle {
       totalFrames,
       missedVsync,
       slowUiThread,
-      frameDeadlineMissed
+      frameDeadlineMissed,
     };
   }
 
@@ -264,9 +283,11 @@ export class Idle {
     missedVsync: number | null;
     slowUiThread: number | null;
   }): boolean {
-    return metrics.percentile50th !== null &&
+    return (
+      metrics.percentile50th !== null &&
       metrics.missedVsync !== null &&
-      metrics.slowUiThread !== null;
+      metrics.slowUiThread !== null
+    );
   }
 
   /**
@@ -276,14 +297,29 @@ export class Idle {
    * @returns Updated state object
    */
   public updateStabilityState(
-    current: { missedVsync: number | null; slowUiThread: number | null; frameDeadlineMissed: number | null; totalFrames: number | null },
-    previous: { missedVsync: number | null; slowUiThread: number | null; frameDeadlineMissed: number | null; totalFrames: number | null }
+    current: {
+      missedVsync: number | null;
+      slowUiThread: number | null;
+      frameDeadlineMissed: number | null;
+      totalFrames: number | null;
+    },
+    previous: {
+      missedVsync: number | null;
+      slowUiThread: number | null;
+      frameDeadlineMissed: number | null;
+      totalFrames: number | null;
+    },
   ): {
     updatedPrevMissedVsync: number | null;
     updatedPrevSlowUiThread: number | null;
     updatedPrevFrameDeadlineMissed: number | null;
     updatedPrevTotalFrames: number | null;
-    deltas: { missedVsyncDelta: number; slowUiThreadDelta: number; frameDeadlineMissedDelta: number; totalFramesDelta: number | null };
+    deltas: {
+      missedVsyncDelta: number;
+      slowUiThreadDelta: number;
+      frameDeadlineMissedDelta: number;
+      totalFramesDelta: number | null;
+    };
   } {
     const updatedPrevMissedVsync = current.missedVsync;
     const updatedPrevSlowUiThread = current.slowUiThread;
@@ -297,7 +333,7 @@ export class Idle {
       updatedPrevSlowUiThread,
       updatedPrevFrameDeadlineMissed,
       updatedPrevTotalFrames,
-      deltas
+      deltas,
     };
   }
 
@@ -314,7 +350,7 @@ export class Idle {
     prevMissedVsync: number | null,
     prevSlowUiThread: number | null,
     prevFrameDeadlineMissed: number | null,
-    prevTotalFrames: number | null
+    prevTotalFrames: number | null,
   ): {
     isStable: boolean;
     shouldUpdateLastNonIdleTime: boolean;
@@ -328,14 +364,16 @@ export class Idle {
 
     // Check if we have valid data
     if (!this.validateFrameData(metrics)) {
-      logger.info(`[AwaitIdle] No valid frame data yet: percentile50th ${metrics.percentile50th} && missedVsync ${metrics.missedVsync} && slowUiThread ${metrics.slowUiThread}`);
+      logger.info(
+        `[AwaitIdle] No valid frame data yet: percentile50th ${metrics.percentile50th} && missedVsync ${metrics.missedVsync} && slowUiThread ${metrics.slowUiThread}`,
+      );
       return {
         isStable: false,
         shouldUpdateLastNonIdleTime: true,
         updatedPrevMissedVsync: prevMissedVsync,
         updatedPrevSlowUiThread: prevSlowUiThread,
         updatedPrevFrameDeadlineMissed: prevFrameDeadlineMissed,
-        updatedPrevTotalFrames: prevTotalFrames
+        updatedPrevTotalFrames: prevTotalFrames,
       };
     }
 
@@ -345,22 +383,26 @@ export class Idle {
         missedVsync: metrics.missedVsync,
         slowUiThread: metrics.slowUiThread,
         frameDeadlineMissed: metrics.frameDeadlineMissed,
-        totalFrames: metrics.totalFrames
+        totalFrames: metrics.totalFrames,
       },
       {
         missedVsync: prevMissedVsync,
         slowUiThread: prevSlowUiThread,
         frameDeadlineMissed: prevFrameDeadlineMissed,
-        totalFrames: prevTotalFrames
-      }
+        totalFrames: prevTotalFrames,
+      },
     );
 
     // Check stability criteria
-    const isStable = this.checkStabilityCriteria(stateUpdate.deltas, {
-      percentile50th: metrics.percentile50th,
-      percentile90th: metrics.percentile90th,
-      percentile95th: metrics.percentile95th
-    }, metrics.totalFrames);
+    const isStable = this.checkStabilityCriteria(
+      stateUpdate.deltas,
+      {
+        percentile50th: metrics.percentile50th,
+        percentile90th: metrics.percentile90th,
+        percentile95th: metrics.percentile95th,
+      },
+      metrics.totalFrames,
+    );
 
     return {
       isStable,
@@ -368,7 +410,7 @@ export class Idle {
       updatedPrevMissedVsync: stateUpdate.updatedPrevMissedVsync,
       updatedPrevSlowUiThread: stateUpdate.updatedPrevSlowUiThread,
       updatedPrevFrameDeadlineMissed: stateUpdate.updatedPrevFrameDeadlineMissed,
-      updatedPrevTotalFrames: stateUpdate.updatedPrevTotalFrames
+      updatedPrevTotalFrames: stateUpdate.updatedPrevTotalFrames,
     };
   }
 
@@ -379,31 +421,52 @@ export class Idle {
    * @returns Object containing calculated deltas
    */
   calculateDeltas(
-    current: { missedVsync: number | null; slowUiThread: number | null; frameDeadlineMissed: number | null; totalFrames: number | null },
-    previous: { missedVsync: number | null; slowUiThread: number | null; frameDeadlineMissed: number | null; totalFrames: number | null }
+    current: {
+      missedVsync: number | null;
+      slowUiThread: number | null;
+      frameDeadlineMissed: number | null;
+      totalFrames: number | null;
+    },
+    previous: {
+      missedVsync: number | null;
+      slowUiThread: number | null;
+      frameDeadlineMissed: number | null;
+      totalFrames: number | null;
+    },
   ): {
     missedVsyncDelta: number;
     slowUiThreadDelta: number;
     frameDeadlineMissedDelta: number;
     totalFramesDelta: number | null;
   } {
-    const missedVsyncDelta = previous.missedVsync !== null && current.missedVsync !== null
-      ? current.missedVsync - previous.missedVsync : 0;
-    const slowUiThreadDelta = previous.slowUiThread !== null && current.slowUiThread !== null
-      ? current.slowUiThread - previous.slowUiThread : 0;
-    const frameDeadlineMissedDelta = previous.frameDeadlineMissed !== null && current.frameDeadlineMissed !== null
-      ? current.frameDeadlineMissed - previous.frameDeadlineMissed : 0;
-    const totalFramesDelta = previous.totalFrames !== null && current.totalFrames !== null
-      ? (current.totalFrames >= previous.totalFrames ? current.totalFrames - previous.totalFrames : null)
-      : null;
+    const missedVsyncDelta =
+      previous.missedVsync !== null && current.missedVsync !== null
+        ? current.missedVsync - previous.missedVsync
+        : 0;
+    const slowUiThreadDelta =
+      previous.slowUiThread !== null && current.slowUiThread !== null
+        ? current.slowUiThread - previous.slowUiThread
+        : 0;
+    const frameDeadlineMissedDelta =
+      previous.frameDeadlineMissed !== null && current.frameDeadlineMissed !== null
+        ? current.frameDeadlineMissed - previous.frameDeadlineMissed
+        : 0;
+    const totalFramesDelta =
+      previous.totalFrames !== null && current.totalFrames !== null
+        ? current.totalFrames >= previous.totalFrames
+          ? current.totalFrames - previous.totalFrames
+          : null
+        : null;
 
-    logger.debug(`Deltas: MissedVsync=${missedVsyncDelta} SlowUI=${slowUiThreadDelta} DeadlineMissed=${frameDeadlineMissedDelta} TotalFrames=${totalFramesDelta}`);
+    logger.debug(
+      `Deltas: MissedVsync=${missedVsyncDelta} SlowUI=${slowUiThreadDelta} DeadlineMissed=${frameDeadlineMissedDelta} TotalFrames=${totalFramesDelta}`,
+    );
 
     return {
       missedVsyncDelta,
       slowUiThreadDelta,
       frameDeadlineMissedDelta,
-      totalFramesDelta
+      totalFramesDelta,
     };
   }
 
@@ -414,9 +477,18 @@ export class Idle {
    * @returns Whether the UI is stable
    */
   checkStabilityCriteria(
-    deltas: { missedVsyncDelta: number; slowUiThreadDelta: number; frameDeadlineMissedDelta: number; totalFramesDelta: number | null },
-    percentiles: { percentile50th: number | null; percentile90th: number | null; percentile95th: number | null },
-    totalFrames: number | null
+    deltas: {
+      missedVsyncDelta: number;
+      slowUiThreadDelta: number;
+      frameDeadlineMissedDelta: number;
+      totalFramesDelta: number | null;
+    },
+    percentiles: {
+      percentile50th: number | null;
+      percentile90th: number | null;
+      percentile95th: number | null;
+    },
+    totalFrames: number | null,
   ): boolean {
     // Check idle criteria:
     // - Zero delta in missed vsyncs
@@ -429,11 +501,12 @@ export class Idle {
     const minFramesForPercentiles = 5;
     const hasNewFrames = deltas.totalFramesDelta !== null && deltas.totalFramesDelta > 0;
     const hasEnoughFrames = totalFrames !== null && totalFrames >= minFramesForPercentiles;
-    const shouldCheckPercentiles = deltas.totalFramesDelta === null || (hasNewFrames && hasEnoughFrames);
-    const percentilesOk = !shouldCheckPercentiles ||
-      (p50Int < 100 && p90Int < 100 && p95Int < 200);
+    const shouldCheckPercentiles =
+      deltas.totalFramesDelta === null || (hasNewFrames && hasEnoughFrames);
+    const percentilesOk = !shouldCheckPercentiles || (p50Int < 100 && p90Int < 100 && p95Int < 200);
 
-    const isStable = deltas.missedVsyncDelta === 0 &&
+    const isStable =
+      deltas.missedVsyncDelta === 0 &&
       deltas.slowUiThreadDelta === 0 &&
       deltas.frameDeadlineMissedDelta === 0 &&
       percentilesOk;
@@ -444,7 +517,9 @@ export class Idle {
       const percentileMessage = shouldCheckPercentiles
         ? `percentiles (50th=${p50Int}, 90th=${p90Int}, 95th=${p95Int})`
         : `percentiles skipped (frames=${totalFrames ?? "n/a"}, delta=${deltas.totalFramesDelta ?? "n/a"})`;
-      logger.info(`[AwaitIdle] UI not stable: deltas (Vsync=${deltas.missedVsyncDelta}, UI=${deltas.slowUiThreadDelta}, Deadline=${deltas.frameDeadlineMissedDelta}, Frames=${deltas.totalFramesDelta ?? "n/a"}), ${percentileMessage}`);
+      logger.info(
+        `[AwaitIdle] UI not stable: deltas (Vsync=${deltas.missedVsyncDelta}, UI=${deltas.slowUiThreadDelta}, Deadline=${deltas.frameDeadlineMissedDelta}, Frames=${deltas.totalFramesDelta ?? "n/a"}), ${percentileMessage}`,
+      );
     }
 
     return isStable;
@@ -467,12 +542,14 @@ export class Idle {
     prevFrameDeadlineMissed: number | null,
     prevTotalFrames: number | null,
     firstGfxInfoLog: boolean,
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<UiStabilityResult> {
     try {
       // For system packages, use a simpler approach
       if (this.isSystemLauncher(packageName)) {
-        logger.info(`[AwaitIdle] ${packageName} is a system package, using simplified stability check`);
+        logger.info(
+          `[AwaitIdle] ${packageName} is a system package, using simplified stability check`,
+        );
         return {
           isStable: true,
           shouldUpdateLastNonIdleTime: false,
@@ -480,7 +557,7 @@ export class Idle {
           updatedPrevSlowUiThread: null,
           updatedPrevFrameDeadlineMissed: null,
           updatedPrevTotalFrames: null,
-          updatedFirstGfxInfoLog: false
+          updatedFirstGfxInfoLog: false,
         };
       }
 
@@ -497,7 +574,7 @@ export class Idle {
           updatedPrevSlowUiThread: null,
           updatedPrevFrameDeadlineMissed: null,
           updatedPrevTotalFrames: null,
-          updatedFirstGfxInfoLog: false
+          updatedFirstGfxInfoLog: false,
         };
       }
 
@@ -507,7 +584,7 @@ export class Idle {
         prevMissedVsync,
         prevSlowUiThread,
         prevFrameDeadlineMissed,
-        prevTotalFrames
+        prevTotalFrames,
       );
 
       return {
@@ -517,7 +594,7 @@ export class Idle {
         updatedPrevSlowUiThread: result.updatedPrevSlowUiThread,
         updatedPrevFrameDeadlineMissed: result.updatedPrevFrameDeadlineMissed,
         updatedPrevTotalFrames: result.updatedPrevTotalFrames,
-        updatedFirstGfxInfoLog: false
+        updatedFirstGfxInfoLog: false,
       };
     } catch (err) {
       // Just continue polling on error
@@ -529,7 +606,7 @@ export class Idle {
         updatedPrevSlowUiThread: prevSlowUiThread,
         updatedPrevFrameDeadlineMissed: prevFrameDeadlineMissed,
         updatedPrevTotalFrames: prevTotalFrames,
-        updatedFirstGfxInfoLog: false
+        updatedFirstGfxInfoLog: false,
       };
     }
   }

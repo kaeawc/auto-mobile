@@ -6,40 +6,40 @@ Status: implemented
 
 These navigation sources exist on both platforms and use identical wire format strings:
 
-| Concept    | Wire Value  | Android Enum           | iOS Enum    |
-|------------|-------------|------------------------|-------------|
-| Deep link  | `deep_link` | `DEEP_LINK`            | `deepLink`  |
-| Custom     | `custom`    | `CUSTOM`               | `custom`    |
+| Concept   | Wire Value  | Android Enum | iOS Enum   |
+| --------- | ----------- | ------------ | ---------- |
+| Deep link | `deep_link` | `DEEP_LINK`  | `deepLink` |
+| Custom    | `custom`    | `CUSTOM`     | `custom`   |
 
 ## Platform-Specific Sources
 
 ### Android Only
 
-| Wire Value              | Enum                    | Description                         |
-|-------------------------|-------------------------|-------------------------------------|
-| `navigation_component`  | `NAVIGATION_COMPONENT`  | Jetpack Navigation Component (XML)  |
-| `compose_navigation`    | `COMPOSE_NAVIGATION`    | Jetpack Compose Navigation          |
-| `circuit`               | `CIRCUIT`               | Circuit navigation library          |
-| `activity`              | `ACTIVITY`              | Activity launch                     |
+| Wire Value             | Enum                   | Description                        |
+| ---------------------- | ---------------------- | ---------------------------------- |
+| `navigation_component` | `NAVIGATION_COMPONENT` | Jetpack Navigation Component (XML) |
+| `compose_navigation`   | `COMPOSE_NAVIGATION`   | Jetpack Compose Navigation         |
+| `circuit`              | `CIRCUIT`              | Circuit navigation library         |
+| `activity`             | `ACTIVITY`             | Activity launch                    |
 
 ### iOS Only
 
-| Wire Value            | Enum                  | Description                          |
-|-----------------------|-----------------------|--------------------------------------|
-| `swiftui_navigation`  | `swiftUINavigation`   | SwiftUI NavigationStack/Path         |
-| `uikit_navigation`    | `uiKitNavigation`     | UIKit UINavigationController         |
+| Wire Value           | Enum                | Description                  |
+| -------------------- | ------------------- | ---------------------------- |
+| `swiftui_navigation` | `swiftUINavigation` | SwiftUI NavigationStack/Path |
+| `uikit_navigation`   | `uiKitNavigation`   | UIKit UINavigationController |
 
 ## NavigationEvent Fields
 
 Both platforms expose the same fields with compatible types:
 
-| Field         | Android Type            | iOS Type            | Notes                              |
-|---------------|-------------------------|---------------------|------------------------------------|
-| `destination` | `String`                | `String`            | Exact match                        |
-| `source`      | `NavigationSource`      | `NavigationSource`  | Aligned via wire values            |
-| `timestamp`   | `Long` (epoch ms)       | `Int64` (epoch ms)  | Both default to current time in ms |
-| `arguments`   | `Map<String, Any?>`     | `[String: String]`  | iOS stringifies; convenience init accepts `[String: Any]` |
-| `metadata`    | `Map<String, String>`   | `[String: String]`  | Exact match                        |
+| Field         | Android Type          | iOS Type           | Notes                                                     |
+| ------------- | --------------------- | ------------------ | --------------------------------------------------------- |
+| `destination` | `String`              | `String`           | Exact match                                               |
+| `source`      | `NavigationSource`    | `NavigationSource` | Aligned via wire values                                   |
+| `timestamp`   | `Long` (epoch ms)     | `Int64` (epoch ms) | Both default to current time in ms                        |
+| `arguments`   | `Map<String, Any?>`   | `[String: String]` | iOS stringifies; convenience init accepts `[String: Any]` |
+| `metadata`    | `Map<String, String>` | `[String: String]` | Exact match                                               |
 
 ## Wire Format Convention
 

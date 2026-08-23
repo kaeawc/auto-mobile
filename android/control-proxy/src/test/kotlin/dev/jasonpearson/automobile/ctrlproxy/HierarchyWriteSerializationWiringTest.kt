@@ -81,9 +81,39 @@ class HierarchyWriteSerializationWiringTest {
       "the redundant pretty-print `json` serializer must be removed (issue #5469)",
       !Regex("""\bval\s+json\s*=\s*Json\b""").containsMatchIn(source),
     )
+    val writeBody = writeHierarchyToFileBody(source)
     assertTrue(
-      "the hierarchy file must be serialized with the canonical compact form",
-      "jsonCompact.encodeToString" in writeHierarchyToFileBody(source),
+      "writeHierarchyToFile must PREFER the caller's already-serialized string (`serialized ?:`) so " +
+        "a passed frame is never re-encoded (issue #5469)",
+      Regex("""serialized\s*\?:""").containsMatchIn(writeBody),
+    )
+    assertTrue(
+      "the fallback (serialized == null) must use the canonical compact form",
+      "jsonCompact.encodeToString" in writeBody,
+    )
+  }
+
+  @Test
+  fun `every serialize-then-deliver call site routes through the leak-safe deliverHierarchyFrame seam`() {
+    // Issue #5469 follow-up: serialization was hoisted ahead of broadcastHierarchyUpdate (the only
+    // remover of the strong-keyed frame-context map). Every call site that serializes-then-delivers
+    // must go through deliverHierarchyFrame, whose finally releases the entry even when the encode
+    // throws — so no site can serialize-then-leak. Guard against a future inline regression by
+    // requiring that no serialize-then-write/broadcast happens outside the seam.
+    val source = KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource())
+
+    // The three delivery sites: collector Changed, extractHierarchyNow, ACTION_EXTRACT_HIERARCHY.
+    // Exclude the `fun deliverHierarchyFrame(` definition itself.
+    assertEquals(
+      "all three serialize-then-deliver call sites must route through deliverHierarchyFrame",
+      3,
+      Regex("""(?<!fun )deliverHierarchyFrame\(""").findAll(source).count(),
+    )
+    // deliverHierarchyFrame must release the frame context in a finally, on every path.
+    val seam = deliverHierarchyFrameBody(source)
+    assertTrue(
+      "deliverHierarchyFrame must release the frame-context entry in a finally block",
+      Regex("""finally\s*\{""").containsMatchIn(seam) && "releaseFrameContext()" in seam,
     )
   }
 
@@ -117,6 +147,18 @@ class HierarchyWriteSerializationWiringTest {
     assertTrue("HierarchyResult.Changed branch not found in CtrlProxy.kt", start >= 0)
     val braceOpen = source.indexOf('{', start)
     assertTrue("Changed branch body not found", braceOpen >= 0)
+    return source.substring(braceOpen, KotlinSourceScan.matchBrace(source, braceOpen))
+  }
+
+  private fun deliverHierarchyFrameBody(source: String): String {
+    val marker = "internal suspend fun deliverHierarchyFrame("
+    val start = source.indexOf(marker)
+    assertTrue("deliverHierarchyFrame not found in CtrlProxy.kt", start >= 0)
+    // The signature has nested parens (e.g. `broadcast: suspend (String) -> Unit`), so balance from
+    // the parameter-list '(' rather than scanning for the first ')'.
+    val parenClose = KotlinSourceScan.matchParen(source, start + marker.length - 1)
+    val braceOpen = source.indexOf('{', parenClose)
+    assertTrue("deliverHierarchyFrame body not found", braceOpen >= 0)
     return source.substring(braceOpen, KotlinSourceScan.matchBrace(source, braceOpen))
   }
 

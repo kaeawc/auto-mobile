@@ -223,6 +223,41 @@ internal fun navigationEventResponse(event: TimestampedNavigationEvent): Navigat
   )
 
 /**
+ * Owns the "serialize once → write file → broadcast → always release the frame-context entry"
+ * sequence for a single hierarchy delivery (issue #5469 follow-up).
+ *
+ * Serialization was hoisted out of the writer/broadcaster's own try/catch so a change is serialized
+ * at most once (the one [serialize] result is reused for both [write] and [broadcast]). That move
+ * exposed a leak: [CtrlProxy.extractedHierarchyFrameContexts] is a strong-keyed identity map that
+ * only the broadcaster removed from, so an encode failure (e.g. a NaN/Infinity `textSizeInPx`)
+ * before the broadcast would retain a full hierarchy forever. Centralizing the sequence guarantees
+ * [releaseFrameContext] runs in a `finally` even when [serialize] throws, so no call site can
+ * serialize-then-leak.
+ *
+ * A failure in [serialize] (or [write]/[broadcast]) skips the remaining steps and rethrows so the
+ * caller drops just that one frame; the frame-context entry is released regardless. This function
+ * is pure over its injected seams — no Android or service state — so it is unit-testable with a
+ * counting serializer and fake writer/broadcaster.
+ */
+internal suspend fun deliverHierarchyFrame(
+  serialize: () -> String,
+  write: (String) -> Unit,
+  broadcast: suspend (String) -> Unit,
+  releaseFrameContext: () -> Unit,
+) {
+  try {
+    val serialized = serialize()
+    write(serialized)
+    broadcast(serialized)
+  } finally {
+    // Runs on every path: on success the broadcaster already removed the entry (this is a no-op
+    // safety net); on a serialize/write/broadcast failure this is the only removal, closing the
+    // leak. remove() is idempotent, so the redundant success-path call is harmless.
+    releaseFrameContext()
+  }
+}
+
+/**
  * Main AutoMobile Accessibility Service that provides view hierarchy extraction capabilities for
  * automated testing and UI interaction.
  */
@@ -1263,13 +1298,24 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                   // staled.
                   if (broadcastThrottler.shouldBroadcast()) {
                     // Serialize the tree exactly once and reuse the compact wire form for the debug
-                    // file, so a single Changed result never serializes twice (issue #5469).
-                    val serialized =
-                      perfProvider.track("serializeHierarchy") {
-                        jsonCompact.encodeToString(result.hierarchy)
-                      }
-                    writeHierarchyToFile(result.hierarchy, serialized = serialized)
-                    broadcastHierarchyUpdate(result.hierarchy, serialized = serialized)
+                    // file, so a single Changed result never serializes twice (issue #5469). The
+                    // frame-context entry is released even if the encode throws (leak fix).
+                    deliverHierarchyFrame(
+                      serialize = {
+                        perfProvider.track("serializeHierarchy") {
+                          jsonCompact.encodeToString(result.hierarchy)
+                        }
+                      },
+                      write = { serialized ->
+                        writeHierarchyToFile(result.hierarchy, serialized = serialized)
+                      },
+                      broadcast = { serialized ->
+                        broadcastHierarchyUpdate(result.hierarchy, serialized = serialized)
+                      },
+                      releaseFrameContext = {
+                        extractedHierarchyFrameContexts.remove(result.hierarchy)
+                      },
+                    )
                   } else {
                     extractedHierarchyFrameContexts.remove(result.hierarchy)
                     Log.d(
@@ -2763,11 +2809,19 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       )
     if (hierarchy != null) {
       // Explicit request: force-write the file and broadcast, serializing the tree once (#5469).
-      val serialized =
-        perfProvider.track("serializeHierarchy") { jsonCompact.encodeToString(hierarchy) }
-      writeHierarchyToFile(hierarchy, serialized = serialized)
+      // Routed through deliverHierarchyFrame so the frame-context entry is released even if the
+      // encode throws (leak fix).
       kotlinx.coroutines.runBlocking {
-        broadcastHierarchyUpdate(hierarchy, sync = true, serialized = serialized)
+        deliverHierarchyFrame(
+          serialize = {
+            perfProvider.track("serializeHierarchy") { jsonCompact.encodeToString(hierarchy) }
+          },
+          write = { serialized -> writeHierarchyToFile(hierarchy, serialized = serialized) },
+          broadcast = { serialized ->
+            broadcastHierarchyUpdate(hierarchy, sync = true, serialized = serialized)
+          },
+          releaseFrameContext = { extractedHierarchyFrameContexts.remove(hierarchy) },
+        )
       }
     }
   }
@@ -2819,12 +2873,20 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           if (hierarchy != null) {
             val filename = "hierarchy_$uuid.json"
             // Explicit request: serialize once and reuse for the file and the wire frame (#5469).
-            val serialized =
-              perfProvider.track("serializeHierarchy") { jsonCompact.encodeToString(hierarchy) }
-            writeHierarchyToFile(hierarchy, filename, serialized = serialized)
-
-            // Broadcast to WebSocket clients
-            broadcastHierarchyUpdate(hierarchy, serialized = serialized)
+            // Routed through deliverHierarchyFrame so the frame-context entry is released even if
+            // the encode throws (leak fix) — the outer catch still reports the failure frame.
+            deliverHierarchyFrame(
+              serialize = {
+                perfProvider.track("serializeHierarchy") { jsonCompact.encodeToString(hierarchy) }
+              },
+              write = { serialized ->
+                writeHierarchyToFile(hierarchy, filename, serialized = serialized)
+              },
+              broadcast = { serialized ->
+                broadcastHierarchyUpdate(hierarchy, serialized = serialized)
+              },
+              releaseFrameContext = { extractedHierarchyFrameContexts.remove(hierarchy) },
+            )
 
             val message =
               if (textFilter != null) {

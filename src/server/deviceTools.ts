@@ -23,6 +23,7 @@ import {
 import { syncInstalledAppResources } from "./appResources";
 import { listActiveVideoRecordings, stopVideoRecording } from "./videoRecordingManager";
 import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
+import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 import { logger } from "../utils/logger";
 import { createPerformanceTracker } from "../utils/PerformanceTracker";
 import { getPerformanceMonitor } from "../features/performance/PerformanceMonitor";
@@ -452,6 +453,7 @@ export interface DeviceToolsDependencies {
   provisionDeviceOperationStoreFactory: () => ProvisionDeviceOperationStore;
   clearInstalledAppsForDevice: (deviceId: string) => Promise<void>;
   stopPerformanceMonitoring: (deviceId: string) => void;
+  stopAndroidObservers: (device: BootedDevice) => Promise<void>;
   idGenerator: IdGenerator;
   timer: Timer;
 }
@@ -475,6 +477,29 @@ async function defaultClearInstalledAppsForDevice(deviceId: string): Promise<voi
       .track(() => repo.clearDeviceSession(deviceId))
       .then(() => undefined),
   );
+}
+
+async function defaultStopAndroidObservers(device: BootedDevice): Promise<void> {
+  // Resolve the per-device singleton through the statically-imported class rather
+  // than a runtime `import()`. On Windows the dynamic specifier resolved to a
+  // second module record with its own empty `instances` registry, so
+  // getExistingInstance returned null and the observer was never detached
+  // (issue #5452 CI failure). A static import shares one class identity with the
+  // observe feature that created the singleton, matching the iOS CtrlProxy path.
+  const observer = AndroidCtrlProxyClient.getExistingInstance(device.deviceId);
+  if (!observer) {
+    return;
+  }
+  try {
+    // Detaching the per-device CtrlProxy singleton disables its auto-reconnect,
+    // health-check, screenshot-backoff, and work-profile loops so they stop
+    // re-referencing the emulator transport while it shuts down.
+    await observer.close();
+  } finally {
+    // close() disables auto-reconnect permanently, so evict the detached client
+    // rather than let a re-booted same-serial emulator reuse a stale one.
+    AndroidCtrlProxyClient.removeInstance(device.deviceId);
+  }
 }
 
 async function clearInstalledAppsAfterShutdown(
@@ -601,6 +626,42 @@ async function stopIosCtrlProxyBeforeShutdown(
     logger.warn(`[DeviceTools] Failed to stop CtrlProxy iOS before kill: ${error}`);
   } finally {
     perf.endOperation("stopCtrlProxy");
+  }
+}
+
+async function stopAndroidCtrlProxyBeforeShutdown(
+  context: ShutdownDeadlineContext,
+  perf: ReturnType<typeof createPerformanceTracker>,
+  stopAndroidObservers: (device: BootedDevice) => Promise<void>,
+): Promise<void> {
+  if (context.device.platform !== "android") {
+    return;
+  }
+  let stop: Promise<void> | undefined;
+  perf.startOperation("stopAndroidCtrlProxy");
+  try {
+    stop = stopAndroidObservers(context.device);
+    await runWithinShutdownDeadline(
+      context.device,
+      context.timer,
+      context.deadlineMs,
+      "Android observer detach did not complete",
+      context.requestAbortSignal,
+      async () => await stop,
+    );
+  } catch (error) {
+    if (shouldPropagateShutdownPreparationError(error, context.requestAbortSignal)) {
+      if (stop) {
+        // Observer detach can keep mutating adb/port state after its caller stops
+        // waiting. Hold the device unavailable until it settles, releasing after a
+        // failed pre-kill teardown because the platform was never shut down.
+        context.retainReservationUntil?.(stop, true);
+      }
+      throw error;
+    }
+    logger.warn(`[DeviceTools] Failed to stop Android observers before kill: ${error}`);
+  } finally {
+    perf.endOperation("stopAndroidCtrlProxy");
   }
 }
 
@@ -1227,6 +1288,7 @@ function getDeviceToolsDependencies(): DeviceToolsDependencies {
       provisionDeviceOperationStoreFactory: () => new ProvisionDeviceOperationRepository(),
       clearInstalledAppsForDevice: defaultClearInstalledAppsForDevice,
       stopPerformanceMonitoring: (deviceId) => getPerformanceMonitor().stopMonitoring(deviceId),
+      stopAndroidObservers: defaultStopAndroidObservers,
       idGenerator: defaultIdGenerator,
       timer: defaultTimer,
     };
@@ -1264,6 +1326,7 @@ export function setDeviceToolsDependencies(deps: Partial<DeviceToolsDependencies
       deps.clearInstalledAppsForDevice ?? currentDeps.clearInstalledAppsForDevice,
     stopPerformanceMonitoring:
       deps.stopPerformanceMonitoring ?? currentDeps.stopPerformanceMonitoring,
+    stopAndroidObservers: deps.stopAndroidObservers ?? currentDeps.stopAndroidObservers,
     idGenerator: deps.idGenerator ?? currentDeps.idGenerator,
     timer: deps.timer ?? currentDeps.timer,
   };
@@ -3041,6 +3104,7 @@ export function registerDeviceTools() {
       };
       await stopVideoRecordingsBeforeShutdown(shutdownContext, perf);
       await stopIosCtrlProxyBeforeShutdown(shutdownContext, perf);
+      await stopAndroidCtrlProxyBeforeShutdown(shutdownContext, perf, deps.stopAndroidObservers);
 
       const alreadyStoppedMessage = await killProcessAndRetireOwnership(
         deps,

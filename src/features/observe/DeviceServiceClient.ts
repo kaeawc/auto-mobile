@@ -74,6 +74,9 @@ export abstract class DeviceServiceClient {
   protected isConnecting: boolean = false;
   protected connectionAttempts: number = 0;
   protected lastConnectionAttempt: number = 0;
+  // Bumped by close() so a connection that opens after close() is discarded
+  // instead of installing its socket and restarting the health check.
+  protected connectionGeneration: number = 0;
 
   // Auto-reconnection state
   protected autoReconnectEnabled: boolean = true;
@@ -239,6 +242,9 @@ export abstract class DeviceServiceClient {
     try {
       // Disable auto-reconnect before closing
       this.autoReconnectEnabled = false;
+      // Invalidate any in-flight connection whose `open` has not fired yet, so
+      // it cannot install its socket / restart the health check after close().
+      this.connectionGeneration++;
 
       // Clear any pending reconnection timeout
       if (this.reconnectTimeoutId !== null) {
@@ -324,10 +330,21 @@ export abstract class DeviceServiceClient {
     this.isConnecting = true;
     this.connectionAttempts++;
     this.lastConnectionAttempt = this.timer.now();
+    // Snapshot the lifecycle generation before the first await so a close() that
+    // overlaps the awaited platform setup (e.g. adb port-forward) is observed.
+    const generation = this.connectionGeneration;
 
     try {
       // Platform-specific setup (e.g., port forwarding)
       await perf.track("platformSetup", () => this.setupBeforeConnect(perf));
+
+      if (generation !== this.connectionGeneration) {
+        // close() ran during platform setup; do not open a socket to a
+        // shutting-down device transport.
+        logger.info(`[${this.logTag}] Aborting connect: closed during platform setup`);
+        this.isConnecting = false;
+        return false;
+      }
 
       const wsUrl = this.getWebSocketUrl();
       logger.info(`[${this.logTag}] Connecting to WebSocket at ${wsUrl} (attempt ${this.connectionAttempts}/${this.config.maxConnectionAttempts})`);
@@ -341,6 +358,21 @@ export abstract class DeviceServiceClient {
 
         ws.on("open", () => {
           this.timer.clearTimeout(connectionTimeout);
+          if (generation !== this.connectionGeneration) {
+            // close() ran while this connection was mid-handshake. Discard the
+            // socket so it cannot re-reference a shutting-down device transport
+            // or restart the health check after teardown.
+            logger.info(`[${this.logTag}] Discarding WebSocket opened after close`);
+            try {
+              ws.close();
+            } catch (error) {
+              // The socket may already be closing; nothing else to clean up.
+              logger.debug(`[${this.logTag}] Error closing post-close WebSocket: ${error}`);
+            }
+            this.isConnecting = false;
+            resolve(false);
+            return;
+          }
           logger.info(`[${this.logTag}] WebSocket connected successfully`);
           this.ws = ws;
           this.isConnecting = false;

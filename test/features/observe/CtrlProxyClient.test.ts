@@ -148,6 +148,100 @@ describe("AndroidCtrlProxyClient", function() {
     }
   };
 
+  test("discards a WebSocket that opens after close() so teardown cannot be undone", async () => {
+    // Manual (non-auto-advancing) timer so the in-flight handshake stays pending
+    // until we trigger `open` ourselves, and the connection timeout never fires.
+    const manualTimer = new FakeTimer();
+    let socket: FakeWebSocket | null = null;
+    const factory = (url: string): WebSocket => {
+      // "timeout" mode keeps the socket CONNECTING (the timer is never advanced).
+      socket = new FakeWebSocket(url, "timeout", 60_000, manualTimer);
+      return socket as unknown as WebSocket;
+    };
+    const client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      fakeAdb,
+      factory,
+      manualTimer,
+    );
+    try {
+      const connectPromise = client.ensureConnected();
+      await flushPromises(8); // let setupBeforeConnect + ws construction settle; open has NOT fired
+      expect(socket).not.toBeNull();
+      expect(client.isConnected()).toBe(false);
+
+      // Shutdown teardown closes the client while the handshake is still in flight.
+      await client.close();
+
+      // The handshake now completes — `open` fires AFTER close().
+      socket!.readyState = WebSocketState.OPEN;
+      socket!.emit("open");
+      await flushPromises(8);
+
+      // The post-close open is discarded: no socket installed, connect resolves false.
+      expect(client.isConnected()).toBe(false);
+      await expect(connectPromise).resolves.toBe(false);
+    } finally {
+      await client.close();
+    }
+  });
+
+  test("aborts a connect whose platform setup completes after close()", async () => {
+    const manualTimer = new FakeTimer();
+    let releaseForward!: () => void;
+    const forwardGate = new Promise<void>(resolve => {
+      releaseForward = resolve;
+    });
+    class GatedForwardAdb extends FakeAdbExecutor {
+      override async executeCommand(
+        command: string,
+        timeoutMs?: number,
+        maxBuffer?: number,
+        noRetry?: boolean,
+        signal?: AbortSignal,
+      ) {
+        if (command.includes("forward")) {
+          await forwardGate; // hold setupBeforeConnect until the test releases it
+        }
+        return super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+      }
+    }
+    const gatedAdb = new GatedForwardAdb();
+    gatedAdb.setCommandResponse("forward", { stdout: `${serverPort}`, stderr: "" });
+    gatedAdb.setScreenState(true);
+    let socket: FakeWebSocket | null = null;
+    const factory = (url: string): WebSocket => {
+      socket = new FakeWebSocket(url, "timeout", 60_000, manualTimer);
+      return socket as unknown as WebSocket;
+    };
+    const client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      gatedAdb,
+      factory,
+      manualTimer,
+    );
+    try {
+      const connectPromise = client.ensureConnected();
+      await flushPromises(8); // parked inside setupBeforeConnect; no socket yet
+      expect(socket).toBeNull();
+
+      // Shutdown teardown closes the client while port-forward setup is pending.
+      await client.close();
+
+      // Platform setup now finishes — after close().
+      releaseForward();
+      await flushPromises(8);
+
+      // The connect aborts before creating a socket, so the loops cannot restart.
+      expect(socket).toBeNull();
+      expect(client.isConnected()).toBe(false);
+      await expect(connectPromise).resolves.toBe(false);
+    } finally {
+      releaseForward();
+      await client.close();
+    }
+  });
+
   const settleNavigationHierarchyInterleaving = async (timer: FakeTimer): Promise<void> => {
     // recordNavigationEvent commits its in-memory writes across several async
     // query hops before assigning currentScreen. Drain setImmediate + microtasks

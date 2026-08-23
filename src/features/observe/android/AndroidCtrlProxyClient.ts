@@ -1075,6 +1075,17 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   /**
+   * Evict the singleton for a device from the registry. `close()` disables
+   * auto-reconnect permanently, so a detached instance left in the map would be
+   * handed back to a device that later reuses the same serial (a re-booted
+   * emulator) as a stale, non-reconnecting client. Removing it lets the next
+   * `getInstance` build a fresh, auto-reconnect-enabled client.
+   */
+  public static removeInstance(deviceId: string): void {
+    AndroidCtrlProxyClient.instances.delete(deviceId);
+  }
+
+  /**
    * Bind this client to a session for multi-agent NavigationGraphManager isolation.
    * Called when a tool execution context binds a session to this device.
    */

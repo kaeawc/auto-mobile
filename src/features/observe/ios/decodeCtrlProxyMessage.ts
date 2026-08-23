@@ -141,6 +141,18 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
       };
       break;
 
+    case "voiceover_set_result":
+      // The runner deliberately returns success:false with an error (e.g. the
+      // Settings VoiceOver row could not be located) rather than throwing, so it
+      // must RESOLVE as a typed CtrlProxyActionResult — VoiceOverToggle maps
+      // success:false to supported:false, never a silent success (#2501).
+      result = {
+        success: message.success ?? false,
+        totalTimeMs: message.totalTimeMs ?? 0,
+        error: message.error,
+      };
+      break;
+
     case "highlight_response":
       result = {
         success: message.success ?? false,

@@ -134,6 +134,45 @@ export class CtrlProxyVoiceOver {
    * @param perf - Optional performance tracker
    * @returns Action result
    */
+  /**
+   * Enable or disable VoiceOver via the runner.
+   *
+   * On the Simulator VoiceOver is toggled host-side with `simctl` (see
+   * VoiceOverToggle); on a **physical** device there is no command-line write
+   * into the system-preferences domain, so the runner drives the Settings app
+   * (open `App-Prefs:root=ACCESSIBILITY`, read the VoiceOver switch, tap only
+   * when it differs). The runner early-returns when already in the target state
+   * because once VoiceOver is on every tap requires the double-tap idiom — so a
+   * blind re-tap would be interpreted as an activation, not a toggle (#2501).
+   *
+   * @param enabled - Target VoiceOver state
+   * @param timeoutMs - Request timeout (default 30000; Settings navigation is slow)
+   * @param perf - Optional performance tracker
+   * @returns Action result — `success:false` with `error` when the Settings row
+   *          cannot be located (locale/layout drift), never a silent success.
+   */
+  async requestSetVoiceOverEnabled(
+    enabled: boolean,
+    timeoutMs: number = 30000,
+    perf?: PerformanceTracker,
+  ): Promise<CtrlProxyActionResult> {
+    return sendCommand<CtrlProxyActionResult>(this.context, {
+      idPrefix: "voiceover_set",
+      responseType: "voiceover_set",
+      messageType: "set_voiceover_state",
+      params: { enabled },
+      timeoutMs,
+      perf,
+      cancelScreenshotBackoff: false,
+      notConnectedError: () => ({ success: false, error: "Not connected to CtrlProxy" }),
+      // The command is new: an older runner that predates it must surface as a
+      // typed failure so VoiceOverToggle reports supported:false (never a silent
+      // success), parity with requestVoiceOverActivate.
+      unsupportedCommandError: (_messageType, error) => ({ success: false, totalTimeMs: 0, error }),
+      timeoutError: () => ({ success: false, error: "Timeout waiting for voiceover_set_result" }),
+    });
+  }
+
   async requestVoiceOverActivate(
     label: string,
     action: "activate" | "long_press",

@@ -24,6 +24,7 @@ public class CommandHandler: CommandHandling {
     private let sdkDatabaseClient: (any SdkDatabaseFetching)?
     private let hierarchyDebouncer: (any HierarchyDebouncing)?
     private let voiceOverStateProvider: any VoiceOverStateProviding
+    private let voiceOverToggle: any VoiceOverToggling
     private let frameContext: FrameContext
 
     public init(
@@ -36,6 +37,7 @@ public class CommandHandler: CommandHandling {
         sdkDatabaseClient: (any SdkDatabaseFetching)? = nil,
         hierarchyDebouncer: (any HierarchyDebouncing)? = nil,
         voiceOverStateProvider: any VoiceOverStateProviding = DefaultVoiceOverStateProvider(),
+        voiceOverToggle: any VoiceOverToggling = DefaultVoiceOverToggle(),
         frameContext: FrameContext = FrameContext()
     ) {
         self.elementLocator = elementLocator
@@ -47,6 +49,7 @@ public class CommandHandler: CommandHandling {
         self.sdkDatabaseClient = sdkDatabaseClient
         self.hierarchyDebouncer = hierarchyDebouncer
         self.voiceOverStateProvider = voiceOverStateProvider
+        self.voiceOverToggle = voiceOverToggle
         self.frameContext = frameContext
     }
 
@@ -61,6 +64,7 @@ public class CommandHandler: CommandHandling {
         sdkDatabaseClient: (any SdkDatabaseFetching)? = nil,
         hierarchyDebouncer: (any HierarchyDebouncing)? = nil,
         voiceOverStateProvider: any VoiceOverStateProviding = DefaultVoiceOverStateProvider(),
+        voiceOverToggle: any VoiceOverToggling = DefaultVoiceOverToggle(),
         frameContext: FrameContext = FrameContext()
     )
         -> CommandHandler
@@ -75,6 +79,7 @@ public class CommandHandler: CommandHandling {
             sdkDatabaseClient: sdkDatabaseClient,
             hierarchyDebouncer: hierarchyDebouncer,
             voiceOverStateProvider: voiceOverStateProvider,
+            voiceOverToggle: voiceOverToggle,
             frameContext: frameContext
         )
     }
@@ -182,6 +187,9 @@ public class CommandHandler: CommandHandling {
 
             case let .getVoiceOverState(payload):
                 return try handleGetVoiceOverState(payload, startTime: startTime)
+
+            case let .setVoiceOverState(payload):
+                return handleSetVoiceOverState(payload, startTime: startTime)
 
             // Storage commands
             case let .listPreferenceFiles(payload):
@@ -1266,6 +1274,47 @@ public class CommandHandler: CommandHandling {
             enabled: enabled,
             totalTimeMs: totalTimeMs(from: startTime)
         )
+    }
+
+    /// Enable/disable VoiceOver on a physical device by driving Settings (#2501).
+    ///
+    /// Idempotent: when VoiceOver is already in the requested state this early-
+    /// returns WITHOUT tapping. That guard is load-bearing, not just an
+    /// optimization — once VoiceOver is on, every tap requires the double-tap
+    /// idiom, so a blind re-tap on the switch would be interpreted as a VoiceOver
+    /// activation rather than a toggle. A locale/layout drift that hides the
+    /// switch surfaces as `success: false` with an error, never a silent success.
+    private func handleSetVoiceOverState(
+        _ request: RequestSetVoiceOverState,
+        startTime: Date
+    )
+        -> VoiceOverSetResponse
+    {
+        let enabled = request.enabled
+
+        if voiceOverStateProvider.isVoiceOverRunning() == enabled {
+            return VoiceOverSetResponse(
+                requestId: request.requestId,
+                success: true,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+
+        do {
+            try voiceOverToggle.setVoiceOver(enabled: enabled)
+            return VoiceOverSetResponse(
+                requestId: request.requestId,
+                success: true,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        } catch {
+            return VoiceOverSetResponse(
+                requestId: request.requestId,
+                success: false,
+                error: error.localizedDescription,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
     }
 
     // MARK: - Storage

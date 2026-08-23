@@ -9,6 +9,18 @@ private final class FakeVoiceOverStateProvider: VoiceOverStateProviding {
     }
 }
 
+private final class FakeVoiceOverToggle: VoiceOverToggling {
+    private(set) var setCalls: [Bool] = []
+    var errorToThrow: Error?
+
+    func setVoiceOver(enabled: Bool) throws {
+        setCalls.append(enabled)
+        if let errorToThrow {
+            throw errorToThrow
+        }
+    }
+}
+
 private final class FakeVoiceOverDefaultsReader: VoiceOverDefaultsReading {
     private var values: [String: Bool] = [:]
 
@@ -1629,6 +1641,70 @@ final class CommandHandlerTests: XCTestCase {
         // enabled is false in SPM tests (macOS, no UIAccessibility)
         XCTAssertFalse(voResponse.enabled)
         XCTAssertNotNil(voResponse.totalTimeMs)
+    }
+
+    private func makeHandler(
+        stateProvider: FakeVoiceOverStateProvider,
+        toggle: FakeVoiceOverToggle
+    )
+        -> CommandHandler
+    {
+        return CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            voiceOverStateProvider: stateProvider,
+            voiceOverToggle: toggle
+        )
+    }
+
+    func testSetVoiceOverStateTogglesWhenStateDiffers() {
+        let stateProvider = FakeVoiceOverStateProvider()
+        stateProvider.isRunning = false
+        let toggle = FakeVoiceOverToggle()
+        commandHandler = makeHandler(stateProvider: stateProvider, toggle: toggle)
+
+        let request = WebSocketRequest.setVoiceOverState(
+            RequestSetVoiceOverState(requestId: "vo-set-1", enabled: true))
+        guard let response = handleRequest(request, as: VoiceOverSetResponse.self) else { return }
+
+        XCTAssertEqual(response.requestId, "vo-set-1")
+        XCTAssertEqual(response.type, "voiceover_set_result")
+        XCTAssertTrue(response.success)
+        XCTAssertNil(response.error)
+        XCTAssertEqual(toggle.setCalls, [true])
+    }
+
+    func testSetVoiceOverStateIsIdempotentNoOpWhenAlreadyInTargetState() {
+        let stateProvider = FakeVoiceOverStateProvider()
+        stateProvider.isRunning = true
+        let toggle = FakeVoiceOverToggle()
+        commandHandler = makeHandler(stateProvider: stateProvider, toggle: toggle)
+
+        let request = WebSocketRequest.setVoiceOverState(
+            RequestSetVoiceOverState(requestId: "vo-set-2", enabled: true))
+        guard let response = handleRequest(request, as: VoiceOverSetResponse.self) else { return }
+
+        XCTAssertTrue(response.success)
+        // Load-bearing: no tap when already on, or VoiceOver's double-tap idiom
+        // would reinterpret the tap as an activation (#2501).
+        XCTAssertEqual(toggle.setCalls, [], "must not tap when already in target state")
+    }
+
+    func testSetVoiceOverStateSurfacesToggleFailureAsUnsuccessful() {
+        let stateProvider = FakeVoiceOverStateProvider()
+        stateProvider.isRunning = false
+        let toggle = FakeVoiceOverToggle()
+        toggle.errorToThrow = VoiceOverToggleError.switchNotFound
+        commandHandler = makeHandler(stateProvider: stateProvider, toggle: toggle)
+
+        let request = WebSocketRequest.setVoiceOverState(
+            RequestSetVoiceOverState(requestId: "vo-set-3", enabled: true))
+        guard let response = handleRequest(request, as: VoiceOverSetResponse.self) else { return }
+
+        XCTAssertFalse(response.success)
+        XCTAssertNotNil(response.error)
+        XCTAssertEqual(toggle.setCalls, [true])
     }
 
     func testGetVoiceOverStateWithNilRequestId() {

@@ -17,8 +17,8 @@ This document compares iOS VoiceOver and Android TalkBack support in AutoMobile 
 | `pressButton` | ✅ Unchanged | ✅ Unchanged | Device/navigation buttons |
 | `accessibilityState` in observe | ✅ `service: "talkback"` | ✅ `service: "voiceover"` | |
 | `accessibilityFocusedElement` | ✅ Reported | ✅ With iOS SDK | Requires SDK-enriched hierarchy |
-| Programmatic enable/disable | ✅ Via ADB | ✅ Simulator only | Physical device support deferred |
-| MCP tool to toggle | ✅ `TalkBackToggle` | ✅ `VoiceOverToggle` (Simulator) | Gap — see below |
+| Programmatic enable/disable | ✅ Via ADB | ✅ Simulator + physical device | Physical uses Settings automation (English locale) |
+| MCP tool to toggle | ✅ `TalkBackToggle` | ✅ `VoiceOverToggle` (Simulator + device) | See Gap 2/3 below |
 | Three-finger swipe fallback | N/A | ✅ | VoiceOver-specific |
 | Two-finger swipe fallback | ✅ | N/A | TalkBack-specific |
 | Boomerang gesture | ✅ | ✅ | Both supported |
@@ -42,21 +42,19 @@ This document compares iOS VoiceOver and Android TalkBack support in AutoMobile 
 
 ---
 
-### Gap 2: No programmatic VoiceOver toggle — RESOLVED (iOS Simulator)
+### Gap 2: No programmatic VoiceOver toggle — RESOLVED (Simulator + physical device)
 
 **TalkBack:** AutoMobile provides `TalkBackToggle.ts` — an MCP tool that enables or disables TalkBack via ADB secure settings. Agents can script test sessions that programmatically toggle TalkBack before and after test cases.
 
 **VoiceOver (Simulator):** Resolved via `xcrun simctl spawn <udid> defaults write com.apple.Accessibility VoiceOverTouchEnabled -bool YES/NO` followed by a `notifyutil -p com.apple.accessibility.VoiceOverStatusDidChange` notification. `VoiceOverToggle.ts` implements this and is exposed through the `accessibility` MCP tool (`voiceover: true/false`).
 
-**VoiceOver (Physical device):** No known `idevice` equivalent. Physical device support remains a gap. Enabling VoiceOver on a physical device still requires:
-- Manual: Settings > Accessibility > VoiceOver inside the device
-- Manual: Triple-click the side button (if Accessibility Shortcut is configured)
+**VoiceOver (Physical device):** Resolved by automating the Settings app through the CtrlProxy runner — there is still no `idevice`/`devicectl` equivalent and no public toggle API, so `VoiceOverToggle` routes physical devices to a `set_voiceover_state` runner command that deep-links to `App-Prefs:root=ACCESSIBILITY`, reads the VoiceOver switch, and taps only when it differs. This path is deliberately narrow: **English locale only**, sensitive to Settings **layout drift** across iOS versions, and idempotent by necessity (once VoiceOver is on, a tap is a double-tap-idiom activation, so the runner early-returns when already in the target state). A switch that can't be located returns `supported:false` with a reason rather than a silent success.
 
-**Impact (remaining):** VoiceOver test sessions on physical devices cannot be fully automated. CI-level VoiceOver testing on physical hardware requires the device to have VoiceOver pre-enabled.
+**Impact (remaining):** Physical-device toggling works in English locale; other locales and future Settings layout changes may still require the device to have VoiceOver pre-enabled or manual intervention.
 
 ---
 
-### Gap 3: No VoiceOver MCP toggle tool — RESOLVED (iOS Simulator)
+### Gap 3: No VoiceOver MCP toggle tool — RESOLVED (Simulator + physical device)
 
 **TalkBack:** The `accessibility` MCP tool (backed by `TalkBackToggle.ts`) enables/disables TalkBack from an agent session.
 
@@ -65,7 +63,7 @@ This document compares iOS VoiceOver and Android TalkBack support in AutoMobile 
 - `accessibility({ voiceover: false })` → `{ voiceover: { supported: true, applied: true, currentState: false } }`
 - `accessibility({})` → `{ enabled: true, service: "voiceover" }` (detect-only, unchanged)
 
-**VoiceOver (Physical device):** Returns `{ supported: false, applied: false, reason: "VoiceOver toggle is only supported on iOS Simulator" }`.
+**VoiceOver (Physical device):** Now supported via Settings automation (see Gap 2). `accessibility({ voiceover: true })` drives the device's Settings > Accessibility > VoiceOver switch through the runner and returns `{ supported: true, applied: true, currentState: true }`; a Settings row that can't be located (locale/layout drift) returns `{ supported: false, applied: false, reason: <specific message> }`, surfaced as an `ActionableError`.
 
 ---
 
@@ -110,7 +108,7 @@ This document compares iOS VoiceOver and Android TalkBack support in AutoMobile 
 VoiceOver and TalkBack reach parity on the core automation behaviors: detection, tool adaptations, gesture fallbacks, and observe output. The primary gaps are:
 
 1. **Accessibility cursor tracking** (Gap 1) — most impactful for agent validation workflows
-2. **Programmatic toggle** (Gaps 2 & 3) — resolved for iOS Simulator; physical device support remains a gap
+2. **Programmatic toggle** (Gaps 2 & 3) — resolved for iOS Simulator and physical devices (physical via Settings automation, English locale)
 3. **Rotor and Magic Tap** (Gaps 4 & 5) — advanced VoiceOver interactions not tested
 4. **iOS 17+ RemoteXPC** (Gap 6) — blocks direct DTX snapshot path on modern iOS
 

@@ -22,6 +22,7 @@ final class CommandPayloadTests: XCTestCase {
             (.pressHome(RequestEnvelope(requestId: "home")), "home"),
             (.selectAll(RequestEnvelope(requestId: "sel")), "sel"),
             (.getVoiceOverState(RequestEnvelope(requestId: "vo")), "vo"),
+            (.setVoiceOverState(RequestSetVoiceOverState(requestId: "vo-set", enabled: true)), "vo-set"),
             (.launchApp(RequestLaunchApp(requestId: "launch", bundleId: "com.example.app")), "launch"),
             (.setPreference(RequestSetPreference(requestId: "sp", key: "k", valueType: "STRING")), "sp"),
             (.getTableStructure(RequestGetTableStructure(requestId: "ts")), "ts"),

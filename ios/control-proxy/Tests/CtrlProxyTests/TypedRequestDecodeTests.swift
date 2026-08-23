@@ -153,6 +153,7 @@ final class TypedRequestDecodeDispatchTests: XCTestCase {
             .getTraversalOrder: "{}",
             .addHighlight: "{}",
             .getVoiceOverState: "{}",
+            .setVoiceOverState: #"{"enabled":true}"#,
             .listPreferenceFiles: "{}",
             .getPreferences: "{}",
             .getPreference: "{}",

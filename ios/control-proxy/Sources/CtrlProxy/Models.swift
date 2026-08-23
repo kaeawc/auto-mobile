@@ -216,6 +216,13 @@ public struct RequestAddHighlight: Decodable {
     public var shape: HighlightShape?
 }
 
+/// Request to enable/disable VoiceOver by driving the Settings app (physical
+/// devices have no `simctl` toggle; the host handles the Simulator). See #2501.
+public struct RequestSetVoiceOverState: Decodable {
+    public var requestId: String?
+    public var enabled: Bool
+}
+
 // MARK: Storage inspection
 
 public struct RequestGetPreferences: Decodable {
@@ -348,6 +355,7 @@ extension RequestResetPermissions: CommandPayload {}
 extension RequestRotate: CommandPayload {}
 extension RequestClipboard: CommandPayload {}
 extension RequestAddHighlight: CommandPayload {}
+extension RequestSetVoiceOverState: CommandPayload {}
 extension RequestGetPreferences: CommandPayload {}
 extension RequestGetPreference: CommandPayload {}
 extension RequestSetPreference: CommandPayload {}
@@ -405,6 +413,7 @@ public enum WebSocketRequest: Decodable {
     case getTraversalOrder(RequestEnvelope)
     case addHighlight(RequestAddHighlight)
     case getVoiceOverState(RequestEnvelope)
+    case setVoiceOverState(RequestSetVoiceOverState)
 
     case listPreferenceFiles(RequestEnvelope)
     case getPreferences(RequestGetPreferences)
@@ -503,6 +512,8 @@ public enum WebSocketRequest: Decodable {
             self = try .addHighlight(RequestAddHighlight(from: decoder))
         case .getVoiceOverState:
             self = try .getVoiceOverState(RequestEnvelope(from: decoder))
+        case .setVoiceOverState:
+            self = try .setVoiceOverState(RequestSetVoiceOverState(from: decoder))
         case .listPreferenceFiles:
             self = try .listPreferenceFiles(RequestEnvelope(from: decoder))
         case .getPreferences:
@@ -570,6 +581,7 @@ public enum WebSocketRequest: Decodable {
         case .getTraversalOrder: return .getTraversalOrder
         case .addHighlight: return .addHighlight
         case .getVoiceOverState: return .getVoiceOverState
+        case .setVoiceOverState: return .setVoiceOverState
         case .listPreferenceFiles: return .listPreferenceFiles
         case .getPreferences: return .getPreferences
         case .getPreference: return .getPreference
@@ -613,6 +625,7 @@ public enum WebSocketRequest: Decodable {
              let .getVoiceOverState(payload),
              let .listPreferenceFiles(payload):
             return payload
+        case let .setVoiceOverState(payload): return payload
         case let .tapCoordinates(payload): return payload
         case let .swipe(payload): return payload
         case let .twoFingerSwipe(payload), let .multiFingerSwipe(payload):
@@ -1770,6 +1783,32 @@ public struct VoiceOverStateResponse: Codable {
     }
 }
 
+// MARK: - VoiceOver Set Response
+
+/// Response to set_voiceover_state command (physical-device toggle via Settings).
+///
+/// Carries an explicit `success`/`error` rather than throwing, so that a
+/// locale/layout drift that leaves the VoiceOver row unlocatable surfaces to the
+/// client as a typed failure (`VoiceOverToggle` maps it to `supported:false`),
+/// never a silent success (#2501).
+public struct VoiceOverSetResponse: Codable {
+    public let type: String
+    public let timestamp: Int64
+    public let requestId: String?
+    public let success: Bool
+    public let error: String?
+    public let totalTimeMs: Int64?
+
+    public init(requestId: String?, success: Bool, error: String? = nil, totalTimeMs: Int64?) {
+        type = ResponseType.voiceOverSetResult.rawValue
+        timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        self.requestId = requestId
+        self.success = success
+        self.error = error
+        self.totalTimeMs = totalTimeMs
+    }
+}
+
 // MARK: - Request Types (matching Android)
 
 public enum RequestType: String, CaseIterable {
@@ -1819,6 +1858,7 @@ public enum RequestType: String, CaseIterable {
     case getTraversalOrder = "get_traversal_order"
     case addHighlight = "add_highlight"
     case getVoiceOverState = "get_voiceover_state"
+    case setVoiceOverState = "set_voiceover_state"
 
     // Storage inspection
     case listPreferenceFiles = "list_preference_files"
@@ -1874,6 +1914,7 @@ public enum ResponseType: String {
     case traversalOrderResult = "traversal_order_result"
     case highlightResponse = "highlight_response"
     case voiceOverStateResult = "voiceover_state_result"
+    case voiceOverSetResult = "voiceover_set_result"
     case connected
 
     // Storage inspection
@@ -1941,6 +1982,7 @@ extension RequestType {
         case .getTraversalOrder: return .traversalOrderResult
         case .addHighlight: return .highlightResponse
         case .getVoiceOverState: return .voiceOverStateResult
+        case .setVoiceOverState: return .voiceOverSetResult
         case .listPreferenceFiles: return .preferenceFiles
         case .getPreferences: return .preferences
         case .getPreference: return .getPreferenceResult

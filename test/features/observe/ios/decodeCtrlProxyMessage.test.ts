@@ -170,6 +170,21 @@ describe("decodeCtrlProxyMessage", () => {
     expect((decoded?.result as { enabled: boolean }).enabled).toBe(false);
   });
 
+  test("voiceover_set_result resolves a runner failure as a typed result (not a rejection)", () => {
+    const decoded = decodeCtrlProxyMessage(
+      msg({ type: "voiceover_set_result", success: false, error: "VoiceOver toggle row not found", totalTimeMs: 12 }),
+    );
+    // Must resolve (result set, errorMessage undefined) so VoiceOverToggle maps
+    // success:false → supported:false, never a silent success (#2501).
+    expect(decoded?.errorMessage).toBeUndefined();
+    expect(decoded?.result).toEqual({ success: false, totalTimeMs: 12, error: "VoiceOver toggle row not found" });
+  });
+
+  test("voiceover_set_result carries a success through", () => {
+    const decoded = decodeCtrlProxyMessage(msg({ type: "voiceover_set_result", success: true, totalTimeMs: 5 }));
+    expect(decoded?.result).toEqual({ success: true, totalTimeMs: 5, error: undefined });
+  });
+
 
   test("highlight_response defaults success to false and echoes requestId/timestamp", () => {
     const decoded = decodeCtrlProxyMessage(msg({ type: "highlight_response", timestamp: 42 }));
@@ -417,8 +432,8 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     "set_network_fault_rules_result",
   ];
 
-  test("Swift ResponseType declares exactly 45 rawValues", () => {
-    expect(rawValues.length).toBe(45);
+  test("Swift ResponseType declares exactly 46 rawValues", () => {
+    expect(rawValues.length).toBe(46);
   });
 
   test("rawValues are unique (no accidental duplicate)", () => {
@@ -431,8 +446,8 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     }
   });
 
-  test("the decoder explicitly reshapes exactly 38 response types", () => {
-    expect(rawValues.filter(isExplicitlyDecoded).length).toBe(38);
+  test("the decoder explicitly reshapes exactly 39 response types", () => {
+    expect(rawValues.filter(isExplicitlyDecoded).length).toBe(39);
   });
 
   test("the only unhandled ResponseType (excluding fire-and-forget) is shake_result", () => {
@@ -455,7 +470,7 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
  */
 describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => {
   // One row per decoded response type → the value of `success` when the wire
-  // message omits it. 38 rows = the 38 explicitly-decoded ResponseTypes.
+  // message omits it. 39 rows = the 39 explicitly-decoded ResponseTypes.
   const DEFAULT_WHEN_ABSENT: Array<{ type: string; expected: boolean | undefined }> = [
     { type: "hierarchy_update", expected: undefined },
     { type: "screenshot", expected: true },
@@ -478,6 +493,7 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     { type: "ime_action_result", expected: true },
     { type: "action_result", expected: true },
     { type: "voiceover_state_result", expected: true },
+    { type: "voiceover_set_result", expected: false },
     { type: "multi_finger_swipe_result", expected: true },
     { type: "clipboard_result", expected: true },
     { type: "highlight_response", expected: false },
@@ -497,8 +513,8 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     { type: "table_structure_result", expected: false },
   ];
 
-  test("the default table covers all 38 explicitly-decoded types", () => {
-    expect(DEFAULT_WHEN_ABSENT.length).toBe(38);
+  test("the default table covers all 39 explicitly-decoded types", () => {
+    expect(DEFAULT_WHEN_ABSENT.length).toBe(39);
   });
 
   for (const { type, expected } of DEFAULT_WHEN_ABSENT) {
@@ -515,8 +531,8 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     .filter(row => row.type !== "hierarchy_update" && row.type !== "screenshot")
     .map(row => row.type);
 
-  test("the passthrough set is the 36 success-reading types", () => {
-    expect(READS_MESSAGE_SUCCESS.length).toBe(36);
+  test("the passthrough set is the 37 success-reading types", () => {
+    expect(READS_MESSAGE_SUCCESS.length).toBe(37);
   });
 
   for (const type of READS_MESSAGE_SUCCESS) {

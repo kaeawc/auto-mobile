@@ -23,7 +23,9 @@ export const accessibilitySchema = addDeviceTargetingToSchema(
     voiceover: z
       .boolean()
       .optional()
-      .describe("Enable (true) or disable (false) VoiceOver on iOS Simulator"),
+      .describe(
+        "Enable (true) or disable (false) VoiceOver on an iOS device (Simulator via simctl; physical devices are driven through the Settings app)",
+      ),
   }),
 );
 
@@ -111,7 +113,7 @@ export function registerAccessibilityTools() {
 
   ToolRegistry.registerDeviceAware(
     "accessibility",
-    "Check or control accessibility services. On Android: omit talkback to check TalkBack state, or pass talkback: true/false to enable/disable it. On iOS: omit voiceover to check VoiceOver state, or pass voiceover: true/false to enable/disable it (Simulator only). Always returns fresh state from the device.",
+    "Check or control accessibility services. On Android: omit talkback to check TalkBack state, or pass talkback: true/false to enable/disable it. On iOS: omit voiceover to check VoiceOver state, or pass voiceover: true/false to enable/disable it (Simulator via simctl, physical devices via the Settings app). Always returns fresh state from the device.",
     accessibilitySchema,
     accessibilityHandler,
     { defaultEnabled: false, outputSchema: accessibilityStateSchema },

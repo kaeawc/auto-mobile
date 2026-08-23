@@ -380,6 +380,12 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     perf?: PerformanceTracker,
   ): Promise<CtrlProxyActionResult>;
 
+  requestSetVoiceOverEnabled(
+    enabled: boolean,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<CtrlProxyActionResult>;
+
   requestAction(
     action: string,
     resourceId?: string,
@@ -2327,6 +2333,14 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     perf?: PerformanceTracker,
   ): Promise<CtrlProxyActionResult> {
     return this.voiceOver.requestVoiceOverActivate(label, action, timeoutMs, perf);
+  }
+
+  async requestSetVoiceOverEnabled(
+    enabled: boolean,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<CtrlProxyActionResult> {
+    return this.voiceOver.requestSetVoiceOverEnabled(enabled, timeoutMs, perf);
   }
 
   async requestAction(

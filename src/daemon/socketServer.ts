@@ -198,6 +198,8 @@ interface McpForwardRecoveryContext {
   request: DaemonRequest;
   route: McpForwardRoute;
   socketSessionId: string;
+  totalTimeoutMs: number;
+  requestDeadlineMs: number;
   remainingTimeoutMs: number;
   forwardStartMs: number;
 }
@@ -706,6 +708,8 @@ export class UnixSocketServer {
                 request,
                 route,
                 socketSessionId: sessionId,
+                totalTimeoutMs,
+                requestDeadlineMs,
                 remainingTimeoutMs,
                 forwardStartMs,
               });
@@ -1305,19 +1309,31 @@ export class UnixSocketServer {
         identity,
       });
     }
-    return this.forwardConnectedMcpRequest(context, identity, mcpClient);
+    const forwardRemainingMs = this.requireRemainingMcpForwardBudget(
+      context.request,
+      context.totalTimeoutMs,
+      context.requestDeadlineMs,
+      "waiting in queues and preparing the MCP client",
+    );
+    return this.forwardConnectedMcpRequest(
+      context,
+      identity,
+      mcpClient,
+      forwardRemainingMs,
+    );
   }
 
   private async forwardConnectedMcpRequest(
     context: McpForwardRecoveryContext,
     identity: DeviceControlTransportIdentity,
     mcpClient: Client,
+    remainingTimeoutMs: number,
   ): Promise<unknown> {
     try {
       return await this.handleIdeRequest(
         mcpClient,
         context.request,
-        context.remainingTimeoutMs,
+        remainingTimeoutMs,
         context.socketSessionId,
       );
     } catch (error) {
@@ -1368,19 +1384,12 @@ export class UnixSocketServer {
         recoveryExhausted: true,
       });
     }
-    const retryRemainingMs =
-      context.remainingTimeoutMs - (this.timer.now() - context.forwardStartMs);
-    if (retryRemainingMs <= 0) {
-      const toolName = context.request.method === "tools/call"
-        ? context.request.params?.name ?? context.request.method
-        : context.request.method;
-      throw new McpTimeoutError({
-        toolName,
-        timeoutMs: context.remainingTimeoutMs,
-        origin: "UnixSocketServer.handleRequest",
-        detail: `no budget remaining after session reconnect (elapsed ${this.timer.now() - context.forwardStartMs}ms)`,
-      });
-    }
+    const retryRemainingMs = this.requireRemainingMcpForwardBudget(
+      context.request,
+      context.totalTimeoutMs,
+      context.requestDeadlineMs,
+      "waiting in queues and reconnecting the MCP client",
+    );
     try {
       return await this.handleIdeRequest(
         freshClient,

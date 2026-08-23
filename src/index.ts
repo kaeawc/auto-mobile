@@ -2,6 +2,7 @@
 import "./runtime/reflectMetadata";
 import { errorMessage } from "./utils/describeUnknownError";
 import { bootstrapEnvironment } from "./utils/envBootstrap";
+import { writeEmergencyLog } from "./utils/loggingConfig";
 import { DAEMON_LAUNCH_CWD_ENV, safeProcessCwd } from "./utils/workingDirectory";
 
 // Run before any other imports that may resolve tool paths at module load time.
@@ -56,7 +57,7 @@ function logFatal(label: string, error: unknown): void {
   } else {
     // The file logger isn't loaded yet (crash during startup imports) — fall
     // back to stderr so the failure is never silently swallowed.
-    console.error(`${label}: ${message}`);
+    writeEmergencyLog(label, message);
   }
 }
 
@@ -639,8 +640,7 @@ async function main() {
 // this type-checks without a suppression.
 if (import.meta.main) {
   main().catch(async (err) => {
-    console.error("Fatal error in main():", err);
-    fatalLogger?.error("Fatal error in main():", err);
+    logFatal("Fatal error in main()", err);
     await fatalLogger?.closeAfterFlush();
     // An incomplete-extraction startup failure exits with a distinct, recoverable
     // code (EX_TEMPFAIL) so a wrapper can re-extract and retry (issue #2833);

@@ -1,9 +1,14 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
-import { DaemonManager, type DaemonProcessSpawner } from "../../src/daemon/manager";
+import { PassThrough } from "node:stream";
+import {
+  DaemonManager,
+  relayDaemonStderr,
+  type DaemonProcessSpawner,
+} from "../../src/daemon/manager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import { TOOL_OUTPUTS_DIR_ENV, TOOL_OUTPUTS_DIR_FLAG } from "../../src/utils/toolOutputArtifacts";
@@ -31,6 +36,25 @@ describe("DaemonManager launch", () => {
       rmSync(dir, { recursive: true, force: true });
     }
     tempDirs.length = 0;
+  });
+
+  test("relays piped daemon stderr without sharing the host descriptor", () => {
+    const daemonStderr = new PassThrough();
+    const writes: string[] = [];
+    const stderrSpy = spyOn(process.stderr, "write").mockImplementation(((chunk: unknown) => {
+      writes.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write);
+
+    try {
+      relayDaemonStderr({ stderr: daemonStderr } as ChildProcess);
+      daemonStderr.write("daemon structured record\n");
+    } finally {
+      stderrSpy.mockRestore();
+      daemonStderr.end();
+    }
+
+    expect(writes).toEqual(["daemon structured record\n"]);
   });
 
   test("writes the daemon launch log under the stable data dir, not an ephemeral mkdtemp", async () => {
@@ -81,7 +105,7 @@ describe("DaemonManager launch", () => {
     expect(launchLogs.length).toBeGreaterThan(0);
   });
 
-  test("inherits stderr for the daemon when structured stderr logging is enabled", async () => {
+  test("pipes stderr without a launch capture when structured stderr logging is enabled", async () => {
     const stateDir = createTempDir("daemon-launch-state-");
     process.env.AUTOMOBILE_DATA_DIR = stateDir;
     process.env.AUTOMOBILE_LOG_FORMAT = "json";
@@ -126,7 +150,7 @@ describe("DaemonManager launch", () => {
 
     await manager.start();
 
-    expect(capturedStdio).toEqual(["ignore", expect.any(Number), "inherit"]);
+    expect(capturedStdio).toEqual(["ignore", "ignore", "pipe"]);
   });
 
   test("writes the daemon launch log to AUTOMOBILE_LOG_DIR without moving data paths", async () => {

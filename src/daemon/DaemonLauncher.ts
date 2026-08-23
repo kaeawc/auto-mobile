@@ -40,6 +40,8 @@ export interface DaemonLaunchRequest {
   command: string;
   args: string[];
   spawnOptions: SpawnOptions;
+  /** Attaches any stream relays before readiness probes can complete. */
+  onSpawn?: (daemonProcess: ChildProcess) => void;
   timeoutMs: number;
   waitForReady: (timeoutMs: number, signal: AbortSignal) => Promise<boolean>;
   /**
@@ -148,6 +150,7 @@ export class DaemonLauncher {
       shell: false,
     });
     daemonProcess.unref();
+    request.onSpawn?.(daemonProcess);
 
     const readinessAbort = new AbortController();
     let cleanupProcessListeners = () => {};

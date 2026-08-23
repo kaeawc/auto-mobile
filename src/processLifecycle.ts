@@ -1,4 +1,5 @@
 import { defaultTimer, type Timer } from "./utils/SystemTimer";
+import { writeEmergencyLog } from "./utils/loggingConfig";
 
 export type ShutdownSignal = "SIGINT" | "SIGTERM" | "stdin";
 
@@ -142,12 +143,12 @@ export class ProcessLifecycleHandlers {
       const shutdownCompleted = await this.runShutdownHandler(signal);
       let exitCode = 0;
       if (!shutdownCompleted) {
-        console.error(`Shutdown timed out after ${this.shutdownTimeoutMs}ms; forcing exit`);
+        writeEmergencyLog(`Shutdown timed out after ${this.shutdownTimeoutMs}ms; forcing exit`);
         exitCode = (await this.runShutdownTimeoutHandler())?.exitCode ?? 1;
       }
       this.lifecycleProcess.exit(exitCode);
     } catch (error) {
-      console.error(`Error during ${signal} shutdown:`, error);
+      writeEmergencyLog(`Error during ${signal} shutdown`, error);
       this.lifecycleProcess.exit(1);
     }
   }
@@ -195,7 +196,7 @@ export class ProcessLifecycleHandlers {
     let timeoutHandle: NodeJS.Timeout | undefined;
     const timedOut = new Promise<undefined>(resolve => {
       timeoutHandle = this.timer.setTimeout(() => {
-        console.error(`Shutdown finalization timed out after ${finalizationTimeoutMs}ms; forcing exit`);
+        writeEmergencyLog(`Shutdown finalization timed out after ${finalizationTimeoutMs}ms; forcing exit`);
         resolve(undefined);
       }, finalizationTimeoutMs);
     });
@@ -213,9 +214,9 @@ export class ProcessLifecycleHandlers {
     const handler = this.fatalProcessHandler;
     if (!handler) {
       if (event.type === "uncaughtException") {
-        console.error("Uncaught exception:", event.error);
+        writeEmergencyLog("Uncaught exception", event.error);
       } else {
-        console.error("Unhandled rejection at:", event.promise, "reason:", event.reason);
+        writeEmergencyLog("Unhandled rejection", event.reason);
       }
       this.lifecycleProcess.exit(1);
       return;
@@ -224,7 +225,7 @@ export class ProcessLifecycleHandlers {
     try {
       await handler(event);
     } catch (error) {
-      console.error("Error in fatal process handler:", error);
+      writeEmergencyLog("Error in fatal process handler", error);
       this.lifecycleProcess.exit(1);
     }
   }

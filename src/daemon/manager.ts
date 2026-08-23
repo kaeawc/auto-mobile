@@ -1,9 +1,9 @@
 import { errorMessage } from "../utils/describeUnknownError";
-import { execSync } from "node:child_process";
+import { execSync, type ChildProcess } from "node:child_process";
 import { open, readFile, rm, unlink } from "node:fs/promises";
 import { existsSync, openSync, closeSync } from "node:fs";
 import { basename, isAbsolute, join, resolve, sep } from "node:path";
-import { tmpdir } from "node:os";
+import { devNull, tmpdir } from "node:os";
 import { isStructuredLoggingEnabled, logger, resolveAutomobileLogSink } from "../utils/logger";
 import { resolveDaemonInstallSpecifier } from "../constants/release";
 import {
@@ -83,6 +83,26 @@ function stderrLog(message: string): void {
     return;
   }
   process.stderr.write(message + "\n");
+}
+
+/**
+ * Relays a detached daemon's stderr without passing the parent's descriptor to
+ * the child. The unref'd read end lets a terminating stdio host close its own
+ * stderr pipe promptly; while the host is alive, pause/resume honors sink
+ * backpressure instead of accumulating arbitrary buffered output.
+ */
+export function relayDaemonStderr(daemonProcess: ChildProcess): void {
+  const daemonStderr = daemonProcess.stderr;
+  if (!daemonStderr) {
+    return;
+  }
+  daemonStderr.on("data", (chunk: Buffer) => {
+    if (!process.stderr.write(chunk)) {
+      daemonStderr.pause();
+      process.stderr.once("drain", () => daemonStderr.resume());
+    }
+  });
+  (daemonStderr as typeof daemonStderr & { unref?: () => void }).unref?.();
 }
 
 export interface DaemonProcessRecord {
@@ -613,13 +633,6 @@ export class DaemonManager implements DaemonManagerLike {
     // and post-hoc debugging impossible (issue #2724). The logs dir is created
     // owner-only (0o700) by ensureSecureLogsDirSync, so a fixed, predictable
     // filename inside it is not exposed to other users.
-    const logPath = this.heldLockLogPath ?? this.daemonLaunchLogPath();
-    ensureSecureLogsDirSync();
-    // Open with restricted permissions (0o600 = owner read/write only).
-    // Truncate per launch so a single manager's bootstrap captures don't grow
-    // unbounded across restarts.
-    const logFd = openSync(logPath, "w", 0o600);
-
     // Propagate any non-default file paths to the child so its constants module
     // resolves to the same locations this manager polls.
     const childEnv = { ...process.env };
@@ -636,6 +649,18 @@ export class DaemonManager implements DaemonManagerLike {
     if (options.toolOutputsDir) {
       childEnv[TOOL_OUTPUTS_DIR_ENV] = options.toolOutputsDir;
     }
+    const logSink = resolveAutomobileLogSink(childEnv);
+    const capturesLaunchOutput = logSink !== "stderr";
+    const logPath = capturesLaunchOutput
+      ? (this.heldLockLogPath ?? this.daemonLaunchLogPath())
+      : devNull;
+    if (capturesLaunchOutput) {
+      ensureSecureLogsDirSync();
+    }
+    // Open with restricted permissions (0o600 = owner read/write only).
+    // Stderr-only containers deliberately skip the file capture and do not need
+    // a writable AutoMobile data directory.
+    const logFd = openSync(logPath, "w", 0o600);
 
     try {
       let retriedIncompleteExtraction = false;
@@ -649,14 +674,12 @@ export class DaemonManager implements DaemonManagerLike {
               cwd: resolveStableDaemonWorkingDirectory(),
               stdio: [
                 "ignore",
-                logFd,
-                resolveAutomobileLogSink(childEnv) === "stderr" ||
-                resolveAutomobileLogSink(childEnv) === "both"
-                  ? "inherit"
-                  : logFd,
+                capturesLaunchOutput ? logFd : "ignore",
+                logSink === "stderr" || logSink === "both" ? "pipe" : logFd,
               ],
               env: childEnv,
             },
+            onSpawn: logSink === "stderr" || logSink === "both" ? relayDaemonStderr : undefined,
             timeoutMs: DAEMON_STARTUP_TIMEOUT_MS,
             waitForReady: (timeoutMs, signal) => this.waitForReady(timeoutMs, signal),
             isReadyForLaunchedProcess: (pid, timeoutMs, signal) =>
@@ -917,14 +940,23 @@ export class DaemonManager implements DaemonManagerLike {
   private async formatDaemonStartupFailure(summary: string, logPath: string): Promise<string> {
     const logExcerpt = await this.readDaemonStartupLogExcerpt(logPath);
     if (logExcerpt.length === 0) {
+      if (logPath === devNull) {
+        return `${summary}\nDaemon stderr was relayed to the configured process sink; file capture is disabled.`;
+      }
       return `${summary}\nLogs: ${logPath} (empty)`;
     }
     return [
       summary,
       `Logs: ${logPath}`,
-      `Daemon stdout/stderr log excerpt (last ${MAX_DAEMON_STARTUP_LOG_BYTES} bytes):`,
+      `${this.daemonLaunchLogLabel()} (last ${MAX_DAEMON_STARTUP_LOG_BYTES} bytes):`,
       logExcerpt,
     ].join("\n");
+  }
+
+  private daemonLaunchLogLabel(): string {
+    return resolveAutomobileLogSink() === "file"
+      ? "Daemon stdout/stderr log excerpt"
+      : "Daemon stdout log excerpt; stderr was relayed to the configured process sink";
   }
 
   private async readDaemonStartupLogExcerpt(logPath: string): Promise<string> {

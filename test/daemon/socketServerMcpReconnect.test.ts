@@ -818,6 +818,50 @@ describe("UnixSocketServer MCP session reconnect", () => {
     });
   });
 
+  test("does not adopt a post-release incarnation for a session captured without one", async () => {
+    // First-use observe: session-a is absent when the identity is captured, so the
+    // captured incarnation is undefined even though the UUID is known. During
+    // dispatch the session is created and recreated on the same device (a fresh
+    // incarnation). Recovery must NOT inherit that replacement incarnation for the
+    // already-captured UUID, or the request would replay and be accepted after the
+    // original caller's ownership ended (issue #5499).
+    sessionIsValid = false;
+    let clientsCreated = 0;
+    let callsDispatched = 0;
+
+    server.mcpClientFactory = async () => {
+      clientsCreated++;
+      return createFakeMcpClient({
+        callTool: async () => {
+          callsDispatched++;
+          // Session-a comes into existence as a *replacement* incarnation.
+          sessionIsValid = true;
+          primarySessionGeneration = 1;
+          throw socketClosedError();
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: {
+        sessionUuid: "session-a",
+        deviceId: "emulator-5554",
+      },
+    });
+
+    expect(response.success).toBe(false);
+    // No reconnect or replay may be attempted — recovery is rejected up front.
+    expect(clientsCreated).toBe(1);
+    expect(callsDispatched).toBe(1);
+    expect(response.transportFailure).toMatchObject({
+      sessionUuid: "session-a",
+      sessionValid: false,
+      reconnectAttempted: false,
+      replayAttempted: false,
+    });
+  });
+
   test("does not replay when only the captured device epoch becomes invalid", async () => {
     let clientsCreated = 0;
     let callsDispatched = 0;

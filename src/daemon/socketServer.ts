@@ -1424,6 +1424,8 @@ export class UnixSocketServer {
         .getDeviceLabels(baseSessionUuid)?.[deviceLabel];
       return typeof mappedSession === "string" && mappedSession.length > 0;
     } catch (error) {
+      // A session-manager lookup failure cannot prove the label still maps to a
+      // live session, so treat the label as unresolved and fail recovery closed.
       logger.debug(
         `Unable to verify device label ${deviceLabel} for session ${baseSessionUuid}: ${error}`,
       );
@@ -1462,6 +1464,8 @@ export class UnixSocketServer {
     try {
       return this.daemonState.getSessionManager().getSessionForDevice?.(deviceId) ?? undefined;
     } catch (error) {
+      // Without a proven device→session mapping the caller must fall back to no
+      // session identity rather than guess an owner, so fail closed to undefined.
       logger.debug(`Unable to resolve session for transport device ${deviceId}: ${error}`);
       return undefined;
     }
@@ -1476,6 +1480,8 @@ export class UnixSocketServer {
     try {
       return this.daemonState.getSessionManager().getSession(sessionUuid) ?? undefined;
     } catch (error) {
+      // A missing incarnation snapshot is safe: downstream owner validation treats
+      // an absent incarnation as unverifiable and fails the ownership check closed.
       logger.debug(`Unable to capture device-control session ${sessionUuid}: ${error}`);
       return undefined;
     }
@@ -1511,6 +1517,8 @@ export class UnixSocketServer {
         .find(record => record.deviceId === deviceId)
         ?.deviceSessionUuid;
     } catch (error) {
+      // An unresolved device epoch is safe: device-session validation treats an
+      // absent epoch as unestablished and will not admit a replay against it.
       logger.debug(`Unable to resolve transport device epoch for ${deviceId}: ${error}`);
       return undefined;
     }
@@ -1549,6 +1557,8 @@ export class UnixSocketServer {
         && (!identity.deviceId || session.assignedDevice === identity.deviceId),
       );
     } catch (error) {
+      // Ownership must be provable to replay; a lookup failure leaves it unproven,
+      // so fail closed to reject the recovery rather than risk a stale-owner replay.
       logger.debug(`Unable to validate device-control target owner: ${error}`);
       return false;
     }
@@ -1572,6 +1582,8 @@ export class UnixSocketServer {
         && session === identity.routingSessionIncarnation,
       );
     } catch (error) {
+      // The routing session's grant must be provable to replay; an unverifiable
+      // lookup fails closed so a superseded routing session cannot authorize it.
       logger.debug(`Unable to validate device-control routing session: ${error}`);
       return false;
     }
@@ -1594,6 +1606,8 @@ export class UnixSocketServer {
         .find(record => record.deviceId === identity.deviceId);
       return liveDeviceSession?.deviceSessionUuid === identity.deviceSessionUuid;
     } catch (error) {
+      // A device-epoch lookup failure cannot confirm the captured epoch is still
+      // live, so fail closed to block replay against a possibly-recreated device.
       logger.debug(`Unable to validate device-control device epoch: ${error}`);
       return false;
     }
@@ -1747,18 +1761,33 @@ export class UnixSocketServer {
     identity: DeviceControlTransportIdentity,
   ): DeviceControlTransportIdentity {
     const refreshedIdentity = this.getDeviceControlTransportIdentity(context);
+    // An incarnation/epoch token only proves ownership as the pair captured with
+    // its identity key. Once the original call captured a session UUID (or device
+    // id), inheriting a *refreshed* token for that same key would let a session
+    // released and recreated on the same device mid-dispatch adopt the replacement
+    // incarnation: the unchanged device epoch and replacement session would then
+    // pass every recovery check and the request would replay and be accepted after
+    // the caller's original ownership ended (issue #5499). So a refreshed token is
+    // only inherited when its key was itself absent at capture — i.e. the key and
+    // its token arrive together from the same refresh, never mixing a captured key
+    // with a post-release token.
     return {
       sessionUuid: identity.sessionUuid ?? refreshedIdentity.sessionUuid,
       sessionIncarnation:
-        identity.sessionIncarnation ?? refreshedIdentity.sessionIncarnation,
+        identity.sessionUuid !== undefined
+          ? identity.sessionIncarnation
+          : refreshedIdentity.sessionIncarnation,
       routingSessionUuid:
         identity.routingSessionUuid ?? refreshedIdentity.routingSessionUuid,
       routingSessionIncarnation:
-        identity.routingSessionIncarnation
-        ?? refreshedIdentity.routingSessionIncarnation,
+        identity.routingSessionUuid !== undefined
+          ? identity.routingSessionIncarnation
+          : refreshedIdentity.routingSessionIncarnation,
       deviceId: identity.deviceId ?? refreshedIdentity.deviceId,
       deviceSessionUuid:
-        identity.deviceSessionUuid ?? refreshedIdentity.deviceSessionUuid,
+        identity.deviceId !== undefined
+          ? identity.deviceSessionUuid
+          : refreshedIdentity.deviceSessionUuid,
       deviceLabelResolved:
         identity.deviceLabelResolved ?? refreshedIdentity.deviceLabelResolved,
     };

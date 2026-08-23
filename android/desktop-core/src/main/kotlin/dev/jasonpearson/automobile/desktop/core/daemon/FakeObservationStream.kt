@@ -99,9 +99,18 @@ class FakeObservationStream(private val failConnect: Boolean = false) : Observat
 
   override fun setCadence(screenshotIntervalMs: Long?, hierarchyIntervalMs: Long?) = Unit
 
-  override fun resetLayoutReplayCache() = Unit
+  // Mirror the real client: drop the buffered layout replay so a resubscribing collector does not
+  // immediately receive the last pre-reset screenshot/hierarchy frame (issue #3347).
+  @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+  override fun resetLayoutReplayCache() {
+    _screenshotUpdates.resetReplayCache()
+    _hierarchyUpdates.resetReplayCache()
+  }
 
   override fun requestNavigationGraph(appId: String?) {
+    // The real ObservationStreamClient no-ops unless connected; guard the fake likewise so a
+    // disconnected test cannot get a false positive that a graph was requested.
+    if (!connected) return
     navigationRequestCount++
     lastNavigationAppId = appId
   }

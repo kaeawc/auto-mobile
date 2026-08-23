@@ -95,10 +95,32 @@ private fun classifyMatched(nodeA: UIElementInfo, nodeB: UIElementInfo?): NodeDi
 /**
  * Build a stable key -> node map in pre-order. Keys are unique within one tree by construction (the
  * per-level sibling index disambiguates siblings, and the ancestor chain disambiguates subtrees).
+ *
+ * The synthetic multi-window wrapper (see [MULTI_WINDOW_ROOT_CLASS_NAME], issue #4874) is
+ * **transparent** to the diff: each window is indexed as if it were a top-level root, keyed by its
+ * window index. Without this, a frame with an extra window (e.g. an IME) is wrapped while the other
+ * side is not, so every node's key gains a `AutoMobile.MultiWindowRoot/…` prefix on only one side
+ * and nothing matches — the whole app reports as OnlyInA/OnlyInB instead of isolating the extra
+ * window. Normalizing both shapes lets a single-window frame (window index 0) still match the first
+ * window of a wrapped multi-window frame, so only the genuinely-extra windows surface.
+ *
+ * Windows are paired positionally (by window index). Known limitation: when both sides are
+ * multi-window and a window is inserted or removed *before* another, the survivors shift index and
+ * their subtrees surface as removed+added. A stable cross-side window identity would fix this, but
+ * none survives to this layer — bounds are excluded by design (resolution differs), and the wire's
+ * only per-window id is a content hash (`src/features/observe/android/StableNodeIdentity.ts`), not
+ * a stable window handle. Tracked as a follow-up; the common single-vs-multi and parallel-window
+ * cases pair correctly.
  */
 private fun indexByPathKey(root: UIElementInfo): LinkedHashMap<String, UIElementInfo> {
   val map = LinkedHashMap<String, UIElementInfo>()
-  addSubtree(map, root, parentKey = "", siblingIndex = 0)
+  if (root.className == MULTI_WINDOW_ROOT_CLASS_NAME) {
+    root.children.forEachIndexed { index, window ->
+      addSubtree(map, window, parentKey = "", siblingIndex = index)
+    }
+  } else {
+    addSubtree(map, root, parentKey = "", siblingIndex = 0)
+  }
   return map
 }
 

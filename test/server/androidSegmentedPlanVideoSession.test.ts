@@ -6,7 +6,7 @@ import { defaultTimer } from "../../src/utils/SystemTimer";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 /** Drain all pending microtasks (setImmediate runs after the microtask queue). */
-const flush = () => new Promise<void>(resolve => setImmediate(resolve));
+const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 const androidDevice: BootedDevice = {
   deviceId: "emulator-5554",
@@ -73,6 +73,28 @@ describe("AndroidSegmentedPlanVideoSession", () => {
     expect(out.recordingIds).toEqual(["r1"]);
   });
 
+  test("matches a booted device by its runtime ID when its name changes", () => {
+    const session = new AndroidSegmentedPlanVideoSession({
+      device: androidDevice,
+      outputNamePrefix: "plan-runtime-id",
+    });
+
+    expect(
+      session.matchesDevice({
+        platform: "android",
+        name: "Unknown (emulator-5554)",
+        deviceId: "emulator-5554",
+      }),
+    ).toBe(true);
+    expect(
+      session.matchesDevice({
+        platform: "android",
+        name: androidDevice.name,
+        deviceId: "emulator-5556",
+      }),
+    ).toBe(false);
+  });
+
   test("onBeforePlanStep rotates after segmentRotateAfterMs", async () => {
     let now = 0;
     const timer: Timer = {
@@ -85,7 +107,7 @@ describe("AndroidSegmentedPlanVideoSession", () => {
     };
 
     const start = mock(async (req: { outputName?: string }) =>
-      makeActiveRecording(`id-${req.outputName}`, `/tmp/${req.outputName}.mp4`)
+      makeActiveRecording(`id-${req.outputName}`, `/tmp/${req.outputName}.mp4`),
     );
     const stop = mock(async (id: string | undefined) => {
       const rid = id ?? "x";

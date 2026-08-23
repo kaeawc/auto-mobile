@@ -6,12 +6,17 @@ import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import {
   type BootedDeviceDiscovery,
+  type DeviceImageDiscovery,
   MultiPlatformDeviceManager,
   PlatformDeviceManager,
 } from "../utils/deviceUtils";
 import { createJSONToolResponse } from "../utils/toolUtils";
-import { ActionableError, BootedDevice, DeviceInfo, SomePlatform } from "../models";
-import type { FormFactor, StartDeviceResult } from "../models/DeviceMatchCriteria";
+import { ActionableError, BootedDevice, DeviceInfo, Platform, SomePlatform } from "../models";
+import type {
+  DeviceMatchCriteria,
+  FormFactor,
+  StartDeviceResult,
+} from "../models/DeviceMatchCriteria";
 import {
   BOOTED_DEVICE_RESOURCE_URIS,
   notifyBootedDeviceResourcesUpdated,
@@ -22,12 +27,17 @@ import {
 } from "./deviceImageResources";
 import { syncInstalledAppResources } from "./appResources";
 import { listActiveVideoRecordings, stopVideoRecording } from "./videoRecordingManager";
+import { stopSegmentedVideoRecordingsForDevice } from "./videoRecordingTools";
 import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 import { logger } from "../utils/logger";
 import { createPerformanceTracker } from "../utils/PerformanceTracker";
 import { getPerformanceMonitor } from "../features/performance/PerformanceMonitor";
-import { platformSchema } from "./toolSchemaHelpers";
+import {
+  platformSchema,
+  withCanonicalDiscriminatedUnionJsonSchema,
+  withJsonSchemaOverride,
+} from "./toolSchemaHelpers";
 import { DefaultDeviceMatcher, type DeviceMatcher } from "../utils/deviceMatcher";
 import { DEVICE_POOL_MATCHING, isDevicePoolAutolockEnabled } from "../daemon/poolConfig";
 import {
@@ -53,6 +63,7 @@ import { executionTracker } from "./executionTracker";
 import {
   registerDirectSessionDevice,
   unregisterDirectSessionsForDevice,
+  unregisterDirectSessionsForStableIdentity,
 } from "./directSessionDeviceRegistry";
 import {
   createDefaultRunnerReadinessService,
@@ -66,6 +77,7 @@ import {
 } from "../utils/runnerReadinessConfig";
 import { serverConfig } from "../utils/ServerConfig";
 import {
+  DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS,
   DEFAULT_DEVICE_READY_TIMEOUT_MS,
   DEFAULT_PROVISION_DEVICE_TIMEOUT_MS,
   MAX_DEVICE_READY_TIMEOUT_MS,
@@ -82,7 +94,20 @@ import {
   ProvisionDeviceOperationConflictError,
   type ProvisionDeviceOperationStore,
 } from "../db/provisionDeviceOperationRepository";
+import {
+  DeviceTeardownOperationRepository,
+  type DeviceTeardownOperationStore,
+} from "../db/deviceTeardownOperationRepository";
 import { stableStringify } from "../utils/stableStringify";
+import {
+  getVirtualDeviceLifecycleCoordinator,
+  InMemoryVirtualDeviceLifecycleCoordinator,
+  type VirtualDeviceLifecycleCoordinator,
+  type VirtualDeviceLifecycleLease,
+  type VirtualDeviceLifecycleOperation,
+} from "../utils/virtualDeviceLifecycleCoordinator";
+import { DeviceTeardownService, type DeviceTeardownPhase } from "../utils/deviceTeardownService";
+import { DeviceShutdownService } from "../utils/deviceShutdownService";
 
 // Schema definitions
 export const listDeviceImagesSchema = z.object({
@@ -250,22 +275,24 @@ const iosProvisionDeviceSpecSchema = z
 export const provisionDeviceSchema = z
   .object({
     operationId: z.string().min(1).describe("Caller-generated idempotency key"),
-    device: z.discriminatedUnion("platform", [
-      z
-        .object({
-          platform: z.literal("android"),
-          name: z.string().min(1).describe("Exact AVD name"),
-          spec: androidProvisionDeviceSpecSchema,
-        })
-        .strict(),
-      z
-        .object({
-          platform: z.literal("ios"),
-          name: z.string().min(1).describe("Exact simulator name"),
-          spec: iosProvisionDeviceSpecSchema,
-        })
-        .strict(),
-    ]),
+    device: withCanonicalDiscriminatedUnionJsonSchema(
+      z.discriminatedUnion("platform", [
+        z
+          .object({
+            platform: z.literal("android"),
+            name: z.string().min(1).describe("Exact AVD name"),
+            spec: androidProvisionDeviceSpecSchema,
+          })
+          .strict(),
+        z
+          .object({
+            platform: z.literal("ios"),
+            name: z.string().min(1).describe("Exact simulator name"),
+            spec: iosProvisionDeviceSpecSchema,
+          })
+          .strict(),
+      ]),
+    ),
     boot: z
       .boolean()
       .default(true)
@@ -295,6 +322,51 @@ export const killDeviceSchema = z.object({
   }),
 });
 
+const TEARDOWN_OPERATION_ID_JSON_SCHEMA_PATTERN =
+  "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$";
+
+export const teardownDeviceSchema = z
+  .object({
+    operationId: withJsonSchemaOverride(
+      z.string().uuid().describe("Caller-generated idempotency and diagnostic correlation ID"),
+      (jsonSchema) => {
+        // Zod's UUID JSON Schema pattern differs between platforms.
+        jsonSchema.pattern = TEARDOWN_OPERATION_ID_JSON_SCHEMA_PATTERN;
+      },
+    ),
+    target: z
+      .object({
+        platform: platformSchema.describe("Platform reported by automobile:devices/booted"),
+        isVirtual: z
+          .literal(true)
+          .describe("Virtual-device flag reported by automobile:devices/booted"),
+        stableId: z
+          .string()
+          .min(1)
+          .describe("Stable platform device identity from automobile:devices/booted"),
+        stableName: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("Stable platform representation name when available"),
+      })
+      .strict(),
+    mode: z
+      .literal("destroy")
+      .describe("Stop and permanently delete the platform device representation"),
+    verifyAbsence: z
+      .literal(true)
+      .describe("Require a complete inventory observation proving durable absence"),
+    timeoutMs: z
+      .number()
+      .int()
+      .positive()
+      .max(MAX_DEVICE_READY_TIMEOUT_MS)
+      .optional()
+      .describe("Total bounded teardown timeout in ms"),
+  })
+  .strict();
+
 export const DEVICE_ALREADY_STOPPED_ERROR_CODE = "device_already_stopped";
 
 // A successful platform shutdown command only confirms that the request was
@@ -303,6 +375,7 @@ export const DEVICE_ALREADY_STOPPED_ERROR_CODE = "device_already_stopped";
 const DEVICE_SHUTDOWN_TIMEOUT_MS = 30_000;
 const DEVICE_SHUTDOWN_POLL_INTERVAL_MS = 1_000;
 const DEVICE_SHUTDOWN_POST_RELEASE_RECHECK_TIMEOUT_MS = 1_000;
+const TEARDOWN_OPERATION_RESULT_TTL_MS = 5 * 60 * 1_000;
 
 function getShutdownInitiatingExecutionId(): string | undefined {
   return getToolSelectionContext()?.execution?.executionId;
@@ -409,6 +482,58 @@ export interface KillDeviceArgs {
   device: BootedDevice;
 }
 
+export interface TeardownDeviceArgs {
+  operationId: string;
+  target: {
+    platform: Platform;
+    isVirtual: true;
+    stableId: string;
+    stableName?: string;
+  };
+  mode: "destroy";
+  verifyAbsence: true;
+  timeoutMs?: number;
+}
+
+interface StableDeviceTarget {
+  platform: Platform;
+  stableId: string;
+}
+
+type StableDeviceLifecycleTimeoutFactory = (detail: string) => Error;
+
+async function reserveStableDeviceLifecycle(
+  target: StableDeviceTarget,
+  deadlineDevice: BootedDevice,
+  timer: Timer,
+  deadlineMs: number,
+  requestAbortSignal: AbortSignal | undefined,
+  timeoutError: StableDeviceLifecycleTimeoutFactory = (detail) =>
+    shutdownTimeoutError(deadlineDevice, detail),
+  operation: VirtualDeviceLifecycleOperation = "start",
+  coordinator: VirtualDeviceLifecycleCoordinator = getVirtualDeviceLifecycleCoordinator(),
+): Promise<VirtualDeviceLifecycleLease> {
+  try {
+    return await coordinator.reserve(
+      {
+        kind: "stable",
+        platform: target.platform,
+        stableId: target.stableId,
+      },
+      {
+        operation,
+        deadlineMs,
+        signal: requestAbortSignal,
+      },
+    );
+  } catch (error) {
+    if (timer.now() >= deadlineMs) {
+      throw timeoutError("waiting for stable device lifecycle reservation");
+    }
+    throw error;
+  }
+}
+
 function deviceIdentityPayload(
   device: BootedDevice,
   sourceImage?: DeviceInfo,
@@ -451,11 +576,13 @@ export interface DeviceToolsDependencies {
     deviceCreationGate: DeviceCreationGate,
   ) => ExactDeviceProvisioner;
   provisionDeviceOperationStoreFactory: () => ProvisionDeviceOperationStore;
+  teardownDeviceOperationStoreFactory: () => DeviceTeardownOperationStore;
   clearInstalledAppsForDevice: (deviceId: string) => Promise<void>;
   stopPerformanceMonitoring: (deviceId: string) => void;
   stopAndroidObservers: (device: BootedDevice) => Promise<void>;
   idGenerator: IdGenerator;
   timer: Timer;
+  lifecycleCoordinator: VirtualDeviceLifecycleCoordinator;
 }
 
 const activeProvisionDeviceOperations = new Map<
@@ -530,6 +657,7 @@ interface ShutdownDeadlineContext {
   device: BootedDevice;
   timer: Timer;
   deadlineMs: number;
+  timeoutMs: number;
   requestAbortSignal: AbortSignal | undefined;
   retainReservationUntil?: (operation: Promise<unknown>, releaseAfterFailure?: boolean) => void;
 }
@@ -553,6 +681,7 @@ async function stopVideoRecordingBeforeShutdown(
       "video recording teardown did not complete",
       context.requestAbortSignal,
       async () => await stopVideoRecording(recordingId),
+      context.timeoutMs,
     );
   } catch (error) {
     if (shouldPropagateShutdownPreparationError(error, context.requestAbortSignal)) {
@@ -568,6 +697,15 @@ async function stopVideoRecordingsBeforeShutdown(
 ): Promise<void> {
   perf.startOperation("stopRecordings");
   try {
+    await runWithinShutdownDeadline(
+      context.device,
+      context.timer,
+      context.deadlineMs,
+      "segmented video recording teardown did not complete",
+      context.requestAbortSignal,
+      async () => await stopSegmentedVideoRecordingsForDevice(context.device),
+      context.timeoutMs,
+    );
     const activeRecordings = await runWithinShutdownDeadline(
       context.device,
       context.timer,
@@ -579,6 +717,7 @@ async function stopVideoRecordingsBeforeShutdown(
           deviceId: context.device.deviceId,
           platform: context.device.platform,
         }),
+      context.timeoutMs,
     );
     for (const recording of activeRecordings) {
       await stopVideoRecordingBeforeShutdown(recording.recordingId, context);
@@ -612,6 +751,7 @@ async function stopIosCtrlProxyBeforeShutdown(
       "iOS CtrlProxy shutdown did not complete",
       context.requestAbortSignal,
       async () => await stop,
+      context.timeoutMs,
     );
   } catch (error) {
     if (shouldPropagateShutdownPreparationError(error, context.requestAbortSignal)) {
@@ -665,10 +805,14 @@ async function stopAndroidCtrlProxyBeforeShutdown(
   }
 }
 
-function shutdownTimeoutError(device: BootedDevice, detail: string): ActionableError {
+function shutdownTimeoutError(
+  device: BootedDevice,
+  detail: string,
+  timeoutMs = DEVICE_SHUTDOWN_TIMEOUT_MS,
+): ActionableError {
   return new ActionableError(
     `Timed out waiting for ${device.platform} device '${device.name}' (${device.deviceId}) ` +
-      `to disappear after ${DEVICE_SHUTDOWN_TIMEOUT_MS}ms: ${detail}. ` +
+      `to disappear after ${timeoutMs}ms: ${detail}. ` +
       "Verify the platform shutdown state and retry.",
   );
 }
@@ -708,6 +852,17 @@ function handleShutdownCommandError(
   throw error;
 }
 
+function rethrowShutdownFailure(
+  device: BootedDevice,
+  requestAbortSignal: AbortSignal | undefined,
+  error: unknown,
+): never {
+  if (error instanceof ActionableError || requestAbortSignal?.aborted) {
+    throw error;
+  }
+  throw new ActionableError(`Failed to kill ${device.platform} device: ${error}`);
+}
+
 function abortPromise(signal: AbortSignal | undefined): {
   promise: Promise<never> | undefined;
   cleanup: () => void;
@@ -741,10 +896,11 @@ async function runWithinShutdownDeadline<T>(
   detail: string,
   requestAbortSignal: AbortSignal | undefined,
   operation: (signal: AbortSignal, timeoutMs: number) => Promise<T>,
+  timeoutMs = DEVICE_SHUTDOWN_TIMEOUT_MS,
 ): Promise<T> {
   const remainingMs = deadlineMs - timer.now();
   if (remainingMs <= 0) {
-    throw shutdownTimeoutError(device, detail);
+    throw shutdownTimeoutError(device, detail, timeoutMs);
   }
   const deadlineController = new AbortController();
   const signal = requestAbortSignal
@@ -756,14 +912,14 @@ async function runWithinShutdownDeadline<T>(
     timeout = timer.setTimeout(() => {
       timedOut = true;
       deadlineController.abort();
-      reject(shutdownTimeoutError(device, detail));
+      reject(shutdownTimeoutError(device, detail, timeoutMs));
     }, remainingMs);
   });
   const requestAbort = abortPromise(requestAbortSignal);
   const operationPromise = runWithAbortSignal(signal, () => operation(signal, remainingMs)).catch(
     (error) => {
       if (timedOut) {
-        throw shutdownTimeoutError(device, detail);
+        throw shutdownTimeoutError(device, detail, timeoutMs);
       }
       throw error;
     },
@@ -786,12 +942,41 @@ async function runWithinShutdownDeadline<T>(
   }
 }
 
+async function runPostShutdownStep(
+  context: ShutdownDeadlineContext,
+  perf: ReturnType<typeof createPerformanceTracker>,
+  operationName: "cleanup" | "notifyResources",
+  detail: string,
+  strictDeadline: boolean,
+  operation: () => Promise<void>,
+): Promise<void> {
+  perf.startOperation(operationName);
+  try {
+    if (strictDeadline) {
+      await runWithinShutdownDeadline(
+        context.device,
+        context.timer,
+        context.deadlineMs,
+        detail,
+        context.requestAbortSignal,
+        async () => await operation(),
+        context.timeoutMs,
+      );
+      return;
+    }
+    await operation();
+  } finally {
+    perf.endOperation(operationName);
+  }
+}
+
 async function getShutdownDiscovery(
   deviceManager: PlatformDeviceManager,
   device: BootedDevice,
   timer: Timer,
   deadlineMs: number,
   requestAbortSignal: AbortSignal | undefined,
+  timeoutMs = DEVICE_SHUTDOWN_TIMEOUT_MS,
 ) {
   return await runWithinShutdownDeadline(
     device,
@@ -803,6 +988,7 @@ async function getShutdownDiscovery(
       await deviceManager.getBootedDevicesDetailed(device.platform, {
         bypassAndroidDeviceListCache: true,
       }),
+    timeoutMs,
   );
 }
 
@@ -812,11 +998,12 @@ async function waitForDeviceShutdown(
   timer: Timer,
   deadlineMs: number,
   requestAbortSignal: AbortSignal | undefined,
+  timeoutMs = DEVICE_SHUTDOWN_TIMEOUT_MS,
 ): Promise<BootedDevice | undefined> {
   let lastDiscoveryDetail = "platform discovery did not complete";
   for (;;) {
     if (timer.now() >= deadlineMs) {
-      throw shutdownTimeoutError(device, lastDiscoveryDetail);
+      throw shutdownTimeoutError(device, lastDiscoveryDetail, timeoutMs);
     }
     const discovery = await getShutdownDiscovery(
       deviceManager,
@@ -824,6 +1011,7 @@ async function waitForDeviceShutdown(
       timer,
       deadlineMs,
       requestAbortSignal,
+      timeoutMs,
     );
     const platformWasDiscovered = discovery.succeededPlatforms.has(device.platform);
     const matchingDevice = findDiscoveredDevice(discovery, device);
@@ -839,7 +1027,7 @@ async function waitForDeviceShutdown(
       : "platform discovery did not succeed";
     const remainingMs = deadlineMs - timer.now();
     if (remainingMs <= 0) {
-      throw shutdownTimeoutError(device, lastDiscoveryDetail);
+      throw shutdownTimeoutError(device, lastDiscoveryDetail, timeoutMs);
     }
     await timer.sleep(Math.min(DEVICE_SHUTDOWN_POLL_INTERVAL_MS, remainingMs));
   }
@@ -892,27 +1080,38 @@ async function rebuildSameIdReplacement(
   });
 }
 
+function shutdownRecheckDeadlineMs(
+  timer: Timer,
+  deadlineMs: number,
+  strictDeadline: boolean,
+): number {
+  if (strictDeadline) {
+    return deadlineMs;
+  }
+  return Math.max(deadlineMs, timer.now() + DEVICE_SHUTDOWN_POST_RELEASE_RECHECK_TIMEOUT_MS);
+}
+
 async function findReplacementAfterSessionRelease(
   deviceManager: PlatformDeviceManager,
   device: BootedDevice,
   timer: Timer,
   deadlineMs: number,
   requestAbortSignal: AbortSignal | undefined,
+  strictDeadline = false,
+  timeoutMs = DEVICE_SHUTDOWN_TIMEOUT_MS,
 ): Promise<BootedDevice | undefined> {
   // The absence observation only proves the old incarnation was gone before
   // session release. A same-ID replacement can appear while that release
-  // awaits persistence, so reserve a short, bounded recheck even after the
-  // disappearance deadline was consumed.
-  const recheckDeadlineMs = Math.max(
-    deadlineMs,
-    timer.now() + DEVICE_SHUTDOWN_POST_RELEASE_RECHECK_TIMEOUT_MS,
-  );
+  // awaits persistence, so ordinary shutdown keeps a short, bounded recheck
+  // even after the disappearance deadline was consumed.
+  const recheckDeadlineMs = shutdownRecheckDeadlineMs(timer, deadlineMs, strictDeadline);
   const discovery = await getShutdownDiscovery(
     deviceManager,
     device,
     timer,
     recheckDeadlineMs,
     requestAbortSignal,
+    timeoutMs,
   );
   const replacement = findDiscoveredDevice(discovery, device);
   if (
@@ -930,6 +1129,7 @@ async function findReplacementAfterSessionRelease(
     timer,
     recheckDeadlineMs,
     requestAbortSignal,
+    timeoutMs,
   );
 }
 
@@ -1014,6 +1214,8 @@ async function findReplacementOrRetainShutdownReservation(
   stopPerformanceMonitoring: (deviceId: string) => void,
   retainReservationUntil: (retirement: Promise<void>) => void,
   retryAfterFailure: boolean,
+  strictDeadline: boolean,
+  timeoutMs: number,
 ): Promise<BootedDevice | undefined> {
   try {
     return (
@@ -1024,6 +1226,8 @@ async function findReplacementOrRetainShutdownReservation(
         timer,
         deadlineMs,
         abortSignal,
+        strictDeadline,
+        timeoutMs,
       ))
     );
   } catch (error) {
@@ -1082,6 +1286,62 @@ function preserveLateShutdownRetirement(
   );
 }
 
+async function releaseShutdownSessionOwnership(
+  device: BootedDevice,
+  expectedPooledDevice: PooledDevice,
+  daemonState: DaemonState,
+  observedReplacement: BootedDevice | undefined,
+  deviceManager: PlatformDeviceManager,
+  timer: Timer,
+  deadlineMs: number,
+  abortSignal: AbortSignal | undefined,
+  stopPerformanceMonitoring: (deviceId: string) => void,
+  retainReservationUntil: (retirement: Promise<void>) => void,
+  strictDeadline: boolean,
+  timeoutMs: number,
+): Promise<void> {
+  const sessionManager = daemonState.getSessionManager();
+  const sessionId = expectedPooledDevice.sessionId;
+  if (!sessionId || sessionManager.getSessionForDevice(device.deviceId) !== sessionId) {
+    return;
+  }
+
+  await executionTracker.cancelSessionUuidExecutions(
+    sessionId,
+    `device-disconnected:${device.deviceId}`,
+    { excludeExecutionId: getShutdownInitiatingExecutionId() },
+  );
+  const release = sessionManager.releaseSession(sessionId, `device-stopped:${device.deviceId}`);
+  try {
+    await runWithinShutdownDeadline(
+      device,
+      timer,
+      shutdownRecheckDeadlineMs(timer, deadlineMs, strictDeadline),
+      "session ownership retirement did not complete",
+      abortSignal,
+      async () => await release,
+      timeoutMs,
+    );
+  } catch (error) {
+    preserveLateShutdownRetirement(
+      error,
+      abortSignal,
+      sessionManager,
+      sessionId,
+      release,
+      device,
+      expectedPooledDevice,
+      observedReplacement,
+      deviceManager,
+      timer,
+      deadlineMs,
+      stopPerformanceMonitoring,
+      retainReservationUntil,
+    );
+    throw error;
+  }
+}
+
 async function retireShutdownOwnership(
   device: BootedDevice,
   expectedPooledDevice: PooledDevice | null,
@@ -1093,6 +1353,8 @@ async function retireShutdownOwnership(
   stopPerformanceMonitoring: (deviceId: string) => void,
   retainReservationUntil: (retirement: Promise<void>) => void,
   retryAfterDiscoveryFailure: boolean = true,
+  strictDeadline = false,
+  timeoutMs = DEVICE_SHUTDOWN_TIMEOUT_MS,
 ): Promise<void> {
   if (!expectedPooledDevice) {
     return;
@@ -1108,47 +1370,20 @@ async function retireShutdownOwnership(
     return;
   }
 
-  const sessionManager = daemonState.getSessionManager();
-  const sessionId = expectedPooledDevice.sessionId;
-  if (sessionId && sessionManager.getSessionForDevice(device.deviceId) === sessionId) {
-    const retirementDeadlineMs = Math.max(
-      deadlineMs,
-      timer.now() + DEVICE_SHUTDOWN_POST_RELEASE_RECHECK_TIMEOUT_MS,
-    );
-    await executionTracker.cancelSessionUuidExecutions(
-      sessionId,
-      `device-disconnected:${device.deviceId}`,
-      { excludeExecutionId: getShutdownInitiatingExecutionId() },
-    );
-    const release = sessionManager.releaseSession(sessionId, `device-stopped:${device.deviceId}`);
-    try {
-      await runWithinShutdownDeadline(
-        device,
-        timer,
-        retirementDeadlineMs,
-        "session ownership retirement did not complete",
-        abortSignal,
-        async () => await release,
-      );
-    } catch (error) {
-      preserveLateShutdownRetirement(
-        error,
-        abortSignal,
-        sessionManager,
-        sessionId,
-        release,
-        device,
-        expectedPooledDevice,
-        observedReplacement,
-        deviceManager,
-        timer,
-        deadlineMs,
-        stopPerformanceMonitoring,
-        retainReservationUntil,
-      );
-      throw error;
-    }
-  }
+  await releaseShutdownSessionOwnership(
+    device,
+    expectedPooledDevice,
+    daemonState,
+    observedReplacement,
+    deviceManager,
+    timer,
+    deadlineMs,
+    abortSignal,
+    stopPerformanceMonitoring,
+    retainReservationUntil,
+    strictDeadline,
+    timeoutMs,
+  );
   if (devicePool.getDevice(device.deviceId) !== expectedPooledDevice) {
     return;
   }
@@ -1169,6 +1404,8 @@ async function retireShutdownOwnership(
     stopPerformanceMonitoring,
     retainReservationUntil,
     retryAfterDiscoveryFailure,
+    strictDeadline,
+    timeoutMs,
   );
   if (replacement) {
     await rebuildSameIdReplacement(
@@ -1197,7 +1434,12 @@ async function killProcessAndRetireOwnership(
   devicePool: DevicePool | undefined,
   expectedPooledDevice: PooledDevice | null,
   shutdownDeadlineMs: number,
-  retainReservationUntil: (retirement: Promise<void>) => void,
+  retainReservationUntil: (
+    retirement: Promise<void>,
+    releaseReservationAfterFailure?: boolean,
+  ) => void,
+  strictDeadline = false,
+  timeoutMs = DEVICE_SHUTDOWN_TIMEOUT_MS,
 ): Promise<string | undefined> {
   const deviceManager = dependencies.deviceManagerFactory();
   if (device.platform === "android") {
@@ -1206,6 +1448,8 @@ async function killProcessAndRetireOwnership(
 
   let shutdownDevice = device;
   let alreadyStoppedMessage: string | undefined;
+  let platformShutdown: Promise<BootedDevice | void> | undefined;
+  let platformShutdownSettled = false;
   perf.startOperation("killProcess");
   try {
     const killedDevice = await runWithinShutdownDeadline(
@@ -1214,10 +1458,17 @@ async function killProcessAndRetireOwnership(
       shutdownDeadlineMs,
       "platform shutdown command did not complete",
       requestAbortSignal,
-      async (signal, timeoutMs) => await deviceManager.killDevice(device, { signal, timeoutMs }),
+      async (signal, timeoutMs) => {
+        platformShutdown = deviceManager.killDevice(device, { signal, timeoutMs }).finally(() => {
+          platformShutdownSettled = true;
+        });
+        return await platformShutdown;
+      },
+      timeoutMs,
     );
     shutdownDevice = killedDevice ?? device;
   } catch (error) {
+    retainLatePlatformShutdown(platformShutdown, platformShutdownSettled, retainReservationUntil);
     alreadyStoppedMessage = handleShutdownCommandError(
       device,
       error,
@@ -1240,6 +1491,7 @@ async function killProcessAndRetireOwnership(
       dependencies.timer,
       shutdownDeadlineMs,
       requestAbortSignal,
+      timeoutMs,
     );
     perf.endOperation("waitForShutdown");
     shutdownWasConfirmed = true;
@@ -1255,6 +1507,9 @@ async function killProcessAndRetireOwnership(
       requestAbortSignal,
       dependencies.stopPerformanceMonitoring,
       retainReservationUntil,
+      true,
+      strictDeadline,
+      timeoutMs,
     );
     perf.endOperation("retireOwnership");
     return undefined;
@@ -1273,6 +1528,886 @@ async function killProcessAndRetireOwnership(
   }
 }
 
+function retainLatePlatformShutdown(
+  platformShutdown: Promise<BootedDevice | void> | undefined,
+  platformShutdownSettled: boolean,
+  retainReservationUntil: (
+    retirement: Promise<void>,
+    releaseReservationAfterFailure?: boolean,
+  ) => void,
+): void {
+  if (platformShutdown && !platformShutdownSettled) {
+    retainReservationUntil(
+      platformShutdown.then(() => undefined),
+      true,
+    );
+  }
+}
+
+interface ShutdownResult {
+  timing: unknown;
+  alreadyStoppedMessage?: string;
+}
+
+const deviceShutdownService = new DeviceShutdownService();
+
+async function shutdownDevice(
+  device: BootedDevice,
+  dependencies: DeviceToolsDependencies,
+  requestAbortSignal: AbortSignal | undefined,
+  shutdownDeadlineMs: number,
+  operationName: string,
+  strictDeadline = false,
+  timeoutMs = DEVICE_SHUTDOWN_TIMEOUT_MS,
+  retainLifecycleUntil?: (operation: Promise<unknown>) => void,
+): Promise<ShutdownResult> {
+  const perf = createPerformanceTracker(true);
+  perf.serial(operationName);
+  const daemonState = DaemonState.getInstance();
+  const devicePool = daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
+  return await deviceShutdownService.shutdown({
+    prepare: async () =>
+      await runWithinShutdownDeadline(
+        device,
+        dependencies.timer,
+        shutdownDeadlineMs,
+        "shutdown preparation did not complete",
+        requestAbortSignal,
+        async (signal) => await devicePool?.reserveDeviceForShutdown(device.deviceId, signal),
+        timeoutMs,
+      ),
+    execute: async (shutdownReservation, retainReservationUntil) => {
+      const expectedPooledDevice = shutdownReservation?.device ?? null;
+      const retainShutdownUntil = (
+        operation: Promise<unknown>,
+        releaseReservationAfterFailure = false,
+      ): void => {
+        retainReservationUntil(operation, releaseReservationAfterFailure);
+        retainLifecycleUntil?.(operation);
+      };
+      const shutdownContext: ShutdownDeadlineContext = {
+        device,
+        timer: dependencies.timer,
+        deadlineMs: shutdownDeadlineMs,
+        timeoutMs,
+        requestAbortSignal,
+        retainReservationUntil: retainShutdownUntil,
+      };
+      await stopVideoRecordingsBeforeShutdown(shutdownContext, perf);
+      await stopIosCtrlProxyBeforeShutdown(shutdownContext, perf);
+      await stopAndroidCtrlProxyBeforeShutdown(
+        shutdownContext,
+        perf,
+        dependencies.stopAndroidObservers,
+      );
+
+      const alreadyStoppedMessage = await killProcessAndRetireOwnership(
+        dependencies,
+        device,
+        perf,
+        requestAbortSignal,
+        devicePool,
+        expectedPooledDevice,
+        shutdownDeadlineMs,
+        (retirement, releaseReservationAfterFailure) => {
+          retainShutdownUntil(retirement, releaseReservationAfterFailure);
+        },
+        strictDeadline,
+        timeoutMs,
+      );
+
+      if (alreadyStoppedMessage !== undefined) {
+        // The target may have stopped between teardown discovery and the platform
+        // kill command. Retire the captured pool incarnation before deletion.
+        perf.startOperation("retireOwnership");
+        await retireShutdownOwnership(
+          device,
+          expectedPooledDevice,
+          undefined,
+          dependencies.deviceManagerFactory(),
+          dependencies.timer,
+          shutdownDeadlineMs,
+          requestAbortSignal,
+          dependencies.stopPerformanceMonitoring,
+          retainShutdownUntil,
+          true,
+          strictDeadline,
+          timeoutMs,
+        );
+        perf.endOperation("retireOwnership");
+      }
+
+      await shutdownReservation?.release();
+      unregisterDirectSessionsForDevice(device.deviceId);
+
+      await runPostShutdownStep(
+        shutdownContext,
+        perf,
+        "cleanup",
+        "installed-app cleanup did not complete",
+        strictDeadline,
+        async () => await clearInstalledAppsAfterShutdown(dependencies, device.deviceId),
+      );
+      await runPostShutdownStep(
+        shutdownContext,
+        perf,
+        "notifyResources",
+        "resource notification did not complete",
+        strictDeadline,
+        async () => await notifyResourcesAfterShutdown(dependencies),
+      );
+
+      perf.end();
+      return {
+        timing: perf.getTimings(),
+        alreadyStoppedMessage,
+      };
+    },
+    failure: (error) => rethrowShutdownFailure(device, requestAbortSignal, error),
+  });
+}
+
+type TeardownFailurePhase = "precondition" | "stop" | "destroy" | "verification";
+
+type TeardownResolvedTarget =
+  | {
+      device: DeviceInfo;
+      wasBooted: false;
+    }
+  | {
+      device: DeviceInfo;
+      wasBooted: true;
+      bootedDevice: BootedDevice;
+    };
+
+function isVirtualAndroidDevice(device: BootedDevice): boolean {
+  return device.platform === "android" && device.deviceId.startsWith("emulator-");
+}
+
+function resolveKillDeviceStableTarget(
+  device: BootedDevice,
+  devicePool: DevicePool | undefined,
+): StableDeviceTarget | undefined {
+  if (device.platform === "ios") {
+    return { platform: "ios", stableId: device.deviceId };
+  }
+  if (!isVirtualAndroidDevice(device)) {
+    return undefined;
+  }
+  if (!isUnknownAndroidRuntimeName(device)) {
+    return { platform: "android", stableId: device.name };
+  }
+  const pooledAvdName = getValidatedPooledAndroidAvdName(device, devicePool);
+  return pooledAvdName ? { platform: "android", stableId: pooledAvdName } : undefined;
+}
+
+function getValidatedPooledAndroidAvdName(
+  device: BootedDevice,
+  devicePool: DevicePool | undefined,
+): string | undefined {
+  if (device.platform !== "android" || !isUnknownAndroidRuntimeName(device)) {
+    return undefined;
+  }
+  const pooled = devicePool?.getDevice(device.deviceId);
+  if (
+    !pooled?.avdName ||
+    !pooled.transportId ||
+    !device.transportId ||
+    pooled.transportId !== device.transportId
+  ) {
+    return undefined;
+  }
+  return pooled.avdName;
+}
+
+function getBootedAndroidStableName(
+  device: BootedDevice,
+  devicePool: DevicePool | undefined,
+): string {
+  return getValidatedPooledAndroidAvdName(device, devicePool) ?? device.name;
+}
+
+function matchesTeardownStableId(
+  device: BootedDevice,
+  stableId: string,
+  devicePool: DevicePool | undefined,
+): boolean {
+  return device.platform === "android" && isVirtualAndroidDevice(device)
+    ? getBootedAndroidStableName(device, devicePool) === stableId
+    : device.deviceId === stableId;
+}
+
+function teardownDeadlineDevice(args: TeardownDeviceArgs): BootedDevice {
+  return {
+    platform: args.target.platform,
+    name: args.target.stableId,
+    deviceId: args.target.stableId,
+  };
+}
+
+function createTeardownResponse(
+  args: TeardownDeviceArgs,
+  state: "destroyed" | "already_absent",
+  command: { stop: "accepted" | "not_required"; destroy: "accepted" | "not_required" },
+  verification: { notRunning: "confirmed"; inventory: "complete_absence_confirmed" },
+  resolved?: DeviceInfo,
+  timing?: unknown,
+) {
+  return createJSONToolResponse({
+    operationId: args.operationId,
+    mode: args.mode,
+    state,
+    target: {
+      stableId: args.target.stableId,
+      stableName: args.target.stableName,
+      platform: resolved?.platform ?? args.target.platform,
+      isVirtual: args.target.isVirtual,
+    },
+    command,
+    verification,
+    timing,
+  });
+}
+
+function createTeardownFailureResponse(
+  args: TeardownDeviceArgs,
+  phase: TeardownFailurePhase,
+  code: string,
+  message: string,
+  resolved?: DeviceInfo,
+) {
+  return {
+    isError: true,
+    content: [
+      {
+        type: "text" as const,
+        text: JSON.stringify({
+          success: false,
+          error: message,
+          operationId: args.operationId,
+          mode: args.mode,
+          state: "failed",
+          target: {
+            stableId: args.target.stableId,
+            stableName: args.target.stableName,
+            platform: resolved?.platform ?? args.target.platform,
+            isVirtual: args.target.isVirtual,
+          },
+          failure: { code, phase, message },
+        }),
+      },
+    ],
+  };
+}
+
+function findMatchingBootedTeardownDevices(
+  discovery: BootedDeviceDiscovery,
+  args: TeardownDeviceArgs,
+  devicePool: DevicePool | undefined,
+): BootedDevice[] {
+  return discovery.devices.filter(
+    (device) =>
+      device.platform === args.target.platform &&
+      matchesTeardownStableId(device, args.target.stableId, devicePool),
+  );
+}
+
+function createBootedTeardownTarget(
+  device: BootedDevice,
+  args: TeardownDeviceArgs,
+  devicePool: DevicePool | undefined,
+): { target?: TeardownResolvedTarget; conflict?: string; unsupported?: string } {
+  const stableName =
+    device.platform === "android" ? getBootedAndroidStableName(device, devicePool) : device.name;
+  if (args.target.stableName && args.target.stableName !== stableName) {
+    return { conflict: "The requested stable name does not match the booted device identity." };
+  }
+  if (device.platform === "android" && !isVirtualAndroidDevice(device)) {
+    return {
+      unsupported:
+        "Physical Android devices do not have a deletable platform device representation.",
+    };
+  }
+  return {
+    target: {
+      device: {
+        ...device,
+        name: stableName,
+        isRunning: true,
+      },
+      wasBooted: true,
+      bootedDevice: {
+        ...device,
+        name: stableName,
+      },
+    },
+  };
+}
+
+function findBootedTeardownTarget(
+  discovery: BootedDeviceDiscovery,
+  args: TeardownDeviceArgs,
+  devicePool: DevicePool | undefined,
+): { target?: TeardownResolvedTarget; conflict?: string; unsupported?: string } {
+  const matchingId = findMatchingBootedTeardownDevices(discovery, args, devicePool);
+  if (matchingId.length > 1) {
+    return { conflict: "Multiple booted devices matched the requested stable ID." };
+  }
+  const device = matchingId[0];
+  if (device) {
+    if (
+      device.platform === "android" &&
+      isUnknownAndroidRuntimeName(device) &&
+      !devicePool?.getDevice(device.deviceId)?.avdName
+    ) {
+      return {
+        unsupported:
+          "Cannot safely identify the requested booted Android AVD because its runtime name is unknown.",
+      };
+    }
+    return createBootedTeardownTarget(device, args, devicePool);
+  }
+  return {};
+}
+
+function findInventoryTeardownTarget(
+  discovery: DeviceImageDiscovery,
+  args: TeardownDeviceArgs,
+): { target?: TeardownResolvedTarget; conflict?: string } {
+  const matches = discovery.devices.filter(
+    (device) =>
+      device.platform === args.target.platform &&
+      (device.platform === "ios"
+        ? device.deviceId === args.target.stableId
+        : device.name === args.target.stableId),
+  );
+  if (matches.length > 1) {
+    return {
+      conflict: "Multiple platform device representations matched the requested stable ID.",
+    };
+  }
+  const device = matches[0];
+  if (device && args.target.stableName && args.target.stableName !== device.name) {
+    return { conflict: "The requested stable name does not match the platform device identity." };
+  }
+  return device ? { target: { device: { ...device, isRunning: false }, wasBooted: false } } : {};
+}
+
+function inventoryContainsTarget(
+  discovery: DeviceImageDiscovery,
+  target: TeardownResolvedTarget,
+): boolean {
+  return discovery.devices.some(
+    (device) =>
+      device.platform === target.device.platform &&
+      (device.platform === "ios"
+        ? device.deviceId === target.device.deviceId
+        : device.name === target.device.name),
+  );
+}
+
+function completedInventoryFor(
+  discovery: { succeededPlatforms: Set<SomePlatform> },
+  platform: SomePlatform,
+): boolean {
+  return discovery.succeededPlatforms.has(platform);
+}
+
+type TeardownToolResponse =
+  | ReturnType<typeof createTeardownResponse>
+  | ReturnType<typeof createTeardownFailureResponse>;
+
+function teardownOperationFingerprint(args: TeardownDeviceArgs): string {
+  return stableStringify({
+    target: args.target,
+    mode: args.mode,
+    verifyAbsence: args.verifyAbsence,
+    timeoutMs: args.timeoutMs,
+  });
+}
+
+function isTeardownFailure(response: TeardownToolResponse): boolean {
+  return "isError" in response && response.isError === true;
+}
+
+let deviceTeardownService: DeviceTeardownService | undefined;
+
+function getDeviceTeardownService(dependencies: DeviceToolsDependencies): DeviceTeardownService {
+  deviceTeardownService ??= new DeviceTeardownService({
+    lifecycleCoordinator: dependencies.lifecycleCoordinator,
+    operationStore: dependencies.teardownDeviceOperationStoreFactory(),
+    timer: dependencies.timer,
+    resultTtlMs: TEARDOWN_OPERATION_RESULT_TTL_MS,
+  });
+  return deviceTeardownService;
+}
+
+type TeardownResolution = { target: TeardownResolvedTarget } | { response: TeardownToolResponse };
+
+interface TeardownContext {
+  args: TeardownDeviceArgs;
+  dependencies: DeviceToolsDependencies;
+  deviceManager: PlatformDeviceManager;
+  requestAbortSignal: AbortSignal | undefined;
+  deadlineDevice: BootedDevice;
+  deadlineMs: number;
+  timeoutMs: number;
+  lifecycleLease?: VirtualDeviceLifecycleLease;
+  initialAndroidRuntimeIds?: Set<string>;
+}
+
+async function stopSegmentedVideoRecordingsBeforeDestroy(
+  context: TeardownContext,
+  target: TeardownResolvedTarget,
+): Promise<void> {
+  await runWithinShutdownDeadline(
+    context.deadlineDevice,
+    context.dependencies.timer,
+    context.deadlineMs,
+    "segmented video recording teardown did not complete",
+    context.requestAbortSignal,
+    async () => await stopSegmentedVideoRecordingsForDevice(target.device),
+    context.timeoutMs,
+  );
+}
+
+async function readTeardownBootedDiscovery(
+  context: TeardownContext,
+  detail = "booted-device precondition discovery did not complete",
+): Promise<BootedDeviceDiscovery> {
+  return await runWithinShutdownDeadline(
+    context.deadlineDevice,
+    context.dependencies.timer,
+    context.deadlineMs,
+    detail,
+    context.requestAbortSignal,
+    async () =>
+      await context.deviceManager.getBootedDevicesDetailed(context.args.target.platform, {
+        bypassAndroidDeviceListCache: true,
+      }),
+    context.timeoutMs,
+  );
+}
+
+async function readTeardownInventory(
+  context: TeardownContext,
+  platform: SomePlatform,
+  detail: string,
+): Promise<DeviceImageDiscovery> {
+  return await runWithinShutdownDeadline(
+    context.deadlineDevice,
+    context.dependencies.timer,
+    context.deadlineMs,
+    detail,
+    context.requestAbortSignal,
+    async () =>
+      await context.deviceManager.getDeviceImagesDetailed(platform, {
+        bypassIosDeviceListCache: true,
+      }),
+    context.timeoutMs,
+  );
+}
+
+async function resolveAbsentTeardownTarget(
+  context: TeardownContext,
+  booted: BootedDeviceDiscovery,
+  inventory: DeviceImageDiscovery,
+): Promise<TeardownResolution> {
+  const bootedComplete = completedInventoryFor(booted, context.args.target.platform);
+  const inventoryComplete = completedInventoryFor(inventory, context.args.target.platform);
+  if (!bootedComplete || !inventoryComplete) {
+    return {
+      response: createTeardownFailureResponse(
+        context.args,
+        "precondition",
+        "inventory_incomplete",
+        "Cannot prove the target is absent because one or more platform inventories did not complete.",
+      ),
+    };
+  }
+  await retireAbsentTeardownOwnership(context);
+  unregisterDirectSessionsForStableIdentity(
+    context.args.target.platform,
+    context.args.target.stableId,
+  );
+  void notifyResourcesAfterShutdown(context.dependencies);
+  return {
+    response: createTeardownResponse(
+      context.args,
+      "already_absent",
+      { stop: "not_required", destroy: "not_required" },
+      { notRunning: "confirmed", inventory: "complete_absence_confirmed" },
+    ),
+  };
+}
+
+async function resolveInventoryTeardownTarget(
+  context: TeardownContext,
+  booted: BootedDeviceDiscovery,
+  inventory: DeviceImageDiscovery,
+): Promise<TeardownResolution> {
+  const resolution = findInventoryTeardownTarget(inventory, context.args);
+  if (resolution.conflict) {
+    return {
+      response: createTeardownFailureResponse(
+        context.args,
+        "precondition",
+        "target_identity_conflict",
+        resolution.conflict,
+      ),
+    };
+  }
+  const target = resolution.target;
+  if (!target) {
+    return await resolveAbsentTeardownTarget(context, booted, inventory);
+  }
+  if (!completedInventoryFor(booted, target.device.platform)) {
+    return {
+      response: createTeardownFailureResponse(
+        context.args,
+        "precondition",
+        "booted_inventory_incomplete",
+        `Cannot confirm ${target.device.platform} target '${target.device.name}' is not running.`,
+        target.device,
+      ),
+    };
+  }
+  return { target };
+}
+
+async function resolveTeardownTarget(context: TeardownContext): Promise<TeardownResolution> {
+  const booted = await readTeardownBootedDiscovery(context);
+  if (context.args.target.platform === "android") {
+    context.initialAndroidRuntimeIds = new Set(
+      booted.devices
+        .filter((device) => device.platform === "android")
+        .map((device) => device.deviceId),
+    );
+  }
+  const daemonState = DaemonState.getInstance();
+  const devicePool = daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
+  const bootedTarget = findBootedTeardownTarget(booted, context.args, devicePool);
+  if (bootedTarget.conflict) {
+    return {
+      response: createTeardownFailureResponse(
+        context.args,
+        "precondition",
+        "target_identity_conflict",
+        bootedTarget.conflict,
+      ),
+    };
+  }
+  if (bootedTarget.unsupported) {
+    return {
+      response: createTeardownFailureResponse(
+        context.args,
+        "precondition",
+        "target_not_destroyable",
+        bootedTarget.unsupported,
+      ),
+    };
+  }
+  if (bootedTarget.target) {
+    return { target: bootedTarget.target };
+  }
+  const unresolvedAndroidRuntime = booted.devices.find(
+    (device) =>
+      device.platform === "android" &&
+      isVirtualAndroidDevice(device) &&
+      isUnknownAndroidRuntimeName(device) &&
+      !getValidatedPooledAndroidAvdName(device, devicePool),
+  );
+  if (unresolvedAndroidRuntime) {
+    return {
+      response: createTeardownFailureResponse(
+        context.args,
+        "precondition",
+        "target_identity_unresolved",
+        `Android emulator runtime '${unresolvedAndroidRuntime.deviceId}' has no resolvable AVD name; refusing deletion.`,
+      ),
+    };
+  }
+  const inventory = await readTeardownInventory(
+    context,
+    context.args.target.platform,
+    "platform inventory precondition did not complete",
+  );
+  return await resolveInventoryTeardownTarget(context, booted, inventory);
+}
+
+function findStoppedTeardownPooledDevices(
+  devicePool: DevicePool,
+  target: TeardownResolvedTarget,
+): PooledDevice[] {
+  return devicePool
+    .getAllDevices()
+    .filter(
+      (device) =>
+        device.platform === target.device.platform &&
+        (device.platform === "ios"
+          ? device.id === target.device.deviceId
+          : (device.avdName ?? device.name) === target.device.name),
+    );
+}
+
+function findAbsentTeardownPooledDevices(
+  devicePool: DevicePool,
+  target: TeardownDeviceArgs["target"],
+): PooledDevice[] {
+  return devicePool
+    .getAllDevices()
+    .filter(
+      (device) =>
+        device.platform === target.platform &&
+        (device.platform === "ios"
+          ? device.id === target.stableId
+          : (device.avdName ?? device.name) === target.stableId),
+    );
+}
+
+async function retireTeardownPooledOwnership(
+  context: TeardownContext,
+  expectedPooledDevice: PooledDevice,
+  name: string,
+): Promise<void> {
+  const devicePool = DaemonState.getInstance().getDevicePool();
+  const reservation = await runWithinShutdownDeadline(
+    context.deadlineDevice,
+    context.dependencies.timer,
+    context.deadlineMs,
+    "stopped-device ownership reservation did not complete",
+    context.requestAbortSignal,
+    async (signal) => await devicePool.reserveDeviceForShutdown(expectedPooledDevice.id, signal),
+    context.timeoutMs,
+  );
+  if (!reservation || reservation.device !== expectedPooledDevice) {
+    await reservation?.release();
+    return;
+  }
+
+  let retainsReservation = false;
+  const retainReservationUntil = (retirement: Promise<unknown>): void => {
+    retainsReservation = true;
+    void retirement.then(
+      () => reservation.release(),
+      () => reservation.release(),
+    );
+  };
+  const retirementDevice: BootedDevice = {
+    platform: expectedPooledDevice.platform,
+    name,
+    deviceId: expectedPooledDevice.id,
+    ...(expectedPooledDevice.transportId ? { transportId: expectedPooledDevice.transportId } : {}),
+  };
+  try {
+    await stopVideoRecordingsBeforeShutdown(
+      {
+        device: retirementDevice,
+        timer: context.dependencies.timer,
+        deadlineMs: context.deadlineMs,
+        timeoutMs: context.timeoutMs,
+        requestAbortSignal: context.requestAbortSignal,
+        retainReservationUntil,
+      },
+      createPerformanceTracker(true),
+    );
+    await retireShutdownOwnership(
+      retirementDevice,
+      expectedPooledDevice,
+      undefined,
+      context.deviceManager,
+      context.dependencies.timer,
+      context.deadlineMs,
+      context.requestAbortSignal,
+      context.dependencies.stopPerformanceMonitoring,
+      retainReservationUntil,
+      false,
+      true,
+      context.timeoutMs,
+    );
+  } finally {
+    if (!retainsReservation) {
+      await reservation.release();
+    }
+  }
+}
+
+async function retireStoppedTeardownOwnership(
+  context: TeardownContext,
+  target: TeardownResolvedTarget,
+): Promise<void> {
+  const daemonState = DaemonState.getInstance();
+  if (!daemonState.isInitialized()) {
+    return;
+  }
+  const expectedPooledDevices = findStoppedTeardownPooledDevices(
+    daemonState.getDevicePool(),
+    target,
+  );
+  for (const expectedPooledDevice of expectedPooledDevices) {
+    await retireTeardownPooledOwnership(context, expectedPooledDevice, target.device.name);
+  }
+}
+
+async function retireAbsentTeardownOwnership(context: TeardownContext): Promise<void> {
+  const daemonState = DaemonState.getInstance();
+  if (!daemonState.isInitialized()) {
+    return;
+  }
+  const expectedPooledDevices = findAbsentTeardownPooledDevices(
+    daemonState.getDevicePool(),
+    context.args.target,
+  );
+  for (const expectedPooledDevice of expectedPooledDevices) {
+    await retireTeardownPooledOwnership(
+      context,
+      expectedPooledDevice,
+      expectedPooledDevice.platform === "android"
+        ? (expectedPooledDevice.avdName ?? expectedPooledDevice.name)
+        : expectedPooledDevice.name,
+    );
+  }
+}
+
+async function destroyTeardownTarget(
+  context: TeardownContext,
+  target: TeardownResolvedTarget,
+  retainStableLifecycleUntil: (operation: Promise<unknown>) => void,
+  markDestructionStarted: () => void,
+): Promise<void> {
+  const deadlineTarget: BootedDevice = {
+    name: target.device.name,
+    platform: target.device.platform,
+    deviceId: target.device.deviceId ?? context.args.target.stableId,
+  };
+  let destroy: Promise<void> | undefined;
+  try {
+    await runWithinShutdownDeadline(
+      deadlineTarget,
+      context.dependencies.timer,
+      context.deadlineMs,
+      "platform deletion command did not complete",
+      context.requestAbortSignal,
+      async (signal, timeoutMs) => {
+        markDestructionStarted();
+        destroy = context.deviceManager.destroyDevice(target.device, {
+          signal,
+          timeoutMs,
+          lifecycleLease: context.lifecycleLease,
+        });
+        return await destroy;
+      },
+      context.timeoutMs,
+    );
+  } catch (error) {
+    if (destroy) {
+      retainStableLifecycleUntil(destroy);
+    }
+    throw error;
+  }
+}
+
+async function checkForRestartedTeardownTarget(
+  context: TeardownContext,
+  target: TeardownResolvedTarget,
+  phase: "stop" | "verification",
+): Promise<TeardownToolResponse | undefined> {
+  if (target.device.platform !== "android") {
+    return undefined;
+  }
+  const booted = await readTeardownBootedDiscovery(
+    context,
+    phase === "stop"
+      ? "post-shutdown booted-device discovery did not complete"
+      : "post-delete booted-device discovery did not complete",
+  );
+  if (!completedInventoryFor(booted, target.device.platform)) {
+    return createTeardownFailureResponse(
+      context.args,
+      phase,
+      "booted_inventory_incomplete",
+      "Cannot confirm the Android AVD is not running.",
+      target.device,
+    );
+  }
+  const daemonState = DaemonState.getInstance();
+  const devicePool = daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
+  const newlyAppearedUnresolvedRuntime = booted.devices.find(
+    (device) =>
+      device.platform === "android" &&
+      isVirtualAndroidDevice(device) &&
+      isUnknownAndroidRuntimeName(device) &&
+      !getValidatedPooledAndroidAvdName(device, devicePool) &&
+      (!context.initialAndroidRuntimeIds?.has(device.deviceId) ||
+        (target.wasBooted && device.deviceId === target.bootedDevice.deviceId)),
+  );
+  if (newlyAppearedUnresolvedRuntime) {
+    return createTeardownFailureResponse(
+      context.args,
+      phase,
+      "target_identity_unresolved",
+      `A new Android emulator runtime '${newlyAppearedUnresolvedRuntime.deviceId}' appeared ` +
+        "without a resolvable AVD name; refusing deletion.",
+      target.device,
+    );
+  }
+  const replacement = findMatchingBootedTeardownDevices(booted, context.args, devicePool)[0];
+  if (!replacement) {
+    return undefined;
+  }
+  return createTeardownFailureResponse(
+    context.args,
+    phase,
+    phase === "stop" ? "target_restarted" : "target_still_running",
+    phase === "stop"
+      ? "The Android AVD restarted after shutdown confirmation; refusing deletion."
+      : "The Android AVD is still running after deletion.",
+    target.device,
+  );
+}
+
+async function verifyTeardownAbsence(
+  context: TeardownContext,
+  target: TeardownResolvedTarget,
+  stop: "accepted" | "not_required",
+): Promise<TeardownToolResponse> {
+  const restarted = await checkForRestartedTeardownTarget(context, target, "verification");
+  if (restarted) {
+    return restarted;
+  }
+  const inventory = await readTeardownInventory(
+    context,
+    target.device.platform,
+    "post-delete platform inventory did not complete",
+  );
+  if (!completedInventoryFor(inventory, target.device.platform)) {
+    return createTeardownFailureResponse(
+      context.args,
+      "verification",
+      "inventory_incomplete",
+      "The platform deletion command completed, but durable absence could not be verified.",
+      target.device,
+    );
+  }
+  if (inventoryContainsTarget(inventory, target)) {
+    return createTeardownFailureResponse(
+      context.args,
+      "verification",
+      "target_still_present",
+      "The platform deletion command completed, but the target is still present in inventory.",
+      target.device,
+    );
+  }
+  void notifyResourcesAfterShutdown(context.dependencies);
+  return createTeardownResponse(
+    context.args,
+    "destroyed",
+    { stop, destroy: "accepted" },
+    { notRunning: "confirmed", inventory: "complete_absence_confirmed" },
+    target.device,
+  );
+}
+
 let moduleDependencies: DeviceToolsDependencies | null = null;
 
 function getDeviceToolsDependencies(): DeviceToolsDependencies {
@@ -1286,11 +2421,13 @@ function getDeviceToolsDependencies(): DeviceToolsDependencies {
       exactDeviceProvisionerFactory: (deviceManager, deviceCreationGate) =>
         createDefaultExactDeviceProvisioner(deviceManager, deviceCreationGate),
       provisionDeviceOperationStoreFactory: () => new ProvisionDeviceOperationRepository(),
+      teardownDeviceOperationStoreFactory: () => new DeviceTeardownOperationRepository(),
       clearInstalledAppsForDevice: defaultClearInstalledAppsForDevice,
       stopPerformanceMonitoring: (deviceId) => getPerformanceMonitor().stopMonitoring(deviceId),
       stopAndroidObservers: defaultStopAndroidObservers,
       idGenerator: defaultIdGenerator,
       timer: defaultTimer,
+      lifecycleCoordinator: getVirtualDeviceLifecycleCoordinator(),
     };
   }
   return moduleDependencies;
@@ -1311,6 +2448,20 @@ function provisionDeviceDependencyOverrides(
   };
 }
 
+function resolveDeviceToolsLifecycleCoordinator(
+  deps: Partial<DeviceToolsDependencies>,
+  currentDeps: DeviceToolsDependencies,
+): VirtualDeviceLifecycleCoordinator {
+  if (deps.lifecycleCoordinator) {
+    return deps.lifecycleCoordinator;
+  }
+  return deps.timer
+    ? new InMemoryVirtualDeviceLifecycleCoordinator(deps.timer)
+    : currentDeps.lifecycleCoordinator;
+}
+
+// The override merger intentionally keeps all dependency seams in one place.
+// oxlint-disable-next-line complexity
 export function setDeviceToolsDependencies(deps: Partial<DeviceToolsDependencies>): void {
   const currentDeps = getDeviceToolsDependencies();
   moduleDependencies = {
@@ -1322,6 +2473,8 @@ export function setDeviceToolsDependencies(deps: Partial<DeviceToolsDependencies
       deps.deviceCreationGateFactory ?? currentDeps.deviceCreationGateFactory,
     deviceProvisionerFactory: deps.deviceProvisionerFactory ?? currentDeps.deviceProvisionerFactory,
     ...provisionDeviceDependencyOverrides(deps, currentDeps),
+    teardownDeviceOperationStoreFactory:
+      deps.teardownDeviceOperationStoreFactory ?? currentDeps.teardownDeviceOperationStoreFactory,
     clearInstalledAppsForDevice:
       deps.clearInstalledAppsForDevice ?? currentDeps.clearInstalledAppsForDevice,
     stopPerformanceMonitoring:
@@ -1329,10 +2482,13 @@ export function setDeviceToolsDependencies(deps: Partial<DeviceToolsDependencies
     stopAndroidObservers: deps.stopAndroidObservers ?? currentDeps.stopAndroidObservers,
     idGenerator: deps.idGenerator ?? currentDeps.idGenerator,
     timer: deps.timer ?? currentDeps.timer,
+    lifecycleCoordinator: resolveDeviceToolsLifecycleCoordinator(deps, currentDeps),
   };
 }
 
 export function resetDeviceToolsDependencies(): void {
+  deviceTeardownService?.dispose();
+  deviceTeardownService = undefined;
   moduleDependencies = null;
   activeProvisionDeviceOperations.clear();
 }
@@ -1445,7 +2601,7 @@ async function runProvisionDeviceWithinDeadline<T>(
   }
 }
 
-async function waitForProvisionDeviceOperation<T>(
+async function waitForSharedOperation<T>(
   promise: Promise<T>,
   signal: AbortSignal | undefined,
 ): Promise<T> {
@@ -1529,9 +2685,9 @@ function validatePooledDeviceMapping(device: BootedDevice, requestedIdentity: st
   }
 }
 
-function cancelUnownedColdBoot(boot: DeviceBootResult | undefined): void {
+function cancelUnownedColdBoot(boot: DeviceBootResult | undefined): Promise<void> | undefined {
   if (boot?.source !== "cold-boot" || !boot.processHandle) {
-    return;
+    return undefined;
   }
   const daemonState = DaemonState.getInstance();
   if (
@@ -1541,8 +2697,16 @@ function cancelUnownedColdBoot(boot: DeviceBootResult | undefined): void {
     logger.info(
       `[DeviceTools] Cold boot ${boot.device.deviceId} process ownership transferred before cleanup`,
     );
-    return;
+    return undefined;
   }
+  const processSettlement =
+    typeof boot.processHandle.once !== "function" ||
+    boot.processHandle.exitCode !== null ||
+    boot.processHandle.signalCode !== null
+      ? Promise.resolve()
+      : new Promise<void>((resolve) => {
+          boot.processHandle?.once("exit", () => resolve());
+        });
   try {
     boot.processHandle.kill();
   } catch (error) {
@@ -1551,6 +2715,7 @@ function cancelUnownedColdBoot(boot: DeviceBootResult | undefined): void {
       error,
     );
   }
+  return processSettlement;
 }
 
 function clearColdBootShutdownMarker(source: "booted" | "cold-boot", deviceId: string): void {
@@ -1686,7 +2851,7 @@ async function rebootAndroidAfterSystemUiAnr(
     // The pool rolls an adopted replacement back before rejecting its handoff,
     // so any replacement still in scope here is safe to cancel as an unowned
     // cold boot.
-    cancelUnownedColdBoot(replacementBoot);
+    void cancelUnownedColdBoot(replacementBoot);
     try {
       await cleanUpFailedSystemUiAnrRecovery(
         devicePool,
@@ -1824,7 +2989,7 @@ async function retireSystemUiAnrReplacement(
   } finally {
     // Retiring the pool entry drops its process tracking, allowing the existing
     // cold-boot cleanup to terminate this recovered emulator deterministically.
-    cancelUnownedColdBoot(replacementBoot);
+    void cancelUnownedColdBoot(replacementBoot);
   }
 }
 
@@ -2106,6 +3271,92 @@ function getVerifiedWarmAndroidAvdIdentity(
   return undefined;
 }
 
+async function resolveAndroidStartStableDeviceLifecycleTarget(
+  deviceId: string,
+  deadlineMs: number,
+  deviceUtils: PlatformDeviceManager,
+  timer: Timer,
+  signal: AbortSignal | undefined,
+): Promise<StableDeviceTarget | undefined> {
+  const bootedDiscovery = await runWithinShutdownDeadline(
+    { name: deviceId, platform: "android", deviceId },
+    timer,
+    deadlineMs,
+    "Android booted-device identity discovery did not complete",
+    signal,
+    async () =>
+      await deviceUtils.getBootedDevicesDetailed("android", {
+        bypassAndroidDeviceListCache: true,
+      }),
+  );
+  const bootedMatches = bootedDiscovery.devices.filter(
+    (device) => device.platform === "android" && device.deviceId === deviceId,
+  );
+  if (bootedMatches.length > 1) {
+    throw new ActionableError(
+      `Cannot uniquely resolve Android device '${deviceId}' for lifecycle coordination.`,
+    );
+  }
+  const bootedMatch = bootedMatches[0];
+  if (bootedMatch && !isVirtualAndroidDevice(bootedMatch)) {
+    // Physical devices have no AVD representation; coordinate by the request selector.
+    return undefined;
+  }
+
+  const imageDiscovery = await runWithinShutdownDeadline(
+    { name: deviceId, platform: "android", deviceId },
+    timer,
+    deadlineMs,
+    "Android AVD identity discovery did not complete",
+    signal,
+    async () => await deviceUtils.getDeviceImagesDetailed("android"),
+  );
+  if (!imageDiscovery.succeededPlatforms.has("android")) {
+    throw new ActionableError(
+      `Cannot uniquely resolve Android device '${deviceId}' for lifecycle coordination.`,
+    );
+  }
+  const imageMatches = imageDiscovery.devices.filter(
+    (device) =>
+      device.platform === "android" && (device.deviceId === deviceId || device.name === deviceId),
+  );
+  if (imageMatches.length > 1) {
+    throw new ActionableError(
+      `Cannot uniquely resolve Android device '${deviceId}' for lifecycle coordination.`,
+    );
+  }
+  if (imageMatches.length === 1) {
+    return { platform: "android", stableId: imageMatches[0].name };
+  }
+
+  const daemonState = DaemonState.getInstance();
+  const devicePool = daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
+  const stableIds = new Set(
+    bootedMatches.map((device) => getBootedAndroidStableName(device, devicePool)),
+  );
+  if (stableIds.size === 0) {
+    if (!bootedDiscovery.succeededPlatforms.has("android")) {
+      throw new ActionableError(
+        `Cannot uniquely resolve Android device '${deviceId}' for lifecycle coordination.`,
+      );
+    }
+    return undefined;
+  }
+  if (
+    stableIds.size !== 1 ||
+    bootedMatches.some(
+      (device) =>
+        isUnknownAndroidRuntimeName(device) &&
+        !getValidatedPooledAndroidAvdName(device, devicePool),
+    )
+  ) {
+    throw new ActionableError(
+      `Cannot uniquely resolve Android device '${deviceId}' for lifecycle coordination.`,
+    );
+  }
+  return { platform: "android", stableId: [...stableIds][0] };
+}
+
 export function registerDeviceTools() {
   // List AVDs handler
   const listDeviceImagesHandler = async (args: ListDeviceImagesArgs) => {
@@ -2171,9 +3422,7 @@ export function registerDeviceTools() {
         );
       }
       try {
-        return createProvisionDeviceResponse(
-          await waitForProvisionDeviceOperation(active.promise, signal),
-        );
+        return createProvisionDeviceResponse(await waitForSharedOperation(active.promise, signal));
       } catch (error) {
         return provisionDeviceErrorResponse(error);
       }
@@ -2195,7 +3444,7 @@ export function registerDeviceTools() {
       },
     );
     try {
-      return createProvisionDeviceResponse(await waitForProvisionDeviceOperation(promise, signal));
+      return createProvisionDeviceResponse(await waitForSharedOperation(promise, signal));
     } catch (error) {
       return provisionDeviceErrorResponse(error);
     }
@@ -2211,10 +3460,9 @@ export function registerDeviceTools() {
     const operation = await store.begin(args.operationId, fingerprint);
     try {
       if (!operation.started) {
-        if (!args.boot) {
-          return operation.result;
-        }
-        if (await revalidateProvisionDeviceReplay(args, deps, operation.result, signal)) {
+        if (
+          await canReplayCompletedProvisionDeviceOperation(args, deps, operation.result, signal)
+        ) {
           return operation.result;
         }
         await releaseErroredProvisionDeviceSession(operation.result);
@@ -2247,6 +3495,87 @@ export function registerDeviceTools() {
       const provisionError = toProvisionDeviceError(args, error);
       await store.fail(args.operationId, provisionError.code, provisionError.message);
       throw provisionError;
+    }
+  }
+
+  interface PersistedProvisionDevice {
+    name: string;
+    platform: "android" | "ios";
+    deviceId?: string;
+  }
+
+  function getPersistedProvisionDevice(
+    result: Record<string, unknown>,
+  ): PersistedProvisionDevice | undefined {
+    const device = result.device;
+    if (typeof device !== "object" || device === null || Array.isArray(device)) {
+      return undefined;
+    }
+    const deviceRecord = device as Record<string, unknown>;
+    if (typeof deviceRecord.name !== "string") {
+      return undefined;
+    }
+    if (deviceRecord.platform !== "android" && deviceRecord.platform !== "ios") {
+      return undefined;
+    }
+    return {
+      name: deviceRecord.name,
+      platform: deviceRecord.platform,
+      deviceId: typeof deviceRecord.deviceId === "string" ? deviceRecord.deviceId : undefined,
+    };
+  }
+
+  async function reserveProvisionDeviceReplayLifecycle(
+    args: ProvisionDeviceArgs,
+    deps: DeviceToolsDependencies,
+    result: Record<string, unknown>,
+    signal: AbortSignal | undefined,
+  ): Promise<VirtualDeviceLifecycleLease | undefined> {
+    const device = getPersistedProvisionDevice(result);
+    const stableId = device?.platform === "android" ? device.name : device?.deviceId;
+    if (!device || !stableId) {
+      return undefined;
+    }
+    const totalDeadlineMs =
+      deps.timer.now() + (args.timeoutMs ?? DEFAULT_PROVISION_DEVICE_TIMEOUT_MS);
+    return await reserveStableDeviceLifecycle(
+      { platform: device.platform, stableId },
+      {
+        platform: device.platform,
+        name: device.name,
+        deviceId: device.deviceId ?? stableId,
+      },
+      deps.timer,
+      totalDeadlineMs,
+      signal,
+      (detail) =>
+        new ProvisionDeviceError(
+          "timeout",
+          `Timed out replaying provisioned ${device.platform} device '${device.name}': ${detail}.`,
+        ),
+      "provision",
+      deps.lifecycleCoordinator,
+    );
+  }
+
+  async function canReplayCompletedProvisionDeviceOperation(
+    args: ProvisionDeviceArgs,
+    deps: DeviceToolsDependencies,
+    result: Record<string, unknown>,
+    signal: AbortSignal | undefined,
+  ): Promise<boolean> {
+    const replayLease = await reserveProvisionDeviceReplayLifecycle(args, deps, result, signal);
+    const replaySignal = replayLease
+      ? signal
+        ? AbortSignal.any([signal, replayLease.signal])
+        : replayLease.signal
+      : signal;
+    try {
+      return (
+        !args.boot || (await revalidateProvisionDeviceReplay(args, deps, result, replaySignal))
+      );
+    } finally {
+      replayLease?.release();
     }
   }
 
@@ -2336,26 +3665,19 @@ export function registerDeviceTools() {
     if (typeof result.sessionId !== "string") {
       return undefined;
     }
-    const device = result.device;
-    if (typeof device !== "object" || device === null || Array.isArray(device)) {
-      return undefined;
-    }
-    const deviceRecord = device as Record<string, unknown>;
-    if (typeof deviceRecord.deviceId !== "string" || typeof deviceRecord.name !== "string") {
-      return undefined;
-    }
-    if (deviceRecord.platform !== "android" && deviceRecord.platform !== "ios") {
+    const device = getPersistedProvisionDevice(result);
+    if (!device?.deviceId) {
       return undefined;
     }
     const persistedDevice: BootedDevice = {
-      name: deviceRecord.name,
-      platform: deviceRecord.platform,
-      deviceId: deviceRecord.deviceId,
+      name: device.name,
+      platform: device.platform,
+      deviceId: device.deviceId,
     };
     return {
       sessionId: result.sessionId,
-      deviceId: deviceRecord.deviceId,
-      platform: deviceRecord.platform,
+      deviceId: device.deviceId,
+      platform: device.platform,
       device: persistedDevice,
     };
   }
@@ -2445,6 +3767,79 @@ export function registerDeviceTools() {
     );
   }
 
+  async function reserveExistingIosProvisionDeviceLifecycle(
+    args: ProvisionDeviceArgs,
+    deps: DeviceToolsDependencies,
+    deviceManager: PlatformDeviceManager,
+    totalDeadlineMs: number,
+    signal: AbortSignal | undefined,
+  ): Promise<VirtualDeviceLifecycleLease | undefined> {
+    const discovery = await runProvisionDeviceWithinDeadline(
+      deps.timer,
+      totalDeadlineMs,
+      signal,
+      "resolving the exact iOS simulator identity",
+      async () =>
+        await deviceManager.getDeviceImagesDetailed("ios", {
+          bypassIosDeviceListCache: true,
+        }),
+    );
+    if (!discovery.succeededPlatforms.has("ios")) {
+      throw new ProvisionDeviceError(
+        "platform_command_failed",
+        `Cannot provision iOS device '${args.device.name}' because simulator identity discovery did not complete.`,
+      );
+    }
+    const spec = args.device.spec;
+    const candidates = discovery.devices.filter(
+      (device) =>
+        device.platform === "ios" &&
+        device.name === args.device.name &&
+        device.deviceId &&
+        device.runtime === spec.runtime &&
+        device.deviceType === spec.deviceType,
+    );
+    const existing = candidates.find((device) => device.isAvailable !== false) ?? candidates[0];
+    if (!existing?.deviceId) {
+      return undefined;
+    }
+    return await reserveIosProvisionDeviceLifecycle(args, deps, existing, totalDeadlineMs, signal);
+  }
+
+  async function reserveIosProvisionDeviceLifecycle(
+    args: ProvisionDeviceArgs,
+    deps: DeviceToolsDependencies,
+    device: Pick<DeviceInfo, "deviceId">,
+    totalDeadlineMs: number,
+    signal: AbortSignal | undefined,
+  ): Promise<VirtualDeviceLifecycleLease> {
+    if (!device.deviceId) {
+      throw new ProvisionDeviceError(
+        "identity_conflict",
+        `Exact iOS simulator '${args.device.name}' has no UDID.`,
+      );
+    }
+    const target: StableDeviceTarget = { platform: "ios", stableId: device.deviceId };
+    return await reserveStableDeviceLifecycle(
+      target,
+      {
+        platform: target.platform,
+        name: args.device.name,
+        deviceId: target.stableId,
+      },
+      deps.timer,
+      totalDeadlineMs,
+      signal,
+      (detail) =>
+        new ProvisionDeviceError(
+          "timeout",
+          `Timed out provisioning ${target.platform} device '${args.device.name}': ${detail}.`,
+        ),
+      "provision",
+      deps.lifecycleCoordinator,
+    );
+  }
+
   async function runProvisionDeviceLifecycle(
     args: ProvisionDeviceArgs,
     deps: DeviceToolsDependencies,
@@ -2456,8 +3851,41 @@ export function registerDeviceTools() {
     perf.serial("provisionDevice");
     const totalDeadlineMs =
       deps.timer.now() + (args.timeoutMs ?? DEFAULT_PROVISION_DEVICE_TIMEOUT_MS);
+    const deviceManager = deps.deviceManagerFactory();
+    let lifecycleLease: VirtualDeviceLifecycleLease | undefined;
     try {
-      const deviceManager = deps.deviceManagerFactory();
+      if (args.device.platform === "android") {
+        lifecycleLease = await reserveStableDeviceLifecycle(
+          { platform: "android", stableId: args.device.name },
+          {
+            platform: "android",
+            name: args.device.name,
+            deviceId: args.device.name,
+          },
+          deps.timer,
+          totalDeadlineMs,
+          signal,
+          (detail) =>
+            new ProvisionDeviceError(
+              "timeout",
+              `Timed out provisioning Android AVD '${args.device.name}': ${detail}.`,
+            ),
+          "provision",
+          deps.lifecycleCoordinator,
+        );
+      } else {
+        lifecycleLease = await reserveExistingIosProvisionDeviceLifecycle(
+          args,
+          deps,
+          deviceManager,
+          totalDeadlineMs,
+          signal,
+        );
+        lifecycleLease ??= await deps.lifecycleCoordinator.reserve(
+          { kind: "selector", platform: "ios", selector: args.device.name },
+          { operation: "provision", deadlineMs: totalDeadlineMs, signal },
+        );
+      }
       const deviceCreationGate = deps.deviceCreationGateFactory();
       const provisioned = await provisionExactDevice(
         args,
@@ -2467,6 +3895,7 @@ export function registerDeviceTools() {
         totalDeadlineMs,
         reconcileExistingConfiguration,
         markDeviceCreationStarted,
+        lifecycleLease,
         signal,
       );
       const createdByOperation = reconcileExistingConfiguration || provisioned.created;
@@ -2477,7 +3906,6 @@ export function registerDeviceTools() {
         perf.end();
         return buildProvisionDeviceResult(args, provisioned, createdByOperation, perf, undefined);
       }
-
       const booted = await bootExactProvisionedDevice(
         args,
         deps,
@@ -2486,6 +3914,7 @@ export function registerDeviceTools() {
         provisioned,
         perf,
         totalDeadlineMs,
+        lifecycleLease,
         signal,
       );
       if (provisioned.created || booted.source === "cold-boot") {
@@ -2496,6 +3925,8 @@ export function registerDeviceTools() {
     } catch (error) {
       perf.end();
       throw error;
+    } finally {
+      lifecycleLease?.release();
     }
   }
 
@@ -2507,6 +3938,7 @@ export function registerDeviceTools() {
     totalDeadlineMs: number,
     reconcileExistingConfiguration: boolean,
     markDeviceCreationStarted: () => Promise<void>,
+    lifecycleLease: VirtualDeviceLifecycleLease,
     signal: AbortSignal | undefined,
   ): Promise<Awaited<ReturnType<ExactDeviceProvisioner["provision"]>>> {
     perf.startOperation("provisionExactDevice");
@@ -2523,6 +3955,8 @@ export function registerDeviceTools() {
             spec: args.device.spec,
             reconcileExistingConfiguration,
             onBeforeCreate: markDeviceCreationStarted,
+            lifecycleLease,
+            deadlineMs: totalDeadlineMs,
             signal: deadlineSignal,
           }),
       );
@@ -2539,6 +3973,7 @@ export function registerDeviceTools() {
     provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>>,
     perf: ReturnType<typeof createPerformanceTracker>,
     totalDeadlineMs: number,
+    lifecycleLease: VirtualDeviceLifecycleLease,
     signal: AbortSignal | undefined,
   ): Promise<{ device: BootedDevice; sessionId: string; source: "booted" | "cold-boot" }> {
     const requestedIdentity = `platform=${args.device.platform} name=${args.device.name}`;
@@ -2549,6 +3984,8 @@ export function registerDeviceTools() {
       deviceProvisioner: deps.deviceProvisionerFactory(),
       matchingStrategy: DEVICE_POOL_MATCHING,
       timer: deps.timer,
+      lifecycleLease,
+      lifecycleCoordinator: deps.lifecycleCoordinator,
     });
     let boot: DeviceBootResult | undefined;
     let ownershipTransferred = false;
@@ -2620,7 +4057,7 @@ export function registerDeviceTools() {
       return { device: boot.device, sessionId, source: boot.source };
     } catch (error) {
       if (!ownershipTransferred) {
-        cancelUnownedColdBoot(boot);
+        void cancelUnownedColdBoot(boot);
       }
       throw error;
     } finally {
@@ -2697,10 +4134,7 @@ export function registerDeviceTools() {
     if (error instanceof ProvisionDeviceOperationConflictError) {
       return createToolErrorResponse("operation_conflict", error.message);
     }
-    return createToolErrorResponse(
-      "platform_command_failed",
-      errorMessage(error),
-    );
+    return createToolErrorResponse("platform_command_failed", errorMessage(error));
   }
 
   type DevicePreparationBudgets = {
@@ -2709,6 +4143,287 @@ export function registerDeviceTools() {
     automationDeadlineMs: number;
     operationName: string;
     androidAvdName?: string;
+    stableTarget?: StableDeviceTarget;
+  };
+
+  const reserveStartStableDeviceLifecycle = async (
+    stableTarget: StableDeviceTarget | undefined,
+    timer: Timer,
+    deadlineMs: number,
+    signal: AbortSignal | undefined,
+    coordinator: VirtualDeviceLifecycleCoordinator,
+  ): Promise<VirtualDeviceLifecycleLease | undefined> => {
+    if (!stableTarget) {
+      return undefined;
+    }
+    return await reserveStableDeviceLifecycle(
+      stableTarget,
+      {
+        name: stableTarget.stableId,
+        platform: stableTarget.platform,
+        deviceId: stableTarget.stableId,
+      },
+      timer,
+      deadlineMs,
+      signal,
+      undefined,
+      "start",
+      coordinator,
+    );
+  };
+
+  const resolveStartStableDeviceLifecycleTarget = async (
+    args: StartDeviceArgs,
+    budgets: DevicePreparationBudgets,
+    deviceUtils: PlatformDeviceManager,
+    deviceMatcher: DeviceMatcher,
+    timer: Timer,
+    signal: AbortSignal | undefined,
+  ): Promise<StableDeviceTarget | undefined> => {
+    if (budgets.stableTarget) {
+      return budgets.stableTarget;
+    }
+    if (args.platform === "android" && args.deviceId) {
+      return await resolveAndroidStartStableDeviceLifecycleTarget(
+        args.deviceId,
+        budgets.automationDeadlineMs,
+        deviceUtils,
+        timer,
+        signal,
+      );
+    }
+    if (args.platform !== "ios" || !args.name || args.deviceId) {
+      return undefined;
+    }
+    const discovery = await runWithinShutdownDeadline(
+      { name: args.name, platform: "ios", deviceId: args.name },
+      timer,
+      budgets.automationDeadlineMs,
+      "iOS simulator identity discovery did not complete",
+      signal,
+      async () =>
+        await deviceUtils.getDeviceImagesDetailed("ios", {
+          bypassIosDeviceListCache: true,
+        }),
+    );
+    if (!discovery.succeededPlatforms.has("ios")) {
+      throw new ActionableError(
+        `Cannot uniquely resolve iOS device '${args.name}' for lifecycle coordination; provide deviceId.`,
+      );
+    }
+    const criteria: DeviceMatchCriteria = {
+      platform: "ios",
+      name: args.name,
+      minOsVersion: args.minOsVersion,
+      maxOsVersion: args.maxOsVersion,
+      formFactor: args.formFactor,
+      screenSize: args.screenSize,
+    };
+    const match = deviceMatcher.matchDeviceImage(
+      criteria,
+      discovery.devices.filter((device) => device.platform === "ios" && device.deviceId),
+      DEVICE_POOL_MATCHING,
+    );
+    if (!match?.deviceId) {
+      // This legacy name is a creation criterion when create-if-missing is
+      // enabled, not the stable identity of an existing simulator.
+      return undefined;
+    }
+    return { platform: "ios", stableId: match.deviceId };
+  };
+
+  const reserveStartDeviceLifecycleReservations = async (
+    args: StartDeviceArgs,
+    budgets: DevicePreparationBudgets,
+    deps: DeviceToolsDependencies,
+    deviceUtils: PlatformDeviceManager,
+    deviceMatcher: DeviceMatcher,
+    bootDeadlineMs: number,
+    signal: AbortSignal | undefined,
+  ): Promise<{
+    releaseAndroidStartupLease: (() => Promise<void>) | undefined;
+    lifecycleLease: VirtualDeviceLifecycleLease;
+  }> => {
+    let releaseAndroidStartupLease: (() => Promise<void>) | undefined;
+    let lifecycleLease: VirtualDeviceLifecycleLease | undefined;
+    try {
+      releaseAndroidStartupLease = await reserveAndroidStartupLease(
+        args,
+        budgets,
+        bootDeadlineMs,
+        deps.timer,
+        signal,
+      );
+      const stableTarget = await resolveStartStableDeviceLifecycleTarget(
+        args,
+        budgets,
+        deviceUtils,
+        deviceMatcher,
+        deps.timer,
+        signal,
+      );
+      lifecycleLease =
+        (await reserveStartStableDeviceLifecycle(
+          stableTarget,
+          deps.timer,
+          budgets.automationDeadlineMs,
+          signal,
+          deps.lifecycleCoordinator,
+        )) ??
+        (await deps.lifecycleCoordinator.reserve(
+          {
+            kind: "selector",
+            platform: args.platform,
+            selector: stableStringify({
+              deviceId: args.deviceId,
+              name: args.name,
+              minOsVersion: args.minOsVersion,
+              maxOsVersion: args.maxOsVersion,
+              formFactor: args.formFactor,
+              screenSize: args.screenSize,
+            }),
+          },
+          { operation: "start", deadlineMs: budgets.automationDeadlineMs, signal },
+        ));
+      if (stableTarget?.platform === "ios" && args.name && !args.deviceId) {
+        const revalidatedTarget = await resolveStartStableDeviceLifecycleTarget(
+          args,
+          budgets,
+          deviceUtils,
+          deviceMatcher,
+          deps.timer,
+          signal,
+        );
+        if (
+          revalidatedTarget?.platform !== "ios" ||
+          revalidatedTarget.stableId !== stableTarget.stableId
+        ) {
+          throw new ActionableError(
+            `iOS simulator '${args.name}' changed while waiting for lifecycle coordination; retry the request.`,
+          );
+        }
+      }
+      return { releaseAndroidStartupLease, lifecycleLease };
+    } catch (error) {
+      lifecycleLease?.release();
+      await releaseAndroidStartupLease?.();
+      throw error;
+    }
+  };
+
+  const bootAndPrepareDevice = async (
+    args: StartDeviceArgs,
+    budgets: DevicePreparationBudgets,
+    deps: DeviceToolsDependencies,
+    deviceUtils: PlatformDeviceManager,
+    deviceMatcher: DeviceMatcher,
+    bootDeadlineMs: number,
+    requestedIdentity: string,
+    progress: ProgressCallback | undefined,
+    signal: AbortSignal | undefined,
+    perf: ReturnType<typeof createPerformanceTracker>,
+    releaseReadinessReservations: DeviceReadinessReservation[],
+    lifecycleLease: VirtualDeviceLifecycleLease,
+    state: { boot: DeviceBootResult | undefined; ownershipTransferred: boolean },
+  ) => {
+    const bootService = new DeviceBootService({
+      deviceManager: deviceUtils,
+      deviceMatcher,
+      deviceCreationGate: deps.deviceCreationGateFactory(),
+      deviceProvisioner: deps.deviceProvisionerFactory(),
+      matchingStrategy: DEVICE_POOL_MATCHING,
+      timer: deps.timer,
+      lifecycleLease,
+      lifecycleCoordinator: deps.lifecycleCoordinator,
+    });
+    perf.startOperation("bootDevice");
+    state.boot = await bootService.boot(
+      {
+        ...args,
+        timeoutMs: budgets.bootTimeoutMs,
+        totalDeadlineMs: bootDeadlineMs,
+        signal,
+      },
+      progress ? { report: progress } : undefined,
+    );
+    perf.endOperation("bootDevice");
+    validateBootIdentity(args, state.boot.device, state.boot.source, state.boot.sourceImage);
+    validatePooledDeviceMapping(state.boot.device, requestedIdentity);
+    // A warm AVD has no cold-boot source image, but its explicit getAndroid
+    // identifier is still the stable identity needed for later recovery.
+    let sourceImage =
+      state.boot.sourceImage ??
+      (budgets.androidAvdName
+        ? {
+            name: budgets.androidAvdName,
+            platform: "android" as const,
+            isRunning: true,
+            source: "local" as const,
+          }
+        : undefined);
+    const daemonState = DaemonState.getInstance();
+    await reserveInitialDeviceForReadiness(daemonState, state.boot, releaseReadinessReservations);
+
+    // A new incarnation must not inherit a prior intentional-shutdown marker
+    // while its per-device runner setup is in flight.
+    clearColdBootShutdownMarker(state.boot.source, state.boot.device.deviceId);
+
+    const ctrlProxySetup = deps.ensureCtrlProxyReady ?? ensureCtrlProxyReady;
+    const readinessResult = await prepareStartDeviceRunnerReadiness({
+      boot: state.boot,
+      args,
+      bootService,
+      deviceUtils,
+      daemonState,
+      totalDeadlineMs: budgets.automationDeadlineMs,
+      readinessTimeoutMs: budgets.automationReadyTimeoutMs,
+      timer: deps.timer,
+      signal,
+      progress,
+      perf,
+      requestedIdentity,
+      ensureCtrlProxyReady: ctrlProxySetup,
+      releaseReadinessReservations,
+    });
+    state.boot = readinessResult.boot;
+    sourceImage = state.boot.sourceImage ?? sourceImage;
+    // Re-check under the later binding lock because pool identity can change
+    // while runner setup is in flight.
+    validatePooledDeviceMapping(state.boot.device, requestedIdentity);
+
+    // Publish only after runner health passes. Readiness remains per-device,
+    // so 20-40 concurrent emulators do not serialize on a host-wide gate.
+    publishWarmDeviceReady(state.boot.source, state.boot.device.deviceId);
+    await validatePreservedSystemUiAnrRecoverySession(
+      readinessResult.preservedSessionId,
+      readinessResult.validatePreservedSession,
+      readinessResult.retireReplacement,
+    );
+    const verifiedWarmAndroidAvdIdentity = getVerifiedWarmAndroidAvdIdentity(
+      state.boot,
+      sourceImage,
+    );
+    const sessionId =
+      readinessResult.preservedSessionId ??
+      (await bindBootedDeviceSession(
+        state.boot.device,
+        args,
+        state.boot.source === "cold-boot" ? sourceImage : undefined,
+        state.boot.processHandle,
+        new Set(releaseReadinessReservations.map((reservation) => reservation.owner)),
+        verifiedWarmAndroidAvdIdentity,
+      ));
+    state.ownershipTransferred = true;
+
+    await notifyResourcesAfterDeviceBoot(state.boot, perf, deps.notifyResourcesChanged);
+    return await buildBootedResponse(
+      state.boot.device,
+      state.boot.source,
+      perf,
+      sessionId,
+      state.boot.processId,
+      sourceImage,
+    );
   };
 
   const prepareDevice = async (
@@ -2721,145 +4436,71 @@ export function registerDeviceTools() {
     perf.serial(budgets.operationName);
     const deps = getDeviceToolsDependencies();
     const deviceUtils = deps.deviceManagerFactory();
+    const deviceMatcher = deps.deviceMatcherFactory();
     const bootDeadlineMs = deps.timer.now() + budgets.bootTimeoutMs;
     const requestedIdentity = describeStartDeviceRequest(args);
-    let boot: DeviceBootResult | undefined;
-    let ownershipTransferred = false;
+    const state: { boot: DeviceBootResult | undefined; ownershipTransferred: boolean } = {
+      boot: undefined,
+      ownershipTransferred: false,
+    };
     const releaseReadinessReservations: DeviceReadinessReservation[] = [];
-    let preservedSessionId: string | undefined;
-    let validatePreservedSession: (() => Promise<void>) | undefined;
-    let retireRecoveredReplacement: (() => Promise<void>) | undefined;
-    let releaseAndroidStartupLease: (() => Promise<void>) | undefined;
+    let lifecycleReservations:
+      | Awaited<ReturnType<typeof reserveStartDeviceLifecycleReservations>>
+      | undefined;
+    let unownedColdBootSettlement: Promise<void> | undefined;
 
     try {
-      releaseAndroidStartupLease = await reserveAndroidStartupLease(
+      lifecycleReservations = await reserveStartDeviceLifecycleReservations(
         args,
         budgets,
-        bootDeadlineMs,
-        deps.timer,
-        signal,
-      );
-      const bootService = new DeviceBootService({
-        deviceManager: deviceUtils,
-        deviceMatcher: deps.deviceMatcherFactory(),
-        deviceCreationGate: deps.deviceCreationGateFactory(),
-        deviceProvisioner: deps.deviceProvisionerFactory(),
-        matchingStrategy: DEVICE_POOL_MATCHING,
-        timer: deps.timer,
-      });
-      perf.startOperation("bootDevice");
-      boot = await bootService.boot(
-        {
-          ...args,
-          timeoutMs: budgets.bootTimeoutMs,
-          totalDeadlineMs: bootDeadlineMs,
-          signal,
-        },
-        progress ? { report: progress } : undefined,
-      );
-      perf.endOperation("bootDevice");
-      validateBootIdentity(args, boot.device, boot.source, boot.sourceImage);
-      validatePooledDeviceMapping(boot.device, requestedIdentity);
-      // A warm AVD has no cold-boot source image, but its explicit getAndroid
-      // identifier is still the stable identity needed for later recovery.
-      let sourceImage =
-        boot.sourceImage ??
-        (budgets.androidAvdName
-          ? {
-              name: budgets.androidAvdName,
-              platform: "android" as const,
-              isRunning: true,
-              source: "local" as const,
-            }
-          : undefined);
-      const daemonState = DaemonState.getInstance();
-      await reserveInitialDeviceForReadiness(daemonState, boot, releaseReadinessReservations);
-
-      // A new incarnation must not inherit a prior intentional-shutdown marker
-      // while its per-device runner setup is in flight.
-      clearColdBootShutdownMarker(boot.source, boot.device.deviceId);
-
-      const ctrlProxySetup = deps.ensureCtrlProxyReady ?? ensureCtrlProxyReady;
-      const readinessResult = await prepareStartDeviceRunnerReadiness({
-        boot,
-        args,
-        bootService,
+        deps,
         deviceUtils,
-        daemonState,
-        totalDeadlineMs: budgets.automationDeadlineMs,
-        readinessTimeoutMs: budgets.automationReadyTimeoutMs,
-        timer: deps.timer,
+        deviceMatcher,
+        bootDeadlineMs,
         signal,
-        progress,
-        perf,
-        requestedIdentity,
-        ensureCtrlProxyReady: ctrlProxySetup,
-        releaseReadinessReservations,
-      });
-      boot = readinessResult.boot;
-      preservedSessionId = readinessResult.preservedSessionId;
-      validatePreservedSession = readinessResult.validatePreservedSession;
-      retireRecoveredReplacement = readinessResult.retireReplacement;
-      sourceImage = boot.sourceImage ?? sourceImage;
-      // Re-check under the later binding lock because pool identity can change
-      // while runner setup is in flight.
-      validatePooledDeviceMapping(boot.device, requestedIdentity);
-
-      // Publish only after runner health passes. Readiness remains per-device,
-      // so 20-40 concurrent emulators do not serialize on a host-wide gate.
-      publishWarmDeviceReady(boot.source, boot.device.deviceId);
-      await validatePreservedSystemUiAnrRecoverySession(
-        preservedSessionId,
-        validatePreservedSession,
-        retireRecoveredReplacement,
       );
-      const verifiedWarmAndroidAvdIdentity = getVerifiedWarmAndroidAvdIdentity(boot, sourceImage);
-      const sessionId =
-        preservedSessionId ??
-        (await bindBootedDeviceSession(
-          boot.device,
-          args,
-          boot.source === "cold-boot" ? sourceImage : undefined,
-          boot.processHandle,
-          new Set(releaseReadinessReservations.map((reservation) => reservation.owner)),
-          verifiedWarmAndroidAvdIdentity,
-        ));
-      ownershipTransferred = true;
-
-      await notifyResourcesAfterDeviceBoot(boot, perf, deps.notifyResourcesChanged);
-      return await buildBootedResponse(
-        boot.device,
-        boot.source,
+      const coordinatedSignals = [signal, lifecycleReservations.lifecycleLease.signal].filter(
+        (candidate): candidate is AbortSignal => candidate !== undefined,
+      );
+      const coordinatedSignal =
+        coordinatedSignals.length === 1
+          ? coordinatedSignals[0]
+          : AbortSignal.any(coordinatedSignals);
+      return await bootAndPrepareDevice(
+        args,
+        budgets,
+        deps,
+        deviceUtils,
+        deviceMatcher,
+        bootDeadlineMs,
+        requestedIdentity,
+        progress,
+        coordinatedSignal,
         perf,
-        sessionId,
-        boot.processId,
-        sourceImage,
+        releaseReadinessReservations,
+        lifecycleReservations.lifecycleLease,
+        state,
       );
     } catch (error) {
       perf.end();
-      if (!ownershipTransferred) {
-        cancelUnownedColdBoot(boot);
+      if (!state.ownershipTransferred) {
+        unownedColdBootSettlement = cancelUnownedColdBoot(state.boot);
       }
       if (error instanceof ActionableError) {
         throw error;
       }
       throw new ActionableError(`Failed to start ${args.platform} device: ${error}`);
     } finally {
-      await releaseDevicePreparationReservations(
-        releaseReadinessReservations,
-        releaseAndroidStartupLease,
-      );
+      for (const releaseReservation of releaseReadinessReservations.reverse()) {
+        await releaseReservation();
+      }
+      if (unownedColdBootSettlement) {
+        void unownedColdBootSettlement.then(() => lifecycleReservations?.lifecycleLease.release());
+      } else {
+        lifecycleReservations?.lifecycleLease.release();
+      }
+      await lifecycleReservations?.releaseAndroidStartupLease?.();
     }
-  };
-
-  const releaseDevicePreparationReservations = async (
-    readinessReservations: DeviceReadinessReservation[],
-    releaseAndroidStartupLease: (() => Promise<void>) | undefined,
-  ): Promise<void> => {
-    for (const releaseReservation of readinessReservations.reverse()) {
-      await releaseReservation();
-    }
-    await releaseAndroidStartupLease?.();
   };
 
   // Compatibility implementation. New callers use getAndroid/getApple so their
@@ -2882,6 +4523,12 @@ export function registerDeviceTools() {
         automationReadyTimeoutMs: resolveRunnerReadinessTimeoutMs(args),
         automationDeadlineMs: getDeviceToolsDependencies().timer.now() + totalTimeoutMs,
         operationName: "startDevice",
+        stableTarget:
+          args.platform === "android" && args.name && !args.deviceId
+            ? { platform: "android", stableId: args.name }
+            : args.platform === "ios" && args.deviceId
+              ? { platform: "ios", stableId: args.deviceId }
+              : undefined,
       },
       progress,
       signal,
@@ -2918,6 +4565,7 @@ export function registerDeviceTools() {
         automationDeadlineMs: startedAtMs + bootTimeoutMs + automationReadyTimeoutMs,
         operationName: "getAndroid",
         androidAvdName: args.avdName,
+        stableTarget: { platform: "android", stableId: args.avdName },
       },
       progress,
       signal,
@@ -2952,6 +4600,7 @@ export function registerDeviceTools() {
         automationReadyTimeoutMs,
         automationDeadlineMs: startedAtMs + bootTimeoutMs + automationReadyTimeoutMs,
         operationName: "getApple",
+        stableTarget: { platform: "ios", stableId: args.udid },
       },
       progress,
       signal,
@@ -3043,7 +4692,9 @@ export function registerDeviceTools() {
       processId,
       isReady: true,
       source,
-      timing,
+      // TimingData's runtime shape is serialized as the legacy flat result.
+      // oxlint-disable-next-line auto-mobile/no-unknown-cast
+      timing: (timing ?? {}) as unknown as Record<string, number>,
     };
 
     return createJSONToolResponse({
@@ -3058,89 +4709,192 @@ export function registerDeviceTools() {
     _progress?: ProgressCallback,
     abortSignal?: AbortSignal,
   ) => {
-    const perf = createPerformanceTracker(true);
-    perf.serial("killDevice");
+    const deps = getDeviceToolsDependencies();
+    const requestAbortSignal = abortSignal ?? getAbortSignal();
+    const deadlineMs = deps.timer.now() + DEVICE_SHUTDOWN_TIMEOUT_MS;
     const daemonState = DaemonState.getInstance();
     const devicePool = daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
-    const deps = getDeviceToolsDependencies();
-    const shutdownDeadlineMs = deps.timer.now() + DEVICE_SHUTDOWN_TIMEOUT_MS;
-    const requestAbortSignal = abortSignal ?? getAbortSignal();
-    let shutdownReservation: Awaited<ReturnType<DevicePool["reserveDeviceForShutdown"]>>;
-    let retainShutdownReservation = false;
-    try {
-      shutdownReservation = await runWithinShutdownDeadline(
-        args.device,
-        deps.timer,
-        shutdownDeadlineMs,
-        "shutdown preparation did not complete",
-        requestAbortSignal,
-        async (signal) => await devicePool?.reserveDeviceForShutdown(args.device.deviceId, signal),
+    const stableTarget = resolveKillDeviceStableTarget(args.device, devicePool);
+    const lifecycleLease = stableTarget
+      ? await reserveStableDeviceLifecycle(
+          stableTarget,
+          args.device,
+          deps.timer,
+          deadlineMs,
+          requestAbortSignal,
+          undefined,
+          "shutdown",
+          deps.lifecycleCoordinator,
+        )
+      : await deps.lifecycleCoordinator.reserve(
+          { kind: "selector", platform: args.device.platform, selector: args.device.deviceId },
+          { operation: "shutdown", deadlineMs, signal: requestAbortSignal },
+        );
+    const signals = [requestAbortSignal, lifecycleLease.signal].filter(
+      (signal): signal is AbortSignal => signal !== undefined,
+    );
+    let retainLifecycleLease = false;
+    const retainLifecycleUntil = (operation: Promise<unknown>): void => {
+      retainLifecycleLease = true;
+      void operation.then(
+        () => lifecycleLease.release(),
+        () => lifecycleLease.release(),
       );
-      const expectedPooledDevice = shutdownReservation?.device ?? null;
-      const retainReservationUntil = (
-        operation: Promise<unknown>,
-        releaseAfterFailure = false,
-      ): void => {
-        retainShutdownReservation = true;
-        void operation.then(
-          () => shutdownReservation?.release(),
-          (error) => {
-            if (releaseAfterFailure) {
-              void shutdownReservation?.release();
+    };
+    try {
+      const result = await shutdownDevice(
+        args.device,
+        deps,
+        signals.length === 1 ? signals[0] : AbortSignal.any(signals),
+        deadlineMs,
+        "killDevice",
+        false,
+        DEVICE_SHUTDOWN_TIMEOUT_MS,
+        retainLifecycleUntil,
+      );
+      return createKillDeviceResponse(args, result.timing, result.alreadyStoppedMessage);
+    } finally {
+      if (!retainLifecycleLease) {
+        lifecycleLease.release();
+      }
+    }
+  };
+
+  const deleteDeviceHandler = async (
+    args: TeardownDeviceArgs,
+    _progress?: ProgressCallback,
+    abortSignal?: AbortSignal,
+  ) => {
+    const deps = getDeviceToolsDependencies();
+    const callerSignal = abortSignal ?? getAbortSignal();
+    const timeoutMs = args.timeoutMs ?? DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS;
+    const deadlineMs = deps.timer.now() + timeoutMs;
+    type TeardownState = {
+      context: TeardownContext;
+      target: TeardownResolvedTarget;
+      earlyResponse?: TeardownToolResponse;
+    };
+    try {
+      return await getDeviceTeardownService(deps).teardown<
+        TeardownState,
+        "accepted" | "not_required",
+        TeardownToolResponse
+      >(
+        {
+          operationId: args.operationId,
+          fingerprint: teardownOperationFingerprint(args),
+          identity: args.target,
+          deadlineMs,
+          callerSignal,
+        },
+        {
+          resolve: async (requestAbortSignal, lifecycleLease) => {
+            const context: TeardownContext = {
+              args,
+              dependencies: deps,
+              deviceManager: deps.deviceManagerFactory(),
+              requestAbortSignal,
+              deadlineDevice: teardownDeadlineDevice(args),
+              deadlineMs,
+              timeoutMs,
+              lifecycleLease,
+            };
+            const resolution = await resolveTeardownTarget(context);
+            if ("response" in resolution) {
+              return { response: resolution.response };
+            }
+            return { target: { context, target: resolution.target } };
+          },
+          stop: async (state, requestAbortSignal, retainLeaseUntil) => {
+            const { context, target } = state;
+            let stop: "accepted" | "not_required" = "not_required";
+            if (target.wasBooted) {
+              const stopped = await shutdownDevice(
+                target.bootedDevice,
+                deps,
+                requestAbortSignal,
+                context.deadlineMs,
+                "deleteDevice",
+                true,
+                context.timeoutMs,
+                retainLeaseUntil,
+              );
+              stop = stopped.alreadyStoppedMessage ? "not_required" : "accepted";
+            } else {
+              await stopSegmentedVideoRecordingsBeforeDestroy(context, target);
+              await retireStoppedTeardownOwnership(context, target);
+            }
+
+            const restarted = await checkForRestartedTeardownTarget(context, target, "stop");
+            if (restarted) {
+              state.earlyResponse = restarted;
+            }
+            return stop;
+          },
+          destroy: async (state, _requestAbortSignal, retainLeaseUntil, markDestructionStarted) => {
+            if (state.earlyResponse) {
               return;
             }
-            logger.warn(
-              `[DeviceTools] Retaining shutdown reservation after late teardown failed: ${error}`,
+            const { context, target } = state;
+            await destroyTeardownTarget(context, target, retainLeaseUntil, markDestructionStarted);
+            unregisterDirectSessionsForStableIdentity(
+              target.device.platform,
+              target.device.platform === "android"
+                ? target.device.name
+                : (target.device.deviceId ?? args.target.stableId),
             );
           },
-        );
-      };
-      const shutdownContext: ShutdownDeadlineContext = {
-        device: args.device,
-        timer: deps.timer,
-        deadlineMs: shutdownDeadlineMs,
-        requestAbortSignal,
-        retainReservationUntil,
-      };
-      await stopVideoRecordingsBeforeShutdown(shutdownContext, perf);
-      await stopIosCtrlProxyBeforeShutdown(shutdownContext, perf);
-      await stopAndroidCtrlProxyBeforeShutdown(shutdownContext, perf, deps.stopAndroidObservers);
-
-      const alreadyStoppedMessage = await killProcessAndRetireOwnership(
-        deps,
-        args.device,
-        perf,
-        requestAbortSignal,
-        devicePool,
-        expectedPooledDevice,
-        shutdownDeadlineMs,
-        (retirement) => {
-          retainReservationUntil(retirement);
+          verify: async (state, stop) => {
+            if (state.earlyResponse) {
+              return state.earlyResponse;
+            }
+            return await verifyTeardownAbsence(state.context, state.target, stop);
+          },
+          conflict: () =>
+            createTeardownFailureResponse(
+              args,
+              "precondition",
+              "operation_id_conflict",
+              "The operation ID has already been used with different teardown arguments.",
+            ),
+          failure: (phase: DeviceTeardownPhase, error, state) => {
+            const effectiveError =
+              phase === "precondition" &&
+              error instanceof Error &&
+              error.message.startsWith("Timed out waiting to teardown")
+                ? shutdownTimeoutError(
+                    teardownDeadlineDevice(args),
+                    "waiting for stable device lifecycle reservation",
+                    timeoutMs,
+                  )
+                : error;
+            logger.warn(
+              `[DeviceTools] teardown operation ${args.operationId} failed during ${phase} ` +
+                `for ${args.target.platform}:${args.target.stableId}: ${effectiveError}`,
+              effectiveError,
+            );
+            return createTeardownFailureResponse(
+              args,
+              phase,
+              "operation_failed",
+              String(effectiveError instanceof Error ? effectiveError.message : effectiveError),
+              state?.target.device,
+            );
+          },
+          isFailure: isTeardownFailure,
         },
       );
-
-      await shutdownReservation?.release();
-      shutdownReservation = undefined;
-      unregisterDirectSessionsForDevice(args.device.deviceId);
-
-      perf.startOperation("cleanup");
-      await clearInstalledAppsAfterShutdown(deps, args.device.deviceId);
-      perf.endOperation("cleanup");
-
-      perf.startOperation("notifyResources");
-      await notifyResourcesAfterShutdown(deps);
-      perf.endOperation("notifyResources");
-
-      perf.end();
-      const timing = perf.getTimings();
-
-      return createKillDeviceResponse(args, timing, alreadyStoppedMessage);
     } catch (error) {
-      throw new ActionableError(`Failed to kill ${args.device.platform} device: ${error}`);
-    } finally {
-      if (!retainShutdownReservation) {
-        await shutdownReservation?.release();
-      }
+      // Caller cancellation ends only this wait; the accepted teardown continues independently.
+      logger.debug(
+        `[DeviceTools] teardown caller stopped waiting for ${args.operationId}: ${String(error instanceof Error ? error.message : error)}`,
+      );
+      return createTeardownFailureResponse(
+        args,
+        "precondition",
+        "operation_cancelled",
+        String(error instanceof Error ? error.message : error),
+      );
     }
   };
 
@@ -3194,4 +4948,12 @@ export function registerDeviceTools() {
   ToolRegistry.register("killDevice", "Kill device", killDeviceSchema, killDeviceHandler, {
     defaultEnabled: true,
   });
+
+  ToolRegistry.register(
+    "deleteDevice",
+    "Stop and permanently delete a device, with verified platform-inventory absence",
+    teardownDeviceSchema,
+    deleteDeviceHandler,
+    { defaultEnabled: false },
+  );
 }

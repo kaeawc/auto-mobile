@@ -27,6 +27,8 @@ export interface AdbExecuteOptions {
   maxBuffer?: number;
   noRetry?: boolean;
   signal?: AbortSignal;
+  /** Keep the command promise pending until a timed-out or aborted child actually exits. */
+  waitForProcessSettlementAfterAbort?: boolean;
   /**
    * Runs after ADB path resolution and immediately before a subprocess dispatch.
    * Receives the remaining command budget, if one was supplied.

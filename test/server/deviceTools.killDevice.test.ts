@@ -32,6 +32,7 @@ import type {
   BootedDeviceDiscoveryOptions,
   DeviceShutdownOptions,
 } from "../../src/utils/deviceUtils";
+import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/utils/virtualDeviceLifecycleCoordinator";
 
 class FailingKillDeviceManager extends FakeDeviceUtils {
   readonly childProcess = new EventEmitter() as ChildProcess;
@@ -247,6 +248,8 @@ class AbortAwareHungDiscoveryKillDeviceManager extends DelayedSuccessfulKillDevi
 class AbortAwareHungShutdownCommandDeviceManager extends FailingKillDeviceManager {
   commandWasAborted = false;
   commandOptions: DeviceShutdownOptions | undefined;
+  private finishCommand!: () => void;
+  private failCommand!: (error: Error) => void;
 
   override killDevice(_: BootedDevice, options?: DeviceShutdownOptions): Promise<void> {
     this.commandOptions = options;
@@ -257,7 +260,18 @@ class AbortAwareHungShutdownCommandDeviceManager extends FailingKillDeviceManage
       },
       { once: true },
     );
-    return new Promise<void>(() => {});
+    return new Promise<void>((resolve, reject) => {
+      this.finishCommand = resolve;
+      this.failCommand = reject;
+    });
+  }
+
+  settleCommand(): void {
+    this.finishCommand();
+  }
+
+  rejectCommand(error: Error): void {
+    this.failCommand(error);
   }
 }
 
@@ -1374,8 +1388,77 @@ describe("killDevice handler", () => {
     expect(abortAwareManager.discoveryWasAborted).toBe(true);
   });
 
+  test("leases the current resolved AVD name when pooled metadata is stale", async () => {
+    const timer = new FakeTimer();
+    const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+    const hungManager = new AbortAwareHungShutdownCommandDeviceManager();
+    const deviceSessionRepository = new FakeDeviceSessionRepository();
+    manager = hungManager;
+    sessionManager = new SessionManager(timer, deviceSessionRepository);
+    hungManager.setDeviceImages("android", [
+      {
+        name: "Old AVD",
+        platform: "android",
+        deviceId: "emulator-5554",
+        isRunning: false,
+        source: "local",
+      },
+    ]);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      hungManager,
+      new DefaultRetryExecutor(timer),
+      deviceSessionRepository,
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.assignMultipleDevices(["session-1"], 1_000, "android");
+    expect(pool.getDevice("emulator-5554")?.avdName).toBe("Old AVD");
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => hungManager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      timer,
+      lifecycleCoordinator,
+    });
+    const device: BootedDevice = {
+      name: "Current AVD",
+      platform: "android",
+      deviceId: "emulator-5554",
+      transportId: "2",
+    };
+    const tool = ToolRegistry.getTool("killDevice");
+    if (!tool) {
+      throw new Error("killDevice not registered");
+    }
+
+    const result = tool.handler({ device });
+    await new Promise((resolve) => setImmediate(resolve));
+    const competingLease = lifecycleCoordinator.reserve(
+      { kind: "stable", platform: "android", stableId: device.name },
+      { operation: "start", deadlineMs: 1_000 },
+    );
+    let acquired = false;
+    void competingLease.then(() => {
+      acquired = true;
+    });
+    for (let attempt = 0; attempt < 50; attempt++) {
+      await Promise.resolve();
+    }
+    expect(acquired).toBe(false);
+
+    hungManager.settleCommand();
+    await expect(result).resolves.toBeDefined();
+    const lease = await competingLease;
+    lease.release();
+  });
+
   test("bounds and aborts a hung platform shutdown command", async () => {
     const timer = new FakeTimer();
+    const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
     const hungManager = new AbortAwareHungShutdownCommandDeviceManager();
     manager = hungManager;
     setDeviceToolsDependencies({
@@ -1384,6 +1467,7 @@ describe("killDevice handler", () => {
       ensureCtrlProxyReady: async () => {},
       clearInstalledAppsForDevice: async () => {},
       timer,
+      lifecycleCoordinator,
     });
     const device: BootedDevice = {
       name: "Pixel 8",
@@ -1402,6 +1486,76 @@ describe("killDevice handler", () => {
     await expect(result).rejects.toThrow("platform shutdown command did not complete");
     expect(hungManager.commandWasAborted).toBe(true);
     expect(hungManager.commandOptions?.timeoutMs).toBe(30_000);
+
+    const startLease = lifecycleCoordinator.reserve(
+      { kind: "stable", platform: "android", stableId: device.name },
+      { operation: "start", deadlineMs: 31_000 },
+    );
+    let acquired = false;
+    void startLease.then(() => {
+      acquired = true;
+    });
+    for (let attempt = 0; attempt < 50; attempt++) {
+      await Promise.resolve();
+    }
+    expect(acquired).toBe(false);
+
+    hungManager.settleCommand();
+    const lease = await startLease;
+    lease.release();
+  });
+
+  test("releases a pooled shutdown reservation after the late command rejects", async () => {
+    const timer = new FakeTimer();
+    const hungManager = new AbortAwareHungShutdownCommandDeviceManager();
+    const deviceSessionRepository = new FakeDeviceSessionRepository();
+    const image: DeviceInfo = {
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+      isRunning: false,
+      source: "local",
+    };
+    manager = hungManager;
+    sessionManager = new SessionManager(timer, deviceSessionRepository);
+    hungManager.setDeviceImages("android", [image]);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      hungManager,
+      new DefaultRetryExecutor(timer),
+      deviceSessionRepository,
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.assignMultipleDevices(["session-1"], 1_000, "android");
+    await pool.releaseDevice(image.deviceId!, "session-1");
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => hungManager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      timer,
+    });
+    const tool = ToolRegistry.getTool("killDevice");
+    if (!tool) {
+      throw new Error("killDevice not registered");
+    }
+
+    const result = tool.handler({
+      device: { name: image.name, platform: image.platform, deviceId: image.deviceId! },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    timer.advanceTime(30_000);
+    await expect(result).rejects.toThrow("platform shutdown command did not complete");
+    expect(pool.getAvailableDeviceCount()).toBe(0);
+
+    hungManager.rejectCommand(new Error("late adb emu kill failure"));
+    for (let attempt = 0; pool.getAvailableDeviceCount() === 0 && attempt < 50; attempt++) {
+      await Promise.resolve();
+    }
+    expect(pool.getAvailableDeviceCount()).toBe(1);
   });
 
   test("preserves caller cancellation while shutdown discovery is pending", async () => {

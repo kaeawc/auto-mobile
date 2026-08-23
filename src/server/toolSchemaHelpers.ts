@@ -39,6 +39,22 @@ export function withJsonSchemaOverride<T extends z.ZodTypeAny>(schema: T, overri
   return schema;
 }
 
+export function withCanonicalDiscriminatedUnionJsonSchema<T extends z.ZodTypeAny>(
+  schema: T,
+  description?: string,
+): T {
+  const advertisedSchema = description ? (schema.describe(description) as T) : schema;
+  return withJsonSchemaOverride(advertisedSchema, (jsonSchema) => {
+    if (Array.isArray(jsonSchema.anyOf)) {
+      jsonSchema.oneOf = jsonSchema.anyOf;
+      delete jsonSchema.anyOf;
+    }
+    if (description) {
+      jsonSchema.description = description;
+    }
+  });
+}
+
 export function applyJsonSchemaOverride(
   zodSchema: object,
   jsonSchema: Record<string, unknown>

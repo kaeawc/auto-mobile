@@ -21,36 +21,49 @@ function forceStaticAvailabilityPath(instance: Simctl): void {
   (instance as unknown as { usesInjectedExecAsync: boolean }).usesInjectedExecAsync = false;
 }
 
+async function waitForCondition(condition: () => boolean, description: string): Promise<void> {
+  for (let attempt = 0; attempt < 25; attempt++) {
+    if (condition()) {
+      return;
+    }
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  throw new Error(`Timed out waiting for ${description}`);
+}
+
 function simulatorListPayload(devices: unknown[]): string {
   return JSON.stringify({
     devices: {
-      "com.apple.CoreSimulator.SimRuntime.iOS-26-4": devices
+      "com.apple.CoreSimulator.SimRuntime.iOS-26-4": devices,
     },
     runtimes: [],
     devicetypes: [],
-    pairs: []
+    pairs: [],
   });
 }
 
 function bootedListPayload(udid: string): string {
-  return simulatorListPayload([
-    { udid, name: "iPhone 17", state: "Booted", isAvailable: true }
-  ]);
+  return simulatorListPayload([{ udid, name: "iPhone 17", state: "Booted", isAvailable: true }]);
 }
 
-describe("Simctl", function() {
+describe("Simctl", function () {
   let simctl: Simctl;
   let mockDevice: BootedDevice;
-  let mockExecAsync: (file: string, args: string[], maxBuffer?: number, signal?: AbortSignal) => Promise<ExecResult>;
+  let mockExecAsync: (
+    file: string,
+    args: string[],
+    maxBuffer?: number,
+    signal?: AbortSignal,
+  ) => Promise<ExecResult>;
 
-  beforeEach(function() {
+  beforeEach(function () {
     resetSimctlCaches();
 
     mockDevice = {
       deviceId: "test-ios-device-id",
       name: "Test iOS Device",
       platform: "ios",
-      source: "local"
+      source: "local",
     };
 
     mockExecAsync = async (): Promise<ExecResult> => {
@@ -59,15 +72,15 @@ describe("Simctl", function() {
         stderr: "",
         toString: () => "",
         trim: () => "",
-        includes: () => false
+        includes: () => false,
       };
     };
 
     simctl = new Simctl(mockDevice, mockExecAsync);
   });
 
-  describe("isAvailable", function() {
-    test("should return true when simctl is available", async function() {
+  describe("isAvailable", function () {
+    test("should return true when simctl is available", async function () {
       mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
         if (file === "xcrun" && args.join(" ") === "simctl --version") {
           return {
@@ -75,10 +88,16 @@ describe("Simctl", function() {
             stderr: "",
             toString: () => "simctl version 1.0.0",
             trim: () => "simctl version 1.0.0",
-            includes: () => false
+            includes: () => false,
           };
         }
-        return { stdout: "", stderr: "", toString: () => "", trim: () => "", includes: () => false };
+        return {
+          stdout: "",
+          stderr: "",
+          toString: () => "",
+          trim: () => "",
+          includes: () => false,
+        };
       };
 
       simctl = new Simctl(null, mockExecAsync);
@@ -87,7 +106,7 @@ describe("Simctl", function() {
       expect(available).toBe(true);
     });
 
-    test("should return false when simctl is not available", async function() {
+    test("should return false when simctl is not available", async function () {
       mockExecAsync = async (): Promise<ExecResult> => {
         throw new Error("Command not found: xcrun");
       };
@@ -99,8 +118,8 @@ describe("Simctl", function() {
     });
   });
 
-  describe("executeCommand", function() {
-    test("should execute simctl commands with xcrun prefix", async function() {
+  describe("executeCommand", function () {
+    test("should execute simctl commands with xcrun prefix", async function () {
       let executedFile = "";
       let executedArgs: string[] = [];
       mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
@@ -112,7 +131,7 @@ describe("Simctl", function() {
             stderr: "",
             toString: () => "simctl version 1.0.0",
             trim: () => "simctl version 1.0.0",
-            includes: () => false
+            includes: () => false,
           };
         }
         return {
@@ -120,7 +139,7 @@ describe("Simctl", function() {
           stderr: "",
           toString: () => "command executed",
           trim: () => "command executed",
-          includes: () => false
+          includes: () => false,
         };
       };
 
@@ -131,7 +150,7 @@ describe("Simctl", function() {
       expect(executedArgs).toEqual(["simctl", "list", "devices"]);
     });
 
-    test("should execute pre-split simctl arguments without dropping empty strings or backslashes", async function() {
+    test("should execute pre-split simctl arguments without dropping empty strings or backslashes", async function () {
       let executedFile = "";
       let executedArgs: string[] = [];
       mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
@@ -172,8 +191,8 @@ describe("Simctl", function() {
     });
   });
 
-  describe("startCommandArgs", function() {
-    test("starts a supervised simctl command with literal argv", async function() {
+  describe("startCommandArgs", function () {
+    test("starts a supervised simctl command with literal argv", async function () {
       const started: { command?: string; args?: readonly string[]; options?: SpawnOptions } = {};
       const child = {} as ChildProcess;
       mockExecAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
@@ -192,25 +211,29 @@ describe("Simctl", function() {
           started.args = args;
           started.options = options;
           return child;
-        }
+        },
       );
 
       const result = await simctl.startCommandArgs(
         ["io", "test-ios-device-id", "recordVideo", "/tmp/a path;$(safe).mov"],
-        { stdio: ["ignore", "ignore", "pipe"] }
+        { stdio: ["ignore", "ignore", "pipe"] },
       );
 
       expect(result).toBe(child);
       expect(started.command).toBe("xcrun");
       expect(started.args).toEqual([
-        "simctl", "io", "test-ios-device-id", "recordVideo", "/tmp/a path;$(safe).mov"
+        "simctl",
+        "io",
+        "test-ios-device-id",
+        "recordVideo",
+        "/tmp/a path;$(safe).mov",
       ]);
       expect(started.options).toEqual({ stdio: ["ignore", "ignore", "pipe"] });
     });
   });
 
-  describe("startSimulator", function() {
-    test("uses bootstatus -b instead of raw boot so already-booted simulators are accepted", async function() {
+  describe("startSimulator", function () {
+    test("uses bootstatus -b instead of raw boot so already-booted simulators are accepted", async function () {
       const commands: string[][] = [];
       mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
         commands.push([file, ...args]);
@@ -222,13 +245,21 @@ describe("Simctl", function() {
         }
         if (file === "xcrun" && args.join(" ") === "simctl list devices --json") {
           // Boot is self-verifying: it requires the device to actually be Booted.
-          return createExecResult(JSON.stringify({
-            devices: {
-              "com.apple.CoreSimulator.SimRuntime.iOS-26-0": [
-                { udid: "test-ios-device-id", name: "iPhone 17", state: "Booted", isAvailable: true }
-              ]
-            }
-          }), "");
+          return createExecResult(
+            JSON.stringify({
+              devices: {
+                "com.apple.CoreSimulator.SimRuntime.iOS-26-0": [
+                  {
+                    udid: "test-ios-device-id",
+                    name: "iPhone 17",
+                    state: "Booted",
+                    isAvailable: true,
+                  },
+                ],
+              },
+            }),
+            "",
+          );
         }
         return createExecResult("command executed", "");
       };
@@ -245,15 +276,10 @@ describe("Simctl", function() {
         "test-ios-device-id",
         "-b",
       ]);
-      expect(commands).not.toContainEqual([
-        "xcrun",
-        "simctl",
-        "boot",
-        "test-ios-device-id",
-      ]);
+      expect(commands).not.toContainEqual(["xcrun", "simctl", "boot", "test-ios-device-id"]);
     });
 
-    test("applies timeout to the bootstatus wait", async function() {
+    test("applies timeout to the bootstatus wait", async function () {
       const timer = new FakeTimer();
       let resolveCommand: ((result: ExecResult) => void) | undefined;
       mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
@@ -263,7 +289,7 @@ describe("Simctl", function() {
         if (file === "xcrun" && args.join(" ") === "simctl shutdown test-ios-device-id") {
           return createExecResult("", "");
         }
-        return new Promise<ExecResult>(resolve => {
+        return new Promise<ExecResult>((resolve) => {
           resolveCommand = resolve;
         });
       };
@@ -271,9 +297,7 @@ describe("Simctl", function() {
       simctl = new Simctl(mockDevice, mockExecAsync, timer);
 
       const bootPromise = simctl.startSimulator("test-ios-device-id", 1234);
-      while (!resolveCommand) {
-        await Promise.resolve();
-      }
+      await waitForCondition(() => resolveCommand !== undefined, "boot command dispatch");
       timer.advanceTime(1234);
 
       await expect(bootPromise).rejects.toThrow(
@@ -282,7 +306,7 @@ describe("Simctl", function() {
       resolveCommand?.(createExecResult("late bootstatus", ""));
     });
 
-    test("applies the default timeout to the bootstatus wait", async function() {
+    test("applies the default timeout to the bootstatus wait", async function () {
       const timer = new FakeTimer();
       let resolveCommand: ((result: ExecResult) => void) | undefined;
       mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
@@ -292,7 +316,7 @@ describe("Simctl", function() {
         if (file === "xcrun" && args.join(" ") === "simctl shutdown test-ios-device-id") {
           return createExecResult("", "");
         }
-        return new Promise<ExecResult>(resolve => {
+        return new Promise<ExecResult>((resolve) => {
           resolveCommand = resolve;
         });
       };
@@ -300,9 +324,7 @@ describe("Simctl", function() {
       simctl = new Simctl(mockDevice, mockExecAsync, timer);
 
       const bootPromise = simctl.startSimulator("test-ios-device-id");
-      while (!resolveCommand) {
-        await Promise.resolve();
-      }
+      await waitForCondition(() => resolveCommand !== undefined, "boot command dispatch");
       timer.advanceTime(DEFAULT_DEVICE_READY_TIMEOUT_MS);
 
       await expect(bootPromise).rejects.toThrow(
@@ -311,10 +333,15 @@ describe("Simctl", function() {
       resolveCommand?.(createExecResult("late bootstatus", ""));
     });
 
-    test("aborts the underlying child process when the bootstatus wait times out", async function() {
+    test("aborts the underlying child process when the bootstatus wait times out", async function () {
       const timer = new FakeTimer();
       let capturedSignal: AbortSignal | undefined;
-      mockExecAsync = async (file: string, args: string[], _maxBuffer?: number, signal?: AbortSignal): Promise<ExecResult> => {
+      mockExecAsync = async (
+        file: string,
+        args: string[],
+        _maxBuffer?: number,
+        signal?: AbortSignal,
+      ): Promise<ExecResult> => {
         if (file === "xcrun" && args.join(" ") === "simctl --version") {
           return createExecResult("simctl version 1.0.0", "");
         }
@@ -334,9 +361,7 @@ describe("Simctl", function() {
       simctl = new Simctl(mockDevice, mockExecAsync, timer);
 
       const bootPromise = simctl.startSimulator("test-ios-device-id", 1234);
-      while (!capturedSignal) {
-        await Promise.resolve();
-      }
+      await waitForCondition(() => capturedSignal !== undefined, "boot abort signal");
       expect(capturedSignal.aborted).toBe(false);
 
       timer.advanceTime(1234);
@@ -349,8 +374,8 @@ describe("Simctl", function() {
     });
   });
 
-  describe("startSimulator returned handle", function() {
-    test("does not fabricate a pid (no real OS process backs a synchronous bootstatus)", async function() {
+  describe("startSimulator returned handle", function () {
+    test("does not fabricate a pid (no real OS process backs a synchronous bootstatus)", async function () {
       mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
         if (file === "xcrun" && args.join(" ") === "simctl --version") {
           return createExecResult("simctl version 1.0.0", "");
@@ -368,7 +393,7 @@ describe("Simctl", function() {
       expect(handle.pid).toBeUndefined();
     });
 
-    test("kill() shuts the simulator back down instead of being a no-op", async function() {
+    test("kill() shuts the simulator back down instead of being a no-op", async function () {
       const commands: string[][] = [];
       mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
         commands.push([file, ...args]);
@@ -387,14 +412,14 @@ describe("Simctl", function() {
       // AC1: kill() reports success and issues `simctl shutdown <udid>` rather
       // than the previous no-op `() => false`.
       expect(handle.kill()).toBe(true);
-      for (let i = 0; i < 25 && !commands.some(c => c.includes("shutdown")); i++) {
+      for (let i = 0; i < 25 && !commands.some((c) => c.includes("shutdown")); i++) {
         await Promise.resolve();
       }
       expect(commands).toContainEqual(["xcrun", "simctl", "shutdown", "iphone-udid"]);
     });
   });
 
-  describe("waitForSimulatorReady", function() {
+  describe("waitForSimulatorReady", function () {
     const readyPayload = simulatorListPayload([
       {
         udid: "iphone-17-pro-udid",
@@ -402,8 +427,8 @@ describe("Simctl", function() {
         state: "Booted",
         isAvailable: true,
         deviceTypeIdentifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro",
-        os_version: "26.4"
-      }
+        os_version: "26.4",
+      },
     ]);
 
     function recordingReadyExec(commands: string[][]): typeof mockExecAsync {
@@ -419,7 +444,7 @@ describe("Simctl", function() {
       };
     }
 
-    test("runs bootstatus -b on the already-running path (no assumeBooted)", async function() {
+    test("runs bootstatus -b on the already-running path (no assumeBooted)", async function () {
       const commands: string[][] = [];
       simctl = new Simctl(mockDevice, recordingReadyExec(commands));
 
@@ -427,24 +452,30 @@ describe("Simctl", function() {
 
       expect(device.deviceId).toBe("iphone-17-pro-udid");
       expect(commands).toContainEqual([
-        "xcrun", "simctl", "bootstatus", "iphone-17-pro-udid", "-b",
+        "xcrun",
+        "simctl",
+        "bootstatus",
+        "iphone-17-pro-udid",
+        "-b",
       ]);
     });
 
-    test("skips the redundant bootstatus -b when assumeBooted is set (cold-boot path)", async function() {
+    test("skips the redundant bootstatus -b when assumeBooted is set (cold-boot path)", async function () {
       const commands: string[][] = [];
       simctl = new Simctl(mockDevice, recordingReadyExec(commands));
 
-      const device = await simctl.waitForSimulatorReady("iphone-17-pro-udid", 1234, { assumeBooted: true });
+      const device = await simctl.waitForSimulatorReady("iphone-17-pro-udid", 1234, {
+        assumeBooted: true,
+      });
 
       expect(device.deviceId).toBe("iphone-17-pro-udid");
       // The cold-boot path already waited via startSimulator; no second boot wait.
-      expect(commands.some(c => c.includes("bootstatus"))).toBe(false);
+      expect(commands.some((c) => c.includes("bootstatus"))).toBe(false);
     });
   });
 
-  describe("listSimulatorImages", function() {
-    test("should retry local simctl availability after a transient failed probe", async function() {
+  describe("listSimulatorImages", function () {
+    test("should retry local simctl availability after a transient failed probe", async function () {
       let versionProbeCalls = 0;
       const payload = simulatorListPayload([
         {
@@ -453,8 +484,8 @@ describe("Simctl", function() {
           state: "Booted",
           isAvailable: true,
           deviceTypeIdentifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro",
-          os_version: "26.4"
-        }
+          os_version: "26.4",
+        },
       ]);
 
       mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
@@ -478,10 +509,10 @@ describe("Simctl", function() {
       const devices = await simctl.listSimulatorImages();
 
       expect(versionProbeCalls).toBe(2);
-      expect(devices.map(device => device.name)).toEqual(["iPhone 17 Pro"]);
+      expect(devices.map((device) => device.name)).toEqual(["iPhone 17 Pro"]);
     });
 
-    test("should not cache an empty simulator discovery result", async function() {
+    test("should not cache an empty simulator discovery result", async function () {
       const timer = new FakeTimer();
       let listCalls = 0;
       const emptyPayload = simulatorListPayload([]);
@@ -492,8 +523,8 @@ describe("Simctl", function() {
           state: "Booted",
           isAvailable: true,
           deviceTypeIdentifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro",
-          os_version: "26.4"
-        }
+          os_version: "26.4",
+        },
       ]);
 
       mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
@@ -513,10 +544,216 @@ describe("Simctl", function() {
       const devices = await simctl.listSimulatorImages();
 
       expect(listCalls).toBe(2);
-      expect(devices.map(device => device.name)).toEqual(["iPhone 17 Pro"]);
+      expect(devices.map((device) => device.name)).toEqual(["iPhone 17 Pro"]);
     });
 
-    test("should surface simctl discovery failures instead of returning an empty list", async function() {
+    test("invalidates the simulator discovery cache after deletion", async function () {
+      let listCalls = 0;
+      const existingSimulatorPayload = simulatorListPayload([
+        {
+          udid: "test-ios-device-id",
+          name: "iPhone 17",
+          state: "Shutdown",
+          isAvailable: true,
+        },
+      ]);
+      const deletedSimulatorPayload = simulatorListPayload([]);
+
+      mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
+        if (file === "xcrun" && args.join(" ") === "simctl --version") {
+          return createExecResult("simctl version 1051.50", "");
+        }
+        if (file === "xcrun" && args.join(" ") === "simctl list devices --json") {
+          listCalls++;
+          return createExecResult(
+            listCalls === 1 ? existingSimulatorPayload : deletedSimulatorPayload,
+            "",
+          );
+        }
+        if (file === "xcrun" && args.join(" ") === "simctl delete test-ios-device-id") {
+          return createExecResult("", "");
+        }
+        return createExecResult("", "");
+      };
+
+      simctl = new Simctl(null, mockExecAsync);
+
+      expect((await simctl.listSimulatorImages()).map((device) => device.deviceId)).toEqual([
+        "test-ios-device-id",
+      ]);
+
+      await simctl.deleteSimulator("test-ios-device-id");
+
+      expect(await simctl.listSimulatorImages()).toEqual([]);
+      expect(listCalls).toBe(2);
+    });
+
+    test("waits for a timed-out delete command to settle before releasing coordination", async function () {
+      const timer = new FakeTimer();
+      let deleteSignal: AbortSignal | undefined;
+      let settleDelete!: (result: ExecResult) => void;
+      mockExecAsync = async (
+        file: string,
+        args: string[],
+        _maxBuffer?: number,
+        signal?: AbortSignal,
+      ): Promise<ExecResult> => {
+        if (file === "xcrun" && args.join(" ") === "simctl --version") {
+          return createExecResult("simctl version 1051.50", "");
+        }
+        if (file === "xcrun" && args.join(" ") === "simctl delete test-ios-device-id") {
+          deleteSignal = signal;
+          return await new Promise<ExecResult>((resolve) => {
+            settleDelete = resolve;
+          });
+        }
+        return createExecResult("", "");
+      };
+
+      simctl = new Simctl(null, mockExecAsync, timer);
+      let settled = false;
+      const deletion = simctl
+        .deleteSimulator("test-ios-device-id", { timeoutMs: 10 })
+        .finally(() => {
+          settled = true;
+        });
+      await waitForCondition(() => deleteSignal !== undefined, "delete abort signal");
+
+      timer.advanceTime(10);
+      await Promise.resolve();
+      expect(deleteSignal.aborted).toBe(true);
+      expect(settled).toBe(false);
+
+      settleDelete(createExecResult("", ""));
+      await expect(deletion).rejects.toThrow(
+        "Command timed out after 10ms: xcrun simctl delete test-ios-device-id",
+      );
+    });
+
+    test("bounds an unsettled delete command with the default timeout", async function () {
+      const timer = new FakeTimer();
+      let deleteSignal: AbortSignal | undefined;
+      mockExecAsync = async (
+        file: string,
+        args: string[],
+        _maxBuffer?: number,
+        signal?: AbortSignal,
+      ): Promise<ExecResult> => {
+        if (file === "xcrun" && args.join(" ") === "simctl --version") {
+          return createExecResult("simctl version 1051.50", "");
+        }
+        if (file === "xcrun" && args.join(" ") === "simctl delete test-ios-device-id") {
+          deleteSignal = signal;
+          return await new Promise<ExecResult>(() => {});
+        }
+        return createExecResult("", "");
+      };
+
+      simctl = new Simctl(null, mockExecAsync, timer);
+      const deletion = simctl.deleteSimulator("test-ios-device-id");
+      const deletionOutcome = deletion.then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      await waitForCondition(() => deleteSignal !== undefined, "delete abort signal");
+      expect(deleteSignal?.aborted).toBe(false);
+
+      timer.advanceTime(DEFAULT_DEVICE_READY_TIMEOUT_MS);
+      for (let attempt = 0; attempt < 50 && timer.getPendingTimeoutCount() === 0; attempt++) {
+        await Promise.resolve();
+      }
+      expect(deleteSignal?.aborted).toBe(true);
+      expect(timer.getPendingTimeoutCount()).toBe(1);
+      timer.advanceTime(1_000);
+
+      const deletionError = await deletionOutcome;
+      expect(deletionError).toBeInstanceOf(Error);
+      expect((deletionError as Error).message).toBe(
+        `Command timed out after ${DEFAULT_DEVICE_READY_TIMEOUT_MS}ms: xcrun simctl delete test-ios-device-id`,
+      );
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    });
+
+    test("waits for a timed-out shutdown command to settle", async function () {
+      const timer = new FakeTimer();
+      let shutdownSignal: AbortSignal | undefined;
+      let settleShutdown!: (result: ExecResult) => void;
+      mockExecAsync = async (
+        file: string,
+        args: string[],
+        _maxBuffer?: number,
+        signal?: AbortSignal,
+      ): Promise<ExecResult> => {
+        if (file === "xcrun" && args.join(" ") === "simctl --version") {
+          return createExecResult("simctl version 1051.50", "");
+        }
+        if (file === "xcrun" && args.join(" ") === "simctl shutdown test-ios-device-id") {
+          shutdownSignal = signal;
+          return await new Promise<ExecResult>((resolve) => {
+            settleShutdown = resolve;
+          });
+        }
+        return createExecResult("", "");
+      };
+
+      simctl = new Simctl(null, mockExecAsync, timer);
+      let settled = false;
+      const shutdown = simctl
+        .killSimulator(
+          {
+            platform: "ios",
+            name: "iPhone 17",
+            deviceId: "test-ios-device-id",
+          },
+          { timeoutMs: 10 },
+        )
+        .finally(() => {
+          settled = true;
+        });
+      await waitForCondition(() => shutdownSignal !== undefined, "shutdown abort signal");
+
+      timer.advanceTime(10);
+      await Promise.resolve();
+      expect(shutdownSignal.aborted).toBe(true);
+      expect(settled).toBe(false);
+
+      settleShutdown(createExecResult("", ""));
+      await expect(shutdown).rejects.toThrow(
+        "Command timed out after 10ms: xcrun simctl shutdown test-ios-device-id",
+      );
+    });
+
+    test("bypasses the simulator discovery cache when requested", async function () {
+      let listCalls = 0;
+      const firstPayload = simulatorListPayload([
+        {
+          udid: "test-ios-device-id",
+          name: "iPhone 17",
+          state: "Shutdown",
+          isAvailable: true,
+        },
+      ]);
+      const secondPayload = simulatorListPayload([]);
+
+      mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
+        if (file === "xcrun" && args.join(" ") === "simctl --version") {
+          return createExecResult("simctl version 1051.50", "");
+        }
+        if (file === "xcrun" && args.join(" ") === "simctl list devices --json") {
+          listCalls++;
+          return createExecResult(listCalls === 1 ? firstPayload : secondPayload, "");
+        }
+        return createExecResult("", "");
+      };
+
+      simctl = new Simctl(null, mockExecAsync);
+
+      expect(await simctl.listSimulatorImages()).toHaveLength(1);
+      expect(await simctl.listSimulatorImages(undefined, { bypassCache: true })).toEqual([]);
+      expect(listCalls).toBe(2);
+    });
+
+    test("should surface simctl discovery failures instead of returning an empty list", async function () {
       mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
         if (file === "xcrun" && args.join(" ") === "simctl --version") {
           return createExecResult("simctl version 1051.50", "");
@@ -530,11 +767,11 @@ describe("Simctl", function() {
       simctl = new Simctl(null, mockExecAsync);
 
       await expect(simctl.listSimulatorImages()).rejects.toThrow(
-        /Failed to list iOS simulator devices.*simctl list devices exploded/
+        /Failed to list iOS simulator devices.*simctl list devices exploded/,
       );
     });
 
-    test("should include unavailable and transitional simulators", async function() {
+    test("should include unavailable and transitional simulators", async function () {
       const simulatorPayload = {
         devices: {
           "com.apple.CoreSimulator.SimRuntime.iOS-17-4": [
@@ -546,7 +783,7 @@ describe("Simctl", function() {
               deviceTypeIdentifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-15-Pro",
               os_version: "17.4",
               model: "iPhone15,3",
-              architecture: "arm64"
+              architecture: "arm64",
             },
             {
               udid: "shutdown-udid",
@@ -554,7 +791,7 @@ describe("Simctl", function() {
               state: "Shutdown",
               isAvailable: true,
               deviceTypeIdentifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-15",
-              os_version: "17.4"
+              os_version: "17.4",
             },
             {
               udid: "creating-udid",
@@ -562,7 +799,7 @@ describe("Simctl", function() {
               state: "Creating",
               isAvailable: true,
               deviceTypeIdentifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-14",
-              os_version: "17.4"
+              os_version: "17.4",
             },
             {
               udid: "unavailable-udid",
@@ -570,13 +807,13 @@ describe("Simctl", function() {
               state: "Unavailable",
               isAvailable: false,
               availabilityError: "runtime missing",
-              deviceTypeIdentifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-13"
-            }
-          ]
+              deviceTypeIdentifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-13",
+            },
+          ],
         },
         runtimes: [],
         devicetypes: [],
-        pairs: []
+        pairs: [],
       };
 
       mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
@@ -586,7 +823,7 @@ describe("Simctl", function() {
             stderr: "",
             toString: () => "simctl version 1.0.0",
             trim: () => "simctl version 1.0.0",
-            includes: () => false
+            includes: () => false,
           };
         }
         if (file === "xcrun" && args.join(" ") === "simctl list devices --json") {
@@ -596,10 +833,16 @@ describe("Simctl", function() {
             stderr: "",
             toString: () => payload,
             trim: () => payload.trim(),
-            includes: (search: string) => payload.includes(search)
+            includes: (search: string) => payload.includes(search),
           };
         }
-        return { stdout: "", stderr: "", toString: () => "", trim: () => "", includes: () => false };
+        return {
+          stdout: "",
+          stderr: "",
+          toString: () => "",
+          trim: () => "",
+          includes: () => false,
+        };
       };
 
       simctl = new Simctl(null, mockExecAsync);
@@ -607,7 +850,7 @@ describe("Simctl", function() {
       const devices = await simctl.listSimulatorImages();
 
       expect(devices).toHaveLength(4);
-      const unavailable = devices.find(device => device.deviceId === "unavailable-udid");
+      const unavailable = devices.find((device) => device.deviceId === "unavailable-udid");
       expect(unavailable?.state).toBe("Unavailable");
       expect(unavailable?.isAvailable).toBe(false);
       expect(unavailable?.availabilityError).toBe("runtime missing");
@@ -616,28 +859,33 @@ describe("Simctl", function() {
     });
   });
 
-  describe("getRuntimes uses dedicated simctl command", function() {
-    test("should return runtimes from simctl list runtimes --json", async function() {
+  describe("getRuntimes uses dedicated simctl command", function () {
+    test("should return runtimes from simctl list runtimes --json", async function () {
       mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
         if (file === "xcrun" && args.join(" ") === "simctl list runtimes --json") {
-          return createExecResult(JSON.stringify({
-            runtimes: [
-              {
-                bundlePath: "/Library/Developer/CoreSimulator/Volumes/iOS_26.2/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.2.simruntime",
-                identifier: "com.apple.CoreSimulator.SimRuntime.iOS-26-2",
-                isAvailable: true,
-                name: "iOS 26.2",
-                version: "26.2"
-              },
-              {
-                bundlePath: "/Library/Developer/CoreSimulator/Volumes/iOS_18.6/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 18.6.simruntime",
-                identifier: "com.apple.CoreSimulator.SimRuntime.iOS-18-6",
-                isAvailable: false,
-                name: "iOS 18.6",
-                version: "18.6"
-              }
-            ]
-          }), "");
+          return createExecResult(
+            JSON.stringify({
+              runtimes: [
+                {
+                  bundlePath:
+                    "/Library/Developer/CoreSimulator/Volumes/iOS_26.2/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.2.simruntime",
+                  identifier: "com.apple.CoreSimulator.SimRuntime.iOS-26-2",
+                  isAvailable: true,
+                  name: "iOS 26.2",
+                  version: "26.2",
+                },
+                {
+                  bundlePath:
+                    "/Library/Developer/CoreSimulator/Volumes/iOS_18.6/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 18.6.simruntime",
+                  identifier: "com.apple.CoreSimulator.SimRuntime.iOS-18-6",
+                  isAvailable: false,
+                  name: "iOS 18.6",
+                  version: "18.6",
+                },
+              ],
+            }),
+            "",
+          );
         }
         return createExecResult("", "");
       };
@@ -653,7 +901,7 @@ describe("Simctl", function() {
     // availability-probe error, not the `list runtimes` command error, because
     // `ensureLocalSimctlAvailable` fires first. Let the probe succeed so only the
     // real command fails, and assert the *command's* message surfaces.
-    test("surfaces the runtimes command error, not the availability-probe error", async function() {
+    test("surfaces the runtimes command error, not the availability-probe error", async function () {
       mockExecAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
         if (args.join(" ") === "simctl --version") {
           return createExecResult("simctl version 0.0", "");
@@ -670,7 +918,7 @@ describe("Simctl", function() {
     // must degrade via `data.runtimes ?? []` — a different branch (SimCtlClient
     // :1119) that no test pinned. A regression in either would silently report
     // zero installed runtimes with no error.
-    test("returns an empty list when the runtimes JSON is malformed (swallow)", async function() {
+    test("returns an empty list when the runtimes JSON is malformed (swallow)", async function () {
       mockExecAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
         if (args.join(" ") === "simctl --version") {
           return createExecResult("simctl version 0.0", "");
@@ -682,7 +930,7 @@ describe("Simctl", function() {
       expect(await simctl.getRuntimes()).toEqual([]);
     });
 
-    test("returns an empty list when the runtimes key is absent (data.runtimes ?? [])", async function() {
+    test("returns an empty list when the runtimes key is absent (data.runtimes ?? [])", async function () {
       mockExecAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
         if (args.join(" ") === "simctl --version") {
           return createExecResult("simctl version 0.0", "");
@@ -695,19 +943,23 @@ describe("Simctl", function() {
     });
   });
 
-  describe("getDeviceTypes uses dedicated simctl command", function() {
-    test("should return device types from simctl list devicetypes --json", async function() {
+  describe("getDeviceTypes uses dedicated simctl command", function () {
+    test("should return device types from simctl list devicetypes --json", async function () {
       mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
         if (file === "xcrun" && args.join(" ") === "simctl list devicetypes --json") {
-          return createExecResult(JSON.stringify({
-            devicetypes: [
-              {
-                name: "iPhone 17 Pro",
-                identifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro",
-                bundlePath: "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Library/Developer/CoreSimulator/Profiles/DeviceTypes/iPhone 17 Pro.simdevicetype"
-              }
-            ]
-          }), "");
+          return createExecResult(
+            JSON.stringify({
+              devicetypes: [
+                {
+                  name: "iPhone 17 Pro",
+                  identifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro",
+                  bundlePath:
+                    "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Library/Developer/CoreSimulator/Profiles/DeviceTypes/iPhone 17 Pro.simdevicetype",
+                },
+              ],
+            }),
+            "",
+          );
         }
         return createExecResult("", "");
       };
@@ -720,7 +972,7 @@ describe("Simctl", function() {
 
     // REWRITE (#4177 item 2): as with getRuntimes, assert the command error and
     // not the availability probe.
-    test("surfaces the devicetypes command error, not the availability-probe error", async function() {
+    test("surfaces the devicetypes command error, not the availability-probe error", async function () {
       mockExecAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
         if (args.join(" ") === "simctl --version") {
           return createExecResult("simctl version 0.0", "");
@@ -733,7 +985,7 @@ describe("Simctl", function() {
     });
 
     // ADD (#4177 item 3): malformed / key-absent payloads degrade to [].
-    test("returns an empty list when the devicetypes JSON is malformed (swallow)", async function() {
+    test("returns an empty list when the devicetypes JSON is malformed (swallow)", async function () {
       mockExecAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
         if (args.join(" ") === "simctl --version") {
           return createExecResult("simctl version 0.0", "");
@@ -745,7 +997,7 @@ describe("Simctl", function() {
       expect(await simctl.getDeviceTypes()).toEqual([]);
     });
 
-    test("returns an empty list when the devicetypes key is absent (data.devicetypes ?? [])", async function() {
+    test("returns an empty list when the devicetypes key is absent (data.devicetypes ?? [])", async function () {
       mockExecAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
         if (args.join(" ") === "simctl --version") {
           return createExecResult("simctl version 0.0", "");
@@ -758,7 +1010,7 @@ describe("Simctl", function() {
     });
   });
 
-  describe("openSimulatorApp headless detection", function() {
+  describe("openSimulatorApp headless detection", function () {
     const HEADLESS_ENV = "AUTOMOBILE_IOS_HEADLESS";
     let savedEnv: string | undefined;
     let calls: Array<{ file: string; args: string[] }>;
@@ -777,14 +1029,16 @@ describe("Simctl", function() {
     }
 
     function openCalls(): Array<{ file: string; args: string[] }> {
-      return calls.filter(c => c.file === "open" && c.args[0] === "-a" && c.args[1] === "Simulator");
+      return calls.filter(
+        (c) => c.file === "open" && c.args[0] === "-a" && c.args[1] === "Simulator",
+      );
     }
 
     function launchctlCalls(): Array<{ file: string; args: string[] }> {
-      return calls.filter(c => c.file === "launchctl" && c.args[0] === "managername");
+      return calls.filter((c) => c.file === "launchctl" && c.args[0] === "managername");
     }
 
-    beforeEach(function() {
+    beforeEach(function () {
       savedEnv = process.env[HEADLESS_ENV];
       delete process.env[HEADLESS_ENV];
       calls = [];
@@ -818,27 +1072,81 @@ describe("Simctl", function() {
       expectedProbes: number;
     }> = [
       // darwin, no override → launchctl decides
-      { override: undefined, platform: "darwin", manager: "Aqua", expectedOpens: 1, expectedProbes: 1 },
-      { override: undefined, platform: "darwin", manager: "System", expectedOpens: 0, expectedProbes: 1 },
-      { override: undefined, platform: "darwin", manager: new Error("launchctl unavailable"), expectedOpens: 1, expectedProbes: 1 },
+      {
+        override: undefined,
+        platform: "darwin",
+        manager: "Aqua",
+        expectedOpens: 1,
+        expectedProbes: 1,
+      },
+      {
+        override: undefined,
+        platform: "darwin",
+        manager: "System",
+        expectedOpens: 0,
+        expectedProbes: 1,
+      },
+      {
+        override: undefined,
+        platform: "darwin",
+        manager: new Error("launchctl unavailable"),
+        expectedOpens: 1,
+        expectedProbes: 1,
+      },
       // darwin, override short-circuits the probe
-      { override: "true", platform: "darwin", manager: "Aqua", expectedOpens: 0, expectedProbes: 0 },
+      {
+        override: "true",
+        platform: "darwin",
+        manager: "Aqua",
+        expectedOpens: 0,
+        expectedProbes: 0,
+      },
       { override: "1", platform: "darwin", manager: "System", expectedOpens: 0, expectedProbes: 0 },
-      { override: "false", platform: "darwin", manager: "System", expectedOpens: 1, expectedProbes: 0 },
+      {
+        override: "false",
+        platform: "darwin",
+        manager: "System",
+        expectedOpens: 1,
+        expectedProbes: 0,
+      },
       { override: "0", platform: "darwin", manager: "System", expectedOpens: 1, expectedProbes: 0 },
       { override: "", platform: "darwin", manager: "System", expectedOpens: 1, expectedProbes: 0 },
-      { override: "maybe", platform: "darwin", manager: "Aqua", expectedOpens: 1, expectedProbes: 0 },
+      {
+        override: "maybe",
+        platform: "darwin",
+        manager: "Aqua",
+        expectedOpens: 1,
+        expectedProbes: 0,
+      },
       // non-darwin → always headless, never probes, never opens, whatever the override
-      { override: undefined, platform: "linux", manager: "Aqua", expectedOpens: 0, expectedProbes: 0 },
+      {
+        override: undefined,
+        platform: "linux",
+        manager: "Aqua",
+        expectedOpens: 0,
+        expectedProbes: 0,
+      },
       { override: "true", platform: "linux", manager: "Aqua", expectedOpens: 0, expectedProbes: 0 },
-      { override: "false", platform: "linux", manager: "Aqua", expectedOpens: 0, expectedProbes: 0 },
-      { override: "false", platform: "win32", manager: "Aqua", expectedOpens: 0, expectedProbes: 0 },
+      {
+        override: "false",
+        platform: "linux",
+        manager: "Aqua",
+        expectedOpens: 0,
+        expectedProbes: 0,
+      },
+      {
+        override: "false",
+        platform: "win32",
+        manager: "Aqua",
+        expectedOpens: 0,
+        expectedProbes: 0,
+      },
       { override: "", platform: "linux", manager: "Aqua", expectedOpens: 0, expectedProbes: 0 },
     ];
 
     for (const row of headlessRows) {
       const label = `override=${JSON.stringify(row.override)} platform=${row.platform} manager=${row.manager instanceof Error ? "probe-error" : row.manager}`;
-      test(`opens×${row.expectedOpens} probes×${row.expectedProbes} for ${label}`, async function() {
+      test(`opens×${row.expectedOpens} probes×${row.expectedProbes} for ${label}`, async function () {
         if (row.override === undefined) {
           delete process.env[HEADLESS_ENV];
         } else {
@@ -855,7 +1163,7 @@ describe("Simctl", function() {
       });
     }
 
-    test("caches the headless detection so launchctl is probed at most once", async function() {
+    test("caches the headless detection so launchctl is probed at most once", async function () {
       simctl = new Simctl(null, recordingExec("Aqua"), new FakeTimer(), "darwin");
       await simctl.openSimulatorApp();
       await simctl.openSimulatorApp();

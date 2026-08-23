@@ -1,5 +1,5 @@
 import { errorMessage } from "../utils/describeUnknownError";
-import type { BootedDevice } from "../models";
+import type { BootedDevice, DeviceInfo } from "../models";
 import {
   ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS,
   ANDROID_SCREENRECORD_MAX_SECONDS,
@@ -38,10 +38,10 @@ export interface AndroidSegmentedPlanVideoSessionOptions {
    */
   onFinalized?: () => void;
   startVideoRecording?: (
-    request: Parameters<typeof defaultStartVideoRecording>[0]
+    request: Parameters<typeof defaultStartVideoRecording>[0],
   ) => Promise<ActiveVideoRecording>;
   stopVideoRecording?: (
-    recordingId?: string
+    recordingId?: string,
   ) => Promise<{ metadata: VideoRecordingMetadata; evictedRecordingIds: string[] }>;
 }
 
@@ -96,18 +96,19 @@ export class AndroidSegmentedPlanVideoSession {
   private readonly completedRecordingIds: string[] = [];
 
   private readonly startVideoRecordingFn: (
-    request: Parameters<typeof defaultStartVideoRecording>[0]
+    request: Parameters<typeof defaultStartVideoRecording>[0],
   ) => Promise<ActiveVideoRecording>;
 
   private readonly stopVideoRecordingFn: (
-    recordingId?: string
+    recordingId?: string,
   ) => Promise<{ metadata: VideoRecordingMetadata; evictedRecordingIds: string[] }>;
 
   constructor(options: AndroidSegmentedPlanVideoSessionOptions) {
     this.device = options.device;
     this.outputNamePrefix = options.outputNamePrefix;
     this.timer = options.timer ?? defaultTimer;
-    this.segmentRotateAfterMs = options.segmentRotateAfterMs ?? ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS;
+    this.segmentRotateAfterMs =
+      options.segmentRotateAfterMs ?? ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS;
     this.maxDurationSeconds = options.maxDurationSeconds;
     this.configOverrides = options.configOverrides;
     this.onFinalized = options.onFinalized;
@@ -118,6 +119,21 @@ export class AndroidSegmentedPlanVideoSession {
   /** Device this session is recording, so callers can match sessions by device. */
   get deviceId(): string {
     return this.device.deviceId;
+  }
+
+  /**
+   * Match the owning device. A stopped Android AVD has no runtime serial, so its stable name is
+   * the available identity during deletion; booted devices retain exact serial matching.
+   */
+  matchesDevice(device: Pick<DeviceInfo, "platform" | "name" | "deviceId">): boolean {
+    if (this.device.platform !== device.platform) {
+      return false;
+    }
+    // A booted target's runtime ID is its exact incarnation identity. A stopped
+    // AVD has no runtime ID, so deletion must fall back to its stable name.
+    return device.deviceId === undefined
+      ? this.device.name === device.name
+      : this.device.deviceId === device.deviceId;
   }
 
   async startFirstSegment(): Promise<ActiveVideoRecording> {
@@ -147,10 +163,8 @@ export class AndroidSegmentedPlanVideoSession {
     }
     this.rotationTimerHandle = this.timer.setTimeout(() => {
       this.pendingRotation = this.rotateToNextSegment()
-        .catch(error => {
-          logger.warn(
-            `[SegmentedTimerVideo] Rotation failed: ${errorMessage(error)}`
-          );
+        .catch((error) => {
+          logger.warn(`[SegmentedTimerVideo] Rotation failed: ${errorMessage(error)}`);
         })
         .then(() => {
           this.scheduleRotation();
@@ -164,11 +178,11 @@ export class AndroidSegmentedPlanVideoSession {
     }
     this.maxDurationTimerHandle = this.timer.setTimeout(() => {
       logger.info(
-        `[SegmentedPlanVideo] Session reached maxDurationSeconds=${this.maxDurationSeconds}, auto-stopping`
+        `[SegmentedPlanVideo] Session reached maxDurationSeconds=${this.maxDurationSeconds}, auto-stopping`,
       );
-      this.stop().catch(error => {
+      this.stop().catch((error) => {
         logger.warn(
-          `[SegmentedPlanVideo] Auto-stop at maxDurationSeconds failed: ${errorMessage(error)}`
+          `[SegmentedPlanVideo] Auto-stop at maxDurationSeconds failed: ${errorMessage(error)}`,
         );
       });
     }, this.maxDurationSeconds * 1000);
@@ -235,7 +249,7 @@ export class AndroidSegmentedPlanVideoSession {
     this.segmentStartedAtMs = this.timer.now();
     this.segmentIndex += 1;
     logger.info(
-      `[SegmentedPlanVideo] Started segment ${this.segmentIndex} recordingId=${recording.recordingId}`
+      `[SegmentedPlanVideo] Started segment ${this.segmentIndex} recordingId=${recording.recordingId}`,
     );
     return recording;
   }
@@ -251,11 +265,11 @@ export class AndroidSegmentedPlanVideoSession {
       this.completedRecordingIds.push(previousId);
       this.completedFilePaths.push(stopped.metadata.filePath);
       logger.info(
-        `[SegmentedPlanVideo] Stopped segment recordingId=${previousId} path=${stopped.metadata.filePath}`
+        `[SegmentedPlanVideo] Stopped segment recordingId=${previousId} path=${stopped.metadata.filePath}`,
       );
     } catch (error) {
       logger.warn(
-        `[SegmentedPlanVideo] Failed to stop segment ${previousId}: ${errorMessage(error)}`
+        `[SegmentedPlanVideo] Failed to stop segment ${previousId}: ${errorMessage(error)}`,
       );
     } finally {
       this.activeRecordingId = undefined;
@@ -265,7 +279,7 @@ export class AndroidSegmentedPlanVideoSession {
       await this.startSegment();
     } catch (error) {
       logger.warn(
-        `[SegmentedPlanVideo] Failed to start next segment after ${previousId}: ${errorMessage(error)}`
+        `[SegmentedPlanVideo] Failed to start next segment after ${previousId}: ${errorMessage(error)}`,
       );
     }
   }
@@ -280,10 +294,12 @@ export class AndroidSegmentedPlanVideoSession {
         const stopped = await this.stopVideoRecordingFn(id);
         this.completedRecordingIds.push(id);
         this.completedFilePaths.push(stopped.metadata.filePath);
-        logger.info(`[SegmentedPlanVideo] Final stop recordingId=${id} path=${stopped.metadata.filePath}`);
+        logger.info(
+          `[SegmentedPlanVideo] Final stop recordingId=${id} path=${stopped.metadata.filePath}`,
+        );
       } catch (error) {
         logger.warn(
-          `[SegmentedPlanVideo] Failed to finalize segment ${id}: ${errorMessage(error)}`
+          `[SegmentedPlanVideo] Failed to finalize segment ${id}: ${errorMessage(error)}`,
         );
       } finally {
         this.activeRecordingId = undefined;

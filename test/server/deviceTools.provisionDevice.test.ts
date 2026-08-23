@@ -14,11 +14,13 @@ import type {
 import type { ProvisionDeviceOperationStore } from "../../src/db/provisionDeviceOperationRepository";
 import { ProvisionDeviceOperationConflictError } from "../../src/db/provisionDeviceOperationRepository";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeDeviceTeardownOperationStore } from "../fakes/FakeDeviceTeardownOperationStore";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/utils/virtualDeviceLifecycleCoordinator";
 
 class FakeExactDeviceProvisioner implements ExactDeviceProvisioner {
   readonly requests: ExactDeviceProvisionRequest[] = [];
@@ -97,15 +99,18 @@ describe("provisionDevice handler", () => {
   let deviceManager: FakeDeviceUtils;
   let exactProvisioner: FakeExactDeviceProvisioner;
   let operationStore: FakeProvisionDeviceOperationStore;
+  let teardownOperationStore: FakeDeviceTeardownOperationStore;
 
   beforeEach(() => {
     deviceManager = new FakeDeviceUtils();
     exactProvisioner = new FakeExactDeviceProvisioner();
     operationStore = new FakeProvisionDeviceOperationStore();
+    teardownOperationStore = new FakeDeviceTeardownOperationStore();
     setDeviceToolsDependencies({
       deviceManagerFactory: () => deviceManager,
       exactDeviceProvisionerFactory: () => exactProvisioner,
       provisionDeviceOperationStoreFactory: () => operationStore,
+      teardownDeviceOperationStoreFactory: () => teardownOperationStore,
       notifyResourcesChanged: async () => {},
     });
     registerDeviceTools();
@@ -131,6 +136,18 @@ describe("provisionDevice handler", () => {
       boot: true,
       readiness: "automation",
     });
+  });
+
+  test("advertises the platform-discriminated device schema with deterministic oneOf", () => {
+    const definition = ToolRegistry.getToolDefinitions().find(
+      (candidate) => candidate.name === "provisionDevice",
+    );
+    const properties = definition?.inputSchema.properties as
+      | Record<string, Record<string, unknown>>
+      | undefined;
+
+    expect(properties?.device.oneOf).toBeArray();
+    expect(properties?.device.anyOf).toBeUndefined();
   });
 
   test("rejects unbootable memory for modern Play Store Android images", () => {
@@ -199,6 +216,49 @@ describe("provisionDevice handler", () => {
       },
     });
     expect(second).toEqual(first);
+  });
+
+  test("coordinates completed provisioning replays with teardown", async () => {
+    const timer = new FakeTimer();
+    const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+    setDeviceToolsDependencies({ timer, lifecycleCoordinator });
+    registerDeviceTools();
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+    const args = {
+      operationId: "operation-replay-lifecycle",
+      device: {
+        platform: "android" as const,
+        name: "phone-api-36-a",
+        spec: {
+          runtime: "system-images;android-36;google_apis;x86_64",
+          deviceType: "pixel_9",
+        },
+      },
+      boot: false,
+      readiness: "none" as const,
+    };
+    await tool.handler(args);
+    await Promise.resolve();
+    const teardownLease = await lifecycleCoordinator.reserve(
+      { kind: "stable", platform: "android", stableId: args.device.name },
+      { operation: "teardown", deadlineMs: 1_000 },
+    );
+    let replaySettled = false;
+    const replay = tool.handler(args).finally(() => {
+      replaySettled = true;
+    });
+
+    for (let attempt = 0; attempt < 10; attempt++) {
+      await Promise.resolve();
+    }
+    expect(replaySettled).toBe(false);
+
+    teardownLease.release();
+    await replay;
+    expect(exactProvisioner.requests).toHaveLength(1);
   });
 
   test("boots the exact device and runs automation readiness when requested", async () => {
@@ -345,6 +405,125 @@ describe("provisionDevice handler", () => {
     });
     expect(deviceManager.getExecutedOperations()).toContainEqual(
       expect.stringContaining("startDevice:phone-api-36-a"),
+    );
+  });
+
+  test("fails closed when iOS lifecycle-reservation discovery is incomplete", async () => {
+    deviceManager.failedPlatforms.add("ios");
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+
+    const response = JSON.parse((await tool.handler({
+      operationId: "operation-ios-discovery-incomplete",
+      device: {
+        platform: "ios",
+        name: "iPhone 17",
+        spec: {
+          runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
+          deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+        },
+      },
+      boot: false,
+      readiness: "none",
+    }) as any).content[0].text);
+
+    expect(response).toMatchObject({
+      success: false,
+      error: { code: "platform_command_failed" },
+    });
+    expect(exactProvisioner.requests).toHaveLength(0);
+  });
+
+  test("locks a newly created iOS simulator before booting it", async () => {
+    const created: ExactProvisionedDevice = {
+      created: true,
+      device: {
+        platform: "ios",
+        name: "iPhone 17",
+        deviceId: "created-udid",
+        isRunning: false,
+        runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
+        deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+      },
+      resolvedSpec: {
+        runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
+        deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+      },
+    };
+    let releaseReadiness!: () => void;
+    const readinessStarted = new Promise<void>((resolve) => {
+      setDeviceToolsDependencies({
+        ensureCtrlProxyReady: async () => {
+          resolve();
+          await new Promise<void>((release) => {
+            releaseReadiness = release;
+          });
+        },
+      });
+    });
+    const exactIosProvisioner: ExactDeviceProvisioner = {
+      provision: async (request) => {
+        deviceManager.setDeviceImages("ios", [created.device]);
+        await request.lifecycleLease?.bindCanonicalIdentity({
+          platform: "ios",
+          stableId: created.device.deviceId!,
+        });
+        return created;
+      },
+    };
+    setDeviceToolsDependencies({
+      exactDeviceProvisionerFactory: () => exactIosProvisioner,
+    });
+    registerDeviceTools();
+    const provisionTool = ToolRegistry.getTool("provisionDevice");
+    const teardownTool = ToolRegistry.getTool("deleteDevice");
+    if (!provisionTool || !teardownTool) {
+      throw new Error("expected provisionDevice and deleteDevice tools");
+    }
+
+    const provision = provisionTool.handler({
+      operationId: "operation-ios-created-lock",
+      device: {
+        platform: "ios",
+        name: created.device.name,
+        spec: created.resolvedSpec,
+      },
+      boot: true,
+      readiness: "automation",
+    });
+    await readinessStarted;
+    deviceManager.clearHistory();
+
+    const teardown = teardownTool.handler({
+      operationId: "35e6f783-b794-47b8-b8a1-8619677820f0",
+      target: {
+        platform: "ios",
+        isVirtual: true,
+        stableId: created.device.deviceId!,
+        stableName: created.device.name,
+      },
+      mode: "destroy",
+      verifyAbsence: true,
+      timeoutMs: 60_000,
+    });
+    let teardownSettled = false;
+    void teardown.then(
+      () => { teardownSettled = true; },
+      () => { teardownSettled = true; },
+    );
+    for (let attempt = 0; attempt < 50; attempt++) {
+      await Promise.resolve();
+    }
+    expect(teardownSettled).toBe(false);
+    expect(deviceManager.getExecutedOperations()).toEqual([]);
+
+    releaseReadiness();
+    await provision;
+    await teardown;
+    expect(deviceManager.getExecutedOperations()).toContainEqual(
+      expect.stringContaining("getBootedDevices:ios"),
     );
   });
 
@@ -931,7 +1110,10 @@ describe("provisionDevice handler", () => {
       timeoutMs: 1_000,
     });
 
-    await Promise.resolve();
+    for (let attempt = 0; provisionSignal === undefined && attempt < 10; attempt++) {
+      await Promise.resolve();
+    }
+    expect(provisionSignal).toBeInstanceOf(AbortSignal);
     timer.advanceTime(1_000);
 
     expect(JSON.parse((await response as any).content[0].text)).toMatchObject({

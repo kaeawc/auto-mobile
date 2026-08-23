@@ -30,6 +30,8 @@ import { DefaultSystemDetection, type SystemDetection } from "../system/SystemDe
 
 type ExecFileAsync = (file: string, args: string[], maxBuffer?: number) => Promise<ExecResult>;
 
+const PROCESS_SETTLEMENT_GRACE_MS = 1_000;
+
 /**
  * The long-lived spawn seam. Kept as its own injectable type so the default can
  * route through the shared {@link HostProcessExecutor} while tests still inject a
@@ -104,12 +106,11 @@ export function resetAdbDeviceListCache(): void {
   deviceListCache = null;
 }
 
-
 // Enhance the standard execFileAsync result to implement the ExecResult interface
 const execFileAsync: ExecFileAsync = async (
   file: string,
   args: string[],
-  maxBuffer?: number
+  maxBuffer?: number,
 ): Promise<ExecResult> => {
   // Debug: Log when real exec is called (helps trace daemon startup in tests)
   if (process.env.DEBUG_ADB_EXEC) {
@@ -155,17 +156,26 @@ export class AdbClient implements AdbExecutor {
    */
   constructor(
     device: BootedDevice | null = null,
-    execAsyncFn: ((command: string, maxBuffer?: number) => Promise<ExecResult>) | ExecFileAsync | null = null,
+    execAsyncFn:
+      | ((command: string, maxBuffer?: number) => Promise<ExecResult>)
+      | ExecFileAsync
+      | null = null,
     spawnFn: SpawnFn | null = null,
     retryExecutor: RetryExecutor = defaultRetryExecutor,
     timer: Timer = defaultTimer,
-    private readonly systemDetectionFactory: () => SystemDetection = () => new DefaultSystemDetection()
+    private readonly systemDetectionFactory: () => SystemDetection = () =>
+      new DefaultSystemDetection(),
   ) {
     this.device = device;
     // Test mode if: custom execAsync provided OR global test mode flag is set
     // Check for any truthy value (not just exactly "true") to handle different env var formats
     const testModeEnv = process.env.AUTOMOBILE_TEST_MODE;
-    this.isTestMode = execAsyncFn !== null || (testModeEnv !== undefined && testModeEnv !== "" && testModeEnv !== "false" && testModeEnv !== "0");
+    this.isTestMode =
+      execAsyncFn !== null ||
+      (testModeEnv !== undefined &&
+        testModeEnv !== "" &&
+        testModeEnv !== "false" &&
+        testModeEnv !== "0");
 
     // In test mode without custom exec function, use a stub that returns empty results
     // This prevents any real adb commands from being executed
@@ -173,14 +183,18 @@ export class AdbClient implements AdbExecutor {
       this.execAsync = async (): Promise<ExecResult> => ({
         stdout: "",
         stderr: "",
-        toString() { return ""; },
-        trim() { return ""; },
-        includes() { return false; }
+        toString() {
+          return "";
+        },
+        trim() {
+          return "";
+        },
+        includes() {
+          return false;
+        },
       });
     } else {
-      this.execAsync = execAsyncFn
-        ? this.wrapExecAsync(execAsyncFn)
-        : execFileAsync;
+      this.execAsync = execAsyncFn ? this.wrapExecAsync(execAsyncFn) : execFileAsync;
     }
     this.spawnFn = spawnFn || ((file, args, options) => hostProcessExecutor.spawn(file, args, options));
     this.retryExecutor = retryExecutor;
@@ -196,14 +210,17 @@ export class AdbClient implements AdbExecutor {
   }
 
   private wrapExecAsync(
-    execAsyncFn: ((command: string, maxBuffer?: number) => Promise<ExecResult>) | ExecFileAsync
+    execAsyncFn: ((command: string, maxBuffer?: number) => Promise<ExecResult>) | ExecFileAsync,
   ): ExecFileAsync {
     if (execAsyncFn.length >= 3) {
       return execAsyncFn as ExecFileAsync;
     }
     return async (file: string, args: string[], maxBuffer?: number) => {
       const command = [file, ...args].join(" ");
-      return (execAsyncFn as (command: string, maxBuffer?: number) => Promise<ExecResult>)(command, maxBuffer);
+      return (execAsyncFn as (command: string, maxBuffer?: number) => Promise<ExecResult>)(
+        command,
+        maxBuffer,
+      );
     };
   }
 
@@ -212,7 +229,8 @@ export class AdbClient implements AdbExecutor {
    */
   private getFallbackAdbPath(): string {
     // Try environment variables
-    const androidHome = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT || process.env.ANDROID_SDK_HOME;
+    const androidHome =
+      process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT || process.env.ANDROID_SDK_HOME;
     if (androidHome) {
       return `${androidHome}/platform-tools/adb`;
     }
@@ -256,7 +274,7 @@ export class AdbClient implements AdbExecutor {
     // 3. Try Android command line tools detection (slower, more comprehensive)
     try {
       const locations = await detectAndroidCommandLineTools(
-        this.createDeadlineBoundSystemDetection(deadlineMs, signal)
+        this.createDeadlineBoundSystemDetection(deadlineMs, signal),
       );
       const bestLocation = getBestAndroidToolsLocation(locations);
 
@@ -291,26 +309,28 @@ export class AdbClient implements AdbExecutor {
     file: string,
     args: string[],
     deadlineMs: number | undefined,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<ExecResult> {
     const timeoutMs = deadlineMs === undefined ? undefined : deadlineMs - this.timer.now();
     if (timeoutMs !== undefined && timeoutMs <= 0) {
-      throw new AdbCommandTimeoutError(`Command timed out before ADB path discovery: ${file} ${args.join(" ")}`);
+      throw new AdbCommandTimeoutError(
+        `Command timed out before ADB path discovery: ${file} ${args.join(" ")}`,
+      );
     }
     return this.execWithSignal(file, args, undefined, timeoutMs, signal);
   }
 
   private createDeadlineBoundSystemDetection(
     deadlineMs: number | undefined,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): SystemDetection {
     const defaults = this.systemDetectionFactory();
     return {
       getCurrentPlatform: () => defaults.getCurrentPlatform(),
       getHomeDir: () => defaults.getHomeDir(),
-      getEnvVar: name => defaults.getEnvVar(name),
-      fileExistsSync: path => defaults.fileExistsSync(path),
-      fileExists: path => this.executeDetectionFileProbe(defaults, path, deadlineMs, signal),
+      getEnvVar: (name) => defaults.getEnvVar(name),
+      fileExistsSync: (path) => defaults.fileExistsSync(path),
+      fileExists: (path) => this.executeDetectionFileProbe(defaults, path, deadlineMs, signal),
       executeCommand: async (file, args = []) => {
         try {
           return await this.executeAdbPathProbe(file, args, deadlineMs, signal);
@@ -331,7 +351,7 @@ export class AdbClient implements AdbExecutor {
     systemDetection: SystemDetection,
     path: string,
     deadlineMs: number | undefined,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<boolean> {
     if (signal?.aborted) {
       throw new AndroidToolsDetectionAbortError(this.getAbortError(signal));
@@ -339,7 +359,9 @@ export class AdbClient implements AdbExecutor {
 
     const timeoutMs = deadlineMs === undefined ? undefined : deadlineMs - this.timer.now();
     if (timeoutMs !== undefined && timeoutMs <= 0) {
-      throw new AndroidToolsDetectionTimeoutError(`Command timed out before ADB path discovery: ${path}`);
+      throw new AndroidToolsDetectionTimeoutError(
+        `Command timed out before ADB path discovery: ${path}`,
+      );
     }
     if (timeoutMs === undefined && !signal) {
       return systemDetection.fileExists(path);
@@ -362,18 +384,26 @@ export class AdbClient implements AdbExecutor {
         cleanup();
         callback();
       };
-      const onAbort = () => settle(() => reject(new AndroidToolsDetectionAbortError(this.getAbortError(signal!))));
+      const onAbort = () =>
+        settle(() => reject(new AndroidToolsDetectionAbortError(this.getAbortError(signal!))));
 
       if (timeoutMs !== undefined) {
         timeoutHandle = this.timer.setTimeout(
-          () => settle(() => reject(new AndroidToolsDetectionTimeoutError(`Command timed out before ADB path discovery: ${path}`))),
-          timeoutMs
+          () =>
+            settle(() =>
+              reject(
+                new AndroidToolsDetectionTimeoutError(
+                  `Command timed out before ADB path discovery: ${path}`,
+                ),
+              ),
+            ),
+          timeoutMs,
         );
       }
       signal?.addEventListener("abort", onAbort, { once: true });
       void systemDetection.fileExists(path).then(
-        exists => settle(() => resolve(exists)),
-        error => settle(() => reject(error))
+        (exists) => settle(() => resolve(exists)),
+        (error) => settle(() => reject(error)),
       );
     });
   }
@@ -387,13 +417,19 @@ export class AdbClient implements AdbExecutor {
     }
   }
 
-  private getRemainingTimeoutMs(timeoutMs: number | undefined, startTime: number, command: string): number | undefined {
+  private getRemainingTimeoutMs(
+    timeoutMs: number | undefined,
+    startTime: number,
+    command: string,
+  ): number | undefined {
     if (timeoutMs === undefined) {
       return undefined;
     }
     const remainingMs = timeoutMs - (this.timer.now() - startTime);
     if (remainingMs <= 0) {
-      throw new AdbCommandTimeoutError(`Command timed out after ${timeoutMs}ms before execution: ${command}`);
+      throw new AdbCommandTimeoutError(
+        `Command timed out after ${timeoutMs}ms before execution: ${command}`,
+      );
     }
     return remainingMs;
   }
@@ -439,7 +475,10 @@ export class AdbClient implements AdbExecutor {
     return [adbPath, ...baseArgs].join(" ");
   }
 
-  async getBaseCommandParts(timeoutMs?: number, signal?: AbortSignal): Promise<{ adbPath: string; baseArgs: string[] }> {
+  async getBaseCommandParts(
+    timeoutMs?: number,
+    signal?: AbortSignal,
+  ): Promise<{ adbPath: string; baseArgs: string[] }> {
     const deviceId = this.device?.deviceId;
     const adbPath = await this.ensureAdbPath(timeoutMs, signal);
     const baseArgs: string[] = [];
@@ -473,22 +512,44 @@ export class AdbClient implements AdbExecutor {
     timeoutMs?: number,
     maxBuffer?: number,
     noRetry?: boolean,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<ExecResult> {
     return this.execute(this.parseCommandArgs(command), { timeoutMs, maxBuffer, noRetry, signal });
   }
 
   async execute(args: string[], options: AdbExecuteOptions = {}): Promise<ExecResult> {
-    const { timeoutMs, maxBuffer, noRetry, signal, beforeDispatch } = options;
+    const {
+      timeoutMs,
+      maxBuffer,
+      noRetry,
+      signal,
+      beforeDispatch,
+      waitForProcessSettlementAfterAbort,
+    } = options;
     const startTime = this.timer.now();
-    const result = await this.executeArgsImpl(args, timeoutMs, maxBuffer, noRetry, signal, beforeDispatch);
+    const result = await this.executeArgsImpl(
+      args,
+      timeoutMs,
+      maxBuffer,
+      noRetry,
+      signal,
+      beforeDispatch,
+      waitForProcessSettlementAfterAbort,
+    );
     const duration = this.timer.now() - startTime;
     const command = args.join(" ");
 
     // Only log longer commands or ones that take significant time
-    if (duration > 10 || command.includes("screencap") || command.includes("uiautomator") || command.includes("getevent")) {
+    if (
+      duration > 10 ||
+      command.includes("screencap") ||
+      command.includes("uiautomator") ||
+      command.includes("getevent")
+    ) {
       const outputSize = result.stdout.length + result.stderr.length;
-      logger.debug(`[ADB] Command completed in ${duration}ms (output: ${outputSize} bytes): ${command.length > 50 ? command.substring(0, 50) + "..." : command}`);
+      logger.debug(
+        `[ADB] Command completed in ${duration}ms (output: ${outputSize} bytes): ${command.length > 50 ? command.substring(0, 50) + "..." : command}`,
+      );
     }
 
     return result;
@@ -555,7 +616,7 @@ export class AdbClient implements AdbExecutor {
         settleStart = undefined;
         reject(error);
       };
-      settleStart = error => error ? reject(error) : resolve();
+      settleStart = (error) => (error ? reject(error) : resolve());
       child.once("spawn", onSpawn);
       child.once("error", onInitialError);
       if (signal?.aborted) {
@@ -629,7 +690,7 @@ export class AdbClient implements AdbExecutor {
         "shell getprop ro.build.version.sdk",
         timeoutMs,
         undefined,
-        true
+        true,
       );
       const parsed = Number.parseInt(result.stdout.trim(), 10);
       this.apiLevelCache = Number.isNaN(parsed) ? null : parsed;
@@ -671,7 +732,7 @@ export class AdbClient implements AdbExecutor {
       "no devices",
       "offline",
     ];
-    return nonRetryablePatterns.some(pattern => message.includes(pattern));
+    return nonRetryablePatterns.some((pattern) => message.includes(pattern));
   }
 
   private notifyMissingDeviceIfNeeded(error: unknown): void {
@@ -686,7 +747,11 @@ export class AdbClient implements AdbExecutor {
   private isMissingExecutableError(error: unknown): boolean {
     const err = error as NodeJS.ErrnoException;
     const message = errorMessage(error);
-    return err.code === "ENOENT" || message.includes("ENOENT") || message.includes("Executable not found");
+    return (
+      err.code === "ENOENT" ||
+      message.includes("ENOENT") ||
+      message.includes("Executable not found")
+    );
   }
 
   private getAbortError(signal?: AbortSignal): Error {
@@ -701,8 +766,10 @@ export class AdbClient implements AdbExecutor {
     if (this.isTestMode) {
       return false;
     }
-    return process.platform === "darwin" &&
-      AdbClient.macosMissingAdbProbes >= AdbClient.MAX_MACOS_MISSING_ADB_PROBES;
+    return (
+      process.platform === "darwin" &&
+      AdbClient.macosMissingAdbProbes >= AdbClient.MAX_MACOS_MISSING_ADB_PROBES
+    );
   }
 
   private recordMissingAdbProbe(): void {
@@ -712,7 +779,9 @@ export class AdbClient implements AdbExecutor {
 
     AdbClient.macosMissingAdbProbes += 1;
     if (AdbClient.macosMissingAdbProbes === AdbClient.MAX_MACOS_MISSING_ADB_PROBES) {
-      logger.debug("[ADB] adb not found after 3 probes; skipping passive Android device scans on this macOS host.");
+      logger.debug(
+        "[ADB] adb not found after 3 probes; skipping passive Android device scans on this macOS host.",
+      );
     }
   }
 
@@ -730,7 +799,8 @@ export class AdbClient implements AdbExecutor {
     maxBuffer?: number,
     noRetry?: boolean,
     signal?: AbortSignal,
-    beforeDispatch?: (remainingTimeoutMs?: number) => Promise<void>
+    beforeDispatch?: (remainingTimeoutMs?: number) => Promise<void>,
+    waitForProcessSettlementAfterAbort = false,
   ): Promise<ExecResult> {
     const startTime = this.timer.now();
     const resolvedSignal = signal ?? getAbortSignal();
@@ -740,7 +810,9 @@ export class AdbClient implements AdbExecutor {
 
     // Log which device is receiving this command for parallel execution debugging
     const deviceInfo = this.device ? `[DEVICE:${this.device.deviceId}]` : "[NO-DEVICE]";
-    logger.debug(`[ADB] ${deviceInfo} Executing: ${command.length > 80 ? command.substring(0, 80) + "..." : command}`);
+    logger.debug(
+      `[ADB] ${deviceInfo} Executing: ${command.length > 80 ? command.substring(0, 80) + "..." : command}`,
+    );
 
     if (noRetry) {
       // No retry - just execute once
@@ -751,7 +823,8 @@ export class AdbClient implements AdbExecutor {
           fullArgs,
           maxBuffer,
           this.getRemainingTimeoutMs(timeoutMs, startTime, command),
-          resolvedSignal
+          resolvedSignal,
+          waitForProcessSettlementAfterAbort,
         );
         return result;
       } catch (error) {
@@ -782,7 +855,8 @@ export class AdbClient implements AdbExecutor {
           fullArgs,
           maxBuffer,
           this.getRemainingTimeoutMs(timeoutMs, startTime, command),
-          resolvedSignal
+          resolvedSignal,
+          waitForProcessSettlementAfterAbort,
         );
         return result;
       },
@@ -790,7 +864,7 @@ export class AdbClient implements AdbExecutor {
         maxAttempts: AdbClient.MAX_ADB_RETRIES + 1,
         delays: 0, // Immediate retry (no delay)
         signal: resolvedSignal,
-        shouldRetry: error => {
+        shouldRetry: (error) => {
           if (resolvedSignal?.aborted) {
             return false;
           }
@@ -801,9 +875,11 @@ export class AdbClient implements AdbExecutor {
           return retryable;
         },
         onRetry: (error, attempt) => {
-          logger.debug(`[ADB] Retrying command (attempt ${attempt + 1}): ${command} - ${error.message}`);
+          logger.debug(
+            `[ADB] Retrying command (attempt ${attempt + 1}): ${command} - ${error.message}`,
+          );
         },
-      }
+      },
     );
   }
 
@@ -812,7 +888,8 @@ export class AdbClient implements AdbExecutor {
     args: string[],
     maxBuffer?: number,
     timeoutMs?: number,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    waitForProcessSettlementAfterAbort = false,
   ): Promise<ExecResult> {
     if (signal?.aborted) {
       throw this.getAbortError(signal);
@@ -824,6 +901,8 @@ export class AdbClient implements AdbExecutor {
 
     return new Promise<ExecResult>((resolve, reject) => {
       let settled = false;
+      let pendingTerminationError: Error | undefined;
+      let terminationTimeoutId: NodeJS.Timeout | undefined;
       const options = maxBuffer ? { maxBuffer } : undefined;
       const child = execFile(file, args, options, (error, stdout, stderr) => {
         if (settled) {
@@ -831,13 +910,19 @@ export class AdbClient implements AdbExecutor {
         }
         settled = true;
         cleanup();
+        if (pendingTerminationError) {
+          reject(pendingTerminationError);
+          return;
+        }
         if (error) {
-          reject(wrapCommandError(error, {
-            command: file,
-            args,
-            stdout,
-            stderr,
-          }));
+          reject(
+            wrapCommandError(error, {
+              command: file,
+              args,
+              stdout,
+              stderr,
+            }),
+          );
           return;
         }
         resolve(createExecResult(stdout, stderr));
@@ -849,10 +934,29 @@ export class AdbClient implements AdbExecutor {
         if (settled) {
           return;
         }
+        const abortError = this.getAbortError(signal);
+        if (waitForProcessSettlementAfterAbort) {
+          pendingTerminationError ??= abortError;
+          if (timeoutId) {
+            this.timer.clearTimeout(timeoutId);
+          }
+          signal?.removeEventListener("abort", onAbort);
+          child.kill("SIGTERM");
+          terminationTimeoutId = this.timer.setTimeout(() => {
+            if (settled) {
+              return;
+            }
+            child.kill("SIGKILL");
+            settled = true;
+            cleanup();
+            reject(pendingTerminationError);
+          }, PROCESS_SETTLEMENT_GRACE_MS);
+          return;
+        }
         settled = true;
         cleanup();
         child.kill("SIGTERM");
-        reject(this.getAbortError(signal));
+        reject(abortError);
       };
 
       const onExit = () => {
@@ -866,7 +970,10 @@ export class AdbClient implements AdbExecutor {
           signal.removeEventListener("abort", onAbort);
         }
         if (timeoutId) {
-          clearTimeout(timeoutId);
+          this.timer.clearTimeout(timeoutId);
+        }
+        if (terminationTimeoutId) {
+          this.timer.clearTimeout(terminationTimeoutId);
         }
       };
 
@@ -876,10 +983,28 @@ export class AdbClient implements AdbExecutor {
           if (settled) {
             return;
           }
+          const timeoutError = new AdbCommandTimeoutError(
+            `Command timed out after ${timeoutMs}ms: ${file} ${args.join(" ")}`,
+          );
+          if (waitForProcessSettlementAfterAbort) {
+            pendingTerminationError ??= timeoutError;
+            signal?.removeEventListener("abort", onAbort);
+            child.kill("SIGTERM");
+            terminationTimeoutId = this.timer.setTimeout(() => {
+              if (settled) {
+                return;
+              }
+              child.kill("SIGKILL");
+              settled = true;
+              cleanup();
+              reject(pendingTerminationError);
+            }, PROCESS_SETTLEMENT_GRACE_MS);
+            return;
+          }
           settled = true;
           cleanup();
           child.kill("SIGTERM");
-          reject(new AdbCommandTimeoutError(`Command timed out after ${timeoutMs}ms: ${file} ${args.join(" ")}`));
+          reject(timeoutError);
         }, timeoutMs);
       }
 
@@ -897,7 +1022,7 @@ export class AdbClient implements AdbExecutor {
     if (trimmed.startsWith("shell ")) {
       let shellCommand = trimmed.slice(6).trim();
       if (
-        (shellCommand.startsWith("\"") && shellCommand.endsWith("\"")) ||
+        (shellCommand.startsWith('"') && shellCommand.endsWith('"')) ||
         (shellCommand.startsWith("'") && shellCommand.endsWith("'"))
       ) {
         shellCommand = shellCommand.slice(1, -1);
@@ -928,7 +1053,7 @@ export class AdbClient implements AdbExecutor {
         continue;
       }
 
-      if (char === "\"" && !inSingle) {
+      if (char === '"' && !inSingle) {
         inDouble = !inDouble;
         continue;
       }
@@ -956,7 +1081,7 @@ export class AdbClient implements AdbExecutor {
    * @returns Promise with an array of device IDs
    */
   async getBootedAndroidDevices(
-    options: { bypassCache?: boolean; throwOnMissingAdb?: boolean; signal?: AbortSignal } = {}
+    options: { bypassCache?: boolean; throwOnMissingAdb?: boolean; signal?: AbortSignal } = {},
   ): Promise<BootedDevice[]> {
     if (this.shouldSkipMissingAdbProbe()) {
       if (options.throwOnMissingAdb) {
@@ -987,7 +1112,9 @@ export class AdbClient implements AdbExecutor {
       if (this.isMissingExecutableError(error)) {
         this.recordMissingAdbProbe();
         if (options.throwOnMissingAdb) {
-          throw new AdbUnavailableError(`ADB executable is unavailable: ${(error as Error).message}`);
+          throw new AdbUnavailableError(
+            `ADB executable is unavailable: ${(error as Error).message}`,
+          );
         }
         return [];
       }
@@ -996,21 +1123,23 @@ export class AdbClient implements AdbExecutor {
     const lines = result.stdout.split("\n").slice(1); // Skip the first line which is the header
 
     const devices = lines
-      .filter(line => line.trim().length > 0)
-      .flatMap(line => {
+      .filter((line) => line.trim().length > 0)
+      .flatMap((line) => {
         const [deviceId, state, ...details] = line.trim().split(/\s+/);
         if (!deviceId || state !== "device") {
           return [];
         }
         const transportId = details
-          .find(detail => detail.startsWith("transport_id:"))
+          .find((detail) => detail.startsWith("transport_id:"))
           ?.slice("transport_id:".length);
-        return [{
-          name: deviceId,
-          platform: "android",
-          deviceId,
-          ...(transportId ? { transportId } : {}),
-        } satisfies BootedDevice];
+        return [
+          {
+            name: deviceId,
+            platform: "android",
+            deviceId,
+            ...(transportId ? { transportId } : {}),
+          } satisfies BootedDevice,
+        ];
       });
 
     // Cache the result
@@ -1024,7 +1153,9 @@ export class AdbClient implements AdbExecutor {
    * getBootedAndroidDevices(). Readiness diagnostics use this to distinguish a
    * device that is absent from one that is present but stuck offline.
    */
-  async getDeviceStates(options: { timeoutMs?: number; signal?: AbortSignal } = {}): Promise<AdbDeviceState[]> {
+  async getDeviceStates(
+    options: { timeoutMs?: number; signal?: AbortSignal } = {},
+  ): Promise<AdbDeviceState[]> {
     if (this.shouldSkipMissingAdbProbe()) {
       return [];
     }
@@ -1041,7 +1172,9 @@ export class AdbClient implements AdbExecutor {
     } catch (error) {
       if (this.isMissingExecutableError(error)) {
         // Preserve the diagnostic path while treating an unavailable ADB as no connected devices.
-        logger.debug(`[ADB] Unable to query device states because adb is unavailable: ${(error as Error).message}`);
+        logger.debug(
+          `[ADB] Unable to query device states because adb is unavailable: ${(error as Error).message}`,
+        );
         this.recordMissingAdbProbe();
         return [];
       }
@@ -1051,7 +1184,7 @@ export class AdbClient implements AdbExecutor {
     return result.stdout
       .split("\n")
       .slice(1)
-      .flatMap(line => {
+      .flatMap((line) => {
         const [deviceId, state] = line.trim().split(/\s+/);
         return deviceId && state ? [{ deviceId, state }] : [];
       });
@@ -1074,7 +1207,13 @@ export class AdbClient implements AdbExecutor {
    */
   async getWakefulness(signal?: AbortSignal): Promise<"Awake" | "Asleep" | "Dozing" | null> {
     try {
-      const result = await this.executeCommand("shell dumpsys power | grep mWakefulness=", undefined, undefined, true, signal);
+      const result = await this.executeCommand(
+        "shell dumpsys power | grep mWakefulness=",
+        undefined,
+        undefined,
+        true,
+        signal,
+      );
       const match = result.stdout.match(/mWakefulness=(\w+)/);
       if (match) {
         const state = match[1];
@@ -1124,7 +1263,7 @@ export class AdbClient implements AdbExecutor {
         undefined,
         undefined,
         true,
-        signal
+        signal,
       );
       policy = result.stdout;
     } catch {
@@ -1144,7 +1283,7 @@ export class AdbClient implements AdbExecutor {
     return {
       locked: keyguardShowing && !occluded,
       keyguardShowing,
-      secure: secure ?? undefined
+      secure: secure ?? undefined,
     };
   }
 
@@ -1163,11 +1302,19 @@ export class AdbClient implements AdbExecutor {
   async listUsers(signal?: AbortSignal): Promise<AndroidUser[]> {
     try {
       // Try dumpsys user first - provides more structured output
-      const result = await this.executeCommand("shell dumpsys user", undefined, undefined, true, signal);
+      const result = await this.executeCommand(
+        "shell dumpsys user",
+        undefined,
+        undefined,
+        true,
+        signal,
+      );
       const users = this.parseUsersFromDumpsys(result.stdout);
 
       if (users.length > 0) {
-        logger.info(`[ADB] Found ${users.length} user(s) via dumpsys: ${users.map(u => `${u.userId}:${u.name}`).join(", ")}`);
+        logger.info(
+          `[ADB] Found ${users.length} user(s) via dumpsys: ${users.map((u) => `${u.userId}:${u.name}`).join(", ")}`,
+        );
         return users;
       }
 
@@ -1175,7 +1322,9 @@ export class AdbClient implements AdbExecutor {
       logger.debug("[ADB] dumpsys user parsing returned no users, falling back to pm list users");
       return await this.listUsersLegacy(signal);
     } catch (error) {
-      logger.debug(`[ADB] dumpsys user failed: ${(error as Error).message}, falling back to pm list users`);
+      logger.debug(
+        `[ADB] dumpsys user failed: ${(error as Error).message}, falling back to pm list users`,
+      );
       return await this.listUsersLegacy(signal);
     }
   }
@@ -1240,7 +1389,7 @@ export class AdbClient implements AdbExecutor {
           userId,
           name: userName,
           flags,
-          running
+          running,
         });
       }
     }
@@ -1259,7 +1408,13 @@ export class AdbClient implements AdbExecutor {
    */
   private async listUsersLegacy(signal?: AbortSignal): Promise<AndroidUser[]> {
     try {
-      const result = await this.executeCommand("shell pm list users", undefined, undefined, true, signal);
+      const result = await this.executeCommand(
+        "shell pm list users",
+        undefined,
+        undefined,
+        true,
+        signal,
+      );
       const lines = result.stdout.split("\n");
       const users: AndroidUser[] = [];
 
@@ -1272,35 +1427,43 @@ export class AdbClient implements AdbExecutor {
             userId: parseInt(match[1], 10),
             name: match[2],
             flags: parseInt(match[3], 16), // Parse as hexadecimal
-            running: match[4] === "running"
+            running: match[4] === "running",
           });
         }
       }
 
       if (users.length > 0) {
-        logger.info(`[ADB] Found ${users.length} user(s) via pm: ${users.map(u => `${u.userId}:${u.name}`).join(", ")}`);
+        logger.info(
+          `[ADB] Found ${users.length} user(s) via pm: ${users.map((u) => `${u.userId}:${u.name}`).join(", ")}`,
+        );
         return users;
       }
 
       // If still no users found, log the raw output for debugging
-      logger.warn(`[ADB] Failed to parse users from pm list users. Raw output: ${result.stdout.substring(0, 200)}`);
+      logger.warn(
+        `[ADB] Failed to parse users from pm list users. Raw output: ${result.stdout.substring(0, 200)}`,
+      );
 
       // Return primary user as last resort fallback
-      return [{
-        userId: 0,
-        name: "Owner",
-        flags: 0x13,
-        running: true
-      }];
+      return [
+        {
+          userId: 0,
+          name: "Owner",
+          flags: 0x13,
+          running: true,
+        },
+      ];
     } catch (error) {
       logger.warn(`[ADB] Failed to list users via pm: ${(error as Error).message}`);
       // Return primary user as fallback
-      return [{
-        userId: 0,
-        name: "Owner",
-        flags: 0x13,
-        running: true
-      }];
+      return [
+        {
+          userId: 0,
+          name: "Owner",
+          flags: 0x13,
+          running: true,
+        },
+      ];
     }
   }
 
@@ -1309,14 +1472,16 @@ export class AdbClient implements AdbExecutor {
    * Uses dumpsys activity to find the resumed/focused activity
    * @returns Promise with { packageName: string, userId: number } or null if no app in foreground
    */
-  async getForegroundApp(signal?: AbortSignal): Promise<{ packageName: string; userId: number } | null> {
+  async getForegroundApp(
+    signal?: AbortSignal,
+  ): Promise<{ packageName: string; userId: number } | null> {
     try {
       const result = await this.executeCommand(
         'shell dumpsys activity activities | grep -E "(mResumedActivity|mFocusedActivity|topResumedActivity)" | head -1',
         undefined,
         undefined,
         true,
-        signal
+        signal,
       );
 
       // Parse output to extract package name and user ID

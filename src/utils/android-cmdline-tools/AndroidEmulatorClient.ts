@@ -2141,7 +2141,12 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
     // Use ADB to stop the emulator
     const adb = this.adbFactory.create(emulator);
-    await adb.executeCommand("emu kill", options.timeoutMs, undefined, true, options.signal);
+    await adb.execute(["emu", "kill"], {
+      timeoutMs: options.timeoutMs,
+      noRetry: true,
+      signal: options.signal,
+      waitForProcessSettlementAfterAbort: true,
+    });
 
     logger.info(`Killed emulator '${device.name}'`);
     return emulator;

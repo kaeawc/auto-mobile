@@ -1,4 +1,5 @@
 export const DEFAULT_DEVICE_READY_TIMEOUT_MS = 120000;
+export const DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS = 60_000;
 // Exact virtual-device provisioning can spend up to five minutes in
 // `avdmanager create avd` before the regular boot/readiness phases begin.
 export const DEFAULT_PROVISION_DEVICE_TIMEOUT_MS = 8 * 60 * 1000;

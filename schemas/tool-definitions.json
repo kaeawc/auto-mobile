@@ -928,6 +928,79 @@
     }
   },
   {
+    "name": "deleteDevice",
+    "description": "Stop and permanently delete a device, with verified platform-inventory absence",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "operationId": {
+          "description": "Caller-generated idempotency and diagnostic correlation ID",
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$"
+        },
+        "target": {
+          "type": "object",
+          "properties": {
+            "platform": {
+              "description": "Platform reported by automobile:devices/booted",
+              "type": "string",
+              "enum": [
+                "android",
+                "ios"
+              ]
+            },
+            "isVirtual": {
+              "description": "Virtual-device flag reported by automobile:devices/booted",
+              "type": "boolean",
+              "const": true
+            },
+            "stableId": {
+              "description": "Stable platform device identity from automobile:devices/booted",
+              "type": "string",
+              "minLength": 1
+            },
+            "stableName": {
+              "description": "Stable platform representation name when available",
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "platform",
+            "isVirtual",
+            "stableId"
+          ],
+          "additionalProperties": false
+        },
+        "mode": {
+          "description": "Stop and permanently delete the platform device representation",
+          "type": "string",
+          "const": "destroy"
+        },
+        "verifyAbsence": {
+          "description": "Require a complete inventory observation proving durable absence",
+          "type": "boolean",
+          "const": true
+        },
+        "timeoutMs": {
+          "description": "Total bounded teardown timeout in ms",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 890000
+        }
+      },
+      "required": [
+        "operationId",
+        "target",
+        "mode",
+        "verifyAbsence"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "deviceSnapshot",
     "description": "Capture or restore device snapshot.",
     "inputSchema": {
@@ -7687,7 +7760,7 @@
           "minLength": 1
         },
         "device": {
-          "anyOf": [
+          "oneOf": [
             {
               "type": "object",
               "properties": {
@@ -11296,7 +11369,7 @@
               },
               "shape": {
                 "description": "Highlight shape",
-                "anyOf": [
+                "oneOf": [
                   {
                     "type": "object",
                     "properties": {

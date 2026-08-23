@@ -1902,29 +1902,45 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     if (expected == null || expected == currentFrameContext()) return false
     val error =
       "Stale frame context for input/${action.wireName}; observe a fresh frame before retrying"
-    launchRequestScope(requestId) {
-      when (action) {
-        StaleFrameContextAction.TAP -> broadcastTapCoordinatesResult(requestId, false, error, 0)
-        StaleFrameContextAction.SWIPE -> broadcastSwipeResult(requestId, false, error, 0, null)
-        StaleFrameContextAction.DRAG -> broadcastDragResult(requestId, false, error, 0, null)
-        StaleFrameContextAction.SET_TEXT -> broadcastSetTextResult(requestId, false, error, 0)
-        StaleFrameContextAction.IME_ACTION ->
-          broadcastImeActionResult(requestId, action.wireName, false, error, 0)
-        StaleFrameContextAction.GLOBAL_ACTION ->
-          webSocketServer.broadcast(
-            dev.jasonpearson.automobile.protocol.GlobalActionResult(
-              timestamp = System.currentTimeMillis(),
-              requestId = requestId,
-              success = false,
-              action = action.wireName,
-              totalTimeMs = 0,
-              error = error,
-            )
-          )
-      }
-    }
+    launchRequestScope(requestId) { broadcastStaleFrameRejection(requestId, action, error) }
     return true
   }
+
+  /**
+   * Broadcasts the correlated stale-frame rejection for [action].
+   *
+   * A future [StaleFrameContextAction] added without its own branch must never route through no
+   * branch and leave the caller to hang until timeout (issue #4577). At this module's Kotlin
+   * language version the compiler already enforces that: a non-exhaustive `when` over the enum is a
+   * compile error in statement or expression form. This is written expression-bodied so the
+   * guarantee also survives lowering the language version below the level where non-exhaustive
+   * `when` *statements* became errors (they are only warnings pre-2.0). Do not add an `else ->`
+   * branch — it would defeat the check by making a missing action compile.
+   */
+  private suspend fun broadcastStaleFrameRejection(
+    requestId: String?,
+    action: StaleFrameContextAction,
+    error: String,
+  ) =
+    when (action) {
+      StaleFrameContextAction.TAP -> broadcastTapCoordinatesResult(requestId, false, error, 0)
+      StaleFrameContextAction.SWIPE -> broadcastSwipeResult(requestId, false, error, 0, null)
+      StaleFrameContextAction.DRAG -> broadcastDragResult(requestId, false, error, 0, null)
+      StaleFrameContextAction.SET_TEXT -> broadcastSetTextResult(requestId, false, error, 0)
+      StaleFrameContextAction.IME_ACTION ->
+        broadcastImeActionResult(requestId, action.wireName, false, error, 0)
+      StaleFrameContextAction.GLOBAL_ACTION ->
+        webSocketServer.broadcast(
+          dev.jasonpearson.automobile.protocol.GlobalActionResult(
+            timestamp = System.currentTimeMillis(),
+            requestId = requestId,
+            success = false,
+            action = action.wireName,
+            totalTimeMs = 0,
+            error = error,
+          )
+        )
+    }
 
   override fun requestPinch(
     requestId: String?,

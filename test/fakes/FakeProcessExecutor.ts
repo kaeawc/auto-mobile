@@ -102,7 +102,7 @@ export class FakeProcessExecutor implements HostProcessExecutor {
   executeCommandWithChild(
     command: string,
     args: string[] = [],
-    options?: HostCommandOptions
+    options?: HostCommandOptions,
   ): StartedHostCommand {
     return {
       child: this.spawn(command, args),

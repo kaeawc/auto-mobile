@@ -1,9 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  runExecSeam,
-  type ExecSeamOptions,
-  type RawExecOutput,
-} from "../../src/utils/ExecSeam";
+import { runExecSeam, type ExecSeamOptions, type RawExecOutput } from "../../src/utils/ExecSeam";
 import { createExecResult } from "../../src/utils/execResult";
 import {
   DefaultHostCommandExecutor,
@@ -29,14 +25,14 @@ function coreSimulator405Error(): NodeExecError {
 
 // The canonical ExecResult factory is the single place exec output is coerced
 // (Buffer→string) for both executors; the exec-seam paths delegate to it.
-describe("createExecResult (canonical exec-seam coercion)", function() {
-  test("passes through string stdout/stderr", function() {
+describe("createExecResult (canonical exec-seam coercion)", function () {
+  test("passes through string stdout/stderr", function () {
     const result = createExecResult("out", "err");
     expect(result.stdout).toBe("out");
     expect(result.stderr).toBe("err");
   });
 
-  test("coerces Buffer stdout/stderr to strings", function() {
+  test("coerces Buffer stdout/stderr to strings", function () {
     const result = createExecResult(Buffer.from("buffered-out"), Buffer.from("buffered-err"));
     expect(result.stdout).toBe("buffered-out");
     expect(result.stderr).toBe("buffered-err");
@@ -44,7 +40,7 @@ describe("createExecResult (canonical exec-seam coercion)", function() {
     expect(typeof result.stderr).toBe("string");
   });
 
-  test("ExecResult helpers operate on stdout", function() {
+  test("ExecResult helpers operate on stdout", function () {
     const result = createExecResult("  hello world  \n", "");
     expect(result.trim()).toBe("hello world");
     expect(result.toString()).toBe("  hello world  \n");
@@ -53,126 +49,187 @@ describe("createExecResult (canonical exec-seam coercion)", function() {
   });
 });
 
-describe("runExecSeam", function() {
-  test("maps request options to node exec option names", async function() {
-    let seen: ExecSeamOptions | undefined;
-    const invoke = async (options: ExecSeamOptions): Promise<RawExecOutput> => {
-      seen = options;
-      return { stdout: "", stderr: "" };
-    };
-    await runExecSeam(invoke, { timeoutMs: 1234, maxBuffer: 42, cwd: "/tmp" }, { command: "cmd" });
-    expect(seen).toEqual({ timeout: 1234, maxBuffer: 42, cwd: "/tmp" });
-  }, FAST_TEST_TIMEOUT_MS);
+describe("runExecSeam", function () {
+  test(
+    "maps request options to node exec option names",
+    async function () {
+      let seen: ExecSeamOptions | undefined;
+      const invoke = async (options: ExecSeamOptions): Promise<RawExecOutput> => {
+        seen = options;
+        return { stdout: "", stderr: "" };
+      };
+      await runExecSeam(
+        invoke,
+        { timeoutMs: 1234, maxBuffer: 42, cwd: "/tmp" },
+        { command: "cmd" },
+      );
+      expect(seen).toEqual({ timeout: 1234, maxBuffer: 42, cwd: "/tmp" });
+    },
+    FAST_TEST_TIMEOUT_MS,
+  );
 
-  test("returns a buffer-coerced ExecResult", async function() {
-    const result = await runExecSeam(
-      async () => ({ stdout: Buffer.from("data"), stderr: Buffer.from("") }),
-      {},
-      { command: "cmd" }
-    );
-    expect(result.stdout).toBe("data");
-    expect(result.trim()).toBe("data");
-  }, FAST_TEST_TIMEOUT_MS);
+  test(
+    "returns a buffer-coerced ExecResult",
+    async function () {
+      const result = await runExecSeam(
+        async () => ({ stdout: Buffer.from("data"), stderr: Buffer.from("") }),
+        {},
+        { command: "cmd" },
+      );
+      expect(result.stdout).toBe("data");
+      expect(result.trim()).toBe("data");
+    },
+    FAST_TEST_TIMEOUT_MS,
+  );
 
-  test("wraps thrown errors with command context", async function() {
-    const invoke = async (): Promise<RawExecOutput> => {
-      const error = new Error("boom") as NodeJS.ErrnoException & { stderr?: string };
-      error.code = 7;
-      error.stderr = "detailed stderr";
-      throw error;
-    };
-    await expect(
-      runExecSeam(invoke, {}, { command: "tool", args: ["arg"], cwd: "/work" })
-    ).rejects.toThrow(
-      /Command failed: tool arg[\s\S]*cwd: \/work[\s\S]*exit code: 7[\s\S]*stderr:[\s\S]*detailed stderr/
-    );
-  }, FAST_TEST_TIMEOUT_MS);
+  test(
+    "wraps thrown errors with command context",
+    async function () {
+      const invoke = async (): Promise<RawExecOutput> => {
+        const error = new Error("boom") as NodeJS.ErrnoException & { stderr?: string };
+        error.code = 7;
+        error.stderr = "detailed stderr";
+        throw error;
+      };
+      await expect(
+        runExecSeam(invoke, {}, { command: "tool", args: ["arg"], cwd: "/work" }),
+      ).rejects.toThrow(
+        /Command failed: tool arg[\s\S]*cwd: \/work[\s\S]*exit code: 7[\s\S]*stderr:[\s\S]*detailed stderr/,
+      );
+    },
+    FAST_TEST_TIMEOUT_MS,
+  );
 
   // The default wrap path returns a fresh Error copying only `.name`, so the raw
   // `.code`/`.stderr` are lost. This pins that loss so the `preserveError`
   // contract below is not silently equivalent (issue #5459).
-  test("default path drops the raw error's .code/.stderr", async function() {
-    const original = coreSimulator405Error();
-    let thrown: NodeExecError | undefined;
-    try {
-      await runExecSeam(async () => {
-        throw original;
-      }, {}, { command: "xcrun", args: ["simctl", "bootstatus"] });
-    } catch (error) {
-      thrown = error as NodeExecError;
-    }
-    expect(thrown).toBeDefined();
-    expect(thrown).not.toBe(original);
-    expect(thrown?.code).toBeUndefined();
-    expect(thrown?.stderr).toBeUndefined();
-  }, FAST_TEST_TIMEOUT_MS);
+  test(
+    "default path drops the raw error's .code/.stderr",
+    async function () {
+      const original = coreSimulator405Error();
+      let thrown: NodeExecError | undefined;
+      try {
+        await runExecSeam(
+          async () => {
+            throw original;
+          },
+          {},
+          { command: "xcrun", args: ["simctl", "bootstatus"] },
+        );
+      } catch (error) {
+        thrown = error as NodeExecError;
+      }
+      expect(thrown).toBeDefined();
+      expect(thrown).not.toBe(original);
+      expect(thrown?.code).toBeUndefined();
+      expect(thrown?.stderr).toBeUndefined();
+    },
+    FAST_TEST_TIMEOUT_MS,
+  );
 
   // SimCtlClient's execFile leg opts into `preserveError` so CoreSimulator-405
   // boot recovery can still read the original `.code`/`.stderr` after routing
   // through the shared seam (issue #5459, #3938 / #4092).
-  test("preserveError propagates the original error with .code/.stderr intact", async function() {
-    const original = coreSimulator405Error();
-    let thrown: NodeExecError | undefined;
-    try {
-      await runExecSeam(async () => {
-        throw original;
-      }, {}, { command: "xcrun", args: ["simctl", "bootstatus"] }, { preserveError: true });
-    } catch (error) {
-      thrown = error as NodeExecError;
-    }
-    expect(thrown).toBe(original);
-    expect(thrown?.code).toBe(149);
-    expect(thrown?.stderr).toContain("code=405");
-  }, FAST_TEST_TIMEOUT_MS);
+  test(
+    "preserveError propagates the original error with .code/.stderr intact",
+    async function () {
+      const original = coreSimulator405Error();
+      let thrown: NodeExecError | undefined;
+      try {
+        await runExecSeam(
+          async () => {
+            throw original;
+          },
+          {},
+          { command: "xcrun", args: ["simctl", "bootstatus"] },
+          { preserveError: true },
+        );
+      } catch (error) {
+        thrown = error as NodeExecError;
+      }
+      expect(thrown).toBe(original);
+      expect(thrown?.code).toBe(149);
+      expect(thrown?.stderr).toContain("code=405");
+    },
+    FAST_TEST_TIMEOUT_MS,
+  );
 });
 
-describe("argv exec seam", function() {
-  test("ExecFileAsync is usable by the argv-first owner", async function() {
-    const argvSeam: ExecFileAsync = async () => ({ stdout: "argv", stderr: "" });
-    const result = await new DefaultHostCommandExecutor(argvSeam).executeCommand("echo", ["argv"]);
-    expect(result.stdout).toBe("argv");
-  }, FAST_TEST_TIMEOUT_MS);
+describe("argv exec seam", function () {
+  test(
+    "ExecFileAsync is usable by the argv-first owner",
+    async function () {
+      const argvSeam: ExecFileAsync = async () => ({ stdout: "argv", stderr: "" });
+      const result = await new DefaultHostCommandExecutor(argvSeam).executeCommand("echo", [
+        "argv",
+      ]);
+      expect(result.stdout).toBe("argv");
+    },
+    FAST_TEST_TIMEOUT_MS,
+  );
 
-  test("trackable command execution shares option mapping and result coercion", async function() {
-    const child = { kill: () => true } as ChildProcess;
-    let seen: ExecSeamOptions | undefined;
-    const execWithChild: ExecFileWithChild = (_file, _args, options, callback) => {
-      seen = options;
-      callback(null, Buffer.from("tracked-out"), Buffer.from("tracked-err"));
-      return child;
-    };
+  test(
+    "trackable command execution shares option mapping and result coercion",
+    async function () {
+      const child = { kill: () => true } as ChildProcess;
+      let seen: ExecSeamOptions | undefined;
+      const execWithChild: ExecFileWithChild = (_file, _args, options, callback) => {
+        seen = options;
+        callback(null, Buffer.from("tracked-out"), Buffer.from("tracked-err"));
+        return child;
+      };
 
-    const started = new DefaultHostCommandExecutor(undefined, execWithChild)
-      .executeCommandWithChild("adb", ["shell", "true"], { timeoutMs: 1234, maxBuffer: 42 });
+      const started = new DefaultHostCommandExecutor(
+        undefined,
+        execWithChild,
+      ).executeCommandWithChild("adb", ["shell", "true"], { timeoutMs: 1234, maxBuffer: 42 });
 
-    expect(started.child).toBe(child);
-    expect(seen).toEqual({ timeout: 1234, maxBuffer: 42, cwd: undefined, signal: undefined });
-    await expect(started.result).resolves.toMatchObject({ stdout: "tracked-out", stderr: "tracked-err" });
-  }, FAST_TEST_TIMEOUT_MS);
+      expect(started.child).toBe(child);
+      expect(seen).toEqual({ timeout: 1234, maxBuffer: 42, cwd: undefined, signal: undefined });
+      await expect(started.result).resolves.toMatchObject({
+        stdout: "tracked-out",
+        stderr: "tracked-err",
+      });
+    },
+    FAST_TEST_TIMEOUT_MS,
+  );
 
-  test("trackable command execution retains callback output when wrapping errors", async function() {
-    const child = { kill: () => true } as ChildProcess;
-    const execWithChild: ExecFileWithChild = (_file, _args, _options, callback) => {
-      const error = new Error("adb failed") as Error & { code?: number };
-      error.code = 1;
-      callback(error, "callback stdout", "callback stderr");
-      return child;
-    };
+  test(
+    "trackable command execution retains callback output when wrapping errors",
+    async function () {
+      const child = { kill: () => true } as ChildProcess;
+      const execWithChild: ExecFileWithChild = (_file, _args, _options, callback) => {
+        const error = new Error("adb failed") as Error & { code?: number };
+        error.code = 1;
+        callback(error, "callback stdout", "callback stderr");
+        return child;
+      };
 
-    const started = new DefaultHostCommandExecutor(undefined, execWithChild)
-      .executeCommandWithChild("adb", ["shell", "true"]);
+      const started = new DefaultHostCommandExecutor(
+        undefined,
+        execWithChild,
+      ).executeCommandWithChild("adb", ["shell", "true"]);
 
-    await expect(started.result).rejects.toThrow(/callback stdout[\s\S]*callback stderr/);
-  }, FAST_TEST_TIMEOUT_MS);
+      await expect(started.result).rejects.toThrow(/callback stdout[\s\S]*callback stderr/);
+    },
+    FAST_TEST_TIMEOUT_MS,
+  );
 
-  test("trackable command execution propagates synchronous startup failures", function() {
-    const startupError = new Error("The argument contains a NUL byte");
-    const execWithChild: ExecFileWithChild = () => {
-      throw startupError;
-    };
+  test(
+    "trackable command execution propagates synchronous startup failures",
+    function () {
+      const startupError = new Error("The argument contains a NUL byte");
+      const execWithChild: ExecFileWithChild = () => {
+        throw startupError;
+      };
 
-    expect(() => new DefaultHostCommandExecutor(undefined, execWithChild)
-      .executeCommandWithChild("adb", ["shell", "a\0b"]))
-      .toThrow(/Command failed: adb shell a\0b[\s\S]*The argument contains a NUL byte/);
-  }, FAST_TEST_TIMEOUT_MS);
+      expect(() =>
+        new DefaultHostCommandExecutor(undefined, execWithChild).executeCommandWithChild("adb", [
+          "shell",
+          "a\0b",
+        ]),
+      ).toThrow(/Command failed: adb shell a\0b[\s\S]*The argument contains a NUL byte/);
+    },
+    FAST_TEST_TIMEOUT_MS,
+  );
 });

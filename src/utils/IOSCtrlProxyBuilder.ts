@@ -1317,7 +1317,7 @@ export class IOSCtrlProxyBuilder {
    */
   private async assertLocalRunnerBinaryHash(
     platform: IOSCtrlProxyPlatform,
-    phase: "post-extract" | "pre-launch"
+    phase: "post-extract" | "pre-launch",
   ): Promise<void> {
     const runnerChecksumTarget = this.getExpectedRunnerChecksumTarget();
     const runnerBinaryPath = await this.getRunnerBinaryPath(platform, runnerChecksumTarget);
@@ -1331,19 +1331,22 @@ export class IOSCtrlProxyBuilder {
       this.derivedLocalRunnerSha256.set(platform, normalized);
       logger.warn(
         `[IOSCtrlProxyBuilder] Local-build mode (${IOS_CTRL_PROXY_USE_LOCAL_BUILD_ENV}) active for ` +
-        `${platform}: trusting the locally built runner (${phase}) with derived SHA256 ${normalized}. ` +
-        `The release-pinned integrity guard is intentionally bypassed for this run.`
+          `${platform}: trusting the locally built runner (${phase}) with derived SHA256 ${normalized}. ` +
+          `The release-pinned integrity guard is intentionally bypassed for this run.`,
       );
       return;
     }
     if (normalized !== pinned) {
       throw new ActionableError(
         `CtrlProxy runner binary SHA256 changed (${phase}) for ${platform} under local-build mode. ` +
-        `Pinned at post-extract: ${pinned}, Got: ${normalized}. Refusing to launch a runner whose ` +
-        `binary changed since it was verified (possible TOCTOU tampering).`
+          `Pinned at post-extract: ${pinned}, Got: ${normalized}. Refusing to launch a runner whose ` +
+          `binary changed since it was verified (possible TOCTOU tampering).`,
       );
     }
-    logger.info(`[IOSCtrlProxyBuilder] Local runner binary SHA256 re-verified (${phase})`, { platform, checksum: normalized });
+    logger.info(`[IOSCtrlProxyBuilder] Local runner binary SHA256 re-verified (${phase})`, {
+      platform,
+      checksum: normalized,
+    });
   }
 
   /**

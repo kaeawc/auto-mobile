@@ -4,7 +4,10 @@ import { logger } from "../../utils/logger";
 import type { VoiceOverResult } from "../../models/AccessibilityResult";
 import type { IosVoiceOverDetector } from "../../utils/interfaces/IosVoiceOverDetector";
 import { iosVoiceOverDetector } from "../../utils/IosVoiceOverDetector";
-import { DefaultHostCommandExecutor, type HostCommandExecutor } from "../../utils/HostCommandExecutor";
+import {
+  DefaultHostCommandExecutor,
+  type HostCommandExecutor,
+} from "../../utils/HostCommandExecutor";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { type Timer, defaultTimer } from "../../utils/SystemTimer";
 import { IOSCtrlProxyClient, type IOSCtrlProxy } from "../observe/ios";
@@ -21,7 +24,7 @@ export class VoiceOverToggle {
     // Resolve lazily so the iOS singleton is only touched when the toggle runs,
     // and so tests can inject a fake CtrlProxy for the physical-device path.
     private readonly clientProvider: () => IOSCtrlProxy = () =>
-      IOSCtrlProxyClient.getInstance(this.device)
+      IOSCtrlProxyClient.getInstance(this.device),
   ) {}
 
   async toggle(enabled: boolean): Promise<VoiceOverResult> {
@@ -55,11 +58,13 @@ export class VoiceOverToggle {
       // Log before returning so the Settings-row-not-found case leaves a trace,
       // matching the Simulator path's logger.warn (the reason also surfaces to
       // the client as an ActionableError).
-      logger.warn(`[VoiceOverToggle] Failed to ${enabled ? "enable" : "disable"} VoiceOver via Settings: ${reason}`);
+      logger.warn(
+        `[VoiceOverToggle] Failed to ${enabled ? "enable" : "disable"} VoiceOver via Settings: ${reason}`,
+      );
       return {
         supported: false,
         applied: false,
-        reason
+        reason,
       };
     }
 
@@ -69,7 +74,7 @@ export class VoiceOverToggle {
     return {
       supported: true,
       applied: true,
-      currentState: enabled
+      currentState: enabled,
     };
   }
 
@@ -84,17 +89,33 @@ export class VoiceOverToggle {
     const boolValue = enabled ? "YES" : "NO";
     try {
       await this.processExecutor.executeCommand("xcrun", [
-        "simctl", "spawn", this.device.deviceId, "defaults", "write", "com.apple.Accessibility", "VoiceOverTouchEnabled", "-bool", boolValue
+        "simctl",
+        "spawn",
+        this.device.deviceId,
+        "defaults",
+        "write",
+        "com.apple.Accessibility",
+        "VoiceOverTouchEnabled",
+        "-bool",
+        boolValue,
       ]);
       await this.processExecutor.executeCommand("xcrun", [
-        "simctl", "spawn", this.device.deviceId, "notifyutil", "-p", "com.apple.accessibility.VoiceOverStatusDidChange"
+        "simctl",
+        "spawn",
+        this.device.deviceId,
+        "notifyutil",
+        "-p",
+        "com.apple.accessibility.VoiceOverStatusDidChange",
       ]);
       const serviceCommand = enabled
         ? "launchctl kickstart -p system/com.apple.VoiceOverTouch"
         : "launchctl kill SIGTERM system/com.apple.VoiceOverTouch";
       try {
         await this.processExecutor.executeCommand("xcrun", [
-          "simctl", "spawn", this.device.deviceId, ...serviceCommand.split(" ")
+          "simctl",
+          "spawn",
+          this.device.deviceId,
+          ...serviceCommand.split(" "),
         ]);
       } catch (error) {
         if (enabled || !this.isServiceAlreadyStopped(error)) {
@@ -104,11 +125,13 @@ export class VoiceOverToggle {
       }
     } catch (error) {
       const reason = errorMessage(error);
-      logger.warn(`[VoiceOverToggle] Failed to ${enabled ? "enable" : "disable"} VoiceOver: ${reason}`);
+      logger.warn(
+        `[VoiceOverToggle] Failed to ${enabled ? "enable" : "disable"} VoiceOver: ${reason}`,
+      );
       return {
         supported: true,
         applied: false,
-        reason
+        reason,
       };
     }
 
@@ -124,7 +147,7 @@ export class VoiceOverToggle {
     return {
       supported: true,
       applied: confirmedEnabled === enabled,
-      currentState: confirmedEnabled
+      currentState: confirmedEnabled,
     };
   }
 
@@ -152,13 +175,15 @@ export class VoiceOverToggle {
         this.device.deviceId,
         client,
         undefined,
-        remainingMs
+        remainingMs,
       );
       if (confirmedEnabled === enabled || this.timer.now() >= deadline) {
         return confirmedEnabled;
       }
 
-      await this.timer.sleep(Math.min(VOICEOVER_CONFIRMATION_POLL_INTERVAL_MS, deadline - this.timer.now()));
+      await this.timer.sleep(
+        Math.min(VOICEOVER_CONFIRMATION_POLL_INTERVAL_MS, deadline - this.timer.now()),
+      );
     }
   }
 

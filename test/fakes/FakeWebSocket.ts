@@ -21,7 +21,7 @@ export class FakeWebSocket
   implements Pick<WebSocket, "readyState" | "send" | "close">
 {
   public readyState: WebSocketState = WebSocketState.CONNECTING;
-  private failureMode: "instant" | "timeout" | "none" = "none";
+  private failureMode: "instant" | "timeout" | "none";
   private connectTimeoutMs: number = 0;
   private timer: Timer;
 

@@ -541,8 +541,8 @@ describe("ObserveScreen", function () {
   });
 
   describe("Integration Tests", function () {
-    let observeScreen: RealObserveScreen;
-    let mockDevice: BootedDevice;
+    let observeScreen: RealObserveScreen | undefined;
+    let mockDevice: BootedDevice | null;
 
     beforeEach(async function () {
       // Clear cache before each test to prevent interference between tests
@@ -550,7 +550,7 @@ describe("ObserveScreen", function () {
 
       // Skip integration tests by default - they require a real device
       // To run integration tests, set a real device ID
-      mockDevice = null as any;
+      mockDevice = null;
       return;
     });
 
@@ -559,7 +559,7 @@ describe("ObserveScreen", function () {
     });
 
     test("should get complete observation data with all features enabled", async function () {
-      if (!mockDevice) {
+      if (!mockDevice || !observeScreen) {
         return;
       } // Skip if no device available
 
@@ -591,7 +591,7 @@ describe("ObserveScreen", function () {
     });
 
     test("should detect and report screen size correctly", async function () {
-      if (!mockDevice) {
+      if (!mockDevice || !observeScreen) {
         return;
       } // Skip if no device available
 
@@ -608,7 +608,7 @@ describe("ObserveScreen", function () {
     });
 
     test("should detect system insets correctly", async function () {
-      if (!mockDevice) {
+      if (!mockDevice || !observeScreen) {
         return;
       } // Skip if no device available
 
@@ -630,7 +630,7 @@ describe("ObserveScreen", function () {
     });
 
     test("should include active window information with the package name", async function () {
-      if (!mockDevice) {
+      if (!mockDevice || !observeScreen) {
         return;
       } // Skip if no device available
 
@@ -648,7 +648,7 @@ describe("ObserveScreen", function () {
     });
 
     test("should execute observe command multiple times maintaining consistency", async function () {
-      if (!mockDevice) {
+      if (!mockDevice || !observeScreen) {
         return;
       } // Skip if no device available
 
@@ -678,7 +678,7 @@ describe("ObserveScreen", function () {
     });
 
     test("should handle errors gracefully if device is disconnected", async function () {
-      if (!mockDevice) {
+      if (!mockDevice || !observeScreen) {
         return;
       } // Skip if no device available
 
@@ -715,7 +715,7 @@ describe("ObserveScreen", function () {
     });
 
     test("should produce complete data that can be serialized to JSON", async function () {
-      if (!mockDevice) {
+      if (!mockDevice || !observeScreen) {
         return;
       } // Skip if no device available
 

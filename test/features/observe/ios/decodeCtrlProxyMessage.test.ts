@@ -30,7 +30,9 @@ describe("decodeCtrlProxyMessage", () => {
   });
 
   test("screenshot forwards capture-time rotation", () => {
-    const decoded = decodeCtrlProxyMessage(msg({ type: "screenshot", data: "b64" as never, timestamp: 9, rotation: 1 }));
+    const decoded = decodeCtrlProxyMessage(
+      msg({ type: "screenshot", data: "b64" as never, timestamp: 9, rotation: 1 }),
+    );
     expect(decoded).toEqual({
       requestId: REQ,
       result: { success: true, data: "b64", format: "png", timestamp: 9, rotation: 1 },
@@ -38,7 +40,9 @@ describe("decodeCtrlProxyMessage", () => {
   });
 
   test("screenshot preserves explicit format", () => {
-    const decoded = decodeCtrlProxyMessage(msg({ type: "screenshot", data: "b64" as never, format: "jpeg" }));
+    const decoded = decodeCtrlProxyMessage(
+      msg({ type: "screenshot", data: "b64" as never, format: "jpeg" }),
+    );
     expect((decoded?.result as { format: string }).format).toBe("jpeg");
   });
 
@@ -72,7 +76,7 @@ describe("decodeCtrlProxyMessage", () => {
 
   test("pinch_result carries element-anchored pinchPath through (#2910)", () => {
     const decoded = decodeCtrlProxyMessage(
-      msg({ type: "pinch_result", totalTimeMs: 7, pinchPath: "element-anchored" })
+      msg({ type: "pinch_result", totalTimeMs: 7, pinchPath: "element-anchored" }),
     );
     expect(decoded).toEqual({
       requestId: REQ,
@@ -92,12 +96,21 @@ describe("decodeCtrlProxyMessage", () => {
   });
 
   test("base result respects explicit success=false and totalTimeMs default", () => {
-    const decoded = decodeCtrlProxyMessage(msg({ type: "swipe_result", success: false, error: "boom" }));
-    expect(decoded?.result).toEqual({ success: false, totalTimeMs: 0, error: "boom", perfTiming: undefined });
+    const decoded = decodeCtrlProxyMessage(
+      msg({ type: "swipe_result", success: false, error: "boom" }),
+    );
+    expect(decoded?.result).toEqual({
+      success: false,
+      totalTimeMs: 0,
+      error: "boom",
+      perfTiming: undefined,
+    });
   });
 
   test("keyboard_result includes open flag", () => {
-    const decoded = decodeCtrlProxyMessage(msg({ type: "keyboard_result", open: true, totalTimeMs: 4 }));
+    const decoded = decodeCtrlProxyMessage(
+      msg({ type: "keyboard_result", open: true, totalTimeMs: 4 }),
+    );
     expect(decoded?.result).toEqual({
       success: true,
       open: true,
@@ -113,14 +126,16 @@ describe("decodeCtrlProxyMessage", () => {
   });
 
   test("rotate_result carries orientation fields", () => {
-    const decoded = decodeCtrlProxyMessage(msg({
-      type: "rotate_result",
-      previousOrientation: "portrait",
-      currentOrientation: "landscape",
-      value: 90,
-      rotationPerformed: true,
-      totalTimeMs: 7,
-    }));
+    const decoded = decodeCtrlProxyMessage(
+      msg({
+        type: "rotate_result",
+        previousOrientation: "portrait",
+        currentOrientation: "landscape",
+        value: 90,
+        rotationPerformed: true,
+        totalTimeMs: 7,
+      }),
+    );
     expect(decoded?.result).toEqual({
       success: true,
       totalTimeMs: 7,
@@ -161,8 +176,15 @@ describe("decodeCtrlProxyMessage", () => {
   }
 
   test("voiceover_state_result includes enabled", () => {
-    const decoded = decodeCtrlProxyMessage(msg({ type: "voiceover_state_result", enabled: true } as never));
-    expect(decoded?.result).toEqual({ success: true, enabled: true, totalTimeMs: 0, error: undefined });
+    const decoded = decodeCtrlProxyMessage(
+      msg({ type: "voiceover_state_result", enabled: true } as never),
+    );
+    expect(decoded?.result).toEqual({
+      success: true,
+      enabled: true,
+      totalTimeMs: 0,
+      error: undefined,
+    });
   });
 
   test("voiceover_state_result enabled defaults false", () => {
@@ -172,19 +194,29 @@ describe("decodeCtrlProxyMessage", () => {
 
   test("voiceover_set_result resolves a runner failure as a typed result (not a rejection)", () => {
     const decoded = decodeCtrlProxyMessage(
-      msg({ type: "voiceover_set_result", success: false, error: "VoiceOver toggle row not found", totalTimeMs: 12 }),
+      msg({
+        type: "voiceover_set_result",
+        success: false,
+        error: "VoiceOver toggle row not found",
+        totalTimeMs: 12,
+      }),
     );
     // Must resolve (result set, errorMessage undefined) so VoiceOverToggle maps
     // success:false → supported:false, never a silent success (#2501).
     expect(decoded?.errorMessage).toBeUndefined();
-    expect(decoded?.result).toEqual({ success: false, totalTimeMs: 12, error: "VoiceOver toggle row not found" });
+    expect(decoded?.result).toEqual({
+      success: false,
+      totalTimeMs: 12,
+      error: "VoiceOver toggle row not found",
+    });
   });
 
   test("voiceover_set_result carries a success through", () => {
-    const decoded = decodeCtrlProxyMessage(msg({ type: "voiceover_set_result", success: true, totalTimeMs: 5 }));
+    const decoded = decodeCtrlProxyMessage(
+      msg({ type: "voiceover_set_result", success: true, totalTimeMs: 5 }),
+    );
     expect(decoded?.result).toEqual({ success: true, totalTimeMs: 5, error: undefined });
   });
-
 
   test("highlight_response defaults success to false and echoes requestId/timestamp", () => {
     const decoded = decodeCtrlProxyMessage(msg({ type: "highlight_response", timestamp: 42 }));
@@ -198,7 +230,9 @@ describe("decodeCtrlProxyMessage", () => {
   });
 
   test("clipboard_result carries action and text", () => {
-    const decoded = decodeCtrlProxyMessage(msg({ type: "clipboard_result", action: "get", text: "hi" } as never));
+    const decoded = decodeCtrlProxyMessage(
+      msg({ type: "clipboard_result", action: "get", text: "hi" } as never),
+    );
     expect(decoded?.result).toEqual({
       success: true,
       action: "get",
@@ -215,7 +249,12 @@ describe("decodeCtrlProxyMessage", () => {
 
   test("preference_files defaults files to empty array and success false", () => {
     const decoded = decodeCtrlProxyMessage(msg({ type: "preference_files" }));
-    expect(decoded?.result).toEqual({ success: false, files: [], totalTimeMs: 0, error: undefined });
+    expect(decoded?.result).toEqual({
+      success: false,
+      files: [],
+      totalTimeMs: 0,
+      error: undefined,
+    });
   });
 
   test("preference_files preserves files", () => {
@@ -226,17 +265,24 @@ describe("decodeCtrlProxyMessage", () => {
 
   test("preferences defaults entries to empty array", () => {
     const decoded = decodeCtrlProxyMessage(msg({ type: "preferences" }));
-    expect(decoded?.result).toEqual({ success: false, entries: [], totalTimeMs: 0, error: undefined });
+    expect(decoded?.result).toEqual({
+      success: false,
+      entries: [],
+      totalTimeMs: 0,
+      error: undefined,
+    });
   });
 
   test("get_preference_result builds entry when found", () => {
-    const decoded = decodeCtrlProxyMessage(msg({
-      type: "get_preference_result",
-      found: true,
-      key: "k",
-      value: "v",
-      valueType: "STRING",
-    } as never));
+    const decoded = decodeCtrlProxyMessage(
+      msg({
+        type: "get_preference_result",
+        found: true,
+        key: "k",
+        value: "v",
+        valueType: "STRING",
+      } as never),
+    );
     expect(decoded?.result).toEqual({
       success: false,
       found: true,
@@ -247,16 +293,28 @@ describe("decodeCtrlProxyMessage", () => {
   });
 
   test("get_preference_result entry undefined when not found", () => {
-    const decoded = decodeCtrlProxyMessage(msg({ type: "get_preference_result", found: false } as never));
+    const decoded = decodeCtrlProxyMessage(
+      msg({ type: "get_preference_result", found: false } as never),
+    );
     expect((decoded?.result as { entry: unknown }).entry).toBeUndefined();
   });
 
   test("get_preference_result defaults value to null and type to UNKNOWN", () => {
-    const decoded = decodeCtrlProxyMessage(msg({ type: "get_preference_result", found: true, key: "k" } as never));
-    expect((decoded?.result as { entry: unknown }).entry).toEqual({ key: "k", value: null, type: "UNKNOWN" });
+    const decoded = decodeCtrlProxyMessage(
+      msg({ type: "get_preference_result", found: true, key: "k" } as never),
+    );
+    expect((decoded?.result as { entry: unknown }).entry).toEqual({
+      key: "k",
+      value: null,
+      type: "UNKNOWN",
+    });
   });
 
-  for (const type of ["set_preference_result", "remove_preference_result", "clear_preferences_result"]) {
+  for (const type of [
+    "set_preference_result",
+    "remove_preference_result",
+    "clear_preferences_result",
+  ]) {
     test(`${type} returns bare success result`, () => {
       const decoded = decodeCtrlProxyMessage(msg({ type }));
       expect(decoded?.result).toEqual({ success: false, totalTimeMs: 0, error: undefined });
@@ -264,11 +322,13 @@ describe("decodeCtrlProxyMessage", () => {
   }
 
   test("set_network_error_simulation_result maps ok to success", () => {
-    const decoded = decodeCtrlProxyMessage(msg({
-      type: "set_network_error_simulation_result",
-      ok: true,
-      totalTimeMs: 7,
-    }));
+    const decoded = decodeCtrlProxyMessage(
+      msg({
+        type: "set_network_error_simulation_result",
+        ok: true,
+        totalTimeMs: 7,
+      }),
+    );
 
     expect(decoded?.result).toEqual({
       success: true,
@@ -278,11 +338,13 @@ describe("decodeCtrlProxyMessage", () => {
   });
 
   test("set_network_fault_rules_result maps ok to success", () => {
-    const decoded = decodeCtrlProxyMessage(msg({
-      type: "set_network_fault_rules_result",
-      ok: true,
-      totalTimeMs: 9,
-    }));
+    const decoded = decodeCtrlProxyMessage(
+      msg({
+        type: "set_network_fault_rules_result",
+        ok: true,
+        totalTimeMs: 9,
+      }),
+    );
 
     expect(decoded?.result).toEqual({
       success: true,
@@ -292,14 +354,16 @@ describe("decodeCtrlProxyMessage", () => {
   });
 
   test("execute_sql_result carries query fields", () => {
-    const decoded = decodeCtrlProxyMessage(msg({
-      type: "execute_sql_result",
-      queryType: "SELECT",
-      columns: ["id"],
-      rows: [[1]],
-      rowsAffected: 0,
-      totalTimeMs: 2,
-    } as never));
+    const decoded = decodeCtrlProxyMessage(
+      msg({
+        type: "execute_sql_result",
+        queryType: "SELECT",
+        columns: ["id"],
+        rows: [[1]],
+        rowsAffected: 0,
+        totalTimeMs: 2,
+      } as never),
+    );
     expect(decoded?.result).toEqual({
       success: false,
       queryType: "SELECT",
@@ -313,12 +377,22 @@ describe("decodeCtrlProxyMessage", () => {
 
   test("list_databases_result defaults databases to empty array", () => {
     const decoded = decodeCtrlProxyMessage(msg({ type: "list_databases_result" }));
-    expect(decoded?.result).toEqual({ success: false, databases: [], totalTimeMs: 0, error: undefined });
+    expect(decoded?.result).toEqual({
+      success: false,
+      databases: [],
+      totalTimeMs: 0,
+      error: undefined,
+    });
   });
 
   test("list_tables_result defaults tables to empty array", () => {
     const decoded = decodeCtrlProxyMessage(msg({ type: "list_tables_result" }));
-    expect(decoded?.result).toEqual({ success: false, tables: [], totalTimeMs: 0, error: undefined });
+    expect(decoded?.result).toEqual({
+      success: false,
+      tables: [],
+      totalTimeMs: 0,
+      error: undefined,
+    });
   });
 
   test("table_data_result defaults columns/rows/total", () => {
@@ -335,15 +409,22 @@ describe("decodeCtrlProxyMessage", () => {
 
   test("table_structure_result defaults columns", () => {
     const decoded = decodeCtrlProxyMessage(msg({ type: "table_structure_result" }));
-    expect(decoded?.result).toEqual({ success: false, columns: [], totalTimeMs: 0, error: undefined });
+    expect(decoded?.result).toEqual({
+      success: false,
+      columns: [],
+      totalTimeMs: 0,
+      error: undefined,
+    });
   });
 
   test("unknown type with an error resolves as a rewritten error", () => {
-    const decoded = decodeCtrlProxyMessage(msg({
-      type: "mystery",
-      error: "Unknown command type: request_teleport",
-      totalTimeMs: 3,
-    }));
+    const decoded = decodeCtrlProxyMessage(
+      msg({
+        type: "mystery",
+        error: "Unknown command type: request_teleport",
+        totalTimeMs: 3,
+      }),
+    );
     expect(decoded?.requestId).toBe(REQ);
     expect(decoded?.result).toBeUndefined();
     expect(decoded?.totalTimeMs).toBe(3);
@@ -374,7 +455,7 @@ describe("decodeCtrlProxyMessage", () => {
  */
 function parseSwiftResponseTypeRawValues(swiftSource: string): string[] {
   const lines = swiftSource.split("\n");
-  const startIdx = lines.findIndex(line => /enum\s+ResponseType\s*:\s*String\s*\{/.test(line));
+  const startIdx = lines.findIndex((line) => /enum\s+ResponseType\s*:\s*String\s*\{/.test(line));
   if (startIdx < 0) {
     throw new Error("Could not locate `enum ResponseType: String` in Models.swift");
   }
@@ -407,7 +488,7 @@ function isExplicitlyDecoded(rawValue: string): boolean {
 describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)", () => {
   const swiftSource = readFileSync(
     join(import.meta.dir, "../../../../ios/control-proxy/Sources/CtrlProxy/Models.swift"),
-    "utf8"
+    "utf8",
   );
   const rawValues = parseSwiftResponseTypeRawValues(swiftSource);
 
@@ -452,8 +533,8 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
 
   test("the only unhandled ResponseType (excluding fire-and-forget) is shake_result", () => {
     const unhandled = rawValues
-      .filter(rawValue => !isExplicitlyDecoded(rawValue))
-      .filter(rawValue => !FIRE_AND_FORGET_EXCUSES.includes(rawValue))
+      .filter((rawValue) => !isExplicitlyDecoded(rawValue))
+      .filter((rawValue) => !FIRE_AND_FORGET_EXCUSES.includes(rawValue))
       .sort();
     expect(unhandled).toEqual(["shake_result"]);
   });
@@ -527,9 +608,9 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
   // Every type that reads `message.success` (all decoded types except the
   // no-success hierarchy_update and the hardcoded-true screenshot) must pass an
   // explicit success flag straight through, both true and false.
-  const READS_MESSAGE_SUCCESS = DEFAULT_WHEN_ABSENT
-    .filter(row => row.type !== "hierarchy_update" && row.type !== "screenshot")
-    .map(row => row.type);
+  const READS_MESSAGE_SUCCESS = DEFAULT_WHEN_ABSENT.filter(
+    (row) => row.type !== "hierarchy_update" && row.type !== "screenshot",
+  ).map((row) => row.type);
 
   test("the passthrough set is the 37 success-reading types", () => {
     expect(READS_MESSAGE_SUCCESS.length).toBe(37);
@@ -582,7 +663,9 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
   });
 
   test("a message with an empty-string requestId decodes to null", () => {
-    expect(decodeCtrlProxyMessage({ type: "swipe_result", requestId: "", success: false })).toBeNull();
+    expect(
+      decodeCtrlProxyMessage({ type: "swipe_result", requestId: "", success: false }),
+    ).toBeNull();
   });
 });
 

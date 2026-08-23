@@ -14,7 +14,7 @@ describe("iOS CtrlProxy process execution boundary (issue #4063)", () => {
   test("keeps ps, pgrep, and kill ownership in the lifecycle client", () => {
     const manager = readFileSync(join(ROOT, "src/utils/IOSCtrlProxyManager.ts"), "utf8");
     expect(manager).not.toMatch(/processExecutor\.exec\(\s*["'`](?:ps|pgrep|kill)/);
-    expect(readFileSync(OWNER, "utf8")).toContain('executeCommand("pgrep"');
+    expect(readFileSync(OWNER, "utf8")).toMatch(/executeCommand\(\s*"pgrep"/);
   });
 
   test("rejects direct and wrapped process APIs for lifecycle tools", () => {

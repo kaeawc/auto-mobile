@@ -43,6 +43,7 @@ export interface WorkflowConcurrency {
 /** A job's own configuration, minus its steps. */
 export interface WorkflowJob {
   "timeout-minutes"?: number;
+  needs?: string | string[];
   /** Set when the job delegates to a reusable workflow. */
   uses?: string;
   if?: string | boolean;

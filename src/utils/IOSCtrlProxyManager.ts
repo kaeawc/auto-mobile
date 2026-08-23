@@ -2,7 +2,11 @@ import { errorMessage } from "./describeUnknownError";
 import { logger } from "./logger";
 import { BootedDevice } from "../models";
 import { requireBootedDevice } from "./requireBootedDevice";
-import { NoOpPerformanceTracker, createGlobalPerformanceTracker, type PerformanceTracker } from "./PerformanceTracker";
+import {
+  NoOpPerformanceTracker,
+  createGlobalPerformanceTracker,
+  type PerformanceTracker,
+} from "./PerformanceTracker";
 import { Timer, defaultTimer } from "./SystemTimer";
 import { IOSCtrlProxyBuilder, type CtrlProxyIosBuildResult } from "./IOSCtrlProxyBuilder";
 import { checkIosCtrlProxyOverride } from "./iosCtrlProxyOverride";
@@ -19,7 +23,7 @@ import { exponentialBackoff } from "./Backoff";
 import { DefaultProcessSupervisor, type ProcessSupervisor } from "./ProcessSupervisor";
 import {
   TcpHostPortAvailabilityChecker,
-  type HostPortAvailabilityChecker
+  type HostPortAvailabilityChecker,
 } from "./ios/IOSHostPortAvailabilityChecker";
 import { IOSCtrlProxyHealthClient, isValidCtrlProxyPort } from "./ios/IOSCtrlProxyHealthClient";
 import { IOSCtrlProxyProcessClient } from "./ios/IOSCtrlProxyProcessClient";
@@ -92,9 +96,15 @@ interface RemoteCtrlProxyIOSRunner {
   isRunningInDocker(): boolean;
   isAvailable(): Promise<boolean>;
   getHost(): string;
-  runIdeviceId(args: string[]): Promise<{ success: boolean; error?: string; data?: { stdout: string } }>;
-  runIdeviceInstaller(args: string[]): Promise<{ success: boolean; error?: string; data?: { stdout: string } }>;
-  runSimctl(args: string[]): Promise<{ success: boolean; error?: string; data?: { stdout: string } }>;
+  runIdeviceId(
+    args: string[],
+  ): Promise<{ success: boolean; error?: string; data?: { stdout: string } }>;
+  runIdeviceInstaller(
+    args: string[],
+  ): Promise<{ success: boolean; error?: string; data?: { stdout: string } }>;
+  runSimctl(
+    args: string[],
+  ): Promise<{ success: boolean; error?: string; data?: { stdout: string } }>;
   startIproxy(params: {
     deviceId: string;
     localPort: number;
@@ -118,13 +128,21 @@ interface RemoteCtrlProxyIOSRunner {
     xctestrunPath?: string;
     bundleId?: string;
     timeoutSeconds?: number;
-  }): Promise<{ success: boolean; error?: string; data?: { pid: number; message: string; port?: number } }>;
+  }): Promise<{
+    success: boolean;
+    error?: string;
+    data?: { pid: number; message: string; port?: number };
+  }>;
   stop(params: { deviceId?: string; pid?: number }): Promise<{ success: boolean; error?: string }>;
   status(params: {
     deviceId?: string;
     pid?: number;
     port?: number;
-  }): Promise<{ success: boolean; error?: string; data?: { running: boolean; pid?: number; port?: number } }>;
+  }): Promise<{
+    success: boolean;
+    error?: string;
+    data?: { running: boolean; pid?: number; port?: number };
+  }>;
 }
 
 interface ExternalCtrlProxyProcess {
@@ -284,7 +302,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     remoteRunner?: RemoteCtrlProxyIOSRunner,
     hostPortAvailabilityChecker: HostPortAvailabilityChecker = new TcpHostPortAvailabilityChecker(),
     xcodebuild: Xcodebuild = new XcodebuildClient(),
-    processClient?: IOSCtrlProxyProcessClient
+    processClient?: IOSCtrlProxyProcessClient,
   ) {
     this.device = device;
     this.timer = timer;
@@ -309,7 +327,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       getIproxyStatus: async () => ({ success: false, error: "Remote runner is disabled" }),
       start: async () => ({ success: false, error: "Remote runner is disabled" }),
       stop: async () => ({ success: false, error: "Remote runner is disabled" }),
-      status: async () => ({ success: false, error: "Remote runner is disabled" })
+      status: async () => ({ success: false, error: "Remote runner is disabled" }),
     };
     this.healthClient = new IOSCtrlProxyHealthClient(this.processExecutor, this.timer, {
       useRemoteRunner: () => this.useRemoteRunner(),
@@ -323,7 +341,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       maxRestartAttempts: IOSCtrlProxyManager.MAX_RESTART_ATTEMPTS,
       restartBackoff: exponentialBackoff({
         initialDelayMs: IOSCtrlProxyManager.RESTART_BASE_DELAY_MS,
-        maxDelayMs: IOSCtrlProxyManager.RESTART_MAX_DELAY_MS
+        maxDelayMs: IOSCtrlProxyManager.RESTART_MAX_DELAY_MS,
       }),
       restart: async () => {
         this.isProcessSupervisorRestarting = true;
@@ -342,7 +360,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       onRestartSuccess: () => {
         logger.info("[IOSCtrlProxy] Auto-restart successful");
       },
-      onRestartFailure: error => {
+      onRestartFailure: (error) => {
         logger.warn(`[IOSCtrlProxy] Auto-restart failed: ${errorMessage(error)}`);
       },
     });
@@ -352,7 +370,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       monitorIntervalMs: IOSCtrlProxyManager.IPROXY_MONITOR_INTERVAL_MS,
       restartBackoff: exponentialBackoff({
         initialDelayMs: IOSCtrlProxyManager.IPROXY_RESTART_BASE_DELAY_MS,
-        maxDelayMs: IOSCtrlProxyManager.IPROXY_RESTART_MAX_DELAY_MS
+        maxDelayMs: IOSCtrlProxyManager.IPROXY_RESTART_MAX_DELAY_MS,
       }),
       restart: () => this.restartIproxyTunnel(),
       isAlive: () => this.isSupervisedIproxyTunnelAlive(),
@@ -360,7 +378,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         this.iproxyProcessId = null;
         this.iproxyProcess = null;
       },
-      onRestartFailure: error => {
+      onRestartFailure: (error) => {
         logger.warn(`[IOSCtrlProxy] Failed to restart iproxy: ${errorMessage(error)}`);
       },
     });
@@ -372,10 +390,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   public static getInstance(device: BootedDevice, timer?: Timer): IOSCtrlProxyManager {
     requireBootedDevice(device, "IOSCtrlProxyManager.getInstance");
     if (!IOSCtrlProxyManager.instances.has(device.deviceId)) {
-      IOSCtrlProxyManager.instances.set(
-        device.deviceId,
-        new IOSCtrlProxyManager(device, timer)
-      );
+      IOSCtrlProxyManager.instances.set(device.deviceId, new IOSCtrlProxyManager(device, timer));
     }
     return IOSCtrlProxyManager.instances.get(device.deviceId)!;
   }
@@ -383,7 +398,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   /**
    * Create instance for testing with injected dependencies
    */
-  public static createForTesting(device: BootedDevice, timer: Timer, builder?: IOSCtrlProxyBuilder): IOSCtrlProxyManager {
+  public static createForTesting(
+    device: BootedDevice,
+    timer: Timer,
+    builder?: IOSCtrlProxyBuilder,
+  ): IOSCtrlProxyManager {
     return new IOSCtrlProxyManager(device, timer, builder);
   }
 
@@ -400,7 +419,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     remoteRunner?: RemoteCtrlProxyIOSRunner,
     hostPortAvailabilityChecker?: HostPortAvailabilityChecker,
     xcodebuild?: Xcodebuild,
-    processClient?: IOSCtrlProxyProcessClient
+    processClient?: IOSCtrlProxyProcessClient,
   ): IOSCtrlProxyManager {
     return new IOSCtrlProxyManager(
       device,
@@ -411,12 +430,13 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       deviceAppManager,
       remoteRunner,
       hostPortAvailabilityChecker,
-      xcodebuild ?? new XcodebuildClient(
-        async (file, args) => processExecutor.executeCommand(file, args),
-        timer,
-        (command, args, options) => processExecutor.spawn(command, args, options)
-      ),
-      processClient ?? new IOSCtrlProxyProcessClient(processExecutor, timer)
+      xcodebuild ??
+        new XcodebuildClient(
+          async (file, args) => processExecutor.executeCommand(file, args),
+          timer,
+          (command, args, options) => processExecutor.spawn(command, args, options),
+        ),
+      processClient ?? new IOSCtrlProxyProcessClient(processExecutor, timer),
     );
   }
 
@@ -434,7 +454,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   public static async shutdownAll(timer: Timer = defaultTimer): Promise<void> {
     const instances = Array.from(IOSCtrlProxyManager.instances.values());
     const results = await Promise.all(
-      instances.map(instance => IOSCtrlProxyManager.stopWithinShutdownDeadline(instance, timer))
+      instances.map((instance) => IOSCtrlProxyManager.stopWithinShutdownDeadline(instance, timer)),
     );
     IOSCtrlProxyManager.instances.clear();
     for (const result of results) {
@@ -446,22 +466,23 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
   private static async stopWithinShutdownDeadline(
     instance: IOSCtrlProxyManager,
-    timer: Timer
+    timer: Timer,
   ): Promise<unknown | null> {
     let timeout: NodeJS.Timeout | undefined;
     let forceStopStarted = false;
-    const settled = instance.stop().then(() => null, error => error);
-    const timedOut = new Promise<Error>(resolve => {
-      timeout = timer.setTimeout(
-        () => {
-          // stop() may be blocked on a remote runner call. Reserve a bounded
-          // window to await direct termination before clearing the registry.
-          forceStopStarted = true;
-          void IOSCtrlProxyManager.forceStopWithinShutdownDeadline(instance, timer)
-            .then(() => resolve(new Error(`timed out after ${SHUTDOWN_STOP_TIMEOUT_MS}ms`)));
-        },
-        SHUTDOWN_STOP_TIMEOUT_MS
-      );
+    const settled = instance.stop().then(
+      () => null,
+      (error) => error,
+    );
+    const timedOut = new Promise<Error>((resolve) => {
+      timeout = timer.setTimeout(() => {
+        // stop() may be blocked on a remote runner call. Reserve a bounded
+        // window to await direct termination before clearing the registry.
+        forceStopStarted = true;
+        void IOSCtrlProxyManager.forceStopWithinShutdownDeadline(instance, timer).then(() =>
+          resolve(new Error(`timed out after ${SHUTDOWN_STOP_TIMEOUT_MS}ms`)),
+        );
+      }, SHUTDOWN_STOP_TIMEOUT_MS);
     });
     try {
       const result = await Promise.race([settled, timedOut]);
@@ -481,13 +502,15 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     timer: Timer,
   ): Promise<void> {
     let timeout: NodeJS.Timeout | undefined;
-    const deadline = new Promise<void>(resolve => {
+    const deadline = new Promise<void>((resolve) => {
       timeout = timer.setTimeout(resolve, SHUTDOWN_FORCE_STOP_TIMEOUT_MS);
     });
     try {
       await Promise.race([instance.forceStopForShutdown(), deadline]);
     } finally {
-      if (timeout) {timer.clearTimeout(timeout);}
+      if (timeout) {
+        timer.clearTimeout(timeout);
+      }
     }
   }
 
@@ -509,7 +532,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
     if (this.useRemoteRunner()) {
       await Promise.allSettled([
-        runnerPid ? this.remoteRunner.stop({ deviceId: this.device.deviceId, pid: runnerPid }) : undefined,
+        runnerPid
+          ? this.remoteRunner.stop({ deviceId: this.device.deviceId, pid: runnerPid })
+          : undefined,
         iproxyPid ? this.remoteRunner.stopIproxy({ pid: iproxyPid }) : undefined,
       ]);
       return;
@@ -526,7 +551,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       logger.debug(`[IOSCtrlProxy] Forced iproxy termination was already complete: ${error}`);
     }
     if (runnerPid) {
-      await this.processClient.terminateProcessTree(runnerPid).catch(error => {
+      await this.processClient.terminateProcessTree(runnerPid).catch((error) => {
         logger.warn(`[IOSCtrlProxy] Forced CtrlProxy runner termination failed: ${error}`);
       });
     }
@@ -538,16 +563,14 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    */
   public static startOrphanRunnerReapOnStartup(
     processClient: IOSCtrlProxyProcessClient = new IOSCtrlProxyProcessClient(),
-    timer: Timer = defaultTimer
+    timer: Timer = defaultTimer,
   ): Promise<void> {
     const work = IOSCtrlProxyManager.reapOrphanedRunnerProcessesOnStartup(processClient, timer);
-    const completedWork = work.catch(error => {
+    const completedWork = work.catch((error) => {
       logger.debug(`[IOSCtrlProxy] Startup orphan runner sweep failed: ${error}`);
     });
-    IOSCtrlProxyManager.startupOrphanRunnerReap = IOSCtrlProxyManager.completeWithinStartupReapDeadline(
-      completedWork,
-      timer
-    );
+    IOSCtrlProxyManager.startupOrphanRunnerReap =
+      IOSCtrlProxyManager.completeWithinStartupReapDeadline(completedWork, timer);
     return IOSCtrlProxyManager.startupOrphanRunnerReap;
   }
 
@@ -557,14 +580,16 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    */
   public static async reapOrphanedRunnerProcessesOnStartup(
     processClient: IOSCtrlProxyProcessClient = new IOSCtrlProxyProcessClient(),
-    timer: Timer = defaultTimer
+    timer: Timer = defaultTimer,
   ): Promise<void> {
     const deadline = timer.now() + STARTUP_ORPHAN_RUNNER_REAP_DEADLINE_MS;
     let pids: number[] = [];
     try {
       pids = await processClient.findStartupCandidatePids(deadline);
     } catch (error) {
-      logger.debug(`[IOSCtrlProxy] Failed to enumerate CtrlProxy iOS processes during startup sweep: ${error}`);
+      logger.debug(
+        `[IOSCtrlProxy] Failed to enumerate CtrlProxy iOS processes during startup sweep: ${error}`,
+      );
       return;
     }
 
@@ -575,17 +600,21 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         return;
       }
       try {
-        if (!await IOSCtrlProxyManager.reapStartupOrphanRunnerCandidate(
-          processClient,
-          pid,
-          deadline,
-          timer,
-          reapedRootPids
-        )) {
+        if (
+          !(await IOSCtrlProxyManager.reapStartupOrphanRunnerCandidate(
+            processClient,
+            pid,
+            deadline,
+            timer,
+            reapedRootPids,
+          ))
+        ) {
           return;
         }
       } catch (error) {
-        logger.debug(`[IOSCtrlProxy] Failed to reap orphaned CtrlProxy iOS process ${pid}: ${error}`);
+        logger.debug(
+          `[IOSCtrlProxy] Failed to reap orphaned CtrlProxy iOS process ${pid}: ${error}`,
+        );
         if (timer.now() >= deadline) {
           IOSCtrlProxyManager.logStartupOrphanRunnerReapDeadline();
           return;
@@ -599,9 +628,14 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     pid: number,
     deadline: number,
     timer: Timer,
-    reapedRootPids: Set<number>
+    reapedRootPids: Set<number>,
   ): Promise<boolean> {
-    const root = await IOSCtrlProxyManager.findStartupOrphanRunnerRoot(processClient, pid, deadline, timer);
+    const root = await IOSCtrlProxyManager.findStartupOrphanRunnerRoot(
+      processClient,
+      pid,
+      deadline,
+      timer,
+    );
     if (root.kind === "deadline_exhausted" || timer.now() >= deadline) {
       IOSCtrlProxyManager.logStartupOrphanRunnerReapDeadline();
       return false;
@@ -612,7 +646,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     if (reapedRootPids.size >= MAX_STARTUP_ORPHAN_RUNNER_CANDIDATES) {
       logger.warn(
         `[IOSCtrlProxy] startup sweep skipped 1 startup CtrlProxy runner candidate after ` +
-        `reaching the ${MAX_STARTUP_ORPHAN_RUNNER_CANDIDATES}-candidate cap`
+          `reaching the ${MAX_STARTUP_ORPHAN_RUNNER_CANDIDATES}-candidate cap`,
       );
       return false;
     }
@@ -630,7 +664,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     processClient: IOSCtrlProxyProcessClient,
     pid: number,
     deadline: number,
-    timer: Timer
+    timer: Timer,
   ): Promise<DaemonManagedRunnerTreeRoot> {
     const processInfo = await processClient.getProcessInfo(pid, deadline);
     if (!processInfo || !processClient.isCtrlProxyRunnerCommand(processInfo.command)) {
@@ -649,7 +683,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         requireOrphanedRoot: true,
         shouldContinue: () => timer.now() < deadline,
         deadline,
-      }
+      },
     );
   }
 
@@ -693,9 +727,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * env var > undefined.
    */
   public static getExistingTargetBundleId(device: BootedDevice): string | undefined {
-    return IOSCtrlProxyManager.instances.get(device.deviceId)?.getTargetBundleId()
-      ?? process.env.CTRL_PROXY_IOS_BUNDLE_ID
-      ?? undefined;
+    return (
+      IOSCtrlProxyManager.instances.get(device.deviceId)?.getTargetBundleId() ??
+      process.env.CTRL_PROXY_IOS_BUNDLE_ID ??
+      undefined
+    );
   }
 
   /**
@@ -752,7 +788,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       } else {
         // For physical devices, check if the test app is installed
         if (this.useRemoteRunner()) {
-          const result = await this.remoteRunner.runIdeviceInstaller(["-u", this.device.deviceId, "-l"]);
+          const result = await this.remoteRunner.runIdeviceInstaller([
+            "-u",
+            this.device.deviceId,
+            "-l",
+          ]);
           if (!result.success || !result.data) {
             this.cachedInstalled = { isInstalled: false, timestamp: this.timer.now() };
             return false;
@@ -762,10 +802,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
           return installed;
         }
 
-        const { stdout } = await this.processExecutor.executeCommand(
-          "ideviceinstaller",
-          ["-u", this.device.deviceId, "-l"]
-        );
+        const { stdout } = await this.processExecutor.executeCommand("ideviceinstaller", [
+          "-u",
+          this.device.deviceId,
+          "-l",
+        ]);
         const installed = stdout.includes(IOSCtrlProxyManager.BUNDLE_ID);
         this.cachedInstalled = { isInstalled: installed, timestamp: this.timer.now() };
         return installed;
@@ -797,7 +838,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       // Cache the result
       this.cachedRunning = {
         isRunning,
-        timestamp: this.timer.now()
+        timestamp: this.timer.now(),
       };
 
       return isRunning;
@@ -819,16 +860,13 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       }
     }
 
-    const [installed, running] = await Promise.all([
-      this.isInstalled(),
-      this.isRunning()
-    ]);
+    const [installed, running] = await Promise.all([this.isInstalled(), this.isRunning()]);
 
     const available = installed && running;
 
     this.cachedAvailability = {
       isAvailable: available,
-      timestamp: this.timer.now()
+      timestamp: this.timer.now(),
     };
 
     return available;
@@ -879,28 +917,30 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       };
       this.sharedStart = createdStart;
       createdStart.completion = this.startInternal(createdStart);
-      void createdStart.completion.finally(() => {
-        createdStart.completed = true;
-        if (this.sharedStart === createdStart) {
-          this.sharedStart = null;
-        }
-      }).catch(() => {});
+      void createdStart.completion
+        .finally(() => {
+          createdStart.completed = true;
+          if (this.sharedStart === createdStart) {
+            this.sharedStart = null;
+          }
+        })
+        .catch(() => {});
       sharedStart = createdStart;
     }
 
     const callerId = Symbol("CtrlProxy startup caller");
-    this.extendHealthPollDeadline(
-      sharedStart,
-      callerId,
-      options.minimumHealthPollDurationMs,
-    );
+    this.extendHealthPollDeadline(sharedStart, callerId, options.minimumHealthPollDurationMs);
     return this.waitForSharedStart(sharedStart, options.signal, callerId);
   }
 
-  private async waitForNonJoinableStart(signal: AbortSignal | undefined): Promise<SharedCtrlProxyStart | null> {
+  private async waitForNonJoinableStart(
+    signal: AbortSignal | undefined,
+  ): Promise<SharedCtrlProxyStart | null> {
     const sharedStart = this.sharedStart;
-    if (!sharedStart ||
-      (!sharedStart.controller.signal.aborted && !sharedStart.teardownCommitted)) {
+    if (
+      !sharedStart ||
+      (!sharedStart.controller.signal.aborted && !sharedStart.teardownCommitted)
+    ) {
       return sharedStart;
     }
     logger.info("[IOSCtrlProxy] Waiting for a non-joinable startup to settle before retrying");
@@ -929,7 +969,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     const iosOverride = await checkIosCtrlProxyOverride();
     if (iosOverride.present && !iosOverride.usable) {
       throw new ActionableError(
-        `AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH / _IPA_PATH is set but unusable: ${iosOverride.reason}`
+        `AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH / _IPA_PATH is set but unusable: ${iosOverride.reason}`,
       );
     }
 
@@ -964,7 +1004,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
             throw error;
           }
           logger.warn(
-            "[IOSCtrlProxy] Existing CtrlProxy process uses a host port that is no longer available; restarting"
+            "[IOSCtrlProxy] Existing CtrlProxy process uses a host port that is no longer available; restarting",
           );
           perf.startOperation("spawnRunner");
           await this.restartDeviceProcessAfterHostPortCollision();
@@ -1010,19 +1050,20 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         if (await this.isOwnRunnerProcessAlive()) {
           logger.info(
             `[IOSCtrlProxy] Own CtrlProxy runner (PID ${this.xcTestProcessId}) is still starting; ` +
-            `waiting for its health endpoint instead of respawning`
+              `waiting for its health endpoint instead of respawning`,
           );
           waitedForStartingRunner = true;
         } else {
           perf.startOperation("externalProcessCheck");
           const externalProcess = await this.findExternalCtrlProxyProcess();
-          const defaultPortIsHealthyForDevice = externalProcess === null &&
+          const defaultPortIsHealthyForDevice =
+            externalProcess === null &&
             !this.useRemoteRunner() &&
             this.servicePort !== IOSCtrlProxyManager.DEFAULT_PORT &&
-            await this.checkHealthEndpointOnPortForDevice(
+            (await this.checkHealthEndpointOnPortForDevice(
               IOSCtrlProxyManager.DEFAULT_PORT,
-              this.device.deviceId
-            );
+              this.device.deviceId,
+            ));
           perf.endOperation("externalProcessCheck");
           if (externalProcess || defaultPortIsHealthyForDevice) {
             const externalPort = externalProcess?.port ?? IOSCtrlProxyManager.DEFAULT_PORT;
@@ -1032,7 +1073,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
             // misattributed to a local build that never ran.
             logger.warn(
               `[IOSCtrlProxy] Reusing an external CtrlProxy runner this daemon did not launch ` +
-              `(port ${externalPort}); skipping spawn. Verify it is the runner you intend to test.`
+                `(port ${externalPort}); skipping spawn. Verify it is the runner you intend to test.`,
             );
             if (externalPort !== this.servicePort) {
               this.adoptServicePort(externalPort);
@@ -1060,8 +1101,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     const delayMs = 500;
     const defaultHealthPollDurationMs =
       IOSCtrlProxyManager.resolveHealthPollMaxAttempts() * delayMs;
-    sharedStart.defaultHealthPollDeadlineMs =
-      this.timer.now() + defaultHealthPollDurationMs;
+    sharedStart.defaultHealthPollDeadlineMs = this.timer.now() + defaultHealthPollDurationMs;
     this.refreshHealthPollDeadline(sharedStart);
     const timeoutSeconds = Math.round(
       ((sharedStart.healthPollDeadlineMs ?? 0) - this.timer.now()) / 1000,
@@ -1078,11 +1118,16 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       // the health poll above only checks servicePort, so a runner that bound the default
       // port would look "hung" here. Adopt it instead of killing a healthy runner
       // (#2834 review).
-      if (this.servicePort !== IOSCtrlProxyManager.DEFAULT_PORT &&
-        await this.checkHealthEndpointOnPortForDevice(IOSCtrlProxyManager.DEFAULT_PORT, this.device.deviceId)) {
+      if (
+        this.servicePort !== IOSCtrlProxyManager.DEFAULT_PORT &&
+        (await this.checkHealthEndpointOnPortForDevice(
+          IOSCtrlProxyManager.DEFAULT_PORT,
+          this.device.deviceId,
+        ))
+      ) {
         logger.info(
           `[IOSCtrlProxy] Deferred-to runner is healthy on default port ${IOSCtrlProxyManager.DEFAULT_PORT}; ` +
-          `adopting it instead of terminating`
+            `adopting it instead of terminating`,
         );
         this.adoptServicePort(IOSCtrlProxyManager.DEFAULT_PORT);
         this.clearCaches();
@@ -1125,7 +1170,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         if (stillOurs) {
           logger.warn(
             `[IOSCtrlProxy] Deferred-to CtrlProxy runner (PID ${hungPid}) never became ` +
-            `healthy within ${timeoutSeconds}s; terminating it so the next start spawns a fresh runner`
+              `healthy within ${timeoutSeconds}s; terminating it so the next start spawns a fresh runner`,
           );
           if (this.useRemoteRunner()) {
             // The runner PID belongs to the macOS HOST, not this (Docker) container —
@@ -1136,7 +1181,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
             } catch (error) {
               logger.warn(
                 `[IOSCtrlProxy] Remote runner stop of hung runner ${hungPid} failed: ` +
-                `${errorMessage(error)}`
+                  `${errorMessage(error)}`,
               );
             }
           } else {
@@ -1149,7 +1194,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         } else {
           logger.warn(
             `[IOSCtrlProxy] Tracked runner PID ${hungPid} is no longer our CtrlProxy runner ` +
-            `(exited/PID-reused); un-tracking without terminating`
+              `(exited/PID-reused); un-tracking without terminating`,
           );
         }
         this.xcTestProcessId = null;
@@ -1178,7 +1223,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     if (heldProcesses.length > 0) {
       throw new Error(
         `CtrlProxy failed to start within timeout (${timeoutSeconds}s); port ${this.servicePort} ` +
-        `still held by ${this.formatListeningProcesses(heldProcesses)}`
+          `still held by ${this.formatListeningProcesses(heldProcesses)}`,
       );
     }
 
@@ -1197,7 +1242,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     if (this.useRemoteRunner()) {
       try {
         if (this.xcTestProcessId) {
-          await this.remoteRunner.stop({ deviceId: this.device.deviceId, pid: this.xcTestProcessId });
+          await this.remoteRunner.stop({
+            deviceId: this.device.deviceId,
+            pid: this.xcTestProcessId,
+          });
         }
       } catch (error) {
         logger.warn(`[IOSCtrlProxy] Remote runner stop failed: ${errorMessage(error)}`);
@@ -1226,13 +1274,13 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         } else {
           logger.debug(
             `[IOSCtrlProxy] Tracked runner PID ${this.xcTestProcessId} is not an owned CtrlProxy runner; ` +
-            `clearing without terminating`
+              `clearing without terminating`,
           );
         }
       } catch (error) {
         logger.warn(
           `[IOSCtrlProxy] Failed to terminate tracked CtrlProxy runner ${this.xcTestProcessId}: ` +
-          `${errorMessage(error)}`
+            `${errorMessage(error)}`,
         );
       }
       this.xcTestProcessId = null;
@@ -1259,16 +1307,18 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       const isInstalled = await this.deviceAppManager.getInstalledAppBundleHash(
         this.device.deviceId,
         IOSCtrlProxyManager.LEGACY_APP_BUNDLE_ID,
-        simulator
+        simulator,
       );
       if (isInstalled === null) {
         return;
       }
-      logger.info(`[IOSCtrlProxy] Found legacy app ${IOSCtrlProxyManager.LEGACY_APP_BUNDLE_ID}, uninstalling`);
+      logger.info(
+        `[IOSCtrlProxy] Found legacy app ${IOSCtrlProxyManager.LEGACY_APP_BUNDLE_ID}, uninstalling`,
+      );
       await this.deviceAppManager.uninstallApp(
         this.device.deviceId,
         IOSCtrlProxyManager.LEGACY_APP_BUNDLE_ID,
-        simulator
+        simulator,
       );
       logger.info(`[IOSCtrlProxy] Legacy app uninstalled`);
     } catch (error) {
@@ -1294,7 +1344,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
           `AUTOMOBILE_VERSION=${resolvePinnedVersion()} is not in the AutoMobile release ` +
           `checksum registry, so the CtrlProxy bundle cannot be integrity-verified. ` +
           `Pin a released version, or vendor a trusted bundle via AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH.`,
-        perfTiming: perf.getTimings()
+        perfTiming: perf.getTimings(),
       };
     }
 
@@ -1307,14 +1357,14 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         return {
           success: true,
           message: "CtrlProxy was already running",
-          perfTiming: perf.getTimings()
+          perfTiming: perf.getTimings(),
         };
       }
       perf.end();
       return {
         success: false,
         message: "Setup already attempted",
-        perfTiming: perf.getTimings()
+        perfTiming: perf.getTimings(),
       };
     }
 
@@ -1328,14 +1378,16 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         return {
           success: true,
           message: "CtrlProxy was already running",
-          perfTiming: perf.getTimings()
+          perfTiming: perf.getTimings(),
         };
       }
 
       // Check if build is needed
       const needsBuild = this.useRemoteRunner()
         ? false
-        : await perf.track("checkBuild", () => this.builder.needsRebuild(this.isSimulator() ? "simulator" : "device"));
+        : await perf.track("checkBuild", () =>
+            this.builder.needsRebuild(this.isSimulator() ? "simulator" : "device"),
+          );
 
       let buildResult: CtrlProxyIosBuildResult | null = null;
       if (needsBuild) {
@@ -1346,14 +1398,18 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
           buildResult = prefetchedResult;
         } else {
           // Wait for prefetch if in progress
-          const waitedResult = await perf.track("waitForPrefetch", () => IOSCtrlProxyBuilder.waitForPrefetch());
+          const waitedResult = await perf.track("waitForPrefetch", () =>
+            IOSCtrlProxyBuilder.waitForPrefetch(),
+          );
           if (waitedResult && waitedResult.success) {
             logger.info("[IOSCtrlProxy] Using completed prefetch build result");
             buildResult = waitedResult;
           } else {
             // Build synchronously
             logger.info("[IOSCtrlProxy] Downloading CtrlProxy bundle");
-            buildResult = await perf.track("build", () => this.builder.build(this.isSimulator() ? "simulator" : "device", perf));
+            buildResult = await perf.track("build", () =>
+              this.builder.build(this.isSimulator() ? "simulator" : "device", perf),
+            );
             if (!buildResult.success) {
               this.attemptedSetup = false; // Allow retry on next call
               perf.end();
@@ -1362,7 +1418,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
                 message: buildResult.message,
                 error: buildResult.error,
                 buildResult,
-                perfTiming: perf.getTimings()
+                perfTiming: perf.getTimings(),
               };
             }
           }
@@ -1370,16 +1426,16 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       }
 
       // Start the service
-      await perf.track("startService", () =>
-        this.start({ minimumHealthPollDurationMs, signal }),
-      );
+      await perf.track("startService", () => this.start({ minimumHealthPollDurationMs, signal }));
 
       perf.end();
       return {
         success: true,
-        message: needsBuild ? "CtrlProxy downloaded and started successfully" : "CtrlProxy started successfully",
+        message: needsBuild
+          ? "CtrlProxy downloaded and started successfully"
+          : "CtrlProxy started successfully",
         buildResult: buildResult || undefined,
-        perfTiming: perf.getTimings()
+        perfTiming: perf.getTimings(),
       };
     } catch (error) {
       this.attemptedSetup = false; // Allow retry on next call
@@ -1389,7 +1445,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         success: false,
         message: "Failed to setup CtrlProxy",
         error: errorMsg,
-        perfTiming: perf.getTimings()
+        perfTiming: perf.getTimings(),
       };
     }
   }
@@ -1408,10 +1464,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
   private allocateServicePort(additionalReservedPorts: Iterable<number> = []): number {
     return PortManager.allocate(this.device.deviceId, {
-      reservedPorts: [
-        ...IOS_CTRL_PROXY_RESERVED_PORTS,
-        ...additionalReservedPorts,
-      ],
+      reservedPorts: [...IOS_CTRL_PROXY_RESERVED_PORTS, ...additionalReservedPorts],
     });
   }
 
@@ -1427,7 +1480,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     const nextPort = this.allocateServicePort(additionalReservedPorts);
     if (nextPort !== this.servicePort) {
       logger.info(
-        `[IOSCtrlProxy] Reallocated service port from ${this.servicePort} to ${nextPort} before runner launch`
+        `[IOSCtrlProxy] Reallocated service port from ${this.servicePort} to ${nextPort} before runner launch`,
       );
       this.servicePort = nextPort;
       this.clearCaches();
@@ -1444,7 +1497,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     }
   }
 
-  private async ensureRemoteServicePortAvailable(options: { allowReallocation?: boolean } = {}): Promise<void> {
+  private async ensureRemoteServicePortAvailable(
+    options: { allowReallocation?: boolean } = {},
+  ): Promise<void> {
     const allowReallocation = options.allowReallocation ?? true;
     const host = this.remoteRunner.getHost();
     const unavailablePorts = new Set<number>();
@@ -1456,7 +1511,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
       const unavailablePort = this.servicePort;
       logger.warn(
-        `[IOSCtrlProxy] Remote runner port ${unavailablePort} is already in use on ${host}; reallocating`
+        `[IOSCtrlProxy] Remote runner port ${unavailablePort} is already in use on ${host}; reallocating`,
       );
       if (!allowReallocation) {
         throw new RemoteServicePortUnavailableError(host, unavailablePort);
@@ -1467,7 +1522,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     }
 
     throw new Error(
-      `No remote iOS CtrlProxy ports are available for device ${this.device.deviceId}.`
+      `No remote iOS CtrlProxy ports are available for device ${this.device.deviceId}.`,
     );
   }
 
@@ -1488,15 +1543,19 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     logger.info("[IOSCtrlProxy] Starting CtrlProxy on simulator");
 
     if (this.useRemoteRunner()) {
-      if (!await this.isRemoteRunnerAvailable()) {
+      if (!(await this.isRemoteRunnerAvailable())) {
         throw new Error("Remote runner not available for CtrlProxy startup");
       }
 
       const existingProcess = await this.remoteRunner.status({ deviceId: this.device.deviceId });
       const existingServicePort = existingProcess.data?.port;
-      if (existingProcess.success && existingProcess.data?.running && typeof existingServicePort === "number") {
+      if (
+        existingProcess.success &&
+        existingProcess.data?.running &&
+        typeof existingServicePort === "number"
+      ) {
         logger.info(
-          `[IOSCtrlProxy] Reusing remote CtrlProxy process on service port ${existingServicePort}`
+          `[IOSCtrlProxy] Reusing remote CtrlProxy process on service port ${existingServicePort}`,
         );
         this.adoptServicePort(existingServicePort);
         this.xcTestProcessId = existingProcess.data.pid ?? null;
@@ -1512,7 +1571,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         deviceId: this.device.deviceId,
         port: this.servicePort,
         xctestrunPath: xctestrunPath || undefined,
-        bundleId
+        bundleId,
       });
 
       if (!result.success || !result.data) {
@@ -1531,7 +1590,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     // simctl spawn is unreliable on Xcode 26.3+ (NSPOSIXErrorDomain code=2).
     const xctestrunPath = await this.builder.getXctestrunPath("simulator");
     if (!xctestrunPath) {
-      throw new Error("CtrlProxy xctestrun not found for simulator. Download the CtrlProxy bundle before starting.");
+      throw new Error(
+        "CtrlProxy xctestrun not found for simulator. Download the CtrlProxy bundle before starting.",
+      );
     }
 
     // Re-verify the runner binary hash (and refuse a foreign-owned derived-data
@@ -1556,22 +1617,28 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     };
     if (bundleId) {
       runnerEnv.CTRL_PROXY_IOS_BUNDLE_ID = bundleId;
-      logger.info(`[IOSCtrlProxy] Passing CTRL_PROXY_IOS_BUNDLE_ID=${bundleId} to runner via xctestrun`);
+      logger.info(
+        `[IOSCtrlProxy] Passing CTRL_PROXY_IOS_BUNDLE_ID=${bundleId} to runner via xctestrun`,
+      );
     }
     const runnerXctestrunPath = await this.builder.writeRunnerEnvironment(
       xctestrunPath,
       runnerEnv,
-      this.device.deviceId
+      this.device.deviceId,
     );
 
     const args = [
       "test-without-building",
-      "-xctestrun", runnerXctestrunPath,
-      "-destination", `platform=iOS Simulator,id=${this.device.deviceId}`,
+      "-xctestrun",
+      runnerXctestrunPath,
+      "-destination",
+      `platform=iOS Simulator,id=${this.device.deviceId}`,
       "-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService",
     ];
 
-    logger.info("[IOSCtrlProxy] Using xcodebuild test-without-building to start runner on simulator");
+    logger.info(
+      "[IOSCtrlProxy] Using xcodebuild test-without-building to start runner on simulator",
+    );
 
     // The streaming client uses piped stdio rather than exec(), so verbose
     // hierarchy dumps cannot exhaust an output buffer.
@@ -1587,7 +1654,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       stdio: ["ignore", "pipe", "pipe"],
     });
 
-    child.on("error", error => {
+    child.on("error", (error) => {
       // Ignore events from a process we no longer track (e.g. hung-recovery already
       // tore it down and cleared tracking) so a late error can't double-run cleanup
       // or schedule an auto-restart of a deliberately-removed runner (#2834 review).
@@ -1654,7 +1721,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     }
 
     const lower = output.toLowerCase();
-    return IOSCtrlProxyManager.IMPORTANT_OUTPUT_MARKERS.some(marker => lower.includes(marker));
+    return IOSCtrlProxyManager.IMPORTANT_OUTPUT_MARKERS.some((marker) => lower.includes(marker));
   }
 
   /**
@@ -1851,15 +1918,17 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       try {
         const status = await this.remoteRunner.status({
           deviceId: this.device.deviceId,
-          pid: this.xcTestProcessId
+          pid: this.xcTestProcessId,
         });
         // PID-strict: the remote daemon resolves status by deviceId BEFORE pid,
         // so running=true alone is not proof the TRACKED pid is alive — a newer runner
         // for the same device aliases it, and treating it as "ours" would make us wait
         // on (and eventually stop) that newer runner (#2834 review).
-        return status.success &&
+        return (
+          status.success &&
           (status.data?.running ?? false) &&
-          status.data?.pid === this.xcTestProcessId;
+          status.data?.pid === this.xcTestProcessId
+        );
       } catch (error) {
         // A failed remote status call (network/daemon error) is treated the same as
         // "not our tracked runner": returning false here is safe because the caller
@@ -1868,7 +1937,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         return false;
       }
     }
-    if (!await this.isProcessRunning(this.xcTestProcessId)) {
+    if (!(await this.isProcessRunning(this.xcTestProcessId))) {
       return false;
     }
     // Guard against PID reuse (#2834 review): a bare `kill -0` only proves *some*
@@ -1877,7 +1946,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     // PID (our runner exited, its PID reassigned to an unrelated process) would make
     // us defer to a health endpoint that never comes.
     const info = await this.processClient.getProcessInfo(this.xcTestProcessId);
-    if (!info) {return false;}
+    if (!info) {
+      return false;
+    }
     // Require CtrlProxy-specific identity, not merely any xcodebuild for this device
     // (#2834 review): a user's own `xcodebuild … -destination id=<deviceId>` on the same
     // simulator must NOT be mistaken for our runner, or we would wait on it and later
@@ -1898,8 +1969,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * cold-start routinely exceeds the default) can extend it without a code change.
    */
   private static resolveHealthPollMaxAttempts(): number {
-    const raw = process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS
-      ?? process.env.AUTO_MOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS;
+    const raw =
+      process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS ??
+      process.env.AUTO_MOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS;
     let configuredAttempts = IOSCtrlProxyManager.DEFAULT_HEALTH_POLL_MAX_ATTEMPTS;
     if (raw !== undefined) {
       const parsed = Number.parseInt(raw, 10);
@@ -1952,7 +2024,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     let attempts = 0;
     for (;;) {
       if (sharedStart.controller.signal.aborted) {
-        throw sharedStart.controller.signal.reason ?? new Error("iOS CtrlProxy startup was aborted");
+        throw (
+          sharedStart.controller.signal.reason ?? new Error("iOS CtrlProxy startup was aborted")
+        );
       }
       attempts++;
       if (await this.checkHealthEndpoint()) {
@@ -1962,7 +2036,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       if (attempts > 1 && attempts % 10 === 0) {
         logger.info(
           `[IOSCtrlProxy] Still waiting for service... (attempt ${attempts}, ` +
-          `${Math.max(0, (sharedStart.healthPollDeadlineMs ?? 0) - this.timer.now())}ms remaining)`,
+            `${Math.max(0, (sharedStart.healthPollDeadlineMs ?? 0) - this.timer.now())}ms remaining)`,
         );
       }
       const remainingPollMs = (sharedStart.healthPollDeadlineMs ?? 0) - this.timer.now();
@@ -2004,7 +2078,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     if ((sharedStart.healthPollDeadlineMs ?? 0) <= this.timer.now()) {
       return false;
     }
-    if (!await this.waitForHealthEndpoint(sharedStart, perf, delayMs)) {
+    if (!(await this.waitForHealthEndpoint(sharedStart, perf, delayMs))) {
       return false;
     }
     await this.completeHealthStartup(sharedStart, perf);
@@ -2034,9 +2108,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         }
         callback();
       };
-      const onAbort = () => settle(() => {
-        reject(signal?.reason ?? new Error("iOS CtrlProxy startup was aborted"));
-      });
+      const onAbort = () =>
+        settle(() => {
+          reject(signal?.reason ?? new Error("iOS CtrlProxy startup was aborted"));
+        });
 
       if (signal?.aborted) {
         onAbort();
@@ -2068,9 +2143,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         signal.removeEventListener("abort", onAbort);
         callback();
       };
-      const onAbort = () => settle(() => {
-        reject(signal.reason ?? new Error("iOS CtrlProxy startup was aborted"));
-      });
+      const onAbort = () =>
+        settle(() => {
+          reject(signal.reason ?? new Error("iOS CtrlProxy startup was aborted"));
+        });
       signal.addEventListener("abort", onAbort, { once: true });
       void this.timer.sleep(delayMs).then(
         () => settle(resolve),
@@ -2095,16 +2171,18 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       try {
         const status = await this.remoteRunner.status({
           deviceId: this.device.deviceId,
-          pid: this.xcTestProcessId
+          pid: this.xcTestProcessId,
         });
         // PID-strict for the same reason as isOwnRunnerProcessAlive: deviceId-first
         // resolution in the remote daemon means running=true may describe a
         // NEWER runner, not the tracked one. On mismatch we return false and the
         // remote start path re-adopts the device's current runner via
         // status({deviceId}) — the correct adoption point (#2834 review).
-        return status.success &&
+        return (
+          status.success &&
           (status.data?.running ?? false) &&
-          status.data?.pid === this.xcTestProcessId;
+          status.data?.pid === this.xcTestProcessId
+        );
       } catch (error) {
         // Remote status call failed; report not-alive so the caller respawns rather
         // than trusting a stale in-memory pid across a daemon error.
@@ -2114,7 +2192,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     }
     // First check PID liveness (fast, no network). If the PID is already gone
     // we can skip the health check entirely.
-    if (!await this.isProcessRunning(this.xcTestProcessId)) {
+    if (!(await this.isProcessRunning(this.xcTestProcessId))) {
       return false;
     }
     // Also verify CtrlProxy identity via the health endpoint.  A different
@@ -2146,13 +2224,25 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
   private async findExternalXcodebuildCtrlProxyProcess(): Promise<ExternalCtrlProxyProcess | null> {
     for (const pid of await this.processClient.findXcodebuildPids()) {
-      if (pid === this.xcTestProcessId) {continue;}
+      if (pid === this.xcTestProcessId) {
+        continue;
+      }
       const processInfo = await this.processClient.getProcessInfo(pid);
       const argsOut = processInfo?.command ?? "";
-      if (!argsOut.includes("CtrlProxy") || await this.isDaemonManagedSimulatorXcodebuildProcess(argsOut, processInfo)) {continue;}
+      if (
+        !argsOut.includes("CtrlProxy") ||
+        (await this.isDaemonManagedSimulatorXcodebuildProcess(argsOut, processInfo))
+      ) {
+        continue;
+      }
       const identityText = `${argsOut} ${processInfo?.environment ?? ""}`;
-      if (!IOSCtrlProxyManager.hasDeviceIdentity(identityText, this.device.deviceId)) {continue;}
-      const port = this.parseCtrlProxyPortFromProcessArgs(argsOut) ?? this.parseCtrlProxyPortFromProcessArgs(processInfo?.environment ?? "") ?? IOSCtrlProxyManager.DEFAULT_PORT;
+      if (!IOSCtrlProxyManager.hasDeviceIdentity(identityText, this.device.deviceId)) {
+        continue;
+      }
+      const port =
+        this.parseCtrlProxyPortFromProcessArgs(argsOut) ??
+        this.parseCtrlProxyPortFromProcessArgs(processInfo?.environment ?? "") ??
+        IOSCtrlProxyManager.DEFAULT_PORT;
       logger.info(`[IOSCtrlProxy] Found external xcodebuild CtrlProxy process: ${pid}`);
       return { pid, port };
     }
@@ -2180,10 +2270,14 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         continue;
       }
       const processInfo = await this.processClient.getProcessInfo(pid, deadline);
-      if (!processInfo || !IOSCtrlProxyManager.isDirectCtrlProxyRunnerCommand(processInfo.command)) {
+      if (
+        !processInfo ||
+        !IOSCtrlProxyManager.isDirectCtrlProxyRunnerCommand(processInfo.command)
+      ) {
         continue;
       }
-      const port = this.parseCtrlProxyPortFromProcessArgs(processInfo.command) ??
+      const port =
+        this.parseCtrlProxyPortFromProcessArgs(processInfo.command) ??
         this.parseCtrlProxyPortFromProcessArgs(processInfo.environment ?? "");
       if (port === null) {
         continue;
@@ -2191,7 +2285,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       const process: ListeningProcess = { pid, port, ...processInfo };
       const daemonManagedRoot = await IOSCtrlProxyManager.findDaemonManagedRunnerTreeRoot(
         this.processClient,
-        process
+        process,
       );
       if (daemonManagedRoot.kind === "root") {
         continue;
@@ -2206,11 +2300,13 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       if (remainingTimeoutMs <= 0) {
         break;
       }
-      if (!await this.checkHealthEndpointOnPortForDevice(
-        process.port,
-        this.device.deviceId,
-        remainingTimeoutMs
-      )) {
+      if (
+        !(await this.checkHealthEndpointOnPortForDevice(
+          process.port,
+          this.device.deviceId,
+          remainingTimeoutMs,
+        ))
+      ) {
         continue;
       }
       logger.info(`[IOSCtrlProxy] Found healthy external direct CtrlProxy runner: ${pid}`);
@@ -2220,10 +2316,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   }
 
   private async findExternalDirectCtrlProxyProcess(): Promise<ExternalCtrlProxyProcess | null> {
-    const candidatePorts = new Set([
-      this.servicePort,
-      IOSCtrlProxyManager.DEFAULT_PORT,
-    ]);
+    const candidatePorts = new Set([this.servicePort, IOSCtrlProxyManager.DEFAULT_PORT]);
 
     for (const port of candidatePorts) {
       const listeningProcesses = await this.findListeningProcessesOnPort(port);
@@ -2236,12 +2329,12 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         // the owning tree instead of adopting a runner whose health endpoint is down.
         const daemonManagedRoot = await IOSCtrlProxyManager.findDaemonManagedRunnerTreeRoot(
           this.processClient,
-          process
+          process,
         );
         if (daemonManagedRoot.kind === "root" && daemonManagedRoot.pid !== process.pid) {
           continue;
         }
-        if (!await this.processAncestryContainsDeviceId(process)) {
+        if (!(await this.processAncestryContainsDeviceId(process))) {
           continue;
         }
         logger.info(`[IOSCtrlProxy] Found external direct CtrlProxy runner: ${process.pid}`);
@@ -2274,15 +2367,15 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         return;
       }
 
-      const ownedProcesses = listeningProcesses.filter(process =>
-        this.isOwnedCtrlProxyRunnerProcess(process)
+      const ownedProcesses = listeningProcesses.filter((process) =>
+        this.isOwnedCtrlProxyRunnerProcess(process),
       );
       if (ownedProcesses.length > 0) {
         for (const process of ownedProcesses) {
           const rootPid = await this.findDaemonManagedRunnerTreeRoot(process);
           logger.warn(
             `[IOSCtrlProxy] Terminating stale CtrlProxy process tree rooted at ${rootPid} ` +
-            `for listener ${process.pid} on port ${this.servicePort}`
+              `for listener ${process.pid} on port ${this.servicePort}`,
           );
           await this.processClient.terminateProcessTree(rootPid);
         }
@@ -2291,14 +2384,14 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         if (remainingProcesses.length === 0) {
           return;
         }
-        const remainingOwnedProcesses = remainingProcesses.filter(process =>
-          this.isOwnedCtrlProxyRunnerProcess(process)
+        const remainingOwnedProcesses = remainingProcesses.filter((process) =>
+          this.isOwnedCtrlProxyRunnerProcess(process),
         );
         if (remainingOwnedProcesses.length > 0) {
           for (const process of remainingOwnedProcesses) {
             logger.warn(
               `[IOSCtrlProxy] CtrlProxy listener ${process.pid} still holds port ${this.servicePort}; ` +
-              `force-terminating remaining owned process tree`
+                `force-terminating remaining owned process tree`,
             );
             await this.processClient.terminateProcessTree(process.pid);
           }
@@ -2308,33 +2401,33 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         if (afterForceCleanup.length === 0) {
           return;
         }
-        if (afterForceCleanup.some(process => this.isOwnedCtrlProxyRunnerProcess(process))) {
+        if (afterForceCleanup.some((process) => this.isOwnedCtrlProxyRunnerProcess(process))) {
           throw new Error(
             `CtrlProxy recovery failed, port ${this.servicePort} still held by ` +
-            this.formatListeningProcesses(afterForceCleanup)
+              this.formatListeningProcesses(afterForceCleanup),
           );
         }
       }
 
       unavailablePorts.add(this.servicePort);
       logger.warn(
-        `[IOSCtrlProxy] Port ${this.servicePort} is held by a foreign process; reallocating CtrlProxy port`
+        `[IOSCtrlProxy] Port ${this.servicePort} is held by a foreign process; reallocating CtrlProxy port`,
       );
       PortManager.release(this.device.deviceId);
       this.servicePort = this.allocateServicePort(unavailablePorts);
       this.clearCaches();
     }
 
-    throw new Error(
-      `No iOS CtrlProxy ports are available for device ${this.device.deviceId}.`
-    );
+    throw new Error(`No iOS CtrlProxy ports are available for device ${this.device.deviceId}.`);
   }
 
   private async findListeningProcessesOnPort(port: number): Promise<ListeningProcess[]> {
     const processes: ListeningProcess[] = [];
     for (const pid of await this.processClient.findListeningPids(port)) {
       const processInfo = await this.processClient.getProcessInfo(pid);
-      if (processInfo) {processes.push({ pid, port, ...processInfo });}
+      if (processInfo) {
+        processes.push({ pid, port, ...processInfo });
+      }
     }
     return processes;
   }
@@ -2343,8 +2436,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     if (!IOSCtrlProxyManager.isCtrlProxyRunnerCommand(process.command)) {
       return false;
     }
-    return IOSCtrlProxyManager.hasDeviceIdentity(process.command, this.device.deviceId) ||
-      IOSCtrlProxyManager.hasDeviceIdentity(process.environment ?? "", this.device.deviceId);
+    return (
+      IOSCtrlProxyManager.hasDeviceIdentity(process.command, this.device.deviceId) ||
+      IOSCtrlProxyManager.hasDeviceIdentity(process.environment ?? "", this.device.deviceId)
+    );
   }
 
   private async processAncestryContainsDeviceId(process: ListeningProcess): Promise<boolean> {
@@ -2370,14 +2465,21 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   }
 
   private async findDaemonManagedRunnerTreeRoot(process: ListeningProcess): Promise<number> {
-    const result = await IOSCtrlProxyManager.findDaemonManagedRunnerTreeRoot(this.processClient, process);
+    const result = await IOSCtrlProxyManager.findDaemonManagedRunnerTreeRoot(
+      this.processClient,
+      process,
+    );
     return result.kind === "root" ? result.pid : process.pid;
   }
 
   private static async findDaemonManagedRunnerTreeRoot(
     processClient: IOSCtrlProxyProcessClient,
     process: ListeningProcess,
-    options: { requireOrphanedRoot?: boolean; shouldContinue?: () => boolean; deadline?: number } = {}
+    options: {
+      requireOrphanedRoot?: boolean;
+      shouldContinue?: () => boolean;
+      deadline?: number;
+    } = {},
   ): Promise<DaemonManagedRunnerTreeRoot> {
     if (!IOSCtrlProxyManager.isCtrlProxyRunnerCommand(process.command)) {
       return { kind: "not_daemon_managed" };
@@ -2391,7 +2493,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       rootPid = IOSCtrlProxyManager.rootPidForDaemonManagedProcess(
         process.pid,
         process.ppid,
-        options.requireOrphanedRoot
+        options.requireOrphanedRoot,
       );
     }
 
@@ -2408,7 +2510,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       const parentRoot = IOSCtrlProxyManager.daemonManagedParentRoot(
         parentInfo,
         parentPid,
-        options.requireOrphanedRoot
+        options.requireOrphanedRoot,
       );
       if (parentRoot) {
         if (parentRoot.terminal) {
@@ -2433,12 +2535,15 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     await IOSCtrlProxyManager.startupOrphanRunnerReap;
   }
 
-  private static async completeWithinStartupReapDeadline(work: Promise<void>, timer: Timer): Promise<void> {
+  private static async completeWithinStartupReapDeadline(
+    work: Promise<void>,
+    timer: Timer,
+  ): Promise<void> {
     let timeout: NodeJS.Timeout | undefined;
     try {
       await Promise.race([
         work,
-        new Promise<void>(resolve => {
+        new Promise<void>((resolve) => {
           timeout = timer.setTimeout(() => {
             IOSCtrlProxyManager.logStartupOrphanRunnerReapDeadline();
             resolve();
@@ -2455,26 +2560,30 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
   private static logStartupOrphanRunnerReapDeadline(): void {
     logger.warn(
-      `[IOSCtrlProxy] startup CtrlProxy runner sweep timed out after ${STARTUP_ORPHAN_RUNNER_REAP_DEADLINE_MS}ms`
+      `[IOSCtrlProxy] startup CtrlProxy runner sweep timed out after ${STARTUP_ORPHAN_RUNNER_REAP_DEADLINE_MS}ms`,
     );
   }
 
-  private static shouldContinueStartupOrphanRunnerTraversal(
-    options: { shouldContinue?: () => boolean }
-  ): boolean {
+  private static shouldContinueStartupOrphanRunnerTraversal(options: {
+    shouldContinue?: () => boolean;
+  }): boolean {
     return options.shouldContinue?.() ?? true;
   }
 
   private static daemonManagedParentRoot(
     process: { command: string; ppid?: number },
     pid: number,
-    requireOrphanedRoot: boolean | undefined
+    requireOrphanedRoot: boolean | undefined,
   ): DaemonManagedRunnerParentRoot | null {
     if (!IOSCtrlProxyManager.isDaemonManagedSimulatorXcodebuildCommandShape(process.command)) {
       return null;
     }
     return {
-      rootPid: IOSCtrlProxyManager.rootPidForDaemonManagedProcess(pid, process.ppid, requireOrphanedRoot),
+      rootPid: IOSCtrlProxyManager.rootPidForDaemonManagedProcess(
+        pid,
+        process.ppid,
+        requireOrphanedRoot,
+      ),
       terminal: IOSCtrlProxyManager.isShellCommand(process.command),
     };
   }
@@ -2482,32 +2591,32 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private static rootPidForDaemonManagedProcess(
     pid: number,
     ppid: number | undefined,
-    requireOrphanedRoot: boolean | undefined
+    requireOrphanedRoot: boolean | undefined,
   ): number | null {
     return requireOrphanedRoot && ppid !== 1 ? null : pid;
   }
 
-  private static toDaemonManagedRunnerTreeRoot(rootPid: number | null): DaemonManagedRunnerTreeRoot {
-    return rootPid === null
-      ? { kind: "not_daemon_managed" }
-      : { kind: "root", pid: rootPid };
+  private static toDaemonManagedRunnerTreeRoot(
+    rootPid: number | null,
+  ): DaemonManagedRunnerTreeRoot {
+    return rootPid === null ? { kind: "not_daemon_managed" } : { kind: "root", pid: rootPid };
   }
 
   private formatListeningProcesses(processes: ListeningProcess[]): string {
-    return processes
-      .map(process => `PID ${process.pid} (cmd: ${process.command})`)
-      .join(", ");
+    return processes.map((process) => `PID ${process.pid} (cmd: ${process.command})`).join(", ");
   }
 
   private static hasDeviceIdentity(text: string, deviceId: string): boolean {
-    return text.includes(`id=${deviceId}`) ||
+    return (
+      text.includes(`id=${deviceId}`) ||
       text.includes(`AUTOMOBILE_DEVICE_ID=${deviceId}`) ||
-      text.includes(`SIMCTL_CHILD_AUTOMOBILE_DEVICE_ID=${deviceId}`);
+      text.includes(`SIMCTL_CHILD_AUTOMOBILE_DEVICE_ID=${deviceId}`)
+    );
   }
 
   private async isDaemonManagedSimulatorXcodebuildProcess(
     command: string,
-    processInfo?: { ppid?: number; environment?: string } | null
+    processInfo?: { ppid?: number; environment?: string } | null,
   ): Promise<boolean> {
     const environment = processInfo?.environment ?? "";
     if (!IOSCtrlProxyManager.isDaemonManagedSimulatorXcodebuildCommandShape(command)) {
@@ -2522,7 +2631,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     return !IOSCtrlProxyManager.hasExternalXcodebuildIdentity(environment);
   }
 
-  private async hasOrphanedDaemonManagedShellParent(parentPid: number | undefined): Promise<boolean> {
+  private async hasOrphanedDaemonManagedShellParent(
+    parentPid: number | undefined,
+  ): Promise<boolean> {
     if (parentPid === undefined || parentPid <= 1) {
       return false;
     }
@@ -2530,18 +2641,22 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     if (!parentInfo || parentInfo.ppid !== 1) {
       return false;
     }
-    return IOSCtrlProxyManager.isShellCommand(parentInfo.command) &&
-      IOSCtrlProxyManager.isDaemonManagedSimulatorXcodebuildCommandShape(parentInfo.command);
+    return (
+      IOSCtrlProxyManager.isShellCommand(parentInfo.command) &&
+      IOSCtrlProxyManager.isDaemonManagedSimulatorXcodebuildCommandShape(parentInfo.command)
+    );
   }
 
   private static isDaemonManagedSimulatorXcodebuildCommandShape(command: string): boolean {
-    return command.includes("xcodebuild") &&
+    return (
+      command.includes("xcodebuild") &&
       command.includes("test-without-building") &&
       command.includes("-xctestrun") &&
       command.includes("platform=iOS Simulator") &&
       command.includes("-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService") &&
       !command.includes("CTRL_PROXY_IOS_PORT=") &&
-      !command.includes("AUTOMOBILE_DEVICE_ID=");
+      !command.includes("AUTOMOBILE_DEVICE_ID=")
+    );
   }
 
   private static isShellCommand(command: string): boolean {
@@ -2549,19 +2664,21 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   }
 
   private static hasExternalXcodebuildIdentity(environment: string): boolean {
-    return environment.includes("CTRL_PROXY_IOS_PORT=") ||
+    return (
+      environment.includes("CTRL_PROXY_IOS_PORT=") ||
       environment.includes("AUTOMOBILE_DEVICE_ID=") ||
-      environment.includes("SIMCTL_CHILD_AUTOMOBILE_DEVICE_ID=");
+      environment.includes("SIMCTL_CHILD_AUTOMOBILE_DEVICE_ID=")
+    );
   }
 
   private static isCtrlProxyRunnerCommand(command: string): boolean {
-    return command.includes("CtrlProxy") &&
-      (
-        command.includes("xcodebuild") ||
+    return (
+      command.includes("CtrlProxy") &&
+      (command.includes("xcodebuild") ||
         command.includes("CtrlProxyUITests") ||
         command.includes("CtrlProxyUITests-Runner") ||
-        command.includes(".xctestrun")
-      );
+        command.includes(".xctestrun"))
+    );
   }
 
   private static isDirectCtrlProxyRunnerCommand(command: string): boolean {
@@ -2595,15 +2712,19 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     logger.info("[IOSCtrlProxy] Starting CtrlProxy on physical device");
 
     if (this.useRemoteRunner()) {
-      if (!await this.isRemoteRunnerAvailable()) {
+      if (!(await this.isRemoteRunnerAvailable())) {
         throw new Error("Remote runner not available for CtrlProxy startup");
       }
 
       const existingProcess = await this.remoteRunner.status({ deviceId: this.device.deviceId });
       const existingDevicePort = existingProcess.data?.port;
-      if (existingProcess.success && existingProcess.data?.running && typeof existingDevicePort === "number") {
+      if (
+        existingProcess.success &&
+        existingProcess.data?.running &&
+        typeof existingDevicePort === "number"
+      ) {
         logger.info(
-          `[IOSCtrlProxy] Reusing remote CtrlProxy process on device port ${existingDevicePort}`
+          `[IOSCtrlProxy] Reusing remote CtrlProxy process on device port ${existingDevicePort}`,
         );
         this.xcTestProcessId = existingProcess.data.pid ?? null;
         this.xcTestProcess = null;
@@ -2620,7 +2741,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         deviceId: this.device.deviceId,
         port: this.servicePort,
         xctestrunPath: xctestrunPath || undefined,
-        bundleId
+        bundleId,
       });
 
       if (!result.success || !result.data) {
@@ -2630,7 +2751,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       const resultDevicePort = result.data.port;
       if (typeof resultDevicePort === "number" && resultDevicePort !== this.servicePort) {
         logger.info(
-          `[IOSCtrlProxy] Host-control CtrlProxy process is listening on device port ${resultDevicePort}; restarting tunnel`
+          `[IOSCtrlProxy] Host-control CtrlProxy process is listening on device port ${resultDevicePort}; restarting tunnel`,
         );
         await this.stopIproxyTunnel();
         await this.startIproxyTunnel({ devicePort: resultDevicePort });
@@ -2644,7 +2765,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     // and run the XCUITest via xcodebuild with device destination
     const xctestrunPath = await this.builder.getXctestrunPath("device");
     if (!xctestrunPath) {
-      throw new Error("CtrlProxy xctestrun not found for device. Download the CtrlProxy bundle before starting.");
+      throw new Error(
+        "CtrlProxy xctestrun not found for device. Download the CtrlProxy bundle before starting.",
+      );
     }
 
     this.ensureLocalServicePortAllocatedAndAvailable();
@@ -2652,7 +2775,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     await this.verifyInstalledAppBundle();
 
     const signing = await this.signingManager.resolveSigningForDevice(this.device.deviceId);
-    signing.warnings.forEach(warning => logger.warn(`[IOSCtrlProxy] ${warning}`));
+    signing.warnings.forEach((warning) => logger.warn(`[IOSCtrlProxy] ${warning}`));
 
     const signingArgs = [...signing.buildSettings];
     if (signing.allowProvisioningUpdates) {
@@ -2672,18 +2795,22 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     };
     if (bundleId) {
       runnerEnv.CTRL_PROXY_IOS_BUNDLE_ID = bundleId;
-      logger.info(`[IOSCtrlProxy] Passing CTRL_PROXY_IOS_BUNDLE_ID=${bundleId} to runner via xctestrun`);
+      logger.info(
+        `[IOSCtrlProxy] Passing CTRL_PROXY_IOS_BUNDLE_ID=${bundleId} to runner via xctestrun`,
+      );
     }
     const runnerXctestrunPath = await this.builder.writeRunnerEnvironment(
       xctestrunPath,
       runnerEnv,
-      this.device.deviceId
+      this.device.deviceId,
     );
 
     const args = [
       "test-without-building",
-      "-xctestrun", runnerXctestrunPath,
-      "-destination", `id=${this.device.deviceId}`,
+      "-xctestrun",
+      runnerXctestrunPath,
+      "-destination",
+      `id=${this.device.deviceId}`,
       "-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService",
       ...signingArgs,
     ];
@@ -2700,7 +2827,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       stdio: ["ignore", "pipe", "pipe"],
     });
 
-    child.on("error", error => {
+    child.on("error", (error) => {
       logger.warn(`[IOSCtrlProxy] xcodebuild test error: ${error.message}`);
       this.handleProcessExit();
     });
@@ -2723,22 +2850,26 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   }
 
   private async verifyInstalledAppBundle(): Promise<void> {
-    if (process.env.AUTOMOBILE_IOS_SKIP_CTRL_PROXY_APP_HASH === "true" ||
-        process.env.AUTOMOBILE_IOS_SKIP_CTRL_PROXY_APP_HASH === "1") {
+    if (
+      process.env.AUTOMOBILE_IOS_SKIP_CTRL_PROXY_APP_HASH === "true" ||
+      process.env.AUTOMOBILE_IOS_SKIP_CTRL_PROXY_APP_HASH === "1"
+    ) {
       return;
     }
 
     const simulator = this.isSimulator();
     const expectedHash = this.builder.getExpectedAppHash(simulator ? "simulator" : "device");
     if (!expectedHash) {
-      logger.warn("[IOSCtrlProxy] CtrlProxy app hash verification skipped (no expected hash configured)");
+      logger.warn(
+        "[IOSCtrlProxy] CtrlProxy app hash verification skipped (no expected hash configured)",
+      );
       return;
     }
 
     const deviceHash = await this.deviceAppManager.getInstalledAppBundleHash(
       this.device.deviceId,
       IOSCtrlProxyManager.APP_BUNDLE_ID,
-      simulator
+      simulator,
     );
     if (!deviceHash) {
       logger.warn("[IOSCtrlProxy] Unable to read installed CtrlProxy app hash from device");
@@ -2748,10 +2879,14 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     if (deviceHash.toLowerCase() !== expectedHash.toLowerCase()) {
       logger.warn("[IOSCtrlProxy] Installed CtrlProxy app hash mismatch", {
         deviceHash,
-        expectedHash
+        expectedHash,
       });
       try {
-        await this.deviceAppManager.uninstallApp(this.device.deviceId, IOSCtrlProxyManager.APP_BUNDLE_ID, simulator);
+        await this.deviceAppManager.uninstallApp(
+          this.device.deviceId,
+          IOSCtrlProxyManager.APP_BUNDLE_ID,
+          simulator,
+        );
         logger.info("[IOSCtrlProxy] Uninstalled CtrlProxy app to force reinstall");
       } catch (error) {
         logger.warn(`[IOSCtrlProxy] Failed to uninstall CtrlProxy app: ${errorMessage(error)}`);
@@ -2801,30 +2936,35 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private async checkHealthEndpointOnPortForDevice(
     port: number,
     deviceId: string,
-    timeoutMs?: number
+    timeoutMs?: number,
   ): Promise<boolean> {
     return this.healthClient.checkHealthEndpointOnPortForDevice(port, deviceId, timeoutMs);
   }
 
   private getIproxyStartTimeoutMs(): number {
-    const envValue = process.env.AUTOMOBILE_IPROXY_START_TIMEOUT_MS ??
+    const envValue =
+      process.env.AUTOMOBILE_IPROXY_START_TIMEOUT_MS ??
       process.env.AUTO_MOBILE_IPROXY_START_TIMEOUT_MS;
     if (!envValue) {
       return IOSCtrlProxyManager.DEFAULT_IPROXY_START_TIMEOUT_MS;
     }
     const parsed = Number.parseInt(envValue, 10);
     if (Number.isNaN(parsed) || parsed <= 0) {
-      logger.warn(`[IOSCtrlProxy] Invalid iproxy timeout '${envValue}', using default ${IOSCtrlProxyManager.DEFAULT_IPROXY_START_TIMEOUT_MS}ms`);
+      logger.warn(
+        `[IOSCtrlProxy] Invalid iproxy timeout '${envValue}', using default ${IOSCtrlProxyManager.DEFAULT_IPROXY_START_TIMEOUT_MS}ms`,
+      );
       return IOSCtrlProxyManager.DEFAULT_IPROXY_START_TIMEOUT_MS;
     }
     return parsed;
   }
 
-  private async startIproxyTunnel(options: {
-    allowServicePortReallocation?: boolean;
-    devicePort?: number;
-    supervise?: boolean;
-  } = {}): Promise<void> {
+  private async startIproxyTunnel(
+    options: {
+      allowServicePortReallocation?: boolean;
+      devicePort?: number;
+      supervise?: boolean;
+    } = {},
+  ): Promise<void> {
     if (this.isSimulator()) {
       return;
     }
@@ -2850,7 +2990,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       const result = await this.remoteRunner.startIproxy({
         deviceId: this.device.deviceId,
         localPort: this.servicePort,
-        devicePort
+        devicePort,
       });
       if (!result.success || !result.data) {
         throw new Error(result.error || "Failed to start iproxy tunnel via remote runner");
@@ -2866,7 +3006,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       return;
     }
 
-    if (this.iproxyProcessId && await this.isProcessRunning(this.iproxyProcessId)) {
+    if (this.iproxyProcessId && (await this.isProcessRunning(this.iproxyProcessId))) {
       if (options.supervise !== false) {
         await this.iproxySupervisor.start();
       }
@@ -2875,11 +3015,13 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
     await this.stopIproxyTunnel({ stopSupervisor: options.supervise !== false });
 
-    logger.info(`[IOSCtrlProxy] Starting iproxy tunnel (localhost:${this.servicePort} -> device:${this.servicePort})`);
+    logger.info(
+      `[IOSCtrlProxy] Starting iproxy tunnel (localhost:${this.servicePort} -> device:${this.servicePort})`,
+    );
     const child = this.processExecutor.spawn(
       "iproxy",
       [String(this.servicePort), String(this.servicePort), this.device.deviceId],
-      { stdio: ["ignore", "pipe", "pipe"] }
+      { stdio: ["ignore", "pipe", "pipe"] },
     );
 
     if (!child.pid) {
@@ -2900,7 +3042,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       }
     });
 
-    child.on("error", error => {
+    child.on("error", (error) => {
       if (this.iproxyProcess !== child) {
         return;
       }
@@ -2916,7 +3058,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     }
   }
 
-  private async stopIproxyTunnel(options: { clearDevicePort?: boolean; stopSupervisor?: boolean } = {}): Promise<void> {
+  private async stopIproxyTunnel(
+    options: { clearDevicePort?: boolean; stopSupervisor?: boolean } = {},
+  ): Promise<void> {
     if (options.stopSupervisor !== false) {
       this.iproxySupervisor.stop();
     }
@@ -2925,7 +3069,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       if (this.iproxyProcessId) {
         const result = await this.remoteRunner.stopIproxy({ pid: this.iproxyProcessId });
         if (!result.success) {
-          logger.warn(`[IOSCtrlProxy] Failed to stop host iproxy: ${result.error || "Unknown error"}`);
+          logger.warn(
+            `[IOSCtrlProxy] Failed to stop host iproxy: ${result.error || "Unknown error"}`,
+          );
         }
       }
     } else if (this.iproxyProcess && typeof this.iproxyProcess.kill === "function") {
@@ -2979,7 +3125,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       return true;
     }
     let timeout: NodeJS.Timeout | undefined;
-    const exited = new Promise<boolean>(resolve => {
+    const exited = new Promise<boolean>((resolve) => {
       const complete = () => resolve(true);
       iproxyProcess.once("exit", complete);
       iproxyProcess.once("error", complete);
@@ -3027,7 +3173,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         throw error;
       }
       logger.warn(
-        "[IOSCtrlProxy] Existing CtrlProxy process uses a host port that is no longer available during iproxy restart; restarting"
+        "[IOSCtrlProxy] Existing CtrlProxy process uses a host port that is no longer available during iproxy restart; restarting",
       );
       await this.restartDeviceProcessAfterHostPortCollision();
       await this.processSupervisor.start();
@@ -3041,7 +3187,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
     const isConnected = await this.isDeviceDetected();
     if (!isConnected) {
-      logger.warn(`[IOSCtrlProxy] Device ${this.device.deviceId} not detected, stopping iproxy monitoring`);
+      logger.warn(
+        `[IOSCtrlProxy] Device ${this.device.deviceId} not detected, stopping iproxy monitoring`,
+      );
       await this.stopIproxyTunnel({ clearDevicePort: true });
       return true;
     }
@@ -3069,7 +3217,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
           return result.data.stdout.includes(this.device.deviceId);
         }
 
-        const { stdout } = await this.processExecutor.executeCommand("xcrun", ["simctl", "list", "devices"]);
+        const { stdout } = await this.processExecutor.executeCommand("xcrun", [
+          "simctl",
+          "list",
+          "devices",
+        ]);
         return stdout.includes(this.device.deviceId);
       } catch (error) {
         // `xcrun simctl list devices` failing (Xcode tooling missing/misconfigured)
@@ -3085,11 +3237,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         if (!result.success || !result.data) {
           return false;
         }
-        return result.data.stdout.split("\n").some(line => line.trim() === this.device.deviceId);
+        return result.data.stdout.split("\n").some((line) => line.trim() === this.device.deviceId);
       }
 
       const { stdout } = await this.processExecutor.executeCommand("idevice_id", ["-l"]);
-      return stdout.split("\n").some(line => line.trim() === this.device.deviceId);
+      return stdout.split("\n").some((line) => line.trim() === this.device.deviceId);
     } catch (error) {
       // `idevice_id -l` failing (libimobiledevice missing, or no physical device
       // attached) means we can't enumerate physical devices; report undetected.
@@ -3127,7 +3279,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     return {
       supportsXCTest: true, // XCUITest is available on all iOS devices
       deviceType: isSimulator ? "simulator" : "physical",
-      iosVersion: null // TODO: Get from device info
+      iosVersion: null, // TODO: Get from device info
     };
   }
 }

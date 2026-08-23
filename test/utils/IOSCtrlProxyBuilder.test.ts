@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   IOS_CTRL_PROXY_RUNNER_SHA256_ENV,
   IOS_CTRL_PROXY_RUNNER_SHA256_TARGET_ENV,
-  IOSCtrlProxyBuilder
+  IOSCtrlProxyBuilder,
 } from "../../src/utils/IOSCtrlProxyBuilder";
 import { FakeIOSCtrlProxyBundleDownloader } from "../fakes/FakeIOSCtrlProxyBundleDownloader";
 import { FakeCtrlProxyCodesignVerifier } from "../fakes/FakeCtrlProxyCodesignVerifier";
@@ -14,7 +14,7 @@ import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import { parsePlist } from "../../src/utils/ios-cmdline-tools/XctestrunPlist";
 import { logger } from "../../src/utils/logger";
 
-describe("IOSCtrlProxyBuilder", function() {
+describe("IOSCtrlProxyBuilder", function () {
   let originalProjectRoot: string | undefined;
   let originalDerivedDataPath: string | undefined;
   let originalSkipDownload: string | undefined;
@@ -26,7 +26,7 @@ describe("IOSCtrlProxyBuilder", function() {
   let originalRunnerSha256Target: string | undefined;
   let tempDir: string;
 
-  beforeEach(async function() {
+  beforeEach(async function () {
     // Save original environment
     originalProjectRoot = process.env.AUTOMOBILE_PROJECT_ROOT;
     originalDerivedDataPath = process.env.AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA;
@@ -51,7 +51,7 @@ describe("IOSCtrlProxyBuilder", function() {
     delete process.env.AUTOMOBILE_IOS_HELPER_TEAM_ID;
   });
 
-  afterEach(async function() {
+  afterEach(async function () {
     // Restore original environment
     if (originalProjectRoot === undefined) {
       delete process.env.AUTOMOBILE_PROJECT_ROOT;
@@ -121,15 +121,15 @@ describe("IOSCtrlProxyBuilder", function() {
     }
   });
 
-  describe("getInstance", function() {
-    test("should return same instance for same configuration", function() {
+  describe("getInstance", function () {
+    test("should return same instance for same configuration", function () {
       const instance1 = IOSCtrlProxyBuilder.getInstance();
       const instance2 = IOSCtrlProxyBuilder.getInstance();
 
       expect(instance1).toBe(instance2);
     });
 
-    test("should return different instances for different configurations", function() {
+    test("should return different instances for different configurations", function () {
       const instance1 = IOSCtrlProxyBuilder.getInstance();
       const instance2 = IOSCtrlProxyBuilder.getInstance({ projectRoot: "/different/path" });
 
@@ -137,8 +137,8 @@ describe("IOSCtrlProxyBuilder", function() {
     });
   });
 
-  describe("getConfig", function() {
-    test("should return default configuration when no overrides", function() {
+  describe("getConfig", function () {
+    test("should return default configuration when no overrides", function () {
       const builder = IOSCtrlProxyBuilder.getInstance();
       const config = builder.getConfig();
 
@@ -152,7 +152,7 @@ describe("IOSCtrlProxyBuilder", function() {
       expect(config.bundleCacheDir).toBe(path.join(os.homedir(), ".automobile", "ctrl-proxy-ios"));
     });
 
-    test("should respect environment variable overrides", function() {
+    test("should respect environment variable overrides", function () {
       process.env.AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA = "/custom/derived/data";
       process.env.AUTOMOBILE_CTRL_PROXY_IOS_CACHE_DIR = "/custom/cache";
 
@@ -166,7 +166,7 @@ describe("IOSCtrlProxyBuilder", function() {
       expect(config.bundleCacheDir).toBe("/custom/cache");
     });
 
-    test("should respect constructor config overrides", function() {
+    test("should respect constructor config overrides", function () {
       const builder = IOSCtrlProxyBuilder.getInstance({
         derivedDataPath: "/override/path",
         scheme: "CustomScheme",
@@ -180,7 +180,7 @@ describe("IOSCtrlProxyBuilder", function() {
     });
   });
 
-  describe("isPinnedVersionUnverifiable", function() {
+  describe("isPinnedVersionUnverifiable", function () {
     const withVersion = (value: string | undefined, fn: () => void) => {
       const prev = process.env.AUTOMOBILE_VERSION;
       if (value === undefined) {
@@ -199,26 +199,34 @@ describe("IOSCtrlProxyBuilder", function() {
       }
     };
 
-    test("false when no explicit pin (latest)", function() {
-      withVersion(undefined, () => expect(IOSCtrlProxyBuilder.isPinnedVersionUnverifiable()).toBe(false));
+    test("false when no explicit pin (latest)", function () {
+      withVersion(undefined, () =>
+        expect(IOSCtrlProxyBuilder.isPinnedVersionUnverifiable()).toBe(false),
+      );
     });
 
-    test("false for a known explicit pin", function() {
-      withVersion("0.0.18", () => expect(IOSCtrlProxyBuilder.isPinnedVersionUnverifiable()).toBe(false));
+    test("false for a known explicit pin", function () {
+      withVersion("0.0.18", () =>
+        expect(IOSCtrlProxyBuilder.isPinnedVersionUnverifiable()).toBe(false),
+      );
     });
 
-    test("true for an unknown explicit pin", function() {
-      withVersion("99.99.99", () => expect(IOSCtrlProxyBuilder.isPinnedVersionUnverifiable()).toBe(true));
+    test("true for an unknown explicit pin", function () {
+      withVersion("99.99.99", () =>
+        expect(IOSCtrlProxyBuilder.isPinnedVersionUnverifiable()).toBe(true),
+      );
     });
 
-    test("false for an unknown pin when a vendored IPA path is set", function() {
+    test("false for an unknown pin when a vendored IPA path is set", function () {
       process.env.AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH = "/opt/automobile/control-proxy.ipa";
-      withVersion("99.99.99", () => expect(IOSCtrlProxyBuilder.isPinnedVersionUnverifiable()).toBe(false));
+      withVersion("99.99.99", () =>
+        expect(IOSCtrlProxyBuilder.isPinnedVersionUnverifiable()).toBe(false),
+      );
     });
   });
 
-  describe("needsRebuild", function() {
-    test("should return false when AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD is true", async function() {
+  describe("needsRebuild", function () {
+    test("should return false when AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD is true", async function () {
       process.env.AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD = "true";
 
       // Reset instances to pick up new env
@@ -230,7 +238,7 @@ describe("IOSCtrlProxyBuilder", function() {
       expect(result).toBe(false);
     });
 
-    test("should return false when AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD is 1", async function() {
+    test("should return false when AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD is 1", async function () {
       process.env.AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD = "1";
 
       // Reset instances to pick up new env
@@ -242,7 +250,7 @@ describe("IOSCtrlProxyBuilder", function() {
       expect(result).toBe(false);
     });
 
-    test("should return true when build products don't exist", async function() {
+    test("should return true when build products don't exist", async function () {
       const builder = IOSCtrlProxyBuilder.getInstance({
         derivedDataPath: path.join(tempDir, "nonexistent"),
         projectRoot: tempDir,
@@ -254,7 +262,7 @@ describe("IOSCtrlProxyBuilder", function() {
       expect(result).toBe(true);
     });
 
-    test("should return false when xctestrun and metadata match", async function() {
+    test("should return false when xctestrun and metadata match", async function () {
       const derivedDataPath = path.join(tempDir, "DerivedData");
       const productsDir = path.join(derivedDataPath, "Build", "Products");
       await fs.mkdir(productsDir, { recursive: true });
@@ -264,20 +272,24 @@ describe("IOSCtrlProxyBuilder", function() {
       await fs.mkdir(cacheDir, { recursive: true });
       await fs.writeFile(
         path.join(cacheDir, "ctrl-proxy-ios-bundle.json"),
-        JSON.stringify({ checksum: "test-checksum", version: "latest", extractedAt: new Date().toISOString() })
+        JSON.stringify({
+          checksum: "test-checksum",
+          version: "latest",
+          extractedAt: new Date().toISOString(),
+        }),
       );
 
       IOSCtrlProxyBuilder.setExpectedChecksumForTesting("test-checksum");
       const builder = IOSCtrlProxyBuilder.getInstance({
         derivedDataPath,
-        bundleCacheDir: cacheDir
+        bundleCacheDir: cacheDir,
       });
 
       const result = await builder.needsRebuild("simulator");
       expect(result).toBe(false);
     });
 
-    test("fails closed on an unknown pin instead of reusing a cached bundle (#2746)", async function() {
+    test("fails closed on an unknown pin instead of reusing a cached bundle (#2746)", async function () {
       const prevVersion = process.env.AUTOMOBILE_VERSION;
       process.env.AUTOMOBILE_VERSION = "99.99.99";
       try {
@@ -286,18 +298,30 @@ describe("IOSCtrlProxyBuilder", function() {
         const derivedDataPath = path.join(tempDir, "DerivedData");
         const productsDir = path.join(derivedDataPath, "Build", "Products");
         await fs.mkdir(productsDir, { recursive: true });
-        await fs.writeFile(path.join(productsDir, "CtrlProxyApp_iphonesimulator.xctestrun"), "mock");
+        await fs.writeFile(
+          path.join(productsDir, "CtrlProxyApp_iphonesimulator.xctestrun"),
+          "mock",
+        );
         const cacheDir = path.join(tempDir, "cache");
         await fs.mkdir(cacheDir, { recursive: true });
         await fs.writeFile(
           path.join(cacheDir, "ctrl-proxy-ios-bundle.json"),
-          JSON.stringify({ checksum: "stale", version: "latest", extractedAt: new Date().toISOString() })
+          JSON.stringify({
+            checksum: "stale",
+            version: "latest",
+            extractedAt: new Date().toISOString(),
+          }),
         );
 
         IOSCtrlProxyBuilder.resetInstances();
-        const builder = IOSCtrlProxyBuilder.getInstance({ derivedDataPath, bundleCacheDir: cacheDir });
+        const builder = IOSCtrlProxyBuilder.getInstance({
+          derivedDataPath,
+          bundleCacheDir: cacheDir,
+        });
 
-        await expect(builder.needsRebuild("simulator")).rejects.toThrow("not in the AutoMobile release");
+        await expect(builder.needsRebuild("simulator")).rejects.toThrow(
+          "not in the AutoMobile release",
+        );
       } finally {
         if (prevVersion === undefined) {
           delete process.env.AUTOMOBILE_VERSION;
@@ -307,7 +331,7 @@ describe("IOSCtrlProxyBuilder", function() {
       }
     });
 
-    test("a vendored IPA path forces extraction even with a cached bundle on an unknown pin (#2746)", async function() {
+    test("a vendored IPA path forces extraction even with a cached bundle on an unknown pin (#2746)", async function () {
       const prevVersion = process.env.AUTOMOBILE_VERSION;
       process.env.AUTOMOBILE_VERSION = "99.99.99";
       process.env.AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH = path.join(tempDir, "vendored.ipa");
@@ -318,16 +342,26 @@ describe("IOSCtrlProxyBuilder", function() {
         const derivedDataPath = path.join(tempDir, "DerivedData");
         const productsDir = path.join(derivedDataPath, "Build", "Products");
         await fs.mkdir(productsDir, { recursive: true });
-        await fs.writeFile(path.join(productsDir, "CtrlProxyApp_iphonesimulator.xctestrun"), "mock");
+        await fs.writeFile(
+          path.join(productsDir, "CtrlProxyApp_iphonesimulator.xctestrun"),
+          "mock",
+        );
         const cacheDir = path.join(tempDir, "cache");
         await fs.mkdir(cacheDir, { recursive: true });
         await fs.writeFile(
           path.join(cacheDir, "ctrl-proxy-ios-bundle.json"),
-          JSON.stringify({ checksum: "stale", version: "latest", extractedAt: new Date().toISOString() })
+          JSON.stringify({
+            checksum: "stale",
+            version: "latest",
+            extractedAt: new Date().toISOString(),
+          }),
         );
 
         IOSCtrlProxyBuilder.resetInstances();
-        const builder = IOSCtrlProxyBuilder.getInstance({ derivedDataPath, bundleCacheDir: cacheDir });
+        const builder = IOSCtrlProxyBuilder.getInstance({
+          derivedDataPath,
+          bundleCacheDir: cacheDir,
+        });
 
         // No throw (vendored is the trusted escape hatch) AND forces a rebuild so
         // the vendored IPA is actually consumed.
@@ -343,8 +377,8 @@ describe("IOSCtrlProxyBuilder", function() {
     });
   });
 
-  describe("getBuildProductsPath", function() {
-    test("should return null when build products don't exist", async function() {
+  describe("getBuildProductsPath", function () {
+    test("should return null when build products don't exist", async function () {
       const builder = IOSCtrlProxyBuilder.getInstance({
         derivedDataPath: path.join(tempDir, "nonexistent"),
       });
@@ -354,7 +388,7 @@ describe("IOSCtrlProxyBuilder", function() {
       expect(result).toBeNull();
     });
 
-    test("should return path when build products exist", async function() {
+    test("should return path when build products exist", async function () {
       // Create fake build products directory
       const buildDir = path.join(tempDir, "Build", "Products", "Debug-iphonesimulator");
       await fs.mkdir(buildDir, { recursive: true });
@@ -369,11 +403,16 @@ describe("IOSCtrlProxyBuilder", function() {
     });
   });
 
-  describe("getRunnerBinaryPath", function() {
-    test("returns the CtrlProxy xctest executable rather than the XCTRunner stub", async function() {
+  describe("getRunnerBinaryPath", function () {
+    test("returns the CtrlProxy xctest executable rather than the XCTRunner stub", async function () {
       const buildDir = path.join(tempDir, "Build", "Products", "Debug-iphonesimulator");
       const runnerDir = path.join(buildDir, "CtrlProxyUITests-Runner.app");
-      const xctestBinary = path.join(runnerDir, "PlugIns", "CtrlProxyUITests.xctest", "CtrlProxyUITests");
+      const xctestBinary = path.join(
+        runnerDir,
+        "PlugIns",
+        "CtrlProxyUITests.xctest",
+        "CtrlProxyUITests",
+      );
       await fs.mkdir(path.dirname(xctestBinary), { recursive: true });
       await fs.writeFile(path.join(runnerDir, "CtrlProxyUITests-Runner"), "xctrunner-stub");
       await fs.writeFile(xctestBinary, "ctrl-proxy-code");
@@ -382,13 +421,13 @@ describe("IOSCtrlProxyBuilder", function() {
 
       expect(await builder.getRunnerBinaryPath("simulator", "xctest")).toBe(xctestBinary);
       expect(await builder.getRunnerBinaryPath("simulator", "runner")).toBe(
-        path.join(runnerDir, "CtrlProxyUITests-Runner")
+        path.join(runnerDir, "CtrlProxyUITests-Runner"),
       );
     });
   });
 
-  describe("getXctestrunPath", function() {
-    test("should return null when xctestrun doesn't exist", async function() {
+  describe("getXctestrunPath", function () {
+    test("should return null when xctestrun doesn't exist", async function () {
       const builder = IOSCtrlProxyBuilder.getInstance({
         derivedDataPath: path.join(tempDir, "nonexistent"),
       });
@@ -398,7 +437,7 @@ describe("IOSCtrlProxyBuilder", function() {
       expect(result).toBeNull();
     });
 
-    test("should return path when xctestrun exists", async function() {
+    test("should return path when xctestrun exists", async function () {
       // Create fake build products directory and xctestrun file
       const productsDir = path.join(tempDir, "Build", "Products");
       const buildDir = path.join(productsDir, "Debug-iphonesimulator");
@@ -416,12 +455,18 @@ describe("IOSCtrlProxyBuilder", function() {
       expect(result).toBe(xctestrunFile);
     });
 
-    test("should prefer newest xctestrun file when multiple exist", async function() {
+    test("should prefer newest xctestrun file when multiple exist", async function () {
       const productsDir = path.join(tempDir, "Build", "Products");
       await fs.mkdir(productsDir, { recursive: true });
 
-      const oldFile = path.join(productsDir, "CtrlProxyApp_iphonesimulator26.0-arm64-x86_64.xctestrun");
-      const newFile = path.join(productsDir, "CtrlProxyApp_iphonesimulator26.2-arm64-x86_64.xctestrun");
+      const oldFile = path.join(
+        productsDir,
+        "CtrlProxyApp_iphonesimulator26.0-arm64-x86_64.xctestrun",
+      );
+      const newFile = path.join(
+        productsDir,
+        "CtrlProxyApp_iphonesimulator26.2-arm64-x86_64.xctestrun",
+      );
       await fs.writeFile(oldFile, "old content");
       await fs.utimes(oldFile, new Date("2026-01-01"), new Date("2026-01-01"));
       await fs.writeFile(newFile, "new content");
@@ -437,11 +482,11 @@ describe("IOSCtrlProxyBuilder", function() {
     });
   });
 
-  describe("writeRunnerEnvironment", function() {
+  describe("writeRunnerEnvironment", function () {
     const SAMPLE_XCTESTRUN = [
-      "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
-      "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">",
-      "<plist version=\"1.0\">",
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
+      '<plist version="1.0">',
       "<dict>",
       "\t<key>CtrlProxyUITests</key>",
       "\t<dict>",
@@ -454,27 +499,30 @@ describe("IOSCtrlProxyBuilder", function() {
       "\t\t<true/>",
       "\t</dict>",
       "</dict>",
-      "</plist>"
+      "</plist>",
     ].join("\n");
 
     async function readUiTestEnv(xctestrunPath: string): Promise<Map<string, unknown>> {
       const xml = await fs.readFile(xctestrunPath, "utf-8");
-      const root = await parsePlist(xml) as Map<string, unknown>;
+      const root = (await parsePlist(xml)) as Map<string, unknown>;
       const uiTarget = root.get("CtrlProxyUITests") as Map<string, unknown>;
       return uiTarget.get("EnvironmentVariables") as Map<string, unknown>;
     }
 
-    test("writes a per-launch copy carrying the injected port without mutating the source (EC3)", async function() {
+    test("writes a per-launch copy carrying the injected port without mutating the source (EC3)", async function () {
       const productsDir = path.join(tempDir, "Build", "Products");
       await fs.mkdir(productsDir, { recursive: true });
-      const sourcePath = path.join(productsDir, "CtrlProxyApp_iphonesimulator26.2-arm64-x86_64.xctestrun");
+      const sourcePath = path.join(
+        productsDir,
+        "CtrlProxyApp_iphonesimulator26.2-arm64-x86_64.xctestrun",
+      );
       await fs.writeFile(sourcePath, SAMPLE_XCTESTRUN);
 
       const builder = IOSCtrlProxyBuilder.getInstance({ derivedDataPath: tempDir });
       const outputPath = await builder.writeRunnerEnvironment(
         sourcePath,
         { CTRL_PROXY_IOS_PORT: "8767", AUTOMOBILE_DEVICE_ID: "SIM-UUID" },
-        "SIM-UUID"
+        "SIM-UUID",
       );
 
       // New file, same directory, platform-token-free name.
@@ -494,10 +542,13 @@ describe("IOSCtrlProxyBuilder", function() {
       expect(env.get("TERM")).toBe("dumb");
     });
 
-    test("per-launch copy is excluded from getXctestrunPath candidate globs", async function() {
+    test("per-launch copy is excluded from getXctestrunPath candidate globs", async function () {
       const productsDir = path.join(tempDir, "Build", "Products");
       await fs.mkdir(productsDir, { recursive: true });
-      const sourcePath = path.join(productsDir, "CtrlProxyApp_iphonesimulator26.2-arm64-x86_64.xctestrun");
+      const sourcePath = path.join(
+        productsDir,
+        "CtrlProxyApp_iphonesimulator26.2-arm64-x86_64.xctestrun",
+      );
       await fs.writeFile(sourcePath, SAMPLE_XCTESTRUN);
 
       const builder = IOSCtrlProxyBuilder.getInstance({ derivedDataPath: tempDir });
@@ -508,16 +559,23 @@ describe("IOSCtrlProxyBuilder", function() {
       expect(resolved).toBe(sourcePath);
     });
 
-    test("per-launch copy is excluded even from the platform-agnostic getXctestrunPath glob", async function() {
+    test("per-launch copy is excluded even from the platform-agnostic getXctestrunPath glob", async function () {
       const productsDir = path.join(tempDir, "Build", "Products");
       await fs.mkdir(productsDir, { recursive: true });
-      const sourcePath = path.join(productsDir, "CtrlProxyApp_iphonesimulator26.2-arm64-x86_64.xctestrun");
+      const sourcePath = path.join(
+        productsDir,
+        "CtrlProxyApp_iphonesimulator26.2-arm64-x86_64.xctestrun",
+      );
       await fs.writeFile(sourcePath, SAMPLE_XCTESTRUN);
       // Make the source older so a naive newest-mtime pick would prefer the copy.
       await fs.utimes(sourcePath, new Date("2026-01-01"), new Date("2026-01-01"));
 
       const builder = IOSCtrlProxyBuilder.getInstance({ derivedDataPath: tempDir });
-      const outputPath = await builder.writeRunnerEnvironment(sourcePath, { CTRL_PROXY_IOS_PORT: "8767" }, "SIM-UUID");
+      const outputPath = await builder.writeRunnerEnvironment(
+        sourcePath,
+        { CTRL_PROXY_IOS_PORT: "8767" },
+        "SIM-UUID",
+      );
       await fs.utimes(outputPath, new Date("2026-06-01"), new Date("2026-06-01"));
 
       // No platform argument → no platform filter; the runner copy must still be skipped.
@@ -525,7 +583,7 @@ describe("IOSCtrlProxyBuilder", function() {
       expect(resolved).toBe(sourcePath);
     });
 
-    test("sanitizes the device id used in the copy filename", async function() {
+    test("sanitizes the device id used in the copy filename", async function () {
       const productsDir = path.join(tempDir, "Build", "Products");
       await fs.mkdir(productsDir, { recursive: true });
       const sourcePath = path.join(productsDir, "CtrlProxyApp_iphoneos.xctestrun");
@@ -535,39 +593,48 @@ describe("IOSCtrlProxyBuilder", function() {
       const outputPath = await builder.writeRunnerEnvironment(
         sourcePath,
         { CTRL_PROXY_IOS_PORT: "8767" },
-        "00008030-001E/28C1 1E"
+        "00008030-001E/28C1 1E",
       );
       expect(path.basename(outputPath)).toBe("automobile-runner-00008030-001E_28C1_1E.xctestrun");
     });
 
-    test("throws an actionable error when the xctestrun has no UI-test bundle (EC4)", async function() {
+    test("throws an actionable error when the xctestrun has no UI-test bundle (EC4)", async function () {
       const productsDir = path.join(tempDir, "Build", "Products");
       await fs.mkdir(productsDir, { recursive: true });
       const sourcePath = path.join(productsDir, "CtrlProxyApp_iphonesimulator.xctestrun");
-      await fs.writeFile(sourcePath, [
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
-        "<plist version=\"1.0\">",
-        "<dict>",
-        "\t<key>CtrlProxyTests</key>",
-        "\t<dict><key>IsUITestBundle</key><false/></dict>",
-        "</dict>",
-        "</plist>"
-      ].join("\n"));
+      await fs.writeFile(
+        sourcePath,
+        [
+          '<?xml version="1.0" encoding="UTF-8"?>',
+          '<plist version="1.0">',
+          "<dict>",
+          "\t<key>CtrlProxyTests</key>",
+          "\t<dict><key>IsUITestBundle</key><false/></dict>",
+          "</dict>",
+          "</plist>",
+        ].join("\n"),
+      );
 
       const builder = IOSCtrlProxyBuilder.getInstance({ derivedDataPath: tempDir });
       await expect(
-        builder.writeRunnerEnvironment(sourcePath, { CTRL_PROXY_IOS_PORT: "8767" }, "SIM")
+        builder.writeRunnerEnvironment(sourcePath, { CTRL_PROXY_IOS_PORT: "8767" }, "SIM"),
       ).rejects.toThrow("no UI-test bundle");
     });
   });
 
-  describe("cleanStaleXctestrunFiles", function() {
-    test("should remove older xctestrun files keeping newest per platform", async function() {
+  describe("cleanStaleXctestrunFiles", function () {
+    test("should remove older xctestrun files keeping newest per platform", async function () {
       const productsDir = path.join(tempDir, "Build", "Products");
       await fs.mkdir(productsDir, { recursive: true });
 
-      const oldFile = path.join(productsDir, "CtrlProxyApp_iphonesimulator26.0-arm64-x86_64.xctestrun");
-      const newFile = path.join(productsDir, "CtrlProxyApp_iphonesimulator26.2-arm64-x86_64.xctestrun");
+      const oldFile = path.join(
+        productsDir,
+        "CtrlProxyApp_iphonesimulator26.0-arm64-x86_64.xctestrun",
+      );
+      const newFile = path.join(
+        productsDir,
+        "CtrlProxyApp_iphonesimulator26.2-arm64-x86_64.xctestrun",
+      );
       await fs.writeFile(oldFile, "old content");
       await fs.utimes(oldFile, new Date("2026-01-01"), new Date("2026-01-01"));
       await fs.writeFile(newFile, "new content");
@@ -579,15 +646,21 @@ describe("IOSCtrlProxyBuilder", function() {
 
       await builder.cleanStaleXctestrunFiles();
 
-      const oldExists = await fs.access(oldFile).then(() => true).catch(() => false);
-      const newExists = await fs.access(newFile).then(() => true).catch(() => false);
+      const oldExists = await fs
+        .access(oldFile)
+        .then(() => true)
+        .catch(() => false);
+      const newExists = await fs
+        .access(newFile)
+        .then(() => true)
+        .catch(() => false);
       expect(oldExists).toBe(false);
       expect(newExists).toBe(true);
     });
   });
 
-  describe("cleanBuildArtifacts", function() {
-    test("should remove derived data directory", async function() {
+  describe("cleanBuildArtifacts", function () {
+    test("should remove derived data directory", async function () {
       // Create fake derived data
       const derivedDataPath = path.join(tempDir, "DerivedData");
       await fs.mkdir(derivedDataPath, { recursive: true });
@@ -600,33 +673,36 @@ describe("IOSCtrlProxyBuilder", function() {
       await builder.cleanBuildArtifacts();
 
       // Verify directory was removed
-      const exists = await fs.access(derivedDataPath).then(() => true).catch(() => false);
+      const exists = await fs
+        .access(derivedDataPath)
+        .then(() => true)
+        .catch(() => false);
       expect(exists).toBe(false);
     });
   });
 
-  describe("static prefetch methods", function() {
-    test("getPrefetchedResult should return null initially", function() {
+  describe("static prefetch methods", function () {
+    test("getPrefetchedResult should return null initially", function () {
       IOSCtrlProxyBuilder.resetInstances();
       const result = IOSCtrlProxyBuilder.getPrefetchedResult();
       expect(result).toBeNull();
     });
 
-    test("getPrefetchError should return null initially", function() {
+    test("getPrefetchError should return null initially", function () {
       IOSCtrlProxyBuilder.resetInstances();
       const error = IOSCtrlProxyBuilder.getPrefetchError();
       expect(error).toBeNull();
     });
 
-    test("waitForPrefetch should return null when no prefetch started", async function() {
+    test("waitForPrefetch should return null when no prefetch started", async function () {
       IOSCtrlProxyBuilder.resetInstances();
       const result = await IOSCtrlProxyBuilder.waitForPrefetch();
       expect(result).toBeNull();
     });
   });
 
-  describe("build", function() {
-    test("should download and extract bundle using downloader", async function() {
+  describe("build", function () {
+    test("should download and extract bundle using downloader", async function () {
       const derivedDataPath = path.join(tempDir, "DerivedData");
       const cacheDir = path.join(tempDir, "cache");
       const downloader = new FakeIOSCtrlProxyBundleDownloader();
@@ -636,20 +712,22 @@ describe("IOSCtrlProxyBuilder", function() {
       const builder = IOSCtrlProxyBuilder.getInstance(
         {
           derivedDataPath,
-          bundleCacheDir: cacheDir
+          bundleCacheDir: cacheDir,
         },
-        { downloader }
+        { downloader },
       );
 
       const result = await builder.build("simulator");
 
       expect(result.success).toBe(true);
-      expect(result.xctestrunPath).toBe(path.join(derivedDataPath, "Build", "Products", "CtrlProxyApp_iphonesimulator.xctestrun"));
+      expect(result.xctestrunPath).toBe(
+        path.join(derivedDataPath, "Build", "Products", "CtrlProxyApp_iphonesimulator.xctestrun"),
+      );
       expect(downloader.downloadedUrls.length).toBe(1);
       expect(downloader.extractedPaths[0]).toBe(derivedDataPath);
     });
 
-    test("should normalize nested bundle layouts", async function() {
+    test("should normalize nested bundle layouts", async function () {
       const derivedDataPath = path.join(tempDir, "DerivedData");
       const cacheDir = path.join(tempDir, "cache");
       const downloader = new FakeIOSCtrlProxyBundleDownloader();
@@ -660,19 +738,21 @@ describe("IOSCtrlProxyBuilder", function() {
       const builder = IOSCtrlProxyBuilder.getInstance(
         {
           derivedDataPath,
-          bundleCacheDir: cacheDir
+          bundleCacheDir: cacheDir,
         },
-        { downloader }
+        { downloader },
       );
 
       const result = await builder.build("simulator");
       const buildProducts = await builder.getBuildProductsPath("simulator");
 
       expect(result.success).toBe(true);
-      expect(buildProducts).toBe(path.join(derivedDataPath, "Build", "Products", "Debug-iphonesimulator"));
+      expect(buildProducts).toBe(
+        path.join(derivedDataPath, "Build", "Products", "Debug-iphonesimulator"),
+      );
     });
 
-    test("verifies the xctest executable for releases that record an xctest checksum", async function() {
+    test("verifies the xctest executable for releases that record an xctest checksum", async function () {
       const derivedDataPath = path.join(tempDir, "DerivedData");
       const cacheDir = path.join(tempDir, "cache");
       const downloader = new FakeIOSCtrlProxyBundleDownloader();
@@ -684,18 +764,27 @@ describe("IOSCtrlProxyBuilder", function() {
       IOSCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("xctest-checksum", "xctest");
       const builder = IOSCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir: cacheDir },
-        { downloader }
+        { downloader },
       );
 
       const result = await builder.build("simulator");
 
       expect(result.success).toBe(true);
       expect(downloader.checksummedFilePaths).toContain(
-        path.join(derivedDataPath, "Build", "Products", "Debug-iphonesimulator", "CtrlProxyUITests-Runner.app", "PlugIns", "CtrlProxyUITests.xctest", "CtrlProxyUITests")
+        path.join(
+          derivedDataPath,
+          "Build",
+          "Products",
+          "Debug-iphonesimulator",
+          "CtrlProxyUITests-Runner.app",
+          "PlugIns",
+          "CtrlProxyUITests.xctest",
+          "CtrlProxyUITests",
+        ),
       );
     });
 
-    test("fails when the xctest executable checksum differs", async function() {
+    test("fails when the xctest executable checksum differs", async function () {
       const derivedDataPath = path.join(tempDir, "DerivedData");
       const cacheDir = path.join(tempDir, "cache");
       const downloader = new FakeIOSCtrlProxyBundleDownloader();
@@ -706,7 +795,7 @@ describe("IOSCtrlProxyBuilder", function() {
       IOSCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("expected-xctest-checksum", "xctest");
       const builder = IOSCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir: cacheDir },
-        { downloader }
+        { downloader },
       );
 
       const result = await builder.build("simulator");
@@ -715,7 +804,7 @@ describe("IOSCtrlProxyBuilder", function() {
       expect(result.error).toContain("runner binary SHA256 mismatch");
     });
 
-    test("extracts the runner into a uid-private 0o700 directory, not /tmp (#4759)", async function() {
+    test("extracts the runner into a uid-private 0o700 directory, not /tmp (#4759)", async function () {
       const derivedDataPath = path.join(tempDir, "DerivedData");
       const cacheDir = path.join(tempDir, "cache");
       const downloader = new FakeIOSCtrlProxyBundleDownloader();
@@ -724,7 +813,7 @@ describe("IOSCtrlProxyBuilder", function() {
       IOSCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
       const builder = IOSCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir: cacheDir },
-        { downloader }
+        { downloader },
       );
 
       const result = await builder.build("simulator");
@@ -738,7 +827,7 @@ describe("IOSCtrlProxyBuilder", function() {
       }
     });
 
-    test("verifyRunnerBinaryBeforeLaunch re-verifies the hash and passes when unchanged (#4759)", async function() {
+    test("verifyRunnerBinaryBeforeLaunch re-verifies the hash and passes when unchanged (#4759)", async function () {
       const derivedDataPath = path.join(tempDir, "DerivedData");
       const cacheDir = path.join(tempDir, "cache");
       const downloader = new FakeIOSCtrlProxyBundleDownloader();
@@ -749,7 +838,7 @@ describe("IOSCtrlProxyBuilder", function() {
       IOSCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("xctest-checksum", "xctest");
       const builder = IOSCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir: cacheDir },
-        { downloader }
+        { downloader },
       );
 
       await builder.build("simulator");
@@ -760,7 +849,7 @@ describe("IOSCtrlProxyBuilder", function() {
       expect(downloader.checksummedFilePaths.length).toBeGreaterThan(before);
     });
 
-    test("source-built runner checksum override remains enforced before launch (#4966)", async function() {
+    test("source-built runner checksum override remains enforced before launch (#4966)", async function () {
       const derivedDataPath = path.join(tempDir, "DerivedData");
       const cacheDir = path.join(tempDir, "cache");
       const sourceBuiltChecksum = "a".repeat(64);
@@ -774,17 +863,18 @@ describe("IOSCtrlProxyBuilder", function() {
       IOSCtrlProxyBuilder.setExpectedRunnerChecksumForTesting(null);
       const builder = IOSCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir: cacheDir },
-        { downloader }
+        { downloader },
       );
 
       expect((await builder.build("simulator")).success).toBe(true);
 
       downloader.runnerChecksum = "b".repeat(64);
-      await expect(builder.verifyRunnerBinaryBeforeLaunch("simulator"))
-        .rejects.toThrow("runner binary SHA256 mismatch (pre-launch)");
+      await expect(builder.verifyRunnerBinaryBeforeLaunch("simulator")).rejects.toThrow(
+        "runner binary SHA256 mismatch (pre-launch)",
+      );
     });
 
-    test("rejects a malformed source-built runner checksum override (#4966)", async function() {
+    test("rejects a malformed source-built runner checksum override (#4966)", async function () {
       const downloader = new FakeIOSCtrlProxyBundleDownloader();
       downloader.checksum = "expected-checksum";
 
@@ -793,8 +883,11 @@ describe("IOSCtrlProxyBuilder", function() {
       IOSCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
       IOSCtrlProxyBuilder.setExpectedRunnerChecksumForTesting(null);
       const builder = IOSCtrlProxyBuilder.getInstance(
-        { derivedDataPath: path.join(tempDir, "DerivedData"), bundleCacheDir: path.join(tempDir, "cache") },
-        { downloader }
+        {
+          derivedDataPath: path.join(tempDir, "DerivedData"),
+          bundleCacheDir: path.join(tempDir, "cache"),
+        },
+        { downloader },
       );
 
       const result = await builder.build("simulator");
@@ -802,7 +895,7 @@ describe("IOSCtrlProxyBuilder", function() {
       expect(result.error).toContain(`${IOS_CTRL_PROXY_RUNNER_SHA256_ENV} must be a 64-character`);
     });
 
-    test("rejects an invalid source-built runner checksum target (#4966)", async function() {
+    test("rejects an invalid source-built runner checksum target (#4966)", async function () {
       const downloader = new FakeIOSCtrlProxyBundleDownloader();
       downloader.checksum = "expected-checksum";
 
@@ -811,8 +904,11 @@ describe("IOSCtrlProxyBuilder", function() {
       IOSCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
       IOSCtrlProxyBuilder.setExpectedRunnerChecksumForTesting(null);
       const builder = IOSCtrlProxyBuilder.getInstance(
-        { derivedDataPath: path.join(tempDir, "DerivedData"), bundleCacheDir: path.join(tempDir, "cache") },
-        { downloader }
+        {
+          derivedDataPath: path.join(tempDir, "DerivedData"),
+          bundleCacheDir: path.join(tempDir, "cache"),
+        },
+        { downloader },
       );
 
       const result = await builder.build("simulator");
@@ -820,7 +916,7 @@ describe("IOSCtrlProxyBuilder", function() {
       expect(result.error).toContain(`${IOS_CTRL_PROXY_RUNNER_SHA256_TARGET_ENV} must be either`);
     });
 
-    test("verifyRunnerBinaryBeforeLaunch refuses launch when the runner binary changed after extraction (#4759)", async function() {
+    test("verifyRunnerBinaryBeforeLaunch refuses launch when the runner binary changed after extraction (#4759)", async function () {
       const derivedDataPath = path.join(tempDir, "DerivedData");
       const cacheDir = path.join(tempDir, "cache");
       const downloader = new FakeIOSCtrlProxyBundleDownloader();
@@ -831,7 +927,7 @@ describe("IOSCtrlProxyBuilder", function() {
       IOSCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("xctest-checksum", "xctest");
       const builder = IOSCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir: cacheDir },
-        { downloader }
+        { downloader },
       );
 
       await builder.build("simulator");
@@ -840,11 +936,12 @@ describe("IOSCtrlProxyBuilder", function() {
       // than it did at extraction time.
       downloader.runnerChecksum = "swapped-attacker-checksum";
 
-      await expect(builder.verifyRunnerBinaryBeforeLaunch("simulator"))
-        .rejects.toThrow("runner binary SHA256 mismatch (pre-launch)");
+      await expect(builder.verifyRunnerBinaryBeforeLaunch("simulator")).rejects.toThrow(
+        "runner binary SHA256 mismatch (pre-launch)",
+      );
     });
 
-    test("local-build mode trusts the freshly built runner even when its SHA differs from the release-pinned checksum (#5561)", async function() {
+    test("local-build mode trusts the freshly built runner even when its SHA differs from the release-pinned checksum (#5561)", async function () {
       const derivedDataPath = path.join(tempDir, "DerivedData");
       const cacheDir = path.join(tempDir, "cache");
       const downloader = new FakeIOSCtrlProxyBundleDownloader();
@@ -857,7 +954,7 @@ describe("IOSCtrlProxyBuilder", function() {
       IOSCtrlProxyBuilder.setUseLocalBuildForTesting(true);
       const builder = IOSCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir: cacheDir },
-        { downloader }
+        { downloader },
       );
 
       // Post-extract must not reject on the release-pinned mismatch; it derives
@@ -868,7 +965,7 @@ describe("IOSCtrlProxyBuilder", function() {
       await builder.verifyRunnerBinaryBeforeLaunch("simulator");
     });
 
-    test("local-build mode still fails closed if the runner binary changes after post-extract (TOCTOU) (#5561)", async function() {
+    test("local-build mode still fails closed if the runner binary changes after post-extract (TOCTOU) (#5561)", async function () {
       const derivedDataPath = path.join(tempDir, "DerivedData");
       const cacheDir = path.join(tempDir, "cache");
       const downloader = new FakeIOSCtrlProxyBundleDownloader();
@@ -880,7 +977,7 @@ describe("IOSCtrlProxyBuilder", function() {
       IOSCtrlProxyBuilder.setUseLocalBuildForTesting(true);
       const builder = IOSCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir: cacheDir },
-        { downloader }
+        { downloader },
       );
 
       expect((await builder.build("simulator")).success).toBe(true);
@@ -888,11 +985,12 @@ describe("IOSCtrlProxyBuilder", function() {
       // Swap the on-disk binary after it was pinned at post-extract.
       downloader.runnerChecksum = "d".repeat(64);
 
-      await expect(builder.verifyRunnerBinaryBeforeLaunch("simulator"))
-        .rejects.toThrow("SHA256 changed");
+      await expect(builder.verifyRunnerBinaryBeforeLaunch("simulator")).rejects.toThrow(
+        "SHA256 changed",
+      );
     });
 
-    test("local-build mode re-derives the pin on an in-process rebuild (#5561)", async function() {
+    test("local-build mode re-derives the pin on an in-process rebuild (#5561)", async function () {
       const derivedDataPath = path.join(tempDir, "DerivedData");
       const cacheDir = path.join(tempDir, "cache");
       const downloader = new FakeIOSCtrlProxyBundleDownloader();
@@ -904,7 +1002,7 @@ describe("IOSCtrlProxyBuilder", function() {
       IOSCtrlProxyBuilder.setUseLocalBuildForTesting(true);
       const builder = IOSCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir: cacheDir },
-        { downloader }
+        { downloader },
       );
 
       expect((await builder.build("simulator")).success).toBe(true);
@@ -916,7 +1014,7 @@ describe("IOSCtrlProxyBuilder", function() {
       await builder.verifyRunnerBinaryBeforeLaunch("simulator");
     });
 
-    test("explicit RUNNER_SHA256 override still wins over local-build mode (#5561)", async function() {
+    test("explicit RUNNER_SHA256 override still wins over local-build mode (#5561)", async function () {
       const derivedDataPath = path.join(tempDir, "DerivedData");
       const cacheDir = path.join(tempDir, "cache");
       const downloader = new FakeIOSCtrlProxyBundleDownloader();
@@ -932,7 +1030,7 @@ describe("IOSCtrlProxyBuilder", function() {
       IOSCtrlProxyBuilder.setUseLocalBuildForTesting(true);
       const builder = IOSCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir: cacheDir },
-        { downloader }
+        { downloader },
       );
 
       const result = await builder.build("simulator");
@@ -940,7 +1038,7 @@ describe("IOSCtrlProxyBuilder", function() {
       expect(result.error).toContain("runner binary SHA256 mismatch");
     });
 
-    test("refuses to reuse a derived-data directory owned by another uid (#4759)", async function() {
+    test("refuses to reuse a derived-data directory owned by another uid (#4759)", async function () {
       if (process.platform === "win32" || typeof process.getuid !== "function") {
         // st_uid/getuid are POSIX-only; ownership refusal no-ops on win32.
         return;
@@ -952,16 +1050,17 @@ describe("IOSCtrlProxyBuilder", function() {
 
       const builder = IOSCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir: cacheDir },
-        { downloader: new FakeIOSCtrlProxyBundleDownloader() }
+        { downloader: new FakeIOSCtrlProxyBundleDownloader() },
       );
 
       const foreignUid = process.getuid()! + 1;
-      const statSpy = spyOn(fs, "stat").mockResolvedValue(
-        { uid: foreignUid } as Awaited<ReturnType<typeof fs.stat>>
-      );
+      const statSpy = spyOn(fs, "stat").mockResolvedValue({ uid: foreignUid } as Awaited<
+        ReturnType<typeof fs.stat>
+      >);
       try {
-        await expect(builder.verifyRunnerBinaryBeforeLaunch("simulator"))
-          .rejects.toThrow(`owned by uid ${foreignUid}`);
+        await expect(builder.verifyRunnerBinaryBeforeLaunch("simulator")).rejects.toThrow(
+          `owned by uid ${foreignUid}`,
+        );
       } finally {
         statSpy.mockRestore();
       }
@@ -984,13 +1083,13 @@ describe("IOSCtrlProxyBuilder", function() {
 
       const builder = IOSCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir: cacheDir },
-        { downloader }
+        { downloader },
       );
       await builder.build("simulator");
       return { builder, verifier };
     }
 
-    test("verifyRunnerBinaryBeforeLaunch runs codesign against the runner app before launch (#4760)", async function() {
+    test("verifyRunnerBinaryBeforeLaunch runs codesign against the runner app before launch (#4760)", async function () {
       if (process.platform !== "darwin") {
         // codesign/spctl are macOS-only; the check no-ops off darwin.
         return;
@@ -1000,10 +1099,12 @@ describe("IOSCtrlProxyBuilder", function() {
       await builder.verifyRunnerBinaryBeforeLaunch("simulator");
 
       expect(verifier.verifiedPaths).toHaveLength(1);
-      expect(verifier.verifiedPaths[0].endsWith(path.join("CtrlProxyUITests-Runner.app"))).toBe(true);
+      expect(verifier.verifiedPaths[0].endsWith(path.join("CtrlProxyUITests-Runner.app"))).toBe(
+        true,
+      );
     });
 
-    test("codesign verification is skipped (exec seam never invoked) on non-darwin (#4760)", async function() {
+    test("codesign verification is skipped (exec seam never invoked) on non-darwin (#4760)", async function () {
       if (process.platform === "darwin") {
         return;
       }
@@ -1014,12 +1115,17 @@ describe("IOSCtrlProxyBuilder", function() {
       expect(verifier.verifiedPaths).toHaveLength(0);
     });
 
-    test("codesign --verify failure warns and proceeds by default (#4760)", async function() {
+    test("codesign --verify failure warns and proceeds by default (#4760)", async function () {
       if (process.platform !== "darwin") {
         return;
       }
       const { builder, verifier } = await buildForCodesign();
-      verifier.outcome = { verified: false, notarized: true, teamId: "ABCDE12345", detail: "bad seal" };
+      verifier.outcome = {
+        verified: false,
+        notarized: true,
+        teamId: "ABCDE12345",
+        detail: "bad seal",
+      };
 
       const warn = spyOn(logger, "warn");
       try {
@@ -1027,25 +1133,33 @@ describe("IOSCtrlProxyBuilder", function() {
         await builder.verifyRunnerBinaryBeforeLaunch("simulator");
 
         expect(verifier.verifiedPaths).toHaveLength(1);
-        expect(warn).toHaveBeenCalledWith(expect.stringContaining("Code-signing verification issues"));
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringContaining("Code-signing verification issues"),
+        );
       } finally {
         warn.mockRestore();
       }
     });
 
-    test("codesign --verify failure refuses launch when require flag is set (#4760)", async function() {
+    test("codesign --verify failure refuses launch when require flag is set (#4760)", async function () {
       if (process.platform !== "darwin") {
         return;
       }
       const { builder, verifier } = await buildForCodesign();
-      verifier.outcome = { verified: false, notarized: true, teamId: "ABCDE12345", detail: "bad seal" };
+      verifier.outcome = {
+        verified: false,
+        notarized: true,
+        teamId: "ABCDE12345",
+        detail: "bad seal",
+      };
       process.env.AUTOMOBILE_IOS_HELPER_REQUIRE_CODESIGN = "1";
 
-      await expect(builder.verifyRunnerBinaryBeforeLaunch("simulator"))
-        .rejects.toThrow("Refusing to launch");
+      await expect(builder.verifyRunnerBinaryBeforeLaunch("simulator")).rejects.toThrow(
+        "Refusing to launch",
+      );
     });
 
-    test("Team-ID mismatch warns by default and refuses under the require flag (#4760)", async function() {
+    test("Team-ID mismatch warns by default and refuses under the require flag (#4760)", async function () {
       if (process.platform !== "darwin") {
         return;
       }
@@ -1058,11 +1172,12 @@ describe("IOSCtrlProxyBuilder", function() {
 
       // With the require flag it becomes a refusal.
       process.env.AUTOMOBILE_IOS_HELPER_REQUIRE_CODESIGN = "1";
-      await expect(builder.verifyRunnerBinaryBeforeLaunch("simulator"))
-        .rejects.toThrow("Team ID mismatch");
+      await expect(builder.verifyRunnerBinaryBeforeLaunch("simulator")).rejects.toThrow(
+        "Team ID mismatch",
+      );
     });
 
-    test("matching pinned Team ID passes without warning (#4760)", async function() {
+    test("matching pinned Team ID passes without warning (#4760)", async function () {
       if (process.platform !== "darwin") {
         return;
       }
@@ -1076,7 +1191,7 @@ describe("IOSCtrlProxyBuilder", function() {
       expect(verifier.verifiedPaths).toHaveLength(1);
     });
 
-    test("a broken codesign toolchain warns by default and refuses under the require flag (#4760)", async function() {
+    test("a broken codesign toolchain warns by default and refuses under the require flag (#4760)", async function () {
       if (process.platform !== "darwin") {
         return;
       }
@@ -1087,11 +1202,12 @@ describe("IOSCtrlProxyBuilder", function() {
       await builder.verifyRunnerBinaryBeforeLaunch("simulator");
 
       process.env.AUTOMOBILE_IOS_HELPER_REQUIRE_CODESIGN = "1";
-      await expect(builder.verifyRunnerBinaryBeforeLaunch("simulator"))
-        .rejects.toThrow("Refusing to launch");
+      await expect(builder.verifyRunnerBinaryBeforeLaunch("simulator")).rejects.toThrow(
+        "Refusing to launch",
+      );
     });
 
-    test("fails closed when AUTOMOBILE_VERSION is pinned to an unknown version (#2746)", async function() {
+    test("fails closed when AUTOMOBILE_VERSION is pinned to an unknown version (#2746)", async function () {
       const prev = process.env.AUTOMOBILE_VERSION;
       process.env.AUTOMOBILE_VERSION = "99.99.99";
       try {
@@ -1103,7 +1219,7 @@ describe("IOSCtrlProxyBuilder", function() {
         // version has no registry checksum, so the download is unverifiable.
         const builder = IOSCtrlProxyBuilder.getInstance(
           { derivedDataPath, bundleCacheDir: cacheDir },
-          { downloader }
+          { downloader },
         );
 
         const result = await builder.build("simulator");
@@ -1119,7 +1235,7 @@ describe("IOSCtrlProxyBuilder", function() {
       }
     });
 
-    test("should reject build when checksum does not match", async function() {
+    test("should reject build when checksum does not match", async function () {
       const derivedDataPath = path.join(tempDir, "DerivedData");
       const cacheDir = path.join(tempDir, "cache");
       const downloader = new FakeIOSCtrlProxyBundleDownloader();
@@ -1129,9 +1245,9 @@ describe("IOSCtrlProxyBuilder", function() {
       const builder = IOSCtrlProxyBuilder.getInstance(
         {
           derivedDataPath,
-          bundleCacheDir: cacheDir
+          bundleCacheDir: cacheDir,
         },
-        { downloader }
+        { downloader },
       );
 
       const result = await builder.build("simulator");
@@ -1140,7 +1256,7 @@ describe("IOSCtrlProxyBuilder", function() {
       expect(result.error).toContain("checksum verification failed");
     });
 
-    test("should redownload when checksum changes", async function() {
+    test("should redownload when checksum changes", async function () {
       const derivedDataPath = path.join(tempDir, "DerivedData");
       const cacheDir = path.join(tempDir, "cache");
       await fs.mkdir(cacheDir, { recursive: true });
@@ -1149,7 +1265,11 @@ describe("IOSCtrlProxyBuilder", function() {
       await fs.writeFile(existingBundle, "a".repeat(12000));
       await fs.writeFile(
         path.join(cacheDir, "ctrl-proxy-ios-bundle.json"),
-        JSON.stringify({ checksum: "old-checksum", version: "0.0.17", extractedAt: new Date().toISOString() })
+        JSON.stringify({
+          checksum: "old-checksum",
+          version: "0.0.17",
+          extractedAt: new Date().toISOString(),
+        }),
       );
 
       let callCount = 0;
@@ -1167,9 +1287,9 @@ describe("IOSCtrlProxyBuilder", function() {
       const builder = IOSCtrlProxyBuilder.getInstance(
         {
           derivedDataPath,
-          bundleCacheDir: cacheDir
+          bundleCacheDir: cacheDir,
         },
-        { downloader }
+        { downloader },
       );
 
       const result = await builder.build("simulator");
@@ -1181,7 +1301,7 @@ describe("IOSCtrlProxyBuilder", function() {
     test.each([
       "AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH",
       "AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH",
-    ] as const)("should resolve relative %s from daemon launch cwd", async function(envName) {
+    ] as const)("should resolve relative %s from daemon launch cwd", async function (envName) {
       const launchCwd = path.join(tempDir, "launch-cwd");
       const derivedDataPath = path.join(tempDir, "DerivedData");
       const cacheDir = path.join(tempDir, "cache");
@@ -1198,9 +1318,9 @@ describe("IOSCtrlProxyBuilder", function() {
       const builder = IOSCtrlProxyBuilder.getInstance(
         {
           derivedDataPath,
-          bundleCacheDir: cacheDir
+          bundleCacheDir: cacheDir,
         },
-        { downloader: new FakeIOSCtrlProxyBundleDownloader() }
+        { downloader: new FakeIOSCtrlProxyBundleDownloader() },
       );
 
       const result = await builder.build("simulator");
@@ -1211,7 +1331,7 @@ describe("IOSCtrlProxyBuilder", function() {
       });
     });
 
-    test("refuses a checksum-mismatched cached bundle on the download-failed fallback (#4761)", async function() {
+    test("refuses a checksum-mismatched cached bundle on the download-failed fallback (#4761)", async function () {
       // A size-valid but checksum-mismatched cached IPA already exists. Previously,
       // when the latest-mode download failed, build() reused it WITHOUT any checksum
       // check (usedCachedFallback skips extract+verify). Now verifyBundle runs on the
@@ -1230,7 +1350,7 @@ describe("IOSCtrlProxyBuilder", function() {
       IOSCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
       const builder = IOSCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir: cacheDir },
-        { downloader }
+        { downloader },
       );
 
       const result = await builder.build("simulator");
@@ -1239,7 +1359,7 @@ describe("IOSCtrlProxyBuilder", function() {
       expect(result.error).toContain("checksum verification failed");
     });
 
-    test("verifies then reuses a checksum-valid cached bundle on the download-failed fallback (#4761)", async function() {
+    test("verifies then reuses a checksum-valid cached bundle on the download-failed fallback (#4761)", async function () {
       // Pre-existing extracted artifacts + a cached IPA. The latest-mode download
       // fails; the cached IPA is checksum-verified and only then reused (extraction
       // is skipped for the fallback path, so the downloader never re-extracts).
@@ -1261,13 +1381,16 @@ describe("IOSCtrlProxyBuilder", function() {
       let shaCalls = 0;
       downloader.computeFileSha256 = async () => {
         shaCalls++;
-        return { checksum: shaCalls === 1 ? "stale-checksum" : "expected-checksum", source: "node" as const };
+        return {
+          checksum: shaCalls === 1 ? "stale-checksum" : "expected-checksum",
+          source: "node" as const,
+        };
       };
 
       IOSCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
       const builder = IOSCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir: cacheDir },
-        { downloader }
+        { downloader },
       );
 
       const result = await builder.build("simulator");
@@ -1279,7 +1402,7 @@ describe("IOSCtrlProxyBuilder", function() {
       expect(downloader.extractedPaths).toHaveLength(0);
     });
 
-    test("rejects a plaintext http:// bundle URL override by default (#4761)", async function() {
+    test("rejects a plaintext http:// bundle URL override by default (#4761)", async function () {
       const prevUrl = process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_URL;
       process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_URL = "http://mirror.test/control-proxy.ipa";
       try {
@@ -1290,7 +1413,7 @@ describe("IOSCtrlProxyBuilder", function() {
         IOSCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
         const builder = IOSCtrlProxyBuilder.getInstance(
           { derivedDataPath, bundleCacheDir: cacheDir },
-          { downloader }
+          { downloader },
         );
 
         const result = await builder.build("simulator");
@@ -1306,7 +1429,7 @@ describe("IOSCtrlProxyBuilder", function() {
       }
     });
 
-    test("re-hashes the device runner executable post-extract, not just simulator (#4761)", async function() {
+    test("re-hashes the device runner executable post-extract, not just simulator (#4761)", async function () {
       const derivedDataPath = path.join(tempDir, "DerivedData");
       const cacheDir = path.join(tempDir, "cache");
       const downloader = new FakeIOSCtrlProxyBundleDownloader();
@@ -1318,7 +1441,7 @@ describe("IOSCtrlProxyBuilder", function() {
       IOSCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("xctest-checksum", "xctest");
       const builder = IOSCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir: cacheDir },
-        { downloader }
+        { downloader },
       );
 
       const result = await builder.build("device");
@@ -1327,13 +1450,19 @@ describe("IOSCtrlProxyBuilder", function() {
       // The device runner executable under Debug-iphoneos was independently hashed.
       expect(downloader.checksummedFilePaths).toContain(
         path.join(
-          derivedDataPath, "Build", "Products", "Debug-iphoneos",
-          "CtrlProxyUITests-Runner.app", "PlugIns", "CtrlProxyUITests.xctest", "CtrlProxyUITests"
-        )
+          derivedDataPath,
+          "Build",
+          "Products",
+          "Debug-iphoneos",
+          "CtrlProxyUITests-Runner.app",
+          "PlugIns",
+          "CtrlProxyUITests.xctest",
+          "CtrlProxyUITests",
+        ),
       );
     });
 
-    test("fails closed when the device runner executable hash differs (#4761)", async function() {
+    test("fails closed when the device runner executable hash differs (#4761)", async function () {
       const derivedDataPath = path.join(tempDir, "DerivedData");
       const cacheDir = path.join(tempDir, "cache");
       const downloader = new FakeIOSCtrlProxyBundleDownloader();
@@ -1343,7 +1472,9 @@ describe("IOSCtrlProxyBuilder", function() {
       downloader.computeFileSha256 = async (filePath: string) => {
         if (path.basename(filePath) === "CtrlProxyUITests") {
           return {
-            checksum: filePath.includes("Debug-iphoneos") ? "tampered-device-checksum" : "xctest-checksum",
+            checksum: filePath.includes("Debug-iphoneos")
+              ? "tampered-device-checksum"
+              : "xctest-checksum",
             source: "node" as const,
           };
         }
@@ -1354,7 +1485,7 @@ describe("IOSCtrlProxyBuilder", function() {
       IOSCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("xctest-checksum", "xctest");
       const builder = IOSCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir: cacheDir },
-        { downloader }
+        { downloader },
       );
 
       const result = await builder.build("device");

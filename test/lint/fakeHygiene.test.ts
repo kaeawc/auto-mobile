@@ -30,7 +30,7 @@ const ALLOWLIST: Record<string, string[]> = {
   ],
   "FakeWebSocket.ts": [
     'import { defaultTimer } from "../../src/utils/SystemTimer";',
-    'constructor(url: string, failureMode: "instant" | "timeout" | "none" = "none", connectTimeoutMs: number = 0, timer: Timer = defaultTimer) {',
+    "timer: Timer = defaultTimer,",
   ],
   "FakeCtrlProxy.ts": [
     'import { defaultTimer } from "../../src/utils/SystemTimer";',

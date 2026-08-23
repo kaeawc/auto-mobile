@@ -61,11 +61,11 @@ graph TD
 
 `AutoMobileConfiguration` uses a builder pattern with validated defaults.
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `bufferSize` | 50 | Maximum events before forced flush |
-| `flushIntervalMs` | 500 ms | Periodic flush interval |
-| `maxBreadcrumbs` | 100 | Ring buffer capacity for breadcrumbs |
+| Parameter          | Default   | Description                                   |
+| ------------------ | --------- | --------------------------------------------- |
+| `bufferSize`       | 50        | Maximum events before forced flush            |
+| `flushIntervalMs`  | 500 ms    | Periodic flush interval                       |
+| `maxBreadcrumbs`   | 100       | Ring buffer capacity for breadcrumbs          |
 | `sessionTimeoutMs` | 30,000 ms | Background inactivity before session rotation |
 
 ```kotlin
@@ -81,9 +81,9 @@ AutoMobileSDK.initialize(applicationContext, config)
 
 All builder parameters are validated with `require(value > 0)` at build time.
 
-| Component | Description | Status |
-|-----------|-------------|--------|
-| `AutoMobileConfiguration` | Builder-pattern config with validated defaults | <kbd>✅ Implemented</kbd> |
+| Component                         | Description                                                                               | Status                    |
+| --------------------------------- | ----------------------------------------------------------------------------------------- | ------------------------- |
+| `AutoMobileConfiguration`         | Builder-pattern config with validated defaults                                            | <kbd>✅ Implemented</kbd> |
 | `AutoMobileConfiguration.Builder` | Fluent builder with `bufferSize`, `flushIntervalMs`, `maxBreadcrumbs`, `sessionTimeoutMs` | <kbd>✅ Implemented</kbd> |
 
 ### Capability discovery and policy
@@ -110,11 +110,11 @@ storage reads; optional UI, control, and storage-mutation capabilities start as 
 
 Shutdown cancels pending main-thread work, tears down OS events, broadcast interceptor, click tracker, session tracker, and event buffer. Note: the crash handler (`AutoMobileCrashes`) and biometric override are **not** uninstalled by `shutdown()` — they persist for the process lifetime.
 
-| Component | Description | Status |
-|-----------|-------------|--------|
-| `AutoMobileSDK.initialize()` | Two-phase init: immediate + main-thread posted | <kbd>✅ Implemented</kbd> |
-| `AutoMobileSDK.shutdown()` | Tears down OS events, broadcast interceptor, click tracker, session tracker, and event buffer; does not uninstall the crash handler or biometric override | <kbd>✅ Implemented</kbd> |
-| `AutoMobileSDK.setEnabled()` | Global enable/disable toggle for event tracking | <kbd>✅ Implemented</kbd> |
+| Component                    | Description                                                                                                                                               | Status                    |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- |
+| `AutoMobileSDK.initialize()` | Two-phase init: immediate + main-thread posted                                                                                                            | <kbd>✅ Implemented</kbd> |
+| `AutoMobileSDK.shutdown()`   | Tears down OS events, broadcast interceptor, click tracker, session tracker, and event buffer; does not uninstall the crash handler or biometric override | <kbd>✅ Implemented</kbd> |
+| `AutoMobileSDK.setEnabled()` | Global enable/disable toggle for event tracking                                                                                                           | <kbd>✅ Implemented</kbd> |
 
 ## 3. Event Pipeline
 
@@ -133,31 +133,31 @@ On next launch, `replayPendingBatches()` re-broadcasts any batches that survived
 
 **Drop tracking:** `DropCounter` records why events were dropped (disabled, shutdown, flush error) via `ConcurrentHashMap<DropReason, AtomicLong>`.
 
-| Component | Description | Status |
-|-----------|-------------|--------|
-| `SdkEventBuffer` | Thread-safe buffer with capacity and timer flush | <kbd>✅ Implemented</kbd> |
-| `SdkEventBroadcaster` | Serializes batches as JSON, sends scoped Intents | <kbd>✅ Implemented</kbd> |
-| `FileEventPersistence` | One JSON file per batch, FIFO ordering, 7-day cleanup | <kbd>✅ Implemented</kbd> |
-| `EventPersistence` | Interface for disk persistence (testable with fakes) | <kbd>✅ Implemented</kbd> |
-| `DropCounter` / `DefaultDropCounter` | Tracks dropped events by reason | <kbd>✅ Implemented</kbd> |
+| Component                            | Description                                           | Status                    |
+| ------------------------------------ | ----------------------------------------------------- | ------------------------- |
+| `SdkEventBuffer`                     | Thread-safe buffer with capacity and timer flush      | <kbd>✅ Implemented</kbd> |
+| `SdkEventBroadcaster`                | Serializes batches as JSON, sends scoped Intents      | <kbd>✅ Implemented</kbd> |
+| `FileEventPersistence`               | One JSON file per batch, FIFO ordering, 7-day cleanup | <kbd>✅ Implemented</kbd> |
+| `EventPersistence`                   | Interface for disk persistence (testable with fakes)  | <kbd>✅ Implemented</kbd> |
+| `DropCounter` / `DefaultDropCounter` | Tracks dropped events by reason                       | <kbd>✅ Implemented</kbd> |
 
 ## 4. Context
 
 `SdkContext` holds ambient state attached to SDK events. Thread-safe via `ReentrantLock`.
 
-| Field | Description |
-|-------|-------------|
-| `sessionId` | Current session UUID (set by `SessionTracker`) |
-| `userId` | User identifier (set via `AutoMobileSDK.setUserId()`) |
-| `appVersion` | From `PackageManager` at init time |
-| `tags` | Arbitrary key-value pairs (set/remove via SDK) |
+| Field        | Description                                           |
+| ------------ | ----------------------------------------------------- |
+| `sessionId`  | Current session UUID (set by `SessionTracker`)        |
+| `userId`     | User identifier (set via `AutoMobileSDK.setUserId()`) |
+| `appVersion` | From `PackageManager` at init time                    |
+| `tags`       | Arbitrary key-value pairs (set/remove via SDK)        |
 
 `SdkContextSnapshot` provides an immutable point-in-time copy via `snapshot()`.
 
-| Component | Description | Status |
-|-----------|-------------|--------|
-| `SdkContext` | Thread-safe mutable context with `@Volatile` fields and lock-guarded tags | <kbd>✅ Implemented</kbd> |
-| `SdkContextSnapshot` | Immutable data class snapshot | <kbd>✅ Implemented</kbd> |
+| Component            | Description                                                               | Status                    |
+| -------------------- | ------------------------------------------------------------------------- | ------------------------- |
+| `SdkContext`         | Thread-safe mutable context with `@Volatile` fields and lock-guarded tags | <kbd>✅ Implemented</kbd> |
+| `SdkContextSnapshot` | Immutable data class snapshot                                             | <kbd>✅ Implemented</kbd> |
 
 ## 5. Session Tracking
 
@@ -167,22 +167,23 @@ On next launch, `replayPendingBatches()` re-broadcasts any batches that survived
 - **Background timeout:** configurable via `sessionTimeoutMs` (default 30 s). When the app is backgrounded, a timer starts. If the app returns to foreground before the timer fires, the session continues. Otherwise the session ends and a new one starts on next foreground.
 - **Testing:** injectable `uuidProvider` and `timerFactory` for deterministic tests with `FakeTimer`.
 
-| State | Transition |
-|-------|------------|
-| `ENDED` | `onForeground()` creates new session UUID |
-| `ACTIVE` | `onBackground()` starts timeout timer |
+| State          | Transition                                          |
+| -------------- | --------------------------------------------------- |
+| `ENDED`        | `onForeground()` creates new session UUID           |
+| `ACTIVE`       | `onBackground()` starts timeout timer               |
 | `BACKGROUNDED` | `onForeground()` resumes; timeout fires session end |
 
-| Component | Description | Status |
-|-----------|-------------|--------|
-| `SessionTracker` | Foreground/background lifecycle with configurable timeout | <kbd>✅ Implemented</kbd> |
-| `SessionTracking` | Interface for testability | <kbd>✅ Implemented</kbd> |
+| Component         | Description                                               | Status                    |
+| ----------------- | --------------------------------------------------------- | ------------------------- |
+| `SessionTracker`  | Foreground/background lifecycle with configurable timeout | <kbd>✅ Implemented</kbd> |
+| `SessionTracking` | Interface for testability                                 | <kbd>✅ Implemented</kbd> |
 
 ## 6. Breadcrumbs
 
 `BreadcrumbTrail` is a thread-safe ring buffer (default capacity 100) of recent app activity. When full, the oldest breadcrumb is evicted.
 
 Breadcrumbs are automatically added for:
+
 - Navigation events
 - Custom events (`trackEvent()`)
 - Manual calls to `addBreadcrumb()`
@@ -191,11 +192,11 @@ Categories: `NAVIGATION`, `TAP`, `LIFECYCLE`, `NETWORK`, `LOG`, `CUSTOM`.
 
 On crash, `AutoMobileCrashes` serializes the breadcrumb snapshot to JSON (capped at 50 KB via binary search) and attaches it to the crash Intent.
 
-| Component | Description | Status |
-|-----------|-------------|--------|
-| `BreadcrumbTrail` | Ring buffer with `ReentrantLock`, evicts oldest on overflow | <kbd>✅ Implemented</kbd> |
-| `BreadcrumbTracking` | Interface for testability | <kbd>✅ Implemented</kbd> |
-| `Breadcrumb` | Data class with timestamp, category, message, metadata | <kbd>✅ Implemented</kbd> |
+| Component            | Description                                                 | Status                    |
+| -------------------- | ----------------------------------------------------------- | ------------------------- |
+| `BreadcrumbTrail`    | Ring buffer with `ReentrantLock`, evicts oldest on overflow | <kbd>✅ Implemented</kbd> |
+| `BreadcrumbTracking` | Interface for testability                                   | <kbd>✅ Implemented</kbd> |
+| `Breadcrumb`         | Data class with timestamp, category, message, metadata      | <kbd>✅ Implemented</kbd> |
 
 ## 7. Navigation
 
@@ -209,26 +210,27 @@ Sources: `NAVIGATION_COMPONENT`, `COMPOSE_NAVIGATION`, `CIRCUIT`, `CUSTOM`, `DEE
 
 All adapters implement `NavigationFrameworkAdapter` (start/stop/isActive).
 
-| Adapter | Framework | Integration |
-|---------|-----------|-------------|
+| Adapter              | Framework              | Integration                                                        |
+| -------------------- | ---------------------- | ------------------------------------------------------------------ |
 | `Navigation3Adapter` | `androidx.navigation3` | `@Composable TrackNavigation(destination)` in each `entry<>` block |
-| `CircuitAdapter` | Slack Circuit | Manual `trackNavigation(destination)` call |
+| `CircuitAdapter`     | Slack Circuit          | Manual `trackNavigation(destination)` call                         |
 
 `Navigation3Adapter` auto-starts on first composable use and supports argument/metadata extraction lambdas. Both adapters delegate to `AutoMobileSDK.notifyNavigationEvent()`.
 
-| Component | Description | Status |
-|-----------|-------------|--------|
-| `NavigationEvent` | Data class with destination, source, arguments, metadata | <kbd>✅ Implemented</kbd> |
-| `NavigationListener` | `fun interface` for in-process navigation observers | <kbd>✅ Implemented</kbd> |
-| `NavigationFrameworkAdapter` | Base interface for framework adapters | <kbd>✅ Implemented</kbd> |
-| `Navigation3Adapter` | Composable integration for `androidx.navigation3` | <kbd>✅ Implemented</kbd> |
-| `CircuitAdapter` | Manual tracking for Slack Circuit | <kbd>✅ Implemented</kbd> |
+| Component                    | Description                                              | Status                    |
+| ---------------------------- | -------------------------------------------------------- | ------------------------- |
+| `NavigationEvent`            | Data class with destination, source, arguments, metadata | <kbd>✅ Implemented</kbd> |
+| `NavigationListener`         | `fun interface` for in-process navigation observers      | <kbd>✅ Implemented</kbd> |
+| `NavigationFrameworkAdapter` | Base interface for framework adapters                    | <kbd>✅ Implemented</kbd> |
+| `Navigation3Adapter`         | Composable integration for `androidx.navigation3`        | <kbd>✅ Implemented</kbd> |
+| `CircuitAdapter`             | Manual tracking for Slack Circuit                        | <kbd>✅ Implemented</kbd> |
 
 ## 8. Crash and Failure Handling
 
 ### Unhandled Crashes (`AutoMobileCrashes`)
 
 Installs an `UncaughtExceptionHandler` that:
+
 1. Captures exception class, message, full stack trace (including all-thread dump, capped at 50 KB).
 2. Collects device info (`Build.MODEL`, `MANUFACTURER`, `VERSION`), app version, current screen.
 3. Serializes breadcrumb trail snapshot.
@@ -244,12 +246,12 @@ Reports non-fatal exceptions that were caught and recovered from. Stores up to 1
 
 Uses `ApplicationExitInfo` API (Android 11+, API 30) to detect ANRs from previous sessions on app restart. Persists the last reported timestamp in `SharedPreferences` to avoid duplicate reporting. Reads ANR traces from `exitInfo.traceInputStream`.
 
-| Component | Description | Status |
-|-----------|-------------|--------|
-| `AutoMobileCrashes` | `UncaughtExceptionHandler` with all-thread dump and breadcrumbs | <kbd>✅ Implemented</kbd> |
-| `AutoMobileFailures` | Non-fatal exception recording and broadcast | <kbd>✅ Implemented</kbd> |
-| `HandledExceptionEvent` | Data class for handled exception details | <kbd>✅ Implemented</kbd> |
-| `AutoMobileAnr` | `ApplicationExitInfo`-based ANR detection (API 30+) | <kbd>✅ Implemented</kbd> |
+| Component               | Description                                                     | Status                    |
+| ----------------------- | --------------------------------------------------------------- | ------------------------- |
+| `AutoMobileCrashes`     | `UncaughtExceptionHandler` with all-thread dump and breadcrumbs | <kbd>✅ Implemented</kbd> |
+| `AutoMobileFailures`    | Non-fatal exception recording and broadcast                     | <kbd>✅ Implemented</kbd> |
+| `HandledExceptionEvent` | Data class for handled exception details                        | <kbd>✅ Implemented</kbd> |
+| `AutoMobileAnr`         | `ApplicationExitInfo`-based ANR detection (API 30+)             | <kbd>✅ Implemented</kbd> |
 
 ## 9. Network Interception
 
@@ -269,13 +271,13 @@ Thread-safe store for mock rules and error simulation config, updated via broadc
 
 The `RuleMatcher` interface decouples the interceptor from the full store.
 
-| Component | Description | Status |
-|-----------|-------------|--------|
-| `AutoMobileNetwork` | OkHttp interceptor factory and WebSocket wrapper | <kbd>✅ Implemented</kbd> |
-| `AutoMobileNetworkInterceptor` | Application-level interceptor with mock rule enforcement | <kbd>✅ Implemented</kbd> |
-| `AutoMobileWebSocketListener` | WebSocket frame metadata capture | <kbd>✅ Implemented</kbd> |
-| `NetworkMockRuleStore` | Broadcast-updated rule store with regex matching and error simulation | <kbd>✅ Implemented</kbd> |
-| `NetworkMockRuleStore.RuleMatcher` | Decoupled interface for interceptor queries | <kbd>✅ Implemented</kbd> |
+| Component                          | Description                                                           | Status                    |
+| ---------------------------------- | --------------------------------------------------------------------- | ------------------------- |
+| `AutoMobileNetwork`                | OkHttp interceptor factory and WebSocket wrapper                      | <kbd>✅ Implemented</kbd> |
+| `AutoMobileNetworkInterceptor`     | Application-level interceptor with mock rule enforcement              | <kbd>✅ Implemented</kbd> |
+| `AutoMobileWebSocketListener`      | WebSocket frame metadata capture                                      | <kbd>✅ Implemented</kbd> |
+| `NetworkMockRuleStore`             | Broadcast-updated rule store with regex matching and error simulation | <kbd>✅ Implemented</kbd> |
+| `NetworkMockRuleStore.RuleMatcher` | Decoupled interface for interceptor queries                           | <kbd>✅ Implemented</kbd> |
 
 ## 10. Logging
 
@@ -293,10 +295,10 @@ AutoMobileLog.addFilter(
 )
 ```
 
-| Component | Description | Status |
-|-----------|-------------|--------|
-| `AutoMobileLog` | `android.util.Log` drop-in with filter-based event capture | <kbd>✅ Implemented</kbd> |
-| `CompiledLogFilter` | Pre-compiled regex filter with level/tag/message matching | <kbd>✅ Implemented</kbd> |
+| Component           | Description                                                | Status                    |
+| ------------------- | ---------------------------------------------------------- | ------------------------- |
+| `AutoMobileLog`     | `android.util.Log` drop-in with filter-based event capture | <kbd>✅ Implemented</kbd> |
+| `CompiledLogFilter` | Pre-compiled regex filter with level/tag/message matching  | <kbd>✅ Implemented</kbd> |
 
 ## 11. Storage Inspection
 
@@ -363,16 +365,16 @@ DataStore-backed preferences are then discoverable and readable through the exis
 
 **Limitations.** Read-only by design (no writes). Change subscriptions/listeners are not part of the contract (unlike `SharedPreferencesInspector`) — reads are point-in-time snapshots. Value redaction operates per key/store name, not on nested structured values. The SDK never links against `androidx.datastore`; representing values is the host adapter's responsibility.
 
-| Component | Description | Status |
-|-----------|-------------|--------|
-| `DatabaseInspector` | SQLite database access with lazy driver and enable/disable gating | <kbd>✅ Implemented</kbd> |
-| `SQLiteDatabaseDriver` | Database driver with connection pooling | <kbd>✅ Implemented</kbd> |
-| `DatabaseDriver` | Interface for testability | <kbd>✅ Implemented</kbd> |
-| `SharedPreferencesInspector` | SharedPreferences access with lazy driver and enable/disable gating | <kbd>✅ Implemented</kbd> |
-| `SharedPreferencesDriverImpl` | SharedPreferences driver with change listeners | <kbd>✅ Implemented</kbd> |
-| `SharedPreferencesDriver` | Interface for testability | <kbd>✅ Implemented</kbd> |
-| `DataStoreInspector` | Read-only DataStore access via app-provided adapters, boundary redaction, and capability reporting | <kbd>✅ Implemented</kbd> |
-| `DataStoreAdapter` | Application-provided read-only DataStore integration contract | <kbd>✅ Implemented</kbd> |
+| Component                     | Description                                                                                        | Status                    |
+| ----------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------- |
+| `DatabaseInspector`           | SQLite database access with lazy driver and enable/disable gating                                  | <kbd>✅ Implemented</kbd> |
+| `SQLiteDatabaseDriver`        | Database driver with connection pooling                                                            | <kbd>✅ Implemented</kbd> |
+| `DatabaseDriver`              | Interface for testability                                                                          | <kbd>✅ Implemented</kbd> |
+| `SharedPreferencesInspector`  | SharedPreferences access with lazy driver and enable/disable gating                                | <kbd>✅ Implemented</kbd> |
+| `SharedPreferencesDriverImpl` | SharedPreferences driver with change listeners                                                     | <kbd>✅ Implemented</kbd> |
+| `SharedPreferencesDriver`     | Interface for testability                                                                          | <kbd>✅ Implemented</kbd> |
+| `DataStoreInspector`          | Read-only DataStore access via app-provided adapters, boundary redaction, and capability reporting | <kbd>✅ Implemented</kbd> |
+| `DataStoreAdapter`            | Application-provided read-only DataStore integration contract                                      | <kbd>✅ Implemented</kbd> |
 
 ## 12. Compose Recomposition Tracking
 
@@ -392,13 +394,13 @@ Three layers work together:
 
 Singleton that aggregates recomposition counts with a 1-second rolling average window. Broadcasts JSON snapshots to the control-proxy every 1 second when enabled. Controlled remotely via broadcast intent. Each entry tracks: total count, skip count, rolling 1s average, composable name, resource ID, test tag, parent chain, stability annotation, remembered count, likely cause, and average duration.
 
-| Component | Description | Status |
-|-----------|-------------|--------|
-| `ComposeRecomposition` | Modifier and composable APIs for recomposition tracking | <kbd>✅ Implemented</kbd> |
-| `TrackRecomposition` | Composable wrapper with optional duration measurement | <kbd>✅ Implemented</kbd> |
-| `ComposeObservableApi` | Compose runtime observer for invalidation cause tracking | <kbd>✅ Implemented</kbd> |
-| `ObservableRecompositionBridge` | Maps `RecomposeScope` to invalidation cause strings | <kbd>✅ Implemented</kbd> |
-| `RecompositionTracker` | Aggregation with rolling average and periodic broadcast | <kbd>✅ Implemented</kbd> |
+| Component                       | Description                                              | Status                    |
+| ------------------------------- | -------------------------------------------------------- | ------------------------- |
+| `ComposeRecomposition`          | Modifier and composable APIs for recomposition tracking  | <kbd>✅ Implemented</kbd> |
+| `TrackRecomposition`            | Composable wrapper with optional duration measurement    | <kbd>✅ Implemented</kbd> |
+| `ComposeObservableApi`          | Compose runtime observer for invalidation cause tracking | <kbd>✅ Implemented</kbd> |
+| `ObservableRecompositionBridge` | Maps `RecomposeScope` to invalidation cause strings      | <kbd>✅ Implemented</kbd> |
+| `RecompositionTracker`          | Aggregation with rolling average and periodic broadcast  | <kbd>✅ Implemented</kbd> |
 
 ## 13. Other Subsystems
 
@@ -406,25 +408,25 @@ Singleton that aggregates recomposition counts with a 1-second rolling average w
 
 Posts notifications from the app-under-test process. Supports DEFAULT, BIG_TEXT, and BIG_PICTURE styles. Handles image loading from file paths, content URIs, and base64 data. Creates notification channels automatically on Android O+.
 
-| Component | Description | Status |
-|-----------|-------------|--------|
+| Component                 | Description                                                 | Status                    |
+| ------------------------- | ----------------------------------------------------------- | ------------------------- |
 | `AutoMobileNotifications` | Notification posting with multiple styles and image sources | <kbd>✅ Implemented</kbd> |
 
 ### Biometric Stubbing (`AutoMobileBiometrics`)
 
 Provides deterministic biometric testing by injecting known `BiometricResult` values (Success, Failure, Cancel, Error) via broadcast. Overrides have a configurable TTL (default 5 s) and are consumed atomically.
 
-| Component | Description | Status |
-|-----------|-------------|--------|
-| `AutoMobileBiometrics` | Biometric override injection via broadcast with TTL | <kbd>✅ Implemented</kbd> |
-| `BiometricResult` | Sealed class: Success, Failure, Cancel, Error(errorCode) | <kbd>✅ Implemented</kbd> |
+| Component              | Description                                              | Status                    |
+| ---------------------- | -------------------------------------------------------- | ------------------------- |
+| `AutoMobileBiometrics` | Biometric override injection via broadcast with TTL      | <kbd>✅ Implemented</kbd> |
+| `BiometricResult`      | Sealed class: Success, Failure, Cancel, Error(errorCode) | <kbd>✅ Implemented</kbd> |
 
 ### Click Tracking (`AutoMobileClickTracker`)
 
 Automatic tap tracking for all Activities via `Window.Callback` delegation. On ACTION_UP (when the gesture is a tap, not a drag), finds the tapped element via the accessibility node tree and emits an `_auto_tap` custom event with coordinates, text, content description, resource ID, class name, and clickability. Debounced at 100 ms. Works with Compose, XML Views, React Native, and Flutter.
 
-| Component | Description | Status |
-|-----------|-------------|--------|
+| Component                | Description                                          | Status                    |
+| ------------------------ | ---------------------------------------------------- | ------------------------- |
 | `AutoMobileClickTracker` | Window.Callback delegation for automatic tap capture | <kbd>✅ Implemented</kbd> |
 
 ### OS Events (`AutoMobileOsEvents`)
@@ -437,24 +439,24 @@ Registers low-overhead listeners for system events and posts `SdkLifecycleEvent`
 - **Battery changes** (level/charging, deduplicated) via `BroadcastReceiver`
 - **Screen on/off** via `BroadcastReceiver`
 
-| Component | Description | Status |
-|-----------|-------------|--------|
+| Component            | Description                                                          | Status                    |
+| -------------------- | -------------------------------------------------------------------- | ------------------------- |
 | `AutoMobileOsEvents` | Foreground, activity lifecycle, connectivity, battery, screen events | <kbd>✅ Implemented</kbd> |
 
 ### Broadcast Interceptor (`AutoMobileBroadcastInterceptor`)
 
 Intercepts a curated set of system broadcasts (locale changed, timezone changed, screen on/off, user present, package added/removed) and records them as `SdkBroadcastEvent`. Only captures action, categories, and extra key names with type names (not values) to avoid leaking sensitive data.
 
-| Component | Description | Status |
-|-----------|-------------|--------|
+| Component                        | Description                                               | Status                    |
+| -------------------------------- | --------------------------------------------------------- | ------------------------- |
 | `AutoMobileBroadcastInterceptor` | Curated system broadcast capture with privacy-safe extras | <kbd>✅ Implemented</kbd> |
 
 ### Testing Utilities
 
 `ConfigurationOverrideHelper` applies configuration overrides in tests (e.g., locale changes) and triggers configuration change callbacks on the activity.
 
-| Component | Description | Status |
-|-----------|-------------|--------|
+| Component                     | Description                                   | Status                    |
+| ----------------------------- | --------------------------------------------- | ------------------------- |
 | `ConfigurationOverrideHelper` | Test-only configuration override for Activity | <kbd>✅ Implemented</kbd> |
 
 ## See Also

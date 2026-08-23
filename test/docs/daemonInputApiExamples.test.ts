@@ -194,7 +194,7 @@ describe("daemon input API consumer docs", () => {
       /`input\/tap` and `input\/swipe`, the\s+daemon rejects a stale echoed context/,
     );
     expect(snapshotGuide).toContain("[#4586](https://github.com/kaeawc/auto-mobile/issues/4586)");
-    expect(unixSocketApi).toContain("`frameContext` | `string` | No |");
+    expect(unixSocketApi).toMatch(/\|\s*`frameContext`\s*\|\s*`string`\s*\|\s*No\s*\|/);
     expect(unixSocketApi).toContain(
       `default \`${defaultReleaseVersion}\` CtrlProxy artifacts are legacy`,
     );
@@ -242,12 +242,16 @@ describe("daemon input API consumer docs", () => {
     ];
 
     for (const row of expectedStatusRows) {
-      expect(unixSocketApi).toContain(row);
+      const whitespaceFlexibleRow = row
+        .trim()
+        .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+        .replace(/\s+/g, "\\s+");
+      expect(unixSocketApi).toMatch(new RegExp(whitespaceFlexibleRow));
     }
 
     // The append mode is the only non-destructive keyboard path a third-party client
     // has; document its support on both platforms and Android's character limitation.
-    expect(unixSocketApi).toContain('| `mode` | `"append"` | No |');
+    expect(unixSocketApi).toMatch(/\|\s*`mode`\s*\|\s*`"append"`\s*\|\s*No\s*\|/);
     expect(unixSocketApi).toContain(
       "**iOS.** Append dispatches to CtrlProxy's focused-field insert primitive",
     );

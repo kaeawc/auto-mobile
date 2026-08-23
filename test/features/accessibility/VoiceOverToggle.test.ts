@@ -35,7 +35,13 @@ describe("VoiceOverToggle", () => {
     let fakeClient: FakeIOSCtrlProxy;
 
     const makeToggle = () =>
-      new VoiceOverToggle(PHYSICAL_DEVICE, fakeDetector, fakeExec, defaultPhysicalTimer(), () => fakeClient);
+      new VoiceOverToggle(
+        PHYSICAL_DEVICE,
+        fakeDetector,
+        fakeExec,
+        defaultPhysicalTimer(),
+        () => fakeClient,
+      );
 
     const defaultPhysicalTimer = () => {
       const t = new FakeTimer();

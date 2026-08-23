@@ -19,6 +19,11 @@ fi
 echo "Generating tool definitions..."
 (cd "${PROJECT_ROOT}" && bun scripts/generate-tool-definitions.ts)
 
+# Keep the pre-commit generated output aligned with the repository formatter.
+# Otherwise generation after `bun run format` immediately recreates formatting
+# drift that the CI formatter gate would reject.
+(cd "${PROJECT_ROOT}" && bunx oxfmt schemas/tool-definitions.json)
+
 if git -C "${PROJECT_ROOT}" diff --quiet -- schemas/tool-definitions.json; then
   echo "schemas/tool-definitions.json is up to date."
   exit 0

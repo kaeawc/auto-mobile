@@ -289,13 +289,9 @@ export async function createStressHarness(): Promise<StressHarness> {
   const observeScreen = new RealObserveScreen(device, fakeAdbFactory);
   (observeScreen as unknown as { viewHierarchy: ViewHierarchy }).viewHierarchy = viewHierarchy;
 
-  const tapOnElement = new TapOnElement(
-    device,
-    fakeAdb as unknown as any,
-    undefined, // visionConfig
-    undefined, // selectionStateTracker
-    fakeAccessibilityDetector,
-  );
+  const tapOnElement = new TapOnElement(device, fakeAdb as unknown as any, {
+    accessibilityDetector: fakeAccessibilityDetector,
+  });
 
   const swipeOn = new SwipeOn(device, fakeAdb as unknown as any, {
     executeGesture: {

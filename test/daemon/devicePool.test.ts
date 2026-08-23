@@ -673,6 +673,93 @@ describe("DevicePool", () => {
     sessionManager.stopCleanupTimer();
   });
 
+  describe("assertSessionReadyForAutomation shutdown admission (#5494)", () => {
+    const sourceImage: DeviceInfo = {
+      name: "Pixel 8",
+      platform: "android",
+      isRunning: false,
+      source: "local",
+    };
+
+    const bindOwnerSession = async (sessionId: string, deviceId: string): Promise<void> => {
+      const device = createBootedDevice(deviceId, "android", "Pixel 8");
+      fakeDeviceManager.bootedDevices = [device];
+      await devicePool.initializeWithDevices([device]);
+      await devicePool.bindOrReuseDeviceSession(sessionId, deviceId, "android", sourceImage);
+      expect(sessionManager.getSession(sessionId)?.assignedDevice).toBe(deviceId);
+    };
+
+    test("rejects a bound session while its device holds a shutdown reservation", async () => {
+      await bindOwnerSession("owner-session", "emulator-5554");
+
+      expect(() => devicePool.assertSessionReadyForAutomation("owner-session")).not.toThrow();
+
+      const reservation = await devicePool.reserveDeviceForShutdown("emulator-5554");
+      if (!reservation) {
+        throw new Error("expected shutdown reservation");
+      }
+      try {
+        expect(() => devicePool.assertSessionReadyForAutomation("owner-session")).toThrow(
+          /shutting down/,
+        );
+      } finally {
+        await reservation.release();
+      }
+
+      // Retirement releases the reservation, so admission resumes.
+      expect(() => devicePool.assertSessionReadyForAutomation("owner-session")).not.toThrow();
+    });
+
+    test("rejects a bound session while its device carries an intentional-shutdown marker", async () => {
+      await bindOwnerSession("owner-session", "emulator-5554");
+
+      devicePool.markIntentionalShutdown("emulator-5554");
+      expect(() => devicePool.assertSessionReadyForAutomation("owner-session")).toThrow(
+        /shutting down/,
+      );
+
+      devicePool.clearIntentionalShutdown("emulator-5554");
+      expect(() => devicePool.assertSessionReadyForAutomation("owner-session")).not.toThrow();
+    });
+
+    test("does not block a session bound to a different, healthy device", async () => {
+      const owner = createBootedDevice("emulator-5554", "android", "Pixel 8");
+      const other = createBootedDevice("emulator-5556", "android", "Pixel 8");
+      fakeDeviceManager.bootedDevices = [owner, other];
+      await devicePool.initializeWithDevices([owner, other]);
+      await devicePool.bindOrReuseDeviceSession(
+        "owner-session",
+        owner.deviceId,
+        "android",
+        sourceImage,
+      );
+      await devicePool.bindOrReuseDeviceSession(
+        "other-session",
+        other.deviceId,
+        "android",
+        sourceImage,
+      );
+
+      const reservation = await devicePool.reserveDeviceForShutdown(owner.deviceId);
+      if (!reservation) {
+        throw new Error("expected shutdown reservation");
+      }
+      try {
+        expect(() => devicePool.assertSessionReadyForAutomation("owner-session")).toThrow(
+          /shutting down/,
+        );
+        // The sibling session on a healthy device is unaffected.
+        expect(() => devicePool.assertSessionReadyForAutomation("other-session")).not.toThrow();
+      } finally {
+        await reservation.release();
+      }
+    });
+
+    test("does not block an unknown session with no device binding", () => {
+      expect(() => devicePool.assertSessionReadyForAutomation("no-such-session")).not.toThrow();
+    });
+  });
+
   describe("initializeWithDevices", () => {
     test("should initialize with empty device list", async () => {
       await devicePool.initializeWithDevices([]);

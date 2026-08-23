@@ -18,6 +18,10 @@ import type {
   VideoCaptureConfig,
 } from "./VideoRecorderService";
 import { ANDROID_SCREENRECORD_MAX_SECONDS } from "./androidScreenrecord";
+import {
+  defaultRecordingCodecProbe,
+  type RecordingCodecProbe,
+} from "./recordingCodec";
 
 interface AndroidBackendHandle {
   kind: "android";
@@ -57,6 +61,9 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
   constructor(
     private readonly adbFactory: AdbClientFactory = defaultAdbClientFactory,
     private readonly timer: Timer = defaultTimer,
+    // Injectable so the codec label can be asserted from synthetic files without
+    // producing real recordings (#4965).
+    private readonly codecProbe: RecordingCodecProbe = defaultRecordingCodecProbe,
   ) {}
 
   async start(config: VideoCaptureConfig): Promise<RecordingHandle> {
@@ -189,7 +196,10 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     // Absolute host path leaks the local username; keep it diagnostic-only.
     logger.debug(`[VideoCapture] Output file at ${handle.outputPath}`);
 
-    const codec = "h264";
+    // Android `screenrecord` emits H.264, so this path was coincidentally
+    // correct — but probe the finalized file rather than trusting a constant, so
+    // the two backends stay honest through the same seam (#4965).
+    const codec = await this.codecProbe.codec(handle.outputPath);
 
     if (backendHandle.exitState.exitCode && backendHandle.exitState.exitCode !== 0) {
       logger.warn(

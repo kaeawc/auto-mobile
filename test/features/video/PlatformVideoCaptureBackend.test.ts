@@ -344,6 +344,32 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       expect(result.recordingId).toBe("test-stop-sequence");
     });
 
+    test("reports the probed codec instead of a hard-coded constant (#4965)", async () => {
+      const fakeFactory = new FakeAdbClientFactory();
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+
+      const probedPaths: string[] = [];
+      const codecProbe = {
+        async codec(filePath: string): Promise<string | undefined> {
+          probedPaths.push(filePath);
+          return "h264";
+        },
+      };
+      const backend = new PlatformVideoCaptureBackend(fakeFactory, fakeTimer, codecProbe);
+      const fakeProcess = new FakeChildProcess();
+      fakeProcess.exitCode = 0;
+
+      const outputPath = path.join(tempDir, "probed.mp4");
+      await fsPromises.writeFile(outputPath, Buffer.alloc(64, 1));
+      const handle = buildAndroidStopHandle(outputPath, fakeProcess);
+
+      const result = await backend.stop(handle);
+
+      expect(result.codec).toBe("h264");
+      expect(probedPaths).toEqual([outputPath]);
+    });
+
     test("still removes the /sdcard temp file when the pull itself fails", async () => {
       const fakeFactory = new FakeAdbClientFactory();
       const fakeClient = fakeFactory.getFakeClient();

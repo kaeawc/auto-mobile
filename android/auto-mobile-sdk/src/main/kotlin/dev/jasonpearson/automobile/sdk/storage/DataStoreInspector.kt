@@ -120,7 +120,10 @@ object DataStoreInspector {
       throw e
     } catch (e: CancellationException) {
       throw e
-    } catch (e: Throwable) {
+    } catch (e: Exception) {
+      // Catch Exception, not Throwable: a JVM-fatal Error (OutOfMemoryError, LinkageError,
+      // ThreadDeath) must propagate rather than be rewrapped as an ordinary ReadError.
+      // CancellationException is an Exception but is handled by its explicit branch above.
       throw DataStoreAdapterError.ReadError(e.message ?: e::class.simpleName ?: "unknown", e)
     }
 }

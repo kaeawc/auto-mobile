@@ -1559,8 +1559,16 @@ describe("SessionManager", () => {
           "device-disconnected:emulator-5554;incident=emulator-loss-1",
         ),
       ).rejects.toThrow("Failed to persist terminal release");
-      expect(manager.getSession("lost-session")?.assignedDevice).toBe("emulator-5554");
+      expect(manager.getSession("lost-session")).toBeNull();
       expect(manager.getSessionForDevice("emulator-5554")).toBe("lost-session");
+      expect(manager.getTerminalReleaseSnapshot("lost-session")).toMatchObject({
+        deviceId: "emulator-5554",
+        releaseReason: "device-disconnected:emulator-5554;incident=emulator-loss-1",
+        terminal: true,
+      });
+      await expect(manager.getOrCreateSession("lost-session")).rejects.toThrow(
+        "device-disconnected:emulator-5554",
+      );
 
       persistence.failure = null;
       await expect(

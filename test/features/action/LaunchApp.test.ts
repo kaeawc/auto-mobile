@@ -132,6 +132,54 @@ describe("LaunchApp", () => {
     expect(hasStartedAppLaunch()).toBe(false);
   });
 
+  test("does not clear Android app data after device loss during the running check", async () => {
+    const controller = new AbortController();
+    const deviceLoss = new DeviceLostError(
+      device.deviceId,
+      `device-disconnected:${device.deviceId}`,
+    );
+    let clearCalls = 0;
+    const cancellableLaunch = new LaunchApp(device, fakeAdb as unknown as any, null, fakeTimer, {
+      createAndroidClearAppData: () => ({
+        async execute() {
+          clearCalls += 1;
+          return { success: true, packageName };
+        },
+      }),
+    });
+    (cancellableLaunch as any).awaitIdle = fakeAwaitIdle;
+    (cancellableLaunch as any).observeScreen = fakeObserveScreen;
+    (cancellableLaunch as any).window = fakeWindow;
+    const originalExecuteCommand = fakeAdb.executeCommand.bind(fakeAdb);
+    const executeSpy = spyOn(fakeAdb, "executeCommand").mockImplementation(
+      async (command, timeoutMs, maxBuffer, noRetry, signal) => {
+        const result = await originalExecuteCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+        if (command.startsWith("shell ps | grep")) {
+          controller.abort(deviceLoss);
+        }
+        return result;
+      },
+    );
+
+    try {
+      await expect(
+        cancellableLaunch.execute(
+          packageName,
+          /* clearAppData */ true,
+          /* coldBoot */ false,
+          undefined,
+          undefined,
+          undefined,
+          controller.signal,
+        ),
+      ).rejects.toBe(deviceLoss);
+      expect(clearCalls).toBe(0);
+      expect(hasStartedAppLaunch()).toBe(false);
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
   test("does not run fallback launch commands after device loss during intent launch", async () => {
     const controller = new AbortController();
     const deviceLoss = new DeviceLostError(

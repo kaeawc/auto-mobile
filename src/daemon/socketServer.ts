@@ -476,34 +476,34 @@ export class UnixSocketServer {
     });
 
     socket.on("data", (data) => {
+      const receivedAtMs = this.timer.now();
       const handler = (async () => {
         buffer += data.toString();
 
         const lines = buffer.split("\n");
         buffer = lines.pop() || "";
 
-        for (const line of lines) {
-          if (!line.trim()) {
-            continue;
-          }
-
-          let requestId = "unknown";
-          try {
-            const request: DaemonRequest = JSON.parse(line);
-            requestId = request.id;
-            const response = await this.handleRequest(sessionId, request);
-            this.writeFrame(socket, sessionId, response);
-          } catch (error) {
-            logger.error(`Error processing request ${requestId} from ${sessionId}:`, error);
-            const errorResponse: DaemonResponse = {
-              id: requestId,
-              type: "mcp_response",
-              success: false,
-              error: errorMessage(error),
-            };
-            this.writeFrame(socket, sessionId, errorResponse);
-          }
-        }
+        const requestHandlers = lines
+          .filter(line => line.trim())
+          .map(async (line) => {
+            let requestId = "unknown";
+            try {
+              const request: DaemonRequest = JSON.parse(line);
+              requestId = request.id;
+              const response = await this.handleRequest(sessionId, request, receivedAtMs);
+              this.writeFrame(socket, sessionId, response);
+            } catch (error) {
+              logger.error(`Error processing request ${requestId} from ${sessionId}:`, error);
+              const errorResponse: DaemonResponse = {
+                id: requestId,
+                type: "mcp_response",
+                success: false,
+                error: errorMessage(error),
+              };
+              this.writeFrame(socket, sessionId, errorResponse);
+            }
+          });
+        await Promise.all(requestHandlers);
       })();
       this.trackRequestHandler(handler);
     });
@@ -614,7 +614,11 @@ export class UnixSocketServer {
   /**
    * Handle a request from a client
    */
-  private async handleRequest(sessionId: string, request: DaemonRequest): Promise<DaemonResponse> {
+  private async handleRequest(
+    sessionId: string,
+    request: DaemonRequest,
+    receivedAtMs: number = this.timer.now(),
+  ): Promise<DaemonResponse> {
     const session = this.sessions.get(sessionId);
     if (!session) {
       return {
@@ -642,6 +646,9 @@ export class UnixSocketServer {
       };
     }
 
+    const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
+    const requestDeadlineMs = receivedAtMs + totalTimeoutMs;
+
     // Enqueue request to maintain order
     return this.enqueueRequest(session, async () => {
       try {
@@ -665,8 +672,6 @@ export class UnixSocketServer {
           };
         }
 
-        const queueEnterMs = this.timer.now();
-        const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
         const initialRoute = this.getMcpForwardRoute(request, sessionId);
 
         const result = await this.runMcpForwardForCurrentRoute(
@@ -674,8 +679,8 @@ export class UnixSocketServer {
           request,
           sessionId,
           async (route) => {
-            const queueWaitMs = this.timer.now() - queueEnterMs;
-            const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
+            const remainingTimeoutMs = requestDeadlineMs - this.timer.now();
+            const queueWaitMs = totalTimeoutMs - remainingTimeoutMs;
             const forwardLabel = UnixSocketServer.describeMcpForwardRequest(request);
             logger.debug(
               `[McpForward] start executionKey=${route.executionKey} clientKey=${route.clientKey} socketSession=${sessionId} requestId=${request.id} ${forwardLabel} queueWaitMs=${queueWaitMs} remainingTimeoutMs=${remainingTimeoutMs}`,
@@ -746,6 +751,28 @@ export class UnixSocketServer {
           ...(error instanceof InputTypeTextAppendError ? { charsSent: error.charsSent } : {}),
         };
       }
+    });
+  }
+
+  private requireRemainingMcpForwardBudget(
+    request: DaemonRequest,
+    totalTimeoutMs: number,
+    requestDeadlineMs: number,
+    phase: string,
+  ): number {
+    const remainingTimeoutMs = requestDeadlineMs - this.timer.now();
+    if (remainingTimeoutMs > 0) {
+      return remainingTimeoutMs;
+    }
+    const toolName =
+      request.method === "tools/call"
+        ? (request.params?.name ?? request.method)
+        : request.method;
+    throw new McpTimeoutError({
+      toolName,
+      timeoutMs: totalTimeoutMs,
+      origin: "UnixSocketServer.handleRequest",
+      detail: `spent ${totalTimeoutMs - remainingTimeoutMs}ms ${phase}`,
     });
   }
 

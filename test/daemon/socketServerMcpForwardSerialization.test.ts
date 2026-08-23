@@ -199,9 +199,21 @@ class PersistentSocketClient {
     });
   }
 
-  request(method: string, params: Record<string, unknown>): Promise<DaemonResponse> {
+  request(
+    method: string,
+    params: Record<string, unknown>,
+    timeoutMs?: number,
+  ): Promise<DaemonResponse> {
     const id = randomUUID();
-    this.socket.write(JSON.stringify({ id, type: "mcp_request", method, params }) + "\n");
+    this.socket.write(
+      JSON.stringify({
+        id,
+        type: "mcp_request",
+        method,
+        params,
+        ...(timeoutMs === undefined ? {} : { timeoutMs }),
+      }) + "\n",
+    );
     const buffered = this.responses.get(id);
     if (buffered) {
       this.responses.delete(id);
@@ -327,6 +339,85 @@ describe("UnixSocketServer MCP forward serialization", () => {
         [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: 7_500,
       },
     });
+  });
+
+  test("charges time spent in the per-socket queue against the forwarded timeout", async () => {
+    await server.close();
+    socketPath = join(tmpdir(), `mcp-outer-deadline-${randomUUID()}.sock`);
+    fakeTimer = new FakeTimer();
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(sessionDevices, sessionDeviceLabels, mcpAutolockSessions),
+      fakeTimer,
+    );
+    await server.start();
+
+    const firstCallStarted = Promise.withResolvers<void>();
+    const releaseFirstCall = Promise.withResolvers<void>();
+    let callCount = 0;
+    server.mcpClientFactory = async () => ({
+      listTools: async () => ({ tools: [] }),
+      callTool: async () => {
+        callCount += 1;
+        if (callCount === 1) {
+          firstCallStarted.resolve();
+          await releaseFirstCall.promise;
+        }
+        return { content: [] };
+      },
+      listResources: async () => ({ resources: [] }),
+      readResource: async () => ({ contents: [] }),
+      listResourceTemplates: async () => ({ resourceTemplates: [] }),
+      close: async () => {},
+    });
+
+    const client = new PersistentSocketClient();
+    await client.connect(socketPath);
+    try {
+      const first = client.request("tools/call", {
+        name: "tapOn",
+        arguments: { deviceId: "device-1" },
+      });
+      await firstCallStarted.promise;
+      const queued = client.request(
+        "tools/call",
+        {
+          name: "tapOn",
+          arguments: { deviceId: "device-1" },
+        },
+        500,
+      );
+      for (let attempt = 0; attempt < 20; attempt++) {
+        const contexts = Array.from(
+          (server as unknown as {
+            sessions: Map<string, { requestQueue: unknown[] }>;
+          }).sessions.values(),
+        );
+        if (contexts.some(context => context.requestQueue.length > 0)) {
+          break;
+        }
+        await new Promise<void>(resolve => setImmediate(resolve));
+      }
+      const queuedRequestCount = Array.from(
+        (server as unknown as {
+          sessions: Map<string, { requestQueue: unknown[] }>;
+        }).sessions.values(),
+      ).reduce((count, context) => count + context.requestQueue.length, 0);
+      expect(queuedRequestCount).toBe(1);
+
+      fakeTimer.advanceTime(501);
+      releaseFirstCall.resolve();
+
+      await expect(first).resolves.toMatchObject({ success: true });
+      await expect(queued).resolves.toMatchObject({
+        success: false,
+        error: expect.stringContaining("exceeded 500ms"),
+      });
+      expect(callCount).toBe(1);
+    } finally {
+      client.close();
+    }
   });
 
   test("binds a generated selection profile to the socket and reuses it for discovery", async () => {

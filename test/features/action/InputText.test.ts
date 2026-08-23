@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { InputText } from "../../../src/features/action/InputText";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
@@ -26,7 +26,8 @@ interface TestInputText {
     imeAction?: undefined,
     dismissKeyboard?: boolean,
     mode?: InputTextMode,
-    previousObserveResult?: ObserveResult
+    previousObserveResult?: ObserveResult,
+    signal?: AbortSignal,
   ) => Promise<{ success: boolean; error?: string; method?: string }>;
 }
 
@@ -289,6 +290,47 @@ describe("InputText", () => {
       "shell input keyevent KEYCODE_SPACE",
       "shell input keycombination KEYCODE_SHIFT_LEFT KEYCODE_C"
     ]);
+  });
+
+  test("eventAll stops sending key events after device-loss cancellation", async () => {
+    const controller = new AbortController();
+    const deviceLoss = new DeviceLostError(
+      androidDevice.deviceId,
+      `device-disconnected:${androidDevice.deviceId}`,
+    );
+    const factory = new FakeAdbClientFactory();
+    const fakeClient = factory.getFakeClient();
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
+    stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
+    const originalExecuteCommand = fakeClient.executeCommand.bind(fakeClient);
+    const executeSpy = spyOn(fakeClient, "executeCommand").mockImplementation(
+      async (command, timeoutMs, maxBuffer, noRetry, signal) => {
+        const result = await originalExecuteCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+        if (command === "shell input keyevent KEYCODE_A") {
+          controller.abort(deviceLoss);
+        }
+        return result;
+      },
+    );
+
+    try {
+      await expect(
+        testInputText(inputText).executeAndroidTextInput(
+          "abc",
+          undefined,
+          false,
+          "eventAll",
+          undefined,
+          controller.signal,
+        ),
+      ).rejects.toBe(deviceLoss);
+      expect(inputCommands(factory)).toEqual([
+        "shell input keyevent KEYCODE_A",
+      ]);
+    } finally {
+      executeSpy.mockRestore();
+    }
   });
 
   test("eventAll alternates a11y for Unicode runs and key events for ASCII", async () => {

@@ -131,7 +131,12 @@ describe("Daemon session-release signal wiring", () => {
         deviceLossCancellationReason(deviceId, "incident-1"),
       )).rejects.toThrow("Failed to persist terminal release");
 
-      expect(sessionManager.getSession(sessionId)?.assignedDevice).toBe(deviceId);
+      expect(sessionManager.getSession(sessionId)).toBeNull();
+      expect(sessionManager.getTerminalReleaseSnapshot(sessionId)).toMatchObject({
+        deviceId,
+        releaseReason: deviceLossCancellationReason(deviceId, "incident-1"),
+        terminal: true,
+      });
       expect(devicePool.getDevice(deviceId)).toMatchObject({
         sessionId,
         status: "busy",

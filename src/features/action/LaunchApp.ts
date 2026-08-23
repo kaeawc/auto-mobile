@@ -721,6 +721,7 @@ export class LaunchApp extends BaseVisualChange {
       logger.info(`[LaunchApp] App running: ${result} (output: "${isRunningOutput.trim()}")`);
       return result;
     });
+    this.assertLaunchNotAborted(signal);
 
     let didTerminateOrClear = false;
     let alreadyForeground = false;
@@ -730,11 +731,13 @@ export class LaunchApp extends BaseVisualChange {
         await perf.track("clearAppData", async () => {
           return this.createAndroidClearAppData(this.device).execute(packageName, targetUserId);
         });
+        this.assertLaunchNotAborted(signal);
         didTerminateOrClear = true;
       } else if (coldBoot) {
         await perf.track("terminateApp", async () => {
           return this.createAndroidColdBoot(this.device).execute(packageName, { skipObservation: true, userId: targetUserId });
         });
+        this.assertLaunchNotAborted(signal);
         didTerminateOrClear = true;
       }
 
@@ -744,6 +747,7 @@ export class LaunchApp extends BaseVisualChange {
         const foregroundApp = await perf.track(`checkForeground`, async () => {
           return this.adb.getForegroundApp();
         });
+        this.assertLaunchNotAborted(signal);
 
         alreadyForeground = foregroundApp &&
                             foregroundApp.packageName === packageName &&
@@ -758,6 +762,7 @@ export class LaunchApp extends BaseVisualChange {
         await perf.track("clearAppData", async () => {
           return this.createAndroidClearAppData(this.device).execute(packageName, targetUserId);
         });
+        this.assertLaunchNotAborted(signal);
         didTerminateOrClear = true;
       }
     }
@@ -788,6 +793,7 @@ export class LaunchApp extends BaseVisualChange {
     }
 
     logger.info(`[LaunchApp] Proceeding with app launch`);
+    this.assertLaunchNotAborted(signal);
 
     const captureDisplayedMetrics = serverConfig.isUiPerfModeEnabled();
     logger.info(`[LaunchApp] captureDisplayedMetrics=${captureDisplayedMetrics} (isUiPerfModeEnabled)`);

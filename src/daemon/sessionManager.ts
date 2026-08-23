@@ -413,6 +413,9 @@ export class SessionManager {
     expireDespiteActiveExecution: boolean,
     execution?: SessionExecutionMetadata,
   ): Session | null {
+    if (this.terminalReleaseSnapshots.has(sessionId)) {
+      return null;
+    }
     const session = this.sessions.get(sessionId);
     if (!session) {
       return null;
@@ -668,7 +671,10 @@ export class SessionManager {
   }
 
   isCurrentSession(session: Session): boolean {
-    return this.sessions.get(session.sessionId) === session;
+    return (
+      this.sessions.get(session.sessionId) === session &&
+      !this.terminalReleaseSnapshots.has(session.sessionId)
+    );
   }
 
   /**
@@ -682,7 +688,10 @@ export class SessionManager {
     releaseReason: string = "explicit-release",
     allowExpired: boolean = false,
   ): Promise<string | null> {
-    const session = allowExpired ? this.sessions.get(sessionId) ?? null : this.getSession(sessionId);
+    const session =
+      allowExpired || this.terminalReleaseSnapshots.has(sessionId)
+        ? (this.sessions.get(sessionId) ?? null)
+        : this.getSession(sessionId);
     if (!session) {
       return await this.releaseUnpublishedSession(sessionId, releaseReason, allowExpired);
     }
@@ -887,6 +896,10 @@ export class SessionManager {
       };
 
       if (releaseSnapshot.terminal) {
+        // Fence the UUID before durable persistence. If the write fails, callers
+        // must still stop routing tools to a device that is already confirmed
+        // lost; a later release retry can persist and complete removal.
+        this.terminalReleaseSnapshots.set(sessionId, releaseSnapshot);
         await this.persistSessionRelease(releaseSnapshot);
       }
       if (!this.removeSession(sessionId, session)) {
@@ -899,9 +912,7 @@ export class SessionManager {
       if (pendingCleanup.length > 0) {
         this.trackPendingDeviceCleanup(deviceId, pendingCleanup);
       }
-      if (releaseSnapshot.terminal) {
-        this.terminalReleaseSnapshots.set(sessionId, releaseSnapshot);
-      } else {
+      if (!releaseSnapshot.terminal) {
         this.terminalReleaseSnapshots.delete(sessionId);
       }
 

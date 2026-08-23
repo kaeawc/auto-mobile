@@ -229,6 +229,27 @@ class DataStoreInspectorTest {
     assertEquals(DataStoreValueType.STRING, entry.type)
   }
 
+  // AC4 — a policy tightened while a read is suspended is honored, not bypassed.
+  @Test
+  fun `redaction policy tightened during a suspended read is applied`() = runTest {
+    val gate = CompletableDeferred<Unit>()
+    val adapter =
+      FakeDataStoreAdapter().apply {
+        setStore("auth", mapOf("token" to "secret"))
+        readGate = gate
+      }
+    DataStoreInspector.registerAdapter("prefs", adapter)
+
+    var result: List<DataStoreEntry>? = null
+    val job = launch { result = DataStoreInspector.readStore("prefs", "auth") }
+    yield() // park the read at the gate before any policy is set
+    DataStoreInspector.setRedactionPolicy { _, _ -> true } // tighten during the suspension
+    gate.complete(Unit)
+    job.join()
+
+    assertEquals(DataStoreInspector.REDACTED_VALUE, result!!.single().value)
+  }
+
   // AC4 — read-only mode: the boundary reports mutation unsupported.
   @Test
   fun `capabilities report read-only and supported types`() {

@@ -75,8 +75,11 @@ object DataStoreInspector {
    */
   suspend fun readStore(adapterName: String, storeName: String): List<DataStoreEntry> {
     val adapter = resolve(adapterName)
-    val policy = redactionPolicy
     val entries = runAdapterRead { adapter.read(storeName) }
+    // Capture the redaction policy AFTER the (suspending) read so a policy tightened concurrently
+    // while the read was suspended is honored rather than bypassed (issue #5192 review). Snapshot
+    // once into a local so it applies uniformly across every entry (no partial application).
+    val policy = redactionPolicy
     return entries.map { entry ->
       if (policy.shouldRedact(storeName, entry.key)) {
         // Redact to a STRING marker rather than keeping the original type: a redacted

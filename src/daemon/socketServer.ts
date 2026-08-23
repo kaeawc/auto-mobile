@@ -1652,6 +1652,11 @@ export class UnixSocketServer {
     ) {
       return request;
     }
+    if (this.hasStableExplicitDeviceControlTarget(request, identity)) {
+      // deviceId is already immutable; retaining the original routing session also
+      // preserves its tool-selection grant alongside the target device's grant.
+      return request;
+    }
     const pinnedArguments: Record<string, unknown> = {
       ...(args as Record<string, unknown>),
       ...(identity.sessionUuid
@@ -1672,6 +1677,21 @@ export class UnixSocketServer {
     };
   }
 
+  private hasStableExplicitDeviceControlTarget(
+    request: DaemonRequest,
+    identity: DeviceControlTransportIdentity,
+  ): boolean {
+    if (identity.deviceLabelResolved === true || request.method !== "tools/call") {
+      return false;
+    }
+    const args = request.params?.arguments;
+    if (!args || typeof args !== "object" || Array.isArray(args)) {
+      return false;
+    }
+    const deviceId = (args as Record<string, unknown>).deviceId;
+    return typeof deviceId === "string" && deviceId.length > 0;
+  }
+
   private getDeviceControlRecoveryRoute(
     input: DeviceControlTransportRecoveryContext,
     replayAfterResponse: boolean,
@@ -1680,6 +1700,7 @@ export class UnixSocketServer {
       !replayAfterResponse
       || !input.identity.sessionUuid
       || input.route.sessionUuid === input.identity.sessionUuid
+      || this.hasStableExplicitDeviceControlTarget(input.request, input.identity)
     ) {
       return input.route;
     }

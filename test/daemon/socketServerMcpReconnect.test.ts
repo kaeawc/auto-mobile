@@ -900,6 +900,40 @@ describe("UnixSocketServer MCP session reconnect", () => {
     });
   });
 
+  test("preserves the caller session grant when replaying an explicit device target", async () => {
+    let clientsCreated = 0;
+    let replayedArguments: Record<string, unknown> | undefined;
+    const clientBindings: Array<string | undefined> = [];
+
+    server.mcpClientFactory = async boundSessionUuid => {
+      clientBindings.push(boundSessionUuid);
+      const clientIndex = ++clientsCreated;
+      return createFakeMcpClient({
+        callTool: async (...args: unknown[]) => {
+          if (clientIndex === 1) {
+            throw socketClosedError();
+          }
+          const [toolCall] = args as [{ arguments: Record<string, unknown> }];
+          replayedArguments = toolCall.arguments;
+          return { content: [{ type: "text", text: "observed" }] };
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: { sessionUuid: "session-a", deviceId: "emulator-5556" },
+    });
+
+    expect(response.success).toBe(true);
+    expect(clientsCreated).toBe(2);
+    expect(clientBindings).toEqual(["session-a", "session-a"]);
+    expect(replayedArguments).toMatchObject({
+      sessionUuid: "session-a",
+      deviceId: "emulator-5556",
+    });
+  });
+
   test("recovers observe for an implicit autolock session", async () => {
     let clientsCreated = 0;
     let callsDispatched = 0;

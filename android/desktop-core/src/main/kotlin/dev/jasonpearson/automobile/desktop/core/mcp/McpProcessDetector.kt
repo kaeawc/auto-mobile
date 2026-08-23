@@ -264,15 +264,21 @@ class RealMcpProcessDetector(
     // Match the default /tmp daemon sockets and the configured override path (issue #4848), so a
     // daemon listening on an AUTOMOBILE_DAEMON_SOCKET_PATH override is recognized here rather than
     // only falling through to the first-socket fallback in detectProcesses().
+    //
+    // lsof's NAME field is the trailing column and MAY contain spaces (e.g. a socket under
+    // "Application Support"), so match the override against the whole line's suffix rather than its
+    // last whitespace token. Default /tmp daemon sockets never contain spaces, so the token check
+    // stays correct for them.
     val overridePath = configuredSocketPath()
     return lines
       .mapNotNull { line ->
-        val candidate = line.trim().split(Regex("\\s+")).lastOrNull() ?: return@mapNotNull null
+        val trimmed = line.trim()
         when {
-          candidate.startsWith("/tmp/auto-mobile-daemon") && candidate.endsWith(".sock") ->
-            candidate
-          candidate == overridePath -> candidate
-          else -> null
+          overridePath.isNotEmpty() && trimmed.endsWith(overridePath) -> overridePath
+          else ->
+            trimmed.split(Regex("\\s+")).lastOrNull()?.takeIf {
+              it.startsWith("/tmp/auto-mobile-daemon") && it.endsWith(".sock")
+            }
         }
       }
       .firstOrNull()

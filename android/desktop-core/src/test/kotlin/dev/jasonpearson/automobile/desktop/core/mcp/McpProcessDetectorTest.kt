@@ -246,6 +246,37 @@ class McpProcessDetectorTest {
   }
 
   @Test
+  fun `isListeningOnSocket matches an override socket path containing whitespace`() {
+    // lsof's NAME column is the trailing field and can contain spaces; matching the last
+    // whitespace token would drop everything before the space and fall through to the /tmp decoy.
+    val overridePath = "/Users/me/Application Support/auto-mobile.sock"
+    val psRunner =
+      FakeProcessRunner(
+        responses =
+          mapOf(
+            listOf("ps", "-eo", "pid,lstart,command") to
+              listOf("97956 Wed Jan 22 11:00:00 2025 bun /path/to/auto-mobile"),
+            listOf("lsof", "-p", "97956", "-a", "-U") to
+              listOf("bun  97956 jason  17u  unix 0x1234 0t0  $overridePath"),
+          )
+      )
+    val detector =
+      RealMcpProcessDetector(
+        timeProvider = timeProvider,
+        processRunner = psRunner,
+        socketFileChecker =
+          FakeSocketFileChecker(files = listOf("/tmp/auto-mobile-daemon-999.sock", overridePath)),
+        configuredSocketPath = { overridePath },
+      )
+
+    val processes = detector.detectProcesses()
+
+    assertEquals(1, processes.size)
+    assertEquals(McpConnectionType.UnixSocket, processes[0].connectionType)
+    assertEquals(overridePath, processes[0].socketPath)
+  }
+
+  @Test
   fun `RealSocketFileChecker scans the default socket directory`() {
     val dir = newTempDir()
     File(dir, "auto-mobile-daemon-501.sock").createNewFile()

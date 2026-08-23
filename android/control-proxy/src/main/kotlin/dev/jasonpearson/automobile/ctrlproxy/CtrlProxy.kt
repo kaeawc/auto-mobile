@@ -208,6 +208,48 @@ internal fun triggersHierarchyRefresh(eventType: Int): Boolean =
 internal fun isHandledEventType(eventType: Int): Boolean =
   interactionDispatchFor(eventType) != null || triggersHierarchyRefresh(eventType)
 
+/**
+ * The per-event push work [CtrlProxy.onAccessibilityEvent] should perform: which interaction (if
+ * any) to record, and whether to schedule a debounced hierarchy refresh (extraction + structural
+ * hash). Both are pure over the classification helpers plus the observer count.
+ */
+internal data class AccessibilityEventWork(
+  val interaction: InteractionDispatch?,
+  val refreshesHierarchy: Boolean,
+) {
+  companion object {
+    /** Nothing to do — no interaction recording, no hierarchy refresh, no frameContext bump. */
+    val NONE = AccessibilityEventWork(interaction = null, refreshesHierarchy = false)
+  }
+}
+
+/**
+ * Pure "is anyone observing" gate (issue #5470). The two biggest continuous-work paths in
+ * [CtrlProxy.onAccessibilityEvent] — per-interaction accessibility-node recording and the debounced
+ * full-hierarchy extraction + structural hash — are background PUSH work that only a connected
+ * client ever consumes. When [connectionCount] is zero they are skipped entirely, along with the
+ * `frameContext` bookkeeping that only labels pushed/broadcast frames.
+ *
+ * This does NOT govern the on-demand PULL path (`request_hierarchy` → `extractNowBlocking`): that
+ * extracts the live accessibility tree directly and reads none of the push-path side effects
+ * (frameContext counter, debouncer hash/cache), so it stays fully correct with zero prior push
+ * activity and zero observers. Gating is race-tolerant by design — the count may change between
+ * this check and use, costing at most one extra or one skipped frame around a connect/disconnect
+ * edge.
+ */
+internal fun accessibilityEventWorkFor(
+  eventType: Int,
+  connectionCount: Int,
+): AccessibilityEventWork =
+  if (connectionCount > 0) {
+    AccessibilityEventWork(
+      interaction = interactionDispatchFor(eventType),
+      refreshesHierarchy = triggersHierarchyRefresh(eventType),
+    )
+  } else {
+    AccessibilityEventWork.NONE
+  }
+
 internal fun navigationEventResponse(event: TimestampedNavigationEvent): NavigationEventResponse =
   NavigationEventResponse(
     timestamp = event.timestamp,
@@ -2134,10 +2176,24 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         lastWindowClassName = event.className?.toString()
       }
 
+      // "Is anyone observing?" gate (issue #5470). Both the interaction/scroll recording below and
+      // the debounced hierarchy refresh further down are PUSH work only a connected client
+      // consumes,
+      // so with zero connections we skip them — and their frameContext bookkeeping — before
+      // touching
+      // event.source, allocating, extracting, or hashing. The pull path (request_hierarchy) does
+      // not
+      // go through here and stays functional with zero observers; see accessibilityEventWorkFor.
+      val work =
+        accessibilityEventWorkFor(
+          event.eventType,
+          if (::webSocketServer.isInitialized) webSocketServer.getConnectionCount() else 0,
+        )
+
       // Broadcast interaction events for telemetry tracking. Classification is routed through the
       // shared [interactionDispatchFor] so the subscribed event-type mask (derived from the same
       // classifier) can never drift from what this `when` actually acts on.
-      when (interactionDispatchFor(event.eventType)) {
+      when (work.interaction) {
         InteractionDispatch.TAP -> recordInteractionEvent(event, "tap")
         InteractionDispatch.LONG_PRESS -> recordInteractionEvent(event, "longPress")
         // Compose doesn't fire TYPE_VIEW_CLICKED — detect taps via content changes
@@ -2170,8 +2226,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       }
 
       // Delegate to the smart debouncer for content/window changes (same shared classifier).
-      // The debouncer uses structural hash comparison to detect animation vs real changes.
-      if (triggersHierarchyRefresh(event.eventType)) {
+      // The debouncer uses structural hash comparison to detect animation vs real changes. Gated on
+      // an observer (issue #5470): with no client connected, work.refreshesHierarchy is false, so
+      // neither the frameContext bump nor the extraction/hash runs.
+      if (work.refreshesHierarchy) {
         frameContext.incrementAndGet()
         if (::hierarchyDebouncer.isInitialized) {
           hierarchyDebouncer.onAccessibilityEvent()
@@ -2188,7 +2246,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   private fun recordInteractionEvent(event: AccessibilityEvent, type: String) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
+    // Observer gate (issue #5470): early-return BEFORE reading event.source / getBoundsInScreen /
+    // allocating when nobody is connected. onAccessibilityEvent already gates dispatch on the same
+    // count; this is the defensive backstop for the scroll/debounced callers, and
+    // getConnectionCount
+    // > 0 also implies the server is running.
+    if (!::webSocketServer.isInitialized || webSocketServer.getConnectionCount() <= 0) {
       return
     }
 

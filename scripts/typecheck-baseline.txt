@@ -114,7 +114,6 @@ src/features/observe/audits/AccessibilityAuditor.ts: error TS2741: Property '$' 
 src/features/observe/collectors/DeviceStateCollector.ts: error TS2554: Expected 0 arguments, but got 1.
 src/features/observe/ios/CtrlProxyGestures.ts: error TS2345: Argument of type '{ idPrefix: string; responseType: string; messageType: string; params: { x1: number; y1: number; x2: number; y2: number; fingerCount: number; duration: number; offset: number | undefined; }; timeoutMs: number; perf: PerformanceTracker | undefined; notConnectedMessage: string; errorLabel: string; }' is not assignable to parameter of type 'SendCommandOptions<GestureTimingResult>'.
 src/features/observe/ios/CtrlProxyGestures.ts: error TS2459: Module '"./types"' declares 'GestureTimingResult' locally, but it is not exported.
-src/features/observe/ios/CtrlProxyHighlights.ts: error TS2322: Type '{ type: "box"; style?: HighlightStyle | null | undefined; bounds: { x: number; y: number; width: number; height: number; sourceWidth: null | number | undefined; sourceHeight: number | ... 1 more ... | undefined; } | null | undefined; } | { ...; }' is not assignable to type 'HighlightShape'.
 src/features/performance/PerformanceAudit.ts: error TS2551: Property 'refreshRateHz' does not exist on type 'DeviceCapabilities'. Did you mean 'refreshRate'?
 src/features/preferences/AppPreferences.ts: error TS2345: Argument of type 'PreferenceResultValue | null' is not assignable to parameter of type 'PreferenceValue | null'.
 src/features/preferences/AppPreferences.ts: error TS2345: Argument of type 'PreferenceResultValue | null' is not assignable to parameter of type 'PreferenceValue | null'.
@@ -259,7 +258,6 @@ src/utils/ios-cmdline-tools/XcodeSigning.ts: error TS2322: Type 'Promise<string 
 # swap-fp: 49 :: src/server/formTools.ts: error TS2345: Argument of type 'AdbExecutor | null' is not assignable to parameter of type 'AdbClient | null | undefined'.
 # swap-fp: 5 :: src/db/migrator.ts: error TS7006: Parameter 'name' implicitly has an 'any' type.
 # swap-fp: 5 :: src/features/observe/android/CtrlProxyHighlights.ts: error TS2322: Type '{ type: "box"; style?: HighlightStyle | null | undefined; bounds: NormalizedHighlightBounds | undefined; } | { type: "circle"; style?: HighlightStyle | ... 1 more ... | undefined; bounds: NormalizedHighlightBounds | undefined; }' is not assignable to type 'HighlightShape'.
-# swap-fp: 5 :: src/features/observe/ios/CtrlProxyHighlights.ts: error TS2322: Type '{ type: "box"; style?: HighlightStyle | null | undefined; bounds: { x: number; y: number; width: number; height: number; sourceWidth: null | number | undefined; sourceHeight: number | ... 1 more ... | undefined; } | null | undefined; } | { ...; }' is not assignable to type 'HighlightShape'.
 # swap-fp: 5 :: src/server/bootedDeviceResources.ts: error TS2322: Type '"local" | "remote"' is not assignable to type '"local" | undefined'.
 # swap-fp: 5,7,7 :: src/server/networkGraph.ts: error TS18048: 'group' is possibly 'undefined'.
 # swap-fp: 51 :: src/server/navigationTools.ts: error TS2339: Property 'interactionsPerformed' does not exist on type 'ExploreExecutionResult'.

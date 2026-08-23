@@ -1712,11 +1712,17 @@ export class UnixSocketServer {
       input.route.sessionUuid,
       input.route.toolSelectionProfileUuid,
     );
+    // getMcpClient registers its pending creation synchronously, so this snapshot
+    // identifies the attempt this wait started. Staggered deadlines can share a
+    // clientKey; without this fence a longer wait's expiry would unconditionally
+    // tear down whatever occupies the key, closing a replacement client that a
+    // sibling wait or an unrelated request already installed (issue #5499).
+    const pendingCreation = this.mcpClientPromises.get(input.route.clientKey);
     try {
       return await Promise.race([connection, deadline]);
     } catch (error) {
       if (error instanceof McpClientReconnectDeadlineError) {
-        await this.resetMcpClient(input.route.clientKey, "detach");
+        this.discardTimedOutMcpReconnect(input.route.clientKey, connection, pendingCreation);
       }
       throw error;
     } finally {
@@ -1852,12 +1858,17 @@ export class UnixSocketServer {
       && input.identity.deviceLabelResolved === true
       && input.identity.sessionUuid
     ) {
+      // Replay the original tool-selection profile verbatim. routingSessionUuid
+      // is a session UUID, not a profile: feeding it here would send a bogus
+      // tool-selection-profile header (createMcpClient forwards this field on the
+      // wire) and drop the generated profile injected by
+      // DaemonMcpProxy.withToolSelectionProfile, so a profile-gated tool admitted
+      // on the original call would be rejected as disabled on replay (issue #5499).
       return this.sessionScopedForwardRoute(
         input.socketSessionId,
         input.identity.sessionUuid,
         input.route.executionKey,
-        input.identity.routingSessionUuid
-          ?? input.route.toolSelectionProfileUuid,
+        input.route.toolSelectionProfileUuid,
       );
     }
     if (
@@ -3961,6 +3972,29 @@ export class UnixSocketServer {
     }
     await this.resetMcpClient(key, closeMode);
     return true;
+  }
+
+  // Clean up after a reconnect that blew its deadline without clobbering an
+  // unrelated request. Two teardown paths, each fenced to what this wait owns:
+  //   1. If our creation is still the pending one, drop it so a hung factory does
+  //      not leak; a resolved or superseded creation has already cleared itself.
+  //   2. When our own creation does resolve, close that specific client only while
+  //      it remains the cached one — never a replacement another request installed
+  //      under the same key (issue #5499). Fire-and-forget: the connection may
+  //      never settle, so the request must not block on it.
+  private discardTimedOutMcpReconnect(
+    key: string,
+    connection: Promise<Client>,
+    pendingCreation: Promise<Client> | undefined,
+  ): void {
+    if (pendingCreation && this.mcpClientPromises.get(key) === pendingCreation) {
+      this.mcpClientPromises.delete(key);
+    }
+    void connection
+      .then(client => this.resetMcpClientIfCurrent(key, client, "detach"))
+      .catch(() => {
+        // Creation was superseded or failed; nothing of ours remains to discard.
+      });
   }
 
   private scheduleMcpClientIdleClose(key: string): void {

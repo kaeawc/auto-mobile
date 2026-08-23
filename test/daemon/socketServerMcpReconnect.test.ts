@@ -972,7 +972,10 @@ describe("UnixSocketServer MCP session reconnect", () => {
 
     expect(clientsCreated).toBe(2);
     expect(clientBindings).toEqual(["session-a", "session-b"]);
-    expect(clientProfiles).toEqual([undefined, "session-a"]);
+    // The replay reuses the original route's tool-selection profile (none here);
+    // it must NOT send the routing session UUID as a profile, which would put a
+    // session UUID on the tool-selection-profile wire header (issue #5499).
+    expect(clientProfiles).toEqual([undefined, undefined]);
     expect(replayedArguments).toMatchObject({
       sessionUuid: "session-b",
       deviceId: "emulator-5556",
@@ -1300,5 +1303,81 @@ describe("UnixSocketServer MCP session reconnect", () => {
 
     expect(closeCalls).toBe(1);
     expect((server as any).mcpClients.size).toBe(0);
+  });
+
+  test("labeled replay carries the original tool-selection profile, not the routing session (#5499)", () => {
+    const route = (server as any).getDeviceControlRecoveryRoute(
+      {
+        socketSessionId: "socket-1",
+        request: {
+          method: "tools/call",
+          params: {
+            name: "observe",
+            arguments: { sessionUuid: "session-a", device: "B" },
+          },
+        },
+        route: {
+          executionKey: "exec-1",
+          clientKey: "orig-key",
+          sessionUuid: "session-b",
+          toolSelectionProfileUuid: "profile-x",
+        },
+        remainingTimeoutMs: 1000,
+        forwardStartMs: 0,
+        phase: "response",
+        identity: {
+          sessionUuid: "session-b",
+          routingSessionUuid: "session-a",
+          deviceLabelResolved: true,
+        },
+      },
+      true,
+    );
+
+    // The recovery route must replay the generated profile from the original
+    // route, never the routing session UUID masquerading as a profile.
+    expect(route.toolSelectionProfileUuid).toBe("profile-x");
+    expect(route.clientKey).toBe(
+      "socket:socket-1:session:session-b:tool-selection:profile-x",
+    );
+    expect(route.clientKey).not.toContain("session-a");
+  });
+
+  test("a stale reconnect deadline leaves a replacement client under the same key intact (#5499)", async () => {
+    const key = "socket-1:session:session-x";
+    // Never resolve: this wait's creation stays pending and the deadline wins.
+    server.mcpClientFactory = () => new Promise<never>(() => {});
+    const internals = server as any;
+
+    const reconnectPromise = internals.reconnectMcpClientWithinDeadline({
+      route: { executionKey: "exec-1", clientKey: key },
+      remainingTimeoutMs: 1000,
+      forwardStartMs: 0,
+    });
+
+    // getMcpClient registers this wait's pending creation synchronously.
+    expect(internals.mcpClientPromises.get(key)).toBeDefined();
+
+    // A sibling wait clears that pending creation; an unrelated request then
+    // installs a replacement client under the same key.
+    internals.mcpClientPromises.delete(key);
+    let replacementClosed = false;
+    const replacement = createFakeMcpClient({
+      close: async () => {
+        replacementClosed = true;
+      },
+    });
+    internals.mcpClients.set(key, replacement);
+
+    fakeTimer.advanceTime(1000);
+    await expect(reconnectPromise).rejects.toThrow(
+      "MCP client reconnect exceeded the request deadline",
+    );
+    await Promise.resolve();
+
+    // The stale deadline reset is fenced to this wait's own (now superseded)
+    // pending creation, so the replacement survives.
+    expect(replacementClosed).toBe(false);
+    expect(internals.mcpClients.get(key)).toBe(replacement);
   });
 });

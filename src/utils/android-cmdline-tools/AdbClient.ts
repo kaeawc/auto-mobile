@@ -1,7 +1,9 @@
 import { errorMessage } from "../describeUnknownError";
-import { execFile, spawn, type ChildProcess } from "child_process";
+import { execFile, type ChildProcess, type SpawnOptions } from "child_process";
 import { promisify } from "util";
 import { logger } from "../logger";
+import { createExecResult } from "../execResult";
+import { DefaultHostCommandExecutor, type HostProcessExecutor } from "../HostCommandExecutor";
 import { BootedDevice, ExecResult, AndroidUser, DeviceLockState } from "../../models";
 import {
   AndroidToolsDetectionAbortError,
@@ -27,6 +29,19 @@ import { isAdbMissingDeviceError, notifyAdbMissingDevice } from "./AdbDeviceHeal
 import { DefaultSystemDetection, type SystemDetection } from "../system/SystemDetection";
 
 type ExecFileAsync = (file: string, args: string[], maxBuffer?: number) => Promise<ExecResult>;
+
+/**
+ * The long-lived spawn seam. Kept as its own injectable type so the default can
+ * route through the shared {@link HostProcessExecutor} while tests still inject a
+ * fake. Deliberately narrower than node's overloaded `typeof spawn`.
+ */
+type SpawnFn = (file: string, args: string[], options?: SpawnOptions) => ChildProcess;
+
+// Route the default long-lived spawn through the shared host-process seam so the
+// client no longer reaches for `child_process.spawn` directly (issue #5459). The
+// executor's `spawn` is a plain passthrough, so this is behavior-identical; all
+// of AdbClient's own timeout/abort/process-tracking orchestration is unchanged.
+const hostProcessExecutor: HostProcessExecutor = new DefaultHostCommandExecutor();
 
 /**
  * Thrown when an adb command exceeds the caller-supplied `timeoutMs` budget, as
@@ -104,22 +119,15 @@ const execFileAsync: ExecFileAsync = async (
   const options = maxBuffer ? { maxBuffer } : undefined;
   const result = await promisify(execFile)(file, args, options);
 
-  // Add the required string methods
-  const enhancedResult: ExecResult = {
-    stdout: typeof result.stdout === "string" ? result.stdout : result.stdout.toString(),
-    stderr: typeof result.stderr === "string" ? result.stderr : result.stderr.toString(),
-    toString() { return this.stdout; },
-    trim() { return this.stdout.trim(); },
-    includes(searchString: string) { return this.stdout.includes(searchString); }
-  };
-
-  return enhancedResult;
+  // Coerce to the canonical ExecResult (Buffer→string plus the trim/toString/
+  // includes helpers) via the shared factory rather than re-inlining it here.
+  return createExecResult(result.stdout, result.stderr);
 };
 
 export class AdbClient implements AdbExecutor {
   device: BootedDevice | null;
   execAsync: ExecFileAsync;
-  spawnFn: typeof spawn;
+  spawnFn: SpawnFn;
   private adbPath: string;
   private isTestMode: boolean;
   private activeProcesses: Set<ChildProcess> = new Set();
@@ -148,7 +156,7 @@ export class AdbClient implements AdbExecutor {
   constructor(
     device: BootedDevice | null = null,
     execAsyncFn: ((command: string, maxBuffer?: number) => Promise<ExecResult>) | ExecFileAsync | null = null,
-    spawnFn: typeof spawn | null = null,
+    spawnFn: SpawnFn | null = null,
     retryExecutor: RetryExecutor = defaultRetryExecutor,
     timer: Timer = defaultTimer,
     private readonly systemDetectionFactory: () => SystemDetection = () => new DefaultSystemDetection()
@@ -174,7 +182,7 @@ export class AdbClient implements AdbExecutor {
         ? this.wrapExecAsync(execAsyncFn)
         : execFileAsync;
     }
-    this.spawnFn = spawnFn || spawn;
+    this.spawnFn = spawnFn || ((file, args, options) => hostProcessExecutor.spawn(file, args, options));
     this.retryExecutor = retryExecutor;
     this.timer = timer;
     // Initialize with fallback, will be updated lazily
@@ -832,13 +840,7 @@ export class AdbClient implements AdbExecutor {
           }));
           return;
         }
-        resolve({
-          stdout: typeof stdout === "string" ? stdout : stdout.toString(),
-          stderr: typeof stderr === "string" ? stderr : stderr.toString(),
-          toString() { return this.stdout; },
-          trim() { return this.stdout.trim(); },
-          includes(searchString: string) { return this.stdout.includes(searchString); }
-        });
+        resolve(createExecResult(stdout, stderr));
       });
 
       this.activeProcesses.add(child);

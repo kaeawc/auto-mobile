@@ -50,6 +50,10 @@ interface AcceptedTeardown<TResponse> {
   execution: { destructionStarted: boolean };
   expiryTimer?: NodeJS.Timeout;
   renewalTimer?: NodeJS.Timeout;
+  renewalWatchdogs: Set<NodeJS.Timeout>;
+  renewalEpoch: number;
+  renewalFailures: number;
+  runningExpiresAtMs?: number;
   ownerToken: string;
 }
 
@@ -102,6 +106,9 @@ export class DeviceTeardownService {
       fingerprint: request.fingerprint,
       promise,
       execution,
+      renewalWatchdogs: new Set(),
+      renewalEpoch: 0,
+      renewalFailures: 0,
       ownerToken,
     };
     this.operations.set(request.operationId, entry as AcceptedTeardown<unknown>);
@@ -120,6 +127,9 @@ export class DeviceTeardownService {
       if (operation.renewalTimer) {
         this.dependencies.timer.clearTimeout(operation.renewalTimer);
       }
+      for (const watchdog of operation.renewalWatchdogs) {
+        this.dependencies.timer.clearTimeout(watchdog);
+      }
     }
     this.operations.clear();
   }
@@ -133,8 +143,8 @@ export class DeviceTeardownService {
     const operationStore = this.dependencies.operationStore;
     if (operationStore) {
       let accepted;
+      const nowMs = this.dependencies.timer.now();
       try {
-        const nowMs = this.dependencies.timer.now();
         accepted = await operationStore.begin(
           request.operationId,
           request.fingerprint,
@@ -163,7 +173,7 @@ export class DeviceTeardownService {
           ),
         );
       }
-      this.scheduleRenewal(request, ownerToken, operationStore);
+      this.startRenewal(request, ownerToken, operationStore, nowMs + this.dependencies.resultTtlMs);
     }
 
     const controller = new AbortController();
@@ -233,14 +243,9 @@ export class DeviceTeardownService {
       phase = "stop";
       const stop = await workflow.stop(target, signal, retainLeaseUntil);
       phase = "destroy";
-      await workflow.destroy(
-        target,
-        signal,
-        retainLeaseUntil,
-        () => {
-          execution.destructionStarted = true;
-        },
-      );
+      await workflow.destroy(target, signal, retainLeaseUntil, () => {
+        execution.destructionStarted = true;
+      });
       phase = "verification";
       return await workflow.verify(target, stop, signal);
     } catch (error) {
@@ -261,10 +266,7 @@ export class DeviceTeardownService {
     if (this.operations.get(operationId) !== entry) {
       return;
     }
-    if (entry.renewalTimer) {
-      this.dependencies.timer.clearTimeout(entry.renewalTimer);
-      entry.renewalTimer = undefined;
-    }
+    this.clearRenewalTimers(entry);
     if (workflow.isFailure(response) && !entry.execution.destructionStarted) {
       this.operations.delete(operationId);
       return;
@@ -279,36 +281,161 @@ export class DeviceTeardownService {
     entry: AcceptedTeardown<TResponse>,
   ): void {
     if (this.operations.get(operationId) === entry) {
-      if (entry.renewalTimer) {
-        this.dependencies.timer.clearTimeout(entry.renewalTimer);
-      }
+      this.clearRenewalTimers(entry);
       this.operations.delete(operationId);
     }
+  }
+
+  private startRenewal(
+    request: DeviceTeardownRequest,
+    ownerToken: string,
+    operationStore: DeviceTeardownOperationStore,
+    expiresAtMs: number,
+  ): void {
+    const entry = this.getRenewingEntry(request.operationId, ownerToken);
+    if (!entry) {
+      return;
+    }
+    entry.runningExpiresAtMs = expiresAtMs;
+    entry.renewalFailures = 0;
+    this.scheduleRenewal(request, ownerToken, operationStore, this.renewalIntervalMs());
   }
 
   private scheduleRenewal(
     request: DeviceTeardownRequest,
     ownerToken: string,
     operationStore: DeviceTeardownOperationStore,
+    delayMs: number,
   ): void {
-    const entry = this.operations.get(request.operationId);
-    if (!entry || entry.ownerToken !== ownerToken) {
+    const entry = this.getRenewingEntry(request.operationId, ownerToken);
+    if (!entry || entry.runningExpiresAtMs === undefined) {
       return;
     }
-    const delay = Math.max(1, Math.floor(this.dependencies.resultTtlMs / 2));
+    if (entry.renewalTimer) {
+      this.dependencies.timer.clearTimeout(entry.renewalTimer);
+    }
+    const renewalEpoch = ++entry.renewalEpoch;
     entry.renewalTimer = this.dependencies.timer.setTimeout(() => {
-      void operationStore
-        .renew(
-          request.operationId,
-          request.fingerprint,
-          ownerToken,
-          this.dependencies.timer.now() + this.dependencies.resultTtlMs,
-        )
-        .then(
-          () => this.scheduleRenewal(request, ownerToken, operationStore),
-          () => this.scheduleRenewal(request, ownerToken, operationStore),
-        );
-    }, delay);
+      if (this.getRenewingEntry(request.operationId, ownerToken)?.renewalEpoch !== renewalEpoch) {
+        return;
+      }
+      entry.renewalTimer = undefined;
+      this.renewRunningOperation(request, ownerToken, operationStore, renewalEpoch);
+    }, delayMs);
+  }
+
+  private renewRunningOperation(
+    request: DeviceTeardownRequest,
+    ownerToken: string,
+    operationStore: DeviceTeardownOperationStore,
+    renewalEpoch: number,
+  ): void {
+    const entry = this.getRenewingEntry(request.operationId, ownerToken);
+    const nowMs = this.dependencies.timer.now();
+    if (
+      !entry ||
+      entry.renewalEpoch !== renewalEpoch ||
+      entry.runningExpiresAtMs === undefined ||
+      nowMs >= entry.runningExpiresAtMs
+    ) {
+      return;
+    }
+    const expiresAtMs = nowMs + this.dependencies.resultTtlMs;
+    let settled = false;
+    const watchdog = this.dependencies.timer.setTimeout(
+      () => {
+        if (!settled) {
+          entry.renewalWatchdogs.delete(watchdog);
+          this.retryRenewal(request, ownerToken, operationStore, renewalEpoch);
+        }
+      },
+      this.renewalRetryDelayMs(entry, nowMs),
+    );
+    entry.renewalWatchdogs.add(watchdog);
+
+    void operationStore
+      .renew(request.operationId, request.fingerprint, ownerToken, expiresAtMs)
+      .then(
+        (renewed) => {
+          settled = true;
+          this.dependencies.timer.clearTimeout(watchdog);
+          entry.renewalWatchdogs.delete(watchdog);
+          if (!renewed) {
+            this.retryRenewal(request, ownerToken, operationStore, renewalEpoch);
+            return;
+          }
+          if (
+            this.getRenewingEntry(request.operationId, ownerToken)?.renewalEpoch !== renewalEpoch
+          ) {
+            return;
+          }
+          entry.runningExpiresAtMs = expiresAtMs;
+          entry.renewalFailures = 0;
+          this.scheduleRenewal(request, ownerToken, operationStore, this.renewalIntervalMs());
+        },
+        () => {
+          settled = true;
+          this.dependencies.timer.clearTimeout(watchdog);
+          entry.renewalWatchdogs.delete(watchdog);
+          this.retryRenewal(request, ownerToken, operationStore, renewalEpoch);
+        },
+      );
+  }
+
+  private retryRenewal(
+    request: DeviceTeardownRequest,
+    ownerToken: string,
+    operationStore: DeviceTeardownOperationStore,
+    renewalEpoch: number,
+  ): void {
+    const entry = this.getRenewingEntry(request.operationId, ownerToken);
+    if (
+      !entry ||
+      entry.renewalEpoch !== renewalEpoch ||
+      entry.runningExpiresAtMs === undefined ||
+      this.dependencies.timer.now() >= entry.runningExpiresAtMs - 1
+    ) {
+      return;
+    }
+    entry.renewalFailures++;
+    this.scheduleRenewal(
+      request,
+      ownerToken,
+      operationStore,
+      this.renewalRetryDelayMs(entry, this.dependencies.timer.now()),
+    );
+  }
+
+  private getRenewingEntry(
+    operationId: string,
+    ownerToken: string,
+  ): AcceptedTeardown<unknown> | undefined {
+    const entry = this.operations.get(operationId);
+    return entry?.ownerToken === ownerToken ? entry : undefined;
+  }
+
+  private renewalIntervalMs(): number {
+    return Math.max(1, Math.floor(this.dependencies.resultTtlMs / 2));
+  }
+
+  private renewalRetryDelayMs(entry: AcceptedTeardown<unknown>, nowMs: number): number {
+    const remainingMs = (entry.runningExpiresAtMs ?? nowMs) - nowMs;
+    const baseDelayMs = Math.max(1, Math.floor(this.dependencies.resultTtlMs / 16));
+    const maxDelayMs = Math.max(baseDelayMs, Math.floor(this.dependencies.resultTtlMs / 8));
+    const backoffMs = Math.min(maxDelayMs, baseDelayMs * 2 ** Math.min(entry.renewalFailures, 3));
+    return Math.max(1, Math.min(backoffMs, remainingMs - 1));
+  }
+
+  private clearRenewalTimers(entry: AcceptedTeardown<unknown>): void {
+    entry.renewalEpoch++;
+    if (entry.renewalTimer) {
+      this.dependencies.timer.clearTimeout(entry.renewalTimer);
+      entry.renewalTimer = undefined;
+    }
+    for (const watchdog of entry.renewalWatchdogs) {
+      this.dependencies.timer.clearTimeout(watchdog);
+    }
+    entry.renewalWatchdogs.clear();
   }
 
   private async waitForCaller<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {

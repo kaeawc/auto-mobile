@@ -38,15 +38,17 @@ export class FakeDeviceTeardownOperationStore implements DeviceTeardownOperation
     requestFingerprint: string,
     ownerToken: string,
     expiresAtMs: number,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const operation = this.operations.get(operationId);
     if (
       operation?.fingerprint === requestFingerprint &&
       operation.ownerToken === ownerToken &&
       operation.result === undefined
     ) {
-      operation.expiresAtMs = expiresAtMs;
+      operation.expiresAtMs = Math.max(operation.expiresAtMs, expiresAtMs);
+      return true;
     }
+    return false;
   }
 
   async complete(

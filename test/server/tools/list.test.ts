@@ -90,8 +90,31 @@ describe("MCP Tools List", () => {
       expect(toolNames).not.toContain("clipboard");
       expect(toolNames).not.toContain("openLink");
       expect(toolNames).not.toContain("provisionDevice");
+      expect(toolNames).not.toContain("deleteDevice");
       expect(toolNames).not.toContain("settleObserve");
       expect(toolNames).not.toContain("waitForCondition");
+    });
+
+    test("lists deleteDevice after it is explicitly enabled", async function () {
+      const { client } = fixture.getContext();
+
+      await client.request(
+        {
+          method: "tools/call",
+          params: {
+            name: "setToolEnabled",
+            arguments: { toolName: "deleteDevice", enabled: true },
+          },
+        },
+        z.any(),
+      );
+
+      const result = await client.request(
+        { method: "tools/list", params: {} },
+        listToolsResponseSchema,
+      );
+
+      expect(result.tools.map((tool) => tool.name)).toContain("deleteDevice");
     });
 
     test("strict clients can compile observe outputSchema", async function () {

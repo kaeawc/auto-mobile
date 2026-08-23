@@ -40,6 +40,12 @@ describe("session tool overrides migration", () => {
           enabled: 0,
           updated_at: "2026-08-02T00:00:00.000Z",
         },
+        {
+          session_uuid: "session-1",
+          capability: "device-control",
+          enabled: 1,
+          updated_at: "2026-08-03T00:00:00.000Z",
+        },
       ])
       .execute();
 
@@ -53,10 +59,12 @@ describe("session tool overrides migration", () => {
       .execute();
     expect(rows).toEqual([
       { tool_name: "clipboard", enabled: 1 },
+      { tool_name: "deleteDevice", enabled: 1 },
       { tool_name: "dragAndDrop", enabled: 0 },
       { tool_name: "imeAction", enabled: 0 },
       { tool_name: "openLink", enabled: 0 },
       { tool_name: "pinchOn", enabled: 0 },
+      { tool_name: "provisionDevice", enabled: 1 },
       { tool_name: "rotate", enabled: 0 },
       { tool_name: "selectAllText", enabled: 1 },
       { tool_name: "shake", enabled: 0 },

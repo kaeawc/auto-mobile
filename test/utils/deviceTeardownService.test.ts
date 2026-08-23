@@ -122,7 +122,7 @@ describe("DeviceTeardownService", () => {
     const idGenerator = new CountingIdGenerator("owner");
     const first = createService(timer, operationStore, idGenerator).service;
     let finishDestroy!: () => void;
-    const destroyGate = new Promise<void>(resolve => {
+    const destroyGate = new Promise<void>((resolve) => {
       finishDestroy = resolve;
     });
     const workflow = {
@@ -136,19 +136,156 @@ describe("DeviceTeardownService", () => {
       failure: (phase: DeviceTeardownPhase) => ({ status: "failed", phase }) as TestResponse,
       isFailure: (response: TestResponse) => response.status === "failed",
     };
-    const request = { operationId: "long-operation", fingerprint: "fingerprint", identity, deadlineMs: 1_000 };
+    const request = {
+      operationId: "long-operation",
+      fingerprint: "fingerprint",
+      identity,
+      deadlineMs: 1_000,
+    };
     const pending = first.teardown(request, workflow);
     await Promise.resolve();
     await Promise.resolve();
     await timer.advanceTimeAsync(2_500);
 
-    const restarted = createService(timer, operationStore, new CountingIdGenerator("replacement")).service;
+    const restarted = createService(
+      timer,
+      operationStore,
+      new CountingIdGenerator("replacement"),
+    ).service;
     await expect(restarted.teardown(request, workflow)).resolves.toEqual({
       status: "failed",
       phase: "precondition",
     });
 
     finishDestroy();
+    await expect(pending).resolves.toEqual({ status: "destroyed" });
+  });
+
+  test("retries a rejected renewal before the running record expires", async () => {
+    class RejectFirstRenewalStore extends FakeDeviceTeardownOperationStore {
+      renewCalls = 0;
+
+      override async renew(
+        ...args: Parameters<DeviceTeardownOperationStore["renew"]>
+      ): Promise<boolean> {
+        this.renewCalls++;
+        if (this.renewCalls === 1) {
+          throw new Error("temporary database error");
+        }
+        return await super.renew(...args);
+      }
+    }
+
+    const timer = new FakeTimer();
+    const operationStore = new RejectFirstRenewalStore();
+    const first = createService(timer, operationStore, new CountingIdGenerator("owner")).service;
+    const destroyGate = Promise.withResolvers<void>();
+    let destroyCalls = 0;
+    const workflow = {
+      resolve: async () => ({ target: "target" }) as const,
+      stop: async () => "accepted" as const,
+      destroy: async () => {
+        destroyCalls++;
+        await destroyGate.promise;
+      },
+      verify: async () => ({ status: "destroyed" }) as TestResponse,
+      conflict: () => ({ status: "failed", phase: "precondition" }) as TestResponse,
+      failure: (phase: DeviceTeardownPhase) => ({ status: "failed", phase }) as TestResponse,
+      isFailure: (response: TestResponse) => response.status === "failed",
+    };
+    const request = {
+      operationId: "renewal-retry",
+      fingerprint: "fingerprint",
+      identity,
+      deadlineMs: 1_000,
+    };
+    const pending = first.teardown(request, workflow);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    await timer.advanceTimeAsync(500);
+    await timer.advanceTimeAsync(124);
+    expect(operationStore.renewCalls).toBe(2);
+    await timer.advanceTimeAsync(400);
+
+    const restarted = createService(
+      timer,
+      operationStore,
+      new CountingIdGenerator("replacement"),
+    ).service;
+    await expect(restarted.teardown(request, workflow)).resolves.toEqual({
+      status: "failed",
+      phase: "precondition",
+    });
+    expect(destroyCalls).toBe(1);
+
+    destroyGate.resolve();
+    await expect(pending).resolves.toEqual({ status: "destroyed" });
+  });
+
+  test("retries a stalled renewal without accepting a duplicate teardown", async () => {
+    const firstRenewal = Promise.withResolvers<boolean>();
+    class StalledRenewalStore extends FakeDeviceTeardownOperationStore {
+      renewCalls = 0;
+
+      override async renew(
+        ...args: Parameters<DeviceTeardownOperationStore["renew"]>
+      ): Promise<boolean> {
+        this.renewCalls++;
+        if (this.renewCalls === 1) {
+          return await firstRenewal.promise;
+        }
+        return await super.renew(...args);
+      }
+    }
+
+    const timer = new FakeTimer();
+    const operationStore = new StalledRenewalStore();
+    const first = createService(timer, operationStore, new CountingIdGenerator("owner")).service;
+    const destroyGate = Promise.withResolvers<void>();
+    let destroyCalls = 0;
+    const workflow = {
+      resolve: async () => ({ target: "target" }) as const,
+      stop: async () => "accepted" as const,
+      destroy: async () => {
+        destroyCalls++;
+        await destroyGate.promise;
+      },
+      verify: async () => ({ status: "destroyed" }) as TestResponse,
+      conflict: () => ({ status: "failed", phase: "precondition" }) as TestResponse,
+      failure: (phase: DeviceTeardownPhase) => ({ status: "failed", phase }) as TestResponse,
+      isFailure: (response: TestResponse) => response.status === "failed",
+    };
+    const request = {
+      operationId: "stalled-renewal",
+      fingerprint: "fingerprint",
+      identity,
+      deadlineMs: 1_000,
+    };
+    const pending = first.teardown(request, workflow);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    await timer.advanceTimeAsync(500);
+    await timer.advanceTimeAsync(62);
+    await timer.advanceTimeAsync(124);
+    expect(operationStore.renewCalls).toBe(2);
+    await timer.advanceTimeAsync(400);
+
+    const restarted = createService(
+      timer,
+      operationStore,
+      new CountingIdGenerator("replacement"),
+    ).service;
+    await expect(restarted.teardown(request, workflow)).resolves.toEqual({
+      status: "failed",
+      phase: "precondition",
+    });
+    expect(destroyCalls).toBe(1);
+
+    firstRenewal.resolve(true);
+    await Promise.resolve();
+    destroyGate.resolve();
     await expect(pending).resolves.toEqual({ status: "destroyed" });
   });
 

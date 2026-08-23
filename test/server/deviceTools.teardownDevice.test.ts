@@ -1,8 +1,20 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { promises as fsPromises } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import type { BootedDevice, DeviceInfo, SomePlatform } from "../../src/models";
+import {
+  DEFAULT_VIDEO_RECORDING_CONFIG,
+  type ActiveVideoRecording,
+} from "../../src/features/video";
+import type {
+  BootedDevice,
+  DeviceInfo,
+  SomePlatform,
+  VideoRecordingMetadata,
+} from "../../src/models";
 import {
   clearDirectSessionDevices,
   registerDirectSessionDevice,
@@ -18,6 +30,12 @@ import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
 } from "../../src/server/videoRecordingManager";
+import {
+  registerVideoRecordingTools,
+  resetSegmentedSessions,
+  setSegmentedSessionRecordingDependencies,
+  setSegmentedSessionTimer,
+} from "../../src/server/videoRecordingTools";
 import type { ProvisionDeviceOperationStore } from "../../src/db/provisionDeviceOperationRepository";
 import type { BootedDeviceDiscovery, DeviceDestroyOptions } from "../../src/utils/deviceUtils";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -181,6 +199,7 @@ describe("deleteDevice handler", () => {
     clearDirectSessionDevices();
     resetDeviceToolsDependencies();
     resetVideoRecordingManagerDependencies();
+    resetSegmentedSessions();
     DaemonState.getInstance().reset();
   });
 
@@ -220,6 +239,97 @@ describe("deleteDevice handler", () => {
         }),
       }),
     ]);
+  });
+
+  test("finalizes a segmented recording before deleting its booted Android AVD", async () => {
+    const device: BootedDevice = {
+      platform: "android",
+      name: "Pixel_8_API_35",
+      deviceId: "emulator-5556",
+    };
+    const segmentedTimer = new FakeTimer();
+    const events: string[] = [];
+    const segmentStarts: string[] = [];
+    const segmentStops: string[] = [];
+    const archiveRoot = await fsPromises.mkdtemp(
+      path.join(os.tmpdir(), "auto-mobile-teardown-segment-"),
+    );
+
+    try {
+      manager.setBootedDevices("android", [device]);
+      manager.setDeviceImages("android", [{ ...device, isRunning: true }]);
+      manager.destroyStarted = () => events.push("destroyed");
+      resetSegmentedSessions();
+      setSegmentedSessionTimer(segmentedTimer);
+      setSegmentedSessionRecordingDependencies({
+        startVideoRecording: async (request): Promise<ActiveVideoRecording> => {
+          const recordingId = request.outputName ?? "segment";
+          segmentStarts.push(recordingId);
+          return {
+            recordingId,
+            outputPath: path.join(archiveRoot, `${recordingId}.mp4`),
+            fileName: `${recordingId}.mp4`,
+            startedAt: new Date(0).toISOString(),
+            outputName: request.outputName,
+            config: DEFAULT_VIDEO_RECORDING_CONFIG,
+          };
+        },
+        stopVideoRecording: async (
+          recordingId,
+        ): Promise<{
+          metadata: VideoRecordingMetadata;
+          evictedRecordingIds: string[];
+        }> => {
+          const id = recordingId ?? "segment";
+          events.push("recording-stopped");
+          segmentStops.push(id);
+          return {
+            metadata: {
+              recordingId: id,
+              fileName: `${id}.mp4`,
+              filePath: path.join(archiveRoot, `${id}.mp4`),
+              format: "mp4",
+              sizeBytes: 1,
+              codec: "h264",
+              createdAt: new Date(0).toISOString(),
+              startedAt: new Date(0).toISOString(),
+              lastAccessedAt: new Date(0).toISOString(),
+              config: DEFAULT_VIDEO_RECORDING_CONFIG,
+            },
+            evictedRecordingIds: [],
+          };
+        },
+      });
+      if (!ToolRegistry.getTool("videoRecording")) {
+        registerVideoRecordingTools();
+      }
+      const recordingHandler = ToolRegistry.getTool("videoRecording")?.deviceAwareHandler;
+      if (!recordingHandler) {
+        throw new Error("videoRecording tool not registered");
+      }
+
+      await recordingHandler(device, {
+        action: "start",
+        platform: "android",
+        deviceId: device.deviceId,
+        maxDuration: 300,
+        outputName: "teardown-video",
+      });
+      expect(segmentedTimer.getPendingTimeoutCount()).toBe(2);
+
+      const response = responseBody(await teardownTool().handler(request("android", device.name)));
+
+      expect(response.state).toBe("destroyed");
+      expect(segmentStops).toEqual(["teardown-video"]);
+      expect(events).toEqual(["recording-stopped", "destroyed"]);
+      expect(segmentedTimer.getPendingTimeoutCount()).toBe(0);
+
+      segmentedTimer.advanceTime(1_000_000);
+      await Promise.resolve();
+      expect(segmentStarts).toEqual(["teardown-video"]);
+    } finally {
+      await fsPromises.rm(archiveRoot, { recursive: true, force: true });
+    }
   });
 
   test("resumes a cancelled stop-and-destroy after the target is already shut down", async () => {

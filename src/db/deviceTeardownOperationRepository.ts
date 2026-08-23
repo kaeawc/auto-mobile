@@ -1,4 +1,4 @@
-import type { Kysely } from "kysely";
+import { sql, type Kysely } from "kysely";
 import { getDatabase } from "./database";
 import type { Database } from "./types";
 import { logger } from "../utils/logger";
@@ -22,7 +22,7 @@ export interface DeviceTeardownOperationStore {
     requestFingerprint: string,
     ownerToken: string,
     expiresAtMs: number,
-  ): Promise<void>;
+  ): Promise<boolean>;
   complete(
     operationId: string,
     requestFingerprint: string,
@@ -56,16 +56,10 @@ export class DeviceTeardownOperationRepository implements DeviceTeardownOperatio
     expiresAtMs: number,
   ): Promise<DeviceTeardownOperationBeginResult> {
     const db = this.getDb();
+    await db.deleteFrom("device_teardown_operations").where("expires_at_ms", "<=", nowMs).execute();
     const existing = await this.read(operationId);
-    if (existing && existing.expires_at_ms > nowMs) {
-      return this.resolveExisting(requestFingerprint, existing);
-    }
     if (existing) {
-      await db
-        .deleteFrom("device_teardown_operations")
-        .where("operation_id", "=", operationId)
-        .where("expires_at_ms", "<=", nowMs)
-        .execute();
+      return this.resolveExisting(requestFingerprint, existing);
     }
 
     try {
@@ -95,15 +89,19 @@ export class DeviceTeardownOperationRepository implements DeviceTeardownOperatio
     requestFingerprint: string,
     ownerToken: string,
     expiresAtMs: number,
-  ): Promise<void> {
-    await this.getDb()
+  ): Promise<boolean> {
+    const result = await this.getDb()
       .updateTable("device_teardown_operations")
-      .set({ expires_at_ms: expiresAtMs, updated_at: new Date().toISOString() })
+      .set({
+        expires_at_ms: sql`MAX(expires_at_ms, ${expiresAtMs})`,
+        updated_at: new Date().toISOString(),
+      })
       .where("operation_id", "=", operationId)
       .where("request_fingerprint", "=", requestFingerprint)
       .where("owner_token", "=", ownerToken)
       .where("status", "=", "running")
-      .execute();
+      .executeTakeFirst();
+    return Number(result.numUpdatedRows) > 0;
   }
 
   async complete(

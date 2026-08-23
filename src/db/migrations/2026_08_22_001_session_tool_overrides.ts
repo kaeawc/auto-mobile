@@ -5,7 +5,7 @@ const TOOLS_BY_LEGACY_CAPABILITY: Readonly<Record<string, readonly string[]>> = 
   "advanced-interaction": ["openLink", "imeAction", "dragAndDrop", "pinchOn", "shake", "rotate"],
   "app-permissions": ["getAppPermissions", "setAppPermissions"],
   "device-settings": ["changeLocalization", "getDeviceState", "setDeviceState"],
-  "device-control": ["provisionDevice"],
+  "device-control": ["provisionDevice", "deleteDevice"],
   "app-data-interop": [
     "putAppFile",
     "getPreference",

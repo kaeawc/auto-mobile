@@ -27,6 +27,7 @@ import {
 } from "./deviceImageResources";
 import { syncInstalledAppResources } from "./appResources";
 import { listActiveVideoRecordings, stopVideoRecording } from "./videoRecordingManager";
+import { stopSegmentedVideoRecordingsForDevice } from "./videoRecordingTools";
 import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 import { logger } from "../utils/logger";
@@ -34,6 +35,7 @@ import { createPerformanceTracker } from "../utils/PerformanceTracker";
 import { getPerformanceMonitor } from "../features/performance/PerformanceMonitor";
 import {
   platformSchema,
+  withCanonicalDiscriminatedUnionJsonSchema,
   withJsonSchemaOverride,
 } from "./toolSchemaHelpers";
 import { DefaultDeviceMatcher, type DeviceMatcher } from "../utils/deviceMatcher";
@@ -273,22 +275,24 @@ const iosProvisionDeviceSpecSchema = z
 export const provisionDeviceSchema = z
   .object({
     operationId: z.string().min(1).describe("Caller-generated idempotency key"),
-    device: z.discriminatedUnion("platform", [
-      z
-        .object({
-          platform: z.literal("android"),
-          name: z.string().min(1).describe("Exact AVD name"),
-          spec: androidProvisionDeviceSpecSchema,
-        })
-        .strict(),
-      z
-        .object({
-          platform: z.literal("ios"),
-          name: z.string().min(1).describe("Exact simulator name"),
-          spec: iosProvisionDeviceSpecSchema,
-        })
-        .strict(),
-    ]),
+    device: withCanonicalDiscriminatedUnionJsonSchema(
+      z.discriminatedUnion("platform", [
+        z
+          .object({
+            platform: z.literal("android"),
+            name: z.string().min(1).describe("Exact AVD name"),
+            spec: androidProvisionDeviceSpecSchema,
+          })
+          .strict(),
+        z
+          .object({
+            platform: z.literal("ios"),
+            name: z.string().min(1).describe("Exact simulator name"),
+            spec: iosProvisionDeviceSpecSchema,
+          })
+          .strict(),
+      ]),
+    ),
     boot: z
       .boolean()
       .default(true)
@@ -693,6 +697,15 @@ async function stopVideoRecordingsBeforeShutdown(
 ): Promise<void> {
   perf.startOperation("stopRecordings");
   try {
+    await runWithinShutdownDeadline(
+      context.device,
+      context.timer,
+      context.deadlineMs,
+      "segmented video recording teardown did not complete",
+      context.requestAbortSignal,
+      async () => await stopSegmentedVideoRecordingsForDevice(context.device),
+      context.timeoutMs,
+    );
     const activeRecordings = await runWithinShutdownDeadline(
       context.device,
       context.timer,
@@ -1943,6 +1956,21 @@ interface TeardownContext {
   initialAndroidRuntimeIds?: Set<string>;
 }
 
+async function stopSegmentedVideoRecordingsBeforeDestroy(
+  context: TeardownContext,
+  target: TeardownResolvedTarget,
+): Promise<void> {
+  await runWithinShutdownDeadline(
+    context.deadlineDevice,
+    context.dependencies.timer,
+    context.deadlineMs,
+    "segmented video recording teardown did not complete",
+    context.requestAbortSignal,
+    async () => await stopSegmentedVideoRecordingsForDevice(target.device),
+    context.timeoutMs,
+  );
+}
+
 async function readTeardownBootedDiscovery(
   context: TeardownContext,
   detail = "booted-device precondition discovery did not complete",
@@ -2169,9 +2197,7 @@ async function retireTeardownPooledOwnership(
     platform: expectedPooledDevice.platform,
     name,
     deviceId: expectedPooledDevice.id,
-    ...(expectedPooledDevice.transportId
-      ? { transportId: expectedPooledDevice.transportId }
-      : {}),
+    ...(expectedPooledDevice.transportId ? { transportId: expectedPooledDevice.transportId } : {}),
   };
   try {
     await stopVideoRecordingsBeforeShutdown(
@@ -2448,8 +2474,7 @@ export function setDeviceToolsDependencies(deps: Partial<DeviceToolsDependencies
     deviceProvisionerFactory: deps.deviceProvisionerFactory ?? currentDeps.deviceProvisionerFactory,
     ...provisionDeviceDependencyOverrides(deps, currentDeps),
     teardownDeviceOperationStoreFactory:
-      deps.teardownDeviceOperationStoreFactory ??
-      currentDeps.teardownDeviceOperationStoreFactory,
+      deps.teardownDeviceOperationStoreFactory ?? currentDeps.teardownDeviceOperationStoreFactory,
     clearInstalledAppsForDevice:
       deps.clearInstalledAppsForDevice ?? currentDeps.clearInstalledAppsForDevice,
     stopPerformanceMonitoring:
@@ -4109,10 +4134,7 @@ export function registerDeviceTools() {
     if (error instanceof ProvisionDeviceOperationConflictError) {
       return createToolErrorResponse("operation_conflict", error.message);
     }
-    return createToolErrorResponse(
-      "platform_command_failed",
-      errorMessage(error),
-    );
+    return createToolErrorResponse("platform_command_failed", errorMessage(error));
   }
 
   type DevicePreparationBudgets = {
@@ -4799,6 +4821,7 @@ export function registerDeviceTools() {
               );
               stop = stopped.alreadyStoppedMessage ? "not_required" : "accepted";
             } else {
+              await stopSegmentedVideoRecordingsBeforeDestroy(context, target);
               await retireStoppedTeardownOwnership(context, target);
             }
 
@@ -4931,6 +4954,6 @@ export function registerDeviceTools() {
     "Stop and permanently delete a device, with verified platform-inventory absence",
     teardownDeviceSchema,
     deleteDeviceHandler,
-    { defaultEnabled: true },
+    { defaultEnabled: false },
   );
 }

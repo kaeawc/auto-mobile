@@ -23,6 +23,8 @@ class ReadinessAdbExecutor extends FakeAdbExecutor {
   discoveryErrors: Error[] = [];
   blockDiscovery = false;
   releaseDiscovery: (() => void) | undefined;
+  blockReadinessProbes = false;
+  readinessProbeCalls = 0;
 
   override async getBootedAndroidDevices(options?: {
     bypassCache?: boolean;
@@ -46,6 +48,32 @@ class ReadinessAdbExecutor extends FakeAdbExecutor {
       });
     }
     return super.getBootedAndroidDevices();
+  }
+
+  override async executeCommand(
+    command: string,
+    timeoutMs?: number,
+    maxBuffer?: number,
+    noRetry?: boolean,
+    signal?: AbortSignal,
+  ): Promise<ExecResult> {
+    const readinessCommands = new Set([
+      "get-state",
+      "shell pm list packages",
+      "shell getprop sys.boot_completed",
+      "shell getprop init.svc.bootanim",
+    ]);
+    if (this.blockReadinessProbes && readinessCommands.has(command)) {
+      this.readinessProbeCalls += 1;
+      return await new Promise<ExecResult>((_resolve, reject) => {
+        signal?.addEventListener(
+          "abort",
+          () => reject(signal.reason ?? new Error("readiness probe cancelled")),
+          { once: true },
+        );
+      });
+    }
+    return super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
   }
 }
 
@@ -162,6 +190,41 @@ describe("Android emulator readiness diagnostics", () => {
 
     expect(adb.discoverySignal).toBe(controller.signal);
     await expect(readiness).rejects.toThrow("caller cancelled readiness");
+  });
+
+  test("cancels parallel readiness probes without waiting for another timer tick", async () => {
+    const timer = new FakeTimer();
+    const adb = new ReadinessAdbExecutor();
+    configureReadyDevice(adb);
+    adb.blockReadinessProbes = true;
+    const controller = new AbortController();
+    const readiness = clientWith(adb, timer).waitForEmulatorReady(
+      "Pixel_9_Pro",
+      5_000,
+      null,
+      "emulator-5554",
+      controller.signal,
+    );
+    let rejection: Error | undefined;
+    void readiness.catch((error: unknown) => {
+      rejection = error instanceof Error ? error : new Error(String(error));
+    });
+
+    while (adb.readinessProbeCalls < 4) {
+      await Promise.resolve();
+    }
+    controller.abort(new Error("caller cancelled parallel probes"));
+    for (let turn = 0; turn < 10 && !rejection; turn += 1) {
+      await Promise.resolve();
+    }
+    const settledWithoutTimerAdvance = rejection !== undefined;
+    if (!settledWithoutTimerAdvance) {
+      timer.advanceTime(5_000);
+      await readiness.catch(() => undefined);
+    }
+
+    expect(settledWithoutTimerAdvance).toBe(true);
+    expect(rejection?.message).toContain("caller cancelled parallel probes");
   });
 
   for (const row of [

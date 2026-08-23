@@ -1,8 +1,15 @@
 import { describe, it, expect } from "bun:test";
 import { ChildProcess } from "child_process";
-import { waitForDeviceReadyOrCancel } from "../../src/utils/deviceUtils";
+import {
+  type PlatformDeviceManager,
+  waitForDeviceReadyOrCancel,
+} from "../../src/utils/deviceUtils";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import type { DeviceInfo } from "../../src/models";
+import { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
+import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 /**
  * Unit coverage for the cancel-on-readiness-failure helper (issue #3952).
@@ -19,6 +26,12 @@ describe("waitForDeviceReadyOrCancel", () => {
     deviceId: "ABCD-1234",
     isRunning: false,
     osVersion: "17.2",
+  };
+  const androidImage: DeviceInfo = {
+    name: "Pixel_9_Pro",
+    platform: "android",
+    deviceId: "emulator-5554",
+    isRunning: false,
   };
 
   /** A spy handle recording whether kill() was invoked. */
@@ -68,6 +81,29 @@ describe("waitForDeviceReadyOrCancel", () => {
     await expect(
       waitForDeviceReadyOrCancel(deviceManager, iosImage, null, 30_000),
     ).rejects.toThrow("readiness timeout");
+  });
+
+  it("preserves real Android diagnostics when the wrapper deadline aborts readiness", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const adb = new FakeAdbExecutor();
+    adb.getBootedAndroidDevices = async () => {
+      throw new Error("adb server unavailable");
+    };
+    const client = new AndroidEmulatorClient(null, null, timer, new FakeAdbClientFactory(adb));
+    const deviceManager = {
+      waitForDeviceReady: (
+        device: DeviceInfo,
+        timeoutMs: number,
+        childProcess: ChildProcess | null | undefined,
+        signal: AbortSignal | undefined,
+      ) =>
+        client.waitForEmulatorReady(device.name, timeoutMs, childProcess, device.deviceId, signal),
+    } as PlatformDeviceManager;
+
+    await expect(
+      waitForDeviceReadyOrCancel(deviceManager, androidImage, null, 100, undefined, timer),
+    ).rejects.toThrow("phase=device-discovery");
   });
 
   it("kills an owned handle when external cancellation preempts non-cooperative readiness", async () => {

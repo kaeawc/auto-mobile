@@ -12,6 +12,8 @@ import { defaultTimer, type Timer } from "./SystemTimer";
 
 export { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "./deviceTimeouts";
 
+const READINESS_ABORT_SETTLEMENT_GRACE_MS = 1_000;
+
 export type DeviceDiscoveryErrorCode = "unavailable" | "failed";
 
 export interface DeviceDiscoveryError {
@@ -122,11 +124,29 @@ async function readinessFailureAfterTimeout(
   controller: AbortController,
   settlement: ReadinessSettlement,
   fallback: unknown,
+  readinessPromise: Promise<BootedDevice>,
+  timer: Pick<Timer, "setTimeout" | "clearTimeout">,
 ): Promise<unknown> {
-  if (controller.signal.aborted && !settlement.settled) {
-    await Promise.resolve();
+  if (!controller.signal.aborted) {
+    return fallback;
   }
-  if (controller.signal.aborted && settlement.settled && settlement.failure !== undefined) {
+  let graceHandle: NodeJS.Timeout | undefined;
+  try {
+    await Promise.race([
+      readinessPromise.then(
+        () => undefined,
+        () => undefined,
+      ),
+      new Promise<void>((resolve) => {
+        graceHandle = timer.setTimeout(resolve, READINESS_ABORT_SETTLEMENT_GRACE_MS);
+      }),
+    ]);
+  } finally {
+    if (graceHandle) {
+      timer.clearTimeout(graceHandle);
+    }
+  }
+  if (settlement.settled && settlement.failure !== undefined) {
     return settlement.failure;
   }
   return fallback;
@@ -175,9 +195,10 @@ export async function waitForDeviceReadyOrCancel(
   let timeoutHandle: NodeJS.Timeout | undefined;
   let abortListener: (() => void) | undefined;
   const settlement: ReadinessSettlement = { settled: false };
+  let readinessPromise!: Promise<BootedDevice>;
 
   try {
-    const readinessPromise = runWithAbortSignal(readinessSignal, () =>
+    readinessPromise = runWithAbortSignal(readinessSignal, () =>
       deviceManager.waitForDeviceReady(device, timeoutMs, handle, readinessSignal),
     ).then(
       (ready) => {
@@ -208,7 +229,13 @@ export async function waitForDeviceReadyOrCancel(
     }, timeoutMs);
     return await Promise.race([readinessPromise, abortPromise]);
   } catch (error) {
-    const failure = await readinessFailureAfterTimeout(controller, settlement, error);
+    const failure = await readinessFailureAfterTimeout(
+      controller,
+      settlement,
+      error,
+      readinessPromise,
+      timer,
+    );
     if (handle) {
       logger.warn(
         `[startDevice] readiness failed for ${device.deviceId ?? device.name}; ` +

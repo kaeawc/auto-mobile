@@ -2596,10 +2596,13 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     error: unknown,
     signal: AbortSignal | undefined,
     polling: ReadinessPollingState,
+    deadlineReached: boolean,
   ): ReadinessDiagnostic | undefined {
     if (signal?.aborted) {
-      polling.failure = signal.reason;
       polling.active = false;
+      if (!deadlineReached) {
+        polling.failure = signal.reason;
+      }
       return undefined;
     }
     return this.readinessDiagnostic("device-discovery", error);
@@ -2620,6 +2623,33 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     timeoutMs: number,
   ): boolean {
     return polling.active && this.timer.now() - startTime < timeoutMs;
+  }
+
+  private readinessDeadlineReached(startTime: number, timeoutMs: number): boolean {
+    return this.timer.now() - startTime >= timeoutMs;
+  }
+
+  private waitForReadinessMainLoop(signal: AbortSignal | undefined): Promise<void> {
+    return new Promise<void>((resolve) => {
+      let settled = false;
+      const waitState: { timeoutHandle?: NodeJS.Timeout } = {};
+      const settle = () => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        if (waitState.timeoutHandle) {
+          this.timer.clearTimeout(waitState.timeoutHandle);
+        }
+        signal?.removeEventListener("abort", settle);
+        resolve();
+      };
+      signal?.addEventListener("abort", settle, { once: true });
+      waitState.timeoutHandle = this.timer.setTimeout(settle, 500);
+      if (signal?.aborted) {
+        settle();
+      }
+    });
   }
 
   private throwPollingFailure(polling: ReadinessPollingState): void {
@@ -3034,6 +3064,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
                   }
                 }
               } catch (parallelError) {
+                this.throwIfReadinessAborted(signal);
                 logger.debug(
                   `[PARALLEL] ❌ Parallel checks failed for ${emulator.deviceId}: ${parallelError}`,
                 );
@@ -3046,7 +3077,12 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           }
         } catch (error) {
           lastDiagnostic =
-            this.handleReadinessPollingError(error, signal, polling) ?? lastDiagnostic;
+            this.handleReadinessPollingError(
+              error,
+              signal,
+              polling,
+              this.readinessDeadlineReached(startTime, timeoutMs),
+            ) ?? lastDiagnostic;
           logger.debug(`Background polling error (will continue): ${error}`);
         }
 
@@ -3114,7 +3150,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       }
 
       // Check less frequently in main loop since background polling is doing the work
-      await this.sleep(500);
+      await this.waitForReadinessMainLoop(signal);
     }
 
     // Stop background polling

@@ -110,7 +110,13 @@ describe("DeviceBootService", () => {
       await new Promise<never>((_resolve, reject) => {
         signal?.addEventListener(
           "abort",
-          () => reject(new ActionableError("phase=device-discovery; summary=adb unavailable")),
+          () => {
+            queueMicrotask(() => {
+              queueMicrotask(() => {
+                reject(new ActionableError("phase=device-discovery; summary=adb unavailable"));
+              });
+            });
+          },
           { once: true },
         );
       });

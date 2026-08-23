@@ -57,6 +57,14 @@ class QualityController(
   /** Minimum frame-time spacing between two automatic changes. */
   private val minDwellMs: Long = 2_000,
   /**
+   * A gap longer than this is treated as a stream discontinuity, not a slow frame, and re-seeds the
+   * rate instead of folding in one implausibly-low sample. This is what keeps a source that omits
+   * idle buffers (iOS ScreenCaptureKit drops frames on a static screen) from reading as a drop when
+   * activity resumes; it comfortably exceeds the interval of the slowest real target (10fps =
+   * 100ms).
+   */
+  private val idleGapMs: Long = 1_000,
+  /**
    * Notified only for an explicit [selectQuality] (a user's manual pick), for persistence.
    * Automatic steps update [quality] (so the pane re-subscribes and the overlay updates) but do not
    * notify.
@@ -87,6 +95,14 @@ class QualityController(
 
     val dt = receivedAtMs - previous
     if (dt <= 0L) return // out-of-order / duplicate timestamp: ignore rather than divide by zero.
+    if (dt > idleGapMs) {
+      // Stream discontinuity (idle-buffer suppression on a static screen, or a reconnect): the next
+      // frame re-seeds the EMA from here rather than this gap being scored as a ~0fps sample.
+      samples = 0
+      lowStreak = 0
+      highStreak = 0
+      return
+    }
 
     val instant = 1000f / dt
     val ema = _actualFps.value

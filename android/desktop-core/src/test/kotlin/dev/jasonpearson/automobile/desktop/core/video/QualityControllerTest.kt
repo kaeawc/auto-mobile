@@ -176,6 +176,31 @@ class QualityControllerTest {
   }
 
   @Test
+  fun `an idle gap on a source that omits idle frames does not trigger a downgrade`() {
+    // iOS ScreenCaptureKit drops idle buffers, so a static screen makes no frame progress; when
+    // activity resumes the resumed burst must not read as a drop. Codex's example: 0, 10_000, then
+    // six healthy 33ms frames must NOT downgrade High.
+    val controller =
+      QualityController(
+        initialQuality = VideoStreamQuality.High,
+        targetFps = 30,
+        samplesToDowngrade = 3,
+        minDwellMs = 0,
+      )
+    controller.onFrame(0)
+    controller.onFrame(10_000) // long idle gap — treated as discontinuity, not a ~0fps sample
+    var t = 10_033L
+    repeat(6) {
+      controller.onFrame(t)
+      t += 33
+    }
+    assertEquals(VideoStreamQuality.High, controller.quality.value)
+    // And once enough healthy frames flow the measured rate reflects the real cadence.
+    controller.feed(count = 6, intervalMs = 33, startMs = t)
+    assertTrue(controller.actualFps.value > 24f)
+  }
+
+  @Test
   fun `a reconnect gap right after a change does not immediately downgrade`() {
     val controller =
       QualityController(

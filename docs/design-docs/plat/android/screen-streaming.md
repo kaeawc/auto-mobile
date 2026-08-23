@@ -224,14 +224,14 @@ That keeps the installer growth to ~20–30 MB per platform. The decoder reads a
 - [ ] Supply that frame: `LayoutInspectorDashboard` must construct a client and collect its frames
 - [ ] Choose live vs screenshot at runtime and fall back on `VideoStreamState.Unavailable`
 - [ ] Frame-rate policy — the existing screenshot flow is `replay = 1` with no conflation and will not survive 60fps
-- [ ] Add FPS counter overlay
-- [ ] Implement latency measurement
-- [ ] Add quality/resolution controls
+- [x] Add FPS counter overlay — the focused pane's `StreamQualityControls` shows measured-vs-target fps (#1098)
+- [ ] Implement latency measurement — decode/end-to-end latency overlay still a follow-up
+- [x] Add quality/resolution controls — Low/Medium/High preset selector on the focused pane; resolution follows the preset (#1098)
 
 ### Milestone 5: Polish
 - [ ] Handle device disconnect/reconnect
 - [ ] Add fallback to screenshot mode
-- [ ] Automatic quality adjustment on frame drops
+- [x] Automatic quality adjustment on frame drops — client-side `QualityController` steps the preset and re-subscribes; because a shared per-device capture's encode is fixed by the first subscriber, this applies for a sole subscriber / the next subscribe, and reconfiguring a live shared capture is a server-side follow-up (#1098)
 - [ ] Optimize memory (double buffering, frame pooling)
 
 ## References

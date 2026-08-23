@@ -208,6 +208,111 @@ internal fun triggersHierarchyRefresh(eventType: Int): Boolean =
 internal fun isHandledEventType(eventType: Int): Boolean =
   interactionDispatchFor(eventType) != null || triggersHierarchyRefresh(eventType)
 
+/**
+ * The per-event push work [CtrlProxy.onAccessibilityEvent] should perform: which interaction (if
+ * any) to record, and whether to schedule a debounced hierarchy refresh (extraction + structural
+ * hash). Both are pure over the classification helpers plus the observer count.
+ */
+internal data class AccessibilityEventWork(
+  val interaction: InteractionDispatch?,
+  val refreshesHierarchy: Boolean,
+) {
+  companion object {
+    /** Nothing to do — no interaction recording and no hierarchy refresh (the expensive work). */
+    val NONE = AccessibilityEventWork(interaction = null, refreshesHierarchy = false)
+  }
+}
+
+/**
+ * True when [eventType] changes the UI enough to advance the `frameContext` staleness token. This
+ * is DELIBERATELY independent of the observer count (issue #5470 review): the token must keep
+ * advancing even while nobody is connected, otherwise a token minted before the last client
+ * disconnected could still pass the daemon/runner frame-context staleness check after a reconnect
+ * even though the screen changed during the gap — aiming an input action at the wrong UI state. The
+ * set is exactly the original bump sites: the hierarchy-refresh types plus a scroll. Advancing the
+ * token is a cheap atomic increment; only the EXPENSIVE extraction/recording/broadcast is gated on
+ * an observer.
+ */
+internal fun advancesFrameContext(eventType: Int): Boolean =
+  triggersHierarchyRefresh(eventType) ||
+    interactionDispatchFor(eventType) == InteractionDispatch.SCROLL
+
+/**
+ * Pure "is anyone observing" gate (issue #5470). The two biggest continuous-work paths in
+ * [CtrlProxy.onAccessibilityEvent] — per-interaction accessibility-node recording and the debounced
+ * full-hierarchy extraction + structural hash — are background PUSH work that only a connected
+ * client ever consumes, so with zero observers they are skipped entirely. The `frameContext`
+ * staleness token is NOT gated here (see [advancesFrameContext]); it keeps advancing regardless.
+ *
+ * This does NOT govern the on-demand PULL path (`request_hierarchy` → `extractNowBlocking`): that
+ * extracts the live accessibility tree directly and reads none of the push-path side effects
+ * (frameContext counter, debouncer hash/cache), so it stays fully correct with zero prior push
+ * activity and zero observers. Gating is race-tolerant by design — the count may change between
+ * this check and use, costing at most one extra or one skipped frame around a connect/disconnect
+ * edge.
+ */
+internal fun accessibilityEventWorkFor(
+  eventType: Int,
+  connectionCount: Int,
+): AccessibilityEventWork =
+  if (connectionCount > 0) {
+    AccessibilityEventWork(
+      interaction = interactionDispatchFor(eventType),
+      refreshesHierarchy = triggersHierarchyRefresh(eventType),
+    )
+  } else {
+    AccessibilityEventWork.NONE
+  }
+
+/**
+ * Debounced-scroll accumulation ([CtrlProxy.pendingScrollDeltaX] / `Y` / package name) tagged with
+ * the [WebSocketServer.observerSessionGeneration] it was accumulated under, modeled as an immutable
+ * value so the cross-session discard is unit-testable.
+ */
+internal data class PendingScroll(
+  val deltaX: Int,
+  val deltaY: Int,
+  val packageName: String?,
+  val sessionGeneration: Int,
+) {
+  companion object {
+    /** No accumulation yet, under no session. */
+    val NONE = PendingScroll(deltaX = 0, deltaY = 0, packageName = null, sessionGeneration = 0)
+  }
+}
+
+/**
+ * Fold one scroll sample into the pending accumulation, FIRST discarding any accumulation that
+ * belongs to a prior observer session (issue #5470 review — the event-free-gap hole in the earlier
+ * fix). Scroll deltas accumulate across the ~300ms scroll debounce; if a client disconnects and a
+ * new one connects before the next scroll — even with no accessibility event in between — the
+ * previous session's deltas must NOT combine with the new session's first scroll and broadcast a
+ * bogus combined value.
+ *
+ * [currentGeneration] is [WebSocketServer.observerSessionGeneration], which advances only on the
+ * empty→non-empty edge. When it differs from the accumulation's tagged
+ * [PendingScroll.sessionGeneration] the observer set emptied and a new session began since the last
+ * sample, so we start from [PendingScroll.NONE] before adding this sample; when it matches — a
+ * client stayed continuously connected, including when a concurrent client merely joined — the
+ * in-flight accumulation is preserved and nothing is dropped. The check runs at sample time, so it
+ * is correct regardless of whether any event fired during the gap.
+ */
+internal fun accumulatePendingScroll(
+  current: PendingScroll,
+  deltaX: Int,
+  deltaY: Int,
+  packageName: String?,
+  currentGeneration: Int,
+): PendingScroll {
+  val base = if (current.sessionGeneration == currentGeneration) current else PendingScroll.NONE
+  return PendingScroll(
+    deltaX = base.deltaX + deltaX,
+    deltaY = base.deltaY + deltaY,
+    packageName = packageName,
+    sessionGeneration = currentGeneration,
+  )
+}
+
 internal fun navigationEventResponse(event: TimestampedNavigationEvent): NavigationEventResponse =
   NavigationEventResponse(
     timestamp = event.timestamp,
@@ -613,6 +718,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   @Volatile private var pendingScrollDeltaX: Int = 0
   @Volatile private var pendingScrollDeltaY: Int = 0
   private var pendingScrollPackageName: String? = null
+
+  // The WebSocketServer.observerSessionGeneration the pending scroll deltas were accumulated under.
+  // A change means the observer set emptied and a new session began since the last sample (issue
+  // #5470 review); the next scroll discards the stale accumulation instead of combining across
+  // sessions. A concurrent client joining does NOT change it, so an in-flight scroll is preserved.
+  @Volatile private var pendingScrollSessionGeneration: Int = 0
 
   private data class ScreenshotCapturePayload(
     val base64Image: String,
@@ -2134,10 +2245,31 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         lastWindowClassName = event.className?.toString()
       }
 
+      // Advance the frameContext staleness token on every UI-changing event REGARDLESS of observers
+      // (issue #5470 review). If it froze while unobserved, a token minted before the last client
+      // disconnected could still pass the daemon/runner staleness check after reconnect even though
+      // the screen changed during the gap, aiming an input action at the wrong UI state. This is a
+      // cheap atomic increment maintaining the invariant; only the expensive work below is gated.
+      if (advancesFrameContext(event.eventType)) {
+        frameContext.incrementAndGet()
+      }
+
+      val connectionCount =
+        if (::webSocketServer.isInitialized) webSocketServer.getConnectionCount() else 0
+
+      // "Is anyone observing?" gate (issue #5470). Both the interaction/scroll recording below and
+      // the debounced hierarchy refresh further down are PUSH work only a connected client
+      // consumes, so with zero connections we skip them — before touching event.source, allocating,
+      // extracting, or hashing. The frameContext token above still advanced. Stale cross-session
+      // scroll deltas are discarded at scroll-accumulation time via accumulatePendingScroll (keyed
+      // on the observer-session generation), so no observer-gap cleanup is needed here. The pull
+      // path (request_hierarchy) does not go through here and stays functional with zero observers.
+      val work = accessibilityEventWorkFor(event.eventType, connectionCount)
+
       // Broadcast interaction events for telemetry tracking. Classification is routed through the
       // shared [interactionDispatchFor] so the subscribed event-type mask (derived from the same
       // classifier) can never drift from what this `when` actually acts on.
-      when (interactionDispatchFor(event.eventType)) {
+      when (work.interaction) {
         InteractionDispatch.TAP -> recordInteractionEvent(event, "tap")
         InteractionDispatch.LONG_PRESS -> recordInteractionEvent(event, "longPress")
         // Compose doesn't fire TYPE_VIEW_CLICKED — detect taps via content changes
@@ -2162,17 +2294,17 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             recordInteractionEvent(event, "inputText")
           }
         }
-        InteractionDispatch.SCROLL -> {
-          frameContext.incrementAndGet()
-          recordDebouncedScroll(event)
-        }
+        // frameContext already advanced above (unconditionally); here we only do the gated,
+        // expensive scroll recording, which runs solely when observed.
+        InteractionDispatch.SCROLL -> recordDebouncedScroll(event)
         null -> {} // event type this service does not act on
       }
 
-      // Delegate to the smart debouncer for content/window changes (same shared classifier).
-      // The debouncer uses structural hash comparison to detect animation vs real changes.
-      if (triggersHierarchyRefresh(event.eventType)) {
-        frameContext.incrementAndGet()
+      // Delegate to the smart debouncer for content/window changes (same shared classifier). The
+      // debouncer uses structural hash comparison to detect animation vs real changes. Gated on an
+      // observer (issue #5470): with no client connected, work.refreshesHierarchy is false, so the
+      // extraction/hash is skipped. The frameContext token advanced unconditionally above.
+      if (work.refreshesHierarchy) {
         if (::hierarchyDebouncer.isInitialized) {
           hierarchyDebouncer.onAccessibilityEvent()
         }
@@ -2188,7 +2320,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   private fun recordInteractionEvent(event: AccessibilityEvent, type: String) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
+    // Observer gate (issue #5470): early-return BEFORE reading event.source / getBoundsInScreen /
+    // allocating when nobody is connected. onAccessibilityEvent already gates dispatch on the same
+    // count; this is the defensive backstop for the scroll/debounced callers, and
+    // getConnectionCount
+    // > 0 also implies the server is running.
+    if (!::webSocketServer.isInitialized || webSocketServer.getConnectionCount() <= 0) {
       return
     }
 
@@ -2290,12 +2427,36 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    */
   private fun recordDebouncedScroll(event: AccessibilityEvent) {
     val now = System.currentTimeMillis()
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-      pendingScrollDeltaX += event.scrollDeltaX
-      pendingScrollDeltaY += event.scrollDeltaY
-    }
-    // Store package name — don't hold the event reference (Android recycles it)
-    pendingScrollPackageName = event.packageName?.toString()
+    // Only observed events reach here (the onAccessibilityEvent gate), so observerSessionGeneration
+    // reflects the current session. Fold this sample in through accumulatePendingScroll, which
+    // discards any accumulation tagged with a prior session first — closing the event-free-gap hole
+    // where a disconnect+reconnect between samples would otherwise let stale deltas combine with
+    // the
+    // first post-reconnect scroll (issue #5470 review). The generation is stable while any client
+    // stays connected, so a concurrent client joining mid-scroll does not drop the in-flight
+    // deltas.
+    // Store extracted fields, not the event reference (Android recycles it).
+    val sampleDeltaX = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) event.scrollDeltaX else 0
+    val sampleDeltaY = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) event.scrollDeltaY else 0
+    val currentGeneration =
+      if (::webSocketServer.isInitialized) webSocketServer.observerSessionGeneration() else 0
+    val accumulated =
+      accumulatePendingScroll(
+        PendingScroll(
+          pendingScrollDeltaX,
+          pendingScrollDeltaY,
+          pendingScrollPackageName,
+          pendingScrollSessionGeneration,
+        ),
+        sampleDeltaX,
+        sampleDeltaY,
+        event.packageName?.toString(),
+        currentGeneration,
+      )
+    pendingScrollDeltaX = accumulated.deltaX
+    pendingScrollDeltaY = accumulated.deltaY
+    pendingScrollPackageName = accumulated.packageName
+    pendingScrollSessionGeneration = accumulated.sessionGeneration
 
     if (now - lastScrollBroadcastMs >= scrollDebounceMs) {
       lastScrollBroadcastMs = now

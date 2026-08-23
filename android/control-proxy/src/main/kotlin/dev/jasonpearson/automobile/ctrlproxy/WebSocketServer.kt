@@ -189,6 +189,14 @@ class WebSocketServer(
   private val firstClientConnection = CompletableDeferred<Unit>()
   private var activeClientConnection = CompletableDeferred<Unit>()
 
+  /**
+   * Observer-session generation: bumped ONLY on the empty→non-empty edge (the first client of a new
+   * session connecting after the observer set was empty), never when a second/third concurrent
+   * client joins. Guarded by the same `connections` monitor as every add/remove, so the 0→1 check
+   * reads a consistent size. See [observerSessionGeneration].
+   */
+  private var observerSessionGen = 0
+
   // Flow to broadcast messages to all connected clients
   private val _messageFlow = MutableSharedFlow<String>(replay = 0, extraBufferCapacity = 10)
 
@@ -251,6 +259,14 @@ class WebSocketServer(
                   )
 
                   synchronized(connections) {
+                    // Bump the observer-session generation only when this connection is the first
+                    // of
+                    // a new session (the set was empty before this add), NOT when a concurrent
+                    // client joins an already-observed session. Checked against the pre-add size
+                    // inside the same monitor that guards every add/remove.
+                    if (connections.isEmpty()) {
+                      observerSessionGen++
+                    }
                     connections.add(this)
                     activeClientConnection.complete(Unit)
                   }
@@ -560,6 +576,20 @@ class WebSocketServer(
   fun getConnectionCount(): Int {
     return synchronized(connections) { connections.size }
   }
+
+  /**
+   * Observer-session generation: a marker that is STABLE for as long as at least one client stays
+   * continuously connected, and advances only after the observer set has emptied and a new client
+   * arrives (the empty→non-empty edge). Unlike [getConnectionCount] (the live count, which returns
+   * to 1 after a reconnect and so cannot distinguish a continuous client from a reconnected one),
+   * and unlike a total-connections counter (which would also advance when a SECOND concurrent
+   * client joins), this changes exactly once per observer session.
+   *
+   * Observers use it as a session marker to discard state accumulated under a previous session
+   * after any disconnect — including one with no intervening activity (issue #5470) — while NOT
+   * discarding a still-connected client's in-flight state when a concurrent client joins.
+   */
+  fun observerSessionGeneration(): Int = synchronized(connections) { observerSessionGen }
 
   /** Suspends until a client has completed the WebSocket handshake. */
   suspend fun awaitFirstClientConnection() {

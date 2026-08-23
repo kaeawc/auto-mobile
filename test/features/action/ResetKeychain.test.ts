@@ -28,7 +28,7 @@ describe("ResetKeychain", () => {
     const simctl = new FakeSimCtlClient();
     const action = new ResetKeychain(simulatorDevice, simctl);
 
-    const result = await action.execute({ appId: APP_ID, confirm: true });
+    const result = await action.execute({ appId: APP_ID, confirm: true, explicitlyTargeted: true });
 
     expect(result.success).toBe(true);
     expect(result.deviceId).toBe(simulatorDevice.deviceId);
@@ -48,14 +48,26 @@ describe("ResetKeychain", () => {
     ]);
   });
 
+  test("refuses to run against an ambiently-resolved device (no explicit target) and issues no command", async () => {
+    const simctl = new FakeSimCtlClient();
+    const action = new ResetKeychain(simulatorDevice, simctl);
+
+    const promise = action.execute({ appId: APP_ID, confirm: true, explicitlyTargeted: false });
+    await expect(promise).rejects.toBeInstanceOf(ActionableError);
+    await expect(promise).rejects.toThrow(/explicit device target/);
+    expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
+  });
+
   test("refuses to run without explicit confirmation and issues no command", async () => {
     const simctl = new FakeSimCtlClient();
     const action = new ResetKeychain(simulatorDevice, simctl);
 
-    await expect(action.execute({ appId: APP_ID, confirm: false })).rejects.toBeInstanceOf(
-      ActionableError,
-    );
-    await expect(action.execute({ appId: APP_ID, confirm: false })).rejects.toThrow(/confirm: true/);
+    await expect(
+      action.execute({ appId: APP_ID, confirm: false, explicitlyTargeted: true }),
+    ).rejects.toBeInstanceOf(ActionableError);
+    await expect(
+      action.execute({ appId: APP_ID, confirm: false, explicitlyTargeted: true }),
+    ).rejects.toThrow(/confirm: true/);
     expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
   });
 
@@ -63,7 +75,9 @@ describe("ResetKeychain", () => {
     const simctl = new FakeSimCtlClient();
     const action = new ResetKeychain(physicalDevice, simctl);
 
-    await expect(action.execute({ appId: APP_ID, confirm: true })).rejects.toThrow(/#5188/);
+    await expect(
+      action.execute({ appId: APP_ID, confirm: true, explicitlyTargeted: true }),
+    ).rejects.toThrow(/#5188/);
     expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
   });
 
@@ -71,7 +85,9 @@ describe("ResetKeychain", () => {
     const simctl = new FakeSimCtlClient();
     const action = new ResetKeychain(androidDevice, simctl);
 
-    await expect(action.execute({ appId: APP_ID, confirm: true })).rejects.toThrow(/#5190/);
+    await expect(
+      action.execute({ appId: APP_ID, confirm: true, explicitlyTargeted: true }),
+    ).rejects.toThrow(/#5190/);
     expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
   });
 
@@ -83,7 +99,7 @@ describe("ResetKeychain", () => {
     );
     const action = new ResetKeychain(simulatorDevice, simctl);
 
-    const promise = action.execute({ appId: APP_ID, confirm: true });
+    const promise = action.execute({ appId: APP_ID, confirm: true, explicitlyTargeted: true });
     await expect(promise).rejects.toBeInstanceOf(ActionableError);
     await expect(promise).rejects.toThrow(/simctl is not available/);
   });
@@ -96,7 +112,7 @@ describe("ResetKeychain", () => {
     );
     const action = new ResetKeychain(simulatorDevice, simctl);
 
-    const promise = action.execute({ appId: APP_ID, confirm: true });
+    const promise = action.execute({ appId: APP_ID, confirm: true, explicitlyTargeted: true });
     await expect(promise).rejects.toBeInstanceOf(ActionableError);
     await expect(promise).rejects.toThrow(/Failed to reset the iOS Simulator Keychain/);
   });

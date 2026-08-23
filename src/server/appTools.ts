@@ -451,8 +451,16 @@ export function registerAppTools() {
   };
 
   const resetKeychainHandler = async (device: BootedDevice, args: ResetKeychainArgs) => {
+    // A destructive, device-wide reset must target an explicitly selected device.
+    // deviceId/device-label/sessionUuid are the device-bound selectors; if none is
+    // present the device was ambiently resolved and the action refuses to run.
+    const explicitlyTargeted = Boolean(args.deviceId || args.device || args.sessionUuid);
     const action = new ResetKeychain(device);
-    const result = await action.execute({ appId: args.appId, confirm: args.confirm });
+    const result = await action.execute({
+      appId: args.appId,
+      confirm: args.confirm,
+      explicitlyTargeted,
+    });
 
     return createJSONToolResponse({ ...result });
   };

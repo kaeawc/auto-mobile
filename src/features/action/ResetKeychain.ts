@@ -26,6 +26,15 @@ export interface ResetKeychainOptions {
    * caller passes `confirm: true`.
    */
   confirm: boolean;
+  /**
+   * Whether the caller supplied an explicit device-bound selector (a `deviceId`,
+   * a `device` label, or a `sessionUuid`) rather than letting the device be
+   * ambiently resolved. Device targeting fields are optional at the tool schema
+   * boundary, so without this guard `registerDeviceAware` would fall back to an
+   * ambient/auto-started simulator — this destructive, device-wide reset must
+   * never hit a simulator the caller did not explicitly select (issue #5187).
+   */
+  explicitlyTargeted: boolean;
 }
 
 /**
@@ -61,17 +70,29 @@ export class ResetKeychain {
     const deviceId = this.device.deviceId;
     const appId = options.appId;
 
+    // Refuse to run against an ambiently-resolved device. The tool's targeting
+    // fields are optional, so without an explicit selector the device layer would
+    // reuse the current simulator or auto-start one — a destructive, device-wide
+    // Keychain wipe must never land on a simulator the caller did not select.
+    if (!options.explicitlyTargeted) {
+      throw new ActionableError(
+        `Refusing to reset the Keychain without an explicit device target. This is a ` +
+          `destructive, device-wide operation, so it will not run against an ambiently ` +
+          `selected device. Provide a deviceId, a device label, or a sessionUuid.`,
+      );
+    }
+
     if (this.device.platform === "android") {
       // Scoped, app-owned Android Keystore reset is not implemented yet (#5190).
       throw new ActionableError(
         `Scoped Keystore reset for '${appId}' is not yet implemented on Android (tracked in #5190). ` +
-          `Only iOS Simulator device-wide Keychain reset is currently supported.`
+          `Only iOS Simulator device-wide Keychain reset is currently supported.`,
       );
     }
 
     if (this.device.platform !== "ios") {
       throw new ActionableError(
-        "Keychain reset is only supported on iOS simulators (Android Keystore support is tracked in #5190)"
+        "Keychain reset is only supported on iOS simulators (Android Keystore support is tracked in #5190)",
       );
     }
 
@@ -80,7 +101,7 @@ export class ResetKeychain {
     if (!isIosSimulatorUdid(deviceId)) {
       throw new ActionableError(
         `Scoped Keychain reset for '${appId}' is not yet implemented on physical iOS devices ` +
-          `(tracked in #5188). Only iOS Simulator device-wide reset is currently supported.`
+          `(tracked in #5188). Only iOS Simulator device-wide reset is currently supported.`,
       );
     }
 
@@ -88,7 +109,7 @@ export class ResetKeychain {
       throw new ActionableError(
         `Refusing to reset the iOS Simulator Keychain without explicit confirmation. ` +
           `iOS Simulator only supports a device-wide reset, so this erases ALL apps' Keychain ` +
-          `data on simulator ${deviceId} — not just '${appId}'. Set confirm: true to proceed.`
+          `data on simulator ${deviceId} — not just '${appId}'. Set confirm: true to proceed.`,
       );
     }
 
@@ -97,7 +118,7 @@ export class ResetKeychain {
     } catch (error) {
       throw toActionableError(
         error,
-        `Failed to reset the iOS Simulator Keychain on simulator ${deviceId}`
+        `Failed to reset the iOS Simulator Keychain on simulator ${deviceId}`,
       );
     }
 

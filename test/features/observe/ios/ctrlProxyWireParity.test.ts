@@ -69,6 +69,7 @@ const SWIFT_REQUEST_TYPES = [
   "get_traversal_order",
   "add_highlight",
   "get_voiceover_state",
+  "set_voiceover_state",
   "list_preference_files",
   "get_preferences",
   "get_preference",

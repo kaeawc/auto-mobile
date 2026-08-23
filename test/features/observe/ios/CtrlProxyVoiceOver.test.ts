@@ -300,4 +300,65 @@ describe("CtrlProxyVoiceOver", function() {
       }
     });
   });
+
+  describe("requestSetVoiceOverEnabled", function() {
+    test("emits set_voiceover_state with the enabled param and resolves on success", async function() {
+      const { factory, getSocket } = createCapturingFactory(fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+
+      try {
+        const resultPromise = client.requestSetVoiceOverEnabled(true);
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+
+        const sentMsg = commandPayloads(socket!)[0];
+        expect(sentMsg.type).toBe("set_voiceover_state");
+        expect((sentMsg as { enabled?: boolean }).enabled).toBe(true);
+        expect(typeof sentMsg.requestId).toBe("string");
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "voiceover_set_result",
+          requestId: sentMsg.requestId,
+          success: true,
+          totalTimeMs: 3,
+        }));
+
+        const result = await resultPromise;
+        expect(result.success).toBe(true);
+      } finally {
+        await client.close();
+      }
+    });
+
+    test("resolves a runner failure as a typed result (never a silent success)", async function() {
+      const { factory, getSocket } = createCapturingFactory(fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+
+      try {
+        const resultPromise = client.requestSetVoiceOverEnabled(false);
+        const socket = await waitForSocket(getSocket);
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+
+        const sentMsg = commandPayloads(socket!)[0];
+        expect((sentMsg as { enabled?: boolean }).enabled).toBe(false);
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "voiceover_set_result",
+          requestId: sentMsg.requestId,
+          success: false,
+          error: "VoiceOver toggle row not found",
+          totalTimeMs: 4,
+        }));
+
+        const result = await resultPromise;
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("VoiceOver toggle row not found");
+      } finally {
+        await client.close();
+      }
+    });
+  });
 });

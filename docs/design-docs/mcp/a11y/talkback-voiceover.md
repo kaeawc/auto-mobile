@@ -7,7 +7,7 @@
 > - **Android (TalkBack):** detection via ADB secure settings; TalkBack-aware `tapOn` (direct `ACTION_CLICK` activation, capability-gated semantic `ClickableSpan` activation, and opt-in cursor navigation behind the `screen-reader-navigation` feature flag) and `swipeOn` (`ACTION_SCROLL_FORWARD`/`BACKWARD` with a two-finger fallback).
 > - **iOS (VoiceOver):** detection via CtrlProxy and VoiceOver-aware tap (label-based accessibility activation). VoiceOver scrolling is unsupported: CtrlProxy scroll endpoints synthesize XCTest swipes, which do not reach VoiceOver, and there is no functional three-finger gesture fallback. The runner reports the VoiceOver cursor when the foreground app supplies SDK-enriched hierarchy data.
 >
-> **Still open:** iOS focus *control* (set/clear focus, cursor stepping), VoiceOver Rotor, Magic Tap, and physical-device VoiceOver toggle. See [`voiceover-talkback-parity.md`](./voiceover-talkback-parity.md) — the source of truth for remaining gaps — and the [Status Glossary](../../status-glossary.md) for chip definitions.
+> **Still open:** iOS focus *control* (set/clear focus, cursor stepping), VoiceOver Rotor, and Magic Tap. See [`voiceover-talkback-parity.md`](./voiceover-talkback-parity.md) — the source of truth for remaining gaps — and the [Status Glossary](../../status-glossary.md) for chip definitions.
 
 ## Overview
 
@@ -193,6 +193,33 @@ iOS VoiceOver follows the same phased approach. Key differences:
 | Focus API | `FOCUS_ACCESSIBILITY` | `UIAccessibilityFocus` |
 | Rotor | No equivalent | Two-finger rotate for navigation modes |
 
+#### Enabling/disabling VoiceOver
+
+The `accessibility { voiceover }` tool toggles VoiceOver through two strategies,
+chosen by device type (`VoiceOverToggle`):
+
+- **Simulator** — writes `com.apple.Accessibility VoiceOverTouchEnabled` via
+  `xcrun simctl spawn … defaults write`, posts the
+  `com.apple.accessibility.VoiceOverStatusDidChange` Darwin notification, and
+  kickstarts/kills `com.apple.VoiceOverTouch`, then re-detects to confirm.
+- **Physical device** — there is no command-line write into a real device's
+  system-preferences domain (no `simctl`/`defaults`/`notifyutil` analog), and no
+  public toggle API. The only realistic mechanism is automating the **Settings
+  app** through the CtrlProxy runner (`set_voiceover_state` → `handleSetVoiceOverState`):
+  deep-link to `App-Prefs:root=ACCESSIBILITY`, read the VoiceOver switch, and tap
+  only when it differs.
+
+  This physical path is deliberately **fragile and narrowly scoped**:
+  - **English locale only** for initial support — the switch is matched by the
+    "VoiceOver" label; other locales are not yet handled.
+  - **Layout drift** across iOS versions can move or rename the switch; a switch
+    that can't be located returns `supported:false` with a reason (surfaced as an
+    `ActionableError`), never a silent success.
+  - **Idempotent by necessity**: the runner early-returns when VoiceOver is
+    already in the requested state and does *not* tap. Once VoiceOver is on, every
+    tap requires the double-tap idiom, so a blind re-tap would be interpreted as a
+    VoiceOver activation rather than a toggle.
+
 ---
 
 ## Still Open
@@ -207,11 +234,11 @@ source of truth for remaining gaps:
   Standard headings are instead exposed as `role: "heading"` in SDK-backed iOS observations;
   custom rotors and Rotor-driven cursor navigation remain unavailable (parity doc Gap 4).
 - **VoiceOver Magic Tap**: two-finger double-tap for an app's primary action (parity doc Gap 5).
-- **Physical-device VoiceOver toggle**: simulator-only today; no known `idevice` equivalent.
 - **Announcement control**: trigger screen-reader announcements for user testing.
 - **Accessibility tree export**: full node hierarchy with actions, for debugging.
 - **TalkBack context menus**: local/global menu gestures.
 
 Delivered since this document was written, and no longer "future": TalkBack and VoiceOver
  detection, tap adaptation on both platforms, Android scroll-action swipe with a two-finger
- fallback, unsupported iOS VoiceOver scrolling, and WCAG auditing alongside screen-reader support.
+ fallback, unsupported iOS VoiceOver scrolling, physical-device VoiceOver enable/disable via
+ Settings automation, and WCAG auditing alongside screen-reader support.

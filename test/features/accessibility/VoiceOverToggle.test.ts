@@ -3,6 +3,7 @@ import { VoiceOverToggle } from "../../../src/features/accessibility/VoiceOverTo
 import { FakeIosVoiceOverDetector } from "../../fakes/FakeIosVoiceOverDetector";
 import { FakeProcessExecutor } from "../../fakes/FakeProcessExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import type { BootedDevice } from "../../../src/models";
 
 const SIMULATOR_DEVICE: BootedDevice = {
@@ -30,21 +31,66 @@ describe("VoiceOverToggle", () => {
     fakeDetector.reset();
   });
 
-  describe("physical device", () => {
-    test("returns supported:false for physical device UDID", async () => {
-      const toggle = new VoiceOverToggle(PHYSICAL_DEVICE, fakeDetector, fakeExec);
-      const result = await toggle.toggle(true);
+  describe("physical device (Settings-driven via CtrlProxy)", () => {
+    let fakeClient: FakeIOSCtrlProxy;
+
+    const makeToggle = () =>
+      new VoiceOverToggle(PHYSICAL_DEVICE, fakeDetector, fakeExec, defaultPhysicalTimer(), () => fakeClient);
+
+    const defaultPhysicalTimer = () => {
+      const t = new FakeTimer();
+      t.enableAutoAdvance();
+      return t;
+    };
+
+    beforeEach(() => {
+      fakeClient = new FakeIOSCtrlProxy();
+    });
+
+    test("enable routes to the runner and reports applied:true", async () => {
+      const result = await makeToggle().toggle(true);
+
+      expect(result.supported).toBe(true);
+      expect(result.applied).toBe(true);
+      expect(result.currentState).toBe(true);
+      expect(result.reason).toBeUndefined();
+      expect(fakeClient.getSetVoiceOverEnabledHistory()).toEqual([true]);
+    });
+
+    test("disable routes to the runner and reports applied:false state", async () => {
+      const result = await makeToggle().toggle(false);
+
+      expect(result.supported).toBe(true);
+      expect(result.applied).toBe(true);
+      expect(result.currentState).toBe(false);
+      expect(fakeClient.getSetVoiceOverEnabledHistory()).toEqual([false]);
+    });
+
+    test("never runs simctl for a physical device (no Simulator mechanism)", async () => {
+      await makeToggle().toggle(true);
+
+      expect(fakeExec.getExecutedCommands()).toHaveLength(0);
+    });
+
+    test("invalidates the detector cache after a successful physical toggle", async () => {
+      await makeToggle().toggle(true);
+
+      expect(fakeDetector.getInvalidatedDevices()).toContain(PHYSICAL_DEVICE.deviceId);
+    });
+
+    test("surfaces a runner failure as supported:false with the reason (never silent success)", async () => {
+      fakeClient.setSetVoiceOverEnabledResult({
+        success: false,
+        error: "VoiceOver toggle row not found",
+      });
+
+      const result = await makeToggle().toggle(true);
 
       expect(result.supported).toBe(false);
       expect(result.applied).toBe(false);
-      expect(result.reason).toBe("VoiceOver toggle is only supported on iOS Simulator");
-    });
-
-    test("does not run any process commands for physical device", async () => {
-      const toggle = new VoiceOverToggle(PHYSICAL_DEVICE, fakeDetector, fakeExec);
-      await toggle.toggle(true);
-
-      expect(fakeExec.getExecutedCommands()).toHaveLength(0);
+      expect(result.reason).toContain("VoiceOver toggle row not found");
+      // A failed toggle must not falsely invalidate the cache as if state changed.
+      expect(fakeDetector.getInvalidatedDevices()).not.toContain(PHYSICAL_DEVICE.deviceId);
     });
   });
 
@@ -243,11 +289,20 @@ describe("VoiceOverToggle", () => {
       expect(fakeDetector.getInvalidatedDevices()).toContain(SIMULATOR_DEVICE.deviceId);
     });
 
-    test("does not invalidate cache for physical device (no commands run)", async () => {
-      const toggle = new VoiceOverToggle(PHYSICAL_DEVICE, fakeDetector, fakeExec);
+    test("invalidates cache for physical device after a Settings-driven toggle", async () => {
+      const fakeClient = new FakeIOSCtrlProxy();
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+      const toggle = new VoiceOverToggle(
+        PHYSICAL_DEVICE,
+        fakeDetector,
+        fakeExec,
+        fakeTimer,
+        () => fakeClient,
+      );
       await toggle.toggle(true);
 
-      expect(fakeDetector.getInvalidatedDevices()).toHaveLength(0);
+      expect(fakeDetector.getInvalidatedDevices()).toContain(PHYSICAL_DEVICE.deviceId);
     });
   });
 });

@@ -43,6 +43,7 @@ final class ErrorResponseTypeTests: XCTestCase {
             .getTraversalOrder: .traversalOrderResult,
             .addHighlight: .highlightResponse,
             .getVoiceOverState: .voiceOverStateResult,
+            .setVoiceOverState: .voiceOverSetResult,
             .listPreferenceFiles: .preferenceFiles,
             .getPreferences: .preferences,
             .getPreference: .getPreferenceResult,

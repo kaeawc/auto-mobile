@@ -7,7 +7,7 @@ import { iosVoiceOverDetector } from "../../utils/IosVoiceOverDetector";
 import { DefaultHostCommandExecutor, type HostCommandExecutor } from "../../utils/HostCommandExecutor";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { type Timer, defaultTimer } from "../../utils/SystemTimer";
-import { IOSCtrlProxyClient } from "../observe/ios";
+import { IOSCtrlProxyClient, type IOSCtrlProxy } from "../observe/ios";
 
 const VOICEOVER_CONFIRMATION_TIMEOUT_MS = 10_000;
 const VOICEOVER_CONFIRMATION_POLL_INTERVAL_MS = 500;
@@ -17,18 +17,58 @@ export class VoiceOverToggle {
     private readonly device: BootedDevice,
     private readonly detector: IosVoiceOverDetector = iosVoiceOverDetector,
     private readonly processExecutor: HostCommandExecutor = new DefaultHostCommandExecutor(),
-    private readonly timer: Timer = defaultTimer
+    private readonly timer: Timer = defaultTimer,
+    // Resolve lazily so the iOS singleton is only touched when the toggle runs,
+    // and so tests can inject a fake CtrlProxy for the physical-device path.
+    private readonly clientProvider: () => IOSCtrlProxy = () =>
+      IOSCtrlProxyClient.getInstance(this.device)
   ) {}
 
   async toggle(enabled: boolean): Promise<VoiceOverResult> {
     if (!this.isSimulator()) {
+      return this.toggleViaSettings(enabled);
+    }
+
+    return this.toggleViaSimctl(enabled);
+  }
+
+  /**
+   * Physical-device path: drive the Settings app through the CtrlProxy runner.
+   *
+   * There is no command-line write into a real device's system-preferences
+   * domain (no `simctl`/`defaults`/`notifyutil` analog), so the runner opens
+   * `App-Prefs:root=ACCESSIBILITY`, reads the VoiceOver switch, and taps only
+   * when it differs — early-returning when already in the target state because
+   * once VoiceOver is on every tap requires the double-tap idiom (#2501).
+   *
+   * We trust the runner's `success` (it confirms/early-returns on-device) rather
+   * than re-detecting host-side: unlike the Simulator's fire-and-forget `simctl`
+   * write, the Settings tap is synchronous on the device. A failure (e.g. the
+   * locale-fragile Settings row could not be found) surfaces as
+   * `supported:false` with the reason — never a silent success (#2501, inv. 5).
+   */
+  private async toggleViaSettings(enabled: boolean): Promise<VoiceOverResult> {
+    const client = this.clientProvider();
+    const result = await client.requestSetVoiceOverEnabled(enabled);
+    if (!result.success) {
       return {
         supported: false,
         applied: false,
-        reason: "VoiceOver toggle is only supported on iOS Simulator"
+        reason: result.error ?? "Failed to toggle VoiceOver via Settings"
       };
     }
 
+    // Parity with the Simulator path: a successful toggle changes device state,
+    // so the cached detection is now stale.
+    this.detector.invalidateCache(this.device.deviceId);
+    return {
+      supported: true,
+      applied: true,
+      currentState: enabled
+    };
+  }
+
+  private async toggleViaSimctl(enabled: boolean): Promise<VoiceOverResult> {
     // Always run the simctl commands — they are idempotent and skipping them
     // based on a detection result is unsafe: IosVoiceOverDetector maps
     // detection failures to false, so a CtrlProxy outage would cause
@@ -73,7 +113,7 @@ export class VoiceOverToggle {
     // requested one (#3921). Detection failure maps to `false`, so a confirmation
     // that cannot be read reports the toggle as not-applied (conservative).
     // Resolve lazily so the iOS singleton is only touched on the iOS path.
-    const client = IOSCtrlProxyClient.getInstance(this.device);
+    const client = this.clientProvider();
     const confirmedEnabled = await this.waitForState(enabled, client);
 
     return {
@@ -92,7 +132,7 @@ export class VoiceOverToggle {
    * Poll the post-apply confirmation through the injectable timer so a successful
    * enable is not reported as failed merely because its service is still starting.
    */
-  private async waitForState(enabled: boolean, client: IOSCtrlProxyClient): Promise<boolean> {
+  private async waitForState(enabled: boolean, client: IOSCtrlProxy): Promise<boolean> {
     const deadline = this.timer.now() + VOICEOVER_CONFIRMATION_TIMEOUT_MS;
     let confirmedEnabled = false;
 

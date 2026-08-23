@@ -116,6 +116,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   private recentAppsResult: CtrlProxyRecentAppsResult | null = null;
   private voiceOverState: boolean = false;
   private voiceOverActivateResult: CtrlProxyActionResult | null = null;
+  private setVoiceOverEnabledResult: CtrlProxyActionResult | null = null;
   private multiFingerSwipeResult: CtrlProxySwipeResult | null = null;
   private actionResult: CtrlProxyActionResult | null = null;
   private clipboardResult: CtrlProxyClipboardResult | null = null;
@@ -131,6 +132,9 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     label: string;
     action: "activate" | "long_press";
   }> = [];
+
+  // requestSetVoiceOverEnabled call history
+  private setVoiceOverEnabledHistory: boolean[] = [];
 
   private actionHistory: Array<{
     action: string;
@@ -248,6 +252,20 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
    */
   setVoiceOverActivateResult(result: CtrlProxyActionResult | null): void {
     this.voiceOverActivateResult = result;
+  }
+
+  /**
+   * Configure the result of requestSetVoiceOverEnabled (null = default success)
+   */
+  setSetVoiceOverEnabledResult(result: CtrlProxyActionResult | null): void {
+    this.setVoiceOverEnabledResult = result;
+  }
+
+  /**
+   * Get requestSetVoiceOverEnabled call history (the requested enabled values)
+   */
+  getSetVoiceOverEnabledHistory(): boolean[] {
+    return [...this.setVoiceOverEnabledHistory];
   }
 
   /**
@@ -453,6 +471,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     this.rotateHistory = [];
     this.currentOrientation = "portrait";
     this.voiceOverActivateHistory = [];
+    this.setVoiceOverEnabledHistory = [];
     this.actionHistory = [];
     this.multiFingerSwipeHistory = [];
     this.clipboardHistory = [];
@@ -963,6 +982,26 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     return {
       success: true,
       action,
+      totalTimeMs: 50,
+    };
+  }
+
+  async requestSetVoiceOverEnabled(
+    enabled: boolean,
+    timeoutMs: number = 30000,
+    perf?: PerformanceTracker,
+  ): Promise<CtrlProxyActionResult> {
+    await this.applyDelay("setVoiceOverEnabled");
+    this.checkFailure("setVoiceOverEnabled");
+
+    this.setVoiceOverEnabledHistory.push(enabled);
+
+    if (this.setVoiceOverEnabledResult) {
+      return this.setVoiceOverEnabledResult;
+    }
+
+    return {
+      success: true,
       totalTimeMs: 50,
     };
   }

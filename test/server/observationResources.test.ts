@@ -200,6 +200,45 @@ describe("session screenshot resources", () => {
     });
   });
 
+  test("returns a typed non-retryable failure when no fresh screenshot session is active", async () => {
+    setSessionScreenshotResourceDependencies({
+      resolveActiveSession: () => undefined,
+      createScreenshotService: () => createTrackedScreenshot({ success: false }),
+    });
+
+    const content = await readTemplate(
+      "automobile:device-session/session-123/screenshot",
+    );
+
+    expect(content.mimeType).toBe("application/json");
+    expect(JSON.parse(content.text!)).toEqual({
+      code: "SESSION_NOT_ACTIVE",
+      retryable: false,
+      error: "No active device session found for sessionUuid session-123.",
+    });
+  });
+
+  test("returns a typed retryable failure when fresh screenshot capture fails", async () => {
+    setSessionScreenshotResourceDependencies({
+      resolveActiveSession: () => activeSession(),
+      createScreenshotService: () => createTrackedScreenshot({
+        success: false,
+        error: "ADB screencap timed out",
+      }),
+    });
+
+    const content = await readTemplate(
+      "automobile:device-session/session-123/screenshot",
+    );
+
+    expect(content.mimeType).toBe("application/json");
+    expect(JSON.parse(content.text!)).toEqual({
+      code: "SCREENSHOT_CAPTURE_FAILED",
+      retryable: true,
+      error: "ADB screencap timed out",
+    });
+  });
+
   test("waits for a pending capture before taking a distinct fresh capture", async () => {
     let resolvePendingCapture: (result: ScreenshotResult) => void = () => {};
     const pendingCapture = new Promise<ScreenshotResult>((resolve) => {
@@ -287,7 +326,11 @@ describe("session screenshot resources", () => {
     const content = await readTemplate("automobile:device-session/session-123/screenshot");
 
     expect(content.mimeType).toBe("application/json");
-    expect(JSON.parse(content.text!).error).toContain("No active device session found");
+    expect(JSON.parse(content.text!)).toEqual({
+      code: "SESSION_OWNERSHIP_LOST",
+      retryable: false,
+      error: "Device session ownership was lost while capturing a fresh screenshot.",
+    });
   });
 
   test("replaces an older direct session for the same device", () => {

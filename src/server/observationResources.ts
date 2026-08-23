@@ -9,6 +9,7 @@ import { resolveDirectSessionDevice } from "./directSessionDeviceRegistry";
 import type { TrackedScreenshotService } from "../features/observe/screenshot/ObserveScreenshotRecorder";
 import type { BootedDevice } from "../models";
 import * as realFs from "fs/promises";
+import { errorMessage } from "../utils/describeUnknownError";
 
 interface ScreenshotFileSystem {
   stat(path: string): Promise<{ isFile(): boolean }>;
@@ -239,6 +240,24 @@ function sessionResourceError(uri: string, sessionUuid: string): ResourceContent
   };
 }
 
+type FreshSessionScreenshotFailureCode =
+  | "SESSION_NOT_ACTIVE"
+  | "SESSION_OWNERSHIP_LOST"
+  | "SCREENSHOT_CAPTURE_FAILED";
+
+function freshSessionScreenshotError(
+  uri: string,
+  code: FreshSessionScreenshotFailureCode,
+  retryable: boolean,
+  error: string,
+): ResourceContent {
+  return {
+    uri,
+    mimeType: "application/json",
+    text: JSON.stringify({ code, retryable, error }, null, 2),
+  };
+}
+
 function unauthorizedSessionResourceError(uri: string): ResourceContent {
   return {
     uri,
@@ -394,7 +413,12 @@ async function getFreshSessionScreenshot(
   }
   const activeSession = sessionScreenshotResourceDependencies.resolveActiveSession(sessionUuid);
   if (!activeSession) {
-    return sessionResourceError(uri, sessionUuid);
+    return freshSessionScreenshotError(
+      uri,
+      "SESSION_NOT_ACTIVE",
+      false,
+      `No active device session found for sessionUuid ${sessionUuid}.`,
+    );
   }
 
   try {
@@ -412,20 +436,19 @@ async function getFreshSessionScreenshot(
 
     const currentSession = sessionScreenshotResourceDependencies.resolveActiveSession(sessionUuid);
     if (currentSession?.device.deviceId !== activeSession.device.deviceId) {
-      return sessionResourceError(uri, sessionUuid);
+      return freshSessionScreenshotError(
+        uri,
+        "SESSION_OWNERSHIP_LOST",
+        false,
+        "Device session ownership was lost while capturing a fresh screenshot.",
+      );
     }
     if (!result.success || !result.path) {
-      return {
+      return freshScreenshotCaptureFailure(
         uri,
-        mimeType: "application/json",
-        text: JSON.stringify(
-          {
-            error: result.error || "Failed to capture a fresh screenshot.",
-          },
-          null,
-          2,
-        ),
-      };
+        context.signal,
+        result.error || "Failed to capture a fresh screenshot.",
+      );
     }
 
     const imageBuffer = await screenshotFileSystem.readFile(result.path);

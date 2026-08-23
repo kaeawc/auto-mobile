@@ -46,6 +46,16 @@ public data class ScreenNode(
   val discoveredAt: Long,
   val screenshotUri: String? = null,
   val provenance: List<ScreenProvenance> = emptyList(),
+  /**
+   * Desktop-side liveness token for this node's screenshot (#5088). The daemon keeps a node's
+   * screenshot at the same stable [screenshotUri] when it re-captures a newer image, so a URI-keyed
+   * thumbnail cache would keep serving the stale bitmap. The Navigation facet bumps this counter
+   * for the node whose screenshot was just re-captured (the screen the device navigated to on a
+   * same-app graph refresh); the canvas keys its screenshot load on it and invalidates the cache
+   * entry when it changes, forcing a re-fetch for exactly that node. Additive: `0` means "no
+   * re-capture observed this session" and every non-facet producer leaves it at the default.
+   */
+  val screenshotVersion: Int = 0,
 )
 
 public data class ScreenTransition(

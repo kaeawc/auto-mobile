@@ -162,7 +162,7 @@ jobs:
           # Publish adds the copy-to destination as a -K override so the key is absent (not blank) on
           # non-publish runs. Signed runs layer ci.conveyor.conf (Developer ID + notarization).
           extra_flags: >-
-            ${{ inputs.signed && '-f android/ci.conveyor.conf' || '-f android/conveyor.conf' }}${{ inputs.publish && ' -Kapp.site.copy-to=github:kaeawc/auto-mobile' || '' }}
+            ${{ inputs.signed && '-f android/ci.conveyor.conf --passphrase env:CONVEYOR_MAC_CERTIFICATE_PASSWORD' || '-f android/conveyor.conf' }}${{ inputs.publish && ' -Kapp.site.copy-to=github:kaeawc/auto-mobile' || '' }}
           signing_key: ${{ secrets.CONVEYOR_SIGNING_KEY }}
           agree_to_license: 1
         env:

@@ -30,7 +30,7 @@ fun parseHierarchyFromJson(hierarchyJson: JsonElement): ParsedHierarchy? {
     val elementMap = mutableMapOf<String, UIElementInfo>()
     val parentMap = mutableMapOf<String, String>()
 
-    val root = parseNodeElement(nodeElement, 0, 0, elementMap, parentMap) ?: return null
+    val root = parseRoots(nodeElement, elementMap, parentMap) ?: return null
 
     // Extract rotation from the ViewHierarchyResult data
     val rotation = (jsonObj["rotation"] as? JsonPrimitive)?.intOrNull ?: 0
@@ -45,6 +45,92 @@ fun parseHierarchyFromJson(hierarchyJson: JsonElement): ParsedHierarchy? {
     log.warn("Failed to parse hierarchy JSON: ${e.message}", e)
     null
   }
+}
+
+/**
+ * Class name of the synthetic root that wraps a multi-window frame. Android captures often carry
+ * several top-level windows (app + IME + System UI); wrapping them keeps the single-root
+ * [ParsedHierarchy.root] contract while ensuring the tree/diff covers every window (issue #4874).
+ */
+const val MULTI_WINDOW_ROOT_CLASS_NAME = "AutoMobile.MultiWindowRoot"
+
+/**
+ * Parse the top-level `node` element into a single root.
+ *
+ * A frame may expose one window (single object, or a one-element array) or several (array of 2+
+ * windows — app + IME + System UI). A single window is returned unwrapped so existing single-root
+ * behavior is unchanged; 2+ windows are wrapped under a synthetic root so no window is dropped and
+ * a compare/diff covers every window rather than only the first.
+ */
+private fun parseRoots(
+  nodeElement: JsonElement,
+  elementMap: MutableMap<String, UIElementInfo>,
+  parentMap: MutableMap<String, String>,
+): UIElementInfo? {
+  val rootElements =
+    when (nodeElement) {
+      is JsonArray -> nodeElement.toList()
+      is JsonObject -> listOf(nodeElement)
+      else -> return null
+    }
+
+  return when (rootElements.size) {
+    0 -> null
+    // Single window: unwrapped root at depth 0 — identical to the pre-#4874 behavior.
+    1 -> parseNodeElement(rootElements[0], 0, 0, elementMap, parentMap)
+    else -> buildMultiWindowRoot(rootElements, elementMap, parentMap)
+  }
+}
+
+/**
+ * Wrap 2+ top-level windows under a synthetic root at depth 0, each window parsed at depth 1. The
+ * synthetic root's bounds are the union of its windows so it frames the whole capture.
+ */
+private fun buildMultiWindowRoot(
+  rootElements: List<JsonElement>,
+  elementMap: MutableMap<String, UIElementInfo>,
+  parentMap: MutableMap<String, String>,
+): UIElementInfo? {
+  val windows = rootElements.mapIndexedNotNull { index, element ->
+    parseNodeElement(element, 1, index, elementMap, parentMap)
+  }
+  if (windows.isEmpty()) return null
+
+  val bounds =
+    ElementBounds(
+      left = windows.minOf { it.bounds.left },
+      top = windows.minOf { it.bounds.top },
+      right = windows.maxOf { it.bounds.right },
+      bottom = windows.maxOf { it.bounds.bottom },
+    )
+  val id = "multiwindow@d0s0:${bounds.left},${bounds.top}-${bounds.right},${bounds.bottom}"
+
+  val root =
+    UIElementInfo(
+      id = id,
+      className = MULTI_WINDOW_ROOT_CLASS_NAME,
+      resourceId = null,
+      text = null,
+      contentDescription = null,
+      bounds = bounds,
+      isClickable = false,
+      isEnabled = true,
+      isFocused = false,
+      isSelected = false,
+      isScrollable = false,
+      isCheckable = false,
+      isChecked = false,
+      depth = 0,
+      children = windows,
+      extras = emptyMap(),
+      diffState = null,
+    )
+
+  elementMap[id] = root
+  for (window in windows) {
+    parentMap[window.id] = id
+  }
+  return root
 }
 
 /** Parse a node JsonElement which can be either a single node or array of nodes. */

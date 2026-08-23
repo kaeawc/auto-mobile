@@ -4,6 +4,7 @@ import { BootedDevice, Platform } from "../models";
 import { KeepScreenAwakeManager, KeepScreenAwakeState } from "../utils/KeepScreenAwakeManager";
 import { DeviceSessionRepository, type DeviceSessionPersistence } from "../db/deviceSessionRepository";
 import { type DbWriteBarrier, getDbWriteBarrier } from "../db/dbWriteBarrier";
+import { toActionableError } from "../models/ActionableError";
 import type { ViewHierarchyResult } from "../models/ViewHierarchyResult";
 import type { ObserveResult } from "../models/ObserveResult";
 
@@ -913,6 +914,12 @@ export class SessionManager {
         await this.deviceSessionRepository.markReleased(sessionId, terminalStatus, this.timer.now(), releaseReason);
       } catch (error) {
         logger.warn(`[SessionManager] Failed to mark session released (${releaseReason}): ${error}`);
+        if (releaseSnapshot.terminal) {
+          throw toActionableError(
+            error,
+            `Failed to persist terminal release for session ${sessionId}`,
+          );
+        }
       }
       logger.info(
         pendingCleanup.length > 0

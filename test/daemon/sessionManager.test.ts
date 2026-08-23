@@ -1546,6 +1546,28 @@ describe("SessionManager", () => {
     });
   });
 
+  test("terminal release fails closed when durable fencing cannot be persisted", async () => {
+    const persistence = new FakeDeviceSessionPersistence();
+    const manager = new SessionManager(fakeTimer, persistence);
+    try {
+      await manager.createSession("lost-session", "emulator-5554", "android");
+      persistence.failure = "release";
+
+      await expect(
+        manager.releaseSession(
+          "lost-session",
+          "device-disconnected:emulator-5554;incident=emulator-loss-1",
+        ),
+      ).rejects.toThrow("Failed to persist terminal release");
+      expect(manager.getSession("lost-session")).toBeNull();
+      await expect(
+        manager.createSession("lost-session", "emulator-5560", "android"),
+      ).rejects.toThrow("terminal");
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
   test("terminal device-loss UUID remains fenced after manager restart", async () => {
     const persisted: DeviceSession = {
       session_uuid: "lost-session",

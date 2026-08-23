@@ -1966,14 +1966,23 @@ export class Daemon {
     expectedSession?: Session,
   ): Promise<void> {
     const cancelled = await executionTracker.cancelSessionUuidExecutions(sessionId, releaseReason);
-    const deviceId = expectedSession
-      ? await this.sessionManager.releaseSessionIfOwned(
-          sessionId,
-          expectedSession,
-          expectedSession.assignedDevice,
-          releaseReason,
-        )
-      : await this.sessionManager.releaseSession(sessionId, releaseReason, allowExpired);
+    let deviceId: string | null;
+    try {
+      deviceId = expectedSession
+        ? await this.sessionManager.releaseSessionIfOwned(
+            sessionId,
+            expectedSession,
+            expectedSession.assignedDevice,
+            releaseReason,
+          )
+        : await this.sessionManager.releaseSession(sessionId, releaseReason, allowExpired);
+    } catch (error) {
+      const terminalRelease = this.sessionManager.getTerminalReleaseSnapshot(sessionId);
+      if (terminalRelease) {
+        await this.devicePool.releaseDevice(terminalRelease.deviceId, sessionId);
+      }
+      throw error;
+    }
     if (deviceId) {
       await this.devicePool.releaseDevice(deviceId, sessionId);
     }

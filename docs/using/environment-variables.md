@@ -166,9 +166,13 @@ remain migration fallbacks for the enablement setting.
 
 Only AutoMobile-owned virtual devices are eligible. Android restarts its owned
 AVD today; externally started emulators, physical devices, and iOS simulators
-are never restarted. A confirmed device loss cancels and releases the active
-session and returns the machine-readable `device_lost` tool outcome rather than
-continuing the in-flight operation.
+are never restarted. A confirmed device loss cancels the in-flight operation
+and returns the machine-readable `device_lost` tool outcome. When the same AVD
+is recovered, the active session is preserved and the outcome reports
+`retry.sameSession: true` with `retry.requiresNewSession: false`; retry the
+operation with the same session UUID. Exhausted or ineligible recovery releases
+the session and reports `retry.sameSession: false` with
+`retry.requiresNewSession: true`.
 
 ## WebRTC screen streaming (`AUTOMOBILE_WEBRTC_*`)
 

@@ -519,6 +519,7 @@ export class LaunchApp extends BaseVisualChange {
     if (expectedPackageName) {
       let pushUnsubscribe: (() => void) | undefined;
       let timeoutHandle: NodeJS.Timeout | undefined;
+      let abortListener: (() => void) | undefined;
 
       const pushPromise = new Promise<string>(resolve => {
         timeoutHandle = this.timer.setTimeout(() => resolve("timeout"), timeoutMs);
@@ -539,12 +540,38 @@ export class LaunchApp extends BaseVisualChange {
           return "error" as string;
         });
 
-      const winner = await Promise.race([pushPromise, syncPromise]);
-      signal?.throwIfAborted();
-
-      // Cleanup
-      pushUnsubscribe?.();
-      if (timeoutHandle) { this.timer.clearTimeout(timeoutHandle); }
+      const abortPromise = signal
+        ? new Promise<never>((_resolve, reject) => {
+            abortListener = () => {
+              try {
+                signal.throwIfAborted();
+              } catch (error) {
+                reject(error);
+              }
+            };
+            signal.addEventListener("abort", abortListener, { once: true });
+            if (signal.aborted) {
+              abortListener();
+            }
+          })
+        : undefined;
+      let winner: string;
+      try {
+        winner = await Promise.race([
+          pushPromise,
+          syncPromise,
+          ...(abortPromise ? [abortPromise] : []),
+        ]);
+        signal?.throwIfAborted();
+      } finally {
+        pushUnsubscribe?.();
+        if (timeoutHandle) {
+          this.timer.clearTimeout(timeoutHandle);
+        }
+        if (signal && abortListener) {
+          signal.removeEventListener("abort", abortListener);
+        }
+      }
 
       if (winner === "push" || winner === "sync") {
         logger.info(`[LaunchApp] iOS hierarchy ready via ${winner} after ${this.timer.now() - startTime}ms (pkg=${expectedPackageName})`);

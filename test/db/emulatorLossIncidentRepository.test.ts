@@ -106,4 +106,54 @@ describe("EmulatorLossIncidentRepository", () => {
       outcome: "exhausted",
     });
   });
+
+  test("persists session diagnostics and replacement settlement", async () => {
+    const timer = new FakeTimer();
+    const repository = new EmulatorLossIncidentRepository(
+      timer,
+      new CountingIdGenerator("incident"),
+      50,
+      db,
+    );
+    const opened = await repository.open({
+      deviceId: "emulator-5554",
+      avdName: "Pixel_8_API_35",
+      detectionPath: "device-discovery-miss",
+      lastAdbState: "absent",
+      session: {
+        sessionUuid: "session-1",
+        state: "recovering",
+        lastHeartbeatMs: 10,
+        hasReceivedHeartbeat: true,
+        heartbeatTimeoutMs: 5_000,
+      },
+      recoveryPolicy: { onLoss: true, maxAttempts: 2 },
+    });
+    await repository.completeRecovery(opened.id, "recovered", {
+      replacementDeviceId: "emulator-5560",
+      sessionState: "active",
+    });
+
+    const reopened = new EmulatorLossIncidentRepository(
+      timer,
+      new CountingIdGenerator("other"),
+      50,
+      db,
+    );
+    await expect(reopened.get(opened.id)).resolves.toMatchObject({
+      deviceId: "emulator-5554",
+      avdName: "Pixel_8_API_35",
+      replacementDeviceId: "emulator-5560",
+      session: {
+        sessionUuid: "session-1",
+        state: "active",
+        lastHeartbeatMs: 10,
+        hasReceivedHeartbeat: true,
+        heartbeatTimeoutMs: 5_000,
+      },
+      recovery: {
+        outcome: "recovered",
+      },
+    });
+  });
 });

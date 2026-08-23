@@ -2292,11 +2292,13 @@ export class DevicePool {
       });
       if (!recovered) {
         await this.releasePreservedAdbResetSessionIfDetached(device, session.sessionId, incidentId);
+        await this.refreshEmulatorLossRecoverySettlement(incidentId, "exhausted");
       }
       return recovered ? "recovered" : "released";
     } catch (error) {
       try {
         await this.releasePreservedAdbResetSessionIfDetached(device, session.sessionId, incidentId);
+        await this.refreshEmulatorLossRecoverySettlement(incidentId, "exhausted");
       } catch (releaseError) {
         logger.warn(
           `[DevicePool] Failed to release detached session ${session.sessionId}: ${releaseError}`,
@@ -2308,6 +2310,20 @@ export class DevicePool {
     } finally {
       this.settleEmulatorLossIncident(incidentId);
     }
+  }
+
+  private async refreshEmulatorLossRecoverySettlement(
+    incidentId: string | undefined,
+    fallbackOutcome: "exhausted" | "not-attempted",
+  ): Promise<void> {
+    if (!incidentId) {
+      return;
+    }
+    const incident = await this.emulatorLossIncidentStore.get(incidentId);
+    await this.completeEmulatorLossRecovery(
+      incidentId,
+      incident?.recovery.outcome ?? fallbackOutcome,
+    );
   }
 
   private getAdbResetRecoveryDevice(
@@ -2425,6 +2441,7 @@ export class DevicePool {
       this.adbServerResetQuarantinedSessions.add(sessionId);
       this.recoveringSessionLosses.set(sessionId, { deviceId, incidentId });
     }
+    await this.settleAbandonedAdbResetIncidents(cohort, sessionTargets);
     try {
       await Promise.all(
         sessionTargets.map(({ sessionId, deviceId, incidentId }) =>
@@ -2447,6 +2464,22 @@ export class DevicePool {
         }
       }
       throw error;
+    }
+  }
+
+  private async settleAbandonedAdbResetIncidents(
+    cohort: readonly PooledDevice[],
+    sessionTargets: readonly { incidentId?: string }[],
+  ): Promise<void> {
+    const activeIncidentIds = new Set(
+      sessionTargets.flatMap(({ incidentId }) => incidentId ? [incidentId] : []),
+    );
+    for (const device of cohort) {
+      const incidentId = device.adbServerResetIncidentId;
+      if (incidentId && !activeIncidentIds.has(incidentId)) {
+        await this.finishEmulatorLossIncident(incidentId, "not-attempted");
+        delete device.adbServerResetIncidentId;
+      }
     }
   }
 

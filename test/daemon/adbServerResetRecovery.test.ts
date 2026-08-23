@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
 import { DevicePool } from "../../src/daemon/devicePool";
+import {
+  InMemoryEmulatorLossIncidentStore,
+  type EmulatorLossIncidentStore,
+} from "../../src/daemon/emulatorLossIncident";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
@@ -407,6 +411,85 @@ describe("ADB server reset session recovery", () => {
       expect(detached.devices).toHaveLength(1);
       await pool.releaseAdbServerResetCohortReservations(detached.devices);
     } finally {
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
+  test("settles an incident when heartbeat release wins during reset preparation", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const manager = new FakeDeviceManager();
+    const backingStore = new InMemoryEmulatorLossIncidentStore(timer);
+    const openStarted = Promise.withResolvers<void>();
+    const releaseOpen = Promise.withResolvers<void>();
+    const incidentStore: EmulatorLossIncidentStore = {
+      async open(input) {
+        openStarted.resolve();
+        await releaseOpen.promise;
+        return await backingStore.open(input);
+      },
+      async recordRecoveryAttempt(incidentId, attempt) {
+        await backingStore.recordRecoveryAttempt(incidentId, attempt);
+      },
+      async completeRecovery(incidentId, outcome, settlement) {
+        await backingStore.completeRecovery(incidentId, outcome, settlement);
+      },
+      async get(incidentId) {
+        return await backingStore.get(incidentId);
+      },
+      async list(limit) {
+        return await backingStore.list(limit);
+      },
+    };
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      incidentStore,
+    );
+    const device: BootedDevice = {
+      platform: "android",
+      name: "Pixel_8_API_35",
+      deviceId: "emulator-5554",
+    };
+    const image: DeviceInfo = {
+      name: device.name,
+      platform: "android",
+      isRunning: true,
+      source: "local",
+    };
+    manager.bootedDevices = [device];
+    await pool.addDevice(device, image);
+    await pool.bindOrReuseDeviceSession("session-active", device.deviceId, "android", image);
+
+    try {
+      const detaching = pool.detachAdbServerResetCohort([pool.getDevice(device.deviceId)!]);
+      await openStarted.promise;
+      await sessionManager.releaseSession("session-active", "heartbeat-timeout");
+      releaseOpen.resolve();
+      const detached = await detaching;
+      const [incident] = await backingStore.list();
+
+      expect(incident).toBeDefined();
+      await expect(
+        pool.waitForEmulatorLossIncident(incident!.id),
+      ).resolves.toMatchObject({
+        session: { state: "released" },
+        recovery: { outcome: "not-attempted" },
+      });
+      await pool.releaseAdbServerResetCohortReservations(detached.devices);
+    } finally {
+      releaseOpen.resolve();
       sessionManager.stopCleanupTimer();
     }
   });
@@ -936,6 +1019,7 @@ describe("ADB server reset session recovery", () => {
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const manager = new FakeDeviceManager();
     const releasedSessionIds: string[] = [];
+    const incidentStore = new InMemoryEmulatorLossIncidentStore(timer);
     const reboot: AndroidDeviceReboot = {
       run: async (_target, attempt) => {
         try {
@@ -955,11 +1039,15 @@ describe("ADB server reset session recovery", () => {
       new DefaultRetryExecutor(timer),
       undefined,
       undefined,
-      async (sessionId) => {
+      async (sessionId, _deviceId, releaseReason) => {
         releasedSessionIds.push(sessionId);
+        await sessionManager.releaseSession(sessionId, releaseReason);
       },
       undefined,
       reboot,
+      undefined,
+      undefined,
+      incidentStore,
     );
     const original: BootedDevice = {
       platform: "android",
@@ -985,6 +1073,11 @@ describe("ADB server reset session recovery", () => {
       ).resolves.toBe(false);
       expect(pool.getDevice(original.deviceId)).toBeNull();
       expect(releasedSessionIds).toEqual(["session-1"]);
+      const [incident] = await incidentStore.list();
+      expect(incident).toMatchObject({
+        session: { state: "released" },
+        recovery: { outcome: "exhausted" },
+      });
     } finally {
       sessionManager.stopCleanupTimer();
     }

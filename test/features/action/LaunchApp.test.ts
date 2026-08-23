@@ -119,6 +119,62 @@ describe("LaunchApp", () => {
     expect(hasStartedAppLaunch()).toBe(false);
   });
 
+  test("aborts and unsubscribes while waiting for an iOS hierarchy race", async () => {
+    const iosDevice: BootedDevice = {
+      name: "test-ios-device",
+      platform: "ios",
+      deviceId: "11111111-1111-1111-1111-111111111111",
+    };
+    const controller = new AbortController();
+    const deviceLoss = new DeviceLostError(
+      iosDevice.deviceId,
+      `device-disconnected:${iosDevice.deviceId}`,
+    );
+    let unsubscribeCount = 0;
+    const client = {
+      async getLatestHierarchy() {
+        return null;
+      },
+      onPushUpdate() {
+        return () => {
+          unsubscribeCount += 1;
+        };
+      },
+      async requestHierarchySync() {
+        return await new Promise<never>(() => {});
+      },
+    };
+    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+      client as unknown as IOSCtrlProxyClient,
+    );
+    const iosLaunchApp = new LaunchApp(
+      iosDevice,
+      fakeAdb as unknown as any,
+      null,
+      fakeTimer,
+    );
+
+    try {
+      const wait = (
+        iosLaunchApp as unknown as {
+          waitForIosHierarchyReady(
+            timeoutMs: number,
+            expectedPackageName: string,
+            signal: AbortSignal,
+          ): Promise<void>;
+        }
+      ).waitForIosHierarchyReady(5_000, packageName, controller.signal);
+      await Promise.resolve();
+      controller.abort(deviceLoss);
+
+      await expect(wait).rejects.toBe(deviceLoss);
+      expect(unsubscribeCount).toBe(1);
+      expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      getInstanceSpy.mockRestore();
+    }
+  });
+
   test("launches an Android app whose launcher activity is not MainActivity with the package resolver", async () => {
     fakeTimer.enableAutoAdvance();
     const settingsPackageName = "com.android.settings";

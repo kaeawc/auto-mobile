@@ -178,6 +178,7 @@ export class DeviceSessionRepository {
         .execute();
     } catch (error) {
       logger.warn(`[DeviceSessionRepository] Failed to mark session ${sessionUuid} ${status}: ${error}`);
+      throw error;
     }
   }
 

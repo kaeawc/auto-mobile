@@ -1095,12 +1095,18 @@ public class GesturePerformer: GesturePerforming {
             try runOnMainThread {
                 let links: [XCUIElement]
                 if let ownerResourceId {
-                    guard let owner = self.elementLocator.findElement(byResourceId: ownerResourceId) as? XCUIElement,
-                          owner.exists
-                    else {
-                        throw GestureError.elementNotFound(ownerResourceId)
+                    let owners = app.descendants(matching: .any).allElementsBoundByIndex.filter {
+                        $0.identifier == ownerResourceId &&
+                            $0.exists &&
+                            $0.isHittable &&
+                            !$0.frame.isEmpty
                     }
-                    links = owner.descendants(matching: .link).allElementsBoundByIndex
+                    guard owners.count == 1 else {
+                        throw GestureError.gestureFailed(
+                            "Semantic link owner '\(ownerResourceId)' is missing, not actionable, or ambiguous"
+                        )
+                    }
+                    links = owners[0].descendants(matching: .link).allElementsBoundByIndex
                 } else {
                     links = app.links.allElementsBoundByIndex
                 }

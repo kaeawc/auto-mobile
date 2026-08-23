@@ -9,11 +9,11 @@ import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { ResultFaker } from "../../fakes/ResultFaker";
 
-const createTapOnElement = (): TapOnElement => {
+const createTapOnElement = (platform: "android" | "ios" = "android"): TapOnElement => {
   return new TapOnElement(
     {
       name: "test-device",
-      platform: "android",
+      platform,
       deviceId: "emulator-5554",
     } as any,
     new FakeAdbClient() as any,
@@ -24,6 +24,61 @@ const createTapOnElement = (): TapOnElement => {
 };
 
 describe("TapOnElement selectedElement metadata", () => {
+  test("rejects a semantic-link owner whose resource ID is shared by another row", () => {
+    const tapOnElement = createTapOnElement();
+    const owner = ResultFaker.element({
+      text: "Account B",
+      "resource-id": "com.example:id/account_row",
+    });
+    const duplicateOwner = ResultFaker.element({
+      text: "Account A",
+      "resource-id": "com.example:id/account_row",
+    });
+    const hierarchy = {
+      hierarchy: {
+        node: [{ ...duplicateOwner, children: [] }, { ...owner, children: [] }],
+      },
+    };
+
+    expect((tapOnElement as any).hasUniqueSemanticLinkOwner(owner, hierarchy)).toBe(false);
+  });
+
+  test("accepts a semantic-link owner with a unique resource ID", () => {
+    const tapOnElement = createTapOnElement();
+    const owner = ResultFaker.element({
+      text: "Account B",
+      "resource-id": "com.example:id/account_row_b",
+    });
+    const hierarchy = {
+      hierarchy: {
+        node: [{ ...owner, children: [] }],
+      },
+    };
+
+    expect((tapOnElement as any).hasUniqueSemanticLinkOwner(owner, hierarchy)).toBe(true);
+  });
+
+  test("uses Android's complete stable selector for duplicate resource IDs", () => {
+    const tapOnElement = createTapOnElement();
+    const owner = ResultFaker.element({
+      text: "Account B",
+      "resource-id": "com.example:id/account_row",
+      "unique-id": "account-row-b",
+    });
+    const duplicateOwner = ResultFaker.element({
+      text: "Account A",
+      "resource-id": "com.example:id/account_row",
+      "unique-id": "account-row-a",
+    });
+    const hierarchy = {
+      hierarchy: {
+        node: [{ ...duplicateOwner, children: [] }, { ...owner, children: [] }],
+      },
+    };
+
+    expect((tapOnElement as any).hasUniqueSemanticLinkOwner(owner, hierarchy)).toBe(true);
+  });
+
   test("populates selection metadata and computes bounds centers", () => {
     const tapOnElement = createTapOnElement();
     const element: Element = {

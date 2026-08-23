@@ -286,38 +286,63 @@ export class TapOnElement extends BaseVisualChange {
     if ((options as { relativePosition?: unknown }).relativePosition !== undefined) {
       return "tapOn relativePosition is no longer supported; use accessibilityLink or subtext";
     }
-    const isDirectLink = options.accessibilityLink !== undefined;
-    const isSemanticLinkRequest = isDirectLink || options.subtext !== undefined;
-    if (!isSemanticLinkRequest) {
+    if (!this.hasSemanticLinkTarget(options)) {
       return null;
     }
-    if (isDirectLink && options.subtext) {
-      return "tapOn accessibilityLink and subtext cannot be used together";
-    }
-    if (options.action !== "tap") {
-      return "tapOn semantic link activation supports only the tap action";
-    }
-    if (options.sibling) {
-      return "tapOn semantic link activation cannot use sibling";
-    }
-    if (options.retryIfNoChange || options.ensureTap) {
-      return "tapOn semantic link activation cannot retry an acknowledged link activation";
-    }
-    if (options.searchUntil) {
-      return "tapOn semantic link activation cannot use searchUntil";
-    }
-    const target = options.subtext?.text ?? options.accessibilityLink;
-    if (!target || target.trim().length === 0) {
-      return "tapOn semantic link text must be non-empty";
-    }
+    return this.semanticLinkValidationErrors(options).find(({ invalid }) => invalid)?.error ?? null;
+  }
+
+  private hasSemanticLinkTarget(options: TapOnElementOptions): boolean {
+    return [options.accessibilityLink, options.subtext].some((value) => value !== undefined);
+  }
+
+  private semanticLinkValidationErrors(options: TapOnElementOptions) {
+    return [
+      {
+        invalid: [options.accessibilityLink, options.subtext].every((value) => value !== undefined),
+        error: "tapOn accessibilityLink and subtext cannot be used together",
+      },
+      {
+        invalid: options.action !== "tap",
+        error: "tapOn semantic link activation supports only the tap action",
+      },
+      { invalid: options.sibling, error: "tapOn semantic link activation cannot use sibling" },
+      {
+        invalid: Boolean(options.retryIfNoChange ?? options.ensureTap),
+        error: "tapOn semantic link activation cannot retry an acknowledged link activation",
+      },
+      {
+        invalid: options.searchUntil,
+        error: "tapOn semantic link activation cannot use searchUntil",
+      },
+      {
+        invalid: this.semanticLinkTextIsBlank(options),
+        error: "tapOn semantic link text must be non-empty",
+      },
+      {
+        invalid: this.semanticLinkOccurrenceIsInvalid(options),
+        error: "tapOn semantic link occurrence must be a non-negative integer",
+      },
+      {
+        invalid: options.subtext ? options.index !== undefined : false,
+        error:
+          "tapOn owner-scoped semantic link activation cannot use index; use a unique owner selector",
+      },
+      {
+        invalid: options.subtext ? options.selectionStrategy === "random" : false,
+        error:
+          "tapOn owner-scoped semantic link activation cannot use random selection; use a unique owner selector",
+      },
+    ];
+  }
+
+  private semanticLinkTextIsBlank(options: TapOnElementOptions): boolean {
+    return (options.subtext?.text ?? options.accessibilityLink)?.trim().length === 0;
+  }
+
+  private semanticLinkOccurrenceIsInvalid(options: TapOnElementOptions): boolean {
     const occurrence = options.subtext?.occurrence ?? options.index ?? 0;
-    if (!Number.isInteger(occurrence) || occurrence < 0) {
-      return "tapOn semantic link occurrence must be a non-negative integer";
-    }
-    if (options.subtext && options.index !== undefined) {
-      return "tapOn owner-scoped semantic link activation cannot use index; use a unique owner selector";
-    }
-    return null;
+    return ![Number.isInteger(occurrence), occurrence >= 0].every(Boolean);
   }
 
   private resolveTapPoint(element: Element): { x: number; y: number } {

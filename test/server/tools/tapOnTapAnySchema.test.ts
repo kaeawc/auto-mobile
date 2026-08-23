@@ -163,6 +163,14 @@ describe("tapOn schema", () => {
         subtext: { text: "Terms of Service" },
       }),
     ).toThrow();
+    expect(() =>
+      tapOnSchema.parse({
+        platform: "android",
+        selector: { elementId: "com.app:id/legal" },
+        selectionStrategy: "random",
+        subtext: { text: "Terms of Service" },
+      }),
+    ).toThrow();
   });
 
   test("accepts container", () => {

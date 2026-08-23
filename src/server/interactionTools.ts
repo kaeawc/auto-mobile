@@ -257,49 +257,41 @@ export const tapOnSchema = withJsonSchemaOverride(
     if (!isDirectLink && !value.subtext) {
       return;
     }
-    if (isDirectLink && value.subtext) {
+    const addIssue = (invalid: unknown, message: string, path: (string | number)[]) => {
+      if (!invalid) {
+        return;
+      }
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "accessibilityLink and subtext cannot be used together",
-        path: ["subtext"],
+        message,
+        path,
       });
-    }
-    if (value.action !== "tap") {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "semantic link activation supports only the tap action",
-        path: ["action"],
-      });
-    }
-    if (value.sibling) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "semantic link activation cannot use sibling",
-        path: ["sibling"],
-      });
-    }
-    if (value.retryIfNoChange || value.ensureTap) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "semantic link activation cannot retry an acknowledged link activation",
-        path: value.retryIfNoChange ? ["retryIfNoChange"] : ["ensureTap"],
-      });
-    }
-    if (value.searchUntil) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "semantic link activation cannot use searchUntil",
-        path: ["searchUntil"],
-      });
-    }
-    if (value.subtext && value.index !== undefined) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message:
-          "owner-scoped semantic link activation cannot use index; use a unique owner selector",
-        path: ["index"],
-      });
-    }
+    };
+    addIssue(
+      isDirectLink && value.subtext,
+      "accessibilityLink and subtext cannot be used together",
+      ["subtext"],
+    );
+    addIssue(value.action !== "tap", "semantic link activation supports only the tap action", [
+      "action",
+    ]);
+    addIssue(value.sibling, "semantic link activation cannot use sibling", ["sibling"]);
+    addIssue(
+      value.retryIfNoChange || value.ensureTap,
+      "semantic link activation cannot retry an acknowledged link activation",
+      value.retryIfNoChange ? ["retryIfNoChange"] : ["ensureTap"],
+    );
+    addIssue(value.searchUntil, "semantic link activation cannot use searchUntil", ["searchUntil"]);
+    addIssue(
+      value.subtext && value.index !== undefined,
+      "owner-scoped semantic link activation cannot use index; use a unique owner selector",
+      ["index"],
+    );
+    addIssue(
+      value.subtext && value.selectionStrategy === "random",
+      "owner-scoped semantic link activation cannot use random selection; use a unique owner selector",
+      ["selectionStrategy"],
+    );
   }),
   (js) => {
     compactExclusiveSelectorProperties(js, ["selector", "container"]);
@@ -334,6 +326,14 @@ export const tapOnSchema = withJsonSchemaOverride(
       {
         if: { required: ["subtext"] },
         then: { not: { required: ["index"] } },
+      },
+      {
+        if: { required: ["subtext"] },
+        then: {
+          properties: {
+            selectionStrategy: { not: { const: "random" } },
+          },
+        },
       },
     ];
   },

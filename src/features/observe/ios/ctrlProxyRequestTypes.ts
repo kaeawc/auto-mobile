@@ -48,6 +48,7 @@ export const IOS_KNOWN_REQUEST_TYPES = [
 
   // Node actions
   "request_action",
+  "request_activate_accessibility_link",
   "request_launch_app",
 
   // App privacy permissions

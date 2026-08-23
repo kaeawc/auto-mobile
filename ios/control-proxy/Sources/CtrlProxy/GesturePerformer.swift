@@ -1105,7 +1105,10 @@ public class GesturePerformer: GesturePerforming {
                     links = app.links.allElementsBoundByIndex
                 }
                 let matches = links.filter {
-                    $0.label.caseInsensitiveCompare(text) == .orderedSame
+                    $0.label.caseInsensitiveCompare(text) == .orderedSame &&
+                        $0.exists &&
+                        $0.isHittable &&
+                        !$0.frame.isEmpty
                 }
                 guard matches.indices.contains(occurrence) else {
                     throw GestureError.elementNotFound("semantic link '\(text)' occurrence \(occurrence)")

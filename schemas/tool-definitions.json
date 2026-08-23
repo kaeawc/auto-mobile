@@ -9416,6 +9416,22 @@
               ]
             }
           }
+        },
+        {
+          "if": {
+            "required": [
+              "subtext"
+            ]
+          },
+          "then": {
+            "properties": {
+              "selectionStrategy": {
+                "not": {
+                  "const": "random"
+                }
+              }
+            }
+          }
         }
       ]
     },

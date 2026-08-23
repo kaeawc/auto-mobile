@@ -61,6 +61,7 @@ const SWIFT_REQUEST_TYPES = [
   "request_shake",
   "request_recent_apps",
   "request_action",
+  "request_activate_accessibility_link",
   "request_launch_app",
   "request_rotate",
   "request_clipboard",
@@ -121,8 +122,8 @@ const COMMAND_TOKEN = "[a-z][a-z0-9_]*";
  */
 function iosEmitSourceFiles(): string[] {
   const iosFiles = readdirSync(IOS_OBSERVE_DIR)
-    .filter(f => f.endsWith(".ts") && !f.endsWith(".test.ts") && !EXCLUDED_IOS_FILES.has(f))
-    .map(f => resolve(IOS_OBSERVE_DIR, f));
+    .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts") && !EXCLUDED_IOS_FILES.has(f))
+    .map((f) => resolve(IOS_OBSERVE_DIR, f));
   const sharedFiles = deriveIosSharedEmitFiles(IOS_CLIENT_ENTRY, SHARED_OBSERVE_DIR);
   return [...iosFiles, ...sharedFiles];
 }
@@ -135,13 +136,16 @@ function iosEmitSourceFiles(): string[] {
  * (template literal, opaque expression) is returned in `unresolved` so the guard fails
  * loudly rather than dropping coverage — the structural analog of the old template guard.
  */
-function extractEmittedTypes(file: string, source: string): { emitted: Set<string>; unresolved: string[] } {
+function extractEmittedTypes(
+  file: string,
+  source: string,
+): { emitted: Set<string>; unresolved: string[] } {
   const result = scanFile(file, source);
-  const emitted = new Set(result.emitted.map(e => e.type));
+  const emitted = new Set(result.emitted.map((e) => e.type));
   for (const denied of NON_REQUEST_TYPE_LITERALS) {
     emitted.delete(denied);
   }
-  const unresolved = result.unresolved.map(u => `${u.file}:${u.line} ${u.text}`);
+  const unresolved = result.unresolved.map((u) => `${u.file}:${u.line} ${u.text}`);
   return { emitted, unresolved };
 }
 
@@ -151,7 +155,9 @@ function readSwiftRequestTypeRawValues(): string[] {
   if (!block) {
     throw new Error("Could not locate `enum RequestType` in Models.swift");
   }
-  return [...block[1].matchAll(new RegExp(`case\\s+\\w+\\s*=\\s*"(${COMMAND_TOKEN})"`, "g"))].map(m => m[1]);
+  return [...block[1].matchAll(new RegExp(`case\\s+\\w+\\s*=\\s*"(${COMMAND_TOKEN})"`, "g"))].map(
+    (m) => m[1],
+  );
 }
 
 describe("iOS control-proxy — RequestType contract coverage", () => {
@@ -175,7 +181,7 @@ describe("iOS control-proxy — RequestType contract coverage", () => {
       expect([...new Set(rawValues)].sort()).toEqual([...IOS_KNOWN_REQUEST_TYPES].sort());
       // The transcribed list must also match source, so it can't rot independently.
       expect([...new Set(rawValues)].sort()).toEqual([...SWIFT_REQUEST_TYPES].sort());
-    }
+    },
   );
 });
 
@@ -195,8 +201,8 @@ describe("iOS control-proxy — emitted commands are a subset of the runner cont
     // Regression guard for #2955 gap 2: the shared files must be discovered via the
     // import graph, not a hardcoded allowlist. The two delegates the client routes
     // through today must both appear; a new one would appear automatically.
-    const shared = deriveIosSharedEmitFiles(IOS_CLIENT_ENTRY, SHARED_OBSERVE_DIR).map(f =>
-      f.slice(SHARED_OBSERVE_DIR.length + 1)
+    const shared = deriveIosSharedEmitFiles(IOS_CLIENT_ENTRY, SHARED_OBSERVE_DIR).map((f) =>
+      f.slice(SHARED_OBSERVE_DIR.length + 1),
     );
     expect(shared).toContain("SharedTextDelegate.ts");
     expect(shared).toContain("SharedGestureDelegate.ts");
@@ -213,7 +219,7 @@ describe("iOS control-proxy — emitted commands are a subset of the runner cont
   });
 
   test("every emitted command type is a known RequestType rawValue", () => {
-    const unknown = [...allEmitted].filter(t => !IOS_KNOWN_REQUEST_TYPE_SET.has(t)).sort();
+    const unknown = [...allEmitted].filter((t) => !IOS_KNOWN_REQUEST_TYPE_SET.has(t)).sort();
     // A non-empty list here is a drift: a TS command the runner cannot decode. Fix by
     // adding a matching `RequestType` case (and rawValue here), or repairing the sender.
     expect(unknown).toEqual([]);
@@ -228,7 +234,7 @@ describe("iOS control-proxy — emitted commands are a subset of the runner cont
   });
 
   test("IOS_RUNNER_FEATURE_COMMANDS is a subset of the known RequestType set", () => {
-    const unknown = IOS_RUNNER_FEATURE_COMMANDS.filter(c => !IOS_KNOWN_REQUEST_TYPE_SET.has(c));
+    const unknown = IOS_RUNNER_FEATURE_COMMANDS.filter((c) => !IOS_KNOWN_REQUEST_TYPE_SET.has(c));
     expect(unknown).toEqual([]);
   });
 

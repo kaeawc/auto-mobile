@@ -153,6 +153,14 @@ describe("Tool Registration Validation (Integration Tests)", () => {
         index: 1,
       }),
     ).toBe(false);
+    expect(
+      validate({
+        platform: "android",
+        selector: { elementId: "com.example:id/legal" },
+        subtext: { text: "Terms of Service" },
+        selectionStrategy: "random",
+      }),
+    ).toBe(false);
   });
 
   // R9 (issue #4183): a negative assertion so the compile check cannot silently

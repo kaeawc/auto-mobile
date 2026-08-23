@@ -12,6 +12,19 @@ import {
 
 const FAST_TEST_TIMEOUT_MS = 100;
 
+type NodeExecError = Error & { code?: number; stderr?: string; stdout?: string };
+
+// A stand-in for the raw node execFile rejection SimCtlClient's boot recovery
+// inspects: CoreSimulator returns SimError 405 with the device already Booted.
+function coreSimulator405Error(): NodeExecError {
+  const error = new Error("Command failed: xcrun simctl bootstatus <udid> -b") as NodeExecError;
+  error.code = 149;
+  error.stderr =
+    "Unable to boot device in current state: Booted " +
+    "(domain=com.apple.CoreSimulator.SimError, code=405)";
+  return error;
+}
+
 // The canonical ExecResult factory is the single place exec output is coerced
 // (Buffer→string) for both executors; the exec-seam paths delegate to it.
 describe("createExecResult (canonical exec-seam coercion)", function() {
@@ -71,6 +84,43 @@ describe("runExecSeam", function() {
     ).rejects.toThrow(
       /Command failed: tool arg[\s\S]*cwd: \/work[\s\S]*exit code: 7[\s\S]*stderr:[\s\S]*detailed stderr/
     );
+  }, FAST_TEST_TIMEOUT_MS);
+
+  // The default wrap path returns a fresh Error copying only `.name`, so the raw
+  // `.code`/`.stderr` are lost. This pins that loss so the `preserveError`
+  // contract below is not silently equivalent (issue #5459).
+  test("default path drops the raw error's .code/.stderr", async function() {
+    const original = coreSimulator405Error();
+    let thrown: NodeExecError | undefined;
+    try {
+      await runExecSeam(async () => {
+        throw original;
+      }, {}, { command: "xcrun", args: ["simctl", "bootstatus"] });
+    } catch (error) {
+      thrown = error as NodeExecError;
+    }
+    expect(thrown).toBeDefined();
+    expect(thrown).not.toBe(original);
+    expect(thrown?.code).toBeUndefined();
+    expect(thrown?.stderr).toBeUndefined();
+  }, FAST_TEST_TIMEOUT_MS);
+
+  // SimCtlClient's execFile leg opts into `preserveError` so CoreSimulator-405
+  // boot recovery can still read the original `.code`/`.stderr` after routing
+  // through the shared seam (issue #5459, #3938 / #4092).
+  test("preserveError propagates the original error with .code/.stderr intact", async function() {
+    const original = coreSimulator405Error();
+    let thrown: NodeExecError | undefined;
+    try {
+      await runExecSeam(async () => {
+        throw original;
+      }, {}, { command: "xcrun", args: ["simctl", "bootstatus"] }, { preserveError: true });
+    } catch (error) {
+      thrown = error as NodeExecError;
+    }
+    expect(thrown).toBe(original);
+    expect(thrown?.code).toBe(149);
+    expect(thrown?.stderr).toContain("code=405");
   }, FAST_TEST_TIMEOUT_MS);
 });
 

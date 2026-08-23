@@ -457,7 +457,14 @@ describe("ADB server reset session recovery", () => {
       await pool.releaseAdbServerResetCohortReservations(detached.devices);
       await idleReservation;
       expect(idleReservationSettled).toBe(true);
+      expect(pool.isSessionRecoveryInFlight("session-0")).toBe(true);
+      expect(pool.isSessionRecoveryInFlight("session-1")).toBe(true);
+      expect(() => pool.assertSessionReadyForAutomation("session-0")).toThrow(
+        /device-disconnected:emulator-5554/,
+      );
     } finally {
+      await sessionManager.releaseSession("session-0", "explicit-release");
+      await sessionManager.releaseSession("session-1", "explicit-release");
       sessionManager.stopCleanupTimer();
     }
   });
@@ -962,6 +969,8 @@ describe("ADB server reset session recovery", () => {
         status: "busy",
       });
       expect(sessionManager.getSession("session-1")?.assignedDevice).toBe(original.deviceId);
+      await pool.releaseAdbServerResetCohortReservations(detached.devices);
+      expect(pool.isSessionRecoveryInFlight("session-1")).toBe(false);
     } finally {
       await pool.releaseAdbServerResetCohortReservations(detached.devices);
       sessionManager.stopCleanupTimer();

@@ -175,6 +175,10 @@ describe("ToolExecutionContext", () => {
       await devicePool.releaseAdbServerResetCohortReservations(detached.devices);
     }
 
+    expect(() => devicePool.assertSessionReadyForAutomation("reset-session-2")).toThrow(
+      /device-disconnected:emulator-5556;incident=/,
+    );
+    await sessionManager.releaseSession("reset-session-2", "explicit-release");
     expect(() => devicePool.assertSessionReadyForAutomation("reset-session-2")).not.toThrow();
   });
 

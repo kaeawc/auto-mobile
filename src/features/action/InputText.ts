@@ -396,9 +396,17 @@ export class InputText extends BaseVisualChange {
   async appendText(
     text: string,
     timeoutMs?: number,
-    beforeKeyEvents?: AppendKeyEventValidator
+    beforeKeyEvents?: AppendKeyEventValidator,
+    signal?: AbortSignal,
   ): Promise<SendTextResult & { method?: InputTextMode }> {
-    return this.executeAndroidAppendTextInput(text, undefined, false, timeoutMs, beforeKeyEvents);
+    return this.executeAndroidAppendTextInput(
+      text,
+      undefined,
+      false,
+      timeoutMs,
+      beforeKeyEvents,
+      signal,
+    );
   }
 
   /**

@@ -37,6 +37,7 @@ export interface DaemonStateAccess {
     getAllDevices?(): PooledDevice[];
     getRecoveryPolicy?(): DeviceRecoveryPolicy;
     getRecoveryEligibility?(deviceId: string): DeviceRecoveryEligibility;
+    assertSessionReadyForAutomation?(sessionId: string): void;
     resolveAutolockSessionForMcpSession?(
       mcpSessionId: string | undefined,
       platform?: "android" | "ios"

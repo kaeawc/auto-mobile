@@ -2804,7 +2804,7 @@ export class DevicePool {
       for (const device of cohort) {
         if (device.adbServerResetSessionId) {
           const sessionId = device.adbServerResetSessionId;
-          if (!this.failedTerminalRecoveryReleases.has(sessionId)) {
+          if (this.canReleaseAdbServerResetSessionFence(device, sessionId)) {
             this.adbServerResetQuarantinedSessions.delete(sessionId);
             this.recoveringSessionLosses.delete(sessionId);
           }
@@ -2820,6 +2820,27 @@ export class DevicePool {
         reservation.resolve();
       }
     });
+  }
+
+  private canReleaseAdbServerResetSessionFence(
+    device: PooledDevice,
+    sessionId: string,
+  ): boolean {
+    if (this.failedTerminalRecoveryReleases.has(sessionId)) {
+      return false;
+    }
+    const capturedSession = device.adbServerResetSession;
+    if (!capturedSession || !this.sessionManager.isCurrentSession(capturedSession)) {
+      return true;
+    }
+    const assignedDeviceId = capturedSession.assignedDevice;
+    const restoredDevice = assignedDeviceId ? this.devices.get(assignedDeviceId) : undefined;
+    return (
+      restoredDevice?.sessionId === sessionId &&
+      restoredDevice.status === "busy" &&
+      restoredDevice.platform === "android" &&
+      restoredDevice.avdName === device.avdName
+    );
   }
 
   private reserveAdbServerResetRecovery(device: PooledDevice): void {

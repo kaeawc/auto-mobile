@@ -57,6 +57,7 @@ import {
 import { assertToolEnabledForAnySession } from "../features/toolSelection/toolSelectionPolicy";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import { ToolRegistry } from "../server/toolRegistry";
+import { validateTypeForPlatform } from "../server/storageTools";
 import { getMcpServerVersion } from "../utils/mcpVersion";
 import {
   IOS_CTRL_PROXY_APP_HASH,
@@ -1582,10 +1583,17 @@ export class UnixSocketServer {
           throw new Error("setKeyValue requires deviceId, appId, fileName, key, and type params");
         }
         await this.assertSocketToolEnabled(args.deviceId, "setKeyValue");
-        const client = await this.resolveKeyValueMutationClient(args.platform, args.deviceId);
+        const { platform, client } = await this.resolveKeyValueMutationClient(
+          args.platform,
+          args.deviceId,
+        );
         if (args.value === null || args.value === undefined) {
           await client.removePreference(args.appId, args.fileName, args.key);
         } else {
+          // Enforce the same cross-platform type guidance as the MCP-tool path
+          // (storageTools.ts) before dispatch, so a platform-incompatible type
+          // fails with an actionable error rather than deeper in the client (#5022).
+          validateTypeForPlatform(platform, args.type as KeyValueType);
           await client.setPreference(
             args.appId,
             args.fileName,
@@ -1608,7 +1616,7 @@ export class UnixSocketServer {
           throw new Error("removeKeyValue requires deviceId, appId, fileName, and key params");
         }
         await this.assertSocketToolEnabled(args.deviceId, "removeKeyValue");
-        const client = await this.resolveKeyValueMutationClient(args.platform, args.deviceId);
+        const { client } = await this.resolveKeyValueMutationClient(args.platform, args.deviceId);
         await client.removePreference(args.appId, args.fileName, args.key);
         return { success: true };
       }
@@ -1623,7 +1631,7 @@ export class UnixSocketServer {
           throw new Error("clearKeyValueFile requires deviceId, appId, and fileName params");
         }
         await this.assertSocketToolEnabled(args.deviceId, "clearKeyValueFile");
-        const client = await this.resolveKeyValueMutationClient(args.platform, args.deviceId);
+        const { client } = await this.resolveKeyValueMutationClient(args.platform, args.deviceId);
         await client.clearPreferenceStore(args.appId, args.fileName);
         return { success: true };
       }
@@ -1641,7 +1649,7 @@ export class UnixSocketServer {
   private async resolveKeyValueMutationClient(
     platformValue: string | undefined,
     deviceId: string,
-  ): Promise<KeyValueMutationClient> {
+  ): Promise<{ platform: "android" | "ios"; client: KeyValueMutationClient }> {
     const platform = platformValue ?? "android";
     if (platform !== "android" && platform !== "ios") {
       throw new Error(`Invalid platform: ${platform}. Must be 'android' or 'ios'.`);
@@ -1652,9 +1660,11 @@ export class UnixSocketServer {
     if (!targetDevice) {
       throw new Error(`Device not found: ${deviceId}`);
     }
-    return platform === "ios"
-      ? IOSCtrlProxyClient.getInstance(targetDevice)
-      : AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
+    const client =
+      platform === "ios"
+        ? IOSCtrlProxyClient.getInstance(targetDevice)
+        : AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
+    return { platform, client };
   }
 
   private async assertSocketToolEnabled(deviceId: string, toolName: string): Promise<void> {

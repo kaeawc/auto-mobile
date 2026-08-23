@@ -154,8 +154,12 @@ function buildEntriesUri(deviceId: string, packageName: string, fileName: string
 
 /**
  * Validate that the type is supported on the given platform. Throws ActionableError with guidance if not.
+ *
+ * Exported so the daemon `ide/*` socket key-value handlers can enforce the same
+ * cross-platform type guidance as the MCP-tool path, without duplicating the
+ * platform-specific type sets (issue #5022).
  */
-function validateTypeForPlatform(platform: string, type: KeyValueType): void {
+export function validateTypeForPlatform(platform: string, type: KeyValueType): void {
   if (type === "UNKNOWN") {
     throw new ActionableError(
       "UNKNOWN type is read-only and cannot be used for write operations. " +

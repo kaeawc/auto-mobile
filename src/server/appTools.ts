@@ -6,6 +6,7 @@ import { TerminateApp } from "../features/action/TerminateApp";
 import { InstallApp } from "../features/action/InstallApp";
 import { UninstallApp } from "../features/action/UninstallApp";
 import { AppPermissions } from "../features/action/AppPermissions";
+import { ResetKeychain } from "../features/action/ResetKeychain";
 import {
   createJSONToolResponse,
   DefaultToolResponseFormatter,
@@ -202,6 +203,25 @@ export const getAppPermissionsSchema = withAppIdAliases(
   ),
 );
 
+export const resetKeychainSchema = withAppIdAliases(
+  addDeviceTargetingToSchema(
+    z.object({
+      appId: z
+        .string()
+        .trim()
+        .min(1)
+        .describe(
+          "Required. The app whose Keychain/Keystore state to reset. NOTE: iOS Simulator only supports a device-wide reset and erases EVERY app's Keychain regardless of this value.",
+        ),
+      confirm: z
+        .boolean()
+        .describe(
+          "Required. Must be true to proceed. On iOS Simulator this erases the Keychain for EVERY app on the target simulator, not just appId.",
+        ),
+    }),
+  ),
+);
+
 export const listAppsSchema = z.object({}).passthrough();
 
 // Export interfaces for type safety
@@ -227,6 +247,8 @@ export interface UninstallAppArgs {
 export type SetAppPermissionsArgs = z.infer<typeof setAppPermissionsSchema>;
 
 export type GetAppPermissionsArgs = z.infer<typeof getAppPermissionsSchema>;
+
+export type ResetKeychainArgs = z.infer<typeof resetKeychainSchema>;
 
 // Register tools
 export function registerAppTools() {
@@ -428,6 +450,21 @@ export function registerAppTools() {
     });
   };
 
+  const resetKeychainHandler = async (device: BootedDevice, args: ResetKeychainArgs) => {
+    // A destructive, device-wide reset must target an explicitly selected device.
+    // deviceId/device-label/sessionUuid are the device-bound selectors; if none is
+    // present the device was ambiently resolved and the action refuses to run.
+    const explicitlyTargeted = Boolean(args.deviceId || args.device || args.sessionUuid);
+    const action = new ResetKeychain(device);
+    const result = await action.execute({
+      appId: args.appId,
+      confirm: args.confirm,
+      explicitlyTargeted,
+    });
+
+    return createJSONToolResponse({ ...result });
+  };
+
   // Register with the tool registry
   ToolRegistry.registerDeviceAware(
     "launchApp",
@@ -474,6 +511,14 @@ export function registerAppTools() {
     "Read app permission state",
     getAppPermissionsSchema,
     getAppPermissionsHandler,
+    { defaultEnabled: false },
+  );
+
+  ToolRegistry.registerDeviceAware(
+    "resetKeychain",
+    "Reset an app's Keychain/Keystore state (scoped by appId). iOS Simulator resets the WHOLE device Keychain regardless of appId; physical iOS (#5188) and Android (#5190) not yet supported. Requires confirm:true.",
+    resetKeychainSchema,
+    resetKeychainHandler,
     { defaultEnabled: false },
   );
 

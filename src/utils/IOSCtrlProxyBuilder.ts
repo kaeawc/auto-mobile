@@ -1055,6 +1055,12 @@ export class IOSCtrlProxyBuilder {
   }
 
   private async extractBundle(bundlePath: string): Promise<void> {
+    // A re-extract replaces the runner binary, so drop any local-build-mode pin
+    // (#5561) BEFORE re-extraction — the post-extract verify a few lines down
+    // re-derives it. Clearing here (not after extract) is essential: the pin is
+    // set inside verifyExtractedArtifacts() below, so clearing post-extract would
+    // erase the fresh pin and make the next pre-launch wrongly store-and-trust.
+    this.derivedLocalRunnerSha256.clear();
     // Fail closed before wiping/repopulating the tree if it is owned by another
     // uid — extracting into a directory we do not own reopens the TOCTOU window
     // this hardening closes (issue #4759).

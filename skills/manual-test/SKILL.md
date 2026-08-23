@@ -157,7 +157,7 @@ at a time to conserve context; never let two actors drive devices at once.
         the expected SHA from your freshly built runner, pins it, and re-verifies
         against that pinned value before launch (so a TOCTOU swap still fails
         closed) — no SHA to hand-copy. It logs a loud WARN that the release-pinned
-        guard is relaxed for the run. Run **without** `SKIP_CTRL_PROXY_DOWNLOAD`
+        guard is relaxed for the run. Run **without** `AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD`
         so the builder actually runs, and point
         `AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA=<derived-data-root>` at your build.
      2. **Explicit pinned SHA (manual).** Set

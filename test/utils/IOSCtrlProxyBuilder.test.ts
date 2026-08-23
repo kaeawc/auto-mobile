@@ -892,6 +892,30 @@ describe("IOSCtrlProxyBuilder", function() {
         .rejects.toThrow("SHA256 changed");
     });
 
+    test("local-build mode re-derives the pin on an in-process rebuild (#5561)", async function() {
+      const derivedDataPath = path.join(tempDir, "DerivedData");
+      const cacheDir = path.join(tempDir, "cache");
+      const downloader = new FakeIOSCtrlProxyBundleDownloader();
+      downloader.checksum = "expected-checksum";
+      downloader.runnerChecksum = "c".repeat(64);
+
+      IOSCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+      IOSCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("a".repeat(64), "xctest");
+      IOSCtrlProxyBuilder.setUseLocalBuildForTesting(true);
+      const builder = IOSCtrlProxyBuilder.getInstance(
+        { derivedDataPath, bundleCacheDir: cacheDir },
+        { downloader }
+      );
+
+      expect((await builder.build("simulator")).success).toBe(true);
+
+      // A legitimate rebuild produces a different local binary. The re-extract must
+      // drop the stale pin so this is NOT rejected as a TOCTOU swap.
+      downloader.runnerChecksum = "d".repeat(64);
+      expect((await builder.build("simulator")).success).toBe(true);
+      await builder.verifyRunnerBinaryBeforeLaunch("simulator");
+    });
+
     test("explicit RUNNER_SHA256 override still wins over local-build mode (#5561)", async function() {
       const derivedDataPath = path.join(tempDir, "DerivedData");
       const cacheDir = path.join(tempDir, "cache");

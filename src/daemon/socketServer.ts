@@ -1285,9 +1285,10 @@ export class UnixSocketServer {
         return this.retryExpiredMcpSession(context, identity, mcpClient);
       }
       if (this.isDeviceControlSocketClosure(context.request, error)) {
-        const recoveryIdentity = this.hasEstablishedDeviceControlTransportIdentity(identity)
-          ? identity
-          : this.getDeviceControlTransportIdentity(context);
+        const recoveryIdentity = this.getDeviceControlRecoveryFailureIdentity(
+          context,
+          identity,
+        );
         return this.recoverDeviceControlTransport({
           ...context,
           phase: "response",
@@ -1650,9 +1651,15 @@ export class UnixSocketServer {
     context: McpForwardRecoveryContext,
     identity: DeviceControlTransportIdentity,
   ): DeviceControlTransportIdentity {
-    return this.hasEstablishedDeviceControlTransportIdentity(identity)
-      ? identity
-      : this.getDeviceControlTransportIdentity(context);
+    const refreshedIdentity = this.getDeviceControlTransportIdentity(context);
+    return {
+      sessionUuid: identity.sessionUuid ?? refreshedIdentity.sessionUuid,
+      deviceId: identity.deviceId ?? refreshedIdentity.deviceId,
+      deviceSessionUuid:
+        identity.deviceSessionUuid ?? refreshedIdentity.deviceSessionUuid,
+      deviceLabelResolved:
+        identity.deviceLabelResolved ?? refreshedIdentity.deviceLabelResolved,
+    };
   }
 
   private pinDeviceControlRecoveryRequest(

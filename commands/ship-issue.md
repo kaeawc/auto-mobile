@@ -167,11 +167,13 @@ For failing CI:
 Arm automerge yourself (`gh pr merge --auto`) once all of these are true:
 
 - local validation is green
-- no CI check is failing (pending checks are fine — `--auto` merges only after required checks and approvals complete)
+- every CI check has finished green — `--auto` waits only for *required*
+  checks, so arming while an optional check is still running can merge past a
+  late failure
 - there are no unresolved actionable review threads
 - there are no known implementation gaps from the issue's acceptance criteria
 
-Do not wait for required approvals before arming automerge; GitHub holds the merge until requirements are met. If a condition is not met, fix it and re-check rather than reporting a blocker — escalate only under the escalation rule.
+Required approvals are the one thing that may still be pending; GitHub holds the merge until they arrive. If a condition is not met, fix it and re-check rather than reporting a blocker — escalate only under the escalation rule.
 
 ## Phase 9: Deferred Work
 

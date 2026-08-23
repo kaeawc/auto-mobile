@@ -7,8 +7,10 @@ import org.junit.Test
 /**
  * Pure client-side quality controller: derives the live frame rate from the timestamps of decoded
  * frames and, when auto-adjustment is on, decides preset downgrades/upgrades with hysteresis and a
- * minimum dwell so a brief dip cannot thrash the encode. No Compose, no IO — frame timestamps are
- * the only clock, so every decision is deterministic.
+ * minimum dwell. Frame timestamps are the only clock, so every decision is deterministic. Drops are
+ * detected by inter-frame interval band — the target is 30fps (33ms), the active-but-slow "drop"
+ * band is intervals of ~42–90ms, and intervals at/over 90ms are treated as idle (a static screen's
+ * repeat cadence or a suppression/reconnect gap), never as degradation.
  */
 class QualityControllerTest {
 
@@ -25,11 +27,24 @@ class QualityControllerTest {
   }
 
   @Test
-  fun `derives actual fps from frame arrival timestamps`() {
+  fun `derives actual fps as frames over elapsed`() {
     val controller = QualityController(initialQuality = VideoStreamQuality.Medium, targetFps = 30)
     // 20 frames, 50ms apart => a steady 20 fps.
     controller.feed(count = 20, intervalMs = 50)
-    assertEquals(20f, controller.actualFps.value, 0.1f)
+    assertEquals(20f, controller.actualFps.value, 0.2f)
+  }
+
+  @Test
+  fun `measures fps by frames over elapsed, not an average of instantaneous rates`() {
+    // Alternating 10ms / 90ms gaps are two frames per 100ms = 20fps. An average of instantaneous
+    // 1000/dt values would overstate this to ~50fps; frames-over-elapsed reports the true rate.
+    val controller = QualityController(initialQuality = VideoStreamQuality.High, targetFps = 30)
+    var t = 0L
+    repeat(40) { i ->
+      controller.onFrame(t)
+      t += if (i % 2 == 0) 10L else 90L
+    }
+    assertEquals(20f, controller.actualFps.value, 2f)
   }
 
   @Test
@@ -49,10 +64,25 @@ class QualityControllerTest {
         samplesToDowngrade = 3,
         minDwellMs = 0,
       )
-    // 10 fps (100ms apart) is a third of the 30fps target — chronic, so it keeps stepping down to
-    // the cheapest preset while the drop lasts.
-    controller.feed(count = 40, intervalMs = 100)
+    // ~17fps (60ms apart) is well under the 30fps target but faster than the idle cadence, so it is
+    // read as genuine degradation and keeps stepping down to the cheapest preset.
+    controller.feed(count = 60, intervalMs = 60)
     assertEquals(VideoStreamQuality.Low, controller.quality.value)
+  }
+
+  @Test
+  fun `a static screen at the idle-repeat cadence does not downgrade`() {
+    // Android repeats the previous frame after ~100ms on a still screen, so a static screen streams
+    // at ~10fps. That is not encoder/transport degradation and must not ratchet the preset down.
+    val controller =
+      QualityController(
+        initialQuality = VideoStreamQuality.High,
+        targetFps = 30,
+        samplesToDowngrade = 3,
+        minDwellMs = 0,
+      )
+    controller.feed(count = 60, intervalMs = 100)
+    assertEquals(VideoStreamQuality.High, controller.quality.value)
   }
 
   @Test
@@ -66,7 +96,7 @@ class QualityControllerTest {
       )
     // Warm the rate up at a healthy 30fps first.
     var t = controller.feed(count = 15, intervalMs = 33)
-    // A single slow frame (one 200ms gap) briefly perturbs the EMA but recovers immediately.
+    // A single slow frame (one 200ms gap) is idle-consistent and clears the streak; it recovers.
     controller.onFrame(t + 200)
     t += 233
     controller.feed(count = 15, intervalMs = 33, startMs = t)
@@ -96,7 +126,7 @@ class QualityControllerTest {
         samplesToDowngrade = 3,
         minDwellMs = 0,
       )
-    low.feed(count = 30, intervalMs = 200) // 5fps, chronic drop
+    low.feed(count = 30, intervalMs = 60) // ~17fps, chronic drop
     assertEquals(VideoStreamQuality.Low, low.quality.value)
 
     val high =
@@ -119,10 +149,10 @@ class QualityControllerTest {
         samplesToDowngrade = 3,
         minDwellMs = 5_000,
       )
-    // Sustained heavy drop over ~4s (< the 5s dwell): without dwell this would fall to Low, but
-    // only
-    // one step is allowed inside the window.
-    controller.feed(count = 40, intervalMs = 100)
+    // Sustained drop over ~3.6s (< the 5s dwell): without dwell this would fall to Low, but only
+    // one
+    // step is allowed inside the window.
+    controller.feed(count = 60, intervalMs = 60)
     assertEquals(VideoStreamQuality.Medium, controller.quality.value)
   }
 
@@ -136,7 +166,7 @@ class QualityControllerTest {
         minDwellMs = 0,
         autoAdjustEnabled = false,
       )
-    controller.feed(count = 30, intervalMs = 100)
+    controller.feed(count = 30, intervalMs = 60)
     assertEquals(VideoStreamQuality.High, controller.quality.value)
     assertTrue("fps still measured when auto-adjust off", controller.actualFps.value > 0f)
   }
@@ -169,35 +199,10 @@ class QualityControllerTest {
         minDwellMs = 0,
         onManualSelection = { selected.add(it) },
       )
-    controller.feed(count = 40, intervalMs = 100) // heavy drop → auto-downgrades
+    controller.feed(count = 60, intervalMs = 60) // heavy drop → auto-downgrades
     assertEquals(VideoStreamQuality.Low, controller.quality.value)
     // Automatic steps re-subscribe via `quality` but must not fire the persistence callback.
     assertEquals(emptyList<VideoStreamQuality>(), selected)
-  }
-
-  @Test
-  fun `an idle gap on a source that omits idle frames does not trigger a downgrade`() {
-    // iOS ScreenCaptureKit drops idle buffers, so a static screen makes no frame progress; when
-    // activity resumes the resumed burst must not read as a drop. Codex's example: 0, 10_000, then
-    // six healthy 33ms frames must NOT downgrade High.
-    val controller =
-      QualityController(
-        initialQuality = VideoStreamQuality.High,
-        targetFps = 30,
-        samplesToDowngrade = 3,
-        minDwellMs = 0,
-      )
-    controller.onFrame(0)
-    controller.onFrame(10_000) // long idle gap — treated as discontinuity, not a ~0fps sample
-    var t = 10_033L
-    repeat(6) {
-      controller.onFrame(t)
-      t += 33
-    }
-    assertEquals(VideoStreamQuality.High, controller.quality.value)
-    // And once enough healthy frames flow the measured rate reflects the real cadence.
-    controller.feed(count = 6, intervalMs = 33, startMs = t)
-    assertTrue(controller.actualFps.value > 24f)
   }
 
   @Test
@@ -213,7 +218,8 @@ class QualityControllerTest {
       )
     controller.selectQuality(VideoStreamQuality.High) // triggers a re-subscribe
     // The first frame after the reconnect arrives a long time later; the reset window swallows it
-    // as the new seed rather than treating the whole gap as one ~0fps interval.
+    // as
+    // the new seed rather than treating the whole gap as one drop sample.
     controller.onFrame(10_000)
     assertEquals(VideoStreamQuality.High, controller.quality.value)
   }

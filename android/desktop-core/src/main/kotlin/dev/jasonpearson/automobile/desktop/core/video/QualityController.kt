@@ -9,28 +9,39 @@ import kotlinx.coroutines.flow.StateFlow
  * The desktop relay fixes a capture's encode at subscribe time — there is no mid-stream control
  * channel and the first subscriber's preset wins for a shared capture (see [VideoStreamQuality] and
  * the screen-streaming design doc). So this controller does the *decision* half of adaptive
- * quality: it derives the actual frame rate from the timestamps of decoded frames ([onFrame]) and,
- * when [autoAdjustEnabled] is on, picks a lower preset when the rate is chronically dropping and a
- * higher one once it is sustainably healthy. The pane applies a change by re-subscribing with the
- * new preset (which takes effect for a sole subscriber / the next subscribe); truly reconfiguring a
- * live shared capture is a server-side follow-up.
+ * quality: it derives the delivered frame rate from the timestamps of decoded frames ([onFrame])
+ * and, when [autoAdjustEnabled] is on, picks a lower preset when the stream is chronically slow
+ * *while actively delivering frames* and a higher one once it is sustainably at target. The pane
+ * applies a change by re-subscribing with the new preset (which takes effect for a sole subscriber
+ * / the next subscribe); truly reconfiguring a live shared capture is a server-side follow-up.
  *
- * Frame timestamps are the only clock, so decisions are deterministic and unit-testable without a
- * FakeTimer. The rate is an exponential moving average of the instantaneous inter-frame rate, so a
- * single late frame perturbs it briefly rather than smearing across a whole window; hysteresis
- * ([samplesToDowngrade]/[samplesToUpgrade]) plus [minDwellMs] then keep a brief dip or a flapping
- * rate from thrashing the encode. Every preset change (manual or automatic) also resets the rate
- * window, so the reconnect gap that a re-subscribe introduces re-seeds cleanly instead of being
- * counted as one implausibly-slow frame that biases the next decision.
+ * ### Why frame timing alone is read carefully
+ * A raw "frames per second below target" signal is confounded by how each platform handles a static
+ * screen, which is the common case for UI automation (mostly still frames):
+ * - Android's encoder *repeats* the previous frame after ~100ms of no change
+ *   (`VideoEncoder.KEY_REPEAT_PREVIOUS_FRAME_AFTER`), so a still screen streams at ~10fps.
+ * - iOS ScreenCaptureKit *suppresses* idle buffers, so a still screen makes no frame progress until
+ *   it changes. Neither is encoder/transport degradation, so neither should downgrade quality. This
+ *   controller therefore classifies each inter-frame interval rather than trusting an fps number:
+ * - `dt` at/under the target interval → **healthy**;
+ * - `dt` between the target interval and [idleIntervalMs] → **active but slow** (genuine
+ *   degradation the encode can plausibly recover from by dropping resolution);
+ * - `dt` at/over [idleIntervalMs] → **idle**, i.e. consistent with a static screen (Android repeat
+ *   cadence) or a suppression/reconnect gap → no signal, streaks reset.
+ *   [samplesToDowngrade]/[samplesToUpgrade] (hysteresis) plus [minDwellMs] then keep a brief dip or
+ *   a flapping rate from thrashing the encode.
  *
- * The rate is measured over the frames the pane actually renders (the caller feeds [onFrame] from
- * its render path), so under a UI that recomposes slower than frames decode it reflects render
- * cadence rather than raw decode rate — an acceptable proxy at the 10–30fps targets here.
+ * The displayed [actualFps] is computed as frames-over-elapsed across a trailing [rateWindowMs]
+ * window — an unbiased rate. (Averaging instantaneous `1000/dt` values would overstate throughput
+ * for unevenly-arriving frames, e.g. alternating 10ms/90ms gaps are 20fps but average to ~50fps.)
+ * That rate reflects the frames the pane actually renders (the caller feeds [onFrame] from its
+ * render path), an acceptable proxy for the decode rate at the 10–30fps targets here.
  *
- * [onManualSelection] fires only for an explicit [selectQuality]; automatic steps deliberately do
- * NOT notify, so the caller persists the user's chosen preset without writing the settings file on
- * every transient auto-adjust (and without persisting a shared-capture ratchet-to-Low the stream
- * never actually applied).
+ * Frame timestamps are the only clock, so every decision is deterministic and unit-testable without
+ * a FakeTimer. [onManualSelection] fires only for an explicit [selectQuality]; automatic steps
+ * update [quality] (so the pane re-subscribes and the overlay updates) but do NOT notify, so the
+ * caller persists only the user's chosen preset — never a transient auto-step or a shared-capture
+ * ratchet the stream did not actually apply.
  *
  * @property targetFps the rate the pane asked the relay for; a drop is measured relative to it.
  */
@@ -38,13 +49,20 @@ class QualityController(
   initialQuality: VideoStreamQuality,
   val targetFps: Int,
   autoAdjustEnabled: Boolean = true,
+  /** Trailing window the displayed [actualFps] is averaged over (frames ÷ elapsed). */
+  private val rateWindowMs: Long = 2_000,
   /**
-   * Smoothing factor for the inter-frame rate EMA (0..1); higher reacts faster, lower is calmer.
+   * Non-idle inter-frame samples needed before any decision, so an early estimate can't misfire.
    */
-  private val smoothing: Double = 0.2,
-  /** Inter-frame samples needed before any decision, so an early estimate can't misfire. */
   private val minSamplesForDecision: Int = 5,
-  /** Below this fraction of [targetFps] a sample counts as dropping. */
+  /**
+   * At/over this inter-frame interval a frame is treated as idle — consistent with a static screen
+   * (Android's ~100ms repeat cadence) or an iOS suppression / reconnect gap — and contributes no
+   * drop signal. Just under the on-device repeat cadence so a still screen never reads as a drop;
+   * genuine degradation the controller acts on shows up as intervals between the target and here.
+   */
+  private val idleIntervalMs: Long = 90,
+  /** Below this fraction of [targetFps] a (non-idle) sample counts as dropping. */
   private val downgradeRatio: Double = 0.8,
   /** At or above this fraction of [targetFps] a sample counts as healthy. */
   private val upgradeRatio: Double = 0.95,
@@ -56,14 +74,6 @@ class QualityController(
   private val samplesToUpgrade: Int = 8,
   /** Minimum frame-time spacing between two automatic changes. */
   private val minDwellMs: Long = 2_000,
-  /**
-   * A gap longer than this is treated as a stream discontinuity, not a slow frame, and re-seeds the
-   * rate instead of folding in one implausibly-low sample. This is what keeps a source that omits
-   * idle buffers (iOS ScreenCaptureKit drops frames on a static screen) from reading as a drop when
-   * activity resumes; it comfortably exceeds the interval of the slowest real target (10fps =
-   * 100ms).
-   */
-  private val idleGapMs: Long = 1_000,
   /**
    * Notified only for an explicit [selectQuality] (a user's manual pick), for persistence.
    * Automatic steps update [quality] (so the pane re-subscribes and the overlay updates) but do not
@@ -80,6 +90,8 @@ class QualityController(
   /** Whether frame-rate drops drive automatic preset changes. FPS is measured regardless. */
   var autoAdjustEnabled: Boolean = autoAdjustEnabled
 
+  // Trailing timestamps for the displayed rate (frames ÷ elapsed over rateWindowMs).
+  private val window = ArrayDeque<Long>()
   private var lastFrameMs: Long? = null
   private var samples = 0
   private var lowStreak = 0
@@ -87,31 +99,30 @@ class QualityController(
   // Null until the first change, so the first decision is never gated by dwell (and no overflow).
   private var lastChangeAtMs: Long? = null
 
+  // Inter-frame interval thresholds (ms) derived from the target rate.
+  private val healthyMaxDtMs: Double
+    get() = 1000.0 / (upgradeRatio * targetFps)
+
+  private val droppingMinDtMs: Double
+    get() = 1000.0 / (downgradeRatio * targetFps)
+
   /** Records a decoded frame's arrival time, updates the live rate, and maybe adjusts quality. */
   fun onFrame(receivedAtMs: Long) {
+    window.addLast(receivedAtMs)
+    while (window.size > 1 && receivedAtMs - window.first() > rateWindowMs) window.removeFirst()
+    _actualFps.value = windowFps()
+
     val previous = lastFrameMs
     lastFrameMs = receivedAtMs
-    if (previous == null) return // first frame: no interval yet, rate stays 0.
+    if (previous == null) return // first frame: no interval yet.
 
     val dt = receivedAtMs - previous
     if (dt <= 0L) return // out-of-order / duplicate timestamp: ignore rather than divide by zero.
-    if (dt > idleGapMs) {
-      // Stream discontinuity (idle-buffer suppression on a static screen, or a reconnect): the next
-      // frame re-seeds the EMA from here rather than this gap being scored as a ~0fps sample.
-      samples = 0
-      lowStreak = 0
-      highStreak = 0
-      return
-    }
+    if (!autoAdjustEnabled) return
 
-    val instant = 1000f / dt
-    val ema = _actualFps.value
-    _actualFps.value =
-      if (samples == 0) instant else (smoothing * instant + (1 - smoothing) * ema).toFloat()
-    samples++
-
-    if (!autoAdjustEnabled || samples < minSamplesForDecision) return
-    evaluate(_actualFps.value, receivedAtMs)
+    classify(dt)
+    if (samples < minSamplesForDecision) return
+    maybeAdjust(receivedAtMs)
   }
 
   /** Applies an explicit user choice, re-seeding the rate window so the manual pick sticks. */
@@ -122,24 +133,46 @@ class QualityController(
     onManualSelection(quality)
   }
 
-  private fun evaluate(fps: Float, nowMs: Long) {
+  /**
+   * Frames-over-elapsed across the retained window; 0 until two frames span a positive interval.
+   */
+  private fun windowFps(): Float {
+    if (window.size < 2) return 0f
+    val span = window.last() - window.first()
+    if (span <= 0L) return 0f
+    return (window.size - 1) * 1000f / span
+  }
+
+  /** Buckets one inter-frame interval into healthy / dropping / idle and advances the streaks. */
+  private fun classify(dt: Long) {
     when {
-      fps < downgradeRatio * targetFps -> {
-        lowStreak++
+      // Idle: consistent with a static screen's repeat cadence or a suppression/reconnect gap.
+      // Not degradation — clear the streaks and do not count it as a decision sample.
+      dt >= idleIntervalMs -> {
+        lowStreak = 0
         highStreak = 0
       }
-      fps >= upgradeRatio * targetFps -> {
+      dt <= healthyMaxDtMs -> {
         highStreak++
         lowStreak = 0
+        samples++
       }
-      // Dead-zone between the two ratios: neither dropping nor clearly healthy — hold and reset,
+      dt > droppingMinDtMs -> {
+        lowStreak++
+        highStreak = 0
+        samples++
+      }
+      // Dead-zone between the two ratios: neither clearly healthy nor dropping — hold and reset,
       // which is what gives the hysteresis its gap and stops boundary flapping.
       else -> {
         lowStreak = 0
         highStreak = 0
+        samples++
       }
     }
+  }
 
+  private fun maybeAdjust(nowMs: Long) {
     val dwellElapsed = lastChangeAtMs?.let { nowMs - it >= minDwellMs } ?: true
     if (!dwellElapsed) return
 
@@ -159,12 +192,12 @@ class QualityController(
   }
 
   /**
-   * Drops the inter-frame timing and hysteresis streaks so the next frame re-seeds the EMA. Called
-   * on every preset change because a change triggers a re-subscribe, and the first frame after that
-   * reconnection is separated from the last pre-change frame by the whole gap — counting it as a
-   * real interval would fold one implausibly-slow sample into the rate.
+   * Drops the retained timing and hysteresis streaks so the next frames re-seed the rate. Called on
+   * every preset change because a change triggers a re-subscribe, and the first frame after that
+   * reconnection is separated from the last pre-change frame by the whole gap.
    */
   private fun resetRateWindow() {
+    window.clear()
     lastFrameMs = null
     samples = 0
     lowStreak = 0

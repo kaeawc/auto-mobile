@@ -310,6 +310,43 @@ Provides SharedPreferences read access for debug builds. Same enable/disable pat
 
 Both inspectors follow the pattern: `initialize(context)` at SDK init, `setEnabled(true)` in debug builds, lazy driver creation on first access.
 
+### DataStore Inspection (`DataStoreInspector`)
+
+Storage inspection is otherwise blind to applications that keep preferences in [Jetpack DataStore](https://developer.android.com/topic/libraries/architecture/datastore) rather than conventional `SharedPreferences` files. `DataStoreInspector` closes that gap with an explicit, read-only, application-provided adapter contract so DataStore state is inspected through a documented interface instead of by inferring it from implementation-specific files (#5192).
+
+**Integration contract.** The host implements `DataStoreAdapter` against its own DataStore instances — typically `androidx.datastore.core.DataStore<androidx.datastore.preferences.core.Preferences>` — and registers it under a stable name:
+
+```kotlin
+class AppDataStoreAdapter(
+  private val stores: Map<String, DataStore<Preferences>>,
+) : DataStoreAdapter {
+  override suspend fun storeNames(): List<String> = stores.keys.toList()
+
+  override suspend fun read(storeName: String): List<DataStoreEntry> {
+    val store = stores[storeName] ?: throw DataStoreAdapterError.StoreNotFound(storeName)
+    return store.data.first().asMap().map { (key, value) ->
+      DataStoreEntry(key.name, value, value.toDataStoreValueType())
+    }
+  }
+}
+
+if (BuildConfig.DEBUG) {
+  SharedPreferencesInspector.setEnabled(true) // shared storage-surface enable switch
+  DataStoreInspector.registerAdapter("app", AppDataStoreAdapter(stores))
+}
+```
+
+DataStore-backed preferences are then discoverable and readable through the existing storage `ContentProvider` (`listDataStores`, `getDataStore`), reusing the same `StorageResponse` shapes as SharedPreferences. Stores are identified by name only — **no filesystem path is ever exposed** — and served via `adb shell content call ... --method getDataStore --extra adapterName:s:app --extra storeName:s:settings`.
+
+**Boundary guarantees** (enforced by `DataStoreInspector`, independent of the host adapter):
+
+- **Read-only.** The `DataStoreAdapter` contract exposes no mutation entry point, so mutation is structurally unsupported; `capabilities().mutationSupported` is always `false`.
+- **Redaction.** A configurable `DataStoreRedactionPolicy` (`setRedactionPolicy`) redacts matching values at the boundary before they leave the SDK; a host adapter cannot opt out.
+- **Structured values and errors.** Values map onto `DataStoreValueType` (String, Int, Long, Float, Double, Boolean, `Set<String>`, byte array); an unrepresentable value is surfaced as `UNKNOWN` or rejected with `DataStoreAdapterError.UnsupportedValue`. Missing adapters/stores and host read failures surface as `AdapterNotFound`, `StoreNotFound`, and `ReadError`.
+- **Lifecycle-safe.** Registration replaces by name, `unregisterAdapter` returns whether one was removed, and `AutoMobileSDK.shutdown()` clears all adapters. Reads run in the caller's coroutine context, so cancellation propagates cooperatively and no background coroutines or listeners are retained.
+
+**Limitations.** Read-only by design (no writes). Change subscriptions/listeners are not part of the contract (unlike `SharedPreferencesInspector`) — reads are point-in-time snapshots. Value redaction operates per key/store name, not on nested structured values. The SDK never links against `androidx.datastore`; representing values is the host adapter's responsibility.
+
 | Component | Description | Status |
 |-----------|-------------|--------|
 | `DatabaseInspector` | SQLite database access with lazy driver and enable/disable gating | <kbd>✅ Implemented</kbd> |
@@ -318,6 +355,8 @@ Both inspectors follow the pattern: `initialize(context)` at SDK init, `setEnabl
 | `SharedPreferencesInspector` | SharedPreferences access with lazy driver and enable/disable gating | <kbd>✅ Implemented</kbd> |
 | `SharedPreferencesDriverImpl` | SharedPreferences driver with change listeners | <kbd>✅ Implemented</kbd> |
 | `SharedPreferencesDriver` | Interface for testability | <kbd>✅ Implemented</kbd> |
+| `DataStoreInspector` | Read-only DataStore access via app-provided adapters, boundary redaction, and capability reporting | <kbd>✅ Implemented</kbd> |
+| `DataStoreAdapter` | Application-provided read-only DataStore integration contract | <kbd>✅ Implemented</kbd> |
 
 ## 12. Compose Recomposition Tracking
 

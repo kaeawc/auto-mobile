@@ -5,6 +5,7 @@ import android.content.ContentValues
 import android.database.Cursor
 import android.net.Uri
 import android.os.Bundle
+import android.util.Base64
 import dev.jasonpearson.automobile.protocol.StorageChangeEvent
 import dev.jasonpearson.automobile.protocol.StorageEntry
 import dev.jasonpearson.automobile.protocol.StorageFileInfo
@@ -12,6 +13,7 @@ import dev.jasonpearson.automobile.protocol.StorageProtocolSerializer
 import dev.jasonpearson.automobile.protocol.StorageResponse
 import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import dev.jasonpearson.automobile.sdk.DebugInspectorAccess
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -62,29 +64,39 @@ class SharedPreferencesInspectorProvider : ContentProvider() {
         return result
       }
 
-      val driver = SharedPreferencesInspector.getDriver(extras?.getString("storeName"))
+      // DataStore-backed preferences are served through this same storage inspection surface via
+      // the read-only application-provided adapter contract (issue #5192). They reuse the existing
+      // StorageResponse shapes (no path is exposed) and are handled before the SharedPreferences
+      // driver is resolved, since they do not use it.
       val responseJson =
-        when (method) {
-          "listFiles" -> handleListFiles(driver)
-          "getPreferences" -> handleGetPreferences(driver, extras)
-          "getPreference" -> handleGetPreference(driver, extras)
-          "setValue" -> {
-            requireMutationsAllowed()
-            handleSetValue(driver, extras)
+        if (method == "listDataStores") {
+          handleListDataStores(extras)
+        } else if (method == "getDataStore") {
+          handleGetDataStore(extras)
+        } else {
+          val driver = SharedPreferencesInspector.getDriver(extras?.getString("storeName"))
+          when (method) {
+            "listFiles" -> handleListFiles(driver)
+            "getPreferences" -> handleGetPreferences(driver, extras)
+            "getPreference" -> handleGetPreference(driver, extras)
+            "setValue" -> {
+              requireMutationsAllowed()
+              handleSetValue(driver, extras)
+            }
+            "removeValue" -> {
+              requireMutationsAllowed()
+              handleRemoveValue(driver, extras)
+            }
+            "clearFile" -> {
+              requireMutationsAllowed()
+              handleClearFile(driver, extras)
+            }
+            "subscribeToFile" -> handleSubscribeToFile(driver, extras)
+            "unsubscribeFromFile" -> handleUnsubscribeFromFile(driver, extras)
+            "getChanges" -> handleGetChanges(driver, extras)
+            "getListenedFiles" -> handleGetListenedFiles(driver)
+            else -> throw IllegalArgumentException("Unknown method: $method")
           }
-          "removeValue" -> {
-            requireMutationsAllowed()
-            handleRemoveValue(driver, extras)
-          }
-          "clearFile" -> {
-            requireMutationsAllowed()
-            handleClearFile(driver, extras)
-          }
-          "subscribeToFile" -> handleSubscribeToFile(driver, extras)
-          "unsubscribeFromFile" -> handleUnsubscribeFromFile(driver, extras)
-          "getChanges" -> handleGetChanges(driver, extras)
-          "getListenedFiles" -> handleGetListenedFiles(driver)
-          else -> throw IllegalArgumentException("Unknown method: $method")
         }
       result.putBoolean("success", true)
       result.putString("result", responseJson)
@@ -103,6 +115,64 @@ class SharedPreferencesInspectorProvider : ContentProvider() {
     }
 
     return result
+  }
+
+  /**
+   * Handles listDataStores - lists the DataStore instances exposed by a registered adapter.
+   *
+   * @param extras Must contain "adapterName" string
+   * @return JSON [StorageResponse.FileList]; descriptors carry an empty path (no filesystem path is
+   *   exposed for DataStore, issue #5192)
+   */
+  private fun handleListDataStores(extras: Bundle?): String {
+    val adapterName =
+      extras?.getString("adapterName") ?: throw IllegalArgumentException("adapterName required")
+    val stores = runBlocking { DataStoreInspector.describeStores(adapterName) }
+    val protocolFiles = stores.map { store ->
+      StorageFileInfo(name = store.name, path = "", entryCount = store.entryCount)
+    }
+    return StorageProtocolSerializer.responseToJson(StorageResponse.FileList(files = protocolFiles))
+  }
+
+  /**
+   * Handles getDataStore - reads all entries from a named DataStore instance.
+   *
+   * @param extras Must contain "adapterName" and "storeName" strings
+   * @return JSON [StorageResponse.Preferences]
+   */
+  private fun handleGetDataStore(extras: Bundle?): String {
+    val adapterName =
+      extras?.getString("adapterName") ?: throw IllegalArgumentException("adapterName required")
+    val storeName =
+      extras.getString("storeName") ?: throw IllegalArgumentException("storeName required")
+    val entries = runBlocking { DataStoreInspector.readStore(adapterName, storeName) }
+    val protocolEntries = entries.map { entry ->
+      StorageEntry(
+        key = entry.key,
+        value = serializeDataStoreValue(entry.value, entry.type),
+        type = entry.type.name,
+      )
+    }
+    val file = StorageFileInfo(name = storeName, path = "", entryCount = protocolEntries.size)
+    return StorageProtocolSerializer.responseToJson(
+      StorageResponse.Preferences(file = file, entries = protocolEntries)
+    )
+  }
+
+  /** Serializes a DataStore value for wire transport, mirroring [serializeValue]. */
+  private fun serializeDataStoreValue(value: Any?, type: DataStoreValueType): String? {
+    return when {
+      value == null -> null
+      type == DataStoreValueType.STRING_SET -> {
+        @Suppress("UNCHECKED_CAST") val set = value as? Set<String> ?: return null
+        json.encodeToString(set.toList())
+      }
+      type == DataStoreValueType.BYTE_ARRAY -> {
+        val bytes = value as? ByteArray ?: return null
+        Base64.encodeToString(bytes, Base64.NO_WRAP)
+      }
+      else -> value.toString()
+    }
   }
 
   private fun requireMutationsAllowed() {

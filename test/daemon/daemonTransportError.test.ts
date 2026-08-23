@@ -116,6 +116,7 @@ describe("DaemonClient device-control transport response", () => {
         deviceSessionUuid: "device-epoch-a",
         sessionUuid: "session-a",
         sessionValid: true,
+        deviceSessionValid: true,
         phase: "response" as const,
         retryable: false,
         reconnectAttempted: true,

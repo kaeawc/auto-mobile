@@ -313,29 +313,29 @@ export const tapOnSchema = withJsonSchemaOverride(
         ensureTap: { not: { const: true } },
         searchUntil: { not: {} },
       },
+      allOf: [
+        {
+          not: {
+            required: ["subtext"],
+            properties: {
+              selector: { required: ["accessibilityLink"] },
+            },
+          },
+        },
+        {
+          if: { required: ["subtext"] },
+          then: { not: { required: ["index"] } },
+        },
+        {
+          if: { required: ["subtext"] },
+          then: {
+            properties: {
+              selectionStrategy: { not: { const: "random" } },
+            },
+          },
+        },
+      ],
     };
-    js.allOf = [
-      {
-        not: {
-          required: ["subtext"],
-          properties: {
-            selector: { required: ["accessibilityLink"] },
-          },
-        },
-      },
-      {
-        if: { required: ["subtext"] },
-        then: { not: { required: ["index"] } },
-      },
-      {
-        if: { required: ["subtext"] },
-        then: {
-          properties: {
-            selectionStrategy: { not: { const: "random" } },
-          },
-        },
-      },
-    ];
   },
 );
 

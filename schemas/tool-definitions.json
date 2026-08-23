@@ -9386,54 +9386,54 @@
           "searchUntil": {
             "not": {}
           }
-        }
-      },
-      "allOf": [
-        {
-          "not": {
-            "required": [
-              "subtext"
-            ],
-            "properties": {
-              "selector": {
+        },
+        "allOf": [
+          {
+            "not": {
+              "required": [
+                "subtext"
+              ],
+              "properties": {
+                "selector": {
+                  "required": [
+                    "accessibilityLink"
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "subtext"
+              ]
+            },
+            "then": {
+              "not": {
                 "required": [
-                  "accessibilityLink"
+                  "index"
                 ]
               }
             }
-          }
-        },
-        {
-          "if": {
-            "required": [
-              "subtext"
-            ]
           },
-          "then": {
-            "not": {
+          {
+            "if": {
               "required": [
-                "index"
+                "subtext"
               ]
-            }
-          }
-        },
-        {
-          "if": {
-            "required": [
-              "subtext"
-            ]
-          },
-          "then": {
-            "properties": {
-              "selectionStrategy": {
-                "not": {
-                  "const": "random"
+            },
+            "then": {
+              "properties": {
+                "selectionStrategy": {
+                  "not": {
+                    "const": "random"
+                  }
                 }
               }
             }
           }
-        }
-      ]
+        ]
+      }
     },
     "outputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

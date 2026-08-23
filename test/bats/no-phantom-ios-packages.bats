@@ -53,3 +53,39 @@ refute_tokens() {
 @test "ios/README.md no longer uses AccessibilityService as an example component" {
   refute_tokens "ios/README.md" "AccessibilityService"
 }
+
+# ---------------------------------------------------------------------------
+# SimctlIntegration (issue #5089). A third phantom: unlike the two above it was
+# described as a TypeScript component, so it also polluted the TS-validation
+# path. No real TypeScript iOS component exists, so the phantom-only CI script
+# scripts/ci/validate-ios-typescript.sh was removed along with its invocation
+# from scripts/ci/validate-ios.sh.
+# ---------------------------------------------------------------------------
+
+@test "phantom-only CI script validate-ios-typescript.sh was removed" {
+  local file="$REPO_ROOT/scripts/ci/validate-ios-typescript.sh"
+  if [ -e "$file" ]; then
+    echo "phantom-only script scripts/ci/validate-ios-typescript.sh still present"
+    return 1
+  fi
+}
+
+@test "validate-ios.sh (ci) no longer invokes the removed TypeScript validation" {
+  refute_tokens "scripts/ci/validate-ios.sh" "SimctlIntegration" "validate-ios-typescript"
+}
+
+@test "validate-ios.sh (local) lists no SimctlIntegration reference" {
+  refute_tokens "scripts/local/validate-ios.sh" "SimctlIntegration"
+}
+
+@test "build-ios-component.sh help lists no SimctlIntegration component" {
+  refute_tokens "scripts/local/build-ios-component.sh" "SimctlIntegration"
+}
+
+@test "test-ios-component.sh help lists no SimctlIntegration component" {
+  refute_tokens "scripts/local/test-ios-component.sh" "SimctlIntegration"
+}
+
+@test "ios/README.md no longer references SimctlIntegration" {
+  refute_tokens "ios/README.md" "SimctlIntegration"
+}

@@ -528,6 +528,8 @@ export const skeletonElementSchema = z
   .object({
     id: z.string().optional(),
     label: z.string().optional(),
+    testTag: z.string().optional(),
+    semanticLinks: z.array(semanticLinkSchema).optional(),
     bounds: compactBoundsTupleSchema.describe(
       "Bounds as the compact [left, top, right, bottom] tuple — always this shape " +
         "for skeleton entries.",

@@ -175,9 +175,18 @@ class ViewHierarchyExtractorTest {
   @Test
   fun `semantic links preserve visible text ranges and per-text occurrences`() {
     val text = SpannableString("Read Terms, Privacy, and Terms")
-    val firstTerms = object : ClickableSpan() { override fun onClick(widget: View) = Unit }
-    val privacy = object : ClickableSpan() { override fun onClick(widget: View) = Unit }
-    val secondTerms = object : ClickableSpan() { override fun onClick(widget: View) = Unit }
+    val firstTerms =
+      object : ClickableSpan() {
+        override fun onClick(widget: View) = Unit
+      }
+    val privacy =
+      object : ClickableSpan() {
+        override fun onClick(widget: View) = Unit
+      }
+    val secondTerms =
+      object : ClickableSpan() {
+        override fun onClick(widget: View) = Unit
+      }
     text.setSpan(firstTerms, 5, 10, 0)
     text.setSpan(privacy, 12, 19, 0)
     text.setSpan(secondTerms, 25, 30, 0)
@@ -195,7 +204,14 @@ class ViewHierarchyExtractorTest {
   @Test
   fun `semantic links stay absent below API 26 and for plain text`() {
     val spanned = SpannableString("Terms")
-    spanned.setSpan(object : ClickableSpan() { override fun onClick(widget: View) = Unit }, 0, 5, 0)
+    spanned.setSpan(
+      object : ClickableSpan() {
+        override fun onClick(widget: View) = Unit
+      },
+      0,
+      5,
+      0,
+    )
 
     assertNull(extractor.semanticLinksFromText(spanned, apiLevel = 25))
     assertNull(extractor.semanticLinksFromText("Terms", apiLevel = 35))
@@ -206,14 +222,17 @@ class ViewHierarchyExtractorTest {
     val verboseJson = Json { encodeDefaults = true }
 
     assertFalse(
-      verboseJson.encodeToString(UIElementInfo.serializer(), UIElementInfo(text = "Plain text"))
+      verboseJson
+        .encodeToString(UIElementInfo.serializer(), UIElementInfo(text = "Plain text"))
         .contains("semantic-links")
     )
     assertTrue(
-      verboseJson.encodeToString(
-        UIElementInfo.serializer(),
-        UIElementInfo(semanticLinks = listOf(SemanticLink("Terms", 0, 0, 5))),
-      ).contains("semantic-links")
+      verboseJson
+        .encodeToString(
+          UIElementInfo.serializer(),
+          UIElementInfo(semanticLinks = listOf(SemanticLink("Terms", 0, 0, 5))),
+        )
+        .contains("semantic-links")
     )
   }
 

@@ -473,6 +473,8 @@ describe("observe tool registration advertises the schema (#3025)", () => {
       const json = JSON.stringify((observe as Record<string, unknown>).outputSchema);
       expect(json).toContain("\"skeleton\"");
       expect(json).toContain("\"affordances\"");
+      expect(json).toContain("\"semanticLinks\"");
+      expect(json).toContain("\"testTag\"");
     });
   });
 });

@@ -4931,6 +4931,41 @@
               "label": {
                 "type": "string"
               },
+              "testTag": {
+                "type": "string"
+              },
+              "semanticLinks": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "occurrence": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "start": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "end": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "text",
+                    "occurrence"
+                  ],
+                  "additionalProperties": false
+                }
+              },
               "bounds": {
                 "description": "Bounds as the compact [left, top, right, bottom] tuple — always this shape for skeleton entries.",
                 "type": "array",

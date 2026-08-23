@@ -1023,7 +1023,10 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
    * Returns only the link metadata needed to discover native [ClickableSpan] activation.
    * Accessibility exposes these spans from API 26 onward; callers omit the field when absent.
    */
-  internal fun semanticLinksFromText(text: CharSequence?, apiLevel: Int = Build.VERSION.SDK_INT): List<SemanticLink>? {
+  internal fun semanticLinksFromText(
+    text: CharSequence?,
+    apiLevel: Int = Build.VERSION.SDK_INT,
+  ): List<SemanticLink>? {
     if (apiLevel < Build.VERSION_CODES.O || text !is Spanned) return null
     val occurrences = mutableMapOf<String, Int>()
     val links =

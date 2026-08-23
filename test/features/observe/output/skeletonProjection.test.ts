@@ -62,6 +62,27 @@ describe("toSkeleton — acceptance criteria", () => {
     });
   });
 
+  test("retains compact semantic links and a Compose owner test tag when present", () => {
+    const composeText: Element = {
+      bounds: bounds(0, 0, 200, 40),
+      text: "Terms of Service",
+      "test-tag": "legal-copy",
+      "semantic-links": [{ text: "Terms of Service", occurrence: 0, start: 0, end: 16 }],
+    };
+
+    const skeleton = toSkeleton(makeElements({ text: [composeText] }));
+
+    expect(skeleton).toEqual([
+      {
+        bounds: [0, 0, 200, 40],
+        label: "Terms of Service",
+        testTag: "legal-copy",
+        semanticLinks: [{ text: "Terms of Service", occurrence: 0, start: 0, end: 16 }],
+        affordances: [],
+      },
+    ]);
+  });
+
   describe("AC3: affordance derivation across boolean | string inputs", () => {
     const cases: Array<{ name: string; attr: Partial<Element>; expected: SkeletonElement["affordances"] }> = [
       { name: "clickable", attr: { clickable: true }, expected: ["tap"] },

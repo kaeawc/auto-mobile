@@ -1,10 +1,10 @@
 package dev.jasonpearson.automobile.ctrlproxy.models
 
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
-import kotlinx.serialization.EncodeDefault
-import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.JsonElement
 
 /** An activatable link embedded in an accessibility element's text. */
@@ -50,7 +50,8 @@ data class UIElementInfo(
   // Additional accessibility semantics fields
   @SerialName("test-tag") val testTag: String? = null, // Compose or View accessibility-extra tag
   @EncodeDefault(EncodeDefault.Mode.NEVER)
-  @SerialName("semantic-links") val semanticLinks: List<SemanticLink>? = null,
+  @SerialName("semantic-links")
+  val semanticLinks: List<SemanticLink>? = null,
   @SerialName("unique-id") val uniqueId: String? = null, // Android-owned ID (API 33+)
   @SerialName("visible-to-user") val visibleToUser: Boolean? = null,
   @SerialName("container-title") val containerTitle: String? = null, // API 34+

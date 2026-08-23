@@ -1752,6 +1752,8 @@ describe("finalizeToolResponse", () => {
             "resource-id": "com.example:id/btn",
             "text": "Submit",
             "clickable": "true",
+            "test-tag": "submit-with-terms",
+            "semantic-links": [{ text: "Terms", occurrence: 0, start: 7, end: 12 }],
           } as any,
         ],
         scrollable: [],
@@ -1771,6 +1773,8 @@ describe("finalizeToolResponse", () => {
       expect(sc.skeleton!.length).toBeGreaterThan(0);
       expect(sc.viewHierarchy).toBeUndefined();
       expect(sc.elements).toBeUndefined();
+      expect(sc.skeleton![0].testTag).toBe("submit-with-terms");
+      expect(sc.skeleton![0].semanticLinks).toEqual([{ text: "Terms", occurrence: 0, start: 7, end: 12 }]);
       // text mirror agrees with structuredContent.
       const parsed = JSON.parse(finalized.content[0].text);
       expect(parsed.skeleton.length).toBe(sc.skeleton!.length);

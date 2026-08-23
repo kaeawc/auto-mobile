@@ -523,6 +523,28 @@ describe("ViewHierarchy", function() {
       });
     });
 
+    test("keeps semantic-link metadata while filtering hierarchy properties", function() {
+      const result = viewHierarchy.filterViewHierarchy({
+        hierarchy: {
+          $: { class: "android.widget.TextView" },
+          node: {
+            $: {
+              text: "Terms of Service",
+              "semantic-links": [{ text: "Terms of Service", occurrence: 0, start: 0, end: 16 }],
+            },
+          },
+        },
+      });
+
+      expect(result.hierarchy).toEqual({
+        $: { class: "android.widget.TextView" },
+        node: {
+          text: "Terms of Service",
+          "semantic-links": [{ text: "Terms of Service", occurrence: 0, start: 0, end: 16 }],
+        },
+      });
+    });
+
     test("returns an empty child list at the root when every descendant is filtered out", function() {
       // Regression for issue #4172 item 4 / A3: filterSingleNode's root branch
       // must overwrite the cloned children even when NOTHING survives, otherwise

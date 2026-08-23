@@ -2,6 +2,18 @@
 import XCTest
 
 final class ElementLocatorTests: XCTestCase {
+    func testCopyingPreservesSemanticLinksOnRetainedLink() {
+        let link = UIElementInfo(
+            text: "Terms of Service",
+            clickable: "true",
+            semanticLinks: [SemanticLink(text: "Terms of Service", occurrence: 0)],
+            role: "link"
+        )
+        let optimized = ElementLocator.copying(link, node: nil)
+
+        XCTAssertEqual(optimized.semanticLinks, link.semanticLinks)
+    }
+
     // MARK: - SpringBoard fallback lookup (#4014)
 
     func testFirstMatchingElement_prefersForegroundApplication() {

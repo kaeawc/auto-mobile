@@ -2,16 +2,20 @@ package dev.jasonpearson.automobile.ctrlproxy
 
 import android.graphics.Rect
 import android.os.Build
+import android.text.Spanned
+import android.text.style.ClickableSpan
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ContentHiddenRegion
 import dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds
 import dev.jasonpearson.automobile.ctrlproxy.models.ScreenDimensions
+import dev.jasonpearson.automobile.ctrlproxy.models.SemanticLink
 import dev.jasonpearson.automobile.ctrlproxy.models.TraversalOrderResult
 import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import dev.jasonpearson.automobile.ctrlproxy.models.WindowInfo
+import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
 
@@ -812,6 +816,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
 
       val extrasMap = extractExtras(node)
       val testTag = extractTestTag(extrasMap)
+      val semanticLinks = if (node.isPassword) null else semanticLinksFromText(node.text)
 
       // Check direct APIs if available (API 30+) with an extras fallback for Compose on API < 30
       val stateDescription: String? = extractStateDescription(node, extrasMap)
@@ -984,6 +989,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
           children = children,
           stateDescription = stateDescription,
           testTag = testTag,
+          semanticLinks = semanticLinks,
           uniqueId = apiGatedFields.uniqueId,
           visibleToUser = node.isVisibleToUser,
           containerTitle = apiGatedFields.containerTitle,
@@ -1012,6 +1018,36 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       Log.e(TAG, "Error extracting node info at depth $depth", e)
       null
     }
+  }
+
+  /**
+   * Returns only the link metadata needed to discover native [ClickableSpan] activation.
+   * Accessibility exposes these spans from API 26 onward; callers omit the field when absent.
+   */
+  internal fun semanticLinksFromText(
+    text: CharSequence?,
+    apiLevel: Int = Build.VERSION.SDK_INT,
+  ): List<SemanticLink>? {
+    if (apiLevel < Build.VERSION_CODES.O || text !is Spanned) return null
+    val occurrences = mutableMapOf<String, Int>()
+    val links =
+      text
+        .getSpans(0, text.length, ClickableSpan::class.java)
+        .sortedWith(compareBy({ text.getSpanStart(it) }, { text.getSpanEnd(it) }))
+        .mapNotNull { span ->
+          val start = text.getSpanStart(span)
+          val end = text.getSpanEnd(span)
+          if (start < 0 || end <= start || end > text.length) return@mapNotNull null
+          val visibleText = text.subSequence(start, end).toString()
+          if (visibleText.isBlank()) return@mapNotNull null
+          // Activation matches span text case-insensitively, so discovery must
+          // use the same equivalence relation for occurrence numbering.
+          val occurrenceKey = visibleText.lowercase(Locale.ROOT)
+          val occurrence = occurrences[occurrenceKey] ?: 0
+          occurrences[occurrenceKey] = occurrence + 1
+          SemanticLink(visibleText, occurrence, start, end)
+        }
+    return links.ifEmpty { null }
   }
 
   /**

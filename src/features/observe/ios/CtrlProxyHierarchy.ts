@@ -5,7 +5,7 @@
  * via the iOS CtrlProxy iOS WebSocket API.
  */
 
-import type { ViewHierarchyResult } from "../../../models";
+import type { SemanticLink, ViewHierarchyResult } from "../../../models";
 import { isDeepStrictEqual } from "node:util";
 import { screenScaleMetadataSpread } from "../../../models/ScreenScaleMetadata";
 import type { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOptions";
@@ -383,6 +383,7 @@ export class CtrlProxyHierarchy {
     const testTag = this.readNodeField<string>(node, "testTag", "test-tag");
     const accessibilityFocused = this.readNodeField<string>(node, "accessibilityFocused", "accessibility-focused");
     const longClickable = this.readNodeField<string>(node, "longClickable", "long-clickable");
+    const semanticLinks = this.readNodeField<SemanticLink[]>(node, "semanticLinks", "semantic-links");
     const stateDescription = this.readNodeField<string>(node, "stateDescription", "state-description");
     const errorMessage = this.readNodeField<string>(node, "errorMessage", "error-message");
     const hintText = this.readNodeField<string>(node, "hintText", "hint-text");
@@ -406,6 +407,9 @@ export class CtrlProxyHierarchy {
     if (node.checked) {attrs["checked"] = node.checked;}
     if (node.selected) {attrs["selected"] = node.selected;}
     if (longClickable) {attrs["long-clickable"] = longClickable;}
+    if (semanticLinks && semanticLinks.length > 0) {
+      attrs["semantic-links"] = semanticLinks;
+    }
     if (hasIosHeaderTrait(node.extras)) {
       attrs["role"] = "heading";
     } else if (node.role) {

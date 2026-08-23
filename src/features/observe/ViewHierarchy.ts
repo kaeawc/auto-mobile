@@ -732,6 +732,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       "content-desc",
       "clickable",
       "long-clickable",
+      "semantic-links",
       "scrollable",
       "enabled",
       "focusable",

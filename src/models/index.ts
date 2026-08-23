@@ -94,6 +94,7 @@ export * from "./ViewHierarchyCache";
 export * from "./ViewHierarchyQueryOptions";
 export * from "./ViewHierarchyResult";
 export * from "./ScreenScaleMetadata";
+export * from "./SemanticLink";
 export * from "./CtrlProxyReconnectStatus";
 export * from "./Plan";
 export * from "./ExportPlanResult";

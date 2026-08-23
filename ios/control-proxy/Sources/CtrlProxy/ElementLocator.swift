@@ -1101,6 +1101,9 @@ public class ElementLocator: ElementLocating {
                 checked: isChecked ? "true" : nil,
                 selected: isSelected ? "true" : nil,
                 longClickable: nil, // Don't include - same as clickable on iOS
+                semanticLinks: snapshot.elementType == .link
+                    ? label.map { [SemanticLink(text: $0, occurrence: 0)] }
+                    : nil,
                 testTag: nil, // Don't duplicate - identifier is in resourceId
                 role: mapRole(snapshot.elementType),
                 stateDescription: nil,
@@ -1183,33 +1186,7 @@ public class ElementLocator: ElementLocating {
 
             // Root element is always kept
             if isRoot {
-                return [UIElementInfo(
-                    text: element.text,
-                    value: element.value,
-                    textSize: element.textSize,
-                    contentDesc: element.contentDesc,
-                    resourceId: element.resourceId,
-                    className: element.className,
-                    bounds: element.bounds,
-                    clickable: element.clickable,
-                    enabled: element.enabled,
-                    focusable: element.focusable,
-                    focused: element.focused,
-                    accessibilityFocused: element.accessibilityFocused,
-                    scrollable: element.scrollable,
-                    password: element.password,
-                    checkable: element.checkable,
-                    checked: element.checked,
-                    selected: element.selected,
-                    longClickable: element.longClickable,
-                    testTag: element.testTag,
-                    role: element.role,
-                    stateDescription: element.stateDescription,
-                    errorMessage: element.errorMessage,
-                    hintText: element.hintText,
-                    actions: element.actions,
-                    node: optimizedChildren
-                )]
+                return [Self.copying(element, node: optimizedChildren)]
             }
 
             // Only promote children (flatten hierarchy) if this is a bounds-only wrapper AND not interactive
@@ -1226,33 +1203,7 @@ public class ElementLocator: ElementLocating {
             }
 
             // Keep this element with optimized children
-            return [UIElementInfo(
-                text: element.text,
-                value: element.value,
-                textSize: element.textSize,
-                contentDesc: element.contentDesc,
-                resourceId: element.resourceId,
-                className: element.className,
-                bounds: element.bounds,
-                clickable: element.clickable,
-                enabled: element.enabled,
-                focusable: element.focusable,
-                focused: element.focused,
-                accessibilityFocused: element.accessibilityFocused,
-                scrollable: element.scrollable,
-                password: element.password,
-                checkable: element.checkable,
-                checked: element.checked,
-                selected: element.selected,
-                longClickable: element.longClickable,
-                testTag: element.testTag,
-                role: element.role,
-                stateDescription: element.stateDescription,
-                errorMessage: element.errorMessage,
-                hintText: element.hintText,
-                actions: element.actions,
-                node: optimizedChildren
-            )]
+            return [Self.copying(element, node: optimizedChildren)]
         }
 
 
@@ -1629,7 +1580,7 @@ public class ElementLocator: ElementLocating {
             && lhsBounds.bottom == rhsBounds.bottom
     }
 
-    private static func copying(_ element: UIElementInfo, node: [UIElementInfo]?) -> UIElementInfo {
+    static func copying(_ element: UIElementInfo, node: [UIElementInfo]?) -> UIElementInfo {
         UIElementInfo(
             text: element.text,
             value: element.value,
@@ -1649,6 +1600,7 @@ public class ElementLocator: ElementLocating {
             checked: element.checked,
             selected: element.selected,
             longClickable: element.longClickable,
+            semanticLinks: element.semanticLinks,
             testTag: element.testTag,
             role: element.role,
             stateDescription: element.stateDescription,

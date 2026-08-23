@@ -39,6 +39,18 @@ function makeHierarchy(root: CtrlProxyNode): any {
 describe("CtrlProxyHierarchy.convertToViewHierarchyResult", () => {
   const subject = new CtrlProxyHierarchy(stubContext);
 
+  test("preserves compact semantic-link metadata from the iOS runner", () => {
+    const result = subject.convertToViewHierarchyResult(makeHierarchy({
+      text: "Terms of Service",
+      role: "link",
+      "semantic-links": [{ text: "Terms of Service", occurrence: 0 }],
+    }));
+
+    expect((result.hierarchy.node as any).$["semantic-links"]).toEqual([
+      { text: "Terms of Service", occurrence: 0 },
+    ]);
+  });
+
   test("preserves capture-time device rotation", () => {
     const result = subject.convertToViewHierarchyResult({
       ...makeHierarchy({ className: "XCUIApplication" }),

@@ -18,6 +18,7 @@ import type { MediaView } from "../features/observe/IdentifyMediaViews";
 import type { ObserveError } from "../features/observe/ObserveError";
 import type { LayoutWarnings, ObservationInsets } from "./ObservationInsets";
 import type { ObserveScopeMetadata } from "./ObserveScope";
+import type { SemanticLink } from "./SemanticLink";
 
 export interface PredictionTarget {
   text?: string;
@@ -78,6 +79,10 @@ export interface SkeletonElement {
   id?: string;
   /** `text ?? content-desc`. */
   label?: string;
+  /** Compose test tag, when supplied by the app; usable as the stable owner key for `subtext`. */
+  testTag?: string;
+  /** Embedded accessibility links, omitted unless this element exposes one. */
+  semanticLinks?: SemanticLink[];
   /** Compact bounds tuple `[left, top, right, bottom]`. */
   bounds: [number, number, number, number];
   /** Actionable affordances, in canonical order tap, long-press, input, scroll, toggle. */

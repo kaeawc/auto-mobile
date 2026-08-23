@@ -345,6 +345,24 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(element.clickable, "false")
     }
 
+    func testUIElementInfoEncodesCompactSemanticLinkMetadata() throws {
+        let info = UIElementInfo(
+            text: "Terms of Service",
+            semanticLinks: [SemanticLink(text: "Terms of Service", occurrence: 0)],
+            role: "link"
+        )
+
+        let data = try JSONEncoder().encode(info)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let links = try XCTUnwrap(json["semantic-links"] as? [[String: Any]])
+
+        XCTAssertEqual(links.count, 1)
+        XCTAssertEqual(links[0]["text"] as? String, "Terms of Service")
+        XCTAssertEqual(links[0]["occurrence"] as? Int, 0)
+        XCTAssertNil(json["start"])
+        XCTAssertNil(json["end"])
+    }
+
     // MARK: - ElementBounds Tests
 
     func testElementBoundsComputedProperties() {

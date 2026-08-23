@@ -58,6 +58,21 @@ describe("TapOnElement selectedElement metadata", () => {
     expect((tapOnElement as any).hasUniqueSemanticLinkOwner(owner, hierarchy)).toBe(true);
   });
 
+  test("accepts a Compose semantic-link owner identified only by test tag", () => {
+    const tapOnElement = createTapOnElement();
+    const owner = ResultFaker.element({
+      text: "Terms and privacy",
+      "test-tag": "legal-copy",
+    });
+    const hierarchy = {
+      hierarchy: {
+        node: [{ ...owner, children: [] }],
+      },
+    };
+
+    expect((tapOnElement as any).hasUniqueSemanticLinkOwner(owner, hierarchy)).toBe(true);
+  });
+
   test("uses Android's complete stable selector for duplicate resource IDs", () => {
     const tapOnElement = createTapOnElement();
     const owner = ResultFaker.element({

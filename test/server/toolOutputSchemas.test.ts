@@ -48,6 +48,18 @@ describe("elementBoundsSchema: object + compact tuple (#2990)", () => {
     expect(elementSchema.parse(el)).toMatchObject({ bounds: tupleBounds, text: "btn" });
   });
 
+  test("elementSchema advertises compact semantic-link metadata", () => {
+    const element = elementSchema.parse({
+      bounds: tupleBounds,
+      text: "Read Terms of Service",
+      "semantic-links": [{ text: "Terms of Service", occurrence: 0, start: 5, end: 21 }],
+    });
+
+    expect(element["semantic-links"]).toEqual([
+      { text: "Terms of Service", occurrence: 0, start: 5, end: 21 },
+    ]);
+  });
+
   test("the advertised JSON schema documents the tuple order (machine-readable)", () => {
     const json = JSON.stringify(toJSONSchema(tapOnResultSchema));
     // The union carries a description naming the positional tuple order, so an

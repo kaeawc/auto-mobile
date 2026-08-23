@@ -1,4 +1,5 @@
 import { ElementBounds } from "./ElementBounds";
+import type { SemanticLink } from "./SemanticLink";
 
 /**
  * Represents a UI element with its properties
@@ -21,6 +22,7 @@ export interface Element {
   scrollable?: boolean | string;
   orientation?: string;
   selected?: boolean | string;
+  "semantic-links"?: SemanticLink[];
   /** Hierarchy depth injected during exploration element extraction */
   hierarchyDepth?: number;
   /** Child nodes from XML parsing (e.g., Compose UI elements) */

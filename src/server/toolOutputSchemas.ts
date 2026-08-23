@@ -4,6 +4,13 @@ import { z } from "zod/v4";
 // This schema accepts both for compatibility
 const booleanOrString = z.union([z.boolean(), z.literal("true"), z.literal("false")]).optional();
 
+const semanticLinkSchema = z.object({
+  text: z.string().min(1),
+  occurrence: z.number().int().nonnegative(),
+  start: z.number().int().nonnegative().optional(),
+  end: z.number().int().nonnegative().optional(),
+});
+
 // Default (verbose) bounds shape: the four-key object plus optional centers.
 //
 // Coordinates are plain numbers, NOT `.int()` (issue #3206): Android bounds are
@@ -77,6 +84,7 @@ export const elementSchema = z
     "accessibility-focused": booleanOrString,
     scrollable: booleanOrString,
     selected: booleanOrString,
+    "semantic-links": z.array(semanticLinkSchema).optional(),
   })
   .passthrough();
 
@@ -520,6 +528,8 @@ export const skeletonElementSchema = z
   .object({
     id: z.string().optional(),
     label: z.string().optional(),
+    testTag: z.string().optional(),
+    semanticLinks: z.array(semanticLinkSchema).optional(),
     bounds: compactBoundsTupleSchema.describe(
       "Bounds as the compact [left, top, right, bottom] tuple — always this shape " +
         "for skeleton entries.",

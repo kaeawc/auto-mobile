@@ -8,7 +8,9 @@ import type { Affordance, ObserveResult, SkeletonElement } from "../../../models
  *
  * `toSkeleton` collapses the already-computed `ObserveResult.elements`
  * (`{ clickable, scrollable, text, media }`) into a flat, actionable-only list —
- * `{ id, label, bounds, affordances }` — dropping layout scaffolding. It is a
+ * `{ id, label, bounds, affordances }` — dropping layout scaffolding. Embedded
+ * semantic links and a Compose test tag are retained only when present, because
+ * they make otherwise inaccessible link activation discoverable. It is a
  * pure merge + dedup + compaction of that structure: no device I/O, no tree
  * walk. The output is what an agent needs to decide "what can I do here, and
  * what does it say?", at a fraction of the token cost of the full hierarchy.
@@ -31,8 +33,8 @@ function nonEmptyString(value: unknown): string | undefined {
 /**
  * `id = resource-id ?? view-id`. The `view-id` slot is the stable content-hash
  * id from `assignStableViewIds` (`s-…`, #3228), so a row keeps its id across a
- * scroll. Compose `testTag` surfaces through `resource-id` in this codebase, so
- * there is no separate `test-tag` attribute to fall back to.
+ * scroll. A test tag is carried separately for Compose owners that do not enable
+ * `testTagsAsResourceId`.
  */
 function deriveId(el: Element): string | undefined {
   return nonEmptyString(el["resource-id"]) ?? nonEmptyString(el["view-id"]);
@@ -107,6 +109,8 @@ function boundsTuple(el: Element): SkeletonElement["bounds"] | undefined {
 interface SkeletonAccumulator {
   id?: string;
   label?: string;
+  testTag?: string;
+  semanticLinks?: SkeletonElement["semanticLinks"];
   bounds: SkeletonElement["bounds"];
   affordances: Set<Affordance>;
   checked?: boolean;
@@ -160,6 +164,12 @@ function accumulateByIdentity(elements: ObserveElements): SkeletonAccumulator[] 
     if (affordances.includes("toggle")) {
       acc.checked = isTruthy(el.checked);
     }
+    if (acc.testTag === undefined) {
+      acc.testTag = nonEmptyString(el["test-tag"]);
+    }
+    if (acc.semanticLinks === undefined && el["semantic-links"]?.length) {
+      acc.semanticLinks = el["semantic-links"];
+    }
   }
   return [...byIdentity.values()];
 }
@@ -191,6 +201,12 @@ function toSkeletonEntry(acc: SkeletonAccumulator): SkeletonElement {
   }
   if (acc.label !== undefined) {
     entry.label = acc.label;
+  }
+  if (acc.testTag !== undefined) {
+    entry.testTag = acc.testTag;
+  }
+  if (acc.semanticLinks !== undefined) {
+    entry.semanticLinks = acc.semanticLinks;
   }
   if (acc.checked !== undefined) {
     entry.checked = acc.checked;

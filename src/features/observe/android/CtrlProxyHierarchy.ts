@@ -976,6 +976,9 @@ export class CtrlProxyHierarchy {
     if (node["long-clickable"] && node["long-clickable"] !== "false") {
       converted["long-clickable"] = node["long-clickable"];
     }
+    if (node["semantic-links"] && node["semantic-links"].length > 0) {
+      converted["semantic-links"] = node["semantic-links"];
+    }
 
     if (node.occlusionState) {
       converted.occlusionState = node.occlusionState;

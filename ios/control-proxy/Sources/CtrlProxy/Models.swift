@@ -155,6 +155,21 @@ public struct RequestActivateAccessibilityLink: Decodable {
     public var ownerResourceId: String?
 }
 
+/// Compact metadata for a discoverable accessibility link in an observed element.
+public struct SemanticLink: Codable, Equatable {
+    public let text: String
+    public let occurrence: Int
+    public let start: Int?
+    public let end: Int?
+
+    public init(text: String, occurrence: Int, start: Int? = nil, end: Int? = nil) {
+        self.text = text
+        self.occurrence = occurrence
+        self.start = start
+        self.end = end
+    }
+}
+
 public struct RequestLaunchApp: Decodable {
     public var requestId: String?
     public var bundleId: String
@@ -1166,6 +1181,7 @@ public struct UIElementInfo: Codable {
     public let checked: String?
     public let selected: String?
     public let longClickable: String?
+    public let semanticLinks: [SemanticLink]?
     public let testTag: String?
     public let role: String?
     public let stateDescription: String?
@@ -1180,6 +1196,7 @@ public struct UIElementInfo: Codable {
         case text, value, textSize, className, bounds, clickable, enabled
         case focusable, focused, scrollable, password, checkable, checked
         case selected, actions, node, role, testTag, extras
+        case semanticLinks = "semantic-links"
         case viewId = "view-id"
         case contentDesc = "content-desc"
         case resourceId = "resource-id"
@@ -1209,6 +1226,7 @@ public struct UIElementInfo: Codable {
         checked: String? = nil,
         selected: String? = nil,
         longClickable: String? = nil,
+        semanticLinks: [SemanticLink]? = nil,
         testTag: String? = nil,
         role: String? = nil,
         stateDescription: String? = nil,
@@ -1237,6 +1255,7 @@ public struct UIElementInfo: Codable {
         self.checked = checked
         self.selected = selected
         self.longClickable = longClickable
+        self.semanticLinks = semanticLinks
         self.testTag = testTag
         self.role = role
         self.stateDescription = stateDescription

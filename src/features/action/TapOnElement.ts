@@ -353,7 +353,15 @@ export class TapOnElement extends BaseVisualChange {
     text: string,
     occurrence: number,
     owner?: Element,
+    viewHierarchy?: ViewHierarchyResult,
   ): Promise<{ success: boolean; error?: string }> {
+    if (owner && !this.hasUniqueSemanticLinkOwner(owner, viewHierarchy)) {
+      return {
+        success: false,
+        error:
+          "Container-scoped semantic link activation requires a unique resource-id owner identity",
+      };
+    }
     if (this.device.platform === "android") {
       const selector = owner ? stableNodeSelectorForElement(owner) : undefined;
       if (owner && !selector) {
@@ -385,6 +393,51 @@ export class TapOnElement extends BaseVisualChange {
       return { success: result.success, error: result.error };
     }
     return { success: false, error: `Unsupported platform: ${this.device.platform}` };
+  }
+
+  private hasUniqueSemanticLinkOwner(
+    owner: Element,
+    viewHierarchy: ViewHierarchyResult | undefined,
+  ): boolean {
+    if (!viewHierarchy) {
+      return false;
+    }
+    const elements = this.elementParser.flattenViewHierarchy(viewHierarchy).map(({ element }) => element);
+    if (this.device.platform === "ios") {
+      const ownerResourceId = owner["resource-id"];
+      return (
+        typeof ownerResourceId === "string" &&
+        ownerResourceId.length > 0 &&
+        elements.filter((element) => element["resource-id"] === ownerResourceId).length === 1
+      );
+    }
+    const selector = stableNodeSelectorForElement(owner);
+    return (
+      selector !== undefined &&
+      elements.filter((element) => this.matchesNativeOwnerSelector(element, selector)).length === 1
+    );
+  }
+
+  private matchesNativeOwnerSelector(
+    element: Element,
+    selector: NonNullable<ReturnType<typeof stableNodeSelectorForElement>>,
+  ): boolean {
+    const resourceId = element["resource-id"];
+    if (
+      selector.resourceId !== undefined &&
+      (typeof resourceId !== "string" ||
+        (resourceId !== selector.resourceId && !resourceId.endsWith(`:id/${selector.resourceId}`)))
+    ) {
+      return false;
+    }
+    return (
+      (selector.testTag === undefined || element["test-tag"] === selector.testTag) &&
+      (selector.uniqueId === undefined || element["unique-id"] === selector.uniqueId) &&
+      (selector.collectionRow === undefined ||
+        element["collection-row-index"] === selector.collectionRow) &&
+      (selector.collectionColumn === undefined ||
+        element["collection-column-index"] === selector.collectionColumn)
+    );
   }
 
   private getSearchUntilDuration(options: TapOnElementOptions): number {
@@ -1295,6 +1348,7 @@ export class TapOnElement extends BaseVisualChange {
               options.accessibilityLink,
               occurrence,
               owner,
+              viewHierarchy,
             );
             if (!activation.success) {
               return { success: false, error: activation.error };
@@ -1333,6 +1387,7 @@ export class TapOnElement extends BaseVisualChange {
               options.subtext.text,
               occurrence,
               element,
+              viewHierarchy,
             );
             if (!activation.success) {
               return { success: false, error: activation.error };

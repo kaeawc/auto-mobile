@@ -276,6 +276,16 @@ export class NavigationGraphManager implements NavigationGraphService {
   // growth over a long-lived daemon.
   private static releasedSessions: Set<string> = new Set();
   private static readonly RELEASED_SESSIONS_CAP = 4096;
+  // Graph-update listener attached to every session-scoped instance minted by
+  // getInstanceForSession (#4932). Session managers keep their own listener list
+  // (reset to [] per session), so the resource layer — which attaches its notify
+  // callback only to the global instance via setGraphUpdateListener — never hears
+  // about session-scoped writes. The daemon registers a single (debounced)
+  // callback here at startup; the same callback coalesces notifications across the
+  // global instance and every session. Attached at instance-creation time only:
+  // the daemon registers before any session exists, so retroactive attachment is
+  // unnecessary.
+  private static sessionGraphUpdateListener: (() => void | Promise<void>) | null = null;
 
   private repository: NavigationRepository;
   private testCoverageRepository: TestCoverageRepository;
@@ -396,6 +406,11 @@ export class NavigationGraphManager implements NavigationGraphService {
         return NavigationGraphManager.getInstance();
       }
       instance = new NavigationGraphManager(undefined, undefined, undefined, sessionId);
+      // Attach the resource-layer notify callback so session-scoped writes refresh
+      // the navigation resources, not only writes on the global instance (#4932).
+      if (NavigationGraphManager.sessionGraphUpdateListener) {
+        instance.setGraphUpdateListener(NavigationGraphManager.sessionGraphUpdateListener);
+      }
       NavigationGraphManager.sessionInstances.set(sessionId, instance);
     }
     return instance;
@@ -449,6 +464,9 @@ export class NavigationGraphManager implements NavigationGraphService {
     NavigationGraphManager.instance = null;
     NavigationGraphManager.sessionInstances.clear();
     NavigationGraphManager.releasedSessions.clear();
+    // Clear the process-wide session listener too, so a listener registered by one
+    // test (or the daemon) never leaks into a sibling suite in the same process.
+    NavigationGraphManager.sessionGraphUpdateListener = null;
   }
 
   /**
@@ -1962,6 +1980,20 @@ export class NavigationGraphManager implements NavigationGraphService {
     } else {
       this.graphUpdateListeners.push(listener);
     }
+  }
+
+  /**
+   * Register a graph-update listener that getInstanceForSession attaches to every
+   * session-scoped instance it mints (#4932). Session managers keep their own
+   * per-session listener list, so without this the resource layer's notify
+   * callback — attached only to the global instance — never fires on session-scoped
+   * writes and subscribers retain stale navigation graph/history/apps data. The
+   * daemon registers this once at startup; passing null clears it.
+   */
+  public static setSessionGraphUpdateListener(
+    listener: (() => void | Promise<void>) | null
+  ): void {
+    NavigationGraphManager.sessionGraphUpdateListener = listener;
   }
 
   private notifyGraphUpdated(): void {

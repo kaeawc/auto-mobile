@@ -1257,6 +1257,37 @@ describe("NavigationGraphManager - Multi-session isolation", () => {
     const freshSession = NavigationGraphManager.getInstanceForSession("session-reset");
     expect(freshSession.getCurrentAppId()).toBeNull();
   });
+
+  // #4932: the resource layer attaches its notify callback only to the global
+  // instance, so before this fix a session-scoped write refreshed no navigation
+  // resource. setSessionGraphUpdateListener wires the callback into every session
+  // instance getInstanceForSession mints.
+  test("session-scoped writes fire the registered session graph-update listener (#4932)", async () => {
+    let notified = 0;
+    NavigationGraphManager.setSessionGraphUpdateListener(() => {
+      notified++;
+    });
+
+    const session = NavigationGraphManager.getInstanceForSession("session-notify");
+    // setCurrentApp is a session-scoped write that fires notifyGraphUpdated.
+    await session.setCurrentApp("com.app.notify");
+
+    expect(notified).toBe(1);
+  });
+
+  test("resetInstance clears the process-wide session graph-update listener (#4932)", async () => {
+    let notified = 0;
+    NavigationGraphManager.setSessionGraphUpdateListener(() => {
+      notified++;
+    });
+
+    NavigationGraphManager.resetInstance();
+
+    const session = NavigationGraphManager.getInstanceForSession("session-after-reset");
+    await session.setCurrentApp("com.app.after-reset");
+
+    expect(notified).toBe(0);
+  });
 });
 
 /**

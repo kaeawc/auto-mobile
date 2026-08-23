@@ -315,6 +315,10 @@ export function registerNavigationResources(options: {
   }
 
   attachGraphUpdateListener(getNavigationGraphProvider());
+  // Session-scoped managers (getInstanceForSession) keep their own listener list,
+  // so the global-instance listener above never fires on session-scoped writes.
+  // Register the same debounced callback for every session instance (#4932).
+  NavigationGraphManager.setSessionGraphUpdateListener(scheduleNavigationGraphUpdate);
 
   ResourceRegistry.register(
     NAVIGATION_RESOURCE_URIS.APPS,

@@ -11,7 +11,9 @@ import { defaultTimer } from "../../src/utils/SystemTimer";
 import {
   DAEMON_BOUND_SESSION_PARAM,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
+  INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
 } from "../../src/daemon/constants";
+import { DEFAULT_OBSERVE_MCP_TIMEOUT_MS } from "../../src/daemon/mcpRequestTimeout";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 import type { DeviceLabelMap, Session } from "../../src/daemon/sessionManager";
@@ -197,9 +199,21 @@ class PersistentSocketClient {
     });
   }
 
-  request(method: string, params: Record<string, unknown>): Promise<DaemonResponse> {
+  request(
+    method: string,
+    params: Record<string, unknown>,
+    timeoutMs?: number,
+  ): Promise<DaemonResponse> {
     const id = randomUUID();
-    this.socket.write(JSON.stringify({ id, type: "mcp_request", method, params }) + "\n");
+    this.socket.write(
+      JSON.stringify({
+        id,
+        type: "mcp_request",
+        method,
+        params,
+        ...(timeoutMs === undefined ? {} : { timeoutMs }),
+      }) + "\n",
+    );
     const buffered = this.responses.get(id);
     if (buffered) {
       this.responses.delete(id);
@@ -293,6 +307,117 @@ describe("UnixSocketServer MCP forward serialization", () => {
     expect(b.success).toBe(true);
     expect(maxInFlight).toBe(1);
     expect(inFlight).toBe(0);
+  });
+
+  test("forwards the socket timeout budget to IDE navigation graph calls", async () => {
+    let forwardedCall: unknown;
+    server.mcpClientFactory = async () => ({
+      listTools: async () => ({ tools: [] }),
+      callTool: async (request) => {
+        forwardedCall = request;
+        return { content: [] };
+      },
+      listResources: async () => ({ resources: [] }),
+      readResource: async () => ({ contents: [] }),
+      listResourceTemplates: async () => ({ resourceTemplates: [] }),
+      close: async () => {},
+    });
+
+    const response = await sendRequest(socketPath, {
+      id: randomUUID(),
+      type: "mcp_request",
+      method: "ide/getNavigationGraph",
+      params: { deviceId: "device-1" },
+      timeoutMs: 7_500,
+    });
+
+    expect(response.success).toBe(true);
+    expect(forwardedCall).toEqual({
+      name: "getNavigationGraph",
+      arguments: {
+        deviceId: "device-1",
+        [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: 7_500,
+      },
+    });
+  });
+
+  test("charges time spent in the per-socket queue against the forwarded timeout", async () => {
+    await server.close();
+    socketPath = join(tmpdir(), `mcp-outer-deadline-${randomUUID()}.sock`);
+    fakeTimer = new FakeTimer();
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(sessionDevices, sessionDeviceLabels, mcpAutolockSessions),
+      fakeTimer,
+    );
+    await server.start();
+
+    const firstCallStarted = Promise.withResolvers<void>();
+    const releaseFirstCall = Promise.withResolvers<void>();
+    let callCount = 0;
+    server.mcpClientFactory = async () => ({
+      listTools: async () => ({ tools: [] }),
+      callTool: async () => {
+        callCount += 1;
+        if (callCount === 1) {
+          firstCallStarted.resolve();
+          await releaseFirstCall.promise;
+        }
+        return { content: [] };
+      },
+      listResources: async () => ({ resources: [] }),
+      readResource: async () => ({ contents: [] }),
+      listResourceTemplates: async () => ({ resourceTemplates: [] }),
+      close: async () => {},
+    });
+
+    const client = new PersistentSocketClient();
+    await client.connect(socketPath);
+    try {
+      const first = client.request("tools/call", {
+        name: "tapOn",
+        arguments: { deviceId: "device-1" },
+      });
+      await firstCallStarted.promise;
+      const queued = client.request(
+        "tools/call",
+        {
+          name: "tapOn",
+          arguments: { deviceId: "device-1" },
+        },
+        500,
+      );
+      for (let attempt = 0; attempt < 20; attempt++) {
+        const contexts = Array.from(
+          (server as unknown as {
+            sessions: Map<string, { requestQueue: unknown[] }>;
+          }).sessions.values(),
+        );
+        if (contexts.some(context => context.requestQueue.length > 0)) {
+          break;
+        }
+        await new Promise<void>(resolve => setImmediate(resolve));
+      }
+      const queuedRequestCount = Array.from(
+        (server as unknown as {
+          sessions: Map<string, { requestQueue: unknown[] }>;
+        }).sessions.values(),
+      ).reduce((count, context) => count + context.requestQueue.length, 0);
+      expect(queuedRequestCount).toBe(1);
+
+      fakeTimer.advanceTime(501);
+      releaseFirstCall.resolve();
+
+      await expect(first).resolves.toMatchObject({ success: true });
+      await expect(queued).resolves.toMatchObject({
+        success: false,
+        error: expect.stringContaining("exceeded 500ms"),
+      });
+      expect(callCount).toBe(1);
+    } finally {
+      client.close();
+    }
   });
 
   test("binds a generated selection profile to the socket and reuses it for discovery", async () => {
@@ -1690,7 +1815,10 @@ describe("UnixSocketServer MCP forward serialization", () => {
     expect(response.success).toBe(true);
     expect(forwardedCall).toBeDefined();
     const args = (forwardedCall as { arguments: Record<string, unknown> }).arguments;
-    expect(Object.keys(args)).toEqual(["__mcpSessionId"]);
+    expect(args).toEqual({
+      __mcpSessionId: expect.any(String),
+      [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: DEFAULT_OBSERVE_MCP_TIMEOUT_MS,
+    });
     expect(typeof args.__mcpSessionId).toBe("string");
   });
 

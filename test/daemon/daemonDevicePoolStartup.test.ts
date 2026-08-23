@@ -43,6 +43,9 @@ class DeferredDiscoveryDeviceManager extends FakeDeviceManager {
 }
 
 class FakeDeviceSessionRepository extends DeviceSessionRepository {
+  override async getSession(): Promise<undefined> {
+    return undefined;
+  }
   override async upsertActiveSession(): Promise<void> {}
 }
 

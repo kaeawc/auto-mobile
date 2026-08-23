@@ -1,16 +1,24 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { InputText } from "../../../src/features/action/InputText";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
+import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { InputTextMode } from "../../../src/features/action/InputText";
-import type { ObserveScreen, ObserveScreenExecuteOptions } from "../../../src/features/observe/interfaces/ObserveScreen";
+import type {
+  ObserveScreen,
+  ObserveScreenExecuteOptions,
+} from "../../../src/features/observe/interfaces/ObserveScreen";
 import type { BootedDevice, ExecResult, ObserveResult } from "../../../src/models";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
-import { AdbClient, AdbCommandTimeoutError } from "../../../src/utils/android-cmdline-tools/AdbClient";
+import {
+  AdbClient,
+  AdbCommandTimeoutError,
+} from "../../../src/utils/android-cmdline-tools/AdbClient";
+import { DeviceLostError } from "../../../src/server/deviceLossOutcome";
 
 interface TestInputText {
   executeAndroidTextInput: (
@@ -18,7 +26,8 @@ interface TestInputText {
     imeAction?: undefined,
     dismissKeyboard?: boolean,
     mode?: InputTextMode,
-    previousObserveResult?: ObserveResult
+    previousObserveResult?: ObserveResult,
+    signal?: AbortSignal,
   ) => Promise<{ success: boolean; error?: string; method?: string }>;
 }
 
@@ -122,6 +131,48 @@ describe("InputText", () => {
     expect(capturedFactory).toBeDefined();
     expect(typeof (capturedFactory as AdbClientFactory).create).toBe("function");
     expect(capturedFactory).toBe(factory as unknown as AdbClientFactory);
+  });
+
+  test("does not turn device-loss cancellation into a success:false input result", async () => {
+    const controller = new AbortController();
+    const deviceLoss = new DeviceLostError(
+      androidDevice.deviceId,
+      `device-disconnected:${androidDevice.deviceId}`,
+    );
+    stubAndroidSetText(async () => {
+      controller.abort(deviceLoss);
+      return { success: false, error: "disconnected", totalTimeMs: 1 };
+    });
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const inputText = new InputText(androidDevice, new FakeAdbClientFactory(), undefined, timer);
+    const observe = new FakeObserveScreen();
+    observe.setObserveResult(observeResultWithFocusedText(""));
+    (inputText as any).observeScreen = observe;
+    (inputText as any).awaitIdle = new FakeAwaitIdle();
+
+    await expect(
+      inputText.execute("hello", undefined, false, undefined, controller.signal),
+    ).rejects.toBe(deviceLoss);
+  });
+
+  test("forwards cancellation through post-input observation", async () => {
+    const controller = new AbortController();
+    stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const inputText = new InputText(androidDevice, new FakeAdbClientFactory(), undefined, timer);
+    const observe = new FakeObserveScreen();
+    observe.setObserveResult(observeResultWithFocusedText(""));
+    observe.enableAutoVaryHierarchy();
+    (inputText as any).observeScreen = observe;
+    (inputText as any).awaitIdle = new FakeAwaitIdle();
+
+    await inputText.execute("hello", undefined, false, undefined, controller.signal);
+
+    expect(observe.getExecuteOptions()).not.toHaveLength(0);
+    expect(observe.getExecuteOptions().every(options => options.signal === controller.signal))
+      .toBe(true);
   });
 
   test("eventLast sets prefix with a11y and sends final ASCII key event", async () => {
@@ -239,6 +290,47 @@ describe("InputText", () => {
       "shell input keyevent KEYCODE_SPACE",
       "shell input keycombination KEYCODE_SHIFT_LEFT KEYCODE_C"
     ]);
+  });
+
+  test("eventAll stops sending key events after device-loss cancellation", async () => {
+    const controller = new AbortController();
+    const deviceLoss = new DeviceLostError(
+      androidDevice.deviceId,
+      `device-disconnected:${androidDevice.deviceId}`,
+    );
+    const factory = new FakeAdbClientFactory();
+    const fakeClient = factory.getFakeClient();
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
+    stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
+    const originalExecuteCommand = fakeClient.executeCommand.bind(fakeClient);
+    const executeSpy = spyOn(fakeClient, "executeCommand").mockImplementation(
+      async (command, timeoutMs, maxBuffer, noRetry, signal) => {
+        const result = await originalExecuteCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+        if (command === "shell input keyevent KEYCODE_A") {
+          controller.abort(deviceLoss);
+        }
+        return result;
+      },
+    );
+
+    try {
+      await expect(
+        testInputText(inputText).executeAndroidTextInput(
+          "abc",
+          undefined,
+          false,
+          "eventAll",
+          undefined,
+          controller.signal,
+        ),
+      ).rejects.toBe(deviceLoss);
+      expect(inputCommands(factory)).toEqual([
+        "shell input keyevent KEYCODE_A",
+      ]);
+    } finally {
+      executeSpy.mockRestore();
+    }
   });
 
   test("eventAll alternates a11y for Unicode runs and key events for ASCII", async () => {

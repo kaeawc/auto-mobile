@@ -39,6 +39,7 @@ function sessionOwnershipLostPayload(error: DaemonBoundSessionExpiredError) {
       message: `Session ownership lost for ${error.sessionUuid}: ${error.reason}`,
       sessionUuid: error.sessionUuid,
       reason: error.reason,
+      ...(error.release ? { release: error.release } : {}),
     },
   };
 }

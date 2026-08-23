@@ -4,6 +4,8 @@ import {
   DeviceLostError,
   deviceLostErrorFromCancellationReason,
   deviceLossOutcomeFromError,
+  enrichDeviceLossOutcome,
+  remainingDeviceLossIncidentWaitMs,
 } from "../../src/server/deviceLossOutcome";
 
 describe("device-loss outcome", () => {
@@ -31,5 +33,49 @@ describe("device-loss outcome", () => {
       incidentId: "emulator-loss-test-1",
       reason: "confirmed-unavailable",
     });
+  });
+
+  test("adds same-session retry guidance from a settled recovery incident", () => {
+    const outcome = deviceLossOutcomeFromError(
+      new DeviceLostError("emulator-5554", "device-disconnected:emulator-5554", "emulator-loss-1"),
+      "session-a",
+    )!;
+
+    expect(
+      enrichDeviceLossOutcome(outcome, {
+        id: "emulator-loss-1",
+        observedAtMs: 10,
+        updatedAtMs: 20,
+        deviceId: "emulator-5554",
+        avdName: "Pixel_8_API_35",
+        replacementDeviceId: "emulator-5560",
+        detectionPath: "device-discovery-miss",
+        session: {
+          sessionUuid: "session-a",
+          state: "active",
+          lastHeartbeatMs: 9,
+          hasReceivedHeartbeat: true,
+          heartbeatTimeoutMs: 10_000,
+        },
+        recovery: {
+          policy: { onLoss: true, maxAttempts: 2 },
+          attempts: [{ attempt: 1, outcome: "succeeded" }],
+          outcome: "recovered",
+        },
+      }),
+    ).toMatchObject({
+      detectionPath: "device-discovery-miss",
+      avdName: "Pixel_8_API_35",
+      replacementDeviceId: "emulator-5560",
+      sessionState: "active",
+      recovery: { status: "recovered", attempts: 1 },
+      retry: { sameSession: true, requiresNewSession: false },
+    });
+  });
+
+  test("reserves transport headroom when waiting for incident settlement", () => {
+    expect(remainingDeviceLossIncidentWaitMs(30_000, 5_000)).toBe(24_000);
+    expect(remainingDeviceLossIncidentWaitMs(30_000, 29_500)).toBe(0);
+    expect(remainingDeviceLossIncidentWaitMs(undefined, 5_000)).toBeUndefined();
   });
 });

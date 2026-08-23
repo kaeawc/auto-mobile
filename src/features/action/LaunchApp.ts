@@ -131,8 +131,10 @@ export class LaunchApp extends BaseVisualChange {
    */
   private async extractLauncherActivities(
     packageName: string,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
+    signal?: AbortSignal,
   ): Promise<string[]> {
+    this.assertLaunchNotAborted(signal);
     logger.info("extractLauncherActivities");
     const activities: string[] = [];
 
@@ -142,6 +144,7 @@ export class LaunchApp extends BaseVisualChange {
       const result = perf
         ? await perf.track("a11yLaunchIntent", () => a11y.requestLaunchIntent(packageName, 3000))
         : await a11y.requestLaunchIntent(packageName, 3000);
+      this.assertLaunchNotAborted(signal);
       if (result.success && result.componentName) {
         // componentName is "package/.Activity" or "package/com.foo.Activity"
         const slash = result.componentName.indexOf("/");
@@ -156,6 +159,7 @@ export class LaunchApp extends BaseVisualChange {
         }
       }
     } catch (error) {
+      this.assertLaunchNotAborted(signal);
       logger.debug(`[LaunchApp] a11y launch intent failed, falling back to ADB: ${error}`);
     }
 
@@ -173,11 +177,21 @@ export class LaunchApp extends BaseVisualChange {
       ];
 
       for (let i = 0; i < approaches.length; i++) {
+        this.assertLaunchNotAborted(signal);
         try {
           logger.info(`[LaunchApp] Trying approach ${i + 1}: ${approaches[i]}`);
           const result = perf
-            ? await perf.track(`activityApproach_${i + 1}`, () => this.adb.executeCommand(approaches[i]))
-            : await this.adb.executeCommand(approaches[i]);
+            ? await perf.track(`activityApproach_${i + 1}`, () =>
+                this.adb.executeCommand(approaches[i], undefined, undefined, undefined, signal)
+              )
+            : await this.adb.executeCommand(
+                approaches[i],
+                undefined,
+                undefined,
+                undefined,
+                signal,
+              );
+          this.assertLaunchNotAborted(signal);
           logger.info(`[LaunchApp] Approach ${i + 1} result: ${result.stdout.length} chars of output`);
 
           if (result.stdout.trim()) {
@@ -219,17 +233,34 @@ export class LaunchApp extends BaseVisualChange {
             }
           }
         } catch (error) {
+          this.assertLaunchNotAborted(signal);
           logger.warn(`[LaunchApp] Approach ${i + 1} failed:`, error);
         }
       }
 
       // If no activities found, try a simpler approach
       if (activities.length === 0) {
+        this.assertLaunchNotAborted(signal);
         logger.info(`[LaunchApp] No activities found, trying fallback approach`);
         try {
           const simpleResult = perf
-            ? await perf.track("activityFallback", () => this.adb.executeCommand(`shell pm dump ${packageName}`))
-            : await this.adb.executeCommand(`shell pm dump ${packageName}`);
+            ? await perf.track("activityFallback", () =>
+                this.adb.executeCommand(
+                  `shell pm dump ${packageName}`,
+                  undefined,
+                  undefined,
+                  undefined,
+                  signal,
+                )
+              )
+            : await this.adb.executeCommand(
+                `shell pm dump ${packageName}`,
+                undefined,
+                undefined,
+                undefined,
+                signal,
+              );
+          this.assertLaunchNotAborted(signal);
           const lines = simpleResult.stdout.split("\n");
 
           for (const line of lines) {
@@ -248,11 +279,13 @@ export class LaunchApp extends BaseVisualChange {
             }
           }
         } catch (error) {
+          this.assertLaunchNotAborted(signal);
           logger.warn(`[LaunchApp] Fallback approach failed:`, error);
         }
       }
 
     } catch (error) {
+      this.assertLaunchNotAborted(signal);
       logger.warn(`[LaunchApp] Failed to extract launcher activities for ${packageName}:`, error);
     }
 
@@ -275,14 +308,24 @@ export class LaunchApp extends BaseVisualChange {
     coldBoot: boolean,
     activityName?: string,
     userId?: number,
-    skipUiStability?: boolean
+    skipUiStability?: boolean,
+    signal?: AbortSignal,
   ): Promise<LaunchAppResult> {
     logger.info("execute");
+    signal?.throwIfAborted();
     switch (this.device.platform) {
       case "ios":
-        return this.executeiOS(packageName, clearAppData, coldBoot);
+        return this.executeiOS(packageName, clearAppData, coldBoot, signal);
       case "android":
-        return this.executeAndroid(packageName, clearAppData, coldBoot, activityName, userId, skipUiStability);
+        return this.executeAndroid(
+          packageName,
+          clearAppData,
+          coldBoot,
+          activityName,
+          userId,
+          skipUiStability,
+          signal,
+        );
       default:
         throw new ActionableError(`Unsupported platform: ${this.device.platform}`);
     }
@@ -305,7 +348,8 @@ export class LaunchApp extends BaseVisualChange {
   private async executeiOS(
     bundleId: string,
     clearAppData: boolean,
-    coldBoot: boolean
+    coldBoot: boolean,
+    signal?: AbortSignal,
   ): Promise<LaunchAppResult> {
     const perf = this.performanceTrackerFactory();
     perf.serial("launchApp");
@@ -316,6 +360,7 @@ export class LaunchApp extends BaseVisualChange {
 
     const result = await this.observedInteraction(
       async () => {
+        this.assertLaunchNotAborted(signal);
         // Set bundle ID before starting CtrlProxy so it targets the app, not SpringBoard
         if (!isSystemBundleId) {
           IOSCtrlProxyManager.getInstance(this.device).setTargetBundleId(bundleId);
@@ -351,6 +396,7 @@ export class LaunchApp extends BaseVisualChange {
                 // App might not be running
               }
             });
+            this.assertLaunchNotAborted(signal);
           }
 
           // Wipe the app's data container (fastest iOS "clear data": no reinstall,
@@ -360,6 +406,7 @@ export class LaunchApp extends BaseVisualChange {
             const clearResult = await perf.track("clearAppData", () =>
               this.clearAppDataFactory(this.device, this.simctl).execute(bundleId)
             );
+            this.assertLaunchNotAborted(signal);
             if (!clearResult.success) {
               // Do NOT launch with stale data — callers request clearAppData to
               // guarantee a clean launch. Fail loudly instead of silently
@@ -391,6 +438,7 @@ export class LaunchApp extends BaseVisualChange {
               // gives cold-boot relaunch semantics (a fresh process foregrounds).
               : this.deviceAppLauncher.launchApp(this.device.deviceId, bundleId, { terminateExisting: true })
           );
+          this.assertLaunchNotAborted(signal);
         } else {
           // Warm launch. Simulator: simctl launch foregrounds a backgrounded app
           // and is faster than the CtrlProxy WebSocket round-trip (~4-5s). Device:
@@ -400,6 +448,7 @@ export class LaunchApp extends BaseVisualChange {
               ? this.simctl.launchApp(bundleId)
               : this.deviceAppLauncher.launchApp(this.device.deviceId, bundleId, { terminateExisting: true })
           );
+          this.assertLaunchNotAborted(signal);
 
           if (!launchResult.success) {
             logger.warn(`[LaunchApp] launch failed: ${launchResult.error ?? "unknown error"}`);
@@ -411,6 +460,7 @@ export class LaunchApp extends BaseVisualChange {
               const installedApps = await perf.track("checkInstalled", () =>
                 this.installedAppsProvider.listInstalledApps()
               );
+              this.assertLaunchNotAborted(signal);
               if (installedApps.length > 0 && !installedApps.includes(bundleId)) {
                 logger.info("App is not installed");
                 perf.end();
@@ -447,18 +497,19 @@ export class LaunchApp extends BaseVisualChange {
           return {
             success: false,
             packageName: bundleId,
-            error: launchResult.error
+            error: launchResult.error,
           };
         }
 
+        signal?.throwIfAborted();
         await perf.track("waitForHierarchy", () =>
-          this.waitForIosHierarchyReady(60000, bundleId)
+          this.waitForIosHierarchyReady(60000, bundleId, signal),
         );
         perf.end();
         return {
           success: true,
           packageName: bundleId,
-          pid: launchResult.pid
+          pid: launchResult.pid,
         };
       },
       {
@@ -468,17 +519,27 @@ export class LaunchApp extends BaseVisualChange {
         // Use minTimestamp=0 so finalObserve returns cached hierarchy without a sync fetch.
         // iOS hierarchy timestamps (Swift Date) and TS timestamps (Date.now) are from
         // different clocks, causing minTimestamp checks to fail and force ~130ms round-trips.
-        overrideMinTimestamp: 0
-      }
+        overrideMinTimestamp: 0,
+        signal,
+      },
     );
 
-    return this.ensureLaunchObservationMatchesPackage(result, bundleId);
+    signal?.throwIfAborted();
+    return this.ensureLaunchObservationMatchesPackage(
+      result,
+      bundleId,
+      undefined,
+      undefined,
+      signal,
+    );
   }
 
   private async waitForIosHierarchyReady(
     timeoutMs: number = 5000,
-    expectedPackageName?: string
+    expectedPackageName?: string,
+    signal?: AbortSignal,
   ): Promise<void> {
+    signal?.throwIfAborted();
     const xcTestClient = IOSCtrlProxyClient.getInstance(this.device);
     const startTime = this.timer.now();
 
@@ -498,6 +559,7 @@ export class LaunchApp extends BaseVisualChange {
     if (expectedPackageName) {
       let pushUnsubscribe: (() => void) | undefined;
       let timeoutHandle: NodeJS.Timeout | undefined;
+      let abortListener: (() => void) | undefined;
 
       const pushPromise = new Promise<string>(resolve => {
         timeoutHandle = this.timer.setTimeout(() => resolve("timeout"), timeoutMs);
@@ -518,11 +580,38 @@ export class LaunchApp extends BaseVisualChange {
           return "error" as string;
         });
 
-      const winner = await Promise.race([pushPromise, syncPromise]);
-
-      // Cleanup
-      pushUnsubscribe?.();
-      if (timeoutHandle) { this.timer.clearTimeout(timeoutHandle); }
+      const abortPromise = signal
+        ? new Promise<never>((_resolve, reject) => {
+            abortListener = () => {
+              try {
+                signal.throwIfAborted();
+              } catch (error) {
+                reject(error);
+              }
+            };
+            signal.addEventListener("abort", abortListener, { once: true });
+            if (signal.aborted) {
+              abortListener();
+            }
+          })
+        : undefined;
+      let winner: string;
+      try {
+        winner = await Promise.race([
+          pushPromise,
+          syncPromise,
+          ...(abortPromise ? [abortPromise] : []),
+        ]);
+        signal?.throwIfAborted();
+      } finally {
+        pushUnsubscribe?.();
+        if (timeoutHandle) {
+          this.timer.clearTimeout(timeoutHandle);
+        }
+        if (signal && abortListener) {
+          signal.removeEventListener("abort", abortListener);
+        }
+      }
 
       if (winner === "push" || winner === "sync") {
         logger.info(`[LaunchApp] iOS hierarchy ready via ${winner} after ${this.timer.now() - startTime}ms (pkg=${expectedPackageName})`);
@@ -574,14 +663,15 @@ export class LaunchApp extends BaseVisualChange {
     coldBoot: boolean,
     activityName?: string,
     userId?: number,
-    skipUiStability?: boolean
+    skipUiStability?: boolean,
+    signal?: AbortSignal,
   ): Promise<LaunchAppResult> {
     const perf = this.performanceTrackerFactory();
     perf.serial("launchApp");
 
     logger.info(`executeAndroid: ${packageName}`);
 
-    const [targetUserResult, installedAppsResult] = await Promise.allSettled([
+    const preflight = Promise.allSettled([
       // Auto-detect target user if not specified
       perf.track("detectTargetUser", async () => {
         return this.targetUserDetector.detectTargetUserId(packageName, userId);
@@ -589,8 +679,13 @@ export class LaunchApp extends BaseVisualChange {
       // Check app status (installation and running)
       perf.track("checkInstalled", async () => {
         return this.installedAppsProvider.listInstalledApps();
-      })
+      }),
     ]);
+    const [targetUserResult, installedAppsResult] = await this.waitForAndroidPreflight(
+      preflight,
+      signal,
+    );
+    signal?.throwIfAborted();
 
     if (targetUserResult.status === "rejected") {
       throw targetUserResult.reason;
@@ -626,6 +721,7 @@ export class LaunchApp extends BaseVisualChange {
       logger.info(`[LaunchApp] App running: ${result} (output: "${isRunningOutput.trim()}")`);
       return result;
     });
+    this.assertLaunchNotAborted(signal);
 
     let didTerminateOrClear = false;
     let alreadyForeground = false;
@@ -635,11 +731,13 @@ export class LaunchApp extends BaseVisualChange {
         await perf.track("clearAppData", async () => {
           return this.createAndroidClearAppData(this.device).execute(packageName, targetUserId);
         });
+        this.assertLaunchNotAborted(signal);
         didTerminateOrClear = true;
       } else if (coldBoot) {
         await perf.track("terminateApp", async () => {
           return this.createAndroidColdBoot(this.device).execute(packageName, { skipObservation: true, userId: targetUserId });
         });
+        this.assertLaunchNotAborted(signal);
         didTerminateOrClear = true;
       }
 
@@ -649,6 +747,7 @@ export class LaunchApp extends BaseVisualChange {
         const foregroundApp = await perf.track(`checkForeground`, async () => {
           return this.adb.getForegroundApp();
         });
+        this.assertLaunchNotAborted(signal);
 
         alreadyForeground = foregroundApp &&
                             foregroundApp.packageName === packageName &&
@@ -663,6 +762,7 @@ export class LaunchApp extends BaseVisualChange {
         await perf.track("clearAppData", async () => {
           return this.createAndroidClearAppData(this.device).execute(packageName, targetUserId);
         });
+        this.assertLaunchNotAborted(signal);
         didTerminateOrClear = true;
       }
     }
@@ -682,6 +782,7 @@ export class LaunchApp extends BaseVisualChange {
           changeExpected: false,
           perf,
           packageName,
+          signal,
           skipPreviousObserve: true,
           skipUiStability: skipUiStability ?? false
         }
@@ -692,6 +793,7 @@ export class LaunchApp extends BaseVisualChange {
     }
 
     logger.info(`[LaunchApp] Proceeding with app launch`);
+    this.assertLaunchNotAborted(signal);
 
     const captureDisplayedMetrics = serverConfig.isUiPerfModeEnabled();
     logger.info(`[LaunchApp] captureDisplayedMetrics=${captureDisplayedMetrics} (isUiPerfModeEnabled)`);
@@ -707,21 +809,30 @@ export class LaunchApp extends BaseVisualChange {
     const launchResult = await this.observedInteraction(
       async () => {
         if (displayedMetricsCollector) {
-          displayedMetricsStartMs = await perf.track(
-            "displayedLogcatStartTime",
-            () => this.adb.getDeviceTimestampMs()
+          displayedMetricsStartMs = await perf.track("displayedLogcatStartTime", () =>
+            this.adb.getDeviceTimestampMs(),
           );
         }
-        const launchOutcome = await this.performLaunch(packageName, activityName, targetUserId, perf);
+        const launchOutcome = await this.performLaunch(
+          packageName,
+          activityName,
+          targetUserId,
+          perf,
+          signal,
+        );
+        signal?.throwIfAborted();
         const foregroundReady = await this.waitForAppForeground(
           packageName,
           targetUserId,
           foregroundWaitTimeoutMs,
           foregroundPollIntervalMs,
-          perf
+          perf,
+          signal,
         );
         if (!foregroundReady) {
-          logger.warn(`[LaunchApp] ${packageName} did not become the foreground app before observation; continuing to validate launch observation`);
+          logger.warn(
+            `[LaunchApp] ${packageName} did not become the foreground app before observation; continuing to validate launch observation`,
+          );
         }
         observationTimestampMs = await this.adb.getDeviceTimestampMs();
         return launchOutcome;
@@ -732,26 +843,41 @@ export class LaunchApp extends BaseVisualChange {
         skipPreviousObserve: true,
         skipUiStability: skipUiStability ?? false,
         packageName,
-        observationTimestampProvider: () => observationTimestampMs
-      }
+        observationTimestampProvider: () => observationTimestampMs,
+        signal,
+      },
     );
 
-    const settledLaunchResult = await this.ensureLaunchObservationMatchesPackage(launchResult, packageName);
+    signal?.throwIfAborted();
+    const settledLaunchResult = await this.ensureLaunchObservationMatchesPackage(
+      launchResult,
+      packageName,
+      undefined,
+      undefined,
+      signal,
+    );
 
-    logger.info(`[LaunchApp] TTI capture check: collector=${!!displayedMetricsCollector}, startMs=${displayedMetricsStartMs}, hasObservation=${!!settledLaunchResult?.observation}`);
-    if (displayedMetricsCollector && displayedMetricsStartMs !== null && settledLaunchResult?.observation) {
-      const displayedMetricsEndMs = await perf.track(
-        "displayedLogcatEndTime",
-        () => this.adb.getDeviceTimestampMs()
+    logger.info(
+      `[LaunchApp] TTI capture check: collector=${!!displayedMetricsCollector}, startMs=${displayedMetricsStartMs}, hasObservation=${!!settledLaunchResult?.observation}`,
+    );
+    if (
+      displayedMetricsCollector &&
+      displayedMetricsStartMs !== null &&
+      settledLaunchResult?.observation
+    ) {
+      const displayedMetricsEndMs = await perf.track("displayedLogcatEndTime", () =>
+        this.adb.getDeviceTimestampMs(),
       );
-      logger.info(`[LaunchApp] Capturing displayed metrics: startMs=${displayedMetricsStartMs}, endMs=${displayedMetricsEndMs}`);
+      logger.info(
+        `[LaunchApp] Capturing displayed metrics: startMs=${displayedMetricsStartMs}, endMs=${displayedMetricsEndMs}`,
+      );
       const displayedTimeMetrics = await displayedMetricsCollector.captureDisplayedMetrics(
         {
           packageName,
           startTimestampMs: displayedMetricsStartMs,
-          endTimestampMs: displayedMetricsEndMs
+          endTimestampMs: displayedMetricsEndMs,
         },
-        perf
+        perf,
       );
       logger.info(`[LaunchApp] Captured ${displayedTimeMetrics.length} displayed metrics`);
       settledLaunchResult.observation.displayedTimeMetrics = displayedTimeMetrics;
@@ -772,13 +898,49 @@ export class LaunchApp extends BaseVisualChange {
     return settledLaunchResult;
   }
 
+  private async waitForAndroidPreflight<T>(
+    preflight: Promise<T>,
+    signal: AbortSignal | undefined,
+  ): Promise<T> {
+    if (!signal) {
+      return await preflight;
+    }
+    signal.throwIfAborted();
+    let abortListener: (() => void) | undefined;
+    const aborted = new Promise<never>((_resolve, reject) => {
+      abortListener = () => {
+        try {
+          signal.throwIfAborted();
+        } catch (error) {
+          reject(error);
+        }
+      };
+      signal.addEventListener("abort", abortListener, { once: true });
+      if (signal.aborted) {
+        abortListener();
+      }
+    });
+    try {
+      return await Promise.race([preflight, aborted]);
+    } finally {
+      if (abortListener) {
+        signal.removeEventListener("abort", abortListener);
+      }
+    }
+  }
+
   private async ensureLaunchObservationMatchesPackage(
     result: LaunchAppResult,
     expectedPackageName: string,
     timeoutMs: number = LAUNCH_OBSERVATION_TIMEOUT_MS,
-    pollIntervalMs: number = LAUNCH_OBSERVATION_POLL_INTERVAL_MS
+    pollIntervalMs: number = LAUNCH_OBSERVATION_POLL_INTERVAL_MS,
+    signal?: AbortSignal,
   ): Promise<LaunchAppResult> {
-    if (!result.observation || this.launchObservationMatchesPackage(result.observation, expectedPackageName)) {
+    signal?.throwIfAborted();
+    if (
+      !result.observation ||
+      this.launchObservationMatchesPackage(result.observation, expectedPackageName)
+    ) {
       return result;
     }
 
@@ -790,11 +952,21 @@ export class LaunchApp extends BaseVisualChange {
     let latestObservation = result.observation;
 
     while (this.timer.now() - startTime < timeoutMs) {
-      logger.info(`[LaunchApp] Launch observation still reports previous app; re-observing for ${expectedPackageName}`);
+      signal?.throwIfAborted();
+      logger.info(
+        `[LaunchApp] Launch observation still reports previous app; re-observing for ${expectedPackageName}`,
+      );
       await this.timer.sleep(pollIntervalMs);
-      latestObservation = await this.observeScreen.execute({ skipWaitForFresh: false });
+      latestObservation = await this.observeScreen.execute({
+        skipWaitForFresh: false,
+        signal,
+      });
+      signal?.throwIfAborted();
       if (this.launchObservationMatchesPackage(latestObservation, expectedPackageName)) {
-        result.observation = this.preserveLaunchObservationMetadata(latestObservation, result.observation);
+        result.observation = this.preserveLaunchObservationMetadata(
+          latestObservation,
+          result.observation,
+        );
         return result;
       }
     }
@@ -871,17 +1043,23 @@ export class LaunchApp extends BaseVisualChange {
     userId: number,
     timeoutMs: number,
     pollIntervalMs: number,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
+    signal?: AbortSignal,
   ): Promise<boolean> {
     const waitForForeground = async (): Promise<boolean> => {
       const startTime = this.timer.now();
 
-      logger.info(`[LaunchApp] Waiting for ${packageName} to reach foreground (timeout: ${timeoutMs}ms)`);
+      logger.info(
+        `[LaunchApp] Waiting for ${packageName} to reach foreground (timeout: ${timeoutMs}ms)`,
+      );
 
       while (true) {
+        signal?.throwIfAborted();
         const isForeground = await this.checkAppForeground(packageName, perf, userId);
         if (isForeground) {
-          logger.info(`[LaunchApp] App ${packageName} reached foreground after ${this.timer.now() - startTime}ms`);
+          logger.info(
+            `[LaunchApp] App ${packageName} reached foreground after ${this.timer.now() - startTime}ms`,
+          );
           return true;
         }
 
@@ -890,9 +1068,12 @@ export class LaunchApp extends BaseVisualChange {
         }
 
         await this.timer.sleep(pollIntervalMs);
+        signal?.throwIfAborted();
       }
 
-      logger.warn(`[LaunchApp] Timed out waiting for ${packageName} to reach foreground after ${timeoutMs}ms`);
+      logger.warn(
+        `[LaunchApp] Timed out waiting for ${packageName} to reach foreground after ${timeoutMs}ms`,
+      );
       return false;
     };
 
@@ -960,12 +1141,18 @@ export class LaunchApp extends BaseVisualChange {
   /**
    * Perform the actual app launch with timing
    */
+  private assertLaunchNotAborted(signal?: AbortSignal): void {
+    signal?.throwIfAborted();
+  }
+
   private async performLaunch(
     packageName: string,
     activityName: string | undefined,
     userId: number,
-    perf: PerformanceTracker
+    perf: PerformanceTracker,
+    signal?: AbortSignal,
   ): Promise<{ success: boolean; packageName: string; activityName?: string; userId: number }> {
+    this.assertLaunchNotAborted(signal);
     let targetActivity = activityName;
 
     // Try am start with intent first (alternative to monkey)
@@ -977,6 +1164,7 @@ export class LaunchApp extends BaseVisualChange {
           const intentCmd = `shell am start --user ${userId} -a android.intent.action.MAIN -c android.intent.category.LAUNCHER ${packageName}`;
           logger.info(`[LaunchApp] Intent command: ${intentCmd}`);
           const result = await this.adb.executeCommand(intentCmd);
+          this.assertLaunchNotAborted(signal);
           // am start may report launch errors on stderr while still returning exit code 0.
           if (result.stdout && !result.stdout.includes("Error") && !result.stderr.includes("Error")) {
             logger.info(`[LaunchApp] Intent launch completed successfully`);
@@ -985,10 +1173,12 @@ export class LaunchApp extends BaseVisualChange {
           logger.info(`[LaunchApp] Intent launch returned error: ${result.stdout}${result.stderr}`);
           return { success: false };
         } catch (error) {
+          this.assertLaunchNotAborted(signal);
           logger.info(`[LaunchApp] Intent launch failed: ${error}, falling back to monkey`);
           return { success: false };
         }
       });
+      this.assertLaunchNotAborted(signal);
 
       if (intentResult.success) {
         perf.end();
@@ -1009,13 +1199,16 @@ export class LaunchApp extends BaseVisualChange {
           const monkeyCmd = `shell monkey -p ${packageName} --user ${userId} 1`;
           logger.info(`[LaunchApp] Monkey command: ${monkeyCmd}`);
           await this.adb.executeCommand(monkeyCmd);
+          this.assertLaunchNotAborted(signal);
           logger.info(`[LaunchApp] Monkey launch completed successfully`);
           return { success: true };
         } catch (error) {
+          this.assertLaunchNotAborted(signal);
           logger.info(`[LaunchApp] Monkey launch failed: ${error}, falling back to activity discovery`);
           return { success: false };
         }
       });
+      this.assertLaunchNotAborted(signal);
 
       if (monkeyResult.success) {
         perf.end();
@@ -1032,8 +1225,9 @@ export class LaunchApp extends BaseVisualChange {
     if (!targetActivity) {
       const launcherActivities = await perf.track("extractLauncherActivities", async () => {
         logger.info(`[LaunchApp] No activity specified, extracting launcher activities`);
-        return this.extractLauncherActivities(packageName, perf);
+        return this.extractLauncherActivities(packageName, perf, signal);
       });
+      this.assertLaunchNotAborted(signal);
 
       if (launcherActivities.length > 0) {
         targetActivity = launcherActivities[0];
@@ -1052,17 +1246,21 @@ export class LaunchApp extends BaseVisualChange {
           ];
 
           for (const pattern of commonPatterns) {
+            this.assertLaunchNotAborted(signal);
             try {
               logger.info(`[LaunchApp] Trying common pattern: ${pattern}`);
               await this.adb.executeCommand(`shell am start --user ${userId} -n ${packageName}/${pattern}`);
+              this.assertLaunchNotAborted(signal);
               logger.info(`[LaunchApp] Successfully launched with pattern: ${pattern}`);
               return { success: true, pattern };
             } catch (error) {
+              this.assertLaunchNotAborted(signal);
               logger.info(`[LaunchApp] Pattern ${pattern} failed: ${error}`);
             }
           }
           return { success: false, pattern: null };
         });
+        this.assertLaunchNotAborted(signal);
 
         if (patternResult.success && patternResult.pattern) {
           perf.end();
@@ -1083,6 +1281,7 @@ export class LaunchApp extends BaseVisualChange {
         const launchCmd = `shell am start --user ${userId} -n ${packageName}/${targetActivity}`;
         logger.info(`[LaunchApp] Launch command: ${launchCmd}`);
         await this.adb.executeCommand(launchCmd);
+        this.assertLaunchNotAborted(signal);
         logger.info(`[LaunchApp] Launch command completed successfully`);
       });
     } else {
@@ -1093,8 +1292,10 @@ export class LaunchApp extends BaseVisualChange {
           const launcherCmd = `shell am start --user ${userId} -a android.intent.action.MAIN -c android.intent.category.LAUNCHER ${packageName}`;
           logger.info(`[LaunchApp] Launcher intent command: ${launcherCmd}`);
           await this.adb.executeCommand(launcherCmd);
+          this.assertLaunchNotAborted(signal);
           logger.info(`[LaunchApp] Launcher intent completed successfully`);
         } catch (error) {
+          this.assertLaunchNotAborted(signal);
           logger.error(`[LaunchApp] Launcher intent failed: ${error}`);
           throw new ActionableError("No launcher activity found and launcher intent failed");
         }

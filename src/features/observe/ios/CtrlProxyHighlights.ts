@@ -4,7 +4,11 @@
 
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { sendCommand } from "../DeviceServiceUtils";
-import type { HighlightOperationResult, HighlightShape } from "../../../models";
+import type {
+  HighlightBounds,
+  HighlightOperationResult,
+  HighlightShape,
+} from "../../../models";
 import type { DelegateContext } from "./types";
 
 export class CtrlProxyHighlights {
@@ -47,10 +51,7 @@ export class CtrlProxyHighlights {
   }
 
   private normalizeHighlightShape(shape: HighlightShape): HighlightShape {
-    const normalizeBounds = (bounds: HighlightShape["bounds"]) => {
-      if (!bounds) {
-        return bounds;
-      }
+    const normalizeBounds = (bounds: HighlightBounds): HighlightBounds => {
       return {
         x: Math.round(bounds.x),
         y: Math.round(bounds.y),
@@ -68,7 +69,7 @@ export class CtrlProxyHighlights {
     if (shape.type === "path") {
       return {
         ...shape,
-        bounds: normalizeBounds(shape.bounds),
+        bounds: shape.bounds ? normalizeBounds(shape.bounds) : shape.bounds,
       };
     }
 

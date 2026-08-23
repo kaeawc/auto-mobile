@@ -214,7 +214,8 @@ export class BaseVisualChange {
       gfxMetrics,
       perf,
       actionStartTime: options.overrideMinTimestamp ?? observationStartTime,
-      predictionContext
+      predictionContext,
+      signal: options.signal,
     });
     this.annotateDeviceLock(observed, previousObserveResult);
     return observed;
@@ -273,6 +274,7 @@ export class BaseVisualChange {
       perf?: PerformanceTracker;
       actionStartTime?: number;
       predictionContext?: PredictionActionContext;
+      signal?: AbortSignal;
     }
   ): Promise<any> {
     const perf = options.perf ?? new NoOpPerformanceTracker();

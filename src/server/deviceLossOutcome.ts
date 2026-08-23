@@ -1,4 +1,11 @@
-export const DEVICE_LOSS_OUTCOME_CODE = "device_lost";
+import {
+  DeviceLostError,
+  DEVICE_LOSS_OUTCOME_CODE,
+  type EmulatorLossIncident,
+} from "../daemon/emulatorLossIncident";
+
+export { DeviceLostError, DEVICE_LOSS_OUTCOME_CODE };
+export const DEVICE_LOSS_RESPONSE_HEADROOM_MS = 1_000;
 const deviceLossAbortErrors = new WeakMap<AbortSignal, DeviceLostError>();
 
 export interface DeviceLossOutcome {
@@ -7,24 +14,23 @@ export interface DeviceLossOutcome {
   sessionUuid?: string;
   incidentId?: string;
   reason: "confirmed-unavailable";
-}
-
-/**
- * A device-loss cancellation is infrastructure failure, not an application or
- * tool failure. Keep the original cancellation reason as the error message so
- * existing logs remain searchable.
- */
-export class DeviceLostError extends Error {
-  readonly code = DEVICE_LOSS_OUTCOME_CODE;
-
-  constructor(
-    readonly deviceId: string,
-    reason: string,
-    readonly incidentId?: string,
-  ) {
-    super(reason);
-    this.name = "DeviceLostError";
-  }
+  detectionPath?: EmulatorLossIncident["detectionPath"];
+  avdName?: string;
+  replacementDeviceId?: string;
+  sessionState?: "recovering" | "active" | "released";
+  heartbeat?: {
+    lastHeartbeatMs: number;
+    hasReceivedHeartbeat: boolean;
+    timeoutMs: number;
+  };
+  recovery?: {
+    status: "pending" | "recovered" | "exhausted" | "not-attempted";
+    attempts: number;
+  };
+  retry?: {
+    sameSession: boolean;
+    requiresNewSession: boolean;
+  };
 }
 
 export function isDeviceLostError(error: unknown): error is DeviceLostError {
@@ -60,6 +66,25 @@ export function deviceLostErrorFromAbortSignal(signal: AbortSignal): DeviceLostE
     : deviceLossAbortErrors.get(signal);
 }
 
+export function throwDeviceLostFromAbortSignal(signal?: AbortSignal): void {
+  if (!signal) {
+    return;
+  }
+  const deviceLoss = deviceLostErrorFromAbortSignal(signal);
+  if (deviceLoss) {
+    throw deviceLoss;
+  }
+}
+
+export function remainingDeviceLossIncidentWaitMs(
+  requestTimeoutMs: number | undefined,
+  elapsedMs: number,
+): number | undefined {
+  return requestTimeoutMs === undefined
+    ? undefined
+    : Math.max(0, requestTimeoutMs - Math.max(0, elapsedMs) - DEVICE_LOSS_RESPONSE_HEADROOM_MS);
+}
+
 export function deviceLossOutcomeFromError(
   error: unknown,
   sessionUuid?: string,
@@ -73,5 +98,39 @@ export function deviceLossOutcomeFromError(
     ...(sessionUuid ? { sessionUuid } : {}),
     ...(error.incidentId ? { incidentId: error.incidentId } : {}),
     reason: "confirmed-unavailable",
+  };
+}
+
+export function enrichDeviceLossOutcome(
+  outcome: DeviceLossOutcome,
+  incident: EmulatorLossIncident | undefined,
+): DeviceLossOutcome {
+  if (!incident) {
+    return outcome;
+  }
+  const sessionState = incident.session?.state;
+  return {
+    ...outcome,
+    detectionPath: incident.detectionPath,
+    ...(incident.avdName ? { avdName: incident.avdName } : {}),
+    ...(incident.replacementDeviceId ? { replacementDeviceId: incident.replacementDeviceId } : {}),
+    ...(sessionState ? { sessionState } : {}),
+    ...(incident.session
+      ? {
+          heartbeat: {
+            lastHeartbeatMs: incident.session.lastHeartbeatMs,
+            hasReceivedHeartbeat: incident.session.hasReceivedHeartbeat,
+            timeoutMs: incident.session.heartbeatTimeoutMs,
+          },
+        }
+      : {}),
+    recovery: {
+      status: incident.recovery.outcome ?? "pending",
+      attempts: incident.recovery.attempts.length,
+    },
+    retry: {
+      sameSession: sessionState === "active",
+      requiresNewSession: sessionState === "released",
+    },
   };
 }

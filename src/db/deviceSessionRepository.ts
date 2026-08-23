@@ -29,6 +29,7 @@ export interface DeviceSessionActivityUpdate {
 
 export interface DeviceSessionPersistence {
   upsertActiveSession(record: DeviceSessionRecord): Promise<void>;
+  getSession?(sessionUuid: string): Promise<DeviceSession | undefined>;
   recordActivity(sessionUuid: string, update: DeviceSessionActivityUpdate): Promise<void>;
   markReleased(
     sessionUuid: string,
@@ -177,6 +178,7 @@ export class DeviceSessionRepository {
         .execute();
     } catch (error) {
       logger.warn(`[DeviceSessionRepository] Failed to mark session ${sessionUuid} ${status}: ${error}`);
+      throw error;
     }
   }
 

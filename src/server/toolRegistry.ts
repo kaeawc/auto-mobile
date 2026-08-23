@@ -50,7 +50,7 @@ import {
   getToolSelectionContext,
   runWithToolSelectionContext,
 } from "../features/toolSelection/toolSelectionContext";
-import { isDeviceLostError } from "./deviceLossOutcome";
+import { isDeviceLostError, throwDeviceLostFromAbortSignal } from "./deviceLossOutcome";
 import { executionTracker } from "./executionTracker";
 
 // Re-exported for backward compatibility; the implementation now lives in
@@ -1123,6 +1123,8 @@ export class ToolRegistryClass {
                 });
               }
 
+              throwDeviceLostFromAbortSignal(signal);
+
               const afterToolCallResult = await this.afterToolCall.handle({
                 name,
                 args: handlerArgs,
@@ -1138,6 +1140,7 @@ export class ToolRegistryClass {
               toolDurationMs = afterToolCallResult.durationMs;
               return afterToolCallResult.finalizedResponse;
             } catch (error) {
+              throwDeviceLostFromAbortSignal(signal);
               if (error instanceof ActionableError || isDeviceLostError(error)) {
                 throw error;
               }

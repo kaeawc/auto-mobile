@@ -171,6 +171,7 @@ const SSE_KEEPALIVE_INTERVAL_MS = 30_000;
 // writes are best-effort: if the bound elapses, shutdown proceeds anyway.
 const DB_WRITE_DRAIN_TIMEOUT_MS = 1_000;
 const SESSION_RELEASE_DRAIN_TIMEOUT_MS = 5_000;
+const DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS = 1_000;
 
 // Ceiling on awaiting an in-flight cold-start migration before closing the DB on
 // shutdown (issue #3044). A SIGTERM arriving mid-startup-migration would otherwise
@@ -369,8 +370,8 @@ export class Daemon {
     // (heartbeat / idle / plan), rather than guessing with the replay TTL. Fires
     // for every released key — base and derived `${base}:${label}` alike; the
     // proxy matches its bound (base) UUID by exact equality (issue #4610).
-    this.sessionManager.onSessionRelease((sessionId, _deviceId, releaseReason) => {
-      SessionReleaseBroadcaster.emit(sessionId, releaseReason);
+    this.sessionManager.onSessionRelease((sessionId, _deviceId, releaseReason, snapshot) => {
+      SessionReleaseBroadcaster.emit(sessionId, releaseReason, snapshot);
     });
     this.installedAppsRepository = installedAppsRepository ?? new InstalledAppsRepository();
     const recoveryConfiguration = parseDeviceRecoveryPolicy(recoveryPolicyEnvironment);
@@ -398,7 +399,7 @@ export class Daemon {
       recoveryConfiguration.policy,
       (deviceId) => this.deviceSessionRegistry.onDeviceDisconnected(deviceId),
       new EmulatorLossIncidentRepository(this.timer, this.idGenerator),
-      (sessionId, reason) => executionTracker.cancelDeviceSessionExecutions(sessionId, reason),
+      (sessionId, reason) => this.cancelAndDrainDeviceSessionExecutions(sessionId, reason),
       this.idGenerator,
     );
     // Initialize singleton for daemon state access
@@ -1444,12 +1445,105 @@ export class Daemon {
     const executionSessionId =
       resolveToolSelectionBaseSessionUuid(sessionId, this.sessionManager) ?? sessionId;
     return (
+      this.devicePool.isSessionRecoveryInFlight(sessionId) ||
       executionTracker.hasActiveSessionUuidExecutions(sessionId, query) ||
       executionTracker.hasActiveAutolockSessionExecutions(sessionId, query) ||
       (executionSessionId !== sessionId &&
         (executionTracker.hasActiveSessionUuidExecutions(executionSessionId, query) ||
           executionTracker.hasActiveAutolockSessionExecutions(executionSessionId, query)))
     );
+  }
+
+  private async tryRecoverCapturedDisconnectTarget(
+    deviceId: string,
+    incidentId: string | undefined,
+    pooledDevice: PooledDevice | null | undefined,
+    sessionId: string | null | undefined,
+    session: Session | null,
+    forceGeneration: number | undefined,
+    preparation?: ReturnType<DevicePool["prepareSessionPreservingRecovery"]>,
+  ): Promise<boolean> {
+    if (!preparation) {
+      if (
+        sessionId &&
+        await this.devicePool.waitForSessionPreservingRecovery(sessionId, incidentId)
+      ) {
+        this.retireAdbServerResetDisconnectState(deviceId, forceGeneration);
+        return true;
+      }
+      if (sessionId && this.devicePool.isSessionRecoveryInFlight(sessionId)) {
+        await this.devicePool.finishEmulatorLossIncident(incidentId, "not-attempted");
+        this.retireAdbServerResetDisconnectState(deviceId, forceGeneration);
+        return true;
+      }
+    }
+    if (!pooledDevice || !sessionId || !session) {
+      return false;
+    }
+    this.devicePool.finishSessionPreservingRecoveryPreparation(preparation);
+    const recovery = await this.devicePool.recoverSessionBoundAndroidDeviceAfterLoss(
+      deviceId,
+      incidentId,
+      pooledDevice,
+    );
+    if (recovery === "not-attempted") {
+      return false;
+    }
+    this.retireAdbServerResetDisconnectState(deviceId, forceGeneration);
+    return true;
+  }
+
+  private async recordAndTryRecoverCapturedDisconnect(
+    deviceId: string,
+    pooledDevice: PooledDevice | null,
+    assignmentCount: number,
+    sessionId: string | null | undefined,
+    session: Session | null,
+    forceGeneration: number | undefined,
+  ): Promise<{ incidentId: string | undefined; handled: boolean }> {
+    const preparation = this.devicePool.prepareSessionPreservingRecovery(
+      deviceId,
+      pooledDevice ?? undefined,
+    );
+    try {
+      const incidentId = await this.devicePool.recordEmulatorLossIncident(
+        deviceId,
+        this.forceDisconnectedDeviceIds.has(deviceId)
+          ? "adb-transport-failure"
+          : "device-discovery-miss",
+        undefined,
+        "absent",
+      );
+      const staleDisconnect =
+        (await this.shouldSkipStaleDisconnectCleanup(
+          pooledDevice,
+          deviceId,
+          forceGeneration,
+        )) ||
+        !this.isCapturedDisconnectTargetCurrent(
+          deviceId,
+          pooledDevice,
+          assignmentCount,
+          sessionId,
+          session,
+        );
+      if (staleDisconnect) {
+        await this.devicePool.finishEmulatorLossIncident(incidentId, "not-attempted");
+        return { incidentId, handled: true };
+      }
+      const handled = await this.tryRecoverCapturedDisconnectTarget(
+        deviceId,
+        incidentId,
+        pooledDevice,
+        sessionId,
+        session,
+        forceGeneration,
+        preparation,
+      );
+      return { incidentId, handled };
+    } finally {
+      this.devicePool.finishSessionPreservingRecoveryPreparation(preparation);
+    }
   }
 
   private startDeviceDisconnectMonitor(): void {
@@ -1617,20 +1711,18 @@ export class Daemon {
 
             // Cancel active executions and release the session so the test fails
             // fast instead of waiting for the full MCP request timeout.
-            const incidentId = await this.devicePool.recordEmulatorLossIncident(
+            const { incidentId, handled } = await this.recordAndTryRecoverCapturedDisconnect(
               deviceId,
-              this.forceDisconnectedDeviceIds.has(deviceId)
-                ? "adb-transport-failure"
-                : "device-discovery-miss",
-              undefined,
-              "absent",
+              pooledDeviceAtDisconnect,
+              assignmentCountAtDisconnect ?? 0,
+              sessionIdAtDisconnect,
+              sessionAtDisconnect,
+              forceGenerationAtDisconnect,
             );
+            if (handled) {
+              continue;
+            }
             if (
-              (await this.shouldSkipStaleDisconnectCleanup(
-                pooledDeviceAtDisconnect,
-                deviceId,
-                forceGenerationAtDisconnect,
-              )) ||
               !this.isCapturedDisconnectTargetCurrent(
                 deviceId,
                 pooledDeviceAtDisconnect,
@@ -1639,6 +1731,7 @@ export class Daemon {
                 sessionAtDisconnect,
               )
             ) {
+              await this.devicePool.finishEmulatorLossIncident(incidentId, "not-attempted");
               continue;
             }
             if (sessionIdAtDisconnect && sessionAtDisconnect) {
@@ -1660,6 +1753,7 @@ export class Daemon {
                 assignmentCountAtDisconnect,
               )
             ) {
+              await this.devicePool.finishEmulatorLossIncident(incidentId, "not-attempted");
               continue;
             }
             await this.devicePool.removeDisconnectedDevice(
@@ -1919,6 +2013,27 @@ export class Daemon {
       `Cancelled session ${sessionId} (${cancelled} executions) and released device ${deviceId ?? "unknown"} ` +
         `(reason=${releaseReason})`,
     );
+  }
+
+  private async cancelAndDrainDeviceSessionExecutions(
+    sessionId: string,
+    reason: string,
+  ): Promise<number> {
+    const cancelled = await executionTracker.cancelDeviceSessionExecutions(sessionId, reason);
+    if (cancelled === 0) {
+      return 0;
+    }
+    const drained = await executionTracker.waitForDeviceSessionExecutionsToEnd(
+      sessionId,
+      DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS,
+    );
+    if (!drained) {
+      logger.warn(
+        `[Daemon] Timed out after ${DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS}ms draining ` +
+          `cancelled executions for device session ${sessionId}`,
+      );
+    }
+    return cancelled;
   }
 
   /**

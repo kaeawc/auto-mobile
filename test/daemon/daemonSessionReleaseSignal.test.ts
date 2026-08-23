@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
+import { deviceLossCancellationReason } from "../../src/daemon/emulatorLossIncident";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
 import { NavigationRepository } from "../../src/db/navigationRepository";
 import { TestCoverageRepository } from "../../src/db/testCoverageRepository";
@@ -17,6 +18,10 @@ import { FakeTimer } from "../fakes/FakeTimer";
 interface DaemonHeartbeatMonitorInternals {
   heartbeatMonitor: { stop(): void } | null;
   startHeartbeatMonitor(): void;
+}
+
+interface DaemonSessionReleaseInternals {
+  cancelAndReleaseSession(sessionId: string, releaseReason: string): Promise<void>;
 }
 
 describe("Daemon session-release signal wiring", () => {
@@ -94,6 +99,63 @@ describe("Daemon session-release signal wiring", () => {
       unsubscribe();
       internals.heartbeatMonitor?.stop();
       sessionManager.stopCleanupTimer();
+    }
+  });
+
+  test("does not publish a terminal release before persistence succeeds", async () => {
+    const db = await createTestDatabase();
+    const repository = new DeviceSessionRepository(db);
+    const daemon = new Daemon({}, undefined, undefined, repository);
+    const sessionManager = daemon.getSessionManager();
+    const devicePool = daemon.getDevicePool();
+    const internals = daemon as unknown as DaemonSessionReleaseInternals;
+    const sessionId = "terminal-persistence-failure";
+    const deviceId = "physical-device";
+    const emitted: string[] = [];
+    const unsubscribe = SessionReleaseBroadcaster.subscribe((releasedSessionId) => {
+      emitted.push(releasedSessionId);
+    });
+    const markReleasedSpy = spyOn(repository, "markReleased")
+      .mockRejectedValue(new Error("database unavailable"));
+
+    try {
+      await devicePool.initializeWithDevices([{
+        name: "Pixel",
+        deviceId,
+        platform: "android",
+      }]);
+      await devicePool.assignDeviceToSession(sessionId, "android");
+
+      await expect(internals.cancelAndReleaseSession(
+        sessionId,
+        deviceLossCancellationReason(deviceId, "incident-1"),
+      )).rejects.toThrow("Failed to persist terminal release");
+
+      expect(sessionManager.getSession(sessionId)).toBeNull();
+      expect(sessionManager.getTerminalReleaseSnapshot(sessionId)).toMatchObject({
+        deviceId,
+        releaseReason: deviceLossCancellationReason(deviceId, "incident-1"),
+        terminal: true,
+      });
+      expect(devicePool.getDevice(deviceId)).toMatchObject({
+        sessionId,
+        status: "busy",
+      });
+      expect(emitted).toEqual([]);
+
+      markReleasedSpy.mockResolvedValue(undefined);
+      await internals.cancelAndReleaseSession(
+        sessionId,
+        deviceLossCancellationReason(deviceId, "incident-1"),
+      );
+      expect(sessionManager.getSession(sessionId)).toBeNull();
+      expect(devicePool.getDevice(deviceId)).toMatchObject({ sessionId: null, status: "idle" });
+      expect(emitted).toEqual([sessionId]);
+    } finally {
+      unsubscribe();
+      markReleasedSpy.mockRestore();
+      sessionManager.stopCleanupTimer();
+      await db.destroy();
     }
   });
 

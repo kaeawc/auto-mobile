@@ -170,11 +170,15 @@ describe("ToolExecutionContext", () => {
     try {
       await expect(
         createToolExecutionContext("reset-session-2", sessionManager, devicePool, sessionOptions),
-      ).rejects.toThrow(/recovering from a process-wide ADB reset/);
+      ).rejects.toThrow(/device-disconnected:emulator-5556;incident=/);
     } finally {
       await devicePool.releaseAdbServerResetCohortReservations(detached.devices);
     }
 
+    expect(() => devicePool.assertSessionReadyForAutomation("reset-session-2")).toThrow(
+      /device-disconnected:emulator-5556;incident=/,
+    );
+    await sessionManager.releaseSession("reset-session-2", "explicit-release");
     expect(() => devicePool.assertSessionReadyForAutomation("reset-session-2")).not.toThrow();
   });
 
@@ -209,7 +213,7 @@ describe("ToolExecutionContext", () => {
       ).toBe(sessionId);
       await expect(
         createToolExecutionContext(sessionId, sessionManager, devicePool, sessionOptions),
-      ).rejects.toThrow(/recovering from a process-wide ADB reset/);
+      ).rejects.toThrow(/device-disconnected:emulator-5554;incident=/);
       expect(
         devicePool.resolveAutolockSessionForMcpSession("mcp-session", "android"),
       ).toBe(sessionId);

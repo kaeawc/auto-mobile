@@ -61,11 +61,18 @@ export function hasFocusedTextInput(
   return false;
 }
 
-export async function clearTextWithKeyEvents(adb: AdbExecutor, count: number): Promise<void> {
+export async function clearTextWithKeyEvents(
+  adb: AdbExecutor,
+  count: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  signal?.throwIfAborted();
   await adb.executeCommand("shell input keyevent KEYCODE_MOVE_END");
+  signal?.throwIfAborted();
 
   for (let index = 0; index < count; index++) {
     await adb.executeCommand("shell input keyevent KEYCODE_DEL");
+    signal?.throwIfAborted();
   }
 }
 

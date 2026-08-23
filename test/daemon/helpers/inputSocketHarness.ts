@@ -68,6 +68,10 @@ export function createFakeDaemonState(
     isInitialized: () => true,
     getSessionManager: () => ({
       getSession: (sessionId: string) => autolockSessions.get(sessionId) ?? null,
+      getSessionForDevice: (deviceId: string) =>
+        Array.from(autolockSessions.values()).find(
+          session => session.assignedDevice === deviceId
+        )?.sessionId ?? null,
       getDeviceLabels: (_sessionId: string): DeviceLabelMap | undefined => undefined,
       releaseSession: async () => null,
     }),
@@ -75,6 +79,7 @@ export function createFakeDaemonState(
       refreshDevices: async () => 0,
       getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
       releaseDevice: async () => {},
+      assertSessionReadyForAutomation: () => {},
       resolveAutolockSessionForMcpSession: (mcpSessionId: string | undefined, platform?: "android" | "ios") => {
         if (!mcpSessionId) {
           return undefined;

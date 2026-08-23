@@ -23,6 +23,7 @@ import {
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
   DAEMON_BOUND_SESSION_PARAM,
   DAEMON_VERSION,
+  INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
 } from "./constants";
 import {
   ListChangedBroadcaster,
@@ -87,6 +88,7 @@ import { getDeviceDataStreamServer } from "./deviceDataStreamSocketServer";
 import type { KeyValueType } from "../features/storage/storageTypes";
 import type { BootedDevice, ImeAction, ScreenScaleMetadata } from "../models";
 import type { DeviceService } from "../features/observe/DeviceService";
+import { executionTracker } from "../server/executionTracker";
 import {
   DEVICE_CONTROL_TRANSPORT_FAILURE_CODE,
   DeviceControlTransportError,
@@ -157,6 +159,7 @@ export interface AppendTextInput {
     text: string,
     timeoutMs?: number,
     beforeKeyEvent?: AppendKeyEventValidator,
+    signal?: AbortSignal,
   ): Promise<{ success: boolean; error?: string; charsSent?: number }>;
 }
 
@@ -197,6 +200,8 @@ interface McpForwardRecoveryContext {
   request: DaemonRequest;
   route: McpForwardRoute;
   socketSessionId: string;
+  totalTimeoutMs: number;
+  requestDeadlineMs: number;
   remainingTimeoutMs: number;
   forwardStartMs: number;
 }
@@ -209,6 +214,10 @@ interface DeviceControlTransportRecoveryContext extends McpForwardRecoveryContex
 
 const isNonBlankSessionUuid = (value: unknown): value is string =>
   typeof value === "string" && value.trim().length > 0;
+
+function assertSocketInputNotAborted(signal?: AbortSignal): void {
+  signal?.throwIfAborted();
+}
 
 /** Wire method name for each streamed-gesture frame kind (issue: streaming gesture input). */
 const GESTURE_FRAME_METHODS = {
@@ -424,10 +433,12 @@ export class UnixSocketServer {
     // replay-TTL guess. Subscribed here (not in the daemon) for the same
     // recovery-rewire reason as list-changed; close() unsubscribes symmetrically.
     this.sessionReleaseUnsubscribe?.();
-    this.sessionReleaseUnsubscribe = SessionReleaseBroadcaster.subscribe((sessionId, reason) => {
-      this.clearBoundMcpClientsForReleasedSession(sessionId);
-      this.broadcastSessionReleased(sessionId, reason);
-    });
+    this.sessionReleaseUnsubscribe = SessionReleaseBroadcaster.subscribe(
+      (sessionId, reason, snapshot) => {
+        this.clearBoundMcpClientsForReleasedSession(sessionId);
+        this.broadcastSessionReleased(sessionId, reason, snapshot);
+      },
+    );
 
     return new Promise((resolve, reject) => {
       this.server!.listen(this.socketPath, () => {
@@ -473,34 +484,34 @@ export class UnixSocketServer {
     });
 
     socket.on("data", (data) => {
+      const receivedAtMs = this.timer.now();
       const handler = (async () => {
         buffer += data.toString();
 
         const lines = buffer.split("\n");
         buffer = lines.pop() || "";
 
-        for (const line of lines) {
-          if (!line.trim()) {
-            continue;
-          }
-
-          let requestId = "unknown";
-          try {
-            const request: DaemonRequest = JSON.parse(line);
-            requestId = request.id;
-            const response = await this.handleRequest(sessionId, request);
-            this.writeFrame(socket, sessionId, response);
-          } catch (error) {
-            logger.error(`Error processing request ${requestId} from ${sessionId}:`, error);
-            const errorResponse: DaemonResponse = {
-              id: requestId,
-              type: "mcp_response",
-              success: false,
-              error: errorMessage(error),
-            };
-            this.writeFrame(socket, sessionId, errorResponse);
-          }
-        }
+        const requestHandlers = lines
+          .filter(line => line.trim())
+          .map(async (line) => {
+            let requestId = "unknown";
+            try {
+              const request: DaemonRequest = JSON.parse(line);
+              requestId = request.id;
+              const response = await this.handleRequest(sessionId, request, receivedAtMs);
+              this.writeFrame(socket, sessionId, response);
+            } catch (error) {
+              logger.error(`Error processing request ${requestId} from ${sessionId}:`, error);
+              const errorResponse: DaemonResponse = {
+                id: requestId,
+                type: "mcp_response",
+                success: false,
+                error: errorMessage(error),
+              };
+              this.writeFrame(socket, sessionId, errorResponse);
+            }
+          });
+        await Promise.all(requestHandlers);
       })();
       this.trackRequestHandler(handler);
     });
@@ -564,12 +575,17 @@ export class UnixSocketServer {
    * {@link broadcastListChanged}. Note `sessionId` here is the socket-client id,
    * distinct from the released daemon session carried in the frame.
    */
-  private broadcastSessionReleased(releasedSessionId: string, reason?: string): void {
+  private broadcastSessionReleased(
+    releasedSessionId: string,
+    reason?: string,
+    release?: DaemonNotification["release"],
+  ): void {
     const notification: DaemonNotification = {
       type: "daemon_notification",
       method: SESSION_RELEASED_NOTIFICATION_METHOD,
       sessionId: releasedSessionId,
       ...(reason !== undefined ? { reason } : {}),
+      ...(release !== undefined ? { release } : {}),
     };
     for (const sessionId of this.notificationSubscribers) {
       const socket = this.clientSockets.get(sessionId);
@@ -606,7 +622,11 @@ export class UnixSocketServer {
   /**
    * Handle a request from a client
    */
-  private async handleRequest(sessionId: string, request: DaemonRequest): Promise<DaemonResponse> {
+  private async handleRequest(
+    sessionId: string,
+    request: DaemonRequest,
+    receivedAtMs: number = this.timer.now(),
+  ): Promise<DaemonResponse> {
     const session = this.sessions.get(sessionId);
     if (!session) {
       return {
@@ -634,6 +654,9 @@ export class UnixSocketServer {
       };
     }
 
+    const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
+    const requestDeadlineMs = receivedAtMs + totalTimeoutMs;
+
     // Enqueue request to maintain order
     return this.enqueueRequest(session, async () => {
       try {
@@ -657,8 +680,6 @@ export class UnixSocketServer {
           };
         }
 
-        const queueEnterMs = this.timer.now();
-        const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
         const initialRoute = this.getMcpForwardRoute(request, sessionId);
 
         const result = await this.runMcpForwardForCurrentRoute(
@@ -666,8 +687,8 @@ export class UnixSocketServer {
           request,
           sessionId,
           async (route) => {
-            const queueWaitMs = this.timer.now() - queueEnterMs;
-            const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
+            const remainingTimeoutMs = requestDeadlineMs - this.timer.now();
+            const queueWaitMs = totalTimeoutMs - remainingTimeoutMs;
             const forwardLabel = UnixSocketServer.describeMcpForwardRequest(request);
             logger.debug(
               `[McpForward] start executionKey=${route.executionKey} clientKey=${route.clientKey} socketSession=${sessionId} requestId=${request.id} ${forwardLabel} queueWaitMs=${queueWaitMs} remainingTimeoutMs=${remainingTimeoutMs}`,
@@ -693,6 +714,8 @@ export class UnixSocketServer {
                 request,
                 route,
                 socketSessionId: sessionId,
+                totalTimeoutMs,
+                requestDeadlineMs,
                 remainingTimeoutMs,
                 forwardStartMs,
               });
@@ -738,6 +761,28 @@ export class UnixSocketServer {
           ...(error instanceof InputTypeTextAppendError ? { charsSent: error.charsSent } : {}),
         };
       }
+    });
+  }
+
+  private requireRemainingMcpForwardBudget(
+    request: DaemonRequest,
+    totalTimeoutMs: number,
+    requestDeadlineMs: number,
+    phase: string,
+  ): number {
+    const remainingTimeoutMs = requestDeadlineMs - this.timer.now();
+    if (remainingTimeoutMs > 0) {
+      return remainingTimeoutMs;
+    }
+    const toolName =
+      request.method === "tools/call"
+        ? (request.params?.name ?? request.method)
+        : request.method;
+    throw new McpTimeoutError({
+      toolName,
+      timeoutMs: totalTimeoutMs,
+      origin: "UnixSocketServer.handleRequest",
+      detail: `spent ${totalTimeoutMs - remainingTimeoutMs}ms ${phase}`,
     });
   }
 
@@ -1270,19 +1315,31 @@ export class UnixSocketServer {
         identity,
       });
     }
-    return this.forwardConnectedMcpRequest(context, identity, mcpClient);
+    const forwardRemainingMs = this.requireRemainingMcpForwardBudget(
+      context.request,
+      context.totalTimeoutMs,
+      context.requestDeadlineMs,
+      "waiting in queues and preparing the MCP client",
+    );
+    return this.forwardConnectedMcpRequest(
+      context,
+      identity,
+      mcpClient,
+      forwardRemainingMs,
+    );
   }
 
   private async forwardConnectedMcpRequest(
     context: McpForwardRecoveryContext,
     identity: DeviceControlTransportIdentity,
     mcpClient: Client,
+    remainingTimeoutMs: number,
   ): Promise<unknown> {
     try {
       return await this.handleIdeRequest(
         mcpClient,
         context.request,
-        context.remainingTimeoutMs,
+        remainingTimeoutMs,
         context.socketSessionId,
       );
     } catch (error) {
@@ -1333,19 +1390,12 @@ export class UnixSocketServer {
         recoveryExhausted: true,
       });
     }
-    const retryRemainingMs =
-      context.remainingTimeoutMs - (this.timer.now() - context.forwardStartMs);
-    if (retryRemainingMs <= 0) {
-      const toolName = context.request.method === "tools/call"
-        ? context.request.params?.name ?? context.request.method
-        : context.request.method;
-      throw new McpTimeoutError({
-        toolName,
-        timeoutMs: context.remainingTimeoutMs,
-        origin: "UnixSocketServer.handleRequest",
-        detail: `no budget remaining after session reconnect (elapsed ${this.timer.now() - context.forwardStartMs}ms)`,
-      });
-    }
+    const retryRemainingMs = this.requireRemainingMcpForwardBudget(
+      context.request,
+      context.totalTimeoutMs,
+      context.requestDeadlineMs,
+      "waiting in queues and reconnecting the MCP client",
+    );
     try {
       return await this.handleIdeRequest(
         freshClient,
@@ -2671,9 +2721,11 @@ export class UnixSocketServer {
       socketSessionId,
       "input/tap",
     );
-    const gestureResult = await this.runKeyedMcpForward(
-      `device:${targetDevice.deviceId}`,
-      async () => {
+    const gestureResult = await this.runTrackedKeyedDeviceInput(
+      request.method,
+      targetDevice,
+      async signal => {
+        assertSocketInputNotAborted(signal);
         this.requireCurrentFrameContext(targetDevice.deviceId, args.frameContext, "input/tap");
         const queueWaitMs = this.timer.now() - queueEnterMs;
         const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
@@ -2729,7 +2781,6 @@ export class UnixSocketServer {
               args.frameContext,
             );
       },
-      `device:${targetDevice.deviceId}`,
     );
 
     if (!gestureResult.success) {
@@ -2758,9 +2809,11 @@ export class UnixSocketServer {
       socketSessionId,
       "input/swipe",
     );
-    const gestureResult = await this.runKeyedMcpForward(
-      `device:${targetDevice.deviceId}`,
-      async () => {
+    const gestureResult = await this.runTrackedKeyedDeviceInput(
+      request.method,
+      targetDevice,
+      async signal => {
+        assertSocketInputNotAborted(signal);
         this.requireCurrentFrameContext(targetDevice.deviceId, args.frameContext, "input/swipe");
         const queueWaitMs = this.timer.now() - queueEnterMs;
         const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
@@ -2831,7 +2884,6 @@ export class UnixSocketServer {
               args.frameContext,
             );
       },
-      `device:${targetDevice.deviceId}`,
     );
 
     if (!gestureResult.success) {
@@ -2874,9 +2926,11 @@ export class UnixSocketServer {
       socketSessionId,
       method,
     );
-    const gestureResult = await this.runKeyedMcpForward(
-      `device:${targetDevice.deviceId}`,
-      async () => {
+    const gestureResult = await this.runTrackedKeyedDeviceInput(
+      method,
+      targetDevice,
+      async signal => {
+        assertSocketInputNotAborted(signal);
         const queueWaitMs = this.timer.now() - queueEnterMs;
         const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
         if (remainingTimeoutMs <= 0) {
@@ -2890,7 +2944,6 @@ export class UnixSocketServer {
         const client = AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
         return this.forwardGestureFrame(client, kind, args, remainingTimeoutMs);
       },
-      `device:${targetDevice.deviceId}`,
     );
 
     if (!gestureResult.success) {
@@ -3060,9 +3113,14 @@ export class UnixSocketServer {
       args.append,
     );
     let confirmedAppendCharsSent: number | undefined;
-    const inputResult = await this.runKeyedMcpForward(
-      `device:${targetDevice.deviceId}`,
-      async () => {
+    const recordConfirmedAppendCharsSent = (charsSent: number): void => {
+      confirmedAppendCharsSent = charsSent;
+    };
+    const inputResult = await this.runTrackedKeyedDeviceInput(
+      request.method,
+      targetDevice,
+      async signal => {
+        assertSocketInputNotAborted(signal);
         // A same-serial emulator may reconnect while this request waits behind an
         // earlier input. Re-read its ADB transport inside the keyed callback so the
         // append-helper lookup cannot reuse a capability from that older instance.
@@ -3103,9 +3161,8 @@ export class UnixSocketServer {
               remainingTimeoutMs,
               args.append,
               args.frameContext,
-              (charsSent) => {
-                confirmedAppendCharsSent = charsSent;
-              },
+              recordConfirmedAppendCharsSent,
+              signal,
             ),
           (timeoutError) =>
             args.append && confirmedAppendCharsSent !== undefined
@@ -3113,7 +3170,6 @@ export class UnixSocketServer {
               : undefined,
         );
       },
-      `device:${targetDevice.deviceId}`,
     );
 
     if (!inputResult.success) {
@@ -3149,9 +3205,11 @@ export class UnixSocketServer {
       socketSessionId,
       "input/pressButton",
     );
-    const buttonResult = await this.runKeyedMcpForward(
-      `device:${targetDevice.deviceId}`,
-      async () => {
+    const buttonResult = await this.runTrackedKeyedDeviceInput(
+      request.method,
+      targetDevice,
+      async signal => {
+        assertSocketInputNotAborted(signal);
         this.requireCurrentFrameContext(
           targetDevice.deviceId,
           args.frameContext,
@@ -3173,7 +3231,6 @@ export class UnixSocketServer {
           ? await pressButton.press(args.button, remainingTimeoutMs)
           : await pressButton.press(args.button, remainingTimeoutMs, args.frameContext);
       },
-      `device:${targetDevice.deviceId}`,
     );
 
     if (!buttonResult.success) {
@@ -3205,9 +3262,11 @@ export class UnixSocketServer {
       socketSessionId,
       "input/key",
     );
-    const keyResult = await this.runKeyedMcpForward(
-      `device:${targetDevice.deviceId}`,
-      async () => {
+    const keyResult = await this.runTrackedKeyedDeviceInput(
+      request.method,
+      targetDevice,
+      async signal => {
+        assertSocketInputNotAborted(signal);
         this.requireCurrentFrameContext(targetDevice.deviceId, args.frameContext, "input/key");
         const queueWaitMs = this.timer.now() - queueEnterMs;
         const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
@@ -3225,7 +3284,6 @@ export class UnixSocketServer {
           ? await inputKey.press(args.key, remainingTimeoutMs)
           : await inputKey.press(args.key, remainingTimeoutMs, args.frameContext);
       },
-      `device:${targetDevice.deviceId}`,
     );
 
     if (!keyResult.success) {
@@ -3250,6 +3308,7 @@ export class UnixSocketServer {
     append: boolean = false,
     frameContext?: string,
     onConfirmedAppendCharsSent?: (charsSent: number) => void,
+    signal?: AbortSignal,
   ): Promise<{ success: boolean; error?: string; charsSent?: number }> {
     // Charge set-text and the optional submit/IME action against a single
     // shared budget. Otherwise submit:true would hand each request the full
@@ -3279,7 +3338,9 @@ export class UnixSocketServer {
         timeoutMs,
         frameContext,
         client as AndroidCtrlProxyClient,
+        signal,
       );
+      assertSocketInputNotAborted(signal);
       if (textResult.charsSent !== undefined) {
         onConfirmedAppendCharsSent?.(textResult.charsSent);
       }
@@ -3300,6 +3361,7 @@ export class UnixSocketServer {
             frameContext,
           )
         : await client.requestSetText(text, { timeoutMs, frameContext });
+      assertSocketInputNotAborted(signal);
       if (!textResult.success) {
         return { success: false, error: textResult.error };
       }
@@ -3310,6 +3372,7 @@ export class UnixSocketServer {
       deadline,
       timeoutMs,
       appendCharsSent,
+      signal,
     );
   }
 
@@ -3320,6 +3383,7 @@ export class UnixSocketServer {
     totalTimeoutMs: number,
     frameContext: string | undefined,
     client: AndroidCtrlProxyClient,
+    signal?: AbortSignal,
   ): Promise<{ success: boolean; error?: string; charsSent?: number }> {
     const appendTimeoutMs = deadline - this.timer.now();
     if (appendTimeoutMs <= 0) {
@@ -3328,13 +3392,14 @@ export class UnixSocketServer {
         error: `input/typeText exceeded ${totalTimeoutMs}ms budget before append key events`,
       };
     }
-    return await this.getAppendTextInput(targetDevice).appendText(
-      text,
-      appendTimeoutMs,
+    const beforeKeyEvent =
       frameContext === undefined
         ? undefined
-        : () => this.validateAppendFrameContext(client, frameContext, deadline, totalTimeoutMs),
-    );
+        : () => this.validateAppendFrameContext(client, frameContext, deadline, totalTimeoutMs);
+    const input = this.getAppendTextInput(targetDevice);
+    return signal
+      ? await input.appendText(text, appendTimeoutMs, beforeKeyEvent, signal)
+      : await input.appendText(text, appendTimeoutMs, beforeKeyEvent);
   }
 
   private async validateAppendFrameContext(
@@ -3367,12 +3432,14 @@ export class UnixSocketServer {
     deadline: number,
     totalTimeoutMs: number,
     appendCharsSent?: number,
+    signal?: AbortSignal,
   ): Promise<{ success: boolean; error?: string; charsSent?: number }> {
     const withAppendProgress = (result: { success: boolean; error?: string }) =>
       appendCharsSent !== undefined ? { ...result, charsSent: appendCharsSent } : result;
     if (!imeAction) {
       return withAppendProgress({ success: true });
     }
+    assertSocketInputNotAborted(signal);
     const remainingTimeoutMs = deadline - this.timer.now();
     if (remainingTimeoutMs <= 0) {
       // Defensive: in practice the outer Promise.race timeout fires first, so
@@ -3780,6 +3847,40 @@ export class UnixSocketServer {
     throw new Error(`${action} requires deviceId when multiple ${platform} devices are booted`);
   }
 
+  private async runTrackedKeyedDeviceInput<T>(
+    toolName: string,
+    targetDevice: BootedDevice,
+    operation: (signal?: AbortSignal) => Promise<T>,
+  ): Promise<T> {
+    const executionKey = `device:${targetDevice.deviceId}`;
+    return await this.runTrackedDeviceInput(toolName, targetDevice, async signal =>
+      this.runKeyedMcpForward(executionKey, () => operation(signal), executionKey)
+    );
+  }
+
+  private async runTrackedDeviceInput<T>(
+    toolName: string,
+    targetDevice: BootedDevice,
+    operation: (signal?: AbortSignal) => Promise<T>,
+  ): Promise<T> {
+    const sessionManager = this.daemonState.isInitialized()
+      ? this.daemonState.getSessionManager()
+      : undefined;
+    const sessionUuid = sessionManager?.getSessionForDevice?.(targetDevice.deviceId) ?? undefined;
+    if (!sessionUuid) {
+      return await operation();
+    }
+
+    this.daemonState.getDevicePool().assertSessionReadyForAutomation?.(sessionUuid);
+    const execution = executionTracker.startExecution(toolName, undefined, sessionUuid);
+    try {
+      execution.abortController.signal.throwIfAborted();
+      return await operation(execution.abortController.signal);
+    } finally {
+      executionTracker.endExecution(execution.id);
+    }
+  }
+
   private async discoverInputTargetDevices(
     platform: "android" | "ios",
     action:
@@ -3821,7 +3922,11 @@ export class UnixSocketServer {
         return await mcpClient.callTool(
           {
             name: request.params.name,
-            arguments: this.withSocketSessionAutolockKey(request.params.arguments, socketSessionId),
+            arguments: this.withSocketSessionAutolockKey(
+              request.params.arguments,
+              socketSessionId,
+              timeoutMs,
+            ),
           },
           undefined,
           requestOptions,
@@ -3840,7 +3945,10 @@ export class UnixSocketServer {
         return await mcpClient.listResourceTemplates();
       }
       case "ide/getNavigationGraph": {
-        const args = request.params ?? {};
+        const args = {
+          ...(request.params ?? {}),
+          [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: timeoutMs,
+        };
         return await mcpClient.callTool(
           { name: "getNavigationGraph", arguments: args },
           undefined,
@@ -3852,10 +3960,15 @@ export class UnixSocketServer {
     }
   }
 
-  private withSocketSessionAutolockKey(args: unknown, socketSessionId: string): unknown {
+  private withSocketSessionAutolockKey(
+    args: unknown,
+    socketSessionId: string,
+    timeoutMs: number,
+  ): unknown {
     if (args === null || args === undefined) {
       return {
         __mcpSessionId: socketSessionId,
+        [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: timeoutMs,
       };
     }
 
@@ -3878,6 +3991,7 @@ export class UnixSocketServer {
     return {
       ...forwardedArgs,
       __mcpSessionId: socketSessionId,
+      [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: timeoutMs,
     };
   }
 

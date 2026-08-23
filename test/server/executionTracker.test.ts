@@ -159,6 +159,44 @@ describe("ExecutionTracker", function() {
     expect(implicit.abortController.signal.aborted).toBe(true);
   });
 
+  test("waits for cancelled explicit and implicit device work to end", async function() {
+    const timer = new FakeTimer();
+    const tracker = new ExecutionTracker(
+      timer,
+      new FakeIdGenerator(["explicit", "implicit"]),
+    );
+    const explicit = tracker.startExecution("tapOn", "mcp-explicit", "device-session");
+    const implicit = tracker.startExecution("swipeOn", "mcp-implicit");
+    tracker.setResolvedAutolockSessionUuid(implicit.id, "device-session");
+
+    await tracker.cancelDeviceSessionExecutions(
+      "device-session",
+      "device-disconnected:process-wide-adb-reset",
+    );
+    const drained = tracker.waitForDeviceSessionExecutionsToEnd("device-session", 1_000);
+    tracker.endExecution(explicit.id);
+    await Promise.resolve();
+    tracker.endExecution(implicit.id);
+
+    await expect(drained).resolves.toBe(true);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("bounds the wait for signal-ignorant device work", async function() {
+    const timer = new FakeTimer();
+    const tracker = new ExecutionTracker(
+      timer,
+      new FakeIdGenerator(["execution-1"]),
+    );
+    const execution = tracker.startExecution("tapOn", undefined, "device-session");
+
+    const drained = tracker.waitForDeviceSessionExecutionsToEnd("device-session", 1_000);
+    await timer.advanceTimeAsync(1_000);
+
+    await expect(drained).resolves.toBe(false);
+    tracker.endExecution(execution.id);
+  });
+
   // #4183 item 6 (A3): the scope fallback in hasActiveToolExecution (executionTracker.ts)
   // had no table coverage. The scope order is: explicit "global" → sessionUuid map →
   // sessionId map → global fallback when neither key is provided.

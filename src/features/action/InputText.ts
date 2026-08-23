@@ -47,6 +47,10 @@ const defaultKeyboardCloserFactory: KeyboardCloserFactory = (device, adbFactory)
   };
 };
 
+function assertInputNotAborted(signal?: AbortSignal): void {
+  signal?.throwIfAborted();
+}
+
 export class InputText extends BaseVisualChange {
   private androidInputKeyCombinationSupported: boolean | undefined;
 
@@ -64,7 +68,8 @@ export class InputText extends BaseVisualChange {
     text: string,
     imeAction?: ImeAction,
     dismissKeyboard: boolean = false,
-    mode?: InputTextMode
+    mode?: InputTextMode,
+    signal?: AbortSignal,
   ): Promise<SendTextResult & { method?: InputTextMode }> {
     const perf = createGlobalPerformanceTracker();
     perf.serial("inputText");
@@ -90,14 +95,16 @@ export class InputText extends BaseVisualChange {
       if (autoMode) {
         resolvedMode = autoMode;
         logger.debug(
-          "[InputText] auto-promoted a11y -> eventAll (text matched a configured event-all marker)"
+          "[InputText] auto-promoted a11y -> eventAll (text matched a configured event-all marker)",
         );
       }
     }
 
-    return this.observedInteraction(
-      async previousObserveResult => {
+    assertInputNotAborted(signal);
+    const result = await this.observedInteraction(
+      async (previousObserveResult) => {
         try {
+          assertInputNotAborted(signal);
           // Platform-specific text input execution
           switch (this.device.platform) {
             case "android":
@@ -107,20 +114,22 @@ export class InputText extends BaseVisualChange {
                   imeAction,
                   dismissKeyboard,
                   resolvedMode,
-                  previousObserveResult
+                  previousObserveResult,
+                  signal,
                 )
               );
             case "ios":
               // dismissKeyboard is Android-only — it works around an emulator
               // bug where the soft keyboard stays visible after setText.
               return await perf.track("iOSTextInput", () =>
-                this.executeiOSTextInput(text, imeAction)
+                this.executeiOSTextInput(text, imeAction, signal)
               );
             default:
               perf.end();
               throw new Error(`Unsupported platform: ${this.device.platform}`);
           }
         } catch (error) {
+          assertInputNotAborted(signal);
           perf.end();
           const errorMsg = errorMessage(error);
           logger.warn(`[InputText] text input failed (mode=${resolvedMode}): ${errorMsg}`, error);
@@ -129,18 +138,21 @@ export class InputText extends BaseVisualChange {
             success: false,
             text,
             error: `Failed to send text input: ${errorMsg}`,
-            method: this.device.platform === "android" ? resolvedMode : "a11y"
+            method: this.device.platform === "android" ? resolvedMode : "a11y",
           };
         }
       },
       {
         changeExpected: true,
-        tolerancePercent: 0.00,
+        tolerancePercent: 0.0,
         timeoutMs: 5000,
         perf,
-        skipUiStability: true // Skip UI stability wait - a11y service already waits 100ms for tree update
-      }
+        signal,
+        skipUiStability: true, // Skip UI stability wait - a11y service already waits 100ms for tree update
+      },
     );
+    assertInputNotAborted(signal);
+    return result;
   }
 
   /**
@@ -154,18 +166,20 @@ export class InputText extends BaseVisualChange {
     imeAction?: ImeAction,
     dismissKeyboard: boolean = false,
     mode: InputTextMode = "a11y",
-    previousObserveResult?: ObserveResult
+    previousObserveResult?: ObserveResult,
+    signal?: AbortSignal,
   ): Promise<SendTextResult & { method?: InputTextMode }> {
+    assertInputNotAborted(signal);
     if (mode === "eventLast") {
-      return this.executeAndroidEventLastTextInput(text, imeAction, dismissKeyboard);
+      return this.executeAndroidEventLastTextInput(text, imeAction, dismissKeyboard, signal);
     }
 
     if (mode === "eventAll") {
-      return this.executeAndroidEventAllTextInput(text, imeAction, dismissKeyboard);
+      return this.executeAndroidEventAllTextInput(text, imeAction, dismissKeyboard, signal);
     }
 
     if (mode === "append") {
-      return this.executeAndroidAppendTextInput(text, imeAction, dismissKeyboard);
+      return this.executeAndroidAppendTextInput(text, imeAction, dismissKeyboard, undefined, undefined, signal);
     }
 
     if (mode === "eventOnly") {
@@ -173,7 +187,8 @@ export class InputText extends BaseVisualChange {
         text,
         imeAction,
         dismissKeyboard,
-        previousObserveResult
+        previousObserveResult,
+        signal,
       );
     }
 
@@ -181,13 +196,14 @@ export class InputText extends BaseVisualChange {
     // It also natively supports Unicode without needing virtual keyboard
     const a11yClient = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
     const a11yResult = await a11yClient.requestSetText(text, { dismissKeyboard });
+    assertInputNotAborted(signal);
 
     if (a11yResult.success) {
       logger.info(`[InputText] Text input via accessibility service: ${a11yResult.totalTimeMs}ms`);
 
       // Handle IME action if specified
       if (imeAction) {
-        await this.executeImeAction(imeAction);
+        await this.executeImeAction(imeAction, signal);
       }
 
       return {
@@ -212,44 +228,63 @@ export class InputText extends BaseVisualChange {
   private async executeAndroidEventLastTextInput(
     text: string,
     imeAction?: ImeAction,
-    dismissKeyboard: boolean = false
+    dismissKeyboard: boolean = false,
+    signal?: AbortSignal,
   ): Promise<SendTextResult & { method?: InputTextMode }> {
+    assertInputNotAborted(signal);
     const split = this.findLastPrintableAsciiNonWhitespace(text);
 
     if (!split) {
       logger.info("[InputText] eventLast requested but no printable non-whitespace ASCII character was found; using a11y");
-      const result = await this.executeAndroidTextInput(text, imeAction, dismissKeyboard, "a11y");
+      const result = await this.executeAndroidTextInput(
+        text,
+        imeAction,
+        dismissKeyboard,
+        "a11y",
+        undefined,
+        signal,
+      );
       return { ...result, method: "a11y" };
     }
 
     const { index, char } = split;
     const prefix = text.slice(0, index);
     const suffix = text.slice(index + 1);
-    const keyEventPlan = await this.getAsciiKeyEventPlan(char);
+    const keyEventPlan = await this.getAsciiKeyEventPlan(char, undefined, signal);
+    assertInputNotAborted(signal);
     if (!keyEventPlan) {
       logger.info(`[InputText] eventLast could not map ASCII character ${JSON.stringify(char)} to a key event; using a11y`);
-      const result = await this.executeAndroidTextInput(text, imeAction, dismissKeyboard, "a11y");
+      const result = await this.executeAndroidTextInput(
+        text,
+        imeAction,
+        dismissKeyboard,
+        "a11y",
+        undefined,
+        signal,
+      );
       return { ...result, method: "a11y" };
     }
 
     const a11yClient = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
 
     const prefixResult = await a11yClient.requestSetText(prefix);
+    assertInputNotAborted(signal);
     if (!prefixResult.success) {
       return this.setTextFailure(text, "eventLast prefix", "before real key event", prefixResult.error, "eventLast");
     }
 
-    await this.executeKeyEventPlan(keyEventPlan);
+    await this.executeKeyEventPlan(keyEventPlan, undefined, false, undefined, signal);
 
     if (suffix.length > 0 || dismissKeyboard) {
       const finalResult = await a11yClient.requestSetText(text, { dismissKeyboard });
+      assertInputNotAborted(signal);
       if (!finalResult.success) {
         return this.setTextFailure(text, "eventLast final", "after real key event", finalResult.error, "eventLast");
       }
     }
 
     if (imeAction) {
-      await this.executeImeAction(imeAction);
+      await this.executeImeAction(imeAction, signal);
     }
 
     return {
@@ -263,39 +298,55 @@ export class InputText extends BaseVisualChange {
   private async executeAndroidEventAllTextInput(
     text: string,
     imeAction?: ImeAction,
-    dismissKeyboard: boolean = false
+    dismissKeyboard: boolean = false,
+    signal?: AbortSignal,
   ): Promise<SendTextResult & { method?: InputTextMode }> {
+    assertInputNotAborted(signal);
     const chars = Array.from(text);
-    if (!await this.hasAsciiKeyEventPlan(chars)) {
-      const result = await this.executeAndroidTextInput(text, imeAction, dismissKeyboard, "a11y");
+    if (!await this.hasAsciiKeyEventPlan(chars, signal)) {
+      const result = await this.executeAndroidTextInput(
+        text,
+        imeAction,
+        dismissKeyboard,
+        "a11y",
+        undefined,
+        signal,
+      );
       return { ...result, method: "a11y" };
     }
 
     const a11yClient = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
     const clearResult = await a11yClient.requestSetText("");
+    assertInputNotAborted(signal);
     if (!clearResult.success) {
       return this.setTextFailure(text, "eventAll initial clear", "before eventAll input", clearResult.error, "eventAll");
     }
 
     let targetText = "";
     for (let index = 0; index < chars.length; index++) {
+      assertInputNotAborted(signal);
       const char = chars[index] ?? "";
-      const keyEventPlan = await this.getAsciiKeyEventPlan(char);
+      const keyEventPlan = await this.getAsciiKeyEventPlan(char, undefined, signal);
 
       if (keyEventPlan) {
-        await this.executeKeyEventPlan(keyEventPlan);
+        await this.executeKeyEventPlan(keyEventPlan, undefined, false, undefined, signal);
         targetText += char;
         continue;
       }
 
       let unsupportedRun = char;
-      while (index + 1 < chars.length && !(await this.getAsciiKeyEventPlan(chars[index + 1] ?? ""))) {
+      while (
+        index + 1 < chars.length &&
+        !(await this.getAsciiKeyEventPlan(chars[index + 1] ?? "", undefined, signal))
+      ) {
+        assertInputNotAborted(signal);
         index++;
         unsupportedRun += chars[index] ?? "";
       }
 
       targetText += unsupportedRun;
       const setTextResult = await a11yClient.requestSetText(targetText);
+      assertInputNotAborted(signal);
       if (!setTextResult.success) {
         return this.setTextFailure(text, "eventAll unsupported text run", "during eventAll input", setTextResult.error, "eventAll");
       }
@@ -303,13 +354,14 @@ export class InputText extends BaseVisualChange {
 
     if (dismissKeyboard) {
       const finalResult = await a11yClient.requestSetText(text, { dismissKeyboard: true });
+      assertInputNotAborted(signal);
       if (!finalResult.success) {
         return this.setTextFailure(text, "eventAll final", "after eventAll input", finalResult.error, "eventAll");
       }
     }
 
     if (imeAction) {
-      await this.executeImeAction(imeAction);
+      await this.executeImeAction(imeAction, signal);
     }
 
     return {
@@ -344,9 +396,17 @@ export class InputText extends BaseVisualChange {
   async appendText(
     text: string,
     timeoutMs?: number,
-    beforeKeyEvents?: AppendKeyEventValidator
+    beforeKeyEvents?: AppendKeyEventValidator,
+    signal?: AbortSignal,
   ): Promise<SendTextResult & { method?: InputTextMode }> {
-    return this.executeAndroidAppendTextInput(text, undefined, false, timeoutMs, beforeKeyEvents);
+    return this.executeAndroidAppendTextInput(
+      text,
+      undefined,
+      false,
+      timeoutMs,
+      beforeKeyEvents,
+      signal,
+    );
   }
 
   /**
@@ -377,16 +437,24 @@ export class InputText extends BaseVisualChange {
     imeAction?: ImeAction,
     dismissKeyboard: boolean = false,
     timeoutMs?: number,
-    beforeKeyEvents?: AppendKeyEventValidator
+    beforeKeyEvents?: AppendKeyEventValidator,
+    signal?: AbortSignal,
   ): Promise<SendTextResult & { method?: InputTextMode }> {
+    assertInputNotAborted(signal);
     const remaining = this.createBudget(timeoutMs);
-    const planned = await this.planAppendKeyEvents(text, remaining, timeoutMs);
+    const planned = await this.planAppendKeyEvents(text, remaining, timeoutMs, signal);
     if (planned.error) {
       // Planning failed before any key event was issued, so nothing landed.
       return this.appendFailure(text, planned.error, 0);
     }
 
-    const typed = await this.typeAppendKeyEvents(planned.plans, remaining, timeoutMs, beforeKeyEvents);
+    const typed = await this.typeAppendKeyEvents(
+      planned.plans,
+      remaining,
+      timeoutMs,
+      beforeKeyEvents,
+      signal,
+    );
     if (typed.error) {
       // A non-timeout failure leaves an exact confirmed prefix, while a timed-out
       // key event is ambiguous: Android may have accepted it before adb was killed.
@@ -395,6 +463,7 @@ export class InputText extends BaseVisualChange {
 
     if (dismissKeyboard) {
       const dismissError = await this.dismissKeyboardAfterAppend();
+      assertInputNotAborted(signal);
       if (dismissError) {
         // All characters landed; only the post-typing keyboard dismissal failed,
         // so the full text was sent — a retry must NOT re-append any of it.
@@ -403,7 +472,7 @@ export class InputText extends BaseVisualChange {
     }
 
     if (imeAction) {
-      await this.executeImeAction(imeAction);
+      await this.executeImeAction(imeAction, signal);
     }
 
     return {
@@ -434,8 +503,10 @@ export class InputText extends BaseVisualChange {
   private async planAppendKeyEvents(
     text: string,
     remaining: () => number | undefined,
-    timeoutMs: number | undefined
+    timeoutMs: number | undefined,
+    signal?: AbortSignal,
   ): Promise<{ plans: KeyEventPlan[]; error?: string }> {
+    assertInputNotAborted(signal);
     const chars = Array.from(text);
     const needsCapability = chars.some(char => asciiKeyEventNeedsKeyCombination(char));
 
@@ -445,7 +516,10 @@ export class InputText extends BaseVisualChange {
       if (budget !== undefined && budget <= 0) {
         return { plans: [], error: this.appendBudgetExceeded(timeoutMs, "resolving key events") };
       }
-      supportsKeyCombination = await this.supportsAndroidInputKeyCombination(budget);
+      supportsKeyCombination = await this.supportsAndroidInputKeyCombination(
+        budget,
+        signal,
+      );
     }
 
     const plans: KeyEventPlan[] = [];
@@ -478,10 +552,12 @@ export class InputText extends BaseVisualChange {
     plans: KeyEventPlan[],
     remaining: () => number | undefined,
     timeoutMs: number | undefined,
-    beforeKeyEvents?: AppendKeyEventValidator
+    beforeKeyEvents?: AppendKeyEventValidator,
+    signal?: AbortSignal,
   ): Promise<{ charsSent?: number; error?: string }> {
     let charsSent = 0;
     for (const plan of plans) {
+      assertInputNotAborted(signal);
       const budget = remaining();
       if (budget !== undefined && budget <= 0) {
         return { charsSent, error: this.appendBudgetExceeded(timeoutMs, "typing") };
@@ -491,6 +567,7 @@ export class InputText extends BaseVisualChange {
         ? async (remainingTimeoutMs?: number) => {
           try {
             const validation = await beforeKeyEvents(remainingTimeoutMs);
+            assertInputNotAborted(signal);
             if (!validation.success) {
               validationError = validation.error ??
                 "Frame context is stale or unavailable; observe a fresh frame before retrying";
@@ -519,9 +596,11 @@ export class InputText extends BaseVisualChange {
           plan,
           budget,
           true,
-          beforeDispatch
+          beforeDispatch,
+          signal,
         );
       } catch (error) {
+        assertInputNotAborted(signal);
         if (validationError) {
           return { charsSent, error: validationError };
         }
@@ -587,11 +666,13 @@ export class InputText extends BaseVisualChange {
     text: string,
     imeAction: ImeAction | undefined,
     dismissKeyboard: boolean,
-    previousObserveResult?: ObserveResult
+    previousObserveResult?: ObserveResult,
+    signal?: AbortSignal,
   ): Promise<SendTextResult & { method?: InputTextMode }> {
+    assertInputNotAborted(signal);
     const keyEventPlans: KeyEventPlan[] = [];
     for (const char of Array.from(text)) {
-      const keyEventPlan = await this.getAsciiKeyEventPlan(char);
+      const keyEventPlan = await this.getAsciiKeyEventPlan(char, undefined, signal);
       if (!keyEventPlan) {
         return {
           success: false,
@@ -613,7 +694,10 @@ export class InputText extends BaseVisualChange {
       };
     }
 
-    const focusedViewHierarchy = await this.refreshFocusedTextInputHierarchy(viewHierarchy);
+    const focusedViewHierarchy = await this.refreshFocusedTextInputHierarchy(
+      viewHierarchy,
+      signal,
+    );
     if (!focusedViewHierarchy) {
       return {
         success: false,
@@ -623,13 +707,18 @@ export class InputText extends BaseVisualChange {
       };
     }
 
-    await clearTextWithKeyEvents(this.adb, getFocusedTextLength(focusedViewHierarchy));
+    await clearTextWithKeyEvents(
+      this.adb,
+      getFocusedTextLength(focusedViewHierarchy),
+      signal,
+    );
     for (const keyEventPlan of keyEventPlans) {
-      await this.executeKeyEventPlan(keyEventPlan);
+      await this.executeKeyEventPlan(keyEventPlan, undefined, false, undefined, signal);
     }
 
     if (dismissKeyboard) {
       const keyboardResult = await this.keyboardCloserFactory(this.device, this.adbFactory).close();
+      assertInputNotAborted(signal);
       if (!keyboardResult.success) {
         return {
           success: false,
@@ -643,7 +732,7 @@ export class InputText extends BaseVisualChange {
     }
 
     if (imeAction) {
-      await this.executeImeAction(imeAction);
+      await this.executeImeAction(imeAction, signal);
     }
 
     return {
@@ -655,8 +744,10 @@ export class InputText extends BaseVisualChange {
   }
 
   private async refreshFocusedTextInputHierarchy(
-    viewHierarchy: ViewHierarchyResult
+    viewHierarchy: ViewHierarchyResult,
+    signal?: AbortSignal,
   ): Promise<ViewHierarchyResult | undefined> {
+    assertInputNotAborted(signal);
     if (hasFocusedTextInput(viewHierarchy)) {
       return viewHierarchy;
     }
@@ -674,6 +765,7 @@ export class InputText extends BaseVisualChange {
       minTimestamp = viewHierarchy.updatedAt + 1;
     } else {
       const timestampResult = await this.adb.getDeviceTimestampMsWithSource();
+      assertInputNotAborted(signal);
       if (timestampResult.source === "host") {
         return undefined;
       }
@@ -683,8 +775,10 @@ export class InputText extends BaseVisualChange {
     }
     const refreshedObserveResult = await this.observeScreen.execute({
       skipWaitForFresh: false,
-      minTimestamp
+      minTimestamp,
+      signal,
     });
+    assertInputNotAborted(signal);
     const refreshedViewHierarchy = refreshedObserveResult.viewHierarchy;
     return refreshedObserveResult.freshness?.isFresh !== false &&
       refreshedViewHierarchy && hasFocusedTextInput(refreshedViewHierarchy)
@@ -733,9 +827,12 @@ export class InputText extends BaseVisualChange {
     return null;
   }
 
-  private async hasAsciiKeyEventPlan(chars: string[]): Promise<boolean> {
+  private async hasAsciiKeyEventPlan(
+    chars: string[],
+    signal?: AbortSignal,
+  ): Promise<boolean> {
     for (const char of chars) {
-      if (await this.getAsciiKeyEventPlan(char)) {
+      if (await this.getAsciiKeyEventPlan(char, undefined, signal)) {
         return true;
       }
     }
@@ -743,16 +840,28 @@ export class InputText extends BaseVisualChange {
     return false;
   }
 
-  private async getAsciiKeyEventPlan(char: string, timeoutMs?: number): Promise<KeyEventPlan | null> {
-    return buildAsciiKeyEventPlan(char, await this.supportsAndroidInputKeyCombination(timeoutMs));
+  private async getAsciiKeyEventPlan(
+    char: string,
+    timeoutMs?: number,
+    signal?: AbortSignal,
+  ): Promise<KeyEventPlan | null> {
+    assertInputNotAborted(signal);
+    const supported = await this.supportsAndroidInputKeyCombination(timeoutMs, signal);
+    assertInputNotAborted(signal);
+    return buildAsciiKeyEventPlan(char, supported);
   }
 
-  private async supportsAndroidInputKeyCombination(timeoutMs?: number): Promise<boolean> {
+  private async supportsAndroidInputKeyCombination(
+    timeoutMs?: number,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    assertInputNotAborted(signal);
     if (this.androidInputKeyCombinationSupported !== undefined) {
       return this.androidInputKeyCombinationSupported;
     }
 
     const apiLevel = await readAndroidDeviceApiLevel(this.adb, timeoutMs, this.timer);
+    assertInputNotAborted(signal);
     if (apiLevel === null) {
       // Unknown is not "unsupported": a transient probe failure (or the caller's
       // budget expiring mid-probe) must not permanently disable SHIFT chords for
@@ -770,14 +879,18 @@ export class InputText extends BaseVisualChange {
     plan: KeyEventPlan,
     timeoutMs?: number,
     noRetry: boolean = false,
-    beforeDispatch?: (remainingTimeoutMs?: number) => Promise<void>
+    beforeDispatch?: (remainingTimeoutMs?: number) => Promise<void>,
+    signal?: AbortSignal,
   ): Promise<void> {
     for (const [index, command] of plan.commands.entries()) {
+      assertInputNotAborted(signal);
       await this.adb.execute(command.split(" "), {
         timeoutMs,
         noRetry,
         beforeDispatch: index === 0 ? beforeDispatch : undefined,
+        signal,
       });
+      assertInputNotAborted(signal);
     }
   }
 
@@ -789,13 +902,16 @@ export class InputText extends BaseVisualChange {
    */
   private async executeiOSTextInput(
     text: string,
-    imeAction?: ImeAction
+    imeAction?: ImeAction,
+    signal?: AbortSignal,
   ): Promise<SendTextResult & { method?: "a11y" }> {
+    assertInputNotAborted(signal);
     const startMs = Date.now();
     logger.debug(`[InputText] iOS begin textLength=${text.length} imeAction=${imeAction ?? "none"}`);
 
     const client = IOSCtrlProxyClient.getInstance(this.device);
     const result = await client.requestSetText(text);
+    assertInputNotAborted(signal);
 
     if (!result.success) {
       logger.error(`[InputText] CtrlProxy iOS setText failed: ${result.error} totalMs=${Date.now() - startMs}`);
@@ -812,6 +928,7 @@ export class InputText extends BaseVisualChange {
     // Handle IME action if specified (CtrlProxy iOS supports this)
     if (imeAction) {
       const imeResult = await client.requestImeAction(imeAction);
+      assertInputNotAborted(signal);
       if (!imeResult.success) {
         logger.warn(`[InputText] CtrlProxy iOS IME action failed: ${imeResult.error}`);
       }
@@ -825,7 +942,10 @@ export class InputText extends BaseVisualChange {
     };
   }
 
-  private async executeImeAction(imeAction: string): Promise<void> {
+  private async executeImeAction(
+    imeAction: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
     // Map IME actions to Android key codes
     const imeKeyCodeMap: { [key: string]: string } = {
       "done": "KEYCODE_ENTER",
@@ -839,17 +959,22 @@ export class InputText extends BaseVisualChange {
     const keyCode = imeKeyCodeMap[imeAction];
     if (keyCode) {
       // Small delay to ensure text input is processed
-      await defaultTimer.sleep(100);
+      assertInputNotAborted(signal);
+      await this.timer.sleep(100);
+      assertInputNotAborted(signal);
 
       // Execute the key event(s)
       if (keyCode.includes(" ")) {
         // Handle multiple key combinations like Shift+Tab
         const keys = keyCode.split(" ");
         for (const key of keys) {
+          assertInputNotAborted(signal);
           await this.adb.executeCommand(`shell input keyevent ${key}`);
+          assertInputNotAborted(signal);
         }
       } else {
         await this.adb.executeCommand(`shell input keyevent ${keyCode}`);
+        assertInputNotAborted(signal);
       }
     }
   }

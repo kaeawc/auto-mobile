@@ -51,6 +51,7 @@ export class ExecutionTracker {
   private sessionExecutions = new Map<string, Set<string>>();
   private sessionUuidExecutions = new Map<string, Set<string>>();
   private autolockSessionExecutions = new Map<string, Set<string>>();
+  private executionEndListeners = new Set<() => void>();
   private timer: Timer;
   private idGenerator: IdGenerator;
 
@@ -122,6 +123,9 @@ export class ExecutionTracker {
     if (execution.resolvedAutolockSessionUuid) {
       this.unregisterAutolockSessionExecution(execution.resolvedAutolockSessionUuid, executionId);
     }
+    for (const listener of this.executionEndListeners) {
+      listener();
+    }
   }
 
   /**
@@ -165,6 +169,43 @@ export class ExecutionTracker {
       reason,
       options,
     );
+  }
+
+  async waitForDeviceSessionExecutionsToEnd(
+    sessionUuid: string,
+    timeoutMs: number,
+  ): Promise<boolean> {
+    if (!this.hasActiveDeviceSessionExecutions(sessionUuid)) {
+      return true;
+    }
+    return await new Promise<boolean>(resolve => {
+      let settled = false;
+      const timeout: { handle?: NodeJS.Timeout } = {};
+      const finish = (drained: boolean): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        this.executionEndListeners.delete(check);
+        if (timeout.handle !== undefined) {
+          this.timer.clearTimeout(timeout.handle);
+        }
+        resolve(drained);
+      };
+      const check = (): void => {
+        if (!this.hasActiveDeviceSessionExecutions(sessionUuid)) {
+          finish(true);
+        }
+      };
+      this.executionEndListeners.add(check);
+      timeout.handle = this.timer.setTimeout(() => finish(false), timeoutMs);
+      check();
+    });
+  }
+
+  private hasActiveDeviceSessionExecutions(sessionUuid: string): boolean {
+    return this.hasActiveSessionUuidExecutions(sessionUuid)
+      || this.hasActiveAutolockSessionExecutions(sessionUuid);
   }
 
   hasActiveSessionUuidExecutions(sessionUuid: string, query?: ActiveExecutionQuery): boolean {

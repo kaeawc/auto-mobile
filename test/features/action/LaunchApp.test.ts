@@ -15,7 +15,9 @@ import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeDeviceAppLauncher } from "../../fakes/FakeDeviceAppLauncher";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
+import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { IOSCtrlProxyManager } from "../../../src/utils/IOSCtrlProxyManager";
+import { DeviceLostError } from "../../../src/server/deviceLossOutcome";
 
 describe("LaunchApp", () => {
   let device: BootedDevice;
@@ -69,16 +71,245 @@ describe("LaunchApp", () => {
   });
 
   test("returns observation when app is already in foreground", async () => {
+    const controller = new AbortController();
     fakeAdb.setForegroundApp({ packageName, userId: 0 });
     fakeAdb.setCommandResponse(`shell ps | grep ${packageName}`, { stdout: "1\n", stderr: "" });
 
-    const result = await launchApp.execute(packageName, false, false);
+    const result = await launchApp.execute(
+      packageName,
+      false,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      controller.signal,
+    );
 
     expect(result.success).toBe(true);
     expect(result.error).toBe("App is already in foreground");
     expect(result.observation).toBeDefined();
     expect(fakeObserveScreen.getExecuteCallCount()).toBeGreaterThan(0);
+    expect(
+      fakeObserveScreen.getExecuteOptions().every(options => options.signal === controller.signal),
+    ).toBe(true);
     expect(fakeAwaitIdle.wasMethodCalled("initializeUiStabilityTracking")).toBe(true);
+  });
+
+  test("stops launch when device loss cancels the operation during preflight", async () => {
+    const controller = new AbortController();
+    const deviceLoss = new DeviceLostError(
+      device.deviceId,
+      `device-disconnected:${device.deviceId}`,
+    );
+    const cancellableLaunch = new LaunchApp(device, fakeAdb as unknown as any, null, fakeTimer, {
+      targetUserDetector: {
+        async detectTargetUserId() {
+          controller.abort(deviceLoss);
+          return 0;
+        },
+      },
+      installedAppsProvider: {
+        async listInstalledApps() {
+          return await new Promise<never>(() => {});
+        },
+      },
+    });
+    (cancellableLaunch as any).awaitIdle = fakeAwaitIdle;
+    (cancellableLaunch as any).observeScreen = fakeObserveScreen;
+    (cancellableLaunch as any).window = fakeWindow;
+
+    await expect(
+      cancellableLaunch.execute(
+        packageName,
+        false,
+        false,
+        undefined,
+        undefined,
+        undefined,
+        controller.signal,
+      ),
+    ).rejects.toBe(deviceLoss);
+    expect(hasStartedAppLaunch()).toBe(false);
+  });
+
+  test("does not clear Android app data after device loss during the running check", async () => {
+    const controller = new AbortController();
+    const deviceLoss = new DeviceLostError(
+      device.deviceId,
+      `device-disconnected:${device.deviceId}`,
+    );
+    let clearCalls = 0;
+    const cancellableLaunch = new LaunchApp(device, fakeAdb as unknown as any, null, fakeTimer, {
+      createAndroidClearAppData: () => ({
+        async execute() {
+          clearCalls += 1;
+          return { success: true, packageName };
+        },
+      }),
+    });
+    (cancellableLaunch as any).awaitIdle = fakeAwaitIdle;
+    (cancellableLaunch as any).observeScreen = fakeObserveScreen;
+    (cancellableLaunch as any).window = fakeWindow;
+    const originalExecuteCommand = fakeAdb.executeCommand.bind(fakeAdb);
+    const executeSpy = spyOn(fakeAdb, "executeCommand").mockImplementation(
+      async (command, timeoutMs, maxBuffer, noRetry, signal) => {
+        const result = await originalExecuteCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+        if (command.startsWith("shell ps | grep")) {
+          controller.abort(deviceLoss);
+        }
+        return result;
+      },
+    );
+
+    try {
+      await expect(
+        cancellableLaunch.execute(
+          packageName,
+          /* clearAppData */ true,
+          /* coldBoot */ false,
+          undefined,
+          undefined,
+          undefined,
+          controller.signal,
+        ),
+      ).rejects.toBe(deviceLoss);
+      expect(clearCalls).toBe(0);
+      expect(hasStartedAppLaunch()).toBe(false);
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
+  test("does not run fallback launch commands after device loss during intent launch", async () => {
+    const controller = new AbortController();
+    const deviceLoss = new DeviceLostError(
+      device.deviceId,
+      `device-disconnected:${device.deviceId}`,
+    );
+    const originalExecuteCommand = fakeAdb.executeCommand.bind(fakeAdb);
+    const executeSpy = spyOn(fakeAdb, "executeCommand").mockImplementation(
+      async (command, timeoutMs, maxBuffer, noRetry, signal) => {
+        if (
+          command.includes("android.intent.action.MAIN") &&
+          command.includes("android.intent.category.LAUNCHER")
+        ) {
+          controller.abort(deviceLoss);
+          throw new Error("ADB transport disconnected");
+        }
+        return await originalExecuteCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+      },
+    );
+
+    try {
+      await expect(
+        launchApp.execute(
+          packageName,
+          false,
+          false,
+          undefined,
+          undefined,
+          undefined,
+          controller.signal,
+        ),
+      ).rejects.toBe(deviceLoss);
+      expect(fakeAdb.wasCommandExecuted(`shell monkey -p ${packageName}`)).toBe(false);
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
+  test("does not run ADB activity probes after device loss during launcher discovery", async () => {
+    const controller = new AbortController();
+    const deviceLoss = new DeviceLostError(
+      device.deviceId,
+      `device-disconnected:${device.deviceId}`,
+    );
+    fakeAdb.setCommandResponse(
+      "android.intent.category.LAUNCHER",
+      { stdout: "Error: launcher intent unavailable", stderr: "" },
+    );
+    fakeAdb.setCommandError(`shell monkey -p ${packageName}`, new Error("monkey unavailable"));
+    const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+      async requestLaunchIntent() {
+        controller.abort(deviceLoss);
+        throw new Error("CtrlProxy disconnected");
+      },
+    } as unknown as AndroidCtrlProxyClient);
+
+    try {
+      await expect(
+        launchApp.execute(
+          packageName,
+          false,
+          false,
+          undefined,
+          undefined,
+          undefined,
+          controller.signal,
+        ),
+      ).rejects.toBe(deviceLoss);
+      expect(fakeAdb.getExecutedCommands().some(command =>
+        command.includes("shell pm dump") || command.includes("query-activities")
+      )).toBe(false);
+    } finally {
+      getInstanceSpy.mockRestore();
+    }
+  });
+
+  test("aborts and unsubscribes while waiting for an iOS hierarchy race", async () => {
+    const iosDevice: BootedDevice = {
+      name: "test-ios-device",
+      platform: "ios",
+      deviceId: "11111111-1111-1111-1111-111111111111",
+    };
+    const controller = new AbortController();
+    const deviceLoss = new DeviceLostError(
+      iosDevice.deviceId,
+      `device-disconnected:${iosDevice.deviceId}`,
+    );
+    let unsubscribeCount = 0;
+    const client = {
+      async getLatestHierarchy() {
+        return null;
+      },
+      onPushUpdate() {
+        return () => {
+          unsubscribeCount += 1;
+        };
+      },
+      async requestHierarchySync() {
+        return await new Promise<never>(() => {});
+      },
+    };
+    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+      client as unknown as IOSCtrlProxyClient,
+    );
+    const iosLaunchApp = new LaunchApp(
+      iosDevice,
+      fakeAdb as unknown as any,
+      null,
+      fakeTimer,
+    );
+
+    try {
+      const wait = (
+        iosLaunchApp as unknown as {
+          waitForIosHierarchyReady(
+            timeoutMs: number,
+            expectedPackageName: string,
+            signal: AbortSignal,
+          ): Promise<void>;
+        }
+      ).waitForIosHierarchyReady(5_000, packageName, controller.signal);
+      await Promise.resolve();
+      controller.abort(deviceLoss);
+
+      await expect(wait).rejects.toBe(deviceLoss);
+      expect(unsubscribeCount).toBe(1);
+      expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      getInstanceSpy.mockRestore();
+    }
   });
 
   test("launches an Android app whose launcher activity is not MainActivity with the package resolver", async () => {
@@ -244,6 +475,7 @@ describe("LaunchApp", () => {
 
   test("re-observes until the launch observation reports the launched Android app", async () => {
     fakeTimer.enableAutoAdvance();
+    const controller = new AbortController();
     const previousPackageName = "com.example.previous";
     const observations = [
       createObserveResult(previousPackageName),
@@ -254,12 +486,23 @@ describe("LaunchApp", () => {
     fakeAdb.setCommandResponse(`shell ps | grep ${packageName}`, { stdout: "0\n", stderr: "" });
     fakeObserveScreen.setObserveResult(() => observations.shift() ?? createObserveResult(packageName));
 
-    const result = await launchApp.execute(packageName, false, false);
+    const result = await launchApp.execute(
+      packageName,
+      false,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      controller.signal,
+    );
 
     expect(result.success).toBe(true);
     expect(result.observation?.activeWindow?.appId).toBe(packageName);
     expect(result.observation?.viewHierarchy?.packageName).toBe(packageName);
     expect(fakeObserveScreen.getExecuteCallCount()).toBeGreaterThan(1);
+    expect(
+      fakeObserveScreen.getExecuteOptions().every(options => options.signal === controller.signal),
+    ).toBe(true);
   });
 
   test("treats Android notification permission dialogs as valid launch observations", async () => {
@@ -875,6 +1118,48 @@ describe("LaunchApp", () => {
         // Simulator path untouched: simctl used, devicectl launcher never called.
         expect(simctlCalls.some(c => c === `launch:${userBundleId}`)).toBe(true);
         expect(deviceAppLauncher.launchCalls).toHaveLength(0);
+      } finally {
+        cleanup();
+      }
+    });
+
+    test("stops an iOS clear-data launch when device loss occurs during termination", async () => {
+      fakeTimer.enableAutoAdvance();
+      const controller = new AbortController();
+      const deviceLoss = new DeviceLostError(
+        simulatorUdid,
+        `device-disconnected:${simulatorUdid}`,
+      );
+      const {
+        iosLaunchApp,
+        deviceAppLauncher,
+        simctlCalls,
+        clearCalls,
+        cleanup,
+      } = createDeviceHarness({ deviceId: simulatorUdid });
+      const simctl = (iosLaunchApp as unknown as {
+        simctl: { terminateApp(bundleId: string): Promise<void> };
+      }).simctl;
+      simctl.terminateApp = async (bundleId: string) => {
+        simctlCalls.push(`terminate:${bundleId}`);
+        controller.abort(deviceLoss);
+      };
+
+      try {
+        await expect(
+          iosLaunchApp.execute(
+            userBundleId,
+            /* clearAppData */ true,
+            /* coldBoot */ false,
+            undefined,
+            undefined,
+            undefined,
+            controller.signal,
+          ),
+        ).rejects.toBe(deviceLoss);
+        expect(clearCalls).toHaveLength(0);
+        expect(deviceAppLauncher.launchCalls).toHaveLength(0);
+        expect(simctlCalls).toEqual([`terminate:${userBundleId}`]);
       } finally {
         cleanup();
       }

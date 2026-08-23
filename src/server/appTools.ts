@@ -24,6 +24,7 @@ import {
   notifyInstalledAppResourceUpdated,
 } from "./appResources";
 import { logger } from "../utils/logger";
+import { isDeviceLostError } from "./deviceLossOutcome";
 
 export interface ListAppsToolDependencies {
   toolResponseFormatter: ToolResponseFormatter;
@@ -254,14 +255,25 @@ export function registerAppTools() {
   };
 
   // Launch app handler
-  const launchAppHandler = async (device: BootedDevice, args: LaunchAppActionArgs) => {
+  const launchAppHandler = async (
+    device: BootedDevice,
+    args: LaunchAppActionArgs,
+    _progress?: unknown,
+    signal?: AbortSignal,
+  ) => {
     try {
+      signal?.throwIfAborted();
       const launchApp = new LaunchApp(device);
       const result = await launchApp.execute(
         args.appId,
         args.clearAppData ?? false,
         args.coldBoot ?? false,
+        undefined,
+        undefined,
+        undefined,
+        signal,
       );
+      signal?.throwIfAborted();
 
       return createJSONToolResponse({
         message: `Launched app ${args.appId}`,
@@ -269,13 +281,18 @@ export function registerAppTools() {
         ...result,
       });
     } catch (error) {
+      if (isDeviceLostError(error)) {
+        throw error;
+      }
       throw new ActionableError(`Failed to launch app: ${error}`);
     } finally {
-      try {
-        invalidateInstalledAppResourceCache(device.deviceId);
-        await notifyInstalledAppResourceUpdated(device.deviceId);
-      } catch (error) {
-        logger.warn(`[AppTools] Failed to refresh app resources after launch: ${error}`);
+      if (!signal?.aborted) {
+        try {
+          invalidateInstalledAppResourceCache(device.deviceId);
+          await notifyInstalledAppResourceUpdated(device.deviceId);
+        } catch (error) {
+          logger.warn(`[AppTools] Failed to refresh app resources after launch: ${error}`);
+        }
       }
     }
   };

@@ -5,6 +5,7 @@ import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
 
 export const DEFAULT_MAX_RETAINED_EMULATOR_LOSS_INCIDENTS = 50;
+export const DEVICE_LOSS_OUTCOME_CODE = "device_lost";
 
 export type EmulatorLossDetectionPath =
   | "watched-process-exit"
@@ -13,6 +14,20 @@ export type EmulatorLossDetectionPath =
   | "adb-server-reset";
 
 export type EmulatorRecoveryOutcome = "recovered" | "exhausted" | "not-attempted";
+export type EmulatorLossSessionState = "recovering" | "active" | "released";
+
+export interface EmulatorLossSessionSnapshot {
+  sessionUuid: string;
+  state: EmulatorLossSessionState;
+  lastHeartbeatMs: number;
+  hasReceivedHeartbeat: boolean;
+  heartbeatTimeoutMs: number;
+}
+
+export interface EmulatorLossRecoverySettlement {
+  replacementDeviceId?: string;
+  sessionState?: EmulatorLossSessionState;
+}
 
 export interface EmulatorLossRecoveryAttempt {
   attempt: number;
@@ -32,11 +47,26 @@ export interface EmulatorLossIncident {
   };
   outputTail?: string;
   lastAdbState?: string;
+  session?: EmulatorLossSessionSnapshot;
+  replacementDeviceId?: string;
   recovery: {
     policy: DeviceRecoveryPolicy;
     attempts: EmulatorLossRecoveryAttempt[];
     outcome?: EmulatorRecoveryOutcome;
   };
+}
+
+export class DeviceLostError extends Error {
+  readonly code = DEVICE_LOSS_OUTCOME_CODE;
+
+  constructor(
+    readonly deviceId: string,
+    reason: string,
+    readonly incidentId?: string,
+  ) {
+    super(reason);
+    this.name = "DeviceLostError";
+  }
 }
 
 export interface OpenEmulatorLossIncidentInput {
@@ -46,13 +76,18 @@ export interface OpenEmulatorLossIncidentInput {
   processExit?: EmulatorLossIncident["processExit"];
   outputTail?: string;
   lastAdbState?: string;
+  session?: EmulatorLossSessionSnapshot;
   recoveryPolicy: DeviceRecoveryPolicy;
 }
 
 export interface EmulatorLossIncidentStore {
   open(input: OpenEmulatorLossIncidentInput): Promise<EmulatorLossIncident>;
   recordRecoveryAttempt(incidentId: string, attempt: EmulatorLossRecoveryAttempt): Promise<void>;
-  completeRecovery(incidentId: string, outcome: EmulatorRecoveryOutcome): Promise<void>;
+  completeRecovery(
+    incidentId: string,
+    outcome: EmulatorRecoveryOutcome,
+    settlement?: EmulatorLossRecoverySettlement,
+  ): Promise<void>;
   get(incidentId: string): Promise<EmulatorLossIncident | undefined>;
   list(limit?: number): Promise<EmulatorLossIncident[]>;
 }
@@ -67,6 +102,7 @@ function copyIncident(incident: EmulatorLossIncident): EmulatorLossIncident {
   return {
     ...incident,
     ...(incident.processExit ? { processExit: { ...incident.processExit } } : {}),
+    ...(incident.session ? { session: { ...incident.session } } : {}),
     recovery: {
       ...incident.recovery,
       policy: { ...incident.recovery.policy },
@@ -97,6 +133,7 @@ export class InMemoryEmulatorLossIncidentStore implements EmulatorLossIncidentSt
       ...(input.processExit ? { processExit: { ...input.processExit } } : {}),
       ...(input.outputTail ? { outputTail: input.outputTail } : {}),
       ...(input.lastAdbState ? { lastAdbState: input.lastAdbState } : {}),
+      ...(input.session ? { session: { ...input.session } } : {}),
       recovery: {
         policy: { ...input.recoveryPolicy },
         attempts: [],
@@ -119,12 +156,22 @@ export class InMemoryEmulatorLossIncidentStore implements EmulatorLossIncidentSt
     incident.updatedAtMs = this.timer.now();
   }
 
-  async completeRecovery(incidentId: string, outcome: EmulatorRecoveryOutcome): Promise<void> {
+  async completeRecovery(
+    incidentId: string,
+    outcome: EmulatorRecoveryOutcome,
+    settlement: EmulatorLossRecoverySettlement = {},
+  ): Promise<void> {
     const incident = this.incidents.get(incidentId);
     if (!incident) {
       return;
     }
     incident.recovery.outcome = outcome;
+    if (settlement.replacementDeviceId) {
+      incident.replacementDeviceId = settlement.replacementDeviceId;
+    }
+    if (incident.session && settlement.sessionState) {
+      incident.session.state = settlement.sessionState;
+    }
     incident.updatedAtMs = this.timer.now();
   }
 

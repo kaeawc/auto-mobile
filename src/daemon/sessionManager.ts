@@ -4,6 +4,7 @@ import { BootedDevice, Platform } from "../models";
 import { KeepScreenAwakeManager, KeepScreenAwakeState } from "../utils/KeepScreenAwakeManager";
 import { DeviceSessionRepository, type DeviceSessionPersistence } from "../db/deviceSessionRepository";
 import { type DbWriteBarrier, getDbWriteBarrier } from "../db/dbWriteBarrier";
+import { toActionableError } from "../models/ActionableError";
 import type { ViewHierarchyResult } from "../models/ViewHierarchyResult";
 import type { ObserveResult } from "../models/ObserveResult";
 
@@ -82,7 +83,38 @@ export interface Session {
  * This enables parallel tests to each have their own device
  * while sharing centralized state in the daemon.
  */
-export type SessionReleaseCallback = (sessionId: string, deviceId: string, releaseReason: string) => void;
+export interface SessionReleaseSnapshot {
+  sessionId: string;
+  deviceId: string;
+  releaseReason: string;
+  releasedAtMs: number;
+  terminal: boolean;
+  heartbeat: {
+    lastHeartbeatMs: number;
+    hasReceivedHeartbeat: boolean;
+    timeoutMs: number;
+    ageMs: number;
+  };
+}
+
+export class TerminalSessionError extends Error {
+  constructor(
+    readonly sessionUuid: string,
+    readonly release: SessionReleaseSnapshot,
+  ) {
+    super(
+      `Session ${sessionUuid} is terminal after ${release.releaseReason}; use a new session UUID.`,
+    );
+    this.name = "TerminalSessionError";
+  }
+}
+
+export type SessionReleaseCallback = (
+  sessionId: string,
+  deviceId: string,
+  releaseReason: string,
+  snapshot: SessionReleaseSnapshot,
+) => void;
 export type SessionCreatedCallback = (session: Session) => void;
 export interface SessionExecutionMetadata {
   executionId: string;
@@ -132,9 +164,18 @@ const EXPIRY_RELEASE_REASONS = new Set([
   "heartbeat-timeout",
 ]);
 
+function isTerminalReleaseReason(releaseReason: string): boolean {
+  return (
+    releaseReason === "missing-first-heartbeat" ||
+    releaseReason === "heartbeat-timeout" ||
+    releaseReason.startsWith("device-disconnected:")
+  );
+}
+
 export function getDefaultSessionHeartbeatTimeoutMs(): number {
-  const rawValue = process.env.AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS
-    ?? process.env.AUTO_MOBILE_SESSION_HEARTBEAT_TIMEOUT_MS;
+  const rawValue =
+    process.env.AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS ??
+    process.env.AUTO_MOBILE_SESSION_HEARTBEAT_TIMEOUT_MS;
   const parsed = rawValue ? Number.parseInt(rawValue, 10) : NaN;
   return Number.isFinite(parsed) && parsed > 0
     ? parsed
@@ -174,9 +215,12 @@ export class SessionManager {
   private readonly pendingSessionReleases: Map<string, PendingSessionRelease> = new Map();
   /** Rebinds that a release must await before it can remove the live binding. */
   private readonly pendingSessionRebinds: Map<string, PendingSessionRebind> = new Map();
+  private readonly terminalReleaseSnapshots: Map<string, SessionReleaseSnapshot> = new Map();
   private deviceSessionRepository: DeviceSessionPersistence;
   private readonly getBarrier: () => DbWriteBarrier;
-  private readonly keepScreenAwakeRestorerFactory: (device: BootedDevice) => KeepScreenAwakeRestorer;
+  private readonly keepScreenAwakeRestorerFactory: (
+    device: BootedDevice,
+  ) => KeepScreenAwakeRestorer;
   private activeSessionExecutionChecker: ActiveSessionExecutionChecker = () => false;
 
   // Session timeout: 30 minutes
@@ -263,6 +307,10 @@ export class SessionManager {
     timeoutMs?: number,
     heartbeatTimeoutMs?: number,
   ): Promise<Session> {
+    const terminalRelease = this.terminalReleaseSnapshots.get(sessionId);
+    if (terminalRelease) {
+      throw new TerminalSessionError(sessionId, terminalRelease);
+    }
     if (this.sessions.has(sessionId)) {
       logger.warn(`Session ${sessionId} already exists, returning existing session`);
       return this.sessions.get(sessionId)!;
@@ -303,6 +351,11 @@ export class SessionManager {
   }
 
   private async persistAndPublishSession(session: Session): Promise<Session> {
+    const persistedTerminalRelease = await this.getPersistedTerminalRelease(session.sessionId);
+    if (persistedTerminalRelease) {
+      this.terminalReleaseSnapshots.set(session.sessionId, persistedTerminalRelease);
+      throw new TerminalSessionError(session.sessionId, persistedTerminalRelease);
+    }
     await this.persistSession(session);
     this.sessions.set(session.sessionId, session);
     this.sessionDeviceMap.set(session.sessionId, session.assignedDevice);
@@ -310,6 +363,33 @@ export class SessionManager {
     this.notifySessionCreated(session);
     logger.info(`Created session ${session.sessionId} with device ${session.assignedDevice}`);
     return session;
+  }
+
+  private async getPersistedTerminalRelease(
+    sessionId: string,
+  ): Promise<SessionReleaseSnapshot | undefined> {
+    const persisted = await this.deviceSessionRepository.getSession?.(sessionId);
+    if (
+      !persisted ||
+      !persisted.release_reason ||
+      !isTerminalReleaseReason(persisted.release_reason)
+    ) {
+      return undefined;
+    }
+    const releasedAtMs = persisted.released_at_ms ?? persisted.last_used_at_ms;
+    return {
+      sessionId,
+      deviceId: persisted.device_id,
+      releaseReason: persisted.release_reason,
+      releasedAtMs,
+      terminal: true,
+      heartbeat: {
+        lastHeartbeatMs: persisted.last_used_at_ms,
+        hasReceivedHeartbeat: persisted.has_received_heartbeat === 1,
+        timeoutMs: persisted.heartbeat_timeout_ms,
+        ageMs: Math.max(0, releasedAtMs - persisted.last_used_at_ms),
+      },
+    };
   }
 
   /**
@@ -333,6 +413,9 @@ export class SessionManager {
     expireDespiteActiveExecution: boolean,
     execution?: SessionExecutionMetadata,
   ): Session | null {
+    if (this.terminalReleaseSnapshots.has(sessionId)) {
+      return null;
+    }
     const session = this.sessions.get(sessionId);
     if (!session) {
       return null;
@@ -412,6 +495,11 @@ export class SessionManager {
       return existing;
     }
 
+    const terminalRelease = this.terminalReleaseSnapshots.get(sessionId);
+    if (terminalRelease) {
+      throw new TerminalSessionError(sessionId, terminalRelease);
+    }
+
     const inFlightRelease = this.releasePromises.get(sessionId);
     const currentSession = this.sessions.get(sessionId);
     if (inFlightRelease && (currentSession === undefined || inFlightRelease.session === currentSession)) {
@@ -443,6 +531,11 @@ export class SessionManager {
     devicePool: SessionDeviceAssigner | undefined,
     platform: Platform | undefined,
   ): Promise<Session> {
+    const persistedTerminalRelease = await this.getPersistedTerminalRelease(sessionId);
+    if (persistedTerminalRelease) {
+      this.terminalReleaseSnapshots.set(sessionId, persistedTerminalRelease);
+      throw new TerminalSessionError(sessionId, persistedTerminalRelease);
+    }
     logger.info(`[SessionManager] Creating new session ${sessionId}, calling devicePool.assignDeviceToSession()`);
 
     // Need to create new session - assign device from pool
@@ -565,6 +658,11 @@ export class SessionManager {
     return session.assignedDevice;
   }
 
+  getTerminalReleaseSnapshot(sessionId: string): SessionReleaseSnapshot | undefined {
+    const snapshot = this.terminalReleaseSnapshots.get(sessionId);
+    return snapshot ? { ...snapshot, heartbeat: { ...snapshot.heartbeat } } : undefined;
+  }
+
   /**
    * Get session assigned to a device (reverse lookup)
    */
@@ -573,7 +671,10 @@ export class SessionManager {
   }
 
   isCurrentSession(session: Session): boolean {
-    return this.sessions.get(session.sessionId) === session;
+    return (
+      this.sessions.get(session.sessionId) === session &&
+      !this.terminalReleaseSnapshots.has(session.sessionId)
+    );
   }
 
   /**
@@ -587,7 +688,10 @@ export class SessionManager {
     releaseReason: string = "explicit-release",
     allowExpired: boolean = false,
   ): Promise<string | null> {
-    const session = allowExpired ? this.sessions.get(sessionId) ?? null : this.getSession(sessionId);
+    const session =
+      allowExpired || this.terminalReleaseSnapshots.has(sessionId)
+        ? (this.sessions.get(sessionId) ?? null)
+        : this.getSession(sessionId);
     if (!session) {
       return await this.releaseUnpublishedSession(sessionId, releaseReason, allowExpired);
     }
@@ -766,40 +870,64 @@ export class SessionManager {
     releaseReason: string,
   ): Promise<string | null> {
     try {
-      const setups = Array.from(this.sessionSetupPromises, setup => setup.session === session ? setup.promise : null)
-        .filter((setup): setup is Promise<void> => setup !== null);
-      const pendingSetups = setups.length > 0
-        ? (await this.waitForSessionSetup(sessionId, setups)).pending
-        : null;
+      const setups = Array.from(this.sessionSetupPromises, (setup) =>
+        setup.session === session ? setup.promise : null,
+      ).filter((setup): setup is Promise<void> => setup !== null);
+      const pendingSetups =
+        setups.length > 0 ? (await this.waitForSessionSetup(sessionId, setups)).pending : null;
       const pendingRestoration = (await this.restoreKeepScreenAwakeBestEffort(session)).pending;
-      const pendingCleanup = [pendingSetups, pendingRestoration]
-        .filter((cleanup): cleanup is Promise<void> => cleanup !== null);
+      const pendingCleanup = [pendingSetups, pendingRestoration].filter(
+        (cleanup): cleanup is Promise<void> => cleanup !== null,
+      );
       const deviceId = session.assignedDevice;
+      const releasedAtMs = this.timer.now();
+      const releaseSnapshot: SessionReleaseSnapshot = {
+        sessionId,
+        deviceId,
+        releaseReason,
+        releasedAtMs,
+        terminal: isTerminalReleaseReason(releaseReason),
+        heartbeat: {
+          lastHeartbeatMs: session.lastHeartbeat,
+          hasReceivedHeartbeat: session.hasReceivedHeartbeat,
+          timeoutMs: session.heartbeatTimeoutMs,
+          ageMs: Math.max(0, releasedAtMs - session.lastHeartbeat),
+        },
+      };
 
+      if (releaseSnapshot.terminal) {
+        // Fence the UUID before durable persistence. If the write fails, callers
+        // must still stop routing tools to a device that is already confirmed
+        // lost; a later release retry can persist and complete removal.
+        this.terminalReleaseSnapshots.set(sessionId, releaseSnapshot);
+        await this.persistSessionRelease(releaseSnapshot);
+      }
       if (!this.removeSession(sessionId, session)) {
-        if (pendingCleanup.length > 0) {this.trackPendingDeviceCleanup(deviceId, pendingCleanup);}
+        if (pendingCleanup.length > 0) {
+          this.trackPendingDeviceCleanup(deviceId, pendingCleanup);
+        }
         logger.warn(`Skipping release finalization for ${sessionId}: session ownership changed`);
         return null;
       }
-      if (pendingCleanup.length > 0) {this.trackPendingDeviceCleanup(deviceId, pendingCleanup);}
+      if (pendingCleanup.length > 0) {
+        this.trackPendingDeviceCleanup(deviceId, pendingCleanup);
+      }
+      if (!releaseSnapshot.terminal) {
+        this.terminalReleaseSnapshots.delete(sessionId);
+      }
 
       // In-memory ownership is already terminal, so notify bound transports
       // before awaiting best-effort persistence. This closes the window where a
       // released UUID could be forwarded again while the DB write is pending.
       for (const callback of this.releaseCallbacks) {
         try {
-          callback(sessionId, deviceId, releaseReason);
+          callback(sessionId, deviceId, releaseReason, releaseSnapshot);
         } catch (error) {
           logger.warn(`Session release callback failed for ${sessionId}: ${error}`);
         }
       }
-      try {
-        const terminalStatus = EXPIRY_RELEASE_REASONS.has(releaseReason)
-          ? "expired"
-          : "released";
-        await this.deviceSessionRepository.markReleased(sessionId, terminalStatus, this.timer.now(), releaseReason);
-      } catch (error) {
-        logger.warn(`[SessionManager] Failed to mark session released (${releaseReason}): ${error}`);
+      if (!releaseSnapshot.terminal) {
+        await this.persistSessionRelease(releaseSnapshot);
       }
       logger.info(
         pendingCleanup.length > 0
@@ -809,6 +937,30 @@ export class SessionManager {
       return deviceId;
     } finally {
       this.releasingSessions.delete(session);
+    }
+  }
+
+  private async persistSessionRelease(snapshot: SessionReleaseSnapshot): Promise<void> {
+    try {
+      const terminalStatus = EXPIRY_RELEASE_REASONS.has(snapshot.releaseReason)
+        ? "expired"
+        : "released";
+      await this.deviceSessionRepository.markReleased(
+        snapshot.sessionId,
+        terminalStatus,
+        snapshot.releasedAtMs,
+        snapshot.releaseReason,
+      );
+    } catch (error) {
+      logger.warn(
+        `[SessionManager] Failed to mark session released (${snapshot.releaseReason}): ${error}`,
+      );
+      if (snapshot.terminal) {
+        throw toActionableError(
+          error,
+          `Failed to persist terminal release for session ${snapshot.sessionId}`,
+        );
+      }
     }
   }
 

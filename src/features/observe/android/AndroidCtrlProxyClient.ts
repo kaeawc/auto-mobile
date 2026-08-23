@@ -1023,6 +1023,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // Android-specific state
   private portForwardingSetup: boolean = false;
   private lastWebSocketTimeout: number = 0;
+  // Terminal-close latch (#5493): set once by close() so the best-effort ADB
+  // screencap fallback in captureScreenshotViaAdb() cannot outlive the client.
+  // Distinct from a transient websocket disconnect (onConnectionClosed), which
+  // must still allow the ADB fallback.
+  private closed: boolean = false;
 
   // Delegate instances (lazy initialized)
   private _gestures: CtrlProxyGestures | null = null;
@@ -2961,6 +2966,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // ===========================================================================
 
   async close(): Promise<void> {
+    // Latch closed BEFORE super.close(): super.close() rejects the in-flight
+    // CtrlProxy screenshot request (requestManager.cancelAll), whose catch falls
+    // through to captureScreenshotViaAdb("ctrlproxy_exception"). Setting the flag
+    // first makes that leaked one-shot fallback short-circuit (#5493).
+    this.closed = true;
     try {
       // Stop work profile monitor if running
       this.stopWorkProfileMonitor();
@@ -4109,6 +4119,14 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   private async captureScreenshotViaAdb(
     fallbackReason?: ScreenshotFallbackReason,
   ): Promise<ScreenshotCaptureResult> {
+    // Once the client is terminally closed, suppress the signal-less ADB screencap
+    // fallback so a capture rejected by close() cannot keep the transport referenced
+    // past teardown (#5493). A transient websocket disconnect does not set this flag,
+    // so the fallback still fires during reconnect windows.
+    if (this.closed) {
+      return { success: false, error: "AndroidCtrlProxyClient closed; ADB screencap fallback suppressed" };
+    }
+
     // Bind the geometry current when the ADB request begins, before its await can let a newer
     // hierarchy relabel the returned pixels.
     const captureBinding = this.screenGeometry.bind() ?? undefined;

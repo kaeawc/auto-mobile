@@ -29,10 +29,14 @@ import dev.jasonpearson.automobile.desktop.core.layout.DeviceScreenView
 import dev.jasonpearson.automobile.desktop.core.platform.MacScreenRecordingSettingsLauncher
 import dev.jasonpearson.automobile.desktop.core.platform.ScreenRecordingSettingsLauncher
 import dev.jasonpearson.automobile.desktop.core.rememberLiveVideoFrame
+import dev.jasonpearson.automobile.desktop.core.settings.SettingsProvider
+import dev.jasonpearson.automobile.desktop.core.video.LiveVideoFrame
+import dev.jasonpearson.automobile.desktop.core.video.QualityController
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamClient
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamQuality
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamSource
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamState
+import dev.jasonpearson.automobile.desktop.domain.DeviceFrameSnapshot
 import dev.jasonpearson.automobile.desktop.domain.DeviceScreenControlMode
 
 /**
@@ -81,34 +85,57 @@ fun DeviceStreamView(
   // Null/disabled ⇒ plain video mirror.
   enableDeviceControl: Boolean = false,
   control: WorkspaceDeviceControlState? = null,
-  // Hoisted so a host or test can pass a different quality/rate or a fake source entirely.
-  sourceFactory: (deviceId: String) -> VideoStreamSource = {
-    if (enableDeviceControl) {
+  // When present, the pane gains a quality overlay (manual Low/Medium/High selector, live FPS, and
+  // an auto-adjust toggle) whose choice persists here across sessions. Null keeps today's fixed
+  // per-mode preset with no overlay, so existing embeddings are unchanged.
+  settings: SettingsProvider? = null,
+  // Hoisted so a host or test can pass a different quality/rate or a fake source entirely. The
+  // quality is passed in (rather than baked in) so the pane can re-subscribe when the selector or
+  // auto-adjust changes it.
+  sourceFactory: (deviceId: String, quality: VideoStreamQuality) -> VideoStreamSource =
+    { deviceId, quality ->
       VideoStreamClient(
-        quality = VideoStreamQuality.High,
-        fps = CONTROL_PANE_FPS,
+        quality = quality,
+        fps = if (enableDeviceControl) CONTROL_PANE_FPS else MIRROR_PANE_FPS,
         sessionUuidProvider = sessionUuidProvider,
       )
-    } else {
-      VideoStreamClient(
-        quality = VideoStreamQuality.Low,
-        fps = MIRROR_PANE_FPS,
-        sessionUuidProvider = sessionUuidProvider,
-      )
-    }
-  },
+    },
   screenRecordingSettingsLauncher: ScreenRecordingSettingsLauncher =
     MacScreenRecordingSettingsLauncher(),
 ) {
+  // The pane's fixed per-mode preset when there's no controller: an armed (user-driven) pane wants
+  // the sharpest High stream; unfocused farm mirrors stay on the cheap Low preset.
+  val defaultQuality = if (enableDeviceControl) VideoStreamQuality.High else VideoStreamQuality.Low
+  val paneFps = if (enableDeviceControl) CONTROL_PANE_FPS else MIRROR_PANE_FPS
+
+  // With settings wired, a per-device controller measures the live rate and (when auto-adjust is
+  // on)
+  // steps the preset down on a sustained drop / back up once healthy. Its choice persists so the
+  // pane re-opens at the same quality. Keyed on deviceId so switching devices starts fresh.
+  val qualityController = settings?.let { s ->
+    remember(column.deviceId) {
+      QualityController(
+        initialQuality = VideoStreamQuality.fromWire(s.streamQualityPreset) ?: defaultQuality,
+        targetFps = paneFps,
+        autoAdjustEnabled = s.streamQualityAutoAdjust,
+        onQualityChange = { s.streamQualityPreset = it.wire },
+      )
+    }
+  }
+  val currentQuality =
+    if (qualityController != null) qualityController.quality.collectAsState().value
+    else defaultQuality
   // The live video mirror always streams — it's what the user watches in both modes. Farm panes
   // auto-reconnect so a dropped relay heals instead of staying "stopped" until the pane is torn
-  // down. Keyed on deviceId ONLY (not enableDeviceControl): the rate/quality preset is fixed at
-  // subscribe. Re-keying on control state to "downgrade" an unfocused pane doesn't reliably work —
-  // the daemon's per-device capture is shared and its encode is fixed by the FIRST subscriber's
-  // hint, so a fresh client that re-subscribes to a still-live capture has its new hint ignored
-  // (VideoStreamSocketServer.attach). Changing an armed pane's live rate needs server-side capture
-  // reconfiguration (follow-up); re-keying only added reconnect churn for no reliable effect.
-  val source = remember(column.deviceId) { sourceFactory(column.deviceId) }
+  // down. Keyed on deviceId AND the current preset: a user-driven quality change (or an auto-adjust
+  // step) re-subscribes with the new hint. That takes effect for a sole subscriber / the next fresh
+  // subscribe; while a per-device capture is SHARED the daemon fixes its encode from the FIRST
+  // subscriber's hint and ignores a re-subscriber's differing one (VideoStreamSocketServer.attach),
+  // so truly reconfiguring a live shared capture needs server-side work (follow-up). When
+  // [settings]
+  // is null the preset is constant, so this keys on deviceId only — unchanged from before.
+  val source =
+    remember(column.deviceId, currentQuality) { sourceFactory(column.deviceId, currentQuality) }
   val liveFrame =
     rememberLiveVideoFrame(
       source,
@@ -123,10 +150,70 @@ fun DeviceStreamView(
   val controlSnapshot = control?.interactionSnapshot
   var settingsLaunchFailure by remember(column.deviceId) { mutableStateOf(false) }
   // Perf span T3: mark each newly rendered video frame so the tracer can time the first frame after
-  // a tap (the visual-response latency). Cheap no-op unless a dispatched tap is pending.
+  // a tap (the visual-response latency). Cheap no-op unless a dispatched tap is pending. The same
+  // frame arrival feeds the quality controller so its live-rate estimate (and any auto-adjust) is
+  // driven by exactly the frames the pane renders.
   LaunchedEffect(liveFrame?.sequence) {
-    if (liveFrame != null) control?.tracer?.videoFrameRendered(column.deviceId)
+    if (liveFrame != null) {
+      control?.tracer?.videoFrameRendered(column.deviceId)
+      qualityController?.onFrame(liveFrame.receivedAtMs)
+    }
   }
+  Box(Modifier.fillMaxSize()) {
+    DeviceStreamContent(
+      column = column,
+      state = state,
+      liveFrame = liveFrame,
+      control = control,
+      controlSnapshot = controlSnapshot,
+      enableDeviceControl = enableDeviceControl,
+      settingsLaunchFailure = settingsLaunchFailure,
+      onSettingsLaunchFailure = { settingsLaunchFailure = it },
+      screenRecordingSettingsLauncher = screenRecordingSettingsLauncher,
+      source = source,
+    )
+    // Quality overlay: only when a controller is wired, and never over the permission surface
+    // (which
+    // owns the whole pane while the relay is refused).
+    if (qualityController != null && state !is VideoStreamState.PermissionRequired) {
+      val actualFps by qualityController.actualFps.collectAsState()
+      var autoAdjust by
+        remember(column.deviceId) { mutableStateOf(qualityController.autoAdjustEnabled) }
+      StreamQualityControls(
+        currentQuality = currentQuality,
+        actualFps = actualFps,
+        targetFps = qualityController.targetFps,
+        autoAdjustEnabled = autoAdjust,
+        onSelectQuality = { qualityController.selectQuality(it) },
+        onToggleAutoAdjust = { enabled ->
+          qualityController.autoAdjustEnabled = enabled
+          settings.streamQualityAutoAdjust = enabled
+          autoAdjust = enabled
+        },
+        modifier = Modifier.align(Alignment.TopEnd).padding(6.dp),
+      )
+    }
+  }
+}
+
+/**
+ * The pane's video surface: permission gate, armed interactive video, or plain mirror/hint. Split
+ * out of [DeviceStreamView] so the quality overlay can compose over it without duplicating the
+ * branch selection.
+ */
+@Composable
+private fun DeviceStreamContent(
+  column: DeviceColumn,
+  state: VideoStreamState,
+  liveFrame: LiveVideoFrame?,
+  control: WorkspaceDeviceControlState?,
+  controlSnapshot: DeviceFrameSnapshot?,
+  enableDeviceControl: Boolean,
+  settingsLaunchFailure: Boolean,
+  onSettingsLaunchFailure: (Boolean) -> Unit,
+  screenRecordingSettingsLauncher: ScreenRecordingSettingsLauncher,
+  source: VideoStreamSource,
+) {
   if (state is VideoStreamState.PermissionRequired) {
     // iOS screen-recording permission gate: the relay refused the capture until the user approves
     // Screen Recording, so there is NO live video to drive. Check this BEFORE the armed branch: on
@@ -135,10 +222,10 @@ fun DeviceStreamView(
     // and swallow the approval UI, stranding the user with no way to recover. Android never reaches
     // PermissionRequired (no screen-recording gate), so this reorder does not change its behavior.
     ScreenRecordingPermissionSurface(
-      approvalTarget = (state as VideoStreamState.PermissionRequired).approvalTarget,
+      approvalTarget = state.approvalTarget,
       settingsLaunchFailure = settingsLaunchFailure,
       onOpenSettings = {
-        settingsLaunchFailure = screenRecordingSettingsLauncher.openScreenRecording().isFailure
+        onSettingsLaunchFailure(screenRecordingSettingsLauncher.openScreenRecording().isFailure)
       },
       onRetry = {
         source.disconnect()
@@ -147,6 +234,7 @@ fun DeviceStreamView(
     )
   } else if (
     enableDeviceControl &&
+      control != null &&
       controlSnapshot != null &&
       liveFrame != null &&
       state is VideoStreamState.Streaming

@@ -120,7 +120,6 @@ import { CtrlProxyPackages, type PackageInfoOptions } from "./CtrlProxyPackages"
 
 // Import types
 import type {
-  DelegateContext,
   HierarchyDelegateContext,
   CertificatesDelegateContext,
   AccessibilityHierarchy,
@@ -1310,16 +1309,6 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // Delegate Context Factories
   // ===========================================================================
 
-  private createDelegateContext(): DelegateContext {
-    return {
-      getWebSocket: () => this.ws,
-      requestManager: this.requestManager,
-      timer: this.timer,
-      ensureConnected: perf => this.ensureConnected(perf),
-      cancelScreenshotBackoff: () => this.cancelScreenshotBackoff(),
-    };
-  }
-
   private createHierarchyDelegateContext(): HierarchyDelegateContext {
     return {
       ...this.createDelegateContext(),
@@ -1344,62 +1333,70 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // ===========================================================================
 
   private get gestures(): CtrlProxyGestures {
-    if (!this._gestures) {
-      this._gestures = new CtrlProxyGestures(this.createDelegateContext());
-    }
-    return this._gestures;
+    return this.lazyDelegate(
+      () => this._gestures,
+      value => { this._gestures = value; },
+      () => new CtrlProxyGestures(this.createDelegateContext())
+    );
   }
 
   private get text(): CtrlProxyText {
-    if (!this._text) {
-      this._text = new CtrlProxyText(this.createDelegateContext());
-    }
-    return this._text;
+    return this.lazyDelegate(
+      () => this._text,
+      value => { this._text = value; },
+      () => new CtrlProxyText(this.createDelegateContext())
+    );
   }
 
   private get hierarchy(): CtrlProxyHierarchy {
-    if (!this._hierarchy) {
-      this._hierarchy = new CtrlProxyHierarchy(this.createHierarchyDelegateContext());
-    }
-    return this._hierarchy;
+    return this.lazyDelegate(
+      () => this._hierarchy,
+      value => { this._hierarchy = value; },
+      () => new CtrlProxyHierarchy(this.createHierarchyDelegateContext())
+    );
   }
 
   private get storage(): CtrlProxyStorage {
-    if (!this._storage) {
-      this._storage = new CtrlProxyStorage(this.createDelegateContext());
-    }
-    return this._storage;
+    return this.lazyDelegate(
+      () => this._storage,
+      value => { this._storage = value; },
+      () => new CtrlProxyStorage(this.createDelegateContext())
+    );
   }
 
   private get certificates(): CtrlProxyCertificates {
-    if (!this._certificates) {
-      this._certificates = new CtrlProxyCertificates(
+    return this.lazyDelegate(
+      () => this._certificates,
+      value => { this._certificates = value; },
+      () => new CtrlProxyCertificates(
         this.createCertificatesDelegateContext(),
         this.certificateFileSystem
-      );
-    }
-    return this._certificates;
+      )
+    );
   }
 
   private get focus(): CtrlProxyFocus {
-    if (!this._focus) {
-      this._focus = new CtrlProxyFocus(this.createDelegateContext());
-    }
-    return this._focus;
+    return this.lazyDelegate(
+      () => this._focus,
+      value => { this._focus = value; },
+      () => new CtrlProxyFocus(this.createDelegateContext())
+    );
   }
 
   private get highlights(): CtrlProxyHighlights {
-    if (!this._highlights) {
-      this._highlights = new CtrlProxyHighlights(this.createDelegateContext());
-    }
-    return this._highlights;
+    return this.lazyDelegate(
+      () => this._highlights,
+      value => { this._highlights = value; },
+      () => new CtrlProxyHighlights(this.createDelegateContext())
+    );
   }
 
   private get packages(): CtrlProxyPackages {
-    if (!this._packages) {
-      this._packages = new CtrlProxyPackages(this.createDelegateContext());
-    }
-    return this._packages;
+    return this.lazyDelegate(
+      () => this._packages,
+      value => { this._packages = value; },
+      () => new CtrlProxyPackages(this.createDelegateContext())
+    );
   }
 
   async requestInstalledPackages(

@@ -23,6 +23,7 @@ import { defaultTimer } from "../../utils/SystemTimer";
 import { RequestManager } from "../../utils/RequestManager";
 import { RetryExecutor, defaultRetryExecutor } from "../../utils/retry/RetryExecutor";
 import type { CtrlProxyReconnectStatus } from "../../models/CtrlProxyReconnectStatus";
+import type { DelegateContext } from "./shared/types";
 
 /**
  * Factory function type for creating WebSocket instances.
@@ -142,6 +143,13 @@ export abstract class DeviceServiceClient {
    * For iOS, this may resolve the host address.
    */
   protected abstract setupBeforeConnect(perf: PerformanceTracker): Promise<void>;
+
+  /**
+   * Cancel any pending screenshot backoff captures.
+   * Wired into every delegate context via {@link createDelegateContext}; the
+   * concrete backoff scheduler lives on the platform subclass.
+   */
+  protected abstract cancelScreenshotBackoff(): void;
 
   // ===========================================================================
   // Connection management (shared implementation)
@@ -469,6 +477,60 @@ export abstract class DeviceServiceClient {
    */
   protected getTimer(): Timer {
     return this.timer;
+  }
+
+  // ===========================================================================
+  // Delegate context + lazy delegate scaffolding (shared implementation)
+  // ===========================================================================
+
+  /**
+   * Platform-specific additions to the base {@link DelegateContext}.
+   *
+   * The base builds the fields common to both platforms; a subclass overrides
+   * this hook to contribute the fields only it wires (e.g. iOS's command-
+   * capability accessors). The default contributes nothing, so a platform whose
+   * context is exactly the shared set (Android) needs no override.
+   */
+  protected extraDelegateContextFields(): Partial<DelegateContext> {
+    return {};
+  }
+
+  /**
+   * Build the base {@link DelegateContext} handed to every delegate.
+   *
+   * The shared fields are wired here from base state; platform-specific fields
+   * come from {@link extraDelegateContextFields}. Subclasses that need an
+   * extended context (e.g. a HierarchyDelegateContext) spread the result of this
+   * method and add their own fields.
+   */
+  protected createDelegateContext(): DelegateContext {
+    return {
+      getWebSocket: () => this.ws,
+      requestManager: this.requestManager,
+      timer: this.timer,
+      ensureConnected: perf => this.ensureConnected(perf),
+      cancelScreenshotBackoff: () => this.cancelScreenshotBackoff(),
+      ...this.extraDelegateContextFields(),
+    };
+  }
+
+  /**
+   * Lazily construct and cache a delegate, replacing the copy-pasted
+   * `if (!this._x) { this._x = new X(...); } return this._x;` getter body.
+   *
+   * The cache slot stays a subclass field (accessed through the get/set pair)
+   * so existing direct-field reads keep working and the singleton semantics are
+   * unchanged: the factory runs at most once and the same instance is returned
+   * on every subsequent access.
+   */
+  protected lazyDelegate<T>(get: () => T | null, set: (value: T) => void, factory: () => T): T {
+    const existing = get();
+    if (existing) {
+      return existing;
+    }
+    const created = factory();
+    set(created);
+    return created;
   }
 
   /**

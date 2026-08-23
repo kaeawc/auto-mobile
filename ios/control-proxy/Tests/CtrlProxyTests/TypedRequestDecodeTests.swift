@@ -145,6 +145,7 @@ final class TypedRequestDecodeDispatchTests: XCTestCase {
             .requestShake: "{}",
             .requestRecentApps: "{}",
             .requestAction: #"{"action":"tap"}"#,
+            .requestActivateAccessibilityLink: #"{"text":"Terms of Service","occurrence":0}"#,
             .requestLaunchApp: #"{"bundleId":"com.example.app"}"#,
             .requestRotate: #"{"orientation":"portrait"}"#,
             .requestClipboard: #"{"action":"get"}"#,

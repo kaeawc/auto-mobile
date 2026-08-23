@@ -34,6 +34,7 @@ final class ErrorResponseTypeTests: XCTestCase {
             .requestShake: .shakeResult,
             .requestRecentApps: .recentAppsResult,
             .requestAction: .actionResult,
+            .requestActivateAccessibilityLink: .actionResult,
             .requestLaunchApp: .launchAppResult,
             .requestResetPermissions: .resetPermissionsResult,
             .requestRotate: .rotateResult,

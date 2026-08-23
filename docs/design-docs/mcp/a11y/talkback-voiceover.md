@@ -4,7 +4,7 @@
 
 > **Current state:** Screen-reader detection and the core tool adaptations are **implemented on both platforms**.
 >
-> - **Android (TalkBack):** detection via ADB secure settings; TalkBack-aware `tapOn` (direct `ACTION_CLICK` activation, precise `relativePosition` coordinate gestures, and opt-in cursor navigation behind the `screen-reader-navigation` feature flag) and `swipeOn` (`ACTION_SCROLL_FORWARD`/`BACKWARD` with a two-finger fallback).
+> - **Android (TalkBack):** detection via ADB secure settings; TalkBack-aware `tapOn` (direct `ACTION_CLICK` activation, capability-gated semantic `ClickableSpan` activation, and opt-in cursor navigation behind the `screen-reader-navigation` feature flag) and `swipeOn` (`ACTION_SCROLL_FORWARD`/`BACKWARD` with a two-finger fallback).
 > - **iOS (VoiceOver):** detection via CtrlProxy and VoiceOver-aware tap (label-based accessibility activation). VoiceOver scrolling is unsupported: CtrlProxy scroll endpoints synthesize XCTest swipes, which do not reach VoiceOver, and there is no functional three-finger gesture fallback. The runner reports the VoiceOver cursor when the foreground app supplies SDK-enriched hierarchy data.
 >
 > **Still open:** iOS focus *control* (set/clear focus, cursor stepping), VoiceOver Rotor, Magic Tap, and physical-device VoiceOver toggle. See [`voiceover-talkback-parity.md`](./voiceover-talkback-parity.md) — the source of truth for remaining gaps — and the [Status Glossary](../../status-glossary.md) for chip definitions.
@@ -126,7 +126,7 @@ When TalkBack is active, Android reserves certain gestures:
 
 ### Per-Tool Adaptations
 
-**tapOn**: Use `ACTION_CLICK` on the target element instead of a coordinate-based tap. Optionally set accessibility focus first to mimic user behavior and trigger TalkBack announcement. Long press uses `ACTION_LONG_CLICK`. When Android-only `relativePosition: { x, y }` is present, bypass node-level semantic activation: focus the normalized coordinate through CtrlProxy, wait outside TalkBack's double-tap window, then send the activation double-tap so distinct targets within one accessibility node remain addressable. The option is unsupported with `focus`.
+**tapOn**: Use `ACTION_CLICK` on the target element instead of a coordinate-based tap. Optionally set accessibility focus first to mimic user behavior and trigger TalkBack announcement. Long press uses `ACTION_LONG_CLICK`. For link text inside a node, `selector.accessibilityLink` or owner-scoped `subtext` invokes the runner's public semantic span API. The request succeeds only after that exact link activates; unsupported, flattened, stale, and ambiguous targets fail without a coordinate or owner-node fallback.
 
 **swipeOn / scroll**: Three approaches in priority order:
 1. **Accessibility scroll actions** (preferred for known scrollable containers) - uses `ACTION_SCROLL_FORWARD`/`ACTION_SCROLL_BACKWARD`

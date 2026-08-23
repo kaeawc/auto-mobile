@@ -110,52 +110,41 @@ describe("tapOn schema", () => {
       selector: { text: "Login" },
     });
     expect(result.sibling).toBeUndefined();
-    expect(result.relativePosition).toBeUndefined();
+    expect(result.subtext).toBeUndefined();
   });
 
-  test("accepts a normalized position within the matched Android element", () => {
+  test("accepts direct semantic link activation on both platforms", () => {
     const result = tapOnSchema.parse({
-      platform: "android",
-      selector: { text: "Read @mention now" },
-      relativePosition: { x: 0.95, y: 0.5 },
+      platform: "ios",
+      selector: { accessibilityLink: "Terms of Service" },
+      index: 1,
     });
-
-    expect(result.relativePosition).toEqual({ x: 0.95, y: 0.5 });
+    expect(result.selector).toEqual({ accessibilityLink: "Terms of Service" });
+    expect(result.index).toBe(1);
   });
 
   test.each([
-    ["iOS", { platform: "ios", action: "tap" }],
-    ["focus", { platform: "android", action: "focus" }],
-  ] as const)("rejects relativePosition with unsupported %s targeting", (_label, target) => {
+    ["non-tap action", { action: "focus" }],
+    ["retry", { retryIfNoChange: true }],
+    ["ensure", { ensureTap: true }],
+  ] as const)("rejects semantic links with %s", (_label, target) => {
     expect(() =>
       tapOnSchema.parse({
+        platform: "android",
         ...target,
-        selector: { text: "Read @mention now" },
-        relativePosition: { x: 0.95, y: 0.5 },
+        selector: { accessibilityLink: "Terms of Service" },
       }),
     ).toThrow();
   });
 
-  test.each([
-    ["x below the element", { x: -0.01, y: 0.5 }, "x", "too_small"],
-    ["x beyond the element", { x: 1.01, y: 0.5 }, "x", "too_big"],
-    ["y above the element", { x: 0.5, y: -0.01 }, "y", "too_small"],
-    ["y below the element", { x: 0.5, y: 1.01 }, "y", "too_big"],
-  ] as const)(
-    "rejects an out-of-bounds relative position: %s",
-    (_reason, relativePosition, coordinate, expectedCode) => {
-      const issue = zodIssues(() =>
-        tapOnSchema.parse({
-          platform: "android",
-          selector: { text: "Read @mention now" },
-          relativePosition,
-        }),
-      ).find((candidate) => candidate.path.join(".") === `relativePosition.${coordinate}`);
-
-      expect(issue).toBeDefined();
-      expect(issue!.code).toBe(expectedCode);
-    },
-  );
+  test("accepts a container-scoped semantic link and defaults its occurrence", () => {
+    const result = tapOnSchema.parse({
+      platform: "android",
+      selector: { elementId: "com.app:id/legal" },
+      subtext: { text: "Terms of Service" },
+    });
+    expect(result.subtext).toEqual({ text: "Terms of Service" });
+  });
 
   test("accepts container", () => {
     const result = tapOnSchema.parse({
@@ -180,13 +169,11 @@ describe("tapOn schema", () => {
       preTapStability: true,
       retryIfNoChange: true,
       ensureTap: true,
-      relativePosition: { x: 0.1, y: 0.9 },
     });
     expect(result.action).toBe("longPress");
     expect(result.duration).toBe(2000);
     expect(result.index).toBe(1);
     expect(result.preTapStability).toBe(true);
-    expect(result.relativePosition).toEqual({ x: 0.1, y: 0.9 });
   });
 
   test.each([

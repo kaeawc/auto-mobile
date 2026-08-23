@@ -162,6 +162,15 @@ const tapOnSelectorSchema = z
     z.object({ text: z.string().min(1).describe("Text, content-desc, or placeholder") }).strict(),
     z
       .object({
+        accessibilityLink: z
+          .string()
+          .trim()
+          .min(1)
+          .describe("Exact visible text of a semantic accessibility link"),
+      })
+      .strict(),
+    z
+      .object({
         textAny: z
           .array(z.string().min(1))
           .min(1)
@@ -169,7 +178,9 @@ const tapOnSelectorSchema = z
       })
       .strict(),
   ])
-  .describe("Element to tap: elementId, Android testTag, text, or ordered text variants");
+  .describe(
+    "Element to tap: elementId, Android testTag, text, semantic accessibility link, or ordered text variants",
+  );
 
 export const tapOnSchema = withJsonSchemaOverride(
   addDeviceTargetingToSchema(
@@ -199,27 +210,24 @@ export const tapOnSchema = withJsonSchemaOverride(
               "selectionStrategy — for repeated controls with no unique text. Out of range → no match.",
           ),
         duration: z.number().optional().describe("Long press duration (ms)"),
-        relativePosition: z
+        subtext: z
           .object({
-            x: z
+            text: z
+              .string()
+              .trim()
+              .min(1)
+              .describe("Exact visible text of a semantic link inside the selected element"),
+            occurrence: z
               .number()
-              .min(0)
-              .max(1)
-              .describe(
-                "Horizontal position within the resolved element: 0 is left, 1 is the rightmost addressable pixel",
-              ),
-            y: z
-              .number()
-              .min(0)
-              .max(1)
-              .describe(
-                "Vertical position within the resolved element: 0 is top, 1 is the bottommost addressable pixel",
-              ),
+              .int()
+              .nonnegative()
+              .optional()
+              .describe("Zero-based occurrence among exact semantic-link matches (default: 0)"),
           })
           .strict()
           .optional()
           .describe(
-            "Android-only precise target within the resolved element; omit to tap its center",
+            "Semantic link inside the selected element; fails if the platform does not expose that link",
           ),
         searchUntil: z
           .object({
@@ -245,33 +253,58 @@ export const tapOnSchema = withJsonSchemaOverride(
       })
       .strict(),
   ).superRefine((value, ctx) => {
-    if (!value.relativePosition) {
+    const isDirectLink = "accessibilityLink" in value.selector;
+    if (!isDirectLink && !value.subtext) {
       return;
     }
-    if (value.platform !== "android") {
+    if (isDirectLink && value.subtext) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "relativePosition is supported only on Android",
-        path: ["relativePosition"],
+        message: "accessibilityLink and subtext cannot be used together",
+        path: ["subtext"],
       });
     }
-    if (value.action === "focus") {
+    if (value.action !== "tap") {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "relativePosition is not supported for focus actions",
-        path: ["relativePosition"],
+        message: "semantic link activation supports only the tap action",
+        path: ["action"],
+      });
+    }
+    if (value.sibling) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "semantic link activation cannot use sibling",
+        path: ["sibling"],
+      });
+    }
+    if (value.retryIfNoChange || value.ensureTap) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "semantic link activation cannot retry an acknowledged link activation",
+        path: value.retryIfNoChange ? ["retryIfNoChange"] : ["ensureTap"],
       });
     }
   }),
   (js) => {
     compactExclusiveSelectorProperties(js, ["selector", "container"]);
-    js.if = { required: ["relativePosition"] };
+    js.if = {
+      anyOf: [
+        { required: ["subtext"] },
+        {
+          properties: {
+            selector: { required: ["accessibilityLink"] },
+          },
+        },
+      ],
+    };
     js.then = {
       properties: {
-        action: { not: { const: "focus" } },
-        platform: { const: "android" },
+        action: { const: "tap" },
+        sibling: { not: { const: true } },
+        retryIfNoChange: { not: { const: true } },
+        ensureTap: { not: { const: true } },
       },
-      required: ["platform"],
     };
   },
 );
@@ -722,6 +755,7 @@ export function registerInteractionTools() {
         textAny: args.selector.textAny,
         elementId: args.selector.elementId,
         testTag: args.selector.testTag,
+        accessibilityLink: args.selector.accessibilityLink,
         sibling: args.sibling,
         selectionStrategy: args.selectionStrategy,
         index: args.index,
@@ -731,7 +765,7 @@ export function registerInteractionTools() {
         preTapStability: args.preTapStability,
         retryIfNoChange: args.retryIfNoChange,
         ensureTap: args.ensureTap,
-        relativePosition: args.relativePosition,
+        subtext: args.subtext,
       },
       progress,
     );

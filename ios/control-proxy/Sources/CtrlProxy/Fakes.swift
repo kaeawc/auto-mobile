@@ -570,6 +570,21 @@ public class FakeGesturePerformer: GesturePerforming {
         actionHistory.append((action: action, resourceId: resourceId, label: label))
     }
 
+    public func activateAccessibilityLink(
+        text: String,
+        occurrence: Int,
+        ownerResourceId: String?
+    ) throws {
+        try checkFailure("accessibilityLink")
+        actionHistory.append(
+            (
+                action: "activate_accessibility_link",
+                resourceId: ownerResourceId,
+                label: "\(text)#\(occurrence)"
+            )
+        )
+    }
+
     public func getScreenshot() throws -> Data {
         try checkFailure("screenshot")
         screenshotCallCount += 1

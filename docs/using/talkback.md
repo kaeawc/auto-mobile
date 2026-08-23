@@ -14,7 +14,7 @@ Understanding these differences helps explain why `observe` output may look diff
 
 TalkBack takes over single-finger swipes for linear navigation through focusable elements (swipe right = next, swipe left = previous). A single tap announces an element; a double-tap activates it. Two-finger swipes scroll content. Three-finger swipes are reserved for system navigation.
 
-Because standard coordinate-based taps and single-finger swipes conflict with TalkBack gestures, AutoMobile normally replaces them with accessibility actions internally. Android `tapOn` calls with `relativePosition` are the exception: they use CtrlProxy to focus the requested coordinate and then send TalkBack's activation double-tap, so a target such as one `ClickableSpan` inside a larger text element is not replaced by node-level activation.
+Because standard coordinate-based taps and single-finger swipes conflict with TalkBack gestures, AutoMobile normally replaces them with accessibility actions internally. To activate one `ClickableSpan` inside a larger text element, use semantic link targeting: `selector: { accessibilityLink: "Terms of Service" }` or a stable owner selector with `subtext: { text: "Terms of Service" }`. The runner confirms the exact native span rather than falling back to an imprecise coordinate or owner-node tap.
 
 ### View hierarchy differences
 
@@ -49,13 +49,13 @@ AutoMobile reads the active accessibility services from ADB secure settings when
 
 | Tool | Standard behavior | TalkBack behavior |
 |------|------------------|-------------------|
-| `tapOn` | Coordinate-based tap | `ACTION_CLICK` on the target element; `relativePosition` focuses the requested coordinate, then activates it |
+| `tapOn` | Coordinate-based tap | `ACTION_CLICK` on the target element; semantic links activate their matching native span |
 | `swipeOn` / scroll | Single-finger swipe | `ACTION_SCROLL_FORWARD`/`BACKWARD` or two-finger swipe |
 | `inputText` / `clearText` | `ACTION_SET_TEXT` | `ACTION_SET_TEXT` (unchanged) |
 | `pressButton` | Device/navigation button | Device/navigation button (unchanged; see note below) |
 | `launchApp`, `terminateApp`, `installApp` | Standard | Unchanged |
 
-Existing automation scripts work without modification. For precise Android targeting, optional `relativePosition: { x, y }` values range from `0` to `1` within the resolved element; it is unsupported on iOS and with the `focus` action.
+Existing automation scripts work without modification. Semantic link targeting is available on Android API 26+ and iOS when the native accessibility tree exposes a link. Flattened text, stale owners, unsupported runners, or ambiguous targets fail explicitly; no coordinate fallback is attempted.
 
 **Back button note.** When TalkBack's local context menu is open, the back button closes the menu rather than navigating back in the app. If navigation behaves unexpectedly after a back press, this is the likely cause.
 

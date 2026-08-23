@@ -1,10 +1,10 @@
 import type { ElementSelectionStrategy } from "./ElementSelectionStrategy";
 
-export interface RelativeTapPosition {
-  /** Horizontal position from 0 (left) to 1 (rightmost addressable pixel). */
-  x: number;
-  /** Vertical position from 0 (top) to 1 (bottommost addressable pixel). */
-  y: number;
+export interface TapOnSubtextTarget {
+  /** Exact visible text of a semantic link inside the selected owner element. */
+  text: string;
+  /** Zero-based occurrence among matching semantic links in the owner. */
+  occurrence?: number;
 }
 
 export interface TapOnElementOptions {
@@ -13,6 +13,8 @@ export interface TapOnElementOptions {
   textAny?: string[];
   elementId?: string;
   testTag?: string;
+  /** Exact text of a semantic accessibility link anywhere in the scoped hierarchy. */
+  accessibilityLink?: string;
   // Selection strategy when multiple elements match (default: first)
   selectionStrategy?: ElementSelectionStrategy;
 
@@ -58,7 +60,6 @@ export interface TapOnElementOptions {
   retryIfNoChange?: boolean;
   ensureTap?: boolean;
 
-  // Android-only normalized position within the final resolved element.
-  // Omit to preserve center tapping.
-  relativePosition?: RelativeTapPosition;
+  /** Semantic accessibility link inside the element selected by the outer selector. */
+  subtext?: TapOnSubtextTarget;
 }

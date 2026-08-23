@@ -10,7 +10,8 @@ import {
   A11yActionResult,
   AccessibilityHierarchyResponse,
   AndroidPerfTiming,
-  AccessibilityHierarchy
+  AccessibilityHierarchy,
+  AccessibilityNodeSelector,
 } from "../../src/features/observe/android";
 import type { SetTextOptions } from "../../src/features/observe/DeviceService";
 import { HighlightOperationResult, HighlightShape, ViewHierarchyResult } from "../../src/models";
@@ -318,7 +319,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
    * @returns true if the action was called at least once
    */
   wasImeActionCalled(action: "done" | "next" | "search" | "send" | "go" | "previous"): boolean {
-    return this.imeActionHistory.some(entry => entry.action === action);
+    return this.imeActionHistory.some((entry) => entry.action === action);
   }
 
   /**
@@ -395,7 +396,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     queryOptions?: ViewHierarchyQueryOptions,
     perf?: PerformanceTracker,
     skipWaitForFresh?: boolean,
-    minTimestamp?: number
+    minTimestamp?: number,
   ): Promise<ViewHierarchyResult | null> {
     this.hierarchyRequestCount++;
     await this.applyDelay("getHierarchy");
@@ -413,7 +414,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     timeout: number = 100,
     perf?: PerformanceTracker,
     skipWaitForFresh: boolean = false,
-    minTimestamp: number = 0
+    minTimestamp: number = 0,
   ): Promise<AccessibilityHierarchyResponse> {
     this.hierarchyRequestCount++;
     await this.applyDelay("getLatestHierarchy");
@@ -422,7 +423,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     if (!this.hierarchyData) {
       return {
         hierarchy: null,
-        fresh: false
+        fresh: false,
       };
     }
 
@@ -430,12 +431,12 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
       hierarchy: this.hierarchyData,
       fresh: true,
       updatedAt: this.hierarchyData.updatedAt,
-      perfTiming: this.performanceTiming || undefined
+      perfTiming: this.performanceTiming || undefined,
     };
   }
 
   async requestHierarchySync(
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<{ hierarchy: AccessibilityHierarchy; perfTiming?: AndroidPerfTiming[] } | null> {
     this.hierarchyRequestCount++;
     await this.applyDelay("requestHierarchySync");
@@ -447,11 +448,13 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
 
     return {
       hierarchy: this.hierarchyData,
-      perfTiming: this.performanceTiming || undefined
+      perfTiming: this.performanceTiming || undefined,
     };
   }
 
-  convertToViewHierarchyResult(accessibilityHierarchy: AccessibilityHierarchy): ViewHierarchyResult {
+  convertToViewHierarchyResult(
+    accessibilityHierarchy: AccessibilityHierarchy,
+  ): ViewHierarchyResult {
     if (this.viewHierarchyResultOverride) {
       return this.viewHierarchyResultOverride;
     }
@@ -460,14 +463,14 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
       hierarchy: {
         node: {
           $: {
-            text: "Fake Hierarchy"
-          }
-        }
+            text: "Fake Hierarchy",
+          },
+        },
       },
       packageName: accessibilityHierarchy.packageName,
       updatedAt: accessibilityHierarchy.updatedAt,
       intentChooserDetected: accessibilityHierarchy.intentChooserDetected,
-      notificationPermissionDetected: accessibilityHierarchy.notificationPermissionDetected
+      notificationPermissionDetected: accessibilityHierarchy.notificationPermissionDetected,
     };
   }
 
@@ -478,7 +481,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     y2: number,
     duration: number = 300,
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<A11ySwipeResult> {
     await this.applyDelay("swipe");
     this.checkFailure("swipe");
@@ -493,7 +496,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
       success: true,
       totalTimeMs: duration,
       gestureTimeMs: duration,
-      perfTiming: this.performanceTiming || undefined
+      perfTiming: this.performanceTiming || undefined,
     };
   }
 
@@ -505,7 +508,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     pressDurationMs: number,
     dragDurationMs: number,
     holdDurationMs: number,
-    timeoutMs: number
+    timeoutMs: number,
   ): Promise<A11yDragResult> {
     await this.applyDelay("drag");
     this.checkFailure("drag");
@@ -518,14 +521,14 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
       pressDurationMs,
       dragDurationMs,
       holdDurationMs,
-      timeoutMs
+      timeoutMs,
     });
 
     if (this.dragResult) {
       const perfTiming = this.dragResult.perfTiming ?? this.performanceTiming ?? undefined;
       return {
         ...this.dragResult,
-        perfTiming
+        perfTiming,
       };
     }
 
@@ -533,7 +536,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
       success: true,
       totalTimeMs: pressDurationMs + dragDurationMs + holdDurationMs,
       gestureTimeMs: dragDurationMs,
-      perfTiming: this.performanceTiming || undefined
+      perfTiming: this.performanceTiming || undefined,
     };
   }
 
@@ -545,7 +548,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     rotationDegrees: number,
     duration?: number,
     timeoutMs?: number,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<A11yPinchResult> {
     await this.applyDelay("pinch");
     this.checkFailure("pinch");
@@ -557,14 +560,14 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
       distanceEnd,
       rotationDegrees,
       duration,
-      timeoutMs
+      timeoutMs,
     });
 
     if (this.pinchResult) {
       const perfTiming = this.pinchResult.perfTiming ?? this.performanceTiming ?? undefined;
       return {
         ...this.pinchResult,
-        perfTiming
+        perfTiming,
       };
     }
 
@@ -574,14 +577,11 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
       success: true,
       totalTimeMs: resolvedDuration,
       gestureTimeMs: resolvedDuration,
-      perfTiming: this.performanceTiming || undefined
+      perfTiming: this.performanceTiming || undefined,
     };
   }
 
-  async requestSetText(
-    text: string,
-    options?: SetTextOptions
-  ): Promise<A11ySetTextResult> {
+  async requestSetText(text: string, options?: SetTextOptions): Promise<A11ySetTextResult> {
     await this.applyDelay("setText");
     this.checkFailure("setText");
 
@@ -590,14 +590,14 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     return {
       success: true,
       totalTimeMs: 100,
-      perfTiming: this.performanceTiming || undefined
+      perfTiming: this.performanceTiming || undefined,
     };
   }
 
   async requestClearText(
     resourceId?: string,
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<A11ySetTextResult> {
     await this.applyDelay("clearText");
     this.checkFailure("clearText");
@@ -612,14 +612,14 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     return {
       success: true,
       totalTimeMs: 100,
-      perfTiming: this.performanceTiming || undefined
+      perfTiming: this.performanceTiming || undefined,
     };
   }
 
   async requestImeAction(
     action: "done" | "next" | "search" | "send" | "go" | "previous",
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<A11yImeActionResult> {
     await this.applyDelay("imeAction");
 
@@ -631,7 +631,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
         action,
         totalTimeMs: 100,
         error: error.message,
-        perfTiming: this.performanceTiming || undefined
+        perfTiming: this.performanceTiming || undefined,
       };
     }
 
@@ -641,13 +641,13 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
       success: true,
       action,
       totalTimeMs: 100,
-      perfTiming: this.performanceTiming || undefined
+      perfTiming: this.performanceTiming || undefined,
     };
   }
 
   async requestSelectAll(
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<A11ySelectAllResult> {
     await this.applyDelay("selectAll");
     this.checkFailure("selectAll");
@@ -655,7 +655,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     return {
       success: true,
       totalTimeMs: 100,
-      perfTiming: this.performanceTiming || undefined
+      perfTiming: this.performanceTiming || undefined,
     };
   }
 
@@ -663,18 +663,18 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     id: string,
     shape: HighlightShape,
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<HighlightOperationResult> {
     await this.applyDelay("addHighlight");
     this.checkFailure("addHighlight");
     return {
-      success: true
+      success: true,
     };
   }
 
   async requestScreenshot(
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<ScreenshotResult> {
     this.screenshotRequestCount++;
     await this.applyDelay("screenshot");
@@ -683,7 +683,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     if (!this.screenshotData) {
       return {
         success: false,
-        error: "No screenshot data configured"
+        error: "No screenshot data configured",
       };
     }
 
@@ -691,7 +691,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
       success: true,
       data: this.screenshotData,
       format: this.screenshotFormat,
-      timestamp: Date.now()
+      timestamp: Date.now(),
     };
   }
 
@@ -699,7 +699,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     action: string,
     resourceId?: string,
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<A11yActionResult> {
     await this.applyDelay("requestAction");
     this.checkFailure("requestAction");
@@ -714,12 +714,35 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
       success: true,
       action,
       totalTimeMs: 100,
-      perfTiming: this.performanceTiming || undefined
+      perfTiming: this.performanceTiming || undefined,
     };
   }
 
   async supportsNodeActionSelectors(): Promise<boolean> {
     return true;
+  }
+
+  async supportsAccessibilityLinkActivation(): Promise<boolean> {
+    return true;
+  }
+
+  async requestActivateAccessibilityLink(
+    text: string,
+    occurrence: number,
+    selector?: AccessibilityNodeSelector,
+  ): Promise<A11yActionResult> {
+    await this.applyDelay("requestActivateAccessibilityLink");
+    this.checkFailure("requestActivateAccessibilityLink");
+    this.actionHistory.push({
+      action: "activate_accessibility_link",
+      resourceId: selector?.resourceId,
+      timeoutMs: 5000,
+    });
+    return {
+      success: true,
+      action: "activate_accessibility_link",
+      totalTimeMs: 100,
+    };
   }
 
   async requestTwoFingerSwipe(
@@ -730,7 +753,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     duration: number = 300,
     offset: number = 100,
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<A11ySwipeResult> {
     await this.applyDelay("requestTwoFingerSwipe");
     this.checkFailure("requestTwoFingerSwipe");
@@ -745,7 +768,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
       success: true,
       totalTimeMs: duration,
       gestureTimeMs: duration,
-      perfTiming: this.performanceTiming || undefined
+      perfTiming: this.performanceTiming || undefined,
     };
   }
 

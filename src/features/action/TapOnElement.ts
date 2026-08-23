@@ -11,7 +11,7 @@ import {
   ViewHierarchyResult,
 } from "../../models";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
-import type { RelativeTapPosition, TapOnElementOptions } from "../../models/TapOnElementOptions";
+import type { TapOnElementOptions } from "../../models/TapOnElementOptions";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
@@ -52,10 +52,8 @@ import { hasAccessibilityAction, isTruthyFlag } from "../../utils/elementPropert
 import {
   requiresNodeSelector,
   stableNodeSelectorForElement,
-  TALKBACK_PRECISE_FOCUS_SETTLE_MS,
   TalkBackTapStrategy,
   type ScreenReaderNavigationResult,
-  type TalkBackTapResult,
 } from "../talkback/TalkBackTapStrategy";
 import {
   DefaultTalkBackNavigationDriverFactory,
@@ -262,9 +260,10 @@ export class TapOnElement extends BaseVisualChange {
       options.elementId,
       options.testTag,
       options.textAny,
+      options.accessibilityLink,
     ].filter(Boolean).length;
     if (selectorCount !== 1) {
-      return "tapOn requires exactly one of text, textAny, elementId, or testTag";
+      return "tapOn requires exactly one of text, textAny, elementId, testTag, or accessibilityLink";
     }
 
     if (options.textAny && options.textAny.length === 0) {
@@ -280,119 +279,81 @@ export class TapOnElement extends BaseVisualChange {
       }
     }
 
-    return this.validateRelativePosition(options);
+    return this.validateSemanticLinkOptions(options);
   }
 
-  private validateRelativePosition(options: TapOnElementOptions): string | null {
-    if (!options.relativePosition) {
+  private validateSemanticLinkOptions(options: TapOnElementOptions): string | null {
+    if ((options as { relativePosition?: unknown }).relativePosition !== undefined) {
+      return "tapOn relativePosition is no longer supported; use accessibilityLink or subtext";
+    }
+    const isDirectLink = options.accessibilityLink !== undefined;
+    const isSemanticLinkRequest = isDirectLink || options.subtext !== undefined;
+    if (!isSemanticLinkRequest) {
       return null;
     }
-    if (this.device.platform !== "android") {
-      return "tapOn relativePosition is only supported on Android";
+    if (isDirectLink && options.subtext) {
+      return "tapOn accessibilityLink and subtext cannot be used together";
     }
-    if (options.action === "focus") {
-      return "tapOn relativePosition cannot be used with the focus action";
+    if (options.action !== "tap") {
+      return "tapOn semantic link activation supports only the tap action";
     }
-
-    const { x, y } = options.relativePosition;
-    if (![x, y].every(Number.isFinite)) {
-      return "tapOn relativePosition x and y must be finite numbers";
+    if (options.sibling) {
+      return "tapOn semantic link activation cannot use sibling";
     }
-    if (x < 0 || x > 1 || y < 0 || y > 1) {
-      return "tapOn relativePosition x and y must be between 0 and 1";
+    if (options.retryIfNoChange || options.ensureTap) {
+      return "tapOn semantic link activation cannot retry an acknowledged link activation";
     }
-
+    const target = options.subtext?.text ?? options.accessibilityLink;
+    if (!target || target.trim().length === 0) {
+      return "tapOn semantic link text must be non-empty";
+    }
+    const occurrence = options.subtext?.occurrence ?? options.index ?? 0;
+    if (!Number.isInteger(occurrence) || occurrence < 0) {
+      return "tapOn semantic link occurrence must be a non-negative integer";
+    }
     return null;
   }
 
-  private hasAddressablePixels(bounds: Element["bounds"]): boolean {
-    const coordinates = [bounds.left, bounds.top, bounds.right, bounds.bottom];
-    return (
-      coordinates.every(Number.isFinite) &&
-      bounds.right - bounds.left >= 1 &&
-      bounds.bottom - bounds.top >= 1
-    );
+  private resolveTapPoint(element: Element): { x: number; y: number } {
+    return this.geometry.getElementCenter(element);
   }
 
-  private hasValidScreenDimensions(screenSize: ObserveResult["screenSize"]): boolean {
-    if (!screenSize) {
-      return false;
-    }
-    return [screenSize.width, screenSize.height].every(
-      (dimension) => Number.isFinite(dimension) && dimension >= 1,
-    );
-  }
-
-  private isPointInHalfOpenBounds(
-    point: { x: number; y: number },
-    bounds: Element["bounds"],
-  ): boolean {
-    return (
-      point.x >= bounds.left &&
-      point.x < bounds.right &&
-      point.y >= bounds.top &&
-      point.y < bounds.bottom
-    );
-  }
-
-  private relativeTapPoint(
-    bounds: Element["bounds"],
-    relativePosition: RelativeTapPosition,
-  ): { x: number; y: number } {
-    const width = bounds.right - bounds.left;
-    const height = bounds.bottom - bounds.top;
-    return {
-      x: Math.round(bounds.left + relativePosition.x * (width - 1)),
-      y: Math.round(bounds.top + relativePosition.y * (height - 1)),
-    };
-  }
-
-  private resolveTapPoint(
-    element: Element,
-    screenSize: ObserveResult["screenSize"],
-    relativePosition?: RelativeTapPosition,
-  ): { x: number; y: number } {
-    if (!relativePosition) {
-      return this.geometry.getElementCenter(element);
-    }
-
-    const bounds = element.bounds;
-    if (!this.hasAddressablePixels(bounds)) {
-      throw new ActionableError(
-        `tapOn relativePosition requires valid element bounds, received ${JSON.stringify(bounds)}`,
+  private async activateSemanticLink(
+    text: string,
+    occurrence: number,
+    owner?: Element,
+  ): Promise<{ success: boolean; error?: string }> {
+    if (this.device.platform === "android") {
+      const selector = owner ? stableNodeSelectorForElement(owner) : undefined;
+      if (owner && !selector) {
+        return {
+          success: false,
+          error:
+            "Container-scoped semantic link activation requires a stable native owner identity",
+        };
+      }
+      const result = await this.accessibilityService.requestActivateAccessibilityLink(
+        text,
+        occurrence,
+        selector,
       );
+      return { success: result.success, error: result.error };
     }
-
-    if (!this.hasValidScreenDimensions(screenSize)) {
-      throw new ActionableError("tapOn relativePosition requires valid Android screen dimensions");
+    if (this.device.platform === "ios") {
+      const ownerResourceId = owner?.["resource-id"];
+      if (owner && (typeof ownerResourceId !== "string" || ownerResourceId.length === 0)) {
+        return {
+          success: false,
+          error:
+            "Container-scoped semantic link activation requires a stable native owner identity",
+        };
+      }
+      const result = await IOSCtrlProxyClient.getInstance(
+        this.device,
+      ).requestActivateAccessibilityLink(text, occurrence, ownerResourceId as string | undefined);
+      return { success: result.success, error: result.error };
     }
-
-    // Android bounds are half-open. Scale across addressable pixels so 0 and 1
-    // map to the first and last valid pixels rather than the exclusive edge.
-    // Round here, before validation and reporting, to match Android dispatch.
-    const point = this.relativeTapPoint(bounds, relativePosition);
-    const { x, y } = point;
-    if (!this.isPointInHalfOpenBounds(point, bounds)) {
-      throw new ActionableError(
-        `tapOn relativePosition resolved to (${x}, ${y}) outside element bounds ` +
-          `${JSON.stringify(bounds)}`,
-      );
-    }
-
-    const screenBounds = {
-      left: 0,
-      top: 0,
-      right: screenSize.width,
-      bottom: screenSize.height,
-    };
-    if (!this.isPointInHalfOpenBounds(point, screenBounds)) {
-      throw new ActionableError(
-        `tapOn relativePosition resolved to (${x}, ${y}) outside screen bounds ` +
-          `[0, ${screenSize.width}) x [0, ${screenSize.height})`,
-      );
-    }
-
-    return point;
+    return { success: false, error: `Unsupported platform: ${this.device.platform}` };
   }
 
   private getSearchUntilDuration(options: TapOnElementOptions): number {
@@ -432,41 +393,13 @@ export class TapOnElement extends BaseVisualChange {
   private isElementTapTargetOffScreen(
     element: Element,
     screenSize?: ObserveResult["screenSize"],
-    relativePosition?: RelativeTapPosition,
   ): boolean {
     if (!screenSize?.width || !screenSize?.height || !element.bounds) {
       return false;
     }
-    if (relativePosition) {
-      if (!this.hasAddressablePixels(element.bounds)) {
-        return false;
-      }
-      const point = this.relativeTapPoint(element.bounds, relativePosition);
-      if (!this.isPointInHalfOpenBounds(point, element.bounds)) {
-        return false;
-      }
-      return !this.isPointInHalfOpenBounds(point, {
-        left: 0,
-        top: 0,
-        right: screenSize.width,
-        bottom: screenSize.height,
-      });
-    }
     const centerX = (element.bounds.left + element.bounds.right) / 2;
     const centerY = (element.bounds.top + element.bounds.bottom) / 2;
     return centerX < 0 || centerX > screenSize.width || centerY < 0 || centerY > screenSize.height;
-  }
-
-  private isSelectionTapTargetOffScreen(
-    element: Element,
-    viewHierarchy: ViewHierarchyResult,
-    screenSize: ObserveResult["screenSize"] | undefined,
-    options: TapOnElementOptions,
-  ): boolean {
-    const target = options.relativePosition
-      ? this.resolveTapTargetElement(element, viewHierarchy, options.action, false).element
-      : element;
-    return this.isElementTapTargetOffScreen(target, screenSize, options.relativePosition);
   }
 
   private getScreenSizeFromHierarchy(
@@ -499,25 +432,12 @@ export class TapOnElement extends BaseVisualChange {
     }
   }
 
-  private requiresResourceIdForTapTarget(
-    isAccessibilityServiceEnabled: boolean,
-    options: TapOnElementOptions,
-  ): boolean {
-    return isAccessibilityServiceEnabled && !options.relativePosition;
-  }
-
   private async prepareSelectionCapture(
-    options: TapOnElementOptions,
     action: string,
     observation: ObserveResult,
     element: Element,
     signal?: AbortSignal,
   ): Promise<SelectionCaptureState | null> {
-    if (options.relativePosition) {
-      // Visual selection enrichment is best-effort; its screenshot await can
-      // make a precise coordinate stale before dispatch.
-      return null;
-    }
     return this.selectionStateTracker.prepare({
       action,
       observation,
@@ -584,14 +504,7 @@ export class TapOnElement extends BaseVisualChange {
             });
         lastSelection = selection;
         if (selection.element) {
-          if (
-            this.isSelectionTapTargetOffScreen(
-              selection.element,
-              viewHierarchy,
-              screenSize,
-              options,
-            )
-          ) {
+          if (this.isElementTapTargetOffScreen(selection.element, screenSize)) {
             offScreenSelection = selection;
             continue;
           }
@@ -916,10 +829,7 @@ export class TapOnElement extends BaseVisualChange {
     let element = selection.element;
     let containerFoundEver = initialSearch.containerFound;
 
-    if (
-      !element ||
-      this.isSelectionTapTargetOffScreen(element, latestViewHierarchy, latestScreenSize, options)
-    ) {
+    if (!element || this.isElementTapTargetOffScreen(element, latestScreenSize)) {
       if (element) {
         logger.warn(
           `[TapOnElement] Element found but tap target is off-screen, will retry. ` +
@@ -960,10 +870,7 @@ export class TapOnElement extends BaseVisualChange {
         selection = searchResult.selection;
         element = selection.element;
         containerFoundEver = containerFoundEver || searchResult.containerFound;
-        if (
-          element &&
-          this.isSelectionTapTargetOffScreen(element, refreshedHierarchy, latestScreenSize, options)
-        ) {
+        if (element && this.isElementTapTargetOffScreen(element, latestScreenSize)) {
           logger.warn(
             `[TapOnElement] Element found but tap target is off-screen, retrying. ` +
               `bounds=${JSON.stringify(element.bounds)}`,
@@ -1097,6 +1004,27 @@ export class TapOnElement extends BaseVisualChange {
     }
 
     return this.finder.hasContainerElement(viewHierarchy, container);
+  }
+
+  private resolveContainerElement(
+    viewHierarchy: ViewHierarchyResult,
+    container?: { elementId?: string; text?: string },
+  ): Element | undefined {
+    if (!container) {
+      return undefined;
+    }
+    if (container.elementId) {
+      return this.elementSelector.selectByResourceId(viewHierarchy, container.elementId).element as
+        | Element
+        | undefined;
+    }
+    if (container.text) {
+      return this.elementSelector.selectByText(viewHierarchy, container.text, {
+        partialMatch: false,
+        caseSensitive: false,
+      }).element as Element | undefined;
+    }
+    return undefined;
   }
 
   private isClickableElement(element: Element): boolean {
@@ -1326,6 +1254,31 @@ export class TapOnElement extends BaseVisualChange {
             return { success: false, error: "Unable to get view hierarchy, cannot tap on element" };
           }
 
+          if (options.accessibilityLink) {
+            const occurrence = options.index ?? 0;
+            const owner = this.resolveContainerElement(viewHierarchy, options.container);
+            if (options.container && !owner) {
+              return { success: false, error: "Semantic link container is no longer present" };
+            }
+            const activation = await this.activateSemanticLink(
+              options.accessibilityLink,
+              occurrence,
+              owner,
+            );
+            if (!activation.success) {
+              return { success: false, error: activation.error };
+            }
+            return {
+              success: true,
+              action: options.action,
+              element: {
+                text: options.accessibilityLink,
+                bounds: { left: 0, top: 0, right: 0, bottom: 0 },
+              } as Element,
+              activatedSubtext: { text: options.accessibilityLink, occurrence },
+            };
+          }
+
           const searchOutcome = await perf.track("findElement", () =>
             this.searchForElement(options, observeResult, signal),
           );
@@ -1343,6 +1296,25 @@ export class TapOnElement extends BaseVisualChange {
           const selection = searchOutcome.selection;
           const element = selection.element as Element;
           const selectedElementMetadata = this.buildSelectedElementMetadata(selection);
+          if (options.subtext) {
+            const occurrence = options.subtext.occurrence ?? 0;
+            const activation = await this.activateSemanticLink(
+              options.subtext.text,
+              occurrence,
+              element,
+            );
+            if (!activation.success) {
+              return { success: false, error: activation.error };
+            }
+            return {
+              success: true,
+              action: options.action,
+              element,
+              selectedElement: selectedElementMetadata,
+              searchUntil: searchOutcome.stats,
+              activatedSubtext: { text: options.subtext.text, occurrence },
+            };
+          }
           const initialTapPoint = this.geometry.getElementCenter(element);
           let action = options.action;
           const longPressDuration = this.getLongPressDuration(options);
@@ -1376,10 +1348,7 @@ export class TapOnElement extends BaseVisualChange {
           // Android, VoiceOver on iOS. Downstream call paths are split by
           // the platform switch below, so a single flag suffices.
           const isAccessibilityServiceEnabled = await this.strategy.isAccessibilityServiceEnabled();
-          const requireResourceId = this.requiresResourceIdForTapTarget(
-            isAccessibilityServiceEnabled,
-            options,
-          );
+          const requireResourceId = isAccessibilityServiceEnabled;
           let tapElement: Element;
           let usedParent: boolean;
           const initialTapTarget = this.resolveTapTargetElement(
@@ -1410,11 +1379,7 @@ export class TapOnElement extends BaseVisualChange {
           }
 
           this.logClickableParentSelection(usedParent);
-          const tapPoint = this.resolveTapPoint(
-            tapElement,
-            observeResult.screenSize,
-            options.relativePosition,
-          );
+          const tapPoint = this.resolveTapPoint(tapElement);
           const tapBounds = tapElement.bounds;
           logger.info(
             `[TapOnElement] Tapping (${tapPoint.x}, ${tapPoint.y}) on element: ` +
@@ -1424,7 +1389,6 @@ export class TapOnElement extends BaseVisualChange {
           );
 
           selectionCapture = await this.prepareSelectionCapture(
-            options,
             action,
             observeResult,
             tapElement,
@@ -1485,8 +1449,6 @@ export class TapOnElement extends BaseVisualChange {
             element: tapElement,
             selectedElement: selectedElementMetadata,
             searchUntil: searchOutcome.stats,
-            x: tapPoint.x,
-            y: tapPoint.y,
             ...(screenReaderNavigation ? { screenReaderNavigation } : {}),
           };
         },
@@ -1512,7 +1474,8 @@ export class TapOnElement extends BaseVisualChange {
               container: options.container,
               searchUntil: options.searchUntil,
               selectionStrategy: options.selectionStrategy,
-              relativePosition: options.relativePosition,
+              accessibilityLink: options.accessibilityLink,
+              subtext: options.subtext,
               platform: this.device.platform,
             },
           },
@@ -1607,14 +1570,7 @@ export class TapOnElement extends BaseVisualChange {
       );
     }
 
-    // Standard mode and precise targets use coordinates. Precise long presses
-    // must not be replaced by node-level ACTION_LONG_CLICK because that cannot
-    // distinguish targets within one element.
-    if (options?.relativePosition) {
-      await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal, true);
-    } else {
-      await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal);
-    }
+    await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal);
     return undefined;
   }
 
@@ -1761,36 +1717,6 @@ export class TapOnElement extends BaseVisualChange {
     );
   }
 
-  private async executeRemainingPreciseTalkBackInput(
-    action: string,
-    x: number,
-    y: number,
-    durationMs: number,
-    element: Element,
-    preciseResult: TalkBackTapResult,
-    signal?: AbortSignal,
-  ): Promise<void> {
-    let remainingAction = action;
-    if (action === "tap") {
-      if (!preciseResult.focusCompleted) {
-        await this.executeAndroidTapWithCoordinates("tap", x, y, durationMs, element, signal, true);
-        await this.timer.sleep(TALKBACK_PRECISE_FOCUS_SETTLE_MS);
-      }
-      remainingAction = preciseResult.completedTaps === 1 ? "tap" : "doubleTap";
-    } else if (action === "doubleTap" && preciseResult.completedTaps === 1) {
-      remainingAction = "tap";
-    }
-    await this.executeAndroidTapWithCoordinates(
-      remainingAction,
-      x,
-      y,
-      durationMs,
-      element,
-      signal,
-      true,
-    );
-  }
-
   private async executeAndroidTapWithAccessibility(
     action: string,
     x: number,
@@ -1802,35 +1728,6 @@ export class TapOnElement extends BaseVisualChange {
   ): Promise<ScreenReaderNavigationResult | undefined> {
     const driver = this.talkBackDriverFactory.createDriver(this.device);
     let screenReaderNavigation: ScreenReaderNavigationResult | undefined;
-
-    if (options?.relativePosition) {
-      const preciseResult =
-        action === "tap" || action === "doubleTap"
-          ? await this.talkBackStrategy.executePreciseTap(x, y, driver)
-          : await this.talkBackStrategy.executeCoordinateFallback(
-              x,
-              y,
-              "longPress",
-              durationMs,
-              driver,
-            );
-      if (!preciseResult.success) {
-        logger.warn(
-          `[TapOnElement] Precise TalkBack coordinate gesture failed (${preciseResult.error}), ` +
-            `falling back to remaining input at (${x}, ${y})`,
-        );
-        await this.executeRemainingPreciseTalkBackInput(
-          action,
-          x,
-          y,
-          durationMs,
-          element,
-          preciseResult,
-          signal,
-        );
-      }
-      return undefined;
-    }
 
     if (action === "longPress") {
       // Long press: try ACTION_LONG_CLICK first, then coordinate gesture fallback

@@ -204,12 +204,17 @@ export const tapOnResultSchema = z
     success: z.boolean(),
     action: z.string().optional(),
     message: z.string().optional(),
-    x: z.number().optional().describe("Horizontal coordinate of the resolved target used for the tap"),
-    y: z.number().optional().describe("Vertical coordinate of the resolved target used for the tap"),
     element: elementSchema.optional(),
     observation: z.union([observationSummarySchema, toolOutputArtifactMetadataSchema]).optional(),
     observationDiff: observationDiffMetadataSchema.optional(),
     selectedElement: selectedElementSchema.optional(),
+    activatedSubtext: z
+      .object({
+        text: z.string(),
+        occurrence: z.number().int().nonnegative(),
+      })
+      .optional()
+      .describe("Semantic accessibility link confirmed by the native runner"),
     selectedElements: z.array(selectedElementSchema).optional(),
     error: z.string().optional(),
     pressRecognized: z.boolean().optional(),

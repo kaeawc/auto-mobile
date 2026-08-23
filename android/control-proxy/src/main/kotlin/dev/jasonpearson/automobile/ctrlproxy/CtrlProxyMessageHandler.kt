@@ -18,6 +18,7 @@ import dev.jasonpearson.automobile.protocol.PinchResult
 import dev.jasonpearson.automobile.protocol.RemoveCaCert
 import dev.jasonpearson.automobile.protocol.RemovePreference
 import dev.jasonpearson.automobile.protocol.RequestAction
+import dev.jasonpearson.automobile.protocol.RequestActivateAccessibilityLink
 import dev.jasonpearson.automobile.protocol.RequestClipboard
 import dev.jasonpearson.automobile.protocol.RequestDeviceInfo
 import dev.jasonpearson.automobile.protocol.RequestDrag
@@ -271,6 +272,13 @@ class CtrlProxyMessageHandler(
           request.requestId,
           request.action,
           request.resourceId,
+          request.selector,
+        )
+      is RequestActivateAccessibilityLink ->
+        actions.requestActivateAccessibilityLink(
+          request.requestId,
+          request.text,
+          request.occurrence,
           request.selector,
         )
       is RequestHitTest ->

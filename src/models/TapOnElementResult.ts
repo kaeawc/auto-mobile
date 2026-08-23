@@ -25,10 +25,11 @@ export interface TapOnSelectedElement {
 export interface TapOnElementResult extends BaseActionResult {
   action: string;
   element: Element;
-  /** Resolved horizontal target coordinate for a successful interaction. */
-  x?: number;
-  /** Resolved vertical target coordinate for a successful interaction. */
-  y?: number;
+  /** Semantic link confirmed by the native runner. */
+  activatedSubtext?: {
+    text: string;
+    occurrence: number;
+  };
   selectedElement?: TapOnSelectedElement;
   debug?: ToolDebugInfo;
   pressRecognized?: boolean;

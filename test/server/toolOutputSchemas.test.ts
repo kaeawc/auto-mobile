@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { toJSONSchema } from "zod/v4";
-import { elementBoundsSchema, elementSchema, tapOnResultSchema, toolOutputArtifactMetadataSchema } from "../../src/server/toolOutputSchemas";
+import {
+  elementBoundsSchema,
+  elementSchema,
+  tapOnResultSchema,
+  toolOutputArtifactMetadataSchema,
+} from "../../src/server/toolOutputSchemas";
 
 /**
  * Wire-schema coverage for the `--observe-result-compact` tuple form (issue #2990,
@@ -54,19 +59,19 @@ describe("elementBoundsSchema: object + compact tuple (#2990)", () => {
 });
 
 describe("tool output artifact metadata schema (#3480)", () => {
-  test("tapOn results advertise and accept resolved target coordinates", () => {
+  test("tapOn results advertise confirmed semantic link activation", () => {
     const result = tapOnResultSchema.parse({
       success: true,
       action: "tap",
-      x: 491,
-      y: 230,
+      activatedSubtext: { text: "Terms of Service", occurrence: 1 },
     });
     const json = JSON.stringify(toJSONSchema(tapOnResultSchema));
 
-    expect(result).toMatchObject({ x: 491, y: 230 });
-    expect(json).toContain("\"x\"");
-    expect(json).toContain("\"y\"");
-    expect(json).toContain("resolved target");
+    expect(result).toMatchObject({
+      activatedSubtext: { text: "Terms of Service", occurrence: 1 },
+    });
+    expect(json).toContain("activatedSubtext");
+    expect(json).toContain("Semantic accessibility link");
   });
 
   test("advertises screen-reader navigation fidelity assertions (#3963)", () => {
@@ -93,29 +98,35 @@ describe("tool output artifact metadata schema (#3480)", () => {
   });
 
   test("tapOn results accept artifact metadata in the embedded observation field", () => {
-    expect(() => tapOnResultSchema.parse({
-      success: true,
-      observation: metadata,
-    })).not.toThrow();
+    expect(() =>
+      tapOnResultSchema.parse({
+        success: true,
+        observation: metadata,
+      }),
+    ).not.toThrow();
   });
 
   test("accepts ObserveDiff artifact metadata for diffed observations", () => {
-    expect(toolOutputArtifactMetadataSchema.parse({
-      artifact: {
-        ...metadata.artifact,
-        payload: "ObserveDiff",
-      },
-    }).artifact.payload).toBe("ObserveDiff");
+    expect(
+      toolOutputArtifactMetadataSchema.parse({
+        artifact: {
+          ...metadata.artifact,
+          payload: "ObserveDiff",
+        },
+      }).artifact.payload,
+    ).toBe("ObserveDiff");
   });
 
   test("accepts non-observation artifact payload labels", () => {
-    expect(toolOutputArtifactMetadataSchema.parse({
-      artifact: {
-        ...metadata.artifact,
-        payload: "NetworkGraph",
-        tool: "getNetworkGraph",
-      },
-    }).artifact.payload).toBe("NetworkGraph");
+    expect(
+      toolOutputArtifactMetadataSchema.parse({
+        artifact: {
+          ...metadata.artifact,
+          payload: "NetworkGraph",
+          tool: "getNetworkGraph",
+        },
+      }).artifact.payload,
+    ).toBe("NetworkGraph");
   });
 });
 
@@ -133,7 +144,14 @@ describe("elementBoundsSchema: fractional iOS point coordinates (#3206)", () => 
   });
 
   test("accepts fractional centerX/centerY", () => {
-    const withCenters = { left: 20.5, top: 68.5, right: 168.5, bottom: 94.5, centerX: 94.5, centerY: 81.5 };
+    const withCenters = {
+      left: 20.5,
+      top: 68.5,
+      right: 168.5,
+      bottom: 94.5,
+      centerX: 94.5,
+      centerY: 81.5,
+    };
     expect(elementBoundsSchema.parse(withCenters)).toEqual(withCenters);
   });
 
@@ -144,7 +162,7 @@ describe("elementBoundsSchema: fractional iOS point coordinates (#3206)", () => 
 
   test("the advertised JSON schema claims number, not integer, for bounds coordinates", () => {
     const json = toJSONSchema(elementBoundsSchema) as Record<string, unknown>;
-    expect(JSON.stringify(json)).not.toContain("\"integer\"");
+    expect(JSON.stringify(json)).not.toContain('"integer"');
   });
 
   test("still rejects non-numeric bounds values", () => {

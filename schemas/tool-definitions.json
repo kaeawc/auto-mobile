@@ -9170,6 +9170,11 @@
               "type": "string",
               "minLength": 1
             },
+            "accessibilityLink": {
+              "description": "Exact visible text of a semantic accessibility link",
+              "type": "string",
+              "minLength": 1
+            },
             "textAny": {
               "description": "Ordered text variants; first visible match wins",
               "minItems": 1,
@@ -9198,11 +9203,16 @@
             },
             {
               "required": [
+                "accessibilityLink"
+              ]
+            },
+            {
+              "required": [
                 "textAny"
               ]
             }
           ],
-          "description": "Element to tap: elementId, Android testTag, text, or ordered text variants"
+          "description": "Element to tap: elementId, Android testTag, text, semantic accessibility link, or ordered text variants"
         },
         "sibling": {
           "description": "Tap a clickable sibling of the match, e.g. checkbox beside label",
@@ -9264,26 +9274,24 @@
           "description": "Long press duration (ms)",
           "type": "number"
         },
-        "relativePosition": {
-          "description": "Android-only precise target within the resolved element; omit to tap its center",
+        "subtext": {
+          "description": "Semantic link inside the selected element; fails if the platform does not expose that link",
           "type": "object",
           "properties": {
-            "x": {
-              "description": "Horizontal position within the resolved element: 0 is left, 1 is the rightmost addressable pixel",
-              "type": "number",
-              "minimum": 0,
-              "maximum": 1
+            "text": {
+              "description": "Exact visible text of a semantic link inside the selected element",
+              "type": "string",
+              "minLength": 1
             },
-            "y": {
-              "description": "Vertical position within the resolved element: 0 is top, 1 is the bottommost addressable pixel",
-              "type": "number",
+            "occurrence": {
+              "description": "Zero-based occurrence among exact semantic-link matches (default: 0)",
+              "type": "integer",
               "minimum": 0,
-              "maximum": 1
+              "maximum": 9007199254740991
             }
           },
           "required": [
-            "x",
-            "y"
+            "text"
           ],
           "additionalProperties": false
         },
@@ -9338,24 +9346,44 @@
       ],
       "additionalProperties": false,
       "if": {
-        "required": [
-          "relativePosition"
+        "anyOf": [
+          {
+            "required": [
+              "subtext"
+            ]
+          },
+          {
+            "properties": {
+              "selector": {
+                "required": [
+                  "accessibilityLink"
+                ]
+              }
+            }
+          }
         ]
       },
       "then": {
         "properties": {
           "action": {
+            "const": "tap"
+          },
+          "sibling": {
             "not": {
-              "const": "focus"
+              "const": true
             }
           },
-          "platform": {
-            "const": "android"
+          "retryIfNoChange": {
+            "not": {
+              "const": true
+            }
+          },
+          "ensureTap": {
+            "not": {
+              "const": true
+            }
           }
-        },
-        "required": [
-          "platform"
-        ]
+        }
       }
     },
     "outputSchema": {
@@ -9370,14 +9398,6 @@
         },
         "message": {
           "type": "string"
-        },
-        "x": {
-          "description": "Horizontal coordinate of the resolved target used for the tap",
-          "type": "number"
-        },
-        "y": {
-          "description": "Vertical coordinate of the resolved target used for the tap",
-          "type": "number"
         },
         "element": {
           "type": "object",
@@ -10631,6 +10651,25 @@
             }
           },
           "additionalProperties": {}
+        },
+        "activatedSubtext": {
+          "description": "Semantic accessibility link confirmed by the native runner",
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "occurrence": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "text",
+            "occurrence"
+          ],
+          "additionalProperties": false
         },
         "selectedElements": {
           "type": "array",

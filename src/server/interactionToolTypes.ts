@@ -2,12 +2,7 @@
  * Type definitions for interaction tools.
  * Extracted from interactionTools.ts for maintainability.
  */
-import type {
-  Platform,
-  ElementSelectionStrategy,
-  ImeAction,
-  RelativeTapPosition
-} from "../models";
+import type { Platform, ElementSelectionStrategy, ImeAction } from "../models";
 import type { ObserveWaitForOptions, SettledOptions } from "./observeTools";
 
 // ============================================================================
@@ -67,6 +62,7 @@ export interface TapOnArgs {
     testTag?: string;
     text?: string;
     textAny?: string[];
+    accessibilityLink?: string;
   };
   sibling?: boolean;
   container?: {
@@ -84,7 +80,10 @@ export interface TapOnArgs {
   preTapStability?: boolean;
   retryIfNoChange?: boolean;
   ensureTap?: boolean;
-  relativePosition?: RelativeTapPosition;
+  subtext?: {
+    text: string;
+    occurrence?: number;
+  };
 }
 
 export interface TapAnyArgs {

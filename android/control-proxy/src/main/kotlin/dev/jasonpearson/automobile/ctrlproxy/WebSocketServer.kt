@@ -244,7 +244,11 @@ class WebSocketServer(
                         ConnectedResponse(
                           id = connectionId,
                           supportedCommands =
-                            listOf("set_hierarchy_interval", "node_selector_actions"),
+                            listOf(
+                              "set_hierarchy_interval",
+                              "node_selector_actions",
+                              "request_activate_accessibility_link",
+                            ),
                         ),
                       )
                     )

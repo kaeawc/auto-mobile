@@ -1081,6 +1081,45 @@ public class GesturePerformer: GesturePerforming {
             }
         }
 
+        public func activateAccessibilityLink(
+            text: String,
+            occurrence: Int,
+            ownerResourceId: String?
+        ) throws {
+            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, occurrence >= 0 else {
+                throw GestureError.gestureFailed("Semantic link text must be non-blank and occurrence non-negative")
+            }
+            guard let app = resolveNavigationApp() else {
+                throw GestureError.noApplication
+            }
+            try runOnMainThread {
+                let links: [XCUIElement]
+                if let ownerResourceId {
+                    guard let owner = self.elementLocator.findElement(byResourceId: ownerResourceId) as? XCUIElement,
+                          owner.exists
+                    else {
+                        throw GestureError.elementNotFound(ownerResourceId)
+                    }
+                    links = owner.descendants(matching: .link).allElementsBoundByIndex
+                } else {
+                    links = app.links.allElementsBoundByIndex
+                }
+                let matches = links.filter {
+                    $0.label.caseInsensitiveCompare(text) == .orderedSame
+                }
+                guard matches.indices.contains(occurrence) else {
+                    throw GestureError.elementNotFound("semantic link '\(text)' occurrence \(occurrence)")
+                }
+                let link = matches[occurrence]
+                guard link.exists, link.isHittable, !link.frame.isEmpty else {
+                    throw GestureError.gestureFailed(
+                        "Semantic link '\(text)' occurrence \(occurrence) is no longer hittable"
+                    )
+                }
+                link.tap()
+            }
+        }
+
         // MARK: - Screenshots
 
         public func getScreenshot() throws -> Data {
@@ -1726,6 +1765,10 @@ public class GesturePerformer: GesturePerforming {
         }
 
         public func performAction(_: String, resourceId _: String?, label _: String?) throws {
+            throw GestureError.notSupported("XCUITest only available on iOS")
+        }
+
+        public func activateAccessibilityLink(text _: String, occurrence _: Int, ownerResourceId _: String?) throws {
             throw GestureError.notSupported("XCUITest only available on iOS")
         }
 

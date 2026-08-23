@@ -147,7 +147,7 @@ describe("TapOnElement TalkBack mode detection", () => {
       expect(executeAndroidTapWithCoordinates).not.toHaveBeenCalled();
     });
 
-    test("uses the requested coordinate instead of semantic activation for a relative position", async () => {
+    test("delegates TalkBack taps to accessibility activation", async () => {
       const element = {
         bounds: { left: 100, top: 200, right: 500, bottom: 260 },
         "resource-id": "test:id/spannable_text",
@@ -156,7 +156,6 @@ describe("TapOnElement TalkBack mode detection", () => {
       const options = {
         action: "tap" as const,
         elementId: "test:id/spannable_text",
-        relativePosition: { x: 0.98, y: 0.5 },
       };
 
       await (tapOnElement as any).executeAndroidTap(
@@ -673,116 +672,6 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
       expect(fakeTalkBackStrategy.fallbackCalls).toHaveLength(1);
       expect(fakeTalkBackStrategy.fallbackCalls[0].action).toBe("doubleTap");
     });
-
-    test("precise tap focuses the requested coordinate before activating it", async () => {
-      const element = makeElement();
-
-      await (tapOnElement as any).executeAndroidTapWithAccessibility(
-        "tap",
-        80,
-        40,
-        element,
-        500,
-        { relativePosition: { x: 0.8, y: 0.4 } },
-        undefined,
-      );
-
-      expect(fakeTalkBackStrategy.preciseTapCalls).toEqual([{ x: 80, y: 40 }]);
-      expect(fakeTalkBackStrategy.fallbackCalls).toHaveLength(0);
-      expect(executeAndroidTapWithCoordinates).not.toHaveBeenCalled();
-    });
-
-    test("precise doubleTap focuses the requested coordinate before activating it", async () => {
-      const element = makeElement();
-
-      await (tapOnElement as any).executeAndroidTapWithAccessibility(
-        "doubleTap",
-        80,
-        40,
-        element,
-        500,
-        { relativePosition: { x: 0.8, y: 0.4 } },
-        undefined,
-      );
-
-      expect(fakeTalkBackStrategy.preciseTapCalls).toEqual([{ x: 80, y: 40 }]);
-      expect(fakeTalkBackStrategy.fallbackCalls).toHaveLength(0);
-      expect(executeAndroidTapWithCoordinates).not.toHaveBeenCalled();
-    });
-
-    test("precise tap retries only the missing second activation tap", async () => {
-      fakeTalkBackStrategy.setPreciseTapResult({
-        success: false,
-        method: "coordinate-fallback",
-        error: "Second tap failed",
-        focusCompleted: true,
-        completedTaps: 1,
-      });
-      const element = makeElement();
-
-      await (tapOnElement as any).executeAndroidTapWithAccessibility(
-        "tap",
-        50,
-        50,
-        element,
-        500,
-        { relativePosition: { x: 0.5, y: 0.5 } },
-        undefined,
-      );
-
-      expect(fakeTalkBackStrategy.preciseTapCalls).toEqual([{ x: 50, y: 50 }]);
-      expect(executeAndroidTapWithCoordinates).toHaveBeenCalledWith(
-        "tap",
-        50,
-        50,
-        500,
-        element,
-        undefined,
-        true,
-      );
-    });
-
-    test("precise tap retries focus and activation when coordinate focus fails", async () => {
-      fakeTalkBackStrategy.setPreciseTapResult({
-        success: false,
-        method: "coordinate-fallback",
-        error: "Focus tap failed",
-        focusCompleted: false,
-        completedTaps: 0,
-      });
-      const element = makeElement();
-
-      await (tapOnElement as any).executeAndroidTapWithAccessibility(
-        "tap",
-        50,
-        50,
-        element,
-        500,
-        { relativePosition: { x: 0.5, y: 0.5 } },
-        undefined,
-      );
-
-      expect(executeAndroidTapWithCoordinates).toHaveBeenNthCalledWith(
-        1,
-        "tap",
-        50,
-        50,
-        500,
-        element,
-        undefined,
-        true,
-      );
-      expect(executeAndroidTapWithCoordinates).toHaveBeenNthCalledWith(
-        2,
-        "doubleTap",
-        50,
-        50,
-        500,
-        element,
-        undefined,
-        true,
-      );
-    });
   });
 
   describe("opt-in screen-reader navigation (fidelity mode)", () => {
@@ -956,30 +845,6 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
   });
 
   describe("longPress (unaffected by navigation mode)", () => {
-    test("uses a CtrlProxy coordinate gesture for a precise long press", async () => {
-      const element = makeElement();
-      const options = {
-        relativePosition: { x: 0.9, y: 0.5 },
-      };
-
-      await (tapOnElement as any).executeAndroidTapWithAccessibility(
-        "longPress",
-        90,
-        50,
-        element,
-        1000,
-        options,
-        undefined,
-      );
-
-      expect(fakeTalkBackStrategy.longPressCalls).toHaveLength(0);
-      expect(fakeTalkBackStrategy.directActivationCalls).toHaveLength(0);
-      expect(fakeTalkBackStrategy.fallbackCalls).toEqual([
-        { x: 90, y: 50, action: "longPress", durationMs: 1000 },
-      ]);
-      expect(executeAndroidTapWithCoordinates).not.toHaveBeenCalled();
-    });
-
     test("uses executeLongPress for longPress action", async () => {
       const element = makeElement();
 

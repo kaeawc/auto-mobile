@@ -5,6 +5,7 @@ import {
   deviceLostErrorFromCancellationReason,
   deviceLossOutcomeFromError,
   enrichDeviceLossOutcome,
+  remainingDeviceLossIncidentWaitMs,
 } from "../../src/server/deviceLossOutcome";
 
 describe("device-loss outcome", () => {
@@ -70,5 +71,11 @@ describe("device-loss outcome", () => {
       recovery: { status: "recovered", attempts: 1 },
       retry: { sameSession: true, requiresNewSession: false },
     });
+  });
+
+  test("reserves transport headroom when waiting for incident settlement", () => {
+    expect(remainingDeviceLossIncidentWaitMs(30_000, 5_000)).toBe(24_000);
+    expect(remainingDeviceLossIncidentWaitMs(30_000, 29_500)).toBe(0);
+    expect(remainingDeviceLossIncidentWaitMs(undefined, 5_000)).toBeUndefined();
   });
 });

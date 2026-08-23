@@ -23,6 +23,7 @@ import {
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
   DAEMON_BOUND_SESSION_PARAM,
   DAEMON_VERSION,
+  INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
 } from "./constants";
 import {
   ListChangedBroadcaster,
@@ -3828,7 +3829,11 @@ export class UnixSocketServer {
         return await mcpClient.callTool(
           {
             name: request.params.name,
-            arguments: this.withSocketSessionAutolockKey(request.params.arguments, socketSessionId),
+            arguments: this.withSocketSessionAutolockKey(
+              request.params.arguments,
+              socketSessionId,
+              timeoutMs,
+            ),
           },
           undefined,
           requestOptions,
@@ -3859,10 +3864,15 @@ export class UnixSocketServer {
     }
   }
 
-  private withSocketSessionAutolockKey(args: unknown, socketSessionId: string): unknown {
+  private withSocketSessionAutolockKey(
+    args: unknown,
+    socketSessionId: string,
+    timeoutMs: number,
+  ): unknown {
     if (args === null || args === undefined) {
       return {
         __mcpSessionId: socketSessionId,
+        [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: timeoutMs,
       };
     }
 
@@ -3885,6 +3895,7 @@ export class UnixSocketServer {
     return {
       ...forwardedArgs,
       __mcpSessionId: socketSessionId,
+      [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: timeoutMs,
     };
   }
 

@@ -415,6 +415,73 @@ describe("ADB server reset session recovery", () => {
     }
   });
 
+  test("keeps recovery fenced until it observes the captured session release", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const manager = new FakeDeviceManager();
+    const device: BootedDevice = {
+      platform: "android",
+      name: "Pixel_8_API_35",
+      deviceId: "emulator-5554",
+    };
+    const image: DeviceInfo = {
+      name: device.name,
+      platform: "android",
+      isRunning: true,
+      source: "local",
+    };
+    let replacementSession: NonNullable<ReturnType<SessionManager["getSession"]>> | undefined;
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { onLoss: true, maxAttempts: 1 },
+      undefined,
+      undefined,
+      async (sessionId) => {
+        await sessionManager.releaseSession(sessionId);
+        await pool.releaseDevice(device.deviceId, sessionId);
+        await pool.bindOrReuseDeviceSession(
+          sessionId,
+          device.deviceId,
+          "android",
+          image,
+        );
+        replacementSession = sessionManager.getSession(sessionId) ?? undefined;
+        return 1;
+      },
+    );
+    manager.bootedDevices = [device];
+    await pool.addDevice(device, image);
+    await pool.bindOrReuseDeviceSession("session-active", device.deviceId, "android", image);
+    const captured = pool.getDevice(device.deviceId)!;
+
+    try {
+      await expect(
+        pool.recoverSessionBoundAndroidDeviceAfterLoss(device.deviceId, undefined, captured),
+      ).resolves.toBe("released");
+
+      expect(replacementSession).toBeDefined();
+      expect(sessionManager.getSession("session-active")).toBe(replacementSession);
+      expect(manager.startedDevices).toEqual([]);
+      expect(pool.isSessionRecoveryInFlight("session-active")).toBe(false);
+      expect(pool.getDevice(device.deviceId)).toMatchObject({
+        sessionId: "session-active",
+        status: "busy",
+      });
+    } finally {
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
   test("settles an incident when heartbeat release wins during reset preparation", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());

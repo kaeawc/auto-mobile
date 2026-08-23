@@ -350,6 +350,7 @@ describe("LaunchApp", () => {
 
   test("re-observes until the launch observation reports the launched Android app", async () => {
     fakeTimer.enableAutoAdvance();
+    const controller = new AbortController();
     const previousPackageName = "com.example.previous";
     const observations = [
       createObserveResult(previousPackageName),
@@ -360,12 +361,23 @@ describe("LaunchApp", () => {
     fakeAdb.setCommandResponse(`shell ps | grep ${packageName}`, { stdout: "0\n", stderr: "" });
     fakeObserveScreen.setObserveResult(() => observations.shift() ?? createObserveResult(packageName));
 
-    const result = await launchApp.execute(packageName, false, false);
+    const result = await launchApp.execute(
+      packageName,
+      false,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      controller.signal,
+    );
 
     expect(result.success).toBe(true);
     expect(result.observation?.activeWindow?.appId).toBe(packageName);
     expect(result.observation?.viewHierarchy?.packageName).toBe(packageName);
     expect(fakeObserveScreen.getExecuteCallCount()).toBeGreaterThan(1);
+    expect(
+      fakeObserveScreen.getExecuteOptions().every(options => options.signal === controller.signal),
+    ).toBe(true);
   });
 
   test("treats Android notification permission dialogs as valid launch observations", async () => {

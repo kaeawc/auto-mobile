@@ -10,10 +10,12 @@ import { createDefaultPlanExecutionLock, type PlanExecutionLock } from "./PlanEx
 import { SessionToolBinding } from "./SessionToolBinding";
 import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import { TerminalSessionError } from "../daemon/sessionManager";
+import { INTERNAL_MCP_REQUEST_TIMEOUT_PARAM } from "../daemon/constants";
 import {
   deviceLostErrorFromAbortSignal,
   deviceLossOutcomeFromError,
   enrichDeviceLossOutcome,
+  remainingDeviceLossIncidentWaitMs,
   type DeviceLossOutcome,
 } from "./deviceLossOutcome";
 
@@ -113,7 +115,10 @@ const INTERNAL_MCP_SESSION_PARAM = "__mcpSessionId";
 const INTERNAL_EXECUTION_ID_PARAM = "__executionId";
 const INTERNAL_EXECUTION_START_TIME_PARAM = "__executionStartTime";
 
-async function resolveDeviceLossOutcome(deviceLoss: DeviceLossOutcome): Promise<DeviceLossOutcome> {
+async function resolveDeviceLossOutcome(
+  deviceLoss: DeviceLossOutcome,
+  timeoutMs?: number,
+): Promise<DeviceLossOutcome> {
   const daemonState = DaemonState.getInstance();
   if (!deviceLoss.incidentId || !daemonState.isInitialized()) {
     return deviceLoss;
@@ -121,7 +126,7 @@ async function resolveDeviceLossOutcome(deviceLoss: DeviceLossOutcome): Promise<
   try {
     const incident = await daemonState
       .getDevicePool()
-      .waitForEmulatorLossIncident(deviceLoss.incidentId);
+      .waitForEmulatorLossIncident(deviceLoss.incidentId, timeoutMs);
     return enrichDeviceLossOutcome(deviceLoss, incident);
   } catch (incidentError) {
     logger.warn(
@@ -141,6 +146,16 @@ function extractInternalMcpSessionId(params: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+function extractInternalMcpRequestTimeoutMs(params: unknown): number | undefined {
+  if (!params || typeof params !== "object" || Array.isArray(params)) {
+    return undefined;
+  }
+  const value = (params as Record<string, unknown>)[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM];
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : undefined;
+}
+
 function stripInternalToolParams(params: unknown): unknown {
   if (!params || typeof params !== "object" || Array.isArray(params)) {
     return params;
@@ -158,6 +173,7 @@ function stripInternalToolParams(params: unknown): unknown {
   delete rest[INTERNAL_MCP_SESSION_PARAM];
   delete rest[INTERNAL_EXECUTION_ID_PARAM];
   delete rest[INTERNAL_EXECUTION_START_TIME_PARAM];
+  delete rest[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM];
   return rest;
 }
 
@@ -587,6 +603,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     );
 
     const requestMcpSessionId = extractInternalMcpSessionId(toolParams);
+    const requestTimeoutMs = extractInternalMcpRequestTimeoutMs(toolParams);
     const implicitAutolockMcpSessionId =
       requestMcpSessionId ?? (!daemonMode ? sessionId : undefined);
     const rawSessionUuid =
@@ -752,7 +769,12 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         // remaining work only enriches the response from that same recovery, so
         // stop tracking it first to avoid making recovery wait on itself.
         executionTracker.endExecution(execution.id);
-        const outcome = await resolveDeviceLossOutcome(deviceLoss);
+        const elapsedMs = Math.max(0, defaultTimer.now() - execution.startTime);
+        const incidentWaitTimeoutMs = remainingDeviceLossIncidentWaitMs(
+          requestTimeoutMs,
+          elapsedMs,
+        );
+        const outcome = await resolveDeviceLossOutcome(deviceLoss, incidentWaitTimeoutMs);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(outcome) }],
           isError: true,

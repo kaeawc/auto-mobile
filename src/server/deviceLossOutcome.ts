@@ -5,6 +5,7 @@ import {
 } from "../daemon/emulatorLossIncident";
 
 export { DeviceLostError, DEVICE_LOSS_OUTCOME_CODE };
+export const DEVICE_LOSS_RESPONSE_HEADROOM_MS = 1_000;
 const deviceLossAbortErrors = new WeakMap<AbortSignal, DeviceLostError>();
 
 export interface DeviceLossOutcome {
@@ -73,6 +74,15 @@ export function throwDeviceLostFromAbortSignal(signal?: AbortSignal): void {
   if (deviceLoss) {
     throw deviceLoss;
   }
+}
+
+export function remainingDeviceLossIncidentWaitMs(
+  requestTimeoutMs: number | undefined,
+  elapsedMs: number,
+): number | undefined {
+  return requestTimeoutMs === undefined
+    ? undefined
+    : Math.max(0, requestTimeoutMs - Math.max(0, elapsedMs) - DEVICE_LOSS_RESPONSE_HEADROOM_MS);
 }
 
 export function deviceLossOutcomeFromError(

@@ -11,7 +11,9 @@ import { defaultTimer } from "../../src/utils/SystemTimer";
 import {
   DAEMON_BOUND_SESSION_PARAM,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
+  INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
 } from "../../src/daemon/constants";
+import { DEFAULT_OBSERVE_MCP_TIMEOUT_MS } from "../../src/daemon/mcpRequestTimeout";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 import type { DeviceLabelMap, Session } from "../../src/daemon/sessionManager";
@@ -1690,7 +1692,10 @@ describe("UnixSocketServer MCP forward serialization", () => {
     expect(response.success).toBe(true);
     expect(forwardedCall).toBeDefined();
     const args = (forwardedCall as { arguments: Record<string, unknown> }).arguments;
-    expect(Object.keys(args)).toEqual(["__mcpSessionId"]);
+    expect(args).toEqual({
+      __mcpSessionId: expect.any(String),
+      [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: DEFAULT_OBSERVE_MCP_TIMEOUT_MS,
+    });
     expect(typeof args.__mcpSessionId).toBe("string");
   });
 

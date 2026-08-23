@@ -23,6 +23,9 @@ const uid = getUserId();
  */
 export const DEFAULT_DAEMON_PORT = 3000;
 
+/** Remaining outer request budget forwarded to the in-daemon MCP handler. */
+export const INTERNAL_MCP_REQUEST_TIMEOUT_PARAM = "__mcpRequestTimeoutMs";
+
 /**
  * Port range to try if default port is unavailable
  */

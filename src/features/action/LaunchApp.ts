@@ -911,7 +911,10 @@ export class LaunchApp extends BaseVisualChange {
         `[LaunchApp] Launch observation still reports previous app; re-observing for ${expectedPackageName}`,
       );
       await this.timer.sleep(pollIntervalMs);
-      latestObservation = await this.observeScreen.execute({ skipWaitForFresh: false });
+      latestObservation = await this.observeScreen.execute({
+        skipWaitForFresh: false,
+        signal,
+      });
       signal?.throwIfAborted();
       if (this.launchObservationMatchesPackage(latestObservation, expectedPackageName)) {
         result.observation = this.preserveLaunchObservationMetadata(

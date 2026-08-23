@@ -3934,9 +3934,20 @@ describe("DevicePool", () => {
         sessionId: "session-2",
         status: "busy",
       });
-      await expect(backingStore.list()).resolves.toMatchObject([
+      const recordedIncidents = await backingStore.list();
+      expect(recordedIncidents).toMatchObject([
         { recovery: { outcome: "not-attempted" } },
       ]);
+      const settlement = devicePool.waitForEmulatorLossIncident(recordedIncidents[0]!.id);
+      let settlementResolved = false;
+      void settlement.then(() => {
+        settlementResolved = true;
+      });
+      for (let attempt = 0; attempt < 10 && !settlementResolved; attempt++) {
+        await Promise.resolve();
+      }
+      expect(settlementResolved).toBe(true);
+      await settlement;
     });
 
     test("coalesces concurrent loss signals into one session-preserving recovery", async () => {

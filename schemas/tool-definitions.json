@@ -8030,14 +8030,19 @@
     }
   },
   {
-    "name": "resetIosSimulatorKeychain",
-    "description": "iOS simulator only: erase EVERY app's Keychain on the selected UDID; requires confirm:true.",
+    "name": "resetKeychain",
+    "description": "Reset an app's Keychain/Keystore state (scoped by appId). iOS Simulator resets the WHOLE device Keychain regardless of appId; physical iOS (#5188) and Android (#5190) not yet supported. Requires confirm:true.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
+        "appId": {
+          "description": "Required. The app whose Keychain/Keystore state to reset. NOTE: iOS Simulator only supports a device-wide reset and erases EVERY app's Keychain regardless of this value.",
+          "type": "string",
+          "minLength": 1
+        },
         "confirm": {
-          "description": "Required. Must be true to proceed. Erases the Keychain for EVERY app on the target simulator.",
+          "description": "Required. Must be true to proceed. On iOS Simulator this erases the Keychain for EVERY app on the target simulator, not just appId.",
           "type": "boolean"
         },
         "platform": {
@@ -8060,6 +8065,7 @@
         }
       },
       "required": [
+        "appId",
         "confirm"
       ],
       "additionalProperties": false

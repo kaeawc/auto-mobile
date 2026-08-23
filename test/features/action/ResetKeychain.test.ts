@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ResetIosSimulatorKeychain } from "../../../src/features/action/ResetIosSimulatorKeychain";
+import { ResetKeychain } from "../../../src/features/action/ResetKeychain";
 import { ActionableError, type BootedDevice } from "../../../src/models";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
 
@@ -21,19 +21,25 @@ const androidDevice: BootedDevice = {
   deviceId: "emulator-5554",
 };
 
-describe("ResetIosSimulatorKeychain", () => {
-  test("constructs `simctl keychain <udid> reset` when confirmed", async () => {
-    const simctl = new FakeSimCtlClient();
-    const action = new ResetIosSimulatorKeychain(simulatorDevice, simctl);
+const APP_ID = "com.example.app";
 
-    const result = await action.execute({ confirm: true });
+describe("ResetKeychain", () => {
+  test("iOS Simulator resets the WHOLE device and reports it exceeded the requested appId scope", async () => {
+    const simctl = new FakeSimCtlClient();
+    const action = new ResetKeychain(simulatorDevice, simctl);
+
+    const result = await action.execute({ appId: APP_ID, confirm: true });
 
     expect(result.success).toBe(true);
     expect(result.deviceId).toBe(simulatorDevice.deviceId);
     expect(result.platform).toBe("ios");
+    expect(result.requestedAppId).toBe(APP_ID);
+    // Device-wide reset over-scopes the per-app request: this must be reported honestly.
     expect(result.scope).toBe("all-apps");
-    // The result must not claim it clears only one app's data.
-    expect(result.message).toContain("Every app's Keychain data");
+    expect(result.exceededRequestedScope).toBe(true);
+    // The message must not claim it cleared only the requested app's data.
+    expect(result.message).toContain("EVERY app's Keychain data");
+    expect(result.message).toContain(APP_ID);
     expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([
       {
         args: ["keychain", "12345678-1234-1234-1234-123456789ABC", "reset"],
@@ -44,28 +50,28 @@ describe("ResetIosSimulatorKeychain", () => {
 
   test("refuses to run without explicit confirmation and issues no command", async () => {
     const simctl = new FakeSimCtlClient();
-    const action = new ResetIosSimulatorKeychain(simulatorDevice, simctl);
+    const action = new ResetKeychain(simulatorDevice, simctl);
 
-    await expect(action.execute({ confirm: false })).rejects.toBeInstanceOf(ActionableError);
-    await expect(action.execute({ confirm: false })).rejects.toThrow(/confirm: true/);
-    expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
-  });
-
-  test("rejects physical iOS devices before execution", async () => {
-    const simctl = new FakeSimCtlClient();
-    const action = new ResetIosSimulatorKeychain(physicalDevice, simctl);
-
-    await expect(action.execute({ confirm: true })).rejects.toThrow(/only supported on simulators/);
-    expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
-  });
-
-  test("rejects non-iOS devices before execution", async () => {
-    const simctl = new FakeSimCtlClient();
-    const action = new ResetIosSimulatorKeychain(androidDevice, simctl);
-
-    await expect(action.execute({ confirm: true })).rejects.toThrow(
-      /only supported on iOS simulators/,
+    await expect(action.execute({ appId: APP_ID, confirm: false })).rejects.toBeInstanceOf(
+      ActionableError,
     );
+    await expect(action.execute({ appId: APP_ID, confirm: false })).rejects.toThrow(/confirm: true/);
+    expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
+  });
+
+  test("rejects physical iOS devices before execution (scoped reset tracked in #5188)", async () => {
+    const simctl = new FakeSimCtlClient();
+    const action = new ResetKeychain(physicalDevice, simctl);
+
+    await expect(action.execute({ appId: APP_ID, confirm: true })).rejects.toThrow(/#5188/);
+    expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
+  });
+
+  test("rejects Android devices before execution (scoped Keystore reset tracked in #5190)", async () => {
+    const simctl = new FakeSimCtlClient();
+    const action = new ResetKeychain(androidDevice, simctl);
+
+    await expect(action.execute({ appId: APP_ID, confirm: true })).rejects.toThrow(/#5190/);
     expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
   });
 
@@ -75,9 +81,9 @@ describe("ResetIosSimulatorKeychain", () => {
       ["keychain", "12345678-1234-1234-1234-123456789ABC", "reset"],
       new Error("simctl is not available. Please install Xcode command line tools to continue."),
     );
-    const action = new ResetIosSimulatorKeychain(simulatorDevice, simctl);
+    const action = new ResetKeychain(simulatorDevice, simctl);
 
-    const promise = action.execute({ confirm: true });
+    const promise = action.execute({ appId: APP_ID, confirm: true });
     await expect(promise).rejects.toBeInstanceOf(ActionableError);
     await expect(promise).rejects.toThrow(/simctl is not available/);
   });
@@ -88,9 +94,9 @@ describe("ResetIosSimulatorKeychain", () => {
       ["keychain", "12345678-1234-1234-1234-123456789ABC", "reset"],
       new Error("Invalid device state"),
     );
-    const action = new ResetIosSimulatorKeychain(simulatorDevice, simctl);
+    const action = new ResetKeychain(simulatorDevice, simctl);
 
-    const promise = action.execute({ confirm: true });
+    const promise = action.execute({ appId: APP_ID, confirm: true });
     await expect(promise).rejects.toBeInstanceOf(ActionableError);
     await expect(promise).rejects.toThrow(/Failed to reset the iOS Simulator Keychain/);
   });

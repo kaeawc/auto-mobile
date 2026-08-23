@@ -6,7 +6,7 @@ import { TerminateApp } from "../features/action/TerminateApp";
 import { InstallApp } from "../features/action/InstallApp";
 import { UninstallApp } from "../features/action/UninstallApp";
 import { AppPermissions } from "../features/action/AppPermissions";
-import { ResetIosSimulatorKeychain } from "../features/action/ResetIosSimulatorKeychain";
+import { ResetKeychain } from "../features/action/ResetKeychain";
 import {
   createJSONToolResponse,
   DefaultToolResponseFormatter,
@@ -203,14 +203,23 @@ export const getAppPermissionsSchema = withAppIdAliases(
   ),
 );
 
-export const resetIosSimulatorKeychainSchema = addDeviceTargetingToSchema(
-  z.object({
-    confirm: z
-      .boolean()
-      .describe(
-        "Required. Must be true to proceed. Erases the Keychain for EVERY app on the target simulator.",
-      ),
-  }),
+export const resetKeychainSchema = withAppIdAliases(
+  addDeviceTargetingToSchema(
+    z.object({
+      appId: z
+        .string()
+        .trim()
+        .min(1)
+        .describe(
+          "Required. The app whose Keychain/Keystore state to reset. NOTE: iOS Simulator only supports a device-wide reset and erases EVERY app's Keychain regardless of this value.",
+        ),
+      confirm: z
+        .boolean()
+        .describe(
+          "Required. Must be true to proceed. On iOS Simulator this erases the Keychain for EVERY app on the target simulator, not just appId.",
+        ),
+    }),
+  ),
 );
 
 export const listAppsSchema = z.object({}).passthrough();
@@ -239,7 +248,7 @@ export type SetAppPermissionsArgs = z.infer<typeof setAppPermissionsSchema>;
 
 export type GetAppPermissionsArgs = z.infer<typeof getAppPermissionsSchema>;
 
-export type ResetIosSimulatorKeychainArgs = z.infer<typeof resetIosSimulatorKeychainSchema>;
+export type ResetKeychainArgs = z.infer<typeof resetKeychainSchema>;
 
 // Register tools
 export function registerAppTools() {
@@ -441,12 +450,9 @@ export function registerAppTools() {
     });
   };
 
-  const resetIosSimulatorKeychainHandler = async (
-    device: BootedDevice,
-    args: ResetIosSimulatorKeychainArgs,
-  ) => {
-    const action = new ResetIosSimulatorKeychain(device);
-    const result = await action.execute({ confirm: args.confirm });
+  const resetKeychainHandler = async (device: BootedDevice, args: ResetKeychainArgs) => {
+    const action = new ResetKeychain(device);
+    const result = await action.execute({ appId: args.appId, confirm: args.confirm });
 
     return createJSONToolResponse({ ...result });
   };
@@ -501,10 +507,10 @@ export function registerAppTools() {
   );
 
   ToolRegistry.registerDeviceAware(
-    "resetIosSimulatorKeychain",
-    "iOS simulator only: erase EVERY app's Keychain on the selected UDID; requires confirm:true.",
-    resetIosSimulatorKeychainSchema,
-    resetIosSimulatorKeychainHandler,
+    "resetKeychain",
+    "Reset an app's Keychain/Keystore state (scoped by appId). iOS Simulator resets the WHOLE device Keychain regardless of appId; physical iOS (#5188) and Android (#5190) not yet supported. Requires confirm:true.",
+    resetKeychainSchema,
+    resetKeychainHandler,
     { defaultEnabled: false },
   );
 

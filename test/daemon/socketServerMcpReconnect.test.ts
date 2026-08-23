@@ -52,6 +52,7 @@ function createFakeDaemonState(
   resolveAutolockSession: () => string | undefined,
   resolveDeviceLabelSession: () => string | undefined,
   resolvePrimaryDeviceOwnerSession: () => string | undefined,
+  resolvePrimarySessionGeneration: () => number,
 ) {
   const session = {
     sessionId: "session-a",
@@ -72,6 +73,10 @@ function createFakeDaemonState(
     sessionId: "session-b",
     assignedDevice: "emulator-5556",
   };
+  const replacementSession = {
+    ...session,
+    cacheData: {},
+  };
   const deviceSession = {
     deviceSessionUuid: "device-epoch-a",
     deviceId: "emulator-5554",
@@ -88,7 +93,9 @@ function createFakeDaemonState(
     getSessionManager: () => ({
       getSession: (sessionId: string) =>
         sessionId === session.sessionId && sessionIsValid()
-          ? session
+          ? resolvePrimarySessionGeneration() === 0
+            ? session
+            : replacementSession
           : sessionId === secondarySession.sessionId && secondarySessionIsValid()
             ? secondarySession
             : null,
@@ -211,6 +218,7 @@ describe("UnixSocketServer MCP session reconnect", () => {
   let autolockSessionUuid: string | undefined;
   let deviceLabelSessionUuid: string | undefined;
   let primaryDeviceOwnerSessionUuid: string | undefined;
+  let primarySessionGeneration: number;
 
   beforeEach(async () => {
     socketPath = join(tmpdir(), `mcp-rc-${randomUUID()}.sock`);
@@ -222,6 +230,7 @@ describe("UnixSocketServer MCP session reconnect", () => {
     autolockSessionUuid = undefined;
     deviceLabelSessionUuid = "session-b";
     primaryDeviceOwnerSessionUuid = "session-a";
+    primarySessionGeneration = 0;
     server = new UnixSocketServer(
       socketPath,
       "http://localhost:0/mcp",
@@ -233,6 +242,7 @@ describe("UnixSocketServer MCP session reconnect", () => {
         () => autolockSessionUuid,
         () => deviceLabelSessionUuid,
         () => primaryDeviceOwnerSessionUuid,
+        () => primarySessionGeneration,
       ),
       fakeTimer,
     );
@@ -743,6 +753,42 @@ describe("UnixSocketServer MCP session reconnect", () => {
     });
   });
 
+  test("does not recover across same-UUID session recreation", async () => {
+    let clientsCreated = 0;
+    let callsDispatched = 0;
+
+    server.mcpClientFactory = async () => {
+      clientsCreated++;
+      return createFakeMcpClient({
+        callTool: async () => {
+          callsDispatched++;
+          primarySessionGeneration = 1;
+          throw socketClosedError();
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: {
+        sessionUuid: "session-a",
+        deviceId: "emulator-5554",
+      },
+    });
+
+    expect(response.success).toBe(false);
+    expect(clientsCreated).toBe(1);
+    expect(callsDispatched).toBe(1);
+    expect(response.transportFailure).toMatchObject({
+      sessionUuid: "session-a",
+      routingSessionUuid: "session-a",
+      sessionValid: false,
+      deviceSessionValid: true,
+      reconnectAttempted: false,
+      replayAttempted: false,
+    });
+  });
+
   test("does not replay when only the captured device epoch becomes invalid", async () => {
     let clientsCreated = 0;
     let callsDispatched = 0;
@@ -854,6 +900,7 @@ describe("UnixSocketServer MCP session reconnect", () => {
     let closeCalls = 0;
     let replayedArguments: Record<string, unknown> | undefined;
     const clientBindings: Array<string | undefined> = [];
+    const clientProfiles: Array<string | undefined> = [];
     let signalReplayStarted = () => {};
     const replayStarted = new Promise<void>(resolve => {
       signalReplayStarted = resolve;
@@ -863,8 +910,9 @@ describe("UnixSocketServer MCP session reconnect", () => {
       finishReplay = () => resolve({ content: [{ type: "text", text: "observed" }] });
     });
 
-    server.mcpClientFactory = async boundSessionUuid => {
+    server.mcpClientFactory = async (boundSessionUuid, toolSelectionProfileUuid) => {
       clientBindings.push(boundSessionUuid);
+      clientProfiles.push(toolSelectionProfileUuid);
       const clientIndex = ++clientsCreated;
       return createFakeMcpClient({
         callTool: async (...args: unknown[]) => {
@@ -894,9 +942,10 @@ describe("UnixSocketServer MCP session reconnect", () => {
     await replayStarted;
 
     expect(clientsCreated).toBe(2);
-    expect(clientBindings).toEqual(["session-a", "session-a"]);
+    expect(clientBindings).toEqual(["session-a", "session-b"]);
+    expect(clientProfiles).toEqual([undefined, "session-a"]);
     expect(replayedArguments).toMatchObject({
-      sessionUuid: "session-a",
+      sessionUuid: "session-b",
       deviceId: "emulator-5556",
     });
     expect(replayedArguments).not.toHaveProperty("device");
@@ -915,8 +964,8 @@ describe("UnixSocketServer MCP session reconnect", () => {
     fakeTimer.advanceTime(5 * 60 * 1000);
     await Promise.resolve();
 
-    expect(closeCalls).toBe(1);
-    expect((server as any).mcpClients.size).toBe(1);
+    expect(closeCalls).toBe(2);
+    expect((server as any).mcpClients.size).toBe(0);
   });
 
   test("preserves an unresolved device label when replaying observe", async () => {

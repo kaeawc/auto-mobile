@@ -185,7 +185,9 @@ interface McpForwardRoute {
 
 interface DeviceControlTransportIdentity {
   sessionUuid?: string;
+  sessionIncarnation?: object;
   routingSessionUuid?: string;
+  routingSessionIncarnation?: object;
   deviceId?: string;
   deviceSessionUuid?: string;
   deviceLabelResolved?: boolean;
@@ -1384,12 +1386,19 @@ export class UnixSocketServer {
       args && typeof args === "object" && !Array.isArray(args)
         ? this.getSessionUuid(args as Record<string, unknown>) ?? context.route.sessionUuid
         : context.route.sessionUuid;
+    const sessionIncarnation = this.getDeviceControlSessionIncarnation(sessionUuid);
+    const routingSessionIncarnation =
+      routingSessionUuid === sessionUuid
+        ? sessionIncarnation
+        : this.getDeviceControlSessionIncarnation(routingSessionUuid);
     const deviceId = this.resolveDeviceControlDeviceId(args, sessionUuid);
     const deviceSessionUuid = this.resolveDeviceControlSessionUuid(deviceId);
     const deviceLabelResolved = this.getDeviceControlLabelResolution(args);
     return {
       sessionUuid,
+      sessionIncarnation,
       routingSessionUuid,
+      routingSessionIncarnation,
       deviceId,
       deviceSessionUuid,
       deviceLabelResolved,
@@ -1458,6 +1467,20 @@ export class UnixSocketServer {
     }
   }
 
+  private getDeviceControlSessionIncarnation(
+    sessionUuid: string | undefined,
+  ): object | undefined {
+    if (!sessionUuid || !this.daemonState.isInitialized()) {
+      return undefined;
+    }
+    try {
+      return this.daemonState.getSessionManager().getSession(sessionUuid) ?? undefined;
+    } catch (error) {
+      logger.debug(`Unable to capture device-control session ${sessionUuid}: ${error}`);
+      return undefined;
+    }
+  }
+
   private resolveDeviceControlDeviceId(
     args: unknown,
     sessionUuid?: string,
@@ -1520,7 +1543,11 @@ export class UnixSocketServer {
     }
     try {
       const session = this.daemonState.getSessionManager().getSession(identity.sessionUuid);
-      return Boolean(session && (!identity.deviceId || session.assignedDevice === identity.deviceId));
+      return Boolean(
+        session
+        && session === identity.sessionIncarnation
+        && (!identity.deviceId || session.assignedDevice === identity.deviceId),
+      );
     } catch (error) {
       logger.debug(`Unable to validate device-control target owner: ${error}`);
       return false;
@@ -1537,10 +1564,12 @@ export class UnixSocketServer {
       return true;
     }
     try {
+      const session = this.daemonState
+        .getSessionManager()
+        .getSession(identity.routingSessionUuid);
       return Boolean(
-        this.daemonState
-          .getSessionManager()
-          .getSession(identity.routingSessionUuid),
+        session
+        && session === identity.routingSessionIncarnation,
       );
     } catch (error) {
       logger.debug(`Unable to validate device-control routing session: ${error}`);
@@ -1708,8 +1737,13 @@ export class UnixSocketServer {
     const refreshedIdentity = this.getDeviceControlTransportIdentity(context);
     return {
       sessionUuid: identity.sessionUuid ?? refreshedIdentity.sessionUuid,
+      sessionIncarnation:
+        identity.sessionIncarnation ?? refreshedIdentity.sessionIncarnation,
       routingSessionUuid:
         identity.routingSessionUuid ?? refreshedIdentity.routingSessionUuid,
+      routingSessionIncarnation:
+        identity.routingSessionIncarnation
+        ?? refreshedIdentity.routingSessionIncarnation,
       deviceId: identity.deviceId ?? refreshedIdentity.deviceId,
       deviceSessionUuid:
         identity.deviceSessionUuid ?? refreshedIdentity.deviceSessionUuid,
@@ -1750,9 +1784,10 @@ export class UnixSocketServer {
       const pinnedArguments: Record<string, unknown> = {
         ...originalArguments,
         deviceId: identity.deviceId,
+        ...(identity.sessionUuid ? { sessionUuid: identity.sessionUuid } : {}),
       };
-      // Preserve the base session's authorization scope while replacing the
-      // mutable label selector with the captured physical target.
+      // Preserve the captured execution session while replacing the mutable
+      // label selector with the captured physical target.
       delete pinnedArguments.device;
       return {
         ...request,
@@ -1807,10 +1842,22 @@ export class UnixSocketServer {
     replayAfterResponse: boolean,
   ): McpForwardRoute {
     if (
+      replayAfterResponse
+      && input.identity.deviceLabelResolved === true
+      && input.identity.sessionUuid
+    ) {
+      return this.sessionScopedForwardRoute(
+        input.socketSessionId,
+        input.identity.sessionUuid,
+        input.route.executionKey,
+        input.identity.routingSessionUuid
+          ?? input.route.toolSelectionProfileUuid,
+      );
+    }
+    if (
       !replayAfterResponse
       || !input.identity.sessionUuid
       || input.route.sessionUuid === input.identity.sessionUuid
-      || input.identity.deviceLabelResolved === true
       || this.hasStableExplicitDeviceControlTarget(input.request, input.identity)
     ) {
       return input.route;

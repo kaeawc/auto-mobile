@@ -15,6 +15,7 @@ import dev.jasonpearson.automobile.ctrlproxy.models.TraversalOrderResult
 import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import dev.jasonpearson.automobile.ctrlproxy.models.WindowInfo
+import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
 
@@ -1039,8 +1040,11 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
           if (start < 0 || end <= start || end > text.length) return@mapNotNull null
           val visibleText = text.subSequence(start, end).toString()
           if (visibleText.isBlank()) return@mapNotNull null
-          val occurrence = occurrences[visibleText] ?: 0
-          occurrences[visibleText] = occurrence + 1
+          // Activation matches span text case-insensitively, so discovery must
+          // use the same equivalence relation for occurrence numbering.
+          val occurrenceKey = visibleText.lowercase(Locale.ROOT)
+          val occurrence = occurrences[occurrenceKey] ?: 0
+          occurrences[occurrenceKey] = occurrence + 1
           SemanticLink(visibleText, occurrence, start, end)
         }
     return links.ifEmpty { null }

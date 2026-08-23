@@ -174,7 +174,7 @@ class ViewHierarchyExtractorTest {
 
   @Test
   fun `semantic links preserve visible text ranges and per-text occurrences`() {
-    val text = SpannableString("Read Terms, Privacy, and Terms")
+    val text = SpannableString("Read Terms, Privacy, and terms")
     val firstTerms =
       object : ClickableSpan() {
         override fun onClick(widget: View) = Unit
@@ -195,7 +195,7 @@ class ViewHierarchyExtractorTest {
       listOf(
         SemanticLink("Terms", 0, 5, 10),
         SemanticLink("Privacy", 0, 12, 19),
-        SemanticLink("Terms", 1, 25, 30),
+        SemanticLink("terms", 1, 25, 30),
       ),
       extractor.semanticLinksFromText(text, apiLevel = 26),
     )

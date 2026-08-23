@@ -547,6 +547,25 @@ describe("UnixSocketServer MCP session reconnect", () => {
     expect((server as any).mcpClients.size).toBe(1);
   });
 
+  test("does not evict a replacement client while resetting a failed route", async () => {
+    let replacementCloseCalls = 0;
+    const failedClient = createFakeMcpClient();
+    const replacementClient = createFakeMcpClient({
+      close: async () => {
+        replacementCloseCalls++;
+      },
+    });
+    const clientKey = "session:replacement-race";
+    const internals = server as any;
+    internals.mcpClients.set(clientKey, replacementClient);
+
+    const reset = await internals.resetMcpClientIfCurrent(clientKey, failedClient, "detach");
+
+    expect(reset).toBe(false);
+    expect(internals.mcpClients.get(clientKey)).toBe(replacementClient);
+    expect(replacementCloseCalls).toBe(0);
+  });
+
   test("does not replay launchApp after an ambiguous response closure", async () => {
     let clientsCreated = 0;
     let callsDispatched = 0;
@@ -847,6 +866,38 @@ describe("UnixSocketServer MCP session reconnect", () => {
 
     expect(closeCalls).toBe(2);
     expect((server as any).mcpClients.size).toBe(0);
+  });
+
+  test("preserves an unresolved device label when replaying observe", async () => {
+    let clientsCreated = 0;
+    let replayedArguments: Record<string, unknown> | undefined;
+    deviceLabelSessionUuid = undefined;
+
+    server.mcpClientFactory = async () => {
+      const clientIndex = ++clientsCreated;
+      return createFakeMcpClient({
+        callTool: async (...args: unknown[]) => {
+          if (clientIndex === 1) {
+            throw socketClosedError();
+          }
+          const [toolCall] = args as [{ arguments: Record<string, unknown> }];
+          replayedArguments = toolCall.arguments;
+          return { content: [{ type: "text", text: "observed" }] };
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: { sessionUuid: "session-a", device: "unknown" },
+    });
+
+    expect(response.success).toBe(true);
+    expect(clientsCreated).toBe(2);
+    expect(replayedArguments).toMatchObject({
+      sessionUuid: "session-a",
+      device: "unknown",
+    });
   });
 
   test("recovers observe for an implicit autolock session", async () => {

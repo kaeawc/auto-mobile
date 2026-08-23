@@ -187,6 +187,7 @@ interface DeviceControlTransportIdentity {
   sessionUuid?: string;
   deviceId?: string;
   deviceSessionUuid?: string;
+  deviceLabelResolved?: boolean;
 }
 
 interface McpForwardRecoveryContext {
@@ -200,6 +201,7 @@ interface McpForwardRecoveryContext {
 interface DeviceControlTransportRecoveryContext extends McpForwardRecoveryContext {
   phase: DeviceControlTransportPhase;
   identity: DeviceControlTransportIdentity;
+  failedClient?: Client;
 }
 
 const isNonBlankSessionUuid = (value: unknown): value is string =>
@@ -1280,7 +1282,7 @@ export class UnixSocketServer {
     } catch (error) {
       const message = errorMessage(error);
       if (message.includes("Session not found")) {
-        return this.retryExpiredMcpSession(context, identity);
+        return this.retryExpiredMcpSession(context, identity, mcpClient);
       }
       if (this.isDeviceControlSocketClosure(context.request, error)) {
         const recoveryIdentity = this.hasEstablishedDeviceControlTransportIdentity(identity)
@@ -1290,6 +1292,7 @@ export class UnixSocketServer {
           ...context,
           phase: "response",
           identity: recoveryIdentity,
+          failedClient: mcpClient,
         });
       }
       throw error;
@@ -1299,9 +1302,10 @@ export class UnixSocketServer {
   private async retryExpiredMcpSession(
     context: McpForwardRecoveryContext,
     identity: DeviceControlTransportIdentity,
+    failedClient: Client,
   ): Promise<unknown> {
     logger.warn("MCP client session expired, reconnecting and retrying...");
-    await this.resetMcpClient(context.route.clientKey);
+    await this.resetMcpClientIfCurrent(context.route.clientKey, failedClient);
     let freshClient: Client;
     try {
       freshClient = await this.getMcpClient(
@@ -1346,7 +1350,7 @@ export class UnixSocketServer {
       if (!this.isDeviceControlSocketClosure(context.request, error)) {
         throw error;
       }
-      await this.resetMcpClient(context.route.clientKey, "detach");
+      await this.resetMcpClientIfCurrent(context.route.clientKey, freshClient, "detach");
       const failureIdentity = this.getDeviceControlRecoveryFailureIdentity(
         context,
         identity,
@@ -1376,7 +1380,34 @@ export class UnixSocketServer {
     );
     const deviceId = this.resolveDeviceControlDeviceId(args, sessionUuid);
     const deviceSessionUuid = this.resolveDeviceControlSessionUuid(deviceId);
-    return { sessionUuid, deviceId, deviceSessionUuid };
+    const deviceLabelResolved = this.getDeviceControlLabelResolution(args);
+    return { sessionUuid, deviceId, deviceSessionUuid, deviceLabelResolved };
+  }
+
+  private getDeviceControlLabelResolution(args: unknown): boolean | undefined {
+    if (!args || typeof args !== "object" || Array.isArray(args)) {
+      return undefined;
+    }
+    const record = args as Record<string, unknown>;
+    const baseSessionUuid = this.getSessionUuid(record);
+    const deviceLabel = record.device;
+    if (typeof deviceLabel !== "string" || deviceLabel.length === 0) {
+      return undefined;
+    }
+    if (!baseSessionUuid || !this.daemonState.isInitialized()) {
+      return false;
+    }
+    try {
+      const mappedSession = this.daemonState
+        .getSessionManager()
+        .getDeviceLabels(baseSessionUuid)?.[deviceLabel];
+      return typeof mappedSession === "string" && mappedSession.length > 0;
+    } catch (error) {
+      logger.debug(
+        `Unable to verify device label ${deviceLabel} for session ${baseSessionUuid}: ${error}`,
+      );
+      return false;
+    }
   }
 
   private resolveDeviceControlIdentitySession(
@@ -1614,6 +1645,7 @@ export class UnixSocketServer {
     if (
       phase !== "response"
       || !identity.deviceId
+      || identity.deviceLabelResolved === false
       || !args
       || typeof args !== "object"
       || Array.isArray(args)
@@ -1697,7 +1729,13 @@ export class UnixSocketServer {
   private async recoverDeviceControlTransport(
     input: DeviceControlTransportRecoveryContext,
   ): Promise<unknown> {
-    await this.resetMcpClient(input.route.clientKey, "detach");
+    if (input.failedClient) {
+      await this.resetMcpClientIfCurrent(
+        input.route.clientKey,
+        input.failedClient,
+        "detach",
+      );
+    }
     if (!this.isDeviceControlRecoveryIdentityValid(input.identity, input.phase)) {
       throw this.deviceControlTransportError({
         request: input.request,
@@ -1743,7 +1781,7 @@ export class UnixSocketServer {
       });
     }
     if (!this.isDeviceControlRecoveryIdentityValid(input.identity, input.phase)) {
-      await this.resetMcpClient(recoveryRoute.clientKey, "detach");
+      await this.resetMcpClientIfCurrent(recoveryRoute.clientKey, freshClient, "detach");
       throw this.deviceControlTransportError({
         request: input.request,
         identity: input.identity,
@@ -1777,7 +1815,7 @@ export class UnixSocketServer {
         input.socketSessionId,
       );
       if (!this.isDeviceControlReplayResultIdentityValid(input.identity)) {
-        await this.resetMcpClient(recoveryRoute.clientKey, "detach");
+        await this.resetMcpClientIfCurrent(recoveryRoute.clientKey, freshClient, "detach");
         throw this.deviceControlTransportError({
           request: input.request,
           identity: input.identity,
@@ -1792,7 +1830,7 @@ export class UnixSocketServer {
       if (!isUnexpectedSocketClosure(error)) {
         throw error;
       }
-      await this.resetMcpClient(recoveryRoute.clientKey, "detach");
+      await this.resetMcpClientIfCurrent(recoveryRoute.clientKey, freshClient, "detach");
       const failureIdentity = this.getDeviceControlRecoveryFailureIdentity(
         input,
         input.identity,
@@ -3726,6 +3764,18 @@ export class UnixSocketServer {
     if (closeMode === "wait") {
       await close;
     }
+  }
+
+  private async resetMcpClientIfCurrent(
+    key: string,
+    expectedClient: Client,
+    closeMode: "wait" | "detach" = "wait",
+  ): Promise<boolean> {
+    if (this.mcpClients.get(key) !== expectedClient) {
+      return false;
+    }
+    await this.resetMcpClient(key, closeMode);
+    return true;
   }
 
   private scheduleMcpClientIdleClose(key: string): void {

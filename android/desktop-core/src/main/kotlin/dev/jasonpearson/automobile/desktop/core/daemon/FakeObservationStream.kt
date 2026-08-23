@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
+import dev.jasonpearson.automobile.desktop.core.connection.isConnected
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -45,8 +46,6 @@ class FakeObservationStream(private val failConnect: Boolean = false) : Observat
   private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected())
   override val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
-  private var connected = false
-
   var connectCallCount = 0
     private set
 
@@ -72,11 +71,9 @@ class FakeObservationStream(private val failConnect: Boolean = false) : Observat
     connectCallCount++
     lastConnectedDeviceId = deviceId
     if (failConnect) {
-      connected = false
       _connectionState.value = ConnectionState.Disconnected("Socket not found")
       return
     }
-    connected = true
     _connectionState.value = ConnectionState.Connected()
   }
 
@@ -87,11 +84,12 @@ class FakeObservationStream(private val failConnect: Boolean = false) : Observat
 
   override fun disconnect() {
     disconnectCallCount++
-    connected = false
     _connectionState.value = ConnectionState.Disconnected()
   }
 
-  override fun isConnected(): Boolean = connected
+  // Derive from the published state (like the real client) so a mid-session drop injected via
+  // [emitConnectionState] is reflected here and by the [requestNavigationGraph] guard.
+  override fun isConnected(): Boolean = _connectionState.value.isConnected
 
   override fun dispose() {
     disconnect()
@@ -108,9 +106,10 @@ class FakeObservationStream(private val failConnect: Boolean = false) : Observat
   }
 
   override fun requestNavigationGraph(appId: String?) {
-    // The real ObservationStreamClient no-ops unless connected; guard the fake likewise so a
+    // The real ObservationStreamClient no-ops unless connected; gate on the published state (not a
+    // separate flag) so a mid-session drop injected via emitConnectionState is honored too, and a
     // disconnected test cannot get a false positive that a graph was requested.
-    if (!connected) return
+    if (!_connectionState.value.isConnected) return
     navigationRequestCount++
     lastNavigationAppId = appId
   }

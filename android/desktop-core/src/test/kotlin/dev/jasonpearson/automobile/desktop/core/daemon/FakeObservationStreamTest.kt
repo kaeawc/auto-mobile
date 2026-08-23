@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
+import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -38,6 +39,21 @@ class FakeObservationStreamTest {
     // Mirrors the real ObservationStreamClient, which returns early unless connected. Without this
     // guard a disconnected test could get a false positive that a graph was requested.
     val stream = FakeObservationStream()
+    assertFalse(stream.isConnected())
+
+    stream.requestNavigationGraph("com.example.app")
+
+    assertEquals(0, stream.navigationRequestCount)
+    assertNull(stream.lastNavigationAppId)
+  }
+
+  @Test
+  fun `requestNavigationGraph is a no-op after a mid-session drop`() {
+    // A drop injected via emitConnectionState must suppress requests just like the real client,
+    // which gates on the published connection state (issue #4810 / Codex review of PR #5520).
+    val stream = FakeObservationStream()
+    stream.connect("dev-1")
+    stream.emitConnectionState(ConnectionState.Disconnected("Stream ended"))
     assertFalse(stream.isConnected())
 
     stream.requestNavigationGraph("com.example.app")

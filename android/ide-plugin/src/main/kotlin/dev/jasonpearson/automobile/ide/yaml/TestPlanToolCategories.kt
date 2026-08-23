@@ -31,6 +31,8 @@ object TestPlanToolCategories {
             "killDevice",
             "setActiveDevice",
             "listDeviceImages",
+            "provisionDevice",
+            "deleteDevice",
           ),
         "Device configuration" to setOf("rotate", "shake", "systemTray", "changeLocalization"),
         "Plan execution" to setOf("executePlan", "criticalSection"),

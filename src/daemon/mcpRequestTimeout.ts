@@ -1,5 +1,6 @@
 import type { DaemonRequest } from "./types";
 import {
+  DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS,
   DEFAULT_DEVICE_READY_TIMEOUT_MS,
   DEFAULT_PROVISION_DEVICE_TIMEOUT_MS,
   MAX_DEVICE_READY_TIMEOUT_MS,
@@ -34,6 +35,9 @@ export const MIN_START_DEVICE_MCP_TIMEOUT_MS = 180_000;
  */
 export const MIN_PROVISION_DEVICE_MCP_TIMEOUT_MS =
   DEFAULT_PROVISION_DEVICE_TIMEOUT_MS + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS;
+
+export const MIN_TEARDOWN_DEVICE_MCP_TIMEOUT_MS =
+  DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS;
 
 /**
  * Floor for `launchApp` — an iOS cold launch waits for CtrlProxy to deliver the
@@ -103,6 +107,8 @@ function resolveToolTimeoutFloorMs(toolName: string | undefined): number | undef
       return MIN_START_DEVICE_MCP_TIMEOUT_MS;
     case "provisionDevice":
       return MIN_PROVISION_DEVICE_MCP_TIMEOUT_MS;
+    case "deleteDevice":
+      return MIN_TEARDOWN_DEVICE_MCP_TIMEOUT_MS;
     case "launchApp":
       return MIN_LAUNCH_APP_MCP_TIMEOUT_MS;
     case "uninstallApp":
@@ -176,6 +182,13 @@ function resolveDevicePreparationToolBudgetMs(request: DaemonRequest): number | 
       const timeoutMs =
         positiveFiniteNumber(argumentsRecord.timeoutMs) ??
         DEFAULT_PROVISION_DEVICE_TIMEOUT_MS;
+      return Math.min(timeoutMs, MAX_DEVICE_READY_TIMEOUT_MS) +
+        START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS;
+    }
+    case "deleteDevice": {
+      const timeoutMs =
+        positiveFiniteNumber(argumentsRecord.timeoutMs) ??
+        DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS;
       return Math.min(timeoutMs, MAX_DEVICE_READY_TIMEOUT_MS) +
         START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS;
     }

@@ -46,6 +46,7 @@ export interface PlanSerializer {
 const OMITTED_TOOLS = new Set([
   "startDevice",
   "killDevice",
+  "deleteDevice",
   "listDeviceImages",
   "checkRunningDevices",
   "listDevices",

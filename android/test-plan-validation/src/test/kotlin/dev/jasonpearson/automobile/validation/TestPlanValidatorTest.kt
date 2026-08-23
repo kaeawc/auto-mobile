@@ -553,6 +553,8 @@ class TestPlanValidatorTest {
             appId: com.example.app
             permissions:
               - camera
+        - tool: provisionDevice
+        - tool: deleteDevice
       """
         .trimIndent()
 

@@ -551,6 +551,17 @@ export interface ProvisionDeviceOperationsTable {
   updated_at: Generated<string>;
 }
 
+export interface DeviceTeardownOperationsTable {
+  operation_id: string;
+  request_fingerprint: string;
+  owner_token: string;
+  status: string;
+  result_json: string | null;
+  expires_at_ms: number;
+  created_at: Generated<string>;
+  updated_at: Generated<string>;
+}
+
 // Feature flags table
 export interface FeatureFlagsTable {
   key: string;
@@ -782,6 +793,7 @@ export interface Database {
   device_locks: DeviceLocksTable;
   emulator_loss_incidents: EmulatorLossIncidentsTable;
   provision_device_operations: ProvisionDeviceOperationsTable;
+  device_teardown_operations: DeviceTeardownOperationsTable;
 }
 
 // Convenience types for each table

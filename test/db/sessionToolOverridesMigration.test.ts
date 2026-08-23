@@ -3,6 +3,7 @@ import { Database as BunDatabase } from "bun:sqlite";
 import { Kysely, sql } from "kysely";
 import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
 import { up } from "../../src/db/migrations/2026_08_22_001_session_tool_overrides";
+import { up as defaultExistingDeleteDeviceDisabled } from "../../src/db/migrations/2026_08_23_001_default_existing_delete_device_disabled";
 
 describe("session tool overrides migration", () => {
   let db: Kysely<unknown>;
@@ -40,6 +41,12 @@ describe("session tool overrides migration", () => {
           enabled: 0,
           updated_at: "2026-08-02T00:00:00.000Z",
         },
+        {
+          session_uuid: "session-1",
+          capability: "device-control",
+          enabled: 1,
+          updated_at: "2026-08-03T00:00:00.000Z",
+        },
       ])
       .execute();
 
@@ -57,6 +64,7 @@ describe("session tool overrides migration", () => {
       { tool_name: "imeAction", enabled: 0 },
       { tool_name: "openLink", enabled: 0 },
       { tool_name: "pinchOn", enabled: 0 },
+      { tool_name: "provisionDevice", enabled: 1 },
       { tool_name: "rotate", enabled: 0 },
       { tool_name: "selectAllText", enabled: 1 },
       { tool_name: "shake", enabled: 0 },
@@ -67,5 +75,39 @@ describe("session tool overrides migration", () => {
       where type = 'table' and name = 'session_tool_capabilities'
     `.execute(db);
     expect(oldTable.rows).toEqual([]);
+  });
+
+  test("keeps deleteDevice disabled for existing device-control profiles", async () => {
+    await db
+      .insertInto("session_tool_capabilities" as any)
+      .values({
+        session_uuid: "session-1",
+        capability: "device-control",
+        enabled: 1,
+        updated_at: "2026-08-03T00:00:00.000Z",
+      })
+      .execute();
+
+    await up(db);
+    await defaultExistingDeleteDeviceDisabled(db);
+
+    const rows = await db
+      .selectFrom("session_tool_overrides" as any)
+      .select(["tool_name", "enabled", "updated_at"])
+      .where("session_uuid", "=", "session-1")
+      .orderBy("tool_name")
+      .execute();
+    expect(rows).toEqual([
+      {
+        tool_name: "deleteDevice",
+        enabled: 0,
+        updated_at: "2026-08-03T00:00:00.000Z",
+      },
+      {
+        tool_name: "provisionDevice",
+        enabled: 1,
+        updated_at: "2026-08-03T00:00:00.000Z",
+      },
+    ]);
   });
 });

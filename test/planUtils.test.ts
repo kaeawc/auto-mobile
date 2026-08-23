@@ -71,12 +71,18 @@ describe("Plan Utils", () => {
       expect(result.planContent).toContain("tapOnText");
     });
 
-    test("should omit emulator tools from plans", async () => {
+    test("should omit device lifecycle tools from plans", async () => {
       const logEntries = [
         {
           timestamp: "2023-01-01T10:00:00.000Z",
           tool: "startDevice",
           params: { avdName: "test" },
+          result: { success: true }
+        },
+        {
+          timestamp: "2023-01-01T10:00:00.500Z",
+          tool: "deleteDevice",
+          params: { operationId: "35e6f783-b794-47b8-b8a1-8619677820f0" },
           result: { success: true }
         },
         {
@@ -97,6 +103,7 @@ describe("Plan Utils", () => {
       expect(result.success).toBe(true);
       expect(result.stepCount).toBe(1); // Only launchApp
       expect(result.planContent).not.toContain("startDevice");
+      expect(result.planContent).not.toContain("deleteDevice");
       expect(result.planContent).toContain("launchApp");
     });
 

@@ -162,6 +162,15 @@ const tapOnSelectorSchema = z
     z.object({ text: z.string().min(1).describe("Text, content-desc, or placeholder") }).strict(),
     z
       .object({
+        accessibilityLink: z
+          .string()
+          .trim()
+          .min(1)
+          .describe("Exact visible text of a semantic accessibility link"),
+      })
+      .strict(),
+    z
+      .object({
         textAny: z
           .array(z.string().min(1))
           .min(1)
@@ -169,7 +178,9 @@ const tapOnSelectorSchema = z
       })
       .strict(),
   ])
-  .describe("Element to tap: elementId, Android testTag, text, or ordered text variants");
+  .describe(
+    "Element to tap: elementId, Android testTag, text, semantic accessibility link, or ordered text variants",
+  );
 
 export const tapOnSchema = withJsonSchemaOverride(
   addDeviceTargetingToSchema(
@@ -199,6 +210,25 @@ export const tapOnSchema = withJsonSchemaOverride(
               "selectionStrategy — for repeated controls with no unique text. Out of range → no match.",
           ),
         duration: z.number().optional().describe("Long press duration (ms)"),
+        subtext: z
+          .object({
+            text: z
+              .string()
+              .trim()
+              .min(1)
+              .describe("Exact visible text of a semantic link inside the selected element"),
+            occurrence: z
+              .number()
+              .int()
+              .nonnegative()
+              .optional()
+              .describe("Zero-based occurrence among exact semantic-link matches (default: 0)"),
+          })
+          .strict()
+          .optional()
+          .describe(
+            "Semantic link inside the selected element; fails if the platform does not expose that link",
+          ),
         searchUntil: z
           .object({
             duration: z
@@ -222,8 +252,91 @@ export const tapOnSchema = withJsonSchemaOverride(
         platform: platformSchema,
       })
       .strict(),
-  ),
-  (js) => compactExclusiveSelectorProperties(js, ["selector", "container"]),
+  ).superRefine((value, ctx) => {
+    const isDirectLink = "accessibilityLink" in value.selector;
+    if (!isDirectLink && !value.subtext) {
+      return;
+    }
+    const addIssue = (invalid: unknown, message: string, path: (string | number)[]) => {
+      if (!invalid) {
+        return;
+      }
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message,
+        path,
+      });
+    };
+    addIssue(
+      isDirectLink && value.subtext,
+      "accessibilityLink and subtext cannot be used together",
+      ["subtext"],
+    );
+    addIssue(value.action !== "tap", "semantic link activation supports only the tap action", [
+      "action",
+    ]);
+    addIssue(value.sibling, "semantic link activation cannot use sibling", ["sibling"]);
+    addIssue(
+      value.retryIfNoChange || value.ensureTap,
+      "semantic link activation cannot retry an acknowledged link activation",
+      value.retryIfNoChange ? ["retryIfNoChange"] : ["ensureTap"],
+    );
+    addIssue(value.searchUntil, "semantic link activation cannot use searchUntil", ["searchUntil"]);
+    addIssue(
+      value.subtext && value.index !== undefined,
+      "owner-scoped semantic link activation cannot use index; use a unique owner selector",
+      ["index"],
+    );
+    addIssue(
+      value.subtext && value.selectionStrategy === "random",
+      "owner-scoped semantic link activation cannot use random selection; use a unique owner selector",
+      ["selectionStrategy"],
+    );
+  }),
+  (js) => {
+    compactExclusiveSelectorProperties(js, ["selector", "container"]);
+    js.if = {
+      anyOf: [
+        { required: ["subtext"] },
+        {
+          properties: {
+            selector: { required: ["accessibilityLink"] },
+          },
+        },
+      ],
+    };
+    js.then = {
+      properties: {
+        action: { const: "tap" },
+        sibling: { not: { const: true } },
+        retryIfNoChange: { not: { const: true } },
+        ensureTap: { not: { const: true } },
+        searchUntil: { not: {} },
+      },
+      allOf: [
+        {
+          not: {
+            required: ["subtext"],
+            properties: {
+              selector: { required: ["accessibilityLink"] },
+            },
+          },
+        },
+        {
+          if: { required: ["subtext"] },
+          then: { not: { required: ["index"] } },
+        },
+        {
+          if: { required: ["subtext"] },
+          then: {
+            properties: {
+              selectionStrategy: { not: { const: "random" } },
+            },
+          },
+        },
+      ],
+    };
+  },
 );
 
 export const tapAnySchema = withJsonSchemaOverride(
@@ -672,6 +785,7 @@ export function registerInteractionTools() {
         textAny: args.selector.textAny,
         elementId: args.selector.elementId,
         testTag: args.selector.testTag,
+        accessibilityLink: args.selector.accessibilityLink,
         sibling: args.sibling,
         selectionStrategy: args.selectionStrategy,
         index: args.index,
@@ -681,6 +795,7 @@ export function registerInteractionTools() {
         preTapStability: args.preTapStability,
         retryIfNoChange: args.retryIfNoChange,
         ensureTap: args.ensureTap,
+        subtext: args.subtext,
       },
       progress,
     );

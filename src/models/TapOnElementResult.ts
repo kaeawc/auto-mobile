@@ -25,6 +25,11 @@ export interface TapOnSelectedElement {
 export interface TapOnElementResult extends BaseActionResult {
   action: string;
   element: Element;
+  /** Semantic link confirmed by the native runner. */
+  activatedSubtext?: {
+    text: string;
+    occurrence: number;
+  };
   selectedElement?: TapOnSelectedElement;
   debug?: ToolDebugInfo;
   pressRecognized?: boolean;

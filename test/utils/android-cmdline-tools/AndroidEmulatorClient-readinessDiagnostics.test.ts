@@ -192,6 +192,43 @@ describe("Android emulator readiness diagnostics", () => {
     await expect(readiness).rejects.toThrow("caller cancelled readiness");
   });
 
+  test("stops an absent-target poll when cancelled between iterations", async () => {
+    const timer = new FakeTimer();
+    const adb = new ReadinessAdbExecutor();
+    const controller = new AbortController();
+    const readiness = clientWith(adb, timer).waitForEmulatorReady(
+      "Pixel_9_Pro",
+      5_000,
+      null,
+      "emulator-5554",
+      controller.signal,
+    );
+    let rejection: Error | undefined;
+    const observedReadiness = readiness.catch((error: unknown) => {
+      rejection = error instanceof Error ? error : new Error(String(error));
+    });
+
+    for (let turn = 0; turn < 10 && timer.getPendingTimeoutCount() < 2; turn += 1) {
+      await Promise.resolve();
+    }
+    const waitingBetweenIterations = timer.getPendingTimeoutCount() === 2;
+    controller.abort(new Error("caller cancelled absent-target poll"));
+    for (let turn = 0; turn < 10 && !rejection; turn += 1) {
+      await Promise.resolve();
+    }
+    const settledWithoutTimerAdvance = rejection !== undefined;
+    if (!settledWithoutTimerAdvance) {
+      timer.resolveAll();
+      timer.advanceTime(5_000);
+      await observedReadiness;
+    }
+
+    expect(waitingBetweenIterations).toBe(true);
+    expect(settledWithoutTimerAdvance).toBe(true);
+    expect(rejection?.message).toContain("caller cancelled absent-target poll");
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
   test("cancels parallel readiness probes without waiting for another timer tick", async () => {
     const timer = new FakeTimer();
     const adb = new ReadinessAdbExecutor();

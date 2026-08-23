@@ -150,6 +150,13 @@ interface CtrlProxyActions {
     selector: NodeSelector?,
   )
 
+  fun requestActivateAccessibilityLink(
+    requestId: String?,
+    text: String,
+    occurrence: Int,
+    selector: NodeSelector?,
+  )
+
   fun requestClipboard(requestId: String?, action: String, text: String?)
 
   fun installCaCert(requestId: String?, certificate: String)

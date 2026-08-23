@@ -4,12 +4,17 @@ import { ToolRegistry } from "./toolRegistry";
 import {
   ActionableError,
   BootedDevice,
+  DeviceInfo,
   VideoFormat,
   VideoRecordingHighlightInput,
   VideoQualityPreset,
 } from "../models";
 import { createJSONToolResponse } from "../utils/toolUtils";
-import { addDeviceTargetingToSchema, platformSchema } from "./toolSchemaHelpers";
+import {
+  addDeviceTargetingToSchema,
+  platformSchema,
+  withCanonicalDiscriminatedUnionJsonSchema,
+} from "./toolSchemaHelpers";
 import {
   IOS_MAX_DURATION_SECONDS,
   listActiveVideoRecordings,
@@ -71,9 +76,11 @@ const segmentedSessions = (() => {
     get(handle: string): AndroidSegmentedPlanVideoSession | undefined {
       return byHandle.get(handle);
     },
-    /** Tracked sessions recording the given device (used by the bare/by-device stop). */
-    forDevice(deviceId: string): Array<[string, AndroidSegmentedPlanVideoSession]> {
-      return [...byHandle.entries()].filter(([, session]) => session.deviceId === deviceId);
+    /** Tracked sessions recording the given device (used by by-device stops and device teardown). */
+    forDevice(
+      device: Pick<DeviceInfo, "platform" | "name" | "deviceId">,
+    ): Array<[string, AndroidSegmentedPlanVideoSession]> {
+      return [...byHandle.entries()].filter(([, session]) => session.matchesDevice(device));
     },
     /**
      * Drop a session from the registry by identity (its handle is not known inside the
@@ -141,6 +148,28 @@ export function resetSegmentedSessions(): void {
 }
 
 /**
+ * Finalize timer-driven sessions for a device before its process or virtual-device image is
+ * removed. This clears their rotation timers and drops them from the private session registry,
+ * which the recording-manager cleanup cannot do because it tracks only individual segments.
+ */
+export async function stopSegmentedVideoRecordingsForDevice(
+  device: Pick<DeviceInfo, "platform" | "name" | "deviceId">,
+): Promise<void> {
+  const deviceSessions = segmentedSessions.forDevice(device);
+  for (const [handle, session] of deviceSessions) {
+    try {
+      await segmentedSessions.stopAndRemove(handle, session);
+    } catch (error) {
+      logger.warn(
+        `[VideoRecording] Failed to finalize segmented session ${handle} on ` +
+          `device ${device.deviceId ?? device.name}: ${errorMessage(error)}`,
+        error,
+      );
+    }
+  }
+}
+
+/**
  * Narrow device-detection seam used by {@link resolveTargetDevices} when a call targets
  * all devices (e.g. a bare, by-device stop). The real {@link DeviceSessionManager} singleton
  * satisfies it. Exposing only `detectConnectedPlatforms` keeps this honest under strict `tsc`
@@ -193,7 +222,7 @@ const highlightTimingSchema = z.object({
 
 const highlightSchema = z.object({
   description: z.string().optional().describe("Highlight description"),
-  shape: highlightShapeSchema.describe("Highlight shape"),
+  shape: withCanonicalDiscriminatedUnionJsonSchema(highlightShapeSchema, "Highlight shape"),
   timing: highlightTimingSchema.optional().describe("Highlight timing"),
 });
 
@@ -469,7 +498,7 @@ export function registerVideoRecordingTools(): void {
         // session for this device; otherwise its rotation timer leaks and keeps
         // producing segments. The session owns its segments' recording lifecycle,
         // so finalizing it replaces the single-recording stop for this device.
-        const deviceSessions = segmentedSessions.forDevice(target.deviceId);
+        const deviceSessions = segmentedSessions.forDevice(target);
         if (deviceSessions.length > 0) {
           stoppedAnySegmented = true;
           for (const [handle, session] of deviceSessions) {

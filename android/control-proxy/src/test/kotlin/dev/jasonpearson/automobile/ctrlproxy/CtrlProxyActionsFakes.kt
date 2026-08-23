@@ -87,6 +87,13 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
     selector: dev.jasonpearson.automobile.protocol.NodeSelector?,
   ) {}
 
+  override fun requestActivateAccessibilityLink(
+    requestId: String?,
+    text: String,
+    occurrence: Int,
+    selector: dev.jasonpearson.automobile.protocol.NodeSelector?,
+  ) {}
+
   override fun requestClipboard(requestId: String?, action: String, text: String?) {}
 
   override fun installCaCert(requestId: String?, certificate: String) {}
@@ -319,6 +326,13 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
     resourceId: String?,
     selector: dev.jasonpearson.automobile.protocol.NodeSelector?,
   ) = record("requestAction", requestId, action, resourceId, selector)
+
+  override fun requestActivateAccessibilityLink(
+    requestId: String?,
+    text: String,
+    occurrence: Int,
+    selector: dev.jasonpearson.automobile.protocol.NodeSelector?,
+  ) = record("requestActivateAccessibilityLink", requestId, text, occurrence, selector)
 
   override fun requestClipboard(requestId: String?, action: String, text: String?) =
     record("requestClipboard", requestId, action, text)

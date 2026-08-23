@@ -62,6 +62,7 @@ export interface TapOnArgs {
     testTag?: string;
     text?: string;
     textAny?: string[];
+    accessibilityLink?: string;
   };
   sibling?: boolean;
   container?: {
@@ -79,6 +80,10 @@ export interface TapOnArgs {
   preTapStability?: boolean;
   retryIfNoChange?: boolean;
   ensureTap?: boolean;
+  subtext?: {
+    text: string;
+    occurrence?: number;
+  };
 }
 
 export interface TapAnyArgs {

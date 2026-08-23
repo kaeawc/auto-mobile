@@ -13,10 +13,18 @@ import {
   waitForDeviceReadyOrCancel,
 } from "./deviceUtils";
 import type { DeviceMatcher } from "./deviceMatcher";
-import type { DeviceProvisioner } from "./deviceProvisioning";
+import type { DeviceProvisioner, DeviceProvisioningIdentityHooks } from "./deviceProvisioning";
 import { NoopDeviceBootRecovery, type DeviceBootRecovery } from "./deviceBootRecovery";
 import { defaultTimer, type Timer } from "./SystemTimer";
 import { runWithAbortSignal } from "./AbortContext";
+import type { StableVirtualDeviceIdentity } from "./virtualDeviceLifecycleCoordinator";
+import {
+  getVirtualDeviceLifecycleCoordinator,
+  InMemoryVirtualDeviceLifecycleCoordinator,
+  type VirtualDeviceLifecycleCoordinator,
+  type VirtualDeviceLifecycleLease,
+} from "./virtualDeviceLifecycleCoordinator";
+import { stableStringify } from "./stableStringify";
 
 const ABORT_SETTLEMENT_GRACE_MS = 1_000;
 
@@ -83,11 +91,18 @@ export interface DeviceBootServiceDependencies {
   /** Defaults to no recovery so normal product and MCP boot never erases devices. */
   bootRecovery?: DeviceBootRecovery;
   timer?: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
+  /** Bind a selector reservation to canonical identity before mutating the device. */
+  onIdentityResolved?: (identity: StableVirtualDeviceIdentity) => Promise<void>;
+  lifecycleCoordinator?: VirtualDeviceLifecycleCoordinator;
+  /** Existing lease held by a caller through later session/readiness work. */
+  lifecycleLease?: VirtualDeviceLifecycleLease;
 }
 
 interface BootDeadlineContext {
   deadlineMs: number;
   signal?: AbortSignal;
+  lifecycleLease?: VirtualDeviceLifecycleLease;
+  ownsLifecycleLease: boolean;
 }
 
 interface PhaseCancellation {
@@ -134,10 +149,16 @@ function createPhaseCancellation(
 export class DeviceBootService {
   private readonly bootRecovery: DeviceBootRecovery;
   private readonly timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
+  private readonly lifecycleCoordinator: VirtualDeviceLifecycleCoordinator;
 
   constructor(private readonly dependencies: DeviceBootServiceDependencies) {
     this.bootRecovery = dependencies.bootRecovery ?? new NoopDeviceBootRecovery();
     this.timer = dependencies.timer ?? defaultTimer;
+    this.lifecycleCoordinator =
+      dependencies.lifecycleCoordinator ??
+      (dependencies.timer
+        ? new InMemoryVirtualDeviceLifecycleCoordinator(dependencies.timer)
+        : getVirtualDeviceLifecycleCoordinator());
   }
 
   async boot(request: DeviceBootRequest, progress?: DeviceBootProgress): Promise<DeviceBootResult> {
@@ -145,11 +166,58 @@ export class DeviceBootService {
     const context: BootDeadlineContext = {
       deadlineMs: request.totalDeadlineMs ?? this.timer.now() + timeoutMs,
       signal: request.signal,
+      lifecycleLease: this.dependencies.lifecycleLease,
+      ownsLifecycleLease: false,
     };
-    if (request.deviceId) {
-      return this.bootKnownDevice({ ...request, deviceId: request.deviceId }, context, progress);
+    if (!context.lifecycleLease && !this.dependencies.onIdentityResolved) {
+      context.lifecycleLease = await this.lifecycleCoordinator.reserve(
+        {
+          kind: "selector",
+          platform: request.platform,
+          selector: stableStringify({
+            deviceId: request.deviceId,
+            name: request.name,
+            minOsVersion: request.minOsVersion,
+            maxOsVersion: request.maxOsVersion,
+            formFactor: request.formFactor,
+            screenSize: request.screenSize,
+          }),
+        },
+        {
+          operation: "start",
+          deadlineMs: context.deadlineMs,
+          signal: request.signal,
+        },
+      );
+      context.ownsLifecycleLease = true;
+      context.signal = request.signal
+        ? AbortSignal.any([request.signal, context.lifecycleLease.signal])
+        : context.lifecycleLease.signal;
     }
-    return this.bootMatchingDevice(request, context, progress);
+    try {
+      if (request.deviceId) {
+        return await this.bootKnownDevice(
+          { ...request, deviceId: request.deviceId },
+          context,
+          progress,
+        );
+      }
+      return await this.bootMatchingDevice(request, context, progress);
+    } finally {
+      if (context.ownsLifecycleLease) {
+        context.lifecycleLease?.release();
+      }
+    }
+  }
+
+  private async bindLifecycleIdentity(
+    context: BootDeadlineContext,
+    identity: StableVirtualDeviceIdentity,
+  ): Promise<void> {
+    if (context.lifecycleLease) {
+      await context.lifecycleLease.bindCanonicalIdentity(identity);
+    }
+    await this.dependencies.onIdentityResolved?.(identity);
   }
 
   private async bootKnownDevice(
@@ -204,9 +272,10 @@ export class DeviceBootService {
     if (running) {
       return running;
     }
-    const image = request.matchExactName && request.name
-      ? images.find(candidate => candidate.name === request.name) ?? null
-      : deviceMatcher.matchDeviceImage(criteria, images, matchingStrategy);
+    const image =
+      request.matchExactName && request.name
+        ? (images.find((candidate) => candidate.name === request.name) ?? null)
+        : deviceMatcher.matchDeviceImage(criteria, images, matchingStrategy);
     if (image) {
       return this.bootMatchedImage(image, context, progress);
     }
@@ -230,13 +299,14 @@ export class DeviceBootService {
       false,
     );
     const enriched = enrichBootedDevicesFromImages(booted, images);
-    const match = request.matchExactName && request.name
-      ? enriched.find(candidate => candidate.name === request.name) ?? null
-      : this.dependencies.deviceMatcher.matchBootedDevice(
-        criteria,
-        enriched,
-        this.dependencies.matchingStrategy,
-      );
+    const match =
+      request.matchExactName && request.name
+        ? (enriched.find((candidate) => candidate.name === request.name) ?? null)
+        : this.dependencies.deviceMatcher.matchBootedDevice(
+            criteria,
+            enriched,
+            this.dependencies.matchingStrategy,
+          );
     if (!match) {
       return undefined;
     }
@@ -261,7 +331,11 @@ export class DeviceBootService {
     if (!running) {
       return this.bootImage(image, context, progress, false);
     }
-    const result = await this.waitForRunningDevice(running, context, progress);
+    const result = await this.waitForRunningDevice(
+      enrichBootedDevice(running, image),
+      context,
+      progress,
+    );
     return { ...result, device: enrichBootedDevice(result.device, image) };
   }
 
@@ -281,8 +355,32 @@ export class DeviceBootService {
           `Available images: ${images.map((device) => `${device.name}${device.osVersion ? ` (v${device.osVersion})` : ""}`).join(", ") || "none"}.`,
       );
     }
+    const identityHooks: DeviceProvisioningIdentityHooks = {
+      reserveBeforeCreate: async (identity) => {
+        if (identity.platform === "android") {
+          await this.bindLifecycleIdentity(context, {
+            platform: "android",
+            stableId: identity.name,
+          });
+        }
+        return context.signal;
+      },
+      bindAfterCreate: async (device) => {
+        if (device.platform === "ios") {
+          if (!device.deviceId) {
+            throw new ActionableError(
+              `Created iOS simulator '${device.name}' has no lifecycle identity.`,
+            );
+          }
+          await this.bindLifecycleIdentity(context, {
+            platform: "ios",
+            stableId: device.deviceId,
+          });
+        }
+      },
+    };
     const provisioned = await this.runPhase(context, "provisioning a device", (signal) =>
-      this.dependencies.deviceProvisioner.provision(criteria, signal),
+      this.dependencies.deviceProvisioner.provision(criteria, signal, identityHooks),
     );
     const createdImage: DeviceInfo = {
       name: provisioned.name,
@@ -299,6 +397,20 @@ export class DeviceBootService {
     context: BootDeadlineContext,
     progress?: DeviceBootProgress,
   ): Promise<DeviceBootResult> {
+    if (device.platform === "ios") {
+      await this.bindLifecycleIdentity(context, {
+        platform: "ios",
+        stableId: device.deviceId,
+      });
+    } else if (
+      device.deviceId.startsWith("emulator-") &&
+      device.name !== `Unknown (${device.deviceId})`
+    ) {
+      await this.bindLifecycleIdentity(context, {
+        platform: "android",
+        stableId: device.name,
+      });
+    }
     const recoveryTarget: DeviceInfo = { ...device, isRunning: true };
     let attempts = 0;
     return this.bootRecovery.run(
@@ -331,6 +443,10 @@ export class DeviceBootService {
     if (image.platform === "ios" && !image.deviceId) {
       throw new ActionableError("iOS simulator deviceId (UDID) is required to start a simulator.");
     }
+    await this.bindLifecycleIdentity(context, {
+      platform: image.platform,
+      stableId: image.platform === "android" ? image.name : image.deviceId!,
+    });
     return this.bootRecovery.run(
       image,
       async () => this.bootImageOnce(image, context, progress, provisioned),

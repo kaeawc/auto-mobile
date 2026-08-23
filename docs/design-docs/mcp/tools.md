@@ -8,7 +8,7 @@ Almost all other tool calls have built-in observation via the [interaction loop]
 
 #### Interactions
 
-- 👆 `tapOn` supports tap, double-tap, long press, and long-press drag actions. Selectors include `selector.text`, `selector.textAny`, and `selector.elementId`; `sibling: true` taps a clickable sibling of the selector match. When multiple elements match, `index` (0-based) taps the Nth on-screen match instead of applying `selectionStrategy`.
+- 👆 `tapOn` supports tap, double-tap, long press, and long-press drag actions. Selectors include `selector.text`, `selector.textAny`, and `selector.elementId`; `sibling: true` taps a clickable sibling of the selector match. When multiple elements match, `index` (0-based) taps the Nth on-screen match instead of applying `selectionStrategy`. Semantic links are activated natively on Android and iOS with `selector: { accessibilityLink: "Terms of Service" }` (use `index` for duplicate labels), or `subtext: { text: "Terms of Service", occurrence: 0 }` scoped to a stable outer selector. Unsupported, flattened, stale, or ambiguous links fail explicitly and never fall back to tapping the container.
 - 👉 `swipeOn` handles directional swipes and scrolling within container bounds.
 - ↔️ `dragAndDrop` for element-to-element moves.
 - 🔍 `pinchOn` for zoom in/out gestures.
@@ -145,6 +145,7 @@ cat "$APP_CONTAINER/Documents/fixtures/hello.txt"
 - 🚀 `startDevice` starts a device with the specified device image.
 - 🧱 `provisionDevice` creates or adopts an exact virtual-device identity. It requires the `device-control` capability.
 - ❌ `killDevice` terminates a running device.
+- 🧹 `deleteDevice` stops and permanently deletes a device identified by its `platform` and stable identity from `automobile:devices/booted`, then verifies its absence from that platform inventory.
 - 🔧 `setActiveDevice` sets the active device for subsequent operations. It is a
   compatibility API; new multi-client daemon integrations should bind a
   device-pool session when the MCP connection starts.

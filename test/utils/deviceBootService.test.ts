@@ -9,6 +9,7 @@ import type { DeviceBootRecovery } from "../../src/utils/deviceBootRecovery";
 import type { Timer } from "../../src/utils/SystemTimer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { DeviceLostError } from "../../src/server/deviceLossOutcome";
+import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/utils/virtualDeviceLifecycleCoordinator";
 
 const image: DeviceInfo = {
   name: "Pixel_9_API_35",
@@ -57,6 +58,123 @@ describe("DeviceBootService", () => {
       "startDevice:Pixel_9_API_35:12345",
       "waitForDeviceReady:Pixel_9_API_35:12345",
     ]);
+  });
+
+  it("binds a resolved running Android emulator before readiness", async () => {
+    const devices = new FakeDeviceUtils();
+    const matcher = new FakeDeviceMatcher();
+    const timer = new FakeTimer();
+    const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+    const running: BootedDevice = {
+      platform: "android",
+      name: image.name,
+      deviceId: "emulator-5554",
+    };
+    const readinessStarted = Promise.withResolvers<void>();
+    const readinessGate = Promise.withResolvers<void>();
+    devices.setDeviceImages("android", [{ ...image, isRunning: true }]);
+    devices.setBootedDevices("android", [running]);
+    matcher.setBootedResult(running);
+    devices.waitForDeviceReady = async () => {
+      readinessStarted.resolve();
+      await readinessGate.promise;
+      return running;
+    };
+    const boot = new DeviceBootService({
+      deviceManager: devices,
+      deviceMatcher: matcher,
+      deviceCreationGate: { isCreationAllowed: () => false, describeSource: () => "test" },
+      deviceProvisioner: {
+        provision: async () => {
+          throw new Error("unexpected provision");
+        },
+      },
+      matchingStrategy: "LATEST",
+      timer,
+      lifecycleCoordinator,
+    }).boot({ platform: "android" });
+    const bootOutcome = boot.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    await readinessStarted.promise;
+
+    const teardown = lifecycleCoordinator.reserve(
+      { kind: "stable", platform: "android", stableId: image.name },
+      { operation: "teardown", deadlineMs: 1_000 },
+    );
+    let teardownAcquired = false;
+    void teardown.then(() => {
+      teardownAcquired = true;
+    });
+    for (let attempt = 0; attempt < 50; attempt++) {
+      await Promise.resolve();
+    }
+    expect(teardownAcquired).toBe(false);
+
+    readinessGate.resolve();
+    expect(String(await bootOutcome)).toContain("was preempted by teardown");
+    const teardownLease = await teardown;
+    teardownLease.release();
+  });
+
+  it("binds a generated Android AVD identity before provisioning creates it", async () => {
+    const devices = new FakeDeviceUtils();
+    const timer = new FakeTimer();
+    const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+    const createStarted = Promise.withResolvers<void>();
+    const createGate = Promise.withResolvers<void>();
+    const generatedName = "AutoMobile-android-35-generated";
+    const boot = new DeviceBootService({
+      deviceManager: devices,
+      deviceMatcher: new FakeDeviceMatcher(),
+      deviceCreationGate: { isCreationAllowed: () => true, describeSource: () => "test" },
+      deviceProvisioner: {
+        provision: async (_criteria, _signal, identityHooks) => {
+          const identitySignal = await identityHooks?.reserveBeforeCreate({
+            platform: "android",
+            name: generatedName,
+          });
+          expect(identitySignal?.aborted).toBe(false);
+          createStarted.resolve();
+          await createGate.promise;
+          const provisioned = {
+            platform: "android" as const,
+            name: generatedName,
+            deviceType: "system-images;android-35;google_apis;arm64-v8a",
+            runtime: "android-35",
+          };
+          await identityHooks?.bindAfterCreate(provisioned);
+          return provisioned;
+        },
+      },
+      matchingStrategy: "LATEST",
+      timer,
+      lifecycleCoordinator,
+    }).boot({ platform: "android", createIfMissing: true });
+    const bootOutcome = boot.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    await createStarted.promise;
+
+    const teardown = lifecycleCoordinator.reserve(
+      { kind: "stable", platform: "android", stableId: generatedName },
+      { operation: "teardown", deadlineMs: 1_000 },
+    );
+    let teardownAcquired = false;
+    void teardown.then(() => {
+      teardownAcquired = true;
+    });
+    for (let attempt = 0; attempt < 50; attempt++) {
+      await Promise.resolve();
+    }
+    expect(teardownAcquired).toBe(false);
+
+    createGate.resolve();
+    expect(String(await bootOutcome)).toContain("was preempted by teardown");
+    const teardownLease = await teardown;
+    teardownLease.release();
   });
 
   it("passes only the remaining total budget to readiness after device start", async () => {

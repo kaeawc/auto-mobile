@@ -19,7 +19,7 @@ import {
   CtrlProxyClipboardResult,
   CtrlProxyHierarchyResponse,
   CtrlProxyPerfTiming,
-  CtrlProxyHierarchy
+  CtrlProxyHierarchy,
 } from "../../src/features/observe/ios";
 import type {
   CtrlProxyVoiceOverResult,
@@ -386,7 +386,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
    * Check if a specific IME action was called
    */
   wasImeActionCalled(action: "done" | "next" | "search" | "send" | "go" | "previous"): boolean {
-    return this.imeActionHistory.some(entry => entry.action === action);
+    return this.imeActionHistory.some((entry) => entry.action === action);
   }
 
   /**
@@ -481,7 +481,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     perf?: PerformanceTracker,
     skipWaitForFresh?: boolean,
     minTimestamp?: number,
-    disableAllFiltering?: boolean
+    disableAllFiltering?: boolean,
   ): Promise<ViewHierarchyResult | null> {
     this.hierarchyRequestCount++;
     await this.applyDelay("getHierarchy");
@@ -499,7 +499,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     timeout: number = 100,
     perf?: PerformanceTracker,
     skipWaitForFresh: boolean = false,
-    minTimestamp: number = 0
+    minTimestamp: number = 0,
   ): Promise<CtrlProxyHierarchyResponse> {
     this.hierarchyRequestCount++;
     await this.applyDelay("getLatestHierarchy");
@@ -508,7 +508,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     if (!this.hierarchyData) {
       return {
         hierarchy: null,
-        fresh: false
+        fresh: false,
       };
     }
 
@@ -516,7 +516,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
       hierarchy: this.hierarchyData,
       fresh: true,
       updatedAt: this.hierarchyData.updatedAt,
-      perfTiming: this.performanceTiming || undefined
+      perfTiming: this.performanceTiming || undefined,
     };
   }
 
@@ -524,7 +524,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     perf?: PerformanceTracker,
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
-    timeoutMs?: number
+    timeoutMs?: number,
   ): Promise<{ hierarchy: CtrlProxyHierarchy; perfTiming?: CtrlProxyPerfTiming } | null> {
     this.hierarchyRequestCount++;
     await this.applyDelay("requestHierarchySync");
@@ -536,7 +536,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
 
     return {
       hierarchy: this.hierarchyData,
-      perfTiming: this.performanceTiming || undefined
+      perfTiming: this.performanceTiming || undefined,
     };
   }
 
@@ -545,12 +545,12 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
       hierarchy: {
         node: {
           $: {
-            text: "Fake Hierarchy"
-          }
-        }
+            text: "Fake Hierarchy",
+          },
+        },
       },
       packageName: hierarchy.packageName,
-      updatedAt: hierarchy.updatedAt
+      updatedAt: hierarchy.updatedAt,
     };
   }
 
@@ -559,7 +559,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     y: number,
     duration: number = 0,
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyTapResult> {
     await this.applyDelay("tap");
     this.checkFailure("tap");
@@ -569,14 +569,14 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     if (this.tapResult) {
       return {
         ...this.tapResult,
-        perfTiming: this.tapResult.perfTiming ?? this.performanceTiming ?? undefined
+        perfTiming: this.tapResult.perfTiming ?? this.performanceTiming ?? undefined,
       };
     }
 
     return {
       success: true,
       totalTimeMs: 50,
-      perfTiming: this.performanceTiming || undefined
+      perfTiming: this.performanceTiming || undefined,
     };
   }
 
@@ -587,7 +587,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     y2: number,
     duration: number = 300,
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxySwipeResult> {
     await this.applyDelay("swipe");
     this.checkFailure("swipe");
@@ -597,7 +597,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     if (this.swipeResult) {
       return {
         ...this.swipeResult,
-        perfTiming: this.swipeResult.perfTiming ?? this.performanceTiming ?? undefined
+        perfTiming: this.swipeResult.perfTiming ?? this.performanceTiming ?? undefined,
       };
     }
 
@@ -605,7 +605,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
       success: true,
       totalTimeMs: duration,
       gestureTimeMs: duration,
-      perfTiming: this.performanceTiming || undefined
+      perfTiming: this.performanceTiming || undefined,
     };
   }
 
@@ -617,7 +617,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     pressDurationMs: number,
     dragDurationMs: number,
     holdDurationMs: number,
-    timeoutMs: number
+    timeoutMs: number,
   ): Promise<CtrlProxyDragResult> {
     await this.applyDelay("drag");
     this.checkFailure("drag");
@@ -630,13 +630,13 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
       pressDurationMs,
       dragDurationMs,
       holdDurationMs,
-      timeoutMs
+      timeoutMs,
     });
 
     if (this.dragResult) {
       return {
         ...this.dragResult,
-        perfTiming: this.dragResult.perfTiming ?? this.performanceTiming ?? undefined
+        perfTiming: this.dragResult.perfTiming ?? this.performanceTiming ?? undefined,
       };
     }
 
@@ -644,7 +644,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
       success: true,
       totalTimeMs: pressDurationMs + dragDurationMs + holdDurationMs,
       gestureTimeMs: dragDurationMs,
-      perfTiming: this.performanceTiming || undefined
+      perfTiming: this.performanceTiming || undefined,
     };
   }
 
@@ -656,7 +656,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     rotationDegrees: number,
     duration?: number,
     timeoutMs?: number,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyPinchResult> {
     await this.applyDelay("pinch");
     this.checkFailure("pinch");
@@ -668,13 +668,13 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
       distanceEnd,
       rotationDegrees,
       duration,
-      timeoutMs
+      timeoutMs,
     });
 
     if (this.pinchResult) {
       return {
         ...this.pinchResult,
-        perfTiming: this.pinchResult.perfTiming ?? this.performanceTiming ?? undefined
+        perfTiming: this.pinchResult.perfTiming ?? this.performanceTiming ?? undefined,
       };
     }
 
@@ -684,14 +684,11 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
       success: true,
       totalTimeMs: resolvedDuration,
       gestureTimeMs: resolvedDuration,
-      perfTiming: this.performanceTiming || undefined
+      perfTiming: this.performanceTiming || undefined,
     };
   }
 
-  async requestSetText(
-    text: string,
-    options?: SetTextOptions
-  ): Promise<CtrlProxySetTextResult> {
+  async requestSetText(text: string, options?: SetTextOptions): Promise<CtrlProxySetTextResult> {
     await this.applyDelay("setText");
     this.checkFailure("setText");
 
@@ -700,14 +697,14 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     return {
       success: true,
       totalTimeMs: 100,
-      perfTiming: this.performanceTiming || undefined
+      perfTiming: this.performanceTiming || undefined,
     };
   }
 
   async requestClearText(
     resourceId?: string,
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxySetTextResult> {
     await this.applyDelay("clearText");
     this.checkFailure("clearText");
@@ -717,14 +714,14 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     return {
       success: true,
       totalTimeMs: 100,
-      perfTiming: this.performanceTiming || undefined
+      perfTiming: this.performanceTiming || undefined,
     };
   }
 
   async requestImeAction(
     action: "done" | "next" | "search" | "send" | "go" | "previous",
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyImeActionResult> {
     await this.applyDelay("imeAction");
 
@@ -735,7 +732,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
         action,
         totalTimeMs: 100,
         error: error.message,
-        perfTiming: this.performanceTiming || undefined
+        perfTiming: this.performanceTiming || undefined,
       };
     }
 
@@ -745,13 +742,13 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
       success: true,
       action,
       totalTimeMs: 100,
-      perfTiming: this.performanceTiming || undefined
+      perfTiming: this.performanceTiming || undefined,
     };
   }
 
   async requestSelectAll(
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxySelectAllResult> {
     await this.applyDelay("selectAll");
     this.checkFailure("selectAll");
@@ -759,14 +756,14 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     return {
       success: true,
       totalTimeMs: 100,
-      perfTiming: this.performanceTiming || undefined
+      perfTiming: this.performanceTiming || undefined,
     };
   }
 
   async requestKeyboard(
     action: "open" | "close" | "detect",
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyKeyboardResult> {
     await this.applyDelay("keyboard");
     this.checkFailure("keyboard");
@@ -782,13 +779,13 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
       success: true,
       open: this.keyboardOpen,
       totalTimeMs: 100,
-      perfTiming: this.performanceTiming || undefined
+      perfTiming: this.performanceTiming || undefined,
     };
   }
 
   async requestPressHome(
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyPressHomeResult> {
     this.pressHomeRequestCount++;
     await this.applyDelay("pressHome");
@@ -797,13 +794,13 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     return {
       success: true,
       totalTimeMs: 100,
-      perfTiming: this.performanceTiming || undefined
+      perfTiming: this.performanceTiming || undefined,
     };
   }
 
   async requestPressBack(
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyPressBackResult> {
     this.pressBackRequestCount++;
     await this.applyDelay("pressBack");
@@ -812,13 +809,13 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     return {
       success: true,
       totalTimeMs: 100,
-      perfTiming: this.performanceTiming || undefined
+      perfTiming: this.performanceTiming || undefined,
     };
   }
 
   async requestShake(
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyShakeResult> {
     this.shakeRequestCount++;
     this.shakeTimeoutHistory.push(timeoutMs);
@@ -828,14 +825,14 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     return {
       success: true,
       totalTimeMs: 100,
-      perfTiming: this.performanceTiming || undefined
+      perfTiming: this.performanceTiming || undefined,
     };
   }
 
   async requestPressButton(
     button: string,
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyPressButtonResult> {
     await this.applyDelay("pressButton");
     this.checkFailure("pressButton");
@@ -843,13 +840,13 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     return {
       success: true,
       totalTimeMs: 100,
-      perfTiming: this.performanceTiming || undefined
+      perfTiming: this.performanceTiming || undefined,
     };
   }
 
   async requestRecentApps(
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyRecentAppsResult> {
     this.recentAppsRequestCount++;
     await this.applyDelay("recentApps");
@@ -858,21 +855,21 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     if (this.recentAppsResult) {
       return {
         ...this.recentAppsResult,
-        perfTiming: this.recentAppsResult.perfTiming ?? this.performanceTiming ?? undefined
+        perfTiming: this.recentAppsResult.perfTiming ?? this.performanceTiming ?? undefined,
       };
     }
 
     return {
       success: true,
       totalTimeMs: 100,
-      perfTiming: this.performanceTiming || undefined
+      perfTiming: this.performanceTiming || undefined,
     };
   }
 
   async requestRotate(
     orientation: string,
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyRotateResult> {
     this.rotateHistory.push({ orientation });
     await this.applyDelay("rotate");
@@ -891,14 +888,14 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
       currentOrientation: this.currentOrientation,
       value: orientation === "portrait" ? 0 : 1,
       rotationPerformed,
-      perfTiming: this.performanceTiming || undefined
+      perfTiming: this.performanceTiming || undefined,
     };
   }
 
   async requestLaunchApp(
     bundleId: string,
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyLaunchAppResult> {
     await this.applyDelay("launchApp");
     this.checkFailure("launchApp");
@@ -907,13 +904,13 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     return {
       success: true,
       totalTimeMs: 100,
-      perfTiming: this.performanceTiming || undefined
+      perfTiming: this.performanceTiming || undefined,
     };
   }
 
   async requestScreenshot(
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyScreenshotResult> {
     this.screenshotRequestCount++;
     await this.applyDelay("screenshot");
@@ -922,7 +919,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     if (!this.screenshotData) {
       return {
         success: false,
-        error: "No screenshot data configured"
+        error: "No screenshot data configured",
       };
     }
 
@@ -930,13 +927,13 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
       success: true,
       data: this.screenshotData,
       format: this.screenshotFormat,
-      timestamp: Date.now()
+      timestamp: Date.now(),
     };
   }
 
   async requestVoiceOverState(
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyVoiceOverResult> {
     await this.applyDelay("voiceOverState");
     this.checkFailure("voiceOverState");
@@ -952,7 +949,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     label: string,
     action: "activate" | "long_press",
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyActionResult> {
     await this.applyDelay("voiceOverActivate");
     this.checkFailure("voiceOverActivate");
@@ -979,7 +976,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     duration: number = 300,
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
-    fingerSpacing?: number
+    fingerSpacing?: number,
   ): Promise<CtrlProxySwipeResult> {
     await this.applyDelay("multiFingerSwipe");
     this.checkFailure("multiFingerSwipe");
@@ -1003,7 +1000,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     resourceId?: string,
     label?: string,
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyActionResult> {
     await this.applyDelay("action");
     this.checkFailure("action");
@@ -1021,11 +1018,32 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     };
   }
 
+  async requestActivateAccessibilityLink(
+    text: string,
+    occurrence: number,
+    ownerResourceId?: string,
+  ): Promise<CtrlProxyActionResult> {
+    await this.applyDelay("accessibilityLink");
+    this.checkFailure("accessibilityLink");
+    this.actionHistory.push({
+      action: "activate_accessibility_link",
+      resourceId: ownerResourceId,
+      label: `${text}#${occurrence}`,
+    });
+    return (
+      this.actionResult ?? {
+        success: true,
+        action: "activate_accessibility_link",
+        totalTimeMs: 50,
+      }
+    );
+  }
+
   async requestClipboard(
     action: "copy" | "paste" | "clear" | "get",
     text?: string,
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyClipboardResult> {
     await this.applyDelay("clipboard");
     this.checkFailure("clipboard");
@@ -1057,7 +1075,11 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     return this.isConnectedState;
   }
 
-  async verifyServiceReady(maxAttempts?: number, delayMs?: number, timeoutMs?: number): Promise<boolean> {
+  async verifyServiceReady(
+    maxAttempts?: number,
+    delayMs?: number,
+    timeoutMs?: number,
+  ): Promise<boolean> {
     return this.isConnectedState;
   }
 

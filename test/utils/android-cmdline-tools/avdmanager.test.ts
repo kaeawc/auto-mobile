@@ -1,11 +1,13 @@
 import { expect, describe, test, beforeEach } from "bun:test";
 import { AvdManagerDependencies } from "../../../src/utils/android-cmdline-tools/avdmanager";
+import { AvdManagerClient } from "../../../src/utils/android-cmdline-tools/AvdManagerClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 // Normalize paths for cross-platform comparison:
 // 1. Convert backslashes to forward slashes
 // 2. Strip Windows drive letter prefix (e.g., "C:" -> "")
-const normalizePath = (value: string): string => value.replace(/\\/g, "/").replace(/^[A-Za-z]:/, "");
+const normalizePath = (value: string): string =>
+  value.replace(/\\/g, "/").replace(/^[A-Za-z]:/, "");
 
 /**
  * REWRITE-5: await a promise that MUST reject, returning its Error. Replaces the
@@ -22,7 +24,7 @@ async function expectRejection(promise: Promise<unknown>): Promise<Error> {
   throw new Error("Expected the operation to reject, but it resolved");
 }
 
-describe("AVDManager", function() {
+describe("AVDManager", function () {
   let mockLocation: any;
   let avdmanager: any;
 
@@ -38,12 +40,14 @@ describe("AVDManager", function() {
     mockLocation = {
       path: "/mock/sdk/cmdline-tools/latest",
       source: "manual" as const,
-      available_tools: ["avdmanager", "sdkmanager"]
+      available_tools: ["avdmanager", "sdkmanager"],
     };
   });
 
   // Helper function to create mock dependencies
-  function createDependencies(overrides: Partial<AvdManagerDependencies> = {}): AvdManagerDependencies {
+  function createDependencies(
+    overrides: Partial<AvdManagerDependencies> = {},
+  ): AvdManagerDependencies {
     class MockChild {
       private stdoutCallbacks: Array<(data: any) => void> = [];
       private stderrCallbacks: Array<(data: any) => void> = [];
@@ -52,42 +56,52 @@ describe("AVDManager", function() {
 
       stdout = {
         on: (event: string, cb: (data: any) => void) => {
-          if (event === "data") {this.stdoutCallbacks.push(cb);}
-        }
+          if (event === "data") {
+            this.stdoutCallbacks.push(cb);
+          }
+        },
       };
 
       stderr = {
         on: (event: string, cb: (data: any) => void) => {
-          if (event === "data") {this.stderrCallbacks.push(cb);}
-        }
+          if (event === "data") {
+            this.stderrCallbacks.push(cb);
+          }
+        },
       };
 
       stdin = {
         write: (data: string) => {},
-        end: () => {}
+        end: () => {},
       };
 
       on = (event: string, cb: any) => {
-        if (event === "close") {this.closeCallbacks.push(cb);}
-        if (event === "error") {this.errorCallbacks.push(cb);}
+        if (event === "close") {
+          this.closeCallbacks.push(cb);
+        }
+        if (event === "error") {
+          this.errorCallbacks.push(cb);
+        }
       };
 
-      kill = () => {};
+      kill = () => {
+        queueMicrotask(() => this.triggerClose(-1));
+      };
 
       triggerStdout(data: Buffer) {
-        this.stdoutCallbacks.forEach(cb => cb(data));
+        this.stdoutCallbacks.forEach((cb) => cb(data));
       }
 
       triggerStderr(data: Buffer) {
-        this.stderrCallbacks.forEach(cb => cb(data));
+        this.stderrCallbacks.forEach((cb) => cb(data));
       }
 
       triggerClose(code: number) {
-        this.closeCallbacks.forEach(cb => cb(code));
+        this.closeCallbacks.forEach((cb) => cb(code));
       }
 
       triggerError(error: Error) {
-        this.errorCallbacks.forEach(cb => cb(error));
+        this.errorCallbacks.forEach((cb) => cb(error));
       }
     }
 
@@ -100,7 +114,7 @@ describe("AVDManager", function() {
       getLogLevel: () => "info",
       enableStdoutLogging: () => {},
       disableStdoutLogging: () => {},
-      close: () => {}
+      close: () => {},
     };
 
     return {
@@ -111,7 +125,7 @@ describe("AVDManager", function() {
       getAndroidHomeWithSystemImages: () => null,
       getBestAndroidToolsLocation: () => mockLocation,
       validateRequiredTools: () => ({ valid: true, missing: [] }),
-      ...overrides
+      ...overrides,
     };
   }
 
@@ -124,7 +138,7 @@ describe("AVDManager", function() {
   async function resolveWithFakeTimer<T>(
     timer: FakeTimer,
     promise: Promise<T>,
-    advanceMs: number = 0
+    advanceMs: number = 0,
   ): Promise<T> {
     await Promise.resolve();
     timer.advanceTime(advanceMs);
@@ -204,7 +218,10 @@ Available Packages:
         return child;
       };
 
-      const result = await resolveWithFakeTimer(fakeTimer, avdmanager.listSystemImages(undefined, mockDeps));
+      const result = await resolveWithFakeTimer(
+        fakeTimer,
+        avdmanager.listSystemImages(undefined, mockDeps),
+      );
 
       expect(result).toHaveLength(2);
       expect(result[0].packageName).toBe("system-images;android-33;google_apis;arm64-v8a");
@@ -239,10 +256,13 @@ Available Packages:
 
       const result = await resolveWithFakeTimer(
         fakeTimer,
-        avdmanager.listSystemImages({
-          apiLevel: 33,
-          tag: "google_apis"
-        }, mockDeps)
+        avdmanager.listSystemImages(
+          {
+            apiLevel: 33,
+            tag: "google_apis",
+          },
+          mockDeps,
+        ),
       );
 
       expect(result).toHaveLength(1);
@@ -264,10 +284,9 @@ Available Packages:
         return child;
       };
 
-      await expect(resolveWithFakeTimer(
-        fakeTimer,
-        avdmanager.listSystemImages(undefined, mockDeps)
-      )).rejects.toThrow("[output truncated]");
+      await expect(
+        resolveWithFakeTimer(fakeTimer, avdmanager.listSystemImages(undefined, mockDeps)),
+      ).rejects.toThrow("[output truncated]");
     });
   });
 
@@ -303,7 +322,7 @@ Available Packages:
 
       const result = await resolveWithFakeTimer(
         fakeTimer,
-        avdmanager.listInstalledSystemImages(undefined, mockDeps)
+        avdmanager.listInstalledSystemImages(undefined, mockDeps),
       );
 
       expect(result).toHaveLength(1);
@@ -319,7 +338,7 @@ Available Packages:
 
       const result = await resolveWithFakeTimer(
         fakeTimer,
-        avdmanager.listSystemImages(undefined, mockDeps)
+        avdmanager.listSystemImages(undefined, mockDeps),
       );
 
       expect(result.map((image: any) => image.apiLevel)).toEqual([35, 36]);
@@ -344,7 +363,7 @@ Available Packages:
         name: "test_avd",
         package: "system-images;android-33;google_apis;arm64-v8a",
         device: "pixel_4",
-        force: true
+        force: true,
       };
 
       const result = await resolveWithFakeTimer(fakeTimer, avdmanager.createAvd(params, mockDeps));
@@ -373,7 +392,7 @@ Available Packages:
         force: true,
         path: "/custom/path",
         tag: "google_apis",
-        abi: "arm64-v8a"
+        abi: "arm64-v8a",
       };
 
       const result = await resolveWithFakeTimer(fakeTimer, avdmanager.createAvd(params, mockDeps));
@@ -397,7 +416,7 @@ Available Packages:
 
       const params = {
         name: "test_avd",
-        package: "system-images;android-33;google_apis;arm64-v8a"
+        package: "system-images;android-33;google_apis;arm64-v8a",
       };
 
       const result = await resolveWithFakeTimer(fakeTimer, avdmanager.createAvd(params, mockDeps));
@@ -414,7 +433,7 @@ Available Packages:
       const oldToolsLocation = {
         path: "/opt/android-sdk/tools",
         source: "typical" as const,
-        available_tools: ["avdmanager", "sdkmanager"]
+        available_tools: ["avdmanager", "sdkmanager"],
       };
 
       mockDeps.getBestAndroidToolsLocation = () => oldToolsLocation;
@@ -430,7 +449,7 @@ Available Packages:
 
       const params = {
         name: "legacy_avd",
-        package: "system-images;android-33;google_apis;arm64-v8a"
+        package: "system-images;android-33;google_apis;arm64-v8a",
       };
 
       const result = await resolveWithFakeTimer(fakeTimer, avdmanager.createAvd(params, mockDeps));
@@ -458,13 +477,15 @@ Available Packages:
 
       const params = {
         name: "jaxb_avd",
-        package: "system-images;android-33;google_apis;arm64-v8a"
+        package: "system-images;android-33;google_apis;arm64-v8a",
       };
 
       const result = await resolveWithFakeTimer(fakeTimer, avdmanager.createAvd(params, mockDeps));
 
       expect(result.success).toBe(false);
-      expect(result.message).toContain("Android SDK tools are outdated and incompatible with Java 11+.");
+      expect(result.message).toContain(
+        "Android SDK tools are outdated and incompatible with Java 11+.",
+      );
       expect(result.message).toContain("javax.xml.bind");
       expect(result.message).toContain("cmdline-tools/latest");
     });
@@ -484,10 +505,39 @@ Available Packages:
         return child;
       };
 
-      const result = await resolveWithFakeTimer(fakeTimer, avdmanager.deleteAvd("test_avd", mockDeps));
+      const result = await resolveWithFakeTimer(
+        fakeTimer,
+        avdmanager.deleteAvd("test_avd", mockDeps),
+      );
 
       expect(result.success).toBe(true);
       expect(result.message).toContain("deleted successfully");
+    });
+
+    test("uses the caller-provided deletion timeout", async () => {
+      const fakeTimer = new FakeTimer();
+      const mockDeps = createDependencies();
+      const client = new AvdManagerClient({
+        ...mockDeps,
+        timer: fakeTimer,
+        environment: {},
+        platform: "darwin",
+      });
+
+      const pending = client.deleteAvd("slow_avd", { timeoutMs: 120_000 });
+      for (
+        let attempt = 0;
+        attempt < 10 && !fakeTimer.getPendingTimeouts().includes(120_000);
+        attempt += 1
+      ) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+
+      expect(fakeTimer.getPendingTimeouts()).toEqual([120_000]);
+      fakeTimer.advanceTime(120_000);
+      const result = await pending;
+      expect(result.success).toBe(false);
+      expect(result.message).toContain("timed out after 120000ms");
     });
 
     test("should return compatibility message for deprecated tools", async () => {
@@ -498,7 +548,7 @@ Available Packages:
       const oldToolsLocation = {
         path: "/opt/android-sdk/tools",
         source: "typical" as const,
-        available_tools: ["avdmanager", "sdkmanager"]
+        available_tools: ["avdmanager", "sdkmanager"],
       };
 
       mockDeps.getBestAndroidToolsLocation = () => oldToolsLocation;
@@ -512,7 +562,10 @@ Available Packages:
         return child;
       };
 
-      const result = await resolveWithFakeTimer(fakeTimer, avdmanager.deleteAvd("legacy_avd", mockDeps));
+      const result = await resolveWithFakeTimer(
+        fakeTimer,
+        avdmanager.deleteAvd("legacy_avd", mockDeps),
+      );
 
       expect(result.success).toBe(false);
       expect(result.message).toContain("Detected deprecated Android SDK Tools");
@@ -535,10 +588,15 @@ Available Packages:
         return child;
       };
 
-      const result = await resolveWithFakeTimer(fakeTimer, avdmanager.deleteAvd("jaxb_avd", mockDeps));
+      const result = await resolveWithFakeTimer(
+        fakeTimer,
+        avdmanager.deleteAvd("jaxb_avd", mockDeps),
+      );
 
       expect(result.success).toBe(false);
-      expect(result.message).toContain("Android SDK tools are outdated and incompatible with Java 11+.");
+      expect(result.message).toContain(
+        "Android SDK tools are outdated and incompatible with Java 11+.",
+      );
       expect(result.message).toContain("javax.xml.bind");
       expect(result.message).toContain("cmdline-tools/latest");
     });
@@ -590,11 +648,15 @@ Available Android Virtual Devices:
       expect(result[1].name).toBe("test_avd_2");
       expect(result[1].path).toBe("/Users/test/.android/avd/test_avd_2.avd");
       expect(result[1].target).toBe("Google APIs (Google Inc.)");
-      expect(result[1].basedOn).toBe("Android 14.0 (UpsideDownCake) Tag/ABI: google_apis_playstore/x86_64");
+      expect(result[1].basedOn).toBe(
+        "Android 14.0 (UpsideDownCake) Tag/ABI: google_apis_playstore/x86_64",
+      );
 
       expect(result[2].name).toBe("broken_avd");
       expect(result[2].path).toBe("/Users/test/.android/avd/broken_avd.avd");
-      expect(result[2].error).toBe("Missing system image for Google Play arm64-v8a Medium Phone API 35.");
+      expect(result[2].error).toBe(
+        "Missing system image for Google Play arm64-v8a Medium Phone API 35.",
+      );
     });
   });
 
@@ -610,21 +672,21 @@ Available Android Virtual Devices:
         getLogLevel: () => "info",
         enableStdoutLogging: () => {},
         disableStdoutLogging: () => {},
-        close: () => {}
+        close: () => {},
       };
 
       const mockDeps = createDependencies({
         logger: mockLogger,
         getAndroidHomeWithSystemImages: () => ({
           androidHome: "/Users/test/Library/Android/sdk",
-          systemImagesPath: "/Users/test/Library/Android/sdk/system-images"
-        })
+          systemImagesPath: "/Users/test/Library/Android/sdk/system-images",
+        }),
       });
 
       const homebrewLocation = {
         path: "/opt/homebrew/share/android-commandlinetools/cmdline-tools/latest",
         source: "homebrew" as const,
-        available_tools: ["avdmanager", "sdkmanager"]
+        available_tools: ["avdmanager", "sdkmanager"],
       };
 
       mockDeps.getBestAndroidToolsLocation = () => homebrewLocation;
@@ -715,7 +777,7 @@ id: pixel_4
       const packageName = "system-images;android-33;google_apis;arm64-v8a";
       const result = await resolveWithFakeTimer(
         fakeTimer,
-        avdmanager.installSystemImage(packageName, true, mockDeps)
+        avdmanager.installSystemImage(packageName, true, mockDeps),
       );
 
       expect(result.success).toBe(true);
@@ -738,7 +800,7 @@ id: pixel_4
       const packageName = "system-images;android-33;google_apis;arm64-v8a";
       const result = await resolveWithFakeTimer(
         fakeTimer,
-        avdmanager.installSystemImage(packageName, false, mockDeps)
+        avdmanager.installSystemImage(packageName, false, mockDeps),
       );
 
       expect(result.success).toBe(true);
@@ -760,7 +822,11 @@ id: pixel_4
 
       const result = await resolveWithFakeTimer(
         fakeTimer,
-        avdmanager.installSystemImage("system-images;android-35;google_apis;arm64-v8a", true, mockDeps)
+        avdmanager.installSystemImage(
+          "system-images;android-35;google_apis;arm64-v8a",
+          true,
+          mockDeps,
+        ),
       );
 
       expect(result.success).toBe(false);
@@ -770,10 +836,12 @@ id: pixel_4
 
   describe("Constants", () => {
     test("should provide common system images", () => {
-      expect(avdmanager.COMMON_SYSTEM_IMAGES.API_35.GOOGLE_APIS_ARM64)
-        .toBe("system-images;android-35;google_apis;arm64-v8a");
-      expect(avdmanager.COMMON_SYSTEM_IMAGES.API_34.PLAYSTORE_X86_64)
-        .toBe("system-images;android-34;google_apis_playstore;x86_64");
+      expect(avdmanager.COMMON_SYSTEM_IMAGES.API_35.GOOGLE_APIS_ARM64).toBe(
+        "system-images;android-35;google_apis;arm64-v8a",
+      );
+      expect(avdmanager.COMMON_SYSTEM_IMAGES.API_34.PLAYSTORE_X86_64).toBe(
+        "system-images;android-34;google_apis_playstore;x86_64",
+      );
     });
 
     test("should provide common device profiles", () => {
@@ -836,7 +904,7 @@ id: pixel_4
           ["/test/sdk/platforms", false],
           ["/test/sdk/platform-tools", false],
           ["/test/sdk/build-tools", false],
-          ["/test/sdk/cmdline-tools/latest/bin/avdmanager", true]
+          ["/test/sdk/cmdline-tools/latest/bin/avdmanager", true],
         ]);
 
         mockDeps.existsSync = (path: string) => pathChecks.get(normalizePath(path)) ?? false;
@@ -853,7 +921,7 @@ id: pixel_4
           ["/test/sdk/system-images", true],
           ["/test/sdk/platforms", true],
           ["/test/sdk/platform-tools", true],
-          ["/test/sdk/build-tools", true]
+          ["/test/sdk/build-tools", true],
         ]);
 
         mockDeps.existsSync = (path: string) => pathChecks.get(normalizePath(path)) ?? false;
@@ -875,14 +943,16 @@ id: pixel_4
           ["/Users/test/Library/Android/sdk", true],
           ["/Users/test/Library/Android/sdk/system-images", true],
           ["/Users/test/Library/Android/sdk/platforms", true],
-          ["/Users/test/Library/Android/sdk/platform-tools", true]
+          ["/Users/test/Library/Android/sdk/platform-tools", true],
         ]);
 
         mockDeps.existsSync = (path: string) => pathChecks.get(normalizePath(path)) ?? false;
 
         // The proper SDK should be preferred because it has system-images
         expect(mockDeps.existsSync("/Users/test/Library/Android/sdk/system-images")).toBe(true);
-        expect(mockDeps.existsSync("/opt/homebrew/share/android-commandlinetools/system-images")).toBe(false);
+        expect(
+          mockDeps.existsSync("/opt/homebrew/share/android-commandlinetools/system-images"),
+        ).toBe(false);
       });
 
       test("two-pass search: should prefer SDK with system-images even when it appears later in candidate list", async () => {
@@ -898,7 +968,10 @@ id: pixel_4
           ["/opt/homebrew/share/android-commandlinetools/cmdline-tools", true],
           ["/opt/homebrew/share/android-commandlinetools/cmdline-tools/latest", true],
           ["/opt/homebrew/share/android-commandlinetools/cmdline-tools/latest/bin", true],
-          ["/opt/homebrew/share/android-commandlinetools/cmdline-tools/latest/bin/avdmanager", true],
+          [
+            "/opt/homebrew/share/android-commandlinetools/cmdline-tools/latest/bin/avdmanager",
+            true,
+          ],
           ["/opt/homebrew/share/android-commandlinetools/system-images", false], // No system-images!
           ["/opt/homebrew/share/android-commandlinetools/platforms", true],
           ["/opt/homebrew/share/android-commandlinetools/platform-tools", true],
@@ -912,7 +985,7 @@ id: pixel_4
           ["/Users/test/Library/Android/sdk/system-images", true], // Has system-images!
           ["/Users/test/Library/Android/sdk/platforms", true],
           ["/Users/test/Library/Android/sdk/platform-tools", true],
-          ["/Users/test/Library/Android/sdk/build-tools", true]
+          ["/Users/test/Library/Android/sdk/build-tools", true],
         ]);
 
         mockDeps.existsSync = (path: string) => pathChecks.get(normalizePath(path)) ?? false;
@@ -922,13 +995,13 @@ id: pixel_4
         mockDeps.detectAndroidCommandLineTools = async () => [
           {
             path: "/opt/homebrew/share/android-commandlinetools/cmdline-tools/latest",
-            source: "homebrew"
-          }
+            source: "homebrew",
+          },
         ];
 
         mockDeps.getBestAndroidToolsLocation = () => ({
           path: "/opt/homebrew/share/android-commandlinetools/cmdline-tools/latest",
-          source: "homebrew"
+          source: "homebrew",
         });
 
         // Set ANDROID_HOME to proper SDK location
@@ -954,8 +1027,12 @@ id: pixel_4
           // The two-pass search should have picked the SDK with system-images
           // even though Homebrew location appears earlier in candidates
           expect(usedEnv).toBeDefined();
-          expect(normalizePath(usedEnv?.ANDROID_HOME ?? "")).toBe("/Users/test/Library/Android/sdk");
-          expect(normalizePath(usedEnv?.ANDROID_SDK_ROOT ?? "")).toBe("/Users/test/Library/Android/sdk");
+          expect(normalizePath(usedEnv?.ANDROID_HOME ?? "")).toBe(
+            "/Users/test/Library/Android/sdk",
+          );
+          expect(normalizePath(usedEnv?.ANDROID_SDK_ROOT ?? "")).toBe(
+            "/Users/test/Library/Android/sdk",
+          );
         } finally {
           // Restore original environment
           if (originalAndroidHome) {
@@ -975,7 +1052,7 @@ id: pixel_4
           ["/test/sdk/system-images", false],
           ["/test/sdk/platforms", true],
           ["/test/sdk/platform-tools", true],
-          ["/test/sdk/build-tools", false]
+          ["/test/sdk/build-tools", false],
         ]);
 
         mockDeps.existsSync = (path: string) => pathChecks.get(normalizePath(path)) ?? false;
@@ -992,7 +1069,7 @@ id: pixel_4
           ["/test/sdk/system-images", false],
           ["/test/sdk/platforms", true],
           ["/test/sdk/platform-tools", false],
-          ["/test/sdk/build-tools", false]
+          ["/test/sdk/build-tools", false],
         ]);
 
         mockDeps.existsSync = (path: string) => pathChecks.get(normalizePath(path)) ?? false;
@@ -1003,8 +1080,12 @@ id: pixel_4
         const platformToolsExist = mockDeps.existsSync("/test/sdk/platform-tools");
         const buildToolsExist = mockDeps.existsSync("/test/sdk/build-tools");
 
-        const markerCount = [platformsExist, systemImagesExist, platformToolsExist, buildToolsExist]
-          .filter(Boolean).length;
+        const markerCount = [
+          platformsExist,
+          systemImagesExist,
+          platformToolsExist,
+          buildToolsExist,
+        ].filter(Boolean).length;
 
         expect(markerCount).toBe(1);
         expect(systemImagesExist).toBe(false);
@@ -1017,7 +1098,7 @@ id: pixel_4
           ["/test/sdk/system-images", false],
           ["/test/sdk/platforms", false],
           ["/test/sdk/platform-tools", false],
-          ["/test/sdk/build-tools", false]
+          ["/test/sdk/build-tools", false],
         ]);
 
         mockDeps.existsSync = (path: string) => pathChecks.get(normalizePath(path)) ?? false;
@@ -1056,13 +1137,15 @@ id: pixel_4
           ["/Users/test/Library/Android/sdk/system-images", true],
           ["/Users/test/Library/Android/sdk/cmdline-tools/latest", true],
           ["/Users/test/Library/Android/sdk/platforms", true],
-          ["/Users/test/Library/Android/sdk/platform-tools", true]
+          ["/Users/test/Library/Android/sdk/platform-tools", true],
         ]);
 
         mockDeps.existsSync = (path: string) => pathChecks.get(normalizePath(path)) ?? false;
 
         expect(mockDeps.existsSync("/Users/test/Library/Android/sdk/system-images")).toBe(true);
-        expect(mockDeps.existsSync("/Users/test/Library/Android/sdk/cmdline-tools/latest")).toBe(true);
+        expect(mockDeps.existsSync("/Users/test/Library/Android/sdk/cmdline-tools/latest")).toBe(
+          true,
+        );
       });
 
       test("should handle Windows typical path with system-images", async () => {
@@ -1073,14 +1156,20 @@ id: pixel_4
           ["/Users/test/AppData/Local/Android/Sdk/system-images", true],
           ["/Users/test/AppData/Local/Android/Sdk/cmdline-tools/latest", true],
           ["/Users/test/AppData/Local/Android/Sdk/platforms", true],
-          ["/Users/test/AppData/Local/Android/Sdk/platform-tools", true]
+          ["/Users/test/AppData/Local/Android/Sdk/platform-tools", true],
         ]);
 
         mockDeps.existsSync = (path: string) => pathChecks.get(normalizePath(path)) ?? false;
 
         // Both backslash and forward slash queries work due to normalization (drive letter stripped)
-        expect(mockDeps.existsSync("C:\\Users\\test\\AppData\\Local\\Android\\Sdk\\system-images")).toBe(true);
-        expect(mockDeps.existsSync("C:\\Users\\test\\AppData\\Local\\Android\\Sdk\\cmdline-tools\\latest")).toBe(true);
+        expect(
+          mockDeps.existsSync("C:\\Users\\test\\AppData\\Local\\Android\\Sdk\\system-images"),
+        ).toBe(true);
+        expect(
+          mockDeps.existsSync(
+            "C:\\Users\\test\\AppData\\Local\\Android\\Sdk\\cmdline-tools\\latest",
+          ),
+        ).toBe(true);
       });
 
       test("should handle Linux typical path with system-images", async () => {
@@ -1090,7 +1179,7 @@ id: pixel_4
           ["/home/test/Android/Sdk/system-images", true],
           ["/home/test/Android/Sdk/cmdline-tools/latest", true],
           ["/home/test/Android/Sdk/platforms", true],
-          ["/home/test/Android/Sdk/platform-tools", true]
+          ["/home/test/Android/Sdk/platform-tools", true],
         ]);
 
         mockDeps.existsSync = (path: string) => pathChecks.get(normalizePath(path)) ?? false;
@@ -1110,14 +1199,16 @@ id: pixel_4
           // ANDROID_HOME location (has system-images)
           ["/Users/test/Library/Android/sdk/cmdline-tools/latest", true],
           ["/Users/test/Library/Android/sdk/system-images", true],
-          ["/Users/test/Library/Android/sdk/platforms", true]
+          ["/Users/test/Library/Android/sdk/platforms", true],
         ]);
 
         mockDeps.existsSync = (path: string) => pathChecks.get(normalizePath(path)) ?? false;
 
         // ANDROID_HOME location should be preferred due to system-images
         expect(mockDeps.existsSync("/Users/test/Library/Android/sdk/system-images")).toBe(true);
-        expect(mockDeps.existsSync("/opt/homebrew/share/android-commandlinetools/system-images")).toBe(false);
+        expect(
+          mockDeps.existsSync("/opt/homebrew/share/android-commandlinetools/system-images"),
+        ).toBe(false);
       });
 
       test("should handle Windows old tools path vs new cmdline-tools", async () => {
@@ -1128,14 +1219,20 @@ id: pixel_4
           ["/Users/test/AppData/Local/Android/Sdk/tools/bin", true],
           // New cmdline-tools location
           ["/Users/test/AppData/Local/Android/Sdk/cmdline-tools/latest", true],
-          ["/Users/test/AppData/Local/Android/Sdk/system-images", true]
+          ["/Users/test/AppData/Local/Android/Sdk/system-images", true],
         ]);
 
         mockDeps.existsSync = (path: string) => pathChecks.get(normalizePath(path)) ?? false;
 
         // Both backslash and forward slash queries work (drive letter stripped)
-        expect(mockDeps.existsSync("C:\\Users\\test\\AppData\\Local\\Android\\Sdk\\cmdline-tools\\latest")).toBe(true);
-        expect(mockDeps.existsSync("C:\\Users\\test\\AppData\\Local\\Android\\Sdk\\tools\\bin")).toBe(true);
+        expect(
+          mockDeps.existsSync(
+            "C:\\Users\\test\\AppData\\Local\\Android\\Sdk\\cmdline-tools\\latest",
+          ),
+        ).toBe(true);
+        expect(
+          mockDeps.existsSync("C:\\Users\\test\\AppData\\Local\\Android\\Sdk\\tools\\bin"),
+        ).toBe(true);
       });
 
       test("should handle mixed path separators in Windows paths", async () => {
@@ -1143,14 +1240,18 @@ id: pixel_4
         // Map keys use paths without drive letters since normalizePath strips them
         const pathChecks = new Map<string, boolean>([
           ["/Users/test/AppData/Local/Android/Sdk", true],
-          ["/Users/test/AppData/Local/Android/Sdk/system-images", true]
+          ["/Users/test/AppData/Local/Android/Sdk/system-images", true],
         ]);
 
         mockDeps.existsSync = (path: string) => pathChecks.get(normalizePath(path)) ?? false;
 
         // Both forward and backslash queries work (drive letter stripped, separators normalized)
-        expect(mockDeps.existsSync("C:/Users/test/AppData/Local/Android/Sdk/system-images")).toBe(true);
-        expect(mockDeps.existsSync("C:\\Users\\test\\AppData\\Local\\Android\\Sdk\\system-images")).toBe(true);
+        expect(mockDeps.existsSync("C:/Users/test/AppData/Local/Android/Sdk/system-images")).toBe(
+          true,
+        );
+        expect(
+          mockDeps.existsSync("C:\\Users\\test\\AppData\\Local\\Android\\Sdk\\system-images"),
+        ).toBe(true);
       });
     });
   });
@@ -1179,8 +1280,12 @@ Caused by: java.lang.ClassNotFoundException: javax.xml.bind.annotation.XmlSchema
 
       {
         // Error should be actionable with JAXB guidance
-        const error = await expectRejection(resolveWithFakeTimer(fakeTimer, avdmanager.listDeviceImages(mockDeps)));
-        expect(error.message).toContain("Android SDK tools are outdated and incompatible with Java 11+.");
+        const error = await expectRejection(
+          resolveWithFakeTimer(fakeTimer, avdmanager.listDeviceImages(mockDeps)),
+        );
+        expect(error.message).toContain(
+          "Android SDK tools are outdated and incompatible with Java 11+.",
+        );
         expect(error.message).toContain("javax.xml.bind");
         expect(error.message).toContain("cmdline-tools/latest");
       }
@@ -1205,8 +1310,12 @@ Caused by: java.lang.ClassNotFoundException: javax.xml.bind.annotation.XmlSchema
       };
 
       {
-        const error = await expectRejection(resolveWithFakeTimer(fakeTimer, avdmanager.listDeviceImages(mockDeps)));
-        expect(error.message).toContain("Android SDK tools are outdated and incompatible with Java 11+.");
+        const error = await expectRejection(
+          resolveWithFakeTimer(fakeTimer, avdmanager.listDeviceImages(mockDeps)),
+        );
+        expect(error.message).toContain(
+          "Android SDK tools are outdated and incompatible with Java 11+.",
+        );
         expect(error.message).toContain("javax.xml.bind");
         expect(error.message).toContain("cmdline-tools/latest");
       }
@@ -1232,7 +1341,7 @@ Caused by: java.lang.ClassNotFoundException: javax.xml.bind.annotation.XmlSchema
       const oldToolsLocation = {
         path: "/opt/android-sdk/tools/bin",
         source: "typical" as const,
-        available_tools: ["avdmanager", "sdkmanager"]
+        available_tools: ["avdmanager", "sdkmanager"],
       };
 
       mockDeps.getBestAndroidToolsLocation = () => oldToolsLocation;
@@ -1250,8 +1359,12 @@ Caused by: java.lang.ClassNotFoundException: javax.xml.bind.annotation.XmlSchema
       };
 
       {
-        const error = await expectRejection(resolveWithFakeTimer(fakeTimer, avdmanager.listDeviceImages(mockDeps)));
-        expect(error.message).toContain("Android SDK tools are outdated and incompatible with Java 11+.");
+        const error = await expectRejection(
+          resolveWithFakeTimer(fakeTimer, avdmanager.listDeviceImages(mockDeps)),
+        );
+        expect(error.message).toContain(
+          "Android SDK tools are outdated and incompatible with Java 11+.",
+        );
         expect(error.message).toContain("javax.xml.bind");
         expect(error.message).toContain("cmdline-tools/latest");
       }
@@ -1265,7 +1378,7 @@ Caused by: java.lang.ClassNotFoundException: javax.xml.bind.annotation.XmlSchema
       const oldToolsLocation = {
         path: "/opt/android-sdk/tools",
         source: "typical" as const,
-        available_tools: ["avdmanager", "sdkmanager"]
+        available_tools: ["avdmanager", "sdkmanager"],
       };
 
       mockDeps.getBestAndroidToolsLocation = () => oldToolsLocation;
@@ -1280,7 +1393,9 @@ Caused by: java.lang.ClassNotFoundException: javax.xml.bind.annotation.XmlSchema
       };
 
       {
-        const error = await expectRejection(resolveWithFakeTimer(fakeTimer, avdmanager.listDeviceImages(mockDeps)));
+        const error = await expectRejection(
+          resolveWithFakeTimer(fakeTimer, avdmanager.listDeviceImages(mockDeps)),
+        );
         expect(error.message).toContain("Detected deprecated Android SDK Tools");
         expect(error.message).toContain("cmdline-tools/latest");
       }
@@ -1338,8 +1453,12 @@ Additional error context`;
       };
 
       {
-        const error = await expectRejection(resolveWithFakeTimer(fakeTimer, avdmanager.listDeviceImages(mockDeps)));
-        expect(error.message).toContain("Android SDK tools are outdated and incompatible with Java 11+.");
+        const error = await expectRejection(
+          resolveWithFakeTimer(fakeTimer, avdmanager.listDeviceImages(mockDeps)),
+        );
+        expect(error.message).toContain(
+          "Android SDK tools are outdated and incompatible with Java 11+.",
+        );
         expect(error.message).toContain("javax.xml.bind");
         expect(error.message).toContain("cmdline-tools/latest");
       }

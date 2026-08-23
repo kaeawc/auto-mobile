@@ -12,13 +12,21 @@ import { FakeObserveScreenCache } from "../fakes/FakeObserveScreenCache";
 import { FakeSimCtlClient } from "../fakes/FakeSimCtlClient";
 import { FakeSimctl } from "../fakes/FakeSimctl";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDeviceCreationGate } from "../fakes/FakeDeviceCreationGate";
+import { FakeVirtualDeviceLifecycleCoordinator } from "../fakes/FakeVirtualDeviceLifecycleCoordinator";
 import { FakeWindow } from "../fakes/FakeWindow";
 import { BootedDevice, AppearanceConfigInput } from "../../src/models";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { DEFAULT_RUNNER_PROVISION_TIMEOUT_MS } from "../../src/utils/runnerReadinessConfig";
+import {
+  InMemoryVirtualDeviceLifecycleCoordinator,
+  type VirtualDeviceLifecycleCoordinator,
+} from "../../src/utils/virtualDeviceLifecycleCoordinator";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type { AndroidCtrlProxy } from "../../src/features/observe/android/AndroidCtrlProxyClient";
 import type { IOSCtrlProxy } from "../../src/features/observe/ios/IOSCtrlProxyClient";
+import { getAbortSignal } from "../../src/utils/AbortContext";
+import { resetDeviceCreationGate, setDeviceCreationGate } from "../../src/utils/deviceCreationGate";
 import { promises as fs } from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -43,7 +51,7 @@ function stubIOSCtrlProxy(overrides: Partial<IOSCtrlProxy>): IOSCtrlProxy {
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
   let resolve!: () => void;
-  const promise = new Promise<void>(done => {
+  const promise = new Promise<void>((done) => {
     resolve = done;
   });
   return { promise, resolve };
@@ -82,7 +90,7 @@ describe("DeviceSessionManager", () => {
       ...originalAppearanceDefaults,
       applyOnConnect: false,
       syncWithHost: false,
-      defaultMode: "light"
+      defaultMode: "light",
     });
   });
 
@@ -166,7 +174,7 @@ describe("DeviceSessionManager", () => {
     });
     const manager = DeviceSessionManager.createInstance(provider);
     await expect(
-      manager.ensureDeviceReady("android", "device-1", { skipCtrlProxyDownload: true })
+      manager.ensureDeviceReady("android", "device-1", { skipCtrlProxyDownload: true }),
     ).rejects.toThrow("Accessibility service version mismatch");
   });
 
@@ -296,10 +304,18 @@ describe("DeviceSessionManager", () => {
 
   test("FakeDeviceClientProvider throws when collaborator fakes are not configured", () => {
     const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils);
-    expect(() => provider.getAndroidCtrlProxyClient(device)).toThrow(/ctrlProxyClient fake not configured/);
-    expect(() => provider.getAndroidCtrlProxyManager(device)).toThrow(/ctrlProxyManager fake not configured/);
-    expect(() => provider.getIOSCtrlProxyManager(device)).toThrow(/iosCtrlProxyManager fake not configured/);
-    expect(() => provider.getIOSCtrlProxyClient(device, 8080)).toThrow(/iosCtrlProxyClient fake not configured/);
+    expect(() => provider.getAndroidCtrlProxyClient(device)).toThrow(
+      /ctrlProxyClient fake not configured/,
+    );
+    expect(() => provider.getAndroidCtrlProxyManager(device)).toThrow(
+      /ctrlProxyManager fake not configured/,
+    );
+    expect(() => provider.getIOSCtrlProxyManager(device)).toThrow(
+      /iosCtrlProxyManager fake not configured/,
+    );
+    expect(() => provider.getIOSCtrlProxyClient(device, 8080)).toThrow(
+      /iosCtrlProxyClient fake not configured/,
+    );
     expect(() => provider.getWindow(device)).toThrow(/window fake not configured/);
   });
 
@@ -364,28 +380,27 @@ describe("DeviceSessionManager iOS push-update cache invalidation", () => {
       verifyServiceReady: () => Promise.resolve(true),
       onPushUpdate: (cb: () => void) => {
         captured = cb;
-        return () => { captured = null; };
+        return () => {
+          captured = null;
+        };
       },
     });
 
     const observeCache = new FakeObserveScreenCache();
 
-    const provider = new FakeDeviceClientProvider(
-      fakeAdb,
-      fakeDeviceUtils,
-      fakeSimctl as any,
-      {
-        iosCtrlProxyManager: iosManager,
-        iosCtrlProxyClient: iosClient,
-        observeScreenCache: observeCache,
-      }
-    );
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any, {
+      iosCtrlProxyManager: iosManager,
+      iosCtrlProxyClient: iosClient,
+      observeScreenCache: observeCache,
+    });
 
     const manager = DeviceSessionManager.createInstance(provider);
     await manager.verifyIosDevice("ios-push-1");
 
     // Listener registered; cache untouched until update fires.
-    if (!captured) {throw new Error("onPushUpdate listener never registered");}
+    if (!captured) {
+      throw new Error("onPushUpdate listener never registered");
+    }
     expect(observeCache.wasClearedFor("ios-push-1")).toBe(false);
 
     captured();
@@ -398,7 +413,7 @@ describe("DeviceSessionManager iOS push-update cache invalidation", () => {
     const reaping = deferred();
     const reapSpy = spyOn(
       IOSCtrlProxyManager,
-      "reapOrphanedRunnerProcessesOnStartup"
+      "reapOrphanedRunnerProcessesOnStartup",
     ).mockImplementation(() => reaping.promise);
     const fakeSimctl = new FakeSimCtlClient();
     fakeSimctl.setDeviceInfo("ios-push-1", {
@@ -411,28 +426,23 @@ describe("DeviceSessionManager iOS push-update cache invalidation", () => {
     const iosManager = new FakeIOSCtrlProxyManager();
     const verifyServiceReady = spyOn(
       new FakeIOSCtrlProxy(),
-      "verifyServiceReady"
+      "verifyServiceReady",
     ).mockResolvedValue(true);
     const iosClient = {
       isConnected: () => true,
       verifyServiceReady,
       onPushUpdate: () => () => {},
     } as unknown as IOSCtrlProxy;
-    const provider = new FakeDeviceClientProvider(
-      fakeAdb,
-      fakeDeviceUtils,
-      fakeSimctl as any,
-      {
-        iosCtrlProxyManager: iosManager,
-        iosCtrlProxyClient: iosClient,
-      }
-    );
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any, {
+      iosCtrlProxyManager: iosManager,
+      iosCtrlProxyClient: iosClient,
+    });
     const manager = DeviceSessionManager.createInstance(provider);
 
     try {
       IOSCtrlProxyManager.startOrphanRunnerReapOnStartup();
       const verify = manager.verifyIosDevice("ios-push-1");
-      await new Promise<void>(resolve => setImmediate(resolve));
+      await new Promise<void>((resolve) => setImmediate(resolve));
 
       expect(verifyServiceReady).not.toHaveBeenCalled();
       reaping.resolve();
@@ -456,6 +466,7 @@ describe("DeviceSessionManager legacy iOS auto-start readiness", () => {
     iosManager: FakeIOSCtrlProxyManager,
     iosClient: FakeIOSCtrlProxy,
     useConfiguredReadinessTimeout: boolean = false,
+    lifecycleCoordinator?: VirtualDeviceLifecycleCoordinator,
   ): DeviceSessionManager {
     const fakeAdb = new FakeAdbExecutor();
     const fakeDeviceUtils = new FakeDeviceUtils();
@@ -471,20 +482,16 @@ describe("DeviceSessionManager legacy iOS auto-start readiness", () => {
     const simctl = Object.assign(fakeSimctl, {
       openSimulatorApp: async () => {},
     });
-    const provider = new FakeDeviceClientProvider(
-      fakeAdb,
-      fakeDeviceUtils,
-      simctl as never,
-      {
-        iosCtrlProxyManager: iosManager,
-        iosCtrlProxyClient: iosClient,
-      },
-    );
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, simctl as never, {
+      iosCtrlProxyManager: iosManager,
+      iosCtrlProxyClient: iosClient,
+    });
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
 
     const options = {
       runnerReadinessTimer: timer,
+      lifecycleCoordinator,
       ...(useConfiguredReadinessTimeout ? {} : { runnerReadinessTimeoutMs: 1_000 }),
     };
     return DeviceSessionManager.createInstance(provider, undefined, options);
@@ -502,8 +509,114 @@ describe("DeviceSessionManager legacy iOS auto-start readiness", () => {
       (reason: unknown) => reason,
     );
     const message = error instanceof Error ? error.message : String(error);
-    expect(message).toMatch(/legacy iOS session auto-start.*phase=runner-setup.*Mock setup failure/);
+    expect(message).toMatch(
+      /legacy iOS session auto-start.*phase=runner-setup.*Mock setup failure/,
+    );
     expect(message).not.toContain("startDevice");
+  });
+
+  test("teardown preempts legacy session auto-start readiness for the same UDID", async () => {
+    const lifecycleTimer = new FakeTimer();
+    const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(lifecycleTimer);
+    const iosManager = new FakeIOSCtrlProxyManager();
+    const iosClient = new FakeIOSCtrlProxy();
+    iosClient.setConnected(false);
+    let setupStarted!: () => void;
+    const didStartSetup = new Promise<void>((resolve) => {
+      setupStarted = resolve;
+    });
+    iosManager.setup = async (_force, _perf, signal) => {
+      setupStarted();
+      return await new Promise((resolve, reject) => {
+        const abort = () => reject(signal?.reason ?? new Error("setup cancelled"));
+        if (signal?.aborted) {
+          abort();
+          return;
+        }
+        signal?.addEventListener("abort", abort, { once: true });
+      });
+    };
+    const manager = createManager(iosManager, iosClient, false, lifecycleCoordinator);
+
+    const readiness = manager.ensureDeviceReady("ios");
+    await didStartSetup;
+    const teardown = lifecycleCoordinator.reserve(
+      { kind: "stable", platform: "ios", stableId: iosDevice.deviceId },
+      { operation: "teardown", deadlineMs: 1_000 },
+    );
+
+    await expect(readiness).rejects.toThrow(/preempted by teardown/);
+    const teardownLease = await teardown;
+    teardownLease.release();
+  });
+
+  test("reserves an auto-created simulator name before creation and binds its UDID", async () => {
+    const lifecycleCoordinator = new FakeVirtualDeviceLifecycleCoordinator();
+    const fakeAdb = new FakeAdbExecutor();
+    const fakeDeviceUtils = new FakeDeviceUtils();
+    const fakeSimctl = new FakeSimctl();
+    const createdUdid = "created-simulator-udid";
+    const bootStarted = deferred();
+    fakeSimctl.setDeviceTypes([
+      {
+        name: "iPhone 17",
+        identifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+        productFamily: "iPhone",
+        bundlePath: "/tmp",
+        minRuntimeVersion: 0,
+        maxRuntimeVersion: 0,
+      },
+    ]);
+    fakeSimctl.setCreatedSimulatorUdid(createdUdid);
+    Object.assign(fakeSimctl, {
+      resolveRuntimeIdentifier: async () => "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
+      openSimulatorApp: async () => {},
+    });
+    fakeSimctl.bootSimulator = async () => {
+      bootStarted.resolve();
+      const signal = getAbortSignal();
+      return await new Promise<BootedDevice>((_resolve, reject) => {
+        const abort = () => reject(signal?.reason ?? new Error("boot cancelled"));
+        if (signal?.aborted) {
+          abort();
+          return;
+        }
+        signal?.addEventListener("abort", abort, { once: true });
+      });
+    };
+    const iosManager = new FakeIOSCtrlProxyManager();
+    const iosClient = new FakeIOSCtrlProxy();
+    iosClient.setConnected(true);
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as never, {
+      iosCtrlProxyManager: iosManager,
+      iosCtrlProxyClient: iosClient,
+    });
+    const manager = DeviceSessionManager.createInstance(provider, undefined, {
+      lifecycleCoordinator,
+    });
+    setDeviceCreationGate(new FakeDeviceCreationGate(true));
+
+    try {
+      const readiness = manager.findOrStartIosDevice();
+      await bootStarted.promise;
+      const createCall = fakeSimctl.getMethodCalls("createSimulator")[0];
+      const createdName = createCall?.name;
+      expect(createdName).toBeString();
+      expect(lifecycleCoordinator.reservations[0]).toEqual({
+        identity: { kind: "selector", platform: "ios", selector: createdName },
+        operation: "start",
+      });
+
+      const teardown = lifecycleCoordinator.reserve(
+        { kind: "stable", platform: "ios", stableId: createdUdid },
+        { operation: "teardown", deadlineMs: 300_000 },
+      );
+      await expect(readiness).rejects.toThrow(/preempted by teardown/);
+      const teardownLease = await teardown;
+      teardownLease.release();
+    } finally {
+      resetDeviceCreationGate();
+    }
   });
 
   test("fails auto-start when CtrlProxy setup throws", async () => {
@@ -556,9 +669,7 @@ describe("DeviceSessionManager legacy iOS auto-start readiness", () => {
     const iosManager = new FakeIOSCtrlProxyManager();
     const iosClient = new FakeIOSCtrlProxy();
     iosClient.setConnected(true);
-    spyOn(iosClient, "verifyServiceReady")
-      .mockResolvedValueOnce(false)
-      .mockResolvedValueOnce(true);
+    spyOn(iosClient, "verifyServiceReady").mockResolvedValueOnce(false).mockResolvedValueOnce(true);
     const manager = createManager(iosManager, iosClient);
 
     await expect(manager.ensureDeviceReady("ios")).resolves.toEqual(iosDevice);
@@ -613,7 +724,7 @@ describe("DeviceSessionManager iOS openSimulatorApp", () => {
       ...originalAppearanceDefaults,
       applyOnConnect: false,
       syncWithHost: false,
-      defaultMode: "light"
+      defaultMode: "light",
     });
   });
 
@@ -624,20 +735,15 @@ describe("DeviceSessionManager iOS openSimulatorApp", () => {
   function buildIosProvider(
     fakeAdb: FakeAdbExecutor,
     fakeDeviceUtils: FakeDeviceUtils,
-    fakeSimctl: FakeSimCtlClient
+    fakeSimctl: FakeSimCtlClient,
   ): FakeDeviceClientProvider {
     const iosManager = new FakeIOSCtrlProxyManager();
     const iosClient = new FakeIOSCtrlProxy();
     iosClient.setConnected(true);
-    return new FakeDeviceClientProvider(
-      fakeAdb,
-      fakeDeviceUtils,
-      fakeSimctl as any,
-      {
-        iosCtrlProxyManager: iosManager,
-        iosCtrlProxyClient: iosClient,
-      }
-    );
+    return new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any, {
+      iosCtrlProxyManager: iosManager,
+      iosCtrlProxyClient: iosClient,
+    });
   }
 
   test("should call openSimulatorApp once on the first booted iOS device verification", async () => {
@@ -650,7 +756,7 @@ describe("DeviceSessionManager iOS openSimulatorApp", () => {
     });
 
     const manager = DeviceSessionManager.createInstance(
-      buildIosProvider(fakeAdb, fakeDeviceUtils, fakeSimctl)
+      buildIosProvider(fakeAdb, fakeDeviceUtils, fakeSimctl),
     );
 
     await manager.verifyIosDevice("ios-sim-1");
@@ -668,7 +774,7 @@ describe("DeviceSessionManager iOS openSimulatorApp", () => {
     });
 
     const manager = DeviceSessionManager.createInstance(
-      buildIosProvider(fakeAdb, fakeDeviceUtils, fakeSimctl)
+      buildIosProvider(fakeAdb, fakeDeviceUtils, fakeSimctl),
     );
 
     await manager.verifyIosDevice("ios-sim-1");
@@ -688,7 +794,7 @@ describe("DeviceSessionManager iOS openSimulatorApp", () => {
     });
 
     const manager = DeviceSessionManager.createInstance(
-      buildIosProvider(fakeAdb, fakeDeviceUtils, fakeSimctl)
+      buildIosProvider(fakeAdb, fakeDeviceUtils, fakeSimctl),
     );
 
     await manager.verifyIosDevice("ios-sim-1");
@@ -706,7 +812,7 @@ describe("DeviceSessionManager iOS openSimulatorApp", () => {
     });
 
     const manager = DeviceSessionManager.createInstance(
-      buildIosProvider(fakeAdb, fakeDeviceUtils, fakeSimctl)
+      buildIosProvider(fakeAdb, fakeDeviceUtils, fakeSimctl),
     );
 
     // First call: openSimulatorApp throws — flag must NOT be set
@@ -784,29 +890,24 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     const fakeIosClient = new FakeIOSCtrlProxy();
     fakeIosClient.setConnected(true);
 
-    return new FakeDeviceClientProvider(
-      fakeAdb,
-      fakeDeviceUtils,
-      fakeSimctl as any,
-      {
-        window: fakeWindow,
-        ctrlProxyManager: fakeCtrlProxy,
-        ctrlProxyClient: stubAndroidCtrlProxy({
-          isConnected: () => true,
-          verifyServiceReady: () => Promise.resolve(true),
-        }),
-        iosCtrlProxyManager: fakeIosManager,
-        iosCtrlProxyClient: fakeIosClient,
-      }
-    );
+    return new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any, {
+      window: fakeWindow,
+      ctrlProxyManager: fakeCtrlProxy,
+      ctrlProxyClient: stubAndroidCtrlProxy({
+        isConnected: () => true,
+        verifyServiceReady: () => Promise.resolve(true),
+      }),
+      iosCtrlProxyManager: fakeIosManager,
+      iosCtrlProxyClient: fakeIosClient,
+    });
   }
 
   test("should throw when both platforms connected and no active device or deviceId", async () => {
     const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory);
 
-    await expect(
-      manager.ensureDeviceReady("either")
-    ).rejects.toThrow("Both Android and iOS devices are connected");
+    await expect(manager.ensureDeviceReady("either")).rejects.toThrow(
+      "Both Android and iOS devices are connected",
+    );
   });
 
   test("fails closed when an unusable iOS runner override is set (#4221)", async () => {
@@ -818,7 +919,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     try {
       const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory);
       await expect(
-        manager.verifyIosDevice(iosDevice.deviceId, { skipCtrlProxyDownload: true })
+        manager.verifyIosDevice(iosDevice.deviceId, { skipCtrlProxyDownload: true }),
       ).rejects.toThrow(/BUNDLE_PATH.*unusable|directory/);
     } finally {
       if (original === undefined) {
@@ -837,7 +938,9 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH = ipa;
     try {
       const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory);
-      const result = await manager.ensureDeviceReady("ios", iosDevice.deviceId, { skipCtrlProxyDownload: true });
+      const result = await manager.ensureDeviceReady("ios", iosDevice.deviceId, {
+        skipCtrlProxyDownload: true,
+      });
       expect(result.platform).toBe("ios");
     } finally {
       if (original === undefined) {
@@ -877,6 +980,20 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     expect(result.deviceId).toBe("ios-sim-1");
   });
 
+  test("reserves a provided simulator through readiness verification", async () => {
+    const lifecycleCoordinator = new FakeVirtualDeviceLifecycleCoordinator();
+    const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory, {
+      lifecycleCoordinator,
+    });
+
+    await manager.ensureDeviceReady("ios", iosDevice.deviceId);
+
+    expect(lifecycleCoordinator.reservations).toContainEqual({
+      identity: { kind: "stable", platform: "ios", stableId: iosDevice.deviceId },
+      operation: "start",
+    });
+  });
+
   test("should resolve android device by providedDeviceId when no active device set", async () => {
     const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory);
 
@@ -901,6 +1018,21 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     // The device should still be set (not cleared by a failed iOS verification)
     expect(manager.getCurrentPlatform()).toBe("android");
     expect(manager.getCurrentDevice()?.deviceId).toBe("emulator-5554");
+  });
+
+  test("reserves the current simulator through readiness verification", async () => {
+    const lifecycleCoordinator = new FakeVirtualDeviceLifecycleCoordinator();
+    const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory, {
+      lifecycleCoordinator,
+    });
+    manager.setCurrentDevice(iosDevice, "ios");
+
+    await manager.ensureDeviceReady("either");
+
+    expect(lifecycleCoordinator.reservations).toContainEqual({
+      identity: { kind: "stable", platform: "ios", stableId: iosDevice.deviceId },
+      operation: "start",
+    });
   });
 
   test("should return android device when platform is explicitly 'android' even with iOS active", async () => {
@@ -943,9 +1075,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
       deviceId: "mock-Pixel_9_Pro",
       platform: "android",
     };
-    fakeDeviceUtils.setDeviceImages("android", [
-      { name: "Pixel_9_Pro", platform: "android" },
-    ]);
+    fakeDeviceUtils.setDeviceImages("android", [{ name: "Pixel_9_Pro", platform: "android" }]);
     fakeDeviceUtils.setMockChildProcess("Pixel_9_Pro", childProcess);
     fakeAdb.setDevices([startedDevice]);
 
@@ -954,6 +1084,91 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     await manager.findOrStartAndroidDevice();
 
     expect(fakeDeviceUtils.getWaitForDeviceReadyChildProcess()).toBe(childProcess);
+  });
+
+  test("holds the Android auto-start lease until a preempted emulator process exits", async () => {
+    const timer = new FakeTimer();
+    const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+    const childProcess = new EventEmitter() as any;
+    Object.assign(childProcess, {
+      exitCode: null,
+      signalCode: null,
+      killed: false,
+      stderr: null,
+      kill: () => {
+        childProcess.killed = true;
+        return true;
+      },
+    });
+    let readinessStarted!: () => void;
+    const didStartReadiness = new Promise<void>((resolve) => {
+      readinessStarted = resolve;
+    });
+    fakeAdb.setDevices([]);
+    fakeDeviceUtils.setDeviceImages("android", [{ name: "Pixel_9_Pro", platform: "android" }]);
+    fakeDeviceUtils.setMockChildProcess("Pixel_9_Pro", childProcess);
+    fakeDeviceUtils.waitForDeviceReady = async (_device, _timeoutMs, _childProcess, signal) => {
+      readinessStarted();
+      return await new Promise<BootedDevice>((_resolve, reject) => {
+        const abort = () => reject(signal?.reason ?? new Error("readiness cancelled"));
+        if (signal?.aborted) {
+          abort();
+          return;
+        }
+        signal?.addEventListener("abort", abort, { once: true });
+      });
+    };
+    const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory, {
+      lifecycleCoordinator,
+      runnerReadinessTimer: timer,
+    });
+
+    const readiness = manager.findOrStartAndroidDevice();
+    await didStartReadiness;
+    const teardown = lifecycleCoordinator.reserve(
+      { kind: "stable", platform: "android", stableId: "Pixel_9_Pro" },
+      { operation: "teardown", deadlineMs: 1_000 },
+    );
+    let teardownAcquired = false;
+    void teardown.then(() => {
+      teardownAcquired = true;
+    });
+    for (let attempt = 0; !childProcess.killed && attempt < 50; attempt++) {
+      await Promise.resolve();
+    }
+    expect(childProcess.killed).toBe(true);
+    expect(teardownAcquired).toBe(false);
+
+    childProcess.exitCode = 0;
+    childProcess.emit("exit", 0, "SIGTERM");
+    await expect(readiness).rejects.toThrow(/preempted by teardown/);
+    const teardownLease = await teardown;
+    teardownLease.release();
+  });
+
+  test("reserves a warm Android emulator by stable AVD name", async () => {
+    const lifecycleCoordinator = new FakeVirtualDeviceLifecycleCoordinator();
+    fakeDeviceUtils.setBootedDevices("android", [
+      {
+        name: "Pixel_9_Pro",
+        deviceId: "emulator-5554",
+        platform: "android",
+      },
+    ]);
+    const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory, {
+      lifecycleCoordinator,
+    });
+
+    await manager.findOrStartAndroidDevice();
+
+    expect(lifecycleCoordinator.reservations).toContainEqual({
+      identity: {
+        kind: "stable",
+        platform: "android",
+        stableId: "Pixel_9_Pro",
+      },
+      operation: "start",
+    });
   });
 });
 
@@ -982,7 +1197,7 @@ describe("DeviceSessionManager device-list error formatting (#4227)", () => {
     const manager = DeviceSessionManager.createInstance(makeProvider([androidDevice]));
 
     await expect(
-      manager.verifyAndroidDevice(androidDevice.deviceId, { skipCtrlProxyDownload: true })
+      manager.verifyAndroidDevice(androidDevice.deviceId, { skipCtrlProxyDownload: true }),
     ).resolves.toBeUndefined();
   });
 
@@ -990,7 +1205,7 @@ describe("DeviceSessionManager device-list error formatting (#4227)", () => {
     const manager = DeviceSessionManager.createInstance(makeProvider([androidDevice]));
 
     await expect(
-      manager.ensureDeviceReady("android", "no-such-device", { skipCtrlProxyDownload: true })
+      manager.ensureDeviceReady("android", "no-such-device", { skipCtrlProxyDownload: true }),
     ).rejects.toThrow(/emulator-5554/);
   });
 

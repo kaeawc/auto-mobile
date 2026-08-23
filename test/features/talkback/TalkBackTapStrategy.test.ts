@@ -23,14 +23,14 @@ describe("TalkBackTapStrategy", () => {
     mockExecutor = new FocusNavigationExecutor({
       matcher,
       pathCalculator: mockPathCalculator,
-      timer: fakeTimer
+      timer: fakeTimer,
     });
 
     strategy = new TalkBackTapStrategy({
       matcher,
       pathCalculator: mockPathCalculator,
       executor: mockExecutor,
-      timer: fakeTimer
+      timer: fakeTimer,
     });
 
     driver = new FakeTalkBackNavigationDriver();
@@ -39,7 +39,7 @@ describe("TalkBackTapStrategy", () => {
   describe("executeTap", () => {
     test("returns error when element has no identifying information", async () => {
       const element = {
-        bounds: { left: 0, top: 0, right: 100, bottom: 100 }
+        bounds: { left: 0, top: 0, right: 100, bottom: 100 },
         // no text, no resource-id, no content-desc
       } as Element;
 
@@ -53,13 +53,12 @@ describe("TalkBackTapStrategy", () => {
     test("navigates using text match when element has no resource-id", async () => {
       const element = {
         bounds: { left: 0, top: 0, right: 100, bottom: 100 },
-        text: "Button"
+        text: "Button",
       } as Element;
 
       driver.setElements([element], 0);
 
-      const navigateToElement = spyOn(mockExecutor, "navigateToElement")
-        .mockResolvedValue(true);
+      const navigateToElement = spyOn(mockExecutor, "navigateToElement").mockResolvedValue(true);
 
       const result = await strategy.executeTap("device-1", element, driver);
 
@@ -68,28 +67,27 @@ describe("TalkBackTapStrategy", () => {
       expect(result.screenReaderNavigation).toMatchObject({
         reachable: true,
         focusTrapDetected: false,
-        traversalOrder: [element]
+        traversalOrder: [element],
       });
       expect(navigateToElement).toHaveBeenCalledTimes(1);
       expect(navigateToElement).toHaveBeenCalledWith(
         "device-1",
         expect.anything(),
         expect.anything(),
-        expect.objectContaining({ verificationInterval: 1 })
+        expect.objectContaining({ verificationInterval: 1 }),
       );
       expect(driver.getTapCount()).toBe(2); // Double-tap to activate
     });
 
     test("navigates using content-desc match when element has no resource-id", async () => {
       const element = {
-        "bounds": { left: 0, top: 0, right: 100, bottom: 100 },
-        "content-desc": "Close dialog"
+        bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+        "content-desc": "Close dialog",
       } as Element;
 
       driver.setElements([element], 0);
 
-      const navigateToElement = spyOn(mockExecutor, "navigateToElement")
-        .mockResolvedValue(true);
+      const navigateToElement = spyOn(mockExecutor, "navigateToElement").mockResolvedValue(true);
 
       const result = await strategy.executeTap("device-1", element, driver);
 
@@ -101,14 +99,13 @@ describe("TalkBackTapStrategy", () => {
     test("uses focus navigation for tap action", async () => {
       const element = {
         "resource-id": "test:id/button",
-        "bounds": { left: 0, top: 0, right: 100, bottom: 100 }
+        bounds: { left: 0, top: 0, right: 100, bottom: 100 },
       } as Element;
 
       // Set up driver with element in traversal order
       driver.setElements([element], 0);
 
-      const navigateToElement = spyOn(mockExecutor, "navigateToElement")
-        .mockResolvedValue(true);
+      const navigateToElement = spyOn(mockExecutor, "navigateToElement").mockResolvedValue(true);
 
       const result = await strategy.executeTap("device-1", element, driver);
 
@@ -121,13 +118,14 @@ describe("TalkBackTapStrategy", () => {
     test("returns error when focus navigation fails", async () => {
       const element = {
         "resource-id": "test:id/button",
-        "bounds": { left: 0, top: 0, right: 100, bottom: 100 }
+        bounds: { left: 0, top: 0, right: 100, bottom: 100 },
       } as Element;
 
       driver.setElements([element], 0);
 
-      const navigateToElement = spyOn(mockExecutor, "navigateToElement")
-        .mockRejectedValue(new Error("Navigation failed"));
+      const navigateToElement = spyOn(mockExecutor, "navigateToElement").mockRejectedValue(
+        new Error("Navigation failed"),
+      );
 
       const result = await strategy.executeTap("device-1", element, driver);
 
@@ -137,7 +135,7 @@ describe("TalkBackTapStrategy", () => {
       expect(result.screenReaderNavigation).toMatchObject({
         reachable: false,
         focusTrapDetected: false,
-        traversalOrder: [element]
+        traversalOrder: [element],
       });
       expect(navigateToElement).toHaveBeenCalledTimes(1);
     });
@@ -145,11 +143,11 @@ describe("TalkBackTapStrategy", () => {
     test("reports a focus trap when the convergence guard stops navigation", async () => {
       const element = {
         "resource-id": "test:id/button",
-        "bounds": { left: 0, top: 0, right: 100, bottom: 100 }
+        bounds: { left: 0, top: 0, right: 100, bottom: 100 },
       } as Element;
       driver.setElements([element], 0);
       spyOn(mockExecutor, "navigateToElement").mockRejectedValue(
-        new Error("Focus navigation is not converging on the target.")
+        new Error("Focus navigation is not converging on the target."),
       );
 
       const result = await strategy.executeTap("device-1", element, driver);
@@ -157,7 +155,7 @@ describe("TalkBackTapStrategy", () => {
       expect(result.screenReaderNavigation).toMatchObject({
         reachable: false,
         focusTrapDetected: true,
-        traversalOrder: [element]
+        traversalOrder: [element],
       });
     });
 
@@ -169,26 +167,23 @@ describe("TalkBackTapStrategy", () => {
       ["Focus navigation could not track the TalkBack cursor position. Try narrowing.", true],
       ["Focus navigation is not converging on the target. Try scrolling.", true],
       ["Navigation failed for an unrelated reason", false],
-    ])(
-      "maps navigation error %j to focusTrapDetected=%p",
-      async (message, expectedTrap) => {
-        const element = {
-          "resource-id": "test:id/button",
-          "bounds": { left: 0, top: 0, right: 100, bottom: 100 }
-        } as Element;
-        driver.setElements([element], 0);
-        spyOn(mockExecutor, "navigateToElement").mockRejectedValue(new Error(message as string));
+    ])("maps navigation error %j to focusTrapDetected=%p", async (message, expectedTrap) => {
+      const element = {
+        "resource-id": "test:id/button",
+        bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+      } as Element;
+      driver.setElements([element], 0);
+      spyOn(mockExecutor, "navigateToElement").mockRejectedValue(new Error(message as string));
 
-        const result = await strategy.executeTap("device-1", element, driver);
+      const result = await strategy.executeTap("device-1", element, driver);
 
-        expect(result.screenReaderNavigation?.focusTrapDetected).toBe(expectedTrap as boolean);
-      }
-    );
+      expect(result.screenReaderNavigation?.focusTrapDetected).toBe(expectedTrap as boolean);
+    });
 
     test("uses ACTION_CLICK fallback if double-tap activation fails", async () => {
       const element = {
         "resource-id": "test:id/button",
-        "bounds": { left: 0, top: 0, right: 100, bottom: 100 }
+        bounds: { left: 0, top: 0, right: 100, bottom: 100 },
       } as Element;
 
       driver.setElements([element], 0);
@@ -209,7 +204,7 @@ describe("TalkBackTapStrategy", () => {
     test("returns failure when text-only element activation double-tap fails (no ACTION_CLICK fallback)", async () => {
       const element = {
         bounds: { left: 0, top: 0, right: 100, bottom: 100 },
-        text: "Button"
+        text: "Button",
       } as Element;
 
       driver.setElements([element], 0);
@@ -227,7 +222,7 @@ describe("TalkBackTapStrategy", () => {
     test("returns failure when text-only element second tap fails (no ACTION_CLICK fallback)", async () => {
       const element = {
         bounds: { left: 0, top: 0, right: 100, bottom: 100 },
-        text: "Button"
+        text: "Button",
       } as Element;
 
       driver.setElements([element], 0);
@@ -246,14 +241,19 @@ describe("TalkBackTapStrategy", () => {
     test("returns error if both double-tap and ACTION_CLICK fail", async () => {
       const element = {
         "resource-id": "test:id/button",
-        "bounds": { left: 0, top: 0, right: 100, bottom: 100 }
+        bounds: { left: 0, top: 0, right: 100, bottom: 100 },
       } as Element;
 
       driver.setElements([element], 0);
 
       spyOn(mockExecutor, "navigateToElement").mockResolvedValue(true);
       driver.queueTapResult({ success: false, totalTimeMs: 1, error: "tap failed" });
-      driver.setActionResult({ success: false, action: "click", totalTimeMs: 1, error: "click failed" });
+      driver.setActionResult({
+        success: false,
+        action: "click",
+        totalTimeMs: 1,
+        error: "click failed",
+      });
 
       const result = await strategy.executeTap("device-1", element, driver);
 
@@ -269,12 +269,12 @@ describe("TalkBackTapStrategy", () => {
       // The caller's element carries stale bounds (center 5,5)...
       const staleElement = {
         "resource-id": "test:id/button",
-        "bounds": { left: 0, top: 0, right: 10, bottom: 10 }
+        bounds: { left: 0, top: 0, right: 10, bottom: 10 },
       } as Element;
       // ...while the node TalkBack actually focused is elsewhere (center 600,700).
       const liveFocusedElement = {
         "resource-id": "test:id/button",
-        "bounds": { left: 500, top: 600, right: 700, bottom: 800 }
+        bounds: { left: 500, top: 600, right: 700, bottom: 800 },
       } as Element;
 
       driver.setElements([liveFocusedElement], 0);
@@ -293,7 +293,7 @@ describe("TalkBackTapStrategy", () => {
     // Regression for #3918: a bounds-less activation target must never tap (0,0).
     test("falls back to ACTION_CLICK (never taps 0,0) when the target has no bounds", async () => {
       const boundsLessElement = {
-        "resource-id": "test:id/button"
+        "resource-id": "test:id/button",
         // no bounds on the caller's element...
       } as Element;
       // ...and the live focused node also has no bounds.
@@ -330,13 +330,19 @@ describe("TalkBackTapStrategy", () => {
     test("returns error when navigation path cannot be calculated", async () => {
       const element = {
         "resource-id": "test:id/nonexistent",
-        "bounds": { left: 0, top: 0, right: 100, bottom: 100 }
+        bounds: { left: 0, top: 0, right: 100, bottom: 100 },
       } as Element;
 
       // Element not in traversal order
-      driver.setElements([
-        { "resource-id": "test:id/other", "bounds": { left: 0, top: 0, right: 50, bottom: 50 } } as Element
-      ], 0);
+      driver.setElements(
+        [
+          {
+            "resource-id": "test:id/other",
+            bounds: { left: 0, top: 0, right: 50, bottom: 50 },
+          } as Element,
+        ],
+        0,
+      );
 
       const result = await strategy.executeTap("device-1", element, driver);
 
@@ -348,7 +354,7 @@ describe("TalkBackTapStrategy", () => {
     test("returns error when traversal order request fails", async () => {
       const element = {
         "resource-id": "test:id/button",
-        "bounds": { left: 0, top: 0, right: 100, bottom: 100 }
+        bounds: { left: 0, top: 0, right: 100, bottom: 100 },
       } as Element;
 
       driver.queueTraversalResult({ error: "Service unavailable", totalTimeMs: 1 });
@@ -365,7 +371,7 @@ describe("TalkBackTapStrategy", () => {
     test("uses ACTION_LONG_CLICK when element has resource-id", async () => {
       const element = {
         "resource-id": "test:id/button",
-        "bounds": { left: 0, top: 0, right: 100, bottom: 100 }
+        bounds: { left: 0, top: 0, right: 100, bottom: 100 },
       } as Element;
 
       driver.setActionResult({ success: true, action: "long_click", totalTimeMs: 1 });
@@ -375,18 +381,26 @@ describe("TalkBackTapStrategy", () => {
       expect(result.success).toBe(true);
       expect(result.method).toBe("accessibility-action");
       expect(driver.actionHistory).toHaveLength(1);
-      expect(driver.actionHistory[0]).toEqual({ action: "long_click", resourceId: "test:id/button" });
+      expect(driver.actionHistory[0]).toEqual({
+        action: "long_click",
+        resourceId: "test:id/button",
+      });
       expect(driver.getTapCount()).toBe(0); // No coordinate taps
     });
 
     test("does not fall back when an advertised semantic long click fails", async () => {
       const element = {
         "test-tag": "message_row_42",
-        "actions": ["long_click"],
-        "bounds": { left: 0, top: 0, right: 100, bottom: 100 }
+        actions: ["long_click"],
+        bounds: { left: 0, top: 0, right: 100, bottom: 100 },
       } as Element;
 
-      driver.setActionResult({ success: false, action: "long_click", totalTimeMs: 1, error: "service unavailable" });
+      driver.setActionResult({
+        success: false,
+        action: "long_click",
+        totalTimeMs: 1,
+        error: "service unavailable",
+      });
 
       const result = await strategy.executeLongPress(50, 50, 1000, element, driver);
 
@@ -394,7 +408,7 @@ describe("TalkBackTapStrategy", () => {
       expect(result.method).toBe("accessibility-action");
       expect(result.error).toContain("service unavailable");
       expect(driver.actionHistory).toEqual([
-        { action: "long_click", selector: { testTag: "message_row_42" } }
+        { action: "long_click", selector: { testTag: "message_row_42" } },
       ]);
       expect(driver.getTapCount()).toBe(0);
     });
@@ -402,8 +416,8 @@ describe("TalkBackTapStrategy", () => {
     test("uses a coordinate fallback for a test tag when the runner lacks selector support", async () => {
       const element = {
         "test-tag": "message_row_42",
-        "actions": ["long_click"],
-        "bounds": { left: 0, top: 0, right: 100, bottom: 100 }
+        actions: ["long_click"],
+        bounds: { left: 0, top: 0, right: 100, bottom: 100 },
       } as Element;
       driver.setNodeActionSelectorsSupported(false);
 
@@ -418,8 +432,8 @@ describe("TalkBackTapStrategy", () => {
       const element = {
         "collection-row-index": 0,
         "collection-column-index": 0,
-        "actions": ["long_click"],
-        "bounds": { left: 0, top: 0, right: 100, bottom: 100 }
+        actions: ["long_click"],
+        bounds: { left: 0, top: 0, right: 100, bottom: 100 },
       } as Element;
 
       const result = await strategy.executeLongPress(50, 50, 1000, element, driver);
@@ -432,7 +446,7 @@ describe("TalkBackTapStrategy", () => {
     test("uses coordinate gesture directly when element has no resource-id", async () => {
       const element = {
         bounds: { left: 0, top: 0, right: 100, bottom: 100 },
-        text: "Button"
+        text: "Button",
       } as Element;
 
       const result = await strategy.executeLongPress(50, 50, 1000, element, driver);
@@ -447,10 +461,15 @@ describe("TalkBackTapStrategy", () => {
     test("returns error when coordinate fallback also fails", async () => {
       const element = {
         "resource-id": "test:id/button",
-        "bounds": { left: 0, top: 0, right: 100, bottom: 100 }
+        bounds: { left: 0, top: 0, right: 100, bottom: 100 },
       } as Element;
 
-      driver.setActionResult({ success: false, action: "long_click", totalTimeMs: 1, error: "failed" });
+      driver.setActionResult({
+        success: false,
+        action: "long_click",
+        totalTimeMs: 1,
+        error: "failed",
+      });
       driver.setTapResult({ success: false, totalTimeMs: 1, error: "gesture failed" });
 
       const result = await strategy.executeLongPress(50, 50, 1000, element, driver);
@@ -497,6 +516,7 @@ describe("TalkBackTapStrategy", () => {
       expect(result.success).toBe(false);
       expect(result.method).toBe("coordinate-fallback");
       expect(result.error).toContain("First tap failed");
+      expect(result.completedTaps).toBe(0);
       expect(driver.getTapCount()).toBe(1);
     });
 
@@ -509,6 +529,7 @@ describe("TalkBackTapStrategy", () => {
       expect(result.success).toBe(false);
       expect(result.method).toBe("coordinate-fallback");
       expect(result.error).toContain("Second tap failed");
+      expect(result.completedTaps).toBe(1);
       expect(driver.getTapCount()).toBe(2);
     });
 
@@ -523,11 +544,42 @@ describe("TalkBackTapStrategy", () => {
     });
   });
 
+  describe("executePreciseTap", () => {
+    test("focuses the requested coordinate before the activation double-tap", async () => {
+      const result = await strategy.executePreciseTap(80, 40, driver);
+
+      expect(result).toMatchObject({
+        success: true,
+        method: "coordinate-fallback",
+        focusCompleted: true,
+        completedTaps: 2,
+      });
+      expect(driver.tapHistory).toEqual([
+        { x: 80, y: 40, durationMs: 50 },
+        { x: 80, y: 40, durationMs: 50 },
+        { x: 80, y: 40, durationMs: 50 },
+      ]);
+    });
+
+    test("reports when the focus tap fails before activation", async () => {
+      driver.queueTapResult({ success: false, totalTimeMs: 1, error: "focus failed" });
+
+      const result = await strategy.executePreciseTap(80, 40, driver);
+
+      expect(result).toMatchObject({
+        success: false,
+        focusCompleted: false,
+        completedTaps: 0,
+      });
+      expect(driver.getTapCount()).toBe(1);
+    });
+  });
+
   describe("executeDirectActivation", () => {
     test("activates via ACTION_CLICK when element has a resource-id", async () => {
       const element = {
         "resource-id": "test:id/button",
-        "bounds": { left: 0, top: 0, right: 100, bottom: 100 }
+        bounds: { left: 0, top: 0, right: 100, bottom: 100 },
       } as Element;
 
       driver.setActionResult({ success: true, action: "click", totalTimeMs: 1 });
@@ -544,7 +596,7 @@ describe("TalkBackTapStrategy", () => {
     test("returns failure without attempting an action when element has no resource-id", async () => {
       const element = {
         bounds: { left: 0, top: 0, right: 100, bottom: 100 },
-        text: "Button"
+        text: "Button",
       } as Element;
 
       const result = await strategy.executeDirectActivation(element, driver);
@@ -558,10 +610,15 @@ describe("TalkBackTapStrategy", () => {
     test("returns failure when ACTION_CLICK is rejected", async () => {
       const element = {
         "resource-id": "test:id/button",
-        "bounds": { left: 0, top: 0, right: 100, bottom: 100 }
+        bounds: { left: 0, top: 0, right: 100, bottom: 100 },
       } as Element;
 
-      driver.setActionResult({ success: false, action: "click", totalTimeMs: 1, error: "node not found" });
+      driver.setActionResult({
+        success: false,
+        action: "click",
+        totalTimeMs: 1,
+        error: "node not found",
+      });
 
       const result = await strategy.executeDirectActivation(element, driver);
 

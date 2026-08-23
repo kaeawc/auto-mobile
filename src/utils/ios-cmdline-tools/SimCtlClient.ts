@@ -19,6 +19,8 @@ import { isIosSimulatorUdid } from "./iosDeviceType";
 import { getAbortSignal } from "../AbortContext";
 import { Mutex } from "async-mutex";
 
+const COMMAND_SETTLEMENT_GRACE_MS = 1_000;
+
 export interface AppleDevice {
   udid: string;
   name: string;
@@ -126,7 +128,10 @@ export interface SimCtl {
    * @param device - Device to kill
    * @returns Promise that resolves when kill is complete
    */
-  killSimulator(device: BootedDevice, options?: { timeoutMs?: number; signal?: AbortSignal }): Promise<void>;
+  killSimulator(
+    device: BootedDevice,
+    options?: { timeoutMs?: number; signal?: AbortSignal },
+  ): Promise<void>;
 
   /** Erase all data from a simulator. Reserved for CI-owned recovery flows. */
   eraseSimulator(udid: string): Promise<void>;
@@ -151,7 +156,10 @@ export interface SimCtl {
    * @param timeoutMs - Optional timeout for simulator discovery
    * @returns Promise with an array of device info
    */
-  listSimulatorImages(timeoutMs?: number): Promise<DeviceInfo[]>;
+  listSimulatorImages(
+    timeoutMs?: number,
+    options?: { bypassCache?: boolean },
+  ): Promise<DeviceInfo[]>;
 
   /**
    * Get the list of booted simulator UDIDs
@@ -204,7 +212,10 @@ export interface SimCtl {
    * @param udid - Device UDID to delete
    * @returns Promise that resolves when deletion is complete
    */
-  deleteSimulator(udid: string): Promise<void>;
+  deleteSimulator(
+    udid: string,
+    options?: { timeoutMs?: number; signal?: AbortSignal },
+  ): Promise<void>;
 
   /**
    * List all installed apps on the simulator
@@ -636,6 +647,7 @@ export class SimCtlClient implements SimCtl {
     timeoutMs?: number,
     displayCommand?: string,
     explicitSignal?: AbortSignal,
+    waitForTimedOutCommandSettlement = false,
   ): Promise<ExecResult> {
     if (args.length === 0) {
       throw new Error("Command cannot be empty");
@@ -660,6 +672,7 @@ export class SimCtlClient implements SimCtl {
     // running orphaned (issue #3938).
     if (timeoutMs) {
       let timeoutId: NodeJS.Timeout;
+      let timeoutError: Error | undefined;
       const controller = new AbortController();
       const signal = callerSignal
         ? AbortSignal.any([callerSignal, controller.signal])
@@ -667,8 +680,9 @@ export class SimCtlClient implements SimCtl {
 
       const timeoutPromise = new Promise<ExecResult>((_, reject) => {
         timeoutId = this.timer.setTimeout(() => {
-          controller.abort();
-          reject(new Error(`Command timed out after ${timeoutMs}ms: ${fullCommand}`));
+          timeoutError = new Error(`Command timed out after ${timeoutMs}ms: ${fullCommand}`);
+          controller.abort(timeoutError);
+          reject(timeoutError);
         }, timeoutMs);
       });
 
@@ -685,13 +699,16 @@ export class SimCtlClient implements SimCtl {
         logger.debug(`[iOS] Command completed in ${duration}ms: ${command}`);
         return result;
       } catch (error) {
+        if (waitForTimedOutCommandSettlement && error === timeoutError) {
+          await this.waitForCommandSettlement(runPromise, command);
+        }
         const duration = this.timer.now() - startTime;
         logger.warn(
           `[iOS] Command failed after ${duration}ms: ${command} - ${(error as Error).message}`,
         );
         throw error;
       } finally {
-        clearTimeout(timeoutId!);
+        this.timer.clearTimeout(timeoutId!);
       }
     }
 
@@ -707,6 +724,38 @@ export class SimCtlClient implements SimCtl {
         `[iOS] Command failed after ${duration}ms: ${command} - ${(error as Error).message}`,
       );
       throw error;
+    }
+  }
+
+  private async waitForCommandSettlement(
+    runPromise: Promise<ExecResult>,
+    command: string,
+  ): Promise<void> {
+    let settlementTimeout: NodeJS.Timeout | undefined;
+    let settlementTimedOut = false;
+    const gracePeriod = new Promise<void>((resolve) => {
+      settlementTimeout = this.timer.setTimeout(() => {
+        settlementTimedOut = true;
+        resolve();
+      }, COMMAND_SETTLEMENT_GRACE_MS);
+    });
+    try {
+      await Promise.race([
+        runPromise.then(
+          () => undefined,
+          () => undefined,
+        ),
+        gracePeriod,
+      ]);
+    } finally {
+      if (settlementTimeout) {
+        this.timer.clearTimeout(settlementTimeout);
+      }
+    }
+    if (settlementTimedOut) {
+      logger.warn(
+        `[iOS] Command did not settle within ${COMMAND_SETTLEMENT_GRACE_MS}ms after termination: ${command}`,
+      );
     }
   }
 
@@ -1098,7 +1147,13 @@ export class SimCtlClient implements SimCtl {
       ) {
         return;
       }
-      await this.executeCommandArgs(["shutdown", udid], timeoutMs, signal);
+      await this.executeCommandArgv(
+        ["shutdown", udid],
+        timeoutMs,
+        `shutdown ${udid}`,
+        signal,
+        true,
+      );
       lease.state.lastBootSucceeded = false;
       lease.state.ownerToken = undefined;
     } finally {
@@ -1387,9 +1442,12 @@ export class SimCtlClient implements SimCtl {
    * Get the list of available (booted and shutdown) simulator UDIDs
    * @returns Promise with an array of device UDIDs
    */
-  async listSimulatorImages(timeoutMs?: number): Promise<DeviceInfo[]> {
+  async listSimulatorImages(
+    timeoutMs?: number,
+    options: { bypassCache?: boolean } = {},
+  ): Promise<DeviceInfo[]> {
     // Check cache first
-    if (SimCtlClient.deviceListCache) {
+    if (!options.bypassCache && SimCtlClient.deviceListCache) {
       const cacheAge = this.timer.now() - SimCtlClient.deviceListCache.timestamp;
       if (cacheAge < SimCtlClient.DEVICE_LIST_CACHE_TTL) {
         logger.info(`Getting list of iOS simulators (cached, age: ${cacheAge}ms)`);
@@ -1609,7 +1667,7 @@ export class SimCtlClient implements SimCtl {
     const result = await this.executeCommandArgs(["list", "runtimes", "--json"]);
     try {
       const data = JSON.parse(result.stdout) as { runtimes?: AppleDeviceRuntime[] };
-      return (data.runtimes ?? []).filter(runtime => runtime.isAvailable);
+      return (data.runtimes ?? []).filter((runtime) => runtime.isAvailable);
     } catch (error) {
       logger.warn(`Failed to parse runtimes from simctl: ${error}`);
       return [];
@@ -1623,7 +1681,7 @@ export class SimCtlClient implements SimCtl {
     if (!Array.isArray(data?.runtimes)) {
       throw new Error("simctl runtimes response does not contain a runtimes array");
     }
-    return (data.runtimes as AppleDeviceRuntime[]).filter(runtime => runtime.isAvailable);
+    return (data.runtimes as AppleDeviceRuntime[]).filter((runtime) => runtime.isAvailable);
   }
 
   /**
@@ -1670,9 +1728,30 @@ export class SimCtlClient implements SimCtl {
    * @param udid - Device UDID to delete
    * @returns Promise that resolves when deletion is complete
    */
-  async deleteSimulator(udid: string): Promise<void> {
+  async deleteSimulator(
+    udid: string,
+    options: { timeoutMs?: number; signal?: AbortSignal } = {},
+  ): Promise<void> {
     logger.debug(`Deleting iOS simulator ${udid}`);
-    await this.executeCommandArgs(["delete", udid]);
+    const lease = await this.acquireSimulatorBoot(
+      udid,
+      this.timer.now() + (options.timeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS),
+      options.signal,
+    );
+    try {
+      await this.executeCommandArgv(
+        ["delete", udid],
+        options.timeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS,
+        `delete ${udid}`,
+        options.signal,
+        true,
+      );
+      lease.state.lastBootSucceeded = false;
+      lease.state.ownerToken = undefined;
+      SimCtlClient.invalidateDeviceListCache();
+    } finally {
+      lease.release();
+    }
   }
 
   /**

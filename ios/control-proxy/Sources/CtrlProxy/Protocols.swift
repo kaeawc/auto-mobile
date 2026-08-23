@@ -163,6 +163,7 @@ public protocol GesturePerforming {
 
     /// Perform action on element by resourceId or label (content-desc)
     func performAction(_ action: String, resourceId: String?, label: String?) throws
+    func activateAccessibilityLink(text: String, occurrence: Int, ownerResourceId: String?) throws
 
     // MARK: - Screenshots
 

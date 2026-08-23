@@ -1,11 +1,20 @@
 import type { ElementSelectionStrategy } from "./ElementSelectionStrategy";
 
+export interface TapOnSubtextTarget {
+  /** Exact visible text of a semantic link inside the selected owner element. */
+  text: string;
+  /** Zero-based occurrence among matching semantic links in the owner. */
+  occurrence?: number;
+}
+
 export interface TapOnElementOptions {
   // Element selection - one of these must be provided
   text?: string;
   textAny?: string[];
   elementId?: string;
   testTag?: string;
+  /** Exact text of a semantic accessibility link anywhere in the scoped hierarchy. */
+  accessibilityLink?: string;
   // Selection strategy when multiple elements match (default: first)
   selectionStrategy?: ElementSelectionStrategy;
 
@@ -50,4 +59,7 @@ export interface TapOnElementOptions {
   preTapStability?: boolean;
   retryIfNoChange?: boolean;
   ensureTap?: boolean;
+
+  /** Semantic accessibility link inside the element selected by the outer selector. */
+  subtext?: TapOnSubtextTarget;
 }

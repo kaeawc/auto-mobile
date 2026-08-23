@@ -5,14 +5,20 @@ import { defaultAdbClientFactory } from "./android-cmdline-tools/AdbClientFactor
 import type { AdbExecutor } from "./android-cmdline-tools/interfaces/AdbExecutor";
 import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
 import { AndroidEmulatorClient } from "./android-cmdline-tools/AndroidEmulatorClient";
+import { deleteAvd } from "./android-cmdline-tools/avdmanager";
 import { logger } from "./logger";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "./deviceTimeouts";
 import { getAbortSignal, runWithAbortSignal } from "./AbortContext";
 import { defaultTimer, type Timer } from "./SystemTimer";
+import {
+  getVirtualDeviceLifecycleCoordinator,
+  type VirtualDeviceLifecycleCoordinator,
+  type VirtualDeviceLifecycleLease,
+} from "./virtualDeviceLifecycleCoordinator";
 
 export { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "./deviceTimeouts";
 
-const READINESS_ABORT_SETTLEMENT_GRACE_MS = 1_000;
+const READINESS_ABORT_SETTLEMENT_TURNS = 8;
 
 export type DeviceDiscoveryErrorCode = "unavailable" | "failed";
 
@@ -41,10 +47,29 @@ export interface BootedDeviceDiscoveryOptions {
   bypassAndroidDeviceListCache?: boolean;
 }
 
+export interface DeviceImageDiscovery {
+  devices: DeviceInfo[];
+  succeededPlatforms: Set<Platform>;
+  /** Platform-specific typed failures for incomplete observations. */
+  discoveryErrors?: Partial<Record<Platform, DeviceDiscoveryError>>;
+}
+
+export interface DeviceImageDiscoveryOptions {
+  /** Bypass simulator inventory caching when durable absence must be proven. */
+  bypassIosDeviceListCache?: boolean;
+}
 /** Bounds and cancels a platform shutdown command. */
 export interface DeviceShutdownOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
+}
+
+/** Bounds and cancels a platform representation deletion. */
+export interface DeviceDestroyOptions {
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  /** Existing teardown lease held by a higher-level orchestrator. */
+  lifecycleLease?: VirtualDeviceLifecycleLease;
 }
 
 /**
@@ -83,8 +108,17 @@ export interface PlatformDeviceManager {
    */
   getBootedDevicesDetailed(
     platform: SomePlatform,
-    options?: BootedDeviceDiscoveryOptions
+    options?: BootedDeviceDiscoveryOptions,
   ): Promise<BootedDeviceDiscovery>;
+
+  /**
+   * Get all platform device representations along with which platform
+   * inventories completed. A missing platform cannot prove durable absence.
+   */
+  getDeviceImagesDetailed(
+    platform: SomePlatform,
+    options?: DeviceImageDiscoveryOptions,
+  ): Promise<DeviceImageDiscovery>;
 
   /**
    * Start a device (emulator or simulator)
@@ -99,6 +133,14 @@ export interface PlatformDeviceManager {
    * @returns Promise that resolves when the device has been stopped
    */
   killDevice(device: BootedDevice, options?: DeviceShutdownOptions): Promise<BootedDevice | void>;
+
+  /**
+   * Delete an already-resolved platform device representation.
+   *
+   * Android destruction is keyed by the exact AVD name resolved from a booted
+   * device. iOS destruction is keyed by the simulator UDID.
+   */
+  destroyDevice(device: DeviceInfo, options?: DeviceDestroyOptions): Promise<void>;
 
   /**
    * Wait for a device to be ready for use after starting
@@ -124,27 +166,12 @@ async function readinessFailureAfterTimeout(
   controller: AbortController,
   settlement: ReadinessSettlement,
   fallback: unknown,
-  readinessPromise: Promise<BootedDevice>,
-  timer: Pick<Timer, "setTimeout" | "clearTimeout">,
 ): Promise<unknown> {
   if (!controller.signal.aborted) {
     return fallback;
   }
-  let graceHandle: NodeJS.Timeout | undefined;
-  try {
-    await Promise.race([
-      readinessPromise.then(
-        () => undefined,
-        () => undefined,
-      ),
-      new Promise<void>((resolve) => {
-        graceHandle = timer.setTimeout(resolve, READINESS_ABORT_SETTLEMENT_GRACE_MS);
-      }),
-    ]);
-  } finally {
-    if (graceHandle) {
-      timer.clearTimeout(graceHandle);
-    }
+  for (let turn = 0; turn < READINESS_ABORT_SETTLEMENT_TURNS && !settlement.settled; turn += 1) {
+    await Promise.resolve();
   }
   if (settlement.settled && settlement.failure !== undefined) {
     return settlement.failure;
@@ -172,7 +199,9 @@ async function readinessFailureAfterTimeout(
  * @param handle - The start handle from `startDevice` (null for adopted devices)
  * @param timeoutMs - Optional readiness timeout
  * @param signal - Optional cancellation signal for a non-cooperative readiness wait
- * @param cancelOwnedBoot - Optional idempotent cleanup for the owned launch handle
+ * @param cancelOwnedBoot - Optional idempotent cleanup for the owned launch handle.
+ *   Async cleanup is awaited so lifecycle owners can retain their lease until
+ *   the launch process settles.
  * @returns The booted device once ready
  * @throws Re-throws the original readiness error after cancelling the boot
  */
@@ -183,15 +212,13 @@ export async function waitForDeviceReadyOrCancel(
   timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS,
   signal: AbortSignal | undefined = getAbortSignal(),
   timer: Pick<Timer, "setTimeout" | "clearTimeout"> = defaultTimer,
-  cancelOwnedBoot?: () => void,
+  cancelOwnedBoot?: () => void | Promise<void>,
 ): Promise<BootedDevice> {
   const timeoutError = new ActionableError(
     `Device readiness timed out after ${timeoutMs}ms for ${device.deviceId ?? device.name}`,
   );
   const controller = new AbortController();
-  const readinessSignal = signal
-    ? AbortSignal.any([signal, controller.signal])
-    : controller.signal;
+  const readinessSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
   let timeoutHandle: NodeJS.Timeout | undefined;
   let abortListener: (() => void) | undefined;
   const settlement: ReadinessSettlement = { settled: false };
@@ -233,8 +260,6 @@ export async function waitForDeviceReadyOrCancel(
       controller,
       settlement,
       error,
-      readinessPromise,
-      timer,
     );
     if (handle) {
       logger.warn(
@@ -242,7 +267,7 @@ export async function waitForDeviceReadyOrCancel(
         `cancelling boot via handle.kill()`,
         failure,
       );
-      (cancelOwnedBoot ?? (() => handle.kill()))();
+      await (cancelOwnedBoot ?? (() => handle.kill()))();
     }
     throw failure;
   } finally {
@@ -259,6 +284,8 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   private adb: AdbExecutor;
   private emulator: AndroidEmulatorClient;
   private simctl: SimCtlClient;
+  private readonly lifecycleCoordinator: VirtualDeviceLifecycleCoordinator;
+  private readonly timer: Pick<Timer, "now">;
 
   /**
    * Create a PlatformDeviceManager instance
@@ -270,10 +297,14 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     adb: AdbExecutor | null = null,
     simctl: SimCtlClient | null = null,
     emulator: AndroidEmulatorClient | null = null,
+    lifecycleCoordinator: VirtualDeviceLifecycleCoordinator = getVirtualDeviceLifecycleCoordinator(),
+    timer: Pick<Timer, "now"> = defaultTimer,
   ) {
     this.adb = adb || defaultAdbClientFactory.create(null);
     this.simctl = simctl || new SimCtlClient();
     this.emulator = emulator || new AndroidEmulatorClient();
+    this.lifecycleCoordinator = lifecycleCoordinator;
+    this.timer = timer;
   }
 
   private async canDiscoverIosLocally(): Promise<boolean> {
@@ -290,7 +321,9 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     }
   }
 
-  private async listIosDeviceImagesIfAvailable(options: { swallowDiscoveryErrors: boolean }): Promise<DeviceInfo[]> {
+  private async listIosDeviceImagesIfAvailable(options: {
+    swallowDiscoveryErrors: boolean;
+  }): Promise<DeviceInfo[]> {
     if (!(await this.canDiscoverIosLocally())) {
       return [];
     }
@@ -328,7 +361,9 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
         return this.listIosDeviceImagesIfAvailable({ swallowDiscoveryErrors: false });
       case "either":
         const emulators = await this.emulator.listAvds();
-        const simulators = await this.listIosDeviceImagesIfAvailable({ swallowDiscoveryErrors: true });
+        const simulators = await this.listIosDeviceImagesIfAvailable({
+          swallowDiscoveryErrors: true,
+        });
         return [...emulators, ...simulators];
     }
   }
@@ -348,7 +383,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
         }
         if (device.deviceId) {
           const booted = await this.simctl.getBootedSimulators();
-          return booted.some(simulator => simulator.deviceId === device.deviceId);
+          return booted.some((simulator) => simulator.deviceId === device.deviceId);
         }
         return this.simctl.isSimulatorRunning(device.name);
     }
@@ -373,7 +408,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
 
   async getBootedDevicesDetailed(
     platform: SomePlatform,
-    options: BootedDeviceDiscoveryOptions = {}
+    options: BootedDeviceDiscoveryOptions = {},
   ): Promise<BootedDeviceDiscovery> {
     const devices: BootedDevice[] = [];
     const succeededPlatforms = new Set<Platform>();
@@ -381,14 +416,18 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
 
     if (platform === "android" || platform === "either") {
       try {
-        const emulators = await this.emulator.getBootedDevicesChecked(false, {
-          bypassDeviceListCache: options.bypassAndroidDeviceListCache,
-        }, getAbortSignal());
+        const emulators = await this.emulator.getBootedDevicesChecked(
+          false,
+          {
+            bypassDeviceListCache: options.bypassAndroidDeviceListCache,
+          },
+          getAbortSignal(),
+        );
         devices.push(...emulators);
         succeededPlatforms.add("android");
       } catch (error) {
         logger.warn(
-          `[DeviceManager] Android booted-device discovery failed; retaining tracked Android devices: ${error}`
+          `[DeviceManager] Android booted-device discovery failed; retaining tracked Android devices: ${error}`,
         );
         discoveryErrors.android = {
           code: "failed",
@@ -404,6 +443,54 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
         succeededPlatforms.add("ios");
       } else if (ios.error) {
         discoveryErrors.ios = ios.error;
+      }
+    }
+
+    return { devices, succeededPlatforms, discoveryErrors };
+  }
+
+  async getDeviceImagesDetailed(
+    platform: SomePlatform,
+    options: DeviceImageDiscoveryOptions = {},
+  ): Promise<DeviceImageDiscovery> {
+    const devices: DeviceInfo[] = [];
+    const succeededPlatforms = new Set<Platform>();
+    const discoveryErrors: Partial<Record<Platform, DeviceDiscoveryError>> = {};
+
+    if (platform === "android" || platform === "either") {
+      try {
+        devices.push(...(await this.emulator.listAvds()));
+        succeededPlatforms.add("android");
+      } catch (error) {
+        logger.warn(`[DeviceManager] Android device inventory failed: ${error}`);
+        discoveryErrors.android = {
+          code: "failed",
+          message: `Android device inventory failed: ${errorMessage(error)}`,
+        };
+      }
+    }
+
+    if (platform === "ios" || platform === "either") {
+      if (!(await this.canDiscoverIosLocally())) {
+        discoveryErrors.ios = {
+          code: "unavailable",
+          message: "iOS device inventory is unavailable.",
+        };
+      } else {
+        try {
+          devices.push(
+            ...(await this.simctl.listSimulatorImages(undefined, {
+              bypassCache: options.bypassIosDeviceListCache,
+            })),
+          );
+          succeededPlatforms.add("ios");
+        } catch (error) {
+          logger.warn(`[DeviceManager] iOS device inventory failed: ${error}`);
+          discoveryErrors.ios = {
+            code: "failed",
+            message: `iOS device inventory failed: ${errorMessage(error)}`,
+          };
+        }
       }
     }
 
@@ -432,7 +519,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       return { devices, succeeded: true };
     } catch (error) {
       logger.warn(
-        `[DeviceManager] iOS booted-device discovery failed; retaining tracked iOS devices: ${error}`
+        `[DeviceManager] iOS booted-device discovery failed; retaining tracked iOS devices: ${error}`,
       );
       return {
         devices: [],
@@ -456,18 +543,18 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   ): Promise<ChildProcess | null> {
     const isRunning = await this.isDeviceImageRunning(device);
     if (isRunning) {
-      throw new ActionableError(
-        `${device.platform} device '${device.name}' is already running`
-      );
+      throw new ActionableError(`${device.platform} device '${device.name}' is already running`);
     }
 
     switch (device.platform) {
       case "android":
-        return (await this.emulator.launchEmulator({
-          avdName: device.name,
-          deviceId: device.deviceId,
-          signal: getAbortSignal(),
-        })).process;
+        return (
+          await this.emulator.launchEmulator({
+            avdName: device.name,
+            deviceId: device.deviceId,
+            signal: getAbortSignal(),
+          })
+        ).process;
       case "ios":
         return this.simctl.startSimulator(device.deviceId ?? device.name, timeoutMs);
       default:
@@ -489,6 +576,68 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
         return this.emulator.killDevice(device, options);
       case "ios":
         return this.simctl.killSimulator(device, options);
+    }
+  }
+
+  async destroyDevice(device: DeviceInfo, options?: DeviceDestroyOptions): Promise<void> {
+    const ownLease = options?.lifecycleLease === undefined;
+    const timeoutMs = options?.timeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS;
+    const lifecycleLease =
+      options?.lifecycleLease ??
+      (await this.lifecycleCoordinator.reserve(
+        {
+          kind: "stable",
+          platform: device.platform,
+          stableId: device.platform === "android" ? device.name : (device.deviceId ?? device.name),
+        },
+        {
+          operation: "teardown",
+          deadlineMs: this.timer.now() + timeoutMs,
+          signal: options?.signal,
+        },
+      ));
+    const signals = [options?.signal, lifecycleLease.signal].filter(
+      (signal): signal is AbortSignal => signal !== undefined,
+    );
+    try {
+      await runWithAbortSignal(
+        signals.length === 1 ? signals[0] : AbortSignal.any(signals),
+        async () =>
+          await this.destroyDeviceRepresentation(device, {
+            timeoutMs,
+            signal: signals.length === 1 ? signals[0] : AbortSignal.any(signals),
+          }),
+      );
+    } finally {
+      if (ownLease) {
+        lifecycleLease.release();
+      }
+    }
+  }
+
+  private async destroyDeviceRepresentation(
+    device: DeviceInfo,
+    options: DeviceDestroyOptions,
+  ): Promise<void> {
+    switch (device.platform) {
+      case "android": {
+        const result = await deleteAvd(device.name, undefined, {
+          signal: options?.signal,
+          timeoutMs: options?.timeoutMs,
+        });
+        if (!result.success) {
+          throw new ActionableError(result.message);
+        }
+        return;
+      }
+      case "ios":
+        if (!device.deviceId) {
+          throw new ActionableError(
+            `Cannot delete iOS simulator '${device.name}' without a simulator UDID`,
+          );
+        }
+        await this.simctl.deleteSimulator(device.deviceId, options);
+        return;
     }
   }
 
@@ -518,11 +667,9 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
         // `startSimulator` has already run `bootstatus -b`. Signal that so the
         // wait doesn't redundantly repeat the full boot-readiness wait; the
         // already-running path (no childProcess) still performs it.
-        return this.simctl.waitForSimulatorReady(
-          device.deviceId ?? device.name,
-          timeoutMs,
-          { assumeBooted: Boolean(childProcess) }
-        );
+        return this.simctl.waitForSimulatorReady(device.deviceId ?? device.name, timeoutMs, {
+          assumeBooted: Boolean(childProcess),
+        });
       default:
         throw new ActionableError("Unknown platform");
     }

@@ -2206,7 +2206,12 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
     // Use ADB to stop the emulator
     const adb = this.adbFactory.create(emulator);
-    await adb.executeCommand("emu kill", options.timeoutMs, undefined, true, options.signal);
+    await adb.execute(["emu", "kill"], {
+      timeoutMs: options.timeoutMs,
+      noRetry: true,
+      signal: options.signal,
+      waitForProcessSettlementAfterAbort: true,
+    });
 
     logger.info(`Killed emulator '${device.name}'`);
     return emulator;
@@ -2629,25 +2634,38 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     return this.timer.now() - startTime >= timeoutMs;
   }
 
-  private waitForReadinessMainLoop(signal: AbortSignal | undefined): Promise<void> {
+  private waitForReadinessDelay(
+    delayMs: number,
+    signal: AbortSignal | undefined,
+    polling: ReadinessPollingState,
+    startTime: number,
+    timeoutMs: number,
+  ): Promise<void> {
     return new Promise<void>((resolve) => {
       let settled = false;
       const waitState: { timeoutHandle?: NodeJS.Timeout } = {};
-      const settle = () => {
+      const settle = (aborted: boolean) => {
         if (settled) {
           return;
         }
         settled = true;
+        if (aborted) {
+          polling.active = false;
+          if (!this.readinessDeadlineReached(startTime, timeoutMs)) {
+            polling.failure = signal?.reason;
+          }
+        }
         if (waitState.timeoutHandle) {
           this.timer.clearTimeout(waitState.timeoutHandle);
         }
-        signal?.removeEventListener("abort", settle);
+        signal?.removeEventListener("abort", abort);
         resolve();
       };
-      signal?.addEventListener("abort", settle, { once: true });
-      waitState.timeoutHandle = this.timer.setTimeout(settle, 500);
+      const abort = () => settle(true);
+      signal?.addEventListener("abort", abort, { once: true });
+      waitState.timeoutHandle = this.timer.setTimeout(() => settle(false), delayMs);
       if (signal?.aborted) {
-        settle();
+        abort();
       }
     });
   }
@@ -3102,7 +3120,13 @@ export class AndroidEmulatorClient implements AndroidEmulator {
             remainingPollingDelayMs,
             MAX_POLLING_SLEEP_CHUNK_MS,
           );
-          await this.sleep(sleepChunkMs);
+          await this.waitForReadinessDelay(
+            sleepChunkMs,
+            signal,
+            polling,
+            startTime,
+            timeoutMs,
+          );
           remainingPollingDelayMs -= sleepChunkMs;
         }
       }
@@ -3150,7 +3174,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       }
 
       // Check less frequently in main loop since background polling is doing the work
-      await this.waitForReadinessMainLoop(signal);
+      await this.waitForReadinessDelay(500, signal, polling, startTime, timeoutMs);
     }
 
     // Stop background polling

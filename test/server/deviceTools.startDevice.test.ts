@@ -31,6 +31,7 @@ import {
 } from "../../src/utils/runnerReadinessConfig";
 import { SystemUiAnrRecoveryRequiredError } from "../../src/utils/RunnerReadinessService";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
+import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/utils/virtualDeviceLifecycleCoordinator";
 import * as os from "os";
 
 const AUTOLOCK_ENV_KEYS = [
@@ -40,8 +41,8 @@ const AUTOLOCK_ENV_KEYS = [
 
 class FakeExitChildProcess extends EventEmitter {
   readonly pid = 4242;
-  readonly exitCode: number | null | undefined = undefined;
-  readonly signalCode: NodeJS.Signals | null | undefined = undefined;
+  readonly exitCode: number | null = null;
+  readonly signalCode: NodeJS.Signals | null = null;
   killed = false;
 
   kill(): boolean {
@@ -607,21 +608,15 @@ describe("startDevice handler", () => {
 
     expect(result.deviceId).toBe("emulator-5556");
     expect(result.sessionId).toBe("owner-session");
-    expect(fakeDeviceUtils.getExecutedOperations()).toContain(
-      "killDevice:Unknown (emulator-5554)",
-    );
-    expect(fakeDeviceUtils.getExecutedOperations()).toContain(
-      "startDevice:Pixel_7_API_34:120000",
-    );
+    expect(fakeDeviceUtils.getExecutedOperations()).toContain("killDevice:Unknown (emulator-5554)");
+    expect(fakeDeviceUtils.getExecutedOperations()).toContain("startDevice:Pixel_7_API_34:120000");
     expect(pool.getDevice("emulator-5556")).toMatchObject({
       sessionId: "owner-session",
       status: "busy",
       avdName: "Pixel_7_API_34",
     });
     expect(pool.getIdleDevices()).toEqual([]);
-    expect(daemonSessionManager.getSession("owner-session")?.assignedDevice).toBe(
-      "emulator-5556",
-    );
+    expect(daemonSessionManager.getSession("owner-session")?.assignedDevice).toBe("emulator-5556");
   });
 
   it("binds an idle System UI recovery replacement through its own readiness reservation", async () => {
@@ -942,9 +937,7 @@ describe("startDevice handler", () => {
     await daemonSessionManager.releaseSession("owner-session", "test released during readiness");
     finishSecondReadiness();
 
-    await expect(start).rejects.toThrow(
-      "was released while System UI recovery was becoming ready",
-    );
+    await expect(start).rejects.toThrow("was released while System UI recovery was becoming ready");
     expect(replacementProcess.killed).toBe(true);
     expect(pool.getDevice(recoveryImage.deviceId!)).toBeNull();
     expect(daemonSessionManager.getSession("owner-session")).toBeNull();
@@ -1191,7 +1184,46 @@ describe("startDevice handler", () => {
     expect(killed).toBe(true);
   });
 
-  it("does not kill a shared cold boot after its process ownership transfers", async () => {
+  it("retains a preempted cold boot lease until its emulator process exits", async () => {
+    const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(bootTimer);
+    const childProcess = new FakeExitChildProcess();
+    fakeDeviceUtils.setBootedDevices("android", []);
+    fakeDeviceUtils.setDeviceImages("android", [androidImage]);
+    fakeMatcher.setBootedResult(null);
+    fakeMatcher.setImageResult(androidImage);
+    fakeDeviceUtils.setMockChildProcess(androidImage.name, childProcess as unknown as ChildProcess);
+    setDeviceToolsDependencies({
+      lifecycleCoordinator,
+      ensureCtrlProxyReady: async () => {
+        throw new Error("runner unavailable");
+      },
+    });
+    registerDeviceTools();
+
+    await expect(callStartDevice({ platform: "android", name: androidImage.name })).rejects.toThrow(
+      "runner unavailable",
+    );
+    expect(childProcess.killed).toBe(true);
+
+    const teardownLease = lifecycleCoordinator.reserve(
+      { kind: "stable", platform: "android", stableId: androidImage.name },
+      { operation: "teardown", deadlineMs: 1_000 },
+    );
+    let acquired = false;
+    void teardownLease.then(() => {
+      acquired = true;
+    });
+    for (let attempt = 0; attempt < 50; attempt++) {
+      await Promise.resolve();
+    }
+    expect(acquired).toBe(false);
+
+    childProcess.emit("exit", 0, null);
+    const lease = await teardownLease;
+    lease.release();
+  });
+
+  it("does not kill a shared cold boot when a later caller loses the reservation race", async () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
@@ -1240,17 +1272,24 @@ describe("startDevice handler", () => {
 
     const ownerStart = callStartDevice({ platform: "android" });
     await ownerReadinessStarted;
-    const adopterResult = await callStartDevice({ platform: "android" });
-
+    let adopterSettled = false;
+    const adopterStart = callStartDevice({ platform: "android" }).finally(() => {
+      adopterSettled = true;
+    });
+    for (let attempt = 0; attempt < 50; attempt++) {
+      await Promise.resolve();
+    }
+    expect(adopterSettled).toBe(false);
     releaseOwnerReadiness();
-    await expect(ownerStart).rejects.toThrow(/Freshly started device .* assigned to session/);
+    const ownerResult = await ownerStart;
+    await expect(adopterStart).rejects.toThrow(/Freshly started device .* assigned to session/);
 
-    expect(adopterResult.sessionId).toBeDefined();
+    expect(ownerResult.sessionId).toBeDefined();
     expect(childProcess.killed).toBe(false);
-    expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBe(adopterResult.sessionId);
+    expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBe(ownerResult.sessionId);
   });
 
-  it("does not kill a transferred cold boot when autolock rejects the later owner", async () => {
+  it("does not kill a shared cold boot when autolock rejects the later caller", async () => {
     process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -1300,14 +1339,24 @@ describe("startDevice handler", () => {
 
     const ownerStart = callStartDevice({ platform: "android", __mcpSessionId: "owner" });
     await ownerReadinessStarted;
-    const adopterResult = await callStartDevice({ platform: "android", __mcpSessionId: "adopter" });
-
+    let adopterSettled = false;
+    const adopterStart = callStartDevice({
+      platform: "android",
+      __mcpSessionId: "adopter",
+    }).finally(() => {
+      adopterSettled = true;
+    });
+    for (let attempt = 0; attempt < 50; attempt++) {
+      await Promise.resolve();
+    }
+    expect(adopterSettled).toBe(false);
     releaseOwnerReadiness();
-    await expect(ownerStart).rejects.toThrow(/Freshly started device .* assigned to session/);
+    const ownerResult = await ownerStart;
+    await expect(adopterStart).rejects.toThrow(/Freshly started device .* assigned to session/);
 
-    expect(adopterResult.sessionId).toBeDefined();
+    expect(ownerResult.sessionId).toBeDefined();
     expect(childProcess.killed).toBe(false);
-    expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBe(adopterResult.sessionId);
+    expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBe(ownerResult.sessionId);
   });
 
   it("passes timeout to the cold boot start operation", async () => {
@@ -1371,6 +1420,57 @@ describe("startDevice handler", () => {
 
     expect(result.deviceId).toBe("emulator-5554");
     expect(result.source).toBe("booted");
+  });
+
+  it("starts a connected physical Android device without requiring AVD inventory", async () => {
+    const physicalDevice: BootedDevice = {
+      platform: "android",
+      name: "Pixel 8",
+      deviceId: "R5CT123456A",
+      transportId: "42",
+    };
+    fakeDeviceUtils.setBootedDevices("android", [physicalDevice]);
+    fakeDeviceUtils.getDeviceImagesDetailed = async () => ({
+      devices: [],
+      succeededPlatforms: new Set(),
+      discoveryErrors: {
+        android: {
+          code: "unavailable",
+          message: "Android AVD inventory is unavailable.",
+        },
+      },
+    });
+
+    const result = await callStartDevice({
+      platform: "android",
+      deviceId: physicalDevice.deviceId,
+    });
+
+    expect(result.deviceId).toBe(physicalDevice.deviceId);
+    expect(result.source).toBe("booted");
+    expect(fakeDeviceUtils.wasMethodCalled("startDevice")).toBe(false);
+  });
+
+  it("fails closed when Android identity discovery is incomplete", async () => {
+    fakeDeviceUtils.getDeviceImagesDetailed = async () => ({
+      devices: [],
+      succeededPlatforms: new Set(),
+      discoveryErrors: {
+        android: {
+          code: "unavailable",
+          message: "Android device inventory is unavailable.",
+        },
+      },
+    });
+
+    await expect(
+      callStartDevice({
+        platform: "android",
+        deviceId: androidImage.name,
+      }),
+    ).rejects.toThrow("Cannot uniquely resolve Android device");
+
+    expect(fakeDeviceUtils.wasMethodCalled("startDevice")).toBe(false);
   });
 
   it("waits for readiness before returning a direct deviceId match", async () => {

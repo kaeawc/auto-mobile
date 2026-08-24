@@ -22,6 +22,9 @@ class McpStdioClient(
   private val command: String,
   private val json: Json = DaemonJson,
   private val statusRequestTimeoutMs: Long = McpDaemonClient.STATUS_REQUEST_TIMEOUT_MS,
+  private val statusDeadlineFactory: (Long) -> StatusRequestDeadline = {
+    StatusRequestDeadline(it)
+  },
 ) : AutoMobileClient {
   override val transportName: String = "MCP STDIO"
   override val connectionDescription: String = command
@@ -239,11 +242,12 @@ class McpStdioClient(
 
   override fun getDaemonStatus():
     dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse {
+    val deadline = statusDeadlineFactory(statusRequestTimeoutMs)
     val response =
       callToolWithTimeout(
         "getDaemonStatus",
         JsonObject(emptyMap()),
-        statusRequestTimeoutMs,
+        deadline,
       )
     return try {
       decodeToolResponse(
@@ -402,9 +406,9 @@ class McpStdioClient(
   private fun callToolWithTimeout(
     name: String,
     arguments: JsonObject,
-    timeoutMs: Long? = null,
+    deadline: StatusRequestDeadline? = null,
   ): JsonElement {
-    ensureInitialized(timeoutMs)
+    ensureInitialized(deadline)
     val response =
       sendRequest(
         "tools/call",
@@ -412,7 +416,7 @@ class McpStdioClient(
           put("name", JsonPrimitive(name))
           put("arguments", arguments)
         },
-        timeoutMs = timeoutMs,
+        timeoutMs = deadline?.remainingTimeoutMs(),
       )
     return response.result ?: JsonObject(emptyMap())
   }
@@ -429,7 +433,7 @@ class McpStdioClient(
     }
   }
 
-  private fun ensureInitialized(timeoutMs: Long? = null) {
+  private fun ensureInitialized(deadline: StatusRequestDeadline? = null) {
     synchronized(ioLock) {
       if (initialized) {
         return
@@ -437,7 +441,12 @@ class McpStdioClient(
       ensureProcessStarted()
     }
 
-    val response = sendRequest("initialize", buildInitializeParams(), timeoutMs = timeoutMs)
+    val response =
+      sendRequest(
+        "initialize",
+        buildInitializeParams(),
+        timeoutMs = deadline?.remainingTimeoutMs(),
+      )
     val result =
       response.result?.jsonObject
         ?: throw McpConnectionException("Initialize response missing result")
@@ -445,13 +454,13 @@ class McpStdioClient(
     synchronized(ioLock) {
       initialized = true
     }
-    sendNotification("notifications/initialized", timeoutMs = timeoutMs)
+    sendNotification("notifications/initialized", deadline = deadline)
   }
 
   private fun sendNotification(
     method: String,
     params: JsonElement? = null,
-    timeoutMs: Long? = null,
+    deadline: StatusRequestDeadline? = null,
   ) {
     val request =
       JsonRpcRequest(
@@ -459,7 +468,7 @@ class McpStdioClient(
         method = method,
         params = params,
       )
-    sendRequest(request, expectResponse = false, timeoutMs = timeoutMs)
+    sendRequest(request, expectResponse = false, timeoutMs = deadline?.remainingTimeoutMs())
   }
 
   private fun sendRequest(

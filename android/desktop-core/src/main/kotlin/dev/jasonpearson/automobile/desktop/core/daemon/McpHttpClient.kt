@@ -21,11 +21,19 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.serializer
 
+fun interface HttpRequestSender {
+  fun send(request: HttpRequest): HttpResponse<String>
+}
+
 class McpHttpClient(
   private val endpoint: String,
   private val json: Json = DaemonJson,
   private val retryPolicy: RetryPolicy = RetryPolicy(),
   private val statusRequestTimeoutMs: Long = McpDaemonClient.STATUS_REQUEST_TIMEOUT_MS,
+  private val statusDeadlineFactory: (Long) -> StatusRequestDeadline = {
+    StatusRequestDeadline(it)
+  },
+  private val requestSender: HttpRequestSender? = null,
 ) : AutoMobileClient {
   override val transportName: String = "MCP HTTP"
   override val connectionDescription: String = endpoint
@@ -246,11 +254,12 @@ class McpHttpClient(
 
   override fun getDaemonStatus():
     dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse {
+    val deadline = statusDeadlineFactory(statusRequestTimeoutMs)
     val response =
       callToolWithTimeout(
         "getDaemonStatus",
         JsonObject(emptyMap()),
-        statusRequestTimeoutMs,
+        deadline,
       )
     return try {
       decodeToolResponse(
@@ -411,9 +420,9 @@ class McpHttpClient(
   private fun callToolWithTimeout(
     name: String,
     arguments: JsonObject,
-    timeoutMs: Long? = null,
+    deadline: StatusRequestDeadline? = null,
   ): JsonElement {
-    ensureInitialized(timeoutMs)
+    ensureInitialized(deadline)
     val response =
       sendRequest(
         "tools/call",
@@ -421,12 +430,12 @@ class McpHttpClient(
           put("name", JsonPrimitive(name))
           put("arguments", arguments)
         },
-        timeoutMs = timeoutMs,
+        timeoutMs = deadline?.remainingTimeoutMs(),
       )
     return response.result ?: JsonObject(emptyMap())
   }
 
-  private fun ensureInitialized(timeoutMs: Long? = null) {
+  private fun ensureInitialized(deadline: StatusRequestDeadline? = null) {
     if (initialized) {
       return
     }
@@ -436,7 +445,7 @@ class McpHttpClient(
         "initialize",
         buildInitializeParams(),
         includeSession = false,
-        timeoutMs = timeoutMs,
+        timeoutMs = deadline?.remainingTimeoutMs(),
       )
 
     val result =
@@ -445,13 +454,13 @@ class McpHttpClient(
     protocolVersion = negotiateProtocolVersion(result)
     initialized = true
 
-    sendNotification("notifications/initialized", timeoutMs = timeoutMs)
+    sendNotification("notifications/initialized", deadline = deadline)
   }
 
   private fun sendNotification(
     method: String,
     params: JsonElement? = null,
-    timeoutMs: Long? = null,
+    deadline: StatusRequestDeadline? = null,
   ) {
     val request =
       JsonRpcRequest(
@@ -459,7 +468,12 @@ class McpHttpClient(
         method = method,
         params = params,
       )
-    sendRequest(request, includeSession = true, expectResponse = false, timeoutMs = timeoutMs)
+    sendRequest(
+      request,
+      includeSession = true,
+      expectResponse = false,
+      timeoutMs = deadline?.remainingTimeoutMs(),
+    )
   }
 
   private fun sendRequest(
@@ -505,12 +519,12 @@ class McpHttpClient(
     val response =
       if (timeoutMs == null) {
         retryWithBackoffBlocking(retryPolicy, isRetryable = ::isRetryableError) {
-          httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString())
+          sendHttpRequest(httpRequest)
         }
       } else {
         // A health probe has one end-to-end hang ceiling. Retrying its individually timed requests
         // would turn a 5s deadline into an unbounded series of 5s waits.
-        httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString())
+        sendHttpRequest(httpRequest)
       }
 
     response.headers().firstValue("mcp-session-id").ifPresent { header ->
@@ -544,6 +558,9 @@ class McpHttpClient(
     }
     return rpcResponse
   }
+
+  private fun sendHttpRequest(request: HttpRequest): HttpResponse<String> =
+    requestSender?.send(request) ?: httpClient.send(request, HttpResponse.BodyHandlers.ofString())
 
   companion object {
     internal fun isRetryableError(e: Exception): Boolean =

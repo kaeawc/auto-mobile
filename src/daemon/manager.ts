@@ -1853,6 +1853,33 @@ export async function runDaemonCommand(
         break;
       }
 
+      case "heartbeat": {
+        if (args.length === 0) {
+          throw new ActionableError("heartbeat requires a session ID argument");
+        }
+        const sessionId = args[0];
+        const daemonState = manager.getDaemonState();
+        if (daemonState.isInitialized()) {
+          const sessionManager = daemonState.getSessionManager();
+          if (!sessionManager.getSession(sessionId)) {
+            throw new ActionableError(`Session not found: ${sessionId}`);
+          }
+          sessionManager.recordHeartbeat(sessionId);
+        } else {
+          const client = manager.createClient();
+          try {
+            await client.connect();
+            await client.callDaemonMethod("daemon/heartbeat", { sessionId });
+          } catch (error) {
+            throw new ActionableError(`Failed to record session heartbeat: ${errorMessage(error)}`);
+          } finally {
+            await client.close();
+          }
+        }
+        console.log(`Session ${sessionId} heartbeat recorded`);
+        break;
+      }
+
       default:
         console.error(`Unknown daemon command: ${command}`);
         console.log("\nAvailable commands:");
@@ -1865,6 +1892,7 @@ export async function runDaemonCommand(
         console.log("  available-devices     Query device pool status");
         console.log("  session-info <id>     Get information about a session");
         console.log("  release-session <id>  Release a session and free its device");
+        console.log("  heartbeat <id>        Record a heartbeat for a session");
         process.exit(1);
     }
   } catch (error) {

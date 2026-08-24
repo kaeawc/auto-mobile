@@ -10,6 +10,7 @@ setup() {
   export SESSION_OBSERVE_FILE="${MOCK_BIN}/session-observe"
   export DOCTOR_CALLS_FILE="${MOCK_BIN}/doctor-calls"
   export HEALTH_ATTEMPTS_FILE="${MOCK_BIN}/health-attempts"
+  export HEARTBEAT_FILE="${MOCK_BIN}/heartbeats"
   export TARGET_APP_LAUNCHED_FILE="${MOCK_BIN}/target-app-launched"
   export INVOCATION_FILE="${MOCK_BIN}/invocations"
 }
@@ -29,7 +30,7 @@ SCRIPT
   chmod +x "${MOCK_BIN}/${name}"
 }
 
-@test "retries getNavigationGraph after an initial CLI failure" {
+@test "renews the graph session while retrying post-bind CtrlProxy health" {
   make_mock xcrun 'exit 0'
   make_mock curl '
 url="${!#}"
@@ -38,7 +39,7 @@ if [[ "$url" == */health ]]; then
   [ -f "$HEALTH_ATTEMPTS_FILE" ] && health_attempts="$(cat "$HEALTH_ATTEMPTS_FILE")"
   health_attempts=$((health_attempts + 1))
   printf "%s\\n" "$health_attempts" > "$HEALTH_ATTEMPTS_FILE"
-  if [ "$health_attempts" -eq 1 ]; then
+  if [ "$health_attempts" -eq 1 ] || { [ -f "$SESSION_OBSERVE_FILE" ] && [ "$health_attempts" -eq 3 ]; }; then
     exit 1
   fi
 fi
@@ -75,6 +76,14 @@ if [ "$1" = "--cli" ] && [ "$2" = "doctor" ]; then
   printf "{\"ios\":{\"checks\":[]}}\\n"
   exit 0
 fi
+if [ "$1" = "--daemon" ] && [ "$2" = "heartbeat" ] && [ "$3" = "44600000-0000-4000-8000-000000000000" ]; then
+  if [ ! -f "$SESSION_OBSERVE_FILE" ]; then
+    echo "session heartbeat ran before the graph session was bound" >&2
+    exit 1
+  fi
+  touch "$HEARTBEAT_FILE"
+  exit 0
+fi
 if [ "$1" = "--debug" ] && [ "$2" = "--embedded-sdk" ] && [ "$3" = "--cli" ] && [ "$4" = "--session-uuid" ] && [ "$6" = "launchApp" ]; then
   if [ "$7" != "--platform" ] || [ "$8" != "ios" ] || [ "$9" != "--appId" ] || [ "${10}" != "com.apple.reminders" ] || [ "${11}" != "--deviceId" ] || [ "${12}" != "simulator-udid" ]; then
     echo "unexpected target app launch arguments: $*" >&2
@@ -108,7 +117,8 @@ fi
   [ "$status" -eq 0 ]
   [ "$(cat "$GRAPH_ATTEMPTS_FILE")" = "2" ]
   [ "$(cat "$DOCTOR_CALLS_FILE")" = "2" ]
-  [ "$(cat "$HEALTH_ATTEMPTS_FILE")" = "3" ]
+  [ "$(cat "$HEALTH_ATTEMPTS_FILE")" = "4" ]
+  [ -f "$HEARTBEAT_FILE" ]
   [ -f "$TARGET_APP_LAUNCHED_FILE" ]
   [[ "$output" == *"getNavigationGraph attempt 1 failed"* ]]
   # Regression for issue #4579: the graph read must be scoped to the fixture

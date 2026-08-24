@@ -55,10 +55,17 @@ ctrl_proxy_port_for_device() {
 
 wait_for_ctrl_proxy_health() {
   local ctrl_proxy_port="$1"
+  local session_uuid="${2:-}"
   local attempt
   for attempt in 1 2 3 4 5; do
     if curl --fail --silent --show-error --max-time 5 "http://127.0.0.1:${ctrl_proxy_port}/health" >/dev/null; then
       return 0
+    fi
+    # One-shot CLI clients stop their proxy heartbeat after each public call.
+    # Renew the graph session while this bounded runner-health retry is in progress.
+    if [[ -n "${session_uuid}" ]] && ! auto-mobile --daemon heartbeat "${session_uuid}" >/dev/null; then
+      echo "error: could not renew navigation graph session ownership" >&2
+      return 1
     fi
     if [[ "${attempt}" -lt 5 ]]; then
       echo "CtrlProxy health check attempt ${attempt} failed; retrying in 2s..." >&2
@@ -100,7 +107,7 @@ fi
 # Requesting debug and embedded-SDK tools can restart the daemon. That restart
 # creates a new CtrlProxy client, so the prior daemon's reported port is stale.
 ctrl_proxy_port="$(ctrl_proxy_port_for_device)"
-wait_for_ctrl_proxy_health "${ctrl_proxy_port}"
+wait_for_ctrl_proxy_health "${ctrl_proxy_port}" "${session_uuid}"
 
 event_payload() {
   local destination="$1"

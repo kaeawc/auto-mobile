@@ -1,297 +1,300 @@
-import { posix } from "node:path";
-import { ActionableError, type BootedDevice, type ExecResult } from "../models";
+import { promises as nodeFs } from "node:fs";
+import { join, posix } from "node:path";
+import { tmpdir } from "node:os";
+import type { BootedDevice } from "../models";
+import { ActionableError } from "../models";
 import {
   defaultAdbClientFactory,
   type AdbClientFactory,
 } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { errorMessage } from "../utils/describeUnknownError";
-import { logger } from "../utils/logger";
 import { shellQuote } from "../utils/shellQuote";
+import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
+import { errorMessage } from "../utils/describeUnknownError";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
-import { fixedBackoff, type BackoffPolicy } from "../utils/Backoff";
-import { normalizeAppFileRelativePath } from "./appFileContract";
+import { readAndroidDeviceApiLevel } from "../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
 import {
   normalizeSharedStorageNamespace,
+  normalizeSharedStorageRelativePath,
+  type SharedStorageFileInput,
   type StageSharedStorageArgs,
   type StageSharedStorageResult,
   type StagedSharedStorageFile,
 } from "./sharedStorageContract";
-import { prepareFileSource, type FileSourceFileSystem } from "./fileSourcePreparation";
 
-const SHARED_STORAGE_ROOT = "/storage/emulated";
-const MEDIA_EXTENSIONS =
-  /\.(3gp|aac|avi|flac|gif|heic|jpeg|jpg|m4a|m4v|mkv|mp3|mp4|ogg|png|webm|webp|wav)$/i;
-const namespaceLocks = new Map<string, Promise<void>>();
+const DOWNLOADS_ROOT = "/sdcard/Download";
 
-export type StageSharedStorageRequest = Omit<StageSharedStorageArgs, "device"> & {
-  device: BootedDevice;
-  signal?: AbortSignal;
+interface SharedStorageStats {
+  size: number;
+  isFile(): boolean;
+}
+
+export interface SharedStorageFileSystem {
+  stat(path: string): Promise<SharedStorageStats>;
+  mkdtemp(prefix: string): Promise<string>;
+  writeFileBuffer(path: string, data: Buffer): Promise<void>;
+  rm(path: string): Promise<void>;
+}
+
+const defaultFileSystem: SharedStorageFileSystem = {
+  stat: (path) => nodeFs.stat(path),
+  mkdtemp: (prefix) => nodeFs.mkdtemp(prefix),
+  writeFileBuffer: (path, data) => nodeFs.writeFile(path, data),
+  rm: (path) => nodeFs.rm(path, { recursive: true, force: true }),
 };
 
 export interface SharedStorageServiceDependencies {
   adbFactory?: AdbClientFactory;
-  fileSystem?: FileSourceFileSystem;
+  fileSystem?: SharedStorageFileSystem;
   timer?: Timer;
-  indexingBackoff?: BackoffPolicy;
+}
+
+export interface StageSharedStorageRequest extends Omit<StageSharedStorageArgs, "device"> {
+  device: BootedDevice;
+  signal?: AbortSignal;
 }
 
 export interface SharedStorageService {
   stage(request: StageSharedStorageRequest): Promise<StageSharedStorageResult>;
 }
 
-export function createSharedStorageServiceForTesting(
-  deps: SharedStorageServiceDependencies = {},
-): SharedStorageService {
-  return new DefaultSharedStorageService(
-    deps.adbFactory ?? defaultAdbClientFactory,
-    deps.fileSystem,
-    deps.timer ?? defaultTimer,
-    deps.indexingBackoff ?? fixedBackoff(100),
-  );
-}
-
 let sharedStorageService: SharedStorageService | null = null;
 
 export function getSharedStorageService(): SharedStorageService {
-  sharedStorageService ??= createSharedStorageServiceForTesting();
+  if (!sharedStorageService) {
+    sharedStorageService = createSharedStorageServiceForTesting();
+  }
   return sharedStorageService;
+}
+
+export function setSharedStorageServiceForTesting(service: SharedStorageService): void {
+  sharedStorageService = service;
 }
 
 export function resetSharedStorageServiceForTesting(): void {
   sharedStorageService = null;
 }
 
+export function createSharedStorageServiceForTesting(
+  dependencies: SharedStorageServiceDependencies = {},
+): SharedStorageService {
+  return new DefaultSharedStorageService(
+    dependencies.adbFactory ?? defaultAdbClientFactory,
+    dependencies.fileSystem ?? defaultFileSystem,
+    dependencies.timer ?? defaultTimer,
+  );
+}
+
 class DefaultSharedStorageService implements SharedStorageService {
   constructor(
     private readonly adbFactory: AdbClientFactory,
-    private readonly fileSystem?: FileSourceFileSystem,
-    private readonly timer: Timer = defaultTimer,
-    private readonly indexingBackoff: BackoffPolicy = fixedBackoff(100),
+    private readonly fileSystem: SharedStorageFileSystem,
+    private readonly timer: Timer,
   ) {}
 
   async stage(request: StageSharedStorageRequest): Promise<StageSharedStorageResult> {
-    const namespace = normalizeSharedStorageNamespace(request.namespace);
-    const lockKey = `${request.device.deviceId}:${namespace}`;
-    const previous = namespaceLocks.get(lockKey) ?? Promise.resolve();
-    let release!: () => void;
-    const current = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    namespaceLocks.set(lockKey, current);
-    await previous;
-    try {
-      return await this.stageLocked({ ...request, namespace });
-    } finally {
-      release();
-      if (namespaceLocks.get(lockKey) === current) {
-        namespaceLocks.delete(lockKey);
-      }
-    }
-  }
-
-  private async stageLocked(request: StageSharedStorageRequest): Promise<StageSharedStorageResult> {
     if (request.device.platform !== "android") {
-      throw new ActionableError("Shared storage fixtures are supported only on Android.");
+      throw new ActionableError("stageSharedStorage is only supported on Android devices.");
     }
-
     const namespace = normalizeSharedStorageNamespace(request.namespace);
-    const prepared = await this.prepareSources(request.files);
+    const destinationDirectory = posix.join(DOWNLOADS_ROOT, namespace);
     const adb = this.adbFactory.create(request.device);
-    const storageRoot = await this.resolveStorageRoot(adb, request);
-    const root = posix.join(storageRoot, "Download", "AutoMobile", namespace);
-
+    const preparedFiles = await this.prepareFiles(request.files);
     try {
-      this.validateDestinations(prepared);
       if (request.reset) {
-        await this.execute(adb, `shell rm -rf -- ${shellQuote(root)}`, request, "reset");
+        // namespace has exactly one safe segment, so this can only remove Downloads/<namespace>.
+        await execute(adb, `shell rm -rf ${shellQuote(destinationDirectory)}`, request.signal);
       }
-      await this.execute(
-        adb,
-        `shell mkdir -p -- ${shellQuote(root)}`,
-        request,
-        "create shared storage namespace",
-      );
+      await execute(adb, `shell mkdir -p ${shellQuote(destinationDirectory)}`, request.signal);
 
       const files: StagedSharedStorageFile[] = [];
-      for (const entry of prepared) {
-        files.push(await this.stageFile(adb, root, entry, request));
+      for (const file of preparedFiles) {
+        files.push(await this.stageFile(adb, request, namespace, destinationDirectory, file));
       }
-
       return {
         success: true,
         deviceId: request.device.deviceId,
         platform: "android",
         namespace,
-        root,
+        destinationDirectory,
         reset: request.reset ?? false,
         files,
       };
     } finally {
-      await Promise.all(prepared.map((entry) => entry.source.cleanup?.() ?? Promise.resolve()));
+      await Promise.all(preparedFiles.map((file) => file.source.cleanup?.()));
     }
   }
 
-  private async prepareSources(files: StageSharedStorageArgs["files"]): Promise<
-    Array<{
-      file: StageSharedStorageArgs["files"][number];
-      destinationPath: string;
-      source: Awaited<ReturnType<typeof prepareFileSource>>;
-    }>
-  > {
-    const prepared: Array<{
-      file: StageSharedStorageArgs["files"][number];
-      destinationPath: string;
-      source: Awaited<ReturnType<typeof prepareFileSource>>;
-    }> = [];
+  private async prepareFiles(
+    files: SharedStorageFileInput[],
+  ): Promise<PreparedSharedStorageFile[]> {
+    const prepared: PreparedSharedStorageFile[] = [];
     try {
       for (const file of files) {
         prepared.push({
-          file,
-          destinationPath: normalizeAppFileRelativePath(file.destinationPath),
-          source: await prepareFileSource(file, this.fileSystem),
+          destinationPath: normalizeSharedStorageRelativePath(file.destinationPath),
+          source: await this.prepareSource(file),
         });
+      }
+      for (const file of prepared) {
+        if (
+          prepared.some(
+            (other) =>
+              other !== file &&
+              (other.destinationPath === file.destinationPath ||
+                other.destinationPath.startsWith(`${file.destinationPath}/`)),
+          )
+        ) {
+          throw new ActionableError(
+            `destinationPath conflicts with a nested fixture: ${file.destinationPath}`,
+          );
+        }
       }
       return prepared;
     } catch (error) {
-      await Promise.all(prepared.map((entry) => entry.source.cleanup?.() ?? Promise.resolve()));
-      throw new ActionableError(`Failed to prepare shared storage sources: ${errorMessage(error)}`);
-    }
-  }
-
-  private async resolveStorageRoot(
-    adb: AdbExecutor,
-    request: StageSharedStorageRequest,
-  ): Promise<string> {
-    try {
-      const result = await adb.executeCommand(
-        "shell cmd activity get-current-user",
-        undefined,
-        undefined,
-        true,
-        request.signal,
-      );
-      const userId = Number.parseInt(result.stdout.trim(), 10);
-      if (Number.isInteger(userId) && userId >= 0) {
-        return posix.join(SHARED_STORAGE_ROOT, String(userId));
-      }
-    } catch (error) {
-      logger.warn(`Failed to resolve Android storage profile: ${errorMessage(error)}`, error);
-    }
-    return posix.join(SHARED_STORAGE_ROOT, "0");
-  }
-
-  private validateDestinations(entries: Array<{ destinationPath: string }>): void {
-    const destinations = new Set<string>();
-    for (const entry of entries) {
-      if (destinations.has(entry.destinationPath)) {
-        throw new ActionableError(`Duplicate destinationPath: ${entry.destinationPath}`);
-      }
-      destinations.add(entry.destinationPath);
+      await Promise.all(prepared.map((file) => file.source.cleanup?.()));
+      throw error;
     }
   }
 
   private async stageFile(
     adb: AdbExecutor,
-    root: string,
-    entry: {
-      file: StageSharedStorageArgs["files"][number];
-      destinationPath: string;
-      source: Awaited<ReturnType<typeof prepareFileSource>>;
-    },
     request: StageSharedStorageRequest,
+    namespace: string,
+    destinationDirectory: string,
+    file: PreparedSharedStorageFile,
   ): Promise<StagedSharedStorageFile> {
-    const devicePath = posix.join(root, entry.destinationPath);
-    await this.execute(
-      adb,
-      `shell mkdir -p -- ${shellQuote(posix.dirname(devicePath))}`,
-      request,
-      "create shared storage directory",
-    );
-    await this.execute(
-      adb,
-      `push ${shellQuote(entry.source.path)} ${shellQuote(devicePath)}`,
-      request,
-      "write shared storage fixture",
-    );
-    const shouldIndex =
-      entry.file.mimeType !== undefined || MEDIA_EXTENSIONS.test(entry.destinationPath);
-    let indexing: StagedSharedStorageFile["indexing"] = "notRequested";
-    let indexingReason: string | undefined;
-    if (shouldIndex) {
-      await this.execute(
-        adb,
-        `shell am broadcast --receiver-include-background -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d ${shellQuote(`file://${devicePath}`)}`,
-        request,
-        "request media indexing",
-      );
-      const verification = await this.verifyIndexing(adb, devicePath, request);
-      indexing = verification.indexing;
-      indexingReason = verification.indexingReason;
-    } else {
-      indexingReason =
-        "File is not a recognized media type and was written for document-picker use.";
+    const destinationPath = file.destinationPath;
+    const destination = posix.join(destinationDirectory, destinationPath);
+    // Re-check the joined result so future path changes cannot widen the reset namespace.
+    if (!destination.startsWith(`${destinationDirectory}/`)) {
+      throw new ActionableError(`destinationPath escapes shared-storage namespace ${namespace}`);
     }
-    return {
-      destinationPath: entry.destinationPath,
-      devicePath,
-      byteCount: entry.source.byteCount,
-      indexing,
-      ...(indexingReason ? { indexingReason } : {}),
-    };
-  }
-
-  private async verifyIndexing(
-    adb: AdbExecutor,
-    devicePath: string,
-    request: StageSharedStorageRequest,
-  ): Promise<{ indexing: "verified" | "dispatched" | "failed"; indexingReason?: string }> {
-    const query = `shell content query --uri content://media/external/file --projection _data --where ${shellQuote(`_data='${devicePath.replace(/'/g, "''")}'`)}`;
-    for (let attempt = 1; attempt <= 4; attempt += 1) {
-      try {
-        const result = await adb.executeCommand(query, undefined, undefined, true, request.signal);
-        if (result.stdout.includes(devicePath)) {
-          return { indexing: "verified" };
-        }
-      } catch (error) {
-        logger.warn(
-          `Media indexing verification failed for ${devicePath}: ${errorMessage(error)}`,
-          error,
-        );
-        return {
-          indexing: "failed",
-          indexingReason: "MediaStore verification failed after the scan request.",
+    await execute(adb, `shell mkdir -p ${shellQuote(posix.dirname(destination))}`, request.signal);
+    await executeArgs(adb, ["push", file.source.path, destination], request.signal);
+    const mediaIndexing = shouldIndexMedia(destinationPath, request.indexMedia ?? true)
+      ? await indexMediaFile(adb, destination, destinationPath, this.timer, request.signal)
+      : {
+          status: "notRequested" as const,
+          reason: indexingNotRequestedReason(destinationPath, request.indexMedia ?? true),
         };
-      }
-      if (attempt < 4) {
-        await this.timer.sleep(this.indexingBackoff.delayForAttempt(attempt));
-      }
-    }
-    return {
-      indexing: "dispatched",
-      indexingReason:
-        "Media scan was dispatched, but MediaStore did not report the file before the verification timeout.",
-    };
+    return { destinationPath, byteCount: file.source.byteCount, mediaIndexing };
   }
 
-  private async execute(
-    adb: AdbExecutor,
-    command: string,
-    request: StageSharedStorageRequest,
-    operation: string,
-  ): Promise<ExecResult> {
-    try {
-      return await adb.executeCommand(command, undefined, undefined, true, request.signal);
-    } catch (error) {
-      const message = errorMessage(error);
-      logger.warn(
-        `Failed to ${operation} on Android device ${request.device.deviceId}: ${message}`,
-        error,
-      );
-      throw new ActionableError(
-        `Failed to ${operation} on Android device ${request.device.deviceId}. ` +
-          `Verify the device is booted and shared storage is writable. Original error: ${message}`,
-      );
+  private async prepareSource(
+    file: SharedStorageFileInput,
+  ): Promise<{ path: string; byteCount: number; cleanup?: () => Promise<void> }> {
+    if (file.sourcePath !== undefined) {
+      const path = resolvePathFromDaemonLaunchWorkingDirectory(file.sourcePath);
+      const stat = await this.fileSystem.stat(path);
+      if (!stat.isFile()) {
+        throw new ActionableError(`sourcePath is not a file: ${path}`);
+      }
+      return { path, byteCount: stat.size };
     }
+    const buffer =
+      file.contentBase64 === undefined
+        ? Buffer.from(file.contentText ?? "", "utf8")
+        : Buffer.from(file.contentBase64, "base64");
+    const directory = await this.fileSystem.mkdtemp(join(tmpdir(), "automobile-shared-storage-"));
+    const path = join(directory, "content");
+    await this.fileSystem.writeFileBuffer(path, buffer);
+    return { path, byteCount: buffer.byteLength, cleanup: () => this.fileSystem.rm(directory) };
   }
+}
+
+interface PreparedSharedStorageFile {
+  destinationPath: string;
+  source: { path: string; byteCount: number; cleanup?: () => Promise<void> };
+}
+
+async function execute(adb: AdbExecutor, command: string, signal?: AbortSignal): Promise<void> {
+  try {
+    await adb.executeCommand(command, undefined, undefined, true, signal);
+  } catch (error) {
+    throw new ActionableError(`Android shared-storage operation failed: ${errorMessage(error)}`);
+  }
+}
+
+async function executeArgs(adb: AdbExecutor, args: string[], signal?: AbortSignal): Promise<void> {
+  try {
+    await adb.execute(args, { noRetry: true, signal });
+  } catch (error) {
+    throw new ActionableError(`Android shared-storage operation failed: ${errorMessage(error)}`);
+  }
+}
+
+async function indexMediaFile(
+  adb: AdbExecutor,
+  destination: string,
+  destinationPath: string,
+  timer: Timer,
+  signal?: AbortSignal,
+): Promise<{ status: "completed" }> {
+  await execute(
+    adb,
+    `shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d ${shellQuote(`file://${destination}`)}`,
+    signal,
+  );
+  const collection = mediaCollectionFor(destinationPath);
+  const apiLevel = await readAndroidDeviceApiLevel(adb);
+  const modernQuery = apiLevel === null || apiLevel >= 29;
+  const deviceRelativePath = destination.slice(`${DOWNLOADS_ROOT}/`.length);
+  const deviceRelativeDirectory = posix.dirname(deviceRelativePath);
+  const relativePath =
+    deviceRelativeDirectory === "." ? "Download/" : `Download/${deviceRelativeDirectory}/`;
+  const selection = modernQuery
+    ? `relative_path=${sqlString(relativePath)} AND _display_name=${sqlString(posix.basename(destination))}`
+    : `_data=${sqlString(destination.replace("/sdcard/", "/storage/emulated/0/"))}`;
+  const volume = modernQuery ? "external_primary" : "external";
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const result = await executeResult(
+      adb,
+      `shell content query --uri content://media/${volume}/${collection}/media --projection _id --where ${shellQuote(selection)}`,
+      signal,
+    );
+    if (/^Row:/m.test(result.stdout)) {
+      return { status: "completed" };
+    }
+    await timer.sleep(250);
+  }
+  throw new ActionableError(
+    `Android media indexing did not complete for ${destination} within 5 seconds.`,
+  );
+}
+
+async function executeResult(adb: AdbExecutor, command: string, signal?: AbortSignal) {
+  try {
+    return await adb.executeCommand(command, undefined, undefined, true, signal);
+  } catch (error) {
+    throw new ActionableError(`Android shared-storage operation failed: ${errorMessage(error)}`);
+  }
+}
+
+function mediaCollectionFor(path: string): "images" | "video" | "audio" {
+  if (/\.(bmp|gif|heic|jpeg|jpg|png|webp)$/i.test(path)) {
+    return "images";
+  }
+  if (/\.(mkv|mov|mp4|webm)$/i.test(path)) {
+    return "video";
+  }
+  return "audio";
+}
+
+function sqlString(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+function shouldIndexMedia(path: string, indexMedia: boolean): boolean {
+  return (
+    indexMedia &&
+    /\.(aac|bmp|flac|gif|heic|jpeg|jpg|m4a|mkv|mov|mp3|mp4|ogg|png|wav|webm|webp)$/i.test(path)
+  );
+}
+
+function indexingNotRequestedReason(path: string, indexMedia: boolean): string {
+  if (!indexMedia) {
+    return "media indexing was disabled by indexMedia=false";
+  }
+  return `media indexing was not requested for ${path}; Android document pickers discover files directly from Downloads`;
 }

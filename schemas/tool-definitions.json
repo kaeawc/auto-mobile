@@ -8034,30 +8034,32 @@
       "type": "object",
       "properties": {
         "platform": {
+          "description": "Android platform",
           "default": "android",
           "type": "string",
           "const": "android"
         },
         "namespace": {
-          "description": "Isolated fixture namespace beneath Download/AutoMobile",
+          "description": "One caller-named child directory beneath Downloads",
           "type": "string"
         },
         "reset": {
-          "description": "Delete only this namespace before writing",
+          "description": "Remove only this declared namespace before writing",
           "default": false,
           "type": "boolean"
         },
+        "indexMedia": {
+          "description": "Request Android media indexing for media files",
+          "default": true,
+          "type": "boolean"
+        },
         "files": {
+          "description": "Files to stage into the namespace",
           "minItems": 1,
-          "maxItems": 100,
           "type": "array",
           "items": {
             "type": "object",
             "properties": {
-              "destinationPath": {
-                "description": "Relative path within the namespace",
-                "type": "string"
-              },
               "sourcePath": {
                 "description": "Host file path",
                 "type": "string",
@@ -8071,10 +8073,9 @@
                 "description": "Base64 content",
                 "type": "string"
               },
-              "mimeType": {
-                "description": "Optional MIME type for media indexing",
-                "type": "string",
-                "minLength": 1
+              "destinationPath": {
+                "description": "Path relative to the declared Downloads namespace",
+                "type": "string"
               }
             },
             "required": ["destinationPath"],
@@ -8093,7 +8094,7 @@
           "type": "string"
         }
       },
-      "required": ["platform", "namespace", "reset", "files"],
+      "required": ["namespace", "files"],
       "additionalProperties": false
     }
   },

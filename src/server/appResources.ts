@@ -60,6 +60,7 @@ interface AppsQueryDeviceContent {
 
 interface AppsQueryResourceContent {
   query: AppsQueryOptions;
+  observationComplete: boolean;
   totalCount: number;
   deviceCount: number;
   lastUpdated: string;
@@ -574,6 +575,7 @@ async function getAppsQueryResource(
 
     const content: AppsQueryResourceContent = {
       query: options,
+      observationComplete: cacheEntry.content.observationComplete,
       totalCount: apps.length,
       deviceCount: 1,
       lastUpdated,

@@ -1,5 +1,5 @@
 import { z } from "zod/v4";
-import { addDeviceTargetingToSchema, platformSchema } from "./toolSchemaHelpers";
+import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
 import type { Platform } from "../models";
 import { normalizeAppFileRelativePath } from "./appFileContract";
 
@@ -60,7 +60,7 @@ export function normalizeSharedStorageNamespace(namespace: string): string {
 
 export const stageSharedStorageSchema = addDeviceTargetingToSchema(
   z.object({
-    platform: platformSchema.default("android"),
+    platform: z.literal("android").default("android"),
     namespace: z.string().describe("Isolated fixture namespace beneath Download/AutoMobile"),
     reset: z
       .boolean()

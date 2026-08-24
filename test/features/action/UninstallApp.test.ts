@@ -227,7 +227,7 @@ describe("UninstallApp (Android)", () => {
 
   test("emits force-stop then a data-clearing pm uninstall for the target user", async () => {
     fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
-    fakeAdb.setUsers([{ userId: 0, name: "Owner", running: true }]);
+    fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
     // Pre-uninstall the app is present; the post-uninstall re-check sees it gone.
     fakeAdb.setCommandResultSequence("shell pm list packages --user 0", [
       { stdout: "package:com.example.app\npackage:com.android.settings" },
@@ -299,7 +299,7 @@ describe("UninstallApp (Android)", () => {
 
   test("emits pm uninstall -k when keepData is requested", async () => {
     fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
-    fakeAdb.setUsers([{ userId: 0, name: "Owner", running: true }]);
+    fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
     fakeAdb.setCommandResultSequence("shell pm list packages --user 0", [
       { stdout: "package:com.example.app\npackage:com.android.settings" },
       { stdout: "package:com.android.settings" },
@@ -526,7 +526,7 @@ describe("UninstallApp (Android)", () => {
     const repo = new FakeInstalledAppsRepository();
     await repo.upsertInstalledApp(androidDevice.deviceId, 0, "com.example.previous", false, 1_000);
     fakeAdb.setForegroundApp(null);
-    fakeAdb.setUsers([{ userId: 0, name: "Owner", running: true }]);
+    fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
     setupNoApp(fakeAdb, 0);
 
     const uninstall = new UninstallApp(androidDevice, fakeAdbFactory(fakeAdb), null, null, repo);
@@ -541,7 +541,7 @@ describe("UninstallApp (Android)", () => {
   test("detects work profile user", async () => {
     fakeAdb.setForegroundApp(null);
     fakeAdb.setUsers([
-      { userId: 0, name: "Owner", running: true },
+      { userId: 0, name: "Owner", flags: 0x4000, running: true },
       { userId: 10, name: "Work", flags: 0x30, running: true },
     ]);
     // App installed under work profile (userId 10)

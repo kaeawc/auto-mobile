@@ -665,6 +665,7 @@ interface ShutdownDeadlineContext {
 interface AndroidObserverShutdownState {
   hadActiveObserver: boolean;
   boundSessionId: string | null;
+  deviceIdentity: BootedDevice | null;
 }
 
 function shouldPropagateShutdownPreparationError(
@@ -780,12 +781,19 @@ async function stopAndroidCtrlProxyBeforeShutdown(
   stopAndroidObservers: (device: BootedDevice) => Promise<void>,
 ): Promise<AndroidObserverShutdownState> {
   if (context.device.platform !== "android") {
-    return { hadActiveObserver: false, boundSessionId: null };
+    return { hadActiveObserver: false, boundSessionId: null, deviceIdentity: null };
   }
   const activeObserver = AndroidCtrlProxyClient.getExistingInstance(context.device.deviceId);
+  const activeDeviceIdentity = activeObserver?.getBootedDeviceIdentity();
   const observerState: AndroidObserverShutdownState = {
     hadActiveObserver: activeObserver !== null,
     boundSessionId: activeObserver?.getBoundSessionId() ?? null,
+    deviceIdentity: activeDeviceIdentity
+      ? {
+          ...activeDeviceIdentity,
+          transportId: activeDeviceIdentity.transportId ?? context.device.transportId,
+        }
+      : null,
   };
   let stop: Promise<void> | undefined;
   perf.startOperation("stopAndroidCtrlProxy");
@@ -906,9 +914,9 @@ async function restoreAndroidObserverAfterCommandFailure(
     const survivingDevice = findDiscoveredDevice(discovery, device);
     if (
       survivingDevice &&
-      device.transportId !== undefined &&
+      observerState.deviceIdentity?.transportId !== undefined &&
       survivingDevice.transportId !== undefined &&
-      isSameBootedDeviceIdentity(device, survivingDevice)
+      isSameBootedDeviceIdentity(observerState.deviceIdentity, survivingDevice)
     ) {
       const observer = AndroidCtrlProxyClient.getInstance(survivingDevice);
       if (hasLiveAndroidObserverSessionBinding(device, observerState.boundSessionId)) {

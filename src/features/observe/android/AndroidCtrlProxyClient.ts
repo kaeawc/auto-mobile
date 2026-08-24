@@ -1225,6 +1225,15 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   /**
+   * Returns the booted-device identity that constructed this client. Callers
+   * use this after teardown to distinguish the original emulator incarnation
+   * from a same-ID replacement.
+   */
+  public getBootedDeviceIdentity(): BootedDevice {
+    return { ...this.device };
+  }
+
+  /**
    * Release this client's binding to a session that has ended (#4984). If still
    * bound to `sessionId`, drop the binding and dispose the cached hierarchy detector
    * so a post-release event (before any new session binds the still-connected

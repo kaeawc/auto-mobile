@@ -882,6 +882,92 @@ function hasLiveAndroidObserverSessionBinding(
   );
 }
 
+function invalidateAndroidObserver(observer: AndroidCtrlProxyClient, deviceId: string): void {
+  // Removal is deliberately synchronous and precedes cleanup. `close()` can
+  // wait on an ADB forward removal that does not honour the shutdown deadline;
+  // retaining the singleton until that completes would keep an obsolete client
+  // (and the failed-shutdown reservation) alive indefinitely.
+  if (AndroidCtrlProxyClient.getExistingInstance(deviceId) === observer) {
+    AndroidCtrlProxyClient.removeInstance(deviceId);
+  }
+  void observer.close().catch(error => {
+    logger.warn(`[DeviceTools] Failed to clean up invalidated Android observer for ${deviceId}: ${error}`);
+  });
+}
+
+async function reconnectAndroidObserverWithinShutdownDeadline(
+  observer: AndroidCtrlProxyClient,
+  device: BootedDevice,
+  timer: Timer,
+  shutdownDeadlineMs: number,
+  requestAbortSignal: AbortSignal | undefined,
+  timeoutMs: number,
+): Promise<boolean> {
+  const reconnect = async (): Promise<boolean> => {
+    try {
+      return await runWithinShutdownDeadline(
+        device,
+        timer,
+        shutdownDeadlineMs,
+        "Android observer reconnect did not complete",
+        requestAbortSignal,
+        async () => await observer.ensureConnected(),
+        timeoutMs,
+      );
+    } catch (error) {
+      if (isShutdownTimeoutError(error) || requestAbortSignal?.aborted) {
+        // Platform setup does not accept an AbortSignal. Invalidate the
+        // in-flight client so a late port-forward cannot register a stale
+        // observer or leave future callers waiting on its connection.
+        invalidateAndroidObserver(observer, device.deviceId);
+      }
+      throw error;
+    }
+  };
+  const connected = await reconnect();
+  // A failed port-forward setup has no WebSocket close event to trigger the
+  // normal automatic reconnect. Retry once while the shutdown budget is still
+  // live so existing passive subscribers regain their cadence.
+  return connected || (await reconnect());
+}
+
+async function revalidateReconnectedAndroidObserver(
+  deviceManager: PlatformDeviceManager,
+  device: BootedDevice,
+  observer: AndroidCtrlProxyClient,
+  observerState: AndroidObserverShutdownState,
+  timer: Timer,
+  shutdownDeadlineMs: number,
+  requestAbortSignal: AbortSignal | undefined,
+  timeoutMs: number,
+): Promise<boolean> {
+  try {
+    // Recheck after the awaited reconnect: ADB addresses a reusable serial,
+    // so the original pre-connect check is no longer sufficient if an emulator
+    // rebooted while its port-forward or WebSocket was starting.
+    const discovery = await getCompleteShutdownDiscovery(
+      deviceManager,
+      device,
+      timer,
+      shutdownDeadlineMs,
+      requestAbortSignal,
+      timeoutMs,
+    );
+    const reconnectedDevice = findDiscoveredDevice(discovery, device);
+    return (
+      reconnectedDevice !== undefined &&
+      observerState.deviceIdentity?.transportId !== undefined &&
+      reconnectedDevice.transportId !== undefined &&
+      isSameBootedDeviceIdentity(observerState.deviceIdentity, reconnectedDevice)
+    );
+  } catch (error) {
+    // A connected observer cannot be safely retained when its incarnation
+    // could not be reconfirmed within the same failed-shutdown budget.
+    invalidateAndroidObserver(observer, device.deviceId);
+    throw error;
+  }
+}
+
 async function restoreAndroidObserverAfterCommandFailure(
   deviceManager: PlatformDeviceManager,
   device: BootedDevice,
@@ -919,44 +1005,36 @@ async function restoreAndroidObserverAfterCommandFailure(
       isSameBootedDeviceIdentity(observerState.deviceIdentity, survivingDevice)
     ) {
       const observer = AndroidCtrlProxyClient.getInstance(survivingDevice);
-      if (hasLiveAndroidObserverSessionBinding(device, observerState.boundSessionId)) {
-        observer.bindSession(observerState.boundSessionId);
-      }
-      const reconnect = async (): Promise<boolean> => {
-        try {
-          return await runWithinShutdownDeadline(
-            device,
-            timer,
-            shutdownDeadlineMs,
-            "Android observer reconnect did not complete",
-            requestAbortSignal,
-            async () => await observer.ensureConnected(),
-            timeoutMs,
-          );
-        } catch (error) {
-          if (isShutdownTimeoutError(error) || requestAbortSignal?.aborted) {
-            // Platform setup does not accept an AbortSignal. Invalidate the
-            // in-flight client so a late port-forward cannot register a stale
-            // observer or leave future callers waiting on its connection.
-            await observer.close();
-            if (AndroidCtrlProxyClient.getExistingInstance(device.deviceId) === observer) {
-              AndroidCtrlProxyClient.removeInstance(device.deviceId);
-            }
-          }
-          throw error;
-        }
-      };
-      let connected = await reconnect();
-      if (!connected) {
-        // A failed port-forward setup has no WebSocket close event to trigger
-        // the normal automatic reconnect. Retry once while the shutdown budget
-        // is still live so existing passive subscribers regain their cadence.
-        connected = await reconnect();
-      }
+      const connected = await reconnectAndroidObserverWithinShutdownDeadline(
+        observer,
+        device,
+        timer,
+        shutdownDeadlineMs,
+        requestAbortSignal,
+        timeoutMs,
+      );
       if (!connected) {
         logger.warn(
           `[DeviceTools] Failed to reconnect Android observer after kill failure for ${device.deviceId}`,
         );
+        return;
+      }
+      const sameIncarnation = await revalidateReconnectedAndroidObserver(
+        deviceManager,
+        device,
+        observer,
+        observerState,
+        timer,
+        shutdownDeadlineMs,
+        requestAbortSignal,
+        timeoutMs,
+      );
+      if (!sameIncarnation) {
+        invalidateAndroidObserver(observer, device.deviceId);
+        return;
+      }
+      if (hasLiveAndroidObserverSessionBinding(device, observerState.boundSessionId)) {
+        observer.bindSession(observerState.boundSessionId);
       }
     }
   } catch (restoreError) {

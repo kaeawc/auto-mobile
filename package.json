@@ -167,7 +167,7 @@
     "uint8array-extras": "1.5.0",
     "utif2": "4.1.0",
     "xml-parse-from-string": "1.0.1",
-    "xmlbuilder": "11.0.1",
+    "xmlbuilder": "15.1.1",
     "zod": "3.25.76"
   },
   "devDependencies": {

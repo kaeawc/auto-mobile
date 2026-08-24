@@ -249,19 +249,59 @@ private fun alignWindowSlots(
 }
 
 /**
- * The set of structural path keys of a window's subtree, computed independently of the window's
- * slot (the window root sits at sibling index 0). Two windows with identical structure produce
- * identical key sets, so [jaccard] overlap measures subtree similarity for [alignWindowSlots].
+ * The semantic-aware signature key set of a window's subtree, computed independently of the
+ * window's slot (the window root sits at sibling index 0). Two windows that are fully equal
+ * (structure **and** compared attributes) produce identical key sets, so [jaccard] overlap measures
+ * subtree similarity for [alignWindowSlots]. See [collectSignatureKeys].
  */
 private fun signatureKeys(window: UIElementInfo): Set<String> {
-  val map = LinkedHashMap<String, UIElementInfo>()
-  addSubtree(map, window, parentKey = "", siblingIndex = 0)
-  return map.keys
+  val keys = LinkedHashSet<String>()
+  collectSignatureKeys(keys, window, parentKey = "", siblingIndex = 0)
+  return keys
 }
 
 /**
- * A canonical, order-independent string for a window's structural key set: its keys sorted and
- * joined. Two windows compare equal here iff they have the same set of structural keys, so it is a
+ * Accumulate a window's subtree into semantic-aware signature keys. Each node contributes its
+ * **structural** path key (via [pathKey], so the ancestor chain and sibling indexes match the diff)
+ * plus a digest of the same attributes [nodeAttributesDiffer] compares. Descendants nest under the
+ * structural parent key, so a semantic difference on one node changes only that node's key.
+ *
+ * Folding semantics in is what lets [alignWindowSlots] pair the *right* window when a side holds
+ * structurally-identical duplicates that differ only in content: a fully-equal window then scores
+ * Jaccard 1 while a same-shape-but-changed one scores lower, so the aligner prefers the true match
+ * instead of arbitrarily pairing a trailing duplicate.
+ */
+private fun collectSignatureKeys(
+  keys: MutableSet<String>,
+  node: UIElementInfo,
+  parentKey: String,
+  siblingIndex: Int,
+) {
+  val structural = pathKey(parentKey, node, siblingIndex)
+  keys.add("$structural::${semanticDigest(node)}")
+  node.children.forEachIndexed { index, child ->
+    collectSignatureKeys(keys, child, structural, index)
+  }
+}
+
+/** The compared semantic attributes of a node, joined — the [nodeAttributesDiffer] surface. */
+private fun semanticDigest(node: UIElementInfo): String =
+  listOf(
+      node.text ?: "",
+      node.contentDescription ?: "",
+      node.isClickable,
+      node.isEnabled,
+      node.isFocused,
+      node.isSelected,
+      node.isScrollable,
+      node.isCheckable,
+      node.isChecked,
+    )
+    .joinToString("|")
+
+/**
+ * A canonical, order-independent string for a window's signature key set: its keys sorted and
+ * joined. Two windows compare equal here iff they have the same set of signature keys, so it is a
  * side-independent total order for the transposition-invariant tie-break in [alignWindowSlots].
  */
 private fun canonicalSignature(signature: Set<String>): String =

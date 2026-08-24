@@ -376,6 +376,28 @@ class HierarchyDiffTest {
   }
 
   @Test
+  fun `structurally identical windows differing in content pair the semantic survivor`() {
+    // A holds two dialogs with identical structure but different text; B keeps only the first.
+    // Structural similarity alone is 1 for every pairing, so a diagonal-on-tie would pair B with
+    // A's *second* dialog and report Changed. Semantic-aware similarity must pair the true survivor
+    // (Equal) and surface the removed dialog (OnlyInA).
+    val dialog = { t: String ->
+      node("dialog.Window", "dialog", children = listOf(node("TextView", "msg", text = t)))
+    }
+    val a = multiWindowRoot(dialog("kept"), dialog("removed"))
+    val b = multiWindowRoot(dialog("kept"))
+
+    val diff = diffHierarchies(a, b)
+
+    // The surviving "kept" dialog pairs as Equal, not Changed against the "removed" one.
+    assertEquals(NodeDiffStatus.Equal, statusOf(diff, "TextView:msg"))
+    assertEquals(0, diff.changed)
+    // The removed dialog window and its text node surface as OnlyInA.
+    assertEquals(2, diff.onlyInA)
+    assertEquals(0, diff.onlyInB)
+  }
+
+  @Test
   fun `parallel multi-window stacks still pair positionally by highest similarity`() {
     // Two devices, same two-window stack, differing only in a text value on the first window: the
     // diagonal alignment wins, so windows pair by position and just the changed node is Changed.

@@ -44,6 +44,12 @@ const sourceCount = (file: SharedStorageFile): number =>
   [file.sourcePath, file.contentText, file.contentBase64].filter((value) => value !== undefined)
     .length;
 
+function isValidBase64(value: string): boolean {
+  const decoded = Buffer.from(value, "base64");
+  const canonical = decoded.toString("base64");
+  return decoded.length > 0 && (value === canonical || value === canonical.replace(/=+$/, ""));
+}
+
 export function normalizeSharedStorageNamespace(namespace: string): string {
   const normalized = namespace.trim();
   if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(normalized)) {
@@ -100,6 +106,13 @@ export const stageSharedStorageSchema = addDeviceTargetingToSchema(
           code: "custom",
           path: ["files", index, "destinationPath"],
           message: "Duplicate destinationPath.",
+        });
+      }
+      if (file.contentBase64 !== undefined && !isValidBase64(file.contentBase64)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["files", index, "contentBase64"],
+          message: "contentBase64 must be valid, non-empty base64.",
         });
       }
       destinations.add(normalized);

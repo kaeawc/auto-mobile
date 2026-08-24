@@ -48,6 +48,17 @@ export async function prepareFileSource(
     return { path: sourcePath, byteCount: stat.size };
   }
 
+  if (args.contentBase64 !== undefined) {
+    const decoded = Buffer.from(args.contentBase64, "base64");
+    const canonical = decoded.toString("base64");
+    const unpadded = canonical.replace(/=+$/, "");
+    if (
+      decoded.length === 0 ||
+      (args.contentBase64 !== canonical && args.contentBase64 !== unpadded)
+    ) {
+      throw new ActionableError("contentBase64 must be valid, non-empty base64.");
+    }
+  }
   const buffer =
     args.contentBase64 !== undefined
       ? Buffer.from(args.contentBase64, "base64")

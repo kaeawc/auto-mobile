@@ -310,6 +310,99 @@ final class TachikomaPlanRecoveryHandlerTests: XCTestCase {
     }
 }
 
+final class RunBlockingBoundTests: XCTestCase {
+    private func makeContext() -> FailedStepContext {
+        FailedStepContext(
+            failedStepIndex: 0,
+            failedTool: "tapOn",
+            error: "element not found",
+            succeededSteps: [],
+            planContent: "name: P\nsteps:\n  - tool: observe",
+            platform: "ios",
+            sessionUuid: "sess-1",
+            deviceId: "dev-1",
+            failureObservation: nil
+        )
+    }
+
+    // A hung model call must fail the recovery attempt (success == false) instead of blocking the
+    // XCTest runner forever. Uses a fake bridge so the handler's timeout handling is deterministic —
+    // no wall-clock wait, no leaked Task.
+    func testHungModelCallFailsRecoveryInsteadOfHanging() {
+        let client = RecoveryMCPClient()
+        let handler = TachikomaPlanRecoveryHandler(
+            mcpClient: client,
+            configProvider: StaticRecoveryConfigProvider(enabled: true, maxToolCalls: 5),
+            modelConfig: RecoveryModelConfig(provider: .anthropic, modelName: "claude-sonnet-4-20250514"),
+            timeoutSeconds: 120,
+            timer: FakeTimer(),
+            logger: SilentLogger(),
+            responderFactory: { _ in NeverReturningModelResponder() },
+            asyncBridge: TimeoutAsyncCallBridge(timeoutSeconds: 0.05)
+        )
+
+        let outcome = handler.attemptRecovery(makeContext())
+
+        XCTAssertFalse(outcome.success, "a timed-out model call must yield a failed recovery outcome")
+        XCTAssertTrue(client.calls.isEmpty, "no device tool calls when the model call times out before returning")
+    }
+
+    // The production bridge must actually bound the wait: a hung operation resolves via timeout, not
+    // by blocking forever. The op sleeps far longer (5s) than the timeout (0.05s), so the timeout
+    // path is deterministic with a huge margin — not flaky.
+    func testSemaphoreBridgeTimesOutOnHungOperation() {
+        let bridge = SemaphoreAsyncCallBridge()
+        let start = Date()
+        XCTAssertThrowsError(
+            try bridge.run(timeout: 0.05) { () async throws -> Int in
+                try await Task.sleep(nanoseconds: 5_000_000_000)
+                return 1
+            }
+        ) { error in
+            XCTAssertTrue(error is RecoveryTimeoutError, "expected RecoveryTimeoutError, got \(error)")
+        }
+        XCTAssertLessThan(Date().timeIntervalSince(start), 2.0, "timeout must return promptly, not block on the op")
+    }
+
+    // On timeout the bridge must cancel the spawned task so a cancellation-aware operation unwinds
+    // promptly instead of running to completion and retaining its resources.
+    func testSemaphoreBridgeCancelsHungTaskOnTimeout() {
+        let cancelled = DispatchSemaphore(value: 0)
+        let bridge = SemaphoreAsyncCallBridge()
+        XCTAssertThrowsError(
+            try bridge.run(timeout: 0.05) { () async throws -> Int in
+                do {
+                    try await Task.sleep(nanoseconds: 5_000_000_000)
+                } catch {
+                    // `Task.sleep` throws `CancellationError` when the task is cancelled.
+                    cancelled.signal()
+                    throw error
+                }
+                return 1
+            }
+        )
+        XCTAssertEqual(
+            cancelled.wait(timeout: .now() + 2.0),
+            .success,
+            "timed-out task must be cancelled so a cancellation-aware operation unwinds promptly"
+        )
+    }
+
+    func testSemaphoreBridgePassesThroughSuccess() throws {
+        let bridge = SemaphoreAsyncCallBridge()
+        let value = try bridge.run(timeout: 5) { () async throws -> Int in 42 }
+        XCTAssertEqual(value, 42)
+    }
+
+    func testSemaphoreBridgeRethrowsOperationError() {
+        struct Boom: Error {}
+        let bridge = SemaphoreAsyncCallBridge()
+        XCTAssertThrowsError(try bridge.run(timeout: 5) { () async throws -> Int in throw Boom() }) { error in
+            XCTAssertTrue(error is Boom, "operation errors must propagate, not be swallowed")
+        }
+    }
+}
+
 // MARK: - Shared fakes
 
 private struct StubPlanLoader: AutoMobilePlanLoading {
@@ -415,6 +508,24 @@ private final class StubModelResponder: ModelResponding {
 
     static func final() -> ModelResponse {
         ModelResponse(id: "resp", content: [.outputText("recovery complete")])
+    }
+}
+
+/// Fake `ModelResponding` that never returns — models a hung provider call. Paired with a fake
+/// bridge in tests so the handler's timeout path is exercised without any real wait.
+private final class NeverReturningModelResponder: ModelResponding {
+    func respond(_: ModelRequest) async throws -> ModelResponse {
+        // Suspend forever without spinning; the fake bridge times out before this can complete.
+        await withCheckedContinuation { (_: CheckedContinuation<Void, Never>) in }
+        return StubModelResponder.final()
+    }
+}
+
+/// Fake `AsyncCallBridging` that always reports a timeout, deterministically and instantly.
+private struct TimeoutAsyncCallBridge: AsyncCallBridging {
+    let timeoutSeconds: TimeInterval
+    func run<T>(timeout _: TimeInterval, _: @escaping () async throws -> T) throws -> T {
+        throw RecoveryTimeoutError(timeoutSeconds: timeoutSeconds)
     }
 }
 

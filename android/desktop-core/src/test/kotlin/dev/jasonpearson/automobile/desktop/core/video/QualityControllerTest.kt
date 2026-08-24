@@ -172,6 +172,25 @@ class QualityControllerTest {
   }
 
   @Test
+  fun `toggling auto adjustment resets the decision streaks`() {
+    val controller =
+      QualityController(
+        initialQuality = VideoStreamQuality.High,
+        targetFps = 30,
+        samplesToDowngrade = 3,
+        minSamplesForDecision = 1,
+        minDwellMs = 0,
+      )
+    // Two dropping samples accrue but don't yet downgrade.
+    controller.feed(count = 3, intervalMs = 60) // frames at 0,60,120 => two 60ms drop intervals
+    // Auto off then on must clear the streak, so the next dropping frame is sample #1, not #3.
+    controller.autoAdjustEnabled = false
+    controller.autoAdjustEnabled = true
+    controller.onFrame(180)
+    assertEquals(VideoStreamQuality.High, controller.quality.value)
+  }
+
+  @Test
   fun `manual selection overrides quality and notifies`() {
     val selected = mutableListOf<VideoStreamQuality>()
     val controller =

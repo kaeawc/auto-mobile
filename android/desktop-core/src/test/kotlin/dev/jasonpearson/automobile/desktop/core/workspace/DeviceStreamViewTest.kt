@@ -335,31 +335,31 @@ class DeviceStreamViewTest {
   fun `manual quality selection persists and re-subscribes with the new preset`() =
     runComposeUiTest {
       val settings = FakeSettingsProvider(streamQualityPreset = "medium")
-      val requested = mutableListOf<VideoStreamQuality>()
-      val source = FakeVideoStreamSource()
+      // A distinct fake per preset, so the assertions prove a genuine source teardown + replacement
+      // (not the same instance re-used) when the pane re-keys on the new quality.
+      val sources = mutableMapOf<VideoStreamQuality, FakeVideoStreamSource>()
       setContent {
         MaterialTheme {
           DeviceStreamView(
             col(),
             enableDeviceControl = true,
             settings = settings,
-            sourceFactory = { _, quality ->
-              requested.add(quality)
-              source
-            },
+            sourceFactory = { _, quality -> sources.getOrPut(quality) { FakeVideoStreamSource() } },
           )
         }
       }
-      waitUntil { requested.isNotEmpty() }
-      // First subscribe uses the persisted Medium preset.
-      assertEquals(VideoStreamQuality.Medium, requested.first())
+      // First subscribe uses the persisted Medium preset and connects.
+      waitUntil { sources[VideoStreamQuality.Medium]?.connectedDeviceId == "emulator-5554" }
+      val medium = sources.getValue(VideoStreamQuality.Medium)
 
       // Expand the collapsed overlay, then pick High.
       onNodeWithText("Medium · 0 / 30 fps").performClick()
       onNodeWithText("High").performClick()
 
-      // The choice persists for next launch and the pane re-subscribes at High.
-      waitUntil { requested.contains(VideoStreamQuality.High) }
+      // A distinct High source is created and connects, the old Medium source is disposed, and the
+      // choice persists for next launch.
+      waitUntil { sources[VideoStreamQuality.High]?.connectedDeviceId == "emulator-5554" }
+      assertNull("old source disposed on re-key", medium.connectedDeviceId)
       assertEquals("high", settings.streamQualityPreset)
     }
 

@@ -31,6 +31,14 @@ import kotlinx.coroutines.flow.StateFlow
  *   [samplesToDowngrade]/[samplesToUpgrade] (hysteresis) plus [minDwellMs] then keep a brief dip or
  *   a flapping rate from thrashing the encode.
  *
+ * **Known limit:** a *severe* sustained drop (roughly ≤ the idle cadence, ~11fps or below) is
+ * indistinguishable from a static screen by inter-frame timing alone, so it lands in the idle band
+ * and is not auto-downgraded — the deliberate safe choice (never degrade a still screen) over
+ * downgrading every idle screen. Auto-adjust therefore covers the common moderate-degradation band
+ * (~12fps up to target); catching severe drops needs a signal timing cannot supply — the on-device
+ * `VideoStatsAccumulator` dropped-frame count plumbed to the client, or content-change detection —
+ * tracked as a follow-up.
+ *
  * The displayed [actualFps] is computed as frames-over-elapsed across a trailing [rateWindowMs]
  * window — an unbiased rate. (Averaging instantaneous `1000/dt` values would overstate throughput
  * for unevenly-arriving frames, e.g. alternating 10ms/90ms gaps are 20fps but average to ~50fps.)
@@ -87,15 +95,28 @@ class QualityController(
   private val _actualFps = MutableStateFlow(0f)
   val actualFps: StateFlow<Float> = _actualFps
 
-  /** Whether frame-rate drops drive automatic preset changes. FPS is measured regardless. */
-  var autoAdjustEnabled: Boolean = autoAdjustEnabled
-
   // Trailing timestamps for the displayed rate (frames ÷ elapsed over rateWindowMs).
   private val window = ArrayDeque<Long>()
   private var lastFrameMs: Long? = null
   private var samples = 0
   private var lowStreak = 0
   private var highStreak = 0
+
+  /**
+   * Whether frame-rate drops drive automatic preset changes. FPS is measured regardless. Toggling
+   * clears the decision streaks so a re-enable cannot complete a stale pre-disable streak on its
+   * first frame and downgrade on history from before Auto was off.
+   */
+  var autoAdjustEnabled: Boolean = autoAdjustEnabled
+    set(value) {
+      if (value != field) {
+        samples = 0
+        lowStreak = 0
+        highStreak = 0
+      }
+      field = value
+    }
+
   // Null until the first change, so the first decision is never gated by dwell (and no overflow).
   private var lastChangeAtMs: Long? = null
 

@@ -83,6 +83,24 @@ async function runVideoRecordingCli(args: string[]): Promise<RecordingToolResult
   return parseToolResult(JSON.parse(stdout) as ToolTextResponse);
 }
 
+async function runVideoRecordingCliWithRetry(
+  args: string[],
+  attempts = 3,
+): Promise<RecordingToolResult> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await runVideoRecordingCli(args);
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts) {
+        await defaultTimer.sleep(2000);
+      }
+    }
+  }
+  throw lastError;
+}
+
 async function assertCommandAvailable(command: string, args: string[]): Promise<void> {
   try {
     await execFileAsync(command, args);
@@ -127,7 +145,7 @@ describeIntegration("iOS videoRecording start-stop integration", () => {
 
       try {
         const deviceId = process.env.AUTOMOBILE_IOS_VIDEO_RECORDING_DEVICE_ID;
-        startPayload = await runVideoRecordingCli([
+        startPayload = await runVideoRecordingCliWithRetry([
           "--action",
           "start",
           "--platform",

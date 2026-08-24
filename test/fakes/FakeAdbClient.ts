@@ -49,7 +49,9 @@ export class FakeAdbClient implements FakeAdbClientContract {
   private foregroundApp: { packageName: string; userId: number } | null = null;
   private foregroundAppError: Error | null = null;
   private hangingCommandPatterns: string[] = [];
-  private users: Array<{ userId: number; name: string; flags?: number; running?: boolean }> = [];
+  private users: Array<{ userId: number; name: string; flags?: number; running?: boolean }> = [
+    { userId: 0, name: "Owner", flags: 0x13, running: true },
+  ];
   private deviceTimestampMs: number | null = null;
   private deviceTimestampSource: DeviceTimestampSource = "device-ms";
   private spawnCalls: string[][] = [];

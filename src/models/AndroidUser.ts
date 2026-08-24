@@ -34,14 +34,12 @@ export interface AndroidUser {
   running: boolean;
 }
 
-export function classifyAndroidUser(
-  userId: number,
-  flags: number,
-): NonNullable<AndroidUser["profileType"]> {
+export function classifyAndroidUser(flags: number): NonNullable<AndroidUser["profileType"]> {
+  const FLAG_MAIN = 0x4000;
   if ((flags & 0x20) !== 0) {
     return "managed";
   }
-  if ((flags & 0x1) !== 0 || userId === 0) {
+  if ((flags & FLAG_MAIN) !== 0 || (flags & 0x1) !== 0) {
     return "primary";
   }
   if ((flags & 0x400) !== 0) {

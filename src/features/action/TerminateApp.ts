@@ -128,7 +128,7 @@ export class TerminateApp extends BaseVisualChange {
       const isRunning = await perf.track("checkRunning", async () => {
         try {
           const result = await this.adb.executeCommand(
-            `shell dumpsys activity processes | grep -E "u${targetUserId} .*${packageName}"`,
+            `shell dumpsys activity processes | grep -E "${packageName}/u${targetUserId}a"`,
             undefined,
             undefined,
             true,

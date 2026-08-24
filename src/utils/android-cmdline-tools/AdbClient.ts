@@ -1408,7 +1408,7 @@ export class AdbClient implements AdbExecutor {
           userId,
           name: userName,
           flags,
-          profileType: classifyAndroidUser(userId, flags),
+          profileType: classifyAndroidUser(flags),
           running,
         });
       }
@@ -1449,7 +1449,7 @@ export class AdbClient implements AdbExecutor {
             userId,
             name: match[2],
             flags, // Parse as hexadecimal
-            profileType: classifyAndroidUser(userId, flags),
+            profileType: classifyAndroidUser(flags),
             running: match[4] === "running",
           });
         }

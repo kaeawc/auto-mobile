@@ -1,11 +1,7 @@
 import type { AdbExecutor } from "./interfaces/AdbExecutor";
 import { classifyAndroidUser } from "../../models/AndroidUser";
 
-export type UserTargetSource =
-  | "explicit"
-  | "foregroundPackage"
-  | "managedProfile"
-  | "primary";
+export type UserTargetSource = "explicit" | "foregroundPackage" | "managedProfile" | "primary";
 
 export interface ResolvedUserTarget {
   userId: number;
@@ -43,9 +39,7 @@ export class AndroidUserTargetResolver {
 
     const users = await this.adb.listUsers(request.signal);
     const managedProfiles = users.filter(
-      (user) =>
-        user.running &&
-        (user.profileType ?? classifyAndroidUser(user.userId, user.flags)) === "managed",
+      (user) => user.running && (user.profileType ?? classifyAndroidUser(user.flags)) === "managed",
     );
     if (managedProfiles.length === 1) {
       const managedProfile = managedProfiles[0];
@@ -59,9 +53,7 @@ export class AndroidUserTargetResolver {
     }
 
     const primary = users.find(
-      (user) =>
-        user.running &&
-        (user.profileType ?? classifyAndroidUser(user.userId, user.flags)) === "primary",
+      (user) => user.running && (user.profileType ?? classifyAndroidUser(user.flags)) === "primary",
     );
     if (primary) {
       return { userId: primary.userId, source: "primary" };

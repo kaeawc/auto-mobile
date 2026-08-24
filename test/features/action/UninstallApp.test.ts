@@ -9,6 +9,7 @@ import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
 import { AdbCommandTimeoutError } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
+import { resetDbWriteBarrier } from "../../../src/db/dbWriteBarrier";
 
 // Keep action tests isolated from the production SQLite repository even when a
 // scenario does not need to inspect stale-marker rows explicitly.
@@ -219,7 +220,9 @@ describe("UninstallApp (Android)", () => {
   }
 
   beforeEach(() => {
+    resetDbWriteBarrier();
     fakeAdb = new FakeAdbClient();
+    fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x13, running: true }]);
   });
 
   test("emits force-stop then a data-clearing pm uninstall for the target user", async () => {

@@ -6,6 +6,7 @@ import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/A
 import { logger } from "../../utils/logger";
 import {
   ActionableError,
+  AndroidUser,
   BootedDevice,
   classifyAndroidUser,
   InstalledAppsByProfile,
@@ -197,15 +198,17 @@ export class ListInstalledApps {
 
     const foregroundApp =
       this.device.platform === "android" ? await this.adb.getForegroundApp() : null;
+    const users = await this.getAndroidUsersForCache();
     logger.info(
       `[ListInstalledApps] Using cached installed apps list (age ${cacheAgeMs}ms, rows ${cachedRows.length})`,
     );
-    return this.buildInstalledAppsFromRows(cachedRows, foregroundApp);
+    return this.buildInstalledAppsFromRows(cachedRows, foregroundApp, users);
   }
 
   private buildInstalledAppsFromRows(
     rows: DbInstalledApp[],
     foregroundApp: { packageName: string; userId: number } | null,
+    users: AndroidUser[] = [],
   ): InstalledAppsByProfile {
     const installedApps: InstalledAppsByProfile = { profiles: {}, system: [] };
     const systemAppsMap = new Map<string, SystemInstalledApp>();
@@ -236,7 +239,7 @@ export class ListInstalledApps {
         installedApps.profiles[row.user_id].push({
           packageName: row.package_name,
           userId: row.user_id,
-          profileType: row.user_id === 0 ? "primary" : "unknown",
+          profileType: this.profileTypeForUser(row.user_id, users),
           foreground: isForeground,
           recent: false,
         });
@@ -245,6 +248,23 @@ export class ListInstalledApps {
 
     installedApps.system = Array.from(systemAppsMap.values());
     return installedApps;
+  }
+
+  private async getAndroidUsersForCache(): Promise<AndroidUser[]> {
+    if (this.device.platform !== "android") {
+      return [];
+    }
+    try {
+      return await this.adb.listUsers();
+    } catch (error) {
+      logger.warn("[ListInstalledApps] Failed to refresh user metadata for cached apps", error);
+      return [];
+    }
+  }
+
+  private profileTypeForUser(userId: number, users: AndroidUser[]): AndroidUser["profileType"] {
+    const user = users.find((candidate) => candidate.userId === userId);
+    return user?.profileType ?? (user ? classifyAndroidUser(user.flags) : "unknown");
   }
 
   private async rebuildInstalledAppsCache(): Promise<InstalledAppsDetailedResult> {
@@ -294,8 +314,7 @@ export class ListInstalledApps {
           installedApps.profiles[user.userId].push({
             packageName,
             userId: user.userId,
-            profileType:
-              user.profileType ?? classifyAndroidUser(user.userId, user.flags),
+            profileType: user.profileType ?? classifyAndroidUser(user.flags),
             foreground: isForeground,
             recent: false, // TODO: Implement recent app detection
           });

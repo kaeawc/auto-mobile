@@ -35,6 +35,12 @@ describe("shared storage fixtures", () => {
         files: [{ destinationPath: "a.txt", contentText: "a", contentBase64: "Yg==" }],
       }).success,
     ).toBe(false);
+    expect(
+      stageSharedStorageSchema.safeParse({
+        namespace: "run-1",
+        files: [{ destinationPath: "a.txt", contentBase64: "!!!" }],
+      }).success,
+    ).toBe(false);
   });
 
   test("resets only the namespace and reports document/media outcomes", async () => {
@@ -81,8 +87,8 @@ describe("shared storage fixtures", () => {
       ],
     });
     const commands = adbFactory.getFakeClient().getAllCommands();
-    expect(commands[0]).toContain("rm -rf");
-    expect(commands[0]).toContain("/storage/emulated/0/Download/AutoMobile/run-1");
+    const resetCommand = commands.find((command) => command.includes("rm -rf"));
+    expect(resetCommand).toContain("/storage/emulated/0/Download/AutoMobile/run-1");
     expect(commands.some((command) => command.includes("MEDIA_SCANNER_SCAN_FILE"))).toBe(true);
     expect(
       commands.some((command) =>

@@ -19,9 +19,10 @@ import {
 } from "./sharedStorageContract";
 import { prepareFileSource, type FileSourceFileSystem } from "./fileSourcePreparation";
 
-const SHARED_STORAGE_ROOT = "/storage/emulated/0/Download/AutoMobile";
+const SHARED_STORAGE_ROOT = "/storage/emulated";
 const MEDIA_EXTENSIONS =
   /\.(3gp|aac|avi|flac|gif|heic|jpeg|jpg|m4a|m4v|mkv|mp3|mp4|ogg|png|webm|webp|wav)$/i;
+const namespaceLocks = new Map<string, Promise<void>>();
 
 export type StageSharedStorageRequest = Omit<StageSharedStorageArgs, "device"> & {
   device: BootedDevice;
@@ -70,14 +71,35 @@ class DefaultSharedStorageService implements SharedStorageService {
   ) {}
 
   async stage(request: StageSharedStorageRequest): Promise<StageSharedStorageResult> {
+    const namespace = normalizeSharedStorageNamespace(request.namespace);
+    const lockKey = `${request.device.deviceId}:${namespace}`;
+    const previous = namespaceLocks.get(lockKey) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    namespaceLocks.set(lockKey, current);
+    await previous;
+    try {
+      return await this.stageLocked({ ...request, namespace });
+    } finally {
+      release();
+      if (namespaceLocks.get(lockKey) === current) {
+        namespaceLocks.delete(lockKey);
+      }
+    }
+  }
+
+  private async stageLocked(request: StageSharedStorageRequest): Promise<StageSharedStorageResult> {
     if (request.device.platform !== "android") {
       throw new ActionableError("Shared storage fixtures are supported only on Android.");
     }
 
     const namespace = normalizeSharedStorageNamespace(request.namespace);
-    const root = posix.join(SHARED_STORAGE_ROOT, namespace);
     const prepared = await this.prepareSources(request.files);
     const adb = this.adbFactory.create(request.device);
+    const storageRoot = await this.resolveStorageRoot(adb, request);
+    const root = posix.join(storageRoot, "Download", "AutoMobile", namespace);
 
     try {
       this.validateDestinations(prepared);
@@ -135,6 +157,28 @@ class DefaultSharedStorageService implements SharedStorageService {
       await Promise.all(prepared.map((entry) => entry.source.cleanup?.() ?? Promise.resolve()));
       throw new ActionableError(`Failed to prepare shared storage sources: ${errorMessage(error)}`);
     }
+  }
+
+  private async resolveStorageRoot(
+    adb: AdbExecutor,
+    request: StageSharedStorageRequest,
+  ): Promise<string> {
+    try {
+      const result = await adb.executeCommand(
+        "shell cmd activity get-current-user",
+        undefined,
+        undefined,
+        true,
+        request.signal,
+      );
+      const userId = Number.parseInt(result.stdout.trim(), 10);
+      if (Number.isInteger(userId) && userId >= 0) {
+        return posix.join(SHARED_STORAGE_ROOT, String(userId));
+      }
+    } catch (error) {
+      logger.warn(`Failed to resolve Android storage profile: ${errorMessage(error)}`, error);
+    }
+    return posix.join(SHARED_STORAGE_ROOT, "0");
   }
 
   private validateDestinations(entries: Array<{ destinationPath: string }>): void {

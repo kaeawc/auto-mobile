@@ -172,16 +172,12 @@ function deriveOperation(
   return { operation, state: "supported", reason: supportedReason };
 }
 
-// OR-combine two requirement signals into one satisfied tri-state: satisfied if
-// either is true; unmet only if both are known-false; otherwise unverified.
-function eitherSatisfied(a: boolean | undefined, b: boolean | undefined): boolean | undefined {
-  if (a === true || b === true) {
-    return true;
-  }
-  if (a === false && b === false) {
-    return false;
-  }
-  return undefined;
+// An operation that is structurally possible on the platform but has no AutoMobile
+// surface exposed yet. Distinct from `unsupported` (the platform cannot do it) and
+// from a prerequisite-gated `unavailable` (which the client can satisfy): here the
+// gap is a missing tool, so the client should not attempt the operation.
+function unavailableOperation(operation: StorageOperation, reason: string): OperationCapability {
+  return { operation, state: "unavailable", reason };
 }
 
 function req(label: string, satisfied: boolean | undefined): Requirement {
@@ -191,7 +187,6 @@ function req(label: string, satisfied: boolean | undefined): Requirement {
 const PREREQ_SDK = "AutoMobile SDK embedded with storage inspection";
 const PREREQ_SESSION = "active CtrlProxy runner session";
 const PREREQ_DEBUGGABLE = "debuggable app build";
-const PREREQ_AUTHORIZED = "user-granted storage authorization";
 const PREREQ_ACTIVE_PROFILE = "active Android user/profile";
 const PREREQ_IOS_FILE_INTEGRATION = "opt-in iOS app file-access integration";
 
@@ -208,26 +203,19 @@ function keyValueDomain(ctx: StorageCapabilityContext): DomainCapability {
 }
 
 function databasesDomain(ctx: StorageCapabilityContext): DomainCapability {
-  // Read-only inspection is reachable via the SDK or a debuggable adb path.
-  const accessible = eitherSatisfied(ctx.embeddedSdk, ctx.debuggableBuild);
-  const readRequirements = [
-    req(`${PREREQ_SDK} or ${PREREQ_DEBUGGABLE}`, accessible),
-    req(PREREQ_SESSION, ctx.sessionActive),
-  ];
-  const readonlyWriteReason =
-    "Database inspection is read-only; mutate databases through the app under test.";
+  // List/read/observe route through the on-device AutoMobile SDK
+  // (DatabaseInspector); writes route through the opt-in `sqlQuery` tool, which
+  // executes INSERT/UPDATE/DELETE and DDL. Both paths require the embedded SDK, so
+  // all exposed operations share the same prerequisites.
+  const requirements = [req(PREREQ_SDK, ctx.embeddedSdk), req(PREREQ_SESSION, ctx.sessionActive)];
   return {
     domain: "databases",
     portable: true,
     platformScope: "cross-platform",
-    note: "SQLite inspection (list, read, bounded queries). Writes are intentionally not exposed.",
-    operations: [
-      deriveOperation("list", undefined, readRequirements),
-      deriveOperation("read", undefined, readRequirements),
-      deriveOperation("observe", undefined, readRequirements),
-      deriveOperation("write", readonlyWriteReason, []),
-      deriveOperation("namespace_reset", readonlyWriteReason, []),
-    ],
+    note: "SQLite inspection (list, read, bounded queries) and mutation via the opt-in sqlQuery tool.",
+    operations: (["list", "read", "observe", "write"] as StorageOperation[]).map((operation) =>
+      deriveOperation(operation, undefined, requirements),
+    ),
   };
 }
 
@@ -289,48 +277,52 @@ function userFilesDomain(ctx: StorageCapabilityContext): DomainCapability {
     domain: "user_files",
     portable: false,
     platformScope: "android",
-    note: "Android user-visible storage (shared / MediaStore-backed documents).",
+    note: "Android user-visible / shared storage. Staging files into shared storage is supported (stageSharedStorage); a listing/read surface is not yet exposed.",
     operations: [
-      deriveOperation("list", undefined, [req(PREREQ_ACTIVE_PROFILE, ctx.activeUserProfile)]),
-      deriveOperation("read", undefined, [
-        req(PREREQ_ACTIVE_PROFILE, ctx.activeUserProfile),
-        req(PREREQ_AUTHORIZED, ctx.authorized),
-      ]),
-      deriveOperation("write", undefined, [
-        req(PREREQ_ACTIVE_PROFILE, ctx.activeUserProfile),
-        req(PREREQ_AUTHORIZED, ctx.authorized),
-      ]),
+      unavailableOperation(
+        "list",
+        "No AutoMobile shared-storage listing surface is currently exposed.",
+      ),
+      unavailableOperation(
+        "read",
+        "No AutoMobile shared-storage read surface is currently exposed.",
+      ),
+      deriveOperation("write", undefined, [req(PREREQ_ACTIVE_PROFILE, ctx.activeUserProfile)]),
     ],
   };
 }
 
 function mediaLibraryDomain(ctx: StorageCapabilityContext): DomainCapability {
-  if (ctx.platform === "ios") {
-    return {
-      domain: "media_library",
-      portable: false,
-      platformScope: "cross-platform",
-      note: "iOS Photos library access requires authorization; there is no host-side media indexer.",
-      operations: [
-        deriveOperation("list", undefined, [req(PREREQ_AUTHORIZED, ctx.authorized)]),
-        deriveOperation("read", undefined, [req(PREREQ_AUTHORIZED, ctx.authorized)]),
-        deriveOperation(
+  // No AutoMobile tool browses or reads the media library on either platform.
+  // On Android, indexing happens only as a side effect of staging a file into
+  // shared storage (there is no standalone index operation); iOS has no
+  // host-triggered indexer at all.
+  const indexing =
+    ctx.platform === "ios"
+      ? deriveOperation(
           "media_indexing",
           "iOS has no MediaScanner-style host-triggered indexing equivalent.",
           [],
-        ),
-      ],
-    };
-  }
+        )
+      : unavailableOperation(
+          "media_indexing",
+          "Media indexing currently occurs only as a side effect of staging a file into shared storage; no standalone indexing operation is exposed.",
+        );
   return {
     domain: "media_library",
     portable: false,
     platformScope: "cross-platform",
-    note: "Android MediaStore listing, reads, and MediaScanner-triggered indexing.",
+    note: "Media-library browse/read is not yet exposed as an AutoMobile capability.",
     operations: [
-      deriveOperation("list", undefined, []),
-      deriveOperation("read", undefined, [req(PREREQ_AUTHORIZED, ctx.authorized)]),
-      deriveOperation("media_indexing", undefined, []),
+      unavailableOperation(
+        "list",
+        "No AutoMobile media-library listing surface is currently exposed.",
+      ),
+      unavailableOperation(
+        "read",
+        "No AutoMobile media-library read surface is currently exposed.",
+      ),
+      indexing,
     ],
   };
 }
@@ -351,11 +343,7 @@ function secureStateDomain(_ctx: StorageCapabilityContext): DomainCapability {
           "Secure-state values are unavailable by default; an opt-in host redaction policy (#5161) must allow the exact field.",
         prerequisites: [policyPrereq],
       },
-      deriveOperation(
-        "write",
-        "Secure-state mutation is not an AutoMobile storage feature.",
-        [],
-      ),
+      deriveOperation("write", "Secure-state mutation is not an AutoMobile storage feature.", []),
       deriveOperation(
         "namespace_reset",
         "Bulk secure-state reset is out of scope here; scoped resets are tracked separately (#5188 / #5190).",

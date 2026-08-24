@@ -14,8 +14,7 @@ import {
 // Single RFC 6570 template; the optional {?appId} query variant matches both the
 // bare capabilities URI and the app-scoped form (issue #4933 ordering note: a
 // query template with an optional suffix subsumes the base, so only one is needed).
-const STORAGE_CAPABILITIES_TEMPLATE =
-  "automobile:devices/{deviceId}/storage/capabilities{?appId}";
+const STORAGE_CAPABILITIES_TEMPLATE = "automobile:devices/{deviceId}/storage/capabilities{?appId}";
 
 /**
  * Find a booted device by ID across both platforms.
@@ -105,9 +104,7 @@ export async function getStorageCapabilitiesResource(
       };
     }
 
-    const report = computeStorageCapabilities(
-      resolveStorageCapabilityContext(device, appId),
-    );
+    const report = computeStorageCapabilities(resolveStorageCapabilityContext(device, appId));
 
     return {
       uri,
@@ -119,7 +116,14 @@ export async function getStorageCapabilitiesResource(
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify({ error: `Failed to compute storage capabilities: ${error}` }, null, 2),
+      text: JSON.stringify(
+        {
+          error: `Failed to compute storage capabilities: ${error}`,
+          schemaVersion: STORAGE_CAPABILITIES_SCHEMA_VERSION,
+        },
+        null,
+        2,
+      ),
     };
   }
 }

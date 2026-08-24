@@ -71,9 +71,19 @@ describe("AC1: availability is queryable before invocation", () => {
   it("isStorageOperationAvailable is true only for fully-supported operations", () => {
     const report = computeStorageCapabilities(ctx());
     expect(isStorageOperationAvailable(report, "key_value", "write")).toBe(true);
-    // Read-only databases: write is unsupported.
-    expect(isStorageOperationAvailable(report, "databases", "write")).toBe(false);
-    expect(findOperationCapability(report, "databases", "write")?.state).toBe("unsupported");
+    // Secure-state mutation is a hard non-goal.
+    expect(isStorageOperationAvailable(report, "secure_state", "write")).toBe(false);
+    expect(findOperationCapability(report, "secure_state", "write")?.state).toBe("unsupported");
+  });
+
+  it("database writes are supported via the sqlQuery tool when the SDK is embedded", () => {
+    // sqlQuery (embeddedSdkOnly) executes INSERT/UPDATE/DELETE and DDL, so DB
+    // mutation is a real, config-gated capability — not unsupported.
+    const report = computeStorageCapabilities(ctx());
+    expect(isStorageOperationAvailable(report, "databases", "write")).toBe(true);
+
+    const noSdk = computeStorageCapabilities(ctx({ embeddedSdk: false }));
+    expect(findOperationCapability(noSdk, "databases", "write")?.state).toBe("unavailable");
   });
 
   it("returns undefined for an operation a domain does not expose", () => {
@@ -94,12 +104,15 @@ describe("AC2: platform-qualified domains", () => {
     }
   });
 
-  it("user_files is available (qualified) on Android", () => {
+  it("user_files staging is available on Android but list/read have no surface yet", () => {
     const report = computeStorageCapabilities(
-      ctx({ platform: "android", activeUserProfile: true, authorized: true }),
+      ctx({ platform: "android", activeUserProfile: true }),
     );
-    expect(isStorageOperationAvailable(report, "user_files", "list")).toBe(true);
-    expect(isStorageOperationAvailable(report, "user_files", "read")).toBe(true);
+    // Staging into shared storage is backed by stageSharedStorage.
+    expect(isStorageOperationAvailable(report, "user_files", "write")).toBe(true);
+    // No AutoMobile listing/read surface exists for shared storage yet.
+    expect(findOperationCapability(report, "user_files", "list")?.state).toBe("unavailable");
+    expect(findOperationCapability(report, "user_files", "read")?.state).toBe("unavailable");
   });
 
   it("app_containers is supported on iOS simulator", () => {
@@ -157,11 +170,12 @@ describe("AC3: iOS physical-device file access", () => {
 describe("AC4: partial / disabled / unsupported / conflicting inputs", () => {
   it("partial: SDK on but a runtime prerequisite is unverified", () => {
     const report = computeStorageCapabilities(
-      ctx({ platform: "android", activeUserProfile: undefined, authorized: undefined }),
+      ctx({ platform: "android", activeUserProfile: undefined }),
     );
-    const read = findOperationCapability(report, "user_files", "read")!;
-    expect(read.state).toBe("partial");
-    expect(read.prerequisites?.length).toBeGreaterThan(0);
+    // Shared-storage staging needs an active user/profile the descriptor can't verify.
+    const write = findOperationCapability(report, "user_files", "write")!;
+    expect(write.state).toBe("partial");
+    expect(write.prerequisites?.length).toBeGreaterThan(0);
   });
 
   it("disabled: embedded SDK off makes key-value operations unavailable", () => {
@@ -183,9 +197,7 @@ describe("AC4: partial / disabled / unsupported / conflicting inputs", () => {
   });
 
   it("conflicting: embeddedSdk true but sessionActive false resolves to the blocker (unavailable)", () => {
-    const report = computeStorageCapabilities(
-      ctx({ embeddedSdk: true, sessionActive: false }),
-    );
+    const report = computeStorageCapabilities(ctx({ embeddedSdk: true, sessionActive: false }));
     const write = findOperationCapability(report, "key_value", "write")!;
     expect(write.state).toBe("unavailable");
     expect(write.prerequisites).toContain("active CtrlProxy runner session");
@@ -195,12 +207,19 @@ describe("AC4: partial / disabled / unsupported / conflicting inputs", () => {
 
   it("conflicting: a known-unmet prerequisite dominates an unverified one", () => {
     const report = computeStorageCapabilities(
-      // databases read needs (SDK or debuggable) AND session; here SDK off,
-      // debuggable off => access known-unmet, while session is unverified.
-      ctx({ embeddedSdk: false, debuggableBuild: false, sessionActive: undefined }),
+      // databases read needs the SDK AND a session; here the SDK is known-off
+      // (a hard blocker) while the session is merely unverified.
+      ctx({ embeddedSdk: false, sessionActive: undefined }),
     );
     const read = findOperationCapability(report, "databases", "read")!;
     expect(read.state).toBe("unavailable");
+  });
+
+  it("media_library browse/read is unavailable — no backing tool is exposed", () => {
+    const report = computeStorageCapabilities(ctx());
+    expect(findOperationCapability(report, "media_library", "list")?.state).toBe("unavailable");
+    expect(findOperationCapability(report, "media_library", "read")?.state).toBe("unavailable");
+    expect(isStorageOperationAvailable(report, "media_library", "list")).toBe(false);
   });
 
   it("secure_state read is unavailable pending the #5161 host policy, not unsupported", () => {

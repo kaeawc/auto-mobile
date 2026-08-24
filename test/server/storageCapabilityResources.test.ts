@@ -4,6 +4,7 @@ import {
   resolveDeviceType,
   resolveStorageCapabilityContext,
 } from "../../src/server/storageCapabilityResources";
+import { registerStorageResources } from "../../src/server/storageResources";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { serverConfig } from "../../src/utils/ServerConfig";
@@ -55,10 +56,27 @@ describe("storageCapabilityResources", () => {
       "automobile:devices/{deviceId}/storage/capabilities{?appId}",
     ]);
     // Both the bare and the ?appId= form resolve to this template.
-    expect(ResourceRegistry.matchTemplate("automobile:devices/dev1/storage/capabilities")).toBeDefined();
+    expect(
+      ResourceRegistry.matchTemplate("automobile:devices/dev1/storage/capabilities"),
+    ).toBeDefined();
     expect(
       ResourceRegistry.matchTemplate("automobile:devices/dev1/storage/capabilities?appId=com.x"),
     ).toBeDefined();
+  });
+
+  test("capabilities URI is not shadowed by the sibling storage files/entries templates", async () => {
+    // Register the sibling storage resources first (as src/server/index.ts does),
+    // then the capability resource. The FILES/ENTRIES templates require a trailing
+    // /files or /{fileName}/entries segment, so the capabilities URI must still
+    // route to this handler regardless of registration order. Guards against a
+    // future template on this prefix greedily capturing `capabilities`.
+    PlatformDeviceManagerFactory.setInstance(new FakeDeviceManager([], []));
+    registerStorageResources();
+    registerStorageCapabilityResources();
+    const content = await readResource("automobile:devices/emulator-5554/storage/capabilities");
+    const body = JSON.parse(content.text ?? "{}");
+    // The capability handler emits schemaVersion; the files/entries handlers do not.
+    expect(body.schemaVersion).toBe(1);
   });
 
   test("reports device-not-found when no device is booted", async () => {

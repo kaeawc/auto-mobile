@@ -92,6 +92,22 @@ describe("session-scoped tool discovery", () => {
     expect(binding.effectiveSessionUuid("transport-c")).toBe("session-2");
   });
 
+  test("retains a released session only for its transport's resource reads", () => {
+    const binding = new SessionToolBinding();
+    binding.bind("transport-a", "session-1");
+    binding.bind("transport-b", "session-2");
+
+    expect(binding.unbindSession("session-1")).toBe(true);
+
+    expect(binding.effectiveSessionUuid("transport-a")).toBeUndefined();
+    expect(binding.effectiveResourceSessionUuid("transport-a")).toBe("session-1");
+    expect(binding.effectiveResourceSessionUuid("transport-b")).toBe("session-2");
+
+    binding.bind("transport-a", "session-3");
+
+    expect(binding.effectiveResourceSessionUuid("transport-a")).toBe("session-3");
+  });
+
   test("unbindSession reports no change when nothing matches the released session", () => {
     const binding = new SessionToolBinding();
     binding.bind("transport", "session-1");

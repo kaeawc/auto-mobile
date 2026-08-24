@@ -1031,7 +1031,6 @@ export class UnixSocketServer {
     request: DaemonRequest,
     socketSessionId: string,
   ): McpForwardRoute {
-    this.throwIfReleasedBoundSession(request.params);
     const sessionUuid = this.getSessionUuid(request.params);
     if (sessionUuid) {
       return this.sessionScopedForwardRoute(socketSessionId, sessionUuid, undefined);

@@ -2,9 +2,12 @@ import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 
 export class SessionToolBinding {
   private readonly boundDeviceSessions = new Map<string, string>();
+  private readonly releasedDeviceSessions = new Map<string, string>();
   private initialSessionUuid?: string;
+  private releasedInitialSessionUuid?: string;
   /** The single stdio transport has no MCP session ID, so retain its device session here. */
   private directDeviceSessionUuid?: string;
+  private releasedDirectDeviceSessionUuid?: string;
   private initialToolSelectionProfileUuid?: string;
   /** The single stdio transport has no MCP session ID, so retain its profile here. */
   private directToolSelectionProfileUuid?: string;
@@ -48,6 +51,22 @@ export class SessionToolBinding {
   }
 
   /**
+   * Preserve a released transport's session identity only for resources/read so
+   * a previously advertised session resource can report a typed inactive-session
+   * result. Tool routing deliberately remains unbound after release.
+   */
+  effectiveResourceSessionUuid(mcpSessionId: string | undefined): string | undefined {
+    const activeSessionUuid = this.boundSessionUuid(mcpSessionId);
+    if (activeSessionUuid) {
+      return activeSessionUuid;
+    }
+    if (mcpSessionId) {
+      return this.releasedDeviceSessions.get(mcpSessionId) ?? this.releasedInitialSessionUuid;
+    }
+    return this.releasedDirectDeviceSessionUuid ?? this.releasedInitialSessionUuid;
+  }
+
+  /**
    * Resolve the profile used solely for exact-tool selection. A generated
    * connection profile deliberately never becomes a routing/device session:
    * executePlan may release device sessions, but that must not erase a user's
@@ -82,12 +101,14 @@ export class SessionToolBinding {
         return false;
       }
       this.directDeviceSessionUuid = sessionUuid;
+      this.releasedDirectDeviceSessionUuid = undefined;
       return true;
     }
     if (this.boundDeviceSessions.get(mcpSessionId) === sessionUuid) {
       return false;
     }
     this.boundDeviceSessions.set(mcpSessionId, sessionUuid);
+    this.releasedDeviceSessions.delete(mcpSessionId);
     return true;
   }
 
@@ -141,15 +162,18 @@ export class SessionToolBinding {
     for (const [mcpSessionId, boundSessionUuid] of this.boundDeviceSessions) {
       if (boundSessionUuid === sessionUuid) {
         this.boundDeviceSessions.delete(mcpSessionId);
+        this.releasedDeviceSessions.set(mcpSessionId, sessionUuid);
         removed = true;
       }
     }
     if (this.initialSessionUuid === sessionUuid) {
       this.initialSessionUuid = undefined;
+      this.releasedInitialSessionUuid = sessionUuid;
       removed = true;
     }
     if (this.directDeviceSessionUuid === sessionUuid) {
       this.directDeviceSessionUuid = undefined;
+      this.releasedDirectDeviceSessionUuid = sessionUuid;
       removed = true;
     }
     return removed;

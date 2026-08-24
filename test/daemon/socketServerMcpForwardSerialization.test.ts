@@ -1071,6 +1071,41 @@ describe("UnixSocketServer MCP forward serialization", () => {
     expect(clientBindings).toEqual(["session-a"]);
   });
 
+  test("routes a released bound resource read so its handler can report the inactive session", async () => {
+    const clientBindings: Array<string | undefined> = [];
+    server.mcpClientFactory = async (boundSessionUuid) => {
+      clientBindings.push(boundSessionUuid);
+      return {
+        listTools: async () => ({ tools: [] }),
+        callTool: async () => ({ content: [] }),
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({
+          contents: [{
+            uri: "automobile:device-session/released-session/screenshot",
+            mimeType: "application/json",
+            text: JSON.stringify({ code: "SESSION_NOT_ACTIVE" }),
+          }],
+        }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
+        close: async () => {},
+      };
+    };
+
+    const response = await sendRequest(socketPath, {
+      id: randomUUID(),
+      type: "mcp_request",
+      method: "resources/read",
+      params: {
+        uri: "automobile:device-session/released-session/screenshot",
+        sessionUuid: "released-session",
+        [DAEMON_BOUND_SESSION_PARAM]: "released-session",
+      },
+    });
+
+    expect(response.success).toBe(true);
+    expect(clientBindings).toEqual(["released-session"]);
+  });
+
   test("retains a bound socket transport past the idle client deadline", async () => {
     sessionDevices.set("session-a", "device-a");
     let closeCalls = 0;

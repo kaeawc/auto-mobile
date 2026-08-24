@@ -5,6 +5,7 @@ import type { TrackedScreenshotService } from "../../src/features/observe/screen
 import type { ScreenshotJobOptions } from "../../src/utils/ScreenshotJobTracker";
 import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
 import { ScreenshotJobTracker } from "../../src/utils/ScreenshotJobTracker";
+import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
 import {
   RESOURCE_URIS,
   registerObservationResources,
@@ -236,6 +237,55 @@ describe("session screenshot resources", () => {
       code: "SCREENSHOT_CAPTURE_FAILED",
       retryable: true,
       error: "ADB screencap timed out",
+    });
+  });
+
+  test("returns a typed non-retryable failure when fresh screenshot capture is cancelled", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    setSessionScreenshotResourceDependencies({
+      resolveActiveSession: () => activeSession(),
+      createScreenshotService: () => createTrackedScreenshot({
+        success: false,
+        error: OPERATION_CANCELLED_MESSAGE,
+      }),
+    });
+
+    const content = await readTemplate(
+      "automobile:device-session/session-123/screenshot",
+      { sessionUuid, signal: controller.signal },
+    );
+
+    expect(JSON.parse(content.text!)).toEqual({
+      code: "SCREENSHOT_CAPTURE_CANCELLED",
+      retryable: false,
+      error: OPERATION_CANCELLED_MESSAGE,
+    });
+  });
+
+  test("returns a typed non-retryable failure when the fresh screenshot cannot be read", async () => {
+    setSessionScreenshotResourceDependencies({
+      resolveActiveSession: () => activeSession(),
+      createScreenshotService: () => createTrackedScreenshot({
+        success: true,
+        path: "/tmp/fresh.png",
+      }),
+    });
+    setScreenshotFileSystem({
+      stat: async () => ({ isFile: () => true }),
+      readFile: async () => {
+        throw new Error("EACCES: permission denied");
+      },
+    });
+
+    const content = await readTemplate(
+      "automobile:device-session/session-123/screenshot",
+    );
+
+    expect(JSON.parse(content.text!)).toEqual({
+      code: "SCREENSHOT_READ_FAILED",
+      retryable: false,
+      error: "Failed to read fresh screenshot for sessionUuid session-123: EACCES: permission denied",
     });
   });
 

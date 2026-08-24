@@ -957,7 +957,6 @@ describe("AndroidCtrlProxyClient", function () {
     const replacementPort = PortManager.getPort(isolatedDevice.deviceId);
     try {
       expect(replacementPort).not.toBe(originalPort);
-
       await original.close();
       expect(PortManager.getPort(isolatedDevice.deviceId)).toBe(replacementPort);
     } finally {

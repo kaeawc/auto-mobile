@@ -141,7 +141,6 @@ src/index.ts: error TS2322: Type 'number | string | undefined' is not assignable
 src/index.ts: error TS2322: Type 'number | string | undefined' is not assignable to type 'number | undefined'.
 src/index.ts: error TS2322: Type 'number | string | undefined' is not assignable to type 'number | undefined'.
 src/index.ts: error TS2322: Type 'number | string | undefined' is not assignable to type 'number | undefined'.
-src/server/appFileService.ts: error TS2345: Argument of type 'PutAppFileRequest' is not assignable to parameter of type 'PutAppFileArgs'.
 src/server/appFileService.ts: error TS2430: Interface 'PutAppFileRequest' incorrectly extends interface 'PutAppFileArgs'.
 src/server/bootedDeviceResources.ts: error TS2322: Type '"local" | "remote"' is not assignable to type '"local" | undefined'.
 src/server/compactBoundsAdvertisement.ts: error TS2698: Spread types may only be created from object types.
@@ -243,7 +242,6 @@ src/utils/ios-cmdline-tools/XcodeSigning.ts: error TS2322: Type 'Promise<string 
 # swap-fp: 44 :: src/db/failureAnalyticsRepository.ts: error TS2345: Argument of type 'FailureType' is not assignable to parameter of type 'OperandValueExpressionOrList<Database, "failure_notifications", "type">'.
 # swap-fp: 44 :: src/features/action/TapAnyElement.ts: error TS2339: Property 'selectClickable' does not exist on type 'ElementSelector'.
 # swap-fp: 44 :: src/features/utility/ElementParser.ts: error TS2345: Argument of type 'ViewHierarchyWindowInfo[]' is not assignable to parameter of type '{ windowLayer: number; }[]'.
-# swap-fp: 45 :: src/server/appFileService.ts: error TS2345: Argument of type 'PutAppFileRequest' is not assignable to parameter of type 'PutAppFileArgs'.
 # swap-fp: 45,46,46 :: src/features/accessibility/ContrastChecker.ts: error TS2345: Argument of type 'number | undefined' is not assignable to parameter of type 'number'.
 # swap-fp: 46 :: src/daemon/telemetryPushSocketServer.ts: error TS2345: Argument of type '"anr" | "crash" | "nonfatal"' is not assignable to parameter of type 'OperandValueExpressionOrList<Database, "failure_groups" | "failure_occurrences", "failure_groups.type">'.
 # swap-fp: 46 :: src/db/bunSqliteDialect.ts: error TS2307: Cannot find module 'bun:sqlite' or its corresponding type declarations.

@@ -21,6 +21,7 @@ import { registerNotificationTools } from "../server/notificationTools";
 import { registerAccessibilityFocusTools } from "../server/accessibilityFocusTools";
 import { registerAccessibilityTools } from "../server/accessibilityTools";
 import { registerAppFileTools } from "../server/appFileTools";
+import { registerSharedStorageTools } from "../server/sharedStorageTools";
 import { registerBarrierTools } from "../server/barrierTools";
 import { registerBiometricTools } from "../server/biometricTools";
 import { registerCriticalSectionTools } from "../server/criticalSectionTools";
@@ -58,6 +59,7 @@ function initializeCliTools(): void {
   registerAccessibilityFocusTools();
   registerAccessibilityTools();
   registerAppFileTools();
+  registerSharedStorageTools();
   registerBarrierTools();
   registerBiometricTools();
   registerCriticalSectionTools();

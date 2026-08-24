@@ -77,10 +77,17 @@ wait_for_ctrl_proxy_health "${ctrl_proxy_port}"
 # The graph query selects the target device's latest observed foreground app.
 # Keep the injected SDK events and the following observations scoped to the
 # same installed app instead of letting a SpringBoard observation hide them.
-if ! auto-mobile --debug --embedded-sdk --cli --session-uuid "${session_uuid}" launchApp --platform ios --appId "${bundle_id}" --deviceId "${device_id}" >/dev/null; then
-  echo "error: could not launch iOS graph target app" >&2
-  exit 1
-fi
+for attempt in 1 2 3; do
+  if auto-mobile --debug --embedded-sdk --cli --session-uuid "${session_uuid}" launchApp --platform ios --appId "${bundle_id}" --deviceId "${device_id}" >/dev/null; then
+    break
+  fi
+  if [[ "${attempt}" -eq 3 ]]; then
+    echo "error: could not launch iOS graph target app after 3 attempts" >&2
+    exit 1
+  fi
+  echo "iOS graph target launch attempt ${attempt} failed; retrying in 2s..." >&2
+  sleep 2
+done
 
 # `doctor` above may have started the shared CtrlProxy client while it was
 # unbound. Bind it to this graph session before posting events so its SDK-event

@@ -209,12 +209,16 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
     }
 
     func stop() async {
-        stateLock.lock()
-        let pipeline = _pipeline
-        let stream = _stream
-        _pipeline = nil
-        _stream = nil
-        stateLock.unlock()
+        // Scoped `withLock` (not `lock()`/`unlock()`): the latter is unavailable from
+        // an async context in the Swift 6 language mode, and scoped locking also makes
+        // it structurally impossible to hold the lock across the `await` below.
+        let (pipeline, stream): (EncodePipeline?, CaptureStream?) = stateLock.withLock {
+            let pipeline = _pipeline
+            let stream = _stream
+            _pipeline = nil
+            _stream = nil
+            return (pipeline, stream)
+        }
 
         // Tear the encoder down ON the frame queue so it cannot overlap an in-flight
         // `encode`/`ensureEncoder` call (both run on `queue`). `queue.sync` waits for
@@ -438,14 +442,15 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
     /// through `reconfigure` → `beginReconfigure`. Commits the size under the lock (only when a
     /// stream is present) then applies it.
     func performReconfiguration(width: Int, height: Int) async {
-        stateLock.lock()
-        guard let stream = _stream else {
-            stateLock.unlock()
-            return
+        // Scoped `withLock`: `lock()`/`unlock()` is unavailable from async contexts in
+        // the Swift 6 language mode, and this keeps the lock off the `await` below.
+        let stream: CaptureStream? = stateLock.withLock {
+            guard let stream = _stream else { return nil }
+            _configuredPixelWidth = width
+            _configuredPixelHeight = height
+            return stream
         }
-        _configuredPixelWidth = width
-        _configuredPixelHeight = height
-        stateLock.unlock()
+        guard let stream = stream else { return }
         await applyStreamConfiguration(stream: stream, width: width, height: height)
     }
 

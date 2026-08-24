@@ -52,6 +52,7 @@ import { registerDatabaseTools } from "./databaseTools";
 import { registerStorageTools } from "./storageTools";
 import { registerPreferenceTools } from "./preferenceTools";
 import { registerAppFileTools } from "./appFileTools";
+import { registerSharedStorageTools } from "./sharedStorageTools";
 import { registerFormTools } from "./formTools";
 import { registerAccessibilityTools } from "./accessibilityTools";
 import { registerAccessibilityFocusTools } from "./accessibilityFocusTools";
@@ -299,6 +300,7 @@ export function registerMcpTools(daemonMode: boolean): void {
   registerStorageTools();
   registerPreferenceTools();
   registerAppFileTools();
+  registerSharedStorageTools();
   registerFormTools();
   registerAccessibilityTools();
   registerAccessibilityFocusTools();

@@ -19,6 +19,7 @@ It uses standard platform tools like `adb` & `simctl` paired with its own additi
 | **[Explore app UX](using/ux-exploration.md)** | Navigate your app, discover screens, map user flows, identify confusing interactions |
 | **[Reproduce bugs](using/reproducing-bugs.md)** | Paste a bug report and get exact reproduction steps with screenshots |
 | **[Create UI tests](using/ui-tests.md)** | Describe test scenarios in plain English, get executable test plans |
+| **[Stage Android picker fixtures](using/android-shared-storage-fixtures.md)** | Prepare bounded Downloads files for system document and media pickers |
 | **[Measure startup time](using/perf-analysis/startup.md)** | Profile cold and warm launch performance |
 | **[Check scroll performance](using/perf-analysis/scroll-framerate.md)** | Detect jank and dropped frames |
 | **[Audit contrast](using/a11y.md#contrast)** | Find accessibility issues with color contrast |

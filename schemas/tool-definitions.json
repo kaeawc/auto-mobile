@@ -9140,6 +9140,86 @@
     }
   },
   {
+    "name": "stageSharedStorage",
+    "description": "Stage host-file, UTF-8, or base64 fixtures into one bounded Android Downloads namespace for system pickers.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "namespace": {
+          "description": "One caller-named child directory beneath Downloads",
+          "type": "string"
+        },
+        "reset": {
+          "description": "Remove only this declared namespace before writing",
+          "default": false,
+          "type": "boolean"
+        },
+        "indexMedia": {
+          "description": "Request Android media indexing for media files",
+          "default": true,
+          "type": "boolean"
+        },
+        "files": {
+          "description": "Files to stage into the namespace",
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "sourcePath": {
+                "description": "Host file path",
+                "type": "string",
+                "minLength": 1
+              },
+              "contentText": {
+                "description": "UTF-8 content",
+                "type": "string"
+              },
+              "contentBase64": {
+                "description": "Base64 content",
+                "type": "string"
+              },
+              "destinationPath": {
+                "description": "Path relative to the declared Downloads namespace",
+                "type": "string"
+              }
+            },
+            "required": [
+              "destinationPath"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": [
+        "namespace",
+        "reset",
+        "indexMedia",
+        "files"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "startTestRecording",
     "description": "Start recording user interactions for exportPlan.",
     "inputSchema": {

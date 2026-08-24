@@ -107,6 +107,45 @@ export const findBundleEntry = (
   return null;
 };
 
+/**
+ * Pull the installed-app records out of a `devicectl device info apps`
+ * payload. devicectl nests the listing under `result.apps`, while the
+ * `--bundle-id` shape used elsewhere in this module (and the fixtures that
+ * pin it) writes a bare `{ apps: [...] }`. Search for the first `apps` array
+ * either way rather than hardcoding one envelope, and drop non-object
+ * members so callers can treat every entry as a record.
+ */
+export const extractInstalledAppEntries = (data: unknown): Record<string, unknown>[] => {
+  if (!data || typeof data !== "object") {
+    return [];
+  }
+  if (Array.isArray(data)) {
+    for (const item of data) {
+      const found = extractInstalledAppEntries(item);
+      if (found.length > 0) {
+        return found;
+      }
+    }
+    return [];
+  }
+
+  const record = data as Record<string, unknown>;
+  if (Array.isArray(record.apps)) {
+    return record.apps.filter(
+      (entry): entry is Record<string, unknown> =>
+        Boolean(entry) && typeof entry === "object" && !Array.isArray(entry),
+    );
+  }
+
+  for (const value of Object.values(record)) {
+    const found = extractInstalledAppEntries(value);
+    if (found.length > 0) {
+      return found;
+    }
+  }
+  return [];
+};
+
 const extractBundlePath = (entry: Record<string, unknown>): string | null => {
   const candidates = [
     entry.bundleURL,
@@ -825,6 +864,52 @@ export class DeviceAppManager implements DeviceUrlLauncher {
       const raw = await this.deps.readFile(jsonPath);
       const data = JSON.parse(raw) as unknown;
       return findBundleEntry(data, bundleId);
+    } finally {
+      await this.deps.rm(tempDir);
+    }
+  }
+
+  /**
+   * List every app `devicectl device info apps` reports for a physical device,
+   * as raw devicectl records. This is the physical-device counterpart of
+   * `simctl listapps`, so `ListInstalledApps` can answer on real hardware
+   * instead of returning an empty list (issue #2883).
+   *
+   * Unlike {@link queryInstalledAppEntry} this omits `--bundle-id`, which is
+   * what turns the lookup into a full listing. devicectl exec / JSON-read
+   * failures are wrapped and PROPAGATE: an empty list must mean "no apps", not
+   * "devicectl is broken", because callers report that distinction as their
+   * `successful` flag. macOS-only.
+   */
+  public async listInstalledApps(deviceUdid: string): Promise<Record<string, unknown>[]> {
+    if (this.deps.platform() !== "darwin") {
+      throw new ActionableError(
+        "Listing apps on a physical iOS device requires macOS (devicectl is Xcode-only)",
+      );
+    }
+
+    const tempDir = await this.deps.mkdtemp(join(this.deps.tmpdir(), "automobile-devicectl-"));
+    const jsonPath = join(tempDir, "apps.json");
+    try {
+      await this.execute("xcrun", [
+        "devicectl",
+        "device",
+        "info",
+        "apps",
+        "--device",
+        deviceUdid,
+        "--json-output",
+        jsonPath,
+        "--quiet",
+      ]);
+
+      const raw = await this.deps.readFile(jsonPath);
+      return extractInstalledAppEntries(JSON.parse(raw) as unknown);
+    } catch (error) {
+      throw toActionableError(
+        error,
+        `Failed to list installed apps on physical iOS device ${deviceUdid}`,
+      );
     } finally {
       await this.deps.rm(tempDir);
     }

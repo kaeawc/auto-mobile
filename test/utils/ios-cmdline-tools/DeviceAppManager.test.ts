@@ -6,6 +6,7 @@ import {
   DeviceAppManager,
   findProcessIdentifier,
   findRunningProcessPid,
+  extractInstalledAppEntries,
   isDevicectlProcessGoneError,
   parseDevicectlJsonOutputPath,
 } from "../../../src/utils/ios-cmdline-tools/DeviceAppManager";
@@ -1495,5 +1496,120 @@ describe("isDevicectlProcessGoneError", () => {
     ]) {
       expect(isDevicectlProcessGoneError(phrasing)).toBe(true);
     }
+  });
+});
+
+describe("extractInstalledAppEntries", () => {
+  test("reads devicectl's nested result.apps envelope", () => {
+    const payload = {
+      info: { outcome: "success" },
+      result: {
+        apps: [{ bundleIdentifier: "com.example.a" }, { bundleIdentifier: "com.example.b" }],
+      },
+    };
+    expect(extractInstalledAppEntries(payload)).toEqual([
+      { bundleIdentifier: "com.example.a" },
+      { bundleIdentifier: "com.example.b" },
+    ]);
+  });
+
+  test("reads the flat apps envelope", () => {
+    expect(extractInstalledAppEntries({ apps: [{ bundleIdentifier: "com.example.a" }] })).toEqual([
+      { bundleIdentifier: "com.example.a" },
+    ]);
+  });
+
+  test("drops non-object entries and returns [] for payloads with no listing", () => {
+    expect(extractInstalledAppEntries({ apps: ["nope", null, { bundleId: "com.a" }] })).toEqual([
+      { bundleId: "com.a" },
+    ]);
+    expect(extractInstalledAppEntries({ result: {} })).toEqual([]);
+    expect(extractInstalledAppEntries(null)).toEqual([]);
+    expect(extractInstalledAppEntries("apps")).toEqual([]);
+  });
+});
+
+describe("DeviceAppManager.listInstalledApps", () => {
+  const createManager = (
+    overrides: {
+      platform?: () => NodeJS.Platform;
+      execute?: (file: string, args: string[]) => Promise<never> | Promise<ExecLike>;
+    } = {},
+    commands: string[] = [],
+    payload: unknown = { result: { apps: [{ bundleIdentifier: "com.example.a" }] } },
+  ) => {
+    const execute =
+      overrides.execute ??
+      (async (file: string, args: string[]) => {
+        const command = [file, ...args].join(" ");
+        commands.push(command);
+        const jsonPath = parseDevicectlJsonOutputPath(command);
+        if (jsonPath) {
+          await fs.writeFile(jsonPath, JSON.stringify(payload), "utf-8");
+        }
+        return emptyExecResult();
+      });
+    return new DeviceAppManager({
+      platform: overrides.platform ?? (() => "darwin"),
+      execute,
+      readFile: async (path: string) => fs.readFile(path, "utf-8"),
+      mkdtemp: async (prefix: string) => fs.mkdtemp(prefix),
+      rm: async (path: string) => fs.rm(path, { recursive: true, force: true }),
+      readdir: async (path: string) => fs.readdir(path),
+      stat: async (path: string) => fs.stat(path),
+      tmpdir,
+      logger: createFakeLogger(),
+    });
+  };
+
+  type ExecLike = ReturnType<typeof emptyExecResult>;
+
+  function emptyExecResult() {
+    return {
+      stdout: "",
+      stderr: "",
+      toString() {
+        return this.stdout;
+      },
+      trim() {
+        return this.stdout.trim();
+      },
+      includes(searchString: string) {
+        return this.stdout.includes(searchString);
+      },
+    };
+  }
+
+  test("queries devicectl for the whole listing, without --bundle-id", async () => {
+    const commands: string[] = [];
+    const manager = createManager({}, commands);
+
+    const apps = await manager.listInstalledApps("00008130-001C2D3E1234567A");
+
+    expect(apps).toEqual([{ bundleIdentifier: "com.example.a" }]);
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toContain("devicectl device info apps");
+    expect(commands[0]).toContain("--device 00008130-001C2D3E1234567A");
+    expect(commands[0]).not.toContain("--bundle-id");
+  });
+
+  test("propagates devicectl failures instead of reporting an empty listing", async () => {
+    const manager = createManager({
+      execute: async () => {
+        throw new Error("xcrun: devicectl not found");
+      },
+    });
+
+    await expect(manager.listInstalledApps("00008130-001C2D3E1234567A")).rejects.toBeInstanceOf(
+      ActionableError,
+    );
+  });
+
+  test("requires macOS", async () => {
+    const manager = createManager({ platform: () => "linux" });
+
+    await expect(manager.listInstalledApps("00008130-001C2D3E1234567A")).rejects.toBeInstanceOf(
+      ActionableError,
+    );
   });
 });

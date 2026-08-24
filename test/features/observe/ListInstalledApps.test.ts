@@ -603,3 +603,125 @@ describe("ListInstalledApps", function () {
     });
   });
 });
+
+describe("ListInstalledApps physical iOS devices", function () {
+  const PHYSICAL_UDID = "00008130-001C2D3E1234567A";
+  const SIMULATOR_UDID = "A1B2C3D4-E5F6-4A7B-8C9D-0E1F2A3B4C5D";
+
+  class FakePhysicalAppLister {
+    calls: string[] = [];
+    apps: Record<string, unknown>[] = [];
+    failure: Error | null = null;
+
+    async listInstalledApps(deviceUdid: string): Promise<Record<string, unknown>[]> {
+      this.calls.push(deviceUdid);
+      if (this.failure) {
+        throw this.failure;
+      }
+      return this.apps;
+    }
+  }
+
+  const iosDevice = (deviceId: string): BootedDevice =>
+    ({ deviceId, platform: "ios" }) as BootedDevice;
+
+  const createFakeAdbFactory = () => new FakeAdbClientFactory(new FakeAdbExecutor());
+
+  test("lists apps via devicectl instead of simctl on a physical UDID", async function () {
+    const lister = new FakePhysicalAppLister();
+    lister.apps = [
+      { bundleIdentifier: "com.example.device", name: "Device App" },
+      { bundleIdentifier: "com.example.other" },
+    ];
+    const simctl = new FakeSimctl();
+    simctl.setInstalledApps([{ bundleId: "com.example.simulator" }]);
+
+    const list = new ListInstalledApps(iosDevice(PHYSICAL_UDID), createFakeAdbFactory(), simctl, {
+      iosPhysicalAppLister: lister,
+    });
+
+    await expect(list.execute()).resolves.toEqual(["com.example.device", "com.example.other"]);
+    expect(lister.calls).toEqual([PHYSICAL_UDID]);
+    expect(simctl.getMethodCallCount("listApps")).toBe(0);
+  });
+
+  test("preserves devicectl app metadata in the detailed result", async function () {
+    const lister = new FakePhysicalAppLister();
+    lister.apps = [
+      {
+        bundleIdentifier: "com.example.device",
+        name: "Device App",
+        version: "4.2.0",
+        url: "file:///private/var/containers/Bundle/Application/ABC/Device.app",
+      },
+    ];
+
+    const list = new ListInstalledApps(
+      iosDevice(PHYSICAL_UDID),
+      createFakeAdbFactory(),
+      new FakeSimctl(),
+      { iosPhysicalAppLister: lister },
+    );
+
+    await expect(list.executeIosDetailedResult()).resolves.toEqual({
+      apps: [
+        {
+          bundleIdentifier: "com.example.device",
+          name: "Device App",
+          version: "4.2.0",
+          url: "file:///private/var/containers/Bundle/Application/ABC/Device.app",
+        },
+      ],
+      successful: true,
+    });
+  });
+
+  test("reports successful:false when devicectl fails rather than an empty listing", async function () {
+    const lister = new FakePhysicalAppLister();
+    lister.failure = new Error("devicectl is not installed");
+
+    const list = new ListInstalledApps(
+      iosDevice(PHYSICAL_UDID),
+      createFakeAdbFactory(),
+      new FakeSimctl(),
+      { iosPhysicalAppLister: lister },
+    );
+
+    await expect(list.executeIosDetailedResult()).resolves.toEqual({
+      apps: [],
+      successful: false,
+    });
+  });
+
+  test("keeps the simctl path for simulator UDIDs", async function () {
+    const lister = new FakePhysicalAppLister();
+    const simctl = new FakeSimctl();
+    simctl.setInstalledApps([{ bundleId: "com.example.simulator" }]);
+
+    const list = new ListInstalledApps(iosDevice(SIMULATOR_UDID), createFakeAdbFactory(), simctl, {
+      iosPhysicalAppLister: lister,
+    });
+
+    await expect(list.execute()).resolves.toEqual(["com.example.simulator"]);
+    expect(lister.calls).toEqual([]);
+  });
+
+  test("dedupes bundle identifiers reported twice by devicectl", async function () {
+    const lister = new FakePhysicalAppLister();
+    lister.apps = [
+      { bundleIdentifier: "com.example.device", version: "1.0.0" },
+      { bundleIdentifier: "com.example.device", version: "2.0.0" },
+    ];
+
+    const list = new ListInstalledApps(
+      iosDevice(PHYSICAL_UDID),
+      createFakeAdbFactory(),
+      new FakeSimctl(),
+      { iosPhysicalAppLister: lister },
+    );
+
+    await expect(list.executeIosDetailed()).resolves.toEqual([
+      { bundleIdentifier: "com.example.device", version: "2.0.0" },
+    ]);
+  });
+});

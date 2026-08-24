@@ -1,7 +1,7 @@
 {
   "name": "auto-mobile",
   "description": "Mobile device automation for Android and iOS - control devices with natural language",
-  "version": "0.0.62",
+  "version": "0.0.63",
   "author": {
     "name": "AutoMobile Contributors",
     "email": "jason.d.pearson@gmail.com"
@@ -9,13 +9,26 @@
   "homepage": "https://kaeawc.github.io/auto-mobile/",
   "repository": "https://github.com/kaeawc/auto-mobile",
   "license": "Apache-2.0",
-  "keywords": ["mobile", "android", "ios", "automation", "testing", "mcp", "adb", "simctl"],
-  "commands": ["./skills/"],
+  "keywords": [
+    "mobile",
+    "android",
+    "ios",
+    "automation",
+    "testing",
+    "mcp",
+    "adb",
+    "simctl"
+  ],
+  "commands": [
+    "./skills/"
+  ],
   "hooks": "./hooks.json",
   "mcpServers": {
     "auto-mobile": {
       "command": "bunx",
-      "args": ["@kaeawc/auto-mobile@latest"]
+      "args": [
+        "@kaeawc/auto-mobile@latest"
+      ]
     }
   }
 }

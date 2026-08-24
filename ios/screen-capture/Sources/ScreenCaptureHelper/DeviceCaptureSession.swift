@@ -25,8 +25,12 @@ final class DeviceCaptureSession: NSObject, AVCaptureVideoDataOutputSampleBuffer
     /// encoder on the next frame. Present even in raw mode (harmless there).
     let forceKeyFrameLatch = ForceKeyFrameLatch()
     /// Shared in-helper encode wiring in `--encode h264` mode; `nil` on the raw
-    /// path. Identical `EncodePipeline` type as the Simulator session.
-    private var pipeline: EncodePipeline?
+    /// path. Identical `EncodePipeline` type as the Simulator session. Guarded by
+    /// `stateLock` because `captureOutput` reads it on the frame `queue` while
+    /// `stop()` clears it off-queue.
+    private var _pipeline: EncodePipeline?
+    /// Guards `_pipeline` across the frame `queue` and `stop()`.
+    private let stateLock = NSLock()
     private let queue = DispatchQueue(label: "automobile.screen-capture.frames")
     private var observers: [NSObjectProtocol] = []
     private var stopping = false
@@ -80,7 +84,9 @@ final class DeviceCaptureSession: NSObject, AVCaptureVideoDataOutputSampleBuffer
             // fire-and-forget and the input drop returns immediately when behind), so
             // AVFoundation does not accumulate late frames without the discard.
             output.alwaysDiscardsLateVideoFrames = false
-            pipeline = EncodePipeline(
+            // Set before `startRunning()`, i.e. before frames flow, so a direct
+            // field write is safe here.
+            _pipeline = EncodePipeline(
                 writer: writer,
                 fps: DeviceCaptureSession.deviceFPS,
                 source: .device,
@@ -116,8 +122,19 @@ final class DeviceCaptureSession: NSObject, AVCaptureVideoDataOutputSampleBuffer
         stopping = true
         removeObservers()
         session.stopRunning()
-        pipeline?.stop()
-        pipeline = nil
+
+        stateLock.lock()
+        let pipeline = _pipeline
+        _pipeline = nil
+        stateLock.unlock()
+        // Tear the encoder down ON the frame queue so it cannot overlap an in-flight
+        // `captureOutput` encode call (both run on `queue`); `queue.sync` waits for any
+        // executing frame callback first, avoiding a use-after-free on the VideoToolbox
+        // session. `stopRunning()` above stops future delivery but does not guarantee an
+        // already-dispatched callback has returned.
+        if let pipeline = pipeline {
+            queue.sync { pipeline.stop() }
+        }
     }
 
     private func installObservers() {
@@ -176,6 +193,9 @@ final class DeviceCaptureSession: NSObject, AVCaptureVideoDataOutputSampleBuffer
         didOutput sampleBuffer: CMSampleBuffer,
         from connection: AVCaptureConnection
     ) {
+        stateLock.lock()
+        let pipeline = _pipeline
+        stateLock.unlock()
         if let pipeline = pipeline {
             encodeFrame(pipeline: pipeline, sampleBuffer: sampleBuffer)
             return

@@ -41,13 +41,27 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
     /// Force-keyframe latch shared with the STDIN control channel; consumed by
     /// the encoder on the next frame. Present even in raw mode (harmless there).
     let forceKeyFrameLatch = ForceKeyFrameLatch()
+    /// Guards the mutable frame-path state shared across the ScreenCaptureKit frame
+    /// queue (`didOutputSampleBuffer`), the MainActor `start()`/`stop()`, and the
+    /// reconfigure `Task`: the encode `pipeline`, the `stream`, the configured
+    /// dimensions, and the reconfigure-in-flight flag. Snapshot-under-lock-then-act;
+    /// the lock is never held across an `await` or a blocking call.
+    private let stateLock = NSLock()
     /// Shared in-helper encode wiring in `--encode h264` mode (issues #4788 /
     /// #4790). `nil` in the raw-BGRA path. The same `EncodePipeline` type backs the
     /// physical-device capture session, so the VideoToolbox glue lives in exactly
-    /// one place.
-    private var pipeline: EncodePipeline?
+    /// one place. Guarded by `stateLock`.
+    private var _pipeline: EncodePipeline?
+    private var _stream: CaptureStream?
+    private var _configuredPixelWidth = 0
+    private var _configuredPixelHeight = 0
+    /// True while an async `updateConfiguration` dispatched by `reconfigure` is in
+    /// flight, so a burst of same-size frames does not spawn overlapping updates.
+    private var _reconfiguring = false
+
     /// Pixel format requested from ScreenCaptureKit — 32BGRA for the raw path,
-    /// 420v (NV12) for the lowest-CPU encode path.
+    /// 420v (NV12) for the lowest-CPU encode path. Set once in `start()` before
+    /// frames flow, then read-only.
     var configuredPixelFormat: OSType = kCVPixelFormatType_32BGRA
     /// Diagnostic lines (first-frame marker, reconfigure warnings) go here so
     /// tests can observe them; the default preserves the stderr behavior.
@@ -55,12 +69,26 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
     private let queue = DispatchQueue(label: "automobile.simulator-capture.frames")
     let firstFrameSignal = FirstFrameSignal()
 
-    // The following are `internal` (not `private`) so `@testable` tests can seed
-    // and inspect lifecycle state that `start()` would otherwise set only behind
-    // a real `SCWindow`. They are not part of the production API surface.
-    var stream: CaptureStream?
-    var configuredPixelWidth: Int = 0
-    var configuredPixelHeight: Int = 0
+    // The `stream`/`configuredPixel*` accessors are `internal` (not `private`) and
+    // `stateLock`-guarded so `@testable` tests can seed and inspect lifecycle state
+    // that `start()` would otherwise set only behind a real `SCWindow`. They are not
+    // part of the production API surface.
+    var stream: CaptureStream? {
+        get { stateLock.lock(); defer { stateLock.unlock() }; return _stream }
+        set { stateLock.lock(); _stream = newValue; stateLock.unlock() }
+    }
+
+    var configuredPixelWidth: Int {
+        get { stateLock.lock(); defer { stateLock.unlock() }; return _configuredPixelWidth }
+        set { stateLock.lock(); _configuredPixelWidth = newValue; stateLock.unlock() }
+    }
+
+    var configuredPixelHeight: Int {
+        get { stateLock.lock(); defer { stateLock.unlock() }; return _configuredPixelHeight }
+        set { stateLock.lock(); _configuredPixelHeight = newValue; stateLock.unlock() }
+    }
+
+    // Set once in `start()` before frames flow, then read-only, so no lock needed.
     var fps: Int = CommandLineOptions.defaultSimulatorFPS
     var audioEnabled = false
     var windowID: UInt32 = 0
@@ -110,7 +138,9 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
         // no color conversion. The raw path keeps 32BGRA untouched.
         if let encodeSettings = encodeSettings {
             configuredPixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
-            pipeline = EncodePipeline(
+            // Set before frames flow (before `beginCapture` starts the stream), so a
+            // direct field write is safe here.
+            _pipeline = EncodePipeline(
                 writer: writer,
                 fps: fps,
                 source: .simulator,
@@ -179,14 +209,31 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
     }
 
     func stop() async {
-        pipeline?.stop()
-        pipeline = nil
+        // Scoped `withLock` (not `lock()`/`unlock()`): the latter is unavailable from
+        // an async context in the Swift 6 language mode, and scoped locking also makes
+        // it structurally impossible to hold the lock across the `await` below.
+        let (pipeline, stream): (EncodePipeline?, CaptureStream?) = stateLock.withLock {
+            let pipeline = _pipeline
+            let stream = _stream
+            _pipeline = nil
+            _stream = nil
+            return (pipeline, stream)
+        }
+
+        // Tear the encoder down ON the frame queue so it cannot overlap an in-flight
+        // `encode`/`ensureEncoder` call (both run on `queue`). `queue.sync` waits for
+        // any executing frame callback to finish first, so the VideoToolbox session is
+        // never invalidated underneath a frame being encoded (the teardown
+        // use-after-free the raw MainActor nil-out risked). Safe from MainActor — this
+        // is never called on `queue`.
+        if let pipeline = pipeline {
+            queue.sync { pipeline.stop() }
+        }
         guard let stream = stream else { return }
         // removeStreamOutput breaks the SCStream → self retain cycle so the
         // session is collectable even before SCStream itself goes away.
         try? stream.removeStreamOutput(self, type: .screen)
         try? await stream.stopCapture()
-        self.stream = nil
     }
 
     // MARK: - SCStreamOutput
@@ -224,7 +271,8 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
             return
         }
 
-        if actualWidth != configuredPixelWidth || actualHeight != configuredPixelHeight {
+        let (configuredWidth, configuredHeight) = currentConfiguredSize()
+        if actualWidth != configuredWidth || actualHeight != configuredHeight {
             reconfigure(width: actualWidth, height: actualHeight)
         }
 
@@ -245,7 +293,7 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
         width: Int,
         height: Int
     ) {
-        guard let pipeline = pipeline else { return }
+        guard let pipeline = currentPipeline() else { return }
         let target = H264EncodeMath.resolveEncoderScale(
             H264EncodeMath.EncoderSize(width: width, height: height)
         ) ?? H264EncodeMath.EncoderSize(width: width, height: height)
@@ -300,23 +348,82 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
 
     // MARK: - Internals
 
+    /// Snapshot of the encode pipeline under `stateLock`, for use on the frame queue.
+    private func currentPipeline() -> EncodePipeline? {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return _pipeline
+    }
+
+    /// Atomic snapshot of the configured dimensions under `stateLock`, so the frame
+    /// callback's mismatch check never reads a torn (width, height) pair.
+    private func currentConfiguredSize() -> (width: Int, height: Int) {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return (_configuredPixelWidth, _configuredPixelHeight)
+    }
+
+    /// Kicks off a size change from the frame queue. `beginReconfigure` commits the
+    /// new size synchronously and claims the single in-flight slot, so a burst of
+    /// frames neither races the dimension writes nor spawns overlapping
+    /// `updateConfiguration` calls (the reconfigure storm). The loop then
+    /// **coalesces to the latest** target: if a newer size is requested while an
+    /// update is applying, it is applied once the current one completes, so the last
+    /// requested geometry is never dropped (only same-size requests are truly
+    /// deduped). The retry inside `applyStreamConfiguration` bounds recovery so a
+    /// single transient failure does not strand the stream at a stale size (#4768).
     private func reconfigure(width: Int, height: Int) {
-        // Detached task: the retry inside `performReconfiguration` bounds the
-        // recovery so a single transient `updateConfiguration` failure does not
-        // silently strand the stream at stale dimensions (issue #4768).
-        Task {
-            await performReconfiguration(width: width, height: height)
+        guard let stream = beginReconfigure(width: width, height: height) else { return }
+        Task { [weak self] in
+            var width = width
+            var height = height
+            while true {
+                await self?.applyStreamConfiguration(stream: stream, width: width, height: height)
+                guard let next = self?.nextReconfigureTarget(applied: width, height) else { return }
+                width = next.width
+                height = next.height
+            }
         }
     }
 
-    /// Applies a new capture size to the live stream. Split out from
-    /// `reconfigure`'s detached task so tests can `await` it deterministically
-    /// and assert both the success path and the swallowed-failure warning.
-    func performReconfiguration(width: Int, height: Int) async {
-        guard let stream = stream else { return }
-        configuredPixelWidth = width
-        configuredPixelHeight = height
+    /// Commits the new size under `stateLock` and claims the reconfigure slot,
+    /// returning the stream to update — or `nil` when there is no stream, or an
+    /// update is already in flight. In the in-flight case the newer size is still
+    /// committed, so the running loop picks it up via `nextReconfigureTarget`
+    /// (coalesce-to-latest). Synchronous, so once a frame commits a size a same-size
+    /// burst no longer re-triggers. Internal so tests can drive it deterministically.
+    func beginReconfigure(width: Int, height: Int) -> CaptureStream? {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        // No stream: nothing to reconfigure, and committing a size here would be wrong
+        // if a frame slipped in before `beginCapture` stored the stream. Leave it.
+        guard let stream = _stream else { return nil }
+        _configuredPixelWidth = width
+        _configuredPixelHeight = height
+        if _reconfiguring { return nil }
+        _reconfiguring = true
+        return stream
+    }
 
+    /// Called after applying `(width, height)`. If the committed target still matches
+    /// what was applied, releases the in-flight slot and returns `nil`. If a newer
+    /// target was committed while the update was applying, keeps the slot and returns
+    /// that target so the loop applies it too — so the latest requested geometry is
+    /// never left unsent. Internal so tests can drive the coalescing deterministically.
+    func nextReconfigureTarget(applied width: Int, _ height: Int) -> (width: Int, height: Int)? {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        if _configuredPixelWidth == width, _configuredPixelHeight == height {
+            _reconfiguring = false
+            return nil
+        }
+        return (_configuredPixelWidth, _configuredPixelHeight)
+    }
+
+    /// Applies a new capture size to the given stream. Split out so tests can `await`
+    /// it deterministically and assert both the success path and the swallowed-failure
+    /// warning. Reads only the set-once `configuredPixelFormat`/`fps`/`audioEnabled`.
+    private func applyStreamConfiguration(stream: CaptureStream, width: Int, height: Int) async {
         let updated = SCStreamConfiguration()
         updated.width = width
         updated.height = height
@@ -332,8 +439,8 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
         // transiently while ScreenCaptureKit is mid-frame, and silently keeping
         // the stale config would drift delivered pixels away from the size the
         // supervisor expects — which the TS side then kills on as a mismatch.
-        // The new dimensions are already recorded above, so on ultimate failure
-        // the next size change still attempts a correcting update.
+        // The new dimensions are already recorded, so on ultimate failure the next
+        // size change still attempts a correcting update.
         do {
             try await stream.updateConfiguration(updated)
             return
@@ -346,6 +453,23 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
         } catch {
             diagnosticSink("warn: failed to update stream configuration after retry: \(error)\n")
         }
+    }
+
+    /// Applies a new capture size to the live stream. Retained as the directly-`await`able
+    /// test seam for the `updateConfiguration` success/retry/failure paths; production goes
+    /// through `reconfigure` → `beginReconfigure`. Commits the size under the lock (only when a
+    /// stream is present) then applies it.
+    func performReconfiguration(width: Int, height: Int) async {
+        // Scoped `withLock`: `lock()`/`unlock()` is unavailable from async contexts in
+        // the Swift 6 language mode, and this keeps the lock off the `await` below.
+        let stream: CaptureStream? = stateLock.withLock {
+            guard let stream = _stream else { return nil }
+            _configuredPixelWidth = width
+            _configuredPixelHeight = height
+            return stream
+        }
+        guard let stream = stream else { return }
+        await applyStreamConfiguration(stream: stream, width: width, height: height)
     }
 
     private static func makeConfiguration(

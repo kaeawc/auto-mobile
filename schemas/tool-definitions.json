@@ -8077,9 +8077,7 @@
                 "minLength": 1
               }
             },
-            "required": [
-              "destinationPath"
-            ],
+            "required": ["destinationPath"],
             "additionalProperties": false
           }
         },
@@ -8095,12 +8093,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "platform",
-        "namespace",
-        "reset",
-        "files"
-      ],
+      "required": ["platform", "namespace", "reset", "files"],
       "additionalProperties": false
     }
   },

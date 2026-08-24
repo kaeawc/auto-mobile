@@ -1774,6 +1774,7 @@ describe("IOSCtrlProxyManager", function() {
         alive: true,
       };
       installListeningProcessFakes(fakeExecutor, [runnerProcess, simulatorProcess]);
+      fakeExecutor.setCommandHandler("lsof -nP -iTCP:", () => createExecResult("", ""));
       const fakeBuilder = {
         getXctestrunPath: async () => {
           throw new Error("should not build when a healthy direct runner is reused");

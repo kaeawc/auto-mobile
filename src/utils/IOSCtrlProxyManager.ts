@@ -134,11 +134,7 @@ interface RemoteCtrlProxyIOSRunner {
     data?: { pid: number; message: string; port?: number };
   }>;
   stop(params: { deviceId?: string; pid?: number }): Promise<{ success: boolean; error?: string }>;
-  status(params: {
-    deviceId?: string;
-    pid?: number;
-    port?: number;
-  }): Promise<{
+  status(params: { deviceId?: string; pid?: number; port?: number }): Promise<{
     success: boolean;
     error?: string;
     data?: { running: boolean; pid?: number; port?: number };

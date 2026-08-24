@@ -1982,6 +1982,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     if (externalXcodebuildProcess) {
       return externalXcodebuildProcess;
     }
+    const healthyDirectProcess = await this.findHealthyExternalDirectCtrlProxyProcess();
+    if (healthyDirectProcess) {
+      return healthyDirectProcess;
+    }
     return this.findExternalDirectCtrlProxyProcess();
   }
 
@@ -1995,6 +1999,47 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       if (!IOSCtrlProxyManager.hasDeviceIdentity(identityText, this.device.deviceId)) {continue;}
       const port = this.parseCtrlProxyPortFromProcessArgs(argsOut) ?? this.parseCtrlProxyPortFromProcessArgs(processInfo?.environment ?? "") ?? IOSCtrlProxyManager.DEFAULT_PORT;
       logger.info(`[IOSCtrlProxy] Found external xcodebuild CtrlProxy process: ${pid}`);
+      return { pid, port };
+    }
+    return null;
+  }
+
+  /**
+   * Finds a healthy direct runner even when `lsof` cannot expose its listener PID.
+   *
+   * Direct simulator runners inherit their CtrlProxy port, so their process
+   * environment identifies a probe candidate. Health is the authority for
+   * adoption: it must confirm the exact device before we reserve that port.
+   * Daemon-managed trees are deliberately excluded so the regular port-cleanup
+   * path still reaps a stale runner whose health endpoint is down.
+   */
+  private async findHealthyExternalDirectCtrlProxyProcess(): Promise<ExternalCtrlProxyProcess | null> {
+    const candidatePids = await this.processClient.findStartupCandidatePids();
+    for (const pid of candidatePids.slice(0, MAX_STARTUP_ORPHAN_RUNNER_CANDIDATES)) {
+      if (pid === this.xcTestProcessId) {
+        continue;
+      }
+      const processInfo = await this.processClient.getProcessInfo(pid);
+      if (!processInfo || !IOSCtrlProxyManager.isDirectCtrlProxyRunnerCommand(processInfo.command)) {
+        continue;
+      }
+      const port = this.parseCtrlProxyPortFromProcessArgs(processInfo.command) ??
+        this.parseCtrlProxyPortFromProcessArgs(processInfo.environment ?? "");
+      if (port === null) {
+        continue;
+      }
+      const process: ListeningProcess = { pid, port, ...processInfo };
+      const daemonManagedRoot = await IOSCtrlProxyManager.findDaemonManagedRunnerTreeRoot(
+        this.processClient,
+        process
+      );
+      if (daemonManagedRoot.kind === "root") {
+        continue;
+      }
+      if (!await this.checkHealthEndpointOnPortForDevice(port, this.device.deviceId)) {
+        continue;
+      }
+      logger.info(`[IOSCtrlProxy] Found healthy external direct CtrlProxy runner: ${pid}`);
       return { pid, port };
     }
     return null;

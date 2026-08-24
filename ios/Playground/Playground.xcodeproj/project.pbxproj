@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		007B2120C2735B42A20C510B /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2F4747AC5700DF138836D5F /* Theme.swift */; };
 		15B37A3EDBAFD6BD0FC98BFC /* DemosTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25213AE8A9FD9A5B1EEFD97F /* DemosTab.swift */; };
+		1F289CED4D38B260C3F553CA /* SwiftUISemanticLinksE2ETests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E6860BC496A7CC1EA51E665 /* SwiftUISemanticLinksE2ETests.swift */; };
 		327A28D4620038BBA8D02656 /* Shapes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5122FF517804CD75B0F75CBA /* Shapes.swift */; };
 		4546703D0511A96D6060F587 /* CrayonSketch.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0972F015B9B7D85BD6F3270 /* CrayonSketch.swift */; };
 		4E220C88A805ED0A7AFDEE38 /* PlaygroundDatabaseFixtureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A14ADB69D8A746CDB99D61DE /* PlaygroundDatabaseFixtureTests.swift */; };
@@ -49,6 +50,7 @@
 		5122FF517804CD75B0F75CBA /* Shapes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Shapes.swift; sourceTree = "<group>"; };
 		51580F5FC5ADCD5576885563 /* Typography.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Typography.swift; sourceTree = "<group>"; };
 		64FD18EC8D1B9A665615C374 /* SettingsTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsTab.swift; sourceTree = "<group>"; };
+		6E6860BC496A7CC1EA51E665 /* SwiftUISemanticLinksE2ETests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwiftUISemanticLinksE2ETests.swift; sourceTree = "<group>"; };
 		8A719AFBA1888450E8653AB6 /* SdkHighlightOverlayE2ETests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkHighlightOverlayE2ETests.swift; sourceTree = "<group>"; };
 		A14ADB69D8A746CDB99D61DE /* PlaygroundDatabaseFixtureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaygroundDatabaseFixtureTests.swift; sourceTree = "<group>"; };
 		AA0EB8290A6E5436B2C8CE6F /* auto-mobile-sdk */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "auto-mobile-sdk"; path = "../auto-mobile-sdk"; sourceTree = SOURCE_ROOT; };
@@ -154,6 +156,7 @@
 				A14ADB69D8A746CDB99D61DE /* PlaygroundDatabaseFixtureTests.swift */,
 				FBFA8ECD2DC59DBF8A6FBBF3 /* PlaygroundThemeTests.swift */,
 				8A719AFBA1888450E8653AB6 /* SdkHighlightOverlayE2ETests.swift */,
+				6E6860BC496A7CC1EA51E665 /* SwiftUISemanticLinksE2ETests.swift */,
 			);
 			path = Tests;
 			sourceTree = "<group>";
@@ -315,6 +318,7 @@
 				4E220C88A805ED0A7AFDEE38 /* PlaygroundDatabaseFixtureTests.swift in Sources */,
 				7C8CF515031B975C05FA2AD2 /* PlaygroundThemeTests.swift in Sources */,
 				B3B613858665E331B7E7EB99 /* SdkHighlightOverlayE2ETests.swift in Sources */,
+				1F289CED4D38B260C3F553CA /* SwiftUISemanticLinksE2ETests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -43,6 +43,32 @@ final class SemanticLinkActivationTests: XCTestCase {
         XCTAssertEqual(second, SemanticLinkActivation.Coordinate(x: 300, y: 20))
     }
 
+    func testResolvesSwiftUIInlineOccurrenceWithoutRange() {
+        // SwiftUI inline links are discovered from the `.link` rotor: they carry a
+        // center but no character range (issue #5578). Owner-scoped occurrence must
+        // still select the correct duplicate-text link by its distinct center.
+        let owner = node("swiftui_semantic_links_inline", links: [
+            SdkSemanticLink(text: "Terms of Service", occurrence: 0, centerX: 156, centerY: 201),
+            SdkSemanticLink(text: "Support", occurrence: 0, centerX: 321, centerY: 201),
+            SdkSemanticLink(text: "Terms of Service", occurrence: 1, centerX: 168, centerY: 222),
+        ])
+        let root = node(children: [owner])
+        let tree = hierarchy(root: root)
+
+        XCTAssertEqual(
+            SemanticLinkActivation.coordinate(
+                in: tree, ownerResourceId: "swiftui_semantic_links_inline", text: "Terms of Service", occurrence: 0
+            ),
+            SemanticLinkActivation.Coordinate(x: 156, y: 201)
+        )
+        XCTAssertEqual(
+            SemanticLinkActivation.coordinate(
+                in: tree, ownerResourceId: "swiftui_semantic_links_inline", text: "Terms of Service", occurrence: 1
+            ),
+            SemanticLinkActivation.Coordinate(x: 168, y: 222)
+        )
+    }
+
     func testMatchesLinkTextCaseInsensitively() {
         let owner = node("inline", links: [
             SdkSemanticLink(text: "Support", occurrence: 0, centerX: 10, centerY: 10),

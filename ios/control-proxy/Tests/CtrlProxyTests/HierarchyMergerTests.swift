@@ -385,6 +385,44 @@ final class HierarchyMergerTests: XCTestCase {
         XCTAssertEqual(links?[2].start, 58)
     }
 
+    func testEnrichesOwnerElementWithSwiftUIRotorSemanticLinks() {
+        // SwiftUI inline `AttributedString` links have no character range (they are
+        // discovered from the element's `.link` rotor, not an attributed string), so
+        // the SDK supplies text + occurrence + center only. The merge must still
+        // project them onto the owning element (issue #5578), matching by
+        // accessibilityIdentifier even though the synthesized SDK owner's bounds
+        // differ from the XCUITest snapshot.
+        let owner = UIElementInfo(
+            text: "Read the Terms of Service, contact Support, or review the Terms of Service again.",
+            resourceId: "swiftui_semantic_links_inline",
+            className: "CGDrawingView",
+            bounds: ElementBounds(left: 16, top: 190, right: 382, bottom: 233)
+        )
+        let sdkOwner = SdkViewNode(
+            className: "AccessibilityNode",
+            bounds: SdkBounds(left: 17, top: 190, right: 383, bottom: 233),
+            accessibilityIdentifier: "swiftui_semantic_links_inline",
+            semanticLinks: [
+                SdkSemanticLink(text: "Terms of Service", occurrence: 0, centerX: 156, centerY: 201),
+                SdkSemanticLink(text: "Support", occurrence: 0, centerX: 321, centerY: 201),
+                SdkSemanticLink(text: "Terms of Service", occurrence: 1, centerX: 168, centerY: 222),
+            ]
+        )
+
+        let result = HierarchyMerger.merge(
+            xcuitest: makeHierarchy(root: owner),
+            sdk: makeSdkHierarchy(root: sdkOwner)
+        )
+
+        let links = result.hierarchy?.semanticLinks
+        XCTAssertEqual(links?.count, 3)
+        XCTAssertEqual(links?.map(\.text), ["Terms of Service", "Support", "Terms of Service"])
+        XCTAssertEqual(links?.map(\.occurrence), [0, 0, 1])
+        // SwiftUI links carry no range; the Android-parity wire shape keeps that nil.
+        XCTAssertNil(links?[0].start)
+        XCTAssertNil(links?[2].end)
+    }
+
     func testDoesNotOverrideExistingXcuitestSemanticLinksWhenSdkHasNone() {
         // A standalone XCUITest link already carries a single-entry semanticLinks;
         // an SDK match without links must leave it intact.

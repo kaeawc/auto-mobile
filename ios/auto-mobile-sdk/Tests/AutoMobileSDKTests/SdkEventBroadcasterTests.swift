@@ -14,6 +14,19 @@ final class SdkEventBroadcasterTests: XCTestCase {
         XCTAssertNotNil(broadcaster.ctrlProxyUrl)
     }
 
+    /// Concurrent get/set of `persistence` must not race. It was a plain `var` read
+    /// on the flush thread and the URLSession completion handler while written from
+    /// the config/shutdown threads (#3632) — now guarded by the same config lock.
+    func testPersistenceConcurrentAccessDoesNotCrash() {
+        let broadcaster = SdkEventBroadcaster.makeTestInstance()
+        let fakes = (0..<8).map { _ in FakeEventPersistence() }
+        DispatchQueue.concurrentPerform(iterations: 2_000) { i in
+            broadcaster.persistence = fakes[i % fakes.count]
+            _ = broadcaster.persistence
+        }
+        XCTAssertNotNil(broadcaster.persistence)
+    }
+
     func testSetCtrlProxyUrlUpdatesValue() {
         let broadcaster = SdkEventBroadcaster.makeTestInstance()
         let url = URL(string: "http://localhost:9999/sdk-events")

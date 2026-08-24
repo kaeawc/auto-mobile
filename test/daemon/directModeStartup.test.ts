@@ -39,12 +39,12 @@ describe("runDirectModeStartup", () => {
     expect(calls).toEqual(["assertDbOwnership", "applyFeatureFlagStartup"]);
   });
 
-  test("skips the ownership guard entirely in proxy mode", async () => {
+  test("does not touch the database in proxy mode", async () => {
     const { steps, calls } = recordingSteps(false);
 
     await runDirectModeStartup(steps);
 
-    expect(calls).toEqual(["applyFeatureFlagStartup"]);
+    expect(calls).toEqual([]);
   });
 
   test("does not touch the DB when the guard refuses (guard throws)", async () => {

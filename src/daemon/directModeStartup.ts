@@ -4,8 +4,8 @@
  * `src/index.ts` (there is no `main()` test harness). Issue #2871 stretch AC.
  *
  * The invariant: under `--no-proxy`/`--direct` the DB-ownership guard MUST run
- * BEFORE the first DB touch. When proxy mode is used (`noProxy` false), the guard
- * is skipped entirely — the daemon owns the DB and the guard doesn't apply.
+ * BEFORE the first DB touch. Proxy mode does not touch the DB at all: the daemon
+ * owns feature-flag initialization and reports any startup failure to the proxy.
  */
 export interface DirectModeStartupSteps {
   /** True only under `--no-proxy`/`--direct`. */
@@ -28,11 +28,13 @@ export interface DirectModeStartupSteps {
  * the ownership guard runs before the first DB touch so a second writer on a
  * daemon-owned SQLite file is refused before this process opens it (issue #2795).
  * With an isolated `AUTOMOBILE_DB_PATH` the guard is a no-op and startup proceeds
- * normally. In proxy mode the guard is skipped altogether.
+ * normally. In proxy mode, the daemon owns both the guard and feature-flag work,
+ * so this client opens no SQLite connection before its stdio transport is ready.
  */
 export async function runDirectModeStartup(steps: DirectModeStartupSteps): Promise<void> {
-  if (steps.noProxy) {
-    await steps.assertDbOwnership();
+  if (!steps.noProxy) {
+    return;
   }
+  await steps.assertDbOwnership();
   await steps.applyFeatureFlagStartup();
 }

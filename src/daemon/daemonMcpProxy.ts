@@ -529,6 +529,14 @@ export class DaemonMcpProxy {
   private clientFactory: DaemonClientFactory;
   private readonly timer: Timer;
   private readonly heartbeatKeeper: SingleFlightInterval;
+  /**
+   * Whether the recurring bound-session heartbeat keeper has been started for the
+   * current binding. Gates the awaited establishment heartbeat (issue #5637) to
+   * the FIRST connection only: once the keeper is running it owns every
+   * subsequent tick, so a later reconnect must not send an extra, un-coalesced
+   * heartbeat.
+   */
+  private heartbeatKeeperStarted = false;
   private readonly buildIdentity: BuildIdentity;
   private readonly clientVersion: string;
   private readonly clientAssetVersion: string | null;
@@ -725,7 +733,7 @@ export class DaemonMcpProxy {
         logger.warn(`[DaemonMcpProxy] Failed to subscribe to daemon notifications: ${error}`);
       }
     }
-    this.startBoundSessionHeartbeat();
+    await this.establishBoundSessionHeartbeat();
   }
 
   /**
@@ -1430,11 +1438,75 @@ export class DaemonMcpProxy {
     if (this.boundSessionUuid && !this.terminalBoundSession && this.connected && !this.closing) {
       void this.heartbeatKeeper.run();
       this.heartbeatKeeper.start();
+      this.heartbeatKeeperStarted = true;
+    }
+  }
+
+  /**
+   * Deliver the first ownership heartbeat as part of connection establishment for
+   * a bound session (issue #5637), then start the recurring keeper.
+   *
+   * A newly connected client whose session was allocated shortly before startup
+   * must reach the daemon with its first heartbeat before the pre-first-heartbeat
+   * fast-reclaim (issue #2443) can release it. Awaiting the send here makes the
+   * guarantee contractual: once ensureConnected() resolves for a bound session,
+   * the daemon has recorded ownership — instead of racing a fire-and-forget
+   * dispatch against the reclaim sweep.
+   *
+   * Only the FIRST establishment sends here: once the keeper is running it owns
+   * every subsequent tick, so a later reconnect (which may itself be driven by a
+   * keeper tick) defers to the keeper's own coalesced heartbeat rather than
+   * emitting a duplicate.
+   */
+  private async establishBoundSessionHeartbeat(): Promise<void> {
+    if (!(this.boundSessionUuid && !this.terminalBoundSession && this.connected && !this.closing)) {
+      return;
+    }
+    if (this.heartbeatKeeperStarted) {
+      // Reconnect/rebind: fall back to the keeper's own coalescing run(). If this
+      // reconnect is itself driven by a keeper tick, run() shares that in-flight
+      // tick instead of emitting a duplicate; otherwise it sends a fresh heartbeat
+      // on the new transport, exactly as before this change.
+      this.startBoundSessionHeartbeat();
+      return;
+    }
+    await this.sendFirstBoundSessionHeartbeat();
+    // The keeper owns every subsequent tick, its reconnect, and terminal fencing.
+    // No immediate run() here: the direct send above already delivered the first
+    // heartbeat, and a second would duplicate it.
+    this.heartbeatKeeper.start();
+    this.heartbeatKeeperStarted = true;
+  }
+
+  /**
+   * Send the establishment heartbeat directly against the freshly connected
+   * client. Deliberately NOT routed through withRecoverableReconnect(): that path
+   * re-enters ensureConnected(), which is still in flight during establishment and
+   * would deadlock on a reconnect. A transient failure is best-effort — the keeper
+   * started next retries within the daemon's pre-first-heartbeat grace, and a
+   * genuinely released session is fenced by the keeper's reconnect path or a
+   * session-released notification.
+   */
+  private async sendFirstBoundSessionHeartbeat(): Promise<void> {
+    const sessionUuid = this.boundSessionUuid;
+    if (!sessionUuid || this.terminalBoundSession || this.closing || !this.client) {
+      return;
+    }
+    try {
+      await this.client.callDaemonMethod("daemon/heartbeat", { sessionId: sessionUuid });
+      if (this.boundSessionUuid === sessionUuid && !this.terminalBoundSession) {
+        this.boundSessionUuidAt = this.timer.now();
+      }
+    } catch (error) {
+      logger.debug(
+        `[DaemonMcpProxy] Initial bound-session heartbeat failed: ${errorMessage(error)}`,
+      );
     }
   }
 
   private async stopBoundSessionHeartbeat(): Promise<void> {
     const settled = await this.heartbeatKeeper.stop();
+    this.heartbeatKeeperStarted = false;
     if (!settled) {
       logger.warn("[DaemonMcpProxy] Bound-session heartbeat did not settle before shutdown");
     }

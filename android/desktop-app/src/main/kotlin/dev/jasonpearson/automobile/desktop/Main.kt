@@ -104,7 +104,7 @@ fun main() {
       )
     }
     val daemonState by
-      daemonMonitor.connectionStates().collectAsState(initial = ConnectionState.Connecting)
+      daemonMonitor.connectionStates.collectAsState(initial = ConnectionState.Connecting)
     val isDaemonConnected = daemonState is ConnectionState.Connected
 
     AutoMobileSystemTray(

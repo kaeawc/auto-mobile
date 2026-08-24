@@ -296,7 +296,13 @@ class McpDaemonClient(
 
   override fun getDaemonStatus():
     dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse {
-    val response = sendRequest("ide/status")
+    // Hang ceiling on the status probe (#4858). The blocking SocketChannel read is not cancellable
+    // by coroutine cancellation, so a wrapping withTimeout at the caller cannot unblock a daemon
+    // that accepts but never replies — only this watchdog, which closes the socket, can. A healthy
+    // ide/status round-trip is ~ms, so a deadline here bounds the connectivity dot without risking
+    // a
+    // slow ordinary tool call (those stay unbounded; see [sendRequest]).
+    val response = sendRequest("ide/status", timeoutMs = STATUS_REQUEST_TIMEOUT_MS)
     ensureSuccess(response)
     return json.decodeFromJsonElement(
       serializer<dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse>(),
@@ -1051,6 +1057,11 @@ class McpDaemonClient(
     /** Hang ceiling for ordinary daemon requests (tool calls can legitimately take tens of s). */
     /** Hang ceiling for the input helpers; a healthy input round-trip is ~milliseconds. */
     const val INPUT_REQUEST_TIMEOUT_MS = 5_000L
+
+    /**
+     * Hang ceiling for the daemon connectivity probe (ide/status); a healthy probe is ~ms (#4858).
+     */
+    const val STATUS_REQUEST_TIMEOUT_MS = 5_000L
 
     // One shared daemon thread arms/cancels every request deadline. It only ever runs a
     // channel.close() for a request that overran its ceiling, so it stays idle in normal use.

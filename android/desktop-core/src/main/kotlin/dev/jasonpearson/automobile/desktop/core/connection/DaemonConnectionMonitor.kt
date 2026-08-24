@@ -30,7 +30,12 @@ import kotlinx.coroutines.withTimeout
  *
  * @param probe suspends until the daemon status resolves, or throws if it is unreachable. Callers
  *   dispatch the blocking client call (e.g. `withContext(Dispatchers.IO) { client.getDaemonStatus()
- *   }`) so [withTimeout] has a suspension point at which to abandon a stalled read.
+ *   }`). The real hang bound lives in the client: `getDaemonStatus()` passes a transport hang
+ *   ceiling that closes the socket on a wedged daemon, which makes the blocking read throw so the
+ *   probe returns as Disconnected. [probeTimeout] here is a coarser coroutine-level backstop — it
+ *   cannot interrupt an uninterruptible blocking read (structured concurrency waits for the
+ *   `withContext` child), so it only bounds cooperative probes; the transport ceiling is what
+ *   actually un-sticks the dot.
  * @param pollInterval delay between the end of one probe and the start of the next.
  * @param probeTimeout deadline for a single probe before it is treated as Disconnected.
  * @param onProbeFailure invoked with the failure (a timeout or a thrown error) whenever a probe
@@ -47,8 +52,14 @@ class DaemonConnectionMonitor(
   /**
    * Emits [ConnectionState.Connecting] immediately, then one state per poll until the collector is
    * cancelled. The flow never completes on its own.
+   *
+   * This is a stable `val`, not a method: `collectAsState` keys its collection on the flow
+   * instance, so handing out a fresh cold flow per access (a `fun`) would restart collection on
+   * every recomposition — re-emitting Connecting and re-probing immediately, defeating
+   * [pollInterval]. One cached instance keeps a single collection alive across recompositions. It
+   * is a cold flow, so each distinct collector still gets its own independent poll loop.
    */
-  fun connectionStates(): Flow<ConnectionState> = flow {
+  val connectionStates: Flow<ConnectionState> = flow {
     emit(ConnectionState.Connecting)
     while (currentCoroutineContext().isActive) {
       emit(probeOnce())

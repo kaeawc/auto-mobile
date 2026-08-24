@@ -126,7 +126,7 @@ private fun rememberDaemonConnectionState(client: AutoMobileClient): ConnectionS
         },
       )
     }
-  return monitor.connectionStates().collectAsState(initial = ConnectionState.Connecting).value
+  return monitor.connectionStates.collectAsState(initial = ConnectionState.Connecting).value
 }
 
 /**

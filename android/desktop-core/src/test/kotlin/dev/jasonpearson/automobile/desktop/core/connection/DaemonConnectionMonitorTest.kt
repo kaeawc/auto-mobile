@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.desktop.core.connection
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.CancellationException
@@ -29,9 +30,18 @@ class DaemonConnectionMonitorTest {
     )
 
   @Test
+  fun `connectionStates is a stable instance across accesses`() {
+    // collectAsState keys its collection on the flow instance; a fresh instance per access would
+    // restart collection on every recomposition (re-emitting Connecting and re-probing). Pin that
+    // the property hands back the same instance so consumers get a single continuous poll loop.
+    val m = monitor(probe = {})
+    assertSame(m.connectionStates, m.connectionStates)
+  }
+
+  @Test
   fun `first emission is Connecting before any probe runs`() = runTest {
     var probes = 0
-    val first = monitor(probe = { probes++ }).connectionStates().take(1).toList().single()
+    val first = monitor(probe = { probes++ }).connectionStates.take(1).toList().single()
 
     assertEquals(ConnectionState.Connecting, first)
     assertEquals(0, probes, "Connecting must be emitted before the first probe")
@@ -39,7 +49,7 @@ class DaemonConnectionMonitorTest {
 
   @Test
   fun `successful probe yields Connected`() = runTest {
-    val states = monitor(probe = {}).connectionStates().take(2).toList()
+    val states = monitor(probe = {}).connectionStates.take(2).toList()
 
     assertEquals(ConnectionState.Connecting, states[0])
     assertTrue(states[1] is ConnectionState.Connected, "expected Connected, got ${states[1]}")
@@ -49,7 +59,7 @@ class DaemonConnectionMonitorTest {
   fun `throwing probe yields Disconnected carrying the failure reason`() = runTest {
     val states =
       monitor(probe = { throw IllegalStateException("socket refused") })
-        .connectionStates()
+        .connectionStates
         .take(2)
         .toList()
 
@@ -61,7 +71,7 @@ class DaemonConnectionMonitorTest {
   fun `monitor re-probes on the poll interval cadence`() = runTest {
     var probes = 0
     val job = backgroundScope.launch {
-      monitor(probe = { probes++ }, pollIntervalMs = 5_000).connectionStates().collect {}
+      monitor(probe = { probes++ }, pollIntervalMs = 5_000).connectionStates.collect {}
     }
 
     runCurrent()
@@ -84,7 +94,7 @@ class DaemonConnectionMonitorTest {
       // CancellationException subtype) rather than being torn down by it (#4858).
       val states =
         monitor(probe = { awaitCancellation() }, probeTimeoutMs = 10_000)
-          .connectionStates()
+          .connectionStates
           .take(3)
           .toList()
 
@@ -108,7 +118,7 @@ class DaemonConnectionMonitorTest {
         },
         onProbeFailure = { failures.add(it) },
       )
-      .connectionStates()
+      .connectionStates
       .take(3)
       .toList()
 
@@ -126,7 +136,7 @@ class DaemonConnectionMonitorTest {
     var leaked: Throwable? = null
     val job = backgroundScope.launch {
       try {
-        monitor(probe = { probes++ }, pollIntervalMs = 5_000).connectionStates().collect {}
+        monitor(probe = { probes++ }, pollIntervalMs = 5_000).connectionStates.collect {}
       } catch (_: CancellationException) {
         // expected on cancel; cooperative
       } catch (t: Throwable) {

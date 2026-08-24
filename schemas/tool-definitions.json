@@ -9210,10 +9210,7 @@
         }
       },
       "required": [
-        "platform",
         "namespace",
-        "reset",
-        "indexMedia",
         "files"
       ],
       "additionalProperties": false

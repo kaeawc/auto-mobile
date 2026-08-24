@@ -87,6 +87,7 @@ nav:
       - "UI Tests": using/ui-tests.md
       - "Hermetic CI Pinning": using/hermetic-ci-pinning.md
       - "Per-tool Selection & Registration Gates": using/tool-capabilities.md
+      - "Stage Android picker fixtures": using/android-shared-storage-fixtures.md
       - "WebRTC Screen Streaming": webrtc-streaming-ci-worker.md
       - "Environment Variables": using/environment-variables.md
       - "Performance Analysis":

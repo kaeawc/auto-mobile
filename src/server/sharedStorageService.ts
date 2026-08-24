@@ -132,7 +132,10 @@ class DefaultSharedStorageService implements SharedStorageService {
         });
       }
       for (const file of prepared) {
-        if (prepared.some(other => other !== file && other.destinationPath.startsWith(`${file.destinationPath}/`))) {
+        if (prepared.some(other => other !== file && (
+          other.destinationPath === file.destinationPath ||
+          other.destinationPath.startsWith(`${file.destinationPath}/`)
+        ))) {
           throw new ActionableError(`destinationPath conflicts with a nested fixture: ${file.destinationPath}`);
         }
       }
@@ -157,7 +160,7 @@ class DefaultSharedStorageService implements SharedStorageService {
       throw new ActionableError(`destinationPath escapes shared-storage namespace ${namespace}`);
     }
     await execute(adb, `shell mkdir -p ${shellQuote(posix.dirname(destination))}`, request.signal);
-    await execute(adb, `push ${shellQuote(file.source.path)} ${shellQuote(destination)}`, request.signal);
+    await executeArgs(adb, ["push", file.source.path, destination], request.signal);
     const mediaIndexing = shouldIndexMedia(destinationPath, request.indexMedia ?? true)
       ? await indexMediaFile(adb, destination, destinationPath, this.timer, request.signal)
       : { status: "notRequested" as const, reason: indexingNotRequestedReason(destinationPath, request.indexMedia ?? true) };
@@ -191,6 +194,14 @@ interface PreparedSharedStorageFile {
 async function execute(adb: AdbExecutor, command: string, signal?: AbortSignal): Promise<void> {
   try {
     await adb.executeCommand(command, undefined, undefined, true, signal);
+  } catch (error) {
+    throw new ActionableError(`Android shared-storage operation failed: ${errorMessage(error)}`);
+  }
+}
+
+async function executeArgs(adb: AdbExecutor, args: string[], signal?: AbortSignal): Promise<void> {
+  try {
+    await adb.execute(args, { noRetry: true, signal });
   } catch (error) {
     throw new ActionableError(`Android shared-storage operation failed: ${errorMessage(error)}`);
   }

@@ -58,6 +58,11 @@ describe("SharedStorageService", () => {
     expect(commands).toContain("shell mkdir -p '/sdcard/Download/run-42/docs'");
     expect(commands).toContain("shell mkdir -p '/sdcard/Download/run-42/media'");
     expect(commands.some(command => command.includes("push ") && command.includes("/sdcard/Download/run-42/docs/read me.txt"))).toBe(true);
+    expect(executor.getExecutedArgv()).toContainEqual([
+      "push",
+      expect.stringContaining("automobile-shared-storage-"),
+      "/sdcard/Download/run-42/docs/read me.txt",
+    ]);
     expect(commands.some(command => command.includes("MEDIA_SCANNER_SCAN_FILE") && command.includes("file:///sdcard/Download/run-42/media/photo.png"))).toBe(true);
     expect(commands.some(command => command.includes("content query") && command.includes("external_primary/images/media"))).toBe(true);
     expect(commands.every(command => !command.includes(".."))).toBe(true);
@@ -127,6 +132,21 @@ describe("SharedStorageService", () => {
       files: [
         { contentText: "nested", destinationPath: "foo/bar.txt" },
         { contentText: "file", destinationPath: "foo" },
+      ],
+    })).rejects.toThrow("conflicts with a nested fixture");
+    expect(adbFactory.getFakeClient().getAllCommands()).toEqual([]);
+  });
+
+  test("rejects duplicate normalized destinations before touching shared storage", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const service = createSharedStorageServiceForTesting({ adbFactory });
+    await expect(service.stage({
+      device: androidDevice,
+      namespace: "run-42",
+      reset: true,
+      files: [
+        { contentText: "first", destinationPath: "fixture.txt" },
+        { contentText: "second", destinationPath: "./fixture.txt" },
       ],
     })).rejects.toThrow("conflicts with a nested fixture");
     expect(adbFactory.getFakeClient().getAllCommands()).toEqual([]);

@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.sdk.storage
 
 import dev.jasonpearson.automobile.sdk.InspectorRegistration
+import dev.jasonpearson.automobile.sdk.removeIfIdentical
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.cancellation.CancellationException
 
@@ -36,7 +37,7 @@ object DataStoreInspector {
   fun registerAdapter(name: String, adapter: DataStoreAdapter): InspectorRegistration {
     require(name.isNotBlank()) { "adapter name must not be blank" }
     adapters[name] = adapter
-    return InspectorRegistration { adapters.remove(name, adapter) }
+    return InspectorRegistration { adapters.removeIfIdentical(name, adapter) }
   }
 
   /** Removes the adapter registered under [name] and returns whether one was registered. */

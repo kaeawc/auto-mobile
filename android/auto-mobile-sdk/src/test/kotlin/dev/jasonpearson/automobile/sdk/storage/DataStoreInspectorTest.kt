@@ -15,6 +15,13 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class DataStoreInspectorTest {
 
+  /** An adapter with value equality, to prove removal keys on reference identity not equals. */
+  private data class EqualAdapter(val tag: String = "same") : DataStoreAdapter {
+    override suspend fun storeNames() = emptyList<String>()
+
+    override suspend fun read(storeName: String) = emptyList<DataStoreEntry>()
+  }
+
   @Before
   fun setUp() {
     DataStoreInspector.reset()
@@ -287,6 +294,20 @@ class DataStoreInspectorTest {
   fun `stale registration handle does not remove a replacement`() {
     val first = FakeDataStoreAdapter()
     val second = FakeDataStoreAdapter()
+    val firstReg = DataStoreInspector.registerAdapter("prefs", first)
+    DataStoreInspector.registerAdapter("prefs", second) // replaces first
+
+    assertFalse(firstReg.unregister())
+    assertEquals(setOf("prefs"), DataStoreInspector.registeredAdapterNames())
+  }
+
+  // #5581 — identity is by reference, not equals: two distinct-but-equal adapters must not let a
+  // stale handle remove the replacement (a ConcurrentHashMap.remove(k,v) equals-based check would).
+  @Test
+  fun `stale handle does not remove an equals-equal replacement`() {
+    val first = EqualAdapter()
+    val second = EqualAdapter()
+    assertEquals(first, second) // value-equal, distinct instances
     val firstReg = DataStoreInspector.registerAdapter("prefs", first)
     DataStoreInspector.registerAdapter("prefs", second) // replaces first
 

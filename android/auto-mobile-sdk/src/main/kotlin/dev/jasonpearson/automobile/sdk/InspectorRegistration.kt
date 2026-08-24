@@ -1,5 +1,31 @@
 package dev.jasonpearson.automobile.sdk
 
+import java.util.concurrent.ConcurrentHashMap
+
+/**
+ * Removes [name] only if it currently maps to the exact [value] instance (reference identity, not
+ * [equals]). Returns whether it was removed.
+ *
+ * `ConcurrentHashMap.remove(key, value)` compares with `equals`, so two distinct drivers that
+ * compare equal (or the same instance registered twice) would let a stale handle remove a live
+ * replacement (issue #5581). This uses `===` under an atomic `computeIfPresent` instead.
+ */
+internal fun <V : Any> ConcurrentHashMap<String, V>.removeIfIdentical(
+  name: String,
+  value: V,
+): Boolean {
+  var removed = false
+  computeIfPresent(name) { _, current ->
+    if (current === value) {
+      removed = true
+      null // returning null removes the mapping
+    } else {
+      current
+    }
+  }
+  return removed
+}
+
 /**
  * Handle returned by an inspector's driver/adapter registration
  * ([dev.jasonpearson.automobile.sdk.storage.SharedPreferencesInspector.registerDriver],

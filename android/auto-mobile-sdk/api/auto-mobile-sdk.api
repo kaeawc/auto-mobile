@@ -211,6 +211,10 @@ public final class dev.jasonpearson.automobile.sdk.InspectorRegistration {
   public dev.jasonpearson.automobile.sdk.InspectorRegistration(kotlin.jvm.functions.Function0<java.lang.Boolean>);
   public final boolean unregister();
 }
+Compiled from "InspectorRegistration.kt"
+public final class dev.jasonpearson.automobile.sdk.InspectorRegistrationKt {
+  public static final <V> boolean removeIfIdentical(java.util.concurrent.ConcurrentHashMap<java.lang.String, V>, java.lang.String, V);
+}
 Compiled from "NavigationEvent.kt"
 public final class dev.jasonpearson.automobile.sdk.NavigationEvent {
   public static final int $stable;

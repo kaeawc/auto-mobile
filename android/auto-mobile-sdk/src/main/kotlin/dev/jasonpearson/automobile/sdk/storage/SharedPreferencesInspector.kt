@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.sdk.storage
 
 import android.content.Context
 import dev.jasonpearson.automobile.sdk.InspectorRegistration
+import dev.jasonpearson.automobile.sdk.removeIfIdentical
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -67,7 +68,7 @@ object SharedPreferencesInspector {
   fun registerDriver(name: String, driver: SharedPreferencesDriver): InspectorRegistration {
     require(name.isNotBlank()) { "driver name must not be blank" }
     customDrivers[name] = driver
-    return InspectorRegistration { customDrivers.remove(name, driver) }
+    return InspectorRegistration { customDrivers.removeIfIdentical(name, driver) }
   }
 
   /** Removes an application-owned key-value driver and returns whether it was registered. */

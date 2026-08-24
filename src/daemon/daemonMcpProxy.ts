@@ -493,18 +493,20 @@ function startupOptionDeficits(
  * *running* daemon's existing options as the base and overlays the connecting
  * client's requested options, so a restart triggered for any reason can never
  * silently strip a flag the daemon was already launched with (issue #3846) —
- * it only ever adds flags the client explicitly asks for. Reuse-critical flags
- * the running daemon already has are force-preserved so an explicit-`false`
- * from the client cannot turn them back off.
+ * it only ever adds flags the client explicitly asks for. Boolean CLI options
+ * are one-directional: `false` means the caller has no opinion, so every
+ * active boolean on the running daemon is force-preserved.
  */
 function mergeDaemonOptions(
   running: DaemonOptions | undefined,
   requested: DaemonOptions | undefined,
 ): DaemonOptions {
-  const merged: DaemonOptions = { ...(running ?? {}), ...(requested ?? {}) };
+  const runningOptions = running ?? {};
+  const requestedOptions = requested ?? {};
+  const merged: DaemonOptions = { ...runningOptions, ...requestedOptions };
   const mergedRecord = merged as Record<string, unknown>;
-  for (const key of REUSE_CRITICAL_OPTION_KEYS) {
-    if (running?.[key] === true) {
+  for (const [key, value] of Object.entries(runningOptions)) {
+    if (value === true) {
       mergedRecord[key] = true;
     }
   }

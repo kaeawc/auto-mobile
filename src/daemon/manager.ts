@@ -821,16 +821,16 @@ export class DaemonManager implements DaemonManagerLike {
       args.push("--accessibility-audit");
     }
     if (options.accessibilityLevel) {
-      args.push("--accessibility-level", options.accessibilityLevel);
+      args.push("--a11y-level", options.accessibilityLevel);
     }
     if (options.accessibilityFailureMode) {
-      args.push("--accessibility-failure-mode", options.accessibilityFailureMode);
+      args.push("--a11y-failure-mode", options.accessibilityFailureMode);
     }
     if (options.accessibilityMinSeverity) {
-      args.push("--accessibility-min-severity", options.accessibilityMinSeverity);
+      args.push("--a11y-min-severity", options.accessibilityMinSeverity);
     }
     if (options.accessibilityUseBaseline) {
-      args.push("--accessibility-use-baseline");
+      args.push("--a11y-use-baseline");
     }
     if (options.predictiveUi) {
       args.push("--predictive-ui");
@@ -1550,16 +1550,16 @@ export function parseDaemonArgs(
       options.memPerfAudit = true;
     } else if (args[i] === "--accessibility-audit") {
       options.accessibilityAudit = true;
-    } else if (args[i] === "--accessibility-level") {
+    } else if (args[i] === "--accessibility-level" || args[i] === "--a11y-level") {
       options.accessibilityLevel = args[i + 1];
       i++;
-    } else if (args[i] === "--accessibility-failure-mode") {
+    } else if (args[i] === "--accessibility-failure-mode" || args[i] === "--a11y-failure-mode") {
       options.accessibilityFailureMode = args[i + 1];
       i++;
-    } else if (args[i] === "--accessibility-min-severity") {
+    } else if (args[i] === "--accessibility-min-severity" || args[i] === "--a11y-min-severity") {
       options.accessibilityMinSeverity = args[i + 1];
       i++;
-    } else if (args[i] === "--accessibility-use-baseline") {
+    } else if (args[i] === "--accessibility-use-baseline" || args[i] === "--a11y-use-baseline") {
       options.accessibilityUseBaseline = true;
     } else if (args[i] === "--predictive-ui" || args[i] === "--predictive") {
       options.predictiveUi = true;

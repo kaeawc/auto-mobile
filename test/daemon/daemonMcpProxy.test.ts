@@ -809,6 +809,12 @@ describe("DaemonMcpProxy", () => {
         enabledTools?: string[];
         disabledTools?: string[];
         predictiveUi?: boolean;
+        noWaitForPollingOverhead?: boolean;
+        dismissKeyboardAfterInput?: boolean;
+        noA11yIncludeNotImportantViews?: boolean;
+        noA11yReportViewIds?: boolean;
+        noA11yRetrieveInteractiveWindows?: boolean;
+        noOcclusion?: boolean;
       }) {
         return {
           running: true,
@@ -899,6 +905,59 @@ describe("DaemonMcpProxy", () => {
           await proxy.listTools();
           expect(fakeManager.restartCalled).toBe(true);
           expect(fakeManager.restartOptions).toEqual({ predictiveUi: true });
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("preserves active non-critical options on a feature-flag restart", async () => {
+        const fakeClient = new FakeDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        });
+        const fakeManager = new FakeDaemonManager();
+        const runningOptions = {
+          predictiveUi: false,
+          noWaitForPollingOverhead: true,
+          dismissKeyboardAfterInput: true,
+          noA11yIncludeNotImportantViews: true,
+          noA11yReportViewIds: true,
+          noA11yRetrieveInteractiveWindows: true,
+          noOcclusion: true,
+        };
+        fakeManager.statusResults = [
+          runningStatus(runningOptions), // ensureVersionMatches
+          runningStatus(runningOptions), // ensureBuildMatches
+          runningStatus(runningOptions), // ensureStartupOptionsMatch (mismatch)
+          runningStatus({ ...runningOptions, predictiveUi: true }), // post-restart verify
+        ];
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => fakeClient,
+          daemonManager: fakeManager,
+          daemonOptions: {
+            predictiveUi: true,
+            noWaitForPollingOverhead: false,
+            dismissKeyboardAfterInput: false,
+            noA11yIncludeNotImportantViews: false,
+            noA11yReportViewIds: false,
+            noA11yRetrieveInteractiveWindows: false,
+            noOcclusion: false,
+          },
+        });
+
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCalled).toBe(true);
+          expect(fakeManager.restartOptions).toEqual({
+            predictiveUi: true,
+            noWaitForPollingOverhead: true,
+            dismissKeyboardAfterInput: true,
+            noA11yIncludeNotImportantViews: true,
+            noA11yReportViewIds: true,
+            noA11yRetrieveInteractiveWindows: true,
+            noOcclusion: true,
+          });
         } finally {
           isAvailableSpy.mockRestore();
           await proxy.close();

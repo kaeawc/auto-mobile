@@ -357,6 +357,25 @@ class HierarchyDiffTest {
   }
 
   @Test
+  fun `z-order-reversed windows classify symmetrically under A and B swap`() {
+    // Two windows that swap z-order: the similarity matrix is [[0,1],[1,0]] with two equally
+    // optimal order-preserving alignments. The tie-break must pick by window content, not by side,
+    // so diffHierarchies(a, b) and diffHierarchies(b, a) agree once A/B roles are swapped.
+    val a = multiWindowRoot(windowA(), windowC())
+    val b = multiWindowRoot(windowC(), windowA())
+    val ab = diffHierarchies(a, b)
+    val ba = diffHierarchies(b, a)
+
+    fun keys(diff: HierarchyDiff, status: NodeDiffStatus) =
+      diff.entries.filter { it.status == status }.map { it.key }.toSet()
+
+    assertEquals(keys(ab, NodeDiffStatus.OnlyInA), keys(ba, NodeDiffStatus.OnlyInB))
+    assertEquals(keys(ab, NodeDiffStatus.OnlyInB), keys(ba, NodeDiffStatus.OnlyInA))
+    assertEquals(keys(ab, NodeDiffStatus.Changed), keys(ba, NodeDiffStatus.Changed))
+    assertEquals(keys(ab, NodeDiffStatus.Equal), keys(ba, NodeDiffStatus.Equal))
+  }
+
+  @Test
   fun `parallel multi-window stacks still pair positionally by highest similarity`() {
     // Two devices, same two-window stack, differing only in a text value on the first window: the
     // diagonal alignment wins, so windows pair by position and just the changed node is Changed.

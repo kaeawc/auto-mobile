@@ -173,6 +173,11 @@ private fun alignWindowSlots(
 
   val signaturesA = windowsA.map { signatureKeys(it) }
   val signaturesB = windowsB.map { signatureKeys(it) }
+  // A canonical, side-independent ordering key per window (its sorted signature). Used only to
+  // break a skipA-vs-skipB tie deterministically by window *content* rather than by side, so the
+  // choice is transposition-invariant (see the backtrack below).
+  val canonicalA = signaturesA.map { canonicalSignature(it) }
+  val canonicalB = signaturesB.map { canonicalSignature(it) }
 
   // Needleman–Wunsch: score[i][j] is the best alignment score of the first i A-windows against the
   // first j B-windows. A diagonal step pairs the two windows (adds their similarity); an up/left
@@ -188,9 +193,11 @@ private fun alignWindowSlots(
   }
 
   // Backtrack to the alignment columns, then number them left-to-right. Ties prefer the diagonal
-  // (keeps positional pairing) and then skipA over skipB (a fixed, direction-consistent order so
-  // the
-  // swapped call produces the mirror alignment and hence identical slots).
+  // (keeps positional pairing). When a gap must be chosen and skipA and skipB score equally, break
+  // the tie by window *content* — skip the canonically-smaller window — not by A/B side. A fixed
+  // side preference (always skipA) is not transposition-invariant: two windows that reverse
+  // z-order (similarities `[[0,1],[1,0]]`) then pair differently under swap, breaking the symmetry
+  // contract of [diffHierarchies]. Choosing by content skips the *same* window either way.
   val columnsA = ArrayList<Int>()
   val columnsB = ArrayList<Int>()
   var i = n
@@ -201,6 +208,15 @@ private fun alignWindowSlots(
       else Double.NEGATIVE_INFINITY
     val skipA = if (i > 0) score[i - 1][j] else Double.NEGATIVE_INFINITY
     val skipB = if (j > 0) score[i][j - 1] else Double.NEGATIVE_INFINITY
+    val takeSkipA =
+      when {
+        j == 0 -> true
+        i == 0 -> false
+        skipA > skipB -> true
+        skipB > skipA -> false
+        // Equal scores: skip the canonically-smaller window (ties → skipA); side-independent.
+        else -> canonicalA[i - 1] <= canonicalB[j - 1]
+      }
     when {
       i > 0 && j > 0 && diagonal >= skipA && diagonal >= skipB -> {
         columnsA.add(i - 1)
@@ -208,7 +224,7 @@ private fun alignWindowSlots(
         i--
         j--
       }
-      i > 0 && skipA >= skipB -> {
+      takeSkipA -> {
         columnsA.add(i - 1)
         columnsB.add(-1)
         i--
@@ -242,6 +258,14 @@ private fun signatureKeys(window: UIElementInfo): Set<String> {
   addSubtree(map, window, parentKey = "", siblingIndex = 0)
   return map.keys
 }
+
+/**
+ * A canonical, order-independent string for a window's structural key set: its keys sorted and
+ * joined. Two windows compare equal here iff they have the same set of structural keys, so it is a
+ * side-independent total order for the transposition-invariant tie-break in [alignWindowSlots].
+ */
+private fun canonicalSignature(signature: Set<String>): String =
+  signature.sorted().joinToString(" ")
 
 /** Jaccard overlap |a ∩ b| / |a ∪ b| of two structural key sets; 0 when both are empty. */
 private fun jaccard(a: Set<String>, b: Set<String>): Double {

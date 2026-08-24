@@ -536,10 +536,14 @@ async function main() {
       noUiPerfMode: !uiPerfMode,
       memPerfAudit: memPerfAuditMode,
       accessibilityAudit: a11yAuditMode,
-      accessibilityLevel: a11yLevel,
-      accessibilityFailureMode: a11yFailureMode,
-      accessibilityMinSeverity: a11yMinSeverity,
-      accessibilityUseBaseline: a11yUseBaseline,
+      ...(accessibilityConfig
+        ? {
+            accessibilityLevel: accessibilityConfig.level,
+            accessibilityFailureMode: accessibilityConfig.failureMode,
+            accessibilityMinSeverity: accessibilityConfig.minSeverity,
+            accessibilityUseBaseline: accessibilityConfig.useBaseline,
+          }
+        : {}),
       predictiveUi,
       rawElementSearch,
       skipCtrlProxyDownload,

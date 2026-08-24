@@ -300,7 +300,6 @@ export const REUSE_CRITICAL_OPTION_KEYS: (keyof DaemonOptions)[] = [
   "noUiPerfMode",
   "memPerfAudit",
   "accessibilityAudit",
-  "accessibilityUseBaseline",
   "predictiveUi",
   "rawElementSearch",
   "mcpRecording",
@@ -475,6 +474,16 @@ function startupOptionDeficits(
       numberOption,
       (options, key) => numberOption(options, key) ?? Number.NaN,
     ),
+    ...requestedOptionDeficits(
+      ["accessibilityUseBaseline"],
+      requested,
+      running,
+      (options) =>
+        options?.accessibilityAudit === true
+          ? options.accessibilityUseBaseline === true
+          : undefined,
+      (options) => options?.accessibilityUseBaseline === true,
+    ),
     ...exactToolSelectionDeficits(requested, running),
     ...requestedOptionDeficits(
       ["eventAllMarkers"],
@@ -509,6 +518,9 @@ function mergeDaemonOptions(
     if (value === true) {
       mergedRecord[key] = true;
     }
+  }
+  if (requested?.accessibilityAudit === true) {
+    merged.accessibilityUseBaseline = requested.accessibilityUseBaseline === true;
   }
   for (const key of REUSE_CRITICAL_STRING_OPTION_KEYS) {
     const runningString = stringOption(running, key);

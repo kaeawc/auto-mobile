@@ -815,6 +815,11 @@ describe("DaemonMcpProxy", () => {
         noA11yReportViewIds?: boolean;
         noA11yRetrieveInteractiveWindows?: boolean;
         noOcclusion?: boolean;
+        accessibilityAudit?: boolean;
+        accessibilityLevel?: string;
+        accessibilityFailureMode?: string;
+        accessibilityMinSeverity?: string;
+        accessibilityUseBaseline?: boolean;
       }) {
         return {
           running: true,
@@ -958,6 +963,48 @@ describe("DaemonMcpProxy", () => {
             noA11yRetrieveInteractiveWindows: true,
             noOcclusion: true,
           });
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("reconciles the effective accessibility-audit defaults", async () => {
+        const fakeClient = new FakeDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        });
+        const fakeManager = new FakeDaemonManager();
+        const runningOptions = {
+          accessibilityAudit: true,
+          accessibilityLevel: "AAA",
+          accessibilityFailureMode: "strict",
+          accessibilityMinSeverity: "error",
+          accessibilityUseBaseline: true,
+        };
+        const requestedOptions = {
+          accessibilityAudit: true,
+          accessibilityLevel: "AA",
+          accessibilityFailureMode: "report",
+          accessibilityMinSeverity: "warning",
+          accessibilityUseBaseline: false,
+        };
+        fakeManager.statusResults = [
+          runningStatus(runningOptions), // ensureVersionMatches
+          runningStatus(runningOptions), // ensureBuildMatches
+          runningStatus(runningOptions), // ensureStartupOptionsMatch (mismatch)
+          runningStatus(requestedOptions), // post-restart verify
+        ];
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => fakeClient,
+          daemonManager: fakeManager,
+          daemonOptions: requestedOptions,
+        });
+
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCalled).toBe(true);
+          expect(fakeManager.restartOptions).toEqual(requestedOptions);
         } finally {
           isAvailableSpy.mockRestore();
           await proxy.close();

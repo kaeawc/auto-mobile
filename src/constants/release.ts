@@ -65,6 +65,15 @@ export interface ReleaseChecksumEntry {
  */
 export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
   {
+    version: "0.0.63",
+    apkSha256: "32c41a2ab7b6f1bb2f736f991de5010658ba5c7b1a1f5c990e390ed939454486",
+    ipaSha256: "6f4a27c4d51b7cc8bf0b512fd163e0a1ff17cf4224c402c264788b23de78b622",
+    runnerSha256: "e392dd7ff4d263c157b8958010447825eba53ef3aa73a54222a5a7090fb41db9",
+    runnerSha256Target: "xctest",
+    videoJarSha256: "e5ce791aed17a1bf391db5737367a8ca2d7792b805f2fa4235e4ec7f8cee062c",
+    screenCaptureHelperSha256: "3a011807006e8c41ea5cb1ac2bb3e272950dc73f3dacd100e8a054411866d3d7",
+  },
+  {
     version: "0.0.62",
     apkSha256: "cb7e7f2d98de39a6db3764633190fadad0eff996f5145f1f744ca1be6d155120",
     ipaSha256: "3129f6969effaa8532890eb9fbfe2abd3d09a93c7dfbd0144d59b520125ec0c2",

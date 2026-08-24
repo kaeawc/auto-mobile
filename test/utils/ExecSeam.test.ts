@@ -164,4 +164,15 @@ describe("argv exec seam", function() {
 
     await expect(started.result).rejects.toThrow(/callback stdout[\s\S]*callback stderr/);
   }, FAST_TEST_TIMEOUT_MS);
+
+  test("trackable command execution propagates synchronous startup failures", function() {
+    const startupError = new Error("The argument contains a NUL byte");
+    const execWithChild: ExecFileWithChild = () => {
+      throw startupError;
+    };
+
+    expect(() => new DefaultHostCommandExecutor(undefined, execWithChild)
+      .executeCommandWithChild("adb", ["shell", "a\0b"]))
+      .toThrow(/Command failed: adb shell a\0b[\s\S]*The argument contains a NUL byte/);
+  }, FAST_TEST_TIMEOUT_MS);
 });

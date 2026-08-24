@@ -1,6 +1,7 @@
 import { execFile, spawn, type ChildProcess, type SpawnOptions } from "child_process";
 import { promisify } from "util";
 import type { ExecResult } from "../models";
+import { wrapCommandError } from "./CommandError";
 import { runExecSeam, type ExecRequestOptions, type ExecSeamOptions, type RawExecOutput } from "./ExecSeam";
 
 export type HostCommandOptions = ExecRequestOptions;
@@ -102,23 +103,37 @@ export class DefaultHostCommandExecutor implements HostProcessExecutor {
     options: HostCommandOptions = {}
   ): StartedHostCommand {
     let child: ChildProcess | undefined;
+    let startupError: unknown;
     const result = runExecSeam(
       execOptions => new Promise<RawExecOutput>((resolve, reject) => {
-        child = this.execWithChild(file, args, execOptions, (error, stdout, stderr) => {
-          if (error) {
-            Object.assign(error, { stdout, stderr });
-            reject(error);
-            return;
-          }
-          resolve({ stdout, stderr });
-        });
+        try {
+          child = this.execWithChild(file, args, execOptions, (error, stdout, stderr) => {
+            if (error) {
+              Object.assign(error, { stdout, stderr });
+              reject(error);
+              return;
+            }
+            resolve({ stdout, stderr });
+          });
+        } catch (error) {
+          startupError = error;
+          reject(error);
+        }
       }),
       options,
       { command: file, args, cwd: options.cwd }
     );
 
     if (!child) {
-      throw new Error(`Failed to start command: ${file}`);
+      // The callback-style exec API may throw before returning a child (for
+      // example, when argv contains a NUL). The promise has already captured
+      // that failure for the shared seam; consume its wrapped rejection before
+      // surfacing the same actionable error synchronously to the caller.
+      void result.catch(() => undefined);
+      throw wrapCommandError(
+        startupError ?? new Error(`Failed to start command: ${file}`),
+        { command: file, args, cwd: options.cwd }
+      );
     }
     return { child, result };
   }

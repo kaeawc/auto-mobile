@@ -16,12 +16,23 @@
         /// Walk the entire view hierarchy and return a snapshot.
         /// Must be called on the main thread.
         public static func walk(bundleId: String? = nil) -> SdkViewHierarchy {
+            walk(in: visibleKeyWindow(), bundleId: bundleId)
+        }
+
+        /// Testability seam: snapshot an explicit window rather than resolving the
+        /// visible key window. Production always goes through `walk(bundleId:)`;
+        /// tests use this so a snapshot doesn't depend on which of several windows
+        /// (app, overlays) the global key-window heuristic happens to pick.
+        static func walk(window: UIWindow, bundleId: String? = nil) -> SdkViewHierarchy {
+            walk(in: window, bundleId: bundleId)
+        }
+
+        private static func walk(in keyWindow: UIWindow?, bundleId: String?) -> SdkViewHierarchy {
             let scale = Float(UIScreen.main.scale)
             let screenBounds = UIScreen.main.bounds
             let screenWidth = Int(screenBounds.width)
             let screenHeight = Int(screenBounds.height)
 
-            let keyWindow = visibleKeyWindow()
             let rootNode = keyWindow.flatMap(walkWindow)
             let safeAreaInsets = keyWindow.map {
                 SdkEdgeInsets(
@@ -261,6 +272,13 @@
             // Propagate any new opaque overlays discovered in children
             opaqueOverlays = childOpaqueOverlays
 
+            // SwiftUI inline `AttributedString` links collapse into a single
+            // `staticText` accessibility node whose links are reachable in-app only
+            // through its `.link` custom rotor (issue #5578). Synthesize an owner
+            // node per such element so the runner can merge + activate them, keyed
+            // by the element's own accessibility identifier.
+            childNodes.append(contentsOf: linkRotorOwnerNodes(of: view, rootView: rootView))
+
             let semanticLinks = semanticLinks(for: view, rootView: rootView)
 
             return SdkViewNode(
@@ -349,6 +367,152 @@
             // category, so reading it directly is safe for whatever concrete elements
             // (typically UIAccessibilityElement) a view vends.
             return elements.filter { $0.accessibilityTraits.contains(.link) }
+        }
+
+        /// Synthesize an owner node for every accessibility element vended by `view`
+        /// that exposes inline links through a `.link` system rotor (SwiftUI
+        /// `Text(AttributedString)`; issue #5578). Each node carries the element's
+        /// own accessibility identifier + frame and the discovered links (text,
+        /// per-text ascending occurrence, and on-screen center), so the runner's
+        /// identifier/bounds match projects them onto the owning element and the
+        /// coordinate-tap activation from #5560 works unchanged.
+        private static func linkRotorOwnerNodes(of view: UIView, rootView: UIView) -> [SdkViewNode] {
+            var owners: [SdkViewNode] = []
+            for element in accessibilityElements(of: view) {
+                guard let items = linkRotorItems(of: element), !items.isEmpty else { continue }
+                let links = SemanticLinkExtractor.links(fromAccessibilityLinkLabels: items.map(\.label))
+                guard !links.isEmpty else { continue }
+
+                // Re-pair each extracted link with the rotor item it came from,
+                // skipping the blank labels the extractor drops, so the activation
+                // frames line up (mirrors the `.link`-child pairing above).
+                var itemIndex = 0
+                let located: [SdkSemanticLink] = links.map { link in
+                    while itemIndex < items.count,
+                          items[itemIndex].label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    {
+                        itemIndex += 1
+                    }
+                    let point = itemIndex < items.count
+                        ? center(ofScreenFrame: items[itemIndex].frame, rootView: rootView)
+                        : nil
+                    itemIndex += 1
+                    return withCenter(link, point: point)
+                }
+
+                // An element can expose a `.link` rotor while sitting off-screen
+                // (e.g. scrolled out), leaving a degenerate `accessibilityFrame`
+                // (`.null` has infinite origin). `sdkBounds` feeds the origin into
+                // `Int(_:)`, which traps on non-finite input, so guard here exactly
+                // as every other `sdkBounds` caller guards its frame.
+                let ownerFrame = rootView.convert(element.accessibilityFrame, from: nil)
+                guard ownerFrame.width > 0, ownerFrame.height > 0,
+                      ownerFrame.origin.x.isFinite, ownerFrame.origin.y.isFinite
+                else {
+                    continue
+                }
+                owners.append(
+                    SdkViewNode(
+                        className: String(describing: type(of: element)),
+                        bounds: sdkBounds(from: ownerFrame),
+                        accessibilityLabel: element.accessibilityLabel,
+                        accessibilityIdentifier: accessibilityIdentifier(of: element),
+                        isAccessibilityElement: true,
+                        accessibilityTraits: traitNames(for: element.accessibilityTraits),
+                        isUserInteractionEnabled: false,
+                        semanticLinks: located
+                    )
+                )
+            }
+            return owners
+        }
+
+        /// Flatten a view's accessibility elements, preferring the array property and
+        /// falling back to the `UIAccessibilityContainer` protocol methods (some
+        /// SwiftUI backing views populate only the latter).
+        private static func accessibilityElements(of view: UIView) -> [NSObject] {
+            if let array = view.accessibilityElements as? [NSObject], !array.isEmpty {
+                return array
+            }
+            // `accessibilityElementCount()` returns `NSNotFound` for a non-container;
+            // a positive value is the number of vended elements (an Int API, not a
+            // collection count).
+            let elementCount = view.accessibilityElementCount()
+            guard elementCount != NSNotFound, elementCount > 0 else { return [] }
+            var out: [NSObject] = []
+            for index in 0 ..< elementCount {
+                if let element = view.accessibilityElement(at: index) as? NSObject {
+                    out.append(element)
+                }
+            }
+            return out
+        }
+
+        /// The ordered link items of `element`'s `.link` system rotor, as
+        /// (label, on-screen frame) pairs in document order. `nil` when the element
+        /// has no link rotor.
+        private static func linkRotorItems(of element: NSObject) -> [(label: String, frame: CGRect)]? {
+            guard let rotors = element.accessibilityCustomRotors,
+                  let rotor = rotors.first(where: { $0.systemRotorType == .link })
+            else {
+                return nil
+            }
+            var items: [(label: String, frame: CGRect)] = []
+            var visited = Set<ObjectIdentifier>()
+            var current = nextRotorItem(rotor, after: UIAccessibilityCustomRotorItemResult())
+            // SwiftUI (verified iOS 18) vends each inline link as its own
+            // `LinkElement` target, so distinct occurrences have distinct
+            // `targetElement`s (and distinct frames). The `targetRange` alternative —
+            // one target with per-item ranges — is intentionally unhandled: this
+            // dedup would then stop after the first item, degrading to a single
+            // whole-element link (no crash; `occurrence > 0` activation just falls
+            // back to XCUITest) rather than misreporting geometry.
+            //
+            // A well-behaved rotor returns nil past its last item; the visited set +
+            // hard cap defend against a wrap-around rotor that never terminates.
+            var guardCount = 0
+            while let result = current, guardCount < 256 {
+                guard let target = result.targetElement as? NSObject,
+                      visited.insert(ObjectIdentifier(target)).inserted
+                else {
+                    break
+                }
+                items.append((target.accessibilityLabel ?? "", target.accessibilityFrame))
+                current = nextRotorItem(rotor, after: result)
+                guardCount += 1
+            }
+            return items.isEmpty ? nil : items
+        }
+
+        private static func nextRotorItem(
+            _ rotor: UIAccessibilityCustomRotor,
+            after item: UIAccessibilityCustomRotorItemResult
+        )
+            -> UIAccessibilityCustomRotorItemResult?
+        {
+            let predicate = UIAccessibilityCustomRotorSearchPredicate()
+            predicate.currentItem = item
+            predicate.searchDirection = .next
+            return rotor.itemSearchBlock(predicate)
+        }
+
+        /// Read an accessibility element's identifier. SwiftUI's private element
+        /// implements `accessibilityIdentifier` but does not declare
+        /// `UIAccessibilityIdentification` conformance, so the protocol cast misses
+        /// it; fall back to the KVC-exposed getter, guarded by `responds(to:)`.
+        private static func accessibilityIdentifier(of object: NSObject) -> String? {
+            if let identified = object as? UIAccessibilityIdentification,
+               let identifier = identified.accessibilityIdentifier, !identifier.isEmpty
+            {
+                return identifier
+            }
+            let key = "accessibilityIdentifier"
+            if object.responds(to: NSSelectorFromString(key)),
+               let value = object.value(forKey: key) as? String, !value.isEmpty
+            {
+                return value
+            }
+            return nil
         }
 
         private static func linkCenter(

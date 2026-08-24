@@ -888,7 +888,9 @@ describe("AndroidCtrlProxyClient", function() {
     }
   });
 
-  test("late invalidated-observer cleanup cannot release a replacement observer's port", async function() {
+  // Windows Bun evaluates the Android barrel and direct import as separate module
+  // records, so their singleton registries cannot exercise this lifecycle.
+  test.skipIf(process.platform === "win32")("late invalidated-observer cleanup cannot release a replacement observer's port", async function() {
     await accessibilityServiceClient.close();
     AndroidCtrlProxyClient.resetInstances();
     PortManager.reset();

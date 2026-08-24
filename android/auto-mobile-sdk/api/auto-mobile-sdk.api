@@ -205,6 +205,16 @@ public final class dev.jasonpearson.automobile.sdk.FrameMetricsCollector {
   public static final void access$attachWindow(dev.jasonpearson.automobile.sdk.FrameMetricsCollector, android.view.Window);
   public static final void access$detachWindow(dev.jasonpearson.automobile.sdk.FrameMetricsCollector, android.view.Window);
 }
+Compiled from "InspectorRegistration.kt"
+public final class dev.jasonpearson.automobile.sdk.InspectorRegistration {
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.InspectorRegistration(kotlin.jvm.functions.Function0<java.lang.Boolean>);
+  public final boolean unregister();
+}
+Compiled from "InspectorRegistration.kt"
+public final class dev.jasonpearson.automobile.sdk.InspectorRegistrationKt {
+  public static final <V> boolean removeIfIdentical(java.util.concurrent.ConcurrentHashMap<java.lang.String, V>, java.lang.String, V);
+}
 Compiled from "NavigationEvent.kt"
 public final class dev.jasonpearson.automobile.sdk.NavigationEvent {
   public static final int $stable;
@@ -813,7 +823,7 @@ public final class dev.jasonpearson.automobile.sdk.database.DatabaseInspector {
   public final void initialize$auto_mobile_sdk(android.content.Context);
   public final boolean isEnabled();
   public final void setEnabled(boolean);
-  public final void registerDriver(java.lang.String, dev.jasonpearson.automobile.sdk.database.DatabaseDriver);
+  public final dev.jasonpearson.automobile.sdk.InspectorRegistration registerDriver(java.lang.String, dev.jasonpearson.automobile.sdk.database.DatabaseDriver);
   public final boolean unregisterDriver(java.lang.String);
   public final java.util.Set<java.lang.String> registeredDriverNames();
   public final dev.jasonpearson.automobile.sdk.database.DatabaseDriver getDriver$auto_mobile_sdk(java.lang.String);
@@ -1663,7 +1673,7 @@ public final class dev.jasonpearson.automobile.sdk.storage.DataStoreInspector {
   public static final dev.jasonpearson.automobile.sdk.storage.DataStoreInspector INSTANCE;
   public static final java.lang.String REDACTED_VALUE;
   public static final int $stable;
-  public final void registerAdapter(java.lang.String, dev.jasonpearson.automobile.sdk.storage.DataStoreAdapter);
+  public final dev.jasonpearson.automobile.sdk.InspectorRegistration registerAdapter(java.lang.String, dev.jasonpearson.automobile.sdk.storage.DataStoreAdapter);
   public final boolean unregisterAdapter(java.lang.String);
   public final java.util.Set<java.lang.String> registeredAdapterNames();
   public final void setRedactionPolicy(dev.jasonpearson.automobile.sdk.storage.DataStoreRedactionPolicy);
@@ -1874,7 +1884,7 @@ public final class dev.jasonpearson.automobile.sdk.storage.SharedPreferencesInsp
   public final void initialize$auto_mobile_sdk(android.content.Context);
   public final boolean isEnabled();
   public final void setEnabled(boolean);
-  public final void registerDriver(java.lang.String, dev.jasonpearson.automobile.sdk.storage.SharedPreferencesDriver);
+  public final dev.jasonpearson.automobile.sdk.InspectorRegistration registerDriver(java.lang.String, dev.jasonpearson.automobile.sdk.storage.SharedPreferencesDriver);
   public final boolean unregisterDriver(java.lang.String);
   public final java.util.Set<java.lang.String> registeredDriverNames();
   public final dev.jasonpearson.automobile.sdk.storage.SharedPreferencesDriver getDriver$auto_mobile_sdk(java.lang.String);

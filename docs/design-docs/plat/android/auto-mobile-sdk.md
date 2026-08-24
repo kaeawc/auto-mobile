@@ -345,7 +345,10 @@ class AppDataStoreAdapter(
 
 if (BuildConfig.DEBUG) {
   SharedPreferencesInspector.setEnabled(true) // shared storage-surface enable switch
-  DataStoreInspector.registerAdapter("app", AppDataStoreAdapter(stores))
+  // Retain the returned handle for registration-scoped teardown (see Lifecycle-safe below).
+  val registration = DataStoreInspector.registerAdapter("app", AppDataStoreAdapter(stores))
+  // ... later, when this owner is torn down:
+  registration.unregister() // removes only if it has not since been replaced
 }
 ```
 
@@ -354,9 +357,9 @@ DataStore-backed preferences are then discoverable and readable through the exis
 **Boundary guarantees** (enforced by `DataStoreInspector`, independent of the host adapter):
 
 - **Read-only.** The `DataStoreAdapter` contract exposes no mutation entry point, so mutation is structurally unsupported; `capabilities().mutationSupported` is always `false`.
-- **Redaction.** A configurable `DataStoreRedactionPolicy` (`setRedactionPolicy`) redacts matching values at the boundary before they leave the SDK; a host adapter cannot opt out.
+- **Redaction.** A configurable `DataStoreRedactionPolicy` (`setRedactionPolicy`) redacts matching values at the boundary before they leave the SDK; a host adapter cannot opt out. A redacted value is replaced with the `DataStoreInspector.REDACTED_VALUE` marker string and its type is set to `STRING` (so the marker survives wire serialization) — redaction never yields a null value.
 - **Structured values and errors.** Values map onto `DataStoreValueType` (String, Int, Long, Float, Double, Boolean, `Set<String>`, byte array); an unrepresentable value is surfaced as `UNKNOWN` or rejected with `DataStoreAdapterError.UnsupportedValue`. Missing adapters/stores and host read failures surface as `AdapterNotFound`, `StoreNotFound`, and `ReadError`.
-- **Lifecycle-safe.** Registration replaces by name, `unregisterAdapter` returns whether one was removed, and `AutoMobileSDK.shutdown()` clears all adapters. Reads run in the caller's coroutine context, so cancellation propagates cooperatively and no background coroutines or listeners are retained.
+- **Lifecycle-safe.** Registration replaces by name and returns an `InspectorRegistration` handle. For registration-scoped teardown, keep that handle and call `registration.unregister()` — it removes the adapter **only if it has not since been replaced** under the same name, so a stale owner cannot tear down a newer owner's replacement. The name-based `unregisterAdapter(name)` removes whatever is currently registered under that name (use it only when you own the name unconditionally). `AutoMobileSDK.shutdown()` clears all adapters. Reads run in the caller's coroutine context, so cancellation propagates cooperatively and no background coroutines or listeners are retained.
 
 **Limitations.** Read-only by design (no writes). Change subscriptions/listeners are not part of the contract (unlike `SharedPreferencesInspector`) — reads are point-in-time snapshots. Value redaction operates per key/store name, not on nested structured values. The SDK never links against `androidx.datastore`; representing values is the host adapter's responsibility.
 

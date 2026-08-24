@@ -1,6 +1,8 @@
 package dev.jasonpearson.automobile.sdk.database
 
 import android.content.Context
+import dev.jasonpearson.automobile.sdk.InspectorRegistration
+import dev.jasonpearson.automobile.sdk.removeIfIdentical
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -57,10 +59,16 @@ object DatabaseInspector {
     }
   }
 
-  /** Registers an application-owned database driver under a stable store name. */
-  fun registerDriver(name: String, driver: DatabaseDriver) {
+  /**
+   * Registers an application-owned database driver under a stable store name.
+   *
+   * Returns an [InspectorRegistration] whose [InspectorRegistration.unregister] removes this driver
+   * only if it has not since been replaced under the same name (issue #5581).
+   */
+  fun registerDriver(name: String, driver: DatabaseDriver): InspectorRegistration {
     require(name.isNotBlank()) { "driver name must not be blank" }
     customDrivers[name] = driver
+    return InspectorRegistration { customDrivers.removeIfIdentical(name, driver) }
   }
 
   /** Removes an application-owned database driver and returns whether it was registered. */

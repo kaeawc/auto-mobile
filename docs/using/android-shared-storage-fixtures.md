@@ -29,9 +29,11 @@ ADB or choose a transport endpoint.
 Each request uses exactly one content source per file: `sourcePath` for a host
 file, `contentText` for UTF-8 text, or `contentBase64` for binary data. The
 result lists every logical destination, byte count, and media-indexing outcome.
-Media files receive an Android media-scanner request by default; documents
-report that indexing was not requested because the document picker discovers
-files directly from Downloads. Set `indexMedia: false` to skip that request.
+Media files receive an Android media-scanner request by default, and the tool
+waits until the corresponding media-provider row is visible before reporting
+indexing as complete. Documents report that indexing was not requested because
+the document picker discovers files directly from Downloads. Set
+`indexMedia: false` to skip that request.
 
 ## Location and safety limits
 

@@ -8,6 +8,7 @@ import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbE
 import { shellQuote } from "../utils/shellQuote";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 import { errorMessage } from "../utils/describeUnknownError";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import {
   normalizeSharedStorageNamespace,
   normalizeSharedStorageRelativePath,
@@ -41,6 +42,7 @@ const defaultFileSystem: SharedStorageFileSystem = {
 export interface SharedStorageServiceDependencies {
   adbFactory?: AdbClientFactory;
   fileSystem?: SharedStorageFileSystem;
+  timer?: Timer;
 }
 
 export interface StageSharedStorageRequest extends Omit<StageSharedStorageArgs, "device"> {
@@ -75,6 +77,7 @@ export function createSharedStorageServiceForTesting(
   return new DefaultSharedStorageService(
     dependencies.adbFactory ?? defaultAdbClientFactory,
     dependencies.fileSystem ?? defaultFileSystem,
+    dependencies.timer ?? defaultTimer,
   );
 }
 
@@ -82,6 +85,7 @@ class DefaultSharedStorageService implements SharedStorageService {
   constructor(
     private readonly adbFactory: AdbClientFactory,
     private readonly fileSystem: SharedStorageFileSystem,
+    private readonly timer: Timer,
   ) {}
 
   async stage(request: StageSharedStorageRequest): Promise<StageSharedStorageResult> {
@@ -91,26 +95,46 @@ class DefaultSharedStorageService implements SharedStorageService {
     const namespace = normalizeSharedStorageNamespace(request.namespace);
     const destinationDirectory = posix.join(DOWNLOADS_ROOT, namespace);
     const adb = this.adbFactory.create(request.device);
+    const preparedFiles = await this.prepareFiles(request.files);
+    try {
+      if (request.reset) {
+        // namespace has exactly one safe segment, so this can only remove Downloads/<namespace>.
+        await execute(adb, `shell rm -rf ${shellQuote(destinationDirectory)}`, request.signal);
+      }
+      await execute(adb, `shell mkdir -p ${shellQuote(destinationDirectory)}`, request.signal);
 
-    if (request.reset) {
-      // namespace has exactly one safe segment, so this can only remove Downloads/<namespace>.
-      await execute(adb, `shell rm -rf ${shellQuote(destinationDirectory)}`, request.signal);
+      const files: StagedSharedStorageFile[] = [];
+      for (const file of preparedFiles) {
+        files.push(await this.stageFile(adb, request, namespace, destinationDirectory, file));
+      }
+      return {
+        success: true,
+        deviceId: request.device.deviceId,
+        platform: "android",
+        namespace,
+        destinationDirectory,
+        reset: request.reset ?? false,
+        files,
+      };
+    } finally {
+      await Promise.all(preparedFiles.map(file => file.source.cleanup?.()));
     }
-    await execute(adb, `shell mkdir -p ${shellQuote(destinationDirectory)}`, request.signal);
+  }
 
-    const files: StagedSharedStorageFile[] = [];
-    for (const file of request.files) {
-      files.push(await this.stageFile(adb, request, namespace, destinationDirectory, file));
+  private async prepareFiles(files: SharedStorageFileInput[]): Promise<PreparedSharedStorageFile[]> {
+    const prepared: PreparedSharedStorageFile[] = [];
+    try {
+      for (const file of files) {
+        prepared.push({
+          destinationPath: normalizeSharedStorageRelativePath(file.destinationPath),
+          source: await this.prepareSource(file),
+        });
+      }
+      return prepared;
+    } catch (error) {
+      await Promise.all(prepared.map(file => file.source.cleanup?.()));
+      throw error;
     }
-    return {
-      success: true,
-      deviceId: request.device.deviceId,
-      platform: "android",
-      namespace,
-      destinationDirectory,
-      reset: request.reset ?? false,
-      files,
-    };
   }
 
   private async stageFile(
@@ -118,25 +142,20 @@ class DefaultSharedStorageService implements SharedStorageService {
     request: StageSharedStorageRequest,
     namespace: string,
     destinationDirectory: string,
-    file: SharedStorageFileInput,
+    file: PreparedSharedStorageFile,
   ): Promise<StagedSharedStorageFile> {
-    const destinationPath = normalizeSharedStorageRelativePath(file.destinationPath);
+    const destinationPath = file.destinationPath;
     const destination = posix.join(destinationDirectory, destinationPath);
     // Re-check the joined result so future path changes cannot widen the reset namespace.
     if (!destination.startsWith(`${destinationDirectory}/`)) {
       throw new ActionableError(`destinationPath escapes shared-storage namespace ${namespace}`);
     }
-    const source = await this.prepareSource(file);
-    try {
-      await execute(adb, `shell mkdir -p ${shellQuote(posix.dirname(destination))}`, request.signal);
-      await execute(adb, `push ${shellQuote(source.path)} ${shellQuote(destination)}`, request.signal);
-      const mediaIndexing = shouldIndexMedia(destinationPath, request.indexMedia ?? true)
-        ? await indexMediaFile(adb, destination, request.signal)
-        : { status: "notRequested" as const, reason: indexingNotRequestedReason(destinationPath, request.indexMedia ?? true) };
-      return { destinationPath, byteCount: source.byteCount, mediaIndexing };
-    } finally {
-      await source.cleanup?.();
-    }
+    await execute(adb, `shell mkdir -p ${shellQuote(posix.dirname(destination))}`, request.signal);
+    await execute(adb, `push ${shellQuote(file.source.path)} ${shellQuote(destination)}`, request.signal);
+    const mediaIndexing = shouldIndexMedia(destinationPath, request.indexMedia ?? true)
+      ? await indexMediaFile(adb, destination, destinationPath, this.timer, request.signal)
+      : { status: "notRequested" as const, reason: indexingNotRequestedReason(destinationPath, request.indexMedia ?? true) };
+    return { destinationPath, byteCount: file.source.byteCount, mediaIndexing };
   }
 
   private async prepareSource(file: SharedStorageFileInput): Promise<{ path: string; byteCount: number; cleanup?: () => Promise<void> }> {
@@ -158,6 +177,11 @@ class DefaultSharedStorageService implements SharedStorageService {
   }
 }
 
+interface PreparedSharedStorageFile {
+  destinationPath: string;
+  source: { path: string; byteCount: number; cleanup?: () => Promise<void> };
+}
+
 async function execute(adb: AdbExecutor, command: string, signal?: AbortSignal): Promise<void> {
   try {
     await adb.executeCommand(command, undefined, undefined, true, signal);
@@ -166,13 +190,56 @@ async function execute(adb: AdbExecutor, command: string, signal?: AbortSignal):
   }
 }
 
-async function indexMediaFile(adb: AdbExecutor, destination: string, signal?: AbortSignal): Promise<{ status: "completed" }> {
+async function indexMediaFile(
+  adb: AdbExecutor,
+  destination: string,
+  destinationPath: string,
+  timer: Timer,
+  signal?: AbortSignal,
+): Promise<{ status: "completed" }> {
   await execute(
     adb,
     `shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d ${shellQuote(`file://${destination}`)}`,
     signal,
   );
-  return { status: "completed" };
+  const collection = mediaCollectionFor(destinationPath);
+  const deviceRelativePath = destination.slice(`${DOWNLOADS_ROOT}/`.length);
+  const deviceRelativeDirectory = posix.dirname(deviceRelativePath);
+  const relativePath = deviceRelativeDirectory === "."
+    ? "Download/"
+    : `Download/${deviceRelativeDirectory}/`;
+  const displayName = posix.basename(destination);
+  const selection = `relative_path=${sqlString(relativePath)} AND _display_name=${sqlString(displayName)}`;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const result = await executeResult(
+      adb,
+      `shell content query --uri content://media/external_primary/${collection}/media --projection _id --where ${shellQuote(selection)}`,
+      signal,
+    );
+    if (/^Row:/m.test(result.stdout)) {
+      return { status: "completed" };
+    }
+    await timer.sleep(250);
+  }
+  throw new ActionableError(`Android media indexing did not complete for ${destination} within 5 seconds.`);
+}
+
+async function executeResult(adb: AdbExecutor, command: string, signal?: AbortSignal) {
+  try {
+    return await adb.executeCommand(command, undefined, undefined, true, signal);
+  } catch (error) {
+    throw new ActionableError(`Android shared-storage operation failed: ${errorMessage(error)}`);
+  }
+}
+
+function mediaCollectionFor(path: string): "images" | "video" | "audio" {
+  if (/\.(bmp|gif|heic|jpeg|jpg|png|webp)$/i.test(path)) {return "images";}
+  if (/\.(mkv|mov|mp4|webm)$/i.test(path)) {return "video";}
+  return "audio";
+}
+
+function sqlString(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
 }
 
 function shouldIndexMedia(path: string, indexMedia: boolean): boolean {

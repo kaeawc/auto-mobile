@@ -114,19 +114,24 @@ export const findBundleEntry = (
  * pin it) writes a bare `{ apps: [...] }`. Search for the first `apps` array
  * either way rather than hardcoding one envelope, and drop non-object
  * members so callers can treat every entry as a record.
+ *
+ * Returns null when the payload carries no `apps` array at all — that is a
+ * payload this code does not understand, which must not be reported as the
+ * device having no apps installed. An `apps` array that is present but empty
+ * returns `[]`, because that genuinely means "nothing installed".
  */
-export const extractInstalledAppEntries = (data: unknown): Record<string, unknown>[] => {
+export const extractInstalledAppEntries = (data: unknown): Record<string, unknown>[] | null => {
   if (!data || typeof data !== "object") {
-    return [];
+    return null;
   }
   if (Array.isArray(data)) {
     for (const item of data) {
       const found = extractInstalledAppEntries(item);
-      if (found.length > 0) {
+      if (found) {
         return found;
       }
     }
-    return [];
+    return null;
   }
 
   const record = data as Record<string, unknown>;
@@ -139,11 +144,11 @@ export const extractInstalledAppEntries = (data: unknown): Record<string, unknow
 
   for (const value of Object.values(record)) {
     const found = extractInstalledAppEntries(value);
-    if (found.length > 0) {
+    if (found) {
       return found;
     }
   }
-  return [];
+  return null;
 };
 
 const extractBundlePath = (entry: Record<string, unknown>): string | null => {
@@ -904,14 +909,28 @@ export class DeviceAppManager implements DeviceUrlLauncher {
       ]);
 
       const raw = await this.deps.readFile(jsonPath);
-      return extractInstalledAppEntries(JSON.parse(raw) as unknown);
+      const apps = extractInstalledAppEntries(JSON.parse(raw) as unknown);
+      if (!apps) {
+        throw new ActionableError(
+          `devicectl reported no app listing for ${deviceUdid}; its JSON output carried no "apps" array`,
+        );
+      }
+      return apps;
     } catch (error) {
       throw toActionableError(
         error,
         `Failed to list installed apps on physical iOS device ${deviceUdid}`,
       );
     } finally {
-      await this.deps.rm(tempDir);
+      // A failed temp-dir cleanup must not replace the devicectl or JSON
+      // diagnostic the caller needs.
+      try {
+        await this.deps.rm(tempDir);
+      } catch (cleanupError) {
+        this.deps.logger.warn(
+          `[DeviceAppManager] Failed to remove temporary app listing directory ${tempDir}: ${getErrorMessage(cleanupError)}`,
+        );
+      }
     }
   }
 

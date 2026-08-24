@@ -1519,13 +1519,20 @@ describe("extractInstalledAppEntries", () => {
     ]);
   });
 
-  test("drops non-object entries and returns [] for payloads with no listing", () => {
+  test("drops non-object entries", () => {
     expect(extractInstalledAppEntries({ apps: ["nope", null, { bundleId: "com.a" }] })).toEqual([
       { bundleId: "com.a" },
     ]);
-    expect(extractInstalledAppEntries({ result: {} })).toEqual([]);
-    expect(extractInstalledAppEntries(null)).toEqual([]);
-    expect(extractInstalledAppEntries("apps")).toEqual([]);
+  });
+
+  test("distinguishes an empty listing from an unrecognized payload", () => {
+    // Present but empty: the device genuinely has nothing installed.
+    expect(extractInstalledAppEntries({ result: { apps: [] } })).toEqual([]);
+    // No apps array anywhere: a payload we do not understand, not "no apps".
+    expect(extractInstalledAppEntries({ result: {} })).toBeNull();
+    expect(extractInstalledAppEntries({ info: { outcome: "failed" } })).toBeNull();
+    expect(extractInstalledAppEntries(null)).toBeNull();
+    expect(extractInstalledAppEntries("apps")).toBeNull();
   });
 });
 
@@ -1602,6 +1609,42 @@ describe("DeviceAppManager.listInstalledApps", () => {
 
     await expect(manager.listInstalledApps("00008130-001C2D3E1234567A")).rejects.toBeInstanceOf(
       ActionableError,
+    );
+  });
+
+  test("rejects a payload with no apps array instead of reporting an empty listing", async () => {
+    const manager = createManager({}, [], { info: { outcome: "failed" } });
+
+    await expect(manager.listInstalledApps("00008130-001C2D3E1234567A")).rejects.toBeInstanceOf(
+      ActionableError,
+    );
+  });
+
+  test("returns an empty listing when devicectl reports no installed apps", async () => {
+    const manager = createManager({}, [], { result: { apps: [] } });
+
+    await expect(manager.listInstalledApps("00008130-001C2D3E1234567A")).resolves.toEqual([]);
+  });
+
+  test("keeps the devicectl diagnostic when temp-dir cleanup also fails", async () => {
+    const manager = new DeviceAppManager({
+      platform: () => "darwin",
+      execute: async () => {
+        throw new Error("xcrun: devicectl not found");
+      },
+      readFile: async (path: string) => fs.readFile(path, "utf-8"),
+      mkdtemp: async (prefix: string) => fs.mkdtemp(prefix),
+      rm: async () => {
+        throw new Error("cleanup exploded");
+      },
+      readdir: async (path: string) => fs.readdir(path),
+      stat: async (path: string) => fs.stat(path),
+      tmpdir,
+      logger: createFakeLogger(),
+    });
+
+    await expect(manager.listInstalledApps("00008130-001C2D3E1234567A")).rejects.toThrow(
+      /devicectl not found/,
     );
   });
 

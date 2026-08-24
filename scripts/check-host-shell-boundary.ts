@@ -246,7 +246,10 @@ export function findViolationsInSource(file: string, source: string): Violation[
     (isChildProcessSource(initializer) || childProcessApiFromMember(initializer) !== undefined);
 
   const scopeDeclaresName = (scope: ts.Node, name: string): boolean => {
-    if (ts.isFunctionLike(scope) && scope.parameters.some((p) => bindingIntroducesName(p.name, name))) {
+    if (
+      ts.isFunctionLike(scope) &&
+      scope.parameters.some((p) => bindingIntroducesName(p.name, name))
+    ) {
       return true;
     }
     const statements =

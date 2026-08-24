@@ -177,7 +177,7 @@ describe("host shell execution boundary (issue #4068)", () => {
     expect(
       findViolationsInSource(
         "fixture.ts",
-        "import { exec } from \"node:child_process\"; function forward(exec: unknown) { consume(exec); }",
+        'import { exec } from "node:child_process"; function forward(exec: unknown) { consume(exec); }',
       ),
     ).toEqual([]);
     expect(

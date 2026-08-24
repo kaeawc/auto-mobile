@@ -935,17 +935,20 @@ interface IosObserveRoundTripClassification {
 function classifyObserveRoundTrip(
   inspection: IosObserveRoundTripInspection,
 ): IosObserveRoundTripClassification {
-  const hasPortMismatch = inspection.runnerPort !== inspection.clientPort;
   const hasDegenerateScreen = inspection.screenSize.width <= 0 || inspection.screenSize.height <= 0;
   const hasHierarchyError =
     inspection.hierarchyError !== null && inspection.hierarchyError.trim().length > 0;
   const hasNoElements = inspection.elementCount < 1;
-  const failed =
-    !inspection.connected ||
-    hasPortMismatch ||
-    hasDegenerateScreen ||
-    hasHierarchyError ||
-    hasNoElements;
+  // A per-device host port legitimately differs from the runner's self-reported
+  // internal port when multiple simulators each run their own CtrlProxy (issue
+  // #5636): the runner always advertises its fixed on-device port (8765) via
+  // /health, while the client reaches it through a unique forwarded host port
+  // (8767, …). So runnerPort vs clientPort is only diagnostic context in the
+  // reported line — never an independent failure. A round trip that actually
+  // completed (connected, non-degenerate, error-free, non-empty) passes despite
+  // the divergence, and a genuine wrong-port bind (issue #2731) still fails here
+  // because it cannot connect (connected=false) and surfaces a hierarchyError.
+  const failed = !inspection.connected || hasDegenerateScreen || hasHierarchyError || hasNoElements;
 
   const parts = [
     "platform=ios",
@@ -1097,8 +1100,9 @@ export async function checkIosObserveRoundTrip(
         status: "fail",
         message,
         recommendation:
-          "Restart the AutoMobile daemon and iOS CtrlProxy runner, then verify the runner WebSocket port " +
-          "matches the client port and re-run: auto-mobile --doctor --ios.",
+          "Restart the AutoMobile daemon and iOS CtrlProxy runner, then confirm each simulator's runner is " +
+          "reachable through its assigned client endpoint and returns a non-empty hierarchy, and re-run: " +
+          "auto-mobile --doctor --ios.",
       };
     }
 

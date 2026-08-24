@@ -865,14 +865,56 @@ describe("checkIosObserveRoundTrip", () => {
     expect(result.message).toContain("elementCount=7");
   });
 
-  test("fails when the client port diverges from the runner serving port", async () => {
+  test("passes when a per-device host port diverges from the runner's internal port on a healthy round trip (#5636)", async () => {
+    // The runner self-reports its internal default port (8765) via /health while
+    // the client reaches it through a unique forwarded host port (8767). That
+    // divergence is expected for a per-device CtrlProxy and must not fail doctor
+    // once the observe round trip has otherwise succeeded.
     const result = await checkIosObserveRoundTrip(
-      withRoundTrips([inspection({ runnerPort: 8765, clientPort: 8766 })]),
+      withRoundTrips([inspection({ runnerPort: 8765, clientPort: 8767 })]),
+    );
+
+    expect(result.status).toBe("pass");
+    expect(result.message).toContain("runnerPort=8765");
+    expect(result.message).toContain("clientPort=8767");
+  });
+
+  test("passes two simulators with distinct per-device host ports (#5636)", async () => {
+    const result = await checkIosObserveRoundTrip(
+      withRoundTrips([
+        inspection({ deviceId: "SIM-A", runnerPort: 8765, clientPort: 8765 }),
+        inspection({ deviceId: "SIM-B", runnerPort: 8765, clientPort: 8767 }),
+      ]),
+    );
+
+    expect(result.status).toBe("pass");
+    expect(result.message).toContain("device=SIM-A");
+    expect(result.message).toContain("device=SIM-B");
+    expect(result.message).toContain("clientPort=8765");
+    expect(result.message).toContain("clientPort=8767");
+  });
+
+  test("still fails when ports diverge and the round trip did not connect (#2731 preserved)", async () => {
+    // A genuine wrong-port bind (#2731): the runner is on 8765 but the client
+    // expects 8767 and cannot connect. The connection failure — not the port
+    // comparison — must keep this red.
+    const result = await checkIosObserveRoundTrip(
+      withRoundTrips([
+        inspection({
+          runnerPort: 8765,
+          clientPort: 8767,
+          connected: false,
+          screenSize: { width: 0, height: 0 },
+          hierarchyError:
+            "iOS CtrlProxy runner is bound to port 8765 but the client expects port 8767",
+          elementCount: 0,
+        }),
+      ]),
     );
 
     expect(result.status).toBe("fail");
     expect(result.message).toContain("runnerPort=8765");
-    expect(result.message).toContain("clientPort=8766");
+    expect(result.message).toContain("clientPort=8767");
     expect(result.recommendation).toContain("CtrlProxy");
   });
 

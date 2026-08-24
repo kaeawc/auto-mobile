@@ -62,7 +62,6 @@ interface AppsQueryDeviceContent {
 
 interface AppsQueryResourceContent {
   query: AppsQueryOptions;
-  observationComplete: boolean;
   totalCount: number;
   deviceCount: number;
   lastUpdated: string;
@@ -73,7 +72,6 @@ interface AppsQueryResourceContent {
 interface AppsResourceContent {
   deviceId: string;
   platform: Platform;
-  observationComplete: boolean;
   apps: InstalledAppInfo[];
   totalCount: number;
   foregroundApp: string | null;
@@ -295,13 +293,11 @@ function createAppsResourceContent(
   apps: InstalledAppInfo[],
   foregroundApp: string | null,
   lastUpdated: string,
-  observationComplete: boolean,
   message?: string,
 ): AppsResourceContent {
   return {
     deviceId: device.deviceId,
     platform: device.platform,
-    observationComplete,
     apps,
     totalCount: apps.length,
     foregroundApp,
@@ -353,14 +349,7 @@ async function fetchAppsForDevice(
       cacheable: result.successful,
       entry: {
         expiresAt: timer.now() + APPS_CACHE_TTL_MS,
-        content: createAppsResourceContent(
-          device,
-          userApps,
-          foregroundApp,
-          lastUpdated,
-          result.successful,
-          message,
-        ),
+        content: createAppsResourceContent(device, userApps, foregroundApp, lastUpdated, message),
         appsByPackage: buildAppsByPackage(userApps),
         queryApps,
       },
@@ -395,7 +384,7 @@ async function fetchAppsForDevice(
     cacheable: result.successful,
     entry: {
       expiresAt: timer.now() + APPS_CACHE_TTL_MS,
-      content: createAppsResourceContent(device, apps, null, lastUpdated, result.successful),
+      content: createAppsResourceContent(device, apps, null, lastUpdated),
       appsByPackage: buildAppsByPackage(apps),
       queryApps,
     },
@@ -596,7 +585,6 @@ async function getAppsQueryResource(
 
     const content: AppsQueryResourceContent = {
       query: options,
-      observationComplete: cacheEntry.content.observationComplete,
       totalCount: apps.length,
       deviceCount: 1,
       lastUpdated,

@@ -1,5 +1,6 @@
 import { errorMessage } from "../utils/describeUnknownError";
 import { promises as nodeFs } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, posix, relative } from "node:path";
 import { TextDecoder } from "node:util";
 import {
@@ -25,8 +26,8 @@ import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { isIosSimulatorUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
 import { shellQuote } from "../utils/shellQuote";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
+import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 import { logger } from "../utils/logger";
-import { prepareFileSource } from "./fileSourcePreparation";
 
 export interface PutAppFileRequest extends PutAppFileArgs {
   device: BootedDevice;
@@ -63,6 +64,12 @@ export interface AppFileService {
   putFile(request: PutAppFileRequest): Promise<PutAppFileResult>;
   listFiles(request: AppFileListRequest): Promise<AppFileListResult>;
   readFile(request: AppFileReadRequest): Promise<AppFileReadResult>;
+}
+
+interface FileSource {
+  path: string;
+  byteCount: number;
+  cleanup?: () => Promise<void>;
 }
 
 export interface AppFileStats {
@@ -192,7 +199,7 @@ class DefaultAppFileService implements AppFileService {
     const appId = normalizeAppId(request.appId);
     const destinationPath = normalizeAppFileRelativePath(request.destinationPath);
     const provider = this.getProvider(request.device.platform, "putFile", appId, request.container);
-    const source = await prepareFileSource(request, this.fileSystem);
+    const source = await this.prepareSource(request);
     try {
       await provider.putFile({
         device: request.device,
@@ -267,6 +274,32 @@ class DefaultAppFileService implements AppFileService {
       );
     }
     return provider;
+  }
+
+  private async prepareSource(args: PutAppFileArgs): Promise<FileSource> {
+    if (args.sourcePath !== undefined) {
+      const sourcePath = resolvePathFromDaemonLaunchWorkingDirectory(args.sourcePath);
+      const stat = await this.fileSystem.stat(sourcePath);
+      if (!stat.isFile()) {
+        throw new ActionableError(`sourcePath is not a file: ${sourcePath}`);
+      }
+      return { path: sourcePath, byteCount: stat.size };
+    }
+
+    const buffer =
+      args.contentBase64 !== undefined
+        ? Buffer.from(args.contentBase64, "base64")
+        : Buffer.from(args.contentText ?? "", "utf8");
+    const dir = await this.fileSystem.mkdtemp(join(tmpdir(), "automobile-app-file-"));
+    const tempPath = join(dir, "content");
+    await this.fileSystem.writeFileBuffer(tempPath, buffer);
+    return {
+      path: tempPath,
+      byteCount: buffer.byteLength,
+      cleanup: async () => {
+        await this.fileSystem.rm(dir);
+      },
+    };
   }
 }
 

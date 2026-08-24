@@ -18,7 +18,8 @@ export interface DirectModeStartupSteps {
   assertDbOwnership(): Promise<void>;
   /**
    * The first DB touch: migration-gated feature-flag initialize() reads plus the
-   * CLI-override setFlag() writes. Opens the shared SQLite DB and runs migrations.
+   * CLI-override setFlag() writes. Opens the shared SQLite DB and runs migrations
+   * only for direct mode; proxy mode delegates this work to the daemon.
    */
   applyFeatureFlagStartup(): Promise<void>;
 }
@@ -28,11 +29,14 @@ export interface DirectModeStartupSteps {
  * the ownership guard runs before the first DB touch so a second writer on a
  * daemon-owned SQLite file is refused before this process opens it (issue #2795).
  * With an isolated `AUTOMOBILE_DB_PATH` the guard is a no-op and startup proceeds
- * normally. In proxy mode the guard is skipped altogether.
+ * normally. Proxy mode delegates feature-flag initialization to the daemon, so the
+ * stdio process never races the daemon (or another process) for the shared DB.
  */
 export async function runDirectModeStartup(steps: DirectModeStartupSteps): Promise<void> {
-  if (steps.noProxy) {
-    await steps.assertDbOwnership();
+  if (!steps.noProxy) {
+    return;
   }
+
+  await steps.assertDbOwnership();
   await steps.applyFeatureFlagStartup();
 }

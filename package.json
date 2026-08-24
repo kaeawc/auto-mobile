@@ -168,7 +168,7 @@
     "utif2": "4.1.0",
     "xml-parse-from-string": "1.0.1",
     "xmlbuilder": "11.0.1",
-    "zod": "3.25.76"
+    "zod": "4.4.3"
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.120.0",

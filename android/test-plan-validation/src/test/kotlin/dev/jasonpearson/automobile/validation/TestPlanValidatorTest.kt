@@ -554,6 +554,7 @@ class TestPlanValidatorTest {
             permissions:
               - camera
         - tool: provisionDevice
+        - tool: stageSharedStorage
         - tool: deleteDevice
       """
         .trimIndent()

@@ -5,6 +5,8 @@ import java.io.BufferedWriter
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.util.UUID
+import java.util.concurrent.Callable
+import java.util.concurrent.TimeUnit
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -24,6 +26,16 @@ class McpStdioClient(
   private val statusRequestTimeoutMs: Long = McpDaemonClient.STATUS_REQUEST_TIMEOUT_MS,
   private val statusDeadlineFactory: (Long) -> StatusRequestDeadline = {
     StatusRequestDeadline(it)
+  },
+  private val processStarter: (List<String>) -> Process = { commandParts ->
+    ProcessBuilder(commandParts).redirectError(ProcessBuilder.Redirect.INHERIT).start()
+  },
+  private val responseReader: StdioResponseReader = StdioResponseReader { read, timeoutMs ->
+    if (timeoutMs == null) {
+      read.call()
+    } else {
+      requestReader.submit(read).get(timeoutMs, TimeUnit.MILLISECONDS)
+    }
   },
 ) : AutoMobileClient {
   override val transportName: String = "MCP STDIO"
@@ -416,7 +428,7 @@ class McpStdioClient(
           put("name", JsonPrimitive(name))
           put("arguments", arguments)
         },
-        timeoutMs = deadline?.remainingTimeoutMs(),
+        deadline = deadline,
       )
     return response.result ?: JsonObject(emptyMap())
   }
@@ -435,6 +447,7 @@ class McpStdioClient(
 
   private fun ensureInitialized(deadline: StatusRequestDeadline? = null) {
     synchronized(ioLock) {
+      deadline?.remainingTimeoutMs()
       if (initialized) {
         return
       }
@@ -445,7 +458,7 @@ class McpStdioClient(
       sendRequest(
         "initialize",
         buildInitializeParams(),
-        timeoutMs = deadline?.remainingTimeoutMs(),
+        deadline = deadline,
       )
     val result =
       response.result?.jsonObject
@@ -468,13 +481,13 @@ class McpStdioClient(
         method = method,
         params = params,
       )
-    sendRequest(request, expectResponse = false, timeoutMs = deadline?.remainingTimeoutMs())
+    sendRequest(request, expectResponse = false, deadline = deadline)
   }
 
   private fun sendRequest(
     method: String,
     params: JsonElement? = null,
-    timeoutMs: Long? = null,
+    deadline: StatusRequestDeadline? = null,
   ): JsonRpcResponse {
     val requestId = JsonPrimitive(UUID.randomUUID().toString())
     val request =
@@ -483,15 +496,16 @@ class McpStdioClient(
         method = method,
         params = params,
       )
-    return sendRequest(request, expectResponse = true, timeoutMs = timeoutMs)
+    return sendRequest(request, expectResponse = true, deadline = deadline)
   }
 
   private fun sendRequest(
     request: JsonRpcRequest,
     expectResponse: Boolean,
-    timeoutMs: Long? = null,
+    deadline: StatusRequestDeadline? = null,
   ): JsonRpcResponse {
     synchronized(ioLock) {
+      val timeoutMs = deadline?.remainingTimeoutMs()
       ensureProcessStarted()
       val currentProcess = process ?: throw McpConnectionException("MCP stdio process unavailable")
       val currentWriter = writer ?: throw McpConnectionException("MCP stdio writer unavailable")
@@ -508,12 +522,8 @@ class McpStdioClient(
 
       try {
         val expectedId = request.id?.jsonPrimitive?.content
-        val read = java.util.concurrent.Callable { readResponse(currentReader, expectedId) }
-        return if (timeoutMs == null) {
-          read.call()
-        } else {
-          requestReader.submit(read).get(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
-        }
+        val read = Callable { readResponse(currentReader, expectedId) }
+        return responseReader.read(read, timeoutMs)
       } catch (_: java.util.concurrent.TimeoutException) {
         // BufferedReader.readLine() cannot be reliably interrupted. Its worker stays isolated on
         // the old stream while this caller releases ioLock; later requests start a fresh process.
@@ -551,8 +561,12 @@ class McpStdioClient(
   }
 
   private fun terminateProcessTree(currentProcess: Process) {
-    currentProcess.toHandle().descendants().use { descendants ->
-      descendants.forEach { descendant -> descendant.destroyForcibly() }
+    try {
+      currentProcess.toHandle().descendants().use { descendants ->
+        descendants.forEach { descendant -> descendant.destroyForcibly() }
+      }
+    } catch (_: UnsupportedOperationException) {
+      // Test doubles and constrained runtimes may not expose process handles.
     }
     currentProcess.destroyForcibly()
   }
@@ -567,8 +581,7 @@ class McpStdioClient(
       throw McpConnectionException("MCP stdio command is empty")
     }
 
-    val newProcess =
-      ProcessBuilder(commandParts).redirectError(ProcessBuilder.Redirect.INHERIT).start()
+    val newProcess = processStarter(commandParts)
     process = newProcess
     reader = BufferedReader(InputStreamReader(newProcess.inputStream))
     writer = BufferedWriter(OutputStreamWriter(newProcess.outputStream))
@@ -640,4 +653,8 @@ class McpStdioClient(
         Thread(runnable, "mcp-stdio-response-reader").apply { isDaemon = true }
       }
   }
+}
+
+fun interface StdioResponseReader {
+  fun read(read: Callable<JsonRpcResponse>, timeoutMs: Long?): JsonRpcResponse
 }

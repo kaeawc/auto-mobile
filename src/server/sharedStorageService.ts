@@ -8,6 +8,8 @@ import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbE
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { shellQuote } from "../utils/shellQuote";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { fixedBackoff, type BackoffPolicy } from "../utils/Backoff";
 import { normalizeAppFileRelativePath } from "./appFileContract";
 import {
   normalizeSharedStorageNamespace,
@@ -29,6 +31,8 @@ export type StageSharedStorageRequest = Omit<StageSharedStorageArgs, "device"> &
 export interface SharedStorageServiceDependencies {
   adbFactory?: AdbClientFactory;
   fileSystem?: FileSourceFileSystem;
+  timer?: Timer;
+  indexingBackoff?: BackoffPolicy;
 }
 
 export interface SharedStorageService {
@@ -41,6 +45,8 @@ export function createSharedStorageServiceForTesting(
   return new DefaultSharedStorageService(
     deps.adbFactory ?? defaultAdbClientFactory,
     deps.fileSystem,
+    deps.timer ?? defaultTimer,
+    deps.indexingBackoff ?? fixedBackoff(100),
   );
 }
 
@@ -59,6 +65,8 @@ class DefaultSharedStorageService implements SharedStorageService {
   constructor(
     private readonly adbFactory: AdbClientFactory,
     private readonly fileSystem?: FileSourceFileSystem,
+    private readonly timer: Timer = defaultTimer,
+    private readonly indexingBackoff: BackoffPolicy = fixedBackoff(100),
   ) {}
 
   async stage(request: StageSharedStorageRequest): Promise<StageSharedStorageResult> {
@@ -164,6 +172,8 @@ class DefaultSharedStorageService implements SharedStorageService {
     );
     const shouldIndex =
       entry.file.mimeType !== undefined || MEDIA_EXTENSIONS.test(entry.destinationPath);
+    let indexing: StagedSharedStorageFile["indexing"] = "notRequested";
+    let indexingReason: string | undefined;
     if (shouldIndex) {
       await this.execute(
         adb,
@@ -171,18 +181,52 @@ class DefaultSharedStorageService implements SharedStorageService {
         request,
         "request media indexing",
       );
+      const verification = await this.verifyIndexing(adb, devicePath, request);
+      indexing = verification.indexing;
+      indexingReason = verification.indexingReason;
+    } else {
+      indexingReason =
+        "File is not a recognized media type and was written for document-picker use.";
     }
     return {
       destinationPath: entry.destinationPath,
       devicePath,
       byteCount: entry.source.byteCount,
-      indexing: shouldIndex ? "dispatched" : "notRequested",
-      ...(shouldIndex
-        ? {}
-        : {
-            indexingReason:
-              "File is not a recognized media type and was written for document-picker use.",
-          }),
+      indexing,
+      ...(indexingReason ? { indexingReason } : {}),
+    };
+  }
+
+  private async verifyIndexing(
+    adb: AdbExecutor,
+    devicePath: string,
+    request: StageSharedStorageRequest,
+  ): Promise<{ indexing: "verified" | "dispatched" | "failed"; indexingReason?: string }> {
+    const query = `shell content query --uri content://media/external/file --projection _data --where ${shellQuote(`_data='${devicePath.replace(/'/g, "''")}'`)}`;
+    for (let attempt = 1; attempt <= 4; attempt += 1) {
+      try {
+        const result = await adb.executeCommand(query, undefined, undefined, true, request.signal);
+        if (result.stdout.includes(devicePath)) {
+          return { indexing: "verified" };
+        }
+      } catch (error) {
+        logger.warn(
+          `Media indexing verification failed for ${devicePath}: ${errorMessage(error)}`,
+          error,
+        );
+        return {
+          indexing: "failed",
+          indexingReason: "MediaStore verification failed after the scan request.",
+        };
+      }
+      if (attempt < 4) {
+        await this.timer.sleep(this.indexingBackoff.delayForAttempt(attempt));
+      }
+    }
+    return {
+      indexing: "dispatched",
+      indexingReason:
+        "Media scan was dispatched, but MediaStore did not report the file before the verification timeout.",
     };
   }
 

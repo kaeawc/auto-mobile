@@ -9,6 +9,7 @@ import { shellQuote } from "../utils/shellQuote";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 import { errorMessage } from "../utils/describeUnknownError";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { readAndroidDeviceApiLevel } from "../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
 import {
   normalizeSharedStorageNamespace,
   normalizeSharedStorageRelativePath,
@@ -130,6 +131,11 @@ class DefaultSharedStorageService implements SharedStorageService {
           source: await this.prepareSource(file),
         });
       }
+      for (const file of prepared) {
+        if (prepared.some(other => other !== file && other.destinationPath.startsWith(`${file.destinationPath}/`))) {
+          throw new ActionableError(`destinationPath conflicts with a nested fixture: ${file.destinationPath}`);
+        }
+      }
       return prepared;
     } catch (error) {
       await Promise.all(prepared.map(file => file.source.cleanup?.()));
@@ -203,17 +209,19 @@ async function indexMediaFile(
     signal,
   );
   const collection = mediaCollectionFor(destinationPath);
+  const apiLevel = await readAndroidDeviceApiLevel(adb);
+  const modernQuery = apiLevel === null || apiLevel >= 29;
   const deviceRelativePath = destination.slice(`${DOWNLOADS_ROOT}/`.length);
   const deviceRelativeDirectory = posix.dirname(deviceRelativePath);
-  const relativePath = deviceRelativeDirectory === "."
-    ? "Download/"
-    : `Download/${deviceRelativeDirectory}/`;
-  const displayName = posix.basename(destination);
-  const selection = `relative_path=${sqlString(relativePath)} AND _display_name=${sqlString(displayName)}`;
+  const relativePath = deviceRelativeDirectory === "." ? "Download/" : `Download/${deviceRelativeDirectory}/`;
+  const selection = modernQuery
+    ? `relative_path=${sqlString(relativePath)} AND _display_name=${sqlString(posix.basename(destination))}`
+    : `_data=${sqlString(destination.replace("/sdcard/", "/storage/emulated/0/"))}`;
+  const volume = modernQuery ? "external_primary" : "external";
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const result = await executeResult(
       adb,
-      `shell content query --uri content://media/external_primary/${collection}/media --projection _id --where ${shellQuote(selection)}`,
+      `shell content query --uri content://media/${volume}/${collection}/media --projection _id --where ${shellQuote(selection)}`,
       signal,
     );
     if (/^Row:/m.test(result.stdout)) {

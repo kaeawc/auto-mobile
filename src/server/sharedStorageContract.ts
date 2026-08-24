@@ -117,6 +117,7 @@ const sharedStorageFileSchema = z.object({
 });
 
 export const stageSharedStorageSchema = addDeviceTargetingToSchema(z.object({
+  platform: z.literal("android").optional().default("android").describe("Android platform"),
   namespace: z.string().describe("One caller-named child directory beneath Downloads"),
   reset: z.boolean().optional().default(false).describe("Remove only this declared namespace before writing"),
   indexMedia: z.boolean().optional().default(true).describe("Request Android media indexing for media files"),

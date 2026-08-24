@@ -116,4 +116,19 @@ describe("SharedStorageService", () => {
     })).rejects.toThrow("media indexing did not complete");
     expect(executor.getExecutedCommands().filter(command => command.includes("content query"))).toHaveLength(20);
   });
+
+  test("rejects prefix-conflicting destinations before touching shared storage", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const service = createSharedStorageServiceForTesting({ adbFactory });
+    await expect(service.stage({
+      device: androidDevice,
+      namespace: "run-42",
+      reset: true,
+      files: [
+        { contentText: "nested", destinationPath: "foo/bar.txt" },
+        { contentText: "file", destinationPath: "foo" },
+      ],
+    })).rejects.toThrow("conflicts with a nested fixture");
+    expect(adbFactory.getFakeClient().getAllCommands()).toEqual([]);
+  });
 });

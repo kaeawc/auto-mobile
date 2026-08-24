@@ -9146,6 +9146,12 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
+        "platform": {
+          "description": "Android platform",
+          "default": "android",
+          "type": "string",
+          "const": "android"
+        },
         "namespace": {
           "description": "One caller-named child directory beneath Downloads",
           "type": "string"
@@ -9191,13 +9197,6 @@
             "additionalProperties": false
           }
         },
-        "platform": {
-          "type": "string",
-          "enum": [
-            "android",
-            "ios"
-          ]
-        },
         "sessionUuid": {
           "description": "Session",
           "type": "string"
@@ -9211,6 +9210,7 @@
         }
       },
       "required": [
+        "platform",
         "namespace",
         "reset",
         "indexMedia",

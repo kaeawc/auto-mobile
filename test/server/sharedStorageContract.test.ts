@@ -15,6 +15,11 @@ describe("shared-storage contract", () => {
     }
   });
 
+  test("defaults platform to Android and rejects iOS routing", () => {
+    expect(stageSharedStorageSchema.parse({ namespace: "run-42", files: [{ contentText: "x", destinationPath: "x.txt" }] }).platform).toBe("android");
+    expect(stageSharedStorageSchema.safeParse({ platform: "ios", namespace: "run-42", files: [{ contentText: "x", destinationPath: "x.txt" }] }).success).toBe(false);
+  });
+
   test("rejects unsafe namespace resets before an ADB operation can be constructed", () => {
     for (const namespace of ["", ".", "..", "a/b", "a\\b"]) {
       expect(stageSharedStorageSchema.safeParse({

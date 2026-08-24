@@ -21,7 +21,23 @@ public final class AutoMobileCrashes: @unchecked Sendable {
     private static let monitoredSignals: [Int32] = [SIGABRT, SIGSEGV, SIGBUS, SIGFPE, SIGILL]
 
     /// Provide a closure that returns the current screen name for crash context.
-    public var currentScreenProvider: (@Sendable () -> String?)?
+    /// Read in the exception handler and written from arbitrary threads (host app,
+    /// `reset()`), so it is serialized by `lock` — reference/Optional assignment is
+    /// not atomic in Swift's memory model (issue #3632), and every other field in
+    /// this class is already lock-guarded.
+    private var _currentScreenProvider: (@Sendable () -> String?)?
+    public var currentScreenProvider: (@Sendable () -> String?)? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _currentScreenProvider
+        }
+        set {
+            lock.lock()
+            _currentScreenProvider = newValue
+            lock.unlock()
+        }
+    }
 
     /// The process-global uncaught-exception handler that routes to this class.
     private static let uncaughtExceptionHandler: @convention(c) (NSException) -> Void = { exception in
@@ -119,11 +135,14 @@ public final class AutoMobileCrashes: @unchecked Sendable {
         lock.lock()
         let currentBuffer = buffer
         let previousHandler = previousExceptionHandler
+        // Snapshot the provider under the lock; invoke it below, outside the lock,
+        // so the (host-supplied) closure can never re-enter the non-recursive lock.
+        let screenProvider = _currentScreenProvider
         lock.unlock()
 
         if enabled {
             let currentBundleId = bundleId ?? Bundle.main.bundleIdentifier ?? ""
-            let currentScreen = currentScreenProvider?()
+            let currentScreen = screenProvider?()
             let stackTrace = exception.callStackSymbols.joined(separator: "\n")
 
             let event = SdkCrashEvent(
@@ -163,7 +182,9 @@ public final class AutoMobileCrashes: @unchecked Sendable {
         // if initialize() is called again (e.g. between tests)
         let prevHandler = previousExceptionHandler
         previousExceptionHandler = nil
-        currentScreenProvider = nil
+        // Direct backing-field write: we already hold `lock` here, and the computed
+        // `currentScreenProvider` setter would re-acquire the non-recursive lock.
+        _currentScreenProvider = nil
         // Note: signal handlers cannot be safely uninstalled, leave installedSignalHandlers as-is
         lock.unlock()
 

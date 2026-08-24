@@ -51,4 +51,17 @@ final class CrashesTests: XCTestCase {
         XCTAssertTrue(crashes.isInitialized)
         crashes.reset()
     }
+
+    /// Concurrent get/set/invoke of `currentScreenProvider` must not race. It was a
+    /// plain `public var` read in the exception handler while written from arbitrary
+    /// threads (#3632) — now serialized by the class lock, snapshotted before use.
+    func testCurrentScreenProviderConcurrentAccessDoesNotCrash() {
+        let crashes = AutoMobileCrashes.makeTestInstance()
+        DispatchQueue.concurrentPerform(iterations: 2_000) { i in
+            crashes.currentScreenProvider = { "screen-\(i % 100)" }
+            _ = crashes.currentScreenProvider
+            _ = crashes.currentScreenProvider?()
+        }
+        XCTAssertNotNil(crashes.currentScreenProvider)
+    }
 }

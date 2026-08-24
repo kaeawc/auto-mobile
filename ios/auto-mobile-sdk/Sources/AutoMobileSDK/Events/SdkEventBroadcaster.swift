@@ -25,28 +25,46 @@ final class SdkEventBroadcaster: EventBroadcasting, @unchecked Sendable {
     /// and written from arbitrary threads (`setCtrlProxyUrl`), so all access is
     /// serialized by a lock — Optional/reference assignment is not atomic in
     /// Swift's memory model (issue #3632).
-    private let ctrlProxyUrlLock = NSLock()
+    /// Guards the cross-thread config references (`_ctrlProxyUrl`, `_persistence`),
+    /// read on the event buffer's flush thread and the URLSession completion handler
+    /// while written from arbitrary threads — Optional/reference assignment is not
+    /// atomic in Swift's memory model (issue #3632).
+    private let configLock = NSLock()
     private var _ctrlProxyUrl: URL?
     var ctrlProxyUrl: URL? {
         get {
-            ctrlProxyUrlLock.lock()
-            defer { ctrlProxyUrlLock.unlock() }
+            configLock.lock()
+            defer { configLock.unlock() }
             return _ctrlProxyUrl
         }
         set {
-            ctrlProxyUrlLock.lock()
-            defer { ctrlProxyUrlLock.unlock() }
+            configLock.lock()
+            defer { configLock.unlock() }
             _ctrlProxyUrl = newValue
         }
     }
 
     private let urlSession: URLSession
 
-    /// Disk-first event persistence for reliable delivery.
-    var persistence: (any EventPersisting)?
+    /// Disk-first event persistence for reliable delivery. Same cross-thread access
+    /// pattern as `ctrlProxyUrl`, so it is guarded by the same `configLock`.
+    private var _persistence: (any EventPersisting)?
+    var persistence: (any EventPersisting)? {
+        get {
+            configLock.lock()
+            defer { configLock.unlock() }
+            return _persistence
+        }
+        set {
+            configLock.lock()
+            defer { configLock.unlock() }
+            _persistence = newValue
+        }
+    }
 
-    /// Retry policy for failed HTTP delivery.
-    var retryPolicy: RetryPolicy = RetryPolicy()
+    /// Retry policy for failed HTTP delivery. A `Sendable` value type that is never
+    /// reassigned, so `let` makes cross-thread reads race-free with no lock.
+    let retryPolicy = RetryPolicy()
 
     private init() {
         let config = URLSessionConfiguration.default

@@ -34,8 +34,13 @@ public final class AutoMobileCrashes: @unchecked Sendable {
         }
         set {
             lock.lock()
+            let old = _currentScreenProvider
             _currentScreenProvider = newValue
             lock.unlock()
+            // Release the replaced closure AFTER unlocking: if it owned the last
+            // reference to an object whose deinit re-enters this lock, releasing it
+            // under the lock would deadlock (the non-recursive lock is not re-entrant).
+            withExtendedLifetime(old) {}
         }
     }
 

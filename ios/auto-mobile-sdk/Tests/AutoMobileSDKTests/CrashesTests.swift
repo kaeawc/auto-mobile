@@ -64,4 +64,41 @@ final class CrashesTests: XCTestCase {
         }
         XCTAssertNotNil(crashes.currentScreenProvider)
     }
+
+    /// Replacing the provider must release the previous closure OUTSIDE the lock. If a
+    /// captured object's `deinit` re-enters the (non-recursive) lock, releasing the old
+    /// closure while still holding it would deadlock. This test would hang on a setter
+    /// that releases under the lock; it passes only with release-after-unlock.
+    func testReplacingProviderReleasesOldClosureWithoutDeadlock() {
+        let crashes = AutoMobileCrashes.makeTestInstance()
+
+        final class ReentrantSentinel {
+            let crashes: AutoMobileCrashes
+            let onDeinit: () -> Void
+            init(_ crashes: AutoMobileCrashes, onDeinit: @escaping () -> Void) {
+                self.crashes = crashes
+                self.onDeinit = onDeinit
+            }
+            deinit {
+                // Re-enter the lock via the getter as the closure is released.
+                _ = crashes.currentScreenProvider
+                onDeinit()
+            }
+        }
+
+        var deinitRan = false
+        var sentinel: ReentrantSentinel? = ReentrantSentinel(crashes) { deinitRan = true }
+        crashes.currentScreenProvider = { [sentinel] in
+            _ = sentinel
+            return "a"
+        }
+        sentinel = nil // the provider closure now holds the only reference
+
+        // Replacing the provider releases the old closure → sentinel.deinit re-enters
+        // the getter. With release-under-lock this deadlocks; with the fix it returns.
+        crashes.currentScreenProvider = { "b" }
+
+        XCTAssertTrue(deinitRan, "the replaced closure's captured object was released")
+        XCTAssertEqual(crashes.currentScreenProvider?(), "b")
+    }
 }

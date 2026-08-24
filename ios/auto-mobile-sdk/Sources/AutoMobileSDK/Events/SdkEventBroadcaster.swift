@@ -57,8 +57,12 @@ final class SdkEventBroadcaster: EventBroadcasting, @unchecked Sendable {
         }
         set {
             configLock.lock()
-            defer { configLock.unlock() }
+            let old = _persistence
             _persistence = newValue
+            configLock.unlock()
+            // Release the replaced persistence AFTER unlocking, in case its deinit
+            // re-enters this lock (the non-recursive lock is not re-entrant).
+            withExtendedLifetime(old) {}
         }
     }
 

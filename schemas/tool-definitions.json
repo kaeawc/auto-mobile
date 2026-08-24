@@ -8036,10 +8036,7 @@
         "platform": {
           "default": "android",
           "type": "string",
-          "enum": [
-            "android",
-            "ios"
-          ]
+          "const": "android"
         },
         "namespace": {
           "description": "Isolated fixture namespace beneath Download/AutoMobile",

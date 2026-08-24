@@ -1,6 +1,10 @@
 import type { ChildProcess, SpawnOptions } from "child_process";
 import type { ExecResult } from "../../src/models";
-import type { HostCommandOptions, HostProcessExecutor } from "../../src/utils/HostCommandExecutor";
+import type {
+  HostCommandOptions,
+  HostProcessExecutor,
+  StartedHostCommand,
+} from "../../src/utils/HostCommandExecutor";
 import { FakeChildProcess } from "./FakeChildProcess";
 
 /**
@@ -69,6 +73,17 @@ export class FakeProcessExecutor implements HostProcessExecutor {
     this.nextSpawnProcess = null;
     this.spawnResponses.push({ command, args, options, process });
     return process;
+  }
+
+  executeCommandWithChild(
+    command: string,
+    args: string[] = [],
+    options?: HostCommandOptions
+  ): StartedHostCommand {
+    return {
+      child: this.spawn(command, args),
+      result: this.executeCommand(command, args, options),
+    };
   }
 
   private createExecResult(stdout: string, stderr: string): ExecResult {

@@ -8,7 +8,9 @@ import { createExecResult } from "../../src/utils/execResult";
 import {
   DefaultHostCommandExecutor,
   type ExecFileAsync,
+  type ExecFileWithChild,
 } from "../../src/utils/HostCommandExecutor";
+import type { ChildProcess } from "child_process";
 
 const FAST_TEST_TIMEOUT_MS = 100;
 
@@ -129,5 +131,48 @@ describe("argv exec seam", function() {
     const argvSeam: ExecFileAsync = async () => ({ stdout: "argv", stderr: "" });
     const result = await new DefaultHostCommandExecutor(argvSeam).executeCommand("echo", ["argv"]);
     expect(result.stdout).toBe("argv");
+  }, FAST_TEST_TIMEOUT_MS);
+
+  test("trackable command execution shares option mapping and result coercion", async function() {
+    const child = { kill: () => true } as ChildProcess;
+    let seen: ExecSeamOptions | undefined;
+    const execWithChild: ExecFileWithChild = (_file, _args, options, callback) => {
+      seen = options;
+      callback(null, Buffer.from("tracked-out"), Buffer.from("tracked-err"));
+      return child;
+    };
+
+    const started = new DefaultHostCommandExecutor(undefined, execWithChild)
+      .executeCommandWithChild("adb", ["shell", "true"], { timeoutMs: 1234, maxBuffer: 42 });
+
+    expect(started.child).toBe(child);
+    expect(seen).toEqual({ timeout: 1234, maxBuffer: 42, cwd: undefined, signal: undefined });
+    await expect(started.result).resolves.toMatchObject({ stdout: "tracked-out", stderr: "tracked-err" });
+  }, FAST_TEST_TIMEOUT_MS);
+
+  test("trackable command execution retains callback output when wrapping errors", async function() {
+    const child = { kill: () => true } as ChildProcess;
+    const execWithChild: ExecFileWithChild = (_file, _args, _options, callback) => {
+      const error = new Error("adb failed") as Error & { code?: number };
+      error.code = 1;
+      callback(error, "callback stdout", "callback stderr");
+      return child;
+    };
+
+    const started = new DefaultHostCommandExecutor(undefined, execWithChild)
+      .executeCommandWithChild("adb", ["shell", "true"]);
+
+    await expect(started.result).rejects.toThrow(/callback stdout[\s\S]*callback stderr/);
+  }, FAST_TEST_TIMEOUT_MS);
+
+  test("trackable command execution propagates synchronous startup failures", function() {
+    const startupError = new Error("The argument contains a NUL byte");
+    const execWithChild: ExecFileWithChild = () => {
+      throw startupError;
+    };
+
+    expect(() => new DefaultHostCommandExecutor(undefined, execWithChild)
+      .executeCommandWithChild("adb", ["shell", "a\0b"]))
+      .toThrow(/Command failed: adb shell a\0b[\s\S]*The argument contains a NUL byte/);
   }, FAST_TEST_TIMEOUT_MS);
 });

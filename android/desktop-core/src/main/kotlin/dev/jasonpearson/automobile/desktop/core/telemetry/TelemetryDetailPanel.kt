@@ -45,6 +45,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.jasonpearson.automobile.desktop.core.clipboard.LocalClipboardWriter
 import dev.jasonpearson.automobile.desktop.core.navigation.ScreenshotLoader
 import dev.jasonpearson.automobile.desktop.core.shell.InspectorTabBar
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
@@ -86,6 +87,8 @@ fun TelemetryDetailPanel(
 
   val focusedBorderColor = SharedTheme.globalColors.outlines.focused
 
+  val clipboard = LocalClipboardWriter.current
+
   // Toast state for share-to-clipboard confirmation
   var showCopiedToast by remember { mutableStateOf(false) }
   LaunchedEffect(showCopiedToast) {
@@ -123,9 +126,16 @@ fun TelemetryDetailPanel(
             textColor = textColor,
             focusedBorderColor = focusedBorderColor,
             onClick = {
-              val jsonStr = serializeEventToJson(event)
-              val clipboard = java.awt.Toolkit.getDefaultToolkit().systemClipboard
-              clipboard.setContents(java.awt.datatransfer.StringSelection(jsonStr), null)
+              clipboard.writeText(serializeEventToJson(event))
+              showCopiedToast = true
+            },
+          )
+          HeaderIconButton(
+            icon = "MD",
+            textColor = textColor,
+            focusedBorderColor = focusedBorderColor,
+            onClick = {
+              clipboard.copyEventAsMarkdown(event)
               showCopiedToast = true
             },
           )
@@ -210,6 +220,7 @@ private fun detailTitle(event: TelemetryDisplayEvent): String =
 private fun DetailRow(label: String, value: String, textColor: Color) {
   val interactionSource = remember { MutableInteractionSource() }
   val isHovered by interactionSource.collectIsHoveredAsState()
+  val clipboard = LocalClipboardWriter.current
 
   Row(
     modifier = Modifier.fillMaxWidth().hoverable(interactionSource).padding(vertical = 2.dp),
@@ -233,10 +244,7 @@ private fun DetailRow(label: String, value: String, textColor: Color) {
     if (isHovered) {
       Box(
         modifier =
-          Modifier.clickable {
-              val clipboard = java.awt.Toolkit.getDefaultToolkit().systemClipboard
-              clipboard.setContents(java.awt.datatransfer.StringSelection(value), null)
-            }
+          Modifier.clickable { clipboard.writeText(value) }
             .pointerHoverIcon(PointerIcon.Hand)
             .padding(2.dp)
       ) {
@@ -508,7 +516,7 @@ private fun NetworkOverviewTab(
 
   // cURL command
   Spacer(Modifier.height(8.dp))
-  val curlCommand = remember(event) { generateCurlCommand(event) }
+  val curlCommand = remember(event) { networkAsCurl(event) }
   CollapsibleSection("cURL", textColor, copyText = curlCommand) {
     MonospaceBlock(curlCommand, textColor)
   }
@@ -788,6 +796,7 @@ private fun CollapsibleSection(
   content: @Composable () -> Unit,
 ) {
   val focusedBorderColor = SharedTheme.globalColors.outlines.focused
+  val clipboard = LocalClipboardWriter.current
   var expanded by remember { mutableStateOf(defaultExpanded) }
   var isFocused by remember { mutableStateOf(false) }
   Row(
@@ -825,10 +834,7 @@ private fun CollapsibleSection(
               if (copyIsFocused) Modifier.border(2.dp, focusedBorderColor, RoundedCornerShape(4.dp))
               else Modifier
             )
-            .clickable {
-              val clipboard = java.awt.Toolkit.getDefaultToolkit().systemClipboard
-              clipboard.setContents(java.awt.datatransfer.StringSelection(copyText), null)
-            }
+            .clickable { clipboard.writeText(copyText) }
             .pointerHoverIcon(PointerIcon.Hand)
             .padding(4.dp)
       ) {
@@ -949,48 +955,6 @@ private fun buildSyntaxHighlightedJson(json: String, baseColor: Color): Annotate
   }
 }
 
-/** Format a TelemetryDisplayEvent as a Markdown table and copy it to the clipboard. */
-private fun copyEventAsMarkdown(event: TelemetryDisplayEvent) {
-  val rows = mutableListOf<Pair<String, String>>()
-  rows.add("Type" to event.javaClass.simpleName)
-  rows.add("Time" to event.timestamp.toString())
-
-  when (event) {
-    is TelemetryDisplayEvent.Network -> {
-      rows.add("URL" to event.url)
-      rows.add("Method" to event.method)
-      rows.add("Status" to "${event.statusCode}")
-      rows.add("Duration" to "${event.durationMs}ms")
-    }
-    is TelemetryDisplayEvent.Log -> {
-      rows.add("Tag" to event.tag)
-      rows.add("Message" to event.message)
-    }
-    is TelemetryDisplayEvent.Navigation -> {
-      rows.add("Destination" to event.destination)
-      event.source?.let { rows.add("Source" to it) }
-    }
-    is TelemetryDisplayEvent.Failure -> {
-      rows.add("Title" to event.title)
-      rows.add("Severity" to event.severity)
-    }
-    is TelemetryDisplayEvent.Performance -> {
-      event.fps?.let { rows.add("FPS" to "${it.toInt()}") }
-      event.cpuUsagePercent?.let { rows.add("CPU" to "${"%.1f".format(it)}%") }
-      event.memoryUsageMb?.let { rows.add("Memory" to "${it.toInt()} MB") }
-    }
-    else -> {}
-  }
-
-  val sb = StringBuilder()
-  sb.appendLine("| Field | Value |")
-  sb.appendLine("|-------|-------|")
-  rows.forEach { (k, v) -> sb.appendLine("| $k | ${v.replace("|", "\\|")} |") }
-
-  val clipboard = java.awt.Toolkit.getDefaultToolkit().systemClipboard
-  clipboard.setContents(java.awt.datatransfer.StringSelection(sb.toString()), null)
-}
-
 @Composable
 private fun ActionButton(
   label: String,
@@ -1024,21 +988,6 @@ private fun ActionButton(
       color = if (enabled) textColor.copy(alpha = 0.8f) else textColor.copy(alpha = 0.4f),
     )
   }
-}
-
-private fun generateCurlCommand(event: TelemetryDisplayEvent.Network): String {
-  val sb = StringBuilder()
-  sb.append("curl -X ${event.method}")
-  event.requestHeaders?.forEach { (key, value) ->
-    val displayValue = if (key.equals("Authorization", ignoreCase = true)) "[REDACTED]" else value
-    sb.append(" \\\n  -H '${key}: ${displayValue.replace("'", "'\\''")}'")
-  }
-  val reqBody = event.requestBody
-  if (!reqBody.isNullOrBlank()) {
-    sb.append(" \\\n  -d '${reqBody.replace("'", "'\\''")}'")
-  }
-  sb.append(" \\\n  '${event.url}'")
-  return sb.toString()
 }
 
 @Composable

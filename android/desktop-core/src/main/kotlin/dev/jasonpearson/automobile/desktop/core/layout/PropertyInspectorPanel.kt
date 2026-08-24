@@ -1,7 +1,11 @@
 package dev.jasonpearson.automobile.desktop.core.layout
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,12 +23,17 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.jasonpearson.automobile.desktop.core.clipboard.LocalClipboardWriter
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 
 /**
@@ -76,6 +85,8 @@ fun PropertyInspectorPanel(
           element.resourceId?.let { PropertyRow("Resource ID", it) }
           element.contentDescription?.let { PropertyRow("Content Desc", it) }
           PropertyRow("Element ID", element.id, isSecondary = true)
+          Spacer(Modifier.height(4.dp))
+          CopySelectorButton(element)
         }
 
         Spacer(Modifier.height(16.dp))
@@ -198,9 +209,12 @@ private fun PropertyRow(
   isSecondary: Boolean = false,
 ) {
   val colors = SharedTheme.globalColors
+  val interactionSource = remember { MutableInteractionSource() }
+  val isHovered by interactionSource.collectIsHoveredAsState()
+  val clipboard = LocalClipboardWriter.current
 
   Row(
-    modifier = Modifier.fillMaxWidth(),
+    modifier = Modifier.fillMaxWidth().hoverable(interactionSource),
     verticalAlignment = Alignment.CenterVertically,
   ) {
     Text(
@@ -215,6 +229,47 @@ private fun PropertyRow(
       value,
       fontSize = 11.sp,
       color = colors.text.normal.copy(alpha = if (isSecondary) 0.6f else 1f),
+      maxLines = 1,
+      softWrap = false,
+    )
+    if (isHovered) {
+      Box(
+        modifier =
+          Modifier.padding(start = 4.dp)
+            .clickable { clipboard.writeText(value) }
+            .pointerHoverIcon(PointerIcon.Hand)
+            .padding(2.dp)
+      ) {
+        Text("📋", fontSize = 9.sp) // clipboard icon
+      }
+    }
+  }
+}
+
+/**
+ * Copies an automation-ready selector for [element] (see [buildElementSelector]) to the clipboard.
+ * Gives the property inspector the same "copy selector" affordance as the hierarchy tree (#5205).
+ */
+@Composable
+private fun CopySelectorButton(element: UIElementInfo) {
+  val colors = SharedTheme.globalColors
+  val clipboard = LocalClipboardWriter.current
+  Row(
+    modifier =
+      Modifier.fillMaxWidth()
+        .clip(RoundedCornerShape(4.dp))
+        .background(colors.text.normal.copy(alpha = 0.08f))
+        .clickable { clipboard.copyElementSelector(element) }
+        .pointerHoverIcon(PointerIcon.Hand)
+        .padding(horizontal = 8.dp, vertical = 4.dp),
+    horizontalArrangement = Arrangement.spacedBy(4.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    Text("📋", fontSize = 10.sp) // clipboard icon
+    Text(
+      "Copy selector",
+      fontSize = 11.sp,
+      color = colors.text.normal.copy(alpha = 0.8f),
       maxLines = 1,
       softWrap = false,
     )

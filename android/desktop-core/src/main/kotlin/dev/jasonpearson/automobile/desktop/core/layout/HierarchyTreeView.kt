@@ -42,6 +42,7 @@ import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.jasonpearson.automobile.desktop.core.clipboard.LocalClipboardWriter
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 import kotlinx.coroutines.delay
 
@@ -219,18 +220,6 @@ fun HierarchyTreeView(
   }
 }
 
-/** Generate an XPath-like selector string for an element. */
-private fun buildElementSelector(element: UIElementInfo): String {
-  val simpleName = element.className.substringAfterLast(".")
-  return when {
-    !element.resourceId.isNullOrEmpty() -> "//$simpleName[@resource-id='${element.resourceId}']"
-    !element.text.isNullOrEmpty() -> "//$simpleName[@text='${element.text}']"
-    !element.contentDescription.isNullOrEmpty() ->
-      "//$simpleName[@content-desc='${element.contentDescription}']"
-    else -> "//$simpleName"
-  }
-}
-
 @Composable
 private fun TreeNodeRow(
   node: FlatTreeNode,
@@ -373,13 +362,11 @@ private fun TreeNodeRow(
     // Copy selector button — visible on row hover
     if (isRowHovered) {
       val selector = remember(node.element) { buildElementSelector(node.element) }
+      val clipboard = LocalClipboardWriter.current
       Box(
         modifier =
           Modifier.size(24.dp)
-            .clickable {
-              val clipboard = java.awt.Toolkit.getDefaultToolkit().systemClipboard
-              clipboard.setContents(java.awt.datatransfer.StringSelection(selector), null)
-            }
+            .clickable { clipboard.writeText(selector) }
             .pointerHoverIcon(PointerIcon.Hand),
         contentAlignment = Alignment.Center,
       ) {

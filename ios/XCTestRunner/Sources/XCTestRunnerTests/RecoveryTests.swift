@@ -364,6 +364,30 @@ final class RunBlockingBoundTests: XCTestCase {
         XCTAssertLessThan(Date().timeIntervalSince(start), 2.0, "timeout must return promptly, not block on the op")
     }
 
+    // On timeout the bridge must cancel the spawned task so a cancellation-aware operation unwinds
+    // promptly instead of running to completion and retaining its resources.
+    func testSemaphoreBridgeCancelsHungTaskOnTimeout() {
+        let cancelled = DispatchSemaphore(value: 0)
+        let bridge = SemaphoreAsyncCallBridge()
+        XCTAssertThrowsError(
+            try bridge.run(timeout: 0.05) { () async throws -> Int in
+                do {
+                    try await Task.sleep(nanoseconds: 5_000_000_000)
+                } catch {
+                    // `Task.sleep` throws `CancellationError` when the task is cancelled.
+                    cancelled.signal()
+                    throw error
+                }
+                return 1
+            }
+        )
+        XCTAssertEqual(
+            cancelled.wait(timeout: .now() + 2.0),
+            .success,
+            "timed-out task must be cancelled so a cancellation-aware operation unwinds promptly"
+        )
+    }
+
     func testSemaphoreBridgePassesThroughSuccess() throws {
         let bridge = SemaphoreAsyncCallBridge()
         let value = try bridge.run(timeout: 5) { () async throws -> Int in 42 }

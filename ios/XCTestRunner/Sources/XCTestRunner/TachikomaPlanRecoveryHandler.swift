@@ -446,7 +446,7 @@ struct SemaphoreAsyncCallBridge: AsyncCallBridging {
     func run<T>(timeout: TimeInterval, _ operation: @escaping () async throws -> T) throws -> T {
         let box = ResultBox<T>()
         let semaphore = DispatchSemaphore(value: 0)
-        Task {
+        let task = Task {
             do {
                 box.result = .success(try await operation())
             } catch {
@@ -455,6 +455,10 @@ struct SemaphoreAsyncCallBridge: AsyncCallBridging {
             semaphore.signal()
         }
         if semaphore.wait(timeout: .now() + timeout) == .timedOut {
+            // Cancel the abandoned work so a cancellation-aware provider can release its network
+            // request and drop its retained state promptly, rather than one orphaned task per
+            // timed-out recovery accumulating for the lifetime of the XCTest process.
+            task.cancel()
             throw RecoveryTimeoutError(timeoutSeconds: timeout)
         }
         switch box.result {

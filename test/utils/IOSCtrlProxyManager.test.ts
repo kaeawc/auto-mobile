@@ -4,6 +4,7 @@ import {
   IOSCtrlProxyManager,
   STARTUP_ORPHAN_RUNNER_REAP_DEADLINE_MS,
   MAX_STARTUP_ORPHAN_RUNNER_CANDIDATES,
+  type CtrlProxyStartOptions,
 } from "../../src/utils/IOSCtrlProxyManager";
 import { BootedDevice } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -333,6 +334,236 @@ describe("IOSCtrlProxyManager", function() {
     test("should return default port 8765", function() {
       const manager = IOSCtrlProxyManager.getInstance(testDevice);
       expect(manager.getServicePort()).toBe(8765);
+    });
+  });
+
+  describe("forceRestart", function() {
+    test("forwards caller startup options after stopping", async function() {
+      const manager = IOSCtrlProxyManager.getInstance(testDevice);
+      const controller = new AbortController();
+      const options = { signal: controller.signal, minimumHealthPollDurationMs: 1_000 };
+      spyOn(manager, "stop").mockResolvedValue();
+      spyOn(manager, "isRunning").mockResolvedValue(false);
+      const start = spyOn(
+        manager as unknown as { startAfterForceRestart(options: CtrlProxyStartOptions): Promise<void> },
+        "startAfterForceRestart",
+      ).mockResolvedValue();
+
+      await manager.forceRestart(options);
+
+      expect(start).toHaveBeenCalledWith(options);
+    });
+
+    test("does not start a replacement after cancellation during stop", async function() {
+      const manager = IOSCtrlProxyManager.getInstance(testDevice);
+      const controller = new AbortController();
+      spyOn(manager, "stop").mockImplementation(async () => {
+        controller.abort(new Error("readiness deadline expired"));
+      });
+      const start = spyOn(
+        manager as unknown as { startAfterForceRestart(options: CtrlProxyStartOptions): Promise<void> },
+        "startAfterForceRestart",
+      ).mockResolvedValue();
+
+      await expect(manager.forceRestart({ signal: controller.signal })).rejects.toThrow(
+        "readiness deadline expired",
+      );
+      expect(start).not.toHaveBeenCalled();
+    });
+
+    test("keeps a subsequent start behind a forced restart whose stop is still settling", async function() {
+      const manager = IOSCtrlProxyManager.getInstance(testDevice);
+      const stopped = deferred();
+      spyOn(manager, "stop").mockImplementation(async () => await stopped.promise);
+      spyOn(manager, "isRunning").mockResolvedValue(false);
+      const start = spyOn(
+        manager as unknown as { startAfterForceRestart(options: CtrlProxyStartOptions): Promise<void> },
+        "startAfterForceRestart",
+      ).mockResolvedValue();
+
+      const forcedRestart = manager.forceRestart();
+      await Promise.resolve();
+      const subsequentStart = manager.start();
+      await Promise.resolve();
+
+      expect(start).not.toHaveBeenCalled();
+      stopped.resolve();
+      await forcedRestart;
+      await subsequentStart;
+      expect(start).toHaveBeenCalledTimes(2);
+    });
+
+    test("lets a live caller retry after an earlier cancelled restart settles", async function() {
+      const manager = IOSCtrlProxyManager.getInstance(testDevice);
+      const stopped = deferred();
+      const controller = new AbortController();
+      const stop = spyOn(manager, "stop")
+        .mockImplementationOnce(async () => await stopped.promise)
+        .mockResolvedValue();
+      spyOn(manager, "isRunning").mockResolvedValue(false);
+      const start = spyOn(
+        manager as unknown as { startAfterForceRestart(options: CtrlProxyStartOptions): Promise<void> },
+        "startAfterForceRestart",
+      ).mockResolvedValue();
+
+      const cancelledRestart = manager.forceRestart({ signal: controller.signal });
+      await Promise.resolve();
+      const liveRestart = manager.forceRestart();
+      controller.abort(new Error("readiness deadline expired"));
+      stopped.resolve();
+
+      await expect(cancelledRestart).rejects.toThrow("readiness deadline expired");
+      await liveRestart;
+      expect(stop).toHaveBeenCalledTimes(2);
+      expect(start).toHaveBeenCalledTimes(1);
+    });
+
+    test("extends a forced restart with a joining caller's health-poll budget", async function() {
+      const manager = IOSCtrlProxyManager.getInstance(testDevice);
+      const stopped = deferred();
+      spyOn(manager, "stop").mockImplementation(async () => await stopped.promise);
+      spyOn(manager, "isRunning").mockResolvedValue(false);
+      const start = spyOn(
+        manager as unknown as { startAfterForceRestart(options: CtrlProxyStartOptions): Promise<void> },
+        "startAfterForceRestart",
+      ).mockResolvedValue();
+
+      const ownerRestart = manager.forceRestart();
+      await Promise.resolve();
+      const joiningRestart = manager.forceRestart({ minimumHealthPollDurationMs: 1_000 });
+      stopped.resolve();
+
+      await ownerRestart;
+      await joiningRestart;
+      expect(start).toHaveBeenCalledWith({ minimumHealthPollDurationMs: 1_000 });
+    });
+
+    test("lets a live caller retry after the owner's startup-phase cancellation", async function() {
+      const manager = IOSCtrlProxyManager.getInstance(testDevice);
+      const started = deferred();
+      const controller = new AbortController();
+      const stop = spyOn(manager, "stop").mockResolvedValue();
+      spyOn(manager, "isRunning").mockResolvedValue(false);
+      const start = spyOn(
+        manager as unknown as { startAfterForceRestart(options: CtrlProxyStartOptions): Promise<void> },
+        "startAfterForceRestart",
+      )
+        .mockImplementationOnce(async () => {
+          await started.promise;
+          throw controller.signal.reason;
+        })
+        .mockResolvedValue();
+
+      const cancelledRestart = manager.forceRestart({ signal: controller.signal });
+      await Promise.resolve();
+      const liveRestart = manager.forceRestart();
+      const cancelledFailure = cancelledRestart.catch(error => error);
+      controller.abort(new Error("readiness deadline expired"));
+      started.resolve();
+
+      const cancelledError = await cancelledFailure;
+      expect(cancelledError).toBeInstanceOf(Error);
+      expect((cancelledError as Error).message).toContain("readiness deadline expired");
+      await liveRestart;
+      expect(stop).toHaveBeenCalledTimes(2);
+      expect(start).toHaveBeenCalledTimes(2);
+    });
+
+    test("keeps a start behind a successor forced restart after cancellation", async function() {
+      const manager = IOSCtrlProxyManager.getInstance(testDevice);
+      const firstStop = deferred();
+      const secondStop = deferred();
+      const startGate = deferred();
+      const controller = new AbortController();
+      const stop = spyOn(manager, "stop")
+        .mockImplementationOnce(async () => await firstStop.promise)
+        .mockImplementationOnce(async () => await secondStop.promise);
+      spyOn(manager, "isRunning").mockResolvedValue(false);
+      const start = spyOn(
+        manager as unknown as { startInternal(sharedStart: unknown): Promise<void> },
+        "startInternal",
+      ).mockResolvedValue();
+      spyOn(
+        manager as unknown as {
+          waitForNonJoinableStart(signal: AbortSignal | undefined): Promise<unknown>;
+        },
+        "waitForNonJoinableStart",
+      ).mockImplementationOnce(async () => {
+        await startGate.promise;
+        return null;
+      });
+
+      const cancelledRestart = manager.forceRestart({ signal: controller.signal });
+      await Promise.resolve();
+      const ordinaryStart = manager.start();
+      const successorRestart = manager.forceRestart();
+      const cancelledFailure = cancelledRestart.catch(error => error);
+      controller.abort(new Error("readiness deadline expired"));
+      firstStop.resolve();
+
+      await cancelledFailure;
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(stop).toHaveBeenCalledTimes(2);
+      expect(start).not.toHaveBeenCalled();
+      startGate.resolve();
+      await Promise.resolve();
+      expect(start).not.toHaveBeenCalled();
+      secondStop.resolve();
+
+      await ordinaryStart;
+      await successorRestart;
+      expect(start).toHaveBeenCalledTimes(2);
+    });
+
+    test("fails rather than reusing a runner that remains after forced teardown", async function() {
+      const manager = IOSCtrlProxyManager.getInstance(testDevice);
+      spyOn(manager, "stop").mockResolvedValue();
+      spyOn(
+        manager as unknown as {
+          checkHealthEndpointOnPortForDevice(port: number, deviceId: string): Promise<boolean>;
+        },
+        "checkHealthEndpointOnPortForDevice",
+      ).mockResolvedValue(true);
+      const start = spyOn(
+        manager as unknown as { startAfterForceRestart(options: CtrlProxyStartOptions): Promise<void> },
+        "startAfterForceRestart",
+      ).mockResolvedValue();
+
+      await expect(manager.forceRestart()).rejects.toThrow(
+        "iOS CtrlProxy is still running after forced teardown",
+      );
+      expect(start).not.toHaveBeenCalled();
+    });
+
+    test("propagates forced teardown failures to a concurrent start", async function() {
+      const manager = IOSCtrlProxyManager.getInstance(testDevice);
+      const stopped = deferred();
+      spyOn(manager, "stop").mockImplementation(async () => await stopped.promise);
+      spyOn(
+        manager as unknown as {
+          checkHealthEndpointOnPortForDevice(port: number, deviceId: string): Promise<boolean>;
+        },
+        "checkHealthEndpointOnPortForDevice",
+      ).mockResolvedValue(true);
+      const start = spyOn(
+        manager as unknown as { startAfterForceRestart(options: CtrlProxyStartOptions): Promise<void> },
+        "startAfterForceRestart",
+      ).mockResolvedValue();
+
+      const forcedRestart = manager.forceRestart();
+      await Promise.resolve();
+      const concurrentStart = manager.start();
+      const forcedFailure = forcedRestart.catch(error => error);
+      const concurrentFailure = concurrentStart.catch(error => error);
+      stopped.resolve();
+
+      const [forcedError, concurrentError] = await Promise.all([forcedFailure, concurrentFailure]);
+      expect(forcedError).toBeInstanceOf(Error);
+      expect(concurrentError).toBeInstanceOf(Error);
+      expect((forcedError as Error).message).toContain("iOS CtrlProxy is still running after forced teardown");
+      expect((concurrentError as Error).message).toContain("iOS CtrlProxy is still running after forced teardown");
+      expect(start).not.toHaveBeenCalled();
     });
   });
 

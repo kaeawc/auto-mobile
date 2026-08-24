@@ -674,7 +674,8 @@ describe("DeviceSessionManager legacy iOS auto-start readiness", () => {
 
     await expect(manager.ensureDeviceReady("ios")).resolves.toEqual(iosDevice);
     expect(iosManager.wasMethodCalled("resetSetupState")).toBe(true);
-    expect(iosManager.wasMethodCalled("setup")).toBe(true);
+    expect(iosManager.wasMethodCalled("forceRestart")).toBe(true);
+    expect(iosManager.wasMethodCalled("setup")).toBe(false);
   });
 
   test("does not retry the current simulator after runner readiness fails", async () => {

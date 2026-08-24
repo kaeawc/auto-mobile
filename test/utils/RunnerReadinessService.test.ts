@@ -102,12 +102,15 @@ class FakeAndroidManager implements ReadinessAndroidManager {
 
 class FakeIosManager implements ReadinessIosManager {
   installed = true;
+  servicePort = 8765;
   setupResult = { success: true, message: "ready" };
   setupCalls = 0;
   startCalls = 0;
+  forceRestartCalls = 0;
   setupSignal: AbortSignal | undefined;
   setupMinimumHealthPollDurationMs: number | undefined;
   startOptions: { signal?: AbortSignal; minimumHealthPollDurationMs?: number } | undefined;
+  forceRestartOptions: { signal?: AbortSignal; minimumHealthPollDurationMs?: number } | undefined;
 
   async isInstalled(): Promise<boolean> {
     return this.installed;
@@ -116,6 +119,7 @@ class FakeIosManager implements ReadinessIosManager {
   /** Optional hook to simulate elapsed provisioning time (e.g. a cold launch). */
   onStart?: () => Promise<void>;
   onSetup?: () => Promise<void>;
+  onForceRestart?: (options?: { signal?: AbortSignal; minimumHealthPollDurationMs?: number }) => Promise<void>;
 
   async start(options?: { signal?: AbortSignal; minimumHealthPollDurationMs?: number }): Promise<void> {
     this.startCalls++;
@@ -124,6 +128,14 @@ class FakeIosManager implements ReadinessIosManager {
       await this.onStart();
     }
   }
+
+  async forceRestart(options?: { signal?: AbortSignal; minimumHealthPollDurationMs?: number }): Promise<void> {
+    this.forceRestartCalls++;
+    this.forceRestartOptions = options;
+    await this.onForceRestart?.(options);
+  }
+
+  resetSetupState(): void {}
 
   async setup(
     _force?: boolean,
@@ -141,7 +153,7 @@ class FakeIosManager implements ReadinessIosManager {
   }
 
   getServicePort(): number {
-    return 8765;
+    return this.servicePort;
   }
 }
 
@@ -152,6 +164,7 @@ function createService(
     androidClient?: FakeReadinessClient;
     iosManager?: FakeIosManager;
     iosClient?: FakeReadinessClient;
+    getIosClient?: (device: BootedDevice, port: number) => FakeReadinessClient;
     autoAdvance?: boolean;
     awaitIosStartupMaintenance?: () => Promise<void>;
   } = {},
@@ -175,7 +188,7 @@ function createService(
       getAndroidManager: () => androidManager,
       getAndroidClient: () => androidClient,
       getIosManager: () => iosManager,
-      getIosClient: () => iosClient,
+      getIosClient: options.getIosClient ?? (() => iosClient),
       checkIosOverride: async () => ({ present: false, usable: true }),
       awaitIosStartupMaintenance: options.awaitIosStartupMaintenance ?? (async () => {}),
     }),
@@ -607,6 +620,82 @@ describe("RunnerReadinessService", () => {
 
     expect(iosManager.setupMinimumHealthPollDurationMs).toBe(110_000);
     expect(iosManager.setupSignal).toBeDefined();
+  });
+
+  test("force-restarts an iOS runner whose port is reachable but hierarchy health fails", async () => {
+    const iosManager = new FakeIosManager();
+    const iosClient = new FakeReadinessClient();
+    iosClient.healthResults = [false, true];
+    const { service } = createService({ iosManager, iosClient });
+
+    await service.ensureReady({
+      device: iosDevice,
+      requestedIdentity: "platform=ios deviceId=IOS-UDID",
+      totalDeadlineMs: 30_000,
+      readinessTimeoutMs: 30_000,
+    });
+
+    expect(iosManager.forceRestartCalls).toBe(1);
+    expect(iosManager.setupCalls).toBe(0);
+    expect(iosClient.healthCalls).toBe(2);
+  });
+
+  test("uses the post-restart iOS service port for readiness", async () => {
+    const iosManager = new FakeIosManager();
+    const staleClient = new FakeReadinessClient();
+    const restartedClient = new FakeReadinessClient();
+    staleClient.healthResults = [false, true];
+    restartedClient.healthResults = [true];
+    iosManager.onForceRestart = async () => {
+      iosManager.servicePort = 9_876;
+    };
+    const requestedPorts: number[] = [];
+    const { service } = createService({
+      iosManager,
+      iosClient: staleClient,
+      getIosClient: (_device, port) => {
+        requestedPorts.push(port);
+        return port === 9_876 ? restartedClient : staleClient;
+      },
+    });
+
+    await service.ensureReady({
+      device: iosDevice,
+      requestedIdentity: "platform=ios deviceId=IOS-UDID",
+      totalDeadlineMs: 30_000,
+      readinessTimeoutMs: 30_000,
+    });
+
+    expect(requestedPorts).toEqual([8_765, 9_876]);
+    expect(staleClient.healthCalls).toBe(1);
+    expect(restartedClient.healthCalls).toBe(1);
+  });
+
+  test("cancels the iOS force-restart when its readiness budget expires", async () => {
+    const timer = new FakeTimer();
+    const iosManager = new FakeIosManager();
+    const iosClient = new FakeReadinessClient();
+    iosClient.healthResults = [false];
+    iosManager.onForceRestart = async (options) => await new Promise<void>((_resolve, reject) => {
+      options?.signal?.addEventListener("abort", () => reject(options.signal?.reason), { once: true });
+    });
+    const { service } = createService({ timer, iosManager, iosClient, autoAdvance: false });
+
+    const ready = service.ensureReady({
+      device: iosDevice,
+      requestedIdentity: "platform=ios deviceId=IOS-UDID",
+      totalDeadlineMs: 1_000,
+      readinessTimeoutMs: 1_000,
+    });
+    for (let attempt = 0; attempt < 20 && iosManager.forceRestartCalls === 0; attempt++) {
+      await new Promise<void>(resolve => setImmediate(resolve));
+    }
+
+    expect(iosManager.forceRestartCalls).toBe(1);
+    expect(iosManager.forceRestartOptions?.signal).toBeDefined();
+    timer.advanceTime(1_000);
+    await expect(ready).rejects.toThrow(/phase=runner-setup/);
+    expect(iosManager.forceRestartOptions?.signal?.aborted).toBe(true);
   });
 
   test("starts only the cached iOS runner when downloads are disabled", async () => {

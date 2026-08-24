@@ -193,9 +193,9 @@ describe("IOSCtrlProxyClient auto-setup", function () {
     // handshake.
     const connect = (client as unknown as { connectWebSocket: () => Promise<boolean> })
       .connectWebSocket;
-    const updatePort = (client as unknown as { updatePort: (port: number) => void }).updatePort.bind(
-      client,
-    );
+    const updatePort = (
+      client as unknown as { updatePort: (port: number) => void }
+    ).updatePort.bind(client);
     try {
       // Start a connect and let it reach the in-flight state: socket CONNECTING,
       // this.ws still null, isConnecting true. The URL was built from the old port.

@@ -441,6 +441,20 @@ describe("PersistentEncoderH264Source on-device jar integrity (issue #4733)", ()
   });
 });
 
+describe("PersistentEncoderH264Source encoder-drop telemetry", () => {
+  test("forwards the Android encoder's cumulative dropped-frame counter", async () => {
+    const droppedFrames: number[] = [];
+    const ctx = makeSource({ onDroppedFrames: value => droppedFrames.push(value) });
+    await startReady(ctx);
+
+    ctx.processes[0].stdout.write(Buffer.from("VIDEO_STATS fps=15 dropped=42 bitrate=900000\n"));
+    await tick();
+
+    expect(droppedFrames).toEqual([42]);
+    await ctx.source.stop();
+  });
+});
+
 describe("PersistentEncoderH264Source", () => {
   test("pushes the jar, launches the server with overrides, forwards, and forwards frames", async () => {
     const ctx = makeSource({

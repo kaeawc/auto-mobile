@@ -18,6 +18,7 @@ private const val FLAG_KEY_FRAME = 1L shl 62
  * `src/daemon/videoStreamFraming.ts` for the encoder.
  */
 private const val FLAG_ROTATION_PRESENT = 1L shl 61
+private const val FLAG_DROPPED_FRAMES = 1L shl 61
 private const val ROTATION_SHIFT = 59
 private const val ROTATION_MASK = 0b11L shl ROTATION_SHIFT
 
@@ -47,6 +48,8 @@ data class VideoPacket(
    * leaves the control gate to fail closed rather than trust an unattested orientation.
    */
   val rotation: Int? = null,
+  /** Cumulative source-encoder drops in a zero-payload telemetry packet (#5582). */
+  val droppedFrames: Long? = null,
 ) {
   // Data classes compare arrays by identity, which would make equality useless in tests.
   override fun equals(other: Any?): Boolean =
@@ -55,10 +58,14 @@ data class VideoPacket(
       presentationTimeUs == other.presentationTimeUs &&
       isConfig == other.isConfig &&
       isKeyFrame == other.isKeyFrame &&
-      rotation == other.rotation
+      rotation == other.rotation &&
+      droppedFrames == other.droppedFrames
 
   override fun hashCode(): Int =
-    payload.contentHashCode() * 31 + presentationTimeUs.hashCode() * 31 + isConfig.hashCode()
+    payload.contentHashCode() * 31 +
+      presentationTimeUs.hashCode() * 31 +
+      isConfig.hashCode() +
+      droppedFrames.hashCode()
 }
 
 /** Raised when the stream is not the framing this client understands. */
@@ -152,6 +159,7 @@ class VideoStreamParser {
 
       val start = offset + PACKET_HEADER_BYTES
       val isConfig = (ptsAndFlags and FLAG_CONFIG) != 0L
+      val isDroppedFrames = !isConfig && size == 0 && (ptsAndFlags and FLAG_DROPPED_FRAMES) != 0L
       onPacket(
         VideoPacket(
           payload = src.copyOfRange(start, start + size),
@@ -166,6 +174,7 @@ class VideoStreamParser {
             } else {
               null
             },
+          droppedFrames = if (isDroppedFrames) ptsAndFlags and PTS_MASK else null,
         )
       )
       offset = start + size

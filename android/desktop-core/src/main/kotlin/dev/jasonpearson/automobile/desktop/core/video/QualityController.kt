@@ -31,9 +31,9 @@ import kotlinx.coroutines.flow.StateFlow
  *   [samplesToDowngrade]/[samplesToUpgrade] (hysteresis) plus [minDwellMs] then keep a brief dip or
  *   a flapping rate from thrashing the encode.
  *
- * A severe interval can be classified safely when its decoded pixels changed: that proves active
- * content, rather than Android's repeated idle frame. This source-neutral signal works for both
- * Android repeat-frame and iOS idle-suppression behavior; absent frames are never samples.
+ * A source-side encoder dropped-frame counter supplies the severe-degradation signal timing cannot:
+ * Android repeat frames and iOS idle suppression leave the counter flat, while a saturated encoder
+ * advances it regardless of which capture source supplied the frames.
  *
  * The displayed [actualFps] is computed as frames-over-elapsed across a trailing [rateWindowMs]
  * window — an unbiased rate. (Averaging instantaneous `1000/dt` values would overstate throughput
@@ -126,12 +126,10 @@ class QualityController(
   /**
    * Records a decoded frame's arrival time, updates the live rate, and maybe adjusts quality.
    *
-   * [contentChanged] is supplied by the decoded-frame source. It is needed only for intervals at
-   * the idle cadence or slower: an unchanged frame is idle, while a changed frame proves a severe
-   * active drop. The conservative default preserves static-safe behavior for sources that do not
-   * yet provide the signal.
+   * Delivery timing still drives the moderate-degradation and recovery bands. Severe drops use
+   * [onDroppedFrames], whose source-side counter is not confounded by idle capture behavior.
    */
-  fun onFrame(receivedAtMs: Long, contentChanged: Boolean = false) {
+  fun onFrame(receivedAtMs: Long) {
     window.addLast(receivedAtMs)
     while (window.size > 1 && receivedAtMs - window.first() > rateWindowMs) window.removeFirst()
     _actualFps.value = windowFps()
@@ -144,7 +142,7 @@ class QualityController(
     if (dt <= 0L) return // out-of-order / duplicate timestamp: ignore rather than divide by zero.
     if (!autoAdjustEnabled) return
 
-    classify(dt, contentChanged)
+    classify(dt)
     if (samples < minSamplesForDecision) return
     maybeAdjust(receivedAtMs)
   }
@@ -174,16 +172,9 @@ class QualityController(
   }
 
   /** Buckets one inter-frame interval into healthy / dropping / idle and advances the streaks. */
-  private fun classify(dt: Long, contentChanged: Boolean) {
+  private fun classify(dt: Long) {
     when {
-      // A changed frame at a static-compatible cadence proves this is not an Android repeat. iOS
-      // emits no idle frames at all, so it reaches here only when content resumed and changed.
-      dt >= idleIntervalMs && contentChanged -> {
-        lowStreak++
-        highStreak = 0
-        samples++
-      }
-      // Idle: unchanged Android repeat frame, or iOS suppression/reconnect gap. Not degradation.
+      // Idle: Android repeat frame, or iOS suppression/reconnect gap. Not degradation.
       dt >= idleIntervalMs -> {
         lowStreak = 0
         highStreak = 0
@@ -206,6 +197,24 @@ class QualityController(
         samples++
       }
     }
+  }
+
+  private var lastDroppedFrames: Long? = null
+
+  /**
+   * Records the source encoder's cumulative dropped-frame count. Counter growth proves encoder
+   * overload even when frame timing is indistinguishable from an idle screen.
+   */
+  fun onDroppedFrames(droppedFrames: Long) {
+    val previous = lastDroppedFrames
+    lastDroppedFrames = droppedFrames
+    if (!autoAdjustEnabled || previous == null || droppedFrames <= previous) return
+    lowStreak++
+    highStreak = 0
+    // A counter increase is direct encoder-overload evidence, unlike a timing sample. It still
+    // uses the low-streak hysteresis, but does not wait for unrelated frame-rate samples first.
+    samples = minSamplesForDecision
+    maybeAdjust(lastFrameMs ?: 0L)
   }
 
   private fun maybeAdjust(nowMs: Long) {
@@ -238,5 +247,6 @@ class QualityController(
     samples = 0
     lowStreak = 0
     highStreak = 0
+    lastDroppedFrames = null
   }
 }

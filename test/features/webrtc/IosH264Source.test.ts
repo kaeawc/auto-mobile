@@ -2561,3 +2561,26 @@ describe("defaultIosBitrateBps (#4349)", () => {
     expect(bitrate).toBeGreaterThanOrEqual(1);
   });
 });
+
+describe("IosH264Source encoder-drop telemetry", () => {
+  test("forwards the helper's cumulative dropped-frame counter", async () => {
+    const droppedFrames: number[] = [];
+    const { source, helper } = createHarness(IOS_DEVICE, {
+      onDroppedFrames: value => droppedFrames.push(value),
+    });
+    await startWithFrame(source, helper, frame(1, 1, 0x11));
+
+    helper.emit("frameMetrics", {
+      captureTimestampMs: 1,
+      frameAgeMs: 0,
+      queueDepth: 0,
+      droppedFrames: 7,
+      bytesQueued: 0,
+      highWaterMarkBytes: 0,
+      maxFrameBytes: 0,
+    });
+
+    expect(droppedFrames).toEqual([7]);
+    await source.stop();
+  });
+});

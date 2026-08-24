@@ -1244,6 +1244,7 @@ export class IosH264Source implements H264CaptureSource {
     helper.on("frameMetrics", (metrics) => {
       if (this.helper === helper && this.isActive()) {
         this.helperFrameMetrics = metrics;
+        this.options.onDroppedFrames?.(metrics.droppedFrames);
         this.reportFrameMetrics();
       }
     });

@@ -81,12 +81,12 @@ class QualityControllerTest {
         samplesToDowngrade = 3,
         minDwellMs = 0,
       )
-    repeat(60) { index -> controller.onFrame(index * 100L, contentChanged = false) }
+    controller.feed(count = 60, intervalMs = 100)
     assertEquals(VideoStreamQuality.High, controller.quality.value)
   }
 
   @Test
-  fun `a severe active drop downgrades when decoded content changes`() {
+  fun `sustained encoder drops downgrade quality regardless of delivery cadence`() {
     val controller =
       QualityController(
         initialQuality = VideoStreamQuality.High,
@@ -95,15 +95,13 @@ class QualityControllerTest {
         minDwellMs = 0,
       )
 
-    // At 5fps timing alone is indistinguishable from Android's static repeat cadence. Pixels that
-    // change on every delivered frame prove this is active content, so it must shed quality.
-    repeat(60) { index -> controller.onFrame(index * 200L, contentChanged = true) }
+    repeat(10) { dropped -> controller.onDroppedFrames((dropped + 1).toLong()) }
 
     assertEquals(VideoStreamQuality.Low, controller.quality.value)
   }
 
   @Test
-  fun `iOS idle suppression never downgrades without a delivered changed frame`() {
+  fun `static Android and iOS sources do not downgrade while encoder drops stay flat`() {
     val controller =
       QualityController(
         initialQuality = VideoStreamQuality.High,
@@ -113,10 +111,9 @@ class QualityControllerTest {
         minDwellMs = 0,
       )
 
-    controller.onFrame(0, contentChanged = true)
-    // ScreenCaptureKit emits nothing while static. Its eventual unchanged resume frame must not
-    // reinterpret the idle gap as encoder overload.
-    controller.onFrame(5_000, contentChanged = false)
+    // Android may repeat frames and iOS may suppress them. Neither behavior increments the source
+    // encoder's dropped-frame counter, so neither can trigger a downgrade.
+    repeat(10) { controller.onDroppedFrames(0) }
 
     assertEquals(VideoStreamQuality.High, controller.quality.value)
   }

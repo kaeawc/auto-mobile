@@ -238,7 +238,7 @@ That keeps the installer growth to ~20–30 MB per platform. The decoder reads a
 
 - [ ] Handle device disconnect/reconnect
 - [ ] Add fallback to screenshot mode
-- [x] Automatic quality adjustment on frame drops — client-side `QualityController` steps the preset and re-subscribes. Decoded-pixel changes distinguish a severe active drop from Android idle repeats and iOS idle suppression (#5582); because a shared per-device capture's encode is fixed by the first subscriber, this applies for a sole subscriber / the next subscribe, and reconfiguring a live shared capture is a server-side follow-up (#1098)
+- [x] Automatic quality adjustment on frame drops — client-side `QualityController` steps the preset and re-subscribes. Source-side encoder-drop telemetry distinguishes a severe active drop from Android idle repeats and iOS idle suppression (#5582); because a shared per-device capture's encode is fixed by the first subscriber, this applies for a sole subscriber / the next subscribe, and reconfiguring a live shared capture is a server-side follow-up (#1098)
 - [ ] Optimize memory (double buffering, frame pooling)
 
 ## References

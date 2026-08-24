@@ -24,7 +24,12 @@ import {
   createDefaultStreamSocketAuthenticator,
   type StreamSocketAuthenticator,
 } from "./streamSocketAuth";
-import { encodePacket, encodePtsAndFlags, encodeStreamHeader } from "./videoStreamFraming";
+import {
+  encodeDroppedFrames,
+  encodePacket,
+  encodePtsAndFlags,
+  encodeStreamHeader,
+} from "./videoStreamFraming";
 import type { VideoStreamSocketRequest, VideoStreamSocketResponse } from "./videoStreamSocketTypes";
 
 /** Creates the capture source for a device. Injected so tests never touch adb. */
@@ -34,6 +39,8 @@ export type CaptureSourceFactory = (options: {
   onError: (error: Error) => void;
   /** Receives the attested display rotation (0..3) when the source can prove it (issue #4786). */
   onRotation?: (rotation: number) => void;
+  /** Receives cumulative source-side encoder drops for client quality control. */
+  onDroppedFrames?: (droppedFrames: number) => void;
   bitrateBps?: number;
   size?: { width: number; height: number };
   /** Aspect-preserving resolution/bitrate preset; see `VideoStreamSocketRequest.quality`. */
@@ -378,6 +385,14 @@ export class VideoStreamSocketServer extends BaseSocketServer {
             const current = this.captures.get(deviceId);
             if (current) {
               current.rotation = rotation;
+            }
+          },
+          onDroppedFrames: droppedFrames => {
+            const current = this.captures.get(deviceId);
+            if (!current || !Number.isSafeInteger(droppedFrames) || droppedFrames < 0) {return;}
+            const packet = encodeDroppedFrames(droppedFrames);
+            for (const subscriber of current.subscribers) {
+              if (!subscriber.destroyed) {subscriber.write(packet);}
             }
           },
           onError: (error) => {

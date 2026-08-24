@@ -68,6 +68,8 @@ interface Harness {
   emit: (chunk: Buffer) => void;
   /** Simulates the source attesting a display rotation (issue #4786). */
   emitRotation: (rotation: number) => void;
+  /** Simulates a cumulative encoder-side dropped-frame measurement. */
+  emitDroppedFrames: (droppedFrames: number) => void;
   cleanup: () => Promise<void>;
 }
 
@@ -93,6 +95,7 @@ async function startHarness(
   const sources: FakeCaptureSource[] = [];
   let onData: ((chunk: Buffer) => void) | null = null;
   let onRotation: ((rotation: number) => void) | null = null;
+  let onDroppedFrames: ((droppedFrames: number) => void) | null = null;
   const captureOptions: Array<{ fps?: number; quality?: string }> = [];
 
   const server = new VideoStreamSocketServer(
@@ -106,6 +109,7 @@ async function startHarness(
       createCaptureSource: async (opts) => {
         onData = opts.onData;
         onRotation = opts.onRotation ?? null;
+        onDroppedFrames = opts.onDroppedFrames ?? null;
         captureOptions.push(opts);
         const source = new FakeCaptureSource();
         source.startError = options.startError ?? null;
@@ -134,6 +138,7 @@ async function startHarness(
     captureOptions,
     emit: (chunk) => onData?.(chunk),
     emitRotation: (rotation) => onRotation?.(rotation),
+    emitDroppedFrames: droppedFrames => onDroppedFrames?.(droppedFrames),
     cleanup: async () => {
       await server.close();
       rmSync(dir, { recursive: true, force: true });
@@ -345,6 +350,20 @@ describe("VideoStreamSocketServer", () => {
     expect(packet.subarray(12, 19)).toEqual(
       Buffer.from([0x00, 0x00, 0x00, 0x01, 0x05, 0xaa, 0xbb]),
     );
+  });
+
+  test("relays cumulative encoder drops as a zero-payload telemetry packet", async () => {
+    const h = await startHarness();
+    const { binary } = await subscribe(h.socketPath);
+    await waitFor(() => binary().length >= 12);
+
+    h.emitDroppedFrames(42);
+    await waitFor(() => binary().length >= 24);
+
+    const packet = binary().subarray(12, 24);
+    expect(packet.readBigInt64BE(0) & ((1n << 61n) - 1n)).toBe(42n);
+    expect(packet.readBigInt64BE(0) & (1n << 61n)).toBe(1n << 61n);
+    expect(packet.readInt32BE(8)).toBe(0);
   });
 
   test("does not mistake arbitrary source chunks for complete H.264 NAL units", async () => {

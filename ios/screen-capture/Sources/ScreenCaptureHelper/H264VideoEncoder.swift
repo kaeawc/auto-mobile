@@ -49,6 +49,7 @@ final class H264VideoEncoder {
     private let forceKeyFrameLatch: ForceKeyFrameLatch
     private let onFatalError: (String) -> Void
     private let diagnosticSink: (String) -> Void
+    private let onDroppedFrame: () -> Void
     private let lock = NSLock()
 
     private var session: VTCompressionSession?
@@ -75,7 +76,8 @@ final class H264VideoEncoder {
         writer: FrameWriter,
         forceKeyFrameLatch: ForceKeyFrameLatch,
         diagnosticSink: @escaping (String) -> Void,
-        onFatalError: @escaping (String) -> Void
+        onFatalError: @escaping (String) -> Void,
+        onDroppedFrame: @escaping () -> Void = {}
     ) {
         self.width = width
         self.height = height
@@ -85,6 +87,7 @@ final class H264VideoEncoder {
         self.forceKeyFrameLatch = forceKeyFrameLatch
         self.diagnosticSink = diagnosticSink
         self.onFatalError = onFatalError
+        self.onDroppedFrame = onDroppedFrame
     }
 
     /// Create the compression session and apply the encoder config. Throws an
@@ -182,6 +185,7 @@ final class H264VideoEncoder {
             maxInFlightFrames: H264VideoEncoder.maxInFlightFrames
         )
         if behind {
+            onDroppedFrame()
             lock.unlock()
             return false
         }
@@ -207,6 +211,7 @@ final class H264VideoEncoder {
             lock.lock()
             inFlightFrames = max(0, inFlightFrames - 1)
             lock.unlock()
+            onDroppedFrame()
             diagnosticSink("warn: VTCompressionSessionEncodeFrame failed (status \(status))\n")
             return false
         }

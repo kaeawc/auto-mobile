@@ -92,6 +92,8 @@ enum class VideoStreamQuality(internal val wire: String) {
 /** A live view of a device's screen. */
 interface VideoStreamSource {
   val frames: SharedFlow<LiveVideoFrame>
+  /** Cumulative source-encoder drops, when the relay provides telemetry. */
+  val droppedFrames: SharedFlow<Long>
   val state: StateFlow<VideoStreamState>
 
   fun connect(deviceId: String?)
@@ -180,6 +182,8 @@ class VideoStreamClient(
       onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
   override val frames: SharedFlow<LiveVideoFrame> = _frames.asSharedFlow()
+  private val _droppedFrames = MutableSharedFlow<Long>(replay = 1, extraBufferCapacity = 1)
+  override val droppedFrames: SharedFlow<Long> = _droppedFrames.asSharedFlow()
 
   private val _state = MutableStateFlow<VideoStreamState>(VideoStreamState.Idle)
   override val state: StateFlow<VideoStreamState> = _state.asStateFlow()
@@ -324,12 +328,6 @@ class VideoStreamClient(
     // the current SPS/PPS attested. Stays null until the first attested config packet, so an
     // unattested stream (screenrecord/iOS relay) leaves the control gate to fail closed.
     var currentRotation: Int? = null
-    // The decoder reuses its BGRA buffer, so fingerprint it before converting to the immutable
-    // raster. A full-array hash uses no extra frame-sized copy and catches Android's repeated idle
-    // output as unchanged; it is intentionally source-neutral for iOS too (#5582).
-    var previousContentHash: Int? = null
-    var previousWidth = 0
-    var previousHeight = 0
 
     while (true) {
       val read = input.read(buffer)
@@ -342,6 +340,10 @@ class VideoStreamClient(
           LOG.info("Live mirroring started (${header.width}x${header.height} advertised)")
         },
         onPacket = { packet ->
+          packet.droppedFrames?.let {
+            _droppedFrames.tryEmit(it)
+            return@onBytes
+          }
           if (packet.isConfig && packet.rotation != null) {
             currentRotation = packet.rotation
           }
@@ -359,15 +361,6 @@ class VideoStreamClient(
               // device rotation.
               _state.value = VideoStreamState.Streaming(frame.width, frame.height)
             }
-            val contentHash = frame.bgra.contentHashCode()
-            val contentChanged =
-              previousContentHash != null &&
-                (previousContentHash != contentHash ||
-                  previousWidth != frame.width ||
-                  previousHeight != frame.height)
-            previousContentHash = contentHash
-            previousWidth = frame.width
-            previousHeight = frame.height
             // Present here, on the reader thread, while the decoder's reused buffer is valid:
             // the immutable raster produced by toImageBitmap is the only per-frame copy, and
             // consumers receive a ready-to-draw frame with no conversion (or allocation) of
@@ -377,7 +370,6 @@ class VideoStreamClient(
                 bitmap = frame.toImageBitmap(),
                 sequence = frameSequence.incrementAndGet(),
                 receivedAtMs = nowMs(),
-                contentChanged = contentChanged,
                 // The stream's config packets attest the display rotation; carrying it here
                 // lets DeviceControlSession re-prove orientation from the live frame alone
                 // (issue #4786).
@@ -470,6 +462,8 @@ class FakeVideoStreamSource(
       onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
   override val frames: SharedFlow<LiveVideoFrame> = _frames.asSharedFlow()
+  private val _droppedFrames = MutableSharedFlow<Long>(replay = 1, extraBufferCapacity = 1)
+  override val droppedFrames: SharedFlow<Long> = _droppedFrames.asSharedFlow()
 
   private val _state = MutableStateFlow<VideoStreamState>(VideoStreamState.Idle)
   override val state: StateFlow<VideoStreamState> = _state.asStateFlow()
@@ -531,16 +525,19 @@ class FakeVideoStreamSource(
     width: Int = 1080,
     height: Int = 2400,
     rotation: Int? = null,
-    contentChanged: Boolean = false,
   ) {
     _frames.tryEmit(
       LiveVideoFrame(
         bitmap = ImageBitmap(width, height),
         sequence = fakeSequence.incrementAndGet(),
         receivedAtMs = nowMs(),
-        contentChanged = contentChanged,
         rotation = rotation,
       )
     )
+  }
+
+  /** Publishes source-side encoder-drop telemetry for quality-controller tests. */
+  fun emitDroppedFrames(droppedFrames: Long) {
+    _droppedFrames.tryEmit(droppedFrames)
   }
 }

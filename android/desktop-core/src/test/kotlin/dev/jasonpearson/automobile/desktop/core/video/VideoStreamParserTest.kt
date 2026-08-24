@@ -114,6 +114,22 @@ class VideoStreamParserTest {
   }
 
   @Test
+  fun `decodes zero-payload dropped-frame telemetry without treating it as video`() {
+    val droppedFrames = 17L
+    val telemetry =
+      ByteBuffer.allocate(12)
+        .order(ByteOrder.BIG_ENDIAN)
+        .putLong((1L shl 61) or droppedFrames)
+        .putInt(0)
+        .array()
+
+    val out = feed(VideoStreamParser(), streamHeader() + telemetry)
+
+    assertEquals(droppedFrames, out.packets.single().droppedFrames)
+    assertTrue(out.packets.single().payload.isEmpty())
+  }
+
+  @Test
   fun `config and key-frame flags survive the round trip`() {
     val out =
       feed(

@@ -18,12 +18,6 @@ data class LiveVideoFrame(
   val sequence: Long,
   val receivedAtMs: Long,
   /**
-   * Whether this decoded frame's pixels differ from the preceding decoded frame in this stream
-   * session. This distinguishes Android's repeated idle frame from an active source that is
-   * actually delivering slowly, without depending on platform-specific capture cadence (#5582).
-   */
-  val contentChanged: Boolean = false,
-  /**
    * Per-frame display rotation; absent until the relay protocol can attest it, so control fails
    * closed.
    */

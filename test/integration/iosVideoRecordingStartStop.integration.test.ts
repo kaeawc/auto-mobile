@@ -3,10 +3,6 @@ import { execFile } from "node:child_process";
 import { promises as fsPromises } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
-import { registerVideoRecordingTools } from "../../src/server/videoRecordingTools";
-import { ToolRegistry } from "../../src/server/toolRegistry";
-import { resetVideoRecordingManagerDependencies } from "../../src/server/videoRecordingManager";
-import { serverConfig } from "../../src/utils/ServerConfig";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 
 const execFileAsync = promisify(execFile);
@@ -76,6 +72,17 @@ function formatError(error: unknown): string {
   return String(error);
 }
 
+async function runVideoRecordingCli(args: string[]): Promise<RecordingToolResult> {
+  // The workflow warms CtrlProxy in the daemon process before this test runs.
+  // Calling the public CLI keeps start and stop in that same process; importing
+  // the tool handler here would create a second cold DeviceSessionManager and
+  // reintroduce the runner-readiness timeout this test is meant to exercise.
+  const { stdout } = await execFileAsync("auto-mobile", ["--cli", "videoRecording", ...args], {
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  return parseToolResult(JSON.parse(stdout) as ToolTextResponse);
+}
+
 async function assertCommandAvailable(command: string, args: string[]): Promise<void> {
   try {
     await execFileAsync(command, args);
@@ -112,14 +119,6 @@ describeIntegration("iOS videoRecording start-stop integration", () => {
       await assertCommandAvailable("ffmpeg", ["-version"]);
       await assertCommandAvailable("ffprobe", ["-version"]);
 
-      if (!ToolRegistry.getTool("videoRecording")) {
-        registerVideoRecordingTools();
-      }
-
-      serverConfig.setSkipCtrlProxyDownload(true);
-      const tool = ToolRegistry.getTool("videoRecording");
-      expect(tool).toBeDefined();
-
       let recordingId: string | undefined;
       let startPayload: RecordingToolResult | undefined;
       let stopPayload: RecordingToolResult | undefined;
@@ -128,17 +127,21 @@ describeIntegration("iOS videoRecording start-stop integration", () => {
 
       try {
         const deviceId = process.env.AUTOMOBILE_IOS_VIDEO_RECORDING_DEVICE_ID;
-        startPayload = parseToolResult(
-          (await tool!.handler({
-            action: "start",
-            platform: "ios",
-            ...(deviceId ? { deviceId } : {}),
-            outputName: "issue-2628-ios-video-recording",
-            qualityPreset: "low",
-            fps: 15,
-            maxDuration: 30,
-          })) as ToolTextResponse,
-        );
+        startPayload = await runVideoRecordingCli([
+          "--action",
+          "start",
+          "--platform",
+          "ios",
+          ...(deviceId ? ["--deviceId", deviceId] : []),
+          "--outputName",
+          "issue-2628-ios-video-recording",
+          "--qualityPreset",
+          "low",
+          "--fps",
+          "15",
+          "--maxDuration",
+          "30",
+        ]);
 
         expect(startPayload.action).toBe("start");
         expect(startPayload.count).toBe(1);
@@ -153,13 +156,14 @@ describeIntegration("iOS videoRecording start-stop integration", () => {
 
         await defaultTimer.sleep(getWaitMs());
 
-        stopPayload = parseToolResult(
-          (await tool!.handler({
-            action: "stop",
-            platform: "ios",
-            recordingId,
-          })) as ToolTextResponse,
-        );
+        stopPayload = await runVideoRecordingCli([
+          "--action",
+          "stop",
+          "--platform",
+          "ios",
+          "--recordingId",
+          recordingId,
+        ]);
         stopped = true;
 
         expect(stopPayload.action).toBe("stop");
@@ -182,11 +186,14 @@ describeIntegration("iOS videoRecording start-stop integration", () => {
         let cleanupError: string | undefined;
         if (recordingId && !stopped) {
           try {
-            await tool!.handler({
-              action: "stop",
-              platform: "ios",
+            await runVideoRecordingCli([
+              "--action",
+              "stop",
+              "--platform",
+              "ios",
+              "--recordingId",
               recordingId,
-            });
+            ]);
           } catch (stopError) {
             cleanupError = formatError(stopError);
           }
@@ -210,9 +217,6 @@ describeIntegration("iOS videoRecording start-stop integration", () => {
             .filter((line): line is string => Boolean(line))
             .join("\n"),
         );
-      } finally {
-        serverConfig.setSkipCtrlProxyDownload(false);
-        resetVideoRecordingManagerDependencies();
       }
     },
     getTestTimeoutMs(),

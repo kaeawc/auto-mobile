@@ -119,7 +119,10 @@ class FakeIosManager implements ReadinessIosManager {
   /** Optional hook to simulate elapsed provisioning time (e.g. a cold launch). */
   onStart?: () => Promise<void>;
   onSetup?: () => Promise<void>;
-  onForceRestart?: (options?: { signal?: AbortSignal; minimumHealthPollDurationMs?: number }) => Promise<void>;
+  onForceRestart?: (options?: {
+    signal?: AbortSignal;
+    minimumHealthPollDurationMs?: number;
+  }) => Promise<void>;
 
   async start(options?: {
     signal?: AbortSignal;
@@ -132,7 +135,10 @@ class FakeIosManager implements ReadinessIosManager {
     }
   }
 
-  async forceRestart(options?: { signal?: AbortSignal; minimumHealthPollDurationMs?: number }): Promise<void> {
+  async forceRestart(options?: {
+    signal?: AbortSignal;
+    minimumHealthPollDurationMs?: number;
+  }): Promise<void> {
     this.forceRestartCalls++;
     this.forceRestartOptions = options;
     await this.onForceRestart?.(options);
@@ -682,9 +688,12 @@ describe("RunnerReadinessService", () => {
     const iosManager = new FakeIosManager();
     const iosClient = new FakeReadinessClient();
     iosClient.healthResults = [false];
-    iosManager.onForceRestart = async (options) => await new Promise<void>((_resolve, reject) => {
-      options?.signal?.addEventListener("abort", () => reject(options.signal?.reason), { once: true });
-    });
+    iosManager.onForceRestart = async (options) =>
+      await new Promise<void>((_resolve, reject) => {
+        options?.signal?.addEventListener("abort", () => reject(options.signal?.reason), {
+          once: true,
+        });
+      });
     const { service } = createService({ timer, iosManager, iosClient, autoAdvance: false });
 
     const ready = service.ensureReady({
@@ -694,7 +703,7 @@ describe("RunnerReadinessService", () => {
       readinessTimeoutMs: 1_000,
     });
     for (let attempt = 0; attempt < 20 && iosManager.forceRestartCalls === 0; attempt++) {
-      await new Promise<void>(resolve => setImmediate(resolve));
+      await new Promise<void>((resolve) => setImmediate(resolve));
     }
 
     expect(iosManager.forceRestartCalls).toBe(1);

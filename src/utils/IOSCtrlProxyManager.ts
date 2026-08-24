@@ -893,8 +893,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     }
 
     let sharedStart = await this.waitForNonJoinableStart(options.signal);
-    if (expectedForceRestartGeneration !== undefined &&
-      (this.forceRestartGeneration !== expectedForceRestartGeneration || this.forceRestartInFlight)) {
+    if (
+      expectedForceRestartGeneration !== undefined &&
+      (this.forceRestartGeneration !== expectedForceRestartGeneration || this.forceRestartInFlight)
+    ) {
       return this.start(options);
     }
     if (sharedStart) {
@@ -1809,12 +1811,14 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       }
     })();
     this.forceRestartInFlight = restart;
-    void restart.finally(() => {
-      if (this.forceRestartInFlight === restart) {
-        this.forceRestartInFlight = null;
-        this.forceRestartHealthPollDurationsMs.clear();
-      }
-    }).catch(() => {});
+    void restart
+      .finally(() => {
+        if (this.forceRestartInFlight === restart) {
+          this.forceRestartInFlight = null;
+          this.forceRestartHealthPollDurationsMs.clear();
+        }
+      })
+      .catch(() => {});
     await restart;
   }
 
@@ -1847,7 +1851,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         throw signal.reason ?? new Error("iOS CtrlProxy startup was aborted");
       }
       return await new Promise<boolean>((resolve, reject) => {
-        const onAbort = () => reject(signal.reason ?? new Error("iOS CtrlProxy startup was aborted"));
+        const onAbort = () =>
+          reject(signal.reason ?? new Error("iOS CtrlProxy startup was aborted"));
         signal.addEventListener("abort", onAbort, { once: true });
         void waitForRestart().then(
           (restarted) => {
@@ -1865,13 +1870,17 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     }
   }
 
-  private maximumForceRestartHealthPollDurationMs(ownerDurationMs: number | undefined): number | undefined {
+  private maximumForceRestartHealthPollDurationMs(
+    ownerDurationMs: number | undefined,
+  ): number | undefined {
     const joiningDurationMs = Math.max(0, ...this.forceRestartHealthPollDurationsMs.values());
     const maximumDurationMs = Math.max(ownerDurationMs ?? 0, joiningDurationMs);
     return maximumDurationMs > 0 ? maximumDurationMs : undefined;
   }
 
-  private registerForceRestartHealthPollDuration(durationMs: number | undefined): symbol | undefined {
+  private registerForceRestartHealthPollDuration(
+    durationMs: number | undefined,
+  ): symbol | undefined {
     if (!durationMs || durationMs <= 0) {
       return undefined;
     }

@@ -78,10 +78,7 @@ export interface ReadinessIosManager {
     signal?: AbortSignal;
     minimumHealthPollDurationMs?: number;
   }): Promise<void>;
-  start(options?: {
-    signal?: AbortSignal;
-    minimumHealthPollDurationMs?: number;
-  }): Promise<void>;
+  start(options?: { signal?: AbortSignal; minimumHealthPollDurationMs?: number }): Promise<void>;
   setup(
     force?: boolean,
     perf?: PerformanceTracker,
@@ -426,16 +423,20 @@ export class RunnerReadinessService {
       );
     }
     try {
-      const hierarchy = await this.runPhase(context, "runner-health", 1, async (signal) =>
-        await client.getAccessibilityHierarchy(
-          undefined,
-          undefined,
-          true,
-          minTimestamp,
-          true,
-          signal,
-          timeoutMs,
-        ),
+      const hierarchy = await this.runPhase(
+        context,
+        "runner-health",
+        1,
+        async (signal) =>
+          await client.getAccessibilityHierarchy(
+            undefined,
+            undefined,
+            true,
+            minTimestamp,
+            true,
+            signal,
+            timeoutMs,
+          ),
       );
       // The production client can fall back to a cached tree when both its
       // fresh-data wait and synchronous request fail. A required read must not
@@ -484,16 +485,20 @@ export class RunnerReadinessService {
   ): Promise<void> {
     const { x, y } = centerOfBounds(bounds);
     try {
-      const tap = await this.runPhase(context, "runner-health", 1, async () =>
-        await client.requestTapCoordinates(
-          x,
-          y,
-          10,
-          Math.min(
-            this.probeTimeout(context),
-            this.remainingSystemUiAnrRecoveryBudget(recoveryDeadlineMs),
+      const tap = await this.runPhase(
+        context,
+        "runner-health",
+        1,
+        async () =>
+          await client.requestTapCoordinates(
+            x,
+            y,
+            10,
+            Math.min(
+              this.probeTimeout(context),
+              this.remainingSystemUiAnrRecoveryBudget(recoveryDeadlineMs),
+            ),
           ),
-        ),
       );
       if (!tap.success) {
         throw new Error(tap.error ?? "unknown tap failure");
@@ -656,10 +661,12 @@ export class RunnerReadinessService {
       // hierarchy. In that state setup() would short-circuit on port health,
       // leaving the runner wedged indefinitely. Restart the process so the
       // next health probe uses a fresh observation stream (#5532).
-      await this.runPhase(context, "runner-setup", 1, (signal) => manager.forceRestart({
-        signal,
-        minimumHealthPollDurationMs: this.remainingForPhase(context, "runner-setup"),
-      }));
+      await this.runPhase(context, "runner-setup", 1, (signal) =>
+        manager.forceRestart({
+          signal,
+          minimumHealthPollDurationMs: this.remainingForPhase(context, "runner-setup"),
+        }),
+      );
       // Restart can reallocate the service port when its prior listener became
       // unavailable. Do not let a stale client accept another device's runner.
       client = this.dependencies.getIosClient(context.device, manager.getServicePort());
@@ -840,10 +847,7 @@ export class RunnerReadinessService {
     return context.healthDeadlineMs ?? context.totalDeadlineMs;
   }
 
-  private remainingForPhase(
-    context: ReadinessAttemptContext,
-    phase: RunnerReadinessPhase,
-  ): number {
+  private remainingForPhase(context: ReadinessAttemptContext, phase: RunnerReadinessPhase): number {
     return Math.max(0, this.phaseDeadlineMs(context, phase) - this.dependencies.timer.now());
   }
 

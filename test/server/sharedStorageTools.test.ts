@@ -9,7 +9,9 @@ describe("shared-storage tools", () => {
 
   test("registers a discoverable session-bound staging operation", () => {
     registerSharedStorageTools();
-    const tool = ToolRegistry.getToolDefinitions().find(candidate => candidate.name === "stageSharedStorage");
+    const tool = ToolRegistry.getToolDefinitions().find(
+      (candidate) => candidate.name === "stageSharedStorage",
+    );
     expect(tool).toBeDefined();
     expect(tool!.inputSchema.properties.namespace).toBeDefined();
     expect(tool!.inputSchema.properties.reset).toBeDefined();
@@ -19,12 +21,16 @@ describe("shared-storage tools", () => {
 
   test("advertises defaulted fields as optional", () => {
     registerSharedStorageTools();
-    const tool = ToolRegistry.getToolDefinitions().find(candidate => candidate.name === "stageSharedStorage")!;
+    const tool = ToolRegistry.getToolDefinitions().find(
+      (candidate) => candidate.name === "stageSharedStorage",
+    )!;
     const validate = new Ajv2020({ strict: false }).compile(tool.inputSchema);
 
-    expect(validate({
-      namespace: "run-42",
-      files: [{ contentText: "fixture", destinationPath: "fixture.txt" }],
-    })).toBe(true);
+    expect(
+      validate({
+        namespace: "run-42",
+        files: [{ contentText: "fixture", destinationPath: "fixture.txt" }],
+      }),
+    ).toBe(true);
   });
 });

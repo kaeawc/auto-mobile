@@ -1533,10 +1533,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": [
-            "android",
-            "ios"
-          ]
+          "enum": ["android", "ios"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -1550,11 +1547,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "appId",
-        "adapterName",
-        "name"
-      ],
+      "required": ["appId", "adapterName", "name"],
       "additionalProperties": false
     }
   },
@@ -2692,10 +2685,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": [
-            "android",
-            "ios"
-          ]
+          "enum": ["android", "ios"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -2709,10 +2699,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "appId",
-        "adapterName"
-      ],
+      "required": ["appId", "adapterName"],
       "additionalProperties": false
     }
   },
@@ -8019,9 +8006,7 @@
                 "type": "string"
               }
             },
-            "required": [
-              "destinationPath"
-            ],
+            "required": ["destinationPath"],
             "additionalProperties": false
           }
         },
@@ -8037,10 +8022,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "namespace",
-        "files"
-      ],
+      "required": ["namespace", "files"],
       "additionalProperties": false
     }
   },

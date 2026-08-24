@@ -30,6 +30,18 @@ async function flushPromises(iterations: number = 5): Promise<void> {
   }
 }
 
+/**
+ * A FakeWebSocket whose close() does not auto-emit "close". The test emits the
+ * close event manually, so a discarded socket's delayed close-handshake can be
+ * made to land AFTER a replacement connection is already live — the race the
+ * generation guard must survive.
+ */
+class ManualCloseWebSocket extends FakeWebSocket {
+  override close(): void {
+    this.readyState = WebSocketState.CLOSING;
+  }
+}
+
 describe("IOSCtrlProxyClient auto-setup", function () {
   let testDevice: BootedDevice;
   let fakeTimer: FakeTimer;
@@ -174,10 +186,11 @@ describe("IOSCtrlProxyClient auto-setup", function () {
     // Manual (non-auto-advancing) timer so the in-flight handshake stays pending
     // until we fire `open` ourselves, and the connection timeout never fires.
     const manualTimer = new FakeTimer();
-    const sockets: { url: string; socket: FakeWebSocket }[] = [];
+    const sockets: { url: string; socket: ManualCloseWebSocket }[] = [];
     const wsFactory = (url: string): WebSocket => {
-      // "timeout" mode keeps the socket CONNECTING (the timer is never advanced).
-      const socket = new FakeWebSocket(url, "timeout", 60_000, manualTimer);
+      // "timeout" mode keeps the socket CONNECTING (the timer is never advanced);
+      // ManualCloseWebSocket also defers the "close" event to our control.
+      const socket = new ManualCloseWebSocket(url, "timeout", 60_000, manualTimer);
       sockets.push({ url, socket });
       return socket as unknown as WebSocket;
     };
@@ -228,6 +241,16 @@ describe("IOSCtrlProxyClient auto-setup", function () {
       latest.socket.emit("open");
       await flushPromises(8);
       expect(await secondPromise).toBe(true);
+      expect(client.isConnected()).toBe(true);
+
+      // The discarded old-port socket's close-handshake finally completes — AFTER
+      // the replacement is live. Its stale, unconditional close/error handlers
+      // must not run: otherwise the close handler nulls out this.ws, stops the
+      // replacement's health check, and schedules a spurious reconnect. The
+      // generation guard detaches the invalidated socket's listeners (both close
+      // and error), so this delayed close is a no-op and the replacement stays up.
+      sockets[0].socket.emit("close");
+      await flushPromises(8);
       expect(client.isConnected()).toBe(true);
     } finally {
       await client.close();

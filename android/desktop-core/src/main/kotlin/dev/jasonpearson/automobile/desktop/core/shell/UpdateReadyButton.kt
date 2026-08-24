@@ -3,9 +3,11 @@ package dev.jasonpearson.automobile.desktop.core.shell
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -14,9 +16,14 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.SystemUpdateAlt
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -121,6 +128,60 @@ fun UpdateDetailsContent(
         Spacer(Modifier.width(4.dp))
         Text("Install & restart")
       }
+    }
+  }
+}
+
+/**
+ * A self-contained "update ready" affordance for the surfaces that have no top bar to host the pill
+ * — the device picker and onboarding (#5271). The workspace keeps its integrated top-bar pill
+ * (#5225 maintainer decision); this gives the launch surfaces the same reachability so a user who
+ * never observes a device still sees that an update is waiting.
+ *
+ * It overlays a [fillMaxSize] parent and pins itself to the bottom-end corner, clear of the
+ * picker's title (top-start) and Close control (top-end) and of onboarding's centered column — so
+ * placement is intentional and collision-free rather than fighting per-surface chrome. Clicking the
+ * pill toggles the same [UpdateDetailsContent] used by the workspace popup, expanded just above the
+ * pill.
+ *
+ * Pure: it renders from [status] and the passed callbacks and owns only its local expand/collapse
+ * state; nothing is silenced unless [status] is not [UpdateStatus.UpdateAvailable].
+ */
+@Composable
+fun FloatingUpdateAffordance(
+  status: UpdateStatus,
+  currentVersion: String,
+  onOpenReleaseNotes: () -> Unit,
+  modifier: Modifier = Modifier,
+  onInstall: (() -> Unit)? = null,
+) {
+  // Only a genuine update surfaces the affordance; every other state renders nothing at all.
+  val update = status as? UpdateStatus.UpdateAvailable ?: return
+  var showDetails by remember { mutableStateOf(false) }
+
+  Box(modifier = modifier.fillMaxSize()) {
+    Column(
+      modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+      horizontalAlignment = Alignment.End,
+      verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+      // The details card expands directly above the pill so the affordance reads as one control
+      // anchored to its trigger, rather than a popup floating in from a window corner.
+      if (showDetails) {
+        Surface(
+          shape = RoundedCornerShape(6.dp),
+          color = MaterialTheme.colorScheme.surface,
+          shadowElevation = 8.dp,
+        ) {
+          UpdateDetailsContent(
+            update = update,
+            currentVersion = currentVersion,
+            onOpenReleaseNotes = onOpenReleaseNotes,
+            onInstall = onInstall,
+          )
+        }
+      }
+      UpdateReadyButton(status = update, onClick = { showDetails = !showDetails })
     }
   }
 }

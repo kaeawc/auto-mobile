@@ -32,6 +32,7 @@ import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.mcp.DaemonMcpResourceClient
 import dev.jasonpearson.automobile.desktop.core.mcp.ResourceReadResult
 import dev.jasonpearson.automobile.desktop.core.settings.SettingsProvider
+import dev.jasonpearson.automobile.desktop.core.shell.FloatingUpdateAffordance
 import dev.jasonpearson.automobile.desktop.core.shell.MenuBarActions
 import dev.jasonpearson.automobile.desktop.core.shell.UpdateDetailsContent
 import dev.jasonpearson.automobile.desktop.core.shell.openReleaseNotesInBrowser
@@ -383,149 +384,186 @@ fun AutoMobileDesktopApp(
       // Device-tab workspace is the desktop app root (replaces ThreePaneShell). AutoMobileContent
       // is retained and still used by the IDE plugin; dashboards return as workspace facets in
       // follow-up PRs. menuBarActions is plumbed for later re-wiring once facets/panes exist.
-      when {
-        showOnboarding ->
-          OnboardingScreen(
-            onGetStarted = {
-              settings.hasSeenOnboarding = true
-              showOnboarding = false
-            }
-          )
-        // The device grid is the home surface whenever nothing is observed (true on launch), and
-        // also whenever "Devices +" explicitly opens it over a live workspace. Observing a device
-        // makes the workspace non-empty, which drops the picker for WorkspaceShell.
-        pickerOpen || workspaceState is WorkspaceUiState.Empty ->
-          DevicePicker(
-            state = pickerState,
-            onAction = pickerViewModel::onAction,
-            onClose = { pickerOpen = false },
-            // Only offer Close when there is an observed workspace to return to.
-            canClose = workspaceState is WorkspaceUiState.Content,
-          )
-        else ->
-          Box(Modifier.fillMaxSize()) {
-            // Roll live connection health up into the top-bar status dot. The daemon signal is
-            // polled here; per-device stream health is not yet fed in — device streams are
-            // facet-owned and carry screenshots, so opening extra status-only streams would be
-            // wasteful. deriveWorkspaceStatus already handles the device dimension, so it can be
-            // fed once a central per-device stream registry exists (follow-up).
-            val workspaceStatus =
-              remember(daemonConnectionState) {
-                deriveWorkspaceStatus(daemon = daemonConnectionState, devices = emptyList())
+      //
+      // The launch surfaces (onboarding + device picker) have no top bar to host the "update ready"
+      // pill, so a user who never observes a device would never see the affordance even though the
+      // startup check already ran (#5271). The workspace keeps its integrated top-bar pill; these
+      // surfaces get a shared floating affordance instead, hosted above the surface switch so it is
+      // reachable from either one. It self-hides unless updateStatus is UpdateAvailable.
+      val onLaunchSurface = showOnboarding || pickerOpen || workspaceState is WorkspaceUiState.Empty
+      Box(Modifier.fillMaxSize()) {
+        when {
+          showOnboarding ->
+            OnboardingScreen(
+              onGetStarted = {
+                settings.hasSeenOnboarding = true
+                showOnboarding = false
               }
-
-            WorkspaceShell(
-              state = workspaceState,
-              onAction = workspaceViewModel::onAction,
-              onOpenPicker = workspaceViewModel::openPicker,
-              onOpenPalette = { paletteOpen = true },
-              status = workspaceStatus.status,
-              statusDetail = workspaceStatus.detail,
-              updateStatus = updateStatus,
-              onUpdateClick = { showUpdateDetails = true },
-              facetContent = { column, tool -> WorkspaceFacet(column, tool) },
-              // Inspect mode's Layout inspector renders live video for its pixels; the session
-              // provider authenticates that subscribe against the stream-socket guard (#4751),
-              // exactly as the stream pane below.
-              inspectContent = { column ->
-                LayoutFacet(
-                  column,
-                  sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
-                )
-              },
-              // Live device mirror in each pane's stream area, fed by the daemon's video-stream
-              // relay. The pane authenticates with the workspace daemon session (#4977) bound to
-              // the focused device above; when no session is available (non-Unix daemon, or the
-              // bind failed) the provider yields null and the pane shows the auth refusal, with
-              // AUTOMOBILE_DAEMON_STREAM_AUTH=0 as the operator escape hatch.
-              streamContent = { column ->
-                // Tap-to-control is armed ONLY for the FOCUSED pane on a Unix daemon.
-                //  - Unix: the other transports (MCP HTTP/STDIO) don't serve the direct `input/*`
-                //    helpers, so `workspaceControlClientProvider` yields null there and a tap could
-                //    never reach the device — arming would only pay for a High-fps stream + an
-                //    observation stream that drive nothing.
-                //  - Focused: only one pane is being driven at a time. Gating on focus keeps the
-                //    unfocused farm panes as cheap Low-fps mirrors (no per-pane observation stream)
-                //    and means only the focused pane requests Compose keyboard focus, so a second
-                //    pane arming can't silently steal keystrokes mid-type (#5217). Click a pane to
-                //    focus (and thus drive) it; the single-device case is always focused.
-                val controlActive =
-                  graph.autoMobileClient.transportName == "Unix Socket" &&
-                    (workspaceState as? WorkspaceUiState.Content)?.focusedDeviceId ==
-                      column.deviceId
-                val control =
-                  rememberWorkspaceDeviceControl(
-                    column = column,
-                    clientProvider = workspaceControlClientProvider,
-                    enabled = controlActive,
-                  )
-                DeviceStreamView(
-                  column,
-                  sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
-                  enableDeviceControl = controlActive,
-                  control = control,
-                  // Wires the per-pane quality overlay (manual Low/Medium/High + live FPS +
-                  // auto-adjust) and persists the choice across sessions.
-                  settings = settings,
-                )
-              },
             )
-            if (paletteOpen) {
-              CommandPalette(
-                commands =
-                  buildWorkspaceCommands(
-                    workspaceState,
-                    onOpenPicker = workspaceViewModel::openPicker,
-                    onAction = workspaceViewModel::onAction,
-                  ),
-                onDismiss = { paletteOpen = false },
-              )
-            }
-
-            // Details popup for the top-bar update pill (#5225). `as?` closes it automatically if
-            // the
-            // status leaves UpdateAvailable while open. Applying the update is a later item, so the
-            // install action inside is disabled.
-            val availableUpdate = updateStatus as? UpdateStatus.UpdateAvailable
-            if (showUpdateDetails && availableUpdate != null) {
-              // Anchor the popup under the top-right pill (below the 40dp top bar) rather than the
-              // window's default top-left, so it reads as coming from its trigger.
-              val popupOffset =
-                with(LocalDensity.current) {
-                  IntOffset(x = -8.dp.roundToPx(), y = 44.dp.roundToPx())
+          // The device grid is the home surface whenever nothing is observed (true on launch), and
+          // also whenever "Devices +" explicitly opens it over a live workspace. Observing a device
+          // makes the workspace non-empty, which drops the picker for WorkspaceShell.
+          pickerOpen || workspaceState is WorkspaceUiState.Empty ->
+            DevicePicker(
+              state = pickerState,
+              onAction = pickerViewModel::onAction,
+              onClose = { pickerOpen = false },
+              // Only offer Close when there is an observed workspace to return to.
+              canClose = workspaceState is WorkspaceUiState.Content,
+            )
+          else ->
+            Box(Modifier.fillMaxSize()) {
+              // Roll live connection health up into the top-bar status dot. The daemon signal is
+              // polled here; per-device stream health is not yet fed in — device streams are
+              // facet-owned and carry screenshots, so opening extra status-only streams would be
+              // wasteful. deriveWorkspaceStatus already handles the device dimension, so it can be
+              // fed once a central per-device stream registry exists (follow-up).
+              val workspaceStatus =
+                remember(daemonConnectionState) {
+                  deriveWorkspaceStatus(daemon = daemonConnectionState, devices = emptyList())
                 }
-              Popup(
-                alignment = Alignment.TopEnd,
-                offset = popupOffset,
-                onDismissRequest = { showUpdateDetails = false },
-                properties = PopupProperties(focusable = true),
-              ) {
-                Surface(
-                  shape = RoundedCornerShape(6.dp),
-                  color = MaterialTheme.colorScheme.surface,
-                  shadowElevation = 8.dp,
-                ) {
-                  UpdateDetailsContent(
-                    update = availableUpdate,
-                    currentVersion = graph.appVersionProvider.current().raw,
-                    onOpenReleaseNotes = {
-                      availableUpdate.releaseNotesUrl?.let { openReleaseNotesInBrowser(it) }
-                    },
-                    // Only a Conveyor package can apply in place; the GitHub path reports false and
-                    // the install action stays disabled. Conveyor tears the app down as it
-                    // restarts,
-                    // so this is the last thing the process does.
-                    onInstall =
-                      if (updateController.canApplyUpdate()) {
-                        { scope.launch { updateController.applyUpdate() } }
-                      } else {
-                        null
-                      },
+
+              WorkspaceShell(
+                state = workspaceState,
+                onAction = workspaceViewModel::onAction,
+                onOpenPicker = workspaceViewModel::openPicker,
+                onOpenPalette = { paletteOpen = true },
+                status = workspaceStatus.status,
+                statusDetail = workspaceStatus.detail,
+                updateStatus = updateStatus,
+                onUpdateClick = { showUpdateDetails = true },
+                facetContent = { column, tool -> WorkspaceFacet(column, tool) },
+                // Inspect mode's Layout inspector renders live video for its pixels; the session
+                // provider authenticates that subscribe against the stream-socket guard (#4751),
+                // exactly as the stream pane below.
+                inspectContent = { column ->
+                  LayoutFacet(
+                    column,
+                    sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
                   )
+                },
+                // Live device mirror in each pane's stream area, fed by the daemon's video-stream
+                // relay. The pane authenticates with the workspace daemon session (#4977) bound to
+                // the focused device above; when no session is available (non-Unix daemon, or the
+                // bind failed) the provider yields null and the pane shows the auth refusal, with
+                // AUTOMOBILE_DAEMON_STREAM_AUTH=0 as the operator escape hatch.
+                streamContent = { column ->
+                  // Tap-to-control is armed ONLY for the FOCUSED pane on a Unix daemon.
+                  //  - Unix: the other transports (MCP HTTP/STDIO) don't serve the direct `input/*`
+                  //    helpers, so `workspaceControlClientProvider` yields null there and a tap
+                  // could
+                  //    never reach the device — arming would only pay for a High-fps stream + an
+                  //    observation stream that drive nothing.
+                  //  - Focused: only one pane is being driven at a time. Gating on focus keeps the
+                  //    unfocused farm panes as cheap Low-fps mirrors (no per-pane observation
+                  // stream)
+                  //    and means only the focused pane requests Compose keyboard focus, so a second
+                  //    pane arming can't silently steal keystrokes mid-type (#5217). Click a pane
+                  // to
+                  //    focus (and thus drive) it; the single-device case is always focused.
+                  val controlActive =
+                    graph.autoMobileClient.transportName == "Unix Socket" &&
+                      (workspaceState as? WorkspaceUiState.Content)?.focusedDeviceId ==
+                        column.deviceId
+                  val control =
+                    rememberWorkspaceDeviceControl(
+                      column = column,
+                      clientProvider = workspaceControlClientProvider,
+                      enabled = controlActive,
+                    )
+                  DeviceStreamView(
+                    column,
+                    sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
+                    enableDeviceControl = controlActive,
+                    control = control,
+                    // Wires the per-pane quality overlay (manual Low/Medium/High + live FPS +
+                    // auto-adjust) and persists the choice across sessions.
+                    settings = settings,
+                  )
+                },
+              )
+              if (paletteOpen) {
+                CommandPalette(
+                  commands =
+                    buildWorkspaceCommands(
+                      workspaceState,
+                      onOpenPicker = workspaceViewModel::openPicker,
+                      onAction = workspaceViewModel::onAction,
+                    ),
+                  onDismiss = { paletteOpen = false },
+                )
+              }
+
+              // Details popup for the top-bar update pill (#5225). `as?` closes it automatically if
+              // the
+              // status leaves UpdateAvailable while open. Applying the update is a later item, so
+              // the
+              // install action inside is disabled.
+              val availableUpdate = updateStatus as? UpdateStatus.UpdateAvailable
+              if (showUpdateDetails && availableUpdate != null) {
+                // Anchor the popup under the top-right pill (below the 40dp top bar) rather than
+                // the
+                // window's default top-left, so it reads as coming from its trigger.
+                val popupOffset =
+                  with(LocalDensity.current) {
+                    IntOffset(x = -8.dp.roundToPx(), y = 44.dp.roundToPx())
+                  }
+                Popup(
+                  alignment = Alignment.TopEnd,
+                  offset = popupOffset,
+                  onDismissRequest = { showUpdateDetails = false },
+                  properties = PopupProperties(focusable = true),
+                ) {
+                  Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    shadowElevation = 8.dp,
+                  ) {
+                    UpdateDetailsContent(
+                      update = availableUpdate,
+                      currentVersion = graph.appVersionProvider.current().raw,
+                      onOpenReleaseNotes = {
+                        availableUpdate.releaseNotesUrl?.let { openReleaseNotesInBrowser(it) }
+                      },
+                      // Only a Conveyor package can apply in place; the GitHub path reports false
+                      // and
+                      // the install action stays disabled. Conveyor tears the app down as it
+                      // restarts,
+                      // so this is the last thing the process does.
+                      onInstall =
+                        if (updateController.canApplyUpdate()) {
+                          { scope.launch { updateController.applyUpdate() } }
+                        } else {
+                          null
+                        },
+                    )
+                  }
                 }
               }
             }
-          }
+        }
+
+        // Shared floating "update ready" affordance for the launch surfaces (#5271). Clicking it
+        // opens the same UpdateDetailsContent the workspace pill uses, wired to apply-in-place only
+        // when the packaging supports it (canApplyUpdate) — the GitHub-Releases path leaves the
+        // install action disabled until the apply item (#5226) lands.
+        if (onLaunchSurface) {
+          FloatingUpdateAffordance(
+            status = updateStatus,
+            currentVersion = graph.appVersionProvider.current().raw,
+            onOpenReleaseNotes = {
+              (updateStatus as? UpdateStatus.UpdateAvailable)?.releaseNotesUrl?.let {
+                openReleaseNotesInBrowser(it)
+              }
+            },
+            onInstall =
+              if (updateController.canApplyUpdate()) {
+                { scope.launch { updateController.applyUpdate() } }
+              } else {
+                null
+              },
+          )
+        }
       }
     }
   }

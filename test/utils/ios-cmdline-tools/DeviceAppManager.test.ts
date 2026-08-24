@@ -1525,6 +1525,13 @@ describe("extractInstalledAppEntries", () => {
     ]);
   });
 
+  test("rejects a nonempty listing whose members are all malformed", () => {
+    // An array that carried entries but none we can read is a payload we do not
+    // understand — reporting [] would publish a false empty inventory.
+    expect(extractInstalledAppEntries({ result: { apps: ["unexpected", null] } })).toBeNull();
+    expect(extractInstalledAppEntries({ apps: [[], 7] })).toBeNull();
+  });
+
   test("distinguishes an empty listing from an unrecognized payload", () => {
     // Present but empty: the device genuinely has nothing installed.
     expect(extractInstalledAppEntries({ result: { apps: [] } })).toEqual([]);

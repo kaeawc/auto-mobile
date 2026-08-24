@@ -15,7 +15,10 @@ import { logger } from "../utils/logger";
 import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
-import { getIosInstalledAppBundleId } from "../utils/ios-cmdline-tools/iosInstalledApp";
+import {
+  getIosInstalledAppBundleId,
+  getIosInstalledAppPath,
+} from "../utils/ios-cmdline-tools/iosInstalledApp";
 
 // Resource URI templates
 export const APP_RESOURCE_TEMPLATES = {
@@ -222,7 +225,9 @@ function extractIosVersion(app: Record<string, unknown>): string | undefined {
 }
 
 function extractIosPath(app: Record<string, unknown>): string | undefined {
-  return readIosAppField(app, ["bundlePath", "bundleContainer", "path", "Path", "dataContainer"]);
+  // Shared with the devicectl listing so a physical device's `file://` bundle
+  // URL reaches this resource as a filesystem path, same as a simulator's.
+  return getIosInstalledAppPath(app);
 }
 
 function toQueryIosApp(app: IosInstalledAppInfo): AppsQueryAppInfo {

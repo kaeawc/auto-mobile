@@ -42,15 +42,19 @@ class McpStatusTimeoutTest {
   }
 
   @Test
-  fun `STDIO status probe closes only the timed-out process`() {
+  fun `STDIO status probe releases the shared client for a later retry`() {
     val client = McpStdioClient("/bin/sh -c 'sleep 30'", statusRequestTimeoutMs = 50)
     try {
-      val elapsedMs = measureTimeMillis {
+      fun assertStatusTimeout() {
         val error = assertFailsWith<McpConnectionException> { client.getDaemonStatus() }
         assertTrue(error.message.orEmpty().contains("timed out"))
       }
 
-      assertTrue(elapsedMs < 500, "status probe took ${elapsedMs}ms")
+      val firstElapsedMs = measureTimeMillis(::assertStatusTimeout)
+      val retryElapsedMs = measureTimeMillis(::assertStatusTimeout)
+
+      assertTrue(firstElapsedMs < 500, "first status probe took ${firstElapsedMs}ms")
+      assertTrue(retryElapsedMs < 500, "retry status probe took ${retryElapsedMs}ms")
     } finally {
       client.close()
     }

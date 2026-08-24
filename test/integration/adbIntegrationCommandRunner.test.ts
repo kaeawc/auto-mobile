@@ -29,7 +29,9 @@ function directAdbExecutionCalls(source: string): string[] {
 // This fixture is static. Keeping its I/O and AST setup out of the assertion
 // body preserves the fast-test budget on cold macOS runners.
 const androidH264IntegrationTestSource = readFileSync(ANDROID_H264_INTEGRATION_TEST_PATH, "utf8");
-const androidH264DirectAdbExecutionCalls = directAdbExecutionCalls(androidH264IntegrationTestSource);
+const androidH264DirectAdbExecutionCalls = directAdbExecutionCalls(
+  androidH264IntegrationTestSource,
+);
 
 describe("createAdbIntegrationCommandRunner", () => {
   test(

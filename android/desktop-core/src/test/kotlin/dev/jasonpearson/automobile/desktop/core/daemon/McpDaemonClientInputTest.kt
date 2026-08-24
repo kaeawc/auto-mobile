@@ -190,6 +190,31 @@ class McpDaemonClientInputTest {
   }
 
   @Test
+  fun `status probe bypasses lifecycle preflight but ordinary requests retain it`() {
+    var lifecycleCalls = 0
+    val lifecycle =
+      object : DaemonLifecycleEnsurer {
+        override fun ensureVersionMatchedDaemon(): DaemonLifecycleResult {
+          lifecycleCalls++
+          return DaemonLifecycleResult.Failure("daemon version mismatch")
+        }
+      }
+
+    TestDaemonSocket(resultJson = "{}").use { server ->
+      val client =
+        McpDaemonClient(
+          socketPathValue = server.socketPath.toString(),
+          daemonLifecycle = lifecycle,
+        )
+
+      client.getDaemonStatus()
+      assertEquals(0, lifecycleCalls)
+      assertFailsWith<DaemonUnavailableException> { client.ping() }
+      assertEquals(1, lifecycleCalls)
+    }
+  }
+
+  @Test
   fun `inputTap serializes to input tap socket request`() {
     val responseResult =
       """

@@ -363,5 +363,51 @@ describe("CtrlProxyStorage (Android)", function () {
         await client.close();
       }
     });
+
+    // Issue #5573 scope: STRING_SET / BYTE_ARRAY carry end-to-end across the wire. DataStore
+    // reuses the `preferences` result envelope, so the entry `type`/`value` pass through the
+    // client verbatim (STRING_SET as a JSON array string, BYTE_ARRAY as base64).
+    test("carries STRING_SET and BYTE_ARRAY entries across the wire", async function () {
+      const { factory, getSocket } = createCapturingFactory(fakeTimer);
+      const client = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        fakeTimer,
+      );
+      try {
+        await client.ensureConnected();
+        const socket = await waitForSocket(getSocket);
+        await waitForSocketOpen(socket);
+
+        const baseCount = socket!.sentMessages.length;
+        const resultPromise = client.getDataStore("com.example", "settings", "user_prefs");
+        await waitForSentMessages(socket, baseCount + 1);
+        const sent = findSentMessage(socket!, "get_data_store");
+
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "preferences",
+            requestId: sent.requestId,
+            success: true,
+            packageName: "com.example",
+            entries: [
+              { key: "tags", value: '["a","b"]', type: "STRING_SET" },
+              { key: "blob", value: "AQID", type: "BYTE_ARRAY" },
+            ],
+            totalTimeMs: 7,
+          }),
+        );
+
+        const entries = await resultPromise;
+        expect(entries).toHaveLength(2);
+        expect(entries[0].type).toBe("STRING_SET");
+        expect(entries[0].value).toBe('["a","b"]');
+        expect(entries[1].type).toBe("BYTE_ARRAY");
+        expect(entries[1].value).toBe("AQID");
+      } finally {
+        await client.close();
+      }
+    });
   });
 });

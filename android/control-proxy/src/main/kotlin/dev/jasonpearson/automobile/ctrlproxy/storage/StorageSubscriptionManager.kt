@@ -252,6 +252,7 @@ class StorageSubscriptionManager(private val context: Context) {
         }
       }
     } catch (e: SecurityException) {
+      Log.e(TAG, "listDataStores: SecurityException (SDK not installed)", e)
       Result.failure(StorageError.SdkNotInstalled(packageName))
     } catch (e: Exception) {
       Log.e(TAG, "Error listing data stores for $packageName (adapter=$adapterName)", e)

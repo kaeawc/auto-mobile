@@ -25,6 +25,35 @@ updates:
         patterns:
           - "sharp"
           - "@img/sharp-*"
+    ignore:
+      # These top-level entries are transitive pins hoisted to a single copy by
+      # scripts/release/pin-runtime-deps.ts (issue #5421), NOT packages our code
+      # bumps directly. Their real consumers (jimp plugins, utif2, xml2js) lock
+      # them to an older major, so a Dependabot major bump only leaves a dead
+      # duplicate copy and reddens the pinned runtime-graph check. Block the
+      # incompatible majors; in-range patches remain welcome.
+      #
+      #   zod        — ~15 @jimp/plugin-* need ^3.23.8 (v3 API); our MCP schemas
+      #                use the v4 API via the `zod/v4` subpath. zod@3.25.x serves
+      #                both from one copy.
+      #   file-type  — @jimp/core needs ^21.3.3
+      #   mime       — @jimp/core needs "3"
+      #   pako       — utif2 needs ^1.0.11
+      - dependency-name: "zod"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "file-type"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "mime"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "pako"
+        update-types: ["version-update:semver-major"]
+      # sax is a build-only hoist pin for the nested xml2js@0.5.0 (under
+      # parse-bmfont-xml); any minor/major bump un-hoists it into a bundled dep
+      # that test/packaging/runtimeGraphPinning.test.ts forbids, with zero
+      # runtime effect. Allow only patch updates to the pinned 1.4.x line.
+      - dependency-name: "sax"
+        update-types:
+          ["version-update:semver-minor", "version-update:semver-major"]
   # Android Gradle dependencies
   - package-ecosystem: "gradle"
     directory: "/android"

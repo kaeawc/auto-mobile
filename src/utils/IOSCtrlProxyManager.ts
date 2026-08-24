@@ -26,6 +26,7 @@ import { IOSCtrlProxyProcessClient } from "./ios/IOSCtrlProxyProcessClient";
 import type { ProxyManager, ProxySetupResult } from "./interfaces/ProxyManager";
 
 export const MAX_STARTUP_ORPHAN_RUNNER_CANDIDATES = 20;
+export const DIRECT_RUNNER_DISCOVERY_DEADLINE_MS = 5_000;
 export const STARTUP_ORPHAN_RUNNER_REAP_DEADLINE_MS = 5_000;
 // ProcessLifecycle and DaemonManager force-exit after ten seconds. This stage
 // shares that budget with capture cleanup, so an unresponsive proxy must not
@@ -2014,12 +2015,17 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * path still reaps a stale runner whose health endpoint is down.
    */
   private async findHealthyExternalDirectCtrlProxyProcess(): Promise<ExternalCtrlProxyProcess | null> {
-    const candidatePids = await this.processClient.findStartupCandidatePids();
-    for (const pid of candidatePids.slice(0, MAX_STARTUP_ORPHAN_RUNNER_CANDIDATES)) {
+    const deadline = this.timer.now() + DIRECT_RUNNER_DISCOVERY_DEADLINE_MS;
+    const candidatePids = await this.processClient.findStartupCandidatePids(deadline);
+    const eligibleCandidates: Array<{ pid: number; process: ListeningProcess }> = [];
+    for (const pid of candidatePids) {
+      if (this.timer.now() >= deadline) {
+        break;
+      }
       if (pid === this.xcTestProcessId) {
         continue;
       }
-      const processInfo = await this.processClient.getProcessInfo(pid);
+      const processInfo = await this.processClient.getProcessInfo(pid, deadline);
       if (!processInfo || !IOSCtrlProxyManager.isDirectCtrlProxyRunnerCommand(processInfo.command)) {
         continue;
       }
@@ -2036,11 +2042,25 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       if (daemonManagedRoot.kind === "root") {
         continue;
       }
-      if (!await this.checkHealthEndpointOnPortForDevice(port, this.device.deviceId)) {
+      eligibleCandidates.push({ pid, process });
+      if (eligibleCandidates.length >= MAX_STARTUP_ORPHAN_RUNNER_CANDIDATES) {
+        break;
+      }
+    }
+    for (const { pid, process } of eligibleCandidates) {
+      const remainingTimeoutMs = deadline - this.timer.now();
+      if (remainingTimeoutMs <= 0) {
+        break;
+      }
+      if (!await this.checkHealthEndpointOnPortForDevice(
+        process.port,
+        this.device.deviceId,
+        remainingTimeoutMs
+      )) {
         continue;
       }
       logger.info(`[IOSCtrlProxy] Found healthy external direct CtrlProxy runner: ${pid}`);
-      return { pid, port };
+      return { pid, port: process.port };
     }
     return null;
   }
@@ -2624,8 +2644,12 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     return null;
   }
 
-  private async checkHealthEndpointOnPortForDevice(port: number, deviceId: string): Promise<boolean> {
-    return this.healthClient.checkHealthEndpointOnPortForDevice(port, deviceId);
+  private async checkHealthEndpointOnPortForDevice(
+    port: number,
+    deviceId: string,
+    timeoutMs?: number
+  ): Promise<boolean> {
+    return this.healthClient.checkHealthEndpointOnPortForDevice(port, deviceId, timeoutMs);
   }
 
   private getIproxyStartTimeoutMs(): number {

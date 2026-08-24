@@ -308,6 +308,26 @@ describe("TerminateApp (Android)", () => {
     expect(fakeAdb.wasCommandExecuted("force-stop")).toBe(false);
   });
 
+  test("fails instead of reporting a stopped app when the user-scoped process check fails", async () => {
+    fakeAdb.setForegroundApp(null);
+    fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
+    fakeAdb.setCommandResult(
+      "shell pm list packages --user 0 -f com.example.app | grep -c com.example.app",
+      "1",
+    );
+    fakeAdb.setCommandError(
+      'shell dumpsys activity processes | grep -E "com.example.app/u0a"',
+      new Error("dumpsys unavailable"),
+    );
+
+    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, null, fakeTimer);
+
+    await expect(
+      terminateApp.execute("com.example.app", { skipObservation: true }),
+    ).rejects.toThrow("Could not determine whether com.example.app is running for Android user 0");
+    expect(fakeAdb.wasCommandExecuted("force-stop")).toBe(false);
+  });
+
   test("treats grep -c failure as not installed instead of throwing", async () => {
     fakeAdb.setForegroundApp(null);
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);

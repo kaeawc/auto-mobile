@@ -24,6 +24,7 @@ interface InstalledAppsTable {
   is_system: number; // SQLite boolean (0/1)
   installed_at: number;
   last_verified_at: number;
+  profile_type: Generated<"primary" | "managed" | "secondary" | "unknown" | null>;
   daemon_session_id: string | null;
   device_session_start: number | null;
 }

@@ -2,7 +2,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
-import { BootedDevice, TerminateAppResult } from "../../models";
+import { ActionableError, BootedDevice, TerminateAppResult } from "../../models";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager";
@@ -136,7 +136,9 @@ export class TerminateApp extends BaseVisualChange {
           return result.stdout.trim().length > 0;
         } catch (error) {
           logger.warn(`[TerminateApp] Running-state check failed for user ${targetUserId}`, error);
-          return false;
+          throw new ActionableError(
+            `Could not determine whether ${packageName} is running for Android user ${targetUserId}: ${errorMessage(error)}`,
+          );
         }
       });
 

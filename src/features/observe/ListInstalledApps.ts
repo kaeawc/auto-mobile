@@ -239,7 +239,7 @@ export class ListInstalledApps {
         installedApps.profiles[row.user_id].push({
           packageName: row.package_name,
           userId: row.user_id,
-          profileType: this.profileTypeForUser(row.user_id, users),
+          profileType: this.profileTypeForUser(row.user_id, users, row.profile_type ?? undefined),
           foreground: isForeground,
           recent: false,
         });
@@ -262,9 +262,16 @@ export class ListInstalledApps {
     }
   }
 
-  private profileTypeForUser(userId: number, users: AndroidUser[]): AndroidUser["profileType"] {
+  private profileTypeForUser(
+    userId: number,
+    users: AndroidUser[],
+    cachedProfileType: AndroidUser["profileType"],
+  ): AndroidUser["profileType"] {
     const user = users.find((candidate) => candidate.userId === userId);
-    return user?.profileType ?? (user ? classifyAndroidUser(user.flags) : "unknown");
+    return (
+      user?.profileType ??
+      (user ? classifyAndroidUser(user.flags) : (cachedProfileType ?? "unknown"))
+    );
   }
 
   private async rebuildInstalledAppsCache(): Promise<InstalledAppsDetailedResult> {
@@ -329,6 +336,7 @@ export class ListInstalledApps {
               is_system: 0,
               installed_at: timestampMs,
               last_verified_at: timestampMs,
+              profile_type: user.profileType ?? classifyAndroidUser(user.flags),
             });
           }
         }
@@ -364,6 +372,7 @@ export class ListInstalledApps {
               is_system: 1,
               installed_at: timestampMs,
               last_verified_at: timestampMs,
+              profile_type: user.profileType ?? classifyAndroidUser(user.flags),
             });
           }
         }

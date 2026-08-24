@@ -389,7 +389,17 @@
                     return withCenter(link, point: point)
                 }
 
+                // An element can expose a `.link` rotor while sitting off-screen
+                // (e.g. scrolled out), leaving a degenerate `accessibilityFrame`
+                // (`.null` has infinite origin). `sdkBounds` feeds the origin into
+                // `Int(_:)`, which traps on non-finite input, so guard here exactly
+                // as every other `sdkBounds` caller guards its frame.
                 let ownerFrame = rootView.convert(element.accessibilityFrame, from: nil)
+                guard ownerFrame.width > 0, ownerFrame.height > 0,
+                      ownerFrame.origin.x.isFinite, ownerFrame.origin.y.isFinite
+                else {
+                    continue
+                }
                 owners.append(
                     SdkViewNode(
                         className: String(describing: type(of: element)),
@@ -436,6 +446,14 @@
             var items: [(label: String, frame: CGRect)] = []
             var visited = Set<ObjectIdentifier>()
             var current = nextRotorItem(rotor, after: UIAccessibilityCustomRotorItemResult())
+            // SwiftUI (verified iOS 18) vends each inline link as its own
+            // `LinkElement` target, so distinct occurrences have distinct
+            // `targetElement`s (and distinct frames). The `targetRange` alternative —
+            // one target with per-item ranges — is intentionally unhandled: this
+            // dedup would then stop after the first item, degrading to a single
+            // whole-element link (no crash; `occurrence > 0` activation just falls
+            // back to XCUITest) rather than misreporting geometry.
+            //
             // A well-behaved rotor returns nil past its last item; the visited set +
             // hard cap defend against a wrap-around rotor that never terminates.
             var guardCount = 0

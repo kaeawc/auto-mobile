@@ -808,6 +808,7 @@ describe("DaemonMcpProxy", () => {
         runnerReadinessTimeoutMs?: number;
         enabledTools?: string[];
         disabledTools?: string[];
+        predictiveUi?: boolean;
       }) {
         return {
           running: true,
@@ -870,6 +871,34 @@ describe("DaemonMcpProxy", () => {
           await proxy.listTools();
           expect(fakeManager.restartCalled).toBe(true);
           expect(fakeManager.restartOptions).toEqual({ debug: true });
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("restarts daemon when predictive UI mode differs", async () => {
+        const fakeClient = new FakeDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        });
+        const fakeManager = new FakeDaemonManager();
+        fakeManager.statusResults = [
+          runningStatus({ predictiveUi: false }), // ensureVersionMatches
+          runningStatus({ predictiveUi: false }), // ensureBuildMatches
+          runningStatus({ predictiveUi: false }), // ensureStartupOptionsMatch (mismatch)
+          runningStatus({ predictiveUi: true }), // post-restart verify
+        ];
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => fakeClient,
+          daemonManager: fakeManager,
+          daemonOptions: { predictiveUi: true },
+        });
+
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCalled).toBe(true);
+          expect(fakeManager.restartOptions).toEqual({ predictiveUi: true });
         } finally {
           isAvailableSpy.mockRestore();
           await proxy.close();

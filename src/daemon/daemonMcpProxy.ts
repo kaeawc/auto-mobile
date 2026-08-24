@@ -280,7 +280,8 @@ export interface ProxiedResourceTemplate {
 /**
  * The daemon startup options that change its observable MCP behavior and so must
  * match before a running daemon can be reused: `debug`, `embeddedSdk`, `networkMockable`,
- * marker-based eventAll promotion config, plus every output-reduction flag. A
+ * every feature-flag CLI override, marker-based eventAll promotion config, plus every
+ * output-reduction flag. A
  * same-build MCP client that requests one of these against an already-running
  * daemon started without it (or vice versa) would otherwise silently get the
  * wrong tool-output or inputText behavior until a manual restart (issue #2759 —
@@ -293,12 +294,26 @@ export interface ProxiedResourceTemplate {
  */
 export const REUSE_CRITICAL_OPTION_KEYS: (keyof DaemonOptions)[] = [
   "debug",
+  "debugPerf",
   "embeddedSdk",
   "networkMockable",
+  "noUiPerfMode",
+  "memPerfAudit",
+  "accessibilityAudit",
+  "accessibilityUseBaseline",
+  "predictiveUi",
+  "rawElementSearch",
+  "mcpRecording",
+  "noNavigationScreenshots",
   ...OUTPUT_REDUCTION_FLAG_SPECS.map((spec) => spec.field),
 ];
 
-const REUSE_CRITICAL_STRING_OPTION_KEYS: (keyof DaemonOptions)[] = ["toolOutputsDir"];
+const REUSE_CRITICAL_STRING_OPTION_KEYS: (keyof DaemonOptions)[] = [
+  "toolOutputsDir",
+  "accessibilityLevel",
+  "accessibilityFailureMode",
+  "accessibilityMinSeverity",
+];
 
 const REUSE_CRITICAL_NUMBER_OPTION_KEYS: (keyof DaemonOptions)[] = ["runnerReadinessTimeoutMs"];
 export const REUSE_CRITICAL_ARRAY_OPTION_KEYS: (keyof DaemonOptions)[] = [

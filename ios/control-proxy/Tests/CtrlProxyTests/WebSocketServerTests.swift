@@ -541,6 +541,138 @@ final class WebSocketServerTests: XCTestCase {
         )
     }
 
+    // MARK: - Inbound ping frame handling (#5669)
+
+    /// End-to-end regression over a real socket for the ping-desync bug (#5669):
+    /// a client→server ping frame is always masked (RFC 6455 §5.3), so after the
+    /// 2-byte header there are 4 masking-key bytes still in the stream. The pre-fix
+    /// ping branch sent a pong and immediately read the *next* 2 bytes as a new
+    /// frame header — consuming the mask bytes as a bogus header and desyncing the
+    /// wire, so every subsequent frame was misparsed. This drives the real
+    /// `WebSocketServer` (real `NWListener`, real sockets on 127.0.0.1): it pings,
+    /// waits for the pong, then sends a data command. The command's typed response
+    /// must still come back — pre-fix it never does because the wire is desynced.
+    func testDataFrameAfterPingStillDecodes() throws {
+        let fakeTimeProvider = FakeTimeProvider(initialTime: 1000)
+        perfProvider = PerfProvider.createForTesting(timeProvider: fakeTimeProvider)
+        let handler = CommandHandler.createForTesting(
+            elementLocator: FakeElementLocator(),
+            gesturePerformer: FakeGesturePerformer(),
+            perfProvider: perfProvider
+        )
+        let (server, port) = startServerOnFreePort(commandHandler: handler, perfProvider: perfProvider)
+        defer { server.stop() }
+
+        let wsURL = try XCTUnwrap(URL(string: "ws://127.0.0.1:\(port)/"))
+        let session = URLSession(configuration: .ephemeral)
+        let wsTask = session.webSocketTask(with: wsURL)
+        wsTask.resume()
+        defer {
+            wsTask.cancel(with: .goingAway, reason: nil)
+            session.invalidateAndCancel()
+        }
+
+        // Drain frames until the command response arrives, ignoring the initial
+        // `connected` event the server sends on upgrade. The receive loop is
+        // started *before* the ping so the task keeps pumping the connection —
+        // URLSession only processes an inbound pong (and thus fires `sendPing`'s
+        // completion) while a `receive` is outstanding. Pre-fix the wire is
+        // desynced after the ping, so this response never decodes and the wait
+        // times out.
+        let responseReceived = expectation(description: "command response decodes after ping")
+        func receiveNext() {
+            wsTask.receive { result in
+                switch result {
+                case let .success(message):
+                    let data: Data?
+                    switch message {
+                    case let .string(text): data = Data(text.utf8)
+                    case let .data(bytes): data = bytes
+                    @unknown default: data = nil
+                    }
+                    let object = data.flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]
+                    if object?["type"] as? String == "press_back_result" {
+                        XCTAssertEqual(object?["requestId"] as? String, "after-ping")
+                        XCTAssertEqual(object?["success"] as? Bool, true)
+                        responseReceived.fulfill()
+                    } else {
+                        receiveNext()
+                    }
+                case let .failure(error):
+                    // Do not fulfill: a desynced/closed connection surfaces as the
+                    // wait timing out, which is the failure this test guards.
+                    print("[testDataFrameAfterPingStillDecodes] receive failed: \(error)")
+                }
+            }
+        }
+        receiveNext()
+
+        // The client library masks the ping per RFC §5.3. Sending the data command
+        // from the pong completion strictly orders it *after* the server has
+        // processed the ping — so a surviving desync manifests purely as the
+        // command response never coming back.
+        wsTask.sendPing { error in
+            XCTAssertNil(error, "ping should be answered with a pong")
+            wsTask.send(.data(Data(#"{"type":"request_press_back","requestId":"after-ping"}"#.utf8))) { sendError in
+                XCTAssertNil(sendError, "sending the data command should not error")
+            }
+        }
+        wait(for: [responseReceived], timeout: 15)
+    }
+
+    /// A ping's unmasked application data is routed to a pong (AC2/§5.5.3), while
+    /// text/binary frames are delivered and pong/other opcodes are ignored — the
+    /// pure decision the socket-facing `readPayload` completion executes.
+    func testFrameActionRoutesPingToPongEchoingPayload() {
+        let payload = Data("keepalive-42".utf8)
+        XCTAssertEqual(WebSocketConnection.frameAction(opcode: 0x09, unmaskedPayload: payload), .pong(payload))
+    }
+
+    /// An empty ping yields an empty pong (AC2: empty payload → empty pong).
+    func testFrameActionEmptyPingYieldsEmptyPong() {
+        XCTAssertEqual(WebSocketConnection.frameAction(opcode: 0x09, unmaskedPayload: Data()), .pong(Data()))
+    }
+
+    /// Text (0x01) and binary (0x02) frames are delivered as application messages,
+    /// unchanged by the ping fix (AC4).
+    func testFrameActionDeliversTextAndBinary() {
+        let text = Data("hello".utf8)
+        let binary = Data([0x00, 0x01, 0x02])
+        XCTAssertEqual(WebSocketConnection.frameAction(opcode: 0x01, unmaskedPayload: text), .deliver(text))
+        XCTAssertEqual(WebSocketConnection.frameAction(opcode: 0x02, unmaskedPayload: binary), .deliver(binary))
+    }
+
+    /// An inbound pong (0x0A) and any other non-actionable opcode are consumed and
+    /// ignored — no pong is echoed back at a pong, so two peers cannot ping-pong
+    /// forever (AC4: existing pong handling unchanged).
+    func testFrameActionIgnoresPongAndOther() {
+        XCTAssertEqual(WebSocketConnection.frameAction(opcode: 0x0A, unmaskedPayload: Data("x".utf8)), .ignore)
+        XCTAssertEqual(WebSocketConnection.frameAction(opcode: 0x00, unmaskedPayload: Data()), .ignore)
+    }
+
+    /// The pong echo is built as a proper unmasked server frame: FIN|pong opcode,
+    /// a 7-bit length, then the payload verbatim (AC2 wire format).
+    func testCreateWebSocketFramePongEchoesPayloadOnTheWire() {
+        let payload = Data([0x61, 0x62, 0x63]) // "abc"
+        let frame = WebSocketConnection.createWebSocketFrame(data: payload, opcode: 0x0A)
+        XCTAssertEqual(Array(frame), [0x8A, 0x03, 0x61, 0x62, 0x63])
+
+        let empty = WebSocketConnection.createWebSocketFrame(data: Data(), opcode: 0x0A)
+        XCTAssertEqual(Array(empty), [0x8A, 0x00])
+    }
+
+    /// Control-frame payload length is bounded at 125 (RFC 6455 §5.5): 125 is the
+    /// last accepted value; 126/127 (the extended-length indicators) and anything
+    /// larger are rejected, so an over-cap/malformed ping closes the connection
+    /// rather than being mis-parsed (AC3).
+    func testControlFramePayloadLengthBound() {
+        XCTAssertEqual(WebSocketConnection.maxControlFramePayloadLength, 125)
+        XCTAssertTrue(WebSocketConnection.isValidControlFramePayloadLength(0))
+        XCTAssertTrue(WebSocketConnection.isValidControlFramePayloadLength(125))
+        XCTAssertFalse(WebSocketConnection.isValidControlFramePayloadLength(126))
+        XCTAssertFalse(WebSocketConnection.isValidControlFramePayloadLength(127))
+    }
+
     // MARK: - Client presence gating (#5477)
 
     /// Presence tracks only upgraded WebSocket clients and fires the hook exactly

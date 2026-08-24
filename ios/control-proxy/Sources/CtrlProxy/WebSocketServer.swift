@@ -689,7 +689,7 @@ class WebSocketConnection: WebSocketResponding {
     }
 
     func send(_ data: Data) {
-        let frame = createWebSocketFrame(data: data, opcode: 0x01) // Text frame
+        let frame = Self.createWebSocketFrame(data: data, opcode: 0x01) // Text frame
         connection.send(content: frame, completion: .contentProcessed { error in
             if let error = error {
                 print("[WebSocketConnection] Send error: \(error)")
@@ -951,12 +951,21 @@ class WebSocketConnection: WebSocketResponding {
             return
         }
 
-        // Handle ping
+        // Handle ping (RFC 6455 §5.5.2). A client→server frame is always masked
+        // (§5.3), so the masking key and any ping payload still sit unread in the
+        // stream after the 2-byte header. Route the ping through the same masked
+        // `readPayload` path as data frames so those bytes are consumed before the
+        // next frame header is read — otherwise the mask bytes are mis-read as a
+        // new header and the wire desyncs (issue #5669). A control-frame payload is
+        // at most 125 bytes and MUST NOT use the 126/127 extended-length forms
+        // (§5.5); a ping violating that is malformed → close rather than mis-parse.
         if opcode == 0x09 {
-            // Send pong
-            let pongFrame = createWebSocketFrame(data: Data(), opcode: 0x0A)
-            connection.send(content: pongFrame, completion: .contentProcessed { _ in })
-            receiveWebSocketFrame()
+            guard Self.isValidControlFramePayloadLength(payloadLength) else {
+                print("[WebSocketConnection] Ping payload too large (\(payloadLength) bytes), closing connection")
+                onClose()
+                return
+            }
+            readPayload(length: payloadLength, isMasked: isMasked, opcode: opcode)
             return
         }
 
@@ -1028,6 +1037,38 @@ class WebSocketConnection: WebSocketResponding {
         return unmasked
     }
 
+    /// RFC 6455 §5.5: a control-frame payload is at most 125 bytes and MUST NOT
+    /// use the 126/127 extended-length forms. Ping length is validated with this
+    /// bound (a stricter cousin of `maxFramePayloadLength` for control frames)
+    /// before the payload is read, so a malformed/oversized ping closes the
+    /// connection instead of being mis-parsed (issue #5669).
+    static let maxControlFramePayloadLength: UInt64 = 125
+
+    static func isValidControlFramePayloadLength(_ payloadLength: UInt64) -> Bool {
+        payloadLength <= maxControlFramePayloadLength
+    }
+
+    /// What to do with a frame whose payload has been fully read and unmasked.
+    /// Keeping the decision pure (opcode + unmasked bytes in, action out) lets the
+    /// ping → pong-echo and data-delivery wiring be unit-tested without a socket
+    /// (issue #5669).
+    enum FrameAction: Equatable {
+        /// Text/binary frame → deliver as an application message.
+        case deliver(Data)
+        /// Ping frame → reply with a pong echoing the application data (§5.5.3).
+        case pong(Data)
+        /// Pong and other non-actionable opcodes → consumed, nothing to emit.
+        case ignore
+    }
+
+    static func frameAction(opcode: UInt8, unmaskedPayload: Data) -> FrameAction {
+        switch opcode {
+        case 0x01, 0x02: return .deliver(unmaskedPayload)
+        case 0x09: return .pong(unmaskedPayload)
+        default: return .ignore
+        }
+    }
+
     private func readPayload(length: UInt64, isMasked: Bool, opcode: UInt8) {
         guard let totalLength = Self.frameReadLength(payloadLength: length, isMasked: isMasked) else {
             print("[WebSocketConnection] Frame payload too large (\(length) bytes), closing connection")
@@ -1049,16 +1090,25 @@ class WebSocketConnection: WebSocketResponding {
 
                 let payload: Data = isMasked ? Self.unmaskFrame(data) : data
 
-                // Handle text or binary frame
-                if opcode == 0x01 || opcode == 0x02 {
-                    self.onMessage(payload)
+                switch Self.frameAction(opcode: opcode, unmaskedPayload: payload) {
+                case let .deliver(message):
+                    self.onMessage(message)
+                case let .pong(applicationData):
+                    // Echo the ping application data back in the pong (§5.5.3).
+                    let pongFrame = Self.createWebSocketFrame(data: applicationData, opcode: 0x0A)
+                    self.connection.send(content: pongFrame, completion: .contentProcessed { _ in })
+                case .ignore:
+                    break
                 }
 
                 self.receiveWebSocketFrame()
             }
     }
 
-    private func createWebSocketFrame(data: Data, opcode: UInt8) -> Data {
+    /// Build an unmasked server→client frame (server frames are never masked,
+    /// RFC 6455 §5.1). `static` and internal so the pong-echo wire format can be
+    /// pinned by `WebSocketServerTests` (issue #5669).
+    static func createWebSocketFrame(data: Data, opcode: UInt8) -> Data {
         var frame = Data()
 
         // FIN + opcode
@@ -1083,7 +1133,7 @@ class WebSocketConnection: WebSocketResponding {
     }
 
     private func sendCloseFrame() {
-        let frame = createWebSocketFrame(data: Data(), opcode: 0x08)
+        let frame = Self.createWebSocketFrame(data: Data(), opcode: 0x08)
         connection.send(content: frame, completion: .contentProcessed { _ in })
     }
 }

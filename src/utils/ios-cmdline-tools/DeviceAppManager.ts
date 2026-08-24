@@ -7,6 +7,7 @@ import { ActionableError, toActionableError } from "../../models/ActionableError
 import { hashAppBundle } from "./AppBundleHasher";
 import { isProcessAlreadyGoneError } from "./iosProcessErrors";
 import { iosMajorVersionFromDevicectlDetails } from "./iosVersion";
+import { normalizeIosDevicePath as normalizeDevicePath } from "./iosInstalledApp";
 import { logger } from "../logger";
 import { DefaultHostCommandExecutor } from "../HostCommandExecutor";
 import type { Logger } from "../logger";
@@ -59,17 +60,6 @@ const parseJsonOutputPath = (command: string): string | null => {
   return null;
 };
 
-const normalizeDevicePath = (rawPath: string): string => {
-  if (rawPath.startsWith("file://")) {
-    try {
-      return decodeURIComponent(new URL(rawPath).pathname);
-    } catch {
-      return rawPath.replace("file://", "");
-    }
-  }
-  return rawPath;
-};
-
 export const findBundleEntry = (
   data: unknown,
   bundleId: string,
@@ -100,6 +90,57 @@ export const findBundleEntry = (
 
   for (const value of Object.values(record)) {
     const found = findBundleEntry(value, bundleId);
+    if (found) {
+      return found;
+    }
+  }
+  return null;
+};
+
+/**
+ * Pull the installed-app records out of a `devicectl device info apps`
+ * payload. devicectl nests the listing under `result.apps`, while the
+ * `--bundle-id` shape used elsewhere in this module (and the fixtures that
+ * pin it) writes a bare `{ apps: [...] }`. Search for the first `apps` array
+ * either way rather than hardcoding one envelope, and drop non-object
+ * members so callers can treat every entry as a record.
+ *
+ * Returns null when the payload carries no `apps` array at all, or carries one
+ * whose members are all unreadable — those are payloads this code does not
+ * understand, which must not be reported as the device having no apps
+ * installed. An `apps` array that is present but empty returns `[]`, because
+ * that genuinely means "nothing installed".
+ */
+export const extractInstalledAppEntries = (data: unknown): Record<string, unknown>[] | null => {
+  if (!data || typeof data !== "object") {
+    return null;
+  }
+  if (Array.isArray(data)) {
+    for (const item of data) {
+      const found = extractInstalledAppEntries(item);
+      if (found) {
+        return found;
+      }
+    }
+    return null;
+  }
+
+  const record = data as Record<string, unknown>;
+  if (Array.isArray(record.apps)) {
+    const entries = record.apps.filter(
+      (entry): entry is Record<string, unknown> =>
+        Boolean(entry) && typeof entry === "object" && !Array.isArray(entry),
+    );
+    // An array that carried members but none we can read is a payload shape we
+    // do not understand; only an originally empty array means "nothing installed".
+    if (entries.length === 0 && record.apps.length > 0) {
+      return null;
+    }
+    return entries;
+  }
+
+  for (const value of Object.values(record)) {
+    const found = extractInstalledAppEntries(value);
     if (found) {
       return found;
     }
@@ -827,6 +868,66 @@ export class DeviceAppManager implements DeviceUrlLauncher {
       return findBundleEntry(data, bundleId);
     } finally {
       await this.deps.rm(tempDir);
+    }
+  }
+
+  /**
+   * List every app `devicectl device info apps` reports for a physical device,
+   * as raw devicectl records. This is the physical-device counterpart of
+   * `simctl listapps`, so `ListInstalledApps` can answer on real hardware
+   * instead of returning an empty list (issue #2883).
+   *
+   * Unlike {@link queryInstalledAppEntry} this omits `--bundle-id`, which is
+   * what turns the lookup into a full listing. devicectl exec / JSON-read
+   * failures are wrapped and PROPAGATE: an empty list must mean "no apps", not
+   * "devicectl is broken", because callers report that distinction as their
+   * `successful` flag. macOS-only.
+   */
+  public async listInstalledApps(deviceUdid: string): Promise<Record<string, unknown>[]> {
+    if (this.deps.platform() !== "darwin") {
+      throw new ActionableError(
+        "Listing apps on a physical iOS device requires macOS (devicectl is Xcode-only)",
+      );
+    }
+
+    const tempDir = await this.deps.mkdtemp(join(this.deps.tmpdir(), "automobile-devicectl-"));
+    const jsonPath = join(tempDir, "apps.json");
+    try {
+      await this.execute("xcrun", [
+        "devicectl",
+        "device",
+        "info",
+        "apps",
+        "--device",
+        deviceUdid,
+        "--json-output",
+        jsonPath,
+        "--quiet",
+      ]);
+
+      const raw = await this.deps.readFile(jsonPath);
+      const apps = extractInstalledAppEntries(JSON.parse(raw) as unknown);
+      if (!apps) {
+        throw new ActionableError(
+          `devicectl reported no readable app listing for ${deviceUdid}; its JSON output carried no usable "apps" array`,
+        );
+      }
+      return apps;
+    } catch (error) {
+      throw toActionableError(
+        error,
+        `Failed to list installed apps on physical iOS device ${deviceUdid}`,
+      );
+    } finally {
+      // A failed temp-dir cleanup must not replace the devicectl or JSON
+      // diagnostic the caller needs.
+      try {
+        await this.deps.rm(tempDir);
+      } catch (cleanupError) {
+        this.deps.logger.warn(
+          `[DeviceAppManager] Failed to remove temporary app listing directory ${tempDir}: ${getErrorMessage(cleanupError)}`,
+        );
+      }
     }
   }
 

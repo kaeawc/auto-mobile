@@ -6,6 +6,7 @@ import {
   DeviceAppManager,
   findProcessIdentifier,
   findRunningProcessPid,
+  extractInstalledAppEntries,
   isDevicectlProcessGoneError,
   parseDevicectlJsonOutputPath,
 } from "../../../src/utils/ios-cmdline-tools/DeviceAppManager";
@@ -1495,5 +1496,170 @@ describe("isDevicectlProcessGoneError", () => {
     ]) {
       expect(isDevicectlProcessGoneError(phrasing)).toBe(true);
     }
+  });
+});
+
+describe("extractInstalledAppEntries", () => {
+  test("reads devicectl's nested result.apps envelope", () => {
+    const payload = {
+      info: { outcome: "success" },
+      result: {
+        apps: [{ bundleIdentifier: "com.example.a" }, { bundleIdentifier: "com.example.b" }],
+      },
+    };
+    expect(extractInstalledAppEntries(payload)).toEqual([
+      { bundleIdentifier: "com.example.a" },
+      { bundleIdentifier: "com.example.b" },
+    ]);
+  });
+
+  test("reads the flat apps envelope", () => {
+    expect(extractInstalledAppEntries({ apps: [{ bundleIdentifier: "com.example.a" }] })).toEqual([
+      { bundleIdentifier: "com.example.a" },
+    ]);
+  });
+
+  test("drops non-object entries", () => {
+    expect(extractInstalledAppEntries({ apps: ["nope", null, { bundleId: "com.a" }] })).toEqual([
+      { bundleId: "com.a" },
+    ]);
+  });
+
+  test("rejects a nonempty listing whose members are all malformed", () => {
+    // An array that carried entries but none we can read is a payload we do not
+    // understand — reporting [] would publish a false empty inventory.
+    expect(extractInstalledAppEntries({ result: { apps: ["unexpected", null] } })).toBeNull();
+    expect(extractInstalledAppEntries({ apps: [[], 7] })).toBeNull();
+  });
+
+  test("distinguishes an empty listing from an unrecognized payload", () => {
+    // Present but empty: the device genuinely has nothing installed.
+    expect(extractInstalledAppEntries({ result: { apps: [] } })).toEqual([]);
+    // No apps array anywhere: a payload we do not understand, not "no apps".
+    expect(extractInstalledAppEntries({ result: {} })).toBeNull();
+    expect(extractInstalledAppEntries({ info: { outcome: "failed" } })).toBeNull();
+    expect(extractInstalledAppEntries(null)).toBeNull();
+    expect(extractInstalledAppEntries("apps")).toBeNull();
+  });
+});
+
+describe("DeviceAppManager.listInstalledApps", () => {
+  const createManager = (
+    overrides: {
+      platform?: () => NodeJS.Platform;
+      execute?: (file: string, args: string[]) => Promise<never> | Promise<ExecLike>;
+    } = {},
+    commands: string[] = [],
+    payload: unknown = { result: { apps: [{ bundleIdentifier: "com.example.a" }] } },
+  ) => {
+    const execute =
+      overrides.execute ??
+      (async (file: string, args: string[]) => {
+        const command = [file, ...args].join(" ");
+        commands.push(command);
+        const jsonPath = parseDevicectlJsonOutputPath(command);
+        if (jsonPath) {
+          await fs.writeFile(jsonPath, JSON.stringify(payload), "utf-8");
+        }
+        return emptyExecResult();
+      });
+    return new DeviceAppManager({
+      platform: overrides.platform ?? (() => "darwin"),
+      execute,
+      readFile: async (path: string) => fs.readFile(path, "utf-8"),
+      mkdtemp: async (prefix: string) => fs.mkdtemp(prefix),
+      rm: async (path: string) => fs.rm(path, { recursive: true, force: true }),
+      readdir: async (path: string) => fs.readdir(path),
+      stat: async (path: string) => fs.stat(path),
+      tmpdir,
+      logger: createFakeLogger(),
+    });
+  };
+
+  type ExecLike = ReturnType<typeof emptyExecResult>;
+
+  function emptyExecResult() {
+    return {
+      stdout: "",
+      stderr: "",
+      toString() {
+        return this.stdout;
+      },
+      trim() {
+        return this.stdout.trim();
+      },
+      includes(searchString: string) {
+        return this.stdout.includes(searchString);
+      },
+    };
+  }
+
+  test("queries devicectl for the whole listing, without --bundle-id", async () => {
+    const commands: string[] = [];
+    const manager = createManager({}, commands);
+
+    const apps = await manager.listInstalledApps("00008130-001C2D3E1234567A");
+
+    expect(apps).toEqual([{ bundleIdentifier: "com.example.a" }]);
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toContain("devicectl device info apps");
+    expect(commands[0]).toContain("--device 00008130-001C2D3E1234567A");
+    expect(commands[0]).not.toContain("--bundle-id");
+  });
+
+  test("propagates devicectl failures instead of reporting an empty listing", async () => {
+    const manager = createManager({
+      execute: async () => {
+        throw new Error("xcrun: devicectl not found");
+      },
+    });
+
+    await expect(manager.listInstalledApps("00008130-001C2D3E1234567A")).rejects.toBeInstanceOf(
+      ActionableError,
+    );
+  });
+
+  test("rejects a payload with no apps array instead of reporting an empty listing", async () => {
+    const manager = createManager({}, [], { info: { outcome: "failed" } });
+
+    await expect(manager.listInstalledApps("00008130-001C2D3E1234567A")).rejects.toBeInstanceOf(
+      ActionableError,
+    );
+  });
+
+  test("returns an empty listing when devicectl reports no installed apps", async () => {
+    const manager = createManager({}, [], { result: { apps: [] } });
+
+    await expect(manager.listInstalledApps("00008130-001C2D3E1234567A")).resolves.toEqual([]);
+  });
+
+  test("keeps the devicectl diagnostic when temp-dir cleanup also fails", async () => {
+    const manager = new DeviceAppManager({
+      platform: () => "darwin",
+      execute: async () => {
+        throw new Error("xcrun: devicectl not found");
+      },
+      readFile: async (path: string) => fs.readFile(path, "utf-8"),
+      mkdtemp: async (prefix: string) => fs.mkdtemp(prefix),
+      rm: async () => {
+        throw new Error("cleanup exploded");
+      },
+      readdir: async (path: string) => fs.readdir(path),
+      stat: async (path: string) => fs.stat(path),
+      tmpdir,
+      logger: createFakeLogger(),
+    });
+
+    await expect(manager.listInstalledApps("00008130-001C2D3E1234567A")).rejects.toThrow(
+      /devicectl not found/,
+    );
+  });
+
+  test("requires macOS", async () => {
+    const manager = createManager({ platform: () => "linux" });
+
+    await expect(manager.listInstalledApps("00008130-001C2D3E1234567A")).rejects.toBeInstanceOf(
+      ActionableError,
+    );
   });
 });

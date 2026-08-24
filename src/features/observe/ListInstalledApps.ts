@@ -23,6 +23,8 @@ import {
   getIosInstalledAppBundleId,
   type IosInstalledAppRecord,
 } from "../../utils/ios-cmdline-tools/iosInstalledApp";
+import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager";
+import { isIosPhysicalUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 
 const INSTALLED_APPS_CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -38,10 +40,20 @@ export interface IosInstalledAppsDetailedResult {
   successful: boolean;
 }
 
+/**
+ * Physical-device app listing seam (`devicectl device info apps`), narrowed to
+ * the single call this feature makes so tests can inject a fake without a
+ * `DeviceAppManager`.
+ */
+export interface IosPhysicalAppLister {
+  listInstalledApps(deviceUdid: string): Promise<IosInstalledAppRecord[]>;
+}
+
 interface ListInstalledAppsOptions {
   cacheEnabled?: boolean;
   installedAppsRepository?: InstalledAppsStore;
   timer?: Timer;
+  iosPhysicalAppLister?: IosPhysicalAppLister;
 }
 
 export class ListInstalledApps {
@@ -51,6 +63,7 @@ export class ListInstalledApps {
   private installedAppsRepository: InstalledAppsStore;
   private cacheEnabled: boolean;
   private timer: Timer;
+  private iosPhysicalAppLister: IosPhysicalAppLister | null;
   /**
    * Create an ListInstalledApps instance
    * @param device - Device to run ADB commands against
@@ -72,6 +85,17 @@ export class ListInstalledApps {
     const defaultCacheEnabled = adbFactory === defaultAdbClientFactory;
     this.cacheEnabled = options.cacheEnabled ?? defaultCacheEnabled;
     this.timer = options.timer ?? defaultTimer;
+    this.iosPhysicalAppLister = options.iosPhysicalAppLister ?? null;
+  }
+
+  /**
+   * Physical iOS devices have no simctl; `devicectl device info apps` is the
+   * only listing available there. Constructed lazily so simulator-only callers
+   * never build a DeviceAppManager.
+   */
+  private getIosPhysicalAppLister(): IosPhysicalAppLister {
+    this.iosPhysicalAppLister ??= new DeviceAppManager();
+    return this.iosPhysicalAppLister;
   }
 
   /**
@@ -153,7 +177,13 @@ export class ListInstalledApps {
     }
 
     try {
-      const apps = await this.simctl.listApps(this.device.deviceId);
+      // Only a positively physical-looking UDID routes to devicectl. Anything
+      // else (simulator UUID, or a non-UDID id) keeps the simctl path, so an
+      // unrecognized id degrades to today's behavior rather than shelling out
+      // to a tool that cannot serve it.
+      const apps = isIosPhysicalUdid(this.device.deviceId)
+        ? await this.getIosPhysicalAppLister().listInstalledApps(this.device.deviceId)
+        : await this.simctl.listApps(this.device.deviceId);
       const appsByBundleId = new Map<string, IosInstalledAppRecord>();
       for (const app of apps) {
         if (!app || typeof app !== "object" || Array.isArray(app)) {

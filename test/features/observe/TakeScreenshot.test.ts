@@ -7,6 +7,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
+import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 
 describe("TakeScreenshot", function () {
@@ -78,6 +79,51 @@ describe("TakeScreenshot", function () {
       expect(first).toMatch(/screenshot_1234567890123_capture-1\.png$/);
       expect(second).toMatch(/screenshot_1234567890123_capture-2\.png$/);
       expect(first).not.toBe(second);
+    });
+
+    test("persists native Android CtrlProxy JPEG as jpg with metadata", async () => {
+      const originalGetInstance = AndroidCtrlProxyClient.getInstance;
+      AndroidCtrlProxyClient.getInstance = (() => ({
+        requestScreenshot: async () => ({
+          success: true,
+          data: Buffer.from([0xff, 0xd8, 0xff, 0xe0]).toString("base64"),
+          format: "jpeg",
+        }),
+      })) as typeof AndroidCtrlProxyClient.getInstance;
+
+      try {
+        const result = await takeScreenshot.execute({});
+
+        expect(result.success).toBe(true);
+        expect(result.path).toMatch(/\.jpg$/);
+        expect(result.screenshotFormat).toBe("jpeg");
+        expect(result.screenshotMimeType).toBe("image/jpeg");
+        expect(fakeAdb.getExecutedCommands()).toHaveLength(0);
+      } finally {
+        AndroidCtrlProxyClient.getInstance = originalGetInstance;
+      }
+    });
+
+    test("keeps the ADB fallback as PNG", async () => {
+      const originalGetInstance = AndroidCtrlProxyClient.getInstance;
+      AndroidCtrlProxyClient.getInstance = (() => ({
+        requestScreenshot: async () => ({ success: false, error: "CtrlProxy unavailable" }),
+      })) as typeof AndroidCtrlProxyClient.getInstance;
+      fakeAdb.setDefaultResponse({
+        stdout: Buffer.from("png bytes").toString("base64"),
+        stderr: "",
+      });
+
+      try {
+        const result = await takeScreenshot.execute({});
+
+        expect(result.success).toBe(true);
+        expect(result.path).toMatch(/\.png$/);
+        expect(result.screenshotFormat).toBe("png");
+        expect(result.screenshotMimeType).toBe("image/png");
+      } finally {
+        AndroidCtrlProxyClient.getInstance = originalGetInstance;
+      }
     });
 
     test("should use single optimized ADB command for screenshot capture", async function () {

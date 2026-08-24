@@ -14,6 +14,7 @@ import {
   setSessionScreenshotResourceDependencies,
   setScreenshotFileSystem,
 } from "../../src/server/observationResources";
+import { getScreenshotStateStore } from "../../src/features/observe/screenshot/ScreenshotStateRegistry";
 import { ResourceRegistry, type ResourceReadContext } from "../../src/server/resourceRegistry";
 import {
   clearDirectSessionDevices,
@@ -46,6 +47,25 @@ function readTemplate(uri: string, context: ResourceReadContext = { sessionUuid 
   return template.handler(params);
 }
 
+function readLatestScreenshot() {
+  registerObservationResources();
+  return ResourceRegistry.getResource(RESOURCE_URIS.LATEST_SCREENSHOT)!.handler();
+}
+
+const imageFixtures = [
+  { extension: "jpg", mimeType: "image/jpeg", bytes: Buffer.from([0xff, 0xd8, 0xff, 0xe0]) },
+  {
+    extension: "png",
+    mimeType: "image/png",
+    bytes: Buffer.from("89504e470d0a1a0a", "hex"),
+  },
+  {
+    extension: "webp",
+    mimeType: "image/webp",
+    bytes: Buffer.from("RIFF\x00\x00\x00\x00WEBPVP8 ", "binary"),
+  },
+] as const;
+
 function createTrackedScreenshot(
   result: ScreenshotResult,
   deviceId: string = sessionDevice.deviceId,
@@ -72,6 +92,28 @@ describe("session screenshot resources", () => {
     clearDirectSessionDevices();
     resetSessionScreenshotResourceDependencies();
     resetScreenshotFileSystem();
+  });
+
+  test("returns the actual MIME type for the latest cached screenshot", async () => {
+    const observeScreen = new RealObserveScreen(
+      sessionDevice,
+      new FakeAdbClientFactory(new FakeAdbExecutor()),
+    );
+    await observeScreen.cacheObserveResult(observeScreen.createBaseResult());
+
+    for (const fixture of imageFixtures) {
+      const screenshotPath = `/tmp/latest.${fixture.extension}`;
+      getScreenshotStateStore().update(sessionDevice.deviceId, screenshotPath);
+      setScreenshotFileSystem({
+        stat: async () => ({ isFile: () => true }),
+        readFile: async () => fixture.bytes,
+      });
+
+      const content = await readLatestScreenshot();
+
+      expect(content.mimeType).toBe(fixture.mimeType);
+      expect(content.blob).toBe(fixture.bytes.toString("base64"));
+    }
   });
 
   test("registers session-scoped cached and fresh screenshot templates", () => {
@@ -199,6 +241,27 @@ describe("session screenshot resources", () => {
       mimeType: "image/png",
       blob: image.toString("base64"),
     });
+  });
+
+  test("returns the actual MIME type for fresh JPEG, PNG, and WebP captures", async () => {
+    for (const fixture of imageFixtures) {
+      const image = fixture.bytes;
+      const screenshotPath = `/tmp/fresh.${fixture.extension}`;
+      setSessionScreenshotResourceDependencies({
+        resolveActiveSession: () => activeSession(),
+        createScreenshotService: () =>
+          createTrackedScreenshot({ success: true, path: screenshotPath }),
+      });
+      setScreenshotFileSystem({
+        stat: async () => ({ isFile: () => true }),
+        readFile: async () => image,
+      });
+
+      const content = await readTemplate("automobile:device-session/session-123/screenshot");
+
+      expect(content.mimeType).toBe(fixture.mimeType);
+      expect(content.blob).toBe(image.toString("base64"));
+    }
   });
 
   test("returns a typed non-retryable failure when no fresh screenshot session is active", async () => {

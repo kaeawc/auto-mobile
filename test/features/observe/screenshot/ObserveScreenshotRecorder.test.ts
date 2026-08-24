@@ -38,6 +38,7 @@ class FakeTrackedScreenshotService implements TrackedScreenshotService {
   private nextThrow: Error | null = null;
   private latestPromise: Promise<ScreenshotResult> | null = null;
   public lastTrackerOptions: ScreenshotJobOptions | null = null;
+  public lastCaptureOptions: ScreenshotOptions | undefined;
 
   setNextResult(result: ScreenshotResult): void {
     this.nextResult = result;
@@ -78,9 +79,10 @@ class FakeTrackedScreenshotService implements TrackedScreenshotService {
   }
 
   startTrackedCapture(
-    _options: ScreenshotOptions = { format: "png" },
+    options: ScreenshotOptions = { format: "png" },
     trackerOptions: ScreenshotJobOptions = {},
   ): ScreenshotJobHandle {
+    this.lastCaptureOptions = options;
     this.lastTrackerOptions = trackerOptions;
     const abortController = new AbortController();
     const result = this.nextResult;
@@ -142,6 +144,17 @@ describe("DefaultObserveScreenshotRecorder.capture", () => {
 
     expect(store.getPath("test-device")).toBe(file);
     expect(store.getError("test-device")).toBeUndefined();
+  });
+
+  test("requests native screenshot format", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "obs-rec-"));
+    const file = path.join(dir, "shot.jpg");
+    writeFileSync(file, "img");
+
+    svc.setNextResult({ success: true, path: file, screenshotFormat: "jpeg" });
+    await recorder.capture(new NoOpPerformanceTracker());
+
+    expect(svc.lastCaptureOptions).toEqual({});
   });
 
   test("failure writes error to store", async () => {

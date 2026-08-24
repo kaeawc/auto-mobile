@@ -1,6 +1,6 @@
-export type ScreenshotFormat = "jpeg" | "png";
+export type ScreenshotFormat = "jpeg" | "png" | "webp";
 
-export type ScreenshotMimeType = "image/jpeg" | "image/png";
+export type ScreenshotMimeType = "image/jpeg" | "image/png" | "image/webp";
 
 export type ScreenshotCaptureSource =
   | "android_ctrlproxy_a11y"
@@ -71,6 +71,12 @@ export function metadataForScreenshotFormat(
         ...metadataWithoutFormat,
         screenshotMimeType: "image/png",
         screenshotFormat: "png",
+      };
+    case "webp":
+      return {
+        ...metadataWithoutFormat,
+        screenshotMimeType: "image/webp",
+        screenshotFormat: "webp",
       };
     default:
       return metadataWithoutFormat;

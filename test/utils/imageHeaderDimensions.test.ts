@@ -1,5 +1,8 @@
 import { describe, expect, it } from "bun:test";
-import { readImageHeaderDimensions } from "../../src/utils/screenshot/imageHeaderDimensions";
+import {
+  detectImageMimeType,
+  readImageHeaderDimensions,
+} from "../../src/utils/screenshot/imageHeaderDimensions";
 
 /** Build a minimal PNG whose IHDR declares the given size. */
 function png(width: number, height: number): Buffer {
@@ -78,5 +81,19 @@ describe("readImageHeaderDimensions", () => {
   it("returns null rather than guessing when a JPEG reaches scan data with no frame header", () => {
     // SOI then SOS: entropy-coded data follows and no SOFn can appear after it.
     expect(readImageHeaderDimensions(Buffer.from([0xff, 0xd8, 0xff, 0xda, 0x00, 0x02]))).toBeNull();
+  });
+});
+
+describe("detectImageMimeType", () => {
+  it.each([
+    ["JPEG", Buffer.from([0xff, 0xd8, 0xff, 0xe0]), "image/jpeg"],
+    ["PNG", png(1, 1), "image/png"],
+    ["WebP", Buffer.from("RIFF\x00\x00\x00\x00WEBPVP8 ", "binary"), "image/webp"],
+  ])("detects %s bytes", (_name, buffer, mimeType) => {
+    expect(detectImageMimeType(buffer)).toBe(mimeType);
+  });
+
+  it("returns null for unknown bytes", () => {
+    expect(detectImageMimeType(Buffer.from("not an image"))).toBeNull();
   });
 });

@@ -19,6 +19,26 @@ export interface ImagePixelDimensions {
 /** PNG signature: the 8-byte magic that opens every PNG. */
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
+export type ImageMimeType = "image/jpeg" | "image/png" | "image/webp";
+
+/** Detect the image container from its magic bytes without decoding pixels. */
+export function detectImageMimeType(buffer: Buffer): ImageMimeType | null {
+  if (buffer.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)) {
+    return "image/png";
+  }
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return "image/jpeg";
+  }
+  if (
+    buffer.length >= 12 &&
+    buffer.toString("ascii", 0, 4) === "RIFF" &&
+    buffer.toString("ascii", 8, 12) === "WEBP"
+  ) {
+    return "image/webp";
+  }
+  return null;
+}
+
 /** Offset of the IHDR chunk's declared length (immediately after the 8-byte signature). */
 const PNG_IHDR_LENGTH_OFFSET = 8;
 /** Offset of the IHDR chunk type. */

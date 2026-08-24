@@ -48,8 +48,12 @@ describe("metadataForScreenshotFormat", () => {
       });
     });
 
-    test(`${name} + webp drops mime/format (unknown format)`, () => {
-      expect(metadataForScreenshotFormat(value, "webp")).toEqual(rest);
+    test(`${name} + webp is labelled image/webp`, () => {
+      expect(metadataForScreenshotFormat(value, "webp")).toEqual({
+        ...rest,
+        screenshotMimeType: "image/webp",
+        screenshotFormat: "webp",
+      });
     });
 
     test(`${name} + undefined format drops mime/format`, () => {

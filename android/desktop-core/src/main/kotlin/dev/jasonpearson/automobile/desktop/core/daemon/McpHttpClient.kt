@@ -5,6 +5,7 @@ import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.time.Duration
 import java.util.UUID
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.serialization.decodeFromString
@@ -20,10 +21,19 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.serializer
 
+fun interface HttpRequestSender {
+  fun send(request: HttpRequest): HttpResponse<String>
+}
+
 class McpHttpClient(
   private val endpoint: String,
   private val json: Json = DaemonJson,
   private val retryPolicy: RetryPolicy = RetryPolicy(),
+  private val statusRequestTimeoutMs: Long = McpDaemonClient.STATUS_REQUEST_TIMEOUT_MS,
+  private val statusDeadlineFactory: (Long) -> StatusRequestDeadline = {
+    StatusRequestDeadline(it)
+  },
+  private val requestSender: HttpRequestSender? = null,
 ) : AutoMobileClient {
   override val transportName: String = "MCP HTTP"
   override val connectionDescription: String = endpoint
@@ -244,11 +254,12 @@ class McpHttpClient(
 
   override fun getDaemonStatus():
     dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse {
-    // For HTTP client, use the status tool
+    val deadline = statusDeadlineFactory(statusRequestTimeoutMs)
     val response =
-      callTool(
+      callToolWithTimeout(
         "getDaemonStatus",
         JsonObject(emptyMap()),
+        deadline,
       )
     return try {
       decodeToolResponse(
@@ -403,7 +414,15 @@ class McpHttpClient(
   ): InputActionResult = unsupportedInputAction(transportName, "input/key")
 
   override fun callTool(name: String, arguments: JsonObject): JsonElement {
-    ensureInitialized()
+    return callToolWithTimeout(name, arguments)
+  }
+
+  private fun callToolWithTimeout(
+    name: String,
+    arguments: JsonObject,
+    deadline: StatusRequestDeadline? = null,
+  ): JsonElement {
+    ensureInitialized(deadline)
     val response =
       sendRequest(
         "tools/call",
@@ -411,16 +430,23 @@ class McpHttpClient(
           put("name", JsonPrimitive(name))
           put("arguments", arguments)
         },
+        timeoutMs = deadline?.remainingTimeoutMs(),
       )
     return response.result ?: JsonObject(emptyMap())
   }
 
-  private fun ensureInitialized() {
+  private fun ensureInitialized(deadline: StatusRequestDeadline? = null) {
     if (initialized) {
       return
     }
 
-    val response = sendRequest("initialize", buildInitializeParams(), includeSession = false)
+    val response =
+      sendRequest(
+        "initialize",
+        buildInitializeParams(),
+        includeSession = false,
+        timeoutMs = deadline?.remainingTimeoutMs(),
+      )
 
     val result =
       response.result?.jsonObject
@@ -428,23 +454,33 @@ class McpHttpClient(
     protocolVersion = negotiateProtocolVersion(result)
     initialized = true
 
-    sendNotification("notifications/initialized")
+    sendNotification("notifications/initialized", deadline = deadline)
   }
 
-  private fun sendNotification(method: String, params: JsonElement? = null) {
+  private fun sendNotification(
+    method: String,
+    params: JsonElement? = null,
+    deadline: StatusRequestDeadline? = null,
+  ) {
     val request =
       JsonRpcRequest(
         id = null,
         method = method,
         params = params,
       )
-    sendRequest(request, includeSession = true, expectResponse = false)
+    sendRequest(
+      request,
+      includeSession = true,
+      expectResponse = false,
+      timeoutMs = deadline?.remainingTimeoutMs(),
+    )
   }
 
   private fun sendRequest(
     method: String,
     params: JsonElement? = null,
     includeSession: Boolean = true,
+    timeoutMs: Long? = null,
   ): JsonRpcResponse {
     val requestId = JsonPrimitive(UUID.randomUUID().toString())
     val request =
@@ -453,13 +489,19 @@ class McpHttpClient(
         method = method,
         params = params,
       )
-    return sendRequest(request, includeSession = includeSession, expectResponse = true)
+    return sendRequest(
+      request,
+      includeSession = includeSession,
+      expectResponse = true,
+      timeoutMs = timeoutMs,
+    )
   }
 
   private fun sendRequest(
     request: JsonRpcRequest,
     includeSession: Boolean,
     expectResponse: Boolean,
+    timeoutMs: Long? = null,
   ): JsonRpcResponse {
     val requestBody = json.encodeToString(serializer<JsonRpcRequest>(), request)
     val builder =
@@ -471,43 +513,54 @@ class McpHttpClient(
     if (protocolVersion != null) {
       builder.header("mcp-protocol-version", protocolVersion!!)
     }
+    timeoutMs?.let { builder.timeout(Duration.ofMillis(it)) }
 
     val httpRequest = builder.POST(HttpRequest.BodyPublishers.ofString(requestBody)).build()
-    return retryWithBackoffBlocking(retryPolicy, isRetryable = ::isRetryableError) {
-      val response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString())
-
-      response.headers().firstValue("mcp-session-id").ifPresent { header ->
-        if (header.isNotBlank()) {
-          sessionId = header
+    val response =
+      if (timeoutMs == null) {
+        retryWithBackoffBlocking(retryPolicy, isRetryable = ::isRetryableError) {
+          sendHttpRequest(httpRequest)
         }
+      } else {
+        // A health probe has one end-to-end hang ceiling. Retrying its individually timed requests
+        // would turn a 5s deadline into an unbounded series of 5s waits.
+        sendHttpRequest(httpRequest)
       }
 
-      val statusCode = response.statusCode()
-      if (statusCode >= 500) {
-        throw McpConnectionException("MCP HTTP server error $statusCode")
+    response.headers().firstValue("mcp-session-id").ifPresent { header ->
+      if (header.isNotBlank()) {
+        sessionId = header
       }
-
-      if (!expectResponse) {
-        return@retryWithBackoffBlocking JsonRpcResponse(jsonrpc = "2.0")
-      }
-
-      val body = response.body().trim()
-      if (body.isEmpty()) {
-        throw McpConnectionException("MCP HTTP response was empty")
-      }
-
-      val rpcResponse = json.decodeFromString(serializer<JsonRpcResponse>(), body)
-      if (rpcResponse.error != null) {
-        throw McpConnectionException(
-          "MCP HTTP error ${rpcResponse.error.code}: ${rpcResponse.error.message}"
-        )
-      }
-      if (rpcResponse.result == null) {
-        throw McpConnectionException("MCP HTTP response missing result")
-      }
-      rpcResponse
     }
+
+    val statusCode = response.statusCode()
+    if (statusCode >= 500) {
+      throw McpConnectionException("MCP HTTP server error $statusCode")
+    }
+
+    if (!expectResponse) {
+      return JsonRpcResponse(jsonrpc = "2.0")
+    }
+
+    val body = response.body().trim()
+    if (body.isEmpty()) {
+      throw McpConnectionException("MCP HTTP response was empty")
+    }
+
+    val rpcResponse = json.decodeFromString(serializer<JsonRpcResponse>(), body)
+    if (rpcResponse.error != null) {
+      throw McpConnectionException(
+        "MCP HTTP error ${rpcResponse.error.code}: ${rpcResponse.error.message}"
+      )
+    }
+    if (rpcResponse.result == null) {
+      throw McpConnectionException("MCP HTTP response missing result")
+    }
+    return rpcResponse
   }
+
+  private fun sendHttpRequest(request: HttpRequest): HttpResponse<String> =
+    requestSender?.send(request) ?: httpClient.send(request, HttpResponse.BodyHandlers.ofString())
 
   companion object {
     internal fun isRetryableError(e: Exception): Boolean =

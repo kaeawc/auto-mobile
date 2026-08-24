@@ -56,6 +56,7 @@ class McpDaemonClient(
    * timeout floors are honored.
    */
   private val inputRequestTimeoutMs: Long = INPUT_REQUEST_TIMEOUT_MS,
+  private val statusRequestTimeoutMs: Long = STATUS_REQUEST_TIMEOUT_MS,
 ) : AutoMobileClient {
   private var daemonLifecycle: DaemonLifecycleEnsurer? =
     if (socketPathValue == DaemonSocketPaths.socketPath()) DesktopDaemonLifecycle() else null
@@ -63,7 +64,8 @@ class McpDaemonClient(
   internal constructor(
     socketPathValue: String,
     daemonLifecycle: DaemonLifecycleEnsurer,
-  ) : this(socketPathValue = socketPathValue) {
+    statusRequestTimeoutMs: Long = STATUS_REQUEST_TIMEOUT_MS,
+  ) : this(socketPathValue = socketPathValue, statusRequestTimeoutMs = statusRequestTimeoutMs) {
     this.daemonLifecycle = daemonLifecycle
   }
 
@@ -302,7 +304,12 @@ class McpDaemonClient(
     // ide/status round-trip is ~ms, so a deadline here bounds the connectivity dot without risking
     // a
     // slow ordinary tool call (those stay unbounded; see [sendRequest]).
-    val response = sendRequest("ide/status", timeoutMs = STATUS_REQUEST_TIMEOUT_MS)
+    val response =
+      sendRequest(
+        "ide/status",
+        timeoutMs = statusRequestTimeoutMs,
+        skipLifecyclePreflight = true,
+      )
     ensureSuccess(response)
     return json.decodeFromJsonElement(
       serializer<dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse>(),
@@ -933,8 +940,13 @@ class McpDaemonClient(
     method: String,
     params: JsonObject = JsonObject(emptyMap()),
     timeoutMs: Long? = null,
+    skipLifecyclePreflight: Boolean = false,
   ): DaemonResponse {
-    ensureVersionMatchedDaemon()
+    // Status is a passive health probe. Its purpose is to report a wedged daemon, so running the
+    // lifecycle preflight first can itself hang before the request watchdog is armed.
+    if (!skipLifecyclePreflight) {
+      ensureVersionMatchedDaemon()
+    }
     ensureSocketExists()
 
     val address = UnixDomainSocketAddress.of(socketPathValue)

@@ -24,18 +24,21 @@ export interface FileSourceStats {
 export interface FileSourceFileSystem {
   stat(path: string): Promise<FileSourceStats>;
   mkdtemp(prefix: string): Promise<string>;
-  writeFileBuffer(
-    path: string,
-    data: Buffer,
-    options?: { flag?: string; mode?: number },
-  ): Promise<void>;
+  writeFileBuffer(path: string, data: Buffer): Promise<void>;
   rm(path: string): Promise<void>;
 }
 
 const defaultFileSystem: FileSourceFileSystem = {
   stat: async (path) => nodeFs.stat(path),
   mkdtemp: async (prefix) => nodeFs.mkdtemp(prefix),
-  writeFileBuffer: async (path, data, options) => nodeFs.writeFile(path, data, options),
+  writeFileBuffer: async (path, data) => {
+    const file = await nodeFs.open(path, "wx", 0o600);
+    try {
+      await file.writeFile(data);
+    } finally {
+      await file.close();
+    }
+  },
   rm: async (path) => nodeFs.rm(path, { recursive: true, force: true }),
 };
 
@@ -69,7 +72,7 @@ export async function prepareFileSource(
       : Buffer.from(args.contentText ?? "", "utf8");
   const dir = await fileSystem.mkdtemp(join(tmpdir(), "automobile-app-file-"));
   const tempPath = join(dir, "content");
-  await fileSystem.writeFileBuffer(tempPath, buffer, { flag: "wx", mode: 0o600 });
+  await fileSystem.writeFileBuffer(tempPath, buffer);
   return {
     path: tempPath,
     byteCount: buffer.byteLength,

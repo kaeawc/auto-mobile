@@ -385,7 +385,11 @@
         }
 
         private static func withCenter(_ link: SdkSemanticLink, point: CGPoint?) -> SdkSemanticLink {
-            guard let point else { return link }
+            // Both coordinates must be finite before they reach JSONEncoder: a
+            // single non-finite center would throw and blank the ENTIRE hierarchy
+            // encode, not just this link. The upstream producers already reject
+            // degenerate rects, so this only closes the finite-x / non-finite-y gap.
+            guard let point, point.x.isFinite, point.y.isFinite else { return link }
             return SdkSemanticLink(
                 text: link.text,
                 occurrence: link.occurrence,

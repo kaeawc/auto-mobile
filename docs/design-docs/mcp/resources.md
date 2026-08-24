@@ -170,6 +170,15 @@ Captures and returns a fresh PNG for the active session. A fresh request queues
 behind an in-flight screenshot for the same device, then takes its own tracked
 capture so session cleanup can cancel it safely.
 
+When a PNG cannot be returned, the resource returns `application/json` with
+`code`, `retryable`, and `error` fields:
+
+- `SESSION_NOT_ACTIVE` and `SCREENSHOT_ACCESS_DENIED` are non-retryable.
+- `SESSION_OWNERSHIP_LOST` is non-retryable when the session changes during capture or file read.
+- `SCREENSHOT_CAPTURE_CANCELLED` is non-retryable when the request is cancelled.
+- `SCREENSHOT_CAPTURE_FAILED` is retryable for transient capture failures.
+- `SCREENSHOT_READ_FAILED` is non-retryable for host-side file-read failures.
+
 ### Installed Apps
 
 **URI**: `automobile:apps`

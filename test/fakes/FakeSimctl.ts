@@ -19,6 +19,7 @@ export class FakeSimctl implements ISimCtl {
   private deviceTypes: AppleDeviceType[] = [];
   private runtimes: AppleDeviceRuntime[] = [];
   private installedApps: any[] = [];
+  private listAppsError: Error | null = null;
   private launchAppResult: {
     success: boolean;
     pid?: number;
@@ -85,6 +86,15 @@ export class FakeSimctl implements ISimCtl {
    */
   setInstalledApps(apps: any[]): void {
     this.installedApps = apps;
+  }
+
+  /**
+   * Configure `listApps` to fail, modelling a simctl listing that could not be
+   * produced (locked/disconnected device, unavailable Xcode) as distinct from a
+   * device that genuinely has no matching app installed.
+   */
+  setListAppsError(error: Error | null): void {
+    this.listAppsError = error;
   }
 
   /**
@@ -269,6 +279,9 @@ export class FakeSimctl implements ISimCtl {
 
   async listApps(deviceId?: string): Promise<any[]> {
     this.recordCall("listApps", { deviceId });
+    if (this.listAppsError) {
+      throw this.listAppsError;
+    }
     return this.installedApps;
   }
 

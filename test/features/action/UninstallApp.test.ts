@@ -569,3 +569,62 @@ describe("UninstallApp (Android)", () => {
     expect(result.error).toBe("Invalid package name provided");
   });
 });
+
+describe("UninstallApp (iOS listing failure)", () => {
+  // Issue #5621: `ListInstalledApps.execute()` collapses "listing failed" into
+  // an empty array, so a failed listing used to read as "app is absent" and the
+  // uninstall silently no-op'd with success:true.
+  const iosSimDevice: BootedDevice = {
+    deviceId: "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
+    name: "iPhone 15",
+    platform: "ios",
+  };
+
+  let fakeSimctl: FakeSimctl;
+  let fakeUninstaller: FakeDeviceAppUninstaller;
+
+  beforeEach(() => {
+    fakeSimctl = new FakeSimctl();
+    fakeUninstaller = new FakeDeviceAppUninstaller();
+  });
+
+  test("reports a failure instead of a success no-op when the listing fails", async () => {
+    fakeSimctl.setInstalledApps([{ bundleId: "com.example.app" }]);
+    fakeSimctl.setListAppsError(new Error("Unable to boot device in current state"));
+
+    const uninstall = new UninstallApp(iosSimDevice, nullAdbFactory, fakeSimctl, fakeUninstaller);
+    const result = await uninstall.execute("com.example.app");
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("com.example.app");
+    expect(result.wasInstalled).toBeUndefined();
+    // The destructive step must not run on an unknown install state.
+    expect(fakeUninstaller.calls).toHaveLength(0);
+  });
+
+  test("preserves the not-installed result when the listing succeeds and the app is absent", async () => {
+    fakeSimctl.setInstalledApps([{ bundleId: "com.example.other" }]);
+
+    const uninstall = new UninstallApp(iosSimDevice, nullAdbFactory, fakeSimctl, fakeUninstaller);
+    const result = await uninstall.execute("com.example.app");
+
+    expect(result.success).toBe(true);
+    expect(result.wasInstalled).toBe(false);
+    expect(fakeUninstaller.calls).toHaveLength(0);
+  });
+
+  test("uninstalls when the listing succeeds and the app is present", async () => {
+    fakeSimctl.setInstalledApps([{ bundleId: "com.example.app" }]);
+    fakeUninstaller.uninstallApp = async (deviceUdid, bundleId, isSimulator) => {
+      fakeUninstaller.calls.push({ deviceUdid, bundleId, isSimulator });
+      fakeSimctl.setInstalledApps([]);
+    };
+
+    const uninstall = new UninstallApp(iosSimDevice, nullAdbFactory, fakeSimctl, fakeUninstaller);
+    const result = await uninstall.execute("com.example.app");
+
+    expect(result.success).toBe(true);
+    expect(result.wasInstalled).toBe(true);
+    expect(fakeUninstaller.calls).toHaveLength(1);
+  });
+});

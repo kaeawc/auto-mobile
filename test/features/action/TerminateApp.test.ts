@@ -112,6 +112,23 @@ describe("TerminateApp (iOS)", () => {
     expect(fakeSimctl.wasMethodCalled("terminateApp")).toBe(false);
   });
 
+  test("reports a failure instead of a no-op when the installed-app listing fails", async () => {
+    // A locked/disconnected device or an unavailable Xcode makes the listing
+    // fail. That is not "the app is absent" — terminating must not silently
+    // report success (issue #5621).
+    fakeSimctl.setInstalledApps([{ bundleId: "com.example.app" }]);
+    fakeSimctl.setListAppsError(new Error("Unable to boot device in current state"));
+
+    const terminateApp = new TerminateApp(iosDevice, null, fakeSimctl, fakeTimer);
+    const result = await terminateApp.execute("com.example.app", { skipObservation: true });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("com.example.app");
+    expect(result.wasInstalled).toBeUndefined();
+    expect(result.wasRunning).toBeUndefined();
+    expect(fakeSimctl.wasMethodCalled("terminateApp")).toBe(false);
+  });
+
   test("detects install when bundleIdentifier is provided", async () => {
     fakeSimctl.setInstalledApps([{ bundleIdentifier: "com.example.app" }]);
 

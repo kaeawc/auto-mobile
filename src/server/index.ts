@@ -78,6 +78,7 @@ import { registerFailuresResources } from "./failuresResources";
 import { registerStorageResources } from "./storageResources";
 import { registerStorageCapabilityResources } from "./storageCapabilityResources";
 import { registerAppFileResources } from "./appFileResources";
+import { registerSharedStorageResources } from "./sharedStorageResources";
 import { registerFeatureFlagResources } from "./featureFlagResources";
 import { registerNetworkResources } from "./networkResources";
 import { registerEmulatorLossIncidentResources } from "./emulatorLossIncidentResources";
@@ -352,6 +353,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   registerStorageResources();
   registerStorageCapabilityResources();
   registerAppFileResources();
+  registerSharedStorageResources();
   registerFeatureFlagResources();
   registerNetworkResources();
   registerEmulatorLossIncidentResources();

@@ -374,11 +374,26 @@ export abstract class DeviceServiceClient {
             ws.on("open", () => {
               this.timer.clearTimeout(connectionTimeout);
               if (generation !== this.connectionGeneration) {
-                // close() ran while this connection was mid-handshake. Discard the
-                // socket so it cannot re-reference a shutting-down device transport
-                // or restart the health check after teardown.
+                // close() or updatePort() ran while this connection was mid-handshake.
+                // Detach this socket's listeners BEFORE closing it, then discard it.
+                // A replacement connect (e.g. to a new port after updatePort) may
+                // already be live; without detaching, this socket's still-attached
+                // close/error handlers would fire on its delayed close-handshake and
+                // null out this.ws, stop the replacement's health check, and schedule
+                // a spurious reconnect. Removing the listeners makes that a no-op.
                 logger.info(`[${this.logTag}] Discarding WebSocket opened after close`);
                 try {
+                  ws.removeAllListeners();
+                  // Keep a lone error listener: a discarded socket (e.g. dialing a
+                  // dead old port) can still emit "error" during its close
+                  // handshake, and an EventEmitter with no "error" listener THROWS,
+                  // which would crash the daemon. The socket is being torn down, so
+                  // the error is expected and needs no state mutation.
+                  ws.on("error", (error) => {
+                    logger.debug(
+                      `[${this.logTag}] Ignoring error on discarded WebSocket: ${error}`,
+                    );
+                  });
                   ws.close();
                 } catch (error) {
                   // The socket may already be closing; nothing else to clean up.

@@ -4,7 +4,10 @@ import { BootedDevice } from "../../../../src/models";
 import {
   createInstantFailureWebSocketFactory,
   createSuccessWebSocketFactory,
+  FakeWebSocket,
+  WebSocketState,
 } from "../../../fakes/FakeWebSocket";
+import type WebSocket from "ws";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeIOSCtrlProxyManager } from "../../../fakes/FakeIOSCtrlProxyManager";
 import type {
@@ -19,6 +22,24 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
     resolve = done;
   });
   return { promise, resolve };
+}
+
+async function flushPromises(iterations: number = 5): Promise<void> {
+  for (let i = 0; i < iterations; i += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
+/**
+ * A FakeWebSocket whose close() does not auto-emit "close". The test emits the
+ * close event manually, so a discarded socket's delayed close-handshake can be
+ * made to land AFTER a replacement connection is already live — the race the
+ * generation guard must survive.
+ */
+class ManualCloseWebSocket extends FakeWebSocket {
+  override close(): void {
+    this.readyState = WebSocketState.CLOSING;
+  }
 }
 
 describe("IOSCtrlProxyClient auto-setup", function () {
@@ -159,6 +180,127 @@ describe("IOSCtrlProxyClient auto-setup", function () {
     expect(urls).toEqual(["ws://localhost:8765/ws", "ws://localhost:8767/ws"]);
 
     await client.close();
+  });
+
+  test("updatePort during an in-flight connect discards a socket that opens on the old port (#5645)", async function () {
+    // Manual (non-auto-advancing) timer so the in-flight handshake stays pending
+    // until we fire `open` ourselves, and the connection timeout never fires.
+    const manualTimer = new FakeTimer();
+    const sockets: { url: string; socket: ManualCloseWebSocket }[] = [];
+    const wsFactory = (url: string): WebSocket => {
+      // "timeout" mode keeps the socket CONNECTING (the timer is never advanced);
+      // ManualCloseWebSocket also defers the "close" event to our control.
+      const socket = new ManualCloseWebSocket(url, "timeout", 60_000, manualTimer);
+      sockets.push({ url, socket });
+      return socket as unknown as WebSocket;
+    };
+    const client = IOSCtrlProxyClient.createForTesting(
+      testDevice,
+      8765,
+      wsFactory,
+      manualTimer,
+      createManagerFactory(),
+    );
+    // Exercise the base-class connect directly so the assertion targets the
+    // generation guard without the iOS auto-setup wrapper reacting to a failed
+    // handshake.
+    const connect = (client as unknown as { connectWebSocket: () => Promise<boolean> })
+      .connectWebSocket;
+    const updatePort = (
+      client as unknown as { updatePort: (port: number) => void }
+    ).updatePort.bind(client);
+    try {
+      // Start a connect and let it reach the in-flight state: socket CONNECTING,
+      // this.ws still null, isConnecting true. The URL was built from the old port.
+      const connectPromise = connect.call(client);
+      await flushPromises(8);
+      expect(sockets.length).toBe(1);
+      expect(sockets[0].url).toBe("ws://localhost:8765/ws");
+      expect(client.isConnected()).toBe(false);
+
+      // A port reallocation races the in-flight connect.
+      updatePort(8767);
+
+      // The old-port handshake now completes — `open` fires AFTER the port change.
+      sockets[0].socket.readyState = WebSocketState.OPEN;
+      sockets[0].socket.emit("open");
+      await flushPromises(8);
+
+      // AC1: the old-port socket is discarded, not installed as this.ws.
+      expect(client.isConnected()).toBe(false);
+      await expect(connectPromise).resolves.toBe(false);
+
+      // AC2: a fresh connect targets the NEW port and succeeds — no wedged
+      // isConnecting / stale-port state left behind.
+      const secondPromise = connect.call(client);
+      await flushPromises(8);
+      const latest = sockets[sockets.length - 1];
+      expect(sockets.length).toBe(2);
+      expect(latest.url).toBe("ws://localhost:8767/ws");
+      latest.socket.readyState = WebSocketState.OPEN;
+      latest.socket.emit("open");
+      await flushPromises(8);
+      expect(await secondPromise).toBe(true);
+      expect(client.isConnected()).toBe(true);
+
+      // The discarded old-port socket's close-handshake finally completes — AFTER
+      // the replacement is live. Its stale, unconditional close/error handlers
+      // must not run: otherwise the close handler nulls out this.ws, stops the
+      // replacement's health check, and schedules a spurious reconnect. The
+      // generation guard detaches the invalidated socket's listeners, so this
+      // delayed close is a no-op and the replacement stays up. A delayed "error"
+      // must not throw either: the guard keeps a lone swallowing error listener,
+      // so the discarded socket cannot crash the daemon or disturb the replacement.
+      sockets[0].socket.emit("close");
+      sockets[0].socket.emit("error", new Error("stale old-port socket reset"));
+      await flushPromises(8);
+      expect(client.isConnected()).toBe(true);
+    } finally {
+      await client.close();
+    }
+  });
+
+  test("a port change resets the per-endpoint attempt budget so the new port is not cooldown-blocked (#5645)", async function () {
+    // Frozen manual timer: the cooldown window never elapses on its own, so only a
+    // budget reset (not the passage of time) can let the new-port connect through.
+    const manualTimer = new FakeTimer();
+    const wsFactory = (url: string): WebSocket => {
+      // The old port fails instantly (exhausting the budget); the new port connects.
+      const mode: "none" | "instant" = url.includes(":8767") ? "none" : "instant";
+      return new FakeWebSocket(url, mode, 0, manualTimer) as unknown as WebSocket;
+    };
+    const client = IOSCtrlProxyClient.createForTesting(
+      testDevice,
+      8765,
+      wsFactory,
+      manualTimer,
+      createManagerFactory(),
+    );
+    const connect = (client as unknown as { connectWebSocket: () => Promise<boolean> })
+      .connectWebSocket;
+    const updatePort = (
+      client as unknown as { updatePort: (port: number) => void }
+    ).updatePort.bind(client);
+    try {
+      // Exhaust the attempt budget against the old port (default max is 3).
+      for (let i = 0; i < 3; i += 1) {
+        expect(await connect.call(client)).toBe(false);
+      }
+      // Now cooled down: another old-port connect is refused without dialing.
+      expect(await connect.call(client)).toBe(false);
+      expect(client.getReconnectStatus()).not.toBeNull();
+
+      // A real port change resets the per-endpoint budget...
+      updatePort(8767);
+      expect(client.getReconnectStatus()).toBeNull();
+
+      // ...so a fresh connect to the new port succeeds immediately — no waiting out
+      // the old port's cooldown.
+      expect(await connect.call(client)).toBe(true);
+      expect(client.isConnected()).toBe(true);
+    } finally {
+      await client.close();
+    }
   });
 
   test("no auto-setup when already connected", async function () {

@@ -22,6 +22,7 @@ type FakeSimCtlClientContract = Pick<
   | "getDeviceTypes"
   | "getRuntimes"
   | "listApps"
+  | "listAppsOrThrow"
   | "terminateApp"
   | "openSimulatorApp"
   | "pushNotification"
@@ -219,6 +220,11 @@ export class FakeSimCtlClient implements FakeSimCtlClientContract {
 
   async listApps(deviceId?: string): Promise<any[]> {
     this.recordCall("listApps", { deviceId });
+    return this.installedApps;
+  }
+
+  async listAppsOrThrow(deviceId?: string): Promise<any[]> {
+    this.recordCall("listAppsOrThrow", { deviceId });
     return this.installedApps;
   }
 

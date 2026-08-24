@@ -279,6 +279,15 @@ export class FakeSimctl implements ISimCtl {
 
   async listApps(deviceId?: string): Promise<any[]> {
     this.recordCall("listApps", { deviceId });
+    // Mirrors production: the lenient variant swallows a listing failure.
+    if (this.listAppsError) {
+      return [];
+    }
+    return this.installedApps;
+  }
+
+  async listAppsOrThrow(deviceId?: string): Promise<any[]> {
+    this.recordCall("listAppsOrThrow", { deviceId });
     if (this.listAppsError) {
       throw this.listAppsError;
     }

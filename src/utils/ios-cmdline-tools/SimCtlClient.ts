@@ -1758,53 +1758,69 @@ export class SimCtlClient implements SimCtl {
    * @returns Promise with array of app objects containing bundle identifiers and other metadata
    */
   async listApps(deviceId?: string): Promise<any[]> {
-    const targetDevice = deviceId || this.device?.deviceId || "booted";
-    logger.debug(`Listing installed apps on iOS simulator ${targetDevice}`);
-
     try {
-      const parseApps = (payload: string): any[] => {
-        const appsData = JSON.parse(payload);
-
-        if (Array.isArray(appsData)) {
-          return appsData;
-        }
-
-        if (!appsData || typeof appsData !== "object") {
-          return [];
-        }
-
-        // Convert the apps object to an array, preserving bundle IDs from keys.
-        return Object.entries(appsData).map(([bundleId, appInfo]) => {
-          const record = appInfo && typeof appInfo === "object" ? appInfo : {};
-          return { ...record, bundleId };
-        });
-      };
-
-      // simctl listapps may return an old-style plist instead of JSON (Xcode
-      // 26+). The plist owner receives the exact bytes over stdin, avoiding a
-      // shell pipe and a temporary host file.
-      const listAppsJson = async (args: string[]): Promise<string> => {
-        const result = await this.executeCommandArgs(["listapps", ...args]);
-        try {
-          JSON.parse(result.stdout);
-          return result.stdout;
-        } catch (error) {
-          logger.debug(`[iOS] listapps returned plist; converting with plutil: ${error}`);
-          return JSON.stringify(await this.plist.readJsonBytes(Buffer.from(result.stdout, "utf8")));
-        }
-      };
-
-      try {
-        return parseApps(await listAppsJson([targetDevice, "--all"]));
-      } catch (error) {
-        logger.warn(`Failed to list iOS apps with --all: ${error}`);
-      }
-
-      return parseApps(await listAppsJson([targetDevice]));
+      return await this.listAppsOrThrow(deviceId);
     } catch (error) {
+      // Legacy lenient contract: callers of `listApps` treat an unavailable
+      // listing as "no apps". Callers that must distinguish a failed listing
+      // from an empty device use `listAppsOrThrow` instead (issue #5621).
       logger.warn(`Failed to list iOS apps: ${error}`);
       return [];
     }
+  }
+
+  /**
+   * List installed apps, propagating a listing failure instead of collapsing it
+   * into an empty array. `listApps` swallows the error for its existing
+   * callers; consumers that must tell "the listing failed" apart from "the
+   * device has no such app" — the install pre-checks in `UninstallApp` and
+   * `TerminateApp` — call this variant (issue #5621).
+   * @param deviceId - Optional device ID (defaults to "booted" for current booted simulator)
+   * @returns Promise with array of app objects containing bundle identifiers and other metadata
+   */
+  async listAppsOrThrow(deviceId?: string): Promise<any[]> {
+    const targetDevice = deviceId || this.device?.deviceId || "booted";
+    logger.debug(`Listing installed apps on iOS simulator ${targetDevice}`);
+
+    const parseApps = (payload: string): any[] => {
+      const appsData = JSON.parse(payload);
+
+      if (Array.isArray(appsData)) {
+        return appsData;
+      }
+
+      if (!appsData || typeof appsData !== "object") {
+        return [];
+      }
+
+      // Convert the apps object to an array, preserving bundle IDs from keys.
+      return Object.entries(appsData).map(([bundleId, appInfo]) => {
+        const record = appInfo && typeof appInfo === "object" ? appInfo : {};
+        return { ...record, bundleId };
+      });
+    };
+
+    // simctl listapps may return an old-style plist instead of JSON (Xcode
+    // 26+). The plist owner receives the exact bytes over stdin, avoiding a
+    // shell pipe and a temporary host file.
+    const listAppsJson = async (args: string[]): Promise<string> => {
+      const result = await this.executeCommandArgs(["listapps", ...args]);
+      try {
+        JSON.parse(result.stdout);
+        return result.stdout;
+      } catch (error) {
+        logger.debug(`[iOS] listapps returned plist; converting with plutil: ${error}`);
+        return JSON.stringify(await this.plist.readJsonBytes(Buffer.from(result.stdout, "utf8")));
+      }
+    };
+
+    try {
+      return parseApps(await listAppsJson([targetDevice, "--all"]));
+    } catch (error) {
+      logger.warn(`Failed to list iOS apps with --all: ${error}`);
+    }
+
+    return parseApps(await listAppsJson([targetDevice]));
   }
 
   /**

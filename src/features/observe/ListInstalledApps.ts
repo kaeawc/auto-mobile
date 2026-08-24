@@ -177,13 +177,17 @@ export class ListInstalledApps {
     }
 
     try {
+      // `listAppsOrThrow` (not `listApps`) so a simctl listing that failed
+      // surfaces as successful:false instead of being collapsed into an empty
+      // array, which callers would read as "the app is absent" (issue #5621).
+      //
       // Only a positively physical-looking UDID routes to devicectl. Anything
       // else (simulator UUID, or a non-UDID id) keeps the simctl path, so an
       // unrecognized id degrades to today's behavior rather than shelling out
       // to a tool that cannot serve it.
       const apps = isIosPhysicalUdid(this.device.deviceId)
         ? await this.getIosPhysicalAppLister().listInstalledApps(this.device.deviceId)
-        : await this.simctl.listApps(this.device.deviceId);
+        : await this.simctl.listAppsOrThrow(this.device.deviceId);
       const appsByBundleId = new Map<string, IosInstalledAppRecord>();
       for (const app of apps) {
         if (!app || typeof app !== "object" || Array.isArray(app)) {

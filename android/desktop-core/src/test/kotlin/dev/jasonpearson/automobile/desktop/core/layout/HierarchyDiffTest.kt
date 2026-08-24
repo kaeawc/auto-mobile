@@ -274,4 +274,115 @@ class HierarchyDiffTest {
     assertEquals(2, diff.equal)
     assertNull(statusOf(diff, MULTI_WINDOW_ROOT_CLASS_NAME))
   }
+
+  // --- Multi-window pairing by subtree similarity (issue #5533) ----------------------------------
+  //
+  // The `text-input-empty.json` / `scroll-before.json` fixtures are a 3-window frame and the same
+  // frame with the *middle* window removed. Positional (by-index) pairing shifts the surviving
+  // third window into the second slot, so both survivors surface as removed+added. Order-preserving
+  // similarity matching must instead pair the two survivors and report only the removed window.
+
+  private fun windowA() =
+    node(
+      "app.Window",
+      "app",
+      children = listOf(node("android.widget.TextView", "title", text = "Home")),
+    )
+
+  private fun windowB() =
+    node(
+      "dialog.Window",
+      "dialog",
+      children = listOf(node("android.widget.Button", "ok", text = "OK")),
+    )
+
+  private fun windowC() =
+    node(
+      "ime.Window",
+      "ime",
+      children = listOf(node("android.widget.EditText", "field", text = "abc")),
+    )
+
+  @Test
+  fun `middle window removed pairs the surviving windows and surfaces only the removed one`() {
+    // A has three windows [app, dialog, ime]; B is the same frame with the middle (dialog) removed.
+    val a = multiWindowRoot(windowA(), windowB(), windowC())
+    val b = multiWindowRoot(windowA(), windowC())
+
+    val diff = diffHierarchies(a, b)
+
+    // The two survivors pair as Equal despite the index shift of the third window...
+    assertEquals(NodeDiffStatus.Equal, statusOf(diff, "app.Window:app"))
+    assertEquals(NodeDiffStatus.Equal, statusOf(diff, "EditText:field"))
+    assertEquals(NodeDiffStatus.Equal, statusOf(diff, "ime.Window:ime"))
+    // ...and only the genuinely-removed middle window (and its subtree) surfaces as OnlyInA.
+    assertEquals(NodeDiffStatus.OnlyInA, statusOf(diff, "dialog.Window:dialog"))
+    assertEquals(NodeDiffStatus.OnlyInA, statusOf(diff, "Button:ok"))
+    assertEquals(2, diff.onlyInA) // dialog window + its button
+    assertEquals(0, diff.onlyInB)
+    assertNull(statusOf(diff, MULTI_WINDOW_ROOT_CLASS_NAME))
+  }
+
+  @Test
+  fun `inserted middle window is the mirror of a removed one`() {
+    // Symmetric to the removal case: inserting a window before another must surface only the
+    // inserted window as OnlyInB, not both survivors.
+    val a = multiWindowRoot(windowA(), windowC())
+    val b = multiWindowRoot(windowA(), windowB(), windowC())
+
+    val diff = diffHierarchies(a, b)
+
+    assertEquals(NodeDiffStatus.Equal, statusOf(diff, "app.Window:app"))
+    assertEquals(NodeDiffStatus.Equal, statusOf(diff, "ime.Window:ime"))
+    assertEquals(NodeDiffStatus.OnlyInB, statusOf(diff, "dialog.Window:dialog"))
+    assertEquals(0, diff.onlyInA)
+    assertEquals(2, diff.onlyInB)
+  }
+
+  @Test
+  fun `multi-window removal classification is symmetric when A and B are swapped`() {
+    val a = multiWindowRoot(windowA(), windowB(), windowC())
+    val b = multiWindowRoot(windowA(), windowC())
+    val ab = diffHierarchies(a, b)
+    val ba = diffHierarchies(b, a)
+
+    fun keys(diff: HierarchyDiff, status: NodeDiffStatus) =
+      diff.entries.filter { it.status == status }.map { it.key }.toSet()
+
+    // The removed window's keys are identical strings in both directions (same window slot), just
+    // labeled OnlyInA one way and OnlyInB the other — the symmetry contract of diffHierarchies.
+    assertEquals(keys(ab, NodeDiffStatus.OnlyInA), keys(ba, NodeDiffStatus.OnlyInB))
+    assertEquals(keys(ab, NodeDiffStatus.OnlyInB), keys(ba, NodeDiffStatus.OnlyInA))
+    assertEquals(keys(ab, NodeDiffStatus.Equal), keys(ba, NodeDiffStatus.Equal))
+  }
+
+  @Test
+  fun `parallel multi-window stacks still pair positionally by highest similarity`() {
+    // Two devices, same two-window stack, differing only in a text value on the first window: the
+    // diagonal alignment wins, so windows pair by position and just the changed node is Changed.
+    val a =
+      multiWindowRoot(
+        node(
+          "app.Window",
+          "app",
+          children = listOf(node("android.widget.TextView", "title", text = "Home")),
+        ),
+        node("ime.Window", "ime"),
+      )
+    val b =
+      multiWindowRoot(
+        node(
+          "app.Window",
+          "app",
+          children = listOf(node("android.widget.TextView", "title", text = "Away")),
+        ),
+        node("ime.Window", "ime"),
+      )
+
+    val diff = diffHierarchies(a, b)
+
+    assertEquals(NodeDiffStatus.Changed, statusOf(diff, "TextView:title"))
+    assertEquals(0, diff.onlyInA)
+    assertEquals(0, diff.onlyInB)
+  }
 }

@@ -117,6 +117,17 @@ export function findViolationsInSource(file: string, source: string): Violation[
     );
   };
 
+  // A child_process value source: either an inline require()/dynamic import, or
+  // an identifier already registered as a child_process namespace. This lets
+  // `const { exec: run } = cp;` (destructured from a namespace) be recognized.
+  const isChildProcessSource = (expression: ts.Expression): boolean => {
+    if (isChildProcessLoaderExpression(expression)) {
+      return true;
+    }
+    const unwrapped = unwrapExpression(expression);
+    return ts.isIdentifier(unwrapped) && childProcessNamespaces.has(unwrapped.text);
+  };
+
   const recordImportedApi = (imported: string, local: string): void => {
     if (SHELL_APIS.has(imported)) {
       importedShellApis.add(local);
@@ -181,21 +192,110 @@ export function findViolationsInSource(file: string, source: string): Violation[
 
   const isDeclarationName = (node: ts.Identifier): boolean => {
     const { parent } = node;
-    return (
-      ts.isImportSpecifier(parent) ||
-      ((ts.isBindingElement(parent) ||
+    if (ts.isImportSpecifier(parent)) {
+      return true;
+    }
+    if (
+      (ts.isBindingElement(parent) ||
         ts.isVariableDeclaration(parent) ||
         ts.isParameter(parent) ||
         ts.isPropertyDeclaration(parent)) &&
-        parent.name === node)
+      parent.name === node
+    ) {
+      return true;
+    }
+    // Non-computed property/method names (e.g. `{ exec: false }`, `exec() {}`)
+    // are declaration positions, not references to the imported API. Shorthand
+    // `{ exec }` is a ShorthandPropertyAssignment and is intentionally excluded
+    // here so it stays detectable as a value reference.
+    return (
+      (ts.isPropertyAssignment(parent) ||
+        ts.isMethodDeclaration(parent) ||
+        ts.isGetAccessorDeclaration(parent) ||
+        ts.isSetAccessorDeclaration(parent)) &&
+      parent.name === node
     );
   };
 
+  // An identifier used purely in a type position (`typeof exec`,
+  // `type X = exec`) does not execute the shell API at runtime.
+  const isTypePositionReference = (node: ts.Identifier): boolean => {
+    let current: ts.Node = node;
+    let parent = current.parent;
+    while (parent && ts.isQualifiedName(parent)) {
+      current = parent;
+      parent = current.parent;
+    }
+    return !!parent && (ts.isTypeQueryNode(parent) || ts.isTypeReferenceNode(parent));
+  };
+
+  const bindingIntroducesName = (binding: ts.BindingName, name: string): boolean => {
+    if (ts.isIdentifier(binding)) {
+      return binding.text === name;
+    }
+    return binding.elements.some(
+      (element) => ts.isBindingElement(element) && bindingIntroducesName(element.name, name),
+    );
+  };
+
+  // A local binding whose initializer is itself a child_process value source
+  // (`const { exec } = require(...)`, `const { exec: run } = cp`, `const run =
+  // cp.exec`) is the API's origin, not a shadow of it.
+  const isApiSourceInitializer = (initializer: ts.Expression | undefined): boolean =>
+    initializer !== undefined &&
+    (isChildProcessSource(initializer) || childProcessApiFromMember(initializer) !== undefined);
+
+  const scopeDeclaresName = (scope: ts.Node, name: string): boolean => {
+    if (ts.isFunctionLike(scope) && scope.parameters.some((p) => bindingIntroducesName(p.name, name))) {
+      return true;
+    }
+    const statements =
+      ts.isSourceFile(scope) || ts.isBlock(scope) || ts.isModuleBlock(scope)
+        ? scope.statements
+        : undefined;
+    if (!statements) {
+      return false;
+    }
+    // Import declarations and API-source locals are the origin binding for the
+    // shell API, not a shadow of it.
+    return statements.some(
+      (statement) =>
+        (ts.isVariableStatement(statement) &&
+          statement.declarationList.declarations.some(
+            (d) => bindingIntroducesName(d.name, name) && !isApiSourceInitializer(d.initializer),
+          )) ||
+        (ts.isFunctionDeclaration(statement) && statement.name?.text === name) ||
+        (ts.isClassDeclaration(statement) && statement.name?.text === name),
+    );
+  };
+
+  // Resolve the identifier by lexical binding: a closer parameter/local of the
+  // same name shadows the imported shell API, so the reference is not the API.
+  const isLexicallyShadowed = (node: ts.Identifier): boolean => {
+    let current: ts.Node | undefined = node.parent;
+    while (current) {
+      if (scopeDeclaresName(current, node.text)) {
+        return true;
+      }
+      current = current.parent;
+    }
+    return false;
+  };
+
   const visit = (node: ts.Node): void => {
-    if (ts.isImportDeclaration(node) && isChildProcessModule(node.moduleSpecifier)) {
+    if (
+      ts.isImportDeclaration(node) &&
+      isChildProcessModule(node.moduleSpecifier) &&
+      // `import type { exec }` introduces no runtime binding.
+      node.importClause?.isTypeOnly !== true
+    ) {
       const bindings = node.importClause?.namedBindings;
       if (bindings && ts.isNamedImports(bindings)) {
         for (const specifier of bindings.elements) {
+          // `import { type exec }` is likewise type-only, not a runtime import.
+          if (specifier.isTypeOnly) {
+            continue;
+          }
           const imported = specifier.propertyName?.text ?? specifier.name.text;
           recordImportedApi(imported, specifier.name.text);
         }
@@ -208,7 +308,7 @@ export function findViolationsInSource(file: string, source: string): Violation[
       ts.isVariableDeclaration(node) &&
       ts.isObjectBindingPattern(node.name) &&
       node.initializer &&
-      isChildProcessLoaderExpression(node.initializer)
+      isChildProcessSource(node.initializer)
     ) {
       for (const element of node.name.elements) {
         const imported =
@@ -222,7 +322,7 @@ export function findViolationsInSource(file: string, source: string): Violation[
       ts.isVariableDeclaration(node) &&
       ts.isIdentifier(node.name) &&
       node.initializer &&
-      isChildProcessLoaderExpression(node.initializer)
+      isChildProcessSource(node.initializer)
     ) {
       childProcessNamespaces.add(node.name.text);
     }
@@ -252,6 +352,8 @@ export function findViolationsInSource(file: string, source: string): Violation[
       ts.isIdentifier(node) &&
       importedShellApis.has(node.text) &&
       !isDeclarationName(node) &&
+      !isTypePositionReference(node) &&
+      !isLexicallyShadowed(node) &&
       !(ts.isCallExpression(node.parent) && node.parent.expression === node)
     ) {
       record(node);
@@ -265,7 +367,10 @@ export function findViolationsInSource(file: string, source: string): Violation[
       record(node);
     }
     if (ts.isCallExpression(node)) {
-      const localApi = ts.isIdentifier(node.expression) ? node.expression.text : undefined;
+      const localCallee = ts.isIdentifier(node.expression) ? node.expression : undefined;
+      // A locally shadowed callee (e.g. a parameter named `exec`) is not the API.
+      const localApi =
+        localCallee && !isLexicallyShadowed(localCallee) ? localCallee.text : undefined;
       const namespaceApi = childProcessApiFromMember(node.expression);
       const api = localApi ?? namespaceApi;
       if (

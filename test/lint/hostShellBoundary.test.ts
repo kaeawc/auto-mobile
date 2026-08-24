@@ -141,6 +141,86 @@ describe("host shell execution boundary (issue #4068)", () => {
     ).toEqual([]);
   });
 
+  test("rejects shell aliases destructured from a namespace import", () => {
+    // Object binding pattern destructured from a registered child_process
+    // namespace escaped the boundary before (no property/element access node).
+    expect(
+      findViolationsInSource(
+        "fixture.ts",
+        'import * as cp from "node:child_process"; const { exec: run } = cp; run("curl $HOST");',
+      ),
+    ).toHaveLength(1);
+    expect(
+      findViolationsInSource(
+        "fixture.ts",
+        'import * as cp from "node:child_process"; const { exec } = cp; exec("curl $HOST");',
+      ),
+    ).toHaveLength(1);
+    // A namespace re-aliased to another identifier stays covered too.
+    expect(
+      findViolationsInSource(
+        "fixture.ts",
+        'import * as cp from "node:child_process"; const cp2 = cp; cp2.exec("curl $HOST");',
+      ),
+    ).toHaveLength(1);
+    // Non-shell APIs destructured from a namespace remain argv-first (allowed).
+    expect(
+      findViolationsInSource(
+        "fixture.ts",
+        'import * as cp from "node:child_process"; const { execFile } = cp; execFile("curl", [url]);',
+      ),
+    ).toEqual([]);
+  });
+
+  test("excludes references that never execute the shell API", () => {
+    // Shadowing parameter resolves to the local binding, not the import.
+    expect(
+      findViolationsInSource(
+        "fixture.ts",
+        "import { exec } from \"node:child_process\"; function forward(exec: unknown) { consume(exec); }",
+      ),
+    ).toEqual([]);
+    expect(
+      findViolationsInSource(
+        "fixture.ts",
+        'import { exec } from "node:child_process"; function forward(exec: (c: string) => void) { exec("curl $HOST"); }',
+      ),
+    ).toEqual([]);
+    // Non-computed property/method names are declaration positions.
+    expect(
+      findViolationsInSource(
+        "fixture.ts",
+        'import { exec } from "node:child_process"; const opts = { exec: false };',
+      ),
+    ).toEqual([]);
+    expect(
+      findViolationsInSource(
+        "fixture.ts",
+        'import { exec } from "node:child_process"; const api = { exec() { return 1; } };',
+      ),
+    ).toEqual([]);
+    // Shorthand property is a value reference and stays detectable.
+    expect(
+      findViolationsInSource(
+        "fixture.ts",
+        'import { exec } from "node:child_process"; const runner = { exec }; runner.exec("curl $HOST");',
+      ).length,
+    ).toBeGreaterThanOrEqual(1);
+    // Type-only imports and type-position references introduce no runtime call.
+    expect(
+      findViolationsInSource(
+        "fixture.ts",
+        'import type { exec } from "node:child_process"; type Executor = typeof exec;',
+      ),
+    ).toEqual([]);
+    expect(
+      findViolationsInSource(
+        "fixture.ts",
+        'import { type exec } from "node:child_process"; type Executor = typeof exec;',
+      ),
+    ).toEqual([]);
+  });
+
   test("fails closed outside a Git worktree", () => {
     expect(() => changedSourceFiles("origin/main", false, false)).toThrow(
       "not a Git or Jujutsu worktree",

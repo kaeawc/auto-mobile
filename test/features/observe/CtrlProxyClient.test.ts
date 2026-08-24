@@ -888,6 +888,32 @@ describe("AndroidCtrlProxyClient", function() {
     }
   });
 
+  // Windows Bun evaluates the Android barrel and direct import as separate module
+  // records, so their singleton registries cannot exercise this lifecycle.
+  test.skipIf(process.platform === "win32")("late invalidated-observer cleanup cannot release a replacement observer's port", async function() {
+    await accessibilityServiceClient.close();
+    AndroidCtrlProxyClient.resetInstances();
+    PortManager.reset();
+    PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
+    try {
+      const original = AndroidCtrlProxyClient.getInstance(testDevice, fakeAdbFactory);
+      const originalPort = PortManager.getPort(testDevice.deviceId);
+      original.invalidateForShutdownRecovery();
+
+      const replacement = AndroidCtrlProxyClient.getInstance(testDevice, fakeAdbFactory);
+      const replacementPort = PortManager.getPort(testDevice.deviceId);
+      expect(replacementPort).not.toBe(originalPort);
+
+      await original.close();
+      expect(PortManager.getPort(testDevice.deviceId)).toBe(replacementPort);
+
+      await replacement.close();
+    } finally {
+      PortManager.setPortAvailabilityCheckerForTesting(null);
+      PortManager.reset();
+    }
+  });
+
   describe("connection lifecycle", function() {
     test("notifies the observation stream when the WebSocket connection closes", function() {
       const lostDeviceIds: string[] = [];
@@ -1490,20 +1516,20 @@ describe("AndroidCtrlProxyClient", function() {
 
       try {
         testClient.bindSession("session-A");
-        expect(testClient.getBoundSessionIdForTesting()).toBe("session-A");
+        expect(testClient.getBoundSessionId()).toBe("session-A");
         const detectorBoundToA = testClient.getHierarchyNavigationDetector();
 
         testClient.releaseSessionBinding("session-A");
 
         // Binding cleared and the cached detector dropped (recreated on next access),
         // so post-release events route to the unattributed global manager, not A's.
-        expect(testClient.getBoundSessionIdForTesting()).toBeNull();
+        expect(testClient.getBoundSessionId()).toBeNull();
         expect(testClient.getHierarchyNavigationDetector()).not.toBe(detectorBoundToA);
 
         // A non-matching release is a no-op once a new session has bound.
         testClient.bindSession("session-B");
         testClient.releaseSessionBinding("session-A");
-        expect(testClient.getBoundSessionIdForTesting()).toBe("session-B");
+        expect(testClient.getBoundSessionId()).toBe("session-B");
       } finally {
         await testClient.close();
         await navHarness.dispose();
@@ -3607,23 +3633,23 @@ describe("AndroidCtrlProxyClient", function() {
     // one session's navigation state into another's.
     test("is unbound (null) until a session is bound", function() {
       // The per-test client from beforeEach is created without a session bound.
-      expect(accessibilityServiceClient.getBoundSessionIdForTesting()).toBeNull();
+      expect(accessibilityServiceClient.getBoundSessionId()).toBeNull();
     });
 
     test("is last-writer-wins: the most recently bound session is the active one", function() {
       accessibilityServiceClient.bindSession("session-A");
-      expect(accessibilityServiceClient.getBoundSessionIdForTesting()).toBe("session-A");
+      expect(accessibilityServiceClient.getBoundSessionId()).toBe("session-A");
 
       // Rebinding (e.g. the device is reassigned to a new session) switches the
       // active session; the previous binding does not linger.
       accessibilityServiceClient.bindSession("session-B");
-      expect(accessibilityServiceClient.getBoundSessionIdForTesting()).toBe("session-B");
+      expect(accessibilityServiceClient.getBoundSessionId()).toBe("session-B");
     });
 
     test("re-binding the same session is idempotent", function() {
       accessibilityServiceClient.bindSession("session-A");
       accessibilityServiceClient.bindSession("session-A");
-      expect(accessibilityServiceClient.getBoundSessionIdForTesting()).toBe("session-A");
+      expect(accessibilityServiceClient.getBoundSessionId()).toBe("session-A");
     });
   });
 

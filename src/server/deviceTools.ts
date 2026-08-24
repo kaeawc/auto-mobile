@@ -62,6 +62,7 @@ import { getToolSelectionContext } from "../features/toolSelection/toolSelection
 import { executionTracker } from "./executionTracker";
 import {
   registerDirectSessionDevice,
+  resolveDirectSessionDevice,
   unregisterDirectSessionsForDevice,
   unregisterDirectSessionsForStableIdentity,
 } from "./directSessionDeviceRegistry";
@@ -662,6 +663,12 @@ interface ShutdownDeadlineContext {
   retainReservationUntil?: (operation: Promise<unknown>, releaseAfterFailure?: boolean) => void;
 }
 
+interface AndroidObserverShutdownState {
+  hadActiveObserver: boolean;
+  boundSessionId: string | null;
+  deviceIdentity: BootedDevice | null;
+}
+
 function shouldPropagateShutdownPreparationError(
   error: unknown,
   requestAbortSignal: AbortSignal | undefined,
@@ -773,10 +780,22 @@ async function stopAndroidCtrlProxyBeforeShutdown(
   context: ShutdownDeadlineContext,
   perf: ReturnType<typeof createPerformanceTracker>,
   stopAndroidObservers: (device: BootedDevice) => Promise<void>,
-): Promise<void> {
+): Promise<AndroidObserverShutdownState> {
   if (context.device.platform !== "android") {
-    return;
+    return { hadActiveObserver: false, boundSessionId: null, deviceIdentity: null };
   }
+  const activeObserver = AndroidCtrlProxyClient.getExistingInstance(context.device.deviceId);
+  const activeDeviceIdentity = activeObserver?.getBootedDeviceIdentity();
+  const observerState: AndroidObserverShutdownState = {
+    hadActiveObserver: activeObserver !== null,
+    boundSessionId: activeObserver?.getBoundSessionId() ?? null,
+    deviceIdentity: activeDeviceIdentity
+      ? {
+          ...activeDeviceIdentity,
+          transportId: activeDeviceIdentity.transportId ?? context.device.transportId,
+        }
+      : null,
+  };
   let stop: Promise<void> | undefined;
   perf.startOperation("stopAndroidCtrlProxy");
   try {
@@ -803,6 +822,7 @@ async function stopAndroidCtrlProxyBeforeShutdown(
   } finally {
     perf.endOperation("stopAndroidCtrlProxy");
   }
+  return observerState;
 }
 
 function shutdownTimeoutError(
@@ -837,16 +857,228 @@ function shouldKeepIntentionalShutdownAfterCommandError(
   return requestAbortSignal?.aborted === true || isShutdownTimeoutError(error);
 }
 
+function shouldRestoreAndroidObserverAfterCommandFailure(
+  device: BootedDevice,
+  error: unknown,
+  requestAbortSignal: AbortSignal | undefined,
+): boolean {
+  return (
+    device.platform === "android" &&
+    !isAlreadyStoppedDeviceError(device.platform, device.deviceId, error) &&
+    !shouldKeepIntentionalShutdownAfterCommandError(error, requestAbortSignal)
+  );
+}
+
+function hasLiveAndroidObserverSessionBinding(
+  device: BootedDevice,
+  boundSessionId: string | null,
+  deviceIdentity: BootedDevice | null,
+): boundSessionId is string {
+  if (boundSessionId === null) {
+    return false;
+  }
+  const daemonState = DaemonState.getInstance();
+  if (daemonState.isInitialized()) {
+    return daemonState.getSessionManager().getSessionForDevice(device.deviceId) === boundSessionId;
+  }
+  const directSession = resolveDirectSessionDevice(boundSessionId);
+  return (
+    directSession !== undefined &&
+    deviceIdentity !== null &&
+    isSameBootedDeviceIdentity(deviceIdentity, directSession.device)
+  );
+}
+
+function bindLiveAndroidObserverSession(
+  observer: AndroidCtrlProxyClient,
+  device: BootedDevice,
+  observerState: AndroidObserverShutdownState,
+): void {
+  if (
+    hasLiveAndroidObserverSessionBinding(
+      device,
+      observerState.boundSessionId,
+      observerState.deviceIdentity,
+    )
+  ) {
+    observer.bindSession(observerState.boundSessionId);
+  }
+}
+
+function invalidateAndroidObserver(observer: AndroidCtrlProxyClient, deviceId: string): void {
+  // Removal is deliberately synchronous and precedes cleanup. `close()` can
+  // wait on an ADB forward removal that does not honour the shutdown deadline;
+  // retaining the singleton until that completes would keep an obsolete client
+  // (and the failed-shutdown reservation) alive indefinitely.
+  observer.invalidateForShutdownRecovery();
+  void observer.close().catch(error => {
+    logger.warn(`[DeviceTools] Failed to clean up invalidated Android observer for ${deviceId}: ${error}`);
+  });
+}
+
+async function reconnectAndroidObserverWithinShutdownDeadline(
+  observer: AndroidCtrlProxyClient,
+  device: BootedDevice,
+  timer: Timer,
+  shutdownDeadlineMs: number,
+  requestAbortSignal: AbortSignal | undefined,
+  timeoutMs: number,
+): Promise<boolean> {
+  const reconnect = async (): Promise<boolean> => {
+    try {
+      return await runWithinShutdownDeadline(
+        device,
+        timer,
+        shutdownDeadlineMs,
+        "Android observer reconnect did not complete",
+        requestAbortSignal,
+        async () => await observer.ensureConnected(),
+        timeoutMs,
+      );
+    } catch (error) {
+      if (isShutdownTimeoutError(error) || requestAbortSignal?.aborted) {
+        // Platform setup does not accept an AbortSignal. Invalidate the
+        // in-flight client so a late port-forward cannot register a stale
+        // observer or leave future callers waiting on its connection.
+        invalidateAndroidObserver(observer, device.deviceId);
+      }
+      throw error;
+    }
+  };
+  const connected = await reconnect();
+  // A failed port-forward setup has no WebSocket close event to trigger the
+  // normal automatic reconnect. Retry once while the shutdown budget is still
+  // live so existing passive subscribers regain their cadence.
+  return connected || (await reconnect());
+}
+
+async function revalidateReconnectedAndroidObserver(
+  deviceManager: PlatformDeviceManager,
+  device: BootedDevice,
+  observer: AndroidCtrlProxyClient,
+  observerState: AndroidObserverShutdownState,
+  timer: Timer,
+  shutdownDeadlineMs: number,
+  requestAbortSignal: AbortSignal | undefined,
+  timeoutMs: number,
+): Promise<boolean> {
+  try {
+    // Recheck after the awaited reconnect: ADB addresses a reusable serial,
+    // so the original pre-connect check is no longer sufficient if an emulator
+    // rebooted while its port-forward or WebSocket was starting.
+    const discovery = await getCompleteShutdownDiscovery(
+      deviceManager,
+      device,
+      timer,
+      shutdownDeadlineMs,
+      requestAbortSignal,
+      timeoutMs,
+    );
+    const reconnectedDevice = findDiscoveredDevice(discovery, device);
+    return (
+      reconnectedDevice !== undefined &&
+      observerState.deviceIdentity?.transportId !== undefined &&
+      reconnectedDevice.transportId !== undefined &&
+      isSameBootedDeviceIdentity(observerState.deviceIdentity, reconnectedDevice)
+    );
+  } catch (error) {
+    // A connected observer cannot be safely retained when its incarnation
+    // could not be reconfirmed within the same failed-shutdown budget.
+    invalidateAndroidObserver(observer, device.deviceId);
+    throw error;
+  }
+}
+
+async function restoreAndroidObserverAfterCommandFailure(
+  deviceManager: PlatformDeviceManager,
+  device: BootedDevice,
+  observerState: AndroidObserverShutdownState,
+  error: unknown,
+  timer: Timer,
+  shutdownDeadlineMs: number,
+  requestAbortSignal: AbortSignal | undefined,
+  timeoutMs: number,
+): Promise<void> {
+  if (
+    !observerState.hadActiveObserver ||
+    !shouldRestoreAndroidObserverAfterCommandFailure(device, error, requestAbortSignal)
+  ) {
+    return;
+  }
+  try {
+    // The pre-kill teardown evicts the observer to release its transport hold.
+    // Recreate it only after a fresh, uncached discovery proves this exact
+    // incarnation survived the failed command; a disappeared device or a
+    // same-ID reboot must stay detached.
+    const discovery = await getCompleteShutdownDiscovery(
+      deviceManager,
+      device,
+      timer,
+      shutdownDeadlineMs,
+      requestAbortSignal,
+      timeoutMs,
+    );
+    const survivingDevice = findDiscoveredDevice(discovery, device);
+    if (
+      survivingDevice &&
+      observerState.deviceIdentity?.transportId !== undefined &&
+      survivingDevice.transportId !== undefined &&
+      isSameBootedDeviceIdentity(observerState.deviceIdentity, survivingDevice)
+    ) {
+      const observer = AndroidCtrlProxyClient.getInstance(survivingDevice);
+      // Bind before connecting so a frame arriving immediately after the socket
+      // opens is attributed to the surviving session. A post-connect identity
+      // mismatch still invalidates this client before it is retained.
+      bindLiveAndroidObserverSession(observer, device, observerState);
+      const connected = await reconnectAndroidObserverWithinShutdownDeadline(
+        observer,
+        device,
+        timer,
+        shutdownDeadlineMs,
+        requestAbortSignal,
+        timeoutMs,
+      );
+      if (!connected) {
+        logger.warn(
+          `[DeviceTools] Failed to reconnect Android observer after kill failure for ${device.deviceId}`,
+        );
+        return;
+      }
+      const sameIncarnation = await revalidateReconnectedAndroidObserver(
+        deviceManager,
+        device,
+        observer,
+        observerState,
+        timer,
+        shutdownDeadlineMs,
+        requestAbortSignal,
+        timeoutMs,
+      );
+      if (!sameIncarnation) {
+        invalidateAndroidObserver(observer, device.deviceId);
+        return;
+      }
+    }
+  } catch (restoreError) {
+    // Preserve the original shutdown command failure. A later explicit tool
+    // call can still recreate the observer if this confirmation was unavailable.
+    logger.warn(
+      `[DeviceTools] Failed to restore Android observer after kill failure for ${device.deviceId}: ${restoreError}`,
+      restoreError,
+    );
+  }
+}
+
 function handleShutdownCommandError(
   device: BootedDevice,
   error: unknown,
   devicePool: DevicePool | undefined,
-  requestAbortSignal: AbortSignal | undefined,
+  keepIntentionalShutdown: boolean,
 ): string | undefined {
   if (isAlreadyStoppedDeviceError(device.platform, device.deviceId, error)) {
     return `Failed to kill ${device.platform} device: ${error}`;
   }
-  if (!shouldKeepIntentionalShutdownAfterCommandError(error, requestAbortSignal)) {
+  if (!keepIntentionalShutdown) {
     devicePool?.clearIntentionalShutdown(device.deviceId);
   }
   throw error;
@@ -990,6 +1222,34 @@ async function getShutdownDiscovery(
       }),
     timeoutMs,
   );
+}
+
+async function getCompleteShutdownDiscovery(
+  deviceManager: PlatformDeviceManager,
+  device: BootedDevice,
+  timer: Timer,
+  deadlineMs: number,
+  requestAbortSignal: AbortSignal | undefined,
+  timeoutMs = DEVICE_SHUTDOWN_TIMEOUT_MS,
+) {
+  for (;;) {
+    const discovery = await getShutdownDiscovery(
+      deviceManager,
+      device,
+      timer,
+      deadlineMs,
+      requestAbortSignal,
+      timeoutMs,
+    );
+    if (discovery.succeededPlatforms.has(device.platform)) {
+      return discovery;
+    }
+    const remainingMs = deadlineMs - timer.now();
+    if (remainingMs <= 0) {
+      throw shutdownTimeoutError(device, "platform discovery did not complete", timeoutMs);
+    }
+    await timer.sleep(Math.min(DEVICE_SHUTDOWN_POLL_INTERVAL_MS, remainingMs));
+  }
 }
 
 async function waitForDeviceShutdown(
@@ -1433,6 +1693,7 @@ async function killProcessAndRetireOwnership(
   requestAbortSignal: AbortSignal | undefined,
   devicePool: DevicePool | undefined,
   expectedPooledDevice: PooledDevice | null,
+  androidObserverState: AndroidObserverShutdownState,
   shutdownDeadlineMs: number,
   retainReservationUntil: (
     retirement: Promise<void>,
@@ -1468,12 +1729,26 @@ async function killProcessAndRetireOwnership(
     );
     shutdownDevice = killedDevice ?? device;
   } catch (error) {
+    const keepIntentionalShutdown = shouldKeepIntentionalShutdownAfterCommandError(
+      error,
+      requestAbortSignal,
+    );
     retainLatePlatformShutdown(platformShutdown, platformShutdownSettled, retainReservationUntil);
+    await restoreAndroidObserverAfterCommandFailure(
+      deviceManager,
+      device,
+      androidObserverState,
+      error,
+      dependencies.timer,
+      shutdownDeadlineMs,
+      requestAbortSignal,
+      timeoutMs,
+    );
     alreadyStoppedMessage = handleShutdownCommandError(
       device,
       error,
       devicePool,
-      requestAbortSignal,
+      keepIntentionalShutdown,
     );
   }
   perf.endOperation("killProcess");
@@ -1595,7 +1870,7 @@ async function shutdownDevice(
       };
       await stopVideoRecordingsBeforeShutdown(shutdownContext, perf);
       await stopIosCtrlProxyBeforeShutdown(shutdownContext, perf);
-      await stopAndroidCtrlProxyBeforeShutdown(
+      const androidObserverState = await stopAndroidCtrlProxyBeforeShutdown(
         shutdownContext,
         perf,
         dependencies.stopAndroidObservers,
@@ -1608,6 +1883,7 @@ async function shutdownDevice(
         requestAbortSignal,
         devicePool,
         expectedPooledDevice,
+        androidObserverState,
         shutdownDeadlineMs,
         (retirement, releaseReservationAfterFailure) => {
           retainShutdownUntil(retirement, releaseReservationAfterFailure);

@@ -1022,6 +1022,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   // Android-specific state
   private portForwardingSetup: boolean = false;
+  private inFlightConnection: Promise<boolean> | null = null;
+  private cleanupHeldPort: number | null = null;
   private lastWebSocketTimeout: number = 0;
   // Terminal-close latch (#5493): set once by close() so the best-effort ADB
   // screencap fallback in captureScreenshotViaAdb() cannot outlive the client.
@@ -1185,6 +1187,19 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   /**
+   * Evict this client before its asynchronous close can complete. Its port is
+   * held so a replacement client cannot share an ADB forward with late cleanup.
+   */
+  public invalidateForShutdownRecovery(): void {
+    if (AndroidCtrlProxyClient.getExistingInstance(this.device.deviceId) === this) {
+      AndroidCtrlProxyClient.removeInstance(this.device.deviceId);
+    }
+    PortManager.releaseIfAllocated(this.device.deviceId, this.localPort);
+    PortManager.holdForCleanup(this.localPort);
+    this.cleanupHeldPort = this.localPort;
+  }
+
+  /**
    * Bind this client to a session for multi-agent NavigationGraphManager isolation.
    * Called when a tool execution context binds a session to this device.
    */
@@ -1217,12 +1232,20 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   /**
-   * Test-only accessor for the currently bound session (or null when unbound).
-   * Lets isolation tests pin the routing invariant that `bindSession` is
-   * last-writer-wins and that an unbound client has no session.
+   * Returns the session currently receiving this device's navigation events,
+   * or null when the client is unbound.
    */
-  public getBoundSessionIdForTesting(): string | null {
+  public getBoundSessionId(): string | null {
     return this.boundSessionId;
+  }
+
+  /**
+   * Returns the booted-device identity that constructed this client. Callers
+   * use this after teardown to distinguish the original emulator incarnation
+   * from a same-ID replacement.
+   */
+  public getBootedDeviceIdentity(): BootedDevice {
+    return { ...this.device };
   }
 
   /**
@@ -1593,6 +1616,23 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       this.syncAccessibilityFlagsToDevice();
     }
     return connected;
+  }
+
+  protected override async connectWebSocket(
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+  ): Promise<boolean> {
+    const connection = super.connectWebSocket(perf);
+    this.inFlightConnection = connection;
+    try {
+      return await connection;
+    } finally {
+      if (this.inFlightConnection === connection) {
+        this.inFlightConnection = null;
+      }
+      if (this.closed) {
+        await this.finishInvalidatedConnectionCleanup();
+      }
+    }
   }
 
   protected onConnectionEstablished(): void {
@@ -2982,7 +3022,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         this.portForwardingSetup = false;
       }
 
-      PortManager.release(this.device.deviceId);
+      PortManager.releaseIfAllocated(this.device.deviceId, this.localPort);
+      await this.finishInvalidatedConnectionCleanup();
     } catch (error) {
       logger.warn(`[CTRL_PROXY] Error during cleanup: ${error}`);
     }
@@ -3015,6 +3056,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   private async setupPortForwarding(
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<void> {
+    if (this.closed) {
+      return;
+    }
     // Verify port forwarding is still active even if we think it's set up
     // Port forwarding can be lost if ADB server restarts or emulator restarts
     if (this.portForwardingSetup) {
@@ -3032,6 +3076,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       await perf.track("clearPortForward", () =>
         this.adb.executeCommand(`forward --remove tcp:${this.localPort}`).catch(() => {}),
       );
+      if (this.closed) {
+        return;
+      }
 
       this.ensureLocalPortAvailableForForwarding();
       logger.debug(
@@ -3048,12 +3095,27 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         this.adb.executeCommand(`forward tcp:${this.localPort} tcp:${PortManager.DEVICE_PORT}`),
       );
 
+      if (this.closed) {
+        await this.adb.executeCommand(`forward --remove tcp:${this.localPort}`).catch(() => {});
+        return;
+      }
+
       this.portForwardingSetup = true;
       logger.debug(`[CTRL_PROXY] Port forwarding setup complete (localhost:${this.localPort})`);
     } catch (error) {
       logger.warn(`[CTRL_PROXY] Failed to setup port forwarding: ${error}`);
       throw error;
     }
+  }
+
+  private async finishInvalidatedConnectionCleanup(): Promise<void> {
+    if (this.inFlightConnection !== null || this.cleanupHeldPort === null) {
+      return;
+    }
+    const heldPort = this.cleanupHeldPort;
+    this.cleanupHeldPort = null;
+    PortManager.releaseIfAllocated(this.device.deviceId, this.localPort);
+    PortManager.releaseCleanupHold(heldPort);
   }
 
   /**

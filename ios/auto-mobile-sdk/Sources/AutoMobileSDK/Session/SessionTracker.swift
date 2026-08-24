@@ -20,6 +20,13 @@ final class SessionTracker: SessionTracking, @unchecked Sendable {
     private var _sessionId: String?
     private var state: State = .ended
     private var timeoutTimer: (any TimerScheduling)?
+    /// Monotonic token identifying the current background cycle. Bumped on every
+    /// state transition so a timeout callback scheduled in an earlier cycle can be
+    /// recognized as stale and ignored — otherwise a timer from a previous
+    /// background could fire after a foreground/background round-trip, see the state
+    /// as `.backgrounded` again, and wrongly end the current session (the
+    /// `AutoMobileHangs` generation-guard pattern).
+    private var timerGeneration = 0
 
     convenience init(
         timeoutMs: Int = 30_000,
@@ -48,6 +55,8 @@ final class SessionTracker: SessionTracking, @unchecked Sendable {
         lock.lock()
         timeoutTimer?.cancel()
         timeoutTimer = nil
+        // Invalidate any in-flight timeout callback from the cycle we're leaving.
+        timerGeneration += 1
         switch state {
         case .ended:
             _sessionId = uuidProvider()
@@ -64,6 +73,8 @@ final class SessionTracker: SessionTracking, @unchecked Sendable {
         lock.lock()
         guard state == .active else { lock.unlock(); return }
         state = .backgrounded
+        timerGeneration += 1
+        let generation = timerGeneration
         let timer = timerFactory()
         timeoutTimer = timer
         lock.unlock()
@@ -71,10 +82,16 @@ final class SessionTracker: SessionTracking, @unchecked Sendable {
         timer.schedule(intervalMs: timeoutMs) { [weak self] in
             guard let self else { return }
             self.lock.lock()
-            if self.state == .backgrounded {
-                self.state = .ended
-                self._sessionId = nil
+            // Only the timer for the current background cycle may end the session. A
+            // stale timer (a foreground/background happened after it was scheduled) has
+            // an older generation and is ignored, so it can't end a session that is now
+            // active or belongs to a newer cycle.
+            guard generation == self.timerGeneration, self.state == .backgrounded else {
+                self.lock.unlock()
+                return
             }
+            self.state = .ended
+            self._sessionId = nil
             self.timeoutTimer?.cancel()
             self.timeoutTimer = nil
             self.lock.unlock()
@@ -85,6 +102,7 @@ final class SessionTracker: SessionTracking, @unchecked Sendable {
         lock.lock()
         timeoutTimer?.cancel()
         timeoutTimer = nil
+        timerGeneration += 1
         state = .ended
         _sessionId = nil
         lock.unlock()

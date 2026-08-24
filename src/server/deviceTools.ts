@@ -62,6 +62,7 @@ import { getToolSelectionContext } from "../features/toolSelection/toolSelection
 import { executionTracker } from "./executionTracker";
 import {
   registerDirectSessionDevice,
+  resolveDirectSessionDevice,
   unregisterDirectSessionsForDevice,
   unregisterDirectSessionsForStableIdentity,
 } from "./directSessionDeviceRegistry";
@@ -871,14 +872,20 @@ function shouldRestoreAndroidObserverAfterCommandFailure(
 function hasLiveAndroidObserverSessionBinding(
   device: BootedDevice,
   boundSessionId: string | null,
+  deviceIdentity: BootedDevice | null,
 ): boundSessionId is string {
   if (boundSessionId === null) {
     return false;
   }
   const daemonState = DaemonState.getInstance();
+  if (daemonState.isInitialized()) {
+    return daemonState.getSessionManager().getSessionForDevice(device.deviceId) === boundSessionId;
+  }
+  const directSession = resolveDirectSessionDevice(boundSessionId);
   return (
-    daemonState.isInitialized() &&
-    daemonState.getSessionManager().getSessionForDevice(device.deviceId) === boundSessionId
+    directSession !== undefined &&
+    deviceIdentity !== null &&
+    isSameBootedDeviceIdentity(deviceIdentity, directSession.device)
   );
 }
 
@@ -1031,7 +1038,13 @@ async function restoreAndroidObserverAfterCommandFailure(
         invalidateAndroidObserver(observer, device.deviceId);
         return;
       }
-      if (hasLiveAndroidObserverSessionBinding(device, observerState.boundSessionId)) {
+      if (
+        hasLiveAndroidObserverSessionBinding(
+          device,
+          observerState.boundSessionId,
+          observerState.deviceIdentity,
+        )
+      ) {
         observer.bindSession(observerState.boundSessionId);
       }
     }

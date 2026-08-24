@@ -24,6 +24,7 @@ import androidx.compose.ui.window.rememberWindowState
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.connection.DaemonConnectionMonitor
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
+import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.shell.MenuBarActions
 import dev.jasonpearson.automobile.desktop.core.workspace.isCommandPaletteShortcut
 import dev.jasonpearson.automobile.desktop.di.AutoMobileGraph
@@ -33,6 +34,8 @@ import java.nio.channels.FileLock
 import java.nio.file.Path
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+
+private val LOG = LoggerFactory.getLogger("Main")
 
 /** True when running on macOS; used to pick Meta (Cmd) vs Ctrl for accelerators. */
 private val IS_MACOS: Boolean = System.getProperty("os.name")?.lowercase()?.contains("mac") == true
@@ -100,7 +103,12 @@ fun main() {
     // than running two overlapping 5s loops.
     val daemonMonitor = remember {
       DaemonConnectionMonitor(
-        probe = { withContext(Dispatchers.IO) { graph.autoMobileClient.getDaemonStatus() } }
+        probe = { withContext(Dispatchers.IO) { graph.autoMobileClient.getDaemonStatus() } },
+        // A failed status call means the daemon socket is unreachable; the dot/tray go red via the
+        // returned Disconnected state, and this keeps a trace behind them.
+        onProbeFailure = { error ->
+          LOG.warn("Daemon status poll failed: ${error.message}", error)
+        },
       )
     }
     val daemonState by
@@ -220,6 +228,7 @@ fun main() {
         AutoMobileDesktopApp(
           menuBarActions = menuBarActions,
           openPaletteRequest = openPaletteRequest,
+          daemonConnectionState = daemonState,
         )
       }
     }

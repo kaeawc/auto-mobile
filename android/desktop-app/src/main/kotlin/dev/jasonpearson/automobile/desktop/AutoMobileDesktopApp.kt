@@ -23,7 +23,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
-import dev.jasonpearson.automobile.desktop.core.connection.DaemonConnectionMonitor
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonSocketPaths
 import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonSession
@@ -71,7 +70,6 @@ import dev.jasonpearson.automobile.desktop.core.workspace.rememberWorkspaceDevic
 import dev.jasonpearson.automobile.desktop.core.workspace.wireName
 import dev.jasonpearson.automobile.desktop.theme.AutoMobileTheme
 import java.util.concurrent.atomic.AtomicLong
-import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -90,10 +88,6 @@ private val LOG = LoggerFactory.getLogger("AutoMobileDesktopApp")
 // Matches AutoMobileContent's binding heartbeat cadence.
 private const val DESKTOP_SESSION_HEARTBEAT_MS = 2_000L
 
-// How often the top-bar status dot re-probes daemon connectivity. Matches the health sheet's
-// read-only refresh cadence (WorkspaceShell.HEALTH_SHEET_REFRESH_MS).
-private const val DAEMON_STATUS_POLL_MS = 5_000L
-
 // How often each observed pane's lock state is re-read so the contextual Unlock control appears or
 // disappears as the device locks/unlocks. Runs only while at least one device is observed. NOTE:
 // it re-reads the whole booted-devices resource, which recomputes service status AND the keyguard
@@ -105,29 +99,6 @@ private const val LOCK_STATE_POLL_MS = 4_000L
 // started/killed by another client appear without a manual refresh. Matches AutoMobileContent's
 // booted-devices poll cadence.
 private const val GRID_REFRESH_POLL_MS = 5_000L
-
-/**
- * Live daemon connectivity as a [ConnectionState], polled from [AutoMobileClient.getDaemonStatus].
- * A successful status call means the daemon socket is reachable ([ConnectionState.Connected]); a
- * throw means it is not ([ConnectionState.Disconnected]). Starts as [ConnectionState.Connecting]
- * until the first probe resolves.
- */
-@Composable
-private fun rememberDaemonConnectionState(client: AutoMobileClient): ConnectionState {
-  val monitor =
-    remember(client) {
-      DaemonConnectionMonitor(
-        probe = { withContext(Dispatchers.IO) { client.getDaemonStatus() } },
-        pollInterval = DAEMON_STATUS_POLL_MS.milliseconds,
-        // A failed status call means the daemon socket is unreachable; the dot goes red via the
-        // returned Disconnected state, and this keeps a trace behind the dot.
-        onProbeFailure = { error ->
-          LOG.warn("Daemon status poll failed: ${error.message}", error)
-        },
-      )
-    }
-  return monitor.connectionStates.collectAsState(initial = ConnectionState.Connecting).value
-}
 
 /**
  * Wraps a [SettingsProvider] so that [themeMode] is backed by Compose snapshot state, enabling
@@ -148,6 +119,10 @@ private class ObservableSettingsProvider(private val delegate: SettingsProvider)
 fun AutoMobileDesktopApp(
   @Suppress("UNUSED_PARAMETER") menuBarActions: MenuBarActions = remember { MenuBarActions() },
   openPaletteRequest: Int = 0,
+  // Hoisted from the single app-level DaemonConnectionMonitor in Main.kt so the status dot and the
+  // system-tray icon share one daemon-health source instead of each running its own 5s poll
+  // (#4858).
+  daemonConnectionState: ConnectionState = ConnectionState.Connecting,
 ) {
   val graph = LocalAutoMobileGraph.current
 
@@ -434,10 +409,9 @@ fun AutoMobileDesktopApp(
             // facet-owned and carry screenshots, so opening extra status-only streams would be
             // wasteful. deriveWorkspaceStatus already handles the device dimension, so it can be
             // fed once a central per-device stream registry exists (follow-up).
-            val daemonState = rememberDaemonConnectionState(graph.autoMobileClient)
             val workspaceStatus =
-              remember(daemonState) {
-                deriveWorkspaceStatus(daemon = daemonState, devices = emptyList())
+              remember(daemonConnectionState) {
+                deriveWorkspaceStatus(daemon = daemonConnectionState, devices = emptyList())
               }
 
             WorkspaceShell(

@@ -14,12 +14,13 @@ import kotlinx.coroutines.withTimeout
 /**
  * Injectable, timeout-bounded poller for daemon connectivity (#4858).
  *
- * This is the single seam behind every daemon-health poll in the desktop app: it replaces the two
+ * This is the single seam behind daemon-health polling in the desktop app: it replaces the two
  * hand-rolled `while (true) { getDaemonStatus(); delay(5s) }` loops that previously lived in
- * `Main.kt` (system-tray dot) and `AutoMobileDesktopApp.rememberDaemonConnectionState` (status
- * dot). The loop is a plain suspend flow so its cadence, its
- * exception→[ConnectionState.Disconnected] transitions, and its cancellation behavior are all
- * coverable with virtual time.
+ * `Main.kt` (system-tray dot) and `AutoMobileDesktopApp` (status dot). One instance is created in
+ * `Main.kt` and its [connectionStates] is collected once, feeding both the tray icon and the status
+ * dot — a single daemon-health source rather than two overlapping polls. The loop is a plain
+ * suspend flow so its cadence, its exception→[ConnectionState.Disconnected] transitions, and its
+ * cancellation behavior are all coverable with virtual time.
  *
  * The [probe] is bounded by [probeTimeout] via [withTimeout]. A [TimeoutCancellationException] is a
  * [CancellationException] subtype, so it MUST be caught before the plain-cancellation rethrow —

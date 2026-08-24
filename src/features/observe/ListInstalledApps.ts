@@ -7,6 +7,7 @@ import { logger } from "../../utils/logger";
 import {
   ActionableError,
   BootedDevice,
+  classifyAndroidUser,
   InstalledAppsByProfile,
   SystemInstalledApp,
 } from "../../models";
@@ -235,6 +236,7 @@ export class ListInstalledApps {
         installedApps.profiles[row.user_id].push({
           packageName: row.package_name,
           userId: row.user_id,
+          profileType: row.user_id === 0 ? "primary" : "unknown",
           foreground: isForeground,
           recent: false,
         });
@@ -292,6 +294,8 @@ export class ListInstalledApps {
           installedApps.profiles[user.userId].push({
             packageName,
             userId: user.userId,
+            profileType:
+              user.profileType ?? classifyAndroidUser(user.userId, user.flags),
             foreground: isForeground,
             recent: false, // TODO: Implement recent app detection
           });

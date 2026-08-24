@@ -272,6 +272,10 @@ describe("TerminateApp (Android)", () => {
       "shell pm list packages --user 0 -f com.example.app | grep -c com.example.app",
       "1",
     );
+    fakeAdb.setCommandResult(
+      'shell dumpsys activity processes | grep -E "u0 .*com.example.app"',
+      "u0a123 com.example.app",
+    );
     fakeAdb.setCommandResult("shell am force-stop --user 0 com.example.app", "");
 
     const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, null, fakeTimer);
@@ -517,6 +521,10 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
     fakeAdb.setCommandResult(
       "shell pm list packages --user 0 -f com.example.app | grep -c com.example.app",
       "1",
+    );
+    fakeAdb.setCommandResult(
+      'shell dumpsys activity processes | grep -E "u0 .*com.example.app"',
+      "u0a123 com.example.app",
     );
     fakeAdb.setCommandResult("shell am force-stop --user 0 com.example.app", "");
 

@@ -22,7 +22,30 @@ export interface AndroidUser {
   flags: number;
 
   /**
+   * Classification derived from Android's flags, never from the numeric ID.
+   * `unknown` is intentional when the platform does not provide enough
+   * metadata to distinguish a secondary user from a managed profile.
+   */
+  profileType?: "primary" | "managed" | "secondary" | "unknown";
+
+  /**
    * Whether the user is currently running
    */
   running: boolean;
+}
+
+export function classifyAndroidUser(
+  userId: number,
+  flags: number,
+): NonNullable<AndroidUser["profileType"]> {
+  if ((flags & 0x20) !== 0) {
+    return "managed";
+  }
+  if ((flags & 0x1) !== 0 || userId === 0) {
+    return "primary";
+  }
+  if ((flags & 0x400) !== 0) {
+    return "secondary";
+  }
+  return "unknown";
 }

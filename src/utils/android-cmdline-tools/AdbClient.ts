@@ -7,7 +7,13 @@ import {
   execFileAsync as sharedExecFileAsync,
   type HostProcessExecutor,
 } from "../HostCommandExecutor";
-import { BootedDevice, ExecResult, AndroidUser, DeviceLockState } from "../../models";
+import {
+  BootedDevice,
+  ExecResult,
+  AndroidUser,
+  classifyAndroidUser,
+  DeviceLockState,
+} from "../../models";
 import {
   AndroidToolsDetectionAbortError,
   AndroidToolsDetectionTimeoutError,
@@ -1402,6 +1408,7 @@ export class AdbClient implements AdbExecutor {
           userId,
           name: userName,
           flags,
+          profileType: classifyAndroidUser(userId, flags),
           running,
         });
       }
@@ -1436,10 +1443,13 @@ export class AdbClient implements AdbExecutor {
         // Note: flags are hexadecimal (e.g., "4c13")
         const match = line.match(/UserInfo\{(\d+):([^:]+):([0-9a-fA-F]+)\}\s*(running)?/);
         if (match) {
+          const userId = parseInt(match[1], 10);
+          const flags = parseInt(match[3], 16);
           users.push({
-            userId: parseInt(match[1], 10),
+            userId,
             name: match[2],
-            flags: parseInt(match[3], 16), // Parse as hexadecimal
+            flags, // Parse as hexadecimal
+            profileType: classifyAndroidUser(userId, flags),
             running: match[4] === "running",
           });
         }
@@ -1457,26 +1467,12 @@ export class AdbClient implements AdbExecutor {
         `[ADB] Failed to parse users from pm list users. Raw output: ${result.stdout.substring(0, 200)}`,
       );
 
-      // Return primary user as last resort fallback
-      return [
-        {
-          userId: 0,
-          name: "Owner",
-          flags: 0x13,
-          running: true,
-        },
-      ];
+      // An unparseable response is not evidence that user 0 is active.
+      return [];
     } catch (error) {
       logger.warn(`[ADB] Failed to list users via pm: ${(error as Error).message}`);
-      // Return primary user as fallback
-      return [
-        {
-          userId: 0,
-          name: "Owner",
-          flags: 0x13,
-          running: true,
-        },
-      ];
+      // An unavailable user service is not evidence that user 0 is active.
+      return [];
     }
   }
 

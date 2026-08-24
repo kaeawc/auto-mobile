@@ -1,6 +1,10 @@
 import { describe, expect, test, spyOn, beforeEach, afterEach } from "bun:test";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
-import { DaemonClient } from "../../src/daemon/client";
+import {
+  DaemonClient,
+  DaemonUnavailableError,
+  type DaemonClientLike,
+} from "../../src/daemon/client";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
@@ -284,6 +288,112 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
         (call) => call.method === "daemon/heartbeat",
       ).length;
       expect(heartbeatsAfter).toBe(heartbeatsBefore);
+    } finally {
+      isAvailableSpy.mockRestore();
+      await proxy.close();
+    }
+  });
+
+  // AC3: a session-released notification landing DURING the establishment
+  // heartbeat must terminally fence the binding without leaving a leaked keeper
+  // interval running against the fenced session.
+  test("does not start the keeper when the session is released mid-establishment", async () => {
+    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+
+    const released = Promise.withResolvers<void>();
+    const clientRef: { current: FakeDaemonClient | null } = { current: null };
+    const fakeClient = new FakeDaemonClient({
+      onCallDaemonMethod: async (method) => {
+        if (method === "daemon/heartbeat") {
+          // The daemon terminally releases the session while the first heartbeat
+          // is still in flight.
+          clientRef.current!.emitNotification(
+            SESSION_RELEASED_NOTIFICATION_METHOD,
+            BOUND_SESSION,
+            "heartbeat-timeout",
+          );
+          await released.promise;
+        }
+      },
+    });
+    clientRef.current = fakeClient;
+    const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const proxy = new DaemonMcpProxy({
+      initialSessionUuid: BOUND_SESSION,
+      clientFactory: () => fakeClient,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer,
+    });
+
+    const pendingBefore = timer.getPendingIntervalCount();
+    try {
+      const connectPromise = proxy.ensureConnected();
+      // Let establishment reach the gated heartbeat (and thus the release).
+      for (let i = 0; i < 50; i++) {
+        await Promise.resolve();
+      }
+      released.resolve();
+      await connectPromise;
+
+      // The keeper must not have been (re)started against the fenced session.
+      expect(timer.getPendingIntervalCount()).toBe(pendingBefore);
+      // Any further work throws the terminal fence rather than heartbeating.
+      await expect(proxy.callTool("observe", { deviceId: "device-a" })).rejects.toThrow();
+    } finally {
+      released.resolve();
+      isAvailableSpy.mockRestore();
+      await proxy.close();
+    }
+  });
+
+  // AC3: a keeper-driven reconnect (the recurring heartbeat itself hitting a
+  // stale transport) must not compound a duplicate heartbeat onto the fresh
+  // transport — the reconnect defers to the keeper's own coalescing run().
+  test("does not duplicate the heartbeat on a keeper-driven reconnect", async () => {
+    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+
+    let staleHeartbeats = 0;
+    const staleClient = new FakeDaemonClient({
+      onCallDaemonMethod: async (method, params) => {
+        if (method === "daemon/heartbeat" && typeof params.sessionId === "string") {
+          staleHeartbeats += 1;
+          if (staleHeartbeats === 1) {
+            // Establishment heartbeat succeeds.
+            sessionManager.recordHeartbeat(params.sessionId);
+            return;
+          }
+          // The keeper's next tick finds the transport gone, forcing a reconnect.
+          throw new DaemonUnavailableError("Daemon socket connection lost");
+        }
+      },
+    });
+    const freshClient = heartbeatForwardingClient(sessionManager);
+    const clients: DaemonClientLike[] = [staleClient, freshClient];
+    const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const proxy = new DaemonMcpProxy({
+      initialSessionUuid: BOUND_SESSION,
+      clientFactory: () => clients.shift()!,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer,
+    });
+
+    try {
+      await proxy.ensureConnected();
+      // Drive the keeper's first tick (default interval 2s), which fails on the
+      // stale client and reconnects to the fresh one.
+      await timer.advanceTimeAsync(2_000);
+
+      const freshHeartbeats = freshClient.callDaemonMethodCalls.filter(
+        (call) => call.method === "daemon/heartbeat",
+      );
+      // Exactly one on the fresh transport: the reconnect coalesces with the
+      // in-flight keeper tick instead of adding an establishment heartbeat.
+      expect(freshHeartbeats).toEqual([
+        { method: "daemon/heartbeat", params: { sessionId: BOUND_SESSION } },
+      ]);
+      expect(sessionManager.getSession(BOUND_SESSION)).not.toBeNull();
     } finally {
       isAvailableSpy.mockRestore();
       await proxy.close();

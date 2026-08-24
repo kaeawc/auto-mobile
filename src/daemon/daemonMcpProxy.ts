@@ -1471,6 +1471,13 @@ export class DaemonMcpProxy {
       return;
     }
     await this.sendFirstBoundSessionHeartbeat();
+    // Re-validate after the awaited round-trip: a session-released notification or
+    // close() landing mid-send may have terminally fenced this binding and stopped
+    // the keeper. Restarting it here would leak a no-op interval and desync
+    // heartbeatKeeperStarted from the fenced state. Mirrors startBoundSessionHeartbeat's guard.
+    if (!(this.boundSessionUuid && !this.terminalBoundSession && this.connected && !this.closing)) {
+      return;
+    }
     // The keeper owns every subsequent tick, its reconnect, and terminal fencing.
     // No immediate run() here: the direct send above already delivered the first
     // heartbeat, and a second would duplicate it.
@@ -1498,6 +1505,11 @@ export class DaemonMcpProxy {
         this.boundSessionUuidAt = this.timer.now();
       }
     } catch (error) {
+      // Safe to swallow: the establishment heartbeat is best-effort. The keeper
+      // started immediately after retries within the pre-first-heartbeat grace,
+      // and a genuinely released session is fenced by the keeper's reconnect path
+      // or a session-released notification — so a transient failure here must not
+      // fail connection establishment.
       logger.debug(
         `[DaemonMcpProxy] Initial bound-session heartbeat failed: ${errorMessage(error)}`,
       );

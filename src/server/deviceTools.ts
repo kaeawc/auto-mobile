@@ -895,7 +895,7 @@ async function restoreAndroidObserverAfterCommandFailure(
     // Recreate it only after a fresh, uncached discovery proves this exact
     // incarnation survived the failed command; a disappeared device or a
     // same-ID reboot must stay detached.
-    const discovery = await getShutdownDiscovery(
+    const discovery = await getCompleteShutdownDiscovery(
       deviceManager,
       device,
       timer,
@@ -914,16 +914,30 @@ async function restoreAndroidObserverAfterCommandFailure(
       if (hasLiveAndroidObserverSessionBinding(device, observerState.boundSessionId)) {
         observer.bindSession(observerState.boundSessionId);
       }
-      const reconnect = async (): Promise<boolean> =>
-        await runWithinShutdownDeadline(
-          device,
-          timer,
-          shutdownDeadlineMs,
-          "Android observer reconnect did not complete",
-          requestAbortSignal,
-          async () => await observer.ensureConnected(),
-          timeoutMs,
-        );
+      const reconnect = async (): Promise<boolean> => {
+        try {
+          return await runWithinShutdownDeadline(
+            device,
+            timer,
+            shutdownDeadlineMs,
+            "Android observer reconnect did not complete",
+            requestAbortSignal,
+            async () => await observer.ensureConnected(),
+            timeoutMs,
+          );
+        } catch (error) {
+          if (isShutdownTimeoutError(error) || requestAbortSignal?.aborted) {
+            // Platform setup does not accept an AbortSignal. Invalidate the
+            // in-flight client so a late port-forward cannot register a stale
+            // observer or leave future callers waiting on its connection.
+            await observer.close();
+            if (AndroidCtrlProxyClient.getExistingInstance(device.deviceId) === observer) {
+              AndroidCtrlProxyClient.removeInstance(device.deviceId);
+            }
+          }
+          throw error;
+        }
+      };
       let connected = await reconnect();
       if (!connected) {
         // A failed port-forward setup has no WebSocket close event to trigger
@@ -1100,6 +1114,34 @@ async function getShutdownDiscovery(
       }),
     timeoutMs,
   );
+}
+
+async function getCompleteShutdownDiscovery(
+  deviceManager: PlatformDeviceManager,
+  device: BootedDevice,
+  timer: Timer,
+  deadlineMs: number,
+  requestAbortSignal: AbortSignal | undefined,
+  timeoutMs = DEVICE_SHUTDOWN_TIMEOUT_MS,
+) {
+  for (;;) {
+    const discovery = await getShutdownDiscovery(
+      deviceManager,
+      device,
+      timer,
+      deadlineMs,
+      requestAbortSignal,
+      timeoutMs,
+    );
+    if (discovery.succeededPlatforms.has(device.platform)) {
+      return discovery;
+    }
+    const remainingMs = deadlineMs - timer.now();
+    if (remainingMs <= 0) {
+      throw shutdownTimeoutError(device, "platform discovery did not complete", timeoutMs);
+    }
+    await timer.sleep(Math.min(DEVICE_SHUTDOWN_POLL_INTERVAL_MS, remainingMs));
+  }
 }
 
 async function waitForDeviceShutdown(

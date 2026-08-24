@@ -212,6 +212,25 @@ class TransientAbsenceThenSameIncarnationDeviceManager extends DelayedSuccessful
   }
 }
 
+class IncompleteThenBootedDiscoveryKillDeviceManager extends FailingKillDeviceManager {
+  private recoveryDiscoveryCalls = 0;
+
+  constructor(private readonly device: BootedDevice) {
+    super();
+  }
+
+  override async getBootedDevicesDetailed(platform: SomePlatform): Promise<BootedDeviceDiscovery> {
+    this.recoveryDiscoveryCalls++;
+    if (this.recoveryDiscoveryCalls === 1) {
+      return { devices: [], succeededPlatforms: new Set() };
+    }
+    return {
+      devices: [this.device],
+      succeededPlatforms: new Set(platform === "either" ? ["android"] : [platform]),
+    };
+  }
+}
+
 class ReplacementDuringCacheClearRepository extends FakeInstalledAppsRepository {
   constructor(private readonly onClearDeviceSession: () => Promise<void>) {
     super();
@@ -2740,6 +2759,52 @@ describe("killDevice handler", () => {
       const result = tool.handler({ device });
       await new Promise(resolve => setImmediate(resolve));
       timer.advanceTime(30_000);
+
+      await expect(result).rejects.toThrow("adb emu kill failed");
+      expect(ensureConnectedSpy).toHaveBeenCalledTimes(1);
+      expect(AndroidCtrlProxyClient.getExistingInstance(device.deviceId)).toBeNull();
+    } finally {
+      ensureConnectedSpy?.mockRestore();
+      getInstanceSpy.mockRestore();
+      closeSpy.mockRestore();
+    }
+  });
+
+  test.skipIf(process.platform === "win32")("retries incomplete Android discovery before restoring an observer", async () => {
+    const timer = new FakeTimer();
+    const device: BootedDevice = {
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+      transportId: "1",
+    };
+    const incompleteManager = new IncompleteThenBootedDiscoveryKillDeviceManager(device);
+    manager = incompleteManager;
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => incompleteManager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      timer,
+    });
+    const activeObserver = AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory());
+    const closeSpy = spyOn(activeObserver, "close").mockResolvedValue(undefined);
+    const originalGetInstance = AndroidCtrlProxyClient.getInstance;
+    let ensureConnectedSpy: ReturnType<typeof spyOn> | undefined;
+    const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(target => {
+      const restoredObserver = originalGetInstance(target, new FakeAdbClientFactory());
+      ensureConnectedSpy = spyOn(restoredObserver, "ensureConnected").mockResolvedValue(true);
+      return restoredObserver;
+    });
+    try {
+      const tool = ToolRegistry.getTool("killDevice");
+      if (!tool) {
+        throw new Error("killDevice not registered");
+      }
+
+      const result = tool.handler({ device });
+      await new Promise(resolve => setImmediate(resolve));
+      timer.advanceTime(1_000);
 
       await expect(result).rejects.toThrow("adb emu kill failed");
       expect(ensureConnectedSpy).toHaveBeenCalledTimes(1);

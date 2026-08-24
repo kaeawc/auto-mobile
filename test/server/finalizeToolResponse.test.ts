@@ -1659,6 +1659,47 @@ describe("finalizeToolResponse", () => {
       expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
     });
 
+    test("bugReport artifacts iOS device-log entries and keeps status summary inline", () => {
+      const writer = new FakeObservationArtifactWriter();
+      const payload = {
+        reportId: "bug-ios-1",
+        timestamp: 123,
+        device: { deviceId: "sim-udid-1", platform: "ios" },
+        screenState: {},
+        viewHierarchy: { elementCount: 0, clickableElements: [] },
+        iosDeviceLog: {
+          status: "collected",
+          entries: ["2026-08-24 10:00:01 App: one", "2026-08-24 10:00:02 App: two"],
+          entryCount: 2,
+          byteSize: 60,
+          truncated: false,
+          window: { duration: "5m", maxEntries: 1000 },
+          appFilter: { appId: "com.example.app", status: "applied" },
+          limits: { maxEntries: 1000, maxBytes: 262144 },
+        },
+        savedTo: "/tmp/bug-report.json",
+        errors: [],
+      };
+
+      const finalized = finalizeToolResponse(createStructuredToolResponse(payload), {
+        name: "bugReport",
+        artifactWriter: writer,
+      } as any);
+
+      const report = finalized.structuredContent as any;
+      expect(report.iosDeviceLogSummary).toEqual({
+        status: "collected",
+        entryCount: 2,
+        byteSize: 60,
+        truncated: false,
+        filterStatus: "applied",
+      });
+      expect(report.iosDeviceLog.entries.artifact.payload).toBe("BugReportIosDeviceLog");
+      expect(report.iosDeviceLog.status).toBe("collected");
+      expect(writer.writes.map((write) => write.payload)).toContain("BugReportIosDeviceLog");
+      expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
+    });
+
     test("getNetworkGraph artifacts aggregate graph and keeps host count inline", () => {
       const writer = new FakeObservationArtifactWriter();
       const payload = {

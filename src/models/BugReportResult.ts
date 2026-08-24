@@ -1,4 +1,5 @@
 import { ElementBounds } from "./ElementBounds";
+import { IosDeviceLog } from "./IosDeviceLog";
 
 /**
  * Result from bug report generation
@@ -107,6 +108,13 @@ export interface BugReportResult {
      */
     appLogs?: string[];
   };
+
+  /**
+   * Bounded, timestamped iOS device-log tail. Present for iOS targets in place
+   * of Android `logcat`. Carries its own collection/truncation status so a
+   * failed capture never fails the surrounding bug-report request (issue #5641).
+   */
+  iosDeviceLog?: IosDeviceLog;
 
   /**
    * File path to saved screenshot image

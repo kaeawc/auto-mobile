@@ -83,11 +83,18 @@ export const bugReportSchema = withAppIdAliases(
   addDeviceTargetingToSchema(
     z.object({
       platform: platformSchema,
-      appId: z.string().optional().describe("App package ID to filter logcat for specific app"),
+      appId: z
+        .string()
+        .optional()
+        .describe(
+          "App identifier to filter device logs for a specific app (Android logcat by PID, or iOS device log when supported)",
+        ),
       logcatLines: z
         .number()
         .optional()
-        .describe("Number of recent logcat lines to include (default: 1000)"),
+        .describe(
+          "Number of recent device-log entries to include (Android logcat lines / iOS log entries, default: 1000)",
+        ),
       saveDir: z.string().optional().describe("Directory to save report to"),
     }),
   ),
@@ -149,7 +156,7 @@ export function registerDebugTools() {
 
   ToolRegistry.registerDeviceAware(
     "bugReport",
-    "Generate a comprehensive bug report for debugging AutoMobile interactions. Captures screen state, view hierarchy, logcat, window info, and screenshot. The report is saved to a file for sharing with AutoMobile developers.",
+    "Generate a comprehensive bug report for debugging AutoMobile interactions. Captures screen state, view hierarchy, a bounded device-log tail (Android logcat or iOS device log), window info, and screenshot. The report is saved to a file for sharing with AutoMobile developers.",
     bugReportSchema,
     bugReportHandler,
     { defaultEnabled: true, debugOnly: true },

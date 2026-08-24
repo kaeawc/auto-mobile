@@ -440,7 +440,7 @@
   },
   {
     "name": "bugReport",
-    "description": "Generate a comprehensive bug report for debugging AutoMobile interactions. Captures screen state, view hierarchy, logcat, window info, and screenshot. The report is saved to a file for sharing with AutoMobile developers.",
+    "description": "Generate a comprehensive bug report for debugging AutoMobile interactions. Captures screen state, view hierarchy, a bounded device-log tail (Android logcat or iOS device log), window info, and screenshot. The report is saved to a file for sharing with AutoMobile developers.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -450,11 +450,11 @@
           "enum": ["android", "ios"]
         },
         "appId": {
-          "description": "App package ID to filter logcat for specific app",
+          "description": "App identifier to filter device logs for a specific app (Android logcat by PID, or iOS device log when supported)",
           "type": "string"
         },
         "logcatLines": {
-          "description": "Number of recent logcat lines to include (default: 1000)",
+          "description": "Number of recent device-log entries to include (Android logcat lines / iOS log entries, default: 1000)",
           "type": "number"
         },
         "saveDir": {

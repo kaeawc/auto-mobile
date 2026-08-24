@@ -888,6 +888,30 @@ describe("AndroidCtrlProxyClient", function() {
     }
   });
 
+  test("late invalidated-observer cleanup cannot release a replacement observer's port", async function() {
+    await accessibilityServiceClient.close();
+    AndroidCtrlProxyClient.resetInstances();
+    PortManager.reset();
+    PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
+    try {
+      const original = AndroidCtrlProxyClient.getInstance(testDevice, fakeAdbFactory);
+      const originalPort = PortManager.getPort(testDevice.deviceId);
+      original.invalidateForShutdownRecovery();
+
+      const replacement = AndroidCtrlProxyClient.getInstance(testDevice, fakeAdbFactory);
+      const replacementPort = PortManager.getPort(testDevice.deviceId);
+      expect(replacementPort).not.toBe(originalPort);
+
+      await original.close();
+      expect(PortManager.getPort(testDevice.deviceId)).toBe(replacementPort);
+
+      await replacement.close();
+    } finally {
+      PortManager.setPortAvailabilityCheckerForTesting(null);
+      PortManager.reset();
+    }
+  });
+
   describe("connection lifecycle", function() {
     test("notifies the observation stream when the WebSocket connection closes", function() {
       const lostDeviceIds: string[] = [];

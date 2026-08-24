@@ -1185,6 +1185,18 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   /**
+   * Evict this client before its asynchronous close can complete. Its port is
+   * held so a replacement client cannot share an ADB forward with late cleanup.
+   */
+  public invalidateForShutdownRecovery(): void {
+    if (AndroidCtrlProxyClient.getExistingInstance(this.device.deviceId) === this) {
+      AndroidCtrlProxyClient.removeInstance(this.device.deviceId);
+    }
+    PortManager.releaseIfAllocated(this.device.deviceId, this.localPort);
+    PortManager.holdForCleanup(this.localPort);
+  }
+
+  /**
    * Bind this client to a session for multi-agent NavigationGraphManager isolation.
    * Called when a tool execution context binds a session to this device.
    */
@@ -2990,7 +3002,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         this.portForwardingSetup = false;
       }
 
-      PortManager.release(this.device.deviceId);
+      PortManager.releaseIfAllocated(this.device.deviceId, this.localPort);
+      PortManager.releaseCleanupHold(this.localPort);
     } catch (error) {
       logger.warn(`[CTRL_PROXY] Error during cleanup: ${error}`);
     }

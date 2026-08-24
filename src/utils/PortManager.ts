@@ -76,6 +76,7 @@ class BunPortAvailabilityChecker implements PortAvailabilityChecker {
  */
 export class PortManager {
   private static allocatedPorts: Map<string, number> = new Map();
+  private static cleanupHeldPorts: Set<number> = new Set();
   private static readonly DEFAULT_BASE_PORT = 8765;
   private static readonly DEFAULT_MAX_DEVICES = 100;
   private static readonly basePort = PortManager.resolveBasePort();
@@ -103,7 +104,7 @@ export class PortManager {
     }
 
     // Find next available port
-    const usedPorts = new Set(this.allocatedPorts.values());
+    const usedPorts = new Set([...this.allocatedPorts.values(), ...this.cleanupHeldPorts]);
     const reservedPorts = new Set(options.reservedPorts ?? []);
     const availabilityChecker = options.availabilityChecker ?? this.portAvailabilityChecker;
     for (let port = this.basePort; port <= 65535; port++) {
@@ -140,6 +141,27 @@ export class PortManager {
     if (port !== undefined) {
       this.allocatedPorts.delete(deviceId);
       logger.info(`[PortManager] Released port ${port} for device ${deviceId}`);
+    }
+  }
+
+  /**
+   * Keep a just-invalidated observer's port unavailable until its asynchronous
+   * cleanup has finished. A replacement observer must use a different port so
+   * late cleanup cannot tear down its ADB forward.
+   */
+  public static holdForCleanup(port: number): void {
+    this.cleanupHeldPorts.add(port);
+  }
+
+  /** Release a port held by a completed invalidated-observer cleanup. */
+  public static releaseCleanupHold(port: number): void {
+    this.cleanupHeldPorts.delete(port);
+  }
+
+  /** Release only when this caller still owns the device's allocated port. */
+  public static releaseIfAllocated(deviceId: string, port: number): void {
+    if (this.allocatedPorts.get(deviceId) === port) {
+      this.release(deviceId);
     }
   }
 
@@ -202,6 +224,7 @@ export class PortManager {
   public static reset(): void {
     const count = this.allocatedPorts.size;
     this.allocatedPorts.clear();
+    this.cleanupHeldPorts.clear();
     logger.info(`[PortManager] Reset all port allocations (cleared ${count} allocations)`);
   }
 

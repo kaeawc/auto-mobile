@@ -887,9 +887,7 @@ function invalidateAndroidObserver(observer: AndroidCtrlProxyClient, deviceId: s
   // wait on an ADB forward removal that does not honour the shutdown deadline;
   // retaining the singleton until that completes would keep an obsolete client
   // (and the failed-shutdown reservation) alive indefinitely.
-  if (AndroidCtrlProxyClient.getExistingInstance(deviceId) === observer) {
-    AndroidCtrlProxyClient.removeInstance(deviceId);
-  }
+  observer.invalidateForShutdownRecovery();
   void observer.close().catch(error => {
     logger.warn(`[DeviceTools] Failed to clean up invalidated Android observer for ${deviceId}: ${error}`);
   });
@@ -1051,12 +1049,12 @@ function handleShutdownCommandError(
   device: BootedDevice,
   error: unknown,
   devicePool: DevicePool | undefined,
-  requestAbortSignal: AbortSignal | undefined,
+  keepIntentionalShutdown: boolean,
 ): string | undefined {
   if (isAlreadyStoppedDeviceError(device.platform, device.deviceId, error)) {
     return `Failed to kill ${device.platform} device: ${error}`;
   }
-  if (!shouldKeepIntentionalShutdownAfterCommandError(error, requestAbortSignal)) {
+  if (!keepIntentionalShutdown) {
     devicePool?.clearIntentionalShutdown(device.deviceId);
   }
   throw error;
@@ -1707,6 +1705,10 @@ async function killProcessAndRetireOwnership(
     );
     shutdownDevice = killedDevice ?? device;
   } catch (error) {
+    const keepIntentionalShutdown = shouldKeepIntentionalShutdownAfterCommandError(
+      error,
+      requestAbortSignal,
+    );
     retainLatePlatformShutdown(platformShutdown, platformShutdownSettled, retainReservationUntil);
     await restoreAndroidObserverAfterCommandFailure(
       deviceManager,
@@ -1722,7 +1724,7 @@ async function killProcessAndRetireOwnership(
       device,
       error,
       devicePool,
-      requestAbortSignal,
+      keepIntentionalShutdown,
     );
   }
   perf.endOperation("killProcess");

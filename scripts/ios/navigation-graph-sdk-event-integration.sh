@@ -26,17 +26,54 @@ require_command auto-mobile
 require_command base64
 require_command curl
 require_command jq
+require_command mktemp
 require_command xcrun
 
 xcrun simctl getenv "${device_id}" HOME >/dev/null
+
+renew_session_ownership() {
+  local session_uuid="$1"
+  if ! AUTOMOBILE_DAEMON_TIMEOUT_MS=2000 auto-mobile --daemon heartbeat "${session_uuid}" >/dev/null; then
+    echo "error: could not renew navigation graph session ownership" >&2
+    return 1
+  fi
+}
 
 ctrl_proxy_port_for_device() {
   # CtrlProxy allocates a per-device host port; 8765 is only its preferred
   # default and may already belong to another local service. `doctor` can exit
   # non-zero for unrelated diagnostics, but still emits the JSON round-trip
   # report that contains this ready runner's port.
-  local doctor_report ctrl_proxy_port
-  doctor_report="$(auto-mobile --cli doctor --ios --json || true)"
+  local session_uuid="${1:-}"
+  local doctor_report ctrl_proxy_port renew_status=0
+  if [[ -z "${session_uuid}" ]]; then
+    doctor_report="$(auto-mobile --cli doctor --ios --json || true)"
+  else
+    local doctor_report_file doctor_pid
+    doctor_report_file="$(mktemp)"
+    # Doctor can run multiple iOS diagnostics longer than the session heartbeat
+    # window, so renew ownership while its JSON report is still being collected.
+    auto-mobile --cli doctor --ios --json >"${doctor_report_file}" &
+    doctor_pid=$!
+    while kill -0 "${doctor_pid}" 2>/dev/null; do
+      sleep 2
+      if kill -0 "${doctor_pid}" 2>/dev/null; then
+        set +e
+        renew_session_ownership "${session_uuid}"
+        renew_status=$?
+        set -e
+      fi
+      if [[ "${renew_status:-0}" -ne 0 ]]; then
+        kill "${doctor_pid}" 2>/dev/null || true
+        wait "${doctor_pid}" 2>/dev/null || true
+        rm -f "${doctor_report_file}"
+        return 1
+      fi
+    done
+    wait "${doctor_pid}" 2>/dev/null || true
+    doctor_report="$(<"${doctor_report_file}")"
+    rm -f "${doctor_report_file}"
+  fi
   if ! ctrl_proxy_port="$(jq -er --arg device_id "${device_id}" '
       .ios.checks[]
       | select(.name == "iOS Observe Round Trip")
@@ -56,16 +93,21 @@ ctrl_proxy_port_for_device() {
 wait_for_ctrl_proxy_health() {
   local ctrl_proxy_port="$1"
   local session_uuid="${2:-}"
-  local attempt
+  local attempt renew_status
   for attempt in 1 2 3 4 5; do
     if curl --fail --silent --show-error --max-time 5 "http://127.0.0.1:${ctrl_proxy_port}/health" >/dev/null; then
       return 0
     fi
     # One-shot CLI clients stop their proxy heartbeat after each public call.
     # Renew the graph session while this bounded runner-health retry is in progress.
-    if [[ -n "${session_uuid}" ]] && ! AUTOMOBILE_DAEMON_TIMEOUT_MS=2000 auto-mobile --daemon heartbeat "${session_uuid}" >/dev/null; then
-      echo "error: could not renew navigation graph session ownership" >&2
-      return 1
+    if [[ -n "${session_uuid}" ]]; then
+      set +e
+      renew_session_ownership "${session_uuid}"
+      renew_status=$?
+      set -e
+      if [[ "${renew_status}" -ne 0 ]]; then
+        return 1
+      fi
     fi
     if [[ "${attempt}" -lt 5 ]]; then
       echo "CtrlProxy health check attempt ${attempt} failed; retrying in 2s..." >&2
@@ -106,7 +148,7 @@ fi
 
 # Requesting debug and embedded-SDK tools can restart the daemon. That restart
 # creates a new CtrlProxy client, so the prior daemon's reported port is stale.
-ctrl_proxy_port="$(ctrl_proxy_port_for_device)"
+ctrl_proxy_port="$(ctrl_proxy_port_for_device "${session_uuid}")"
 wait_for_ctrl_proxy_health "${ctrl_proxy_port}" "${session_uuid}"
 
 event_payload() {

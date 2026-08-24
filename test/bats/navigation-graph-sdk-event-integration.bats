@@ -9,6 +9,8 @@ setup() {
   export CURL_URL_FILE="${MOCK_BIN}/curl-urls"
   export SESSION_OBSERVE_FILE="${MOCK_BIN}/session-observe"
   export DOCTOR_CALLS_FILE="${MOCK_BIN}/doctor-calls"
+  export POST_BIND_DOCTOR_FILE="${MOCK_BIN}/post-bind-doctor"
+  export POST_BIND_DOCTOR_FAILURE_FILE="${MOCK_BIN}/post-bind-doctor-failure"
   export HEALTH_ATTEMPTS_FILE="${MOCK_BIN}/health-attempts"
   export HEARTBEAT_FILE="${MOCK_BIN}/heartbeats"
   export TARGET_APP_LAUNCHED_FILE="${MOCK_BIN}/target-app-launched"
@@ -57,6 +59,9 @@ if [ "$1" = "-cn" ]; then
   exit 0
 fi
 if [ "$1" = "-er" ]; then
+  if [ -f "$POST_BIND_DOCTOR_FAILURE_FILE" ]; then
+    exit 1
+  fi
   doctor_calls="$(cat "$DOCTOR_CALLS_FILE")"
   if [ "$doctor_calls" -eq 1 ]; then
     printf "8768\\n"
@@ -73,6 +78,14 @@ if [ "$1" = "--cli" ] && [ "$2" = "doctor" ]; then
   doctor_calls=0
   [ -f "$DOCTOR_CALLS_FILE" ] && doctor_calls="$(cat "$DOCTOR_CALLS_FILE")"
   printf "%s\\n" "$((doctor_calls + 1))" > "$DOCTOR_CALLS_FILE"
+  if [ -f "$SESSION_OBSERVE_FILE" ]; then
+    touch "$POST_BIND_DOCTOR_FILE"
+    /bin/sleep 0.1
+    if [ ! -f "$HEARTBEAT_FILE" ]; then
+      touch "$POST_BIND_DOCTOR_FAILURE_FILE"
+      exit 1
+    fi
+  fi
   printf "{\"ios\":{\"checks\":[]}}\\n"
   exit 0
 fi
@@ -122,6 +135,7 @@ fi
   [ "$(cat "$GRAPH_ATTEMPTS_FILE")" = "2" ]
   [ "$(cat "$DOCTOR_CALLS_FILE")" = "2" ]
   [ "$(cat "$HEALTH_ATTEMPTS_FILE")" = "4" ]
+  [ -f "$POST_BIND_DOCTOR_FILE" ]
   [ -f "$HEARTBEAT_FILE" ]
   [ -f "$TARGET_APP_LAUNCHED_FILE" ]
   [[ "$output" == *"getNavigationGraph attempt 1 failed"* ]]

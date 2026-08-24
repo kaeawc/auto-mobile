@@ -183,9 +183,22 @@ class QualityControllerTest {
     controller.selectQuality(VideoStreamQuality.Low)
     assertEquals(VideoStreamQuality.Low, controller.quality.value)
     assertEquals(listOf(VideoStreamQuality.Low), selected)
-    // Re-selecting the same quality is a no-op (no duplicate notification / churn).
-    controller.selectQuality(VideoStreamQuality.Low)
-    assertEquals(listOf(VideoStreamQuality.Low), selected)
+  }
+
+  @Test
+  fun `an explicit reselection persists even when the current preset already matches`() {
+    // After an automatic step set the in-memory preset to Medium (persisted value may still
+    // differ),
+    // explicitly picking Medium must persist the user's choice rather than early-returning.
+    val selected = mutableListOf<VideoStreamQuality>()
+    val controller =
+      QualityController(
+        initialQuality = VideoStreamQuality.Medium,
+        targetFps = 30,
+        onManualSelection = { selected.add(it) },
+      )
+    controller.selectQuality(VideoStreamQuality.Medium)
+    assertEquals(listOf(VideoStreamQuality.Medium), selected)
   }
 
   @Test

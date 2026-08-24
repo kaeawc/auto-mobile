@@ -143,8 +143,15 @@ fun DeviceStreamView(
   // so truly reconfiguring a live shared capture needs server-side work (follow-up). When
   // [settings]
   // is null the preset is constant, so this keys on deviceId only — unchanged from before.
+  // Keyed on deviceId, the current preset, AND paneFps: focus changes paneFps (10↔30) independently
+  // of the preset, so without paneFps a pane that gains/loses focus without a preset change would
+  // keep streaming at the old rate (a focused pane stuck at the farm 10fps, or an unfocused pane
+  // still consuming 30fps). Re-subscribing on the change applies for a sole subscriber / the next
+  // subscribe; a live shared capture keeps the first subscriber's encode (server follow-up).
   val source =
-    remember(column.deviceId, currentQuality) { sourceFactory(column.deviceId, currentQuality) }
+    remember(column.deviceId, currentQuality, paneFps) {
+      sourceFactory(column.deviceId, currentQuality)
+    }
   val liveFrame =
     rememberLiveVideoFrame(
       source,

@@ -125,12 +125,18 @@ class QualityController(
     maybeAdjust(receivedAtMs)
   }
 
-  /** Applies an explicit user choice, re-seeding the rate window so the manual pick sticks. */
+  /**
+   * Applies an explicit user choice, re-seeding the rate window so the manual pick sticks. Persists
+   * unconditionally: the user's explicit choice must be written even when it equals the *current*
+   * preset, because that preset may have been set by an automatic step while the persisted value
+   * still differs — otherwise picking the already-highlighted chip would silently fail to persist.
+   * The state change / re-subscribe is skipped when nothing actually changes.
+   */
   fun selectQuality(quality: VideoStreamQuality) {
+    onManualSelection(quality)
     if (_quality.value == quality) return
     _quality.value = quality
     resetRateWindow()
-    onManualSelection(quality)
   }
 
   /**

@@ -19,9 +19,12 @@ data class DataStoreEntry(
   /** The preference key. */
   val key: String,
   /**
-   * The preference value, or null when the key is absent or the value was redacted away. Callers
-   * should interpret the value through [type]; an [DataStoreValueType.UNKNOWN] type marks a value
-   * whose runtime kind is not representable by the contract.
+   * The preference value, or null when the key is absent. A value removed by the configured
+   * redaction policy is replaced with the [DataStoreInspector.REDACTED_VALUE] marker string and its
+   * [type] is set to [DataStoreValueType.STRING] (so the marker survives wire serialization) —
+   * redaction never yields null. Callers should interpret the value through [type]; an
+   * [DataStoreValueType.UNKNOWN] type marks a value whose runtime kind is not representable by the
+   * contract.
    */
   val value: Any?,
   /** The structured type of [value]. */
@@ -71,7 +74,10 @@ fun interface DataStoreRedactionPolicy {
  * an adapter is registered (issue #5192).
  */
 data class DataStoreCapabilities(
-  /** Whether at least one application-provided adapter is registered and readable. */
+  /**
+   * Whether at least one application-provided adapter is currently registered. This reflects
+   * registration only — it does not verify that an adapter can successfully list or read a store.
+   */
   val readSupported: Boolean,
   /**
    * Always false: the DataStore adapter contract is read-only and exposes no mutation entry point,

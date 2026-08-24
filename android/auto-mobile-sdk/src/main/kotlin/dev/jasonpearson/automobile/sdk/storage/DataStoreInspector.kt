@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.sdk.storage
 
+import dev.jasonpearson.automobile.sdk.InspectorRegistration
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.cancellation.CancellationException
 
@@ -26,10 +27,16 @@ object DataStoreInspector {
   private val adapters = ConcurrentHashMap<String, DataStoreAdapter>()
   @Volatile private var redactionPolicy: DataStoreRedactionPolicy = DataStoreRedactionPolicy.NONE
 
-  /** Registers or replaces the application-provided adapter under [name]. */
-  fun registerAdapter(name: String, adapter: DataStoreAdapter) {
+  /**
+   * Registers or replaces the application-provided adapter under [name].
+   *
+   * Returns an [InspectorRegistration] whose [InspectorRegistration.unregister] removes this
+   * adapter only if it has not since been replaced under the same name (issue #5581).
+   */
+  fun registerAdapter(name: String, adapter: DataStoreAdapter): InspectorRegistration {
     require(name.isNotBlank()) { "adapter name must not be blank" }
     adapters[name] = adapter
+    return InspectorRegistration { adapters.remove(name, adapter) }
   }
 
   /** Removes the adapter registered under [name] and returns whether one was registered. */

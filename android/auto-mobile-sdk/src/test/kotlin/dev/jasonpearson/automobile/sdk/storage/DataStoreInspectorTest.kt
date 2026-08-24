@@ -281,6 +281,29 @@ class DataStoreInspectorTest {
     assertEquals("two", DataStoreInspector.readStore("prefs", "s").single().value)
   }
 
+  // #5581 — a stale registration handle must not remove a replacement registered under the same
+  // name.
+  @Test
+  fun `stale registration handle does not remove a replacement`() {
+    val first = FakeDataStoreAdapter()
+    val second = FakeDataStoreAdapter()
+    val firstReg = DataStoreInspector.registerAdapter("prefs", first)
+    DataStoreInspector.registerAdapter("prefs", second) // replaces first
+
+    assertFalse(firstReg.unregister())
+    assertEquals(setOf("prefs"), DataStoreInspector.registeredAdapterNames())
+  }
+
+  // #5581 — a current registration handle removes only its own registration.
+  @Test
+  fun `current registration handle removes its adapter`() {
+    val reg = DataStoreInspector.registerAdapter("prefs", FakeDataStoreAdapter())
+
+    assertTrue(reg.unregister())
+    assertTrue(DataStoreInspector.registeredAdapterNames().isEmpty())
+    assertFalse(reg.unregister())
+  }
+
   // AC5 — removal is lifecycle-safe and idempotent.
   @Test
   fun `unregister returns true then false`() {

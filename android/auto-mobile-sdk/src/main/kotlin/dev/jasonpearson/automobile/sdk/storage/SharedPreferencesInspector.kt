@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.sdk.storage
 
 import android.content.Context
+import dev.jasonpearson.automobile.sdk.InspectorRegistration
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -57,10 +58,16 @@ object SharedPreferencesInspector {
     }
   }
 
-  /** Registers an application-owned key-value driver under a stable store name. */
-  fun registerDriver(name: String, driver: SharedPreferencesDriver) {
+  /**
+   * Registers an application-owned key-value driver under a stable store name.
+   *
+   * Returns an [InspectorRegistration] whose [InspectorRegistration.unregister] removes this driver
+   * only if it has not since been replaced under the same name (issue #5581).
+   */
+  fun registerDriver(name: String, driver: SharedPreferencesDriver): InspectorRegistration {
     require(name.isNotBlank()) { "driver name must not be blank" }
     customDrivers[name] = driver
+    return InspectorRegistration { customDrivers.remove(name, driver) }
   }
 
   /** Removes an application-owned key-value driver and returns whether it was registered. */

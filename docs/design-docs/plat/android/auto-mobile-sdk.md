@@ -354,7 +354,7 @@ DataStore-backed preferences are then discoverable and readable through the exis
 **Boundary guarantees** (enforced by `DataStoreInspector`, independent of the host adapter):
 
 - **Read-only.** The `DataStoreAdapter` contract exposes no mutation entry point, so mutation is structurally unsupported; `capabilities().mutationSupported` is always `false`.
-- **Redaction.** A configurable `DataStoreRedactionPolicy` (`setRedactionPolicy`) redacts matching values at the boundary before they leave the SDK; a host adapter cannot opt out.
+- **Redaction.** A configurable `DataStoreRedactionPolicy` (`setRedactionPolicy`) redacts matching values at the boundary before they leave the SDK; a host adapter cannot opt out. A redacted value is replaced with the `DataStoreInspector.REDACTED_VALUE` marker string and its type is set to `STRING` (so the marker survives wire serialization) — redaction never yields a null value.
 - **Structured values and errors.** Values map onto `DataStoreValueType` (String, Int, Long, Float, Double, Boolean, `Set<String>`, byte array); an unrepresentable value is surfaced as `UNKNOWN` or rejected with `DataStoreAdapterError.UnsupportedValue`. Missing adapters/stores and host read failures surface as `AdapterNotFound`, `StoreNotFound`, and `ReadError`.
 - **Lifecycle-safe.** Registration replaces by name, `unregisterAdapter` returns whether one was removed, and `AutoMobileSDK.shutdown()` clears all adapters. Reads run in the caller's coroutine context, so cancellation propagates cooperatively and no background coroutines or listeners are retained.
 

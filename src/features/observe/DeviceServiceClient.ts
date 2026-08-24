@@ -266,11 +266,24 @@ export abstract class DeviceServiceClient {
 
       if (this.ws) {
         logger.info(`[${this.logTag}] Closing WebSocket connection`);
-        this.ws.close();
+        const socket = this.ws;
         this.ws = null;
+        // Detach the lifecycle listeners installed in connectWebSocket() BEFORE
+        // closing, so the socket's async `close` event cannot drive a SECOND
+        // onConnectionClosed() after the synchronous call below (issue #5657).
+        // Mirrors updatePort() and the discarded-socket path in connectWebSocket().
+        socket.removeAllListeners();
+        // Keep a lone error listener: a socket torn down mid-handshake can still
+        // emit "error", and an EventEmitter with no "error" listener THROWS,
+        // which would crash the daemon. The socket is going away, so the error
+        // is expected and needs no state mutation.
+        socket.on("error", (error) => {
+          logger.debug(`[${this.logTag}] Ignoring error on closed WebSocket: ${error}`);
+        });
+        socket.close();
       }
 
-      // Platform-specific cleanup
+      // Platform-specific cleanup — fires exactly once per close().
       this.onConnectionClosed();
     } catch (error) {
       logger.warn(`[${this.logTag}] Error during close: ${error}`);

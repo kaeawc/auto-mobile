@@ -1894,9 +1894,11 @@ describe("AndroidCtrlProxyClient", function () {
         await resultPromise;
         await settleNavigationHierarchyInterleaving(testTimer);
 
-        // The navigation write and the CtrlProxy-close cache invalidation both
-        // register with the shared shutdown barrier.
-        expect(trackExistingSpy).toHaveBeenCalledTimes(2);
+        // The single navigation write registers with the shared shutdown barrier.
+        // (This previously asserted 2, silently absorbing a leaked second
+        // onConnectionClosed() from a prior test's close() — the #5657
+        // double-fire. With that fixed, only this test's own nav write counts.)
+        expect(trackExistingSpy).toHaveBeenCalledTimes(1);
         // Ordering still preserved: the write committed the SDK screen name.
         expect(navManager.getCurrentScreen()).toBe("SdkHome");
       } finally {

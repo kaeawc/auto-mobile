@@ -494,7 +494,7 @@ export class TakeScreenshot implements ScreenshotService {
     return {
       success: true,
       path: finalPath,
-      ...ANDROID_ADB_SCREENSHOT_METADATA,
+      ...metadataForScreenshotFormat(ANDROID_ADB_SCREENSHOT_METADATA, options.format),
     };
   }
 
@@ -595,7 +595,7 @@ export class TakeScreenshot implements ScreenshotService {
       return {
         success: true,
         path: finalPath,
-        ...ANDROID_ADB_SCREENSHOT_METADATA,
+        ...metadataForScreenshotFormat(ANDROID_ADB_SCREENSHOT_METADATA, options.format),
       };
     } catch (err) {
       const totalDuration = this.timer.now() - startTime;

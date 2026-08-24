@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { TakeScreenshot } from "../../../src/features/observe/TakeScreenshot";
 import { BootedDevice } from "../../../src/models/DeviceInfo";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -48,6 +49,28 @@ describe("TakeScreenshot", function () {
 
       expect(result).toContain("screenshot_1234567890456");
       expect(result).toMatch(/screenshot_1234567890456_[^.]+\.webp$/);
+    });
+
+    test("tracks WebP metadata when requested", async function () {
+      const originalGetInstance = AndroidCtrlProxyClient.getInstance;
+      AndroidCtrlProxyClient.getInstance = (() => ({
+        requestScreenshot: async () => ({ success: false, error: "CtrlProxy unavailable" }),
+      })) as typeof AndroidCtrlProxyClient.getInstance;
+      fakeAdb.setDefaultResponse({
+        stdout: readFileSync("test/fixtures/screenshots/black-on-white.png").toString("base64"),
+        stderr: "",
+      });
+
+      try {
+        const result = await takeScreenshot.execute({ format: "webp" });
+
+        expect(result.success).toBe(true);
+        expect(result.path).toMatch(/\.webp$/);
+        expect(result.screenshotFormat).toBe("webp");
+        expect(result.screenshotMimeType).toBe("image/webp");
+      } finally {
+        AndroidCtrlProxyClient.getInstance = originalGetInstance;
+      }
     });
 
     test("should generate different timestamps for consecutive calls", async function () {

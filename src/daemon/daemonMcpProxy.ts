@@ -280,7 +280,8 @@ export interface ProxiedResourceTemplate {
 /**
  * The daemon startup options that change its observable MCP behavior and so must
  * match before a running daemon can be reused: `debug`, `embeddedSdk`, `networkMockable`,
- * marker-based eventAll promotion config, plus every output-reduction flag. A
+ * every feature-flag CLI override, marker-based eventAll promotion config, plus every
+ * output-reduction flag. A
  * same-build MCP client that requests one of these against an already-running
  * daemon started without it (or vice versa) would otherwise silently get the
  * wrong tool-output or inputText behavior until a manual restart (issue #2759 —
@@ -293,12 +294,25 @@ export interface ProxiedResourceTemplate {
  */
 export const REUSE_CRITICAL_OPTION_KEYS: (keyof DaemonOptions)[] = [
   "debug",
+  "debugPerf",
   "embeddedSdk",
   "networkMockable",
+  "noUiPerfMode",
+  "memPerfAudit",
+  "accessibilityAudit",
+  "predictiveUi",
+  "rawElementSearch",
+  "mcpRecording",
+  "noNavigationScreenshots",
   ...OUTPUT_REDUCTION_FLAG_SPECS.map((spec) => spec.field),
 ];
 
-const REUSE_CRITICAL_STRING_OPTION_KEYS: (keyof DaemonOptions)[] = ["toolOutputsDir"];
+const REUSE_CRITICAL_STRING_OPTION_KEYS: (keyof DaemonOptions)[] = [
+  "toolOutputsDir",
+  "accessibilityLevel",
+  "accessibilityFailureMode",
+  "accessibilityMinSeverity",
+];
 
 const REUSE_CRITICAL_NUMBER_OPTION_KEYS: (keyof DaemonOptions)[] = ["runnerReadinessTimeoutMs"];
 export const REUSE_CRITICAL_ARRAY_OPTION_KEYS: (keyof DaemonOptions)[] = [
@@ -460,6 +474,16 @@ function startupOptionDeficits(
       numberOption,
       (options, key) => numberOption(options, key) ?? Number.NaN,
     ),
+    ...requestedOptionDeficits(
+      ["accessibilityUseBaseline"],
+      requested,
+      running,
+      (options) =>
+        options?.accessibilityAudit === true
+          ? options.accessibilityUseBaseline === true
+          : undefined,
+      (options) => options?.accessibilityUseBaseline === true,
+    ),
     ...exactToolSelectionDeficits(requested, running),
     ...requestedOptionDeficits(
       ["eventAllMarkers"],
@@ -478,20 +502,25 @@ function startupOptionDeficits(
  * *running* daemon's existing options as the base and overlays the connecting
  * client's requested options, so a restart triggered for any reason can never
  * silently strip a flag the daemon was already launched with (issue #3846) —
- * it only ever adds flags the client explicitly asks for. Reuse-critical flags
- * the running daemon already has are force-preserved so an explicit-`false`
- * from the client cannot turn them back off.
+ * it only ever adds flags the client explicitly asks for. Boolean CLI options
+ * are one-directional: `false` means the caller has no opinion, so every
+ * active boolean on the running daemon is force-preserved.
  */
 function mergeDaemonOptions(
   running: DaemonOptions | undefined,
   requested: DaemonOptions | undefined,
 ): DaemonOptions {
-  const merged: DaemonOptions = { ...(running ?? {}), ...(requested ?? {}) };
+  const runningOptions = running ?? {};
+  const requestedOptions = requested ?? {};
+  const merged: DaemonOptions = { ...runningOptions, ...requestedOptions };
   const mergedRecord = merged as Record<string, unknown>;
-  for (const key of REUSE_CRITICAL_OPTION_KEYS) {
-    if (running?.[key] === true) {
+  for (const [key, value] of Object.entries(runningOptions)) {
+    if (value === true) {
       mergedRecord[key] = true;
     }
+  }
+  if (requested?.accessibilityAudit === true) {
+    merged.accessibilityUseBaseline = requested.accessibilityUseBaseline === true;
   }
   for (const key of REUSE_CRITICAL_STRING_OPTION_KEYS) {
     const runningString = stringOption(running, key);

@@ -808,6 +808,18 @@ describe("DaemonMcpProxy", () => {
         runnerReadinessTimeoutMs?: number;
         enabledTools?: string[];
         disabledTools?: string[];
+        predictiveUi?: boolean;
+        noWaitForPollingOverhead?: boolean;
+        dismissKeyboardAfterInput?: boolean;
+        noA11yIncludeNotImportantViews?: boolean;
+        noA11yReportViewIds?: boolean;
+        noA11yRetrieveInteractiveWindows?: boolean;
+        noOcclusion?: boolean;
+        accessibilityAudit?: boolean;
+        accessibilityLevel?: string;
+        accessibilityFailureMode?: string;
+        accessibilityMinSeverity?: string;
+        accessibilityUseBaseline?: boolean;
       }) {
         return {
           running: true,
@@ -870,6 +882,129 @@ describe("DaemonMcpProxy", () => {
           await proxy.listTools();
           expect(fakeManager.restartCalled).toBe(true);
           expect(fakeManager.restartOptions).toEqual({ debug: true });
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("restarts daemon when predictive UI mode differs", async () => {
+        const fakeClient = new FakeDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        });
+        const fakeManager = new FakeDaemonManager();
+        fakeManager.statusResults = [
+          runningStatus({ predictiveUi: false }), // ensureVersionMatches
+          runningStatus({ predictiveUi: false }), // ensureBuildMatches
+          runningStatus({ predictiveUi: false }), // ensureStartupOptionsMatch (mismatch)
+          runningStatus({ predictiveUi: true }), // post-restart verify
+        ];
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => fakeClient,
+          daemonManager: fakeManager,
+          daemonOptions: { predictiveUi: true },
+        });
+
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCalled).toBe(true);
+          expect(fakeManager.restartOptions).toEqual({ predictiveUi: true });
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("preserves active non-critical options on a feature-flag restart", async () => {
+        const fakeClient = new FakeDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        });
+        const fakeManager = new FakeDaemonManager();
+        const runningOptions = {
+          predictiveUi: false,
+          noWaitForPollingOverhead: true,
+          dismissKeyboardAfterInput: true,
+          noA11yIncludeNotImportantViews: true,
+          noA11yReportViewIds: true,
+          noA11yRetrieveInteractiveWindows: true,
+          noOcclusion: true,
+        };
+        fakeManager.statusResults = [
+          runningStatus(runningOptions), // ensureVersionMatches
+          runningStatus(runningOptions), // ensureBuildMatches
+          runningStatus(runningOptions), // ensureStartupOptionsMatch (mismatch)
+          runningStatus({ ...runningOptions, predictiveUi: true }), // post-restart verify
+        ];
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => fakeClient,
+          daemonManager: fakeManager,
+          daemonOptions: {
+            predictiveUi: true,
+            noWaitForPollingOverhead: false,
+            dismissKeyboardAfterInput: false,
+            noA11yIncludeNotImportantViews: false,
+            noA11yReportViewIds: false,
+            noA11yRetrieveInteractiveWindows: false,
+            noOcclusion: false,
+          },
+        });
+
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCalled).toBe(true);
+          expect(fakeManager.restartOptions).toEqual({
+            predictiveUi: true,
+            noWaitForPollingOverhead: true,
+            dismissKeyboardAfterInput: true,
+            noA11yIncludeNotImportantViews: true,
+            noA11yReportViewIds: true,
+            noA11yRetrieveInteractiveWindows: true,
+            noOcclusion: true,
+          });
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("reconciles the effective accessibility-audit defaults", async () => {
+        const fakeClient = new FakeDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        });
+        const fakeManager = new FakeDaemonManager();
+        const runningOptions = {
+          accessibilityAudit: true,
+          accessibilityLevel: "AAA",
+          accessibilityFailureMode: "strict",
+          accessibilityMinSeverity: "error",
+          accessibilityUseBaseline: true,
+        };
+        const requestedOptions = {
+          accessibilityAudit: true,
+          accessibilityLevel: "AA",
+          accessibilityFailureMode: "report",
+          accessibilityMinSeverity: "warning",
+          accessibilityUseBaseline: false,
+        };
+        fakeManager.statusResults = [
+          runningStatus(runningOptions), // ensureVersionMatches
+          runningStatus(runningOptions), // ensureBuildMatches
+          runningStatus(runningOptions), // ensureStartupOptionsMatch (mismatch)
+          runningStatus(requestedOptions), // post-restart verify
+        ];
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => fakeClient,
+          daemonManager: fakeManager,
+          daemonOptions: requestedOptions,
+        });
+
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCalled).toBe(true);
+          expect(fakeManager.restartOptions).toEqual(requestedOptions);
         } finally {
           isAvailableSpy.mockRestore();
           await proxy.close();

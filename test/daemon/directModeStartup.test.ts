@@ -39,12 +39,20 @@ describe("runDirectModeStartup", () => {
     expect(calls).toEqual(["assertDbOwnership", "applyFeatureFlagStartup"]);
   });
 
-  test("skips the ownership guard entirely in proxy mode", async () => {
-    const { steps, calls } = recordingSteps(false);
+  test("keeps proxy startup clear of a contended feature-flag database", async () => {
+    const { steps, calls } = recordingSteps(false, {
+      applyFeatureFlagStartup: async () => {
+        calls.push("applyFeatureFlagStartup");
+        throw new Error("SQLITE_BUSY: database is locked");
+      },
+    });
 
     await runDirectModeStartup(steps);
 
-    expect(calls).toEqual(["applyFeatureFlagStartup"]);
+    // The daemon owns feature-flag initialization in proxy mode. Skipping the
+    // proxy process's DB touch lets it connect its stdio transport even when
+    // another writer is temporarily holding the shared database.
+    expect(calls).toEqual([]);
   });
 
   test("does not touch the DB when the guard refuses (guard throws)", async () => {

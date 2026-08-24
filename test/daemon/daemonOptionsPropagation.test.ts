@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { DaemonManager, parseDaemonArgs } from "../../src/daemon/manager";
+import { parseArgs } from "../../src/cli/parseArgs";
 import {
   REUSE_CRITICAL_ARRAY_OPTION_KEYS,
   REUSE_CRITICAL_OPTION_KEYS,
@@ -104,6 +105,39 @@ describe("daemon startup-option propagation", () => {
         AUTOMOBILE_RUNNER_READINESS_TIMEOUT_MS: "20000",
       }),
     ).toMatchObject({ runnerReadinessTimeoutMs: 45_000 });
+  });
+
+  test("accessibility audit options reach both daemon parsers", () => {
+    const options: DaemonOptions = {
+      accessibilityAudit: true,
+      accessibilityLevel: "AAA",
+      accessibilityFailureMode: "strict",
+      accessibilityMinSeverity: "error",
+      accessibilityUseBaseline: true,
+    };
+
+    const args = serialize(options);
+
+    expect(args).toEqual(
+      expect.arrayContaining([
+        "--accessibility-audit",
+        "--a11y-level",
+        "AAA",
+        "--a11y-failure-mode",
+        "strict",
+        "--a11y-min-severity",
+        "error",
+        "--a11y-use-baseline",
+      ]),
+    );
+    expect(parseDaemonArgs(args)).toMatchObject(options);
+    expect(parseArgs(args)).toMatchObject({
+      a11yAuditMode: true,
+      a11yLevel: "AAA",
+      a11yFailureMode: "strict",
+      a11yMinSeverity: "error",
+      a11yUseBaseline: true,
+    });
   });
 
   test("a missing runner readiness value does not consume the following flag", () => {

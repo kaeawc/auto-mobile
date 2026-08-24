@@ -300,6 +300,31 @@ class WebSocketRequestTest {
   }
 
   @Test
+  fun `deserialize list_data_stores`() {
+    val message =
+      """{"type":"list_data_stores","requestId":"lds-1","packageName":"com.example.app","adapterName":"settings"}"""
+    val request = json.decodeFromString<WebSocketRequest>(message)
+
+    assertIs<ListDataStores>(request)
+    assertEquals("lds-1", request.requestId)
+    assertEquals("com.example.app", request.packageName)
+    assertEquals("settings", request.adapterName)
+  }
+
+  @Test
+  fun `deserialize get_data_store`() {
+    val message =
+      """{"type":"get_data_store","requestId":"gds-1","packageName":"com.example.app","adapterName":"settings","storeName":"user_prefs"}"""
+    val request = json.decodeFromString<WebSocketRequest>(message)
+
+    assertIs<GetDataStore>(request)
+    assertEquals("gds-1", request.requestId)
+    assertEquals("com.example.app", request.packageName)
+    assertEquals("settings", request.adapterName)
+    assertEquals("user_prefs", request.storeName)
+  }
+
+  @Test
   fun `deserialize request_settings_get`() {
     val message =
       """{"type":"request_settings_get","requestId":"sg-1","namespace":"system","key":"user_rotation"}"""

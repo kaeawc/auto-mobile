@@ -2070,6 +2070,23 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     return this.storage.getPreferenceEntries(packageName, fileName, timeoutMs);
   }
 
+  async listDataStores(
+    packageName: string,
+    adapterName: string,
+    timeoutMs?: number,
+  ): Promise<PreferenceFile[]> {
+    return this.storage.listDataStores(packageName, adapterName, timeoutMs);
+  }
+
+  async getDataStore(
+    packageName: string,
+    adapterName: string,
+    storeName: string,
+    timeoutMs?: number,
+  ): Promise<KeyValueEntry[]> {
+    return this.storage.getDataStore(packageName, adapterName, storeName, timeoutMs);
+  }
+
   async getPreference(
     packageName: string,
     fileName: string,
@@ -4186,7 +4203,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     // past teardown (#5493). A transient websocket disconnect does not set this flag,
     // so the fallback still fires during reconnect windows.
     if (this.closed) {
-      return { success: false, error: "AndroidCtrlProxyClient closed; ADB screencap fallback suppressed" };
+      return {
+        success: false,
+        error: "AndroidCtrlProxyClient closed; ADB screencap fallback suppressed",
+      };
     }
 
     // Bind the geometry current when the ADB request begins, before its await can let a newer

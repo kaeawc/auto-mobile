@@ -206,6 +206,15 @@ interface CtrlProxyActions {
 
   fun getPreferences(requestId: String?, packageName: String, fileName: String)
 
+  fun listDataStores(requestId: String?, packageName: String, adapterName: String)
+
+  fun getDataStore(
+    requestId: String?,
+    packageName: String,
+    adapterName: String,
+    storeName: String,
+  )
+
   fun subscribeStorage(requestId: String?, packageName: String, fileName: String)
 
   fun unsubscribeStorage(requestId: String?, packageName: String, fileName: String)

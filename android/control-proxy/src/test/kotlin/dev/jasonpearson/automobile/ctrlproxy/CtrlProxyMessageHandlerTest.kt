@@ -685,6 +685,25 @@ class CtrlProxyMessageHandlerTest {
   }
 
   @Test
+  fun `dispatches list_data_stores`() = runTest {
+    dispatch(
+      """{"type":"list_data_stores","requestId":"lds1","packageName":"com.example","adapterName":"settings"}"""
+    )
+    assertEquals("listDataStores" to listOf<Any?>("lds1", "com.example", "settings"), lastCall)
+  }
+
+  @Test
+  fun `dispatches get_data_store`() = runTest {
+    dispatch(
+      """{"type":"get_data_store","requestId":"gds1","packageName":"com.example","adapterName":"settings","storeName":"user_prefs"}"""
+    )
+    assertEquals(
+      "getDataStore" to listOf<Any?>("gds1", "com.example", "settings", "user_prefs"),
+      lastCall,
+    )
+  }
+
+  @Test
   fun `dispatches subscribe_storage`() = runTest {
     dispatch(
       """{"type":"subscribe_storage","requestId":"sub1","packageName":"com.example","fileName":"settings.xml"}"""

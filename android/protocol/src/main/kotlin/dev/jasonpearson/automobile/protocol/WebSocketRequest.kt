@@ -382,6 +382,29 @@ data class GetPreferences(
   val fileName: String,
 ) : WebSocketRequest()
 
+/**
+ * Lists the Jetpack DataStore instances exposed by a host-registered adapter (issue #5192/#5573).
+ * DataStore descriptors reuse the SharedPreferences result shapes (StorageResponse.FileList, empty
+ * path); only the request type is distinct so the device can route to the DataStore adapter.
+ */
+@Serializable
+@SerialName("list_data_stores")
+data class ListDataStores(
+  override val requestId: String? = null,
+  val packageName: String,
+  val adapterName: String,
+) : WebSocketRequest()
+
+/** Reads all entries from a named DataStore instance (issue #5192/#5573). */
+@Serializable
+@SerialName("get_data_store")
+data class GetDataStore(
+  override val requestId: String? = null,
+  val packageName: String,
+  val adapterName: String,
+  val storeName: String,
+) : WebSocketRequest()
+
 @Serializable
 @SerialName("subscribe_storage")
 data class SubscribeStorage(

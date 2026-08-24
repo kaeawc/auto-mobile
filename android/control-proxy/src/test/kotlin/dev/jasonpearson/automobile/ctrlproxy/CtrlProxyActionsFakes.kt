@@ -142,6 +142,15 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
 
   override fun getPreferences(requestId: String?, packageName: String, fileName: String) {}
 
+  override fun listDataStores(requestId: String?, packageName: String, adapterName: String) {}
+
+  override fun getDataStore(
+    requestId: String?,
+    packageName: String,
+    adapterName: String,
+    storeName: String,
+  ) {}
+
   override fun subscribeStorage(requestId: String?, packageName: String, fileName: String) {}
 
   override fun unsubscribeStorage(requestId: String?, packageName: String, fileName: String) {}
@@ -403,6 +412,16 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
 
   override fun getPreferences(requestId: String?, packageName: String, fileName: String) =
     record("getPreferences", requestId, packageName, fileName)
+
+  override fun listDataStores(requestId: String?, packageName: String, adapterName: String) =
+    record("listDataStores", requestId, packageName, adapterName)
+
+  override fun getDataStore(
+    requestId: String?,
+    packageName: String,
+    adapterName: String,
+    storeName: String,
+  ) = record("getDataStore", requestId, packageName, adapterName, storeName)
 
   override fun subscribeStorage(requestId: String?, packageName: String, fileName: String) =
     record("subscribeStorage", requestId, packageName, fileName)

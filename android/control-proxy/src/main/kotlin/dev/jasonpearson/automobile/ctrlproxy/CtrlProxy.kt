@@ -2091,6 +2091,16 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   override fun getPreferences(requestId: String?, packageName: String, fileName: String) =
     handleGetPreferences(requestId, packageName, fileName)
 
+  override fun listDataStores(requestId: String?, packageName: String, adapterName: String) =
+    handleListDataStores(requestId, packageName, adapterName)
+
+  override fun getDataStore(
+    requestId: String?,
+    packageName: String,
+    adapterName: String,
+    storeName: String,
+  ) = handleGetDataStore(requestId, packageName, adapterName, storeName)
+
   override fun subscribeStorage(requestId: String?, packageName: String, fileName: String) =
     handleSubscribeStorage(requestId, packageName, fileName)
 
@@ -6916,6 +6926,42 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         },
         onFailure = { error ->
           broadcastPreferencesResult(requestId, packageName, fileName, null, error.message)
+        },
+      )
+    }
+  }
+
+  private fun handleListDataStores(requestId: String?, packageName: String, adapterName: String) {
+    asyncActionRunner.launch(requestId, "list_data_stores") {
+      val result = storageSubscriptionManager.listDataStores(packageName, adapterName)
+      result.fold(
+        // DataStore descriptors reuse the SharedPreferences `preference_files` result envelope
+        // (StorageResponse.FileList); the awaiting TS client disambiguates by requestId.
+        onSuccess = { files ->
+          broadcastPreferenceFilesResult(requestId, packageName, files, null)
+        },
+        onFailure = { error ->
+          broadcastPreferenceFilesResult(requestId, packageName, null, error.message)
+        },
+      )
+    }
+  }
+
+  private fun handleGetDataStore(
+    requestId: String?,
+    packageName: String,
+    adapterName: String,
+    storeName: String,
+  ) {
+    asyncActionRunner.launch(requestId, "get_data_store") {
+      val result = storageSubscriptionManager.getDataStore(packageName, adapterName, storeName)
+      result.fold(
+        // Reuses the SharedPreferences `preferences` result envelope; storeName maps to fileName.
+        onSuccess = { entries ->
+          broadcastPreferencesResult(requestId, packageName, storeName, entries, null)
+        },
+        onFailure = { error ->
+          broadcastPreferencesResult(requestId, packageName, storeName, null, error.message)
         },
       )
     }

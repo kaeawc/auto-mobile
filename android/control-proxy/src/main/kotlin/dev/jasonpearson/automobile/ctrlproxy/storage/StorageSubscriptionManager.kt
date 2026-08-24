@@ -214,6 +214,110 @@ class StorageSubscriptionManager(private val context: Context) {
   }
 
   /**
+   * Lists the Jetpack DataStore instances exposed by a host-registered adapter (issue #5573).
+   *
+   * DataStore is served through the same storage-inspection ContentProvider as SharedPreferences
+   * (authority [AUTHORITY_SUFFIX]); the provider routes the `listDataStores` method to the
+   * host-registered adapter and returns descriptors in the shared [StorageResponse.FileList] shape
+   * (path emitted empty — no filesystem path is exposed for DataStore).
+   *
+   * @param packageName The target app package name
+   * @param adapterName The stable name the host registered its DataStore adapter under
+   * @return Result with list of DataStore descriptors (as [PreferenceFileInfo]) or error
+   */
+  fun listDataStores(packageName: String, adapterName: String): Result<List<PreferenceFileInfo>> {
+    return try {
+      val authority = packageName + AUTHORITY_SUFFIX
+      val uri = Uri.parse("content://$authority")
+      val extras = Bundle().apply { putString("adapterName", adapterName) }
+      val result = context.contentResolver.call(uri, "listDataStores", null, extras)
+
+      if (result == null) {
+        Result.failure(StorageError.SdkNotInstalled(packageName))
+      } else if (!result.getBoolean("success", false)) {
+        val error = result.getString("error") ?: "Unknown error"
+        Result.failure(StorageError.SdkError(error))
+      } else {
+        val responseJson = result.getString("result") ?: "{}"
+        val response = StorageProtocolSerializer.responseFromJson(responseJson)
+        when (response) {
+          is StorageResponse.FileList -> {
+            val files =
+              response.files.map { file ->
+                PreferenceFileInfo(name = file.name, path = file.path, entryCount = file.entryCount)
+              }
+            Result.success(files)
+          }
+          else -> Result.failure(StorageError.SdkError("Unexpected response type"))
+        }
+      }
+    } catch (e: SecurityException) {
+      Log.e(TAG, "listDataStores: SecurityException (SDK not installed)", e)
+      Result.failure(StorageError.SdkNotInstalled(packageName))
+    } catch (e: Exception) {
+      Log.e(TAG, "Error listing data stores for $packageName (adapter=$adapterName)", e)
+      Result.failure(StorageError.SdkError(e.message ?: "Unknown error"))
+    }
+  }
+
+  /**
+   * Reads all entries from a named DataStore instance (issue #5573).
+   *
+   * Reuses the shared [StorageResponse.Preferences] response shape.
+   *
+   * @param packageName The target app package name
+   * @param adapterName The stable name the host registered its DataStore adapter under
+   * @param storeName The DataStore instance name
+   * @return Result with list of entries (as [PreferenceEntry]) or error
+   */
+  fun getDataStore(
+    packageName: String,
+    adapterName: String,
+    storeName: String,
+  ): Result<List<PreferenceEntry>> {
+    return try {
+      val authority = packageName + AUTHORITY_SUFFIX
+      val uri = Uri.parse("content://$authority")
+      val extras =
+        Bundle().apply {
+          putString("adapterName", adapterName)
+          putString("storeName", storeName)
+        }
+      val result = context.contentResolver.call(uri, "getDataStore", null, extras)
+
+      if (result == null) {
+        Result.failure(StorageError.SdkNotInstalled(packageName))
+      } else if (!result.getBoolean("success", false)) {
+        val error = result.getString("error") ?: "Unknown error"
+        val errorType = result.getString("errorType")
+        if (errorType == "StoreNotFound") {
+          Result.failure(StorageError.FileNotFound(storeName))
+        } else {
+          Result.failure(StorageError.SdkError(error))
+        }
+      } else {
+        val responseJson = result.getString("result") ?: "{}"
+        val response = StorageProtocolSerializer.responseFromJson(responseJson)
+        when (response) {
+          is StorageResponse.Preferences -> {
+            val entries =
+              response.entries.map { entry ->
+                PreferenceEntry(key = entry.key, value = entry.value, type = entry.type)
+              }
+            Result.success(entries)
+          }
+          else -> Result.failure(StorageError.SdkError("Unexpected response type"))
+        }
+      }
+    } catch (e: SecurityException) {
+      Result.failure(StorageError.SdkNotInstalled(packageName))
+    } catch (e: Exception) {
+      Log.e(TAG, "Error getting data store for $packageName:$storeName (adapter=$adapterName)", e)
+      Result.failure(StorageError.SdkError(e.message ?: "Unknown error"))
+    }
+  }
+
+  /**
    * Subscribes to changes on a SharedPreferences file.
    *
    * @param packageName The target app package name

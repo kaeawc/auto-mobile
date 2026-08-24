@@ -55,6 +55,8 @@ const KOTLIN_SERIAL_NAMES = [
   "add_highlight",
   "list_preference_files",
   "get_preferences",
+  "list_data_stores",
+  "get_data_store",
   "subscribe_storage",
   "unsubscribe_storage",
   "get_preference",
@@ -497,6 +499,33 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
         '{"type":"get_preferences","requestId":"gp-1","packageName":"com.x","fileName":"prefs"}',
     },
     {
+      builder: "listDataStores",
+      name: "packageName + adapterName",
+      actual: serializeCtrlProxyRequest(
+        ctrlProxyRequests.listDataStores({
+          requestId: "lds-1",
+          packageName: "com.x",
+          adapterName: "settings",
+        }),
+      ),
+      expected:
+        '{"type":"list_data_stores","requestId":"lds-1","packageName":"com.x","adapterName":"settings"}',
+    },
+    {
+      builder: "getDataStore",
+      name: "packageName + adapterName + storeName",
+      actual: serializeCtrlProxyRequest(
+        ctrlProxyRequests.getDataStore({
+          requestId: "gds-1",
+          packageName: "com.x",
+          adapterName: "settings",
+          storeName: "user",
+        }),
+      ),
+      expected:
+        '{"type":"get_data_store","requestId":"gds-1","packageName":"com.x","adapterName":"settings","storeName":"user"}',
+    },
+    {
       builder: "subscribeStorage",
       name: "packageName + fileName",
       actual: serializeCtrlProxyRequest(
@@ -735,12 +764,12 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
   });
 
   // Completeness guard: every builder in the module must have at least one wire row above, and the
-  // total builder count is pinned. Ship builder #39 without a row and this fails — not a silently
+  // total builder count is pinned. Ship builder #41 without a row and this fails — not a silently
   // uncovered send site. `request_two_finger_swipe` has no builder here by design (it goes through
   // the shared sendCommand path, asserted in CtrlProxyGestures.test.ts), so it is not a builder key.
-  test("every ctrlProxyRequests builder has wire coverage and the count is pinned at 38", () => {
+  test("every ctrlProxyRequests builder has wire coverage and the count is pinned at 40", () => {
     const builderNames = Object.keys(ctrlProxyRequests);
-    expect(builderNames.length).toBe(38);
+    expect(builderNames.length).toBe(40);
     const covered = new Set(cases.map((row) => row.builder));
     expect([...covered].sort()).toEqual([...builderNames].sort());
   });

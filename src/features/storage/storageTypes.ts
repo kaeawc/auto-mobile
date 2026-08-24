@@ -26,6 +26,8 @@ export type KeyValueType =
   | "DOUBLE"
   | "BOOLEAN"
   | "STRING_SET"
+  // Android DataStore only, read surface: base64-encoded bytes (SDK DataStoreValueType.BYTE_ARRAY).
+  | "BYTE_ARRAY"
   | "DATA"
   | "DATE"
   | "ARRAY"

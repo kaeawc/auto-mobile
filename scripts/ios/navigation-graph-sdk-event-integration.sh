@@ -63,7 +63,7 @@ wait_for_ctrl_proxy_health() {
     fi
     # One-shot CLI clients stop their proxy heartbeat after each public call.
     # Renew the graph session while this bounded runner-health retry is in progress.
-    if [[ -n "${session_uuid}" ]] && ! auto-mobile --daemon heartbeat "${session_uuid}" >/dev/null; then
+    if [[ -n "${session_uuid}" ]] && ! AUTOMOBILE_DAEMON_TIMEOUT_MS=2000 auto-mobile --daemon heartbeat "${session_uuid}" >/dev/null; then
       echo "error: could not renew navigation graph session ownership" >&2
       return 1
     fi

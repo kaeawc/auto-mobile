@@ -81,6 +81,10 @@ if [ "$1" = "--daemon" ] && [ "$2" = "heartbeat" ] && [ "$3" = "44600000-0000-40
     echo "session heartbeat ran before the graph session was bound" >&2
     exit 1
   fi
+  if [ "${AUTOMOBILE_DAEMON_TIMEOUT_MS:-}" != "2000" ]; then
+    echo "session heartbeat did not use the bounded daemon timeout" >&2
+    exit 1
+  fi
   touch "$HEARTBEAT_FILE"
   exit 0
 fi

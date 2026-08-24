@@ -17,6 +17,7 @@ import {
   SOCKET_PATH,
   MCP_STREAMABLE_PATH,
   DAEMON_SESSION_TOOL_BINDING_HEADER,
+  DAEMON_RELEASED_SESSION_HEADER,
   DAEMON_TOOL_SELECTION_PROFILE_HEADER,
   DAEMON_PORT_RANGE_START,
   DAEMON_PORT_RANGE_END,
@@ -813,10 +814,20 @@ export class Daemon {
           const sessionContext: {
             sessionId?: string;
             initialSessionToolBinding?: string;
+            initialReleasedSession?: string;
             initialToolSelectionProfile?: string;
           } = {
-            ...(typeof boundSessionUuid === "string" && boundSessionUuid.trim().length > 0
+            ...(typeof boundSessionUuid === "string" &&
+            boundSessionUuid.trim().length > 0 &&
+            !(
+              typeof req.headers[DAEMON_RELEASED_SESSION_HEADER] === "string" &&
+              req.headers[DAEMON_RELEASED_SESSION_HEADER].trim() === boundSessionUuid.trim()
+            )
               ? { initialSessionToolBinding: boundSessionUuid }
+              : {}),
+            ...(typeof req.headers[DAEMON_RELEASED_SESSION_HEADER] === "string" &&
+            req.headers[DAEMON_RELEASED_SESSION_HEADER].trim().length > 0
+              ? { initialReleasedSession: req.headers[DAEMON_RELEASED_SESSION_HEADER] }
               : {}),
             ...(typeof boundToolSelectionProfileUuid === "string" &&
             boundToolSelectionProfileUuid.trim().length > 0

@@ -16,6 +16,7 @@ import {
   DAEMON_BOUND_SESSION_REPLAY_TTL_MS,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
   DAEMON_BOUND_SESSION_PARAM,
+  DAEMON_RELEASED_SESSION_PARAM,
 } from "./constants";
 import type { DaemonNotification, DaemonOptions } from "./types";
 import { listChangedKindForMethod, type ListChangedKind } from "../server/listChangedBroadcast";
@@ -50,6 +51,10 @@ export type VersionMismatchReason =
 export type BuildMismatchReason = "autoStartDisabled" | "cooldown" | "restartMismatch";
 
 const DAEMON_MCP_HEARTBEAT_INTERVAL_MS = 2_000;
+
+function isFreshSessionScreenshotUri(uri: string, sessionUuid: string): boolean {
+  return uri === `automobile:device-session/${sessionUuid}/screenshot`;
+}
 
 function heartbeatIntervalMs(config: DaemonMcpProxyConfig): number {
   const configuredTimeout = config.heartbeatTimeoutMs;
@@ -1089,13 +1094,14 @@ export class DaemonMcpProxy {
   private async withRecoverableReconnect<T>(
     operation: () => Promise<T>,
     attemptedSessionUuid?: string,
+    allowReleasedSession?: boolean,
   ): Promise<T> {
     if (this.closing) {
       throw new DaemonUnavailableError("MCP proxy is closing");
     }
-    this.throwIfBoundSessionFenced();
+    this.throwIfBoundSessionFenced(allowReleasedSession);
     await this.ensureConnected();
-    this.throwIfBoundSessionFenced();
+    this.throwIfBoundSessionFenced(allowReleasedSession);
 
     try {
       return await operation();
@@ -1103,7 +1109,7 @@ export class DaemonMcpProxy {
       if (this.closing) {
         throw error;
       }
-      this.throwIfBoundSessionFenced();
+      this.throwIfBoundSessionFenced(allowReleasedSession);
       if (!this.isRecoverableDaemonSessionError(error)) {
         throw error;
       }
@@ -1112,13 +1118,13 @@ export class DaemonMcpProxy {
         `[DaemonMcpProxy] Daemon session is stale, reconnecting and retrying once: ${errorMessage(error)}`,
       );
       await this.resetConnection();
-      this.throwIfBoundSessionFenced();
+      this.throwIfBoundSessionFenced(allowReleasedSession);
       await this.ensureConnected();
-      this.throwIfBoundSessionFenced();
+      this.throwIfBoundSessionFenced(allowReleasedSession);
       try {
         return await operation();
       } catch (retryError) {
-        this.throwIfBoundSessionFenced();
+        this.throwIfBoundSessionFenced(allowReleasedSession);
         if (
           attemptedSessionUuid &&
           this.boundSessionUuid === attemptedSessionUuid &&
@@ -1402,8 +1408,8 @@ export class DaemonMcpProxy {
     void this.stopBoundSessionHeartbeat();
   }
 
-  private throwIfBoundSessionFenced(): void {
-    if (this.terminalBoundSession) {
+  private throwIfBoundSessionFenced(allowReleasedSession = false): void {
+    if (this.terminalBoundSession && !allowReleasedSession) {
       throw this.boundSessionExpiredError();
     }
   }
@@ -1702,10 +1708,20 @@ export class DaemonMcpProxy {
    * Read a resource from the daemon
    */
   async readResource(uri: string): Promise<any> {
-    const forwardedParams = this.withBoundSessionUuid({});
+    const terminalSessionUuid = this.terminalBoundSession?.sessionUuid;
+    const allowReleasedSession =
+      terminalSessionUuid !== undefined && isFreshSessionScreenshotUri(uri, terminalSessionUuid);
+    const forwardedParams = allowReleasedSession
+      ? {
+          sessionUuid: terminalSessionUuid,
+          [DAEMON_BOUND_SESSION_PARAM]: terminalSessionUuid,
+          [DAEMON_RELEASED_SESSION_PARAM]: terminalSessionUuid,
+        }
+      : this.withBoundSessionUuid({});
     return await this.withRecoverableReconnect(
       () => this.client!.readResource(uri, forwardedParams),
       this.sessionUuidFromArgs(forwardedParams),
+      allowReleasedSession,
     );
   }
 

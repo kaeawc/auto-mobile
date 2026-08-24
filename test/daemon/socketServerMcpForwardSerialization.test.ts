@@ -10,6 +10,7 @@ import { SOCKET_REQUEST_DEADLINE_MS, sendRawSocketRequest } from "./helpers/sock
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import {
   DAEMON_BOUND_SESSION_PARAM,
+  DAEMON_RELEASED_SESSION_PARAM,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
 } from "../../src/daemon/constants";
@@ -1000,6 +1001,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
       params: {
         sessionUuid: "released-session",
         [DAEMON_BOUND_SESSION_PARAM]: "released-session",
+        [DAEMON_RELEASED_SESSION_PARAM]: "released-session",
       },
     });
 
@@ -1009,9 +1011,9 @@ describe("UnixSocketServer MCP forward serialization", () => {
   });
 
   test("rejects released bound resource discovery before shared routing", async () => {
-    const clientBindings: Array<string | undefined> = [];
-    server.mcpClientFactory = async (boundSessionUuid) => {
-      clientBindings.push(boundSessionUuid);
+    const clientBindings: Array<[string | undefined, string | undefined]> = [];
+    server.mcpClientFactory = async (boundSessionUuid, _profile, releasedSessionUuid) => {
+      clientBindings.push([boundSessionUuid, releasedSessionUuid]);
       return {
         listTools: async () => ({ tools: [] }),
         callTool: async () => ({ content: [] }),
@@ -1069,6 +1071,44 @@ describe("UnixSocketServer MCP forward serialization", () => {
 
     expect(response.success).toBe(true);
     expect(clientBindings).toEqual(["session-a"]);
+  });
+
+  test("routes a released bound resource read so its handler can report the inactive session", async () => {
+    const clientBindings: Array<[string | undefined, string | undefined]> = [];
+    server.mcpClientFactory = async (boundSessionUuid, _profile, releasedSessionUuid) => {
+      clientBindings.push([boundSessionUuid, releasedSessionUuid]);
+      return {
+        listTools: async () => ({ tools: [] }),
+        callTool: async () => ({ content: [] }),
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({
+          contents: [
+            {
+              uri: "automobile:device-session/released-session/screenshot",
+              mimeType: "application/json",
+              text: JSON.stringify({ code: "SESSION_NOT_ACTIVE" }),
+            },
+          ],
+        }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
+        close: async () => {},
+      };
+    };
+
+    const response = await sendRequest(socketPath, {
+      id: randomUUID(),
+      type: "mcp_request",
+      method: "resources/read",
+      params: {
+        uri: "automobile:device-session/released-session/screenshot",
+        sessionUuid: "released-session",
+        [DAEMON_BOUND_SESSION_PARAM]: "released-session",
+        [DAEMON_RELEASED_SESSION_PARAM]: "released-session",
+      },
+    });
+
+    expect(response.success).toBe(true);
+    expect(clientBindings).toEqual([["released-session", "released-session"]]);
   });
 
   test("retains a bound socket transport past the idle client deadline", async () => {

@@ -2,6 +2,10 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
 import type { ToolCapability } from "../../src/features/toolSelection/SessionToolSelectionService";
+import {
+  resetSessionScreenshotResourceDependencies,
+  setSessionScreenshotResourceDependencies,
+} from "../../src/server/observationResources";
 
 // End-to-end coverage for the server-side SessionToolBinding teardown wired into
 // createMcpServer (issue #4611 Gap D). A transport seeded with a released-able
@@ -18,6 +22,7 @@ describe("createMcpServer server-side session-binding teardown (issue #4611 Gap 
       await fixture.teardown();
       fixture = undefined;
     }
+    resetSessionScreenshotResourceDependencies();
   });
 
   // Narrow the released session so the whole "clipboard" capability is disabled
@@ -45,6 +50,34 @@ describe("createMcpServer server-side session-binding teardown (issue #4611 Gap 
     // The binding is gone, so tools/list reverts to the unbound (unfiltered) surface.
     const after = await client.listTools();
     expect(after.tools.map((tool) => tool.name)).toContain("clipboard");
+  });
+
+  test("a session release preserves typed fresh screenshot failures for the same transport", async () => {
+    setSessionScreenshotResourceDependencies({
+      resolveActiveSession: () => undefined,
+      createScreenshotService: () => {
+        throw new Error("inactive sessions must not capture screenshots");
+      },
+    });
+    fixture = new McpTestFixture({
+      sessionContext: {
+        sessionId: "transport-resource",
+        initialSessionToolBinding: RELEASED_SESSION,
+      },
+    });
+    await fixture.setup();
+    const { client } = fixture.getContext();
+
+    SessionReleaseBroadcaster.emit(RELEASED_SESSION);
+
+    const response = await client.readResource({
+      uri: `automobile:device-session/${RELEASED_SESSION}/screenshot`,
+    });
+
+    expect(JSON.parse(response.contents[0].text!)).toMatchObject({
+      code: "SESSION_NOT_ACTIVE",
+      retryable: false,
+    });
   });
 
   test("releasing an unrelated session leaves the bound profile intact", async () => {

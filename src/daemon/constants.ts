@@ -147,6 +147,12 @@ export const DAEMON_TOOL_SELECTION_PROFILE_PARAM = "__autoMobileToolSelectionPro
  */
 export const DAEMON_BOUND_SESSION_PARAM = "__autoMobileBoundSessionUuid";
 
+/** Socket RPC field identifying a released session used only for inactive resource reads. */
+export const DAEMON_RELEASED_SESSION_PARAM = "__autoMobileReleasedSessionUuid";
+
+/** Loopback-only header for a released session's inactive resource-read capability. */
+export const DAEMON_RELEASED_SESSION_HEADER = "x-auto-mobile-released-session-uuid";
+
 /**
  * How long the proxy will keep replaying a remembered session binding on
  * sessionless calls before treating it as retired (issue #4610). It mirrors the

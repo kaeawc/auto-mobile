@@ -5,6 +5,7 @@ import type { TrackedScreenshotService } from "../../src/features/observe/screen
 import type { ScreenshotJobOptions } from "../../src/utils/ScreenshotJobTracker";
 import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
 import { ScreenshotJobTracker } from "../../src/utils/ScreenshotJobTracker";
+import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
 import {
   RESOURCE_URIS,
   registerObservationResources,
@@ -200,6 +201,171 @@ describe("session screenshot resources", () => {
     });
   });
 
+  test("returns a typed non-retryable failure when no fresh screenshot session is active", async () => {
+    setSessionScreenshotResourceDependencies({
+      resolveActiveSession: () => undefined,
+      createScreenshotService: () => createTrackedScreenshot({ success: false }),
+    });
+
+    const content = await readTemplate("automobile:device-session/session-123/screenshot");
+
+    expect(content.mimeType).toBe("application/json");
+    expect(JSON.parse(content.text!)).toEqual({
+      code: "SESSION_NOT_ACTIVE",
+      retryable: false,
+      error: "No active device session found for sessionUuid session-123.",
+    });
+  });
+
+  test("does not authorize a replacement session from a released session identity", async () => {
+    let screenshotServiceCalls = 0;
+    setSessionScreenshotResourceDependencies({
+      resolveActiveSession: () => activeSession(),
+      createScreenshotService: () => {
+        screenshotServiceCalls++;
+        return createTrackedScreenshot({ success: true, path: "/tmp/fresh.png" });
+      },
+    });
+
+    const content = await readTemplate("automobile:device-session/session-123/screenshot", {
+      releasedSessionUuid: sessionUuid,
+    });
+
+    expect(JSON.parse(content.text!).error).toContain("bound device session");
+    expect(screenshotServiceCalls).toBe(0);
+  });
+
+  test("returns a typed retryable failure when fresh screenshot capture fails", async () => {
+    setSessionScreenshotResourceDependencies({
+      resolveActiveSession: () => activeSession(),
+      createScreenshotService: () =>
+        createTrackedScreenshot({
+          success: false,
+          error: "ADB screencap timed out",
+        }),
+    });
+
+    const content = await readTemplate("automobile:device-session/session-123/screenshot");
+
+    expect(content.mimeType).toBe("application/json");
+    expect(JSON.parse(content.text!)).toEqual({
+      code: "SCREENSHOT_CAPTURE_FAILED",
+      retryable: true,
+      error: "ADB screencap timed out",
+    });
+  });
+
+  test("returns a typed non-retryable failure when fresh screenshot capture is cancelled", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    setSessionScreenshotResourceDependencies({
+      resolveActiveSession: () => activeSession(),
+      createScreenshotService: () =>
+        createTrackedScreenshot({
+          success: false,
+          error: OPERATION_CANCELLED_MESSAGE,
+        }),
+    });
+
+    const content = await readTemplate("automobile:device-session/session-123/screenshot", {
+      sessionUuid,
+      signal: controller.signal,
+    });
+
+    expect(JSON.parse(content.text!)).toEqual({
+      code: "SCREENSHOT_CAPTURE_CANCELLED",
+      retryable: false,
+      error: OPERATION_CANCELLED_MESSAGE,
+    });
+  });
+
+  test("returns a typed non-retryable failure when the fresh screenshot cannot be read", async () => {
+    setSessionScreenshotResourceDependencies({
+      resolveActiveSession: () => activeSession(),
+      createScreenshotService: () =>
+        createTrackedScreenshot({
+          success: true,
+          path: "/tmp/fresh.png",
+        }),
+    });
+    setScreenshotFileSystem({
+      stat: async () => ({ isFile: () => true }),
+      readFile: async () => {
+        throw new Error("EACCES: permission denied");
+      },
+    });
+
+    const content = await readTemplate("automobile:device-session/session-123/screenshot");
+
+    expect(JSON.parse(content.text!)).toEqual({
+      code: "SCREENSHOT_READ_FAILED",
+      retryable: false,
+      error:
+        "Failed to read fresh screenshot for sessionUuid session-123: EACCES: permission denied",
+    });
+  });
+
+  test("does not return a PNG when cancellation occurs while reading the fresh screenshot", async () => {
+    const controller = new AbortController();
+    let resolveRead: (image: Buffer) => void = () => {};
+    const pendingRead = new Promise<Buffer>((resolve) => {
+      resolveRead = resolve;
+    });
+    setSessionScreenshotResourceDependencies({
+      resolveActiveSession: () => activeSession(),
+      createScreenshotService: () =>
+        createTrackedScreenshot({
+          success: true,
+          path: "/tmp/fresh.png",
+        }),
+    });
+    setScreenshotFileSystem({
+      stat: async () => ({ isFile: () => true }),
+      readFile: () => pendingRead,
+    });
+
+    const readPromise = readTemplate("automobile:device-session/session-123/screenshot", {
+      sessionUuid,
+      signal: controller.signal,
+    });
+    controller.abort();
+    resolveRead(Buffer.from("fresh"));
+
+    expect(JSON.parse((await readPromise).text!)).toMatchObject({
+      code: "SCREENSHOT_CAPTURE_CANCELLED",
+      retryable: false,
+    });
+  });
+
+  test("does not return a PNG when ownership is lost while reading the fresh screenshot", async () => {
+    let owned = true;
+    let resolveRead: (image: Buffer) => void = () => {};
+    const pendingRead = new Promise<Buffer>((resolve) => {
+      resolveRead = resolve;
+    });
+    setSessionScreenshotResourceDependencies({
+      resolveActiveSession: () => (owned ? activeSession() : undefined),
+      createScreenshotService: () =>
+        createTrackedScreenshot({
+          success: true,
+          path: "/tmp/fresh.png",
+        }),
+    });
+    setScreenshotFileSystem({
+      stat: async () => ({ isFile: () => true }),
+      readFile: () => pendingRead,
+    });
+
+    const readPromise = readTemplate("automobile:device-session/session-123/screenshot");
+    owned = false;
+    resolveRead(Buffer.from("fresh"));
+
+    expect(JSON.parse((await readPromise).text!)).toMatchObject({
+      code: "SESSION_OWNERSHIP_LOST",
+      retryable: false,
+    });
+  });
+
   test("waits for a pending capture before taking a distinct fresh capture", async () => {
     let resolvePendingCapture: (result: ScreenshotResult) => void = () => {};
     const pendingCapture = new Promise<ScreenshotResult>((resolve) => {
@@ -287,7 +453,11 @@ describe("session screenshot resources", () => {
     const content = await readTemplate("automobile:device-session/session-123/screenshot");
 
     expect(content.mimeType).toBe("application/json");
-    expect(JSON.parse(content.text!).error).toContain("No active device session found");
+    expect(JSON.parse(content.text!)).toEqual({
+      code: "SESSION_OWNERSHIP_LOST",
+      retryable: false,
+      error: "Device session ownership was lost while capturing a fresh screenshot.",
+    });
   });
 
   test("replaces an older direct session for the same device", () => {
@@ -298,6 +468,7 @@ describe("session screenshot resources", () => {
     expect(resolveDirectSessionDevice("session-new")).toEqual({
       sessionUuid: "session-new",
       device: sessionDevice,
+      incarnation: expect.any(Number),
     });
   });
 });

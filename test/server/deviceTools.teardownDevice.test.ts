@@ -409,6 +409,7 @@ describe("deleteDevice handler", () => {
     expect(resolveDirectSessionDevice("physical-session")).toEqual({
       sessionUuid: "physical-session",
       device: physicalDevice,
+      incarnation: expect.any(Number),
     });
   });
 

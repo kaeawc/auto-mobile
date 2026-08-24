@@ -2,9 +2,12 @@ import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 
 export class SessionToolBinding {
   private readonly boundDeviceSessions = new Map<string, string>();
+  private readonly releasedDeviceSessions = new Map<string, string>();
   private initialSessionUuid?: string;
+  private releasedInitialSessionUuid?: string;
   /** The single stdio transport has no MCP session ID, so retain its device session here. */
   private directDeviceSessionUuid?: string;
+  private releasedDirectDeviceSessionUuid?: string;
   private initialToolSelectionProfileUuid?: string;
   /** The single stdio transport has no MCP session ID, so retain its profile here. */
   private directToolSelectionProfileUuid?: string;
@@ -14,9 +17,11 @@ export class SessionToolBinding {
     initialSessionUuid?: string,
     initialToolSelectionProfileUuid?: string,
     private readonly idGenerator: IdGenerator = defaultIdGenerator,
+    initialReleasedSessionUuid?: string,
   ) {
     this.initialSessionUuid = initialSessionUuid;
     this.initialToolSelectionProfileUuid = initialToolSelectionProfileUuid;
+    this.releasedInitialSessionUuid = initialReleasedSessionUuid;
   }
 
   private boundSessionUuid(mcpSessionId: string | undefined): string | undefined {
@@ -45,6 +50,17 @@ export class SessionToolBinding {
       );
     }
     return explicitSessionUuid ?? boundSessionUuid;
+  }
+
+  /** A released identity is not an authorization grant for a replacement session. */
+  releasedResourceSessionUuid(mcpSessionId: string | undefined): string | undefined {
+    if (this.boundSessionUuid(mcpSessionId)) {
+      return undefined;
+    }
+    if (mcpSessionId) {
+      return this.releasedDeviceSessions.get(mcpSessionId) ?? this.releasedInitialSessionUuid;
+    }
+    return this.releasedDirectDeviceSessionUuid ?? this.releasedInitialSessionUuid;
   }
 
   /**
@@ -82,12 +98,14 @@ export class SessionToolBinding {
         return false;
       }
       this.directDeviceSessionUuid = sessionUuid;
+      this.releasedDirectDeviceSessionUuid = undefined;
       return true;
     }
     if (this.boundDeviceSessions.get(mcpSessionId) === sessionUuid) {
       return false;
     }
     this.boundDeviceSessions.set(mcpSessionId, sessionUuid);
+    this.releasedDeviceSessions.delete(mcpSessionId);
     return true;
   }
 
@@ -141,15 +159,18 @@ export class SessionToolBinding {
     for (const [mcpSessionId, boundSessionUuid] of this.boundDeviceSessions) {
       if (boundSessionUuid === sessionUuid) {
         this.boundDeviceSessions.delete(mcpSessionId);
+        this.releasedDeviceSessions.set(mcpSessionId, sessionUuid);
         removed = true;
       }
     }
     if (this.initialSessionUuid === sessionUuid) {
       this.initialSessionUuid = undefined;
+      this.releasedInitialSessionUuid = sessionUuid;
       removed = true;
     }
     if (this.directDeviceSessionUuid === sessionUuid) {
       this.directDeviceSessionUuid = undefined;
+      this.releasedDirectDeviceSessionUuid = sessionUuid;
       removed = true;
     }
     return removed;
